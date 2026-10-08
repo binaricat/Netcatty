@@ -92,7 +92,10 @@ import {
   type UndoLastTurnRestoredDraft,
 } from '../../domain/aiUndoLastTurn';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
-import { installToolOutputPersistence } from '../../infrastructure/ai/harness/installToolOutputPersistence';
+import {
+  installToolOutputPersistence,
+  isToolOutputPersistenceDurable,
+} from '../../infrastructure/ai/harness/installToolOutputPersistence';
 
 function providerPatchIsNoop(
   current: ProviderConfig,
@@ -740,6 +743,42 @@ export function useAIState() {
     getAgentRuntime()
       .getSessionStateStore()
       .rebuildConversationalStateFromMessages(branched.id, branched.messages);
+    // The retained prefix may reference tool outputs stored under the source
+    // session id (spilled tool results, compaction archive handles), and the
+    // alias pass below gives the branch durable copies under its own id before
+    // the branch is published. Both the copies and the deferred restores that
+    // back them live in in-memory queues (`pendingAliasRestores`, alias
+    // materialization retries) that die with the app, so the work is only safe
+    // to start once persistence is installed AND durable. Persistence installs
+    // on the first turn, so undoing as the first action after an app restart
+    // must install it here; when secure storage is still unavailable the
+    // installed persistence has no `restore` and a write that always rejects,
+    // so publishing the branch would leave its retained `tool_output_read`
+    // references permanently unresolvable if the app closes before the next
+    // turn repairs storage. Refuse to publish instead: undo is
+    // non-destructive, so the user can retry once storage recovers. The gate
+    // runs BEFORE any background-job inheritance is registered so this abort
+    // cannot strand partially registered inheritors under a never-published
+    // branch id (see the registration failure path below).
+    const retainedHandleIds = collectRetainedToolOutputHandleIds(
+      branched.messages,
+      branched.contextCompaction,
+    );
+    if (retainedHandleIds.size > 0) {
+      const installed = await installToolOutputPersistence(
+        getAgentRuntime().getToolOutputStore(source.id),
+      ).catch(() => false);
+      const durable = installed
+        && await isToolOutputPersistenceDurable().catch(() => false);
+      if (!durable) {
+        // The branch was never published, so drop the operational state
+        // copyState made for it — nothing else references this fresh id.
+        getAgentRuntime()
+          .getSessionStateStore()
+          .clear(branched.id);
+        return null;
+      }
+    }
     // Inherited background jobs stay owned by the source chat id in the main
     // process, which gates their poll/stop RPCs on that id. Register the
     // inheritance so the branch's OWN chat id is accepted too — without this,
@@ -794,6 +833,15 @@ export function useAIState() {
         }
       }
       if (registrationFailed) {
+        // Owners that already accepted this branch's inheritance must forget
+        // it again: the branch was never published, so the normal
+        // session-cleanup path will never run for its id, and keeping the
+        // registrations would make a later deletion of an affected owner
+        // preserve phantom inheritors' jobs and terminal execution locks
+        // indefinitely. The main process drops every registration for a chat
+        // id in one call, which is exactly bookkeeping-neutral for an owner
+        // whose registration is still live.
+        void getAIBridge()?.aiForgetInheritedBackgroundJobs?.(branched.id).catch(() => {});
         // The branch was never published, so drop the operational state
         // copyState made for it — nothing else references this fresh id.
         getAgentRuntime()
@@ -805,24 +853,15 @@ export function useAIState() {
     // The retained prefix may reference tool outputs stored under the source
     // session id (spilled tool results, compaction archive handles). Alias
     // only those under the branch id so tool_output_read still resolves there
-    // while outputs created by the removed turn stay out of the branch.
-    // Finish the pass (including the durable branch-owned copies) before the
-    // branch session is published: exiting the app during this window must
-    // not leave the branch pointing at handles that only resolve in memory.
-    // Persistence installs on the first turn, so undoing as the first action
-    // after an app restart must install it here: otherwise `restore` is
-    // unavailable, the alias pass can only defer the restores in memory, and
-    // closing the app before the next turn would silently lose the deferred
-    // requests (leaving the branch with handles that no longer resolve).
+    // while outputs created by the removed turn stay out of the branch. The
+    // durability gate above already installed working persistence (or aborted
+    // the undo), so the pass below materializes durable branch-owned copies
+    // before the branch session is published: exiting the app during this
+    // window must not leave the branch pointing at handles that only resolve
+    // in memory.
     const toolOutputStore = getAgentRuntime().getToolOutputStore(source.id);
-    await installToolOutputPersistence(toolOutputStore).catch(() => {});
     await toolOutputStore
-      .aliasSessionHandles(source.id, branched.id, {
-        retainedHandleIds: collectRetainedToolOutputHandleIds(
-          branched.messages,
-          branched.contextCompaction,
-        ),
-      })
+      .aliasSessionHandles(source.id, branched.id, { retainedHandleIds })
       .catch(() => {});
     setSessionsRaw(prev => {
       const next = [branched, ...prev];

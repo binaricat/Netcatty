@@ -2633,6 +2633,7 @@ module.exports = {
   cancelWorkerBackgroundJobsForSession,
   cancelWorkerBackgroundJobsForTerminalSession,
   registerInheritedBackgroundJobs,
+  forgetInheritedJobsForChatSession,
   hasActiveWorkerJobForTerminalSession,
   cancelSftpOpsForSession,
   getSessionMeta,

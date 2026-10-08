@@ -39,6 +39,9 @@ export interface AIBridge {
     ownerChatSessionId: string,
     jobIds: string[],
   ) => Promise<{ ok: boolean; registered?: number; error?: string }>;
+  aiForgetInheritedBackgroundJobs?: (
+    chatSessionId: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function getAIBridge() {

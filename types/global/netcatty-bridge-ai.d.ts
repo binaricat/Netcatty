@@ -113,6 +113,13 @@ declare global {
      * `ownerChatSessionId`) for the inherited jobs' poll/stop RPCs.
      */
     aiRegisterInheritedBackgroundJobs?(chatSessionId: string, ownerChatSessionId: string, jobIds: string[]): Promise<{ ok: boolean; registered?: number; error?: string }>;
+    /**
+     * Drop every inherited-jobs registration recorded for `chatSessionId`:
+     * used when an undo aborts after some owners already registered the
+     * never-published branch, so the main process cannot keep phantom
+     * inheritors that would preserve their jobs and execution locks forever.
+     */
+    aiForgetInheritedBackgroundJobs?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
     /** Update the app-owned live session snapshot used by existing AI scopes. */
     aiMcpUpdateLiveSessions?(sessions: Array<{
       sessionId: string;

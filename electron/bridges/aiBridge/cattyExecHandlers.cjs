@@ -334,6 +334,29 @@ function registerCattyExecHandlers(ctx) {
     }
   });
 
+  // Mirror of "register-inherited-jobs" for an undo that aborted AFTER some
+  // owners already registered the branch's inheritance (multi-owner branches
+  // register per owner): the branch was never published, so nothing will later
+  // clean its registrations up, and a deletion of an affected owner would
+  // otherwise preserve its jobs and terminal execution locks for the phantom
+  // inheritor forever.
+  ipcMain.handle("netcatty:ai:chat-session:forget-inherited-jobs", async (event, {
+    chatSessionId,
+  }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (!chatSessionId || typeof chatSessionId !== "string") {
+      return { ok: false, error: "chatSessionId is required" };
+    }
+    try {
+      mcpServerBridge.forgetInheritedJobsForChatSession(chatSessionId);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
   ipcMain.handle("netcatty:ai:capability", async (event, { rpcMethod, params, chatSessionId }) => {
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };

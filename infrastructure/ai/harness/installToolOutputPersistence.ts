@@ -113,3 +113,23 @@ export async function installToolOutputPersistence(
   setPersistence.call(store, undefined);
   return false;
 }
+
+/**
+ * Whether the netcatty bridge currently reports durable tool-output storage.
+ * False when no bridge is available or the status call fails (any failure is
+ * treated as non-durable). Callers that must not publish state whose
+ * tool-output copies would exist only in memory — an installed-but-not-durable
+ * persistence has an always-rejecting `write` and no `restore`, so the alias
+ * restore/materialization queues that keep a branch's retained handles
+ * resolvable would live only in this process and die with the app — use this
+ * to abort instead of publishing.
+ */
+export async function isToolOutputPersistenceDurable(bridge?: unknown): Promise<boolean> {
+  const netcattyBridge = (
+    (bridge ?? getNetcattyBridge()) as ToolOutputTempBridge | undefined
+  );
+  if (!netcattyBridge) return false;
+  const status = await netcattyBridge.getToolOutputPersistenceStatus?.()
+    .catch((): { durable: boolean; reason?: string } | undefined => undefined);
+  return status?.durable === true;
+}

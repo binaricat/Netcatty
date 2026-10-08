@@ -1824,6 +1824,50 @@ test('alias restore requests staged past every queue are never dropped outright'
   assert.ok(persistence.entries.has('chat-branch-1:h1'));
 });
 
+test('a branch alias restored after a restart keeps its durable record through cache-limit eviction', async () => {
+  // `materializedAliasHandles`/`materializedAliasKeys` die with the process.
+  // The persisted records therefore carry an alias marker, and restoring an
+  // alias after a restart must re-arm the eviction protection from it:
+  // otherwise cache-pressure eviction would treat the fresh handle object as
+  // an ordinary one and delete the branch-owned record that the branch's
+  // retained prefix still references, making the handle permanently unreadable.
+  const base = createFakeToolOutputPersistence();
+  const persistence: ToolOutputPersistence & { entries: typeof base.entries } = {
+    ...base,
+    delete: async path => {
+      for (const [key, entry] of base.entries) {
+        if (entry.path === path) base.entries.delete(key);
+      }
+    },
+  };
+  const store = new ToolOutputStore({ persistence, maxHandlesPerSession: 2, now: () => 10_000 });
+
+  const handle = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'source output for the branch',
+  });
+  await store.flush('chat-source');
+  await store.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set([handle.id]),
+  });
+  const branchEntry = persistence.entries.get(`chat-branch:${handle.id}`);
+  assert.ok(branchEntry);
+  assert.equal(branchEntry.record.aliased, true);
+
+  // Simulate a restart: a brand-new store over the same durable records.
+  const afterRestart = new ToolOutputStore({ persistence, maxHandlesPerSession: 1, now: () => 10_000 });
+  const restored = await afterRestart.readChunkAsync({ handleId: handle.id }, 'chat-branch');
+  assert.equal(restored?.content, 'source output for the branch');
+
+  // Cache pressure evicts the restored alias object again; the branch-owned
+  // record must survive, and a later reread must restore it once more.
+  afterRestart.store({ chatSessionId: 'chat-branch', capabilityId: 'terminal.execute', content: 'branch-a' });
+  assert.ok(persistence.entries.has(`chat-branch:${handle.id}`));
+  const reread = await afterRestart.readChunkAsync({ handleId: handle.id }, 'chat-branch');
+  assert.equal(reread?.content, 'source output for the branch');
+});
+
 test('pruning a branch chat clears its durable-alias keys', async () => {
   const persistence = createFakeToolOutputPersistence();
   const store = new ToolOutputStore({ persistence });

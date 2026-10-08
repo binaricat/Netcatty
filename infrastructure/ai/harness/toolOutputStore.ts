@@ -27,6 +27,15 @@ export interface PersistedToolOutputRecord {
   preview: string;
   storedAt: number;
   accessedAt: number;
+  /**
+   * Marks a branch-owned alias copy written by `materializeDurableHandles`.
+   * `materializedAliasHandles`/`materializedAliasKeys` are in-memory only, so
+   * after an app restart a restored alias is a brand-new handle object whose
+   * protection must be re-armed from this marker — otherwise cache-limit
+   * eviction would fall through to `persistence.delete` and destroy the
+   * branch-owned record that the branch's retained prefix still references.
+   */
+  aliased?: true;
 }
 
 export interface StoreToolOutputInput {
@@ -691,6 +700,7 @@ export class ToolOutputStore {
             ...toPersistedRecord(alias),
             chatSessionId: targetChatSessionId,
             accessedAt: this.now(),
+            aliased: true,
           },
           content,
         );
@@ -1476,6 +1486,15 @@ export class ToolOutputStore {
       accessedAt: this.now(),
       filePath: restored.path,
     };
+    if (record.aliased === true) {
+      // Restart resurrection: the WeakSet cannot track objects across
+      // processes and the key set died with the previous one, so re-arm the
+      // eviction protection from the persisted alias marker. This must happen
+      // before the enforceSessionLimits/enforceGlobalLimits calls below, whose
+      // cache-pressure eviction would otherwise delete the branch-owned record
+      // the branch's retained prefix still references (see `evictHandle`).
+      this.materializedAliasKeys.add(`${chatSessionId}:${handleId}`);
+    }
     const sessionMap = this.bySession.get(chatSessionId) ?? new Map<string, ToolOutputHandle>();
     const existing = sessionMap.get(handleId);
     if (existing) return existing;

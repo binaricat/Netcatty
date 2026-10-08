@@ -8,6 +8,7 @@ import type { AISession, UploadedFile } from '../../infrastructure/ai/types.ts';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime.ts';
 import { useAIState } from './useAIState.ts';
 import { useAISessionsStore } from './aiSessionsStore.ts';
+import { setLatestAISessionsSnapshot } from './aiStateSnapshots.ts';
 
 const SCOPE_KEY = 'terminal:terminal-a';
 
@@ -189,6 +190,111 @@ test('undoLastTurnInSession does not publish the branch when inheritance registr
   await act(async () => root.unmount());
   container.remove();
   dom.window.close();
+});
+
+test('undoLastTurnInSession refuses to publish a branch when tool-output storage is not durable', async () => {
+  // The branch's retained prefix references a stored tool output. The alias
+  // pass that moves it under the branch id defers unfulfilled restores/copies
+  // through in-memory queues, so publishing the branch while secure storage is
+  // not durable would leave the references permanently unresolvable if the app
+  // closes before storage recovers. Undo must abort (and before it registers
+  // any background-job inheritance it would then have to roll back).
+  const sessionWithToolOutput: AISession = {
+    ...SOURCE_SESSION,
+    id: 'chat-with-handle',
+    messages: [
+      { id: 'user-1', role: 'user', content: 'first prompt', timestamp: 1 },
+      { id: 'assistant-1', role: 'assistant', content: 'saved handleId=tool-output-kept-1', timestamp: 2 },
+      { id: 'user-2', role: 'user', content: 'bad last prompt', timestamp: 3 },
+      { id: 'assistant-2', role: 'assistant', content: 'bad answer', timestamp: 4 },
+    ],
+  };
+  // useAIState prefers the module-singleton snapshot over localStorage when
+  // it is non-null, so seed it (and reset it at cleanup) to make this test's
+  // source session visible to the undo's session lookup.
+  setLatestAISessionsSnapshot([sessionWithToolOutput]);
+  const { dom, container, root, capture } = await setupAiState([sessionWithToolOutput]);
+  assert.ok(capture.ai);
+
+  const registrationCalls: string[] = [];
+  const forgetCalls: string[] = [];
+  dom.window.netcatty = {
+    getToolOutputPersistenceStatus: async () => ({ durable: false, reason: 'locked' }),
+    writeToolOutputTemp: async () => ({ ok: false }),
+    readToolOutputTemp: async () => null,
+    deleteToolOutputTemp: async () => ({ ok: true }),
+    aiRegisterInheritedBackgroundJobs: async () => {
+      registrationCalls.push('registered');
+      return { ok: true };
+    },
+    aiForgetInheritedBackgroundJobs: async (chatSessionId: string) => {
+      forgetCalls.push(chatSessionId);
+      return { ok: true };
+    },
+  } as never;
+
+  let result: Awaited<ReturnType<typeof undo>> | null = null;
+  async function undo() {
+    return capture.ai!.undoLastTurnInSession('chat-with-handle');
+  }
+  const sessionIdsBefore = capture.sessions.map((session) => session.id);
+  await act(async () => {
+    result = await undo();
+  });
+
+  assert.equal(result, null);
+  assert.deepEqual(registrationCalls, []);
+  assert.deepEqual(forgetCalls, []);
+  // No branch session was published for the aborted undo.
+  assert.deepEqual(capture.sessions.map((session) => session.id), sessionIdsBefore);
+
+  await act(async () => root.unmount());
+  container.remove();
+  dom.window.close();
+  setLatestAISessionsSnapshot(null as unknown as AISession[]);
+});
+
+test('undoLastTurnInSession publishes a branch with retained tool outputs once storage is durable', async () => {
+  const sessionWithToolOutput: AISession = {
+    ...SOURCE_SESSION,
+    id: 'chat-with-handle',
+    messages: [
+      { id: 'user-1', role: 'user', content: 'first prompt', timestamp: 1 },
+      { id: 'assistant-1', role: 'assistant', content: 'saved handleId=tool-output-kept-1', timestamp: 2 },
+      { id: 'user-2', role: 'user', content: 'bad last prompt', timestamp: 3 },
+      { id: 'assistant-2', role: 'assistant', content: 'bad answer', timestamp: 4 },
+    ],
+  };
+  // useAIState prefers the module-singleton snapshot over localStorage when
+  // it is non-null, so seed it (and reset it at cleanup) to make this test's
+  // source session visible to the undo's session lookup.
+  setLatestAISessionsSnapshot([sessionWithToolOutput]);
+  const { dom, container, root, capture } = await setupAiState([sessionWithToolOutput]);
+  assert.ok(capture.ai);
+
+  dom.window.netcatty = {
+    getToolOutputPersistenceStatus: async () => ({ durable: true }),
+    writeToolOutputTemp: async () => ({ ok: true, path: '/tmp/tool-output.log' }),
+    restoreToolOutputTemp: async () => null,
+    readToolOutputTemp: async () => null,
+    deleteToolOutputTemp: async () => ({ ok: true }),
+  } as never;
+
+  let result: Awaited<ReturnType<typeof undo>> | null = null;
+  async function undo() {
+    return capture.ai!.undoLastTurnInSession('chat-with-handle');
+  }
+  await act(async () => {
+    result = await undo();
+  });
+
+  assert.ok(result);
+  assert.ok(capture.sessions.some((session) => session.id === result!.sessionId));
+
+  await act(async () => root.unmount());
+  container.remove();
+  dom.window.close();
+  setLatestAISessionsSnapshot(null as unknown as AISession[]);
 });
 
 test('undoLastTurnInSession publishes the branch once inheritance registration succeeds', async () => {

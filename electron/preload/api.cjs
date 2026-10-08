@@ -1794,6 +1794,11 @@ function createPreloadApi(ctx) {
       jobIds,
     });
   },
+  aiForgetInheritedBackgroundJobs: (chatSessionId) => {
+    return ipcRenderer.invoke("netcatty:ai:chat-session:forget-inherited-jobs", {
+      chatSessionId,
+    });
+  },
   aiDiscoverAgents: async (options) => {
     return ipcRenderer.invoke("netcatty:ai:agents:discover", options);
   },
