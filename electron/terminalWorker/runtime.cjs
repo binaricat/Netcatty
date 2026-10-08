@@ -656,6 +656,10 @@ function createTerminalWorkerRuntime(options = {}) {
       }
       return;
     }
+    // Signal cancellation before waiting for the start operation. Otherwise a
+    // pending PATH refresh can spawn a PTY before its queued close runs.
+    const { abortPendingBoot } = require("../bridges/sessionBootEpoch.cjs");
+    abortPendingBoot(sessionId, message.payload?.bootEpoch);
     sessionCloseEpochs.set(sessionId, (sessionCloseEpochs.get(sessionId) ?? 0) + 1);
     pendingSessionStartBootEpochs.delete(sessionId);
     touchSessionLifecycleTombstone(sessionId);

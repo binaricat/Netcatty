@@ -470,7 +470,7 @@ async function withPendingLocalPath(run) {
   const spawns = [];
   const sessions = new Map();
   const bridge = loadBridgeWithFakes(spawns, []);
-  bridge.init({ sessions, electron: { webContents: { fromId: () => null } } });
+  bridge.init({ sessions, electronModule: { webContents: { fromId: () => null } } });
   try {
     Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
     shellUtils.resolveWindowsLivePath = () => new Promise((resolve) => resolvers.push(resolve));
@@ -520,3 +520,59 @@ test("a stale close and old PATH completion cannot cancel a newer local boot", a
     bridge.closeSession(event, { ...payload, bootEpoch: 2 });
   });
 });
+
+for (const closeChannel of ["netcatty:close", "netcatty:close:await"]) {
+  test(`worker ${closeChannel} cancels a local start before PATH refresh can spawn it`, async () => {
+    await withPendingLocalPath(async ({ bridge, resolvers, spawns, sessions }) => {
+      const { createTerminalWorkerRuntime } = require("../terminalWorker/runtime.cjs");
+      const messages = [];
+      let receiveMessage;
+      const parentPort = {
+        on: (_channel, listener) => { receiveMessage = listener; },
+        postMessage: (message) => messages.push(message),
+      };
+      createTerminalWorkerRuntime({
+        parentPort,
+        registerBridges: (ipcMain) => bridge.registerHandlers(ipcMain),
+      }).start();
+      const payload = { sessionId: `worker-pending-${closeChannel}`, shell: "C:\\Windows\\cmd.exe" };
+      const start = (bootEpoch) => receiveMessage({
+        kind: "request", requestId: `start-${bootEpoch}`, channel: "netcatty:local:start",
+        webContentsId: 7, payload: { ...payload, bootEpoch },
+      });
+      const close = (bootEpoch) => receiveMessage({
+        kind: closeChannel.endsWith(":await") ? "request" : "send",
+        requestId: `close-${bootEpoch}`, channel: closeChannel,
+        webContentsId: 7, payload: { ...payload, bootEpoch },
+      });
+      const drainMessages = () => new Promise((resolve) => setImmediate(resolve));
+      start(1);
+      await drainMessages();
+      assert.equal(resolvers.length, 1, "the real bridge is waiting for PATH inside the worker queue");
+      close(1);
+      resolvers[0]("C:\\Windows\\System32");
+      await drainMessages();
+      await drainMessages();
+      assert.equal(spawns.length, 0, "a closed tab must not run shell startup scripts");
+      assert.equal(sessions.has(payload.sessionId), false);
+      assert.match(messages.find((message) => message.requestId === "start-1")?.error ?? "", /closed or superseded/);
+      if (closeChannel.endsWith(":await")) {
+        assert.equal(messages.find((message) => message.requestId === "close-1")?.result?.closed, false);
+      }
+
+      start(2);
+      await drainMessages();
+      assert.equal(resolvers.length, 2);
+      close(1); // A delayed old close must not abort the replacement's PATH wait.
+      resolvers[1]("C:\\Windows\\System32");
+      await drainMessages();
+      await drainMessages();
+      assert.equal(spawns.length, 1);
+      assert.equal(sessions.get(payload.sessionId)?.bootEpoch, 2);
+      close(2);
+      await drainMessages();
+      await drainMessages();
+      assert.equal(sessions.has(payload.sessionId), false);
+    });
+  });
+}
