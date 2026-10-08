@@ -1083,7 +1083,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         } catch { stagedMode = null; }
         intendedMode = stagedMode === null ? 0o600 : stagedMode;
       }
-      await copyFileExclusiveWithFallback(stagedPath, readyPath, intendedMode);
+      await copyFileExclusiveWithFallback(stagedPath, readyPath, intendedMode, { assertNotCancelled });
     }
     // Stamp the private prepared file before applying possibly unreadable
     // destination permissions. Publication carries these times to the target.

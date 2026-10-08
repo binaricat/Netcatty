@@ -458,3 +458,78 @@ test("publishLocalFileExclusive tolerates chmod/utimes rejection without hardlin
   assert.equal(identity.size, fs.lstatSync(target).size);
   assert.equal(fs.lstatSync(target).isFile(), true);
 });
+
+test("copyFileExclusiveWithFallback stops streaming when the caller cancels mid-copy", async (t) => {
+  const dir = makeTempDir("copy-fallback-cancel-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(4 * 1024 * 1024, 7);
+  fs.writeFileSync(source, payload);
+  const restore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(restore);
+  // Cancel after a few streamed chunks: the gate must abort the pipeline
+  // instead of copying the whole staged file to completion.
+  let chunksSeen = 0;
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, null, {
+      assertNotCancelled() {
+        chunksSeen += 1;
+        if (chunksSeen > 8) throw new Error("Transfer cancelled");
+      },
+    }),
+    (error) => error?.message === "Transfer cancelled",
+  );
+  assert.ok(chunksSeen > 8, "the cancellation check ran per streamed chunk");
+  const copied = fs.existsSync(target) ? fs.statSync(target).size : 0;
+  assert.ok(
+    copied < payload.length,
+    `the cancelled copy must not stream the full payload (copied ${copied} of ${payload.length} bytes)`,
+  );
+});
+
+test("copyFileExclusiveWithFallback rejects an already-aborted signal before creating the target", async (t) => {
+  const dir = makeTempDir("copy-fallback-aborted-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "never copied");
+  const restore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(restore);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, null, { signal: controller.signal }),
+    (error) => error?.code === "ABORT_ERR",
+  );
+  assert.equal(fs.existsSync(target), false, "a cancelled copy never leaves a created target");
+});
+
+test("promoteLocalTransfer observes cancellation during the cross-device fallback copy", async (t) => {
+  const dir = makeTempDir("promote-cancel-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(4 * 1024 * 1024, 5);
+  fs.writeFileSync(staged, payload);
+  // Force the EXDEV staging rename so promotion takes the streamed fallback.
+  const renameOriginal = fs.promises.rename;
+  const renameRestore = stubPromises("rename", async (...args) => {
+    if (String(args[1]).endsWith(".ready")) {
+      throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+    }
+    return renameOriginal.apply(fs.promises, args);
+  });
+  t.after(renameRestore);
+  await assert.rejects(
+    () => transferBridge._promoteLocalTransferForTests(staged, target, {
+      assertNotCancelled() {
+        throw new Error("Transfer cancelled");
+      },
+    }),
+    (error) => error?.message === "Transfer cancelled",
+  );
+  assert.equal(fs.existsSync(target), false, "a cancelled promotion never publishes the target");
+  const leftovers = fs.readdirSync(dir).filter((name) => name.startsWith(".target."));
+  assert.equal(leftovers.length, 0, "cancelled promotion cleans up its private ready file");
+});

@@ -2,6 +2,7 @@
 
 const fs = require("node:fs");
 const crypto = require("node:crypto");
+const { Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 
 // Node's fs.copyFile accelerates the data copy with Linux copy_file_range().
@@ -21,6 +22,14 @@ function isCopyFallbackError(error) {
 
 function isMetadataUnsupportedError(error) {
   return METADATA_UNSUPPORTED_ERRNOS.has(error?.code);
+}
+
+// Same shape as the transfer bridge's local stream cancellation error, so
+// callers can treat a cancelled fallback copy like any other cancellation.
+function cancelledError() {
+  const error = new Error("Transfer cancelled");
+  error.code = "ABORT_ERR";
+  return error;
 }
 
 // Comparable signature of the inode a name currently resolves to (same shape
@@ -47,8 +56,16 @@ function fileIdentity(statLike) {
 // relabel-then-verify: rename moves whatever currently owns the name to a
 // private side name without deleting anything, and only an inode verifiably
 // equal to the copy this module produced is unlinked from that side name.
-async function copyFileExclusiveWithFallback(source, target, mode = null) {
+// `options` (optional) carries cancellation: `signal` (AbortSignal) aborts
+// the fallback stream immediately, and `assertNotCancelled` is re-checked
+// between streamed chunks so cancelling a slow GVFS/FUSE copy stops writing
+// to the mount instead of finishing the whole staged copy first.
+async function copyFileExclusiveWithFallback(source, target, mode = null, options = {}) {
   const creationMode = Number.isInteger(mode) && mode >= 0 ? mode & 0o7777 : null;
+  const assertNotCancelled = typeof options.assertNotCancelled === "function"
+    ? options.assertNotCancelled
+    : () => {};
+  const signal = options.signal;
   try {
     await fs.promises.copyFile(source, target, fs.constants.COPYFILE_EXCL);
     if (creationMode === null) return;
@@ -111,10 +128,36 @@ async function copyFileExclusiveWithFallback(source, target, mode = null) {
   }
   const writeOptions = { flags: "wx" };
   if (creationMode !== null) writeOptions.mode = creationMode;
-  await pipeline(
-    fs.createReadStream(source),
-    fs.createWriteStream(target, writeOptions),
-  );
+  assertNotCancelled();
+  if (signal?.aborted) throw cancelledError();
+  const controller = new AbortController();
+  const abortFromExternalSignal = () => controller.abort(cancelledError());
+  signal?.addEventListener?.("abort", abortFromExternalSignal, { once: true });
+  // Re-check cancellation between chunks: a multi-gigabyte staged file being
+  // streamed onto a slow GVFS/FUSE mount must stop writing as soon as the
+  // caller cancels, instead of finishing the whole temporary copy (and
+  // lingering on the network mount) before the result is discarded.
+  const cancellationGate = new Transform({
+    transform(chunk, _encoding, callback) {
+      try {
+        assertNotCancelled();
+      } catch (error) {
+        callback(error);
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+  try {
+    await pipeline(
+      fs.createReadStream(source),
+      cancellationGate,
+      fs.createWriteStream(target, writeOptions),
+      { signal: controller.signal },
+    );
+  } finally {
+    signal?.removeEventListener?.("abort", abortFromExternalSignal);
+  }
   if (creationMode !== null) {
     // The destination applies the process umask to the stream's creation
     // mode (e.g. an intended 0664 becomes 0600 under umask 0077), so the
