@@ -51,9 +51,11 @@ function identityChangedError(target) {
 // resolve to the inode `copiedIdentity` describes, so a successful return can
 // never bless a replacement for the caller's later publication. The preferred
 // path performs the change through an owned handle, which pins the inode: the
-// opened inode must still be the copied one before it is touched. A copy too
-// restrictive to open for reading must still regain its intended mode, so that
-// case chmods through the pathname and re-verifies the inode afterwards.
+// opened inode must still be the copied one before it is touched, and again
+// after the change the pathname is re-verified (a replacement could have won
+// the name while the metadata change was in flight). A copy too restrictive
+// to open for reading must still regain its intended mode, so that case
+// chmods through the pathname and re-verifies the inode afterwards.
 // Identity mismatches fail closed like COPYFILE_EXCL; the replacement is
 // left in place and the caller never publishes it.
 async function chmodOnCopiedFile(target, mode, copiedIdentity) {
@@ -81,6 +83,17 @@ async function chmodOnCopiedFile(target, mode, copiedIdentity) {
       throw identityChangedError(target);
     }
     await handle.chmod(mode);
+    // The chmod was pinned to the held inode, but the pathname itself may have
+    // been replaced while the (possibly slow) metadata change ran. Like the
+    // pathname branch above, revalidate the name before returning success so a
+    // replacement is never blessed for the caller's later publication.
+    let chmodgedIdentity = null;
+    try {
+      chmodgedIdentity = fileIdentity(await fs.promises.lstat(target));
+    } catch { chmodgedIdentity = null; }
+    if (chmodgedIdentity !== heldIdentity) {
+      throw identityChangedError(target);
+    }
   } finally {
     await handle.close().catch(() => {});
   }

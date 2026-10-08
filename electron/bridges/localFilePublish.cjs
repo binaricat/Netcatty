@@ -8,14 +8,19 @@ const { isMetadataUnsupportedError } = require("./fsCopyFallback.cjs");
 // exclusively created handle instead: partial contents can be visible there,
 // but no pathname cleanup may remove a concurrent writer's replacement.
 // Resolves with the published inode identity ({ dev, ino, size }) so callers can
-// verify an open destination handle before later metadata stamping.
+// verify an open destination handle before later metadata stamping, plus
+// `timestampsPreserved`: whether the published inode actually carries the
+// prepared file's timestamps. Hardlinked publication shares the inode; the copy
+// path re-applies the times and falls back to a pathname-based stamp when the
+// handle-based one is refused, reporting `false` when neither could stamp (so
+// callers must not treat the metadata as prepared).
 async function publishLocalFileExclusive(source, target, assertNotCancelled = () => {}, preparedHandle) {
   assertNotCancelled();
   try {
     await fs.promises.link(source, target);
     // The hardlink shares the published inode; stat either name.
     const linkedStat = await fs.promises.lstat(source);
-    return { dev: linkedStat.dev, ino: linkedStat.ino, size: linkedStat.size };
+    return { dev: linkedStat.dev, ino: linkedStat.ino, size: linkedStat.size, timestampsPreserved: true };
   } catch (error) {
     // EISDIR is the misleading libuv mapping for Win32 ERROR_INVALID_FUNCTION
     // when the volume has no hard-link support (exFAT/FAT32); the source here
@@ -27,6 +32,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
   let output;
   let failure;
   let publishedIdentity;
+  let timestampsPreserved = true;
   try {
     input = preparedHandle ?? await fs.promises.open(source, "r");
     const stat = await input.stat();
@@ -63,17 +69,40 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
       const createdMode = (await output.stat()).mode & 0o7777;
       if (createdMode !== (stat.mode & 0o7777)) throw chmodError;
     }
+    timestampsPreserved = false;
     try {
       await output.utimes(stat.atime, stat.mtime);
+      timestampsPreserved = true;
     } catch (utimesError) {
       if (!isMetadataUnsupportedError(utimesError)) throw utimesError;
+      // The handle-based futimens was refused, but the prepared timestamps can
+      // still be applied through the pathname: some backends implement
+      // utimensat while rejecting futimens. Retry through the pathname only
+      // after the identity check below confirms the name still holds the
+      // published inode, so the stamp cannot land on a replacement; if the
+      // pathname refuses too, the caller reports the stamp as not prepared so
+      // its final best-effort stamp still runs.
     }
     const ownedStat = await output.stat();
     const targetStat = await fs.promises.lstat(target);
     if (!targetStat.isFile() || targetStat.dev !== ownedStat.dev || targetStat.ino !== ownedStat.ino) {
       throw new Error("Local download target changed during replacement");
     }
-    publishedIdentity = { dev: ownedStat.dev, ino: ownedStat.ino, size: ownedStat.size };
+    if (!timestampsPreserved) {
+      try {
+        await fs.promises.utimes(target, stat.atime, stat.mtime);
+        const stampedStat = await fs.promises.lstat(target);
+        if (!stampedStat.isFile() || stampedStat.dev !== ownedStat.dev || stampedStat.ino !== ownedStat.ino) {
+          throw new Error("Local download target changed during replacement");
+        }
+        timestampsPreserved = true;
+      } catch (stampingError) {
+        if (!isMetadataUnsupportedError(stampingError)) throw stampingError;
+      }
+    }
+    publishedIdentity = {
+      dev: ownedStat.dev, ino: ownedStat.ino, size: ownedStat.size, timestampsPreserved,
+    };
   } catch (error) {
     failure = error;
   } finally {

@@ -464,6 +464,41 @@ test("copyFileExclusiveWithFallback does not unlink a concurrent replacement at 
   );
 });
 
+test("copyFileExclusiveWithFallback fails closed when the pathname changes while the handle-based chmod runs", async (t) => {
+  const dir = makeTempDir("copy-fallback-race-handle-chmod-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  // Let the first lstat (which pins the copied identity) pass through, then
+  // replace the pathname before the post-chmod revalidation lstat: the chmod
+  // itself landed on our pinned inode, but the name no longer holds it, so a
+  // successful return would bless a replacement for the caller's publication.
+  const lstatOriginal = fs.promises.lstat;
+  let lstatCalls = 0;
+  const lstatRestore = stubPromises("lstat", async (...args) => {
+    if (args[0] === target) {
+      lstatCalls += 1;
+      if (lstatCalls > 1) {
+        fs.unlinkSync(target);
+        fs.writeFileSync(target, "written by another process");
+      }
+    }
+    return lstatOriginal.apply(fs.promises, args);
+  });
+  t.after(lstatRestore);
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, 0o600),
+    (error) => error?.code === "EEXIST",
+  );
+  assert.equal(lstatCalls >= 2, true, "the post-chmod pathname revalidation ran");
+  assert.equal(
+    fs.readFileSync(target, "utf8"),
+    "written by another process",
+    "the concurrent replacement is never removed by the cleanup",
+  );
+});
+
 test("copyFileExclusiveWithFallback does not chmod a concurrent replacement on the streamed path", async (t) => {
   const dir = makeTempDir("copy-fallback-race-stream-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -575,6 +610,58 @@ test("publishLocalFileExclusive tolerates chmod/utimes rejection without hardlin
   assert.equal(fs.readFileSync(target, "utf8"), "gvfs bytes");
   assert.equal(identity.size, fs.lstatSync(target).size);
   assert.equal(fs.lstatSync(target).isFile(), true);
+  // The owned-handle futimens was refused, so the pathname-based retry must
+  // still stamp the prepared timestamps onto the published inode.
+  assert.equal(fs.statSync(target).mtimeMs, 1_700_000_000_000);
+  assert.equal(identity.timestampsPreserved, true);
+});
+
+test("local promotion reports the prepared stamp as unapplied when publication cannot carry the timestamps", async (t) => {
+  const dir = makeTempDir("promote-mtime-unstamped-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(staged, "timestamped bytes");
+  fs.utimesSync(staged, new Date(1_700_000_000_000), new Date(1_700_000_000_000));
+  const linkRestore = stubPromises("link", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported, link"), { code: "ENOTSUP" });
+  });
+  const handleRestore = makeHandleStub(
+    "utimes",
+    Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" }),
+  );
+  // The pathname stamp on the prepared file succeeds, but the published copy
+  // cannot be stamped: both the owned-handle futimens and the pathname-based
+  // utimensat on the target are refused. The caller must not be told the
+  // timestamps are prepared, or its final best-effort stamp never runs.
+  const utimesOriginal = fs.promises.utimes;
+  const utimesRestore = stubPromises("utimes", async (...args) => {
+    if (args[0] === target) {
+      throw Object.assign(new Error("ENOTSUP: operation not supported, utimensat"), { code: "ENOTSUP" });
+    }
+    return utimesOriginal.apply(fs.promises, args);
+  });
+  t.after(linkRestore);
+  t.after(handleRestore);
+  t.after(utimesRestore);
+  const committed = [];
+  await transferBridge._promoteLocalTransferForTests(staged, target, {
+    sourceSoftIdentity: { mtimeMs: 1_700_000_000_000 },
+    onCommit(publishedIdentity, localMtimePrepared) {
+      committed.push({ publishedIdentity, localMtimePrepared });
+    },
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "timestamped bytes");
+  assert.equal(committed.length, 1);
+  assert.equal(committed[0].publishedIdentity.timestampsPreserved, false);
+  assert.equal(
+    committed[0].localMtimePrepared, false,
+    "the unapplied prepared stamp is not reported as prepared",
+  );
+  assert.notEqual(
+    Math.floor(fs.statSync(target).mtimeMs / 1000), 1_700_000_000,
+    "the published file is unstamped, so the final stamp must still be attempted",
+  );
 });
 
 test("copyFileExclusiveWithFallback stops streaming when the caller cancels mid-copy", async (t) => {

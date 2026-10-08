@@ -1233,8 +1233,14 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // check-then-unlink rollback against a name another process may now own.
     committed = true;
     // Hand the published inode identity to the caller for descriptor-based
-    // metadata stamping after publication.
-    options.onCommit?.(publishedIdentity, localMtimePrepared);
+    // metadata stamping after publication. The prepared stamp only counts as
+    // applied when the publication actually carried the prepared times to the
+    // published inode; when the copy path could not stamp them (futimens- and
+    // utimensat-refusing mounts), clear the flag so the caller's final
+    // best-effort stamp still runs instead of trusting a timestamp the target
+    // does not have.
+    const timestampsPreserved = publishedIdentity?.timestampsPreserved !== false;
+    options.onCommit?.(publishedIdentity, localMtimePrepared && timestampsPreserved);
     if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
     await fs.promises.unlink(readyPath).catch(() => {});
     await fs.promises.unlink(stagedPath).catch(() => {});
