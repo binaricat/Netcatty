@@ -499,7 +499,13 @@ async function createDefaultOpenCode(options, env, binPath) {
   };
 
   try {
-    const opencode = await withExclusiveProcessEnv(nextEnv, () => sdk.createOpencode(options));
+    // The SDK spawns synchronously before waiting for server readiness. Only
+    // that spawn needs the temporary environment; holding the gate through
+    // cold startup serializes unrelated profiles and exhausts their deadlines.
+    const { startup } = await withExclusiveProcessEnv(nextEnv, () => ({
+      startup: sdk.createOpencode(options),
+    }));
+    const opencode = await startup;
     const originalClose = opencode.server?.close?.bind(opencode.server);
     if (typeof originalClose === "function") {
       opencode.server.close = () => {
