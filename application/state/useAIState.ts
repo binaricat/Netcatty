@@ -844,7 +844,7 @@ export function useAIState() {
         jobIdsByOwner.set(inherited.ownerChatSessionId, jobIds);
       }
       let registrationFailed = false;
-      for (const [ownerChatSessionId, jobIds] of jobIdsByOwner) {
+      for (const [ownerChatSessionId] of jobIdsByOwner) {
         // Await and validate every registration before the branch is
         // published: a fire-and-forget call would let Undo hand out a branch
         // id the main process does not yet recognize for these jobs, so a
@@ -863,6 +863,20 @@ export function useAIState() {
         if (!register) continue;
         let registered = false;
         for (let attempt = 0; ; attempt++) {
+          // Re-read the ids the copied state still tracks for this owner so a
+          // reconciliation below actually shrinks what the next attempt sends.
+          const jobIds = getAgentRuntime()
+            .getSessionStateStore()
+            .getInheritedBackgroundJobs(branched.id)
+            .filter(inherited => inherited.ownerChatSessionId === ownerChatSessionId)
+            .map(inherited => inherited.jobId);
+          // A job can be gone from the copied state with nothing left to
+          // register for this owner (reconciliation below dropped the last
+          // entry): that owner's inheritance is simply complete.
+          if (jobIds.length === 0) {
+            registered = true;
+            break;
+          }
           try {
             const result = await register(branched.id, ownerChatSessionId, jobIds);
             // The main process reports how many of `jobIds` it actually
@@ -877,6 +891,26 @@ export function useAIState() {
             if (result?.ok === true && result.registered === jobIds.length) {
               registered = true;
               break;
+            }
+            // The main process labels an unregistered id it has never heard of
+            // as `unknownJobIds`: that job already completed/exited/stopped and
+            // its registry entry was cleaned up — notably by the idle close
+            // poll, which runs even when the model never polls the job — so
+            // there is no running side effect left to inherit. Reconcile those
+            // ids out of the copied state and retry the remaining ones instead
+            // of aborting every undo over a stale completed entry. Ids the main
+            // process still tracks but cannot register (`unownedJobIds`, or a
+            // partial count reported without the classification) may still be
+            // running, so they are never reconciled: they keep the strict
+            // retry/abort behavior above.
+            const unknownJobIds = Array.isArray(result?.unknownJobIds)
+              ? result.unknownJobIds as string[]
+              : [];
+            if (unknownJobIds.length > 0) {
+              getAgentRuntime().getSessionStateStore().forgetBackgroundJobs(
+                branched.id,
+                unknownJobIds,
+              );
             }
           } catch {
             // Transient IPC/persistence failure — retry below.

@@ -38,7 +38,15 @@ export interface AIBridge {
     chatSessionId: string,
     ownerChatSessionId: string,
     jobIds: string[],
-  ) => Promise<{ ok: boolean; registered?: number; error?: string }>;
+  ) => Promise<{
+    ok: boolean;
+    registered?: number;
+    error?: string;
+    /** Unregistered ids the main process has no record of: already gone. */
+    unknownJobIds?: string[];
+    /** Unregistered ids the main process still knows but cannot register here. */
+    unownedJobIds?: string[];
+  }>;
   aiForgetInheritedBackgroundJobs?: (
     chatSessionId: string,
   ) => Promise<{ ok: boolean; error?: string }>;

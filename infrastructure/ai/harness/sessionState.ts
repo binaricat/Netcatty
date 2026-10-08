@@ -177,6 +177,35 @@ export class SessionStateStore {
   }
 
   /**
+   * Drop the background-job entries the main process no longer tracks (the
+   * reported "unknown ids" of an inheritance registration). The main process
+   * removes a job from its registry as soon as it is known to be gone —
+   * completed/exited, stopped, or cancelled — including the idle-close poll
+   * path that runs even when the model never polls the job. Such a job has no
+   * running side effect the branch could inherit, so the copied entry must not
+   * stay in `activeJobs`: it would keep the branch reinjecting and re-register
+   * (and aborting undo over) a job that can only ever answer "not found".
+   * Jobs the main process still tracks but cannot register (owner mismatch, an
+   * in-flight orphan stop) are NOT reconciled here; the undo flow keeps
+   * rejecting those.
+   */
+  forgetBackgroundJobs(chatSessionId: string, jobIds: readonly string[]): void {
+    const state = this.bySession.get(chatSessionId);
+    if (!state) return;
+    const removed = jobIds.filter(jobId =>
+      Object.prototype.hasOwnProperty.call(state.activeJobs, jobId),
+    );
+    if (removed.length === 0) return;
+    const nextJobs = { ...state.activeJobs };
+    for (const jobId of removed) delete nextJobs[jobId];
+    this.bySession.set(chatSessionId, {
+      ...state,
+      activeJobs: nextJobs,
+      updatedAt: Date.now(),
+    });
+  }
+
+  /**
    * Rebuild the copied poll offsets of `chatSessionId`'s background jobs from
    * the poll output the branch's retained prefix still contains. `copyState`
    * carries the source's latest `nextOffset` over, but the undone turn's poll

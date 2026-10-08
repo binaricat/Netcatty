@@ -162,8 +162,12 @@ export function buildUndoLastTurnBranch(
   // prompt. Reset it to the untitled placeholder so `autoTitleSession` can
   // retitle the branch from the prompt the user sends next; otherwise the
   // branch is permanently labeled with text that is no longer its prompt.
+  // A retained user turn can legitimately carry empty text: a note-only send
+  // leaves `content` blank while the mentioned note rides on the attachment
+  // (and its title) — that turn still anchored the conversation, so it must
+  // keep the note-derived title and suppress the reset.
   const hasRetainedUserMessage = retainedPrefix.some(
-    message => message.role === 'user' && message.content.trim(),
+    message => message.role === 'user',
   );
   const branchedSession: AISession = {
     ...source,

@@ -288,6 +288,30 @@ test('SessionStateStore enumerates inherited background jobs for undo registrati
   assert.deepEqual(store.getInheritedBackgroundJobs('chat-stranger'), []);
 });
 
+test('SessionStateStore forgets reconciled background jobs of a branched chat', () => {
+  // Jobs the main process reports as unknown (already completed and cleaned
+  // up) must leave the copied state so the undo flow stops re-registering —
+  // and aborting over — entries with no running side effect to inherit.
+  const store = new SessionStateStore();
+  store.updateFromToolResult(
+    'chat-source', 'terminal_start', { sessionId: 'sess-1', command: 'sleep 30' },
+    JSON.stringify({ jobId: 'job-gone', status: 'running' }), false,
+  );
+  store.copyState('chat-source', 'chat-branch');
+
+  assert.deepEqual(store.getInheritedBackgroundJobs('chat-branch'), [
+    { jobId: 'job-gone', ownerChatSessionId: 'chat-source' },
+  ]);
+
+  store.forgetBackgroundJobs('chat-branch', ['job-gone', 'job-never-copied']);
+  assert.equal(store.get('chat-branch').activeJobs['job-gone'], undefined);
+  // Nothing left to inherit for the branch; the source state stays untouched.
+  assert.deepEqual(store.getInheritedBackgroundJobs('chat-branch'), []);
+  assert.ok(store.get('chat-source').activeJobs['job-gone']);
+  // Forgetting on a session with no copied state is a no-op.
+  store.forgetBackgroundJobs('chat-ghost', ['job-gone']);
+});
+
 test('SessionStateStore rebuilds inherited job offsets from the retained prefix', () => {
   const store = new SessionStateStore();
   // A retained turn starts a job and polls it; its results stay in the branch.

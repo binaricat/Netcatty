@@ -209,6 +209,34 @@ test('buildUndoLastTurnBranch resets the title when undo removes the first turn'
   assert.equal(result?.session.title, 'New Chat');
 });
 
+test('buildUndoLastTurnBranch keeps the title when the retained user turn is note-only', () => {
+  // A note-only send persists empty user text while the mentioned note rides
+  // on the attachment (its title seeded the conversation title), so a
+  // blank-content retained user turn must still count as "a user message is
+  // kept" and must not reset the title to the untitled placeholder.
+  const noteOnlyUser: ChatMessage = {
+    id: 'u_note-only',
+    role: 'user',
+    content: '',
+    timestamp: 3,
+    attachments: [{
+      base64Data: '',
+      mediaType: 'text/markdown',
+      filename: 'plan.md',
+      vaultNoteId: 'note-1',
+      vaultNoteTitle: 'Deploy plan',
+      previewText: '# Deploy plan',
+    }],
+  };
+  const source = session(
+    [noteOnlyUser, assistant('reply'), user('second prompt'), assistant('reply2')],
+    { title: 'Deploy plan' },
+  );
+  const result = buildUndoLastTurnBranch(source, { newId: 'chat-branch', now: 100 });
+  assert.ok(result);
+  assert.equal(result?.session.title, 'Deploy plan');
+});
+
 test('buildUndoLastTurnBranch keeps the title when a user message is retained', () => {
   const source = session(
     [user('first prompt'), assistant('reply'), user('second prompt'), assistant('reply2')],

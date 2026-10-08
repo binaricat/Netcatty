@@ -2012,8 +2012,22 @@ function registerInheritedBackgroundJobs(chatSessionId, ownerChatSessionId, jobI
   if (ownerChatSessionId === chatSessionId) return { ok: true };
   if (!Array.isArray(jobIds) || jobIds.length === 0) return { ok: true };
   let registered = 0;
+  // Ids this main process has no record of at all (neither worker registry nor
+  // exec-handler history): the job is gone — completed/exited, stopped, or
+  // cancelled — and its registry entry was cleaned up, including by the idle
+  // close poll that runs even when the model never polls the job. The renderer
+  // reconciles these out of the copied state instead of aborting the undo over
+  // them: no running side effect is left to inherit.
+  const unknownJobIds = [];
+  // Ids the main process still knows but cannot register for this owner
+  // (owner mismatch, or an orphan stop already in flight). Unlike unknown ids
+  // these may still be running, so the undo keeps retrying/aborting over them.
+  const unownedJobIds = [];
   for (const jobId of jobIds) {
-    if (typeof jobId !== "string" || !jobId) continue;
+    if (typeof jobId !== "string" || !jobId) {
+      unknownJobIds.push(jobId);
+      continue;
+    }
     // Only accept jobs this chat actually owns, so a branch cannot claim
     // control over a job started by an unrelated chat session.
     const job = workerBackgroundJobs.get(jobId);
@@ -2023,6 +2037,7 @@ function registerInheritedBackgroundJobs(chatSessionId, ownerChatSessionId, jobI
       // Skip it — the reported count falls short and the undo retries/aborts
       // instead of publishing a branch that would immediately poll
       // "Background job not found".
+      unownedJobIds.push(jobId);
       continue;
     }
     if (job && job.chatSessionId === ownerChatSessionId) {
@@ -2042,9 +2057,15 @@ function registerInheritedBackgroundJobs(chatSessionId, ownerChatSessionId, jobI
       inheritedJobInheritors.set(jobId, inheritors);
       orphanJobStopRetryPending.delete(jobId);
       registered += 1;
+      continue;
+    }
+    if (job || ownerChatSessionIdOfJob != null) {
+      unownedJobIds.push(jobId);
+    } else {
+      unknownJobIds.push(jobId);
     }
   }
-  return { ok: true, registered };
+  return { ok: true, registered, unknownJobIds, unownedJobIds };
 }
 
 // Job ids owned by `chatSessionId` that live chat sessions still inherited:

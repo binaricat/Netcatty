@@ -1341,3 +1341,85 @@ test("an in-flight orphan stop rejects inheritance registration for its job", as
   flight = bridge.registerInheritedBackgroundJobs("chat-new-branch", "chat-src", ["worker-job-stopflight"]);
   assert.equal(flight.registered, 0);
 });
+
+test("registration classifies unregistered ids as unknown (gone) or unowned (still known)", async () => {
+  // A job that completes without being polled is removed from the registry by
+  // the idle close poll; inheritor registration can never succeed for it. The
+  // undo flow reconciles such ids out of the copied state, so registration
+  // must label them distinctly from jobs the main process still knows but
+  // cannot register under the claimed owner (owner mismatch) — the latter
+  // keep the strict retry/abort behavior.
+  const requests = [];
+  const bridge = loadFreshBridge();
+  let nextJobId = 0;
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload) {
+        requests.push({ channel, payload });
+        if (channel === "netcatty:ai:jobStart") {
+          nextJobId += 1;
+          return Promise.resolve({
+            ok: true,
+            jobId: `worker-job-cls-${nextJobId}`,
+            sessionId: payload.sessionId,
+            status: "running",
+          });
+        }
+        if (channel === "netcatty:ai:jobPoll" && payload.jobId === "worker-job-cls-1") {
+          return Promise.resolve({ ok: true, jobId: payload.jobId, completed: true });
+        }
+        return Promise.resolve({ ok: true, jobId: payload.jobId, completed: false });
+      },
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    { sessionId: "ssh-cls", hostname: "host.example", protocol: "ssh", connected: true },
+  ], "chat-src");
+  bridge.updateSessionMetadata([
+    { sessionId: "ssh-cls", hostname: "host.example", protocol: "ssh", connected: true },
+  ], "chat-other");
+  bridge.updateSessionMetadata([
+    { sessionId: "ssh-cls", hostname: "host.example", protocol: "ssh", connected: true },
+  ], "chat-branch");
+
+  const started = await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-cls",
+    command: "sleep 30",
+    chatSessionId: "chat-src",
+  });
+  assert.equal(started.ok, true);
+  const otherStarted = await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-cls",
+    command: "sleep 30",
+    chatSessionId: "chat-other",
+  });
+  assert.equal(otherStarted.ok, true);
+
+  // Completing the source's job deletes its registry entry even though the
+  // model never polled it (same removal the idle close poll performs).
+  const completed = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-cls-1",
+    chatSessionId: "chat-src",
+  });
+  assert.equal(completed.completed, true);
+
+  const registration = bridge.registerInheritedBackgroundJobs("chat-branch", "chat-src", [
+    "worker-job-cls-1",
+    "worker-never-started",
+    "worker-job-cls-2",
+  ]);
+  assert.equal(registration.ok, true);
+  assert.equal(registration.registered, 0);
+  // The completed job and the never-seen id are both unknown to this main
+  // process (no side effect left to inherit); the still-running job owned by
+  // another chat stays in the `unownedJobIds` bucket instead.
+  assert.deepEqual(new Set(registration.unknownJobIds), new Set([
+    "worker-job-cls-1",
+    "worker-never-started",
+  ]));
+  assert.deepEqual(registration.unownedJobIds, ["worker-job-cls-2"]);
+});

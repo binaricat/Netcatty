@@ -662,3 +662,75 @@ test('undoLastTurnInSession publishes the branch once inheritance registration s
   container.remove();
   dom.window.close();
 });
+
+test('undoLastTurnInSession reconciles completed jobs the main process no longer tracks', async () => {
+  // A background job that completes without the model polling it is removed
+  // from the main-process registry by the idle close poll, but the source
+  // session's copied `activeJobs` entry survives in the renderer. Registration
+  // reports the id as unknown instead of only short-counting it, so undo
+  // reconciles it out of the branch state and publishes — instead of aborting
+  // every attempt over a job with no running side effect to inherit.
+  const { dom, container, root, capture } = await setupAiState([SOURCE_SESSION]);
+  assert.ok(capture.ai);
+
+  const sessionStateStore = getAgentRuntime().getSessionStateStore();
+  sessionStateStore.updateFromToolResult(
+    'chat-source',
+    'terminal_start',
+    { sessionId: 'sess-1', command: 'npm run dev' },
+    JSON.stringify({ jobId: 'job-gone', status: 'running', nextOffset: 0 }),
+    false,
+  );
+  sessionStateStore.updateFromToolResult(
+    'chat-source',
+    'terminal_start',
+    { sessionId: 'sess-1', command: 'npm run serve' },
+    JSON.stringify({ jobId: 'job-live', status: 'running', nextOffset: 0 }),
+    false,
+  );
+
+  const registrationCalls: string[][] = [];
+  dom.window.netcatty = {
+    aiRegisterInheritedBackgroundJobs: async (
+      _chatSessionId: string,
+      _ownerChatSessionId: string,
+      jobIds: string[],
+    ) => {
+      registrationCalls.push(jobIds);
+      const unknown = jobIds.filter((jobId) => jobId === 'job-gone');
+      return {
+        ok: true,
+        registered: jobIds.length - unknown.length,
+        unknownJobIds: unknown,
+        unownedJobIds: [],
+      };
+    },
+  } as never;
+
+  let result: Awaited<ReturnType<typeof runUndo>> | null = null;
+  async function runUndo() {
+    return capture.ai!.undoLastTurnInSession('chat-source');
+  }
+  await act(async () => {
+    result = await runUndo();
+  });
+
+  // First attempt registers both copied jobs; the gone one is reported as
+  // unknown and reconciled, and the retry registers only the live job.
+  assert.ok(result);
+  assert.equal(registrationCalls.length, 2);
+  assert.deepEqual(registrationCalls[0], ['job-gone', 'job-live']);
+  assert.deepEqual(registrationCalls[1], ['job-live']);
+  // The reconciled job is gone from the branch state, the live one stays for
+  // polling/reinjection.
+  const branchedJobs = sessionStateStore.get(result!.sessionId).activeJobs;
+  assert.ok(branchedJobs['job-live']);
+  assert.equal(branchedJobs['job-gone'], undefined);
+
+  sessionStateStore.clear('chat-source');
+  sessionStateStore.clear(result!.sessionId);
+  delete dom.window.netcatty;
+  await act(async () => root.unmount());
+  container.remove();
+  dom.window.close();
+});
