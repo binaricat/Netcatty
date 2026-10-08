@@ -6,7 +6,7 @@ const { pipeline } = require("node:stream/promises");
 // Node's fs.copyFile accelerates the data copy with Linux copy_file_range().
 // FUSE/network filesystems such as GVFS SMB mounts, NFS and CIFS can reject
 // that syscall with ENOTSUP/EOPNOTSUPP (nodejs/node#36439) even though plain
-// read/write copies — what cp does — succeed. Those refuse-to-copy errnos fall
+// read/write copies (what cp does) succeed. Those refuse-to-copy errnos fall
 // back to a stream copy so the transfer still completes.
 const COPY_FALLBACK_ERRNOS = new Set(["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV", "EINVAL"]);
 // gvfsd-fuse-style backends also only partially implement metadata operations:
@@ -20,6 +20,12 @@ function isCopyFallbackError(error) {
 
 function isMetadataUnsupportedError(error) {
   return METADATA_UNSUPPORTED_ERRNOS.has(error?.code);
+}
+
+// Comparable signature of the inode a name currently resolves to (same shape
+// as the transfer bridge's stableLocalFileIdentity).
+function fileIdentity(statLike) {
+  return [statLike?.dev, statLike?.ino, statLike?.size].join(":");
 }
 
 // Exclusive copy with COPYFILE_EXCL semantics that falls back to a read/write
@@ -39,6 +45,13 @@ async function copyFileExclusiveWithFallback(source, target, mode = null) {
   try {
     await fs.promises.copyFile(source, target, fs.constants.COPYFILE_EXCL);
     if (creationMode === null) return;
+    // Pin the identity of the produced copy while the (possibly slow, e.g.
+    // network-backed) chmod below runs, so the replacement only removes a
+    // name that still resolves to our own inode.
+    let copiedIdentity = null;
+    try {
+      copiedIdentity = fileIdentity(await fs.promises.lstat(target));
+    } catch { copiedIdentity = null; }
     try {
       await fs.promises.chmod(target, creationMode);
       return;
@@ -49,6 +62,25 @@ async function copyFileExclusiveWithFallback(source, target, mode = null) {
     // chmod, so the intended mode can never be applied to it afterwards.
     // Replace it with a streamed copy whose creation mode carries the
     // intended (no broader than requested) bits.
+    if (copiedIdentity !== null) {
+      // Only unlink while the name still resolves to the copy we produced: a
+      // concurrent replacement at the same path must not be removed. If the
+      // identity moved (or the name vanished), fail closed like COPYFILE_EXCL
+      // rather than clobbering someone else's file.
+      let currentIdentity;
+      try {
+        currentIdentity = fileIdentity(await fs.promises.lstat(target));
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+        currentIdentity = null;
+      }
+      if (currentIdentity !== copiedIdentity) {
+        throw Object.assign(
+          new Error(`EEXIST: file exists, ${target} changed while its mode could not be applied`),
+          { code: "EEXIST" },
+        );
+      }
+    }
     await fs.promises.unlink(target);
   } catch (error) {
     if (!isCopyFallbackError(error)) throw error;

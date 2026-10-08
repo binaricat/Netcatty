@@ -1064,14 +1064,24 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       // The fallback creates the replacement with a default 0666 mode. On
       // mounts that reject chmod below, the later mode loop cannot correct it,
       // so seed the intended permissions now: the destination's existing mode
-      // when known, else a private one. Owner read is forced until the handle
-      // below is acquired — write-only or mode-0000 seeds would make our own
-      // fs.promises.open(readyPath, "r") fail with EACCES. The mode loop (and
-      // publication) applies the exact destination mode afterwards; on mounts
-      // that refuse chmod the worst case keeps a private owner-readable file.
-      const intendedMode = Number.isInteger(options.existingMode)
+      // when known, else the staged file's own mode (what the accelerated
+      // copyFile path would have preserved, so cross-device copies keep the
+      // permissions a same-device rename produces). Owner read is forced
+      // until the handle below is acquired — write-only or mode-0000 seeds
+      // would make our own fs.promises.open(readyPath, "r") fail with EACCES.
+      // The mode loop (and publication) applies the exact destination mode
+      // afterwards; on mounts that refuse chmod the worst case keeps an
+      // owner-readable file with the staged/destination permissions.
+      let intendedMode = Number.isInteger(options.existingMode)
         ? (options.existingMode & 0o7777) | 0o400
-        : 0o600;
+        : null;
+      if (intendedMode === null) {
+        let stagedMode = null;
+        try {
+          stagedMode = (await fs.promises.stat(stagedPath)).mode & 0o7777;
+        } catch { stagedMode = null; }
+        intendedMode = stagedMode === null ? 0o600 : stagedMode | 0o400;
+      }
       await copyFileExclusiveWithFallback(stagedPath, readyPath, intendedMode);
     }
     // Stamp the private prepared file before applying possibly unreadable

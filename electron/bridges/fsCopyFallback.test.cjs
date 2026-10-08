@@ -231,6 +231,59 @@ test("copyFileExclusiveWithFallback applies restrictive creation mode to the str
   );
 });
 
+test("copyFileExclusiveWithFallback does not unlink a concurrent replacement at the same path", async (t) => {
+  const dir = makeTempDir("copy-fallback-race-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  // Simulate another process writing the same pathname while our (stalled)
+  // chmod is still in flight: the stub replaces the copy and then refuses.
+  const chmodRestore = stubPromises("chmod", async (pathName) => {
+    fs.writeFileSync(pathName, "written by another process");
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  t.after(chmodRestore);
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, 0o600),
+    (error) => error?.code === "EEXIST",
+  );
+  assert.equal(
+    fs.readFileSync(target, "utf8"),
+    "written by another process",
+    "the concurrent replacement is never removed by the cleanup",
+  );
+});
+
+test("local promotion without existingMode keeps the staged mode for cross-device resumable copies", async (t) => {
+  const dir = makeTempDir("promote-staged-mode-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(64 * 1024, 3);
+  fs.writeFileSync(staged, payload, { mode: 0o644 });
+  fs.writeFileSync(target, "original");
+  // Force the EXDEV staging rename like a FUSE staging volume, but leave the
+  // real copyFile/chmod in place (working filesystem, missing destination
+  // metadata). This is the local-to-local resumable caller's situation.
+  const renameOriginal = fs.promises.rename;
+  const renameRestore = stubPromises("rename", async (...args) => {
+    if (String(args[1]).endsWith(".ready")) {
+      throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+    }
+    return renameOriginal.apply(fs.promises, args);
+  });
+  t.after(renameRestore);
+  await transferBridge._promoteLocalTransferForTests(staged, target, {});
+  assert.ok(fs.readFileSync(target).equals(payload));
+  assert.equal(
+    fs.statSync(target).mode & 0o777,
+    0o644,
+    "cross-device promotion preserves the staged permissions instead of forcing 0600",
+  );
+  assert.equal(fs.readdirSync(dir).filter((name) => name !== "target").length, 0);
+});
+
 test("copyFileExclusiveWithFallback applies the intended mode when the accelerated copy succeeds but chmod is refused", async (t) => {
   const dir = makeTempDir("copy-fallback-accel-mode-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
