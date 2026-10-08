@@ -242,6 +242,65 @@ test('ToolOutputStore global quotas evict the borrowed alias, not the owner of i
   assert.equal(original.get(handle.id, 'chat-fork'), undefined);
 });
 
+test('ToolOutputStore global quotas evict the fresh clone, not its source handle', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    read: async (path, input) => {
+      const content = files.get(path)?.content;
+      if (content == null) return null;
+      const offset = input.mode === 'tail'
+        ? Math.max(0, content.length - (input.maxChars ?? 12_000))
+        : input.offset ?? 0;
+      const selected = content.slice(offset, offset + (input.maxChars ?? 12_000));
+      const nextOffset = offset + selected.length;
+      return {
+        mode: input.mode ?? 'head',
+        content: selected,
+        totalChars: content.length,
+        startOffset: offset,
+        endOffset: nextOffset,
+        nextOffset,
+        hasMore: nextOffset < content.length,
+      };
+    },
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  // The global handle quota is already full when the fork is created, and the
+  // clone succeeds in reading the persisted content back, so it re-spills
+  // instead of aliasing the source path. The source and the clone then share
+  // `accessedAt`: the source record must survive (its durable file is what
+  // the original conversation reads), the clone is what gets evicted.
+  const original = new ToolOutputStore({ spillThresholdChars: 0, maxHandlesGlobal: 1, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+
+  const sourceCopy = original.get(handle.id, 'chat-source');
+  assert.ok(sourceCopy);
+  assert.ok(files.has(`/netcatty/${handle.id}-chat-source.log`));
+  assert.deepEqual(deletedPaths, []);
+  assert.equal((
+    await original.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-source')
+  )?.content?.length, 100);
+  // The clone was evicted to satisfy the quota.
+  assert.equal(original.get(handle.id, 'chat-fork'), undefined);
+});
+
 test('ToolOutputStore respilled forked copies clear the borrowed flag so eviction frees their file', async () => {
   const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
   const deletedPaths: string[] = [];

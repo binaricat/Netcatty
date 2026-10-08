@@ -433,8 +433,12 @@ export class ToolOutputStore {
     this.enforceSessionLimits(targetChatSessionId, targetMap);
     // Cloning adds whole sessions' worth of handles with each fork; keep the
     // registry within the global handle/char bounds (matching `store` and
-    // `restoreHandleImpl`).
-    this.enforceGlobalLimits();
+    // `restoreHandleImpl`). Protect the source handles so overflow is
+    // absorbed by the fresh clones: clones share the source's `accessedAt`,
+    // and without protection the eviction scan could remove the source record
+    // (deleting its durable file) and break `tool_output_read` in the
+    // original conversation merely because it was forked.
+    this.enforceGlobalLimits(new Set(selected.map(([, handle]) => handle)));
     // Copies still holding in-memory content (fresh or read-back) become
     // target-owned through the normal spill path, which re-writes a durable
     // record carrying the target's chat session id. Await the writes so the
@@ -662,7 +666,7 @@ export class ToolOutputStore {
     }
   }
 
-  private enforceGlobalLimits(): void {
+  private enforceGlobalLimits(protect?: ReadonlySet<ToolOutputHandle>): void {
     const allHandles = () => [...this.bySession.entries()].flatMap(([chatSessionId, sessionMap]) => (
       [...sessionMap.values()].map(handle => ({ chatSessionId, sessionMap, handle }))
     ));
@@ -670,7 +674,7 @@ export class ToolOutputStore {
       const entries = allHandles();
       const totalChars = entries.reduce((sum, entry) => sum + entry.handle.storedChars, 0);
       if (entries.length <= this.maxHandlesGlobal && totalChars <= this.maxCharsGlobal) break;
-      const oldest = this.pickEvictionEntry(entries);
+      const oldest = this.pickEvictionEntry(entries, protect);
       if (!oldest) break;
       oldest.sessionMap.delete(oldest.handle.id);
       this.evictHandle(oldest.handle);
@@ -684,22 +688,34 @@ export class ToolOutputStore {
    * borrower does — evicting the owner would delete the very file the alias
    * points at, leaving that alias unreadable. Prefer the oldest borrowed
    * alias instead (evicting an alias never deletes a file) before falling
-   * back to the oldest handle overall.
+   * back to the oldest handle overall. `protect` marks handles that must not
+   * be chosen for eviction (e.g. the source records behind a fresh fork):
+   * they are skipped while any unprotected candidate remains, so satisfying a
+   * clone quota never sacrifices existing source ownership.
    */
-  private pickEvictionEntry<T extends { handle: ToolOutputHandle }>(entries: ReadonlyArray<T>): T | undefined {
+  private pickEvictionEntry<T extends { handle: ToolOutputHandle }>(
+    entries: ReadonlyArray<T>,
+    protect?: ReadonlySet<ToolOutputHandle>,
+  ): T | undefined {
     const borrowedPaths = new Set<string>();
     for (const sessionMap of this.bySession.values()) {
       for (const handle of sessionMap.values()) {
         if (handle.borrowedFilePath && handle.filePath) borrowedPaths.add(handle.filePath);
       }
     }
-    const candidates = borrowedPaths.size
+    let candidates = borrowedPaths.size
       ? entries.filter(entry => !(
         entry.handle.filePath
         && !entry.handle.borrowedFilePath
         && borrowedPaths.has(entry.handle.filePath)
       ))
-      : entries;
+      : [...entries];
+    if (protect && protect.size > 0) {
+      // When every remaining entry is protected, yield no candidates: the
+      // caller breaks and the (previously compliant) registry is left as-is
+      // instead of sacrificing existing source ownership for a fresh clone.
+      candidates = candidates.filter(entry => !protect.has(entry.handle));
+    }
     let oldest: T | undefined;
     for (const entry of candidates) {
       if (!oldest || entry.handle.accessedAt < oldest.handle.accessedAt) oldest = entry;
