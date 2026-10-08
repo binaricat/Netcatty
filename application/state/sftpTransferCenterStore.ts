@@ -1356,8 +1356,11 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       await store.settleCancellation(taskId, cancelledIdSet, failedIds, retainedTasks, async () => {
         clearTransferCancelledTree(taskId, childIds);
         if (failedIds.size > 0) {
-          for (const id of cancelIds) {
-            try { await netcattyBridge.get()?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+          const recoveryIds = cancelIds;
+          for (let offset = 0; offset < recoveryIds.length; offset += 32) {
+            await Promise.all(recoveryIds.slice(offset, offset + 32).map(async (id) => {
+              try { await netcattyBridge.get()?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+            }));
           }
         } else if (tasks.find((candidate) => candidate.id === taskId)?.status === "cancelled") {
           try {

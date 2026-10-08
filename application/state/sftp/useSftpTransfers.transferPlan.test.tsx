@@ -589,6 +589,9 @@ test("owned cancelled directory settles recoverable children without dropping co
   }]);
   let active = 0;
   let peak = 0;
+  let clearing = 0;
+  let clearPeak = 0;
+  let clearCount = 0;
   const cleaned: string[] = [];
   const restore = installGlobals({
     cancelTransfer: async (id: string) => {
@@ -599,7 +602,13 @@ test("owned cancelled directory settles recoverable children without dropping co
       active -= 1;
       return { success: id !== "cancel-child-0" };
     },
-    clearPendingTransferCancel: async () => undefined,
+    clearPendingTransferCancel: async () => {
+      clearing += 1;
+      clearPeak = Math.max(clearPeak, clearing);
+      await new Promise((resolve) => setImmediate(resolve));
+      clearing -= 1;
+      clearCount += 1;
+    },
     cleanupTransferArtifacts: async ({ transferId }: { transferId: string }) => { cleaned.push(transferId); },
   });
   let ops: ReturnType<typeof useSftpTransfers> | undefined;
@@ -635,6 +644,8 @@ test("owned cancelled directory settles recoverable children without dropping co
       await Promise.all([walking, cancellation]);
     });
     assert.ok(peak <= 32, `bounded cancellation IPC, got ${peak}`);
+    assert.equal(clearCount, 2201);
+    assert.ok(clearPeak > 1 && clearPeak <= 32, `bounded concurrent cleanup, got ${clearPeak}`);
     assert.equal(sftpTransferCenterStore.getTask(rootId)?.status, "attention");
     assert.equal(sftpTransferCenterStore.getTask("cancel-child-0")?.status, "attention");
     const remaining = sftpTransferCenterStore.getTask("cancel-child-1");

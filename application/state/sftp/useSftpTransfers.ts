@@ -1449,8 +1449,11 @@ export const useSftpTransfers = ({
           if (failedIds.size > 0) {
             // Preserve stages while any writer could not be cancelled. The
             // fresh recovery walk reuses ids only after this settlement.
-            for (const id of ids) {
-              try { await netcattyBridge.get()?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+            const recoveryIds = [...ids];
+            for (let offset = 0; offset < recoveryIds.length; offset += 32) {
+              await Promise.all(recoveryIds.slice(offset, offset + 32).map(async (id) => {
+                try { await netcattyBridge.get()?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+              }));
             }
             return;
           }

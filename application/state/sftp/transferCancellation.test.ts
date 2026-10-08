@@ -174,3 +174,29 @@ test("failed cancel can be retried while its old walk is still running", async (
   assert.equal(attempts, 2, "second cancel must reach the backend before natural completion");
   assert.equal(store.getTask("retry-live-cancel")?.status, "cancelled", "new successful cancel owns final outcome");
 });
+
+
+test("large orphan recovery clears pending cancellations in bounded concurrent batches", async (t) => {
+  const originalGet = netcattyBridge.get;
+  t.after(() => { netcattyBridge.get = originalGet; resetTransferCancelLatchesForTests(); });
+  const store = createSftpTransferCenterStore();
+  store.publishOwner("gone", [task("cleanup-root", { isDirectory: true }),
+    ...Array.from({ length: 2200 }, (_, index) => task(`cleanup-${index}`, { parentTaskId: "cleanup-root" }))]);
+  let active = 0;
+  let peak = 0;
+  let cleared = 0;
+  netcattyBridge.get = () => ({
+    cancelTransfer: async (id: string) => ({ success: id !== "cleanup-0" }),
+    clearPendingTransferCancel: async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      active -= 1;
+      cleared += 1;
+    },
+  } as unknown as ReturnType<typeof netcattyBridge.get>);
+  await store.cancel("cleanup-root");
+  assert.equal(cleared, 2201);
+  assert.ok(peak > 1, "recovery must not serialize one IPC per row");
+  assert.ok(peak <= 32, "recovery uses the cancellation batch bound");
+});
