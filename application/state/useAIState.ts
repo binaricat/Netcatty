@@ -90,6 +90,7 @@ import {
   buildUndoLastTurnBranch,
   type UndoLastTurnRestoredDraft,
 } from '../../domain/aiUndoLastTurn';
+import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
 
 function providerPatchIsNoop(
   current: ProviderConfig,
@@ -715,6 +716,12 @@ export function useAIState() {
     if (!result) return null;
 
     const branched = result.session;
+    // The retained prefix may reference tool outputs stored under the source
+    // session id (spilled tool results, compaction archive handles). Alias
+    // them under the branch id so tool_output_read still resolves there.
+    getAgentRuntime()
+      .getToolOutputStore(source.id)
+      .aliasSessionHandles(source.id, branched.id);
     setSessionsRaw(prev => {
       const next = [branched, ...prev];
       setLatestAISessionsSnapshot(next);

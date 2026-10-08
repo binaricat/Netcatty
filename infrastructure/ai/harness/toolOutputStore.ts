@@ -293,6 +293,35 @@ export class ToolOutputStore {
     return [...(this.bySession.get(chatSessionId)?.values() ?? [])];
   }
 
+  /**
+   * Alias every handle stored under `sourceChatSessionId` into
+   * `targetChatSessionId`'s namespace, keeping the same handle ids so
+   * references retained in a branched conversation still resolve. Aliases
+   * share the source content/spill path; deleting the source session also
+   * evicts them (the spill file is single-owner).
+   */
+  aliasSessionHandles(sourceChatSessionId: string, targetChatSessionId: string): void {
+    if (sourceChatSessionId === targetChatSessionId) return;
+    if (this.lifecycleDenyFilter.has(`chat:${targetChatSessionId}`)) return;
+    const sourceMap = this.bySession.get(sourceChatSessionId);
+    if (!sourceMap || sourceMap.size === 0) return;
+    const targetMap = this.bySession.get(targetChatSessionId) ?? new Map<string, ToolOutputHandle>();
+    let changed = false;
+    for (const sourceHandle of sourceMap.values()) {
+      if (sourceHandle.evicted || targetMap.has(sourceHandle.id)) continue;
+      targetMap.set(sourceHandle.id, {
+        ...sourceHandle,
+        chatSessionId: targetChatSessionId,
+        accessedAt: this.now(),
+      });
+      changed = true;
+    }
+    if (!changed) return;
+    this.bySession.set(targetChatSessionId, targetMap);
+    this.enforceSessionLimits(targetChatSessionId, targetMap);
+    this.enforceGlobalLimits();
+  }
+
   async flush(chatSessionId: string): Promise<void> {
     const handles = [...(this.bySession.get(chatSessionId)?.values() ?? [])];
     await Promise.allSettled(handles.map(handle => handle.spillPromise));

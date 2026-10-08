@@ -838,18 +838,31 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     if (!result) return;
 
     ensureScopeDraft(currentAgentId);
-    updateScopeDraft(currentAgentId, (draft) => ({
-      ...draft,
-      // Keep anything the user is still typing; the undone prompt goes first.
-      text: draft.text.trim()
-        ? `${result.restored.text}\n\n${draft.text}`
-        : result.restored.text,
-      attachments: [...result.restored.attachments, ...draft.attachments],
-    }));
+    // Text typed since the last flush lives only in the live composer buffer
+    // (pendingComposerTextRef/currentDraftRef), not in the persisted draft;
+    // merge from the live buffer so it is not lost, then drop the pending
+    // buffer so the later flushDraftText() cannot overwrite the merged text.
+    const liveDraft = currentDraftRef.current;
+    updateScopeDraft(currentAgentId, (draft) => {
+      const liveText = liveDraft?.text ?? draft.text;
+      return {
+        ...draft,
+        // Keep anything the user is still typing; the undone prompt goes first.
+        text: liveText.trim()
+          ? `${result.restored.text}\n\n${liveText}`
+          : result.restored.text,
+        attachments: [
+          ...result.restored.attachments,
+          ...(liveDraft?.attachments ?? draft.attachments),
+        ],
+      };
+    });
+    discardPendingComposerText();
     showScopeSessionView(result.sessionId);
     // Tool side effects live outside the conversation and cannot be rolled back.
     toast.info(t('ai.chat.undoLastTurnNotice'));
   }, [
+    discardPendingComposerText,
     ensureScopeDraft,
     isStreaming,
     showScopeSessionView,

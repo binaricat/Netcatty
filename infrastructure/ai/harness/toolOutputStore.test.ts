@@ -640,6 +640,63 @@ test('ToolOutputStore rejects cross-chat handle reads', async () => {
   assert.equal(await store.readChunkAsync({ handleId: handle.id }, 'chat-other'), null);
 });
 
+test('ToolOutputStore aliases session handles so a branched chat keeps reading them', async () => {
+  const store = new ToolOutputStore();
+  const spilled = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(50_000),
+  });
+  const inMemory = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'exact detail',
+  });
+  await store.flush('chat-source');
+
+  store.aliasSessionHandles('chat-source', 'chat-branch');
+
+  const aliasSpilled = await store.readChunkAsync({ handleId: spilled.id }, 'chat-branch');
+  assert.equal(aliasSpilled?.content.length, TOOL_OUTPUT_READ_MAX_CHARS);
+  assert.equal(aliasSpilled?.totalChars, 50_000);
+  const aliasInMemory = await store.readChunkAsync({ handleId: inMemory.id }, 'chat-branch');
+  assert.equal(aliasInMemory?.content, 'exact detail');
+  assert.deepEqual(
+    store.listPendingHandles('chat-branch').map(handle => handle.id).sort(),
+    [spilled.id, inMemory.id].sort(),
+  );
+
+  // New handles stored in the source stay out of the branch.
+  store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'after undo',
+  });
+  assert.equal(
+    store.listPendingHandles('chat-branch').some(handle => handle.preview === 'after undo'),
+    false,
+  );
+});
+
+test('ToolOutputStore aliasing is idempotent and blocked for pruned chats', () => {
+  const store = new ToolOutputStore();
+  const handle = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'kept',
+  });
+
+  store.aliasSessionHandles('chat-source', 'chat-branch');
+  store.aliasSessionHandles('chat-source', 'chat-branch');
+  assert.equal(store.read({ handleId: handle.id }, 'chat-branch'), 'kept');
+  assert.equal(store.listPendingHandles('chat-branch').length, 1);
+
+  // A deleted chat must not be resurrected by later aliasing.
+  store.prune('chat-branch');
+  store.aliasSessionHandles('chat-source', 'chat-branch');
+  assert.equal(store.read({ handleId: handle.id }, 'chat-branch'), null);
+});
+
 test('ToolOutputStore reclaims chat generations after deletion churn settles', () => {
   const store = new ToolOutputStore();
   for (let index = 0; index < 2_000; index += 1) {
