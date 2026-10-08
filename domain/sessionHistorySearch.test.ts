@@ -294,3 +294,45 @@ test("collectSessionSearchFields truncates a field to the remaining session budg
   assert.ok(fields.some((field) => field.length === 64_000 - (11 + 3 * 19_000)));
   assert.ok(fields.some((field) => field.startsWith("aaa")));
 });
+
+test("huge tool call arguments are serialized within the field cap without full materialization", () => {
+  const blob = "x".repeat(5_000_000);
+  const sessions = [
+    createSession("a", "Ops", [
+      {
+        role: "assistant",
+        toolCalls: [{
+          // Retained calls can carry uncapped payloads (e.g. `sftp_write_file`
+          // content); serialization must stop at the field cap instead of
+          // stringifying the whole argument object on every keystroke.
+          name: "sftp_write_file",
+          id: "t1",
+          arguments: { path: "/tmp/report.md", content: blob },
+        }],
+      },
+    ]),
+  ];
+
+  const fields = collectSessionSearchFields(sessions[0]);
+  const serialized = fields.find((field) => field.includes("/tmp/report.md"));
+  assert.ok(serialized);
+  // The serialized field (plus the tool name) must land under the total
+  // per-session budget cap, i.e. no multi-megabyte field is ever emitted.
+  assert.ok(serialized!.length <= 2_000);
+  assert.ok(serialized!.includes("/tmp/report.md"));
+
+  // Short payloads still serialize fully and stay searchable.
+  const searchable = createSession("b", "Ops", [
+    {
+      role: "assistant",
+      toolCalls: [{
+        name: "shell",
+        id: "t2",
+        arguments: { command: "systemctl restart nginx" },
+      }],
+    },
+  ]);
+  assert.ok(
+    collectSessionSearchFields(searchable).some((field) => field.includes('"command":"systemctl restart nginx"')),
+  );
+});

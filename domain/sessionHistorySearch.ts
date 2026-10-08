@@ -62,9 +62,87 @@ function createSearchFieldCollector(): SearchFieldCollector {
   return collector;
 }
 
+/** Depth bound for argument traversal so pathological nesting cannot recurse unboundedly. */
+const MAX_TOOL_ARGUMENTS_SERIALIZATION_DEPTH = 12;
+
+/**
+ * Serialize tool-call arguments within a hard character budget: traversal and
+ * emitted text both stop as soon as the field cap is reached, so a retained
+ * call carrying a multi-megabyte blob (e.g. an uncapped `content` for
+ * `sftp_write_file`) never materializes in full on every search keystroke.
+ * The output mirrors `JSON.stringify` for the region it covers.
+ */
 function serializeToolCallArguments(args: Record<string, unknown>): string {
   try {
-    return JSON.stringify(args) ?? '';
+    let out = '';
+    let exhausted = false;
+    const emit = (text: string): boolean => {
+      const remaining = MAX_TOOL_ARGUMENTS_FIELD_LENGTH - out.length;
+      if (remaining <= 0) {
+        exhausted = true;
+        return false;
+      }
+      if (text.length > remaining) {
+        out += text.slice(0, remaining);
+        exhausted = true;
+        return false;
+      }
+      out += text;
+      return true;
+    };
+    const writeValue = (value: unknown, depth: number): boolean => {
+      if (exhausted) return false;
+      if (value === null || value === undefined || typeof value === 'function' || typeof value === 'symbol') {
+        return emit('null');
+      }
+      switch (typeof value) {
+        case 'boolean':
+          return emit(value ? 'true' : 'false');
+        case 'number':
+          return emit(Number.isFinite(value) ? String(value) : 'null');
+        case 'bigint':
+          // `JSON.stringify` throws on BigInt; degrade to a cappable string.
+          return emit(JSON.stringify(String(value)) ?? 'null');
+        case 'string':
+          // Keep per-value allocation bounded too: escaping a multi-megabyte
+          // string whole would defeat the budget even if `emit` slices after.
+          return emit(
+            JSON.stringify(
+              value.length > MAX_TOOL_ARGUMENTS_FIELD_LENGTH
+                ? value.slice(0, MAX_TOOL_ARGUMENTS_FIELD_LENGTH)
+                : value,
+            ) ?? 'null',
+          );
+        default: {
+          if (depth <= 0) return emit('null');
+          if (Array.isArray(value)) {
+            if (!emit('[')) return false;
+            let first = true;
+            for (const item of value) {
+              if (!first && !emit(',')) return false;
+              first = false;
+              if (!writeValue(item, depth - 1)) return false;
+            }
+            return emit(']');
+          }
+          if (typeof value === 'object') {
+            if (!emit('{')) return false;
+            let first = true;
+            for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+              if (!first && !emit(',')) return false;
+              first = false;
+              if (!emit(JSON.stringify(key) ?? 'null')) return false;
+              if (!emit(':')) return false;
+              if (!writeValue(item, depth - 1)) return false;
+            }
+            return emit('}');
+          }
+          return emit('null');
+        }
+      }
+    };
+    writeValue(args, MAX_TOOL_ARGUMENTS_SERIALIZATION_DEPTH);
+    return out;
   } catch {
     return '';
   }
