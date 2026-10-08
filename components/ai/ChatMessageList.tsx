@@ -6,10 +6,11 @@
  * No avatars. Thinking blocks are collapsible.
  */
 
-import { AlertCircle, BookOpen, FileText, RotateCcw, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertCircle, BookOpen, FileText, GitFork, RotateCcw, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import type { ChatMessage, ToolCall as AgentToolCall } from '../../infrastructure/ai/types';
+import type { AISessionContextCompaction, ChatMessage, ToolCall as AgentToolCall } from '../../infrastructure/ai/types';
+import { canForkFromMessage } from '../../domain/aiSessionFork';
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
 import {
   Conversation,
@@ -92,6 +93,10 @@ interface ChatMessageListProps {
   /** Active chat session ID — used to filter standalone MCP approval blocks */
   activeSessionId?: string | null;
   activeCompaction?: ActiveCompactionUi | null;
+  /** Stored compaction summary for the viewed session — fork boundaries must not fall inside its coverage. */
+  contextCompaction?: AISessionContextCompaction | null;
+  /** Present when the panel supports forking a conversation from a completed assistant response. */
+  onForkFromMessage?: (messageId: string) => void;
   notes?: VaultNote[];
   hosts?: Host[];
   snippets?: Snippet[];
@@ -160,6 +165,8 @@ export function buildCodexApprovalRenderPlan(
 const MESSAGE_RENDER_BATCH = 50;
 const MESSAGE_RENDER_STEP = 50;
 
+const EMPTY_FORKABLE_SET: ReadonlySet<string> = new Set();
+
 export function pruneResolvedApprovals(
   previous: ReadonlyMap<string, boolean>,
   messages: readonly ChatMessage[],
@@ -180,6 +187,8 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   isStreaming,
   activeSessionId,
   activeCompaction = null,
+  contextCompaction,
+  onForkFromMessage,
   notes = [],
   hosts = [],
   snippets = [],
@@ -398,6 +407,24 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
     () => messages.filter((message) => message.role !== 'system'),
     [messages],
   );
+
+  // "Fork from here" targets: completed assistant responses whose whole
+  // prefix is a safe fork boundary (fully resolved tool calls, stored
+  // compaction summary still accurate). Hidden entirely while a turn streams.
+  const forkableMessageIds = useMemo(() => {
+    if (!onForkFromMessage || isStreaming) return EMPTY_FORKABLE_SET;
+    const ids = new Set<string>();
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue;
+      if (canForkFromMessage(
+        { messages, contextCompaction: contextCompaction ?? undefined },
+        message.id,
+      )) {
+        ids.add(message.id);
+      }
+    }
+    return ids;
+  }, [onForkFromMessage, isStreaming, messages, contextCompaction]);
 
   // While a jump target is active, re-resolve the tail against the current list
   // so streaming appends cannot slide the window past the selected message.
@@ -798,6 +825,22 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                     </div>
                   </div>
                 )}
+
+                {/* Fork from here — copies the conversation up to this completed
+                    response into a new session. Only on safe boundaries; hidden
+                    while a turn streams (forkableMessageIds empty). */}
+                {!isUser && onForkFromMessage && forkableMessageIds.has(message.id) && (
+                  <div className="hidden group-hover:flex -mt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => onForkFromMessage(message.id)}
+                      className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground/40 hover:text-foreground hover:bg-white/[0.05] transition-colors cursor-pointer"
+                    >
+                      <GitFork size={11} />
+                      <span>{t('ai.chat.forkFromHere')}</span>
+                    </button>
+                  </div>
+                )}
               </MessageContent>
             </Message>
           );
@@ -1042,6 +1085,8 @@ function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps
   if (prev.onOpenVaultHost !== next.onOpenVaultHost) return false;
   if (prev.onOpenVaultSnippet !== next.onOpenVaultSnippet) return false;
   if (prev.onOpenVaultSection !== next.onOpenVaultSection) return false;
+  if (prev.onForkFromMessage !== next.onForkFromMessage) return false;
+  if (prev.contextCompaction !== next.contextCompaction) return false;
   if (prev.messages.length !== next.messages.length) return false;
   if (prev.messages === next.messages) return true;
 

@@ -11,6 +11,8 @@ export interface ToolOutputHandle {
   accessedAt: number;
   fullContent?: string;
   filePath?: string;
+  /** True when `filePath` is borrowed from another session and must not be deleted on eviction. */
+  borrowedFilePath?: boolean;
   spillPromise?: Promise<void>;
   evicted?: boolean;
 }
@@ -332,6 +334,273 @@ export class ToolOutputStore {
     };
   }
 
+  /**
+   * Copy the live tool-output handles stored under `sourceChatSessionId` into
+   * the namespace of `targetChatSessionId` (same chat session, e.g. a forked
+   * session that replays history referencing the source's handles), preserving
+   * handle ids so retained "handleId=tool-output-…" notices stay valid. The
+   * source session keeps its own copies. Handles spilled to disk are
+   * re-owned by the target: their content is read back from the source's
+   * durable record and re-written under the target's chat session id, so a
+   * restart can restore the fork's handle independently and deleting either
+   * session cannot delete the other's spill file. Handles that never spilled
+   * are copied in memory and pick up their own durable record through the
+   * normal spill path. If the persisted content cannot be read back, the
+   * target falls back to aliasing the source-owned spill path as a
+   * non-owning borrow, so live reads still resolve while both namespaces
+   * exist and deleting the fork never removes the source-backed file.
+   * `retainHandleIds` may pass the
+   * handle ids referenced by the retained fork prefix: handles missing from
+   * the live cache (e.g. after an app restart or cache expiry) are restored
+   * from persistence under the source session before cloning, so forking a
+   * historical session still produces target-owned records instead of a
+   * no-op. When `retainHandleIds` is provided, only those handles are
+   * cloned; outputs saved by turns after the fork boundary stay in the
+   * source session. The fork is refused (`false`) unless every requested
+   * id resolves in the source namespace — including through the restore
+   * attempts above — because a retained message advertising an
+   * unresolvable handle would break `tool_output_read` permanently.
+   * Returns `true` only when the target namespace resolves every
+   * advertised handle id, and `false` when a requested handle id cannot
+   * be resolved or when the global quota cannot hold both the source and
+   * the fresh clones (checked before any eviction, so the refusal leaves
+   * the registry untouched): the caller must then abort
+   * publishing the fork, because its retained messages would reference handle
+   * ids that resolve to "not found".
+   */
+  async rehomeChatSession(
+    sourceChatSessionId: string,
+    targetChatSessionId: string,
+    retainHandleIds?: readonly string[],
+  ): Promise<boolean> {
+    this.pruneExpired();
+    const missingIds = (retainHandleIds ?? [])
+      .filter(handleId => !this.bySession.get(sourceChatSessionId)?.has(handleId));
+    if (missingIds.length > 0 && this.persistence?.restore) {
+      // After an app restart (or once the live-cache entry expires), the
+      // retained handles exist only behind `persistence.restore`. Restore
+      // them under the source session before cloning so the fork gets real
+      // records instead of a silent no-op that breaks `tool_output_read`.
+      await Promise.allSettled(missingIds.map(
+        handleId => this.restoreHandle(handleId, sourceChatSessionId).catch(() => undefined),
+      ));
+    }
+    const sourceMap = this.bySession.get(sourceChatSessionId);
+    if (!sourceMap || sourceMap.size === 0) {
+      // A retained prefix that references handle ids must not fork "into
+      // nothing": a restore after a restart can come back null (e.g. the
+      // durable record is gone or was rejected by the generation checks),
+      // and reporting success here would publish a fork whose
+      // `tool_output_read` calls fail permanently.
+      if (retainHandleIds && retainHandleIds.length > 0) return false;
+      return true;
+    }
+    // When the caller names the handles the retained prefix references, clone
+    // only those: copying the whole source session would pull in outputs the
+    // fork never reads and could evict still-valid handles (source or other
+    // sessions) purely to make room for them.
+    const selected: [string, ToolOutputHandle][] = [];
+    if (retainHandleIds) {
+      const seen = new Set<string>();
+      for (const handleId of retainHandleIds) {
+        if (seen.has(handleId)) continue;
+        seen.add(handleId);
+        const handle = sourceMap.get(handleId);
+        // A requested id still missing after the restore attempts above must
+        // not be silently skipped: `Promise.allSettled` swallowed the restore
+        // failure, and cloning the survivors would advertise a handle nothing
+        // can ever resolve — refuse instead of publishing a broken fork.
+        if (!handle) return false;
+        selected.push([handleId, handle]);
+      }
+    } else {
+      selected.push(...sourceMap.entries());
+    }
+    // Let pending spills settle so each source handle's durable ownership is
+    // decided: either the content is still in memory (write pending/failed) or
+    // the handle owns a durable file path.
+    await Promise.allSettled(selected.map(([, handle]) => handle.spillPromise));
+    const targetMap = this.bySession.get(targetChatSessionId) ?? new Map<string, ToolOutputHandle>();
+    const protect = new Set(selected.map(([, handle]) => handle));
+    // Determine feasibility *before* touching the registry: if the global
+    // quota cannot admit the fresh clones without evicting handles other
+    // conversations still resolve, refuse the fork now — a refusal after
+    // eviction would already have deleted collateral, unrelated output
+    // (rolling back only the clones cannot bring it back).
+    let cloneCount = 0;
+    let cloneChars = 0;
+    for (const [handleId, handle] of selected) {
+      if (targetMap.has(handleId)) continue;
+      cloneCount += 1;
+      cloneChars += handle.storedChars;
+    }
+    if (!this.canAdmitWithinGlobalQuota(cloneCount, cloneChars, protect)) {
+      return false;
+    }
+    const freshClones: ToolOutputHandle[] = [];
+    for (const [handleId, handle] of selected) {
+      if (targetMap.has(handleId)) continue;
+      const copy: ToolOutputHandle = {
+        ...handle,
+        chatSessionId: targetChatSessionId,
+        filePath: undefined,
+        spillPromise: undefined,
+        evicted: undefined,
+      };
+      if (copy.fullContent == null && handle.filePath) {
+        const content = await this.tryReadPersistedContent(handle);
+        if (content != null) {
+          copy.fullContent = content;
+          // The copy now holds its own content and will respill the borrowed
+          // path if it came in through the spread: drop the inherited
+          // non-owning marker so eviction deletes the target-owned spill file.
+          copy.borrowedFilePath = undefined;
+        } else {
+          // Persisted content is unreadable (e.g. the spill file vanished).
+          // Fall back to aliasing the source-owned path so the live fork can
+          // still read while both sessions survive, but mark the alias as
+          // non-owning: evicting or pruning the fork must never delete the
+          // source-backed file, which the source session still references.
+          // The forked handle will not survive a restart or a source-session
+          // delete in this case.
+          copy.filePath = handle.filePath;
+          copy.borrowedFilePath = true;
+        }
+      }
+      targetMap.set(handleId, copy);
+      freshClones.push(copy);
+    }
+    this.bySession.set(targetChatSessionId, targetMap);
+    this.enforceSessionLimits(targetChatSessionId, targetMap);
+    // Cloning adds whole sessions' worth of handles with each fork; keep the
+    // registry within the global handle/char bounds (matching `store` and
+    // `restoreHandleImpl`). The fork's retained messages reference the cloned
+    // handle ids, so evicting a clone here — before its durable record is
+    // written — makes `tool_output_read` in the fork return "not found".
+    // Capacity is therefore reserved for the fresh clones and the source
+    // handles behind them (whose durable files the original conversation
+    // still reads): when the quota is already full, the oldest unprotected
+    // pre-existing handle (mirroring the plain `store()` eviction policy)
+    // absorbs the overflow instead. When the protected set itself exceeds
+    // the quota (e.g. a very small `maxHandlesGlobal`), no eviction can
+    // admit the clones without destroying output a live conversation still
+    // resolves: dropping one copy would either delete the source-owned file
+    // the original conversation reads, or — when the clone is a borrowed
+    // alias — leave the fork publishing a handle id that immediately
+    // misses. Refuse the fork instead: roll back the fresh clones so the
+    // registry returns to its pre-fork (compliant) state, keeping the
+    // source record intact, and report the refusal (`false`) so the caller
+    // aborts publishing the fork: no existing conversation's output is
+    // invalidated and no fork advertises unresolvable handle ids.
+    // Capacity was reserved above via `canAdmitWithinGlobalQuota`, which
+    // simulates the same eviction policy (`pickEvictionEntry` with the same
+    // protect set) without mutating anything, so this enforcement re-check
+    // can only reach the same "within quota" outcome and never evicts a
+    // collateral victim on a fork that was already deemed infeasible. The
+    // protect set and rollback below remain as a safety net for concurrent
+    // registry changes that slipped in across the awaited persistence reads.
+    const withinQuota = this.enforceGlobalLimits(new Set([
+      ...protect,
+      ...freshClones,
+    ]));
+    if (!withinQuota) {
+      // The fresh clones own no durable files yet (their spills happen below),
+      // so removing them deletes nothing and retires no borrow aliases.
+      for (const clone of freshClones) {
+        if (targetMap.get(clone.id) === clone) targetMap.delete(clone.id);
+      }
+      if (targetMap.size === 0) {
+        this.bySession.delete(targetChatSessionId);
+      } else {
+        this.bySession.set(targetChatSessionId, targetMap);
+      }
+      // The registry the clones were added to was within quota, so rolling
+      // them back is guaranteed to restore compliance; no further eviction
+      // pass runs here.
+      // Communicate the refusal so the caller aborts the fork instead of
+      // publishing a conversation whose retained handles miss.
+      return false;
+    }
+    // Copies still holding in-memory content (fresh or read-back) become
+    // target-owned through the normal spill path, which re-writes a durable
+    // record carrying the target's chat session id. Await the writes so the
+    // target's durable ownership is settled when this promise resolves.
+    const spillWrites: Promise<void>[] = [];
+    for (const handle of targetMap.values()) {
+      if (handle.fullContent == null) continue;
+      this.startSpill(handle);
+      if (handle.spillPromise) spillWrites.push(handle.spillPromise);
+    }
+    await Promise.allSettled(spillWrites);
+    return true;
+  }
+
+  /**
+   * Check — without mutating any registry state — whether adding
+   * `extraHandles` handles totalling `extraChars` chars could be admitted
+   * into the global quota by evicting unprotected existing handles,
+   * simulating exactly the eviction `enforceGlobalLimits` would perform
+   * (same `pickEvictionEntry` rules, same `protect` set). Returns false when
+   * the quota is still exceeded after every remaining entry is protected (or
+   * shielded by the borrow-alias rule), which is the condition under which
+   * a fork must be refused *before* any real eviction runs, so unrelated
+   * handles are never deleted by a fork attempt that then fails.
+   */
+  private canAdmitWithinGlobalQuota(
+    extraHandles: number,
+    extraChars: number,
+    protect: ReadonlySet<ToolOutputHandle>,
+  ): boolean {
+    const evicted = new Set<ToolOutputHandle>();
+    while (true) {
+      const entries = [...this.bySession.values()]
+        .flatMap(sessionMap => [...sessionMap.values()])
+        .filter(handle => !evicted.has(handle))
+        .map(handle => ({ handle }));
+      const totalChars = entries.reduce((sum, entry) => sum + entry.handle.storedChars, 0)
+        + extraChars;
+      if (
+        entries.length + extraHandles <= this.maxHandlesGlobal
+        && totalChars <= this.maxCharsGlobal
+      ) return true;
+      const oldest = this.pickEvictionEntry(entries, protect);
+      if (!oldest) return false;
+      evicted.add(oldest.handle);
+    }
+  }
+
+  /**
+   * Read a handle's full persisted content back through the persistence
+   * adapter, paging `read` (which caps each response) until the durable file
+   * is exhausted. Returns null when the adapter cannot serve the content.
+   */
+  private async tryReadPersistedContent(handle: ToolOutputHandle): Promise<string | null> {
+    const persistence = this.persistence;
+    const path = handle.filePath;
+    if (!persistence || !path) return null;
+    const maxPages = Math.ceil(TOOL_OUTPUT_MAX_HANDLE_CHARS / TOOL_OUTPUT_READ_MAX_CHARS) + 1;
+    const parts: string[] = [];
+    try {
+      let offset = 0;
+      for (let page = 0; page < maxPages; page += 1) {
+        const chunk = await persistence.read(path, {
+          handleId: handle.id,
+          mode: 'range',
+          offset,
+          maxChars: TOOL_OUTPUT_READ_MAX_CHARS,
+        });
+        if (!chunk) return null;
+        parts.push(chunk.content);
+        if (!chunk.hasMore) return parts.join('');
+        if (chunk.content.length === 0) return null; // No forward progress.
+        offset = chunk.nextOffset;
+      }
+    } catch {
+      // Treat read failures (e.g. adapter offline) as unreadable content.
+    }
+    return null;
+  }
+
   prune(chatSessionId: string): void {
     this.lifecycleDenyFilter.add(`chat:${chatSessionId}`);
     this.failedSessionDeletions.delete(chatSessionId);
@@ -445,6 +714,11 @@ export class ToolOutputStore {
         return;
       }
       handle.filePath = path;
+      // The freshly written path is owned by this handle; a previously
+      // borrowed spill path (fell back to durably, in place of the source's
+      // own file) must not keep the eviction-protection flag now that the
+      // handle owns durable content again.
+      handle.borrowedFilePath = false;
       handle.fullContent = undefined;
     }).catch(() => {
       // Keep the in-memory copy if persistence is temporarily unavailable.
@@ -489,10 +763,10 @@ export class ToolOutputStore {
       sessionMap.size > this.maxHandlesPerSession
       || totalChars() > this.maxCharsPerSession
     ) {
-      const oldest = [...sessionMap.values()].sort((a, b) => a.accessedAt - b.accessedAt)[0];
+      const oldest = this.pickEvictionEntry([...sessionMap.values()].map(handle => ({ handle })));
       if (!oldest) break;
-      sessionMap.delete(oldest.id);
-      this.evictHandle(oldest);
+      sessionMap.delete(oldest.handle.id);
+      this.evictHandle(oldest.handle);
     }
     if (sessionMap.size === 0) this.bySession.delete(chatSessionId);
   }
@@ -509,26 +783,109 @@ export class ToolOutputStore {
     }
   }
 
-  private enforceGlobalLimits(): void {
+  private enforceGlobalLimits(protect?: ReadonlySet<ToolOutputHandle>): boolean {
+    // Returns true when the loop ends with the registry within quota, and
+    // false when every remaining entry is protected and the registry is still
+    // over quota (the caller decides what to sacrifice, if anything).
     const allHandles = () => [...this.bySession.entries()].flatMap(([chatSessionId, sessionMap]) => (
       [...sessionMap.values()].map(handle => ({ chatSessionId, sessionMap, handle }))
     ));
     while (true) {
       const entries = allHandles();
       const totalChars = entries.reduce((sum, entry) => sum + entry.handle.storedChars, 0);
-      if (entries.length <= this.maxHandlesGlobal && totalChars <= this.maxCharsGlobal) break;
-      const oldest = entries.sort((a, b) => a.handle.accessedAt - b.handle.accessedAt)[0];
-      if (!oldest) break;
+      if (entries.length <= this.maxHandlesGlobal && totalChars <= this.maxCharsGlobal) return true;
+      const oldest = this.pickEvictionEntry(entries, protect);
+      if (!oldest) return false;
       oldest.sessionMap.delete(oldest.handle.id);
       this.evictHandle(oldest.handle);
       if (oldest.sessionMap.size === 0) this.bySession.delete(oldest.chatSessionId);
     }
   }
 
+  /**
+   * Pick the next handle to evict: a handle owning a durable spill path that
+   * other handles in the same eviction set borrow as a non-owning alias must
+   * stay in memory while the borrower does — evicting the owner would delete
+   * the very file the alias points at, leaving that alias unreadable. Prefer
+   * the oldest borrowed alias instead (evicting an alias never deletes a
+   * file) before falling back to the oldest handle overall. The borrow
+   * protection is scoped to `entries`: only the global pass sees every
+   * session's handles, so only there can the borrower take the owner's
+   * place as the victim. A per-session pass (`enforceSessionLimits`) never
+   * contains an alias of another session's owner, and scoping the filter to
+   * `entries` keeps it from pinning owners against their own session's
+   * quota — otherwise a source session whose quota is filled by borrowed
+   * owners would leave a freshly stored handle as the only eviction
+   * candidate, and `store()` would return an immediately dead handle id.
+   * When such an owner *is* evicted by a per-session pass, `evictHandle`
+   * first retires the cross-session aliases of its path so the fork never
+   * keeps a handle registered against a deleted file.
+   * `protect` marks handles that must not be chosen for eviction (e.g. the
+   * records a fresh fork advertises, its clones and their source handles):
+   * they are skipped while any unprotected candidate remains, so making room
+   * for a fork never removes a handle the fork or the conversation it was
+   * forked from still resolves.
+   */
+  private pickEvictionEntry<T extends { handle: ToolOutputHandle }>(
+    entries: ReadonlyArray<T>,
+    protect?: ReadonlySet<ToolOutputHandle>,
+  ): T | undefined {
+    const borrowedPaths = new Set<string>();
+    for (const entry of entries) {
+      if (entry.handle.borrowedFilePath && entry.handle.filePath) borrowedPaths.add(entry.handle.filePath);
+    }
+    let candidates = borrowedPaths.size
+      ? entries.filter(entry => !(
+        entry.handle.filePath
+        && !entry.handle.borrowedFilePath
+        && borrowedPaths.has(entry.handle.filePath)
+      ))
+      : [...entries];
+    if (protect && protect.size > 0) {
+      // When every remaining entry is protected, yield no candidates: the
+      // caller breaks and the (previously compliant) registry is left as-is
+      // instead of sacrificing existing source ownership for a fresh clone.
+      candidates = candidates.filter(entry => !protect.has(entry.handle));
+    }
+    let oldest: T | undefined;
+    for (const entry of candidates) {
+      if (!oldest || entry.handle.accessedAt < oldest.handle.accessedAt) oldest = entry;
+    }
+    return oldest;
+  }
+
   private evictHandle(handle: ToolOutputHandle): void {
     handle.evicted = true;
-    if (handle.filePath && this.persistence) {
+    if (handle.filePath && !handle.borrowedFilePath && this.persistence) {
+      this.retireBorrowAliases(handle);
       void this.persistence.delete(handle.filePath).catch(() => {});
+    }
+  }
+
+  /**
+   * Remove handles in *other* chat sessions that alias `owner.filePath` as a
+   * non-owning borrow, before the owner's durable file is deleted. Eviction
+   * runs per session (`enforceSessionLimits`, `pruneTerminalSession`,
+   * `removeHandle`), so `pickEvictionEntry`'s borrow protection — which only
+   * sees the handles of the eviction set — cannot shield an owner whose path
+   * is aliased by a fork in another session. Deleting the owner's file would
+   * otherwise leave the fork's alias registered against a path that no longer
+   * exists, so a later `tool_output_read` in the fork fails and then drops the
+   * alias. Retiring the alias (removing it from its session map; evicting an
+   * alias never deletes a file) surfaces the loss immediately as a "not found"
+   * read instead of a dangling handle, and frees the fork's quota slot.
+   */
+  private retireBorrowAliases(owner: ToolOutputHandle): void {
+    if (!owner.filePath || owner.borrowedFilePath) return;
+    for (const [chatSessionId, sessionMap] of this.bySession) {
+      if (chatSessionId === owner.chatSessionId) continue;
+      for (const [handleId, alias] of sessionMap) {
+        if (!alias.borrowedFilePath || alias.filePath !== owner.filePath) continue;
+        sessionMap.delete(handleId);
+        // An alias never owns the shared file, so this recursion stops here.
+        this.evictHandle(alias);
+      }
+      if (sessionMap.size === 0) this.bySession.delete(chatSessionId);
     }
   }
 

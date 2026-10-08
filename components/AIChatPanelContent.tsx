@@ -47,6 +47,8 @@ interface AIChatPanelContentProps {
   activeSessionId: string | null;
   handleSelectSession: (sessionId: string) => void;
   handleDeleteSession: (event: React.MouseEvent, sessionId: string) => void;
+  /** Fork the conversation up to a completed assistant response into a new session. */
+  onForkFromMessage?: (messageId: string) => void;
   messages: ChatMessage[];
   isStreaming: boolean;
   activeCompaction?: import('../application/state/useAgentCompactionUi').ActiveCompactionUi | null;
@@ -124,6 +126,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   activeSessionId,
   handleSelectSession,
   handleDeleteSession,
+  onForkFromMessage,
   messages,
   isStreaming,
   activeCompaction = null,
@@ -291,6 +294,8 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                 isStreaming={isStreaming}
                 activeSessionId={activeSessionId}
                 activeCompaction={activeCompaction}
+                contextCompaction={activeSession?.contextCompaction}
+                onForkFromMessage={onForkFromMessage}
                 notes={notes}
                 hosts={hosts}
                 onOpenVaultNote={onOpenVaultNote}

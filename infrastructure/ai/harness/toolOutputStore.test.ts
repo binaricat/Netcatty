@@ -33,6 +33,592 @@ test('ToolOutputStore stores and reads truncated output by handle', () => {
   assert.equal(store.read({ handleId: handle.id }, 'chat-1'), null);
 });
 
+test('ToolOutputStore rehomes handles into a forked chat session namespace', async () => {
+  const store = new ToolOutputStore();
+  const handle = store.store({
+    chatSessionId: 'chat-1',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(50_000),
+  });
+
+  await store.rehomeChatSession('chat-1', 'chat-fork');
+  // Same handle id stays valid in the fork's namespace.
+  const head = store.read({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-fork');
+  assert.equal(head?.length, 100);
+
+  // The source session keeps its own copy.
+  assert.equal(store.read({ handleId: handle.id, mode: 'tail', maxChars: 50 }, 'chat-1'), 'A'.repeat(50));
+
+  // Sessions with no handles rehome to nothing.
+  await store.rehomeChatSession('chat-missing', 'chat-fork');
+  assert.equal(store.read({ handleId: 'tool-output-none' }, 'chat-fork'), null);
+});
+
+test('ToolOutputStore clones only the handles referenced by the retained prefix', async () => {
+  const store = new ToolOutputStore({
+    maxHandlesGlobal: 4,
+    maxCharsGlobal: 200,
+  });
+  const retained = store.store({
+    chatSessionId: 'chat-1',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(30),
+  });
+  const discarded = store.store({
+    chatSessionId: 'chat-1',
+    capabilityId: 'terminal.execute',
+    content: 'B'.repeat(30),
+  });
+  const unrelated = store.store({
+    chatSessionId: 'chat-other',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30),
+  });
+
+  await store.rehomeChatSession('chat-1', 'chat-fork', [retained.id]);
+
+  // Only the retained handle reaches the fork; the clone must not consume the
+  // shared quota for outputs the fork never references.
+  assert.ok(store.get(retained.id, 'chat-fork'));
+  assert.equal(store.get(discarded.id, 'chat-fork'), undefined);
+  // The source session keeps both of its handles, and unrelated sessions are
+  // not evicted to make room for duplicated output.
+  assert.ok(store.get(retained.id, 'chat-1'));
+  assert.ok(store.get(discarded.id, 'chat-1'));
+  assert.ok(store.get(unrelated.id, 'chat-other'));
+});
+
+test('ToolOutputStore rehomed spilled handles become durably owned by the target', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    restore: async (handleId, chatSessionId) => {
+      for (const [path, entry] of files) {
+        if (entry.record.handleId !== handleId || entry.record.chatSessionId !== chatSessionId) continue;
+        return { path, record: entry.record };
+      }
+      return null;
+    },
+    read: async (path, input) => {
+      const content = files.get(path)?.content;
+      if (content == null) return null;
+      const startOffset = input.mode === 'tail'
+        ? Math.max(0, content.length - (input.maxChars ?? 12_000))
+        : Math.max(0, input.offset ?? 0);
+      const selected = content.slice(startOffset, startOffset + (input.maxChars ?? 12_000));
+      const endOffset = startOffset + selected.length;
+      return {
+        mode: input.mode ?? 'head',
+        content: selected,
+        totalChars: content.length,
+        startOffset,
+        endOffset,
+        nextOffset: endOffset,
+        hasMore: endOffset < content.length,
+      };
+    },
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  const original = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'B'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  // A rehome that fits the quota reports success.
+  assert.equal(await original.rehomeChatSession('chat-source', 'chat-fork'), true);
+  const forkCopy = original.get(handle.id, 'chat-fork');
+  assert.ok(forkCopy);
+  // The copy owns its own durable record under the target's chat session id.
+  assert.notEqual(forkCopy.filePath, undefined);
+  const forkRecord = files.get(forkCopy.filePath!)?.record;
+  assert.ok(forkRecord);
+  assert.equal(forkRecord.chatSessionId, 'chat-fork');
+  assert.equal(forkRecord.handleId, handle.id);
+
+  // A restart can restore the fork's handle from its own record.
+  const afterRestart = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const restored = await afterRestart.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-fork');
+  assert.equal(restored?.content, 'B'.repeat(100));
+
+  // Deleting the source session removes only the source-owned file; the
+  // fork's copy stays readable.
+  original.prune('chat-source');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(deletedPaths.includes(`/netcatty/${handle.id}-chat-source.log`));
+  const forkRecordAfterPrune = files.get(forkCopy.filePath!);
+  assert.ok(forkRecordAfterPrune);
+  assert.equal(forkRecordAfterPrune.record.chatSessionId, 'chat-fork');
+  const stillReadable = await original.readChunkAsync({ handleId: handle.id, mode: 'tail', maxChars: 50 }, 'chat-fork');
+  assert.equal(stillReadable?.content, 'B'.repeat(50));
+});
+
+test('ToolOutputStore rehome falls back to a non-owning alias of the source spill path', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    read: async () => null,
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  const original = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  // `read` cannot serve the durable content, so the clone cannot take
+  // ownership: it aliases the source path as a non-owning borrow instead.
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+  const forkCopy = original.get(handle.id, 'chat-fork');
+  assert.ok(forkCopy);
+  assert.equal(forkCopy.filePath, `/netcatty/${handle.id}-chat-source.log`);
+  assert.equal(forkCopy.borrowedFilePath, true);
+  assert.equal(forkCopy.fullContent, undefined);
+
+  // Pruning the fork must not delete the source-owned spill file.
+  original.prune('chat-fork');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(deletedPaths.length, 0);
+  assert.ok(files.has(`/netcatty/${handle.id}-chat-source.log`));
+});
+
+test('ToolOutputStore global quotas keep the borrowed fork alias when every record is protected', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    read: async () => null,
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  // The global handle quota is already full when the fork is created. Every
+  // registry entry is protected by the rehome — the fork's retained messages
+  // advertise the cloned handle (the alias), and the source record backs the
+  // original conversation — so no eviction can admit the clone without
+  // destroying output a live conversation still resolves. The fork is
+  // refused: the borrowed alias (which owns nothing) is rolled back, the
+  // source-owned record keeps the handle readable for the original
+  // conversation, and no spill file is deleted.
+  const original = new ToolOutputStore({ spillThresholdChars: 0, maxHandlesGlobal: 1, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  // `read` cannot serve the durable content, so the clone would alias the
+  // source-owned spill path as a non-owning borrow.
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+
+  const sourceCopy = original.get(handle.id, 'chat-source');
+  assert.ok(sourceCopy);
+  assert.ok(files.has(`/netcatty/${handle.id}-chat-source.log`));
+  // Rolling the alias back never deletes the shared file.
+  assert.equal(deletedPaths.length, 0);
+  // The fork is refused: its read of this handle id misses, but the original
+  // conversation keeps it.
+  assert.equal(original.get(handle.id, 'chat-fork'), undefined);
+});
+
+test('ToolOutputStore session quotas evict a borrowed owner instead of the fresh store', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    read: async () => null,
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  // The source session's handle quota is full and its only record's spill
+  // path is borrowed by a fork alias in another session. Storing a new
+  // output into the source session must not sacrifice that fresh handle:
+  // the per-session pass never sees the fork's alias, so the borrowed owner
+  // (not the new store) is the eviction candidate, freeing the session
+  // quota so `store()` still returns a live handle id.
+  const original = new ToolOutputStore({ spillThresholdChars: 0, maxHandlesPerSession: 1, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  // `read` cannot serve the durable content, so the clone aliases the
+  // source-owned spill path as a non-owning borrow.
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+  assert.equal(original.get(handle.id, 'chat-fork')?.borrowedFilePath, true);
+
+  const fresh = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'D'.repeat(30_000),
+  });
+  const freshCopy = original.get(fresh.id, 'chat-source');
+  assert.ok(freshCopy);
+  assert.notEqual(freshCopy.evicted, true);
+  await freshCopy.spillPromise;
+  assert.ok(files.has(`/netcatty/${fresh.id}-chat-source.log`));
+  // The old owner is gone, and evicting it deletes the spill path the fork
+  // alias used to borrow (the alias never owned that file). The alias is
+  // retired alongside so the fork never keeps a handle registered against a
+  // deleted file.
+  assert.equal(original.get(handle.id, 'chat-source'), undefined);
+  assert.equal(original.get(handle.id, 'chat-fork'), undefined);
+  assert.deepEqual(deletedPaths, [`/netcatty/${handle.id}-chat-source.log`]);
+});
+
+test('ToolOutputStore retires the borrowed fork alias before its owner is evicted', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    read: async () => null,
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  // A fork holds a non-owning alias of the source session's only spill path.
+  // Filling the source session's quota must retire the alias when its owner
+  // is evicted, so the fork never serves a dangling handle: the read fails
+  // (content is gone) and the alias is gone from the registry, instead of
+  // lingering until a later read trips over the deleted file.
+  const original = new ToolOutputStore({ spillThresholdChars: 0, maxHandlesPerSession: 1, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  // `read` cannot serve the durable content, so the clone aliases the
+  // source-owned spill path as a non-owning borrow.
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+  const alias = original.get(handle.id, 'chat-fork');
+  assert.ok(alias);
+  assert.equal(alias.borrowedFilePath, true);
+
+  const fresh = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'D'.repeat(30_000),
+  });
+  await fresh.spillPromise;
+  assert.ok(files.has(`/netcatty/${fresh.id}-chat-source.log`));
+  // The alias is retired before the owner's file is deleted.
+  assert.equal(original.get(handle.id, 'chat-fork'), undefined);
+  assert.deepEqual(deletedPaths, [`/netcatty/${handle.id}-chat-source.log`]);
+  // The fork's read no longer resolves the retired alias.
+  assert.equal(await original.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 10 }, 'chat-fork'), null);
+});
+
+test('ToolOutputStore global quotas refuse a fork whose copies cannot fit', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    read: async (path, input) => {
+      const content = files.get(path)?.content;
+      if (content == null) return null;
+      const offset = input.mode === 'tail'
+        ? Math.max(0, content.length - (input.maxChars ?? 12_000))
+        : input.offset ?? 0;
+      const selected = content.slice(offset, offset + (input.maxChars ?? 12_000));
+      const nextOffset = offset + selected.length;
+      return {
+        mode: input.mode ?? 'head',
+        content: selected,
+        totalChars: content.length,
+        startOffset: offset,
+        endOffset: nextOffset,
+        nextOffset,
+        hasMore: nextOffset < content.length,
+      };
+    },
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  // The global handle quota is already full when the fork is created, and
+  // the only unprotected entry is nothing — the freshly cloned handle and
+  // its source are both protected, because the clone must survive quota
+  // enforcement (the fork advertises its handle id) and the source record
+  // backs the original conversation. No eviction can fit both copies, so
+  // the fork is refused: the fresh clone (which re-read the source's
+  // durable content but has not yet spilled it) is rolled back, and the
+  // source-owned record — the one the original conversation still resolves —
+  // keeps its durable file. The fork's read of the handle id misses instead
+  // of invalidating either live copy.
+  const original = new ToolOutputStore({ spillThresholdChars: 0, maxHandlesGlobal: 1, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  // The refusal is reported to the caller so it can abort publishing the
+  // fork instead of leaving it with unresolvable retained handle ids.
+  assert.equal(await original.rehomeChatSession('chat-source', 'chat-fork'), false);
+
+  // The source copy survives untouched with its durable spill file.
+  const sourceCopy = original.get(handle.id, 'chat-source');
+  assert.ok(sourceCopy);
+  assert.deepEqual(deletedPaths, []);
+  assert.ok(files.has(`/netcatty/${handle.id}-chat-source.log`));
+  assert.equal((
+    await original.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-source')
+  )?.content?.length, 100);
+  // The fork is refused: no clone, no target-owned record for it.
+  assert.equal(original.get(handle.id, 'chat-fork'), undefined);
+  assert.equal(files.has(`/netcatty/${handle.id}-chat-fork.log`), false);
+  assert.equal(await original.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-fork'), null);
+});
+
+test('ToolOutputStore global quotas evict an unrelated session\'s older handle, not the fresh clone', async () => {
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      return path;
+    },
+    read: async (path, input) => {
+      return {
+        mode: input.mode ?? 'head',
+        content: 'r'.repeat(input.maxChars ?? 12_000),
+        totalChars: 30_000,
+        startOffset: input.offset ?? 0,
+        endOffset: (input.offset ?? 0) + (input.maxChars ?? 12_000),
+        nextOffset: (input.offset ?? 0) + (input.maxChars ?? 12_000),
+        hasMore: false,
+      };
+    },
+    delete: async path => {
+      deletedPaths.push(path);
+    },
+  };
+
+  // The global handle quota is full with two handles when the fork is
+  // created, and neither the clone nor its source may be evicted: the fork
+  // advertises the clone's handle id before its durable record is written,
+  // and the source record backs the original conversation. The oldest
+  // unprotected pre-existing handle (the unrelated session's, mirroring the
+  // plain `store()` eviction policy) is what absorbs the overflow.
+  let tick = 0;
+  const original = new ToolOutputStore({
+    spillThresholdChars: 0,
+    maxHandlesGlobal: 2,
+    persistence,
+    now: () => tick += 1,
+  });
+  const unrelated = original.store({
+    chatSessionId: 'chat-other',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(30_000),
+  });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'B'.repeat(30_000),
+  });
+  await unrelated.spillPromise;
+  await handle.spillPromise;
+
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+
+  assert.equal((
+    await original.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-source')
+  )?.content?.length, 100);
+  // The clone survives and stays readable.
+  assert.ok(original.get(handle.id, 'chat-fork'));
+  assert.equal((
+    await original.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-fork')
+  )?.content?.length, 100);
+  // The unrelated session's older handle is what got sacrificed.
+  assert.equal(original.get(unrelated.id, 'chat-other'), undefined);
+  assert.deepEqual(deletedPaths, [`/netcatty/${unrelated.id}-chat-other.log`]);
+});
+
+test('ToolOutputStore respilled forked copies clear the borrowed flag so eviction frees their file', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  let readBlocks = true;
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    read: async (path, input) => {
+      const content = files.get(path)?.content;
+      if (content == null || readBlocks) return null;
+      const startOffset = input.mode === 'tail'
+        ? Math.max(0, content.length - (input.maxChars ?? 12_000))
+        : Math.max(0, input.offset ?? 0);
+      const selected = content.slice(startOffset, startOffset + (input.maxChars ?? 12_000));
+      const endOffset = startOffset + selected.length;
+      return {
+        mode: input.mode ?? 'head',
+        content: selected,
+        totalChars: content.length,
+        startOffset,
+        endOffset,
+        nextOffset: endOffset,
+        hasMore: endOffset < content.length,
+      };
+    },
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  const original = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  // First fork cannot read the durable content, so it borrows the
+  // source-owned spill path as a non-owning alias.
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+  const forkCopy = original.get(handle.id, 'chat-fork');
+  assert.ok(forkCopy);
+  assert.equal(forkCopy.borrowedFilePath, true);
+
+  // The second fork re-spills to a target-owned path once the source path
+  // becomes readable; the borrowed marker must not survive into the copy.
+  readBlocks = false;
+  await original.rehomeChatSession('chat-fork', 'chat-fork-2');
+  const fork2 = original.get(handle.id, 'chat-fork-2');
+  assert.ok(fork2);
+  await fork2.spillPromise;
+  assert.equal(fork2.borrowedFilePath, false);
+  assert.ok(fork2.filePath?.endsWith('-chat-fork-2.log'));
+  assert.notEqual(fork2.filePath, `/netcatty/${handle.id}-chat-source.log`);
+
+  // Evicting the grandfork deletes the file this copy owns, but never the
+  // source-backed path its spill content came from.
+  original.prune('chat-fork-2');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(deletedPaths, [`/netcatty/${handle.id}-chat-fork-2.log`]);
+});
+
+test('ToolOutputStore restores retained source handles when rehoming after a restart', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    restore: async (handleId, chatSessionId) => {
+      for (const [path, entry] of files) {
+        if (entry.record.handleId !== handleId || entry.record.chatSessionId !== chatSessionId) continue;
+        return { path, record: entry.record };
+      }
+      return null;
+    },
+    read: async (path, input) => {
+      const content = files.get(path)?.content;
+      if (content == null) return null;
+      const startOffset = input.mode === 'tail'
+        ? Math.max(0, content.length - (input.maxChars ?? 12_000))
+        : Math.max(0, input.offset ?? 0);
+      const selected = content.slice(startOffset, startOffset + (input.maxChars ?? 12_000));
+      const endOffset = startOffset + selected.length;
+      return {
+        mode: input.mode ?? 'head',
+        content: selected,
+        totalChars: content.length,
+        startOffset,
+        endOffset,
+        nextOffset: endOffset,
+        hasMore: endOffset < content.length,
+      };
+    },
+    delete: async path => {
+      files.delete(path);
+    },
+  };
+
+  const firstRun = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const handle = firstRun.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(20_000),
+  });
+  await handle.spillPromise;
+
+  // Simulate an app restart: a fresh store with no live-cache entry for the
+  // source session, forking with the retained handle ids.
+  const afterRestart = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  await afterRestart.rehomeChatSession('chat-source', 'chat-fork', [handle.id]);
+  const restored = await afterRestart.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-fork');
+  assert.equal(restored?.content, 'C'.repeat(100));
+  // The fork owns its own durable record under the target chat session id.
+  const forkCopy = afterRestart.get(handle.id, 'chat-fork');
+  assert.ok(forkCopy);
+  const forkRecord = files.get(forkCopy.filePath!)?.record;
+  assert.ok(forkRecord);
+  assert.equal(forkRecord.chatSessionId, 'chat-fork');
+
+  // Without the retained ids (and with no live cache), rehome stays a no-op.
+  const freshForkTarget = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  await freshForkTarget.rehomeChatSession('chat-source', 'chat-fork-2');
+  assert.equal(await freshForkTarget.readChunkAsync({ handleId: handle.id }, 'chat-fork-2'), null);
+});
+
 test('ToolOutputStore pages large output with a hard per-read cap', () => {
   const store = new ToolOutputStore();
   const content = `${'0123456789'.repeat(3_000)}END`;
@@ -985,4 +1571,112 @@ test('saved-output read budgets reset at the start of each turn', () => {
   assert.equal(dedup.takeBudget('read', 1, 24_000), 0);
   dedup.beginTurn();
   assert.equal(dedup.takeBudget('read', 24_000, 24_000), 24_000);
+});
+
+test('ToolOutputStore refuses a kept-prefix fork when a retained handle cannot be restored', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    restore: async (handleId, chatSessionId) => {
+      for (const [path, entry] of files) {
+        if (entry.record.handleId !== handleId || entry.record.chatSessionId !== chatSessionId) continue;
+        return { path, record: entry.record };
+      }
+      return null;
+    },
+    read: async (path, input) => {
+      const content = files.get(path)?.content;
+      if (content == null) return null;
+      const startOffset = Math.max(0, input.offset ?? 0);
+      const selected = content.slice(startOffset, startOffset + (input.maxChars ?? 12_000));
+      return {
+        mode: input.mode ?? 'head',
+        content: selected,
+        totalChars: content.length,
+        startOffset,
+        endOffset: startOffset + selected.length,
+        nextOffset: startOffset + selected.length,
+        hasMore: startOffset + selected.length < content.length,
+      };
+    },
+    delete: async path => {
+      files.delete(path);
+    },
+  };
+
+  const firstRun = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const kept = firstRun.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'K'.repeat(5_000),
+  });
+  const lost = firstRun.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'L'.repeat(5_000),
+  });
+  await kept.spillPromise;
+  await lost.spillPromise;
+  // The durable record behind `lost` is gone (e.g. expired or deleted while
+  // the app was stopped): restore comes back null for it after a restart.
+  for (const [path, entry] of [...files]) {
+    if (entry.record.handleId === lost.id) files.delete(path);
+  }
+
+  const afterRestart = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  // Both ids are referenced by the retained prefix; one cannot be restored,
+  // so the fork must be refused instead of published with a permanently
+  // unresolvable `tool_output_read`.
+  assert.equal(
+    await afterRestart.rehomeChatSession('chat-source', 'chat-fork', [kept.id, lost.id]),
+    false,
+  );
+  // Nothing was cloned into the fork's namespace: none of the advertised ids
+  // can resolve there.
+  assert.equal(afterRestart.get(kept.id, 'chat-fork'), undefined);
+  assert.equal(afterRestart.listPendingHandles('chat-fork').length, 0);
+  assert.equal(
+    await afterRestart.readChunkAsync({ handleId: kept.id, mode: 'head', maxChars: 10 }, 'chat-fork'),
+    null,
+  );
+});
+
+test('ToolOutputStore refuses a kept-prefix fork when the source namespace is empty', async () => {
+  const store = new ToolOutputStore();
+  // A retained prefix references a handle the store cannot resolve (even in
+  // the source namespace), so the fork is refused instead of no-op success.
+  assert.equal(await store.rehomeChatSession('chat-source', 'chat-fork', ['tool-output-missing']), false);
+  assert.equal(store.listPendingHandles('chat-fork').length, 0);
+  // Without retained ids an empty source session stays a legitimate no-op.
+  assert.equal(await store.rehomeChatSession('chat-source', 'chat-fork-2'), true);
+  assert.equal(store.listPendingHandles('chat-fork-2').length, 0);
+});
+
+test('ToolOutputStore refuses an infeasible fork without evicting collateral handles', async () => {
+  const store = new ToolOutputStore({ maxCharsGlobal: 100 });
+  const source = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'S'.repeat(60),
+  });
+  const collateral = store.store({
+    chatSessionId: 'chat-unrelated',
+    capabilityId: 'terminal.execute',
+    content: 'U'.repeat(40),
+  });
+
+  // The global char quota (100) cannot admit the 60-char clone even after
+  // evicting every unprotected handle (the 40-char unrelated one leaves the
+  // registry at 120 chars), so the fork is refused — and the refusal must
+  // leave the collateral handle of the other conversation untouched.
+  assert.equal(await store.rehomeChatSession('chat-source', 'chat-fork'), false);
+  assert.ok(store.get(source.id, 'chat-source'));
+  assert.ok(store.get(collateral.id, 'chat-unrelated'));
+  assert.equal(store.read({ handleId: collateral.id, mode: 'head', maxChars: 10 }, 'chat-unrelated'), 'U'.repeat(10));
+  assert.equal(store.get(source.id, 'chat-fork'), undefined);
+  assert.equal(store.listPendingHandles('chat-fork').length, 0);
 });

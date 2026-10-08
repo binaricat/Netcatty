@@ -1,3 +1,4 @@
+import type { AgentActivity } from '../../../domain/agentActivity';
 import { redactSecretsForModel } from './modelSecretRedaction';
 
 const MAX_DECISIONS = 15;
@@ -8,6 +9,28 @@ export interface ActiveTerminalJobState {
   command?: string;
   status: string;
   nextOffset: number;
+}
+
+/**
+ * Structural message subset used to rebuild a session's runtime state from a
+ * retained conversation prefix (e.g. when forking a session at a message).
+ */
+export interface SessionStateReplayMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  toolCalls?: ReadonlyArray<{
+    id: string;
+    name?: string;
+    arguments?: Record<string, unknown>;
+  }>;
+  toolResults?: ReadonlyArray<{
+    toolCallId: string;
+    toolName?: string;
+    content?: string;
+    isError?: boolean;
+  }>;
+  /** Plan/file-change activities persisted on assistant messages. */
+  agentActivities?: ReadonlyArray<AgentActivity>;
 }
 
 export interface TerminalReadCursorState {
@@ -288,6 +311,64 @@ export class SessionStateStore {
     }
     if (lines.length === 0) return undefined;
     return lines.join('\n');
+  }
+
+  /**
+   * Rebuild `chatSessionId`'s state from a retained conversation prefix
+   * (e.g. when a session is forked at a message): the fork replays only the
+   * messages kept by the boundary, so runtime state derived from turns
+   * discarded by the branch (active jobs, poll offsets, cursors, blockers)
+   * is not copied from the source's latest state.
+   */
+  rebuildFromMessages(
+    chatSessionId: string,
+    messages: readonly SessionStateReplayMessage[],
+  ): void {
+    this.clear(chatSessionId);
+    // Pair each result with the nearest preceding unresolved call carrying
+    // the same id (same rule as the historical replay maps, which match with
+    // findLastIndex, and as the live runtime, whose per-id metadata map keeps
+    // the most recent call) so tool names and arguments survive the walk
+    // across messages. A provider may emit several unresolved calls sharing
+    // one id before their results arrive; keep a LIFO stack per id so each
+    // result pairs with the nearest pending call instead of the oldest one.
+    const pendingCalls = new Map<string, Array<{ name: string; arguments?: Record<string, unknown> }>>();
+    for (const message of messages) {
+      for (const call of message.toolCalls ?? []) {
+        if (!call?.id || typeof call.name !== 'string' || !call.name) continue;
+        const queue = pendingCalls.get(call.id) ?? [];
+        queue.push({ name: call.name, arguments: call.arguments });
+        pendingCalls.set(call.id, queue);
+      }
+      // Replay the plan/file-change activities the retained prefix persisted
+      // on its assistant messages, the same subset the live runtime records
+      // (completed file changes and the latest plan items); otherwise a fork
+      // loses planItems and editedFiles and compaction cannot reinject them.
+      for (const activity of message.agentActivities ?? []) {
+        if (activity?.type === 'plan_update') {
+          this.mergePlan(chatSessionId, activity.items);
+        } else if (activity?.type === 'file_change' && activity.status === 'completed') {
+          this.mergeFileChanges(chatSessionId, activity.changes.map(change => change.path));
+        }
+      }
+      if (message.role === 'user') this.mergeFromUserGoal(chatSessionId, message.content);
+      if (message.role === 'assistant') this.mergeFromAssistantContent(chatSessionId, message.content);
+      for (const result of message.toolResults ?? []) {
+        const callId = result?.toolCallId;
+        if (!callId) continue;
+        const queue = pendingCalls.get(callId);
+        const call = queue?.pop()
+          ?? (result.toolName ? { name: result.toolName } : undefined);
+        if (queue && queue.length === 0) pendingCalls.delete(callId);
+        this.updateFromToolResult(
+          chatSessionId,
+          call?.name ?? 'unknown',
+          call?.arguments,
+          result.content ?? '',
+          result.isError,
+        );
+      }
+    }
   }
 }
 

@@ -276,6 +276,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   updateLastMessage,
   updateMessageById,
   persistContextCompaction,
+  forkSessionFromMessage,
   providers,
   activeProviderId,
   activeModelId,
@@ -1767,6 +1768,39 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     [setActiveSessionId, showScopeSessionView],
   );
 
+  // "Fork from here": copy the viewed conversation up to a completed assistant
+  // response into a new session, switch to it, and confirm via toast. The
+  // original stays in history. Boundary validation is re-run by the state
+  // hook; a null result means the fork was refused (already hidden in the UI).
+  // This panel's scope is passed so the branch is created in the scope viewing
+  // it, even when the source session's own scope went stale (e.g. a terminal
+  // chat resumed after reconnecting under a new terminal id).
+  const handleForkFromMessage = useCallback(async (messageId: string) => {
+    const sourceSessionId = activeSessionRef.current?.id ?? activeSessionId;
+    if (!sourceSessionId) return;
+    // A double-click enters this handler twice before the first fork finishes
+    // rehoming handles and switching sessions; reject the duplicate so one
+    // interaction cannot create two forks.
+    if (!tryBeginSendForKey(`fork:${sourceSessionId}`)) return;
+    try {
+      // Fork completion awaits handle rehoming (target-owned durable records),
+      // so the new session is fully readable the moment it is exposed.
+      const fork = await forkSessionFromMessage?.(sourceSessionId, messageId, {
+        type: scopeType,
+        targetId: scopeTargetId,
+      });
+      if (!fork) return;
+      applyHistorySessionSelection(fork.id, {
+        showSessionView: showScopeSessionView,
+        setActiveSessionId,
+        closeHistory: () => setShowHistory(false),
+      });
+      toast.success(t('ai.chat.forkCreated'));
+    } finally {
+      endSendForKey(`fork:${sourceSessionId}`);
+    }
+  }, [activeSessionId, forkSessionFromMessage, scopeTargetId, scopeType, setActiveSessionId, showScopeSessionView, t]);
+
   const handleDeleteSession = useCallback(
     async (e: React.MouseEvent, sessionId: string) => {
       e.stopPropagation();
@@ -1853,6 +1887,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         activeSessionId={activeSessionId}
         handleSelectSession={handleSelectSession}
         handleDeleteSession={handleDeleteSession}
+        onForkFromMessage={handleForkFromMessage}
         messages={messages}
         isStreaming={isStreaming}
         activeCompaction={
@@ -1941,6 +1976,7 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'updateLastMessage',
   'updateMessageById',
   'persistContextCompaction',
+  'forkSessionFromMessage',
   'providers',
   'activeProviderId',
   'activeModelId',

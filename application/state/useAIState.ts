@@ -55,6 +55,9 @@ import {
 import { convertFilesToUploads } from './useFileUpload';
 import { removeProviderReferences } from './aiProviderCleanup';
 import { publishAISessionsSnapshot } from './aiSessionsStore';
+import { collectForkHandleIds, planSessionFork } from '../../domain/aiSessionFork';
+import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
+import { installToolOutputPersistence } from '../../infrastructure/ai/harness/toolOutputPersistenceSetup';
 import {
   AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
   AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE,
@@ -675,6 +678,100 @@ export function useAIState() {
     };
   }, [persistSessions]);
 
+  // "Fork from here": copy the conversation up to a completed assistant
+  // response into a new session and make it the scope's active chat. The
+  // original session stays untouched in history. Pure boundary validation and
+  // plan building live in domain/aiSessionFork; the fork gets a fresh
+  // external session id, no pending-turn state, and the saved-output handles
+  // referenced by the retained prefix are rehomed into the fork's namespace
+  // (per-message provider replay metadata is preserved for history replay).
+  // Null is returned when the boundary is not forkable.
+  // `viewingScope` is the panel scope the fork was requested from; the branch
+  // is created there so the fork is active and visible in the very scope that
+  // is viewing it, even when the source session carries a stale scope (e.g. a
+  // terminal chat resumed in a reconnected terminal or a merged workspace).
+  const forkSessionFromMessage = useCallback(async (
+    sessionId: string,
+    messageId: string,
+    viewingScope?: Pick<AISessionScope, 'type' | 'targetId'>,
+  ): Promise<AISession | null> => {
+    const source = sessionsRef.current.find(s => s.id === sessionId);
+    if (!source) return null;
+    const plan = planSessionFork(source, messageId);
+    if (!plan.ok) return null;
+    const now = Date.now();
+    const fork: AISession = {
+      id: `ai_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      title: plan.title,
+      agentId: source.agentId,
+      scope: {
+        ...source.scope,
+        // Host membership stays with the source (the messages were produced
+        // there); the scope the fork belongs to is the viewing scope.
+        ...(viewingScope ? { type: viewingScope.type, targetId: viewingScope.targetId } : {}),
+        hostIds: source.scope.hostIds ? [...source.scope.hostIds] : undefined,
+      },
+      messages: plan.messages,
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (plan.contextCompaction) {
+      fork.contextCompaction = plan.contextCompaction;
+    }
+    // Saved-output handles are scoped per chat session; rehome the ones the
+    // retained prefix references so tool_output_read still resolves in the
+    // fork (with the original handle ids, keeping the notices valid).
+    // Rehome before the fork is exposed: rehoming spilled handles re-writes
+    // target-owned durable records, and the fork must not become readable or
+    // active until those records exist under its own session id, or the very
+    // first turn could see handles as missing.
+    try {
+      const runtime = getAgentRuntime();
+      const store = runtime.getToolOutputStore(sessionId);
+      // The persistence adapter is normally configured when a turn starts;
+      // forking can be the very first action after an app restart, so
+      // configure it here too or retained handles cannot be restored from
+      // durable storage before rehoming.
+      await installToolOutputPersistence(store);
+      // A carried-over compaction summary can reference archive handles not
+      // present in any retained message; collect those too so the summary
+      // stays readable via tool_output_read in the fork.
+      const rehomed = await store.rehomeChatSession(
+        sessionId,
+        fork.id,
+        collectForkHandleIds(plan.messages, plan.contextCompaction?.summary),
+      );
+      if (!rehomed) {
+        // The tool-output store refused the fork because its global quota
+        // cannot hold both the source and the fork's fresh clones without
+        // evicting output a live conversation still resolves. Publishing the
+        // fork would advertise retained handle ids that miss on
+        // `tool_output_read`, so abort instead; the boundary stays forkable
+        // if the user retries later.
+        return null;
+      }
+    } catch {
+      // Rehoming is best-effort; the fork is still usable (reads fall back
+      // to the live cache or restore path under the target namespace).
+    }
+    // Structured runtime state (active background jobs and their poll
+    // offsets, read cursors, decisions, plan, blockers) is keyed by chat
+    // session id; rebuild it for the fork from the retained prefix so a
+    // later compaction re-injects the state the branch actually kept, not
+    // the source's latest state (which may describe turns discarded by the
+    // branch).
+    getAgentRuntime().getSessionStateStore().rebuildFromMessages(fork.id, plan.messages);
+    setSessionsRaw(prev => {
+      const next = [fork, ...prev];
+      setLatestAISessionsSnapshot(next);
+      persistSessions(next);
+      return next;
+    });
+    const scopeKey = `${fork.scope.type}:${fork.scope.targetId ?? ''}`;
+    setActiveSessionId(scopeKey, fork.id);
+    return fork;
+  }, [persistSessions, setActiveSessionId]);
+
   const createSession = useCallback((scope: AISessionScope, agentId?: string): AISession => {
     const now = Date.now();
     const session: AISession = {
@@ -1287,6 +1384,7 @@ export function useAIState() {
     seedWorkspaceActiveSessionFromMembers,
     handoffDissolvedWorkspaceScope,
     retargetWorkspaceActiveChatForMemberLoss,
+    forkSessionFromMessage,
   }), [
     providers,
     setProviders,
@@ -1347,5 +1445,6 @@ export function useAIState() {
     seedWorkspaceActiveSessionFromMembers,
     handoffDissolvedWorkspaceScope,
     retargetWorkspaceActiveChatForMemberLoss,
+    forkSessionFromMessage,
   ]);
 }
