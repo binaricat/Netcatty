@@ -534,6 +534,10 @@ test("isDec2026SyncModeParams matches the 2026 mode param anywhere in the list",
   assert.equal(isDec2026SyncModeParams([2004]), false);
   assert.equal(isDec2026SyncModeParams([25]), false);
   assert.equal(isDec2026SyncModeParams([1049]), false);
+  // Subparameter 2026 (`ESC[?25:2026h` -> [25, [2026]]) must be ignored:
+  // xterm's private-mode handlers act only on the primary param 25.
+  assert.equal(isDec2026SyncModeParams([25, [2026]]), false);
+  assert.equal(isDec2026SyncModeParams([[2026]]), false);
   assert.equal(isDec2026SyncModeParams([]), false);
 });
 

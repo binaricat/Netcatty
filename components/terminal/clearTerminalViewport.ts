@@ -184,12 +184,16 @@ export const isEraseScrollbackSequence = (params: CsiParam[]): boolean =>
  * params passed to the callback instead.
  *
  * DECSET/DECRST can carry multiple semicolon-separated modes
- * (`ESC[?2026;25h`), so match 2026 anywhere in the parameter list.
+ * (`ESC[?2026;25h`), so match 2026 among the top-level parameters.
+ *
+ * Ignore subparameters: an array in `toArray()` output is always the list of
+ * subparameters of the preceding top-level param (e.g. `ESC[?25:2026h` yields
+ * `[25, [2026]]`), and xterm's private-mode handlers iterate only over the
+ * top-level params — a nested 2026 never enters synchronized-output mode, so
+ * it must not flip this flag either.
  */
 export const isDec2026SyncModeParams = (params: CsiParam[]): boolean =>
-  params.some(
-    (param) => param === 2026 || (Array.isArray(param) && param.includes(2026)),
-  );
+  params.some((param) => param === 2026);
 
 export const isEraseViewportSequence = (params: CsiParam[]): boolean =>
   params.length > 0 && params[0] === 2;

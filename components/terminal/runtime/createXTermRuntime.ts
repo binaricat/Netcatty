@@ -3192,6 +3192,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     { prefix: "?", final: "h" },
     (params) => {
       if (isDec2026SyncModeParams(params)) {
+        // A repeated open while already tracking must not restart the safety
+        // timeout: xterm's RenderService arms its own deadline with
+        // `_timeout ??=`, so it expires on the original schedule while a
+        // producer that re-opens and then crashes would otherwise let this
+        // stale flag stay true far longer and misclassify CSI 2 J in between.
+        if (inDec2026SyncBlock) {
+          return false;
+        }
         inDec2026SyncBlock = true;
         clearDec2026SyncBlockTimeout();
         // xterm's RenderService expires synchronizedOutputMode after its safety
