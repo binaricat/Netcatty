@@ -73,7 +73,10 @@ const TOOL_OUTPUT_SEARCH_CONTEXT_CHARS = 320;
 const TOOL_OUTPUT_SEARCH_MAX_MATCHES = 20;
 const TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES = 50;
 export const TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS = 200;
-const TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_ATTEMPTS = 5;
+// Failed alias materializations are retried indefinitely (with capped
+// exponential backoff) because a later turn may install working persistence;
+// dropping them would permanently lose the branch-owned durable copy.
+const TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_RETRY_DELAY_MS = 30_000;
 const TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS = 50;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_BITS = 1 << 22;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_HASHES = 4;
@@ -204,8 +207,10 @@ export class ToolOutputStore {
     handleIds: string[];
   }>();
   // Alias passes still running for a source chat session; `prune` waits for
-  // them before deleting the source session's durable records.
-  private readonly aliasMaterializationPromises = new Map<string, Promise<void>>();
+  // every one of them before deleting the source session's durable records.
+  // A Set per source so undoing the same session into several branches keeps
+  // an older in-flight copy tracked after a newer one is registered.
+  private readonly aliasMaterializationPromises = new Map<string, Set<Promise<void>>>();
   // Shared durable files whose delete was deferred until the last alias stops
   // referencing them.
   private readonly deferredPathDeletes = new Set<string>();
@@ -372,12 +377,21 @@ export class ToolOutputStore {
       sourceChatSessionId,
       targetChatSessionId,
       options,
-    ).finally(() => {
-      if (this.aliasMaterializationPromises.get(sourceChatSessionId) === flight) {
-        this.aliasMaterializationPromises.delete(sourceChatSessionId);
-      }
+    );
+    let flights = this.aliasMaterializationPromises.get(sourceChatSessionId);
+    if (!flights) {
+      flights = new Set<Promise<void>>();
+      this.aliasMaterializationPromises.set(sourceChatSessionId, flights);
+    }
+    flights.add(flight);
+    // Drop the flight once it settles without changing the promise's rejection
+    // behavior for callers awaiting the alias pass.
+    void flight.then(() => {}, () => {}).then(() => {
+      const current = this.aliasMaterializationPromises.get(sourceChatSessionId);
+      if (!current) return;
+      current.delete(flight);
+      if (current.size === 0) this.aliasMaterializationPromises.delete(sourceChatSessionId);
     });
-    this.aliasMaterializationPromises.set(sourceChatSessionId, flight);
     return flight;
   }
 
@@ -529,10 +543,21 @@ export class ToolOutputStore {
 
   private scheduleAliasMaterializationRetry(): void {
     if (this.aliasMaterializationRetryTimer) return;
+    // Back off as attempts accumulate so persistently unavailable storage (for
+    // example a locked secure store) does not spin every 200 ms forever, while
+    // the work stays queued until persistence can actually write it.
+    let maxAttempts = 0;
+    for (const item of this.pendingAliasMaterializations.values()) {
+      maxAttempts = Math.max(maxAttempts, item.attempts);
+    }
+    const delay = Math.min(
+      TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS * 2 ** maxAttempts,
+      TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_RETRY_DELAY_MS,
+    );
     this.aliasMaterializationRetryTimer = setTimeout(() => {
       this.aliasMaterializationRetryTimer = undefined;
       void this.runAliasMaterializationRetries();
-    }, TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS);
+    }, delay);
   }
 
   private async runAliasMaterializationRetries(): Promise<void> {
@@ -554,7 +579,10 @@ export class ToolOutputStore {
       );
       if (handles.length === 0) continue;
       const failed = await this.materializeDurableHandles(item.targetChatSessionId, handles);
-      if (failed.length > 0 && attempts < TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_ATTEMPTS) {
+      // Keep failed aliases pending indefinitely (the retry timer backs off
+      // with attempts): a later turn can install working persistence, and
+      // dropping the request here would permanently lose the branch copy.
+      if (failed.length > 0) {
         this.pendingAliasMaterializations.set(item.targetChatSessionId, {
           targetChatSessionId: item.targetChatSessionId,
           handles: failed,
@@ -677,12 +705,16 @@ export class ToolOutputStore {
     const persistence = this.persistence;
     const deleteSessionImpl = persistence?.deleteSession;
     if (persistence && deleteSessionImpl) {
-      // A concurrently running alias pass for this source session may still be
-      // reading its durable files; wait for it before deleting the records.
-      const pendingFlight = this.aliasMaterializationPromises.get(chatSessionId);
+      // Concurrently running alias passes for this source session may still be
+      // reading its durable files; wait for every one of them before deleting
+      // the records.
+      const pendingFlights = [...(this.aliasMaterializationPromises.get(chatSessionId) ?? [])];
+      const waitForFlights = pendingFlights.length > 0
+        ? Promise.allSettled(pendingFlights)
+        : undefined;
       const deleteSession = (): Promise<void> => deleteSessionImpl.call(persistence, chatSessionId);
-      deletion = pendingFlight
-        ? pendingFlight.catch(() => {}).then(deleteSession).then(
+      deletion = waitForFlights
+        ? waitForFlights.then(deleteSession).then(
           () => { deletionSucceeded = true; },
           () => {},
         )
@@ -736,16 +768,19 @@ export class ToolOutputStore {
     const persistence = this.persistence;
     const deleteTerminalSessionImpl = persistence?.deleteTerminalSession;
     if (persistence && deleteTerminalSessionImpl) {
-      // Same as `prune`: wait for a running alias pass before deleting the
+      // Same as `prune`: wait for every running alias pass before deleting the
       // durable records the aliases still read from.
-      const pendingFlight = this.aliasMaterializationPromises.get(chatSessionId);
+      const pendingFlights = [...(this.aliasMaterializationPromises.get(chatSessionId) ?? [])];
+      const waitForFlights = pendingFlights.length > 0
+        ? Promise.allSettled(pendingFlights)
+        : undefined;
       const deleteTerminalSession = (): Promise<void> => deleteTerminalSessionImpl.call(
         persistence,
         chatSessionId,
         terminalSessionId,
       );
-      deletion = pendingFlight
-        ? pendingFlight.catch(() => {}).then(deleteTerminalSession).then(
+      deletion = waitForFlights
+        ? waitForFlights.then(deleteTerminalSession).then(
           () => { deletionSucceeded = true; },
           () => {},
         )

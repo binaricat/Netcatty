@@ -706,10 +706,10 @@ export function useAIState() {
   // Non-destructive "undo last turn": branch the session at the boundary
   // before the latest user message and keep the original in history intact.
   // Returns the new branch id plus the undone user message for the composer.
-  const undoLastTurnInSession = useCallback((sessionId: string): {
+  const undoLastTurnInSession = useCallback(async (sessionId: string): Promise<{
     sessionId: string;
     restored: UndoLastTurnRestoredDraft;
-  } | null => {
+  } | null> => {
     const nextId = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const source = sessionsRef.current.find(s => s.id === sessionId);
     if (!source) return null;
@@ -729,7 +729,10 @@ export function useAIState() {
     // session id (spilled tool results, compaction archive handles). Alias
     // only those under the branch id so tool_output_read still resolves there
     // while outputs created by the removed turn stay out of the branch.
-    void getAgentRuntime()
+    // Finish the pass (including the durable branch-owned copies) before the
+    // branch session is published: exiting the app during this window must
+    // not leave the branch pointing at handles that only resolve in memory.
+    await getAgentRuntime()
       .getToolOutputStore(source.id)
       .aliasSessionHandles(source.id, branched.id, {
         retainedHandleIds: collectRetainedToolOutputHandleIds(

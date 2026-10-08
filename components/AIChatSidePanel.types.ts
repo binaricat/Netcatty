@@ -40,7 +40,7 @@ export interface AIChatSidePanelProps {
   /** Non-destructively branch before the last user turn; returns the branch id + restored composer content. */
   undoLastTurnInSession?: (
     sessionId: string,
-  ) => { sessionId: string; restored: { text: string; attachments: import('../infrastructure/ai/types').UploadedFile[] } } | null;
+  ) => Promise<{ sessionId: string; restored: { text: string; attachments: import('../infrastructure/ai/types').UploadedFile[] } } | null>;
   deleteSession: (sessionId: string, scopeKey?: string) => void;
   updateSessionTitle: (sessionId: string, title: string) => void;
   updateSessionExternalSessionId: (sessionId: string, externalSessionId: string | undefined) => void;

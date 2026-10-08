@@ -830,11 +830,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     ) != null,
   ), [activeSession, isStreaming]);
 
-  const handleUndoLastTurn = useCallback(() => {
+  const handleUndoLastTurn = useCallback(async () => {
     const sessionId = activeSessionRef.current?.id;
     if (!sessionId || !undoLastTurnInSession) return;
     if (isStreaming || isAIChatSessionStreaming(sessionId)) return;
-    const result = undoLastTurnInSession(sessionId);
+    const result = await undoLastTurnInSession(sessionId);
     if (!result) return;
 
     ensureScopeDraft(currentAgentId);

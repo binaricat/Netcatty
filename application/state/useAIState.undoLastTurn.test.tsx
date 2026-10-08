@@ -75,7 +75,7 @@ test('undoLastTurnInSession branches and restores the last user turn', async () 
   assert.ok(capture.ai);
 
   let result: Awaited<ReturnType<typeof runUndo>> | null = null;
-  async function runUndo(): Promise<{ sessionId: string } | null> {
+  async function runUndo() {
     return capture.ai!.undoLastTurnInSession('chat-source');
   }
 
@@ -122,7 +122,7 @@ test('undoLastTurnInSession returns null when there is nothing to undo', async (
 
   let result: unknown;
   await act(async () => {
-    result = capture.ai!.undoLastTurnInSession('chat-empty');
+    result = await capture.ai!.undoLastTurnInSession('chat-empty');
   });
   assert.equal(result, null);
 
