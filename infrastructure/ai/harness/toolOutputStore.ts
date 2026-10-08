@@ -199,13 +199,16 @@ export class ToolOutputStore {
   private readonly closedTerminalSessions = new Set<string>();
   private readonly lifecycleDenyFilter = new FixedStringBloomFilter();
   // Alias requests whose in-memory handles are gone and whose durable restore
-  // cannot run yet because persistence installs on the first turn (for example
-  // undo immediately after an app restart). Replayed once persistence appears.
+  // cannot run yet: persistence installs on the first turn (for example undo
+  // immediately after an app restart), or `restore` just rejected transiently.
+  // Retried with capped backoff (and replayed once persistence appears).
   private readonly pendingAliasRestores = new Map<string, {
     sourceChatSessionId: string;
     targetChatSessionId: string;
     handleIds: string[];
   }>();
+  private pendingAliasRestoreReplayTimer?: ReturnType<typeof setTimeout>;
+  private pendingAliasRestoreReplayAttempts = 0;
   // Alias passes still running for a source chat session; `prune` waits for
   // every one of them before deleting the source session's durable records.
   // A Set per source so undoing the same session into several branches keeps
@@ -217,12 +220,20 @@ export class ToolOutputStore {
   // Alias handles whose branch-owned durable copy could not be written (for
   // example a transient persistence.read/write failure). Retried with a delay
   // so deleting the source session or a restart does not lose the branch copy.
+  // The failed aliases still read their content from the source chat session's
+  // durable records, so the source is tracked here too: `prune` must not
+  // delete it until every retry for it has drained.
   private readonly pendingAliasMaterializations = new Map<string, {
     targetChatSessionId: string;
+    sourceChatSessionIds: Set<string>;
     handles: ToolOutputHandle[];
     attempts: number;
   }>();
   private aliasMaterializationRetryTimer?: ReturnType<typeof setTimeout>;
+  // Notified whenever the pending alias materialization queue changes; lets
+  // `prune` wait until every retry that still needs its source durable
+  // records has finished before deleting them.
+  private readonly materializationDrainListeners = new Set<() => void>();
   private persistence?: ToolOutputPersistence;
 
   constructor(options: ToolOutputStoreOptions = {}) {
@@ -239,7 +250,12 @@ export class ToolOutputStore {
 
   setPersistence(persistence: ToolOutputPersistence | undefined): void {
     this.persistence = persistence;
-    if (persistence?.restore) this.replayPendingAliasRestores();
+    if (persistence?.restore) {
+      // A fresh (possibly repaired) persistence closure was installed; failed
+      // restore attempts before it do not reflect its health.
+      this.pendingAliasRestoreReplayAttempts = 0;
+      this.replayPendingAliasRestores();
+    }
     if (persistence?.write && this.pendingAliasMaterializations.size > 0) {
       void this.runAliasMaterializationRetries();
     }
@@ -254,6 +270,58 @@ export class ToolOutputStore {
         retainedHandleIds: new Set(request.handleIds),
       }).catch(() => {});
     }
+    // Restores that still fail are re-queued by the alias pass; keep retrying
+    // them later so a transient rejection does not permanently drop them.
+    this.schedulePendingAliasRestoreReplay();
+  }
+
+  private queuePendingAliasRestores(
+    sourceChatSessionId: string,
+    targetChatSessionId: string,
+    handleIds: string[],
+  ): void {
+    const key = `${sourceChatSessionId}\n${targetChatSessionId}`;
+    const existing = this.pendingAliasRestores.get(key);
+    if (existing) {
+      existing.handleIds.push(...handleIds.filter(id => !existing.handleIds.includes(id)));
+    } else {
+      this.pendingAliasRestores.set(key, {
+        sourceChatSessionId,
+        targetChatSessionId,
+        handleIds: [...handleIds],
+      });
+    }
+    this.enforcePendingAliasRestoresLimit();
+    this.schedulePendingAliasRestoreReplay();
+  }
+
+  private schedulePendingAliasRestoreReplay(): void {
+    if (this.pendingAliasRestoreReplayTimer) return;
+    if (this.pendingAliasRestores.size === 0) return;
+    if (!this.persistence?.restore) return;
+    // Back off while restores keep rejecting so a persistently unhealthy store
+    // does not spin every 200 ms forever, mirroring the materialization queue.
+    const delay = Math.min(
+      TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS * 2 ** this.pendingAliasRestoreReplayAttempts,
+      TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_RETRY_DELAY_MS,
+    );
+    this.pendingAliasRestoreReplayTimer = setTimeout(() => {
+      this.pendingAliasRestoreReplayTimer = undefined;
+      const pending = [...this.pendingAliasRestores.values()];
+      this.pendingAliasRestores.clear();
+      void Promise
+        .allSettled(pending.map(request => this.aliasSessionHandles(
+          request.sourceChatSessionId,
+          request.targetChatSessionId,
+          { retainedHandleIds: new Set(request.handleIds) },
+        )))
+        .then(() => {
+          this.pendingAliasRestoreReplayAttempts = this.pendingAliasRestores.size > 0
+            ? this.pendingAliasRestoreReplayAttempts + 1
+            : 0;
+          this.schedulePendingAliasRestoreReplay();
+        });
+    }, delay);
   }
 
   resolveRestartPersistenceNotices<T>(value: T, chatSessionId: string): T {
@@ -412,11 +480,18 @@ export class ToolOutputStore {
     for (const handleId of wantedHandleIds) {
       let sourceHandle = sourceMap?.get(handleId);
       if (!sourceHandle) {
-        sourceHandle = await this.restoreHandle(handleId, sourceChatSessionId).catch(() => undefined);
-        if (!sourceHandle && !this.persistence?.restore) {
-          // Persistence (which installs on the first turn) is not available
-          // yet, so the handle may exist durably but cannot be restored right
-          // now. Remember the request and retry once persistence appears.
+        let restoreFailed = false;
+        sourceHandle = await this.restoreHandle(handleId, sourceChatSessionId).catch(() => {
+          restoreFailed = true;
+          return undefined;
+        });
+        if (!sourceHandle && (!this.persistence?.restore || restoreFailed)) {
+          // Either persistence (which installs on the first turn) is not
+          // available yet, or `restore` just rejected transiently (for example
+          // a locked secure store right after a restart). Remember the request
+          // and retry it instead of publishing the branch without the handle:
+          // the retained prefix references it, and the branch namespace never
+          // falls back to the source restore later.
           missingRestoreHandleIds.push(handleId);
         }
       }
@@ -430,17 +505,18 @@ export class ToolOutputStore {
       aliased.push(alias);
     }
     if (missingRestoreHandleIds.length > 0) {
-      this.pendingAliasRestores.set(
-        `${sourceChatSessionId}\n${targetChatSessionId}`,
-        { sourceChatSessionId, targetChatSessionId, handleIds: missingRestoreHandleIds },
+      this.queuePendingAliasRestores(
+        sourceChatSessionId,
+        targetChatSessionId,
+        missingRestoreHandleIds,
       );
-      this.enforcePendingAliasRestoresLimit();
     }
     if (aliased.length === 0) return;
     this.bySession.set(targetChatSessionId, targetMap);
     this.enforceSessionLimits(targetChatSessionId, targetMap);
     this.enforceGlobalLimits();
     await this.materializeDurableAliases(
+      sourceChatSessionId,
       targetChatSessionId,
       aliased.filter(alias => !alias.evicted),
     );
@@ -462,6 +538,7 @@ export class ToolOutputStore {
    * branch-owned record after a restart.
    */
   private async materializeDurableAliases(
+    sourceChatSessionId: string,
     targetChatSessionId: string,
     aliases: ToolOutputHandle[],
   ): Promise<void> {
@@ -469,7 +546,9 @@ export class ToolOutputStore {
     // The materialized aliases no longer read from the shared source files;
     // now is a good moment to finish any deferred deletes for them.
     this.processDeferredPathDeletes();
-    if (failed.length > 0) this.queueAliasMaterializationRetry(targetChatSessionId, failed);
+    if (failed.length > 0) {
+      this.queueAliasMaterializationRetry(sourceChatSessionId, targetChatSessionId, failed);
+    }
   }
 
   /**
@@ -519,6 +598,7 @@ export class ToolOutputStore {
   }
 
   private queueAliasMaterializationRetry(
+    sourceChatSessionId: string,
     targetChatSessionId: string,
     handles: ToolOutputHandle[],
   ): void {
@@ -526,19 +606,51 @@ export class ToolOutputStore {
       const oldest = this.pendingAliasMaterializations.keys().next().value;
       if (oldest === undefined) break;
       this.pendingAliasMaterializations.delete(oldest);
+      this.notifyMaterializationWaiters();
     }
     const existing = this.pendingAliasMaterializations.get(targetChatSessionId);
     if (existing) {
+      existing.sourceChatSessionIds.add(sourceChatSessionId);
       existing.handles.push(...handles.filter(handle => !existing.handles.includes(handle)));
       this.scheduleAliasMaterializationRetry();
       return;
     }
     this.pendingAliasMaterializations.set(targetChatSessionId, {
       targetChatSessionId,
+      sourceChatSessionIds: new Set([sourceChatSessionId]),
       handles: [...handles],
       attempts: 0,
     });
     this.scheduleAliasMaterializationRetry();
+  }
+
+  private notifyMaterializationWaiters(): void {
+    for (const notify of [...this.materializationDrainListeners]) {
+      this.materializationDrainListeners.delete(notify);
+      notify();
+    }
+  }
+
+  /**
+   * Resolves once the pending alias-materialization retry queue no longer
+   * contains a request whose failed aliases still read the given source chat
+   * session's durable records. Failed retries re-read the source-owned file on
+   * every attempt, so the source session must be retained until each retry
+   * either materializes the branch-owned copy or the queue drains some other
+   * way (the target chat was deleted, its handles evicted/dropped, ...).
+   */
+  private async waitForPendingAliasMaterializationsDrain(
+    predicate: (item: {
+      sourceChatSessionIds: Set<string>;
+      handles: ToolOutputHandle[];
+    }) => boolean,
+  ): Promise<void> {
+    for (;;) {
+      if (![...this.pendingAliasMaterializations.values()].some(predicate)) return;
+      await new Promise<void>(resolve => {
+        this.materializationDrainListeners.add(resolve);
+      });
+    }
   }
 
   private scheduleAliasMaterializationRetry(): void {
@@ -585,11 +697,15 @@ export class ToolOutputStore {
       if (failed.length > 0) {
         this.pendingAliasMaterializations.set(item.targetChatSessionId, {
           targetChatSessionId: item.targetChatSessionId,
+          sourceChatSessionIds: item.sourceChatSessionIds,
           handles: failed,
           attempts,
         });
       }
     }
+    // Source sessions scheduled for deletion may now be drainable (retries
+    // succeeded or their entries were dropped above).
+    this.notifyMaterializationWaiters();
     if (this.pendingAliasMaterializations.size > 0) this.scheduleAliasMaterializationRetry();
   }
 
@@ -705,20 +821,22 @@ export class ToolOutputStore {
     const persistence = this.persistence;
     const deleteSessionImpl = persistence?.deleteSession;
     if (persistence && deleteSessionImpl) {
-      // Concurrently running alias passes for this source session may still be
-      // reading its durable files; wait for every one of them before deleting
-      // the records.
+      // Deleting the session must not break work that still reads its durable
+      // records: concurrently running alias passes may be reading its files,
+      // and failed alias copies are queued for retries that re-read the
+      // source-owned file on every attempt. Wait for the alias passes and for
+      // the queued retries targeting this session to drain before deleting.
       const pendingFlights = [...(this.aliasMaterializationPromises.get(chatSessionId) ?? [])];
-      const waitForFlights = pendingFlights.length > 0
-        ? Promise.allSettled(pendingFlights)
-        : undefined;
+      const waitForSourceReads = Promise.all([
+        Promise.allSettled(pendingFlights),
+        this.waitForPendingAliasMaterializationsDrain(item => (
+          item.sourceChatSessionIds.has(chatSessionId)
+        )),
+      ]);
       const deleteSession = (): Promise<void> => deleteSessionImpl.call(persistence, chatSessionId);
-      deletion = waitForFlights
-        ? waitForFlights.then(deleteSession).then(
-          () => { deletionSucceeded = true; },
-          () => {},
-        )
-        : deleteSession().then(
+      deletion = waitForSourceReads
+        .then(deleteSession)
+        .then(
           () => { deletionSucceeded = true; },
           () => {},
         );
@@ -768,23 +886,25 @@ export class ToolOutputStore {
     const persistence = this.persistence;
     const deleteTerminalSessionImpl = persistence?.deleteTerminalSession;
     if (persistence && deleteTerminalSessionImpl) {
-      // Same as `prune`: wait for every running alias pass before deleting the
-      // durable records the aliases still read from.
+      // Same as `prune`: wait for every running alias pass and for the queued
+      // alias copy retries that still read this terminal's durable records
+      // before deleting them.
       const pendingFlights = [...(this.aliasMaterializationPromises.get(chatSessionId) ?? [])];
-      const waitForFlights = pendingFlights.length > 0
-        ? Promise.allSettled(pendingFlights)
-        : undefined;
+      const waitForSourceReads = Promise.all([
+        Promise.allSettled(pendingFlights),
+        this.waitForPendingAliasMaterializationsDrain(item => (
+          item.sourceChatSessionIds.has(chatSessionId)
+          && item.handles.some(handle => handle.sessionId === terminalSessionId)
+        )),
+      ]);
       const deleteTerminalSession = (): Promise<void> => deleteTerminalSessionImpl.call(
         persistence,
         chatSessionId,
         terminalSessionId,
       );
-      deletion = waitForFlights
-        ? waitForFlights.then(deleteTerminalSession).then(
-          () => { deletionSucceeded = true; },
-          () => {},
-        )
-        : deleteTerminalSession().then(
+      deletion = waitForSourceReads
+        .then(deleteTerminalSession)
+        .then(
           () => { deletionSucceeded = true; },
           () => {},
         );

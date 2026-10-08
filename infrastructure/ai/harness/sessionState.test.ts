@@ -134,7 +134,7 @@ test('SessionStateStore reinjects edited files and unfinished plan items', () =>
   assert.match(text, /\[todo\] run regression tests/);
 });
 
-test('SessionStateStore copies runtime state for a branched chat and keeps copies independent', () => {
+test('SessionStateStore copies operational state for a branched chat and keeps copies independent', () => {
   const store = new SessionStateStore();
   store.updateFromToolResult(
     'chat-source',
@@ -145,6 +145,13 @@ test('SessionStateStore copies runtime state for a branched chat and keeps copie
   );
   store.mergeFileChanges('chat-source', ['src/a.ts']);
   store.mergePlan('chat-source', [{ text: 'step one', completed: false }]);
+  store.updateFromToolResult(
+    'chat-source',
+    'terminal_execute',
+    { sessionId: 'sess-1' },
+    'boom',
+    true,
+  );
 
   store.copyState('chat-source', 'chat-branch');
 
@@ -152,7 +159,10 @@ test('SessionStateStore copies runtime state for a branched chat and keeps copie
   assert.match(branchReinjection ?? '', /job-1/);
   assert.match(branchReinjection ?? '', /offset=300/);
   assert.match(branchReinjection ?? '', /src\/a\.ts/);
-  assert.match(branchReinjection ?? '', /step one/);
+  // Conversational state (plan, blockers) must not ride along with the
+  // operational copy: it can only come from the retained prefix.
+  assert.doesNotMatch(branchReinjection ?? '', /step one/);
+  assert.doesNotMatch(branchReinjection ?? '', /terminal_execute/);
   assert.ok(store.toReinjectionText('chat-source'));
 
   // Updates under the branch id must not leak back into the source state.
@@ -164,4 +174,68 @@ test('SessionStateStore copies runtime state for a branched chat and keeps copie
     store.get('chat-source').activeJobs['job-1'],
     store.get('chat-branch').activeJobs['job-1'],
   );
+});
+
+test('SessionStateStore rebuilds conversational state from the retained prefix only', () => {
+  const store = new SessionStateStore();
+  store.copyState('chat-source', 'chat-branch');
+  store.rebuildConversationalStateFromMessages('chat-branch', [
+    {
+      id: 'user-1',
+      role: 'user',
+      content: 'keep investigating the outage',
+      timestamp: 1,
+    },
+    {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: 'Decided to restart the nginx service after checking logs',
+      timestamp: 2,
+      toolCalls: [
+        { id: 'call-1', name: 'terminal_execute', arguments: { sessionId: 'sess-1' } },
+      ],
+      toolResults: [
+        { toolCallId: 'call-1', toolName: 'terminal_execute', content: 'service restarted', isError: false },
+        { toolCallId: 'call-2', toolName: 'terminal_execute', content: 'disk almost full', isError: true },
+      ],
+      agentActivities: [
+        { id: 'plan-1', type: 'plan_update', status: 'running', items: [{ text: 'check disk space', completed: false }] },
+      ],
+    },
+  ]);
+
+  const state = store.get('chat-branch');
+  assert.equal(state.userGoal, 'keep investigating the outage');
+  assert.ok(state.decisions[0]?.includes('restart the nginx service'));
+  assert.ok(state.blockers.some(entry => entry.startsWith('terminal_execute: disk almost full')));
+  assert.deepEqual(state.planItems, [{ text: 'check disk space', completed: false }]);
+});
+
+test('SessionStateStore rebuild keeps plan and blockers from the removed turn out of the branch', () => {
+  const store = new SessionStateStore();
+  // State as it exists after the undone turn ran.
+  store.updateFromToolResult(
+    'chat-source',
+    'terminal_execute',
+    { sessionId: 'sess-1', command: 'deploy.sh' },
+    'deploy failed',
+    true,
+  );
+  store.mergePlan('chat-source', [
+    { text: 'ship the release', completed: false },
+  ]);
+  store.copyState('chat-source', 'chat-branch');
+  // The retained prefix contains only messages from before the undone turn
+  // (and none of its plan/blocker output).
+  store.rebuildConversationalStateFromMessages('chat-branch', [
+    { id: 'user-1', role: 'user', content: 'prepare the release', timestamp: 1 },
+    { id: 'assistant-1', role: 'assistant', content: 'Working on it', timestamp: 2 },
+  ]);
+
+  const state = store.get('chat-branch');
+  assert.equal(state.userGoal, 'prepare the release');
+  assert.deepEqual(state.planItems, []);
+  assert.deepEqual(state.blockers, []);
+  assert.doesNotMatch(store.toReinjectionText('chat-branch') ?? '', /ship the release/);
+  assert.doesNotMatch(store.toReinjectionText('chat-branch') ?? '', /deploy failed/);
 });

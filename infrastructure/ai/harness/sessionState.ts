@@ -1,7 +1,14 @@
+import type { ChatMessage } from '../types';
 import { redactSecretsForModel } from './modelSecretRedaction';
 
 const MAX_DECISIONS = 15;
 const MAX_BLOCKERS = 10;
+
+const DECISION_PATTERNS = [
+  /\bdecided to\b[:\s]+(.{10,200})/i,
+  /\bwill use\b[:\s]+(.{10,200})/i,
+  /\bconstraint[:\s]+(.{10,200})/i,
+];
 
 export interface ActiveTerminalJobState {
   sessionId?: string;
@@ -78,19 +85,25 @@ export class SessionStateStore {
   }
 
   /**
-   * Deep-copy the runtime session state tracked under `fromChatSessionId` into
-   * `toChatSessionId`. Used when a chat is branched (undo last turn): tool side
-   * effects are not rolled back, so the branch must keep reinjecting the same
-   * state (active background jobs, poll offsets, edited files, plan, ...) that
-   * the retained history refers to. The two copies stay independent.
+   * Deep-copy the operational runtime state tracked under `fromChatSessionId`
+   * into `toChatSessionId`. Used when a chat is branched (undo last turn): tool
+   * side effects are not rolled back, so the branch must keep reinjecting the
+   * operational state (active background jobs, poll offsets, edited files, ...)
+   * that the undone turn set up. The two copies stay independent.
+   *
+   * Only operational side-effect state is copied here. Conversational state
+   * (user goal, decisions, plan, blockers) is derived from messages, so the
+   * branch rebuilds it from its retained prefix via
+   * `rebuildConversationalStateFromMessages` instead: a full-state copy would
+   * reinject plan updates, blockers, or decisions that the removed turn
+   * produced even though the messages describing them are gone.
    */
   copyState(fromChatSessionId: string, toChatSessionId: string): void {
     if (fromChatSessionId === toChatSessionId) return;
     const state = this.bySession.get(fromChatSessionId);
     if (!state) return;
     this.bySession.set(toChatSessionId, {
-      ...state,
-      decisions: [...state.decisions],
+      ...emptyState(),
       activeHosts: Object.fromEntries(
         Object.entries(state.activeHosts).map(([id, host]) => [id, { ...host }]),
       ),
@@ -101,9 +114,68 @@ export class SessionStateStore {
         Object.entries(state.terminalReadCursors).map(([id, cursor]) => [id, { ...cursor }]),
       ),
       editedFiles: [...state.editedFiles],
-      planItems: state.planItems.map(item => ({ ...item })),
-      blockers: [...state.blockers],
+      updatedAt: Date.now(),
     });
+  }
+
+  /**
+   * Rebuild the conversational state (user goal, decisions, blockers, plan) of
+   * a branched chat by replaying its retained conversation prefix. The removed
+   * turn's messages are gone, so conversational state captured while it ran
+   * must not be reinjected into the branch (`toReinjectionText` would keep
+   * steering the agent toward work the user just undid); replaying only the
+   * retained messages restores exactly the state that history still refers to.
+   */
+  rebuildConversationalStateFromMessages(
+    chatSessionId: string,
+    messages: readonly ChatMessage[],
+  ): void {
+    const toolNames = new Map<string, string>();
+    for (const message of messages) {
+      for (const call of message.toolCalls ?? []) {
+        if (call.name) toolNames.set(call.id, call.name);
+      }
+    }
+
+    let userGoal: string | undefined;
+    let decisions: string[] = [];
+    let blockers: string[] = [];
+    let planItems: Array<{ text: string; completed: boolean }> = [];
+    for (const message of messages) {
+      if (message.role === 'user' && message.content.trim()) {
+        userGoal = message.content.trim().slice(0, 500);
+      }
+      if (message.role === 'assistant' && message.content) {
+        for (const pattern of DECISION_PATTERNS) {
+          const match = message.content.match(pattern);
+          if (match?.[1]) {
+            decisions = pushUnique(decisions, match[1].trim(), MAX_DECISIONS);
+          }
+        }
+      }
+      for (const result of message.toolResults ?? []) {
+        if (!result.isError) continue;
+        const toolName = result.toolName ?? toolNames.get(result.toolCallId) ?? 'unknown';
+        const preview = result.content.slice(0, 160).replace(/\s+/g, ' ').trim();
+        if (preview) blockers = pushUnique(blockers, `${toolName}: ${preview}`, MAX_BLOCKERS);
+      }
+      for (const activity of message.agentActivities ?? []) {
+        if (activity.type === 'plan_update' && Array.isArray(activity.items)) {
+          planItems = activity.items.map(item => ({ text: item.text, completed: item.completed }));
+        }
+      }
+    }
+
+    const state = { ...this.get(chatSessionId) };
+    if (userGoal) state.userGoal = userGoal;
+    state.decisions = decisions;
+    state.blockers = blockers;
+    state.planItems = planItems.slice(-30).map(item => ({
+      text: item.text.slice(0, 300),
+      completed: item.completed,
+    }));
+    state.updatedAt = Date.now();
+    this.bySession.set(chatSessionId, state);
   }
 
   mergeFromUserGoal(chatSessionId: string, goal: string | undefined): void {
@@ -115,13 +187,8 @@ export class SessionStateStore {
   }
 
   mergeFromAssistantContent(chatSessionId: string, content: string): void {
-    const decisionPatterns = [
-      /\bdecided to\b[:\s]+(.{10,200})/i,
-      /\bwill use\b[:\s]+(.{10,200})/i,
-      /\bconstraint[:\s]+(.{10,200})/i,
-    ];
     let state = this.get(chatSessionId);
-    for (const pattern of decisionPatterns) {
+    for (const pattern of DECISION_PATTERNS) {
       const match = content.match(pattern);
       if (match?.[1]) {
         state = {
