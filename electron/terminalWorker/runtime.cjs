@@ -402,11 +402,11 @@ function createTerminalWorkerRuntime(options = {}) {
     pendingSessionStartBootEpochs.set(sessionId, normalized);
   }
 
-  function shouldSkipStaleEpochClose(sessionId, bootEpoch) {
-    const closeEpoch = normalizeBootEpoch(bootEpoch);
-    if (closeEpoch === undefined || !sessionId) return false;
+  function isStaleSessionBootEpoch(sessionId, bootEpoch) {
+    const requestedEpoch = normalizeBootEpoch(bootEpoch);
+    if (requestedEpoch === undefined || !sessionId) return false;
     const ownerEpoch = pendingSessionStartBootEpochs.get(sessionId);
-    return ownerEpoch !== undefined && ownerEpoch > closeEpoch;
+    return ownerEpoch !== undefined && ownerEpoch > requestedEpoch;
   }
 
   function pruneSessionLifecycleTombstones() {
@@ -614,20 +614,30 @@ function createTerminalWorkerRuntime(options = {}) {
       void handleRequest(message);
       return;
     }
+    if (isStaleSessionBootEpoch(sessionId, message.payload?.bootEpoch)) {
+      postRequestError(message, new Error("Terminal session start was superseded by a newer boot"));
+      return;
+    }
+    // The replacement cannot register its own controller until the queued
+    // start settles, so cancel that start before waiting for its PATH refresh.
+    const { abortPendingBoot } = require("../bridges/sessionBootEpoch.cjs");
+    abortPendingBoot(sessionId, message.payload?.bootEpoch);
     rememberPendingStartBootEpoch(sessionId, message.payload?.bootEpoch);
     const closeEpoch = sessionCloseEpochs.get(sessionId) ?? 0;
     const previous = sessionOperationTails.get(sessionId);
     const previousKind = sessionOperationKinds.get(sessionId);
     const shouldClosePreviousStart = previousKind === "start" || sessionStartMarkers.has(sessionId);
     const current = (previous || Promise.resolve()).catch(() => {}).then(async () => {
-      if ((sessionCloseEpochs.get(sessionId) ?? 0) !== closeEpoch) {
-        postRequestError(message, new Error("Terminal session start was cancelled by close"));
+      if ((sessionCloseEpochs.get(sessionId) ?? 0) !== closeEpoch
+        || isStaleSessionBootEpoch(sessionId, message.payload?.bootEpoch)) {
+        postRequestError(message, new Error("Terminal session start was cancelled by close or superseded by a newer boot"));
         return;
       }
       try {
         if (shouldClosePreviousStart) await closeSupersededSessionStart(message);
-        if ((sessionCloseEpochs.get(sessionId) ?? 0) !== closeEpoch) {
-          postRequestError(message, new Error("Terminal session start was cancelled by close"));
+        if ((sessionCloseEpochs.get(sessionId) ?? 0) !== closeEpoch
+          || isStaleSessionBootEpoch(sessionId, message.payload?.bootEpoch)) {
+          postRequestError(message, new Error("Terminal session start was cancelled by close or superseded by a newer boot"));
           return;
         }
         sessionStartMarkers.add(sessionId);
@@ -646,7 +656,7 @@ function createTerminalWorkerRuntime(options = {}) {
       else handleSend(message);
       return;
     }
-    if (shouldSkipStaleEpochClose(sessionId, message.payload?.bootEpoch)) {
+    if (isStaleSessionBootEpoch(sessionId, message.payload?.bootEpoch)) {
       if (expectsResponse) {
         parentPort.postMessage({
           kind: "response",

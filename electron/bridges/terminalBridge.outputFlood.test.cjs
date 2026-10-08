@@ -576,3 +576,53 @@ for (const closeChannel of ["netcatty:close", "netcatty:close:await"]) {
     });
   });
 }
+
+test("worker replacements abort pending and skip superseded queued local starts", async () => {
+  await withPendingLocalPath(async ({ bridge, resolvers, spawns, sessions }) => {
+    const { createTerminalWorkerRuntime } = require("../terminalWorker/runtime.cjs");
+    const messages = [];
+    let receiveMessage;
+    createTerminalWorkerRuntime({
+      parentPort: {
+        on: (_channel, listener) => { receiveMessage = listener; },
+        postMessage: (message) => messages.push(message),
+      },
+      registerBridges: (ipcMain) => bridge.registerHandlers(ipcMain),
+    }).start();
+    const payload = { sessionId: "worker-replaced-path", shell: "C:\\Windows\\cmd.exe" };
+    const start = (bootEpoch, requestId) => receiveMessage({
+      kind: "request", requestId, channel: "netcatty:local:start",
+      webContentsId: 7, payload: { ...payload, bootEpoch },
+    });
+    const drainMessages = () => new Promise((resolve) => setImmediate(resolve));
+    start(1, "old-start");
+    await drainMessages();
+    start(2, "queued-replacement");
+    start(3, "replacement");
+    resolvers[0]("C:\\Windows\\System32");
+    await drainMessages();
+    await drainMessages();
+    assert.equal(spawns.length, 0, "a superseded PATH wait must not run shell startup scripts");
+    assert.equal(resolvers.length, 2, "the replacement now owns the startup queue");
+    assert.match(messages.find((message) => message.requestId === "old-start")?.error ?? "", /closed or superseded/);
+    assert.match(messages.find((message) => message.requestId === "queued-replacement")?.error ?? "", /superseded/);
+    start(2, "stale-start");
+    receiveMessage({
+      kind: "send", channel: "netcatty:close", webContentsId: 7,
+      payload: { ...payload, bootEpoch: 2 },
+    });
+    resolvers[1]("C:\\Windows\\System32");
+    await drainMessages();
+    await drainMessages();
+    assert.equal(spawns.length, 1);
+    assert.equal(resolvers.length, 2, "a stale start must not even prepare a new environment");
+    assert.equal(sessions.get(payload.sessionId)?.bootEpoch, 3);
+    assert.match(messages.find((message) => message.requestId === "stale-start")?.error ?? "", /superseded/);
+    receiveMessage({
+      kind: "send", channel: "netcatty:close", webContentsId: 7,
+      payload: { ...payload, bootEpoch: 3 },
+    });
+    await drainMessages();
+    await drainMessages();
+  });
+});
