@@ -29,12 +29,14 @@ const MAX_TOOL_ARGUMENTS_FIELD_LENGTH = 2_000;
 type SearchFieldCollector = {
   fields: string[];
   push: (text: unknown, maxLength?: number) => void;
+  /** True once the per-session budget is exhausted: further fields are dropped. */
+  isFull: boolean;
 };
 
 function createSearchFieldCollector(): SearchFieldCollector {
   const fields: string[] = [];
   let totalLength = 0;
-  return {
+  const collector = {
     fields,
     push(text: unknown, maxLength: number = MAX_SEARCHABLE_FIELD_LENGTH) {
       if (typeof text !== 'string') return;
@@ -53,7 +55,11 @@ function createSearchFieldCollector(): SearchFieldCollector {
       totalLength += capped.length;
       fields.push(capped);
     },
+    get isFull() {
+      return totalLength >= MAX_SESSION_SEARCHABLE_TOTAL_LENGTH;
+    },
   };
+  return collector;
 }
 
 function serializeToolCallArguments(args: Record<string, unknown>): string {
@@ -65,30 +71,43 @@ function serializeToolCallArguments(args: Record<string, unknown>): string {
 }
 
 /**
- * Serialize the human-visible text carried by persisted agent activities
- * (web-search queries, changed file paths, plan items, warnings). For
- * external SDK sessions these live only in `message.agentActivities` and are
- * rendered when the conversation is reopened, so they must be indexed too.
+ * Collect the human-visible text carried by persisted agent activities
+ * (web-search queries, changed file paths, plan items, warnings) as
+ * individual fields. For external SDK sessions these live only in
+ * `message.agentActivities` and are rendered when the conversation is
+ * reopened, so they must be indexed too. Each value is fed to the collector
+ * on its own (capped per value, not per message) so activities accumulated
+ * later in one message stay searchable, and values are pushed newest-first to
+ * match the newest-first budget allocation of the message loop.
  */
-function serializeAgentActivities(activities: AgentActivity[]): string {
-  const parts: string[] = [];
-  for (const activity of activities) {
+function collectAgentActivityFields(
+  collector: SearchFieldCollector,
+  activities: AgentActivity[],
+): void {
+  for (let i = activities.length - 1; i >= 0; i--) {
+    if (collector.isFull) return;
+    const activity = activities[i];
     switch (activity.type) {
       case 'file_change':
-        for (const change of activity.changes) parts.push(change.path);
+        for (const change of activity.changes) {
+          if (collector.isFull) return;
+          collector.push(change.path, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
+        }
         break;
       case 'web_search':
-        parts.push(activity.query);
+        collector.push(activity.query, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
         break;
       case 'plan_update':
-        for (const item of activity.items) parts.push(item.text);
+        for (const item of activity.items) {
+          if (collector.isFull) return;
+          collector.push(item.text, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
+        }
         break;
       case 'warning':
-        parts.push(activity.message);
+        collector.push(activity.message, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
         break;
     }
   }
-  return parts.join('\n');
 }
 
 /**
@@ -120,9 +139,17 @@ export function collectSessionSearchFields(session: SessionHistorySearchTarget):
   // the cap, recent messages stay searchable instead of being silently
   // dropped in favor of the oldest content.
   for (let i = session.messages.length - 1; i >= 0; i--) {
+    // Stop as soon as the per-session budget is exhausted: older messages
+    // cannot contribute anything, and traversing them (or serializing their
+    // tool arguments/activities) would waste work on every keystroke.
+    if (collector.isFull) break;
     const message = session.messages[i];
     collector.push(message.content);
+    // `push` drops fields once the budget is spent; skip the remaining
+    // (potentially expensive) serialization for this message too.
+    if (collector.isFull) continue;
     collector.push(message.thinking);
+    if (collector.isFull) continue;
     // Persisted failure diagnostics: when a Catty turn fails with empty
     // content the error message is the only visible text in the reopened
     // conversation, so it must be indexed. Error strings are short, hence the
@@ -130,17 +157,17 @@ export function collectSessionSearchFields(session: SessionHistorySearchTarget):
     collector.push(message.errorInfo?.message, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
     collector.push(serializeAttachmentLabels(message.attachments ?? message.images), MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
     for (const toolCall of message.toolCalls ?? []) {
+      if (collector.isFull) break;
       collector.push(toolCall.name);
       collector.push(serializeToolCallArguments(toolCall.arguments), MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
     }
     for (const toolResult of message.toolResults ?? []) {
+      if (collector.isFull) break;
       collector.push(toolResult.toolName);
       collector.push(toolResult.content);
     }
-    collector.push(
-      serializeAgentActivities(message.agentActivities ?? []),
-      MAX_TOOL_ARGUMENTS_FIELD_LENGTH,
-    );
+    if (collector.isFull) continue;
+    collectAgentActivityFields(collector, message.agentActivities ?? []);
   }
   const fields = collector.fields;
   // Restore chronological output order: the head (title) stays first, while
