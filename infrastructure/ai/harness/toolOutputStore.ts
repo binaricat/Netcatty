@@ -72,6 +72,9 @@ export const TOOL_OUTPUT_SPILL_THRESHOLD_CHARS = 0;
 const TOOL_OUTPUT_SEARCH_CONTEXT_CHARS = 320;
 const TOOL_OUTPUT_SEARCH_MAX_MATCHES = 20;
 const TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES = 50;
+export const TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS = 200;
+const TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_ATTEMPTS = 5;
+const TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS = 50;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_BITS = 1 << 22;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_HASHES = 4;
 
@@ -206,6 +209,15 @@ export class ToolOutputStore {
   // Shared durable files whose delete was deferred until the last alias stops
   // referencing them.
   private readonly deferredPathDeletes = new Set<string>();
+  // Alias handles whose branch-owned durable copy could not be written (for
+  // example a transient persistence.read/write failure). Retried with a delay
+  // so deleting the source session or a restart does not lose the branch copy.
+  private readonly pendingAliasMaterializations = new Map<string, {
+    targetChatSessionId: string;
+    handles: ToolOutputHandle[];
+    attempts: number;
+  }>();
+  private aliasMaterializationRetryTimer?: ReturnType<typeof setTimeout>;
   private persistence?: ToolOutputPersistence;
 
   constructor(options: ToolOutputStoreOptions = {}) {
@@ -223,6 +235,9 @@ export class ToolOutputStore {
   setPersistence(persistence: ToolOutputPersistence | undefined): void {
     this.persistence = persistence;
     if (persistence?.restore) this.replayPendingAliasRestores();
+    if (persistence?.write && this.pendingAliasMaterializations.size > 0) {
+      void this.runAliasMaterializationRetries();
+    }
   }
 
   private replayPendingAliasRestores(): void {
@@ -436,15 +451,35 @@ export class ToolOutputStore {
     targetChatSessionId: string,
     aliases: ToolOutputHandle[],
   ): Promise<void> {
+    const failed = await this.materializeDurableHandles(targetChatSessionId, aliases);
+    // The materialized aliases no longer read from the shared source files;
+    // now is a good moment to finish any deferred deletes for them.
+    this.processDeferredPathDeletes();
+    if (failed.length > 0) this.queueAliasMaterializationRetry(targetChatSessionId, failed);
+  }
+
+  /**
+   * Try to give each alias its own durable copy under the branch chat's
+   * namespace. Returns the aliases whose materialization failed so the caller
+   * can queue them for retry instead of silently losing the branch copy.
+   */
+  private async materializeDurableHandles(
+    targetChatSessionId: string,
+    aliases: ToolOutputHandle[],
+  ): Promise<ToolOutputHandle[]> {
     const persistence = this.persistence;
-    if (!persistence?.write) return;
+    if (!persistence?.write) return aliases;
+    const failed: ToolOutputHandle[] = [];
     for (const alias of aliases) {
       try {
         await alias.spillPromise;
         if (alias.evicted) continue;
         if (alias.fullContent == null && !alias.filePath) continue;
         const content = alias.fullContent ?? await this.readPersistedContent(alias, persistence);
-        if (content == null) continue;
+        if (content == null) {
+          failed.push(alias);
+          continue;
+        }
         const path = await persistence.write(
           {
             ...toPersistedRecord(alias),
@@ -460,13 +495,74 @@ export class ToolOutputStore {
         alias.filePath = path;
         alias.fullContent = undefined;
       } catch {
-        // Keep the shared-source view; the alias still works while the source
-        // handle is reachable, exactly as before.
+        // Transient persistence failure while the alias still shares the
+        // source-owned view; queue the alias for retry rather than leaving it
+        // pointing at the source's durable file forever.
+        failed.push(alias);
       }
     }
-    // The materialized aliases no longer read from the shared source files;
-    // now is a good moment to finish any deferred deletes for them.
-    this.processDeferredPathDeletes();
+    return failed;
+  }
+
+  private queueAliasMaterializationRetry(
+    targetChatSessionId: string,
+    handles: ToolOutputHandle[],
+  ): void {
+    while (this.pendingAliasMaterializations.size >= TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS) {
+      const oldest = this.pendingAliasMaterializations.keys().next().value;
+      if (oldest === undefined) break;
+      this.pendingAliasMaterializations.delete(oldest);
+    }
+    const existing = this.pendingAliasMaterializations.get(targetChatSessionId);
+    if (existing) {
+      existing.handles.push(...handles.filter(handle => !existing.handles.includes(handle)));
+      this.scheduleAliasMaterializationRetry();
+      return;
+    }
+    this.pendingAliasMaterializations.set(targetChatSessionId, {
+      targetChatSessionId,
+      handles: [...handles],
+      attempts: 0,
+    });
+    this.scheduleAliasMaterializationRetry();
+  }
+
+  private scheduleAliasMaterializationRetry(): void {
+    if (this.aliasMaterializationRetryTimer) return;
+    this.aliasMaterializationRetryTimer = setTimeout(() => {
+      this.aliasMaterializationRetryTimer = undefined;
+      void this.runAliasMaterializationRetries();
+    }, TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS);
+  }
+
+  private async runAliasMaterializationRetries(): Promise<void> {
+    if (this.pendingAliasMaterializations.size === 0) return;
+    const persistence = this.persistence;
+    if (!persistence?.write) {
+      // Persistence is not installed (or was removed); replay once
+      // `setPersistence` provides it again instead of burning attempts.
+      return;
+    }
+    const pending = [...this.pendingAliasMaterializations.values()];
+    this.pendingAliasMaterializations.clear();
+    for (const item of pending) {
+      const attempts = item.attempts + 1;
+      if (this.lifecycleDenyFilter.has(`chat:${item.targetChatSessionId}`)) continue;
+      const targetMap = this.bySession.get(item.targetChatSessionId);
+      const handles = item.handles.filter(
+        handle => !handle.evicted && targetMap?.get(handle.id) === handle,
+      );
+      if (handles.length === 0) continue;
+      const failed = await this.materializeDurableHandles(item.targetChatSessionId, handles);
+      if (failed.length > 0 && attempts < TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_ATTEMPTS) {
+        this.pendingAliasMaterializations.set(item.targetChatSessionId, {
+          targetChatSessionId: item.targetChatSessionId,
+          handles: failed,
+          attempts,
+        });
+      }
+    }
+    if (this.pendingAliasMaterializations.size > 0) this.scheduleAliasMaterializationRetry();
   }
 
   private isPathReferencedByOtherHandles(path: string, except: ToolOutputHandle): boolean {

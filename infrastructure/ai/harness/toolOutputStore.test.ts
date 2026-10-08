@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS,
   TOOL_OUTPUT_MAX_CLOSED_TERMINAL_SESSIONS,
   TOOL_OUTPUT_MAX_FAILED_SESSION_DELETIONS,
   TOOL_OUTPUT_READ_MAX_CHARS,
@@ -764,6 +765,59 @@ function createFakeToolOutputPersistence(): ToolOutputPersistence & {
     delete: async () => {},
   };
 }
+
+test('ToolOutputStore retries alias materialization after transient persistence failures', async () => {
+  const base = createFakeToolOutputPersistence();
+  let failingWrites = 2;
+  let failingReads = 0;
+  const persistence: ToolOutputPersistence & { entries: typeof base.entries } = {
+    ...base,
+    write: async (record, content) => {
+      if (failingWrites > 0) {
+        failingWrites -= 1;
+        throw new Error('temporarily busy');
+      }
+      return base.write(record, content);
+    },
+    read: async (path, request) => {
+      if (failingReads > 0) {
+        failingReads -= 1;
+        throw new Error('temporarily busy');
+      }
+      return base.read(path, request);
+    },
+  };
+  const store = new ToolOutputStore({ persistence });
+  const handle = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(50_000),
+  });
+  await store.flush('chat-source');
+
+  await store.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set([handle.id]),
+  });
+  // Both writes failed, so no branch-owned durable copy exists yet.
+  assert.equal(persistence.entries.has(`chat-branch:${handle.id}`), false);
+
+  // The queued retries land eventually without a new undo.
+  await new Promise(resolve => setTimeout(
+    resolve,
+    TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS * 3 + 50,
+  ));
+  assert.equal(persistence.entries.has(`chat-branch:${handle.id}`), true);
+  const restored = await store.readChunkAsync({ handleId: handle.id }, 'chat-branch');
+  assert.equal(restored?.content.length, TOOL_OUTPUT_READ_MAX_CHARS);
+  assert.equal(restored?.totalChars, 50_000);
+
+  // Deleting the source session must not break the branch read anymore.
+  await store.prune('chat-source');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const afterDelete = await store.readChunkAsync({ handleId: handle.id }, 'chat-branch');
+  assert.ok(afterDelete);
+  assert.equal(afterDelete.totalChars, 50_000);
+});
 
 test('ToolOutputStore gives branched chats their own durable copies so reads survive a restart', async () => {
   const persistence = createFakeToolOutputPersistence();
