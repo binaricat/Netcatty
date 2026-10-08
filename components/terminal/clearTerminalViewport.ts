@@ -47,7 +47,6 @@ type AppendEraseScrollbackOptions = {
 
 type EraseInDisplayHandlerOptions = {
   getClearWipesScrollback: () => boolean;
-  isInDec2026SyncBlock: () => boolean;
   scheduleMicrotask?: (callback: () => void) => void;
 };
 
@@ -264,7 +263,6 @@ export const installEraseInDisplayHandlers = (
   term: EraseInDisplayTerminal,
   {
     getClearWipesScrollback,
-    isInDec2026SyncBlock,
     scheduleMicrotask = queueMicrotask,
   }: EraseInDisplayHandlerOptions,
 ): IDisposable => {
@@ -279,7 +277,8 @@ export const installEraseInDisplayHandlers = (
 
   const eraseDisposable = term.parser.registerCsiHandler({ final: "J" }, (params) => {
     const wipeAllowed = getClearWipesScrollback();
-    const inDec2026SyncBlock = isInDec2026SyncBlock();
+    // Use xterm's parsed mode, including its native safety timeout.
+    const inDec2026SyncBlock = term.modes.synchronizedOutputMode;
     // Scope xterm's native preservation to shell clears, not TUI redraws.
     if (isEraseViewportSequence(params)) {
       const useNativeScrollPreservation = shouldScrollOnEraseInDisplay(

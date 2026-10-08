@@ -36,6 +36,8 @@ export const enScriptsMessages = {
   'scripts.sidePanel.library': 'Library',
   'scripts.sidePanel.running': 'Running',
   'scripts.sidePanel.newScript': 'New script',
+  'scripts.sidePanel.viewList': 'List view',
+  'scripts.sidePanel.viewStacked': 'Stacked view',
   'scripts.running.empty': 'No scripts are running in this session.',
   'scripts.running.unnamed': 'Untitled script',
   'scripts.running.status.running': 'Running',

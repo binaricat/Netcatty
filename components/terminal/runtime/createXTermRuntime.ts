@@ -366,7 +366,8 @@ export type CreateXTermRuntimeContext = {
     hostLabel: string,
     sessionId: string,
   ) => void;
-  onCommandCompleted?: () => void;
+  /** False when a plain prompt cannot correlate multiple queued submissions. */
+  onCommandCompleted?: (completionConfirmed?: boolean) => void;
   requestPluginTerminalProviders?: RequestPluginTerminalProviders;
   pluginProviderVisible?: boolean;
   isPluginTerminalProviderAvailable?: (kind: NetcattyTerminalProviderKind) => boolean;
@@ -3170,28 +3171,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // OSC 7 format: \x1b]7;file://hostname/path\x07 or \x1b]7;file://hostname/path\x1b\\
   let currentCwd: string | undefined = undefined;
 
-  // Track DEC 2026 synchronized-output blocks so CSI 2 J can erase in place for
-  // Codex/Claude Code TUIs instead of pushing visible rows into scrollback.
-  let inDec2026SyncBlock = false;
-
-  const dec2026SyncStartDisposable = term.parser.registerCsiHandler(
-    { prefix: "?", final: "h", params: [2026] },
-    () => {
-      inDec2026SyncBlock = true;
-      return false;
-    },
-  );
-  const dec2026SyncEndDisposable = term.parser.registerCsiHandler(
-    { prefix: "?", final: "l", params: [2026] },
-    () => {
-      inDec2026SyncBlock = false;
-      return false;
-    },
-  );
-
   const eraseScrollbackDisposable = installEraseInDisplayHandlers(term, {
     getClearWipesScrollback: () => ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true,
-    isInDec2026SyncBlock: () => inDec2026SyncBlock,
   });
 
   const markCursorPositionReportRequest = (params: readonly (number | number[])[]): boolean => {
@@ -3500,8 +3481,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       pluginLinkProviderHost?.dispose();
       pluginProviderHost?.dispose();
       eraseScrollbackDisposable.dispose();
-      dec2026SyncStartDisposable.dispose();
-      dec2026SyncEndDisposable.dispose();
       for (const disposable of cursorPositionReportRequestDisposables) {
         disposable.dispose();
       }

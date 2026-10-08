@@ -13,6 +13,7 @@ const { CodexAppServerRuntime } = require("../codexAppServer/runtime.cjs");
 const { probeCodexAppServer } = require("../codexAppServer/probe.cjs");
 const { codebuddySessionManager } = require("./codebuddySessionManager.cjs");
 const codebuddyDriver = require("./codebuddyDriver.cjs");
+const { OPENCODE_SERVER_START_TIMEOUT_MS } = require("./opencodeDriver.cjs");
 
 const VALID_BACKENDS = new Set(listBackends());
 
@@ -982,7 +983,11 @@ function registerSdkStreamHandlers(ctx) {
                 cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
                 codexAppServerRuntime,
               }),
-              MODEL_LIST_TIMEOUT_MS,
+              // Include OpenCode cold startup in this single cancellable
+              // catalog budget, then allow the normal provider-query budget.
+              backendKey === "opencode"
+                ? OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
+                : MODEL_LIST_TIMEOUT_MS,
               abortController,
             );
             const { currentModelId, models } = normalizeSdkListModelsResult(raw);

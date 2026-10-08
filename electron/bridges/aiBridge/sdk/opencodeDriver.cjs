@@ -13,6 +13,12 @@ const {
 
 const OPENCODE_IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const DEFAULT_OPENCODE_PORT = 4096;
+// The bundled @opencode-ai/sdk defaults `createOpencodeServer` to a 5000ms
+// startup deadline, which is too tight for opencode server cold starts on
+// Windows (antivirus scans / first-run autoupdate can push it past 8s, and
+// community reports show 30s still missed there). Always pass an explicit,
+// generous timeout so the SDK default never applies (#3579).
+const OPENCODE_SERVER_START_TIMEOUT_MS = process.platform === "win32" ? 60000 : 30000;
 
 function resolveUsableOpenCodeBinPath(binPath, env) {
   const candidates = [];
@@ -461,8 +467,10 @@ function getAvailablePort(host = "127.0.0.1") {
 }
 
 async function withOpenCodeServerPort(options = {}) {
-  if (options.port != null) return options;
-  return { ...options, port: await getAvailablePort(options.hostname || "127.0.0.1") };
+  // Never let the SDK's hardcoded 5000ms startup deadline apply (#3579).
+  const timeout = options.timeout ?? OPENCODE_SERVER_START_TIMEOUT_MS;
+  if (options.port != null) return { ...options, timeout };
+  return { ...options, timeout, port: await getAvailablePort(options.hostname || "127.0.0.1") };
 }
 
 function closeOpenCodeInstance(opencode) {
@@ -491,7 +499,13 @@ async function createDefaultOpenCode(options, env, binPath) {
   };
 
   try {
-    const opencode = await withExclusiveProcessEnv(nextEnv, () => sdk.createOpencode(options));
+    // The SDK spawns synchronously before waiting for server readiness. Only
+    // that spawn needs the temporary environment; holding the gate through
+    // cold startup serializes unrelated profiles and exhausts their deadlines.
+    const { startup } = await withExclusiveProcessEnv(nextEnv, () => ({
+      startup: sdk.createOpencode(options),
+    }));
+    const opencode = await startup;
     const originalClose = opencode.server?.close?.bind(opencode.server);
     if (typeof originalClose === "function") {
       opencode.server.close = () => {
@@ -772,9 +786,12 @@ function buildOpenCodeListServerKey(binPath, env) {
 }
 
 // Shared list-models servers: coalesce concurrent catalog loads for the same
-// binary, then tear down after a short idle so idle Netcatty does not keep
-// opencode processes around (issue #2184).
-const OPENCODE_LIST_SERVER_IDLE_MS = 1500;
+// binary, then tear down after an idle window so idle Netcatty does not keep
+// opencode processes around (issue #2184). The idle window stays generous
+// (30s, unref'd) because Windows opencode server cold starts take 4.6–8.9s
+// (#3584): killing the server 1.5s after a load makes every agent switch pay
+// the full spawn cost again and re-show the placeholder catalog.
+const OPENCODE_LIST_SERVER_IDLE_MS = 30000;
 const openCodeListServers = new Map();
 
 function clearOpenCodeListServerIdle(entry) {
@@ -837,7 +854,8 @@ async function acquireOpenCodeListServer({ env, binPath, openCodeFactory, signal
     entry.ready = (async () => {
       const options = await withOpenCodeServerPort({
         config: { autoupdate: false },
-        timeout: 10000,
+        // Startup deadline comes from withOpenCodeServerPort; the SDK's 5000ms
+        // default is too tight for Windows cold starts (#3579).
         signal: createAbort.signal,
       });
       const opencode = await factory(options);
@@ -907,8 +925,15 @@ async function listOpenCodeModels({ env, binPath, openCodeFactory, abortControll
       currentModelId: getOpenCodeDefaultModelId(data),
       models: mapOpenCodeModels(data),
     };
-  } catch {
-    return emptyOpenCodeModelCatalog();
+  } catch (error) {
+    // Surface catalog load failures to the caller so the UI can tell "still
+    // loading" apart from "failed" (#3584). Silently swallowing spawn /
+    // providers() errors meant a bad OPENCODE_BIN or a Windows cold-start
+    // timeout degraded to an empty catalog with no error and no retry path.
+    // An aborted load keeps the silent empty result: the caller cancelled on
+    // purpose, so there is nothing to retry.
+    if (effectiveSignal?.aborted) return emptyOpenCodeModelCatalog();
+    throw error;
   } finally {
     if (acquired) releaseOpenCodeListServer(acquired.key);
   }
@@ -923,6 +948,7 @@ module.exports = {
   getOpenCodeDefaultModelId,
   getOpenCodeSessionIdFromEvent,
   withOpenCodeProcessEnv,
+  withOpenCodeServerPort,
   listOpenCodeModels,
   mapOpenCodeModels,
   parseOpenCodeModel,
@@ -932,4 +958,5 @@ module.exports = {
   toOpenCodeMcpConfig,
   translateOpenCodeEvent,
   OPENCODE_LIST_SERVER_IDLE_MS,
+  OPENCODE_SERVER_START_TIMEOUT_MS,
 };

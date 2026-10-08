@@ -66,6 +66,7 @@ const createEraseHandlerHarness = (
   };
   const observedScrollRegions: Array<[number, number]> = [];
   const term = {
+    modes: { synchronizedOutputMode: options.inDec2026SyncBlock ?? false },
     rows: 5,
     options: {
       scrollOnEraseInDisplay: false,
@@ -118,7 +119,6 @@ const createEraseHandlerHarness = (
   };
   const disposable = installEraseInDisplayHandlers(term as never, {
     getClearWipesScrollback: () => options.clearWipesScrollback ?? false,
-    isInDec2026SyncBlock: () => options.inDec2026SyncBlock ?? false,
     scheduleMicrotask: (callback) => {
       microtasks.push(callback);
     },
@@ -321,7 +321,6 @@ test("erase-below wipe preserves later output from the same write batch", async 
   const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
   const disposable = installEraseInDisplayHandlers(term as never, {
     getClearWipesScrollback: () => true,
-    isInDec2026SyncBlock: () => false,
   });
 
   await writeTerminal(term, "old1\r\nold2\r\nold3\r\nold4\r\nold5\r\nold6\r\nold7\r\nold8");
@@ -524,3 +523,96 @@ test("appendEraseScrollback still wipes when delayed clear is outside a sync blo
     "\x1b[H\x1b[2J\x1b[3Jframe",
   );
 });
+
+const getScrollbackLines = (term: InstanceType<typeof Terminal>): string[] =>
+  Array.from({ length: term.buffer.active.baseY }, (_, row) =>
+    term.buffer.active.getLine(row)?.translateToString(true) ?? ""
+  );
+
+test("native synchronized-output mode ignores unrelated private modes", async () => {
+  const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
+
+  await writeTerminal(term, "\x1b[?2004h");
+  assert.equal(term.modes.synchronizedOutputMode, false, "bracketed paste 2004 must not open a sync block");
+
+  await writeTerminal(term, "\x1b[?25h\x1b[?1049h");
+  assert.equal(term.modes.synchronizedOutputMode, false, "cursor/alt-screen modes must not open a sync block");
+
+  await writeTerminal(term, "\x1b[?25:2026h");
+  assert.equal(term.modes.synchronizedOutputMode, false, "subparameters do not enable sync mode");
+
+  await writeTerminal(term, "\x1b[?25;2026h");
+  assert.equal(term.modes.synchronizedOutputMode, true, "combined primary modes enable sync mode");
+
+  await writeTerminal(term, "\x1b[?2004l");
+  assert.equal(term.modes.synchronizedOutputMode, true, "closing 2004 must not close the 2026 block");
+
+  await writeTerminal(term, "\x1b[?2026l");
+  assert.equal(term.modes.synchronizedOutputMode, false);
+
+  term.dispose();
+});
+
+test("Ctrl+L clear survives a bash prompt (2004 open, 2026 closed)", async () => {
+  const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
+  const erase = installEraseInDisplayHandlers(term as never, {
+    getClearWipesScrollback: () => false,
+  });
+
+  // Exactly two rows already in scrollback, then a full screen of visible rows.
+  await writeTerminal(term, "old1\r\nold2\r\nvis1\r\nvis2\r\nvis3\r\nvis4\r\nvis5");
+  assert.equal(term.buffer.active.baseY, 2);
+
+  // bash 5.1 at a prompt holds bracketed paste open; Ctrl+L only sends CSI 2 J.
+  await writeTerminal(term, "\x1b[?2004h");
+  await writeTerminal(term, "\x1b[H\x1b[2Jnew1");
+
+  const scrollback = getScrollbackLines(term);
+  assert.equal(scrollback.some((line) => line.startsWith("vis")), true, "visible rows preserved in scrollback");
+  assert.equal(scrollback.some((line) => line.startsWith("old")), true, "earlier history not trimmed");
+
+  erase.dispose();
+  term.dispose();
+});
+
+test("clears inside a DEC 2026 sync block still erase in place", async () => {
+  const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
+  const erase = installEraseInDisplayHandlers(term as never, {
+    getClearWipesScrollback: () => false,
+  });
+
+  await writeTerminal(term, "old1\r\nold2\r\nvis1\r\nvis2\r\nvis3\r\nvis4\r\nvis5");
+  assert.equal(term.buffer.active.baseY, 2);
+  await writeTerminal(term, "\x1b[?2026h\x1b[H\x1b[2Jnew1\x1b[?2026l");
+
+  const scrollback = getScrollbackLines(term);
+  assert.equal(scrollback.some((line) => line.startsWith("vis")), false, "sync-block erase stays in place");
+  assert.equal(scrollback.some((line) => line.startsWith("old")), true, "only pre-existing scrollback remains");
+
+  erase.dispose();
+  term.dispose();
+});
+
+for (const [label, sequence, preservesViewport] of [
+  ["combined primary modes", "\x1b[?25;2026h", false],
+  ["subparameter only", "\x1b[?25:2026h", true],
+  ["explicit reset", "\x1b[?2026h\x1b[?2026l", true],
+] as const) {
+  test(`full erase uses native synchronized-output state for ${label}`, async () => {
+    const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
+    const erase = installEraseInDisplayHandlers(term, {
+      getClearWipesScrollback: () => false,
+    });
+    try {
+      await writeTerminal(term, "old1\r\nold2\r\nvis1\r\nvis2\r\nvis3\r\nvis4\r\nvis5");
+      // The mode and erase arrive in separate PTY chunks, as with TUI redraws.
+      await writeTerminal(term, sequence);
+      await writeTerminal(term, "\x1b[H\x1b[2Jnew1");
+      assert.equal(getScrollbackLines(term).some((line) => line.startsWith("vis")), preservesViewport);
+      assert.equal(getScrollbackLines(term).some((line) => line.startsWith("old")), true);
+    } finally {
+      erase.dispose();
+      term.dispose();
+    }
+  });
+}

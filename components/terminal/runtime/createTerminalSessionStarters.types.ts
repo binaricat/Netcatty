@@ -262,7 +262,8 @@ export type TerminalSessionStartersContext = {
     hostLabel: string,
     sessionId: string,
   ) => void;
-  onCommandCompleted?: () => void;
+  /** False when a plain prompt cannot correlate multiple queued submissions. */
+  onCommandCompleted?: (completionConfirmed?: boolean) => void;
 };
 
 export type TerminalSessionDataMeta = {

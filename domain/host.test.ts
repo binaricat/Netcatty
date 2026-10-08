@@ -772,3 +772,14 @@ test("getHostAddressForClipboard omits synthesized plugin hostnames", () => {
     "",
   );
 });
+
+test("CloudLinker skips the cwd probe without restricting generic Go servers", () => {
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "SSH-2.0-CloudLinker" }),
+    false,
+  );
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "SSH-2.0-Go" }),
+    true,
+  );
+});

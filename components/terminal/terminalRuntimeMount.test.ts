@@ -238,3 +238,20 @@ test('normal boot and hibernate wake share terminal link error feedback', () => 
     /createXTermRuntime\(\{[\s\S]*?onOpenExternalError,/,
   );
 });
+
+
+test('normal and reactivated terminals forward completion only after queued commands drain', () => {
+  for (const source of [terminalSource, effectsSource]) {
+    assert.match(source, /completionConfirmed && promptLineBreakStateRef\.current\.pendingCommandCompletions === 0\) \{\s*onCommandCompleted\?\.\(sessionId\)/);
+  }
+  const layer = readFileSync(new URL('../TerminalLayer.tsx', import.meta.url), 'utf8');
+  const submitted = layer.slice(layer.indexOf('const handleCommandSubmitted ='), layer.indexOf('const handleCommandCompleted ='));
+  const completed = layer.slice(layer.indexOf('const handleCommandCompleted ='), layer.indexOf('const handleCommandExecuted ='));
+  assert.doesNotMatch(submitted, /scheduleBackendCwdProbeAfterCommand/);
+  assert.match(completed, /scheduleBackendCwdProbeAfterCommand/);
+  assert.match(layer, /if \(nextCwd\) onUpdateSessionRestoreCwd\?\.\(sessionId, nextCwd\)/);
+  const panes = readFileSync(new URL('../terminalLayer/TerminalLayerSupport.tsx', import.meta.url), 'utf8');
+  const workspaces = readFileSync(new URL('../terminalLayer/TerminalLayerWorkspaceSection.tsx', import.meta.url), 'utf8');
+  assert.match(panes, /onCommandCompleted=\{onCommandCompleted\}/);
+  assert.match(workspaces, /onCommandCompleted=\{handleCommandCompleted\}/);
+});

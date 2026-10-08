@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { createSessionOpsApi, decodeLsofFileName } = require("./sessionOps.cjs");
+const { optionsForPeerSingleChannel } = require("../../../domain/singleChannelSshBanner.shared.cjs");
 
 function quoteShellArg(value) {
   return "'" + String(value).replace(/'/g, "'\\''") + "'";
@@ -878,5 +879,21 @@ test("listSessionDir skips extra exec when singleChannelSsh is set", async () =>
   assert.equal(result.success, false);
   assert.match(result.error, /extra exec channels/);
   assert.deepEqual(result.entries, []);
+  assert.equal(execCalls, 0);
+});
+
+test("getSessionPwd skips exec after the CloudLinker banner stamps the runtime capability", async () => {
+  let execCalls = 0;
+  const api = makeApi({
+    ...optionsForPeerSingleChannel({}, { _remoteVer: "CloudLinker" }),
+    remoteSshVersion: "CloudLinker",
+    stream: {},
+    conn: { exec() { execCalls += 1; } },
+  });
+
+  const result = await api.getSessionPwd(null, { sessionId: "session-1" });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /extra exec channels/);
   assert.equal(execCalls, 0);
 });

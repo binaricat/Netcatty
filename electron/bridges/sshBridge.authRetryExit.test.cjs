@@ -467,6 +467,30 @@ function loadBridgeWithAuthRetryMocks(t, options = {}) {
           );
           return;
         }
+        if (eventName === "jump-mfa-prompt") {
+          // Bastion that demands a human-entered OTP via keyboard-interactive.
+          this.keyboardInteractiveResponses = [];
+          this.emit("connect");
+          this.emit("handshake");
+          this.emit(
+            "keyboard-interactive",
+            "Bastion MFA",
+            "Enter the one-time code from your authenticator.",
+            "",
+            [{ prompt: "Verification code:", echo: true }],
+            (responses) => {
+              this.keyboardInteractiveResponses.push(responses);
+              if (responses?.[0] === "123456") {
+                this.emit("ready");
+                return;
+              }
+              const err = new Error("All configured authentication methods failed");
+              err.level = "client-authentication";
+              this.emit("error", err);
+            },
+          );
+          return;
+        }
         if (eventName === "auth-error") {
           const err = new Error("All configured authentication methods failed");
           err.level = "client-authentication";
@@ -547,6 +571,12 @@ function loadBridgeWithAuthRetryMocks(t, options = {}) {
       return {
         Client: MockSSHClient,
         utils: { parseKey: () => options.parseKeyResult || new Error("no key parse needed") },
+      };
+    }
+    if (options.macLocalNetworkAccess && request.endsWith("macLocalNetworkAccess.cjs")) {
+      return {
+        ...originalLoad.call(this, request, parent, isMain),
+        ...options.macLocalNetworkAccess,
       };
     }
     if (request === "./netcattyAgent.cjs" || request.endsWith("/netcattyAgent.cjs")) {
@@ -2034,4 +2064,152 @@ test("cancelled encrypted-key retry emits one final exit", async (t) => {
     events.indexOf("send:netcatty:exit") > events.indexOf("passphrase-request"),
     true,
   );
+});
+
+/**
+ * Mirrors the renderer gate in application/app/useAppStartupEffects.ts
+ * (shouldQueueKeyboardInteractiveRequest): terminal-scoped prompts whose
+ * session is not in the renderer session list are auto-cancelled with an
+ * empty answer; other prompts are shown and answered by the user.
+ */
+function makeRendererEmulatingSender(rendererSessionIds, answer) {
+  const sender = makeSender();
+  const send = sender.send.bind(sender);
+  sender.send = (channel, payload) => {
+    send(channel, payload);
+    if (channel !== "netcatty:keyboard-interactive") return;
+    const rejected = payload.scope === "terminal" && !rendererSessionIds.has(payload.sessionId);
+    keyboardInteractiveHandler.handleResponse(
+      { sender },
+      rejected
+        ? { requestId: payload.requestId, responses: [], cancelled: true }
+        : { requestId: payload.requestId, responses: [answer], cancelled: false },
+    );
+  };
+  return sender;
+}
+
+function findBastionClient(MockSSHClient) {
+  return MockSSHClient.instances.find((client) => Array.isArray(client.keyboardInteractiveResponses));
+}
+
+function jumpMfaPayload(sessionId) {
+  return {
+    sessionId,
+    hostname: "target.example",
+    username: "target-user",
+    authMethod: "password",
+    password: "target-password",
+    useSshAgent: false,
+    port: 22,
+    knownHosts: [],
+    jumpHosts: [{
+      hostname: "bastion.example",
+      username: "jump-user",
+      port: 22,
+      label: "Bastion",
+    }],
+  };
+}
+
+test("connection test shows and answers jump-host MFA prompts, then connects", async (t) => {
+  const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["jump-mfa-prompt", "ready"],
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions: new Map(), electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+  // A connection test never registers a renderer terminal session.
+  const sender = makeRendererEmulatingSender(new Set(), "123456");
+
+  const result = await ipcMain.handlers.get("netcatty:test-connection")(
+    { sender },
+    jumpMfaPayload("jump-mfa-test-session"),
+  );
+
+  assert.deepEqual(result, { sessionId: "jump-mfa-test-session", testResult: "connected" });
+  const prompts = sender.sent.filter((message) => message.channel === "netcatty:keyboard-interactive");
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].payload.scope, "external");
+  assert.equal(prompts[0].payload.prompts[0].prompt, "Verification code:");
+  assert.deepEqual(findBastionClient(MockSSHClient).keyboardInteractiveResponses, [["123456"]]);
+  assert.equal(
+    sender.sent.some((message) => (
+      message.channel === "netcatty:test:result"
+      && message.payload.sessionId === "jump-mfa-test-session"
+      && message.payload.ok === true
+    )),
+    true,
+  );
+});
+
+test("terminal SSH still answers jump-host MFA prompts through the terminal scope", async (t) => {
+  const { bridge, MockSSHClient } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["jump-mfa-prompt", "ready"],
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions: new Map(), electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+  const sender = makeRendererEmulatingSender(new Set(["jump-mfa-terminal-session"]), "123456");
+
+  const result = await ipcMain.handlers.get("netcatty:start")(
+    { sender },
+    jumpMfaPayload("jump-mfa-terminal-session"),
+  );
+
+  assert.deepEqual(result, { sessionId: "jump-mfa-terminal-session" });
+  const prompts = sender.sent.filter((message) => message.channel === "netcatty:keyboard-interactive");
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].payload.scope, "terminal");
+  assert.deepEqual(findBastionClient(MockSSHClient).keyboardInteractiveResponses, [["123456"]]);
+});
+
+test("connection test runs the macOS Local Network preflight before dialing", async (t) => {
+  const order = [];
+  const probedPayloads = [];
+  const attachedProbeResults = [];
+  const originalMacAccess = require("./macLocalNetworkAccess.cjs");
+  const { bridge } = loadBridgeWithAuthRetryMocks(t, {
+    connectEvents: ["ready"],
+    macLocalNetworkAccess: {
+      ensureMacLocalNetworkAccess: async (payload) => {
+        order.push("probe");
+        probedPayloads.push(payload);
+        return { hostname: "192.168.1.20" };
+      },
+      attachMacLocalNetworkProbeResult: (options, probeResult) => {
+        attachedProbeResults.push(probeResult);
+        return originalMacAccess.attachMacLocalNetworkProbeResult(options, probeResult);
+      },
+    },
+  });
+  const ipcMain = makeIpcMain();
+  bridge.init({ sessions: new Map(), electronModule: {} });
+  bridge.registerHandlers(ipcMain);
+  const sender = makeSender();
+  const send = sender.send.bind(sender);
+  sender.send = (channel, payload) => {
+    if (channel === "netcatty:chain:progress" && payload.status === "connecting") order.push("dial");
+    send(channel, payload);
+  };
+
+  const result = await ipcMain.handlers.get("netcatty:test-connection")(
+    { sender },
+    {
+      sessionId: "mac-preflight-test-session",
+      hostname: "nas.local",
+      username: "alice",
+      authMethod: "password",
+      password: "secret",
+      useSshAgent: false,
+      port: 22,
+      knownHosts: [],
+    },
+  );
+
+  assert.deepEqual(result, { sessionId: "mac-preflight-test-session", testResult: "connected" });
+  assert.equal(probedPayloads.length, 1);
+  assert.equal(probedPayloads[0].hostname, "nas.local");
+  assert.deepEqual(attachedProbeResults, [{ hostname: "192.168.1.20" }]);
+  assert.equal(order[0], "probe", "the Local Network preflight must run before the SSH dial");
 });

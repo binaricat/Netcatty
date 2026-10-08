@@ -641,7 +641,9 @@ const writeSessionDataImmediate = (
         ctx.promptLineBreakStateRef?.current,
       );
       for (let index = 0; index < completed; index += 1) {
-        ctx.onCommandCompleted?.();
+        // A single prompt does not confirm all queued commands completed.
+        // Keep plugin accounting, but do not publish an unconfirmed cwd.
+        ctx.onCommandCompleted?.(completed === 1);
       }
     };
     const finishQueueItem = () => {
