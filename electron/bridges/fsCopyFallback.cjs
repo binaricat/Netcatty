@@ -148,8 +148,17 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
     ? options.assertNotCancelled
     : () => {};
   const signal = options.signal;
+  // Only a copy-fallback errno raised by the copyFile syscall itself moves
+  // this call to the stream fallback: a later metadata/relabel error that
+  // happens to carry such a code (e.g. EINVAL from fchmod on a FUSE backend)
+  // must propagate, otherwise a successfully completed accelerated copy would
+  // be mistaken for a failed one and streamed over the still-existing target,
+  // which fails closed with EEXIST below and discloses a relinquished target.
+  let copySyscallInFlight = false;
   try {
+    copySyscallInFlight = true;
     await fs.promises.copyFile(source, target, fs.constants.COPYFILE_EXCL);
+    copySyscallInFlight = false;
     if (creationMode === null) return;
     // Pin the identity of the produced copy while the (possibly slow, e.g.
     // network-backed) chmod below runs, so the replacement only removes a
@@ -243,7 +252,9 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
       }
     }
   } catch (error) {
-    if (!isCopyFallbackError(error)) throw error;
+    if (!(copySyscallInFlight && isCopyFallbackError(error))) throw error;
+    // The accelerated copy refused to run (libuv unlinks its partial
+    // destination on copyFile failure); fall through to the stream fallback.
   }
   assertNotCancelled();
   if (signal?.aborted) throw cancelledError();

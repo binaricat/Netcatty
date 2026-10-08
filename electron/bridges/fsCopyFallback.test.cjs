@@ -943,6 +943,28 @@ test("copyFileExclusiveWithFallback applies the intended mode when the accelerat
   );
 });
 
+test("copyFileExclusiveWithFallback propagates a copy-fallback errno raised by post-copy metadata handling", async (t) => {
+  const dir = makeTempDir("copy-fallback-postmeta-einval-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "accelerated bytes");
+  // EINVAL is a copy-fallback errno, but a FUSE backend raises it from the
+  // chmod *after* the accelerated copy already succeeded. That must
+  // propagate instead of starting the stream fallback over the existing
+  // target (which would fail closed with EEXIST and leave the copy behind).
+  const handleChmodRestore = makeHandleStub(
+    "chmod",
+    Object.assign(new Error("EINVAL: refused by FUSE backend"), { code: "EINVAL" }),
+  );
+  t.after(handleChmodRestore);
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, 0o600),
+    (error) => error?.code === "EINVAL" && error?.targetOwnershipRelinquished !== true,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "accelerated bytes");
+});
+
 test("publishLocalFileExclusive tolerates chmod/utimes rejection without hardlinks", async (t) => {
   const dir = makeTempDir("publish-refused-metadata-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
