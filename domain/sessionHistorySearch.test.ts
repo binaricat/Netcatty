@@ -101,6 +101,62 @@ test("filterSessionHistory matches text stored only in tool call arguments", () 
   assert.ok(fields.some((field) => field.includes("systemctl restart nginx")));
 });
 
+test("filterSessionHistory matches persisted agent activities", () => {
+  const sessions = [
+    createSession("a", "Research", [
+      {
+        role: "assistant",
+        agentActivities: [
+          { id: "1", type: "web_search", status: "completed", query: "rust async runtime benchmarks" },
+        ],
+      },
+    ]),
+    createSession("b", "Refactor", [
+      {
+        role: "assistant",
+        agentActivities: [
+          {
+            id: "2",
+            type: "file_change",
+            status: "completed",
+            changes: [
+              { path: "src/sessionStore.ts", kind: "update" },
+              { path: "src/sessionStore.test.ts", kind: "add" },
+            ],
+          },
+        ],
+      },
+    ]),
+    createSession("c", "Plan", [
+      {
+        role: "assistant",
+        agentActivities: [
+          {
+            id: "3",
+            type: "plan_update",
+            status: "completed",
+            items: [
+              { text: "extract search collector", completed: true },
+              { text: "wire into drawer", completed: false },
+            ],
+          },
+          { id: "4", type: "warning", status: "completed", message: "rate limit hit" },
+        ],
+      },
+    ]),
+  ];
+
+  assert.deepEqual(filterSessionHistory(sessions, "async runtime"), [sessions[0]]);
+  assert.deepEqual(filterSessionHistory(sessions, "sessionStore.test"), [sessions[1]]);
+  assert.deepEqual(filterSessionHistory(sessions, "extract search collector"), [sessions[2]]);
+  assert.deepEqual(filterSessionHistory(sessions, "rate limit"), [sessions[2]]);
+  assert.deepEqual(filterSessionHistory(sessions, "nothing here"), []);
+
+  const fields = collectSessionSearchFields(sessions[2]);
+  assert.ok(fields.some((field) => field.includes("extract search collector")));
+  assert.ok(fields.some((field) => field.includes("rate limit hit")));
+});
+
 test("collectSessionSearchFields skips empty content and caps very long fields", () => {
   const session = createSession("a", "  ", [
     { role: "user", content: "   " },

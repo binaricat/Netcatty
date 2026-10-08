@@ -1,11 +1,13 @@
+import type { AgentActivity } from './agentActivity';
 import type { AISession } from '../infrastructure/ai/types';
 import { matchesSearchQuery } from '../lib/searchMatcher';
 
 /**
  * Searchable shape for session history search. Pure domain logic consumed by
  * the session history drawer; matches on title plus user/assistant message
- * text, including thinking, tool call names/arguments and tool result content
- * already stored on messages.
+ * text, including thinking, tool call names/arguments, tool result content and
+ * persisted agent activities (web-search queries, file paths, plan items,
+ * warnings) already stored on messages.
  */
 export type SessionHistorySearchTarget = Pick<AISession, 'title' | 'messages'>;
 
@@ -61,6 +63,33 @@ function serializeToolCallArguments(args: Record<string, unknown>): string {
   }
 }
 
+/**
+ * Serialize the human-visible text carried by persisted agent activities
+ * (web-search queries, changed file paths, plan items, warnings). For
+ * external SDK sessions these live only in `message.agentActivities` and are
+ * rendered when the conversation is reopened, so they must be indexed too.
+ */
+function serializeAgentActivities(activities: AgentActivity[]): string {
+  const parts: string[] = [];
+  for (const activity of activities) {
+    switch (activity.type) {
+      case 'file_change':
+        for (const change of activity.changes) parts.push(change.path);
+        break;
+      case 'web_search':
+        parts.push(activity.query);
+        break;
+      case 'plan_update':
+        for (const item of activity.items) parts.push(item.text);
+        break;
+      case 'warning':
+        parts.push(activity.message);
+        break;
+    }
+  }
+  return parts.join('\n');
+}
+
 export function collectSessionSearchFields(session: SessionHistorySearchTarget): string[] {
   const collector = createSearchFieldCollector();
   // The title is indexed first so it always survives the total-length cap.
@@ -83,6 +112,10 @@ export function collectSessionSearchFields(session: SessionHistorySearchTarget):
       collector.push(toolResult.toolName);
       collector.push(toolResult.content);
     }
+    collector.push(
+      serializeAgentActivities(message.agentActivities ?? []),
+      MAX_TOOL_ARGUMENTS_FIELD_LENGTH,
+    );
   }
   const fields = collector.fields;
   // Restore chronological output order: the head (title) stays first, while
