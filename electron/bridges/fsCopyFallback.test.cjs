@@ -1253,6 +1253,34 @@ test("copyFileExclusiveWithFallback rejects an already-aborted signal before cre
   assert.equal(fs.existsSync(target), false, "a cancelled copy never leaves a created target");
 });
 
+test("copyFileExclusiveWithFallback relinquishes the name when cancelled after a failed accelerated copy", async (t) => {
+  const dir = makeTempDir("copy-fallback-cancel-race-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "never copied");
+  // Simulate the race window: the accelerated copy fails and its partial
+  // destination is removed, a concurrent writer creates the pathname, and
+  // only then is the pre-stream cancellation guard observed.
+  const restore = stubPromises("copyFile", async () => {
+    fs.writeFileSync(target, "another writer's file");
+    throw Object.assign(new Error("ENOTSUP: operation not supported on socket, copyfile"), { code: "ENOTSUP" });
+  });
+  t.after(restore);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, null, { signal: controller.signal }),
+    (error) => error?.code === "ABORT_ERR"
+      && error?.targetOwnershipRelinquished === true,
+    "cancellation before the exclusive open must not let the caller unlink a re-created pathname",
+  );
+  assert.equal(
+    fs.readFileSync(target, "utf8"), "another writer's file",
+    "the other writer's file must survive the cancelled fallback",
+  );
+});
+
 test("promoteLocalTransfer observes cancellation during the cross-device fallback copy", async (t) => {
   const dir = makeTempDir("promote-cancel-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

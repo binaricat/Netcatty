@@ -292,8 +292,21 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
     // a relinquished EEXIST rather than unlinking an entry whose ownership
     // cannot be proven).
   }
-  assertNotCancelled();
-  if (signal?.aborted) throw cancelledError();
+  // Cancellation observed here cannot be tied to a verified inode: the
+  // accelerated copy may have failed (possibly leaving libuv's unremoved
+  // partial behind) or the mode-fallback branch above may have removed its
+  // verified copy, so the destination name may be free for a concurrent
+  // writer to claim before the exclusive open below. Mark the handover so
+  // the caller's pre-commit cleanup never unlinks such a re-created
+  // pathname, matching the exclusive open's fail-closed EEXIST behavior.
+  try {
+    assertNotCancelled();
+  } catch (cancelError) {
+    throw Object.assign(cancelError, { targetOwnershipRelinquished: true });
+  }
+  if (signal?.aborted) {
+    throw Object.assign(cancelledError(), { targetOwnershipRelinquished: true });
+  }
   // The copy is driven through owned handles instead of fs streams: only a
   // handle pins the inode the copy actually wrote (a stream's fd is closed
   // by the time the copy ends), which the pathname revalidation below needs.
