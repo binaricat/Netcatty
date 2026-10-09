@@ -397,7 +397,14 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
             { code: "EEXIST", targetOwnershipRelinquished: true },
           );
         } else {
-          throw openError;
+          // Any other open failure (e.g. a process-local EMFILE) happens
+          // before a destination handle was obtained, so this module never
+          // acquired the pathname's ownership: a concurrent writer could
+          // create or already own `target` in the unguarded window before
+          // this open, and the caller's pre-commit cleanup must not unlink
+          // that writer's only visible file. Fail closed by marking the
+          // handover so the cleanup leaves the pathname alone.
+          throw Object.assign(openError, { targetOwnershipRelinquished: true });
         }
       }
       // Pin the created inode's identity immediately: the copy loop below can
