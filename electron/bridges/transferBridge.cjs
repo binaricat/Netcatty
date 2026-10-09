@@ -1150,8 +1150,8 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         preparedHandle = await fs.promises.open(readyPath, "r");
         // The open pinned an inode, but the pathname may have changed hands
         // between the read grant and this open: verify the held inode is
-        // still the copied one before the pathname-based restore chmod, so a
-        // replacement is never handed the copied file's permissions.
+        // still the copied one before the restore chmod, so a replacement is
+        // never handed the copied file's permissions.
         const heldIdentity = fileIdentity(await preparedHandle.stat());
         if (heldIdentity !== copiedIdentity) {
           throw Object.assign(
@@ -1160,7 +1160,21 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           );
         }
         try {
-          await fs.promises.chmod(readyPath, intendedMode);
+          // Restore through the pinned handle, not the pathname: a pathname
+          // chmod could race with a concurrent writer replacing the ready
+          // pathname between the identity check above and the chmod, relabelling
+          // the replacement while the held copied inode kept the broadened
+          // owner-read bit that publication would then preserve.
+          await preparedHandle.chmod(intendedMode);
+          const restoredStat = await preparedHandle.stat();
+          if (fileIdentity(restoredStat) !== heldIdentity
+            || (restoredStat.mode & 0o7777) !== intendedMode) {
+            // Defensive: an fchmod that silently dropped its request would leave
+            // the broadened bit on the held inode; fail closed either way.
+            throw new Error(
+              `Cannot publish local destination mode ${intendedMode.toString(8)}: the mount did not restore the intended mode`,
+            );
+          }
         } catch (restoreError) {
           if (!isMetadataUnsupportedError(restoreError)) throw restoreError;
           // Owner read was granted but this mount refuses to remove it again,
@@ -1174,6 +1188,21 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           throw new Error(
             `Cannot publish local destination mode ${intendedMode.toString(8)}: the mount refused to re-remove owner read`,
             { cause: restoreError },
+          );
+        }
+        // The handle-pinned restore cannot relabel a foreign replacement, but
+        // the ready pathname may still have changed hands while the read grant
+        // was live: publication is pathname-based (link or a fresh open), so
+        // revalidate the pathname resolves to the copied inode before handing
+        // it to publication.
+        let restoredPathIdentity = null;
+        try {
+          restoredPathIdentity = fileIdentity(await fs.promises.lstat(readyPath));
+        } catch { restoredPathIdentity = null; }
+        if (restoredPathIdentity !== copiedIdentity) {
+          throw Object.assign(
+            new Error(`EEXIST: file exists, ${readyPath} changed hands while its read access was being restored`),
+            { code: "EEXIST", targetOwnershipRelinquished: true },
           );
         }
       }
