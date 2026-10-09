@@ -2,9 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 
 import { LocalShellHostDetailsPanel } from "./LocalShellHostDetailsPanel.tsx";
 import type { Host } from "../types.ts";
+
+const panelSource = readFileSync(
+  new URL("./LocalShellHostDetailsPanel.tsx", import.meta.url),
+  "utf8",
+);
 
 const existingLocalHost = {
   id: "local-existing",
@@ -57,4 +63,13 @@ test("renderToStaticMarkup: edit mode hides Save & Connect and shows existing sh
   // Existing label and local tag are carried into the form
   assert.match(markup, /Project A CMD/);
   assert.match(markup, />local</);
+});
+
+test("buildHost preserves the saved OS on edits and detects it only for new entries", () => {
+  // Editing must retain initialData.os: entries imported/synced on one
+  // platform must not be re-classified as the editor machine's OS on save.
+  assert.match(
+    panelSource,
+    /os:\s*initialData\?\.os \?\? detectLocalOs\(navigator\.userAgent \|\| navigator\.platform\)/,
+  );
 });

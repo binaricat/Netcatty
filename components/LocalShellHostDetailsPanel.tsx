@@ -127,7 +127,10 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
   const buildHost = (): Host => {
     const host = createLocalShellHost({
       id: initialData?.id,
-      os: detectLocalOs(navigator.userAgent || navigator.platform),
+      // Keep the entry's saved OS on edits: importing/syncing on one platform
+      // then editing elsewhere must not silently re-classify the host (shell
+      // defaults, CSV round trips, dedup) as the editor machine's OS.
+      os: initialData?.os ?? detectLocalOs(navigator.userAgent || navigator.platform),
       label,
       shell,
       shellArgs: shellMeta?.args,
