@@ -348,17 +348,28 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
       try {
         readHandle = await fs.promises.open(source, "r");
       } catch (sourceError) {
-        // The stream copy only runs after the accelerated copy was refused,
-        // and the window since that failure is unguarded: `target` may have
-        // been claimed (or re-created) by a concurrent writer by now, and
-        // this module holds no handle that could prove the pathname's
-        // ownership. Mark the handover so the caller's pre-commit cleanup
-        // does not unlink the pathname and destroy that writer's only
-        // visible file (an unremoved partial of the failed accelerated copy,
-        // whose removal libuv's best effort could not complete, is disclosed
-        // by relinquishing too, matching the exclusive-open fail-closed
-        // posture below).
-        throw Object.assign(sourceError, { targetOwnershipRelinquished: true });
+        // The stream copy only runs after the accelerated copy was refused, and
+        // the window since that failure is unguarded: `target` may have been
+        // claimed (or re-created) by a concurrent writer by now, and this
+        // module holds no handle that could prove the pathname's ownership.
+        // Mark the handover so the caller's pre-commit cleanup does not
+        // unlink the pathname and destroy that writer's only visible file.
+        // Disclose the pathname itself when it still exists: libuv's
+        // best-effort removal of the failed accelerated copy's partial may
+        // have failed, so an owned-but-unverifiable fragment can remain
+        // behind the pathname, and the caller's recovery reporting (which
+        // needs `retainedTarget` on the error) must surface it instead of
+        // silently leaking it, matching the exclusive-open fail-closed
+        // posture below.
+        let sourceRetainedTarget = null;
+        try {
+          await fs.promises.lstat(target);
+          sourceRetainedTarget = target;
+        } catch { sourceRetainedTarget = null; }
+        throw Object.assign(sourceError, {
+          targetOwnershipRelinquished: true,
+          ...(sourceRetainedTarget ? { retainedTarget: sourceRetainedTarget } : {}),
+        });
       }
       try {
         writeHandle = await fs.promises.open(target, "wx", creationMode === null ? 0o666 : creationMode);

@@ -96,10 +96,40 @@ test("copyFileExclusiveWithFallback marks the handover when the source disappear
     (error) => {
       assert.equal(error?.targetOwnershipRelinquished, true);
       assert.equal(error?.code, "ENOENT");
+      // The destination pathname still exists (the concurrent writer's file,
+      // or possibly libuv's unremoved partial): it must be disclosed via
+      // `retainedTarget` so the caller's recovery reporting surfaces it
+      // instead of silently leaking an unremovable fragment.
+      assert.equal(error?.retainedTarget, target);
       return true;
     },
   );
   assert.equal(fs.readFileSync(target, "utf8"), "concurrent");
+});
+
+test("copyFileExclusiveWithFallback omits the retained target when the destination vanished with the source", async (t) => {
+  const dir = makeTempDir("copy-fallback-source-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "new bytes");
+  const restore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(restore);
+  // The accelerated copy was refused before it could create anything (or
+  // libuv's best-effort removal of its partial succeeded) and no concurrent
+  // writer claimed the pathname: there is nothing retained behind the
+  // pathname, so the source-open failure must not report a recovery file.
+  fs.unlinkSync(source);
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target),
+    (error) => {
+      assert.equal(error?.targetOwnershipRelinquished, true);
+      assert.equal(error?.code, "ENOENT");
+      assert.equal(error?.retainedTarget, undefined);
+      return true;
+    },
+  );
+  assert.equal(fs.existsSync(target), false);
 });
 
 test("copyFileExclusiveWithFallback rethrows unrelated copyFile errors", async (t) => {
