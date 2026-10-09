@@ -77,6 +77,31 @@ test("copyFileExclusiveWithFallback preserves COPYFILE_EXCL semantics", async (t
   assert.equal(fs.readFileSync(target, "utf8"), "existing");
 });
 
+test("copyFileExclusiveWithFallback marks the handover when the source disappears before the fallback stream", async (t) => {
+  const dir = makeTempDir("copy-fallback-source-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "new bytes");
+  const restore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(restore);
+  // The accelerated copy was refused with a fallback errno, then the staged
+  // source vanished while a concurrent writer claimed the destination
+  // pathname: the source-open failure must mark the handover so the
+  // caller's pre-commit cleanup never unlinks that writer's file.
+  fs.writeFileSync(target, "concurrent");
+  fs.unlinkSync(source);
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target),
+    (error) => {
+      assert.equal(error?.targetOwnershipRelinquished, true);
+      assert.equal(error?.code, "ENOENT");
+      return true;
+    },
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "concurrent");
+});
+
 test("copyFileExclusiveWithFallback rethrows unrelated copyFile errors", async (t) => {
   const dir = makeTempDir("copy-fallback-missing-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

@@ -1299,6 +1299,23 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
               } catch { relabelled = false; }
             }
             if (relabelled) {
+              // The relabel only re-proved the held inode: the ready pathname
+              // may have changed hands between the pre-chmod lstat and the
+              // (possibly slow) fd chmod. Publication below is pathname-based
+              // and the next loop iteration only revalidates the destination
+              // target, so revalidate the pathname against the pinned inode
+              // before accepting the relabel; otherwise a replacement could
+              // win the name and be hard-linked as the completed download.
+              let relabelledPathIdentity = null;
+              try {
+                relabelledPathIdentity = fileIdentity(await fs.promises.lstat(readyPath));
+              } catch { relabelledPathIdentity = null; }
+              if (relabelledPathIdentity !== pinnedIdentity) {
+                throw Object.assign(
+                  new Error(`EEXIST: file exists, ${readyPath} changed hands while its mode was being relabelled`),
+                  { code: "EEXIST", targetOwnershipRelinquished: true },
+                );
+              }
               appliedMode = mode;
               continue;
             }

@@ -36,6 +36,50 @@ for (const restore of [false, true]) {
   });
 }
 
+test("the ready pathname is revalidated after an fd-based mode relabel", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-relabel")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.chmodSync(staged, 0o644);
+  // gvfsd-fuse-style mount: pathname chmods are refused while fd chmods work.
+  const chmod = fs.promises.chmod;
+  fs.promises.chmod = async (...args) => {
+    if (String(args[0]).endsWith(".ready")) {
+      throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" });
+    }
+    return chmod.apply(fs.promises, args);
+  };
+  t.after(() => { fs.promises.chmod = chmod; });
+  const open = fs.promises.open;
+  fs.promises.open = async (...args) => {
+    const handle = await open.apply(fs.promises, args);
+    if (String(args[0]).endsWith(".ready") && args[1] === "r") {
+      const readyPath = String(args[0]);
+      const fchmod = handle.chmod.bind(handle);
+      handle.chmod = async (...modes) => {
+        fs.unlinkSync(readyPath);
+        fs.writeFileSync(readyPath, "concurrent");
+        return fchmod(...modes);
+      };
+    }
+    return handle;
+  };
+  t.after(() => { fs.promises.open = open; });
+  fs.writeFileSync(target, "concurrent");
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    validateTarget: async () => ({ targetIdentity: "missing", existingMode: 0o600 }),
+  }), (error) => {
+    assert.equal(error?.code, "EEXIST");
+    assert.equal(error?.targetOwnershipRelinquished, true);
+    return true;
+  });
+  const readyName = fs.readdirSync(root).find((name) => name.endsWith(".ready"));
+  assert.ok(readyName, "retains the ready pathname for the concurrent writer");
+  assert.equal(fs.readFileSync(path.join(root, readyName), "utf8"), "concurrent");
+});
+
 test("an explicitly absent destination is never moved aside if another writer creates it", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-absent")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

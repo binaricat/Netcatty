@@ -345,7 +345,21 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
     let readHandle = null;
     let writeHandle = null;
     try {
-      readHandle = await fs.promises.open(source, "r");
+      try {
+        readHandle = await fs.promises.open(source, "r");
+      } catch (sourceError) {
+        // The stream copy only runs after the accelerated copy was refused,
+        // and the window since that failure is unguarded: `target` may have
+        // been claimed (or re-created) by a concurrent writer by now, and
+        // this module holds no handle that could prove the pathname's
+        // ownership. Mark the handover so the caller's pre-commit cleanup
+        // does not unlink the pathname and destroy that writer's only
+        // visible file (an unremoved partial of the failed accelerated copy,
+        // whose removal libuv's best effort could not complete, is disclosed
+        // by relinquishing too, matching the exclusive-open fail-closed
+        // posture below).
+        throw Object.assign(sourceError, { targetOwnershipRelinquished: true });
+      }
       try {
         writeHandle = await fs.promises.open(target, "wx", creationMode === null ? 0o666 : creationMode);
       } catch (openError) {
