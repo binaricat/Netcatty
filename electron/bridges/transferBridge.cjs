@@ -1057,9 +1057,16 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   let restoreProbeCreated = false;
   let localMtimePrepared = false;
   let copiedIdentity = null;
+  let stagedIdentity = null;
   try {
     assertNotCancelled();
     try {
+      // Pin the staged file's identity before the rename: a same-device
+      // rename preserves dev/ino, so this is the identity the ready pathname
+      // must still resolve to on the non-EXDEV path (the EXDEV path pins
+      // `copiedIdentity` below instead). This lets the readable open and the
+      // publication step verify the pathname was never replaced.
+      stagedIdentity = fileIdentity(await fs.promises.lstat(stagedPath));
       await fs.promises.rename(stagedPath, readyPath);
     } catch (error) {
       if (error?.code !== "EXDEV") throw error;
@@ -1104,6 +1111,20 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // can remove it; the no-hardlink fallback copies through this handle.
     try {
       preparedHandle = await fs.promises.open(readyPath, "r");
+      // The successful open pinned an inode, but the pathname may already
+      // have changed hands between the prepared file's creation (EXDEV copy
+      // or same-device rename) and this open: verify the held inode is the
+      // prepared one, exactly as the restrictive-mode recovery path below
+      // does, so a concurrent replacement is never pinned here and committed
+      // by the pathname-based publication below.
+      const openedIdentity = fileIdentity(await preparedHandle.stat());
+      const preparedIdentity = copiedIdentity ?? stagedIdentity;
+      if (preparedIdentity !== null && openedIdentity !== preparedIdentity) {
+        throw Object.assign(
+          new Error(`EEXIST: file exists, ${readyPath} changed hands before its readable open was verified`),
+          { code: "EEXIST", targetOwnershipRelinquished: true },
+        );
+      }
     } catch (openError) {
       // A restrictive seed is unreadable by us. Grant owner read only to
       // acquire the temporary handle and remove the extra bit again right
@@ -1375,6 +1396,29 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       }
     }
     assertNotCancelled();
+    // Publication resolves the ready pathname by name (hardlink, or a fresh
+    // open on the copy fallback), so revalidate that the pathname still
+    // resolves to the verified prepared inode before handing it over: a
+    // replacement that won the name after the readable open was pinned must
+    // never be committed as the completed download.
+    let publicationPinnedIdentity = copiedIdentity ?? stagedIdentity;
+    if (publicationPinnedIdentity === null && preparedHandle) {
+      try {
+        publicationPinnedIdentity = fileIdentity(await preparedHandle.stat());
+      } catch { publicationPinnedIdentity = null; }
+    }
+    if (publicationPinnedIdentity !== null) {
+      let publicationPathIdentity = null;
+      try {
+        publicationPathIdentity = fileIdentity(await fs.promises.lstat(readyPath));
+      } catch { publicationPathIdentity = null; }
+      if (publicationPathIdentity !== publicationPinnedIdentity) {
+        throw Object.assign(
+          new Error(`EEXIST: file exists, ${readyPath} changed hands before publication`),
+          { code: "EEXIST", targetOwnershipRelinquished: true },
+        );
+      }
+    }
     let publishedIdentity = null;
     try {
       publishedIdentity = await publishLocalFileExclusive(readyPath, targetPath, assertNotCancelled, preparedHandle) ?? null;
