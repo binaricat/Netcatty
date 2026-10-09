@@ -30,6 +30,8 @@ interface SelectHostPanelProps {
   resizable?: boolean;
   persistWidthStorageKey?: string;
   resizeAriaLabel?: string;
+  /** Allow saved local-shell (CMD/PowerShell/...) hosts as targets, e.g. snippet/script runners. */
+  allowLocalHosts?: boolean;
 }
 
 const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
@@ -56,6 +58,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   resizable = false,
   persistWidthStorageKey,
   resizeAriaLabel,
+  allowLocalHosts = false,
 }) => {
   const { t } = useI18n();
   const [newHostPanelOpen, setNewHostPanelOpen] = useState(false);
@@ -103,6 +106,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
         onSaveHost={onSaveHost}
         onCreateGroup={onCreateGroup}
         onNewHostPanelOpenChange={setNewHostPanelOpen}
+        allowLocalHosts={allowLocalHosts}
         className="flex-1 min-h-0"
       />
     </AsidePanel>

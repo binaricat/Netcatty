@@ -58,6 +58,8 @@ export interface SelectHostPanelContentProps {
   onSaveHost?: (host: Host) => void;
   onCreateGroup?: (groupPath: string) => void;
   onNewHostPanelOpenChange?: (open: boolean) => void;
+  /** Allow saved local-shell (CMD/PowerShell/...) hosts as targets, e.g. snippet/script runners. */
+  allowLocalHosts?: boolean;
   className?: string;
 }
 
@@ -85,6 +87,7 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
   onSaveHost,
   onCreateGroup,
   onNewHostPanelOpenChange,
+  allowLocalHosts = false,
   className,
 }) => {
   const { t } = useI18n();
@@ -106,9 +109,14 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
     onNewHostPanelOpenChange?.(showNewHostPanel);
   }, [onNewHostPanelOpenChange, showNewHostPanel]);
 
+  // This panel picks hosts for SSH-backed capabilities (tunnels, keychain
+  // key export targets); serial hosts have no SSH session to target and, by
+  // default, neither do local-shell hosts. Snippet/script target pickers pass
+  // `allowLocalHosts` because their domain treats every non-serial host
+  // (including saved CMD/PowerShell shells) as a runnable target.
   const selectableHosts = useMemo(
-    () => hosts.filter((host) => host.protocol !== 'serial'),
-    [hosts],
+    () => hosts.filter((host) => host.protocol !== 'serial' && (allowLocalHosts || host.protocol !== 'local')),
+    [hosts, allowLocalHosts],
   );
   const selectedHostIdSet = useMemo(
     () => new Set(selectedHostIds),

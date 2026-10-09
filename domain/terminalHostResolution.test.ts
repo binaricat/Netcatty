@@ -488,3 +488,77 @@ test("resolveTerminalChainHosts applies group default proxy profiles to jump hos
   assert.equal(resolved[0]?.proxyProfileId, "proxy-1");
   assert.deepEqual(resolved[0]?.proxyConfig, proxyProfiles[0].config);
 });
+
+test("resolveTerminalChainHosts skips non-SSH jump candidates", () => {
+  const target: Host = {
+    id: "target",
+    label: "Target",
+    hostname: "target.example.test",
+    username: "alice",
+    port: 22,
+    protocol: "ssh",
+    tags: [],
+    os: "linux",
+    hostChain: { hostIds: ["jump-local", "jump-serial", "jump-telnet", "jump-ssh", "jump-mosh"] },
+  };
+  const localHost: Host = {
+    id: "jump-local",
+    label: "Local Shell",
+    hostname: "localhost",
+    username: "",
+    port: 22,
+    protocol: "local",
+    tags: [],
+    os: "linux",
+  };
+  const serialHost: Host = {
+    id: "jump-serial",
+    label: "Serial",
+    hostname: "/dev/ttyUSB0",
+    username: "",
+    port: 22,
+    protocol: "serial",
+    tags: [],
+    os: "linux",
+  };
+  const telnetHost: Host = {
+    id: "jump-telnet",
+    label: "Telnet",
+    hostname: "telnet.example.test",
+    username: "bob",
+    port: 23,
+    protocol: "telnet",
+    tags: [],
+    os: "linux",
+  };
+  const sshHost: Host = {
+    id: "jump-ssh",
+    label: "Jump SSH",
+    hostname: "jump.example.test",
+    username: "jump",
+    port: 22,
+    protocol: "ssh",
+    tags: [],
+    os: "linux",
+  };
+  const moshHost: Host = {
+    id: "jump-mosh",
+    label: "Jump Mosh",
+    hostname: "mosh.example.test",
+    username: "jump",
+    port: 22,
+    protocol: "ssh",
+    moshEnabled: true,
+    tags: [],
+    os: "linux",
+  };
+
+  const resolved = resolveTerminalChainHosts({
+    host: target,
+    hosts: [target, localHost, serialHost, telnetHost, sshHost, moshHost],
+    groupConfigs: [],
+    proxyProfiles,
+  });
+
+  assert.deepEqual(resolved.map((host) => host.id), ["jump-ssh", "jump-mosh"]);
+});

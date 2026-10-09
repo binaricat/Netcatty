@@ -1123,6 +1123,7 @@ Highlight the focused split pane:
   'vault.tree.expandAll': 'Expand All',
   'vault.tree.collapseAll': 'Collapse All',
   'vault.hosts.newHost': 'New Host',
+  'vault.hosts.newLocalShell': 'Local Shell (CMD)',
   'vault.hosts.newGroup': 'New Group',
   'vault.hosts.import': 'Import',
   'vault.hosts.export': 'Export',

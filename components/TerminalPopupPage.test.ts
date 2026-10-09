@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import type { Host, TerminalSession } from '../types';
 import type { TerminalPopupPayload } from '../domain/systemManager/types';
 import { resolveTerminalPopupHost, resolveTerminalPopupReuseId } from './TerminalPopupPage';
+import { resolveShellSetting } from '../lib/useDiscoveredShells';
 
 const source = readFileSync(new URL('./TerminalPopupPage.tsx', import.meta.url), 'utf8');
 const terminalSource = readFileSync(new URL('./Terminal.tsx', import.meta.url), 'utf8');
@@ -51,6 +52,36 @@ test('resolveTerminalPopupHost honors source session transport over saved Mosh h
   assert.equal(host.protocol, 'ssh');
   assert.equal(host.moshEnabled, false);
   assert.equal(host.etEnabled, false);
+});
+
+test('resolveTerminalPopupHost resolves the settings shell for saved local hosts with a system default shell', () => {
+  const localHost = vaultHost({
+    protocol: 'local',
+    hostname: 'localhost',
+    username: '',
+    port: undefined,
+    localShell: undefined,
+  });
+  const defaultLocalShell = {
+    discoveredShells: [],
+    resolveShellSetting,
+    terminalSettings: { localShell: 'fish', localShellArgs: [] },
+  };
+
+  const withContext = resolveTerminalPopupHost(
+    popupPayload(sourceSession({ protocol: 'local', port: undefined })),
+    [localHost],
+    { defaultLocalShell },
+  );
+  assert.equal(withContext.localShell, 'fish');
+
+  // Without the context (e.g. callers that cannot resolve it) the vault host
+  // keeps its saved (empty) shell — the caller decides how to handle it.
+  const withoutContext = resolveTerminalPopupHost(
+    popupPayload(sourceSession({ protocol: 'local', port: undefined })),
+    [localHost],
+  );
+  assert.equal(withoutContext.localShell, undefined);
 });
 
 test('resolveTerminalPopupHost still falls back to source session details when the host is missing', () => {

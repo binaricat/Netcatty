@@ -15,7 +15,7 @@ export {
 } from "./vaultHostCreate";
 import { parseQuickConnectInput } from "./quickConnect";
 import { findExactHeaderIndex, findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
-import { decodeCsvKeyPath, decodeCsvPassphrase } from "./vaultImport/csvCredentialFields";
+import { decodeCsvKeyPath, decodeCsvLocalShell, decodeCsvPassphrase } from "./vaultImport/csvCredentialFields";
 import { parseCsvProxy } from "./vaultImport/csvProxy";
 import { attachMobaXtermPasswords } from "./vaultImport/mobaXtermPasswords";
 import { decodeFinalShellPassword } from "./finalShellPassword";
@@ -326,7 +326,9 @@ const createHost = (input: {
 
 const dedupeHosts = (
   hosts: Host[],
-  options?: { isCollapsible?: (host: Host) => boolean },
+  options?: {
+    isCollapsible?: (host: Host) => boolean;
+  },
 ): { hosts: Host[]; duplicates: number } => {
   const seen = new Map<string, Host>();
   const retained: Host[] = [];
@@ -446,6 +448,7 @@ const importFromCsv = (text: string): VaultImportResult => {
   const keyPathIdx = findExactHeaderIndex(header, ["keypath", "key path", "identityfile", "identity file"]);
   const explicitPassphraseIdx = findExactHeaderIndex(header, ["passphrase", "keypassphrase", "key passphrase"]);
   const proxyIdx = findExactHeaderIndex(header, ["proxy", "proxyserver", "proxy server"]);
+  const localShellIdx = findExactHeaderIndex(header, ["localshell"]);
   const passphraseIdx = keyPathIdx >= 0 ? explicitPassphraseIdx : -1;
   const exactPasswordIdx = findExactHeaderIndex(header, ["password", "pass", "passwd"]);
   const fuzzyNamedPasswordIdx = findHeaderIndex(header, ["password", "passwd"]);
@@ -537,6 +540,15 @@ const importFromCsv = (text: string): VaultImportResult => {
       });
     }
 
+    const localShellRaw = (localShellIdx >= 0 ? row[localShellIdx] : undefined)?.trim();
+    const localShellSpec = localShellRaw ? decodeCsvLocalShell(localShellRaw) : undefined;
+    if (localShellRaw && !localShellSpec) {
+      issues.push({
+        level: "warning",
+        message: `CSV row ${i + 2}: LocalShell was ignored because it is not a valid encoded local-shell value.`,
+      });
+    }
+
     if (decodedPassphrase && isEncryptedCredentialPlaceholder(decodedPassphrase)) {
       issues.push({
         level: "warning",
@@ -564,6 +576,14 @@ const importFromCsv = (text: string): VaultImportResult => {
       notes,
     });
     if (proxyConfig) host.proxyConfig = proxyConfig;
+    if (localShellSpec && protocol === "local") {
+      if (localShellSpec.shell) host.localShell = localShellSpec.shell;
+      if (localShellSpec.shellArgs) host.localShellArgs = localShellSpec.shellArgs;
+      if (localShellSpec.shellName) host.localShellName = localShellSpec.shellName;
+      if (localShellSpec.shellIcon) host.localShellIcon = localShellSpec.shellIcon;
+      if (localShellSpec.startDir) host.localStartDir = localShellSpec.startDir;
+      if (localShellSpec.os) host.os = localShellSpec.os;
+    }
     parsedHosts.push(host);
     if (keyPath && passphrase) {
       const keyPathKey = normalizeKeyPathKey(keyPath);
@@ -586,6 +606,10 @@ const importFromCsv = (text: string): VaultImportResult => {
     }
   }
 
+  // Local-shell entries share the endpoint key (local|localhost|22|<group>), so
+  // the shell identity is part of buildVaultHostMergeKey; otherwise importing a
+  // backup with CMD and PowerShell in the same group silently keeps only the
+  // first shell and flags the rest as duplicates.
   const { hosts, duplicates } = dedupeHosts(parsedHosts);
   const keyPassphrases = hosts.flatMap((host) => {
     const selectedKeyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();

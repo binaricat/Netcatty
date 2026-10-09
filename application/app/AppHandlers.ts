@@ -4,6 +4,7 @@ import type { Host, HostProtocol, TerminalSession } from '../../types';
 import type { PassphraseRequest } from '../../components/PassphraseModal';
 import type { TerminalPopupPayload } from '../../domain/systemManager/types';
 import { getEffectiveHostDistro, classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from '../../domain/host';
+import { resolveHostDefaultLocalShell } from '../../domain/localShellHost';
 import { getAvailablePaneMagnificationController } from '../../domain/paneMagnification';
 import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
@@ -204,7 +205,10 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
       hostId: host.id,
       hostLabel: host.label,
       hostname: host.hostname,
-      username: resolvedAuth.username || 'root',
+      // Local-shell vault hosts carry no SSH credentials, so log the system
+      // user like local terminals do (see handleConnectToHostImpl) instead of
+      // 'root' or an inherited group SSH username.
+      username: protocol === 'local' ? username : (resolvedAuth.username || 'root'),
       protocol,
       ...getLogHostVisualSnapshot(effectiveHost),
       startTime: Date.now(),
@@ -1104,11 +1108,15 @@ export function handleCreateLocalTerminalImpl(
 }
 
 export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host, hidden = false) {
-  const { addConnectionLog, connectToHost, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef } = getCtx();
+  const { addConnectionLog, connectToHost, discoveredShells, identities, keys, resolveEffectiveHost, resolveHostAuth, resolveShellSetting, systemInfoRef, terminalSettings } = getCtx();
 {
     const { username, hostname: localHost } = systemInfoRef.current;
 
-    const effectiveHost = resolveEffectiveHost(host);
+    const effectiveHost = resolveHostDefaultLocalShell(resolveEffectiveHost(host), {
+      discoveredShells,
+      resolveShellSetting,
+      terminalSettings,
+    });
 
     // Handle serial hosts separately
     if (effectiveHost.protocol === 'serial') {
@@ -1138,7 +1146,10 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host, hi
       hostId: host.id,
       hostLabel: host.label,
       hostname: host.hostname,
-      username: resolvedAuth.username || 'root',
+      // Local-shell vault hosts carry no SSH credentials, so log the system
+      // user like local terminals do (see handleCreateLocalTerminalImpl)
+      // instead of 'root' or an inherited group SSH username.
+      username: protocol === 'local' ? username : (resolvedAuth.username || 'root'),
       protocol,
       ...getLogHostVisualSnapshot(effectiveHost),
       startTime: Date.now(),
@@ -1186,8 +1197,13 @@ export function hasMultipleProtocolsImpl(getCtx: AppContextGetter, host: Host) {
     // Gates the protocol picker (legacy name kept for its existing wiring).
     // Only prompt when Telnet is available but isn't the host's default protocol;
     // SSH-only, SSH+Mosh and Telnet-default all connect directly.
+    // SSH-only guard, matching VaultView's handleHostConnect: local-shell and
+    // serial hosts must always launch their own transport, never offer
+    // SSH/Telnet pickers driven by an inherited group Telnet flag. Hosts
+    // without an explicit protocol are legacy SSH entries.
     const effective = resolveEffectiveHost(host);
-    return Boolean(effective.telnetEnabled) && effective.protocol !== 'telnet';
+    const effectiveProtocol = effective.protocol ?? 'ssh';
+    return effectiveProtocol === 'ssh' && Boolean(effective.telnetEnabled);
   }
 }
 

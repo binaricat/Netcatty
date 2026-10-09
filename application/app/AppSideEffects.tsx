@@ -38,6 +38,7 @@ import {
 import { isTerminalBootEpochCurrent } from '../../domain/terminalBootEpoch';
 import { useI18n } from '../i18n/I18nProvider';
 import { matchesKeyBinding } from '../../domain/models';
+import { resolveHostDefaultLocalShell } from '../../domain/localShellHost';
 import { resolveGroupDefaults, applyGroupDefaults } from '../../domain/groupConfig';
 import { upsertKnownHost } from '../../domain/knownHosts';
 import { materializeHostProxyProfile } from '../../domain/proxyProfiles';
@@ -1366,8 +1367,18 @@ export function AppSideEffects() {
           { validProxyProfileIds: proxyProfileIdSet },
         )
       : applyGroupDefaults(host, {}, { validProxyProfileIds: proxyProfileIdSet });
-    return materializeHostProxyProfile(withGroupDefaults, proxyProfiles);
-  }, [groupConfigs, proxyProfileIdSet, proxyProfiles]);
+    const effectiveHost = materializeHostProxyProfile(withGroupDefaults, proxyProfiles);
+    // Local-shell vault hosts saved with "System default shell" carry no
+    // localShell; resolve the Settings → Terminal shell here at the shared
+    // effective-host boundary so every launch path (connect, tray/dock open,
+    // workspace creation/append, tunnels) uses the configured shell instead
+    // of silently falling back to the backend OS default shell.
+    return resolveHostDefaultLocalShell(effectiveHost, {
+      discoveredShells,
+      resolveShellSetting,
+      terminalSettings,
+    });
+  }, [groupConfigs, proxyProfileIdSet, proxyProfiles, discoveredShells, terminalSettings]);
 
   const createWorkspaceWithEffectiveHosts = useCallback((name: string, selectedHosts: Host[]) => {
     createWorkspaceWithHosts(name, selectedHosts.map(resolveEffectiveHost));
@@ -1398,14 +1409,17 @@ export function AppSideEffects() {
     return handleConnectToHostImpl(() => ({
       addConnectionLog,
       connectToHost,
+      discoveredShells,
       host,
       identities,
       keys,
       resolveEffectiveHost: effectiveHostResolver,
       resolveHostAuth,
+      resolveShellSetting,
       systemInfoRef,
+      terminalSettings,
     }), host, hidden);
-  }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys]);
+  }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys, discoveredShells, terminalSettings]);
 
   const handleConnectToHostWithTabName = useCallback((host: Host, tabName?: string) => {
     const sessionId = handleConnectToHost(host);

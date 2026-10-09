@@ -1,4 +1,5 @@
 import type { Host, SerialConfig, TerminalSession } from "../../domain/models";
+import { classifyLocalShellType } from "../../lib/localShell";
 
 export interface LocalTerminalOptions {
   shellType?: TerminalSession["shellType"];
@@ -113,6 +114,18 @@ export const createHostTerminalSession = (
     moshEnabled: host.moshEnabled,
     etEnabled: host.etEnabled,
     charset: host.charset,
+    // Local-shell vault hosts carry the per-host shell selection into the
+    // session (the bridge resolves discovered shell ids at spawn time).
+    // shellType matches ordinary local-terminal creation so captured-CWD
+    // restore can reject POSIX injection into CMD/PowerShell sessions.
+    ...(host.protocol === "local" ? {
+      shellType: classifyLocalShellType(host.localShell, host.os),
+      localShell: host.localShell,
+      localShellArgs: host.localShellArgs,
+      localShellName: host.localShellName,
+      localShellIcon: host.localShellIcon,
+      localStartDir: host.localStartDir,
+    } : {}),
     ...(host.ephemeral ? { ephemeralHost: true } : {}),
     ...(host.autoOpenSftpPanel ? { autoOpenSidePanel: "sftp" as const } : {}),
   };

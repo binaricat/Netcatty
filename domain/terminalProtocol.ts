@@ -11,3 +11,18 @@ export function resolveEffectiveTerminalProtocol(host: TerminalTransportHost): H
   if (host.hostname === 'localhost') return 'local';
   return host.protocol ?? 'ssh';
 }
+
+/**
+ * Whether a vault host can serve as an SSH jump (ProxyJump) hop.
+ *
+ * Chain hops are dialed over SSH, so ssh-family transports (including mosh/et
+ * hosts, which bootstrap over SSH) qualify, while local shells, serial links,
+ * telnet and plugin transports must never be materialized as jump hosts.
+ * Hosts without an explicit protocol are legacy SSH entries.
+ */
+export function canServeAsSshJumpHost(
+  host: Pick<Host, 'protocol'>,
+): boolean {
+  const protocol = host.protocol;
+  return protocol === undefined || protocol === 'ssh' || protocol === 'mosh' || protocol === 'et';
+}

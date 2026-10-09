@@ -23,6 +23,7 @@ import {
   updateProxyConfigField,
 } from "../domain/proxyProfiles";
 import { hasRequiredHostAuthCredential, resolveHostAuth, resolveHostAuthMethodForPersistence } from "../domain/sshAuth";
+import { canServeAsSshJumpHost } from "../domain/terminalProtocol";
 import { customThemeStore } from "../application/state/customThemeStore";
 import {
   hasHostFontSizeOverride,
@@ -749,7 +750,13 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
 
   const availableHostsForChain = useMemo(() => {
     const chainedIds = new Set(form.hostChain?.hostIds || []);
-    return allHosts.filter((h) => h.id !== form.id && !chainedIds.has(h.id));
+    // Chain hops are SSH ProxyJump hops; never offer local/serial/telnet/plugin
+    // entries (e.g. saved local shells) as jump hosts.
+    return allHosts.filter((h) =>
+      h.id !== form.id
+      && !chainedIds.has(h.id)
+      && canServeAsSshJumpHost(h),
+    );
   }, [allHosts, form.id, form.hostChain?.hostIds]);
 
   const chainedHosts = useMemo(() => {

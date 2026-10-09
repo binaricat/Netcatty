@@ -55,6 +55,32 @@ test("CSV round-trips local key authentication and its saved passphrase", () => 
   }]);
 });
 
+test("CSV import keeps distinct local-shell entries in the same group", () => {
+  const localShellHost = (id: string, label: string, shell: string, shellName: string): Host => ({
+    ...hostDefaults,
+    id,
+    label,
+    hostname: "localhost",
+    port: 22,
+    protocol: "local",
+    group: "Shells",
+    localShell: shell,
+    localShellName: shellName,
+  });
+
+  const cmd = localShellHost("local-cmd", "Command Prompt", "cmd.exe", "Command Prompt");
+  const powershell = localShellHost("local-ps", "PowerShell", "powershell.exe", "Windows PowerShell");
+  const { csv } = exportHostsToCsvWithStats([cmd, powershell]);
+
+  const imported = importVaultHostsFromText("csv", csv);
+  assert.equal(imported.stats.duplicates, 0);
+  assert.equal(imported.hosts.length, 2);
+  assert.deepEqual(
+    imported.hosts.map((h) => h.localShell).sort(),
+    ["cmd.exe", "powershell.exe"],
+  );
+});
+
 test("CSV round-trips a referenced Keychain file path and saved passphrase", () => {
   const host: Host = {
     ...hostDefaults,
@@ -424,4 +450,68 @@ test("CSV reports unreadable proxy passwords for exported hosts only", () => {
   const imported = importVaultHostsFromText("csv", result.csv);
   assert.deepEqual(imported.hosts.map((host) => host.proxyConfig?.password), [undefined, undefined, "readable"]);
   assert.equal(exportHostsToCsvWithStats([]).unreadableProxyCredentialCount, 0);
+});
+
+test("CSV round-trips local-shell vault host settings", () => {
+  const localHost: Host = {
+    ...hostDefaults,
+    id: "local-cmd",
+    label: "CMD host",
+    hostname: "localhost",
+    username: "",
+    protocol: "local",
+    os: "windows",
+    tags: ["local"],
+    localShell: "cmd",
+    localShellArgs: ["/k", "echo hi"],
+    localShellName: "CMD",
+    localShellIcon: "cmd",
+    localStartDir: "C:\\Users\\dev",
+  };
+  const defaultLocalHost: Host = {
+    ...hostDefaults,
+    id: "local-default",
+    label: "Local shell",
+    hostname: "localhost",
+    username: "",
+    protocol: "local",
+    os: "windows",
+    tags: ["local"],
+    group: "Backups",
+  };
+
+  const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats([localHost, defaultLocalHost]);
+  assert.equal(exportedCount, 2);
+  assert.equal(skippedCount, 0);
+
+  const imported = importVaultHostsFromText("csv", csv);
+  assert.equal(imported.hosts.length, 2);
+  assert.equal(imported.issues.length, 0);
+
+  const roundTripped = imported.hosts[0];
+  assert.equal(roundTripped.protocol, "local");
+  assert.equal(roundTripped.os, "windows");
+  assert.equal(roundTripped.localShell, "cmd");
+  assert.deepEqual(roundTripped.localShellArgs, ["/k", "echo hi"]);
+  assert.equal(roundTripped.localShellName, "CMD");
+  assert.equal(roundTripped.localShellIcon, "cmd");
+  assert.equal(roundTripped.localStartDir, "C:\\Users\\dev");
+
+  const roundTrippedDefault = imported.hosts[1];
+  assert.equal(roundTrippedDefault.protocol, "local");
+  assert.equal(roundTrippedDefault.os, "windows");
+  assert.equal(roundTrippedDefault.localShell, undefined);
+  assert.equal(roundTrippedDefault.localStartDir, undefined);
+});
+
+test("CSV import warns and ignores a malformed LocalShell value", () => {
+  const csv = [
+    "Groups,Label,Tags,Notes,Hostname/IP,Protocol,Port,Username,Password,KeyPath,Passphrase,Proxy,LocalShell",
+    ',"Bad local shell",,,localhost,local,22,,,,,,"not json"',
+  ].join("\r\n");
+
+  const imported = importVaultHostsFromText("csv", csv);
+  assert.equal(imported.hosts.length, 1);
+  assert.equal(imported.hosts[0]?.localShell, undefined);
+  assert.ok(imported.issues.some((issue) => issue.message.includes("row 2") && issue.message.includes("LocalShell")));
 });
