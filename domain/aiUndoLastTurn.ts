@@ -77,16 +77,22 @@ export interface UndoLastTurnResult {
  * desync agent tool bookkeeping, so such boundaries are rejected.
  */
 export function hasUnresolvedToolCalls(messages: readonly ChatMessage[]): boolean {
-  const answered = new Set<string>();
-  for (const message of messages) {
-    for (const result of message.toolResults ?? []) {
-      answered.add(result.toolCallId);
-    }
-  }
+  // Providers may reuse tool-call IDs across a session. Pair each result with
+  // the nearest preceding unresolved call carrying the same ID (same strategy
+  // as `repairToolMessageIntegrity`), otherwise a result for an earlier
+  // occurrence would satisfy a later call that reused the ID.
+  const pendingCalls = new Map<string, number>();
   for (const message of messages) {
     for (const call of message.toolCalls ?? []) {
-      if (!answered.has(call.id)) return true;
+      pendingCalls.set(call.id, (pendingCalls.get(call.id) ?? 0) + 1);
     }
+    for (const result of message.toolResults ?? []) {
+      const pending = pendingCalls.get(result.toolCallId) ?? 0;
+      if (pending > 0) pendingCalls.set(result.toolCallId, pending - 1);
+    }
+  }
+  for (const pending of pendingCalls.values()) {
+    if (pending > 0) return true;
   }
   return false;
 }
