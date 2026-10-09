@@ -299,28 +299,28 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
   // writer to claim before the exclusive open below. Mark the handover so
   // the caller's pre-commit cleanup never unlinks such a re-created
   // pathname, matching the exclusive open's fail-closed EEXIST behavior.
-  // Disclose the pathname itself when it still exists: libuv's best-effort
-  // removal of the failed accelerated copy's partial may have failed, and
-  // the marker alone would keep the caller from unlinking it without also
-  // routing it through recovery reporting, silently leaking the partial.
-  const cancellationWithHandover = async (cancelError) => {
-    let cancelledRetainedTarget = null;
-    try {
-      await fs.promises.lstat(target);
-      cancelledRetainedTarget = target;
-    } catch { cancelledRetainedTarget = null; }
-    return Object.assign(cancelError, {
-      targetOwnershipRelinquished: true,
-      ...(cancelledRetainedTarget ? { retainedTarget: cancelledRetainedTarget } : {}),
-    });
-  };
+  // No metadata probe (lstat) is issued on this path: the caller may have
+  // aborted a copy against a mount that has stopped responding, and a
+  // metadata request against that same stalled destination cannot be
+  // cancelled, so probing existence here would turn prompt cancellation
+  // into another unbounded filesystem wait just when the caller asked to
+  // stop. The handover marker alone already keeps the caller's pre-commit
+  // cleanup from unlinking the pathname, which protects both a re-created
+  // foreign file and a rare unremoved libuv partial (libuv's best-effort
+  // removal of the failed accelerated copy's destination may have failed);
+  // those fail-closed leftovers stay in place undisclosed, exactly like the
+  // exclusive open's EEXIST below, which also fails without reporting the
+  // pathname's existence.
+  const cancellationWithHandover = (cancelError) => Object.assign(cancelError, {
+    targetOwnershipRelinquished: true,
+  });
   try {
     assertNotCancelled();
   } catch (cancelError) {
-    throw await cancellationWithHandover(cancelError);
+    throw cancellationWithHandover(cancelError);
   }
   if (signal?.aborted) {
-    throw await cancellationWithHandover(cancelledError());
+    throw cancellationWithHandover(cancelledError());
   }
   // The copy is driven through owned handles instead of fs streams: only a
   // handle pins the inode the copy actually wrote (a stream's fd is closed

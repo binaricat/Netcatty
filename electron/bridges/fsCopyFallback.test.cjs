@@ -1372,6 +1372,34 @@ test("copyFileExclusiveWithFallback relinquishes the name when cancelled after a
   );
 });
 
+test("copyFileExclusiveWithFallback cancels promptly without a metadata probe after a failed accelerated copy", async (t) => {
+  const dir = makeTempDir("copy-fallback-cancel-no-probe-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "never copied");
+  const copyRestore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(copyRestore);
+  // A mount that has stopped responding: any metadata request would hang
+  // forever. The cancellation path must return without issuing one instead
+  // of stalling the abort behind an uncancellable lstat.
+  const lstatOriginal = fs.promises.lstat;
+  let lstatCalls = 0;
+  fs.promises.lstat = async () => {
+    lstatCalls += 1;
+    return new Promise(() => {});
+  };
+  t.after(() => { fs.promises.lstat = lstatOriginal; });
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, null, { signal: controller.signal }),
+    (error) => error?.code === "ABORT_ERR" && error?.targetOwnershipRelinquished === true,
+    "the cancellation handover must still be marked without a metadata probe",
+  );
+  assert.equal(lstatCalls, 0, "the cancelled handover must not stat the destination");
+});
+
 test("promoteLocalTransfer observes cancellation during the cross-device fallback copy", async (t) => {
   const dir = makeTempDir("promote-cancel-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
