@@ -299,13 +299,28 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
   // writer to claim before the exclusive open below. Mark the handover so
   // the caller's pre-commit cleanup never unlinks such a re-created
   // pathname, matching the exclusive open's fail-closed EEXIST behavior.
+  // Disclose the pathname itself when it still exists: libuv's best-effort
+  // removal of the failed accelerated copy's partial may have failed, and
+  // the marker alone would keep the caller from unlinking it without also
+  // routing it through recovery reporting, silently leaking the partial.
+  const cancellationWithHandover = async (cancelError) => {
+    let cancelledRetainedTarget = null;
+    try {
+      await fs.promises.lstat(target);
+      cancelledRetainedTarget = target;
+    } catch { cancelledRetainedTarget = null; }
+    return Object.assign(cancelError, {
+      targetOwnershipRelinquished: true,
+      ...(cancelledRetainedTarget ? { retainedTarget: cancelledRetainedTarget } : {}),
+    });
+  };
   try {
     assertNotCancelled();
   } catch (cancelError) {
-    throw Object.assign(cancelError, { targetOwnershipRelinquished: true });
+    throw await cancellationWithHandover(cancelError);
   }
   if (signal?.aborted) {
-    throw Object.assign(cancelledError(), { targetOwnershipRelinquished: true });
+    throw await cancellationWithHandover(cancelledError());
   }
   // The copy is driven through owned handles instead of fs streams: only a
   // handle pins the inode the copy actually wrote (a stream's fd is closed
@@ -422,6 +437,23 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
       } catch { heldIdentity = null; }
       try {
         copied = await copyLoop(readHandle, writeHandle);
+        // The copy loop's stat already reflects the logical size, so a
+        // backend that defers writeback to the final close (FUSE/NFS/CIFS)
+        // can reject the data only when the write handle is closed, with
+        // EIO, ENOSPC or EDQUOT. Suppressing that close error would treat
+        // the streamed copy as complete and let the caller publish a copy
+        // the backend refused to flush, so a write-handle close failure is
+        // treated exactly like a copy-loop failure and routed through the
+        // same partial-copy recovery path below. The read handle's close
+        // stays best-effort: a failed read already aborts the loop, and a
+        // read-side close error carries no data-loss risk.
+        try {
+          await writeHandle.close();
+          writeHandle = null;
+        } catch (writeCloseError) {
+          writeHandle = null;
+          throw writeCloseError;
+        }
       } catch (copyError) {
         // A rejected copy loop bypasses the post-copy revalidation entirely,
         // so the partial destination's ownership cannot simply be decided by
