@@ -256,7 +256,32 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
             { code: "EEXIST", stalePath, targetOwnershipRelinquished: true, cause: restoreLinkFailure },
           );
         }
-        await fs.promises.unlink(stalePath);
+        // The side name verifiably holds this module's accelerated copy:
+        // unlink it from the private side name, which a concurrent writer
+        // cannot race because only this relabel knows the name. If the mount
+        // refuses the removal, the verified copy persists at the disclosed
+        // side name and is reported the same way as the streamed failure
+        // branches: `targetOwnershipRelinquished` keeps the caller's
+        // pre-commit cleanup from unlinking a pathname another writer may
+        // have re-created in the meantime (`target` is already absent here),
+        // and `stalePath` discloses the remaining copy fragment instead of
+        // silently leaking it behind a hidden `.stale-*` name.
+        let unlinkFailure = null;
+        try {
+          await fs.promises.unlink(stalePath);
+        } catch (failure) {
+          unlinkFailure = failure;
+        }
+        if (unlinkFailure !== null) {
+          throw Object.assign(
+            new Error(
+              `EPERM: operation not permitted, ${target} was relabelled because its mode`
+              + ` could not be applied and the mount refused the removal of the verified`
+              + ` copy, which was left aside at ${stalePath}`,
+            ),
+            { code: "EPERM", stalePath, targetOwnershipRelinquished: true, cause: unlinkFailure },
+          );
+        }
       }
     }
   } catch (error) {
