@@ -1,4 +1,4 @@
-import { Server, Usb } from "lucide-react";
+import { Server, Terminal, Usb } from "lucide-react";
 import React, { memo } from "react";
 import { getEffectiveHostDistro } from "../domain/host";
 import { resolveHostIconAppearance, resolveHostIconColorAppearance } from "../domain/hostIcon";
@@ -125,6 +125,21 @@ const DistroAvatarInner: React.FC<DistroAvatarProps> = ({
 
   const containerClass = cn(sizeClasses[size], radiusClasses[size]);
   const iconSize = iconSizes[size];
+
+  // Show terminal icon for local shell hosts
+  if (host.protocol === 'local') {
+    return (
+      <div
+        className={cn(
+          "shrink-0 flex items-center justify-center bg-emerald-600 text-white dark:bg-emerald-400 dark:text-slate-950",
+          containerClass,
+          className,
+        )}
+      >
+        <Terminal className={iconSize} />
+      </div>
+    );
+  }
 
   // Show USB icon for serial hosts
   if (host.protocol === 'serial') {

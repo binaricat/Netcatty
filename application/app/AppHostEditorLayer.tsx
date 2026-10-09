@@ -5,6 +5,7 @@ import type { EditorTabChrome } from '../state/editorTabStore';
 import type { LogView } from '../state/logViewState';
 import { useI18n } from '../i18n/I18nProvider';
 import HostDetailsPanel from '../../components/HostDetailsPanel';
+import LocalShellHostDetailsPanel from '../../components/LocalShellHostDetailsPanel';
 import SerialHostDetailsPanel from '../../components/SerialHostDetailsPanel';
 import { PortalContainerProvider } from '../../components/ui/portal-container';
 import { resolveGroupDefaults } from '../../domain/groupConfig';
@@ -22,14 +23,16 @@ import type {
 } from '../../types';
 import { useWorkSurfaceVisible } from './AppHostEditorSurface';
 
-export type WorkSurfaceHostEditorKind = 'standard' | 'serial';
+export type WorkSurfaceHostEditorKind = 'standard' | 'serial' | 'local';
 
 export function resolveWorkSurfaceHostEditorKind(
   target: WorkSurfaceHostEditorTarget,
 ): WorkSurfaceHostEditorKind {
   return target.mode === 'edit' && target.openedHost.protocol === 'serial'
     ? 'serial'
-    : 'standard';
+    : target.mode === 'edit' && target.openedHost.protocol === 'local'
+      ? 'local'
+      : 'standard';
 }
 
 function addGroupAndAncestors(groups: Set<string>, path: string | null | undefined) {
@@ -160,7 +163,19 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
       style={getAppHostEditorLayerStyle(surfaceVisible)}
     >
       <PortalContainerProvider container={portalContainer}>
-        {target.mode === 'edit' && target.openedHost.protocol === 'serial' ? (
+        {target.mode === 'edit' && target.openedHost.protocol === 'local' ? (
+          <LocalShellHostDetailsPanel
+            key={editorKey}
+            initialData={target.openedHost}
+            allTags={allTags}
+            groups={groups}
+            onSave={onSave}
+            onCancel={onCancel}
+            layout="overlay"
+            className="pointer-events-auto"
+            {...hostPanelResizeProps}
+          />
+        ) : target.mode === 'edit' && target.openedHost.protocol === 'serial' ? (
           <SerialHostDetailsPanel
             key={editorKey}
             initialData={target.openedHost}

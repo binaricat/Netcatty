@@ -16,6 +16,7 @@ import {
   type HostClickBehavior,
 } from '../domain/hostClickBehavior';
 import { sortByVaultOrder } from '../domain/vaultOrder';
+import { getVaultHostRowSubtitle } from '../domain/localShellHost';
 import { STORAGE_KEY_VAULT_HOSTS_TREE_EXPANDED } from '../infrastructure/config/storageKeys';
 import { GroupConfig, GroupNode, Host } from '../types';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
@@ -726,6 +727,7 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
   initialTreeItemKey,
   onActiveTreeItemChange,
 }) => {
+  const { t } = useI18n();
   const safeHost = sanitizeHost(host);
   const tags = host.tags || [];
   const displayDetails = useMemo(
@@ -843,7 +845,9 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
                 <HostNotesIndicator notes={host.notes} />
               </div>
               <div className="truncate text-[11px] leading-4 text-muted-foreground">
-                {displayUsername}@{host.hostname}:{displayPort}
+                {displayProtocol === 'local'
+                  ? getVaultHostRowSubtitle(safeHost, { localFallback: t('localShell.subtitle') })
+                  : `${displayUsername}@${host.hostname}:${displayPort}`}
               </div>
             </div>
           )}

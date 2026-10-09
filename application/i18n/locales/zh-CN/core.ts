@@ -740,6 +740,7 @@ export const zhCNCoreMessages: Messages = {
   'vault.tree.expandAll': '展开全部',
   'vault.tree.collapseAll': '折叠全部',
   'vault.hosts.newHost': '新建主机',
+  'vault.hosts.newLocalShell': '本地终端 (CMD)',
   'vault.hosts.newGroup': '新建分组',
   'vault.hosts.import': '导入',
   'vault.hosts.export': '导出',

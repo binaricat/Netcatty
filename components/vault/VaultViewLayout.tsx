@@ -12,6 +12,7 @@ import {
 } from "../../domain/vaultGroupSelection";
 import { STORAGE_KEY_VAULT_HOST_PANEL_WIDTH } from "@/infrastructure/config/storageKeys.ts";
 import { VaultHostListSection } from "./VaultHostListSection";
+import { LocalShellHostDetailsPanel } from "../LocalShellHostDetailsPanel";
 import { VaultImportProgressPanel } from "./ImportVaultDialog";
 import {
   VaultHeaderSearch,
@@ -172,6 +173,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     Edit2,
     editingGroupPath,
     editingHost,
+    editingLocalShellHost,
     editingHostGroupDefaults,
     FileCode,
     FileSymlink,
@@ -195,6 +197,9 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     handleHostConnect,
     handleImportFileSelected,
     handleNewHost,
+    handleNewLocalShellHost,
+    handleCancelLocalShellHost,
+    handleSaveLocalShellHost,
     handleProtocolSelect,
     handleQuickConnect,
     handleQuickConnectSaveHost,
@@ -214,6 +219,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     isDeleteGroupOpen,
     isGroupPanelOpen,
     isHostPanelOpen,
+    isLocalShellHostPanelOpen,
     isHostsSectionActive,
     isImportOpen,
     isMultiSelectMode,
@@ -380,6 +386,9 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   } = ctx;
   const { importProgress, onCommitPluginImporterData, resetImportProgress } =
     ctx;
+  // Host aside panel (SSH/new host) or the local-shell host panel occupies the
+  // aside area — both collapse the header action buttons the same way.
+  const isHostAsideOpen = isHostPanelOpen || isLocalShellHostPanelOpen;
   const pendingDeleteGroupPaths =
     bulkDeleteGroupPaths.length > 0
       ? bulkDeleteGroupPaths
@@ -521,7 +530,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   );
 
   React.useEffect(() => {
-    if (!isHostPanelOpen) return;
+    if (!isHostAsideOpen) return;
     const activeElement = document.activeElement;
     if (!(activeElement instanceof HTMLElement)) return;
     if (
@@ -530,7 +539,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     ) {
       activeElement.blur();
     }
-  }, [isHostPanelOpen]);
+  }, [isHostAsideOpen]);
 
   return (
     <div
@@ -961,12 +970,12 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 ref={newHostActionsRef}
                 className={cn(
                   "flex items-center app-no-drag overflow-hidden transition-[max-width,opacity,margin] duration-200 ease-in-out",
-                  isHostPanelOpen
+                  isHostAsideOpen
                     ? "max-w-0 opacity-0 -ml-2 pointer-events-none"
                     : "max-w-[260px] opacity-100",
                 )}
-                aria-hidden={isHostPanelOpen ? true : undefined}
-                inert={isHostPanelOpen ? true : undefined}
+                aria-hidden={isHostAsideOpen ? true : undefined}
+                inert={isHostAsideOpen ? true : undefined}
               >
                 <Dropdown>
                   <div className="flex items-center rounded-md bg-primary text-primary-foreground">
@@ -974,7 +983,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                       size="sm"
                       className="h-10 px-3 rounded-r-none bg-transparent hover:bg-white/10 shadow-none"
                       onClick={handleNewHost}
-                      tabIndex={isHostPanelOpen ? -1 : 0}
+                      tabIndex={isHostAsideOpen ? -1 : 0}
                     >
                       <Plus size={14} className="mr-2" />{" "}
                       {t("vault.hosts.newHost")}
@@ -983,13 +992,20 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                       <Button
                         size="sm"
                         className="h-10 px-2 rounded-l-none bg-transparent hover:bg-white/10 border-l border-primary-foreground/20 shadow-none"
-                        tabIndex={isHostPanelOpen ? -1 : 0}
+                        tabIndex={isHostAsideOpen ? -1 : 0}
                       >
                         <ChevronDown size={14} />
                       </Button>
                     </DropdownTrigger>
                   </div>
                   <DropdownContent className="w-44" align="end" alignToParent>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start gap-2"
+                      onClick={handleNewLocalShellHost}
+                    >
+                      <TerminalSquare size={14} /> {t("vault.hosts.newLocalShell")}
+                    </Button>
                     <Button
                       variant="ghost"
                       className="w-full justify-start gap-2"
@@ -1029,19 +1045,19 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 ref={sessionActionsRef}
                 className={cn(
                   "flex items-center gap-3 overflow-hidden transition-[max-width,opacity,margin] duration-200 ease-in-out",
-                  isHostPanelOpen
+                  isHostAsideOpen
                     ? "max-w-0 opacity-0 -ml-3 pointer-events-none"
                     : "max-w-[320px] opacity-100",
                 )}
-                aria-hidden={isHostPanelOpen ? true : undefined}
-                inert={isHostPanelOpen ? true : undefined}
+                aria-hidden={isHostAsideOpen ? true : undefined}
+                inert={isHostAsideOpen ? true : undefined}
               >
                 <Button
                   size="sm"
                   variant="secondary"
                   className={vaultHeaderSecondaryButtonClass}
                   onClick={onCreateLocalTerminal}
-                  tabIndex={isHostPanelOpen ? -1 : 0}
+                  tabIndex={isHostAsideOpen ? -1 : 0}
                 >
                   <TerminalSquare size={14} className="mr-2" />{" "}
                   {t("common.terminal")}
@@ -1051,7 +1067,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   variant="secondary"
                   className={vaultHeaderSecondaryButtonClass}
                   onClick={() => setIsSerialModalOpen(true)}
-                  tabIndex={isHostPanelOpen ? -1 : 0}
+                  tabIndex={isHostAsideOpen ? -1 : 0}
                 >
                   <Usb size={14} className="mr-2" /> {t("serial.button")}
                 </Button>
@@ -1523,6 +1539,26 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   setEditingHost(null);
                   setNewHostGroupPath(null);
                 }}
+                layout="inline"
+                {...vaultHostPanelResizeProps}
+              />
+            )}
+
+          {/* Local Shell Host Details Panel - for editing/saving local shell (CMD) hosts */}
+          {currentSection === "hosts" &&
+            isLocalShellHostPanelOpen && (
+              <LocalShellHostDetailsPanel
+                initialData={editingLocalShellHost}
+                allTags={allTags}
+                groups={allGroupPaths}
+                defaultGroup={
+                  editingLocalShellHost
+                    ? undefined
+                    : newHostGroupPath || selectedGroupPath
+                }
+                onSave={(host) => handleSaveLocalShellHost(host)}
+                onSaveAndConnect={(host) => handleSaveLocalShellHost(host, true)}
+                onCancel={handleCancelLocalShellHost}
                 layout="inline"
                 {...vaultHostPanelResizeProps}
               />

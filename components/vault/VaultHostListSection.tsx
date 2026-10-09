@@ -27,6 +27,7 @@ import {
 import type { GroupNode, Host } from "../../domain/models";
 import { isPluginHostProtocol } from "../../domain/pluginConnection";
 import { OpenDualPaneSftpMenuItem } from "../host/HostTreeContextMenus";
+import { getVaultHostRowSubtitle } from "../../domain/localShellHost";
 
 type VaultHostListSectionContext = Record<string, any>;
 
@@ -598,7 +599,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         <HostNotesIndicator notes={safeHost.notes} />
                                       </div>
                                       <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
-                                        {safeHost.username}@{safeHost.hostname}
+                                        {getVaultHostRowSubtitle(safeHost, { localFallback: t('localShell.subtitle') })}
                                       </div>
                                     </div>
                                     {viewMode === "grid" && renderHostEditButton(host)}
@@ -718,7 +719,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         <HostNotesIndicator notes={safeHost.notes} />
                                       </div>
                                       <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
-                                        {safeHost.username}@{safeHost.hostname}
+                                        {getVaultHostRowSubtitle(safeHost, { localFallback: t('localShell.subtitle') })}
                                       </div>
                                     </div>
                                     {viewMode === "grid" && renderHostEditButton(host)}
@@ -1097,7 +1098,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                               <HostNotesIndicator notes={safeHost.notes} />
                                             </div>
                                             <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
-                                              {safeHost.username}@{safeHost.hostname}
+                                              {getVaultHostRowSubtitle(safeHost, { localFallback: t('localShell.subtitle') })}
                                             </div>
                                           </div>
                                           {viewMode === "grid" && renderHostEditButton(host)}
@@ -1247,7 +1248,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         <HostNotesIndicator notes={safeHost.notes} />
                                       </div>
                                       <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
-                                        {safeHost.username}@{safeHost.hostname}
+                                        {getVaultHostRowSubtitle(safeHost, { localFallback: t('localShell.subtitle') })}
                                       </div>
                                     </div>
                                     {viewMode === "grid" && renderHostEditButton(host)}

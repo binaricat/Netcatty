@@ -102,3 +102,15 @@ test("DistroAvatar renders the FreeBSD logo for a detected FreeBSD host", () => 
 test("FreeBSD is available as a manual host icon choice", () => {
   assert.ok(LINUX_DISTRO_OPTION_IDS.includes("freebsd"));
 });
+
+test("DistroAvatar renders local shell hosts with the terminal glyph", () => {
+  const markup = renderToStaticMarkup(
+    <DistroAvatar
+      host={{ ...baseHost, protocol: "local", distro: "ubuntu" }}
+      fallback="L"
+    />,
+  );
+
+  assert.match(markup, /bg-emerald-600/);
+  assert.doesNotMatch(markup, /ubuntu\.svg/);
+});

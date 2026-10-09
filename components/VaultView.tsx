@@ -458,6 +458,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const [isHostPanelOpen, setIsHostPanelOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<Host | null>(null);
   const [newHostGroupPath, setNewHostGroupPath] = useState<string | null>(null);
+  // Local shell (CMD) host panel state — a vault host entry with protocol 'local'
+  const [isLocalShellHostPanelOpen, setIsLocalShellHostPanelOpen] = useState(false);
+  const [editingLocalShellHost, setEditingLocalShellHost] = useState<Host | null>(null);
   const [pendingOpenNoteId, setPendingOpenNoteId] = useState<string | null>(
     null,
   );
@@ -507,17 +510,17 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   useEffect(() => {
     const currentIds = new Set(hosts.map((h) => h.id));
     // Check against previous IDs before updating the ref
-    if (
-      editingHost &&
-      knownHostIdsRef.current.has(editingHost.id) &&
-      !currentIds.has(editingHost.id)
-    ) {
+    const editingDeleted = (openHost: Host | null) =>
+      Boolean(openHost && knownHostIdsRef.current.has(openHost.id) && !currentIds.has(openHost.id));
+    if (editingDeleted(editingHost) || editingDeleted(editingLocalShellHost)) {
       setIsHostPanelOpen(false);
       setEditingHost(null);
+      setIsLocalShellHostPanelOpen(false);
+      setEditingLocalShellHost(null);
       setNewHostGroupPath(null);
     }
     knownHostIdsRef.current = currentIds;
-  }, [hosts, editingHost]);
+  }, [hosts, editingHost, editingLocalShellHost]);
 
   // Group panel state
   const [isGroupPanelOpen, setIsGroupPanelOpen] = useState(false);
@@ -654,13 +657,49 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setIsGroupPanelOpen(false);
     setEditingGroupPath(null);
     setEditingHost(null);
+    setIsLocalShellHostPanelOpen(false);
+    setEditingLocalShellHost(null);
     setNewHostGroupPath(null);
     setIsHostPanelOpen(true);
   }, []);
 
+  // "Local shell (CMD)" entry under the New Host menu — opens the dedicated
+  // local-shell host editor with the current vault group preselected.
+  const handleNewLocalShellHost = useCallback(() => {
+    setIsGroupPanelOpen(false);
+    setEditingGroupPath(null);
+    setEditingHost(null);
+    setIsHostPanelOpen(false);
+    setEditingLocalShellHost(null);
+    setNewHostGroupPath(null);
+    setIsLocalShellHostPanelOpen(true);
+  }, []);
+
+  const handleCancelLocalShellHost = useCallback(() => {
+    setIsLocalShellHostPanelOpen(false);
+    setEditingLocalShellHost(null);
+  }, []);
+
+  const handleSaveLocalShellHost = useCallback((host: Host, connectNow?: boolean) => {
+    onUpdateHosts(upsertHostById(hosts, host));
+    setIsLocalShellHostPanelOpen(false);
+    setEditingLocalShellHost(null);
+    if (connectNow) onConnect(host);
+  }, [hosts, onConnect, onUpdateHosts]);
+
   const handleEditHost = useCallback((host: Host) => {
     setIsGroupPanelOpen(false);
     setEditingGroupPath(null);
+    // Local shell hosts route to their dedicated editor (no SSH auth fields).
+    if (host.protocol === "local") {
+      setEditingHost(null);
+      setIsHostPanelOpen(false);
+      setEditingLocalShellHost(host);
+      setIsLocalShellHostPanelOpen(true);
+      return;
+    }
+    setIsLocalShellHostPanelOpen(false);
+    setEditingLocalShellHost(null);
     setEditingHost(host);
     setIsHostPanelOpen(true);
   }, []);
@@ -687,6 +726,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         lastConnectedAt: undefined,
       };
       // Open the edit panel with the duplicated host for modification
+      if (duplicatedHost.protocol === "local") {
+        setEditingLocalShellHost(duplicatedHost);
+        setIsLocalShellHostPanelOpen(true);
+        return;
+      }
       setEditingHost(duplicatedHost);
       setIsHostPanelOpen(true);
     },
@@ -1355,7 +1399,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const isHostsSectionActive = currentSection === "hosts";
   const hasHostsSidePanel =
     isHostsSectionActive &&
-    ((isGroupPanelOpen && !!editingGroupPath) || isHostPanelOpen);
+    ((isGroupPanelOpen && !!editingGroupPath)
+      || isHostPanelOpen
+      || isLocalShellHostPanelOpen);
   // Every host grid uses the same container-based fixed column count. This keeps
   // pinned/recent cards aligned with the virtualized main grid and prevents a
   // single card from stretching across the full row.
@@ -1469,6 +1515,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           handleHostConnect,
           handleImportFileSelected,
           handleNewHost,
+          handleNewLocalShellHost,
+          handleCancelLocalShellHost,
+          handleSaveLocalShellHost,
           handleProtocolSelect,
           handleQuickConnect,
           handleQuickConnectSaveHost,
@@ -1488,6 +1537,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           isDeleteGroupOpen,
           isGroupPanelOpen,
           isHostPanelOpen,
+          isLocalShellHostPanelOpen,
+          editingLocalShellHost,
           isHostsSectionActive,
           isImportOpen,
           isMultiSelectMode,
