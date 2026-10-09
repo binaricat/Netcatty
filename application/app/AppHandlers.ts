@@ -205,7 +205,10 @@ export function handleTrayPanelConnectImpl(getCtx: AppContextGetter, hostId: str
       hostId: host.id,
       hostLabel: host.label,
       hostname: host.hostname,
-      username: resolvedAuth.username || 'root',
+      // Local-shell vault hosts carry no SSH credentials, so log the system
+      // user like local terminals do (see handleConnectToHostImpl) instead of
+      // 'root' or an inherited group SSH username.
+      username: protocol === 'local' ? username : (resolvedAuth.username || 'root'),
       protocol,
       ...getLogHostVisualSnapshot(effectiveHost),
       startTime: Date.now(),

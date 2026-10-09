@@ -3,6 +3,7 @@ import { applyGroupDefaults, resolveGroupDefaults } from "./groupConfig";
 import { materializeHostProxyProfile } from "./proxyProfiles";
 import { sanitizePluginConnection } from "./pluginConnection";
 import { resolveHostDefaultLocalShell, type ResolveDefaultLocalShellContext } from "./localShellHost";
+import { canServeAsSshJumpHost } from "./terminalProtocol";
 
 type LocalOs = Host["os"];
 
@@ -163,7 +164,9 @@ export function resolveTerminalChainHosts({
   return host.hostChain.hostIds
     .map((hostId) => {
       const chainHost = hostMap.get(hostId);
-      if (!chainHost) return undefined;
+      // Jump hops are dialed over SSH; skip local/serial/telnet/plugin entries
+      // that can never serve as a ProxyJump hop (e.g. saved local shells).
+      if (!chainHost || !canServeAsSshJumpHost(chainHost)) return undefined;
       return resolveEffectiveTerminalHost({
         host: chainHost,
         groupConfigs,
