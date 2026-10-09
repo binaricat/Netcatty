@@ -120,7 +120,9 @@ test('send preflight aborts after the panel unmounts or the scope changes', () =
 test('send preflight locks header agent and new-chat controls', () => {
   const panel = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
   const content = readFileSync(new URL('./AIChatPanelContent.tsx', import.meta.url), 'utf8');
-  assert.match(panel, /sending=\{isSending\}/);
+  // `sending` also covers an in-flight undo-last-turn so the header controls
+  // (and a quick send) stay locked while the branch materializes.
+  assert.match(panel, /sending=\{isSending \|\| isUndoingLastTurn\}/);
   assert.match(content, /disabled=\{sending\}/);
   const selector = readFileSync(new URL('./ai/AgentSelector.tsx', import.meta.url), 'utf8');
   assert.match(selector, /if \(parked \|\| disabled\) setOpen\(false\)/);

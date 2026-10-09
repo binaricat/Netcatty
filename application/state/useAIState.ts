@@ -86,6 +86,16 @@ import {
   retargetWorkspaceActiveChatAfterMemberLoss,
   seedWorkspaceAIActiveSessionFromMembers,
 } from '../../domain/workspaceAiScopeHandoff';
+import {
+  buildUndoLastTurnBranch,
+  collectRetainedToolOutputHandleIds,
+  type UndoLastTurnRestoredDraft,
+} from '../../domain/aiUndoLastTurn';
+import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
+import {
+  installToolOutputPersistence,
+  isToolOutputPersistenceDurable,
+} from '../../infrastructure/ai/harness/installToolOutputPersistence';
 
 function providerPatchIsNoop(
   current: ProviderConfig,
@@ -697,6 +707,287 @@ export function useAIState() {
     return session;
   }, [defaultAgentId, persistSessions, setActiveSessionId]);
 
+  // Non-destructive "undo last turn": branch the session at the boundary
+  // before the latest user message and keep the original in history intact.
+  // Returns the new branch id plus the undone user message for the composer.
+  const undoLastTurnInSession = useCallback(async (sessionId: string): Promise<{
+    sessionId: string;
+    restored: UndoLastTurnRestoredDraft;
+  } | null> => {
+    const nextId = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const source = sessionsRef.current.find(s => s.id === sessionId);
+    if (!source) return null;
+    const result = buildUndoLastTurnBranch(source, { newId: nextId, now: Date.now() });
+    if (!result) return null;
+
+    const branched = result.session;
+    // Aborts an undo whose branch is not going to be published. The rollback
+    // of any background-job inheritance registered so far is awaited,
+    // validated, and retried: this cleanup runs exactly once (the branch is
+    // never published, so no later session cleanup would retry it) and a
+    // fire-and-forget or unchecked call would leave the owners' registrations
+    // as phantom inheritors — preserving owners' jobs and terminal locks
+    // indefinitely once those owners are deleted. When the rollback still
+    // fails after the retries the bridge is persistently unhealthy, so it is
+    // surfaced instead of silently swallowed. Undo is non-destructive, so
+    // dropping the not-yet-published branch (and the state copied for it) is
+    // safe and the user can retry once the bridge is healthy again.
+    const abortUnpublishedBranch = async (toolOutputStore?: {
+      prune: (chatSessionId: string) => void;
+    }): Promise<null> => {
+      const forget = getAIBridge()?.aiForgetInheritedBackgroundJobs;
+      if (forget) {
+        let forgotten = false;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const result = await forget(branched.id);
+            if (result?.ok === true) {
+              forgotten = true;
+              break;
+            }
+          } catch {
+            // Transient IPC/persistence failure — retry below.
+          }
+          if (attempt >= 4) break;
+          await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+        }
+        if (!forgotten) {
+          console.warn(
+            `[useAIState] Undo: failed to roll back inherited background-job registrations for unpublished branch ${branched.id}`,
+          );
+        }
+      }
+      // Drop any tool-output alias work started for the never-published branch
+      // id (the durability/alias gate runs after registration): the pending
+      // in-memory retries die with the app, and prune removes the branch's
+      // in-memory aliases plus any branch-owned durable copy already written.
+      toolOutputStore?.prune(branched.id);
+      // The branch was never published, so drop the operational state
+      // copyState made for it — nothing else references this fresh id.
+      getAgentRuntime()
+        .getSessionStateStore()
+        .clear(branched.id);
+      return null;
+    };
+    // Tool side effects are not rolled back, so the retained conversation may
+    // still reference Catty runtime state (active background jobs, poll
+    // offsets, edited files) tracked under the source chat id. Copy that
+    // operational state under the branch id so the next branch turn reinjects
+    // it instead of an empty one; the two copies stay independent.
+    getAgentRuntime()
+      .getSessionStateStore()
+      .copyState(source.id, branched.id);
+    // copyState carries the source's latest poll offsets over, but the undone
+    // turn's poll results are gone from the branch: rebuild each job's offset
+    // from the retained prefix so the branch polls from the last offset its
+    // history actually observed (or from 0) instead of skipping unseen output.
+    getAgentRuntime()
+      .getSessionStateStore()
+      .rebuildBackgroundJobOffsetsFromMessages(branched.id, branched.messages);
+    // Conversational state (user goal, decisions, plan, blockers) is derived
+    // from messages, so copyState excludes it: plan updates or tool errors the
+    // undone turn produced must not be reinjected into the branch. Rebuild it
+    // from the retained prefix instead.
+    getAgentRuntime()
+      .getSessionStateStore()
+      .rebuildConversationalStateFromMessages(branched.id, branched.messages);
+    // The retained prefix may reference tool outputs stored under the source
+    // session id (spilled tool results, compaction archive handles), and the
+    // alias pass below gives the branch durable copies under its own id before
+    // the branch is published. Both the copies and the deferred restores that
+    // back them live in in-memory queues (`pendingAliasRestores`, alias
+    // materialization retries) that die with the app, so the work is only safe
+    // to start once persistence is installed AND durable. Persistence installs
+    // on the first turn, so undoing as the first action after an app restart
+    // must install it here; when secure storage is still unavailable the
+    // installed persistence has no `restore` and a write that always rejects,
+    // so publishing the branch would leave its retained `tool_output_read`
+    // references permanently unresolvable if the app closes before the next
+    // turn repairs storage. Refuse to publish instead: undo is
+    // non-destructive, so the user can retry once storage recovers. The gate
+    // runs BEFORE any background-job inheritance is registered so this abort
+    // cannot strand partially registered inheritors under a never-published
+    // branch id (see the registration failure path below).
+    const retainedHandleIds = collectRetainedToolOutputHandleIds(
+      branched.messages,
+      branched.contextCompaction,
+    );
+    if (retainedHandleIds.size > 0) {
+      const installed = await installToolOutputPersistence(
+        getAgentRuntime().getToolOutputStore(source.id),
+      ).catch(() => false);
+      const durable = installed
+        && await isToolOutputPersistenceDurable().catch(() => false);
+      if (!durable) {
+        // The branch was never published, so drop the operational state
+        // copyState made for it — nothing else references this fresh id.
+        getAgentRuntime()
+          .getSessionStateStore()
+          .clear(branched.id);
+        return null;
+      }
+    }
+    // Inherited background jobs stay owned by the source chat id in the main
+    // process, which gates their poll/stop RPCs on that id. Register the
+    // inheritance so the branch's OWN chat id is accepted too — without this,
+    // external-agent branches reach MCP with only the branch id and get
+    // "Background job not found" when polling or stopping the side effects
+    // undo explicitly preserved.
+    const inheritedJobs = getAgentRuntime()
+      .getSessionStateStore()
+      .getInheritedBackgroundJobs(branched.id);
+    if (inheritedJobs.length > 0) {
+      const jobIdsByOwner = new Map<string, string[]>();
+      for (const inherited of inheritedJobs) {
+        const jobIds = jobIdsByOwner.get(inherited.ownerChatSessionId) ?? [];
+        if (!jobIds.includes(inherited.jobId)) jobIds.push(inherited.jobId);
+        jobIdsByOwner.set(inherited.ownerChatSessionId, jobIds);
+      }
+      let registrationFailed = false;
+      for (const [ownerChatSessionId] of jobIdsByOwner) {
+        // Await and validate every registration before the branch is
+        // published: a fire-and-forget call would let Undo hand out a branch
+        // id the main process does not yet recognize for these jobs, so a
+        // following `terminal.poll` would fail with "Background job not found"
+        // indefinitely — and a source deletion in that window could also cancel
+        // the job because no branch depends on it yet. Retry briefly on
+        // transient failures; a registration that still fails after the
+        // retries aborts the undo instead of publishing the branch anyway —
+        // a published branch whose inheritance is unregistered keeps polling
+        // "Background job not found" and lets a source deletion cancel the
+        // very side effects undo is meant to preserve. Undo is
+        // non-destructive, so dropping the not-yet-published branch (and the
+        // runtime state copied for it) is safe and the user can retry once
+        // the bridge is healthy again.
+        const register = getAIBridge()?.aiRegisterInheritedBackgroundJobs;
+        if (!register) continue;
+        let registered = false;
+        for (let attempt = 0; ; attempt++) {
+          // Re-read the ids the copied state still tracks for this owner so a
+          // reconciliation below actually shrinks what the next attempt sends.
+          const jobIds = getAgentRuntime()
+            .getSessionStateStore()
+            .getInheritedBackgroundJobs(branched.id)
+            .filter(inherited => inherited.ownerChatSessionId === ownerChatSessionId)
+            .map(inherited => inherited.jobId);
+          // A job can be gone from the copied state with nothing left to
+          // register for this owner (reconciliation below dropped the last
+          // entry): that owner's inheritance is simply complete.
+          if (jobIds.length === 0) {
+            registered = true;
+            break;
+          }
+          try {
+            const result = await register(branched.id, ownerChatSessionId, jobIds);
+            // The main process reports how many of `jobIds` it actually
+            // registered and still answers ok:true for a partial count: a job
+            // deleted between the inherited-jobs snapshot read and this call
+            // (e.g. the history drawer's delete action while Undo awaits
+            // persistence) is simply skipped. Treating that as success would
+            // publish a branch polling "Background job not found" for the
+            // missing id forever, so require the count to cover every job;
+            // a partial response retries and then aborts the undo like any
+            // other registration failure.
+            if (result?.ok === true && result.registered === jobIds.length) {
+              registered = true;
+              break;
+            }
+            // The main process labels an unregistered id it has never heard of
+            // as `unknownJobIds`: that job already completed/exited/stopped and
+            // its registry entry was cleaned up — notably by the idle close
+            // poll, which runs even when the model never polls the job — so
+            // there is no running side effect left to inherit. Reconcile those
+            // ids out of the copied state and retry the remaining ones instead
+            // of aborting every undo over a stale completed entry. Ids the main
+            // process still tracks but cannot register (`unownedJobIds`, or a
+            // partial count reported without the classification) may still be
+            // running, so they are never reconciled: they keep the strict
+            // retry/abort behavior above.
+            const unknownJobIds = Array.isArray(result?.unknownJobIds)
+              ? result.unknownJobIds as string[]
+              : [];
+            if (unknownJobIds.length > 0) {
+              getAgentRuntime().getSessionStateStore().forgetBackgroundJobs(
+                branched.id,
+                unknownJobIds,
+              );
+            }
+          } catch {
+            // Transient IPC/persistence failure — retry below.
+          }
+          if (attempt >= 2) break;
+          await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+        }
+        if (!registered) {
+          registrationFailed = true;
+          break;
+        }
+      }
+      if (registrationFailed) {
+        // Owners that already accepted this branch's inheritance must forget
+        // it again: the branch was never published, so the normal
+        // session-cleanup path will never run for its id, and keeping the
+        // registrations would make a later deletion of an affected owner
+        // preserve phantom inheritors' jobs and terminal execution locks
+        // indefinitely. The main process drops every registration for a chat
+        // id in one call, which is exactly bookkeeping-neutral for an owner
+        // whose registration is still live.
+        return abortUnpublishedBranch();
+      }
+    }
+    // The retained prefix may reference tool outputs stored under the source
+    // session id (spilled tool results, compaction archive handles). Alias
+    // only those under the branch id so tool_output_read still resolves there
+    // while outputs created by the removed turn stay out of the branch. The
+    // durability gate above already installed working persistence (or aborted
+    // the undo), so the pass below materializes durable branch-owned copies
+    // before the branch session is published: exiting the app during this
+    // window must not leave the branch pointing at handles that only resolve
+    // in memory. A transient per-alias failure is only queued for an in-memory
+    // retry by the store, so `aliasSessionHandles` resolving is NOT confirmation
+    // that the copies landed — requiring confirmation here before publishing
+    // closes the window where an app exit before the retry would leave the
+    // branch's retained references permanently unresolvable. Retained ids with
+    // no durable source record at all (a hallucinated handle id from a failed
+    // tool_output_read, or already-pruned output) are reconciled out by the
+    // store's confirmation: they can never materialize, and the branch reads
+    // them as missing at runtime just like the source.
+    if (retainedHandleIds.size > 0) {
+      const toolOutputStore = getAgentRuntime().getToolOutputStore(source.id);
+      try {
+        const confirmation = await toolOutputStore.aliasSessionHandles(
+          source.id,
+          branched.id,
+          { retainedHandleIds },
+        ).then(() => toolOutputStore.confirmRetainedAliasesMaterialized(
+          source.id,
+          branched.id,
+          retainedHandleIds,
+        ));
+        if (!confirmation.ok) {
+          throw new Error(
+            `Retained tool outputs were not durably materialized: ${confirmation.unconfirmed.join(', ')}`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `[useAIState] Undo: branch ${branched.id} retained tool outputs could not be backed durably — aborting the undo`,
+          err,
+        );
+        return abortUnpublishedBranch(toolOutputStore);
+      }
+    }
+    setSessionsRaw(prev => {
+      const next = [branched, ...prev];
+      setLatestAISessionsSnapshot(next);
+      persistSessions(next);
+      return next;
+    });
+    const scopeKey = `${branched.scope.type}:${branched.scope.targetId ?? ''}`;
+    setActiveSessionId(scopeKey, branched.id);
+    return { sessionId: branched.id, restored: result.restored };
+  }, [persistSessions, setActiveSessionId]);
+
   const deleteSession = useCallback((sessionId: string, scopeKey?: string) => {
     cleanupDeletedAIChatSessions([sessionId]);
     if (persistTimerRef.current) {
@@ -1275,6 +1566,7 @@ export function useAIState() {
     addDraftFiles,
     removeDraftFile,
     createSession,
+    undoLastTurnInSession,
     deleteSession,
     deleteSessionsByTarget,
     updateSessionTitle,
@@ -1335,6 +1627,7 @@ export function useAIState() {
     addDraftFiles,
     removeDraftFile,
     createSession,
+    undoLastTurnInSession,
     deleteSession,
     deleteSessionsByTarget,
     updateSessionTitle,

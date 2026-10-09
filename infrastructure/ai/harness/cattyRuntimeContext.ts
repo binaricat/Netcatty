@@ -3,6 +3,7 @@ import type { NetcattyBridge } from '../cattyAgent/executor';
 import type { ExecutorContext } from '../cattyAgent/executor';
 import type { AIPermissionMode, WebSearchConfig } from '../types';
 import type { ToolOutputStore } from './toolOutputStore';
+import type { SessionStateStore } from './sessionState';
 import type { ToolResultDedup } from './toolResultDedup';
 import type { CompactionTrace } from './types';
 import type { AgentKind } from '../agentKinds';
@@ -34,6 +35,12 @@ export const cattyToolContextSchema = z.object({
   getExecutorContext: z.custom<() => ExecutorContext>(),
   toolOutputStore: z.custom<ToolOutputStore>().optional(),
   toolResultDedup: z.custom<ToolResultDedup>().optional(),
+  // Tracks jobs inherited from a branched source chat, so a background job's
+  // stop call can be dispatched with the owner chat session id as a fallback
+  // when the branch's inheritor registration is missing (see
+  // SessionStateStore.getInheritedJobOwnerChatSessionId). Polls must keep the
+  // branch's own id so the main process validates the branch's current scope.
+  sessionStateStore: z.custom<SessionStateStore>().optional(),
 });
 
 export type CattyToolContext = z.infer<typeof cattyToolContextSchema>;

@@ -34,6 +34,22 @@ export interface AIBridge {
   aiMcpSetCommandBlocklist?: (blocklist: string[]) => Promise<unknown> | unknown;
   aiMcpSetCommandTimeout?: (timeout: number) => Promise<unknown> | unknown;
   aiMcpSetMaxIterations?: (maxIterations: number) => Promise<unknown> | unknown;
+  aiRegisterInheritedBackgroundJobs?: (
+    chatSessionId: string,
+    ownerChatSessionId: string,
+    jobIds: string[],
+  ) => Promise<{
+    ok: boolean;
+    registered?: number;
+    error?: string;
+    /** Unregistered ids the main process has no record of: already gone. */
+    unknownJobIds?: string[];
+    /** Unregistered ids the main process still knows but cannot register here. */
+    unownedJobIds?: string[];
+  }>;
+  aiForgetInheritedBackgroundJobs?: (
+    chatSessionId: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function getAIBridge() {
@@ -59,9 +75,25 @@ export function cleanupDeletedAIChatSessions(sessionIds: string[]) {
   const bridge = getAIBridge();
   if (sessionIds.length === 0) return;
   for (const sessionId of sessionIds) {
-    getAgentRuntime().clearChatSession(sessionId);
+    const runtime = getAgentRuntime();
+    runtime.clearChatSession(sessionId);
     void bridge?.aiSdkAgentCleanup?.(sessionId).catch(() => {});
-    void bridge?.deleteChatToolOutputsTemp?.(sessionId).catch(() => {});
+    // Durable tool-output records must be deleted through the protected
+    // store path: `clearChatSession()` schedules the deletion via `prune`,
+    // which waits for in-flight undo alias passes and queued alias
+    // materialization retries to finish reading the source's durable records
+    // before firing the same IPC. Only fall back to a direct IPC call when
+    // the store has no protected deletion in flight (persistence is not
+    // installed, so no alias pass can be reading this source's files — undo
+    // installs persistence before it starts aliasing handles) or when the
+    // protected deletion failed (a transient IPC / filesystem error), so the
+    // durable tool-output records are actually retried instead of being left
+    // on disk.
+    void runtime.waitForChatSessionToolOutputDeletion(sessionId).then((handled) => {
+      if (!handled) {
+        void bridge?.deleteChatToolOutputsTemp?.(sessionId).catch(() => {});
+      }
+    });
   }
 }
 

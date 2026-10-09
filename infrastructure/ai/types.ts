@@ -162,6 +162,8 @@ export interface ChatMessage {
   providerContinuation?: ProviderContinuation;
   toolCalls?: ToolCall[];
   toolResults?: ToolResult[];
+  /** User-skill pills selected for this turn (user messages); restored on undo. */
+  selectedUserSkillSlugs?: string[];
   agentActivities?: AgentActivity[];
   usage?: AgentUsage;
   timestamp: number;

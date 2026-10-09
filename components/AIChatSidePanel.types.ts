@@ -37,6 +37,10 @@ export interface AIChatSidePanelProps {
   addDraftFiles: (scopeKey: string, fallbackAgentId: string, inputFiles: File[]) => Promise<void>;
   removeDraftFile: (scopeKey: string, fallbackAgentId: string, fileId: string) => void;
   createSession: (scope: AISessionScope, agentId?: string) => AISession;
+  /** Non-destructively branch before the last user turn; returns the branch id + restored composer content. */
+  undoLastTurnInSession?: (
+    sessionId: string,
+  ) => Promise<{ sessionId: string; restored: { text: string; attachments: import('../infrastructure/ai/types').UploadedFile[]; selectedUserSkillSlugs: string[] } } | null>;
   deleteSession: (sessionId: string, scopeKey?: string) => void;
   updateSessionTitle: (sessionId: string, title: string) => void;
   updateSessionExternalSessionId: (sessionId: string, externalSessionId: string | undefined) => void;

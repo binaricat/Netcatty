@@ -74,6 +74,11 @@ function createConfigAndCleanupApi(ctx) {
         cancelledChatSessions.delete(chatSessionId);
         cancelBackgroundJobsForSession(chatSessionId);
         cancelWorkerBackgroundJobsForSession(chatSessionId);
+        // Cancel-and-cleanup leave the owner's jobs running only when a live
+        // branch still inherited them. Record which jobs were deferred like
+        // that: once the last inheritor chat is deleted, the deferred job
+        // has no live chat left to poll or stop it and must be cancelled.
+        markOwnerTornDownInheritedJobs?.(chatSessionId);
         // Resolve any in-flight approval requests so dispatch()'s finally block
         // releases its pendingSessionWriteApprovals entry. Without this, a chat
         // deleted while an approval was pending would leave the per-session
@@ -81,6 +86,11 @@ function createConfigAndCleanupApi(ctx) {
         clearPendingApprovals(chatSessionId);
         await cancelSftpOpsForSession(chatSessionId);
         sftpBridge.clearSftpEncodingStateByPrefix?.(`chat:${chatSessionId}:session:`);
+        // The chat is gone: drop any background-job inheritance it registered
+        // (it can no longer poll or stop those jobs). Owner-owned jobs that a
+        // different live branch still inherited keep their remaining
+        // inheritors, so they stay under the still-live branch's control.
+        forgetInheritedJobsForChatSession?.(chatSessionId);
       }
     }
 

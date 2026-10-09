@@ -592,3 +592,60 @@ test("single-channel worker exec does not open an exec channel or send line-kill
   await execution.catch(() => {});
 });
 
+
+test("worker chat cancellation preserves explicitly inherited background jobs", async () => {
+  const ptyA = new FakePty();
+  const ptyB = new FakePty();
+  const sessions = new Map([
+    ["ssh-1", { protocol: "ssh", stream: ptyA, shellKind: "posix" }],
+    ["ssh-2", { protocol: "ssh", stream: ptyB, shellKind: "posix" }],
+  ]);
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions });
+
+  const event = createFakeEvent();
+  const startA = await ipcMain.handlers.get("netcatty:ai:jobStart")(event, {
+    sessionId: "ssh-1",
+    command: "sleep 30",
+    chatSessionId: "chat-1",
+    commandTimeoutMs: 5000,
+  });
+  const markerA = await extractMarker(ptyA.writes);
+  ptyA.emit("data", `${markerA}_S\r\nrunning A\r\n`);
+  await nextTick();
+
+  const startB = await ipcMain.handlers.get("netcatty:ai:jobStart")(event, {
+    sessionId: "ssh-2",
+    command: "sleep 30",
+    chatSessionId: "chat-1",
+    commandTimeoutMs: 5000,
+  });
+  const markerB = await extractMarker(ptyB.writes);
+  ptyB.emit("data", `${markerB}_S\r\nrunning B\r\n`);
+  await nextTick();
+
+  ipcMain.listeners.get("netcatty:ai:catty:cancel")(event, {
+    chatSessionId: "chat-1",
+    preserveJobIds: [startB.jobId],
+  });
+
+  const jobA = await ipcMain.handlers.get("netcatty:ai:jobPoll")(event, {
+    jobId: startA.jobId,
+    offset: 0,
+    chatSessionId: "chat-1",
+  });
+  assert.equal(jobA.status, "stopping");
+  assert.equal(jobA.error, "Cancellation requested");
+
+  const jobB = await ipcMain.handlers.get("netcatty:ai:jobPoll")(event, {
+    jobId: startB.jobId,
+    offset: 0,
+    chatSessionId: "chat-1",
+  });
+  assert.equal(jobB.status, "running");
+  assert.equal(ptyB.writes.includes("\x03"), false, "inherited job must not receive Ctrl+C");
+
+  // Leave no live job timers behind when the test file exits.
+  ptyB.emit("data", `${markerB}_E:0\r\n`);
+  await nextTick();
+});

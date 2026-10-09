@@ -300,6 +300,63 @@ function registerCattyExecHandlers(ctx) {
     }
   });
 
+  // Chat-session branching ("undo last turn") copies a running command's
+  // operational state into the branched chat. Background-job ownership in the
+  // main process stays with the starting chat id, so register the inheritance
+  // here: the branch's own chat id is then accepted for the inherited jobs'
+  // poll/stop RPCs, including those arriving from an external-agent SDK turn
+  // via the MCP transport (which always presents the branch's own chat id).
+  ipcMain.handle("netcatty:ai:chat-session:register-inherited-jobs", async (event, {
+    chatSessionId,
+    ownerChatSessionId,
+    jobIds,
+  }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (!chatSessionId || typeof chatSessionId !== "string") {
+      return { ok: false, error: "chatSessionId is required" };
+    }
+    if (!ownerChatSessionId || typeof ownerChatSessionId !== "string") {
+      return { ok: false, error: "ownerChatSessionId is required" };
+    }
+    if (!Array.isArray(jobIds)) {
+      return { ok: false, error: "jobIds must be an array" };
+    }
+    try {
+      return mcpServerBridge.registerInheritedBackgroundJobs(
+        chatSessionId,
+        ownerChatSessionId,
+        jobIds,
+      );
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
+  // Mirror of "register-inherited-jobs" for an undo that aborted AFTER some
+  // owners already registered the branch's inheritance (multi-owner branches
+  // register per owner): the branch was never published, so nothing will later
+  // clean its registrations up, and a deletion of an affected owner would
+  // otherwise preserve its jobs and terminal execution locks for the phantom
+  // inheritor forever.
+  ipcMain.handle("netcatty:ai:chat-session:forget-inherited-jobs", async (event, {
+    chatSessionId,
+  }) => {
+    if (!validateSender(event)) {
+      return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (!chatSessionId || typeof chatSessionId !== "string") {
+      return { ok: false, error: "chatSessionId is required" };
+    }
+    try {
+      mcpServerBridge.forgetInheritedJobsForChatSession(chatSessionId);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
   ipcMain.handle("netcatty:ai:capability", async (event, { rpcMethod, params, chatSessionId }) => {
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };

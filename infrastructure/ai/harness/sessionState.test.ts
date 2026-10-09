@@ -133,3 +133,243 @@ test('SessionStateStore reinjects edited files and unfinished plan items', () =>
   assert.match(text, /\[done\] inspect failure/);
   assert.match(text, /\[todo\] run regression tests/);
 });
+
+test('SessionStateStore copies operational state for a branched chat and keeps copies independent', () => {
+  const store = new SessionStateStore();
+  store.updateFromToolResult(
+    'chat-source',
+    'terminal_start',
+    { sessionId: 'sess-1', command: 'npm run dev' },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 300 }),
+    false,
+  );
+  store.mergeFileChanges('chat-source', ['src/a.ts']);
+  store.mergePlan('chat-source', [{ text: 'step one', completed: false }]);
+  store.updateFromToolResult(
+    'chat-source',
+    'terminal_execute',
+    { sessionId: 'sess-1' },
+    'boom',
+    true,
+  );
+  store.updateFromToolResult(
+    'chat-source',
+    'terminal_read_context',
+    { sessionId: 'sess-1', range: 'viewport' },
+    JSON.stringify({ startLine: 10, endLine: 40 }),
+    false,
+  );
+
+  store.copyState('chat-source', 'chat-branch');
+
+  const branchReinjection = store.toReinjectionText('chat-branch');
+  assert.match(branchReinjection ?? '', /job-1/);
+  assert.match(branchReinjection ?? '', /offset=300/);
+  assert.match(branchReinjection ?? '', /src\/a\.ts/);
+  // Conversational state (plan, blockers) must not ride along with the
+  // operational copy: it can only come from the retained prefix. Terminal
+  // read cursors are conversational too (they point at tool results that the
+  // removed turn produced), so they must not be copied either.
+  assert.doesNotMatch(branchReinjection ?? '', /step one/);
+  assert.doesNotMatch(branchReinjection ?? '', /terminal_execute/);
+  assert.doesNotMatch(branchReinjection ?? '', /Terminal read cursors/);
+  assert.deepEqual(store.get('chat-branch').terminalReadCursors, {});
+  assert.ok(store.toReinjectionText('chat-source'));
+
+  // Updates under the branch id must not leak back into the source state.
+  store.mergeFromUserGoal('chat-branch', 'new goal');
+  assert.equal(store.get('chat-source').userGoal, undefined);
+  assert.equal(store.get('chat-branch').userGoal, 'new goal');
+  // The copied job record must carry the owner chat id so background-job
+  // control calls dispatched by the branch can be authorized under the
+  // source chat's identity; the owner's own copy must not (it already
+  // presents its own id). Chained branches keep the original owner.
+  assert.equal(store.get('chat-source').activeJobs['job-1'].ownerChatSessionId, undefined);
+  assert.equal(store.get('chat-branch').activeJobs['job-1'].ownerChatSessionId, 'chat-source');
+  assert.equal(
+    store.getInheritedJobOwnerChatSessionId('chat-branch', 'job-1'),
+    'chat-source',
+  );
+  assert.equal(
+    store.getInheritedJobOwnerChatSessionId('chat-source', 'job-1'),
+    undefined,
+  );
+  store.copyState('chat-branch', 'chat-grandbranch');
+  assert.equal(
+    store.get('chat-grandbranch').activeJobs['job-1'].ownerChatSessionId,
+    'chat-source',
+  );
+  assert.notEqual(
+    store.get('chat-source').activeJobs['job-1'],
+    store.get('chat-branch').activeJobs['job-1'],
+  );
+});
+
+test('SessionStateStore rebuilds conversational state from the retained prefix only', () => {
+  const store = new SessionStateStore();
+  store.copyState('chat-source', 'chat-branch');
+  store.rebuildConversationalStateFromMessages('chat-branch', [
+    {
+      id: 'user-1',
+      role: 'user',
+      content: 'keep investigating the outage',
+      timestamp: 1,
+    },
+    {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: 'Decided to restart the nginx service after checking logs',
+      timestamp: 2,
+      toolCalls: [
+        { id: 'call-1', name: 'terminal_execute', arguments: { sessionId: 'sess-1' } },
+      ],
+      toolResults: [
+        { toolCallId: 'call-1', toolName: 'terminal_execute', content: 'service restarted', isError: false },
+        { toolCallId: 'call-2', toolName: 'terminal_execute', content: 'disk almost full', isError: true },
+      ],
+      agentActivities: [
+        { id: 'plan-1', type: 'plan_update', status: 'running', items: [{ text: 'check disk space', completed: false }] },
+      ],
+    },
+  ]);
+
+  const state = store.get('chat-branch');
+  assert.equal(state.userGoal, 'keep investigating the outage');
+  assert.ok(state.decisions[0]?.includes('restart the nginx service'));
+  assert.ok(state.blockers.some(entry => entry.startsWith('terminal_execute: disk almost full')));
+  assert.deepEqual(state.planItems, [{ text: 'check disk space', completed: false }]);
+});
+
+test('SessionStateStore rebuild keeps plan and blockers from the removed turn out of the branch', () => {
+  const store = new SessionStateStore();
+  // State as it exists after the undone turn ran.
+  store.updateFromToolResult(
+    'chat-source',
+    'terminal_execute',
+    { sessionId: 'sess-1', command: 'deploy.sh' },
+    'deploy failed',
+    true,
+  );
+  store.mergePlan('chat-source', [
+    { text: 'ship the release', completed: false },
+  ]);
+  store.copyState('chat-source', 'chat-branch');
+  // The retained prefix contains only messages from before the undone turn
+  // (and none of its plan/blocker output).
+  store.rebuildConversationalStateFromMessages('chat-branch', [
+    { id: 'user-1', role: 'user', content: 'prepare the release', timestamp: 1 },
+    { id: 'assistant-1', role: 'assistant', content: 'Working on it', timestamp: 2 },
+  ]);
+
+  const state = store.get('chat-branch');
+  assert.equal(state.userGoal, 'prepare the release');
+  assert.deepEqual(state.planItems, []);
+  assert.deepEqual(state.blockers, []);
+  assert.doesNotMatch(store.toReinjectionText('chat-branch') ?? '', /ship the release/);
+  assert.doesNotMatch(store.toReinjectionText('chat-branch') ?? '', /deploy failed/);
+});
+
+test('SessionStateStore enumerates inherited background jobs for undo registration', () => {
+  const store = new SessionStateStore();
+  store.updateFromToolResult(
+    'chat-source', 'terminal_start', { sessionId: 'sess-1', command: 'sleep 30' },
+    JSON.stringify({ jobId: 'job-1', status: 'running' }), false,
+  );
+  store.copyState('chat-source', 'chat-branch');
+  store.updateFromToolResult(
+    'chat-branch', 'terminal_start', { sessionId: 'sess-1', command: 'sleep 5' },
+    JSON.stringify({ jobId: 'job-own', status: 'running' }), false,
+  );
+
+  assert.deepEqual(store.getInheritedBackgroundJobs('chat-branch'), [
+    // The inherited job keeps its chain root as the owner.
+    { jobId: 'job-1', ownerChatSessionId: 'chat-source' },
+  ]);
+  assert.deepEqual(store.getInheritedBackgroundJobs('chat-stranger'), []);
+});
+
+test('SessionStateStore forgets reconciled background jobs of a branched chat', () => {
+  // Jobs the main process reports as unknown (already completed and cleaned
+  // up) must leave the copied state so the undo flow stops re-registering —
+  // and aborting over — entries with no running side effect to inherit.
+  const store = new SessionStateStore();
+  store.updateFromToolResult(
+    'chat-source', 'terminal_start', { sessionId: 'sess-1', command: 'sleep 30' },
+    JSON.stringify({ jobId: 'job-gone', status: 'running' }), false,
+  );
+  store.copyState('chat-source', 'chat-branch');
+
+  assert.deepEqual(store.getInheritedBackgroundJobs('chat-branch'), [
+    { jobId: 'job-gone', ownerChatSessionId: 'chat-source' },
+  ]);
+
+  store.forgetBackgroundJobs('chat-branch', ['job-gone', 'job-never-copied']);
+  assert.equal(store.get('chat-branch').activeJobs['job-gone'], undefined);
+  // Nothing left to inherit for the branch; the source state stays untouched.
+  assert.deepEqual(store.getInheritedBackgroundJobs('chat-branch'), []);
+  assert.ok(store.get('chat-source').activeJobs['job-gone']);
+  // Forgetting on a session with no copied state is a no-op.
+  store.forgetBackgroundJobs('chat-ghost', ['job-gone']);
+});
+
+test('SessionStateStore rebuilds inherited job offsets from the retained prefix', () => {
+  const store = new SessionStateStore();
+  // A retained turn starts a job and polls it; its results stay in the branch.
+  store.updateFromToolResult(
+    'chat-source', 'terminal_start', { sessionId: 'sess-1', command: 'npm run dev' },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 100 }), false,
+  );
+  store.updateFromToolResult(
+    'chat-source', 'terminal_poll', { jobId: 'job-1', offset: 0 },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 300 }), false,
+  );
+  // The undone turn polls again; its result is removed from the branch but its
+  // advanced offset is what `copyState` would carry over.
+  store.updateFromToolResult(
+    'chat-source', 'terminal_poll', { jobId: 'job-1', offset: 300 },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 420 }), false,
+  );
+  // A job started by the undone turn only: the branch retains nothing for it.
+  store.updateFromToolResult(
+    'chat-source', 'terminal_start', { sessionId: 'sess-2', command: 'sleep 60' },
+    JSON.stringify({ jobId: 'job-2', status: 'running', nextOffset: 250 }), false,
+  );
+
+  store.copyState('chat-source', 'chat-branch');
+  assert.equal(store.get('chat-branch').activeJobs['job-1'].nextOffset, 420);
+  assert.equal(store.get('chat-branch').activeJobs['job-2'].nextOffset, 250);
+
+  store.rebuildBackgroundJobOffsetsFromMessages('chat-branch', [
+    { id: 'user-1', role: 'user', content: 'run the job', timestamp: 1 },
+    {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: '',
+      timestamp: 2,
+      toolCalls: [
+        { id: 'call-start', name: 'terminal_start', arguments: { sessionId: 'sess-1' } },
+        { id: 'call-poll', name: 'terminal_poll', arguments: { jobId: 'job-1' } },
+      ],
+      toolResults: [
+        {
+          toolCallId: 'call-start', toolName: 'terminal_start',
+          content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 100 }),
+          isError: false,
+        },
+        {
+          toolCallId: 'call-poll', toolName: 'terminal_poll',
+          content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 300 }),
+          isError: false,
+        },
+      ],
+    },
+  ]);
+
+  // The branch polls from the last offset its retained history observed, and a
+  // job the retained prefix never observed re-reads from the start.
+  assert.equal(store.get('chat-branch').activeJobs['job-1'].nextOffset, 300);
+  assert.equal(store.get('chat-branch').activeJobs['job-2'].nextOffset, 0);
+  // The source state (undone turn included) is untouched.
+  assert.equal(store.get('chat-source').activeJobs['job-1'].nextOffset, 420);
+  assert.equal(store.get('chat-source').activeJobs['job-2'].nextOffset, 250);
+});

@@ -151,6 +151,22 @@ const cancelledChatSessions = new Set();
 const activeExecChatSessions = new Map(); // chatSessionId -> { sessionId, command, startedAt }
 const backgroundJobs = new Map(); // jobId -> job metadata
 const workerBackgroundJobs = new Map(); // jobId -> { chatSessionId, sessionId }
+// Orphaned inherited jobs whose cancellation stop was sent but never confirmed
+// (the worker rejected or the request failed). Once the owner chat and every
+// inheriting branch are gone there is no live chat left to poll/stop the job,
+// so nothing would ever finish the cancellation and the worker-side command —
+// with its held terminal execution lock — would run until the terminal is
+// explicitly closed. The idle path's periodic job poll retries the stop for
+// these ids until the worker confirms the stop or reports the job was never
+// running.
+const orphanJobStopRetryPending = new Set();
+// Orphan stops whose worker "jobStop" request is still in flight: the registry
+// entry is deliberately retained until the stop is confirmed, but the stop is
+// already irreversible — once it completes, the job and every inheritor are
+// deleted. Inheritance registrations in this window must be rejected (not
+// treated as a live registration), or an undo publishing a branch against the
+// entry would see the job deleted underneath it right after registering.
+const orphanJobStopInFlight = new Set();
 const pendingWorkerJobStarts = new Map(); // sessionId -> Set<{ chatSessionId, cancelled }>
 const activeSessionExecutions = new Map(); // sessionId -> { kind, startedAt, token }
 const activeSessionSftpOps = new Map(); // opId -> { chatSessionId, sessionId, cancel }
@@ -402,6 +418,9 @@ const backgroundJobApi = createBackgroundJobApi({
   BACKGROUND_JOB_RETENTION_MS, DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS, MAX_BACKGROUND_JOB_OUTPUT_CHARS,
   SESSION_CLOSE_CLEANUP_TIMEOUT_MS,
   debugLog, sftpBridge,
+  // Jobs owned by a chat being cancelled/deleted may still be inherited by a
+  // live branched chat; they must not be cancelled here.
+  getLiveInheritedJobIdsForOwner,
 });
 const {
   createBackgroundJobId,
@@ -1860,11 +1879,257 @@ async function handleWorkerJobStart(params = {}) {
   }
 }
 
+// Chat-session inheritance for background jobs. When a chat is branched
+// ("undo last turn"), renderer-side state copies keep the branch reinjecting
+// the source's still-running jobs, but the jobs remain owned by the source
+// chat id in this process. Undo registers each inherited (jobId, owner)
+// pair here so the branch's OWN chat id is also accepted for those jobs'
+// control RPCs — including calls arriving through the external-agent MCP
+// transport, which always presents the conversation id of the branch.
+const inheritedJobInheritors = new Map(); // jobId -> Set<inheriting chat session ids>
+// Jobs whose owner chat was torn down while a live branch still inherited
+// them (its cancellation deferred the teardown instead of stopping them).
+// Once the last inheritor disappears, no live chat can poll or stop such a
+// job any more, so it must be cancelled then instead of leaving the remote
+// command and its terminal execution lock running forever.
+const ownerTornDownInheritedJobs = new Set();
+
+function markOwnerTornDownInheritedJobs(ownerChatSessionId) {
+  if (!ownerChatSessionId) return;
+  for (const jobId of getLiveInheritedJobIdsForOwner(ownerChatSessionId)) {
+    ownerTornDownInheritedJobs.add(jobId);
+  }
+}
+
+function isInheritedJobInheritor(jobId, chatSessionId) {
+  if (!jobId || !chatSessionId) return false;
+  return inheritedJobInheritors.get(jobId)?.has(chatSessionId) === true;
+}
+
+function forgetInheritedJobInheritors(jobId) {
+  inheritedJobInheritors.delete(jobId);
+  ownerTornDownInheritedJobs.delete(jobId);
+  // The job's registry lifecycle ended; a pending orphan-stop retry marker
+  // would otherwise survive it and never become actionable again.
+  orphanJobStopRetryPending.delete(jobId);
+}
+
+// Best-effort stop of an orphaned inherited job: its owner chat is already
+// gone, so present the owner chat id the running job was started with (the
+// worker authorizes cancellation on that id, like every other stop path).
+function cancelOrphanedInheritedJob(jobId) {
+  const workerJob = workerBackgroundJobs.get(jobId);
+  if (workerJob) {
+    // Keep the registry entry until the stop is confirmed: dropping it first
+    // leaves a still-running command (and its held execution lock) with no
+    // main-process entry any poll, stop, or cleanup path can resolve if the
+    // stop request rejects or reports failure. Only a confirmed stop (or an
+    // authoritative "job not found") may drop the entry and its inheritor
+    // bookkeeping.
+    try {
+      const request = terminalWorkerManager?.request?.("netcatty:ai:jobStop", {
+        jobId,
+        sessionId: workerJob.sessionId,
+        chatSessionId: workerJob.chatSessionId || null,
+      }, {});
+      if (!request || typeof request.catch !== "function") {
+        workerBackgroundJobs.delete(jobId);
+        forgetInheritedJobInheritors(jobId);
+        return;
+      }
+      // The stop is in flight and irreversible: mark the entry so a concurrent
+      // inheritance registration is rejected instead of treating this retained
+      // registry entry as a live, pollable job.
+      orphanJobStopInFlight.add(jobId);
+      void request.then((result) => {
+        orphanJobStopInFlight.delete(jobId);
+        if (!result?.completed
+          && !(result?.ok === false && /not found/i.test(result?.error || ""))) {
+          // Stop not confirmed (job still running or the request failed):
+          // retain the entry and remember the job so the terminal session's
+          // periodic idle-close poll (the only recurring path left for an
+          // orphaned job with no live chat to poll/stop it) retries the
+          // cancellation instead of just rescheduling itself forever.
+          orphanJobStopRetryPending.add(jobId);
+          return;
+        }
+        if (workerBackgroundJobs.get(jobId) === workerJob) {
+          workerBackgroundJobs.delete(jobId);
+          forgetInheritedJobInheritors(jobId);
+        }
+      }).catch(() => {
+        orphanJobStopInFlight.delete(jobId);
+        // Transient worker failure while stopping: retain the entry (and the
+        // retry marker) so the idle path's next poll retries the stop instead
+        // of orphaning the running command.
+        orphanJobStopRetryPending.add(jobId);
+      });
+    } catch {
+      // The worker may already be gone while cancelling the orphaned job;
+      // keep the entry (and the retry marker) so a later cleanup pass can
+      // retry the stop.
+      orphanJobStopRetryPending.add(jobId);
+    }
+    return;
+  }
+  const job = backgroundJobs.get(jobId);
+  if (!job) return;
+  if (job.status === "running" || job.status === "stopping") {
+    try {
+      job.handle?.cancel?.();
+    } catch {
+      // Ignore cancellation failures
+    }
+    job.status = "stopping";
+    job.error = "Cancellation requested";
+    job.updatedAt = Date.now();
+    // Keep the registry entry until the job's result promise confirms the
+    // cancellation (the command is gone and its execution lock released),
+    // exactly like the worker-job path above: dropping it first leaves a
+    // still-running command with no registry entry any poll, stop, or
+    // cleanup path can resolve if the cancellation does not land. The stop
+    // is already irreversible, so mark the entry the same way an in-flight
+    // worker stop is marked: inheritance registrations must be rejected
+    // instead of treating this retained entry as a live, pollable job.
+    const resultPromise = job.handle?.resultPromise;
+    if (resultPromise && typeof resultPromise.then === "function") {
+      orphanJobStopInFlight.add(jobId);
+      const settle = () => {
+        orphanJobStopInFlight.delete(jobId);
+        if (backgroundJobs.get(jobId) === job) {
+          backgroundJobs.delete(jobId);
+        }
+        forgetInheritedJobInheritors(jobId);
+      };
+      void resultPromise.then(settle, () => {
+        // A rejected result promise cannot confirm the cancellation, but the
+        // job's own bookkeeping already marked it failed and released the
+        // session's execution lock; settling here matches the previous
+        // drop-immediately behavior without leaving an entry nothing can
+        // ever confirm.
+        settle();
+      });
+      return;
+    }
+  }
+  backgroundJobs.delete(jobId);
+}
+
+function forgetInheritedJobsForChatSession(chatSessionId) {
+  if (!chatSessionId) return;
+  for (const [jobId, inheritors] of inheritedJobInheritors) {
+    if (!inheritors.delete(chatSessionId)) continue;
+    if (inheritors.size === 0) inheritedJobInheritors.delete(jobId);
+    // The source chat was torn down earlier while this branch (and possibly
+    // sibling branches) kept its job alive. Only once the last inheritor is
+    // gone can nothing poll or stop the job any more: cancel it then, and
+    // keep the "torn down owner" marker while sibling branches still live.
+    if (inheritors.size === 0 && ownerTornDownInheritedJobs.delete(jobId)) {
+      cancelOrphanedInheritedJob(jobId);
+    }
+  }
+}
+
+function registerInheritedBackgroundJobs(chatSessionId, ownerChatSessionId, jobIds) {
+  if (!chatSessionId || typeof chatSessionId !== "string") {
+    throw new Error("chatSessionId is required");
+  }
+  if (!ownerChatSessionId || typeof ownerChatSessionId !== "string") {
+    throw new Error("ownerChatSessionId is required");
+  }
+  if (ownerChatSessionId === chatSessionId) return { ok: true };
+  if (!Array.isArray(jobIds) || jobIds.length === 0) return { ok: true };
+  let registered = 0;
+  // Ids this main process has no record of at all (neither worker registry nor
+  // exec-handler history): the job is gone — completed/exited, stopped, or
+  // cancelled — and its registry entry was cleaned up, including by the idle
+  // close poll that runs even when the model never polls the job. The renderer
+  // reconciles these out of the copied state instead of aborting the undo over
+  // them: no running side effect is left to inherit.
+  const unknownJobIds = [];
+  // Ids the main process still knows but cannot register for this owner
+  // (owner mismatch, or an orphan stop already in flight). Unlike unknown ids
+  // these may still be running, so the undo keeps retrying/aborting over them.
+  const unownedJobIds = [];
+  for (const jobId of jobIds) {
+    if (typeof jobId !== "string" || !jobId) {
+      unknownJobIds.push(jobId);
+      continue;
+    }
+    // Only accept jobs this chat actually owns, so a branch cannot claim
+    // control over a job started by an unrelated chat session.
+    const job = workerBackgroundJobs.get(jobId);
+    if (orphanJobStopInFlight.has(jobId)) {
+      // An orphan stop for this job is already in flight; its completion will
+      // delete the entry (and every inheritor) no matter what registers here.
+      // Skip it — the reported count falls short and the undo retries/aborts
+      // instead of publishing a branch that would immediately poll
+      // "Background job not found".
+      unownedJobIds.push(jobId);
+      continue;
+    }
+    if (orphanJobStopRetryPending.has(jobId)) {
+      // An earlier orphan stop settled without confirming (the worker handler
+      // resolves as soon as cancellation is requested, not when the job is
+      // done, and a transient failure keeps the job running): cancellation is
+      // already underway or will be retried, so registering the retained
+      // entry here would publish a branch over a job that is irreversibly
+      // stopping (or about to be stopped again) and soon polls as completed
+      // or missing. Stay non-registerable until the confirmed stop (or the
+      // idle poll's completion check) removes the entry; then this job is
+      // unknown and the undo reconciles it out instead.
+      unownedJobIds.push(jobId);
+      continue;
+    }
+    if (job && job.chatSessionId === ownerChatSessionId) {
+      const inheritors = inheritedJobInheritors.get(jobId) ?? new Set();
+      inheritors.add(chatSessionId);
+      inheritedJobInheritors.set(jobId, inheritors);
+      registered += 1;
+      continue;
+    }
+    const ownerChatSessionIdOfJob = execHandlerApi?.getBackgroundJobOwnerChatSessionId?.(jobId);
+    if (ownerChatSessionIdOfJob === ownerChatSessionId) {
+      const inheritors = inheritedJobInheritors.get(jobId) ?? new Set();
+      inheritors.add(chatSessionId);
+      inheritedJobInheritors.set(jobId, inheritors);
+      registered += 1;
+      continue;
+    }
+    if (job || ownerChatSessionIdOfJob != null) {
+      unownedJobIds.push(jobId);
+    } else {
+      unknownJobIds.push(jobId);
+    }
+  }
+  return { ok: true, registered, unknownJobIds, unownedJobIds };
+}
+
+// Job ids owned by `chatSessionId` that live chat sessions still inherited:
+// deleting or cancelling the owner chat must stop them only once no live
+// branch depends on them (`forgetInheritedJobsForChatSession` drops a branch's
+// registrations when that branch is itself removed).
+function getLiveInheritedJobIdsForOwner(ownerChatSessionId) {
+  if (!ownerChatSessionId) return [];
+  const inherited = [];
+  for (const [jobId, inheritors] of inheritedJobInheritors) {
+    if (inheritors.size === 0) continue;
+    if (workerBackgroundJobs.get(jobId)?.chatSessionId === ownerChatSessionId) {
+      inherited.push(jobId);
+      continue;
+    }
+    if (execHandlerApi?.getBackgroundJobOwnerChatSessionId?.(jobId) === ownerChatSessionId) {
+      inherited.push(jobId);
+    }
+  }
+  return inherited;
+}
+
 function getWorkerJob(jobId, chatSessionId) {
   const job = workerBackgroundJobs.get(jobId);
   if (!job) return null;
   if (job.chatSessionId && (!chatSessionId || chatSessionId !== job.chatSessionId)) {
-    return null;
+    if (!isInheritedJobInheritor(jobId, chatSessionId)) return null;
   }
   return job;
 }
@@ -1876,13 +2141,34 @@ async function handleWorkerJobPoll(params = {}) {
   if (!job || !terminalWorkerManager?.request) {
     return { ok: false, error: "Background job not found" };
   }
+  // Session scope stays validated with the caller's own chat id (a live
+  // branch keeps the inherited terminal in its scope), but the worker-side
+  // ownership check must present the owner chat id: the worker — like
+  // getWorkerJob — only knows the chat id that started the job.
+  const workerChatSessionId = job.chatSessionId || chatSessionId || null;
   if (job.sessionId) {
     const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
-    if (scopeErr) return { ok: false, error: scopeErr };
+    // An inheritor-registered job stays pollable by its owner chat only after
+    // that chat was actually torn down (deleted/cancelled while a live branch
+    // still inherited the job — `markOwnerTornDownInheritedJobs` recorded the
+    // deferred cancellation): the deleted chat's scope snapshot then resolves
+    // to an empty list forever, so it can no longer say "in scope", and
+    // ownership plus the registered inheritance is the authorization. A live
+    // owner whose scope snapshot merely went empty (its terminal disappeared
+    // from the workspace) must NOT get this bypass: it keeps scope
+    // validation like any other caller.
+    const ownerScopeSnapshotGone = chatSessionId === job.chatSessionId
+      && getScopedSessionIds(chatSessionId || null).length === 0
+      && ownerTornDownInheritedJobs.has(jobId);
+    if (scopeErr && !ownerScopeSnapshotGone) return { ok: false, error: scopeErr };
   }
-  const result = await terminalWorkerManager.request("netcatty:ai:jobPoll", params, {});
+  const result = await terminalWorkerManager.request("netcatty:ai:jobPoll", {
+    ...params,
+    chatSessionId: workerChatSessionId,
+  }, {});
   if (result?.completed) {
     workerBackgroundJobs.delete(jobId);
+    forgetInheritedJobInheritors(jobId);
   }
   return result;
 }
@@ -1894,12 +2180,17 @@ async function handleWorkerJobStop(params = {}) {
   if (!job || !terminalWorkerManager?.request) {
     return { ok: false, error: "Background job not found" };
   }
+  const effectiveChatSessionId = job.chatSessionId || chatSessionId || null;
   if (Array.isArray(scopedSessionIds) && job.sessionId && !scopedSessionIds.includes(job.sessionId)) {
     return { ok: false, error: `Session "${job.sessionId}" is not in the current scope.` };
   }
-  const result = await terminalWorkerManager.request("netcatty:ai:jobStop", params, {});
+  const result = await terminalWorkerManager.request("netcatty:ai:jobStop", {
+    ...params,
+    chatSessionId: job.chatSessionId || chatSessionId || null,
+  }, {});
   if (result?.completed) {
     workerBackgroundJobs.delete(jobId);
+    forgetInheritedJobInheritors(jobId);
   }
   return result;
 }
@@ -1918,7 +2209,17 @@ async function hasActiveWorkerJobForTerminalSession(sessionId) {
       }, {});
       if (result?.completed || (result?.ok === false && /not found/i.test(result?.error || ""))) {
         workerBackgroundJobs.delete(jobId);
+        forgetInheritedJobInheritors(jobId);
         continue;
+      }
+      if (orphanJobStopRetryPending.has(jobId)
+        && (inheritedJobInheritors.get(jobId)?.size ?? 0) === 0) {
+        // An earlier orphan stop never confirmed (the request rejected or the
+        // job is still running) and no live chat inherits or owns the job any
+        // more: nothing else can ever finish the cancellation, so retry it on
+        // this periodic idle poll rather than leaving the worker-side command
+        // (and its held execution lock) running until the terminal closes.
+        cancelOrphanedInheritedJob(jobId);
       }
       return true;
     } catch {
@@ -1936,13 +2237,26 @@ function cancelWorkerBackgroundJobsForSession(chatSessionId) {
       if (pendingStart.chatSessionId === chatSessionId) pendingStart.cancelled = true;
     }
   }
+  // Jobs that a live branched chat still inherited must survive their owner's
+  // teardown: the branch keeps reinjecting them and cannot be re-granted
+  // ownership, so cancelling them here would strand the branch with an
+  // unpollable, unstoppable running command.
+  const preserveJobIds = getLiveInheritedJobIdsForOwner(chatSessionId);
+  const preserve = new Set(preserveJobIds);
   for (const [jobId, job] of workerBackgroundJobs) {
     if (job.chatSessionId === chatSessionId) {
+      if (preserve.has(jobId)) continue;
       workerBackgroundJobs.delete(jobId);
+      forgetInheritedJobInheritors(jobId);
     }
   }
   try {
-    terminalWorkerManager?.send?.("netcatty:ai:catty:cancel", { chatSessionId }, {});
+    terminalWorkerManager?.send?.("netcatty:ai:catty:cancel", {
+      chatSessionId,
+      // Only sent when live branches inherited jobs owned by this chat; the
+      // worker cancels everything else owned by the chat session.
+      ...(preserveJobIds.length > 0 ? { preserveJobIds } : {}),
+    }, {});
   } catch {
     // Worker may already be gone while cancelling a torn-down chat/session.
   }
@@ -2387,6 +2701,12 @@ const execHandlerApi = createExecHandlerApi({
   beginChatExecution, execViaRawPty, execViaPty, execViaChannel, startPtyJob,
   getFreshIdlePrompt, echoCommandToSession, createBackgroundJobId, storeCompletedJobOutput,
   serializeBackgroundJob, validateSessionScope, Date, Error,
+  // Scoped background-job control also accepts registered inheritors
+  // (branched chats that inherited the job from their undo source).
+  isInheritedJobControl: isInheritedJobInheritor,
+  jobHasInheritors: (jobId) => inheritedJobInheritors.has(jobId),
+  jobOwnerTornDown: (jobId) => ownerTornDownInheritedJobs.has(jobId),
+  getScopedSessionIds,
 });
 const {
   resolveExecContext,
@@ -2407,6 +2727,8 @@ const configAndCleanupApi = createConfigAndCleanupApi({
   clearPendingApprovals, cancelSftpOpsForSession, sftpBridge,
   preserveIdleSessionCleanup: sessionIdleManager.scopeCleared,
   clearOpenedSessionScope: openedSessionOwnership.clearScope,
+  markOwnerTornDownInheritedJobs,
+  forgetInheritedJobsForChatSession,
 });
 const { resolveMcpServerRuntimeCommand, buildMcpServerConfig, cleanupScopedMetadata } = configAndCleanupApi;
 
@@ -2452,6 +2774,8 @@ module.exports = {
   cancelPtyExecsForSession,
   cancelWorkerBackgroundJobsForSession,
   cancelWorkerBackgroundJobsForTerminalSession,
+  registerInheritedBackgroundJobs,
+  forgetInheritedJobsForChatSession,
   hasActiveWorkerJobForTerminalSession,
   cancelSftpOpsForSession,
   getSessionMeta,
