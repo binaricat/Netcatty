@@ -159,7 +159,15 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
     copySyscallInFlight = true;
     await fs.promises.copyFile(source, target, fs.constants.COPYFILE_EXCL);
     copySyscallInFlight = false;
-    if (creationMode === null) return;
+    if (creationMode === null) {
+      // Pin the produced copy's identity for callers that revalidate later
+      // pathname mutations against it.
+      let pinnedIdentity = null;
+      try {
+        pinnedIdentity = fileIdentity(await fs.promises.lstat(target));
+      } catch { pinnedIdentity = null; }
+      return { writtenIdentity: pinnedIdentity };
+    }
     // Pin the identity of the produced copy while the (possibly slow, e.g.
     // network-backed) chmod below runs, so the replacement only removes a
     // name that still resolves to our own inode.
@@ -169,7 +177,7 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
     } catch { copiedIdentity = null; }
     try {
       await chmodOnCopiedFile(target, creationMode, copiedIdentity);
-      return;
+      return { writtenIdentity: copiedIdentity };
     } catch (error) {
       if (!isMetadataUnsupportedError(error)) throw error;
       // The accelerated copy preserves the source's mode. When it already
@@ -190,7 +198,7 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
         && fileIdentity(keptStat) === copiedIdentity
         && (keptStat.mode & 0o7777) === creationMode
       ) {
-        return;
+        return { writtenIdentity: copiedIdentity };
       }
     }
     // Otherwise the accelerated copy does not carry the requested mode and
@@ -458,24 +466,79 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
       await chmodOnCopiedFile(target, creationMode, writtenIdentity);
     } catch (chmodError) {
       if (!isMetadataUnsupportedError(chmodError)) throw chmodError;
-      // The chmod was refused by the mount, so the failure path must be
-      // revalidated like every other failure: the (possibly slow, e.g.
-      // network-backed) metadata change was in flight while a concurrent
-      // writer could win the pathname, and throwing the fresh EPERM without
-      // rechecking the name would let the caller's pre-commit cleanup unlink
-      // that writer's replacement. Revalidate the pathname against the pinned
-      // copied inode and mark the ownership loss when it changed hands.
-      let refusedIdentity = null;
+      // The chmod was refused by the mount, so the failure path must fail
+      // closed like every other failure: the (possibly slow) metadata change
+      // was in flight while a concurrent writer could win the pathname. Do
+      // not rely on a check-then-throw: even a revalidation that finds the
+      // pinned inode still wins the name can race, because the pathname
+      // could be replaced between that lstat and the caller's pre-commit
+      // cleanup unlink, which would destroy the replacement. Relabel-then-
+      // verify instead (the same pattern as the copy-loop failure path):
+      // rename moves whatever currently owns the pathname to a private side
+      // name, and only an inode verifiably equal to the pinned copy is
+      // unlinked from that side name; the handover is marked so the caller's
+      // cleanup never unlinks the pathname itself.
+      if (writtenIdentity === null) throw identityChangedError(target);
+      const stalePath = `${target}.stale-${crypto.randomUUID().replace(/-/g, "")}`;
+      let moved = false;
+      let relabelError = null;
       try {
-        refusedIdentity = fileIdentity(await fs.promises.lstat(target));
-      } catch { refusedIdentity = null; }
-      if (refusedIdentity !== writtenIdentity) {
-        throw identityChangedError(target);
+        await fs.promises.rename(target, stalePath);
+        moved = true;
+      } catch (relabelFailure) {
+        if (relabelFailure?.code !== "ENOENT") relabelError = relabelFailure;
       }
-      throw Object.assign(
+      const refusalError = () => Object.assign(
         new Error(`EPERM: operation not permitted, umask narrowed the creation mode of ${target} and the mount refuses chmod`),
-        { code: "EPERM" },
+        { code: "EPERM", targetOwnershipRelinquished: true },
       );
+      let staleIdentity = null;
+      if (moved) {
+        try {
+          staleIdentity = fileIdentity(await fs.promises.lstat(stalePath));
+        } catch { staleIdentity = null; }
+      }
+      if (moved && staleIdentity === writtenIdentity) {
+        // The side name verifiably holds this module's copied inode: unlink
+        // it from the private side name, which a concurrent writer cannot
+        // race. If the mount refuses the removal, the verified copy
+        // persists at the side name and is disclosed to the caller via
+        // `stalePath` instead of silently accumulating hidden partials.
+        let unlinkFailure = null;
+        try {
+          await fs.promises.unlink(stalePath);
+        } catch (failure) {
+          unlinkFailure = failure;
+        }
+        throw Object.assign(refusalError(), {
+          ...(unlinkFailure ? { cause: unlinkFailure, stalePath } : {}),
+        });
+      }
+      if (moved) {
+        // The relabelled side name holds a foreign replacement: put it back
+        // without clobbering whoever re-created the pathname (a failed
+        // restore leaves the verified data aside, never deleted).
+        let restoreError = null;
+        try {
+          await fs.promises.link(stalePath, target);
+        } catch (linkError) {
+          // EEXIST means the pathname was already re-created by a newer
+          // writer and their name wins; keep the verified data aside.
+          if (linkError?.code !== "EEXIST") restoreError = linkError;
+        }
+        throw Object.assign(identityChangedError(target), {
+          stalePath,
+          cause: restoreError ?? chmodError,
+        });
+      }
+      // Nothing was relabelled (the pathname vanished) or the relabel could
+      // not be verified: in both cases the caller must not unlink the
+      // pathname, so the handover is marked either way. A refused relabel
+      // leaves the unverified mode-narrowed copy behind the pathname itself,
+      // which is disclosed via `retainedTarget` for recovery reporting.
+      throw Object.assign(refusalError(), {
+        ...(relabelError ? { cause: relabelError, retainedTarget: target } : {}),
+      });
     }
   }
   // Revalidate the pathname against the pinned copied inode before
@@ -491,10 +554,15 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
   if (finalIdentity !== writtenIdentity) {
     throw identityChangedError(target);
   }
+  // Post-copy revalidation confirmed the pathname still resolves to the
+  // copied inode; hand its pinned identity back so callers can revalidate
+  // their own pathname mutations against the same copy.
+  return { writtenIdentity };
 }
 
 module.exports = {
   copyFileExclusiveWithFallback,
   isCopyFallbackError,
   isMetadataUnsupportedError,
+  fileIdentity,
 };

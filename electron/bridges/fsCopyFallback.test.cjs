@@ -960,8 +960,13 @@ test("promoteLocalTransfer preserves a ready pathname whose ownership the fallba
   } catch (thrown) {
     error = thrown;
   }
-  assert.equal(error?.code, "EEXIST", "the relabelled ready pathname fails closed");
-  assert.equal(error.targetOwnershipRelinquished, true);
+  // The relinquished handover is routed through recovery reporting, so the
+  // caller sees the recovery-failure wrapper (the underlying relinquished
+  // EEXIST is preserved as its cause, with the side name disclosed).
+  assert.equal(error?.recoveryFailed, true, "the relabelled ready pathname fails closed via recovery reporting");
+  assert.equal(error?.cause?.code, "EEXIST", "the underlying relinquished EEXIST is preserved as the cause");
+  assert.equal(error?.cause?.targetOwnershipRelinquished, true);
+  assert.equal(error?.stalePath, error?.cause?.stalePath, "the side name is disclosed in the recovery error");
   assert.equal(
     fs.readdirSync(dir).filter((name) => name.endsWith(".ready")).length,
     1,

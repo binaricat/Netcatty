@@ -1041,7 +1041,7 @@ function stableLocalFileIdentity(statLike) {
 
 async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   const { publishLocalFileExclusive } = require("./localFilePublish.cjs");
-  const { copyFileExclusiveWithFallback, isMetadataUnsupportedError } = require("./fsCopyFallback.cjs");
+  const { copyFileExclusiveWithFallback, fileIdentity, isMetadataUnsupportedError } = require("./fsCopyFallback.cjs");
   const assertNotCancelled = options.assertNotCancelled || (() => {});
   const token = crypto.randomUUID().replace(/-/g, "");
   const base = path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.netcatty-${token}`);
@@ -1056,6 +1056,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   let intendedMode = null;
   let restoreProbeCreated = false;
   let localMtimePrepared = false;
+  let copiedIdentity = null;
   try {
     assertNotCancelled();
     try {
@@ -1083,7 +1084,12 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         } catch { stagedMode = null; }
         intendedMode = stagedMode === null ? 0o600 : stagedMode;
       }
-      await copyFileExclusiveWithFallback(stagedPath, readyPath, intendedMode, { assertNotCancelled });
+      // Pin the copied inode's identity so the pathname chmods below (which
+      // cannot be pinned to an inode by themselves) can revalidate the ready
+      // pathname still resolves to this copy before mutating another
+      // pathname's permissions.
+      copiedIdentity = (await copyFileExclusiveWithFallback(stagedPath, readyPath, intendedMode, { assertNotCancelled }))
+        ?.writtenIdentity ?? null;
     }
     // Stamp the private prepared file before applying possibly unreadable
     // destination permissions. Publication carries these times to the target.
@@ -1106,6 +1112,30 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       preparedHandle = null;
       if (openError?.code !== "EACCES" && openError?.code !== "EPERM") throw openError;
       if (intendedMode === null) throw openError;
+      // A pathname chmod cannot be pinned to the copied inode, so verify the
+      // ready pathname still resolves to the copy this module created before
+      // granting read access: a replacement that won the name after the
+      // failed open must not be handed the copied file's permissions (and
+      // then pinned and published as the completed download).
+      if (copiedIdentity === null) {
+        // Without a pinned identity the ownership of the ready pathname
+        // cannot be proven: fail closed without mutating it, and mark the
+        // handover so the caller's cleanup never unlinks whoever owns it.
+        throw Object.assign(
+          new Error(`EEXIST: file exists, ${readyPath}'s ownership could not be verified before its read access was granted`),
+          { code: "EEXIST", targetOwnershipRelinquished: true, cause: openError },
+        );
+      }
+      let grantIdentity = null;
+      try {
+        grantIdentity = fileIdentity(await fs.promises.lstat(readyPath));
+      } catch { grantIdentity = null; }
+      if (grantIdentity !== copiedIdentity) {
+        throw Object.assign(
+          new Error(`EEXIST: file exists, ${readyPath} changed hands while its read access was being granted`),
+          { code: "EEXIST", targetOwnershipRelinquished: true, cause: openError },
+        );
+      }
       let grantedRead = false;
       try {
         await fs.promises.chmod(readyPath, intendedMode | 0o400);
@@ -1118,6 +1148,17 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       }
       if (grantedRead) {
         preparedHandle = await fs.promises.open(readyPath, "r");
+        // The open pinned an inode, but the pathname may have changed hands
+        // between the read grant and this open: verify the held inode is
+        // still the copied one before the pathname-based restore chmod, so a
+        // replacement is never handed the copied file's permissions.
+        const heldIdentity = fileIdentity(await preparedHandle.stat());
+        if (heldIdentity !== copiedIdentity) {
+          throw Object.assign(
+            new Error(`EEXIST: file exists, ${readyPath} changed hands while its read access was being restored`),
+            { code: "EEXIST", targetOwnershipRelinquished: true },
+          );
+        }
         try {
           await fs.promises.chmod(readyPath, intendedMode);
         } catch (restoreError) {
@@ -1251,7 +1292,12 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // relinquished handover keeps the pre-commit cleanup from unlinking the
     // pathname, so the retained partial must be routed through recovery
     // reporting instead of silently accumulating hidden `.ready` fragments.
-    if (error?.targetOwnershipRelinquished && error?.retainedTarget === readyPath) {
+    // Likewise, a verified `.stale-*` partial whose removal the mount
+    // refused (or whose verified data was left aside while restoring a
+    // foreign replacement) persists at the disclosed side name and must be
+    // reported the same way.
+    if (error?.targetOwnershipRelinquished
+      && (error?.retainedTarget === readyPath || typeof error?.stalePath === "string")) {
       keepRecoveryFiles = true;
     }
     if (backedUp && !keepRecoveryFiles) {
@@ -1274,13 +1320,21 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       }
     }
     if (keepRecoveryFiles) {
+      // Copy-fallback failures can leave a verified partial behind a private
+      // `.stale-*` side name (`error.stalePath`) whose removal the mount
+      // refused; disclose that pathname alongside the other recovery files
+      // so repeated failures do not accumulate hidden partial files.
+      const staleSegment = typeof error?.stalePath === "string"
+        ? `; copy fragment: ${error.stalePath}`
+        : "";
       const failure = new Error(
         `${error.message}. Recovery files preserved. Backup: ${backedUp ? backupPath : "none"}; `
-        + `prepared replacement: ${readyPath}; target: ${targetPath}`,
+        + `prepared replacement: ${readyPath}; target: ${targetPath}${staleSegment}`,
         { cause: error },
       );
       failure.recoveryFailed = true;
       if (backedUp) failure.remoteBackupPath = backupPath;
+      if (typeof error?.stalePath === "string") failure.stalePath = error.stalePath;
       throw failure;
     }
     // The copy fallback reports `targetOwnershipRelinquished` when the ready
