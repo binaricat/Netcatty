@@ -10,7 +10,7 @@ import {
   filterVaultImportKeyPassphrasesAgainstExisting,
   resolveVaultImportKeyPassphraseConflicts,
 } from "./vaultImport.ts";
-import { encodeCsvPassphrase } from "./vaultImport/csvCredentialFields.ts";
+import { encodeCsvPassphrase, encodeCsvLocalShell } from "./vaultImport/csvCredentialFields.ts";
 import type { Host } from "./models.ts";
 
 const mobaXtermSshSession = (
@@ -525,6 +525,26 @@ test("applyVaultImportDestination does not override retained key auth with ident
   assert.equal(targeted.hosts.length, 1);
   assert.deepEqual(targeted.hosts[0]?.identityFilePaths, ["~/.ssh/id_ed25519"]);
   assert.equal(targeted.hosts[0]?.identityId, undefined);
+});
+
+test("CSV import keeps default-shell local hosts distinct across OS values", () => {
+  // The merge key for local hosts must include the host OS: two default-shell
+  // entries (no shell/args/name/startDir) in the same group differ only by os,
+  // and dropping the second would silently lose that OS's default shell.
+  const csvQuote = (value: string): string => `"${value.replaceAll('"', '""')}"`;
+  const result = importVaultHostsFromText("csv", [
+    "Label,Hostname,Protocol,Group,LocalShell",
+    `Win,localhost,local,Tools,${csvQuote(encodeCsvLocalShell({ os: "windows" }))}`,
+    `Nix,localhost,local,Tools,${csvQuote(encodeCsvLocalShell({ os: "linux" }))}`,
+  ].join("\n"));
+
+  assert.deepEqual(result.issues, []);
+  assert.equal(result.stats.duplicates, 0);
+  assert.equal(result.hosts.length, 2);
+  assert.deepEqual(
+    result.hosts.map((host) => host.os),
+    ["windows", "linux"],
+  );
 });
 
 test("CSV import keeps working when KeyPath and Passphrase columns are absent", () => {

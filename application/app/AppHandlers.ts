@@ -1157,7 +1157,10 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host, hi
       hostId: host.id,
       hostLabel: host.label,
       hostname: host.hostname,
-      username: resolvedAuth.username || 'root',
+      // Local-shell vault hosts carry no SSH credentials, so log the system
+      // user like local terminals do (see handleCreateLocalTerminalImpl)
+      // instead of 'root' or an inherited group SSH username.
+      username: protocol === 'local' ? username : (resolvedAuth.username || 'root'),
       protocol,
       ...getLogHostVisualSnapshot(effectiveHost),
       startTime: Date.now(),

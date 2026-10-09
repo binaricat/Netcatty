@@ -617,6 +617,7 @@ const importFromCsv = (text: string): VaultImportResult => {
   const csvMergeKey = (host: Host): string => {
     if (host.protocol !== "local") return hostKey(host);
     const shellIdentity = [
+      host.os ?? "",
       host.localShell ?? "",
       host.localShellName ?? "",
       host.localShellArgs ? JSON.stringify(host.localShellArgs) : "",

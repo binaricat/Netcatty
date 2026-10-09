@@ -611,8 +611,12 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             {},
             { validProxyProfileIds: proxyProfileIdSet },
           );
-      // Only prompt when Telnet is available but isn't the host's default protocol.
-      if (effective.telnetEnabled && effective.protocol !== "telnet") {
+      // Only prompt when Telnet is available but isn't the host's default
+      // protocol, and only for SSH hosts: local-shell and serial hosts must
+      // always launch their own transport, never an inherited group Telnet
+      // flag. Hosts without an explicit protocol are legacy SSH entries.
+      const effectiveProtocol = effective.protocol ?? "ssh";
+      if (effectiveProtocol === "ssh" && effective.telnetEnabled) {
         setProtocolSelectHost(effective);
       } else if (effective.protocol === "telnet") {
         // Telnet-as-default wins over a stray moshEnabled flag.
