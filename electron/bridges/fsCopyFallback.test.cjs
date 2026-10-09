@@ -612,6 +612,49 @@ test("copyFileExclusiveWithFallback does not chmod a concurrent replacement on t
   );
 });
 
+test("copyFileExclusiveWithFallback marks a relinquished target when a refused post-stream chmod raced a replacement", async (t) => {
+  const dir = makeTempDir("copy-fallback-race-chmod-refused-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  // Force the streamed path and a umask-narrowed mode so the post-stream chmod
+  // runs, then let another process win the pathname while the chmod itself is
+  // being refused: the fresh EPERM for the refused metadata change must not
+  // reach the caller unmarked, or its pre-commit cleanup would unlink the
+  // concurrent writer's only visible file.
+  const copyRestore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(copyRestore);
+  const openOriginal = fs.promises.open;
+  const openRestore = stubPromises("open", async (...args) => {
+    const handle = await openOriginal.apply(fs.promises, args);
+    const originalChmod = handle.chmod?.bind(handle);
+    if (typeof originalChmod === "function") {
+      handle.chmod = async () => {
+        // A real concurrent replacement creates a new inode at the pathname;
+        // truncating the existing one would keep this module's inode.
+        fs.unlinkSync(target);
+        fs.writeFileSync(target, "written by another process");
+        throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+      };
+    }
+    return handle;
+  });
+  t.after(openRestore);
+  const previousUmask = process.umask(0o077);
+  t.after(() => process.umask(previousUmask));
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, 0o664),
+    (error) => error?.code === "EEXIST" && error.targetOwnershipRelinquished === true,
+    "the refused chmod's failure path revalidates the pathname before throwing",
+  );
+  assert.equal(
+    fs.readFileSync(target, "utf8"),
+    "written by another process",
+    "the concurrent replacement is never removed by the caller's cleanup",
+  );
+});
+
 test("copyFileExclusiveWithFallback flags a relabelled target so callers skip its cleanup", async (t) => {
   const dir = makeTempDir("copy-fallback-relabel-flag-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

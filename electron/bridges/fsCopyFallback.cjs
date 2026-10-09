@@ -458,6 +458,20 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
       await chmodOnCopiedFile(target, creationMode, writtenIdentity);
     } catch (chmodError) {
       if (!isMetadataUnsupportedError(chmodError)) throw chmodError;
+      // The chmod was refused by the mount, so the failure path must be
+      // revalidated like every other failure: the (possibly slow, e.g.
+      // network-backed) metadata change was in flight while a concurrent
+      // writer could win the pathname, and throwing the fresh EPERM without
+      // rechecking the name would let the caller's pre-commit cleanup unlink
+      // that writer's replacement. Revalidate the pathname against the pinned
+      // copied inode and mark the ownership loss when it changed hands.
+      let refusedIdentity = null;
+      try {
+        refusedIdentity = fileIdentity(await fs.promises.lstat(target));
+      } catch { refusedIdentity = null; }
+      if (refusedIdentity !== writtenIdentity) {
+        throw identityChangedError(target);
+      }
       throw Object.assign(
         new Error(`EPERM: operation not permitted, umask narrowed the creation mode of ${target} and the mount refuses chmod`),
         { code: "EPERM" },
