@@ -175,6 +175,27 @@ export interface AliasRestoreRequest {
   handleIds: string[];
 }
 
+/**
+ * Sentinel returned by `restoreHandleImpl` when a durable record was read but
+ * its restore was rejected by lifecycle state (a pruned chat, or a pruned or
+ * closed terminal): resurrecting the record under that id is denied and the
+ * deny path purges the restored file. This is distinct from a record that
+ * does not exist at all: a lifecycle-rejected restore can neither be treated
+ * as definitively missing nor as retryable, so alias ids resolved through it
+ * stay unconfirmed and callers abort instead of silently publishing branches
+ * whose retained `tool_output_read` references could never resolve.
+ */
+const RESTORE_LIFECYCLE_REJECTED: { readonly lifecycleRejected: true } = {
+  lifecycleRejected: true,
+};
+
+type RestoreOutcome = ToolOutputHandle | typeof RESTORE_LIFECYCLE_REJECTED | undefined;
+
+function isRestoreHandle(outcome: RestoreOutcome): outcome is ToolOutputHandle {
+  return outcome !== undefined
+    && (outcome as { lifecycleRejected?: unknown }).lifecycleRejected !== true;
+}
+
 export interface ToolOutputStoreOptions {
   maxHandleChars?: number;
   maxHandlesPerSession?: number;
@@ -223,7 +244,7 @@ export class ToolOutputStore {
   private readonly ttlMs: number;
   private readonly spillThresholdChars: number;
   private readonly now: () => number;
-  private readonly restorePromises = new Map<string, Promise<ToolOutputHandle | undefined>>();
+  private readonly restorePromises = new Map<string, Promise<RestoreOutcome>>();
   private readonly sessionGenerations = new Map<string, number>();
   private readonly sessionDeletionPromises = new Map<string, Promise<void>>();
   private readonly failedSessionDeletions = new Set<string>();
@@ -590,10 +611,11 @@ export class ToolOutputStore {
       let sourceHandle = sourceMap?.get(handleId);
       if (!sourceHandle) {
         let restoreFailed = false;
-        sourceHandle = await this.restoreHandle(handleId, sourceChatSessionId).catch(() => {
+        const outcome = await this.restoreHandleOutcome(handleId, sourceChatSessionId).catch(() => {
           restoreFailed = true;
           return undefined;
         });
+        sourceHandle = isRestoreHandle(outcome) ? outcome : undefined;
         if (!sourceHandle && (!this.persistence?.restore || restoreFailed)) {
           // Either persistence (which installs on the first turn) is not
           // available yet, or `restore` just rejected transiently (for example
@@ -602,6 +624,17 @@ export class ToolOutputStore {
           // the retained prefix references it, and the branch namespace never
           // falls back to the source restore later.
           missingRestoreHandleIds.push(handleId);
+        } else if (outcome === RESTORE_LIFECYCLE_REJECTED) {
+          // The durable record was read, but this chat/terminal's lifecycle
+          // state now denies restoring it (the source chat or its terminal was
+          // pruned mid-restore, and the deny path purges the restored record).
+          // That is neither definitively missing (the record really existed —
+          // recording the id would silently publish a branch whose retained
+          // `tool_output_read` reference can never resolve) nor repeatable for
+          // this pass, and any queued/replayed retry would race the same
+          // rejection and purge instead of healing it. Leave the id alone: it
+          // still shows up unconfirmed, so the branch-publish confirmation
+          // aborts the undo instead of publishing an unbacked branch.
         } else if (!sourceHandle) {
           // `restore` ran and definitively resolved without a usable record
           // under the source namespace: nothing exists to alias or to
@@ -1546,6 +1579,14 @@ export class ToolOutputStore {
   }
 
   private async restoreHandle(handleId: string, chatSessionId: string): Promise<ToolOutputHandle | undefined> {
+    const outcome = await this.restoreHandleOutcome(handleId, chatSessionId);
+    // A lifecycle-rejected restore must read as a missing handle to callers
+    // that only want a handle (the retain branch's own runtime reads): the
+    // record was there but this chat/terminal's lifecycle now denies it.
+    return isRestoreHandle(outcome) ? outcome : undefined;
+  }
+
+  private async restoreHandleOutcome(handleId: string, chatSessionId: string): Promise<RestoreOutcome> {
     if (!this.persistence?.restore) return undefined;
     // Flushed prune restore retries must not wait for the deletion promise
     // (which itself waits for these retries to drain) or that dependency
@@ -1583,7 +1624,7 @@ export class ToolOutputStore {
     chatSessionId: string,
     generation: number,
     terminalMutationGenerations: Map<string, number>,
-  ): Promise<ToolOutputHandle | undefined> {
+  ): Promise<RestoreOutcome> {
     const restored = await this.persistence?.restore?.(handleId, chatSessionId);
     if (!restored || !isValidPersistedRecord(restored.record, handleId, chatSessionId)) return undefined;
     const restoredTerminalKey = restored.record.terminalSessionId
@@ -1603,7 +1644,7 @@ export class ToolOutputStore {
       )
     ) {
       void this.persistence?.delete(restored.path).catch(() => {});
-      return undefined;
+      return RESTORE_LIFECYCLE_REJECTED;
     }
     if (
       (
@@ -1627,7 +1668,7 @@ export class ToolOutputStore {
       )
     ) {
       void this.persistence?.delete(restored.path).catch(() => {});
-      return undefined;
+      return RESTORE_LIFECYCLE_REJECTED;
     }
 
     const record = restored.record;

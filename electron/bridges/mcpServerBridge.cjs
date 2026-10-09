@@ -1983,6 +1983,34 @@ function cancelOrphanedInheritedJob(jobId) {
     job.status = "stopping";
     job.error = "Cancellation requested";
     job.updatedAt = Date.now();
+    // Keep the registry entry until the job's result promise confirms the
+    // cancellation (the command is gone and its execution lock released),
+    // exactly like the worker-job path above: dropping it first leaves a
+    // still-running command with no registry entry any poll, stop, or
+    // cleanup path can resolve if the cancellation does not land. The stop
+    // is already irreversible, so mark the entry the same way an in-flight
+    // worker stop is marked: inheritance registrations must be rejected
+    // instead of treating this retained entry as a live, pollable job.
+    const resultPromise = job.handle?.resultPromise;
+    if (resultPromise && typeof resultPromise.then === "function") {
+      orphanJobStopInFlight.add(jobId);
+      const settle = () => {
+        orphanJobStopInFlight.delete(jobId);
+        if (backgroundJobs.get(jobId) === job) {
+          backgroundJobs.delete(jobId);
+        }
+        forgetInheritedJobInheritors(jobId);
+      };
+      void resultPromise.then(settle, () => {
+        // A rejected result promise cannot confirm the cancellation, but the
+        // job's own bookkeeping already marked it failed and released the
+        // session's execution lock; settling here matches the previous
+        // drop-immediately behavior without leaving an entry nothing can
+        // ever confirm.
+        settle();
+      });
+      return;
+    }
   }
   backgroundJobs.delete(jobId);
 }
