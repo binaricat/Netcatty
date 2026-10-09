@@ -1230,15 +1230,35 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           // destination being replaced (e.g. a 0644 stage over a 0600
           // destination). Verify the ready file's actual mode and fail
           // closed rather than silently publishing a different mode.
-          let readyMode;
+          let readyStat;
           try {
-            readyMode = (await fs.promises.lstat(readyPath)).mode & 0o7777;
+            readyStat = await fs.promises.lstat(readyPath);
           } catch (statError) {
             throw new Error(
               `Cannot publish local destination mode ${mode.toString(8)}: the mount refused chmod and the prepared file's mode could not be verified`,
               { cause: statError },
             );
           }
+          // A pathname lstat cannot pin an inode: in a concurrently writable
+          // destination directory the ready pathname may have been replaced
+          // since it was prepared, and a replacement coincidentally carrying
+          // the requested mode would otherwise be accepted here and committed
+          // by the hard-link publication below as the completed download.
+          // Fail closed unless the pathname still resolves to the inode
+          // pinned by the prepared handle (or the copy's pinned identity).
+          let pinnedIdentity = copiedIdentity;
+          if (pinnedIdentity === null && preparedHandle) {
+            try {
+              pinnedIdentity = fileIdentity(await preparedHandle.stat());
+            } catch { pinnedIdentity = null; }
+          }
+          if (pinnedIdentity === null || fileIdentity(readyStat) !== pinnedIdentity) {
+            throw Object.assign(
+              new Error(`EEXIST: file exists, ${readyPath} changed hands while its mode was being verified`),
+              { code: "EEXIST", targetOwnershipRelinquished: true, cause: error },
+            );
+          }
+          const readyMode = readyStat.mode & 0o7777;
           if (readyMode !== mode) {
             throw new Error(
               `Cannot publish local destination mode ${mode.toString(8)}: the mount refused chmod and the prepared file has mode ${readyMode.toString(8)}`,

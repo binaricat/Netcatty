@@ -317,9 +317,9 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
         // open, and the failure must be marked with
         // `targetOwnershipRelinquished` so the caller's pre-commit cleanup
         // does not unlink the pathname and destroy that writer's only
-        // visible file. The alternative — that the entry is this helper's
+        // visible file. The alternative (that the entry is this helper's
         // own leftover partial (libuv's best-effort removal of its failed
-        // copyFile destination) — cannot be proven: this module never held a
+        // copyFile destination)) cannot be proven: this module never held a
         // handle to libuv's partial, so any identity "pinned" after the copy
         // failure could equally belong to a concurrent writer that created
         // the name in the window between that removal and the pin, and no
