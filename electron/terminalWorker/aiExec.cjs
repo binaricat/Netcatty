@@ -8,6 +8,7 @@ const {
   execViaChannel,
   execViaRawPty,
 } = require("../bridges/ai/ptyExec.cjs");
+const { posixFlavorForSession } = require("../bridges/ai/ptyExecHelpers.cjs");
 const { getFreshIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
 const {
   ensureSessionShellKind,
@@ -292,6 +293,7 @@ function createWorkerAiExecHandler({
         timeoutMs,
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
+        posixFlavor: posixFlavorForSession(session),
         probeLiveShell: true,
         bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
         skipPendingInputClear: session.singleChannelSsh === true,
@@ -504,6 +506,7 @@ function createWorkerAiJobStartHandler({
         timeoutMs,
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
+        posixFlavor: posixFlavorForSession(session),
         probeLiveShell: true,
         bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
         skipPendingInputClear: session.singleChannelSsh === true,

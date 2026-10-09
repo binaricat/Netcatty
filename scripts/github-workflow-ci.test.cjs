@@ -73,7 +73,7 @@ test("PR validation runs once per commit and includes a production build", () =>
   assert.match(testWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main/);
   assert.doesNotMatch(testWorkflow, /branches:\s*\n\s*- "\*\*"/);
   assert.match(testWorkflow, /name: lint-and-test\s*\n\s*runs-on: ubuntu-latest\s*\n\s*timeout-minutes: 20/);
-  assert.match(testWorkflow, /sudo apt-get install -y fish xvfb/);
+  assert.match(testWorkflow, /sudo apt-get install -y fish zsh xvfb/);
   assert.match(
     testWorkflow,
     /- name: Test terminal keyword highlight performance\s*\n\s*env:\s*\n\s*NETCATTY_TERMINAL_PERF_SHOW_WINDOW: "1"\s*\n\s*# GitHub-hosted runners do not configure Electron's SUID sandbox helper\.\s*\n\s*run: xvfb-run -a \.\/node_modules\/\.bin\/electron --no-sandbox scripts\/xterm-keyword-highlight-performance\.live\.test\.cjs/,

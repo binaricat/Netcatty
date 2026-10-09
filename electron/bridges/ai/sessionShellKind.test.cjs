@@ -218,6 +218,22 @@ test("ensureSessionShellKind probes fish once but does not pin it as active shel
     resolveEffectiveShellKind(session.shellKind, "", { loginShellHint: session._loginShellKind }),
     "fish",
   );
+  // The raw probed path is kept for the zsh single-line wrapper flavor; the
+  // kind hint itself stays the coarse posix/fish classification.
+  assert.equal(session._loginShellPath, "/usr/bin/fish");
+});
+
+test("probed zsh login-shell path is stored without pinning the active shell", async () => {
+  const session = { protocol: "ssh" };
+  const kind = await ensureSessionShellKind(session, {
+    execProbe: async () => `${PROBE_OUTPUT_MARKER}/usr/local/bin/zsh-5.9\n`,
+  });
+  assert.equal(kind, undefined);
+  assert.equal(session.shellKind, undefined);
+  assert.equal(session._loginShellKind, "posix");
+  assert.equal(session._loginShellPath, "/usr/local/bin/zsh-5.9");
+  const { posixFlavorForSession } = require("./ptyExecHelpers.cjs");
+  assert.equal(posixFlavorForSession(session), "zsh");
 });
 
 test("ensureSessionShellKind shares one in-flight probe across concurrent callers", async () => {

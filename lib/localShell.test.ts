@@ -13,6 +13,8 @@ const cjsLocalShell = require("./localShell.cjs") as {
 test("local shell classification is shared between renderer and CommonJS bridge", () => {
   const cases: Array<[string | undefined, string | undefined, ReturnType<typeof classifyLocalShellType>]> = [
     ["/bin/zsh", "MacIntel", "posix"],
+    ["/usr/local/bin/zsh-5.9", "MacIntel", "posix"],
+    ["/opt/homebrew/bin/fish-3.7", "MacIntel", "unknown"],
     ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "Win32", "powershell"],
     ["C:\\Windows\\System32\\cmd.exe", "Win32", "cmd"],
     ["C:\\Windows\\System32\\wsl.exe", "Win32", "posix"],

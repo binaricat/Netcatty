@@ -9,11 +9,18 @@ test('live shell response excludes echoed commands, stale markers and partial li
   assert.equal(parseLiveShellProbe(buildLiveShellProbe(marker), marker), null);
   assert.equal(parseLiveShellProbe(`${marker}_P:fi`, marker), null);
   assert.equal(parseLiveShellProbe('__NCMCP_old___P:fish\n', marker), null);
-  assert.deepEqual(parseLiveShellProbe(`\r${marker}_P:/usr/bin/fish\r\n${marker}_Q`, marker), { kind: 'fish' });
-  assert.deepEqual(parseLiveShellProbe(`${marker}_P:-zsh\n${marker}_Q`, marker), { kind: 'posix' });
-  assert.deepEqual(parseLiveShellProbe(`${marker}_P:\n${marker}_Q`, marker), { kind: null });
-  assert.deepEqual(parseLiveShellProbe(`> ${marker}_P:bash\n> ${marker}_Q`, marker), { kind: 'posix' });
-  assert.deepEqual(parseLiveShellProbe(`> ${marker}_P:fish\n> ${marker}_Q`, marker), { kind: 'fish' });
+  const cases = [
+    [`\r${marker}_P:/usr/bin/fish\r\n${marker}_Q`, { kind: 'fish', shellName: 'fish' }],
+    [`${marker}_P:-zsh\n${marker}_Q`, { kind: 'posix', shellName: 'zsh' }],
+    [`${marker}_P:/bin/zsh\n${marker}_Q`, { kind: 'posix', shellName: 'zsh' }],
+    [`${marker}_P:\n${marker}_Q`, { kind: null, shellName: '' }],
+    [`> ${marker}_P:bash\n> ${marker}_Q`, { kind: 'posix', shellName: 'bash' }],
+    [`> ${marker}_P:fish\n> ${marker}_Q`, { kind: 'fish', shellName: 'fish' }],
+    [`> ${marker}_P:sshd\n> ${marker}_Q`, { kind: null, shellName: 'sshd' }],
+  ];
+  for (const [output, expected] of cases) {
+    assert.deepEqual(parseLiveShellProbe(output, marker), expected);
+  }
 });
 
 test('probe waits for complete reply before choosing the first wrapper', async () => {
@@ -260,7 +267,10 @@ for (const [customization, listHistory] of [
       const { buildWrappedCommand } = require('./ptyExecHelpers.cjs');
       const marker = '__NCMCP_HISTORY_PROBE__';
       const input = `HISTFILE=/dev/null; HISTCONTROL=; PS1=; PS2=\n${customization}\n${listHistory} -c\necho user_one\necho user_two\n`
-        + buildLiveShellProbe(marker)
+        // The hardened cleanup only fits the multiline Bash form, which is
+        // typed once the live probe has reported a bash shell (unknown
+        // flavors type the zsh-safe single-line probe first).
+        + buildLiveShellProbe(marker, 'bash')
         + (executeCommand ? buildWrappedCommand('echo command_ok', 'posix', marker, true) : '')
         + '\nprintf \"\\n\"\n' + listHistory + '\nexit\n';
       const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-i'], {
@@ -325,10 +335,11 @@ test('real PTY: probe and execution leave only user commands for arrow recall', 
 });
 
 for (const invocationName of ['sh', 'renamed-bash']) {
-  test(`Bash invoked as ${invocationName} cleans probe history`, () => {
+  test(`Bash invoked as ${invocationName} cleans probe history via the wrapper cleanup`, () => {
     const fs = require('node:fs');
     const path = require('node:path');
     const { spawnSync } = require('node:child_process');
+    const { buildWrappedCommand } = require('./ptyExecHelpers.cjs');
     const directory = require('../tempDirBridge.cjs').getTempFilePath('probe-bash');
     fs.mkdirSync(directory, { mode: 0o700 });
     try {
@@ -336,12 +347,19 @@ for (const invocationName of ['sh', 'renamed-bash']) {
       fs.symlinkSync('/bin/bash', shell);
       const marker = '__NCMCP_RENAMED_BASH__';
       const result = spawnSync(shell, ['--noprofile', '--norc', '-i'], {
+        // Production flow for an undetectable bash (unknown flavor): the live
+        // probe types no Bash history cleanup (it must stay zsh-safe), and the
+        // wrapper typed after refinement carries the marker-based cleanup that
+        // removes both the wrapper's and the probe's history lines.
         input: 'HISTFILE=/dev/null; HISTCONTROL=; PS1=; PS2=\nbuiltin history -c\necho preserve_user_history\n'
-          + buildLiveShellProbe(marker) + '\nprintf "\\n"\ncommand builtin history\nexit\n',
+          + buildLiveShellProbe(marker)
+          + buildWrappedCommand('echo wrapper_ok', 'posix', marker, true)
+          + '\nprintf "\\n"\ncommand builtin history\nexit\n',
         encoding: 'utf8', env: { ...process.env, TERM: 'dumb' }, timeout: 5000,
       });
       assert.equal(result.status, 0, result.stderr);
       assert.ok(result.stdout.includes(`${marker}_Q`), result.stdout);
+      assert.match(result.stdout, /wrapper_ok/);
       const entries = result.stdout.split('\n').filter(line => /^\s*\d+\s/.test(line));
       assert.ok(entries.some(line => line.includes('echo preserve_user_history')), result.stdout);
       assert.ok(entries.every(line => !line.includes(marker)), result.stdout);
@@ -412,7 +430,9 @@ for (const stop of ['cancel', 'timeout']) {
     pty.write = data => writes.push(data);
     const job = startPtyJob(pty, 'echo must_not_run', {
       shellKind: 'posix', probeLiveShell: true, timeoutMs: stop === 'timeout' ? 70 : 1000,
-      enforceWallTimeout: stop === 'timeout',
+      // bash flavor keeps the long multiline probe that spans several paced
+      // 128-char chunks (unknown flavors type the short zsh-safe probe).
+      posixFlavor: 'bash', enforceWallTimeout: stop === 'timeout',
     });
     await new Promise(resolve => setTimeout(resolve, 45));
     assert.ok(writes.length >= 2, 'probe must have started a later chunk');
