@@ -476,8 +476,17 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setCurrentSection("hosts");
     setSelectedGroupPath(null);
     setNewHostGroupPath(null);
-    setEditingHost(deepLinkHostDraft);
-    setIsHostPanelOpen(true);
+    if (deepLinkHostDraft.protocol === "local") {
+      setEditingHost(null);
+      setIsHostPanelOpen(false);
+      setEditingLocalShellHost(deepLinkHostDraft);
+      setIsLocalShellHostPanelOpen(true);
+    } else {
+      setIsLocalShellHostPanelOpen(false);
+      setEditingLocalShellHost(null);
+      setEditingHost(deepLinkHostDraft);
+      setIsHostPanelOpen(true);
+    }
     onDeepLinkHostDraftHandled?.();
   }, [deepLinkHostDraft, onDeepLinkHostDraftHandled]);
 

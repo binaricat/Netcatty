@@ -55,6 +55,32 @@ test("CSV round-trips local key authentication and its saved passphrase", () => 
   }]);
 });
 
+test("CSV import keeps distinct local-shell entries in the same group", () => {
+  const localShellHost = (id: string, label: string, shell: string, shellName: string): Host => ({
+    ...hostDefaults,
+    id,
+    label,
+    hostname: "localhost",
+    port: 22,
+    protocol: "local",
+    group: "Shells",
+    localShell: shell,
+    localShellName: shellName,
+  });
+
+  const cmd = localShellHost("local-cmd", "Command Prompt", "cmd.exe", "Command Prompt");
+  const powershell = localShellHost("local-ps", "PowerShell", "powershell.exe", "Windows PowerShell");
+  const { csv } = exportHostsToCsvWithStats([cmd, powershell]);
+
+  const imported = importVaultHostsFromText("csv", csv);
+  assert.equal(imported.stats.duplicates, 0);
+  assert.equal(imported.hosts.length, 2);
+  assert.deepEqual(
+    imported.hosts.map((h) => h.localShell).sort(),
+    ["cmd.exe", "powershell.exe"],
+  );
+});
+
 test("CSV round-trips a referenced Keychain file path and saved passphrase", () => {
   const host: Host = {
     ...hostDefaults,
