@@ -46,6 +46,35 @@ test("createHostTerminalSession does not add local shell fields to SSH hosts", (
   assert.equal(session.protocol, "ssh");
   assert.equal(session.localShell, undefined);
   assert.equal(session.localShellName, undefined);
+  assert.equal(session.shellType, undefined);
+});
+
+test("createHostTerminalSession classifies the shell for CMD/PowerShell local vault hosts", () => {
+  const cmd = createHostTerminalSession("session-cmd", localVaultHost({ localShell: "cmd", os: "windows" }));
+  assert.equal(cmd.shellType, "cmd");
+
+  const pwsh = createHostTerminalSession("session-pwsh", localVaultHost({ localShell: "pwsh", os: "windows" }));
+  assert.equal(pwsh.shellType, "powershell");
+
+  const customPowershellPath = createHostTerminalSession(
+    "session-pwsh-path",
+    localVaultHost({ localShell: "C:\\Program Files\\PowerShell\\7\\pwsh.exe", os: "windows" }),
+  );
+  assert.equal(customPowershellPath.shellType, "powershell");
+
+  // Default-shell hosts classify by the saved host OS, like ordinary
+  // local-terminal creation classifies by the resolved shell.
+  const windowsDefault = createHostTerminalSession("session-win-default", localVaultHost({ os: "windows" }));
+  assert.equal(windowsDefault.shellType, "powershell");
+
+  const posixDefault = createHostTerminalSession("session-posix-default", localVaultHost({ os: "linux" }));
+  assert.equal(posixDefault.shellType, "posix");
+
+  const unknownCustom = createHostTerminalSession(
+    "session-unknown",
+    localVaultHost({ localShell: "/usr/local/bin/exotic-shell", os: "linux" }),
+  );
+  assert.equal(unknownCustom.shellType, "unknown");
 });
 
 test("createLocalTerminalSession is unaffected by vault local hosts", () => {
