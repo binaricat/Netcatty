@@ -91,7 +91,6 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
       { value: '', label: t('localShell.field.shellDefault') },
     ];
     for (const candidate of discoveredShells) {
-      if (candidate.id === shell) continue;
       options.push({
         value: candidate.id,
         label: candidate.name,
@@ -99,7 +98,7 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
       });
     }
     return options;
-  }, [discoveredShells, shell, t]);
+  }, [discoveredShells, t]);
 
   const tagOptions: ComboboxOption[] = useMemo(() => {
     const allUniqueTags = new Set([...allTags, ...tags]);
@@ -120,8 +119,8 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
     }));
   }, [groups, group]);
 
-  const buildHost = (): Host =>
-    createLocalShellHost({
+  const buildHost = (): Host => {
+    const host = createLocalShellHost({
       id: initialData?.id,
       os: detectLocalOs(navigator.userAgent || navigator.platform),
       label,
@@ -134,6 +133,13 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
       tags,
       notes,
     });
+    // On edits, merge over the existing host so fields this form does not
+    // expose (pinned, lastConnectedAt, order, ...) and the original
+    // creation timestamp survive a save.
+    return initialData
+      ? { ...initialData, ...host, createdAt: initialData.createdAt ?? host.createdAt }
+      : host;
+  };
 
   const handleSave = () => onSave(buildHost());
   const handleSaveAndConnect = () => {

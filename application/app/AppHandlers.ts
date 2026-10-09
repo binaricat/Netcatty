@@ -1104,11 +1104,30 @@ export function handleCreateLocalTerminalImpl(
 }
 
 export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host, hidden = false) {
-  const { addConnectionLog, connectToHost, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef } = getCtx();
+  const { addConnectionLog, connectToHost, discoveredShells, identities, keys, resolveEffectiveHost, resolveHostAuth, resolveShellSetting, systemInfoRef, terminalSettings } = getCtx();
 {
     const { username, hostname: localHost } = systemInfoRef.current;
 
-    const effectiveHost = resolveEffectiveHost(host);
+    let effectiveHost = resolveEffectiveHost(host);
+
+    // Local-shell vault hosts saved with "System default shell" carry no
+    // localShell; resolve the Settings → Terminal shell here (the same
+    // resolution ordinary local-terminal creation uses) so those hosts do not
+    // silently fall back to the OS default shell.
+    if (effectiveHost.protocol === 'local' && !effectiveHost.localShell) {
+      const configuredShell = terminalSettings?.localShell ?? '';
+      const resolved = resolveShellSetting?.(configuredShell, discoveredShells ?? [], terminalSettings?.localShellArgs);
+      if (resolved?.command) {
+        const matchedShell = discoveredShells?.find?.((s) => s.id === configuredShell);
+        effectiveHost = {
+          ...effectiveHost,
+          localShell: resolved.command,
+          localShellArgs: resolved.args,
+          localShellName: matchedShell?.name,
+          localShellIcon: matchedShell?.icon,
+        };
+      }
+    }
 
     // Handle serial hosts separately
     if (effectiveHost.protocol === 'serial') {
