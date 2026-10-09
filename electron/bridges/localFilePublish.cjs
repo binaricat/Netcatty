@@ -1,20 +1,27 @@
 "use strict";
 
 const fs = require("node:fs");
+const { isMetadataUnsupportedError } = require("./fsCopyFallback.cjs");
 
 // Publish a prepared regular file without replacing any destination entry.
 // Hardlinks make complete bytes visible atomically. FAT-like filesystems use an
 // exclusively created handle instead: partial contents can be visible there,
 // but no pathname cleanup may remove a concurrent writer's replacement.
 // Resolves with the published inode identity ({ dev, ino, size }) so callers can
-// verify an open destination handle before later metadata stamping.
+// verify an open destination handle before later metadata stamping, plus
+// `timestampsPreserved`: whether the published inode actually carries the
+// prepared file's timestamps. Hardlinked publication shares the inode; the copy
+// path re-applies the times through the owned handle only (a pathname-based
+// stamp cannot stay pinned to the validated inode and could land on a
+// concurrent replacement), reporting `false` when the handle stamp is refused
+// so callers must not treat the metadata as prepared.
 async function publishLocalFileExclusive(source, target, assertNotCancelled = () => {}, preparedHandle) {
   assertNotCancelled();
   try {
     await fs.promises.link(source, target);
     // The hardlink shares the published inode; stat either name.
     const linkedStat = await fs.promises.lstat(source);
-    return { dev: linkedStat.dev, ino: linkedStat.ino, size: linkedStat.size };
+    return { dev: linkedStat.dev, ino: linkedStat.ino, size: linkedStat.size, timestampsPreserved: true };
   } catch (error) {
     // EISDIR is the misleading libuv mapping for Win32 ERROR_INVALID_FUNCTION
     // when the volume has no hard-link support (exFAT/FAT32); the source here
@@ -26,6 +33,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
   let output;
   let failure;
   let publishedIdentity;
+  let timestampsPreserved = true;
   try {
     input = preparedHandle ?? await fs.promises.open(source, "r");
     const stat = await input.stat();
@@ -49,14 +57,40 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     assertNotCancelled();
     // Restore metadata after writes (which may clear special permission bits),
     // through the owned handle rather than a potentially replaced pathname.
-    await output.chmod(stat.mode & 0o7777);
-    await output.utimes(stat.atime, stat.mtime);
+    // gvfsd-fuse-style mounts reject chmod/utimes with ENOTSUP even though the
+    // bytes are fully published; keep the copy instead of failing the transfer.
+    try {
+      await output.chmod(stat.mode & 0o7777);
+    } catch (chmodError) {
+      if (!isMetadataUnsupportedError(chmodError)) throw chmodError;
+      // The target was created through the process umask, which may have
+      // narrowed the requested mode. Only accept the chmod failure when the
+      // published bytes already carry the intended mode; otherwise fail closed
+      // rather than silently publishing a narrower one.
+      const createdMode = (await output.stat()).mode & 0o7777;
+      if (createdMode !== (stat.mode & 0o7777)) throw chmodError;
+    }
+    timestampsPreserved = false;
+    try {
+      await output.utimes(stat.atime, stat.mtime);
+      timestampsPreserved = true;
+    } catch (utimesError) {
+      if (!isMetadataUnsupportedError(utimesError)) throw utimesError;
+      // Even if this backend implements utimensat while rejecting futimens,
+      // the prepared timestamps must not be re-applied through the pathname:
+      // `lstat`-verified names can be replaced before the pathname-based
+      // stamp lands on the replacement's inode. Report the stamp as not
+      // preserved instead, so the caller's descriptor-pinned best-effort
+      // stamp still runs (or correctly reports the metadata as unprepared).
+    }
     const ownedStat = await output.stat();
     const targetStat = await fs.promises.lstat(target);
     if (!targetStat.isFile() || targetStat.dev !== ownedStat.dev || targetStat.ino !== ownedStat.ino) {
       throw new Error("Local download target changed during replacement");
     }
-    publishedIdentity = { dev: ownedStat.dev, ino: ownedStat.ino, size: ownedStat.size };
+    publishedIdentity = {
+      dev: ownedStat.dev, ino: ownedStat.ino, size: ownedStat.size, timestampsPreserved,
+    };
   } catch (error) {
     failure = error;
   } finally {

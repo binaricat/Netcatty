@@ -1041,6 +1041,7 @@ function stableLocalFileIdentity(statLike) {
 
 async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   const { publishLocalFileExclusive } = require("./localFilePublish.cjs");
+  const { copyFileExclusiveWithFallback, fileIdentity, isMetadataUnsupportedError } = require("./fsCopyFallback.cjs");
   const assertNotCancelled = options.assertNotCancelled || (() => {});
   const token = crypto.randomUUID().replace(/-/g, "");
   const base = path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.netcatty-${token}`);
@@ -1052,15 +1053,50 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   let keepRecoveryFiles = false;
   let preparedHandle;
   let originalHandle;
+  let intendedMode = null;
   let restoreProbeCreated = false;
   let localMtimePrepared = false;
+  let copiedIdentity = null;
+  let stagedIdentity = null;
   try {
     assertNotCancelled();
     try {
+      // Pin the staged file's identity before the rename: a same-device
+      // rename preserves dev/ino, so this is the identity the ready pathname
+      // must still resolve to on the non-EXDEV path (the EXDEV path pins
+      // `copiedIdentity` below instead). This lets the readable open and the
+      // publication step verify the pathname was never replaced.
+      stagedIdentity = fileIdentity(await fs.promises.lstat(stagedPath));
       await fs.promises.rename(stagedPath, readyPath);
     } catch (error) {
       if (error?.code !== "EXDEV") throw error;
-      await fs.promises.copyFile(stagedPath, readyPath, fs.constants.COPYFILE_EXCL);
+      // The fallback creates the replacement with a default 0666 mode. On
+      // mounts that reject chmod below, the later mode loop cannot correct it,
+      // so seed the exact intended permissions now: the destination's existing
+      // mode when known, else the staged file's own mode (what the accelerated
+      // copyFile path would have preserved, so cross-device copies keep the
+      // permissions a same-device rename produces). Seeding never adds
+      // permissions the destination did not have: if the exact mode is
+      // unreadable by us (mode-0000 or write-only seeds), owner read is
+      // granted only for the instant the prepared handle below is acquired
+      // and then removed again, so a chmod-refusing mount never ends up
+      // publishing a broader mode than the destination had.
+      intendedMode = Number.isInteger(options.existingMode)
+        ? (options.existingMode & 0o7777)
+        : null;
+      if (intendedMode === null) {
+        let stagedMode = null;
+        try {
+          stagedMode = (await fs.promises.stat(stagedPath)).mode & 0o7777;
+        } catch { stagedMode = null; }
+        intendedMode = stagedMode === null ? 0o600 : stagedMode;
+      }
+      // Pin the copied inode's identity so the pathname chmods below (which
+      // cannot be pinned to an inode by themselves) can revalidate the ready
+      // pathname still resolves to this copy before mutating another
+      // pathname's permissions.
+      copiedIdentity = (await copyFileExclusiveWithFallback(stagedPath, readyPath, intendedMode, { assertNotCancelled }))
+        ?.writtenIdentity ?? null;
     }
     // Stamp the private prepared file before applying possibly unreadable
     // destination permissions. Publication carries these times to the target.
@@ -1073,7 +1109,145 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     }
     // Keep read access to our private bytes before destination permissions
     // can remove it; the no-hardlink fallback copies through this handle.
-    preparedHandle = await fs.promises.open(readyPath, "r");
+    try {
+      preparedHandle = await fs.promises.open(readyPath, "r");
+      // The successful open pinned an inode, but the pathname may already
+      // have changed hands between the prepared file's creation (EXDEV copy
+      // or same-device rename) and this open: verify the held inode is the
+      // prepared one, exactly as the restrictive-mode recovery path below
+      // does, so a concurrent replacement is never pinned here and committed
+      // by the pathname-based publication below.
+      const openedIdentity = fileIdentity(await preparedHandle.stat());
+      const preparedIdentity = copiedIdentity ?? stagedIdentity;
+      if (preparedIdentity !== null && openedIdentity !== preparedIdentity) {
+        throw Object.assign(
+          new Error(`EEXIST: file exists, ${readyPath} changed hands before its readable open was verified`),
+          { code: "EEXIST", targetOwnershipRelinquished: true },
+        );
+      }
+    } catch (openError) {
+      // A restrictive seed is unreadable by us. Grant owner read only to
+      // acquire the temporary handle and remove the extra bit again right
+      // away: publication must not preserve permissions the destination never
+      // had, even when the destination mount refuses the removal.
+      preparedHandle = null;
+      if (openError?.code !== "EACCES" && openError?.code !== "EPERM") throw openError;
+      if (intendedMode === null) throw openError;
+      // A pathname chmod cannot be pinned to the copied inode, so verify the
+      // ready pathname still resolves to the copy this module created before
+      // granting read access: a replacement that won the name after the
+      // failed open must not be handed the copied file's permissions (and
+      // then pinned and published as the completed download).
+      if (copiedIdentity === null) {
+        // Without a pinned identity the ownership of the ready pathname
+        // cannot be proven: fail closed without mutating it, and mark the
+        // handover so the caller's cleanup never unlinks whoever owns it.
+        throw Object.assign(
+          new Error(`EEXIST: file exists, ${readyPath}'s ownership could not be verified before its read access was granted`),
+          { code: "EEXIST", targetOwnershipRelinquished: true, cause: openError },
+        );
+      }
+      let grantIdentity = null;
+      try {
+        grantIdentity = fileIdentity(await fs.promises.lstat(readyPath));
+      } catch { grantIdentity = null; }
+      if (grantIdentity !== copiedIdentity) {
+        throw Object.assign(
+          new Error(`EEXIST: file exists, ${readyPath} changed hands while its read access was being granted`),
+          { code: "EEXIST", targetOwnershipRelinquished: true, cause: openError },
+        );
+      }
+      let grantedRead = false;
+      try {
+        await fs.promises.chmod(readyPath, intendedMode | 0o400);
+        grantedRead = true;
+      } catch (grantError) {
+        if (!isMetadataUnsupportedError(grantError)) throw grantError;
+        // A chmod-refusing mount keeps the exact restrictive creation mode.
+        // Publication below either hardlinks (no read access needed) or fails
+        // closed rather than publishing a broadened mode.
+      }
+      if (grantedRead) {
+        preparedHandle = await fs.promises.open(readyPath, "r");
+        // The open pinned an inode, but the pathname may have changed hands
+        // between the read grant and this open: verify the held inode is
+        // still the copied one before the restore chmod, so a replacement is
+        // never handed the copied file's permissions.
+        const heldIdentity = fileIdentity(await preparedHandle.stat());
+        if (heldIdentity !== copiedIdentity) {
+          throw Object.assign(
+            new Error(`EEXIST: file exists, ${readyPath} changed hands while its read access was being restored`),
+            { code: "EEXIST", targetOwnershipRelinquished: true },
+          );
+        }
+        try {
+          // Restore through the pinned handle, not the pathname: a pathname
+          // chmod could race with a concurrent writer replacing the ready
+          // pathname between the identity check above and the chmod, relabelling
+          // the replacement while the held copied inode kept the broadened
+          // owner-read bit that publication would then preserve.
+          await preparedHandle.chmod(intendedMode);
+          const restoredStat = await preparedHandle.stat();
+          if (fileIdentity(restoredStat) !== heldIdentity
+            || (restoredStat.mode & 0o7777) !== intendedMode) {
+            // Defensive: an fchmod that silently dropped its request would leave
+            // the broadened bit on the held inode; fail closed either way.
+            // The metadata restore failed just like the refused-chmod path
+            // below, so the same ownership caveat applies: cleanup is
+            // pathname-based and the pathname's ownership is no longer
+            // provable, so mark the handover and disclose the retained
+            // pathname instead of letting the caller's cleanup unlink a
+            // concurrently replaced name.
+            throw Object.assign(
+              new Error(
+                `Cannot publish local destination mode ${intendedMode.toString(8)}: the mount did not restore the intended mode`,
+              ),
+              { targetOwnershipRelinquished: true, retainedTarget: readyPath },
+            );
+          }
+        } catch (restoreError) {
+          if (!isMetadataUnsupportedError(restoreError)) throw restoreError;
+          // Owner read was granted but this mount refuses to remove it again,
+          // so publishing would preserve a mode the destination never had:
+          // fail closed instead of leaking the extra permission bit.
+          // Close the live handle here: dropping the reference alone would
+          // keep the descriptor open until GC and the finally block would
+          // no longer see it.
+          await preparedHandle?.close().catch(() => {});
+          preparedHandle = null;
+          // This failure is thrown after the read-grant chmod succeeded, so
+          // the ready pathname's identity was last verified before that grant:
+          // by the time the caller's pathname-based cleanup runs, readyPath
+          // may hold either this module's broadened copy (whose extra
+          // owner-read bit could not be removed) or a concurrent writer's
+          // replacement. Cleanup cannot re-prove ownership, so mark the
+          // handover (the caller then leaves the name alone) and attach the
+          // retained pathname so the caller's recovery reporting discloses the
+          // leftover fragment rather than leaving a hidden partial behind.
+          throw Object.assign(
+            new Error(
+              `Cannot publish local destination mode ${intendedMode.toString(8)}: the mount refused to re-remove owner read`,
+            ),
+            { cause: restoreError, targetOwnershipRelinquished: true, retainedTarget: readyPath },
+          );
+        }
+        // The handle-pinned restore cannot relabel a foreign replacement, but
+        // the ready pathname may still have changed hands while the read grant
+        // was live: publication is pathname-based (link or a fresh open), so
+        // revalidate the pathname resolves to the copied inode before handing
+        // it to publication.
+        let restoredPathIdentity = null;
+        try {
+          restoredPathIdentity = fileIdentity(await fs.promises.lstat(readyPath));
+        } catch { restoredPathIdentity = null; }
+        if (restoredPathIdentity !== copiedIdentity) {
+          throw Object.assign(
+            new Error(`EEXIST: file exists, ${readyPath} changed hands while its read access was being restored`),
+            { code: "EEXIST", targetOwnershipRelinquished: true },
+          );
+        }
+      }
+    }
     let appliedMode = null;
     let validatedTarget;
     let stable = false;
@@ -1085,7 +1259,100 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         ? validatedTarget.existingMode & 0o7777
         : Number.isInteger(options.existingMode) ? options.existingMode & 0o7777 : null;
       if (mode !== null && mode !== appliedMode) {
-        await fs.promises.chmod(readyPath, mode);
+        try {
+          await fs.promises.chmod(readyPath, mode);
+        } catch (error) {
+          if (!isMetadataUnsupportedError(error)) throw error;
+          // gvfsd-fuse-style mounts reject chmod while accepting bytes.
+          // Publishing without exact mode fidelity is only safe when the
+          // ready file already carries the intended mode: the cross-device
+          // seed creates it with the intended mode, but a same-device rename
+          // preserves the staged file's mode, which may differ from the
+          // destination being replaced (e.g. a 0644 stage over a 0600
+          // destination). Verify the ready file's actual mode and fail
+          // closed rather than silently publishing a different mode.
+          let readyStat;
+          try {
+            readyStat = await fs.promises.lstat(readyPath);
+          } catch (statError) {
+            throw new Error(
+              `Cannot publish local destination mode ${mode.toString(8)}: the mount refused chmod and the prepared file's mode could not be verified`,
+              { cause: statError },
+            );
+          }
+          // A pathname lstat cannot pin an inode: in a concurrently writable
+          // destination directory the ready pathname may have been replaced
+          // since it was prepared, and a replacement coincidentally carrying
+          // the requested mode would otherwise be accepted here and committed
+          // by the hard-link publication below as the completed download.
+          // Fail closed unless the pathname still resolves to the inode
+          // pinned by the prepared handle (or the copy's pinned identity).
+          let pinnedIdentity = copiedIdentity;
+          if (pinnedIdentity === null && preparedHandle) {
+            try {
+              pinnedIdentity = fileIdentity(await preparedHandle.stat());
+            } catch { pinnedIdentity = null; }
+          }
+          if (pinnedIdentity === null || fileIdentity(readyStat) !== pinnedIdentity) {
+            throw Object.assign(
+              new Error(`EEXIST: file exists, ${readyPath} changed hands while its mode was being verified`),
+              { code: "EEXIST", targetOwnershipRelinquished: true, cause: error },
+            );
+          }
+          const readyMode = readyStat.mode & 0o7777;
+          if (readyMode !== mode) {
+            // The pathname chmod was refused: relabel the prepared inode
+            // through the handle pinned to it before failing. An fd chmod
+            // can still succeed on mounts that only reject pathname chmods.
+            let relabelled = false;
+            if (preparedHandle) {
+              try {
+                let relabelPathIdentity = null;
+                try {
+                  relabelPathIdentity = fileIdentity(await fs.promises.lstat(readyPath));
+                } catch { relabelPathIdentity = null; }
+                if (relabelPathIdentity === pinnedIdentity) {
+                  await preparedHandle.chmod(mode);
+                  const heldStat = await preparedHandle.stat();
+                  relabelled = fileIdentity(heldStat) === pinnedIdentity
+                    && (heldStat.mode & 0o7777) === mode;
+                }
+              } catch { relabelled = false; }
+            }
+            if (relabelled) {
+              // The relabel only re-proved the held inode: the ready pathname
+              // may have changed hands between the pre-chmod lstat and the
+              // (possibly slow) fd chmod. Publication below is pathname-based
+              // and the next loop iteration only revalidates the destination
+              // target, so revalidate the pathname against the pinned inode
+              // before accepting the relabel; otherwise a replacement could
+              // win the name and be hard-linked as the completed download.
+              let relabelledPathIdentity = null;
+              try {
+                relabelledPathIdentity = fileIdentity(await fs.promises.lstat(readyPath));
+              } catch { relabelledPathIdentity = null; }
+              if (relabelledPathIdentity !== pinnedIdentity) {
+                throw Object.assign(
+                  new Error(`EEXIST: file exists, ${readyPath} changed hands while its mode was being relabelled`),
+                  { code: "EEXIST", targetOwnershipRelinquished: true },
+                );
+              }
+              appliedMode = mode;
+              continue;
+            }
+            // Ownership was only proven at the readyStat check above. Throwing
+            // an ordinary error would let the caller's pathname-based cleanup
+            // unlink whoever owns readyPath by then, so relinquish the name
+            // and disclose the retained prepared file through the recovery
+            // reporting instead.
+            throw Object.assign(
+              new Error(
+                `Cannot publish local destination mode ${mode.toString(8)}: the mount refused chmod and the prepared file has mode ${readyMode.toString(8)}`,
+              ),
+              { cause: error, targetOwnershipRelinquished: true, retainedTarget: readyPath },
+            );
+          }
+        }
         appliedMode = mode;
         continue;
       }
@@ -1129,6 +1396,29 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       }
     }
     assertNotCancelled();
+    // Publication resolves the ready pathname by name (hardlink, or a fresh
+    // open on the copy fallback), so revalidate that the pathname still
+    // resolves to the verified prepared inode before handing it over: a
+    // replacement that won the name after the readable open was pinned must
+    // never be committed as the completed download.
+    let publicationPinnedIdentity = copiedIdentity ?? stagedIdentity;
+    if (publicationPinnedIdentity === null && preparedHandle) {
+      try {
+        publicationPinnedIdentity = fileIdentity(await preparedHandle.stat());
+      } catch { publicationPinnedIdentity = null; }
+    }
+    if (publicationPinnedIdentity !== null) {
+      let publicationPathIdentity = null;
+      try {
+        publicationPathIdentity = fileIdentity(await fs.promises.lstat(readyPath));
+      } catch { publicationPathIdentity = null; }
+      if (publicationPathIdentity !== publicationPinnedIdentity) {
+        throw Object.assign(
+          new Error(`EEXIST: file exists, ${readyPath} changed hands before publication`),
+          { code: "EEXIST", targetOwnershipRelinquished: true },
+        );
+      }
+    }
     let publishedIdentity = null;
     try {
       publishedIdentity = await publishLocalFileExclusive(readyPath, targetPath, assertNotCancelled, preparedHandle) ?? null;
@@ -1143,13 +1433,32 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // check-then-unlink rollback against a name another process may now own.
     committed = true;
     // Hand the published inode identity to the caller for descriptor-based
-    // metadata stamping after publication.
-    options.onCommit?.(publishedIdentity, localMtimePrepared);
+    // metadata stamping after publication. The prepared stamp only counts as
+    // applied when the publication actually carried the prepared times to the
+    // published inode; when the copy path could not stamp them (futimens- and
+    // utimensat-refusing mounts), clear the flag so the caller's final
+    // best-effort stamp still runs instead of trusting a timestamp the target
+    // does not have.
+    const timestampsPreserved = publishedIdentity?.timestampsPreserved !== false;
+    options.onCommit?.(publishedIdentity, localMtimePrepared && timestampsPreserved);
     if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
     await fs.promises.unlink(readyPath).catch(() => {});
     await fs.promises.unlink(stagedPath).catch(() => {});
   } catch (error) {
     if (committed) throw error;
+    // A copy fallback that could not relabel the ready pathname still holds
+    // its unverified partial copy behind it (`retainedTarget`): the
+    // relinquished handover keeps the pre-commit cleanup from unlinking the
+    // pathname, so the retained partial must be routed through recovery
+    // reporting instead of silently accumulating hidden `.ready` fragments.
+    // Likewise, a verified `.stale-*` partial whose removal the mount
+    // refused (or whose verified data was left aside while restoring a
+    // foreign replacement) persists at the disclosed side name and must be
+    // reported the same way.
+    if (error?.targetOwnershipRelinquished
+      && (error?.retainedTarget === readyPath || typeof error?.stalePath === "string")) {
+      keepRecoveryFiles = true;
+    }
     if (backedUp && !keepRecoveryFiles) {
       try {
         // The pathname may have changed between open and rename. Never copy
@@ -1161,25 +1470,51 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           ]);
           if (stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(backupStat)) restoreHandle = originalHandle;
         }
-        await publishLocalFileExclusive(backupPath, targetPath, undefined, restoreHandle);
-        await fs.promises.unlink(backupPath).catch(() => {});
-        backedUp = false;
+        const restored = await publishLocalFileExclusive(backupPath, targetPath, undefined, restoreHandle);
+        if (restored?.timestampsPreserved === false) {
+          // A gvfsd-fuse-style mount accepted the restore copy's bytes but
+          // refused `futimes`, so the restored inode carries the copy time
+          // instead of the original's timestamps. Deleting the backup would
+          // then discard the only copy of the original metadata: retain it
+          // and disclose it through the recovery-failure reporting instead.
+          keepRecoveryFiles = true;
+        } else {
+          await fs.promises.unlink(backupPath).catch(() => {});
+          backedUp = false;
+        }
       } catch (restoreError) {
         keepRecoveryFiles = true;
         error.cause ??= restoreError;
       }
     }
     if (keepRecoveryFiles) {
+      // Copy-fallback failures can leave a verified partial behind a private
+      // `.stale-*` side name (`error.stalePath`) whose removal the mount
+      // refused; disclose that pathname alongside the other recovery files
+      // so repeated failures do not accumulate hidden partial files.
+      const staleSegment = typeof error?.stalePath === "string"
+        ? `; copy fragment: ${error.stalePath}`
+        : "";
       const failure = new Error(
         `${error.message}. Recovery files preserved. Backup: ${backedUp ? backupPath : "none"}; `
-        + `prepared replacement: ${readyPath}; target: ${targetPath}`,
+        + `prepared replacement: ${readyPath}; target: ${targetPath}${staleSegment}`,
         { cause: error },
       );
       failure.recoveryFailed = true;
       if (backedUp) failure.remoteBackupPath = backupPath;
+      if (typeof error?.stalePath === "string") failure.stalePath = error.stalePath;
       throw failure;
     }
-    await fs.promises.unlink(readyPath).catch(() => {});
+    // The copy fallback reports `targetOwnershipRelinquished` when the ready
+    // pathname changed hands before its identity was verified: the name then
+    // either was relabelled back to another writer's file or was already
+    // re-created by a newer writer, so unlinking it here would destroy that
+    // writer's only visible name (its data must not be discarded). Leave the
+    // pathname untouched; the fallback discloses any side name it moved data
+    // to via `error.stalePath`.
+    if (!error?.targetOwnershipRelinquished) {
+      await fs.promises.unlink(readyPath).catch(() => {});
+    }
     throw error;
   } finally {
     await preparedHandle?.close().catch(() => {});
