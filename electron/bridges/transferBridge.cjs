@@ -1360,9 +1360,18 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           ]);
           if (stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(backupStat)) restoreHandle = originalHandle;
         }
-        await publishLocalFileExclusive(backupPath, targetPath, undefined, restoreHandle);
-        await fs.promises.unlink(backupPath).catch(() => {});
-        backedUp = false;
+        const restored = await publishLocalFileExclusive(backupPath, targetPath, undefined, restoreHandle);
+        if (restored?.timestampsPreserved === false) {
+          // A gvfsd-fuse-style mount accepted the restore copy's bytes but
+          // refused `futimes`, so the restored inode carries the copy time
+          // instead of the original's timestamps. Deleting the backup would
+          // then discard the only copy of the original metadata: retain it
+          // and disclose it through the recovery-failure reporting instead.
+          keepRecoveryFiles = true;
+        } else {
+          await fs.promises.unlink(backupPath).catch(() => {});
+          backedUp = false;
+        }
       } catch (restoreError) {
         keepRecoveryFiles = true;
         error.cause ??= restoreError;

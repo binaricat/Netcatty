@@ -171,6 +171,40 @@ test("cancelled replacement restores original timestamps through the copy fallba
   assert.equal(fs.readFileSync(target, "utf8"), "original");
 });
 
+test("rollback keeps the backup when the restore copy cannot stamp timestamps", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-restore-utimes")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const link = fs.promises.link;
+  fs.promises.link = async () => { throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" }); };
+  t.after(() => { fs.promises.link = link; });
+  const open = fs.promises.open;
+  fs.promises.open = async (...args) => {
+    const handle = await open(...args);
+    if (args[0] === target && args[1] === "wx") {
+      // gvfsd-fuse-style backend: futimens is refused on an otherwise
+      // writable handle, so the rollback copy cannot carry the backup's
+      // original timestamps over to the restored destination.
+      handle.utimes = async () => { throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" }); };
+    }
+    return handle;
+  };
+  t.after(() => { fs.promises.open = open; });
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    assertNotCancelled() { if (!fs.existsSync(target)) throw new Error("Transfer cancelled"); },
+  }), (error) => {
+    assert.equal(error.recoveryFailed, true);
+    assert.ok(error.remoteBackupPath, "retains the backup");
+    assert.equal(fs.readFileSync(error.remoteBackupPath, "utf8"), "original");
+    return true;
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "original");
+  assert.ok(fs.readdirSync(root).some((name) => name.endsWith(".backup")), "backup stays on disk");
+});
+
 for (const replaceAfterCommit of [false, true]) {
   test(`local publication prepares timestamps before restrictive permissions${replaceAfterCommit ? " and leaves post-commit replacement alone" : ""}`, async (t) => {
     const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-mtime")}-`);
