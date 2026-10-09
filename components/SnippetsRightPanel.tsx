@@ -132,6 +132,7 @@ export const SnippetsRightPanel: React.FC<SnippetsRightPanelProps> = ({
           customGroups={customGroups}
           selectedHostIds={targetSelection}
           multiSelect={true}
+          allowLocalHosts={true}
           onSelect={handleTargetSelect}
           onSelectionChange={handleTargetSelectionChange}
           onBack={handleTargetPickerBack}

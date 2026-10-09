@@ -2,6 +2,7 @@ import type { GroupConfig, Host, ProxyProfile, TerminalSession } from "./models"
 import { applyGroupDefaults, resolveGroupDefaults } from "./groupConfig";
 import { materializeHostProxyProfile } from "./proxyProfiles";
 import { sanitizePluginConnection } from "./pluginConnection";
+import { resolveHostDefaultLocalShell, type ResolveDefaultLocalShellContext } from "./localShellHost";
 
 type LocalOs = Host["os"];
 
@@ -10,6 +11,8 @@ interface ResolveEffectiveHostOptions {
   groupConfigs: GroupConfig[];
   proxyProfiles: ProxyProfile[];
   validProxyProfileIds?: ReadonlySet<string>;
+  /** When provided, saved local hosts with no shell resolve the Settings shell. */
+  defaultLocalShell?: ResolveDefaultLocalShellContext;
 }
 
 interface ResolveTerminalSessionHostOptions {
@@ -18,6 +21,8 @@ interface ResolveTerminalSessionHostOptions {
   groupConfigs: GroupConfig[];
   proxyProfiles: ProxyProfile[];
   localOs: LocalOs;
+  /** When provided, saved local hosts with no shell resolve the Settings shell. */
+  defaultLocalShell?: ResolveDefaultLocalShellContext;
 }
 
 interface ResolveTerminalChainHostsOptions {
@@ -41,14 +46,18 @@ export function resolveEffectiveTerminalHost({
   groupConfigs,
   proxyProfiles,
   validProxyProfileIds = new Set(proxyProfiles.map((profile) => profile.id)),
+  defaultLocalShell,
 }: ResolveEffectiveHostOptions): Host {
   const groupDefaults = host.group
     ? resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds })
     : {};
-  return materializeHostProxyProfile(
+  const effectiveHost = materializeHostProxyProfile(
     applyGroupDefaults(host, groupDefaults, { validProxyProfileIds }),
     proxyProfiles,
   );
+  return defaultLocalShell
+    ? resolveHostDefaultLocalShell(effectiveHost, defaultLocalShell)
+    : effectiveHost;
 }
 
 const suppressDeviceTypeForShellTransport = (host: Host): Host => {
@@ -92,6 +101,7 @@ export function resolveTerminalSessionHost({
   groupConfigs,
   proxyProfiles,
   localOs,
+  defaultLocalShell,
 }: ResolveTerminalSessionHostOptions): Host {
   const vaultHost = hosts.find((host) => host.id === session.hostId);
   if (!vaultHost) return buildFallbackHostFromSession(session, localOs);
@@ -100,6 +110,7 @@ export function resolveTerminalSessionHost({
     host: vaultHost,
     groupConfigs,
     proxyProfiles,
+    defaultLocalShell,
   });
 
   const protocol = session.protocol ?? existingHost.protocol;

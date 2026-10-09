@@ -50,6 +50,7 @@ import {
   resolveTerminalChainHosts,
   resolveTerminalSessionHost,
 } from '../domain/terminalHostResolution';
+import { useDefaultLocalShellContext } from '../lib/useDiscoveredShells';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { toast } from './ui/toast';
 import { useI18n } from '../application/i18n/I18nProvider';
@@ -1193,14 +1194,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     () => new Set(proxyProfiles.map((profile) => profile.id)),
     [proxyProfiles],
   );
+  const defaultLocalShell = useDefaultLocalShellContext(terminalSettings);
   const effectiveHosts = useMemo(
     () => hosts.map((host) => resolveEffectiveTerminalHost({
       host,
       groupConfigs,
       proxyProfiles,
       validProxyProfileIds: proxyProfileIdSet,
+      defaultLocalShell,
     })),
-    [groupConfigs, hosts, proxyProfileIdSet, proxyProfiles],
+    [groupConfigs, hosts, proxyProfileIdSet, proxyProfiles, defaultLocalShell],
   );
 
   // Pre-compute fallback hosts to avoid creating new objects on every render
@@ -1213,11 +1216,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         groupConfigs,
         proxyProfiles,
         localOs: detectLocalOs(navigator.userAgent || navigator.platform),
+        defaultLocalShell,
       });
       map.set(session.id, applySessionFontSizeToHost(hostForSession, session));
     }
     return map;
-  }, [sessions, hosts, groupConfigs, proxyProfiles]);
+  }, [sessions, hosts, groupConfigs, proxyProfiles, defaultLocalShell]);
   const resolvedSessionHostIds = useMemo(() => {
     const ids = new Set<string>();
     for (const session of sessions) {

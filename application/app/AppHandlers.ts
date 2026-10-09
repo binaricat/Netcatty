@@ -4,6 +4,7 @@ import type { Host, HostProtocol, TerminalSession } from '../../types';
 import type { PassphraseRequest } from '../../components/PassphraseModal';
 import type { TerminalPopupPayload } from '../../domain/systemManager/types';
 import { getEffectiveHostDistro, classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from '../../domain/host';
+import { resolveHostDefaultLocalShell } from '../../domain/localShellHost';
 import { getAvailablePaneMagnificationController } from '../../domain/paneMagnification';
 import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
@@ -1108,26 +1109,11 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host, hi
 {
     const { username, hostname: localHost } = systemInfoRef.current;
 
-    let effectiveHost = resolveEffectiveHost(host);
-
-    // Local-shell vault hosts saved with "System default shell" carry no
-    // localShell; resolve the Settings → Terminal shell here (the same
-    // resolution ordinary local-terminal creation uses) so those hosts do not
-    // silently fall back to the OS default shell.
-    if (effectiveHost.protocol === 'local' && !effectiveHost.localShell) {
-      const configuredShell = terminalSettings?.localShell ?? '';
-      const resolved = resolveShellSetting?.(configuredShell, discoveredShells ?? [], terminalSettings?.localShellArgs);
-      if (resolved?.command) {
-        const matchedShell = discoveredShells?.find?.((s) => s.id === configuredShell);
-        effectiveHost = {
-          ...effectiveHost,
-          localShell: resolved.command,
-          localShellArgs: resolved.args,
-          localShellName: matchedShell?.name,
-          localShellIcon: matchedShell?.icon,
-        };
-      }
-    }
+    const effectiveHost = resolveHostDefaultLocalShell(resolveEffectiveHost(host), {
+      discoveredShells,
+      resolveShellSetting,
+      terminalSettings,
+    });
 
     // Handle serial hosts separately
     if (effectiveHost.protocol === 'serial') {

@@ -67,3 +67,43 @@ export const getVaultHostRowSubtitle = (
     ? getLocalShellHostSubtitle(host, options?.localFallback)
     : `${host.username ?? ''}@${host.hostname ?? ''}`
 );
+
+export interface ResolveDefaultLocalShellContext {
+  discoveredShells?: DiscoveredShell[];
+  terminalSettings?: { localShell?: string; localShellArgs?: string[] };
+  resolveShellSetting?: (
+    localShell: string,
+    discoveredShells: DiscoveredShell[],
+    customArgs?: string[],
+  ) => { command: string; args?: string[] } | null;
+}
+
+/**
+ * Saved local-shell hosts created with "System default shell" carry no
+ * `localShell`. Resolve the Settings → Terminal shell for them so every save
+ * path that materializes effective hosts (host connect, tray/dock open,
+ * workspace creation/append, ...) launches the configured shell instead of
+ * silently falling back to the backend OS default. A no-op for non-local
+ * hosts and for hosts that already specify a shell.
+ */
+export const resolveHostDefaultLocalShell = (
+  host: Host,
+  ctx: ResolveDefaultLocalShellContext,
+): Host => {
+  if (host.protocol !== 'local' || host.localShell) return host;
+  const configuredShell = ctx.terminalSettings?.localShell ?? '';
+  const resolved = ctx.resolveShellSetting?.(
+    configuredShell,
+    ctx.discoveredShells ?? [],
+    ctx.terminalSettings?.localShellArgs,
+  );
+  if (!resolved?.command) return host;
+  const matchedShell = ctx.discoveredShells?.find((s) => s.id === configuredShell);
+  return {
+    ...host,
+    localShell: resolved.command,
+    localShellArgs: resolved.args,
+    localShellName: matchedShell?.name,
+    localShellIcon: matchedShell?.icon,
+  };
+};

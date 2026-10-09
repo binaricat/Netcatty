@@ -200,6 +200,7 @@ export const ScriptEditorModal: React.FC<ScriptEditorModalProps> = ({
         customGroups={customGroups}
         selectedHostIds={selectedHostIds}
         multiSelect
+        allowLocalHosts={true}
         onSelect={onSelectHost}
         onSelectionChange={onSelectionChange}
         onConfirm={handleTargetsConfirm}

@@ -56,12 +56,16 @@ export const getVaultCsvTemplate = (
 // The legacy CSV format has no per-host shell columns, so local-shell vault
 // hosts are serialized as one encoded "LocalShell" field; hosts with a
 // non-default shell are otherwise lost on reimport (backup data silently
-// changed). Default-shell local hosts need no field: connecting resolves the
-// Settings shell the same way ordinary local-terminal creation does.
+// changed). Default-shell Windows/macOS local hosts still export their OS:
+// reimport defaults to Linux, and the OS is part of the reimport dedupe key,
+// so a macOS default-shell entry without an OS field would be reimported as
+// (and collapse with) a Linux host. Linux default-shell hosts match the
+// reimport default and need no field.
 const getLocalShellSpec = (host: Host): CsvLocalShellSpec | null => (
   host.protocol === "local"
     && (host.localShell || host.localShellName || host.localShellIcon
-      || host.localStartDir || host.localShellArgs?.length || host.os === "windows")
+      || host.localStartDir || host.localShellArgs?.length
+      || host.os === "windows" || host.os === "macos")
     ? {
         shell: host.localShell || undefined,
         shellArgs: host.localShellArgs?.length ? host.localShellArgs : undefined,

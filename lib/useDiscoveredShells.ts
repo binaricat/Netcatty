@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { netcattyBridge } from "../infrastructure/services/netcattyBridge";
+import type { ResolveDefaultLocalShellContext } from "../domain/localShellHost";
 
 let shellCache: DiscoveredShell[] | null = null;
 let shellPromise: Promise<DiscoveredShell[]> | null = null;
@@ -207,4 +208,19 @@ export function getShellIconPath(iconId: string): string {
 /** Distro icons are monochrome black and need `dark:invert` in dark mode */
 export function isMonochromeShellIcon(iconId: string): boolean {
   return DISTRO_ICONS.has(iconId);
+}
+
+/**
+ * Build the context consumed by `resolveHostDefaultLocalShell` (Settings shell
+ * + discovered shells + resolver) so every effective-host/session-creation
+ * boundary can resolve saved local hosts saved with "System default shell".
+ */
+export function useDefaultLocalShellContext(
+  terminalSettings?: { localShell?: string; localShellArgs?: string[] },
+): ResolveDefaultLocalShellContext {
+  const discoveredShells = useDiscoveredShells();
+  return useMemo(
+    () => ({ discoveredShells, resolveShellSetting, terminalSettings }),
+    [discoveredShells, terminalSettings],
+  );
 }
