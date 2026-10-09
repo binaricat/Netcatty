@@ -193,8 +193,8 @@ test("normalizeTerminalSettings preserves disabled terminal auto-close", () => {
   assert.equal(normalizeTerminalSettings({ autoCloseOnExit: false }).autoCloseOnExit, false);
 });
 
-test("normalizeTerminalSettings disables SSH auto reconnect by default", () => {
-  assert.equal(normalizeTerminalSettings().sshAutoReconnectEnabled, false);
+test("normalizeTerminalSettings enables SSH auto reconnect by default", () => {
+  assert.equal(normalizeTerminalSettings().sshAutoReconnectEnabled, true);
 });
 
 test("normalizeTerminalSettings preserves explicit SSH auto reconnect settings", () => {
