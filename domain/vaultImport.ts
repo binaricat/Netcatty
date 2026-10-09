@@ -328,10 +328,6 @@ const dedupeHosts = (
   hosts: Host[],
   options?: {
     isCollapsible?: (host: Host) => boolean;
-    // Optional merge-key override so importers can keep hosts distinct when
-    // buildVaultHostMergeKey alone is too coarse (e.g. local shells sharing
-    // the same endpoint/group but running different shells).
-    mergeKey?: (host: Host) => string;
   },
 ): { hosts: Host[]; duplicates: number } => {
   const seen = new Map<string, Host>();
@@ -343,7 +339,7 @@ const dedupeHosts = (
       retained.push(host);
       continue;
     }
-    const key = options?.mergeKey ? options.mergeKey(host) : hostKey(host);
+    const key = hostKey(host);
     const existing = seen.get(key);
     if (!existing) {
       seen.set(key, host);
@@ -611,22 +607,10 @@ const importFromCsv = (text: string): VaultImportResult => {
   }
 
   // Local-shell entries share the endpoint key (local|localhost|22|<group>), so
-  // include the shell identity in the merge key; otherwise importing a backup
-  // with CMD and PowerShell in the same group silently keeps only the first
-  // shell and flags the rest as duplicates.
-  const csvMergeKey = (host: Host): string => {
-    if (host.protocol !== "local") return hostKey(host);
-    const shellIdentity = [
-      host.os ?? "",
-      host.localShell ?? "",
-      host.localShellName ?? "",
-      host.localShellArgs ? JSON.stringify(host.localShellArgs) : "",
-      host.localStartDir ?? "",
-    ].join("|");
-    return `${hostKey(host)}|${shellIdentity}`;
-  };
-
-  const { hosts, duplicates } = dedupeHosts(parsedHosts, { mergeKey: csvMergeKey });
+  // the shell identity is part of buildVaultHostMergeKey; otherwise importing a
+  // backup with CMD and PowerShell in the same group silently keeps only the
+  // first shell and flags the rest as duplicates.
+  const { hosts, duplicates } = dedupeHosts(parsedHosts);
   const keyPassphrases = hosts.flatMap((host) => {
     const selectedKeyPath = host.identityFilePaths?.find((path) => path.trim())?.trim();
     if (!selectedKeyPath) return [];

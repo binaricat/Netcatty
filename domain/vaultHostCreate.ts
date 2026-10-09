@@ -190,14 +190,28 @@ export const buildVaultHostEndpointKey = (
 /**
  * Session identity for vault import/create dedupe.
  * Same endpoint in a different group is a distinct connection (e.g. direct vs proxy copy).
+ * Local-shell entries all share an endpoint key (local|localhost|22|<group>), so
+ * their shell identity (shell, args, name, start dir, OS) is part of the key:
+ * CMD and PowerShell entries in the same group must not collapse or skip each
+ * other during any import dedupe stage.
  */
 export const buildVaultHostMergeKey = (
-  host: Pick<Host, 'hostname' | 'port' | 'username' | 'protocol' | 'group'>,
+  host: Pick<Host, 'hostname' | 'port' | 'username' | 'protocol' | 'group'>
+    & Partial<Pick<Host, 'os' | 'localShell' | 'localShellArgs' | 'localShellName' | 'localStartDir'>>,
 ): string => {
   // Keep normalized group spelling (do not case-fold). Vault group paths are
   // compared exactly elsewhere, so Prod vs prod are distinct sessions.
   const group = normalizeGroupPath(host.group) ?? '';
-  return `${buildVaultHostEndpointKey(host)}|${group}`;
+  const endpointGroupKey = `${buildVaultHostEndpointKey(host)}|${group}`;
+  if (host.protocol !== 'local') return endpointGroupKey;
+  const shellIdentity = [
+    host.os ?? '',
+    host.localShell ?? '',
+    host.localShellName ?? '',
+    host.localShellArgs ? JSON.stringify(host.localShellArgs) : '',
+    host.localStartDir ?? '',
+  ].join('|');
+  return `${endpointGroupKey}|${shellIdentity}`;
 };
 
 export function buildVaultHostFromDraft(

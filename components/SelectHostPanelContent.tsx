@@ -106,8 +106,11 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
     onNewHostPanelOpenChange?.(showNewHostPanel);
   }, [onNewHostPanelOpenChange, showNewHostPanel]);
 
+  // This panel picks remote hosts for SSH-backed capabilities (tunnels,
+  // keychain targets, snippet/script runs); serial and local-shell hosts have
+  // no SSH session to target, so they are not selectable here.
   const selectableHosts = useMemo(
-    () => hosts.filter((host) => host.protocol !== 'serial'),
+    () => hosts.filter((host) => host.protocol !== 'serial' && host.protocol !== 'local'),
     [hosts],
   );
   const selectedHostIdSet = useMemo(

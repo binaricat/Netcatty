@@ -1208,8 +1208,13 @@ export function hasMultipleProtocolsImpl(getCtx: AppContextGetter, host: Host) {
     // Gates the protocol picker (legacy name kept for its existing wiring).
     // Only prompt when Telnet is available but isn't the host's default protocol;
     // SSH-only, SSH+Mosh and Telnet-default all connect directly.
+    // SSH-only guard, matching VaultView's handleHostConnect: local-shell and
+    // serial hosts must always launch their own transport, never offer
+    // SSH/Telnet pickers driven by an inherited group Telnet flag. Hosts
+    // without an explicit protocol are legacy SSH entries.
     const effective = resolveEffectiveHost(host);
-    return Boolean(effective.telnetEnabled) && effective.protocol !== 'telnet';
+    const effectiveProtocol = effective.protocol ?? 'ssh';
+    return effectiveProtocol === 'ssh' && Boolean(effective.telnetEnabled);
   }
 }
 

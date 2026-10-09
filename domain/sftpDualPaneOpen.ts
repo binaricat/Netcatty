@@ -46,6 +46,9 @@ export type DualPaneSftpPlan = {
 export function canOpenDualPaneSftp(host: { protocol?: string }): boolean {
   const protocol = host.protocol ?? "ssh";
   if (protocol === "serial") return false;
+  // Local-shell vault hosts have no SFTP/SSH channel: opening dual-pane SFTP
+  // from one would try to SSH into localhost with empty credentials.
+  if (protocol === "local") return false;
   if (isPluginHostProtocol(protocol)) return false;
   return true;
 }
