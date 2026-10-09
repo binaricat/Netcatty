@@ -1171,8 +1171,17 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             || (restoredStat.mode & 0o7777) !== intendedMode) {
             // Defensive: an fchmod that silently dropped its request would leave
             // the broadened bit on the held inode; fail closed either way.
-            throw new Error(
-              `Cannot publish local destination mode ${intendedMode.toString(8)}: the mount did not restore the intended mode`,
+            // The metadata restore failed just like the refused-chmod path
+            // below, so the same ownership caveat applies: cleanup is
+            // pathname-based and the pathname's ownership is no longer
+            // provable, so mark the handover and disclose the retained
+            // pathname instead of letting the caller's cleanup unlink a
+            // concurrently replaced name.
+            throw Object.assign(
+              new Error(
+                `Cannot publish local destination mode ${intendedMode.toString(8)}: the mount did not restore the intended mode`,
+              ),
+              { targetOwnershipRelinquished: true, retainedTarget: readyPath },
             );
           }
         } catch (restoreError) {
@@ -1185,9 +1194,20 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           // no longer see it.
           await preparedHandle?.close().catch(() => {});
           preparedHandle = null;
-          throw new Error(
-            `Cannot publish local destination mode ${intendedMode.toString(8)}: the mount refused to re-remove owner read`,
-            { cause: restoreError },
+          // This failure is thrown after the read-grant chmod succeeded, so
+          // the ready pathname's identity was last verified before that grant:
+          // by the time the caller's pathname-based cleanup runs, readyPath
+          // may hold either this module's broadened copy (whose extra
+          // owner-read bit could not be removed) or a concurrent writer's
+          // replacement. Cleanup cannot re-prove ownership, so mark the
+          // handover (the caller then leaves the name alone) and attach the
+          // retained pathname so the caller's recovery reporting discloses the
+          // leftover fragment rather than leaving a hidden partial behind.
+          throw Object.assign(
+            new Error(
+              `Cannot publish local destination mode ${intendedMode.toString(8)}: the mount refused to re-remove owner read`,
+            ),
+            { cause: restoreError, targetOwnershipRelinquished: true, retainedTarget: readyPath },
           );
         }
         // The handle-pinned restore cannot relabel a foreign replacement, but
