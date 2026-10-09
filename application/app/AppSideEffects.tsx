@@ -1398,14 +1398,17 @@ export function AppSideEffects() {
     return handleConnectToHostImpl(() => ({
       addConnectionLog,
       connectToHost,
+      discoveredShells,
       host,
       identities,
       keys,
       resolveEffectiveHost: effectiveHostResolver,
       resolveHostAuth,
+      resolveShellSetting,
       systemInfoRef,
+      terminalSettings,
     }), host, hidden);
-  }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys]);
+  }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys, discoveredShells, terminalSettings]);
 
   const handleConnectToHostWithTabName = useCallback((host: Host, tabName?: string) => {
     const sessionId = handleConnectToHost(host);

@@ -727,10 +727,14 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       };
       // Open the edit panel with the duplicated host for modification
       if (duplicatedHost.protocol === "local") {
+        setEditingHost(null);
+        setIsHostPanelOpen(false);
         setEditingLocalShellHost(duplicatedHost);
         setIsLocalShellHostPanelOpen(true);
         return;
       }
+      setEditingLocalShellHost(null);
+      setIsLocalShellHostPanelOpen(false);
       setEditingHost(duplicatedHost);
       setIsHostPanelOpen(true);
     },

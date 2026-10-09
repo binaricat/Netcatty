@@ -65,7 +65,12 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
   const [shell, setShell] = useState(initialData?.localShell ?? '');
   const [startDir, setStartDir] = useState(initialData?.localStartDir ?? '');
   const [tags, setTags] = useState<string[]>(initialData?.tags ?? []);
-  const [group, setGroup] = useState(initialData?.group ?? '');
+  // On creation, initialize from defaultGroup so the field reflects what a
+  // plain save would persist; clearing it then intentionally saves at the
+  // vault root. Edits keep the host's own group (possibly empty).
+  const [group, setGroup] = useState(
+    initialData ? initialData.group ?? '' : defaultGroup ?? '',
+  );
   const [notes, setNotes] = useState(initialData?.notes ?? '');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -129,7 +134,9 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
       shellName: shellMeta?.name,
       shellIcon: shellMeta?.icon,
       startDir,
-      group: group || defaultGroup || '',
+      // Save the controlled value directly: '' means the user explicitly
+      // cleared the group, which persists at the vault root.
+      group: group,
       tags,
       notes,
     });
