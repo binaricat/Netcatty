@@ -205,14 +205,50 @@ test("promotion fails closed when a same-device rename stage matches neither the
   const chmodRestore = stubPromises("chmod", async () => {
     throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
   });
+  // Metadata refusal is simulated at the owned-handle level too, like the
+  // gvfsd-fuse-style mounts above that reject chmod entirely; only mounts
+  // that reject pathname chmods while accepting fchmod can still recover.
+  const handleChmodRestore = makeHandleStub(
+    "chmod",
+    Object.assign(new Error("EOPNOTSUPP: Operation not supported"), { code: "EOPNOTSUPP" }),
+  );
   t.after(chmodRestore);
+  t.after(handleChmodRestore);
   await assert.rejects(
     () => transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o600 }),
     /mount refused chmod/,
   );
   assert.equal(fs.readFileSync(target, "utf8"), "original");
   assert.equal(fs.statSync(target).mode & 0o777, 0o600);
-  assert.equal(fs.readdirSync(dir).filter((name) => name !== "staged" && name !== "target").length, 0);
+  // The failed promotion relinquishes the ready pathname instead of unlinking
+  // it after the mode check: the retained prepared fragment is disclosed
+  // through recovery reporting rather than silently accumulating.
+  const leftovers = fs.readdirSync(dir).filter((name) => name !== "staged" && name !== "target");
+  assert.equal(leftovers.length, 1);
+  assert.match(leftovers[0], /\.ready$/);
+  assert.ok(fs.readFileSync(path.join(dir, leftovers[0])).equals(Buffer.alloc(64 * 1024, 21)));
+});
+
+test("promotion relabels the prepared inode through its handle when only pathname chmod is refused", async (t) => {
+  const dir = makeTempDir("promote-same-device-fchmod-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(64 * 1024, 33);
+  fs.writeFileSync(staged, payload, { mode: 0o644 });
+  fs.writeFileSync(target, "original");
+  fs.chmodSync(target, 0o600);
+  // Same-device staging keeps the staged 0644 mode. The mount refuses
+  // pathname-based chmod but accepts an fd chmod on the pinned handle, so
+  // promotion relabels the prepared inode and publishes the exact 0600 mode.
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  t.after(chmodRestore);
+  await transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o600 });
+  assert.ok(fs.readFileSync(target).equals(payload));
+  assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+  assert.equal(fs.readdirSync(dir).filter((name) => name !== "target").length, 0);
 });
 
 test("promotion publishes without chmod when a same-device rename stage already carries the destination mode", async (t) => {

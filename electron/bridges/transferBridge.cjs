@@ -1280,9 +1280,38 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           }
           const readyMode = readyStat.mode & 0o7777;
           if (readyMode !== mode) {
-            throw new Error(
-              `Cannot publish local destination mode ${mode.toString(8)}: the mount refused chmod and the prepared file has mode ${readyMode.toString(8)}`,
-              { cause: error },
+            // The pathname chmod was refused: relabel the prepared inode
+            // through the handle pinned to it before failing. An fd chmod
+            // can still succeed on mounts that only reject pathname chmods.
+            let relabelled = false;
+            if (preparedHandle) {
+              try {
+                let relabelPathIdentity = null;
+                try {
+                  relabelPathIdentity = fileIdentity(await fs.promises.lstat(readyPath));
+                } catch { relabelPathIdentity = null; }
+                if (relabelPathIdentity === pinnedIdentity) {
+                  await preparedHandle.chmod(mode);
+                  const heldStat = await preparedHandle.stat();
+                  relabelled = fileIdentity(heldStat) === pinnedIdentity
+                    && (heldStat.mode & 0o7777) === mode;
+                }
+              } catch { relabelled = false; }
+            }
+            if (relabelled) {
+              appliedMode = mode;
+              continue;
+            }
+            // Ownership was only proven at the readyStat check above. Throwing
+            // an ordinary error would let the caller's pathname-based cleanup
+            // unlink whoever owns readyPath by then, so relinquish the name
+            // and disclose the retained prepared file through the recovery
+            // reporting instead.
+            throw Object.assign(
+              new Error(
+                `Cannot publish local destination mode ${mode.toString(8)}: the mount refused chmod and the prepared file has mode ${readyMode.toString(8)}`,
+              ),
+              { cause: error, targetOwnershipRelinquished: true, retainedTarget: readyPath },
             );
           }
         }
