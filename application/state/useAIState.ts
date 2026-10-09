@@ -947,7 +947,11 @@ export function useAIState() {
     // retry by the store, so `aliasSessionHandles` resolving is NOT confirmation
     // that the copies landed — requiring confirmation here before publishing
     // closes the window where an app exit before the retry would leave the
-    // branch's retained references permanently unresolvable.
+    // branch's retained references permanently unresolvable. Retained ids with
+    // no durable source record at all (a hallucinated handle id from a failed
+    // tool_output_read, or already-pruned output) are reconciled out by the
+    // store's confirmation: they can never materialize, and the branch reads
+    // them as missing at runtime just like the source.
     if (retainedHandleIds.size > 0) {
       const toolOutputStore = getAgentRuntime().getToolOutputStore(source.id);
       try {

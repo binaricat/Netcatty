@@ -2120,14 +2120,18 @@ async function handleWorkerJobPoll(params = {}) {
   const workerChatSessionId = job.chatSessionId || chatSessionId || null;
   if (job.sessionId) {
     const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
-    // An inheritor-registered job stays pollable by its owner chat even after
-    // that chat's scope snapshot is gone (owner deleted, a live branch still
-    // inherited the job): ownership plus the registered inheritance is the
-    // authorization then — the scope snapshot for the deleted chat resolves
-    // to an empty list forever, so it can no longer say "in scope".
+    // An inheritor-registered job stays pollable by its owner chat only after
+    // that chat was actually torn down (deleted/cancelled while a live branch
+    // still inherited the job — `markOwnerTornDownInheritedJobs` recorded the
+    // deferred cancellation): the deleted chat's scope snapshot then resolves
+    // to an empty list forever, so it can no longer say "in scope", and
+    // ownership plus the registered inheritance is the authorization. A live
+    // owner whose scope snapshot merely went empty (its terminal disappeared
+    // from the workspace) must NOT get this bypass: it keeps scope
+    // validation like any other caller.
     const ownerScopeSnapshotGone = chatSessionId === job.chatSessionId
       && getScopedSessionIds(chatSessionId || null).length === 0
-      && inheritedJobInheritors.has(jobId);
+      && ownerTornDownInheritedJobs.has(jobId);
     if (scopeErr && !ownerScopeSnapshotGone) return { ok: false, error: scopeErr };
   }
   const result = await terminalWorkerManager.request("netcatty:ai:jobPoll", {
@@ -2673,6 +2677,7 @@ const execHandlerApi = createExecHandlerApi({
   // (branched chats that inherited the job from their undo source).
   isInheritedJobControl: isInheritedJobInheritor,
   jobHasInheritors: (jobId) => inheritedJobInheritors.has(jobId),
+  jobOwnerTornDown: (jobId) => ownerTornDownInheritedJobs.has(jobId),
   getScopedSessionIds,
 });
 const {

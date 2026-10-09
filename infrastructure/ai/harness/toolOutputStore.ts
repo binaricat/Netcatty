@@ -94,6 +94,12 @@ export const TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS = 50;
 const TOOL_OUTPUT_ALIAS_CONFIRM_BUDGET_MS = 4_000;
 const TOOL_OUTPUT_ALIAS_CONFIRM_POLL_MS = 100;
 const TOOL_OUTPUT_ALIAS_CONFIRM_MAX_POLL_MS = 800;
+// Cap for the retained alias ids recorded as definitively missing under their
+// source session (see `missingSourceHandleIds`). Handle ids are UUID-like and
+// never intentionally reused, so a capped FIFO only guards pathological callers
+// against unbounded growth; losing the oldest entries could at worst re-require
+// an unmaterializable id in a later confirmation pass.
+const TOOL_OUTPUT_MAX_MISSING_SOURCE_HANDLES = 1024;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_BITS = 1 << 22;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_HASHES = 4;
 
@@ -231,6 +237,14 @@ export class ToolOutputStore {
   // cannot run yet: persistence installs on the first turn (for example undo
   // immediately after an app restart), or `restore` just rejected transiently.
   // Retried with capped backoff (and replayed once persistence appears).
+  // Retained alias ids whose source record definitively does not exist: an
+  // installed `persistence.restore` ran against the source namespace and
+  // resolved without a usable record (a hallucinated handle id from a failed
+  // `tool_output_read`, or a source output whose durable record is already
+  // gone). Such an id can never become materialized, so confirming an undo
+  // must reconcile it out instead of requiring it — the branch (and the
+  // source itself) just reads the reference as missing at runtime.
+  private readonly missingSourceHandleIds = new Set<string>();
   private readonly pendingAliasRestores = new Map<string, AliasRestoreRequest>();
   // Requests evicted from the pending-restore cap above. They keep their
   // recoverable source→branch relationship (instead of being dropped, which
@@ -588,6 +602,15 @@ export class ToolOutputStore {
           // the retained prefix references it, and the branch namespace never
           // falls back to the source restore later.
           missingRestoreHandleIds.push(handleId);
+        } else if (!sourceHandle) {
+          // `restore` ran and definitively resolved without a usable record
+          // under the source namespace: nothing exists to alias or to
+          // materialize a durable copy from, and no retry can change that.
+          // Record the id so the branch-publish confirmation reconciles it
+          // out (the branch reads the reference as missing at runtime, like
+          // the source does) instead of aborting every undo over a
+          // hallucinated or already-pruned handle id forever.
+          this.recordMissingSourceHandleId(sourceChatSessionId, handleId);
         }
       }
       if (!sourceHandle || sourceHandle.evicted || targetMap.has(handleId)) continue;
@@ -641,7 +664,10 @@ export class ToolOutputStore {
    * manifest after a restart. Drives the restore and durable-copy retry passes
    * directly (their scheduled timers back off behind other chats) for a
    * bounded budget, then reports the ids that remain unconfirmed so the caller
-   * can abort instead of publishing an unbacked branch.
+   * can abort instead of publishing an unbacked branch. Ids definitively
+   * missing under the source namespace (nothing exists to materialize) are
+   * reconciled out of the confirmation instead of aborting: the branch reads
+   * them as missing at runtime, exactly like the source itself does.
    */
   async confirmRetainedAliasesMaterialized(
     sourceChatSessionId: string,
@@ -655,6 +681,7 @@ export class ToolOutputStore {
     let lastUnconfirmedCount = Number.POSITIVE_INFINITY;
     for (;;) {
       const unconfirmed = this.unconfirmedRetainedAliasIds(
+        sourceChatSessionId,
         targetChatSessionId,
         retainedHandleIds,
       );
@@ -707,18 +734,33 @@ export class ToolOutputStore {
    * The retained handle ids that do not yet have a durable branch-owned record
    * under `targetChatSessionId`. The in-memory alias alone is not confirmation:
    * until its durable copy lands it reads the source-owned file, which a
-   * restart can no longer resolve under the branch namespace.
+   * restart can no longer resolve under the branch namespace. Ids definitively
+   * recorded as missing under the source namespace (see
+   * `missingSourceHandleIds`) are reconciled out: they can never become
+   * materialized, and requiring them would abort every undo over a
+   * hallucinated or already-pruned retained reference.
    */
   private unconfirmedRetainedAliasIds(
+    sourceChatSessionId: string,
     targetChatSessionId: string,
     retainedHandleIds: ReadonlySet<string>,
   ): string[] {
     const unconfirmed: string[] = [];
     for (const handleId of retainedHandleIds) {
       if (this.materializedAliasKeys.has(`${targetChatSessionId}:${handleId}`)) continue;
+      if (this.missingSourceHandleIds.has(`${sourceChatSessionId}:${handleId}`)) continue;
       unconfirmed.push(handleId);
     }
     return unconfirmed;
+  }
+
+  private recordMissingSourceHandleId(sourceChatSessionId: string, handleId: string): void {
+    this.missingSourceHandleIds.add(`${sourceChatSessionId}:${handleId}`);
+    while (this.missingSourceHandleIds.size > TOOL_OUTPUT_MAX_MISSING_SOURCE_HANDLES) {
+      const oldest = this.missingSourceHandleIds.values().next().value;
+      if (oldest === undefined) break;
+      this.missingSourceHandleIds.delete(oldest);
+    }
   }
 
   private enforcePendingAliasRestoresLimit(): void {

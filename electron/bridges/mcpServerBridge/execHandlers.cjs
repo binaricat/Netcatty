@@ -443,14 +443,18 @@ function createExecHandlerApi(ctx) {
       // accepting inheritor, matching the caller-agnostic ownership check.
       if (job.sessionId) {
         const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
-        // An inheritor-registered job stays pollable by its owner chat even
-        // after that chat's scope snapshot is gone (owner deleted, a live
-        // branch still inherited the job): ownership plus the registered
-        // inheritance is the authorization then.
-        const ownerScopeSnapshotGone = typeof jobHasInheritors === "function"
+        // An inheritor-registered job stays pollable by its owner chat only
+        // after that chat was actually torn down (deleted/cancelled while a
+        // live branch still inherited the job, so the cancellation was
+        // deferred): the deleted chat's scope snapshot then resolves to an
+        // empty list forever, and ownership plus the registered inheritance
+        // is the authorization. A live owner whose scope snapshot merely went
+        // empty (its terminal disappeared from the workspace) keeps scope
+        // validation like any other caller.
+        const ownerScopeSnapshotGone = typeof jobOwnerTornDown === "function"
           && typeof getScopedSessionIds === "function"
           && chatSessionId === job.chatSessionId
-          && jobHasInheritors(jobId)
+          && jobOwnerTornDown(jobId)
           && getScopedSessionIds(chatSessionId).length === 0;
         if (scopeErr && !ownerScopeSnapshotGone) return { ok: false, error: scopeErr };
       }
