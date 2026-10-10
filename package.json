@@ -157,7 +157,7 @@
     "@vitejs/plugin-react": "^5.1.2",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^42.3.3",
+    "electron": "^42.11.12",
     "electron-builder": "^26.15.2",
     "esbuild": "0.27.2",
     "eslint": "^9.39.1",
