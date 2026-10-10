@@ -87,7 +87,7 @@ function todayFileName() {
 
 function boundedText(text, maxChars) {
   if (typeof text !== "string" || text.length <= maxChars) return text;
-  return `${text.slice(0, maxChars)}… [truncated]`;
+  return `${text.slice(0, maxChars)} ... [truncated]`;
 }
 
 function buildEntry(source, err, extra) {

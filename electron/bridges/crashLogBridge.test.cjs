@@ -15,8 +15,17 @@ const {
   truncateFileToTail,
 } = require("./crashLogBridge.cjs").__internals;
 
-function tmpFile(name = "crash-2026-10-10.log") {
+// Creates a unique temp directory for one test and registers teardown on the
+// test context so large fixture files never outlive the run.
+function tmpFile(t, name = "crash-2026-10-10.log") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-crashlog-"));
+  t.after(() => {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // best effort cleanup
+    }
+  });
   return { dir, filePath: path.join(dir, name) };
 }
 
@@ -29,8 +38,8 @@ function entryLine(padLen = 0) {
   });
 }
 
-test("appendEntryLine stops accepting entries once the per-day file reaches the size cap", () => {
-  const { filePath } = tmpFile();
+test("appendEntryLine stops accepting entries once the per-day file reaches the size cap", (t) => {
+  const { filePath } = tmpFile(t);
 
   assert.equal(appendEntryLine(filePath, entryLine()), true, "first entry written");
   assert.equal(
@@ -77,13 +86,13 @@ test("serializeEntry keeps serialized lines bounded even for huge extras", () =>
 test("boundedText truncates long strings and leaves short ones alone", () => {
   assert.equal(boundedText("short", 100), "short");
   const cut = boundedText("a".repeat(5000), 4096);
-  assert.equal(cut.length, 4096 + "… [truncated]".length);
+  assert.equal(cut.length, 4096 + " ... [truncated]".length);
   assert.ok(cut.startsWith("a".repeat(4096)));
   assert.ok(cut.endsWith("[truncated]"));
 });
 
-test("truncateFileToTail trims oversized files to their last lines", () => {
-  const { filePath } = tmpFile();
+test("truncateFileToTail trims oversized files to their last lines", (t) => {
+  const { filePath } = tmpFile(t);
 
   // Simulate a pathological file like issue #3626's 149.7 GB log by writing
   // a ~17 MB file of valid JSONL lines (each ~16 KB), then trimming.
@@ -106,8 +115,8 @@ test("truncateFileToTail trims oversized files to their last lines", () => {
   assert.equal(truncateFileToTail(filePath, MAX_LOG_FILE_BYTES), false);
 });
 
-test("truncateFileToTail tolerates a tail with no newline and missing files", () => {
-  const { dir, filePath } = tmpFile();
+test("truncateFileToTail tolerates a tail with no newline and missing files", (t) => {
+  const { dir, filePath } = tmpFile(t);
 
   // Missing file
   assert.equal(truncateFileToTail(path.join(dir, "crash-2026-01-01.log"), MAX_LOG_FILE_BYTES), false);
