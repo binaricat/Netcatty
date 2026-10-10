@@ -26,6 +26,11 @@ const VALID_BACKENDS = new Set(listBackends());
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MODEL_CACHE_MAX_ENTRIES = 32;
 const MODEL_LIST_TIMEOUT_MS = 10000;
+// Per-backend overrides for the catalog budget above. MiMo cold-boots a
+// dedicated `mimo serve` process for every catalog pull (unlike OpenCode's
+// pooled server), so its server start + provider query needs more than the
+// shared default.
+const MODEL_LIST_TIMEOUT_OVERRIDES_MS = { mimo: 30_000 };
 const sdkModelCache = new Map();
 const sdkModelInFlight = new Map();
 const {
@@ -985,9 +990,12 @@ function registerSdkStreamHandlers(ctx) {
               }),
               // Include OpenCode cold startup in this single cancellable
               // catalog budget, then allow the normal provider-query budget.
-              backendKey === "opencode"
-                ? OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
-                : MODEL_LIST_TIMEOUT_MS,
+              // Per-backend overrides (see MODEL_LIST_TIMEOUT_OVERRIDES_MS)
+              // win over both the shared default and OpenCode's budget.
+              MODEL_LIST_TIMEOUT_OVERRIDES_MS[backendKey]
+                ?? (backendKey === "opencode"
+                  ? OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
+                  : MODEL_LIST_TIMEOUT_MS),
               abortController,
             );
             const { currentModelId, models } = normalizeSdkListModelsResult(raw);
@@ -1287,6 +1295,7 @@ function registerSdkStreamHandlers(ctx) {
 
 module.exports = {
   registerSdkStreamHandlers,
+  MODEL_LIST_TIMEOUT_OVERRIDES_MS,
   resolveBackendKey,
   resolveSdkBackendBinPath,
   buildSdkSessionKey,

@@ -766,26 +766,19 @@ function emptyMimoModelCatalog() {
  * The OpenCode driver keeps a pooled server because catalog loads are frequent;
  * MiMo Code has no such traffic yet, so spawning per call keeps this simple.
  */
-async function listMimoModels({ env, binPath, cwd, mimoFactory, mimoConfigReader, abortController, signal } = {}) {
+async function listMimoModels({ env, binPath, cwd, mimoFactory, abortController, signal } = {}) {
   const effectiveSignal = signal || abortController?.signal;
   if (effectiveSignal?.aborted) return emptyMimoModelCatalog();
   let instance = null;
   try {
     const factory = mimoFactory || ((options) => spawnMimoServer({ ...options, cwd, env, binPath }));
-    const configReader = mimoConfigReader || (mimoFactory
-      ? async () => ({ project: [], global: [] })
-      : () => readMimoSkillPaths({ cwd, env, binPath, signal: effectiveSignal }));
-    const skillPaths = await configReader();
-    if (effectiveSignal?.aborted) return emptyMimoModelCatalog();
-    const trustedPaths = filterMimoTrustedSkillPaths(skillPaths.project, {
-      cwd, env: { ...process.env, ...env }, globalSkillPaths: skillPaths.global,
-    });
+    // Deliberately skip readMimoSkillPaths(): it spawns `mimo debug config`
+    // (seconds on a cold CLI) only to seed the server's skills config, which
+    // the provider catalog never reads. Keeping the chain to serve + providers
+    // is what lets the catalog fit its timeout budget at all.
     const port = await getAvailablePort();
     instance = await factory({
-      config: {
-        autoupdate: false,
-        ...(skillPaths.project.length > 0 ? { skills: { paths: trustedPaths } } : {}),
-      },
+      config: { autoupdate: false },
       port,
       signal: effectiveSignal,
     });

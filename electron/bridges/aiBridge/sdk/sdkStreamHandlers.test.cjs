@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   registerSdkStreamHandlers,
+  MODEL_LIST_TIMEOUT_OVERRIDES_MS,
   buildSdkTurnPrompt,
   formatSdkHistoryReplaySection,
   buildSdkModelCacheKey,
@@ -1066,4 +1067,8 @@ test("OpenCode catalog IPC allows cold startup past 10s and still aborts a stall
   await entered;
   complete(catalog);
   assert.deepEqual(await retried, { ok: true, ...catalog });
+});
+
+test("model catalog timeout override widens the budget only for mimo", () => {
+  assert.deepEqual(MODEL_LIST_TIMEOUT_OVERRIDES_MS, { mimo: 30_000 });
 });

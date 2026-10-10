@@ -1284,3 +1284,40 @@ test("listMimoModels stops when the service exits during provider discovery", as
   assert.deepEqual(result, { currentModelId: null, models: [] });
   assert.equal(closeCount, 1);
 });
+
+test("listMimoModels does not probe skill paths (no `mimo debug config` spawn) before the catalog server", async () => {
+  const spawns = [];
+  spawnMock = (command, args) => {
+    spawns.push({ command, args });
+    return fakeChild();
+  };
+  try {
+    const models = await listMimoModels({
+      binPath: "/tmp/mimo-no-skill-probe",
+      mimoFactory: async () => ({
+        client: {
+          config: {
+            providers: async () => ({
+              providers: [
+                { id: "xiaomi", name: "Xiaomi", models: { "mimo-v2.6-flash": { name: "MiMo V2.6 Flash" } } },
+              ],
+              default: { xiaomi: "mimo-v2.6-flash" },
+            }),
+          },
+        },
+        server: { close() {} },
+      }),
+    });
+    // The provider catalog never reads skill paths, so the driver must not
+    // pay the `mimo debug config` spawn (it alone can exceed the catalog
+    // timeout). No child-process spawn may happen at all — the factory above
+    // stands in for the server.
+    assert.deepEqual(spawns, []);
+    assert.deepEqual(models, {
+      currentModelId: "xiaomi/mimo-v2.6-flash",
+      models: [{ id: "xiaomi/mimo-v2.6-flash", name: "Xiaomi MiMo V2.6 Flash" }],
+    });
+  } finally {
+    spawnMock = null;
+  }
+});
