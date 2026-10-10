@@ -159,10 +159,16 @@ export function matchesWordPrefixQuery(
     .filter((word) => word.length > 0);
   if (words.length === 0) return false;
 
-  const compactQuery = compactText(normalizedQuery);
+  // The compact/pinyin fallback must not discard the query's leading
+  // punctuation: option-style needles like "--ve" or "-d" would otherwise
+  // match words ("version", "deploy") that never literally start with them
+  // and displace the real Fig option completions while typing flags.
+  const compactQuery = /^[a-z0-9]/.test(normalizedQuery)
+    ? compactText(normalizedQuery)
+    : "";
   return words.some((word) => {
     if (word.startsWith(normalizedQuery)) return true;
-    if (!compactQuery || !/[a-z0-9]/i.test(normalizedQuery)) return false;
+    if (!compactQuery) return false;
     const { full, initials } = getPinyinVariants(word);
     return (
       (full !== "" && full.startsWith(compactQuery))

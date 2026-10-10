@@ -128,3 +128,14 @@ test("prefixOnly mode matches Chinese labels via pinyin and initials", () => {
   const mailbox = snip({ id: "yx", label: "邮箱", command: "user@example.com" });
   assert.equal(getSnippetSuggestions("yx", [mailbox], { prefixOnly: true })[0]?.snippet?.id, "yx");
 });
+
+test("prefixOnly mode does not match option-prefixed needles (#3623)", () => {
+  // The pinyin fallback must not strip the leading "--"/"-" punctuation:
+  // "--ve" (from `git --ve`) would otherwise match "version", and "-d"
+  // (from `git -d`) match "deploy" via a single typed letter, displacing
+  // the real Fig option completions while typing flags.
+  const version = snip({ id: "v", label: "version", command: "echo version" });
+  const deploy = snip({ id: "d", label: "deploy", command: "kubectl apply" });
+  assert.deepEqual(getSnippetSuggestions("--ve", [version], { prefixOnly: true }), []);
+  assert.deepEqual(getSnippetSuggestions("-d", [deploy], { prefixOnly: true }), []);
+});
