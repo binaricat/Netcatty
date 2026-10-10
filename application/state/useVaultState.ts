@@ -79,7 +79,8 @@ import {
   publishNotesSnapshot,
   registerNotesActions,
 } from "./notesStore";
-import { commitVaultNotesWrite, rebasePendingVaultNotes } from "./vaultNotesPersistence";
+import { commitVaultNotesWrite } from "./vaultNotesPersistence";
+import { rebasePendingVaultNotes } from "../../domain/vaultNotesReconciliation";
 import { publishShellHistorySnapshot } from "./shellHistoryStore";
 import { setVaultInitialized } from "./vaultInitStore";
 import { notify } from "../notification";
