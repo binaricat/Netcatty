@@ -559,28 +559,60 @@ export interface AgentModelPreset {
 
 const CLAUDE_REASONING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
 
+// Fallback presets used when the live catalog (SDK listModels) is unavailable.
+// Mirrors the live model picker catalog observed 2026-10-10 (claude CLI
+// 2.1.296); ids are explicit model ids sent to the CLI verbatim and were
+// verified against the binary's model-id strings and alias table
+// (opus/sonnet/haiku → claude-*-5-5, fable → claude-fable-5-1). Live
+// discovery supersedes this list whenever it succeeds. `default` has no
+// fixed alias target and keeps the CLI's own neutral label.
 export const CLAUDE_MODEL_PRESETS: AgentModelPreset[] = [
   {
     id: 'default',
-    name: 'Opus 4.6',
+    name: 'Default (recommended)',
     description: 'Recommended',
     thinkingLevels: [...CLAUDE_REASONING_LEVELS],
     defaultThinkingLevel: 'medium',
   },
   {
-    id: 'sonnet',
-    name: 'Sonnet 4.6',
+    id: 'claude-opus-5-5',
+    name: 'Opus 5.5',
+    description: 'Flagship',
+    thinkingLevels: [...CLAUDE_REASONING_LEVELS],
+    defaultThinkingLevel: 'medium',
+  },
+  {
+    id: 'claude-fable-5-1',
+    name: 'Fable 5.1',
+    description: 'Latest Fable',
+  },
+  {
+    id: 'claude-sonnet-5-5',
+    name: 'Sonnet 5.5',
     description: 'Everyday tasks',
     thinkingLevels: [...CLAUDE_REASONING_LEVELS],
     defaultThinkingLevel: 'medium',
   },
   {
-    id: 'haiku',
-    name: 'Haiku 4.5',
-    description: 'Fastest',
+    id: 'claude-haiku-5-5',
+    name: 'Haiku 5.5',
+    description: 'Fastest current',
     thinkingLevels: [...CLAUDE_REASONING_LEVELS],
     defaultThinkingLevel: 'low',
   },
+  {
+    id: 'claude-haiku-4-5',
+    name: 'Haiku 4.5',
+    thinkingLevels: [...CLAUDE_REASONING_LEVELS],
+    defaultThinkingLevel: 'low',
+  },
+  { id: 'claude-sonnet-5', name: 'Sonnet 5' },
+  { id: 'claude-opus-5', name: 'Opus 5' },
+  { id: 'claude-fable-5', name: 'Fable 5' },
+  { id: 'claude-opus-4-8', name: 'Opus 4.8' },
+  { id: 'claude-opus-4-7', name: 'Opus 4.7' },
+  { id: 'claude-opus-4-6', name: 'Opus 4.6' },
+  { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6' },
 ];
 
 // Curated codex model list (codex-sdk has no enumeration API). IDs/efforts
