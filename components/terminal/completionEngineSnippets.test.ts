@@ -14,8 +14,28 @@ test("getCompletions includes snippet suggestions at the command position", asyn
   assert.equal(snip?.displayText, "deploy");
 });
 
-test("getCompletions does not surface snippets past the command position", async () => {
-  const out = await getCompletions("git dep", { snippets: [deploySnippet] });
+test("getCompletions surfaces prefix-matching snippets while typing an argument (#3622)", async () => {
+  const out = await getCompletions("git pull dep", { snippets: [deploySnippet] });
+  const snip = out.find((s) => s.source === "snippet");
+  assert.ok(snip, "expected a snippet suggestion while typing an argument");
+  assert.equal(snip?.displayText, "deploy");
+});
+
+test("getCompletions does not surface snippets for mid-word argument matches", async () => {
+  // Argument-position matching works on word boundaries only: "mai" sits
+  // mid-word in "gmail" and must not surface the snippet.
+  const substringSnippet: Snippet = { id: "gm", label: "gmail", command: "echo gmail" };
+  const out = await getCompletions("git push mai", { snippets: [substringSnippet] });
+  assert.equal(out.find((s) => s.source === "snippet"), undefined);
+});
+
+test("getCompletions does not surface snippets for single-character arguments", async () => {
+  const out = await getCompletions("git pull d", { snippets: [deploySnippet] });
+  assert.equal(out.find((s) => s.source === "snippet"), undefined);
+});
+
+test("getCompletions yields argument-position snippets to path completion", async () => {
+  const out = await getCompletions("cat dep", { snippets: [deploySnippet] });
   assert.equal(out.find((s) => s.source === "snippet"), undefined);
 });
 

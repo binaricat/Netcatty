@@ -139,6 +139,39 @@ export function matchesSearchQuery(
 }
 
 /**
+ * Word-prefix matcher: the query must prefix-match a whole token (word) of one
+ * of the fields — including that token's pinyin full/initials forms. Strictly
+ * weaker than matchesSearchQuery's substring behavior; used where substring
+ * noise is undesirable, e.g. snippet completions while typing an argument
+ * (issue #3622). Dashes/underscores separate tokens, so "set-email" still
+ * matches from the word "email".
+ */
+export function matchesWordPrefixQuery(
+  query: string,
+  ...fields: Array<string | null | undefined>
+): boolean {
+  const normalizedQuery = normalizeText(query);
+  if (!normalizedQuery) return true;
+
+  const words = fields
+    .filter((field): field is string => typeof field === "string" && field.trim().length > 0)
+    .flatMap((field) => normalizeText(field).split(SEARCH_SPLIT_REGEX))
+    .filter((word) => word.length > 0);
+  if (words.length === 0) return false;
+
+  const compactQuery = compactText(normalizedQuery);
+  return words.some((word) => {
+    if (word.startsWith(normalizedQuery)) return true;
+    if (!compactQuery || !/[a-z0-9]/i.test(normalizedQuery)) return false;
+    const { full, initials } = getPinyinVariants(word);
+    return (
+      (full !== "" && full.startsWith(compactQuery))
+      || (initials !== "" && initials.startsWith(normalizedQuery))
+    );
+  });
+}
+
+/**
  * Host search should avoid mixing label/group tokens with hostname/IP tokens.
  * Otherwise queries like "山东 6-1" can accidentally match:
  * - "山东" from group/label

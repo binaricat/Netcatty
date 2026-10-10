@@ -8,7 +8,7 @@
  */
 import type { Snippet } from "../../../domain/models";
 import { snippetAppliesToHost } from "../../../domain/snippetTargets";
-import { matchesSearchQuery } from "../../../lib/searchMatcher";
+import { matchesSearchQuery, matchesWordPrefixQuery } from "../../../lib/searchMatcher";
 import type { CompletionSuggestion } from "./completionEngine";
 
 const SNIPPET_BASE_SCORE = 2000; // Above history (1000+freq) per "snippet > history".
@@ -30,7 +30,7 @@ function snippetAvailableForAutocomplete(
 export function getSnippetSuggestions(
   input: string,
   snippets: Snippet[],
-  options: { hostId?: string; hostGroup?: string } = {},
+  options: { hostId?: string; hostGroup?: string; prefixOnly?: boolean } = {},
 ): CompletionSuggestion[] {
   const needle = input.trim().toLowerCase();
   if (!needle || !Array.isArray(snippets)) return [];
@@ -44,10 +44,16 @@ export function getSnippetSuggestions(
     const labelPrefix = label.startsWith(needle);
     // Literal prefix/substring first (cheap); fall back to shared smart matcher
     // so Chinese titles surface for pinyin / initials the same way host search does.
-    const matches = labelPrefix
-      || label.includes(needle)
-      || firstLine.startsWith(needle)
-      || matchesSearchQuery(needle, snippet.label, firstLine);
+    // In prefixOnly mode (argument position), matches must start at a word
+    // boundary to avoid flooding mid-argument popups; pinyin still applies.
+    const matches = options.prefixOnly
+      ? labelPrefix
+        || firstLine.startsWith(needle)
+        || matchesWordPrefixQuery(needle, snippet.label, firstLine)
+      : labelPrefix
+        || label.includes(needle)
+        || firstLine.startsWith(needle)
+        || matchesSearchQuery(needle, snippet.label, firstLine);
     if (!matches) continue;
 
     out.push({
