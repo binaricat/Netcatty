@@ -1,31 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { AISession, ChatMessage } from "../infrastructure/ai/types.ts";
 import {
   collectSessionSearchFields,
   filterSessionHistory,
+  type SessionHistorySearchMessage,
 } from "./sessionHistorySearch.ts";
 
+// Fixture messages stay loosely typed: persisted sessions carry far richer
+// shapes (role, ids, payload fields, …) than the minimal searchable shapes,
+// and extra properties must remain structurally harmless.
 function createSession(
   id: string,
   title: string,
-  messages: Partial<ChatMessage>[],
-): AISession {
+  messages: Array<Record<string, unknown>>,
+) {
   return {
     id,
     title,
-    agentId: "catty",
-    scope: { type: "terminal", targetId: "terminal-1" },
     messages: messages.map((message, index) => ({
       id: `${id}-m${index}`,
       role: "user",
       content: "",
       timestamp: index,
       ...message,
-    })) as ChatMessage[],
-    createdAt: 0,
-    updatedAt: 0,
+    })) as SessionHistorySearchMessage[],
   };
 }
 
@@ -292,6 +291,27 @@ test("filterSessionHistory matches CJK titles via the shared pinyin matcher", ()
 
   assert.deepEqual(filterSessionHistory(sessions, "chongqi"), [sessions[0]]);
   assert.deepEqual(filterSessionHistory(sessions, "重启"), [sessions[0]]);
+});
+
+test("filterSessionHistory indexes the displayed fallback for untitled sessions", () => {
+  // An empty persisted title is displayed as the localized "Untitled" label;
+  // searching for that label must find the session instead of hiding it.
+  const sessions = [
+    createSession("a", "", [{ content: "nginx notes" }]),
+    createSession("b", "nginx restart", []),
+  ];
+
+  // Without the fallback the blank title contributes nothing.
+  assert.deepEqual(filterSessionHistory(sessions, "untitled"), []);
+  assert.deepEqual(filterSessionHistory(sessions, "untitled", { untitledLabel: "Untitled" }), [sessions[0]]);
+  // Titled sessions are unaffected by the fallback label.
+  assert.deepEqual(filterSessionHistory(sessions, "restart"), [sessions[1]]);
+  // Localized (CJK) fallback labels match through title pinyin too.
+  assert.deepEqual(filterSessionHistory(sessions, "无标题", { untitledLabel: "无标题" }), [sessions[0]]);
+  assert.deepEqual(filterSessionHistory(sessions, "wbt", { untitledLabel: "无标题" }), [sessions[0]]);
+
+  const fields = collectSessionSearchFields(sessions[0], "Untitled");
+  assert.deepEqual(fields, ["Untitled", "nginx notes"]);
 });
 
 test("filterSessionHistory lets tokens span title pinyin and message text", () => {

@@ -1,10 +1,35 @@
 import type { AgentActivity } from './agentActivity';
-import type { AISession, ChatMessageAttachment } from '../infrastructure/ai/types';
 import {
   matchesPreparedSearchQuery,
   prepareSearchFields,
   type PreparedSearchFields,
 } from '../lib/searchMatcher';
+
+/**
+ * Minimal structural shapes for session history search. Declared here (not
+ * imported from `infrastructure/ai/types`) so this domain module keeps no
+ * dependency on the infrastructure layer; persisted `AISession`s satisfy
+ * these shapes structurally.
+ */
+export type SessionHistorySearchAttachment = {
+  /** Rendered file label (absent for terminal selections and note-only files). */
+  filename?: string;
+  /** Rendered Vault note label. */
+  vaultNoteTitle?: string;
+};
+
+export type SessionHistorySearchMessage = {
+  content: string;
+  thinking?: string;
+  statusText?: string;
+  errorInfo?: { message: string };
+  attachments?: readonly SessionHistorySearchAttachment[];
+  /** @deprecated Legacy attachment field, kept for backward compatibility. */
+  images?: readonly SessionHistorySearchAttachment[];
+  toolCalls?: readonly { name: string; arguments: Record<string, unknown> }[];
+  toolResults?: readonly { toolName?: string; content: string }[];
+  agentActivities?: readonly AgentActivity[];
+};
 
 /**
  * Searchable shape for session history search. Pure domain logic consumed by
@@ -14,7 +39,11 @@ import {
  * warnings) already stored on messages, visible attachment labels (file names
  * and Vault note titles) and persisted error messages.
  */
-export type SessionHistorySearchTarget = Pick<AISession, 'title' | 'messages'>;
+export type SessionHistorySearchTarget = {
+  /** Raw persisted title; may be empty (the UI then renders a fallback). */
+  title: string;
+  messages: readonly SessionHistorySearchMessage[];
+};
 
 /** Cap per-field text so very large tool result payloads stay cheap to scan. */
 const MAX_SEARCHABLE_FIELD_LENGTH = 20_000;
@@ -174,7 +203,7 @@ function serializeToolCallArguments(args: Record<string, unknown>): string {
  */
 function collectAgentActivityFields(
   collector: SearchFieldCollector,
-  activities: AgentActivity[],
+  activities: readonly AgentActivity[],
 ): void {
   for (let i = activities.length - 1; i >= 0; i--) {
     if (collector.isFull) return;
@@ -212,7 +241,7 @@ function collectAgentActivityFields(
  */
 function collectAttachmentLabelFields(
   collector: SearchFieldCollector,
-  attachments: ChatMessageAttachment[],
+  attachments: readonly SessionHistorySearchAttachment[],
 ): void {
   // Individual labels are handed to the collector newest-first so the 2,000-
   // character field cap (and the remaining session budget) can truncate the
@@ -227,10 +256,25 @@ function collectAttachmentLabelFields(
   }
 }
 
-export function collectSessionSearchFields(session: SessionHistorySearchTarget): string[] {
+/**
+ * The title exactly as the history drawer renders it: an empty persisted
+ * title is displayed with the localized "Untitled" fallback, so the fallback
+ * text (passed by the caller) must be indexed too — searching for the label
+ * the user actually sees must not hide the session.
+ */
+function resolveDisplayTitle(session: SessionHistorySearchTarget, untitledLabel: string): string {
+  return session.title || untitledLabel;
+}
+
+export function collectSessionSearchFields(
+  session: SessionHistorySearchTarget,
+  untitledLabel: string = '',
+): string[] {
   const collector = createSearchFieldCollector();
-  // The title is indexed first so it always survives the total-length cap.
-  collector.push(session.title);
+  // The displayed title is indexed first so it always survives the
+  // total-length cap. Still skipped entirely when both the raw title and the
+  // fallback are blank.
+  collector.push(resolveDisplayTitle(session, untitledLabel));
   // Fields pushed before the message loop (0 or 1 entries; the title may be
   // blank and therefore skipped).
   const headCount = collector.fields.length;
@@ -297,6 +341,8 @@ export function collectSessionSearchFields(session: SessionHistorySearchTarget):
 }
 
 type SessionSearchIndex = {
+  /** Displayed title the index was built for (raw title or the fallback). */
+  displayTitle: string;
   fields: string[];
   prepared: PreparedSearchFields;
 };
@@ -311,14 +357,20 @@ type SessionSearchIndex = {
  * reliable cache key: each session's fields and normalized/compact haystacks
  * are built once and reused until that session's object changes. The entry
  * dies with the session object, so no eviction bookkeeping is needed.
+ * A changed display title (e.g. a localized fallback switch) forces a rebuild.
  */
 const SESSION_SEARCH_INDEX_CACHE = new WeakMap<SessionHistorySearchTarget, SessionSearchIndex>();
 
-function getSessionSearchIndex(session: SessionHistorySearchTarget): SessionSearchIndex {
+function getSessionSearchIndex(
+  session: SessionHistorySearchTarget,
+  untitledLabel: string,
+): SessionSearchIndex {
+  const displayTitle = resolveDisplayTitle(session, untitledLabel);
   const cached = SESSION_SEARCH_INDEX_CACHE.get(session);
-  if (cached) return cached;
-  const fields = collectSessionSearchFields(session);
+  if (cached && cached.displayTitle === displayTitle) return cached;
+  const fields = collectSessionSearchFields(session, untitledLabel);
   const index: SessionSearchIndex = {
+    displayTitle,
     fields,
     prepared: prepareSearchFields(fields),
   };
@@ -326,24 +378,35 @@ function getSessionSearchIndex(session: SessionHistorySearchTarget): SessionSear
   return index;
 }
 
+export type SessionHistorySearchOptions = {
+  /**
+   * Localized fallback label rendered by the drawer for sessions with an
+   * empty persisted title (e.g. `t('ai.chat.untitled')`); indexed as the
+   * displayed title so searching for the visible label finds the session.
+   */
+  untitledLabel?: string;
+};
+
 export function filterSessionHistory<T extends SessionHistorySearchTarget>(
   sessions: readonly T[],
   query: string,
+  options: SessionHistorySearchOptions = {},
 ): T[] {
   const trimmed = query.trim();
   if (!trimmed) return [...sessions];
-  return sessions.filter((session) =>
+  const untitledLabel = options.untitledLabel ?? '';
+  return sessions.filter((session) => {
     // Pinyin transliteration is too expensive to run over every collected
     // message field on each keystroke; the pinyin fallback is restricted to
-    // the (small) title field, while literal/compact matching stays global.
-    // Restricting pinyin per field still allows tokens within one query to
-    // span fields: "chongqi nginx" matches a session titled "重启服务器"
-    // whose message contains "nginx" ("chongqi" via title pinyin, "nginx"
-    // literally in the message content).
-    matchesPreparedSearchQuery(
+    // the (small) displayed-title field, while literal/compact matching stays
+    // global. Restricting pinyin per field still allows tokens within one
+    // query to span fields: "chongqi nginx" matches a session titled
+    // "重启服务器" whose message contains "nginx" ("chongqi" via title
+    // pinyin, "nginx" literally in the message content).
+    return matchesPreparedSearchQuery(
       trimmed,
-      getSessionSearchIndex(session).prepared,
-      { pinyinFields: [session.title] },
-    ),
-  );
+      getSessionSearchIndex(session, untitledLabel).prepared,
+      { pinyinFields: [resolveDisplayTitle(session, untitledLabel)] },
+    );
+  });
 }

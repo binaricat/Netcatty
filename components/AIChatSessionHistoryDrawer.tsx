@@ -38,8 +38,10 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const filteredSessions = React.useMemo(
-    () => filterSessionHistory(sessions, searchQuery),
-    [sessions, searchQuery],
+    // The localized fallback below is displayed for untitled sessions
+    // (row label), so it must be indexed for search as the displayed title.
+    () => filterSessionHistory(sessions, searchQuery, { untitledLabel: t('ai.chat.untitled') }),
+    [sessions, searchQuery, t],
   );
 
   // Reset the render batch when the list scope or query changes so matching
