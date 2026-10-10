@@ -19,6 +19,8 @@ export type SessionHistorySearchAttachment = {
 };
 
 export type SessionHistorySearchMessage = {
+  /** Persisted role; 'system' messages are hidden by the UI and never indexed. */
+  role?: string;
   content: string;
   thinking?: string;
   statusText?: string;
@@ -34,7 +36,8 @@ export type SessionHistorySearchMessage = {
 /**
  * Searchable shape for session history search. Pure domain logic consumed by
  * the session history drawer; matches on title plus user/assistant message
- * text, including thinking, tool call names/arguments, tool result content,
+ * text (hidden `system` messages are excluded, mirroring the reopened-chat
+ * rendering), including thinking, tool call names/arguments, tool result content,
  * persisted agent activities (web-search queries, file paths, plan items,
  * warnings) already stored on messages, visible attachment labels (file names
  * and Vault note titles) and persisted error messages.
@@ -287,6 +290,10 @@ export function collectSessionSearchFields(
     // tool arguments/activities) would waste work on every keystroke.
     if (collector.isFull) break;
     const message = session.messages[i];
+    // `ChatMessageList` removes `system` messages from the reopened
+    // conversation, so their (hidden) content must not make a session
+    // searchable — otherwise a match would show no matching text when opened.
+    if (message.role === 'system') continue;
     collector.push(message.content);
     // `push` drops fields once the budget is spent; skip the remaining
     // (potentially expensive) serialization for this message too.

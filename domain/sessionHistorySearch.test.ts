@@ -67,6 +67,24 @@ test("filterSessionHistory matches message content of user and assistant turns",
   assert.deepEqual(filterSessionHistory(sessions, "nothing here"), []);
 });
 
+test("filterSessionHistory ignores hidden system messages", () => {
+  const sessions = [
+    createSession("a", "Ops", [
+      { role: "system", content: "shared hidden prompt with marker text" },
+      { role: "user", content: "all clear" },
+    ]),
+    createSession("b", "Deploy", [
+      { role: "system", content: "shared hidden prompt with marker text" },
+      { role: "user", content: "ship it" },
+    ]),
+  ];
+
+  // A query found only inside system messages must not surface the sessions:
+  // the reopened conversation hides those messages, so a match would display
+  // no matching text.
+  assert.deepEqual(filterSessionHistory(sessions, "marker text"), []);
+});
+
 test("filterSessionHistory searches thinking and tool call/result content", () => {
   const sessions = [
     createSession("a", "Untitled", [
