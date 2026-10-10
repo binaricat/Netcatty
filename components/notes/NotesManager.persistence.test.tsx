@@ -108,7 +108,7 @@ const setupDom = () => {
 };
 
 for (const mode of ["source", "edit"] as const) {
-  test(`mounted notes ${mode}: failed save retains both versions through retry and switching`, { timeout: 30_000 }, async () => {
+  test(`mounted notes ${mode}: failed save retains both versions through retry and switching`, { timeout: 30_000 }, async (t) => {
     const { window, cleanup } = setupDom();
     // The app initializes unrelated vault collections under Web Locks. Serialize
     // those calls in the fixture too (Node 22 does not always expose Web Locks).
@@ -284,6 +284,45 @@ for (const mode of ["source", "edit"] as const) {
       realSetItem.call(window.localStorage, keys.STORAGE_KEY_NOTES, JSON.stringify([...persisted(), { ...second, id: "disk-only" }]));
       await act(async () => { assert.equal(vault.updateNotes([original], { replace: true }), true); });
       assert.deepEqual(persisted().map(note => note.id), [original.id]);
+
+      for (const operation of ["clear", "import"] as const) {
+        await t.test(`failed ${operation} retains replacement ownership through events and retry`, async () => {
+          quota = false;
+          await act(async () => { assert.equal(vault.updateNotes([original, second], { replace: true }), true); });
+          const replacement = operation === "clear" ? [] : [{ ...original, content: "Imported snapshot" }];
+          quota = true;
+          await act(async () => {
+            if (operation === "clear") vault.clearVaultData();
+            else await vault.importDataFromString(JSON.stringify({ notes: replacement }));
+          });
+          const contents = (notes: VaultNote[]) => notes.map(({ id, content }) => [id, content]);
+          assert.deepEqual(contents(vault.notes), contents(replacement));
+          assert.deepEqual(contents(persisted()), contents([original, second]), "replacement has not reached disk");
+          const peer = [
+            { ...original, content: "Changed in another window", updatedAt: 30 }, second,
+            { ...second, id: "peer-added", content: "Added in another window" },
+          ];
+          await incoming(peer);
+          assert.deepEqual(contents(vault.notes), contents(replacement), "failed replacement must not adopt peer edits or additions");
+          assert.deepEqual(contents(getNotesSnapshot().notes), contents(replacement));
+
+          const edited = operation === "clear"
+            ? [{ ...original, id: "created-after-clear", content: "New local note" }]
+            : replacement.map(note => ({ ...note, content: "Edited after import" }));
+          await act(async () => { assert.equal(vault.updateNotes(edited), false); });
+          await incoming([...peer, { ...second, id: "peer-added-again" }]);
+          assert.deepEqual(contents(vault.notes), contents(edited), "an ordinary failed edit must inherit replacement ownership");
+
+          // Also cover a peer write whose storage event has not arrived yet.
+          realSetItem.call(window.localStorage, keys.STORAGE_KEY_NOTES, JSON.stringify([...peer, { ...second, id: "unobserved-peer" }]));
+          quota = false;
+          await act(async () => { assert.equal(vault.updateNotes(vault.notes), true); });
+          assert.deepEqual(contents(persisted()), contents(edited), "successful retry persists only the replacement catalog");
+          const afterReplacement = [{ ...second, id: "legitimate-later-peer" }];
+          await incoming(afterReplacement);
+          assert.deepEqual(contents(vault.notes), contents(afterReplacement), "successful current owner releases replacement protection");
+        });
+      }
       console.log(`NOTES_FIX_${mode.toUpperCase()}: success, dirty-before-echo, failed-echo conflict, duplicate delivery, repeated failure, switch, retry, legal external update passed`);
     } finally {
       await act(async () => root.unmount());

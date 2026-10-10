@@ -311,6 +311,8 @@ export const useVaultState = () => {
   // An optimistic React echo is not a persistence acknowledgement. Keep this
   // owner until that exact generation has successfully reached storage.
   const notesPendingRef = useRef<VaultNote[] | null>(null);
+  // Failed clear/import keeps full-snapshot ownership across later local edits.
+  const notesPendingReplaceRef = useRef(false);
   const noteGroupsRef = useRef<string[]>([]);
   const notesPersistFailureNotifiedAtRef = useRef(0);
   customGroupsRef.current = customGroups;
@@ -843,13 +845,15 @@ export const useVaultState = () => {
     const stored = normalizeVaultNotes(localStorageAdapter.read<VaultNote[]>(STORAGE_KEY_NOTES) ?? []);
     const requested = normalizeVaultNotes(data);
     // Explicit clear/restore keeps its existing full-snapshot semantics.
-    const pending = options?.replace ? requested : rebasePendingVaultNotes({
+    const replace = options?.replace === true || notesPendingReplaceRef.current;
+    const pending = replace ? requested : rebasePendingVaultNotes({
       base: notesStorageRef.current,
       ours: requested,
       theirs: stored,
     });
     notesStorageRef.current = stored;
     notesPendingRef.current = pending;
+    notesPendingReplaceRef.current = replace;
     notesRef.current = pending;
     const { notes: cleaned, persisted } = commitVaultNotesWrite({
       data: pending,
@@ -863,6 +867,7 @@ export const useVaultState = () => {
       if (persisted) {
         notesStorageRef.current = cleaned;
         notesPendingRef.current = null;
+        notesPendingReplaceRef.current = false;
       }
       setNotes(cleaned);
       publishNotesSnapshot({ notes: cleaned, noteGroups: noteGroupsRef.current });
@@ -1806,6 +1811,8 @@ export const useVaultState = () => {
       if (key === STORAGE_KEY_NOTES) {
         // Like snippets, ignore queued events for a snapshot no longer on disk.
         if (event.newValue !== localStorageAdapter.readString(STORAGE_KEY_NOTES)) return;
+        // Only a successful current write can release an outstanding replacement.
+        if (notesPendingReplaceRef.current) return;
         const next = normalizeVaultNotes(safeParse<VaultNote[]>(event.newValue) ?? []);
         const pending = notesPendingRef.current;
         const visible = pending === null ? next : rebasePendingVaultNotes({
