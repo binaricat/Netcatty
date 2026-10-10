@@ -192,7 +192,7 @@ function serializeEntry(entry) {
 
   const minimalEntry = {
     timestamp: entry.timestamp,
-    source: entry.source,
+    source: boundedText(entry.source, 256),
     message: boundedText(entry.message, 512),
     pid: entry.pid,
     version: entry.version,
