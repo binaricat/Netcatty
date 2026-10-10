@@ -163,13 +163,23 @@ function appendEntryLine(filePath, line) {
 }
 
 /**
+ * True when `line` (plus its trailing newline) fits inside the per-entry byte
+ * cap.  JSON.stringify measures UTF-16 code units, but the file stores UTF-8
+ * bytes, so multibyte text must be measured with Buffer.byteLength here to
+ * match what appendEntryLine actually enforces.
+ */
+function fitsEntryByteBudget(line) {
+  return Buffer.byteLength(line, "utf-8") + 1 <= MAX_LOG_ENTRY_BYTES;
+}
+
+/**
  * Serialize a crash entry into a bounded JSONL line.  If the caller-supplied
  * extra payload (or anything else) blows past MAX_LOG_ENTRY_BYTES, retry with
  * progressively less detail so the line length is always bounded.
  */
 function serializeEntry(entry) {
   let line = JSON.stringify(entry);
-  if (line.length <= MAX_LOG_ENTRY_BYTES) return line;
+  if (fitsEntryByteBudget(line)) return line;
 
   const leanEntry = {
     ...entry,
@@ -178,7 +188,7 @@ function serializeEntry(entry) {
     extra: undefined,
   };
   line = JSON.stringify(leanEntry);
-  if (line.length <= MAX_LOG_ENTRY_BYTES) return line;
+  if (fitsEntryByteBudget(line)) return line;
 
   const minimalEntry = {
     timestamp: entry.timestamp,
@@ -267,9 +277,12 @@ function truncateFileToTail(filePath, maxBytes) {
     const read = fs.readSync(fd, buf, 0, buf.length, stat.size - buf.length);
     const tail = buf.subarray(0, read);
     // Drop the first (possibly partial) line of the tail so every remaining
-    // line is a complete JSONL entry.
+    // line is a complete JSONL entry.  If the tail contains no newline at all
+    // it is one giant partial entry (e.g. from an interrupted write), so
+    // discard it entirely rather than keeping an unappendable file: the file
+    // would sit exactly at the cap and reject every later report for the day.
     const newline = tail.indexOf("\n");
-    const keep = newline >= 0 ? tail.subarray(newline + 1) : tail;
+    const keep = newline >= 0 ? tail.subarray(newline + 1) : Buffer.alloc(0);
     fs.ftruncateSync(fd, keep.length);
     if (keep.length > 0) {
       fs.writeSync(fd, keep, 0, keep.length, 0);
