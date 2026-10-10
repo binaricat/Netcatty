@@ -268,8 +268,15 @@ export function collectSessionSearchFields(session: SessionHistorySearchTarget):
       collector.push(toolCall.name);
       collector.push(serializeToolCallArguments(toolCall.arguments), MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
     }
-    for (const toolResult of message.toolResults ?? []) {
+    // Tool results accumulate at the end of `message.toolResults` (and
+    // `ChatMessageList` renders them in array order), so iterate newest-first:
+    // if a burst of large results from this message exhausts the remaining
+    // session budget, the newest (still visible) results stay searchable
+    // instead of being dropped in favor of the oldest ones.
+    const toolResults = message.toolResults ?? [];
+    for (let i = toolResults.length - 1; i >= 0; i--) {
       if (collector.isFull) break;
+      const toolResult = toolResults[i];
       collector.push(toolResult.toolName);
       collector.push(toolResult.content);
     }
