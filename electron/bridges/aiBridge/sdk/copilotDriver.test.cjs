@@ -422,6 +422,40 @@ test("listCopilotModels resolves a Windows .cmd shim to the copilot JS entry bef
   }
 });
 
+test("listCopilotModels prefers the native copilot.exe over npm-loader.js (avoids console flash)", async () => {
+  if (process.platform !== "win32") return; // resolution only special-cases win32
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-copilot-native-"));
+  try {
+    const shim = path.join(dir, "copilot.cmd");
+    fs.writeFileSync(shim, '@ECHO off\r\n"node"  "%dp0%\node_modules\@github\copilot\npm-loader.js" %*');
+    const packageRoot = path.join(dir, "node_modules", "@github", "copilot");
+    fs.mkdirSync(packageRoot, { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, "npm-loader.js"), "");
+    // The platform-native binary that npm-loader.js would spawnSync itself
+    // (without windowsHide — the source of the console-window flash).
+    const nativeExe = path.join(
+      dir, "node_modules", "@github", `copilot-${process.platform}-${process.arch}`, "copilot.exe",
+    );
+    fs.mkdirSync(path.dirname(nativeExe), { recursive: true });
+    fs.writeFileSync(nativeExe, "");
+    const captured = {};
+    const sdkModule = {
+      CopilotClient: class {
+        constructor(options) { captured.options = options; }
+        async start() {}
+        async listModels() { return [{ id: "auto", name: "auto" }]; }
+        async stop() {}
+      },
+      RuntimeConnection: { forStdio: (config) => { captured.forStdio = config; return {}; } },
+    };
+    const models = await listCopilotModels({ cliPath: shim, sdkModule });
+    assert.equal(captured.forStdio.path, nativeExe);
+    assert.deepEqual(models, [{ id: "auto", name: "auto" }]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("listCopilotModels passes a real .js entry and a native .exe through to the SDK unchanged", async () => {
   for (const cliPath of ["/opt/copilot/npm-loader.js", "C:\tools\copilot\copilot.exe"]) {
     const captured = {};
