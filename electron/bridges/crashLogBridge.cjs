@@ -3,7 +3,9 @@
  *
  * Log files are stored as JSONL (one JSON object per line) under
  * {userData}/crash-logs/crash-YYYY-MM-DD.log so that appending is cheap and
- * atomic.  Files older than 30 days are pruned on startup.
+ * atomic.  Files older than 30 days are pruned on startup and every file is
+ * capped at 16 MB: once today's file is full, further entries are dropped,
+ * and oversized files left by previous runs are trimmed to their tail.
  */
 
 const fs = require("node:fs");
@@ -24,6 +26,15 @@ let electronShell = null;
 let sessionsMap = null;
 
 const LOG_RETENTION_DAYS = 30;
+// Hard caps so a recurring error can never fill the disk (see issue #3626:
+// a single crash-YYYY-MM-DD.log grew to ~150 GB).  The per-day file stops
+// accepting entries once it reaches MAX_LOG_FILE_BYTES and existing oversized
+// files are trimmed down to their tail at startup.
+const MAX_LOG_FILE_BYTES = 16 * 1024 * 1024;
+// Cap the size of a single serialized entry before it is appended.
+const MAX_LOG_ENTRY_BYTES = 128 * 1024;
+const MAX_MESSAGE_CHARS = 4096;
+const MAX_STACK_CHARS = 16384;
 const TERMINAL_PERF_DEBUG_ENV_KEYS = [
   "NETCATTY_TERMINAL_PERF_DEBUG",
   "NETCATTY_TERMINAL_DEBUG",
@@ -74,6 +85,11 @@ function todayFileName() {
   return `crash-${ymd}.log`;
 }
 
+function boundedText(text, maxChars) {
+  if (typeof text !== "string" || text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)} ... [truncated]`;
+}
+
 function buildEntry(source, err, extra) {
   const error = err instanceof Error ? err : new Error(String(err ?? "unknown"));
 
@@ -100,8 +116,8 @@ function buildEntry(source, err, extra) {
   return {
     timestamp: new Date().toISOString(),
     source,
-    message: error.message || String(err),
-    stack: error.stack || undefined,
+    message: boundedText(error.message || String(err), MAX_MESSAGE_CHARS),
+    stack: boundedText(error.stack, MAX_STACK_CHARS) || undefined,
     errorMeta: Object.keys(errorMeta).length > 0 ? errorMeta : undefined,
     extra: extra || undefined,
     pid: process.pid,
@@ -121,6 +137,70 @@ function buildEntry(source, err, extra) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Append one JSONL line to filePath as long as the file stays under
+ * MAX_LOG_FILE_BYTES.  Oversized entries are rejected; once a day's file is
+ * full, later entries are dropped instead of growing the file further.
+ * Returns true when the line was written.
+ */
+function appendEntryLine(filePath, line) {
+  const lineBytes = Buffer.byteLength(line, "utf-8");
+  if (lineBytes + 1 > MAX_LOG_ENTRY_BYTES) return false;
+
+  let size = 0;
+  try {
+    size = fs.statSync(filePath).size;
+  } catch {
+    size = 0; // file does not exist yet
+  }
+  if (size + lineBytes > MAX_LOG_FILE_BYTES) return false;
+
+  try {
+    fs.appendFileSync(filePath, line + "\n", "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when `line` (plus its trailing newline) fits inside the per-entry byte
+ * cap.  JSON.stringify measures UTF-16 code units, but the file stores UTF-8
+ * bytes, so multibyte text must be measured with Buffer.byteLength here to
+ * match what appendEntryLine actually enforces.
+ */
+function fitsEntryByteBudget(line) {
+  return Buffer.byteLength(line, "utf-8") + 1 <= MAX_LOG_ENTRY_BYTES;
+}
+
+/**
+ * Serialize a crash entry into a bounded JSONL line.  If the caller-supplied
+ * extra payload (or anything else) blows past MAX_LOG_ENTRY_BYTES, retry with
+ * progressively less detail so the line length is always bounded.
+ */
+function serializeEntry(entry) {
+  let line = JSON.stringify(entry);
+  if (fitsEntryByteBudget(line)) return line;
+
+  const leanEntry = {
+    ...entry,
+    message: boundedText(entry.message, 1024),
+    stack: boundedText(entry.stack, MAX_STACK_CHARS),
+    extra: undefined,
+  };
+  line = JSON.stringify(leanEntry);
+  if (fitsEntryByteBudget(line)) return line;
+
+  const minimalEntry = {
+    timestamp: entry.timestamp,
+    source: boundedText(entry.source, 256),
+    message: boundedText(entry.message, 512),
+    pid: entry.pid,
+    version: entry.version,
+  };
+  return JSON.stringify(minimalEntry);
+}
+
+/**
  * Write a crash/error entry to today's log file (sync, safe for use in
  * uncaughtException handlers).
  */
@@ -130,8 +210,9 @@ function captureError(source, err, extra) {
     if (!dir) return;
 
     const entry = buildEntry(source, err, extra);
+    const line = serializeEntry(entry);
     const filePath = path.join(dir, todayFileName());
-    fs.appendFileSync(filePath, JSON.stringify(entry) + "\n", "utf-8");
+    appendEntryLine(filePath, line);
   } catch {
     // Never throw from the crash logger itself.
   }
@@ -164,6 +245,82 @@ function pruneOldLogs() {
         if (stat.mtimeMs < cutoff) {
           fs.unlinkSync(filePath);
           console.log(`[CrashLog] Pruned old log: ${file}`);
+        }
+      } catch {
+        // skip
+      }
+    }
+  } catch {
+    // skip
+  }
+}
+
+/**
+ * Rewrite an oversized log file in place so only its last MAX_LOG_FILE_BYTES
+ * (aligned to a line boundary so every remaining line parses) is kept.  This
+ * reads and writes at most MAX_LOG_FILE_BYTES, so it is safe even for a
+ * multi-gigabyte file.  Returns true when the file was trimmed.
+ */
+function truncateFileToTail(filePath, maxBytes) {
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    return false;
+  }
+  if (stat.size <= maxBytes) return false;
+
+  let fd;
+  try {
+    fd = fs.openSync(filePath, "r+");
+    const buf = Buffer.alloc(maxBytes);
+    const read = fs.readSync(fd, buf, 0, buf.length, stat.size - buf.length);
+    const tail = buf.subarray(0, read);
+    // Drop the first (possibly partial) line of the tail so every remaining
+    // line is a complete JSONL entry.  Also trim anything after the last
+    // newline: a final write interrupted before its trailing newline would
+    // otherwise leave a partial object that the next appendEntryLine appends
+    // to, corrupting both lines.  If the tail contains no newline at all it
+    // is one giant partial entry (e.g. from an interrupted write), so
+    // discard it entirely rather than keeping an unappendable file: the file
+    // would sit exactly at the cap and reject every later report for the day.
+    const newline = tail.indexOf("\n");
+    let keep = Buffer.alloc(0);
+    if (newline >= 0) {
+      const lastNewline = tail.lastIndexOf("\n");
+      keep = tail.subarray(newline + 1, lastNewline + 1);
+    }
+    fs.ftruncateSync(fd, keep.length);
+    if (keep.length > 0) {
+      fs.writeSync(fd, keep, 0, keep.length, 0);
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      if (fd !== undefined) fs.closeSync(fd);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Cap every existing crash log file at MAX_LOG_FILE_BYTES.  Runs at startup
+ * before any new entries are appended, so a bloated file from a previous run
+ * (e.g. issue #3626) is shrunk instead of filling the disk for another day.
+ */
+function trimOversizedLogs() {
+  try {
+    const dir = ensureLogDir();
+    if (!dir) return;
+
+    for (const file of fs.readdirSync(dir)) {
+      if (!file.startsWith("crash-") || !file.endsWith(".log")) continue;
+      try {
+        if (truncateFileToTail(path.join(dir, file), MAX_LOG_FILE_BYTES)) {
+          console.log(`[CrashLog] Trimmed oversized log: ${file}`);
         }
       } catch {
         // skip
@@ -331,6 +488,7 @@ function init(deps) {
     // ignore
   }
   pruneOldLogs();
+  trimOversizedLogs();
 
   console.log(`[CrashLog] Crash log directory: ${logDir}`);
 }
@@ -359,9 +517,22 @@ function registerHandlers(ipcMain) {
   });
 }
 
+// Internals exposed for tests only; not part of the public bridge API.
+const __internals = {
+  MAX_LOG_FILE_BYTES,
+  MAX_LOG_ENTRY_BYTES,
+  MAX_MESSAGE_CHARS,
+  MAX_STACK_CHARS,
+  appendEntryLine,
+  boundedText,
+  serializeEntry,
+  truncateFileToTail,
+};
+
 module.exports = {
   init,
   captureError,
   captureDiagnostic,
   registerHandlers,
+  __internals,
 };
