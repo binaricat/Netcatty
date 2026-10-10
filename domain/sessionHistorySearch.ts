@@ -348,7 +348,14 @@ export function collectSessionSearchFields(
 }
 
 type SessionSearchIndex = {
-  /** Displayed title the index was built for (raw title or the fallback). */
+  /**
+   * Displayed title the index was built for (raw title or the fallback), capped
+   * exactly like the title field admitted by `collectSessionSearchFields`:
+   * this string feeds the pinyin fallback (`pinyinFields`) on every keystroke,
+   * so an uncapped restored title could push megabytes through pinyin
+   * normalization, and characters beyond the collector's cap are never indexed
+   * (and must not become pinyin-matchable either).
+   */
   displayTitle: string;
   prepared: PreparedSearchFields;
 };
@@ -483,8 +490,17 @@ function getSessionSearchIndex(
   untitledLabel: string,
 ): SessionSearchIndex {
   const displayTitle = resolveDisplayTitle(session, untitledLabel);
+  // Cap the title exactly like the collector does for the title field (the
+  // first field pushed, so the per-field cap applies in full; trailing
+  // whitespace is trimmed the same way). The capped form is what the index
+  // stores and what the cache-change check compares, so a title that changes
+  // only beyond the cap reuses the cached index — correct, because the
+  // collector never admits those characters into the prepared haystacks
+  // either. A title whose capped form is blank was skipped by the collector
+  // entirely; the blank pinyin field is filtered out downstream.
+  const indexedTitle = displayTitle.slice(0, MAX_SEARCHABLE_FIELD_LENGTH).trim();
   const cached = SESSION_SEARCH_INDEX_CACHE.get(session);
-  if (cached && cached.displayTitle === displayTitle) {
+  if (cached && cached.displayTitle === indexedTitle) {
     // Re-append on every visit so the cache's insertion order mirrors the
     // latest scan's visitation order (the ranked, newest-first session list);
     // `pruneSessionSearchIndexCache` relies on that order when evicting.
@@ -495,7 +511,7 @@ function getSessionSearchIndex(
   }
   const fields = collectSessionSearchFields(session, untitledLabel);
   const index: SessionSearchIndex = {
-    displayTitle,
+    displayTitle: indexedTitle,
     prepared: prepareSearchFields(fields),
   };
   // Mark the session touched before the gate so the gate's admission eviction
