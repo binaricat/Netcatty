@@ -25,6 +25,7 @@
  *   text + per-tool-call events (assistant.message / tool execution events).
  */
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const { resolveCopilotExecutableForSdk } = require("../../ai/shellUtils.cjs");
 const { isRemovedChatSessionFlag } = require("../../../cli/cliChatSession.cjs");
 const {
   TOOL_CLI_CHAT_SESSION_ENV_VAR,
@@ -451,7 +452,12 @@ async function runCopilotTurn({
     realClientOptions.env = runtimeEnv;
   }
   if (clientOptions?.cliPath && RuntimeConnection?.forStdio) {
-    realClientOptions.connection = RuntimeConnection.forStdio({ path: clientOptions.cliPath });
+    // The SDK spawns `path` via node without shell:true; a Windows .cmd shim
+    // would fail with spawn EINVAL (Node >= 18.20), so hand over the real JS
+    // entry instead.
+    realClientOptions.connection = RuntimeConnection.forStdio({
+      path: resolveCopilotExecutableForSdk(clientOptions.cliPath),
+    });
   }
   if (clientOptions?.gitHubToken) realClientOptions.gitHubToken = clientOptions.gitHubToken;
 
@@ -582,7 +588,10 @@ async function listCopilotModels({ cliPath, sdkModule, abortController, signal }
   const { CopilotClient, RuntimeConnection } = sdk;
   const clientOptions = { useLoggedInUser: true };
   if (cliPath && RuntimeConnection?.forStdio) {
-    clientOptions.connection = RuntimeConnection.forStdio({ path: cliPath });
+    // Same EINVAL hazard as runCopilotTurn: resolve .cmd/.bat shims first.
+    clientOptions.connection = RuntimeConnection.forStdio({
+      path: resolveCopilotExecutableForSdk(cliPath),
+    });
   }
   const client = new CopilotClient(clientOptions);
   let stopPromise;
