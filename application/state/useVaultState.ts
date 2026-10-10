@@ -79,7 +79,7 @@ import {
   publishNotesSnapshot,
   registerNotesActions,
 } from "./notesStore";
-import { commitVaultNotesWrite } from "./vaultNotesPersistence";
+import { commitVaultNotesWrite, rebasePendingVaultNotes } from "./vaultNotesPersistence";
 import { publishShellHistorySnapshot } from "./shellHistoryStore";
 import { setVaultInitialized } from "./vaultInitStore";
 import { notify } from "../notification";
@@ -306,6 +306,10 @@ export const useVaultState = () => {
   const snippetsRef = useRef<Snippet[]>([]);
   const groupConfigsRef = useRef<GroupConfig[]>([]);
   const notesRef = useRef<VaultNote[]>([]);
+  const notesStorageRef = useRef<VaultNote[]>([]);
+  // An optimistic React echo is not a persistence acknowledgement. Keep this
+  // owner until that exact generation has successfully reached storage.
+  const notesPendingRef = useRef<VaultNote[] | null>(null);
   const noteGroupsRef = useRef<string[]>([]);
   const notesPersistFailureNotifiedAtRef = useRef(0);
   customGroupsRef.current = customGroups;
@@ -834,17 +838,34 @@ export const useVaultState = () => {
     localStorageAdapter.write(STORAGE_KEY_SNIPPET_PACKAGES, data);
   }, []);
 
-  const updateNotes = useCallback((data: Partial<VaultNote>[]) => {
+  const updateNotes = useCallback((data: Partial<VaultNote>[], options?: { replace?: boolean }) => {
+    const stored = normalizeVaultNotes(localStorageAdapter.read<VaultNote[]>(STORAGE_KEY_NOTES) ?? []);
+    const requested = normalizeVaultNotes(data);
+    // Explicit clear/restore keeps its existing full-snapshot semantics.
+    const pending = options?.replace ? requested : rebasePendingVaultNotes({
+      base: notesStorageRef.current,
+      ours: requested,
+      theirs: stored,
+    });
+    notesStorageRef.current = stored;
+    notesPendingRef.current = pending;
+    notesRef.current = pending;
     const { notes: cleaned, persisted } = commitVaultNotesWrite({
-      data,
+      data: pending,
       write: (key, value) => localStorageAdapter.write(key, value),
     });
     // Keep the in-session catalog updated so an autosave quota failure does not
     // snap the editor back to stale props and discard the user's draft. Disk
     // may still be behind — surface that explicitly.
-    notesRef.current = cleaned;
-    setNotes(cleaned);
-    publishNotesSnapshot({ notes: cleaned, noteGroups: noteGroupsRef.current });
+    if (notesPendingRef.current === pending) {
+      notesRef.current = cleaned;
+      if (persisted) {
+        notesStorageRef.current = cleaned;
+        notesPendingRef.current = null;
+      }
+      setNotes(cleaned);
+      publishNotesSnapshot({ notes: cleaned, noteGroups: noteGroupsRef.current });
+    }
     if (!persisted) {
       const now = Date.now();
       // Debounced autosave can hit quota repeatedly; avoid toast spam.
@@ -1163,7 +1184,7 @@ export const useVaultState = () => {
     updateProxyProfiles([]);
     updateSnippets([], { replace: true });
     updateSnippetPackages([]);
-    updateNotes([]);
+    updateNotes([], { replace: true });
     updateNoteGroups([]);
     updateCustomGroups([]);
     updateKnownHosts([]);
@@ -1534,8 +1555,10 @@ export const useVaultState = () => {
 
         if (savedGroups) setCustomGroups(savedGroups);
         if (savedSnippetPackages) setSnippetPackages(savedSnippetPackages);
-        if (savedNotes) {
+        if (savedNotes && notesPendingRef.current === null) {
           const cleanedNotes = normalizeVaultNotes(savedNotes);
+          notesStorageRef.current = cleanedNotes;
+          notesRef.current = cleanedNotes;
           setNotes(cleanedNotes);
           localStorageAdapter.write(STORAGE_KEY_NOTES, cleanedNotes);
         }
@@ -1780,8 +1803,19 @@ export const useVaultState = () => {
       }
 
       if (key === STORAGE_KEY_NOTES) {
-        const next = safeParse<VaultNote[]>(event.newValue) ?? [];
-        setNotes(normalizeVaultNotes(next));
+        // Like snippets, ignore queued events for a snapshot no longer on disk.
+        if (event.newValue !== localStorageAdapter.readString(STORAGE_KEY_NOTES)) return;
+        const next = normalizeVaultNotes(safeParse<VaultNote[]>(event.newValue) ?? []);
+        const pending = notesPendingRef.current;
+        const visible = pending === null ? next : rebasePendingVaultNotes({
+          base: notesStorageRef.current,
+          ours: pending,
+          theirs: next,
+        });
+        notesStorageRef.current = next;
+        if (pending !== null) notesPendingRef.current = visible;
+        notesRef.current = visible;
+        setNotes(visible);
         return;
       }
 
@@ -1952,7 +1986,7 @@ export const useVaultState = () => {
       }
       if (payload.customGroups) updateCustomGroups(payload.customGroups);
       if (payload.snippetPackages) updateSnippetPackages(payload.snippetPackages);
-      if (payload.notes) updateNotes(payload.notes);
+      if (payload.notes) updateNotes(payload.notes, { replace: true });
       if (payload.noteGroups) updateNoteGroups(payload.noteGroups);
       if (payload.knownHosts) updateKnownHosts(payload.knownHosts);
       if (Array.isArray(payload.groupConfigs)) encryptedWrites.push(updateGroupConfigs(payload.groupConfigs));
