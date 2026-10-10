@@ -647,6 +647,14 @@ function resolveCopilotExecutableForSdk(copilotExecutablePath, platform = proces
     path.join(shimDir, "..", "@github", "copilot"),
   ];
   for (const root of packageRoots) {
+    // Prefer the platform-native binary: the SDK spawns it directly with
+    // windowsHide:true, whereas npm-loader.js re-spawns the same binary via
+    // spawnSync WITHOUT windowsHide — a console window flashes when the SDK
+    // runs inside a GUI (Electron main) process on Windows.
+    const nativeExe = path.join(
+      root, "..", `copilot-${platform}-${process.arch}`, "copilot.exe",
+    );
+    if (existsSync(nativeExe)) return nativeExe;
     const loaderJs = path.join(root, "npm-loader.js");
     if (existsSync(loaderJs)) return loaderJs;
   }
@@ -659,7 +667,14 @@ function resolveCopilotExecutableForSdk(copilotExecutablePath, platform = proces
       const match = contents.match(/node_modules[\\/]+@github[\\/]copilot[\\/][\w\\/.-]+\.js/i);
       if (match) {
         const loaderJs = path.resolve(path.dirname(shimPath), match[0]);
-        if (existsSync(loaderJs)) return loaderJs;
+        if (existsSync(loaderJs)) {
+          // Same native-binary preference as the package-root path above.
+          const nativeExe = path.join(
+            path.dirname(loaderJs), "..", `copilot-${platform}-${process.arch}`, "copilot.exe",
+          );
+          if (existsSync(nativeExe)) return nativeExe;
+          return loaderJs;
+        }
       }
     } catch {
       // Try the next shim candidate.
