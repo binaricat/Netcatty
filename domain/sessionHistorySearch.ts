@@ -579,46 +579,63 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
   options: SessionHistorySearchOptions = {},
 ): T[] {
   const trimmed = query.trim();
-  if (!trimmed) return [...sessions];
+  if (!trimmed) {
+    // The blank-query path skips the scan entirely; release any stale
+    // scan-touched state so it cannot pin visited sessions (and their
+    // message/attachment memory) while the drawer is open without a query.
+    // Normally this set is already empty — the nonblank scan clears it in its
+    // `finally` — but clearing here too keeps every entry path leak-free.
+    sessionSearchIndexScanTouched.clear();
+    return [...sessions];
+  }
   const untitledLabel = options.untitledLabel ?? '';
   // A new scan starts with no visited sessions: the touched set records only
   // this scan's visits so `canCacheSessionSearchIndex` can never mistake a
   // previous scan's keys for keys the current scan still needs.
   sessionSearchIndexScanTouched.clear();
-  // Drop entries still held by sessions that left the scan list (e.g. the
-  // history shrank or session objects changed since the previous scan). Those
-  // entries are never visited by this scan — the end-of-scan prune would
-  // remove them too — but dropping them up front keeps their characters
-  // available to this scan's inserts (via the eager char gate). Cheap: one
-  // Set plus one pass over the cached keys.
-  const currentLive = new Set<SessionHistorySearchTarget>(sessions);
-  for (const key of [...SESSION_SEARCH_INDEX_CACHE.keys()]) {
-    if (!currentLive.has(key)) {
-      const removed = SESSION_SEARCH_INDEX_CACHE.get(key);
-      if (removed) sessionSearchIndexCacheChars -= indexRetainedChars(removed);
-      SESSION_SEARCH_INDEX_CACHE.delete(key);
+  try {
+    // Drop entries still held by sessions that left the scan list (e.g. the
+    // history shrank or session objects changed since the previous scan). Those
+    // entries are never visited by this scan — the end-of-scan prune would
+    // remove them too — but dropping them up front keeps their characters
+    // available to this scan's inserts (via the eager char gate). Cheap: one
+    // Set plus one pass over the cached keys.
+    const currentLive = new Set<SessionHistorySearchTarget>(sessions);
+    for (const key of [...SESSION_SEARCH_INDEX_CACHE.keys()]) {
+      if (!currentLive.has(key)) {
+        const removed = SESSION_SEARCH_INDEX_CACHE.get(key);
+        if (removed) sessionSearchIndexCacheChars -= indexRetainedChars(removed);
+        SESSION_SEARCH_INDEX_CACHE.delete(key);
+      }
     }
-  }
-  // Scan all sessions first (a miss admits its index into the cache — evicting
-  // this scan's untouched stale tail if the char budget is full; the
-  // entry-count overshoot this may cause mid-scan is trimmed by the prune
-  // below), then prune entries that fell out of the scan list at the end of
-  // the scan.
-  const result = sessions.filter((session) => {
-    // Pinyin transliteration is too expensive to run over every collected
-    // message field on each keystroke; the pinyin fallback is restricted to
-    // the (small) displayed-title field, while literal/compact matching stays
-    // global. Restricting pinyin per field still allows tokens within one
-    // query to span fields: "chongqi nginx" matches a session titled
-    // "重启服务器" whose message contains "nginx" ("chongqi" via title
-    // pinyin, "nginx" literally in the message content).
-    const index = getSessionSearchIndex(session, untitledLabel);
-    return matchesPreparedSearchQuery(trimmed, index.prepared, {
-      pinyinFields: [index.displayTitle],
+    // Scan all sessions first (a miss admits its index into the cache — evicting
+    // this scan's untouched stale tail if the char budget is full; the
+    // entry-count overshoot this may cause mid-scan is trimmed by the prune
+    // below), then prune entries that fell out of the scan list at the end of
+    // the scan.
+    const result = sessions.filter((session) => {
+      // Pinyin transliteration is too expensive to run over every collected
+      // message field on each keystroke; the pinyin fallback is restricted to
+      // the (small) displayed-title field, while literal/compact matching stays
+      // global. Restricting pinyin per field still allows tokens within one
+      // query to span fields: "chongqi nginx" matches a session titled
+      // "重启服务器" whose message contains "nginx" ("chongqi" via title
+      // pinyin, "nginx" literally in the message content).
+      const index = getSessionSearchIndex(session, untitledLabel);
+      return matchesPreparedSearchQuery(trimmed, index.prepared, {
+        pinyinFields: [index.displayTitle],
+      });
     });
-  });
-  // Prune against the full scanned list (not the filtered result): sessions
-  // that merely did not match this query must keep their cached indexes.
-  pruneSessionSearchIndexCache(sessions);
-  return result;
+    // Prune against the full scanned list (not the filtered result): sessions
+    // that merely did not match this query must keep their cached indexes.
+    pruneSessionSearchIndexCache(sessions);
+    return result;
+  } finally {
+    // The touched set only guards against cycle-eviction within the current
+    // scan; once the scan ends (even if it throws), release its strong
+    // references to session objects so deleted/replaced sessions and their
+    // large message/attachment payloads aren't retained until the next
+    // nonblank search.
+    sessionSearchIndexScanTouched.clear();
+  }
 }
