@@ -358,11 +358,16 @@ type SessionSearchIndex = {
  * within a `MAX_SESSION_SEARCH_INDEX_CACHE_CHARS` character budget: an
  * unbounded cache would let one entry per live session (several normalized
  * copies of each session's searchable corpus) permanently pin hundreds of
- * megabytes in a long-running process. Bounds are enforced once per scan (see
- * `pruneSessionSearchIndexCache`), not on every miss, so a history longer than
- * the entry cap cannot cycle-evict entries it still needs within the same
- * scan. Evicted indexes are simply rebuilt on the next search — the pre-cache
- * per-keystroke cost for that session only.
+ * megabytes in a long-running process. The bounds hold continuously, including
+ * mid-scan: a freshly built index is only cached if it fits both bounds
+ * (eviction itself is deferred to the per-scan prune below), so
+ * a single search over thousands of uncached sessions cannot transiently pin
+ * hundreds of megabytes. Skipping the insert — instead of evicting — keeps
+ * the per-scan prune safe for histories longer than the entry cap: nothing
+ * already cached is dropped by a miss, so the prune at the end of
+ * `filterSessionHistory` cannot cycle-evict entries the same scan still
+ * needs. Indexes that skip insertion are simply rebuilt on the next search —
+ * the pre-cache per-keystroke cost for that session only.
  */
 const MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES = 64;
 const MAX_SESSION_SEARCH_INDEX_CACHE_CHARS = 4_000_000;
@@ -380,6 +385,39 @@ function indexRetainedChars(index: SessionSearchIndex): number {
   // `haystackCompact` is derived from `haystack`, but both are retained and
   // their combined length approximates the cache's per-entry memory cost.
   return index.prepared.haystack.length + index.prepared.haystackCompact.length;
+}
+
+/**
+ * Whether a freshly built index may be inserted into the cache without
+ * pushing it past either bound. New inserts must fit eagerly — the prune that
+ * enforces the bounds only runs once per scan, so inserting every prepared
+ * index would let a single search over hundreds/thousands of uncached
+ * sessions transiently pin the whole corpus (several normalized haystacks per
+ * session) before pruning, briefly allocating hundreds of megabytes.
+ *
+ * The check is only applied to NEW entries: cache hits merely re-append an
+ * existing entry (no growth), and a rebuild replaces the same session's entry
+ * (no size growth; the char delta against the replaced index is checked), so
+ * skipping the insert for an over-budget index drops nothing that is already
+ * cached — that is what keeps the deferred per-scan prune from cycle-evicting
+ * entries the same scan still needs.
+ */
+function canCacheSessionSearchIndex(
+  previous: SessionSearchIndex | undefined,
+  index: SessionSearchIndex,
+): boolean {
+  if (previous === undefined) {
+    if (SESSION_SEARCH_INDEX_CACHE.size >= MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES) return false;
+  }
+  const deltaChars = indexRetainedChars(index) - (previous ? indexRetainedChars(previous) : 0);
+  if (deltaChars > 0) {
+    let retained = 0;
+    for (const cachedIndex of SESSION_SEARCH_INDEX_CACHE.values()) {
+      retained += indexRetainedChars(cachedIndex);
+    }
+    if (retained + deltaChars > MAX_SESSION_SEARCH_INDEX_CACHE_CHARS) return false;
+  }
+  return true;
 }
 
 function getSessionSearchIndex(
@@ -401,7 +439,9 @@ function getSessionSearchIndex(
     displayTitle,
     prepared: prepareSearchFields(fields),
   };
-  SESSION_SEARCH_INDEX_CACHE.set(session, index);
+  if (canCacheSessionSearchIndex(cached, index)) {
+    SESSION_SEARCH_INDEX_CACHE.set(session, index);
+  }
   return index;
 }
 
@@ -415,6 +455,11 @@ function getSessionSearchIndex(
  * indexes for sessions no longer in the scanned list, then by evicting the
  * lowest-ranked entries (the oldest tail of the newest-first ranked list)
  * until both bounds hold, preserving the front of the ranked list.
+ *
+ * In practice the eviction loop rarely runs: freshly built indexes are only
+ * cached while both bounds hold (see `canCacheSessionSearchIndex`), so a scan
+ * no longer overshoots them — the prune mainly drops indexes for sessions
+ * that left the scanned list.
  */
 function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTarget[]): void {
   const live = new Set<SessionHistorySearchTarget>(sessions);
@@ -471,8 +516,20 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
   const trimmed = query.trim();
   if (!trimmed) return [...sessions];
   const untitledLabel = options.untitledLabel ?? '';
-  // Scan all sessions first (each miss only inserts into the cache); bounds
-  // enforcement is deferred to the end-of-scan prune below.
+  // Free slots still held by sessions that left the scan list (e.g. the
+  // history shrank or session objects changed since the previous scan) before
+  // any miss is gated by the bounds; those entries are never visited by this
+  // scan, so dropping them up front cannot break anything below, and it lets
+  // this scan's misses refill capacity that the end-of-scan prune would only
+  // free after the scan. Cheap: one Set plus one pass over the ≤64 cached
+  // keys.
+  const currentLive = new Set<SessionHistorySearchTarget>(sessions);
+  for (const key of [...SESSION_SEARCH_INDEX_CACHE.keys()]) {
+    if (!currentLive.has(key)) SESSION_SEARCH_INDEX_CACHE.delete(key);
+  }
+  // Scan all sessions first (each miss inserts into the cache only if it
+  // still fits within the bounds); pruning of entries
+  // that fell out of the scan list happens at the end of the scan below.
   const result = sessions.filter((session) => {
     // Pinyin transliteration is too expensive to run over every collected
     // message field on each keystroke; the pinyin fallback is restricted to
