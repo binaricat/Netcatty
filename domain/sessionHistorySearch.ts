@@ -358,8 +358,11 @@ type SessionSearchIndex = {
  * within a `MAX_SESSION_SEARCH_INDEX_CACHE_CHARS` character budget: an
  * unbounded cache would let one entry per live session (several normalized
  * copies of each session's searchable corpus) permanently pin hundreds of
- * megabytes in a long-running process. Evicted indexes are simply rebuilt on
- * the next search — the pre-cache per-keystroke cost for that session only.
+ * megabytes in a long-running process. Bounds are enforced once per scan (see
+ * `pruneSessionSearchIndexCache`), not on every miss, so a history longer than
+ * the entry cap cannot cycle-evict entries it still needs within the same
+ * scan. Evicted indexes are simply rebuilt on the next search — the pre-cache
+ * per-keystroke cost for that session only.
  */
 const MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES = 64;
 const MAX_SESSION_SEARCH_INDEX_CACHE_CHARS = 4_000_000;
@@ -397,25 +400,44 @@ function getSessionSearchIndex(
     prepared: prepareSearchFields(fields),
   };
   SESSION_SEARCH_INDEX_CACHE.set(session, index);
-  // Evict least-recently-used entries (Map iteration order) until both bounds
-  // hold. The newest entry is always kept, even if it alone exceeds the char
-  // budget (a single entry is bounded by ~192K chars by the collector caps).
+  return index;
+}
+
+/**
+ * Eviction runs once per full scan (at the end of `filterSessionHistory`), not
+ * on every cache miss: evicting during the scan would make each miss drop the
+ * index of a later session in the same scan, so any history longer than the
+ * entry cap would cycle-evict the whole cache and rebuild every session's
+ * haystack on every keystroke. Deferring eviction keeps every retained entry
+ * usable within a scan while still bounding the cache — first by dropping
+ * indexes for sessions no longer in the scanned list, then by evicting
+ * least-recently-used entries until both bounds hold.
+ */
+function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTarget[]): void {
+  const live = new Set<SessionHistorySearchTarget>(sessions);
+  for (const key of [...SESSION_SEARCH_INDEX_CACHE.keys()]) {
+    if (!live.has(key)) SESSION_SEARCH_INDEX_CACHE.delete(key);
+  }
   let retained = 0;
   for (const cachedIndex of SESSION_SEARCH_INDEX_CACHE.values()) {
     retained += indexRetainedChars(cachedIndex);
   }
+  // Evict least-recently-used entries (Map iteration order) until both bounds
+  // hold. The newest entry is always kept, even if it alone exceeds the char
+  // budget (a single entry is bounded by ~192K chars by the collector caps).
   while (
     SESSION_SEARCH_INDEX_CACHE.size > MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES
     || retained > MAX_SESSION_SEARCH_INDEX_CACHE_CHARS
   ) {
+    // A single entry can never push the cache past the char budget (it is
+    // bounded by ~192K chars by the collector caps), so keep the last entry.
+    if (SESSION_SEARCH_INDEX_CACHE.size <= 1) break;
     const oldestKey = SESSION_SEARCH_INDEX_CACHE.keys().next().value;
     if (oldestKey === undefined) break;
-    if (oldestKey === session) break;
     const oldest = SESSION_SEARCH_INDEX_CACHE.get(oldestKey);
     if (oldest) retained -= indexRetainedChars(oldest);
     SESSION_SEARCH_INDEX_CACHE.delete(oldestKey);
   }
-  return index;
 }
 
 export type SessionHistorySearchOptions = {
@@ -435,7 +457,9 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
   const trimmed = query.trim();
   if (!trimmed) return [...sessions];
   const untitledLabel = options.untitledLabel ?? '';
-  return sessions.filter((session) => {
+  // Scan all sessions first (each miss only inserts into the cache); bounds
+  // enforcement is deferred to the end-of-scan prune below.
+  const result = sessions.filter((session) => {
     // Pinyin transliteration is too expensive to run over every collected
     // message field on each keystroke; the pinyin fallback is restricted to
     // the (small) displayed-title field, while literal/compact matching stays
@@ -448,4 +472,8 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
       pinyinFields: [index.displayTitle],
     });
   });
+  // Prune against the full scanned list (not the filtered result): sessions
+  // that merely did not match this query must keep their cached indexes.
+  pruneSessionSearchIndexCache(sessions);
+  return result;
 }

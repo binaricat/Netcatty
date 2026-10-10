@@ -502,3 +502,37 @@ test("filterSessionHistory matches persisted status text", () => {
   const fields = collectSessionSearchFields(sessions[0]);
   assert.ok(fields.some((field) => field.includes("generating diff for src/main.ts")));
 });
+
+// Regression: bounds enforcement must run once per scan, not on every cache
+// miss. Evicting per miss makes each rebuild drop the index of a later
+// session in the same scan, so any history longer than the entry cap
+// cycle-evicts the whole cache and rebuilds every corpus on every keystroke.
+test("filterSessionHistory keeps index-cache hits for histories larger than the cache cap", () => {
+  const sessionCount = 80;
+  const sessions = Array.from({ length: sessionCount }, (_, i) =>
+    createSession(`s${i}`, `session ${i}`, [{ content: `body ${i} deploy` }]));
+  // Observe corpus (re)builds: a cache hit serves the prepared haystack
+  // without touching `messages`, while a rebuild collects the fields again.
+  const readSessions = new Set<string>();
+  for (const session of sessions) {
+    const messages = session.messages;
+    Object.defineProperty(session, "messages", {
+      get() {
+        readSessions.add(session.id);
+        return messages;
+      },
+      configurable: true,
+    });
+  }
+
+  filterSessionHistory(sessions, "deploy");
+  readSessions.clear();
+  const second = filterSessionHistory(sessions, "deploy");
+
+  // End-of-scan eviction only prunes the per-scan overshoot: the indexes of
+  // every session retained by the last prune are cache hits. Per-miss
+  // eviction would have rebuilt all 80 sessions here.
+  const rebuilt = readSessions.size;
+  assert.ok(rebuilt <= sessionCount - 64, `expected no cache thrash, rebuilt ${rebuilt}`);
+  assert.deepEqual(second, sessions);
+});
