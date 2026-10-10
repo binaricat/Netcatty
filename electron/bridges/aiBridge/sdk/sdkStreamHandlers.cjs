@@ -14,6 +14,11 @@ const { probeCodexAppServer } = require("../codexAppServer/probe.cjs");
 const { codebuddySessionManager } = require("./codebuddySessionManager.cjs");
 const codebuddyDriver = require("./codebuddyDriver.cjs");
 const { OPENCODE_SERVER_START_TIMEOUT_MS } = require("./opencodeDriver.cjs");
+const {
+  buildLastKnownCatalogPath,
+  readLastKnownCatalogEntry,
+  writeLastKnownCatalogEntry,
+} = require("./modelCatalogLastKnown.cjs");
 
 const VALID_BACKENDS = new Set(listBackends());
 
@@ -26,6 +31,11 @@ const VALID_BACKENDS = new Set(listBackends());
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MODEL_CACHE_MAX_ENTRIES = 32;
 const MODEL_LIST_TIMEOUT_MS = 10000;
+// Per-backend overrides for the catalog budget above. MiMo cold-boots a
+// dedicated `mimo serve` process for every catalog pull (unlike OpenCode's
+// pooled server), so its server start + provider query needs more than the
+// shared default.
+const MODEL_LIST_TIMEOUT_OVERRIDES_MS = { mimo: 30_000 };
 const sdkModelCache = new Map();
 const sdkModelInFlight = new Map();
 const {
@@ -144,6 +154,15 @@ function setSdkModelCacheEntry(cache, key, entry, options) {
 
 function shouldCacheSdkRuntimeModels(_backendKey) {
   return true;
+}
+
+/** Resolve the last-known-good catalog file under userData (null if unknown). */
+function resolveLastKnownCatalogPath(electronModule) {
+  try {
+    return buildLastKnownCatalogPath(electronModule?.app?.getPath?.("userData"));
+  } catch {
+    return null;
+  }
 }
 
 function normalizeSdkListModelsResult(raw) {
@@ -968,6 +987,7 @@ function registerSdkStreamHandlers(ctx) {
         const existing = sdkModelInFlight.get(cacheKey);
         if (existing) return await existing;
 
+        const lastKnownPath = resolveLastKnownCatalogPath(electronModule);
         const loadPromise = (async () => {
           const abortController = new AbortController();
           try {
@@ -985,9 +1005,12 @@ function registerSdkStreamHandlers(ctx) {
               }),
               // Include OpenCode cold startup in this single cancellable
               // catalog budget, then allow the normal provider-query budget.
-              backendKey === "opencode"
-                ? OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
-                : MODEL_LIST_TIMEOUT_MS,
+              // Per-backend overrides (see MODEL_LIST_TIMEOUT_OVERRIDES_MS)
+              // win over both the shared default and OpenCode's budget.
+              MODEL_LIST_TIMEOUT_OVERRIDES_MS[backendKey]
+                ?? (backendKey === "opencode"
+                  ? OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
+                  : MODEL_LIST_TIMEOUT_MS),
               abortController,
             );
             const { currentModelId, models } = normalizeSdkListModelsResult(raw);
@@ -998,9 +1021,37 @@ function registerSdkStreamHandlers(ctx) {
             if (shouldCacheModels && (models.length > 0 || currentModelId)) {
               setSdkModelCacheEntry(sdkModelCache, cacheKey, { at: Date.now(), currentModelId, models });
             }
+            // Persist the good catalog so a later live failure (CLI update,
+            // cold-boot race, dead binary) can serve it instead of presets.
+            // Best-effort: an IO error must never fail the fetch itself.
+            if (models.length > 0) {
+              writeLastKnownCatalogEntry(lastKnownPath, cacheKey, {
+                backend: backendKey,
+                models,
+                currentModelId,
+              });
+            }
             return { ok: true, currentModelId, models };
           } catch (err) {
-            // Degrade to [] so the renderer keeps its curated presets (never empty).
+            // Degrade to curated presets, but first offer the last-known-good
+            // catalog persisted from a prior successful fetch (preferred over
+            // presets, including copilot's single `auto` entry). The warning
+            // keeps the renderer's retry banner, and the marker lets the UI
+            // say the list is the previous success.
+            const lastKnown = readLastKnownCatalogEntry(lastKnownPath, cacheKey);
+            if (lastKnown) {
+              console.debug(
+                `[sdk] list-models(${backendKey}) unavailable, serving last-known-good catalog from ${lastKnown.fetchedAt}`,
+              );
+              return {
+                ok: true,
+                currentModelId: lastKnown.currentModelId || null,
+                models: lastKnown.models,
+                warning: `${err?.message || String(err)} — serving the last-known-good catalog fetched at ${lastKnown.fetchedAt}`,
+                source: "last-known-good",
+                fetchedAt: lastKnown.fetchedAt,
+              };
+            }
             console.debug(`[sdk] list-models(${backendKey}) unavailable, using curated presets`);
             return {
               ok: true,
@@ -1280,6 +1331,7 @@ function registerSdkStreamHandlers(ctx) {
     ctx.sdkActiveStreams = sdkActiveStreams;
     ctx.sdkRequestSessions = sdkRequestSessions;
     ctx.sdkRequestRuntimes = sdkRequestRuntimes;
+    ctx.sdkModelCache = sdkModelCache; // exposed for catalog tests
     ctx.codexAppServerRuntime = codexAppServerRuntime;
     ctx.codebuddySessionManager = codebuddySessionManager;
   }
@@ -1287,6 +1339,7 @@ function registerSdkStreamHandlers(ctx) {
 
 module.exports = {
   registerSdkStreamHandlers,
+  MODEL_LIST_TIMEOUT_OVERRIDES_MS,
   resolveBackendKey,
   resolveSdkBackendBinPath,
   buildSdkSessionKey,
