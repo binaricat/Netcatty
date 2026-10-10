@@ -7,7 +7,10 @@ import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { SESSION_HISTORY_ROW_CLASSNAMES } from './ai/sessionHistoryLayout';
-import { filterSessionHistory } from '../domain/sessionHistorySearch';
+import {
+  clearSessionHistorySearchCache,
+  filterSessionHistory,
+} from '../domain/sessionHistorySearch';
 
 // -------------------------------------------------------------------
 // Session History Drawer
@@ -49,6 +52,14 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   useEffect(() => {
     setRenderCount(SESSION_RENDER_BATCH);
   }, [sessions, searchQuery]);
+
+  // The search index cache is keyed by session object references (it retains
+  // their haystacks), so release it entirely when the drawer unmounts — cache
+  // entries for deleted/replaced sessions would otherwise pin those sessions'
+  // payloads until the next drawer search.
+  useEffect(() => () => {
+    clearSessionHistorySearchCache();
+  }, []);
 
   const displayedSessions = filteredSessions.slice(0, renderCount);
   const hiddenSessionCount = Math.max(0, filteredSessions.length - renderCount);

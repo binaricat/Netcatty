@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  clearSessionHistorySearchCache,
   collectSessionSearchFields,
   filterSessionHistory,
   type SessionHistorySearchMessage,
@@ -636,4 +637,30 @@ test("filterSessionHistory admits a newly created session after the char budget 
   readSessions.clear();
   filterSessionHistory(sessions, "x");
   assert.deepEqual([...readSessions], ["s30"]);
+});
+
+test("filterSessionHistory blank-query path prunes cache entries for sessions that left the list", () => {
+  const kept = createSession("keep", "nginx restart", [{ content: "reload nginx" }]);
+  const removed = createSession("remove", "disk cleanup", [{ content: "rm old logs" }]);
+
+  filterSessionHistory([kept, removed], "nginx");
+  // Deleting a session then clearing the query goes through the blank path,
+  // which must prune the cache against the remaining list.
+  filterSessionHistory([kept], "");
+  // Subsequent searches are unaffected: the surviving session stays cached
+  // (its cached index is still there) and matching still works.
+  assert.deepEqual(filterSessionHistory([kept], "nginx"), [kept]);
+  assert.deepEqual(filterSessionHistory([kept], "nothing here"), []);
+  // The removed session's index is gone entirely (no match via a stale cache).
+  assert.deepEqual(filterSessionHistory([kept, removed], "rm old logs"), [removed]);
+});
+
+test("clearSessionHistorySearchCache releases cached indexes without breaking later searches", () => {
+  const session = createSession("a", "nginx restart", [{ content: "reload nginx" }]);
+
+  filterSessionHistory([session], "nginx");
+  clearSessionHistorySearchCache();
+  // After the clear, the next search rebuilds from scratch and still matches.
+  assert.deepEqual(filterSessionHistory([session], "nginx"), [session]);
+  assert.deepEqual(filterSessionHistory([session], ""), [session]);
 });

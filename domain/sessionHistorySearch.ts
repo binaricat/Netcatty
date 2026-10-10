@@ -564,6 +564,18 @@ function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTar
   sessionSearchIndexCacheChars = retained;
 }
 
+/**
+ * Release every cached index and touched-session reference (exported for the
+ * drawer's unmount lifecycle). Cache keys are the session objects themselves,
+ * so clearing fully drops all strong session references — the retained
+ * haystack characters become garbage together with their sessions.
+ */
+export function clearSessionHistorySearchCache(): void {
+  SESSION_SEARCH_INDEX_CACHE.clear();
+  sessionSearchIndexScanTouched.clear();
+  sessionSearchIndexCacheChars = 0;
+}
+
 export type SessionHistorySearchOptions = {
   /**
    * Localized fallback label rendered by the drawer for sessions with an
@@ -586,6 +598,13 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
     // Normally this set is already empty — the nonblank scan clears it in its
     // `finally` — but clearing here too keeps every entry path leak-free.
     sessionSearchIndexScanTouched.clear();
+    // Cache keys are the session objects themselves, so an entry for a
+    // deleted/replaced session strongly retains that session (and its full
+    // message/attachment payloads). Prune against the current list here too:
+    // the blank-query path may run while the drawer stays open after
+    // deletions, and a later nonblank search that would prune otherwise may
+    // never happen (e.g. the user just closes the drawer).
+    pruneSessionSearchIndexCache(sessions);
     return [...sessions];
   }
   const untitledLabel = options.untitledLabel ?? '';
