@@ -646,15 +646,23 @@ function resolveCopilotExecutableForSdk(copilotExecutablePath, platform = proces
     path.join(shimDir, "node_modules", "@github", "copilot"),
     path.join(shimDir, "..", "@github", "copilot"),
   ];
+  // Loader-first is the DEFAULT. The 1.0.59-era native CLI bootstraps versioned
+  // runtimes into %LOCALAPPDATA%\copilot\pkg\ on first start (slow start, and
+  // its conhost child can outlive app-side timeout/abort — the PR #3624
+  // "console window stays open / CLI server exited unexpectedly with code 0"
+  // regression), so preferring it over npm-loader.js is OPT-IN for users on
+  // newer CLIs where that bootstrap is fixed. npm-loader.js re-spawns the same
+  // binary via spawnSync WITHOUT windowsHide, which flashes a console window
+  // when the SDK runs inside a GUI (Electron main) process on Windows —
+  // cosmetic only.
+  const preferNative = process.env.NETCATTY_COPILOT_PREFER_NATIVE === "1";
   for (const root of packageRoots) {
-    // Prefer the platform-native binary: the SDK spawns it directly with
-    // windowsHide:true, whereas npm-loader.js re-spawns the same binary via
-    // spawnSync WITHOUT windowsHide — a console window flashes when the SDK
-    // runs inside a GUI (Electron main) process on Windows.
-    const nativeExe = path.join(
-      root, "..", `copilot-${platform}-${process.arch}`, "copilot.exe",
-    );
-    if (existsSync(nativeExe)) return nativeExe;
+    if (preferNative) {
+      const nativeExe = path.join(
+        root, "..", `copilot-${platform}-${process.arch}`, "copilot.exe",
+      );
+      if (existsSync(nativeExe)) return nativeExe;
+    }
     const loaderJs = path.join(root, "npm-loader.js");
     if (existsSync(loaderJs)) return loaderJs;
   }
@@ -668,11 +676,13 @@ function resolveCopilotExecutableForSdk(copilotExecutablePath, platform = proces
       if (match) {
         const loaderJs = path.resolve(path.dirname(shimPath), match[0]);
         if (existsSync(loaderJs)) {
-          // Same native-binary preference as the package-root path above.
-          const nativeExe = path.join(
-            path.dirname(loaderJs), "..", `copilot-${platform}-${process.arch}`, "copilot.exe",
-          );
-          if (existsSync(nativeExe)) return nativeExe;
+          // Same opt-in native preference as the package-root path above.
+          if (preferNative) {
+            const nativeExe = path.join(
+              path.dirname(loaderJs), "..", `copilot-${platform}-${process.arch}`, "copilot.exe",
+            );
+            if (existsSync(nativeExe)) return nativeExe;
+          }
           return loaderJs;
         }
       }

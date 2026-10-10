@@ -1034,9 +1034,10 @@ function registerSdkStreamHandlers(ctx) {
             return { ok: true, currentModelId, models };
           } catch (err) {
             // Degrade to curated presets, but first offer the last-known-good
-            // catalog persisted from a prior successful fetch (copilot has no
-            // presets at all). The warning keeps the renderer's retry banner,
-            // and the marker lets the UI say the list is the previous success.
+            // catalog persisted from a prior successful fetch (preferred over
+            // presets, including copilot's single `auto` entry). The warning
+            // keeps the renderer's retry banner, and the marker lets the UI
+            // say the list is the previous success.
             const lastKnown = readLastKnownCatalogEntry(lastKnownPath, cacheKey);
             if (lastKnown) {
               console.debug(

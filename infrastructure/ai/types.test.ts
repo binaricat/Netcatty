@@ -7,8 +7,10 @@ import {
   CODEBUDDY_PERSIST_SESSION_MIN_CLI_VERSION,
   CODEX_GPT_5_6_MIN_CLI_VERSION,
   CODEX_MODEL_PRESETS,
+  COPILOT_MODEL_PRESETS,
   CURSOR_MODEL_PRESETS,
   GROK_MODEL_PRESETS,
+  MIMO_MODEL_PRESETS,
   extractCliSemver,
   filterAgentModelPresetsForCliVersion,
   getAgentModelPresets,
@@ -73,6 +75,32 @@ test('CodeBuddy session persistence is gated by CLI version', () => {
 test('getAgentModelPresets keeps Codex presets separate from CodeBuddy presets', () => {
   assert.deepEqual(getAgentModelPresets('codex'), CODEX_MODEL_PRESETS);
   assert.notDeepEqual(CODEBUDDY_MODEL_PRESETS, CODEX_MODEL_PRESETS);
+});
+
+test('getAgentModelPresets returns the Copilot auto fallback for sdkBackend and command paths', () => {
+  assert.deepEqual(getAgentModelPresets(undefined, 'copilot'), COPILOT_MODEL_PRESETS);
+  assert.deepEqual(getAgentModelPresets('copilot'), COPILOT_MODEL_PRESETS);
+  assert.deepEqual(getAgentModelPresets('C:\\\\Users\\\\me\\\\AppData\\\\Roaming\\\\npm\\\\copilot.cmd'), COPILOT_MODEL_PRESETS);
+  // A live-catalog failure must still yield a non-empty picker (`auto`).
+  assert.deepEqual(COPILOT_MODEL_PRESETS, [
+    { id: 'auto', name: 'Auto', description: 'Automatic model selection' },
+  ]);
+});
+
+test('MIMO_MODEL_PRESETS mirrors the live catalog without the auto channel', () => {
+  assert.deepEqual(
+    MIMO_MODEL_PRESETS.map((model) => model.id),
+    [
+      'xiaomi/mimo-v2.6-pro-ultraspeed',
+      'xiaomi/mimo-v2.6-pro',
+      'xiaomi/mimo-v2.6-flash',
+      'xiaomi/mimo-v2.5-pro-ultraspeed',
+      'xiaomi/mimo-v2.5-pro',
+      'xiaomi/mimo-v2.5',
+    ],
+  );
+  assert.deepEqual(getAgentModelPresets(undefined, 'mimo'), MIMO_MODEL_PRESETS);
+  assert.ok(MIMO_MODEL_PRESETS.every((model) => !model.id.endsWith('/auto')));
 });
 
 test('getAgentModelPresets returns curated Grok fallback when runtime catalog is empty', () => {

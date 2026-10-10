@@ -868,14 +868,24 @@ export const OPENCODE_MODEL_PRESETS: AgentModelPreset[] = [
   { id: 'ollama/llama3.3', name: 'Ollama Llama 3.3' },
 ];
 
-// Curated MiMo Code models when live discovery is unavailable. IDs read from
-// the CLI's own catalog (`mimo serve` + `config.providers()`) on v0.1.15: the
-// vendor provider is `xiaomi` and ids are lower-case, provider-prefixed.
-// Live discovery still overrides.
+// First-time fallback for the GitHub Copilot backend. Copilot's live catalog
+// (SDK listModels) exposes the implicit `auto` model; without any preset a
+// live-listModels failure (CLI missing, not logged in, slow native CLI) left
+// the picker empty and the agent unusable. Live discovery still overrides.
+export const COPILOT_MODEL_PRESETS: AgentModelPreset[] = [
+  { id: 'auto', name: 'Auto', description: 'Automatic model selection' },
+];
+
+// Curated MiMo Code models when live discovery is unavailable. Verified
+// against the live catalog on 2026-10-10 (user-observed picker + harness);
+// the `auto` channel is excluded — the mimo driver filters it driver-side.
 export const MIMO_MODEL_PRESETS: AgentModelPreset[] = [
-  { id: 'xiaomi/mimo-v2.5', name: 'MiMo V2.5' },
+  { id: 'xiaomi/mimo-v2.6-pro-ultraspeed', name: 'MiMo V2.6 Pro UltraSpeed' },
   { id: 'xiaomi/mimo-v2.6-pro', name: 'MiMo V2.6 Pro' },
   { id: 'xiaomi/mimo-v2.6-flash', name: 'MiMo V2.6 Flash' },
+  { id: 'xiaomi/mimo-v2.5-pro-ultraspeed', name: 'MiMo V2.5 Pro UltraSpeed' },
+  { id: 'xiaomi/mimo-v2.5-pro', name: 'MiMo V2.5 Pro' },
+  { id: 'xiaomi/mimo-v2.5', name: 'MiMo V2.5' },
 ];
 
 // Curated Grok Build models when `grok models` is unavailable. IDs mirror the
@@ -923,6 +933,7 @@ export function getAgentModelPresets(
   if (backend === 'opencode') return OPENCODE_MODEL_PRESETS;
   if (backend === 'grok') return GROK_MODEL_PRESETS;
   if (backend === 'mimo') return MIMO_MODEL_PRESETS;
+  if (backend === 'copilot') return COPILOT_MODEL_PRESETS;
 
   if (!agentCommand) return [];
   // Split on both POSIX (/) and Windows (\) separators so command paths like
@@ -943,6 +954,7 @@ export function getAgentModelPresets(
   if (basename.startsWith('opencode')) return OPENCODE_MODEL_PRESETS;
   if (basename.startsWith('grok')) return GROK_MODEL_PRESETS;
   if (basename.startsWith('mimo')) return MIMO_MODEL_PRESETS;
+  if (basename.startsWith('copilot')) return COPILOT_MODEL_PRESETS;
   return [];
 }
 

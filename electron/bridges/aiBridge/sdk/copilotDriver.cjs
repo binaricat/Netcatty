@@ -32,6 +32,31 @@ const {
   TOOL_CLI_DISCOVERY_ENV_VAR,
 } = require("../../../cli/discoveryPath.cjs");
 
+/**
+ * Stop a CopilotClient and make sure the spawned CLI process is reaped.
+ *
+ * The SDK (client.d.ts) exposes graceful `stop()`, `forceStop()` (SIGKILL),
+ * and `[Symbol.asyncDispose]` (an alias of stop) — no separate kill/dispose.
+ * Graceful stop closes sessions + the JSON-RPC connection and terminates the
+ * CLI process, but the 1.0.59-era native CLI can hang during that handshake,
+ * leaving its conhost child alive after an app-side timeout/abort (the
+ * "console window stays open" amplifier). Race a short grace period and fall
+ * back to forceStop() when graceful stop does not settle.
+ */
+async function stopCopilotClient(client, graceMs = 3000) {
+  if (!client || typeof client.stop !== "function") return;
+  let settled = false;
+  try {
+    await Promise.race([
+      Promise.resolve(client.stop()).catch(() => {}).then(() => { settled = true; }),
+      new Promise((resolve) => setTimeout(resolve, graceMs)),
+    ]);
+  } catch { /* best effort */ }
+  if (!settled && typeof client.forceStop === "function") {
+    try { await client.forceStop(); } catch { /* best effort */ }
+  }
+}
+
 // Neutral client options. The real CopilotClient options (with RuntimeConnection)
 // are assembled in runCopilotTurn, because RuntimeConnection comes from the SDK
 // module which is loaded via dynamic import().
@@ -509,6 +534,9 @@ async function runCopilotTurn({
         if (typeof session.abort === "function") {
           void session.abort().catch(() => {});
         }
+        // Reap the spawned CLI promptly: graceful session.abort() alone does
+        // not terminate the CLI server process.
+        void stopCopilotClient(client);
       };
       if (signal.aborted) {
         onAbort();
@@ -558,7 +586,7 @@ async function runCopilotTurn({
     }
     return { sessionId };
   } finally {
-    try { await client?.stop?.(); } catch { /* best effort */ }
+    await stopCopilotClient(client);
   }
 }
 
@@ -596,9 +624,7 @@ async function listCopilotModels({ cliPath, sdkModule, abortController, signal }
   const client = new CopilotClient(clientOptions);
   let stopPromise;
   const stopClient = () => {
-    if (!stopPromise) {
-      try { stopPromise = Promise.resolve(client.stop()).catch(() => {}); } catch { stopPromise = Promise.resolve(); }
-    }
+    if (!stopPromise) stopPromise = stopCopilotClient(client);
     return stopPromise;
   };
   let resolveAbort;
