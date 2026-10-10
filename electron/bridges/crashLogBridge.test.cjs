@@ -125,4 +125,22 @@ test("truncateFileToTail tolerates a tail with no newline and missing files", (t
   fs.appendFileSync(filePath, "g".repeat(MAX_LOG_FILE_BYTES + 4096));
   assert.equal(truncateFileToTail(filePath, MAX_LOG_FILE_BYTES), true);
   assert.ok(fs.statSync(filePath).size <= MAX_LOG_FILE_BYTES);
+
+  // Oversized tail whose final write was interrupted before its trailing
+  // newline: three terminated entries followed by one entry whose trailing
+  // newline was never written. The partial final line must be dropped so the
+  // rewritten file ends on a complete JSONL boundary and the next append does
+  // not merge with a partial object.
+  fs.appendFileSync(
+    filePath,
+    Array.from({ length: 3 }, () => entryLine(1200) + "\n").join("") +
+      entryLine(1200),
+  );
+  assert.ok(fs.statSync(filePath).size > 4096);
+  assert.equal(truncateFileToTail(filePath, 4096), true);
+  const trimmed = fs.readFileSync(filePath, "utf-8");
+  assert.ok(trimmed.endsWith("\n"), "trimmed file must end on a line boundary");
+  for (const l of trimmed.split("\n").filter(Boolean)) {
+    assert.doesNotThrow(() => JSON.parse(l));
+  }
 });

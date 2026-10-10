@@ -277,12 +277,19 @@ function truncateFileToTail(filePath, maxBytes) {
     const read = fs.readSync(fd, buf, 0, buf.length, stat.size - buf.length);
     const tail = buf.subarray(0, read);
     // Drop the first (possibly partial) line of the tail so every remaining
-    // line is a complete JSONL entry.  If the tail contains no newline at all
-    // it is one giant partial entry (e.g. from an interrupted write), so
+    // line is a complete JSONL entry.  Also trim anything after the last
+    // newline: a final write interrupted before its trailing newline would
+    // otherwise leave a partial object that the next appendEntryLine appends
+    // to, corrupting both lines.  If the tail contains no newline at all it
+    // is one giant partial entry (e.g. from an interrupted write), so
     // discard it entirely rather than keeping an unappendable file: the file
     // would sit exactly at the cap and reject every later report for the day.
     const newline = tail.indexOf("\n");
-    const keep = newline >= 0 ? tail.subarray(newline + 1) : Buffer.alloc(0);
+    let keep = Buffer.alloc(0);
+    if (newline >= 0) {
+      const lastNewline = tail.lastIndexOf("\n");
+      keep = tail.subarray(newline + 1, lastNewline + 1);
+    }
     fs.ftruncateSync(fd, keep.length);
     if (keep.length > 0) {
       fs.writeSync(fd, keep, 0, keep.length, 0);
