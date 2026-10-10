@@ -559,24 +559,29 @@ export interface AgentModelPreset {
 
 const CLAUDE_REASONING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
 
+// Fallback presets used when the live catalog (SDK listModels) is unavailable.
+// Ids are Claude CLI model keywords and must stay stable; names track the
+// current CLI generation. `sonnet`/`haiku` resolve to claude-sonnet-5-5 /
+// claude-haiku-5-5 (Claude CLI 2.1.296 alias table); `default` has no fixed
+// alias target, so it keeps the CLI's own neutral label.
 export const CLAUDE_MODEL_PRESETS: AgentModelPreset[] = [
   {
     id: 'default',
-    name: 'Opus 4.6',
+    name: 'Default (recommended)',
     description: 'Recommended',
     thinkingLevels: [...CLAUDE_REASONING_LEVELS],
     defaultThinkingLevel: 'medium',
   },
   {
     id: 'sonnet',
-    name: 'Sonnet 4.6',
+    name: 'Sonnet 5.5',
     description: 'Everyday tasks',
     thinkingLevels: [...CLAUDE_REASONING_LEVELS],
     defaultThinkingLevel: 'medium',
   },
   {
     id: 'haiku',
-    name: 'Haiku 4.5',
+    name: 'Haiku 5.5',
     description: 'Fastest',
     thinkingLevels: [...CLAUDE_REASONING_LEVELS],
     defaultThinkingLevel: 'low',
