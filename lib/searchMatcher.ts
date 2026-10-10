@@ -88,14 +88,18 @@ export function tokenizeSearchQuery(query: string): string[] {
 
 /**
  * Optional matching tweaks. Callers with large unbounded haystacks (e.g.
- * full conversation histories) should set `allowPinyin: false`: the pinyin
- * fallback transliterates the joined fields, which is expensive for long text.
+ * full conversation histories) can keep literal/compact matching global
+ * while restricting the (expensive) pinyin fallback to specific fields via
+ * `pinyinFields`: each token may still match literally anywhere in the
+ * haystack, but is only transliteration-matched against the listed fields.
  */
 export type SearchMatchOptions = {
   allowPinyin?: boolean;
+  /** Restrict the pinyin fallback to these fields; defaults to every field. */
+  pinyinFields?: string[];
 };
 
-const DEFAULT_SEARCH_MATCH_OPTIONS: Required<SearchMatchOptions> = {
+const DEFAULT_SEARCH_MATCH_OPTIONS: Required<Pick<SearchMatchOptions, "allowPinyin">> = {
   allowPinyin: true,
 };
 
@@ -104,7 +108,8 @@ export function matchesSearchQuery(
   ...rest: Array<string | null | undefined | SearchMatchOptions>
 ): boolean {
   const args = [...rest];
-  const options: Required<SearchMatchOptions> = args.length > 0
+  const options: Pick<SearchMatchOptions, "allowPinyin"> & { pinyinFields?: string[] } =
+    args.length > 0
     && typeof args[args.length - 1] === "object"
     && args[args.length - 1] !== null
     ? { ...DEFAULT_SEARCH_MATCH_OPTIONS, ...(args.pop() as SearchMatchOptions) }
@@ -145,7 +150,13 @@ export function matchesSearchQuery(
   const hasLatinToken = tokens.some((token) => /[a-z]/i.test(token));
   if (!hasLatinToken || !options.allowPinyin) return false;
 
-  const { full, initials } = getPinyinVariants(sourceText);
+  const pinyinSource = options.pinyinFields === undefined
+    ? sourceText
+    : options.pinyinFields
+      .filter((field): field is string => typeof field === "string" && field.trim().length > 0)
+      .map((field) => normalizeText(field))
+      .join(" ");
+  const { full, initials } = getPinyinVariants(pinyinSource);
   if (!full && !initials) return false;
 
   return tokens.every((token) => {

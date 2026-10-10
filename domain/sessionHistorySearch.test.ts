@@ -244,6 +244,23 @@ test("filterSessionHistory matches CJK titles via the shared pinyin matcher", ()
   assert.deepEqual(filterSessionHistory(sessions, "重启"), [sessions[0]]);
 });
 
+test("filterSessionHistory lets tokens span title pinyin and message text", () => {
+  const sessions = [
+    createSession("a", "重启服务器", [
+      { role: "user", content: "restarted nginx without errors" },
+    ]),
+  ];
+
+  const combined = filterSessionHistory(sessions, "chongqi nginx");
+  assert.deepEqual(combined, [sessions[0]]);
+  // Message-only pinyin still stays out of the expensive fallback.
+  assert.deepEqual(filterSessionHistory(sessions, "chongqi"), [sessions[0]]);
+  assert.deepEqual(
+    filterSessionHistory(sessions, "failing nginx"),
+    [],
+  );
+});
+
 test("search field trimming stays inside the field and remaining session limits", () => {
   const fieldLimited = createSession("a", "Ops", [
     { content: " ".repeat(20_000) + "outside-field" },

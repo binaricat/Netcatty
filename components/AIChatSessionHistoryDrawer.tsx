@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Search, Trash2, X } from 'lucide-react';
 import type { AISession } from '../infrastructure/ai/types';
 import { useI18n } from '../application/i18n/I18nProvider';
@@ -35,6 +35,7 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   const [renderCount, setRenderCount] = useState(SESSION_RENDER_BATCH);
   const [searchQuery, setSearchQuery] = useState('');
   const searchHintId = useId();
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const filteredSessions = React.useMemo(
     () => filterSessionHistory(sessions, searchQuery),
@@ -68,6 +69,7 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 pointer-events-none"
           />
           <Input
+            ref={searchInputRef}
             type="text"
             value={searchQuery}
             placeholder={t('ai.chat.searchSessions')}
@@ -78,7 +80,11 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
           {searchQuery && (
             <button
               type="button"
-              onClick={() => setSearchQuery('')}
+              aria-label={t('ai.chat.clearSessionSearch')}
+              onClick={() => {
+                setSearchQuery('');
+                searchInputRef.current?.focus();
+              }}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-muted-foreground transition-colors cursor-pointer"
             >
               <X size={12} />

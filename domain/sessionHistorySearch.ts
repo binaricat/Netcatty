@@ -280,13 +280,16 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
   if (!trimmed) return [...sessions];
   return sessions.filter((session) =>
     // Pinyin transliteration is too expensive to run over every collected
-    // message field on each keystroke; literal/compact matching stays global,
-    // while the pinyin fallback is restricted to the (small) title field.
+    // message field on each keystroke; the pinyin fallback is restricted to
+    // the (small) title field, while literal/compact matching stays global.
+    // Restricting pinyin per field still allows tokens within one query to
+    // span fields: "chongqi nginx" matches a session titled "重启服务器"
+    // whose message contains "nginx" ("chongqi" via title pinyin, "nginx"
+    // literally in the message content).
     matchesSearchQuery(
       trimmed,
       ...collectSessionSearchFields(session),
-      { allowPinyin: false },
-    )
-    || matchesSearchQuery(trimmed, session.title),
+      { pinyinFields: [session.title] },
+    ),
   );
 }

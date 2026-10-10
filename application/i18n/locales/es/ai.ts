@@ -519,6 +519,7 @@ export const esAiMessages: Messages = {
   'ai.chat.usedTools': 'Herramientas usadas: {n}',
   'ai.chat.loadMoreSessions': 'Cargar más sesiones ({n} más)',
   'ai.chat.searchSessions': 'Buscar títulos y contenido reciente…',
+  'ai.chat.clearSessionSearch': 'Borrar la búsqueda de sesiones',
   'ai.chat.searchSessionsHint': 'Solo se buscan títulos y contenido reciente conservado. Es posible que el contenido extenso no se busque por completo.',
   'ai.chat.noMatchingSessions': 'Sin coincidencias en títulos ni contenido reciente conservado',
   'ai.chat.noSessions': 'No hay sesiones anteriores',

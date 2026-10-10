@@ -528,6 +528,7 @@ export const enAiMessages: Messages = {
   'ai.chat.usedTools': 'Tools used: {n}',
   'ai.chat.loadMoreSessions': 'Load more sessions ({n} more)',
   'ai.chat.searchSessions': 'Search titles and recent content…',
+  'ai.chat.clearSessionSearch': 'Clear session search',
   'ai.chat.searchSessionsHint': 'Searches only titles and recent retained content. Long content may not be searched in full.',
   'ai.chat.noMatchingSessions': 'No matches in titles or recent retained content',
   'ai.chat.noSessions': 'No previous sessions',

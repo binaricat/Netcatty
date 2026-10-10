@@ -528,6 +528,7 @@ export const zhCNAiMessages: Messages = {
   'ai.chat.usedTools': '已使用 {n} 个工具',
   'ai.chat.loadMoreSessions': '加载更多会话（还有 {n} 条）',
   'ai.chat.searchSessions': '搜索标题和近期内容…',
+  'ai.chat.clearSessionSearch': '清空会话搜索',
   'ai.chat.searchSessionsHint': '仅搜索标题和近期保留的内容，较长内容可能无法完整搜索。',
   'ai.chat.noMatchingSessions': '标题和近期保留的内容中没有匹配结果',
   'ai.chat.noSessions': '没有历史会话',

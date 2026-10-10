@@ -475,6 +475,7 @@ export const ruAiMessages: Messages = {
   'ai.chat.usedTools': 'Использовано инструментов: {n}',
   'ai.chat.loadMoreSessions': 'Загрузить больше сессий (ещё {n})',
   'ai.chat.searchSessions': 'Поиск по заголовкам и недавнему содержимому…',
+  'ai.chat.clearSessionSearch': 'Очистить поиск сессий',
   'ai.chat.searchSessionsHint': 'Поиск только по заголовкам и недавнему сохранённому содержимому. Длинное содержимое может быть охвачено не полностью.',
   'ai.chat.noMatchingSessions': 'Нет совпадений в заголовках и недавнем сохранённом содержимом',
   'ai.chat.noSessions': 'Предыдущих сессий нет',
