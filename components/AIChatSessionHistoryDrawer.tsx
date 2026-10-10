@@ -7,10 +7,7 @@ import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { SESSION_HISTORY_ROW_CLASSNAMES } from './ai/sessionHistoryLayout';
-import {
-  clearSessionHistorySearchCache,
-  filterSessionHistory,
-} from '../domain/sessionHistorySearch';
+import { useSessionHistorySearch } from '../application/state/useSessionHistorySearch';
 
 // -------------------------------------------------------------------
 // Session History Drawer
@@ -39,12 +36,15 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const searchHintId = useId();
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // One cache instance per mounted drawer: caches of concurrently mounted
+  // drawers stay independent (no shared state to prune or discard across tabs).
+  const search = useSessionHistorySearch();
 
   const filteredSessions = React.useMemo(
     // The localized fallback below is displayed for untitled sessions
     // (row label), so it must be indexed for search as the displayed title.
-    () => filterSessionHistory(sessions, searchQuery, { untitledLabel: t('ai.chat.untitled') }),
-    [sessions, searchQuery, t],
+    () => search.filterSessionHistory(sessions, searchQuery, { untitledLabel: t('ai.chat.untitled') }),
+    [sessions, searchQuery, t, search],
   );
 
   // Reset the render batch when the list scope or query changes so matching
@@ -52,14 +52,6 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   useEffect(() => {
     setRenderCount(SESSION_RENDER_BATCH);
   }, [sessions, searchQuery]);
-
-  // The search index cache is keyed by session object references (it retains
-  // their haystacks), so release it entirely when the drawer unmounts — cache
-  // entries for deleted/replaced sessions would otherwise pin those sessions'
-  // payloads until the next drawer search.
-  useEffect(() => () => {
-    clearSessionHistorySearchCache();
-  }, []);
 
   const displayedSessions = filteredSessions.slice(0, renderCount);
   const hiddenSessionCount = Math.max(0, filteredSessions.length - renderCount);

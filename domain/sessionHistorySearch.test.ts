@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  clearSessionHistorySearchCache,
   collectSessionSearchFields,
-  filterSessionHistory,
+  createSessionHistorySearch,
   type SessionHistorySearchMessage,
 } from "./sessionHistorySearch.ts";
+
+// One instance for the whole file: it keeps the pre-factory semantics of every
+// test sharing (and clearing) a single cache.
+const { clearSessionHistorySearchCache, filterSessionHistory } = createSessionHistorySearch();
 
 // Fixture messages stay loosely typed: persisted sessions carry far richer
 // shapes (role, ids, payload fields, …) than the minimal searchable shapes,
@@ -681,4 +684,16 @@ test("clearSessionHistorySearchCache releases cached indexes without breaking la
   // After the clear, the next search rebuilds from scratch and still matches.
   assert.deepEqual(filterSessionHistory([session], "nginx"), [session]);
   assert.deepEqual(filterSessionHistory([session], ""), [session]);
+});
+
+test("independent search instances own isolated caches", () => {
+  const first = createSessionHistorySearch();
+  const second = createSessionHistorySearch();
+  const session = createSession("iso-1", "isolated cache", [{ content: "lighthouse" }]);
+  assert.deepEqual(first.filterSessionHistory([session], "lighthouse"), [session]);
+  // Clearing one instance must not disturb the other's state: both stay fully
+  // functional afterwards (each store is private to its instance).
+  second.clearSessionHistorySearchCache();
+  assert.deepEqual(second.filterSessionHistory([session], "lighthouse"), [session]);
+  assert.deepEqual(first.filterSessionHistory([session], "lighthouse"), [session]);
 });

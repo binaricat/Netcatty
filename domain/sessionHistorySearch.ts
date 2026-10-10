@@ -393,31 +393,40 @@ const MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES = 64;
 const MAX_SESSION_SEARCH_INDEX_CACHE_CHARS = 4_000_000;
 
 /**
- * Session keys the in-flight `filterSessionHistory` scan has already visited
- * (re-appended cache hits or inserted misses). `canCacheSessionSearchIndex`
- * never evicts a touched key: it either ranks above the current insert (it was
- * visited earlier in this newest-first scan) or it is the current session
- * itself (whose stale entry a rebuild is about to replace), and evicting either
- * would cycle-evict entries the same scan still needs.
+ * Mutable cache state owned by exactly one search client (one mounted history
+ * drawer). Keeping this out of module scope means several concurrently mounted
+ * drawers (one per terminal tab) never share a cache: each drawer's prune only
+ * drops entries no longer in that drawer's scoped session list, and one
+ * drawer's unmount releases only its own store (previously a shared
+ * module-level cache was discarded for every drawer on any unmount and pruned
+ * against whichever drawer scanned last).
  */
-const sessionSearchIndexScanTouched = new Set<SessionHistorySearchTarget>();
-
-/**
- * Running total of the cache's retained characters. Maintained at every
- * mutation site so the eager insert gate in `canCacheSessionSearchIndex` stays
- * O(1) per miss instead of re-summing the whole cache on every keystroke
- * (mid-scan overshoot of the entry cap would otherwise make that sum O(n²)
- * across a scan).
- */
-let sessionSearchIndexCacheChars = 0;
-
-/**
- * Sessions in state are updated immutably (`{ ...s, messages: next }`), so
- * object identity is a reliable cache key: each session's normalized/compact
- * haystacks are built once and reused until that session's object changes.
- * A changed display title (e.g. a localized fallback switch) forces a rebuild.
- */
-const SESSION_SEARCH_INDEX_CACHE = new Map<SessionHistorySearchTarget, SessionSearchIndex>();
+export type SessionHistorySearchStore = {
+  /**
+   * Sessions in state are updated immutably (`{ ...s, messages: next }`), so
+   * object identity is a reliable cache key: each session's normalized/compact
+   * haystacks are built once and reused until that session's object changes.
+   * A changed display title (e.g. a localized fallback switch) forces a rebuild.
+   */
+  cache: Map<SessionHistorySearchTarget, SessionSearchIndex>;
+  /**
+   * Session keys the in-flight `filterSessionHistory` scan has already visited
+   * (re-appended cache hits or inserted misses). `canCacheSessionSearchIndex`
+   * never evicts a touched key: it either ranks above the current insert (it was
+   * visited earlier in this newest-first scan) or it is the current session
+   * itself (whose stale entry a rebuild is about to replace), and evicting either
+   * would cycle-evict entries the same scan still needs.
+   */
+  scanTouched: Set<SessionHistorySearchTarget>;
+  /**
+   * Running total of the cache's retained characters. Maintained at every
+   * mutation site so the eager insert gate in `canCacheSessionSearchIndex` stays
+   * O(1) per miss instead of re-summing the whole cache on every keystroke
+   * (mid-scan overshoot of the entry cap would otherwise make that sum O(n²)
+   * across a scan).
+   */
+  cacheChars: number;
+};
 
 /** Retained characters of an index (the prepared haystacks; raw fields are dropped). */
 function indexRetainedChars(index: SessionSearchIndex): number {
@@ -467,32 +476,34 @@ function indexRetainedChars(index: SessionSearchIndex): number {
  * then simply rebuilt on the next search.
  */
 function canCacheSessionSearchIndex(
+  store: SessionHistorySearchStore,
   previous: SessionSearchIndex | undefined,
   index: SessionSearchIndex,
 ): boolean {
   const deltaChars = indexRetainedChars(index) - (previous ? indexRetainedChars(previous) : 0);
   if (deltaChars <= 0) return true;
-  const budgetAfter = sessionSearchIndexCacheChars + deltaChars;
+  const budgetAfter = store.cacheChars + deltaChars;
   if (budgetAfter <= MAX_SESSION_SEARCH_INDEX_CACHE_CHARS) return true;
   // Not enough headroom: evict the lowest-ranked untouched entries. Mid-scan
   // the Map's order is old-insertion-order front to back with this scan's
   // touched keys re-appended at the end, so scanning the keys back-to-front
   // and skipping touched ones reaches the untouched (stalest, lowest-ranked)
   // entries first.
-  const keysInInsertionOrder = [...SESSION_SEARCH_INDEX_CACHE.keys()];
+  const keysInInsertionOrder = [...store.cache.keys()];
   for (let i = keysInInsertionOrder.length - 1; i >= 0; i--) {
-    if (sessionSearchIndexCacheChars + deltaChars <= MAX_SESSION_SEARCH_INDEX_CACHE_CHARS) break;
+    if (store.cacheChars + deltaChars <= MAX_SESSION_SEARCH_INDEX_CACHE_CHARS) break;
     const key = keysInInsertionOrder[i];
-    if (sessionSearchIndexScanTouched.has(key)) continue;
-    const evicted = SESSION_SEARCH_INDEX_CACHE.get(key);
+    if (store.scanTouched.has(key)) continue;
+    const evicted = store.cache.get(key);
     if (!evicted) continue;
-    sessionSearchIndexCacheChars -= indexRetainedChars(evicted);
-    SESSION_SEARCH_INDEX_CACHE.delete(key);
+    store.cacheChars -= indexRetainedChars(evicted);
+    store.cache.delete(key);
   }
-  return sessionSearchIndexCacheChars + deltaChars <= MAX_SESSION_SEARCH_INDEX_CACHE_CHARS;
+  return store.cacheChars + deltaChars <= MAX_SESSION_SEARCH_INDEX_CACHE_CHARS;
 }
 
 function getSessionSearchIndex(
+  store: SessionHistorySearchStore,
   session: SessionHistorySearchTarget,
   untitledLabel: string,
 ): SessionSearchIndex {
@@ -506,14 +517,14 @@ function getSessionSearchIndex(
   // either. A title whose capped form is blank was skipped by the collector
   // entirely; the blank pinyin field is filtered out downstream.
   const indexedTitle = displayTitle.slice(0, MAX_SEARCHABLE_FIELD_LENGTH).trim();
-  const cached = SESSION_SEARCH_INDEX_CACHE.get(session);
+  const cached = store.cache.get(session);
   if (cached && cached.displayTitle === indexedTitle) {
     // Re-append on every visit so the cache's insertion order mirrors the
     // latest scan's visitation order (the ranked, newest-first session list);
     // `pruneSessionSearchIndexCache` relies on that order when evicting.
-    SESSION_SEARCH_INDEX_CACHE.delete(session);
-    SESSION_SEARCH_INDEX_CACHE.set(session, cached);
-    sessionSearchIndexScanTouched.add(session);
+    store.cache.delete(session);
+    store.cache.set(session, cached);
+    store.scanTouched.add(session);
     return cached;
   }
   const fields = collectSessionSearchFields(session, untitledLabel);
@@ -524,13 +535,12 @@ function getSessionSearchIndex(
   // Mark the session touched before the gate so the gate's admission eviction
   // can never pick this session's own (stale) entry — the rebuild below is
   // about to replace it, and evicting it would corrupt the running char total.
-  sessionSearchIndexScanTouched.add(session);
-  if (canCacheSessionSearchIndex(cached, index)) {
-    SESSION_SEARCH_INDEX_CACHE.set(session, index);
+  store.scanTouched.add(session);
+  if (canCacheSessionSearchIndex(store, cached, index)) {
+    store.cache.set(session, index);
     // Keep the eager gate's running total in sync (also covers the
     // display-title-change rebuild, which replaces an existing entry).
-    sessionSearchIndexCacheChars +=
-      indexRetainedChars(index) - (cached ? indexRetainedChars(cached) : 0);
+    store.cacheChars += indexRetainedChars(index) - (cached ? indexRetainedChars(cached) : 0);
   }
   return index;
 }
@@ -552,18 +562,21 @@ function getSessionSearchIndex(
  * session in the scan) — it drops that overshoot plus indexes for sessions
  * that left the scanned list.
  */
-function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTarget[]): void {
+function pruneSessionSearchIndexCache(
+  store: SessionHistorySearchStore,
+  sessions: readonly SessionHistorySearchTarget[],
+): void {
   const live = new Set<SessionHistorySearchTarget>(sessions);
-  for (const key of [...SESSION_SEARCH_INDEX_CACHE.keys()]) {
-    if (!live.has(key)) SESSION_SEARCH_INDEX_CACHE.delete(key);
+  for (const key of [...store.cache.keys()]) {
+    if (!live.has(key)) store.cache.delete(key);
   }
   let retained = 0;
-  for (const cachedIndex of SESSION_SEARCH_INDEX_CACHE.values()) {
+  for (const cachedIndex of store.cache.values()) {
     retained += indexRetainedChars(cachedIndex);
   }
   // Re-sync the eager gate's running total: the sum above is authoritative
   // here (once per scan), so any drift accumulated mid-scan is corrected.
-  sessionSearchIndexCacheChars = retained;
+  store.cacheChars = retained;
   // Evict from the END of the Map until both bounds hold. Every scan visits
   // the full ranked session list newest-first and `getSessionSearchIndex`
   // re-appends each visited entry, so after a scan the Map's insertion order
@@ -577,33 +590,34 @@ function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTar
   // chars by the collector caps).
   // Snapshot the keys once: prune only deletes (never inserts), so popping
   // from this array visits keys exactly in Map order, back to front.
-  const keysInInsertionOrder = [...SESSION_SEARCH_INDEX_CACHE.keys()];
+  const keysInInsertionOrder = [...store.cache.keys()];
   while (
-    SESSION_SEARCH_INDEX_CACHE.size > MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES
+    store.cache.size > MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES
     || retained > MAX_SESSION_SEARCH_INDEX_CACHE_CHARS
   ) {
     // A single entry can never push the cache past the char budget (it is
     // bounded by ~192K chars by the collector caps), so keep the last entry.
-    if (SESSION_SEARCH_INDEX_CACHE.size <= 1) break;
+    if (store.cache.size <= 1) break;
     const evictKey = keysInInsertionOrder.pop();
     if (evictKey === undefined) break;
-    const evicted = SESSION_SEARCH_INDEX_CACHE.get(evictKey);
+    const evicted = store.cache.get(evictKey);
     if (evicted) retained -= indexRetainedChars(evicted);
-    SESSION_SEARCH_INDEX_CACHE.delete(evictKey);
+    store.cache.delete(evictKey);
   }
-  sessionSearchIndexCacheChars = retained;
+  store.cacheChars = retained;
 }
 
 /**
- * Release every cached index and touched-session reference (exported for the
- * drawer's unmount lifecycle). Cache keys are the session objects themselves,
- * so clearing fully drops all strong session references — the retained
- * haystack characters become garbage together with their sessions.
+ * Release every cached index and touched-session reference for one store
+ * (invoked for the drawer's unmount lifecycle via the per-drawer search
+ * instance). Cache keys are the session objects themselves, so clearing fully
+ * drops all strong session references — the retained haystack characters
+ * become garbage together with their sessions.
  */
-export function clearSessionHistorySearchCache(): void {
-  SESSION_SEARCH_INDEX_CACHE.clear();
-  sessionSearchIndexScanTouched.clear();
-  sessionSearchIndexCacheChars = 0;
+function clearSessionHistorySearchStore(store: SessionHistorySearchStore): void {
+  store.cache.clear();
+  store.scanTouched.clear();
+  store.cacheChars = 0;
 }
 
 export type SessionHistorySearchOptions = {
@@ -615,7 +629,8 @@ export type SessionHistorySearchOptions = {
   untitledLabel?: string;
 };
 
-export function filterSessionHistory<T extends SessionHistorySearchTarget>(
+function filterSessionHistoryStore<T extends SessionHistorySearchTarget>(
+  store: SessionHistorySearchStore,
   sessions: readonly T[],
   query: string,
   options: SessionHistorySearchOptions = {},
@@ -627,21 +642,21 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
     // message/attachment memory) while the drawer is open without a query.
     // Normally this set is already empty — the nonblank scan clears it in its
     // `finally` — but clearing here too keeps every entry path leak-free.
-    sessionSearchIndexScanTouched.clear();
+    store.scanTouched.clear();
     // Cache keys are the session objects themselves, so an entry for a
     // deleted/replaced session strongly retains that session (and its full
     // message/attachment payloads). Prune against the current list here too:
     // the blank-query path may run while the drawer stays open after
     // deletions, and a later nonblank search that would prune otherwise may
     // never happen (e.g. the user just closes the drawer).
-    pruneSessionSearchIndexCache(sessions);
+    pruneSessionSearchIndexCache(store, sessions);
     return [...sessions];
   }
   const untitledLabel = options.untitledLabel ?? '';
   // A new scan starts with no visited sessions: the touched set records only
   // this scan's visits so `canCacheSessionSearchIndex` can never mistake a
   // previous scan's keys for keys the current scan still needs.
-  sessionSearchIndexScanTouched.clear();
+  store.scanTouched.clear();
   try {
     // Drop entries still held by sessions that left the scan list (e.g. the
     // history shrank or session objects changed since the previous scan). Those
@@ -650,11 +665,11 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
     // available to this scan's inserts (via the eager char gate). Cheap: one
     // Set plus one pass over the cached keys.
     const currentLive = new Set<SessionHistorySearchTarget>(sessions);
-    for (const key of [...SESSION_SEARCH_INDEX_CACHE.keys()]) {
+    for (const key of [...store.cache.keys()]) {
       if (!currentLive.has(key)) {
-        const removed = SESSION_SEARCH_INDEX_CACHE.get(key);
-        if (removed) sessionSearchIndexCacheChars -= indexRetainedChars(removed);
-        SESSION_SEARCH_INDEX_CACHE.delete(key);
+        const removed = store.cache.get(key);
+        if (removed) store.cacheChars -= indexRetainedChars(removed);
+        store.cache.delete(key);
       }
     }
     // Scan all sessions first (a miss admits its index into the cache — evicting
@@ -670,14 +685,14 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
       // query to span fields: "chongqi nginx" matches a session titled
       // "重启服务器" whose message contains "nginx" ("chongqi" via title
       // pinyin, "nginx" literally in the message content).
-      const index = getSessionSearchIndex(session, untitledLabel);
+      const index = getSessionSearchIndex(store, session, untitledLabel);
       return matchesPreparedSearchQuery(trimmed, index.prepared, {
         pinyinFields: [index.displayTitle],
       });
     });
     // Prune against the full scanned list (not the filtered result): sessions
     // that merely did not match this query must keep their cached indexes.
-    pruneSessionSearchIndexCache(sessions);
+    pruneSessionSearchIndexCache(store, sessions);
     return result;
   } finally {
     // The touched set only guards against cycle-eviction within the current
@@ -685,6 +700,39 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
     // references to session objects so deleted/replaced sessions and their
     // large message/attachment payloads aren't retained until the next
     // nonblank search.
-    sessionSearchIndexScanTouched.clear();
+    store.scanTouched.clear();
   }
+}
+
+/**
+ * One stateful search instance per consumer (one mounted session history
+ * drawer). The cache lives in the returned instance's store instead of module
+ * scope, so concurrently mounted drawers (one per terminal tab) never share
+ * state: an unmount of one drawer clears only that drawer's indexes, and each
+ * drawer's prune is scoped to its own session list. All module-level bindings
+ * in this file stay pure.
+ */
+export type SessionHistorySearch = {
+  filterSessionHistory: <T extends SessionHistorySearchTarget>(
+    sessions: readonly T[],
+    query: string,
+    options?: SessionHistorySearchOptions,
+  ) => T[];
+  clearSessionHistorySearchCache: () => void;
+};
+
+export function createSessionHistorySearch(): SessionHistorySearch {
+  const store: SessionHistorySearchStore = {
+    cache: new Map(),
+    scanTouched: new Set(),
+    cacheChars: 0,
+  };
+  return {
+    filterSessionHistory(sessions, query, options = {}) {
+      return filterSessionHistoryStore(store, sessions, query, options);
+    },
+    clearSessionHistorySearchCache() {
+      clearSessionHistorySearchStore(store);
+    },
+  };
 }
