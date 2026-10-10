@@ -544,3 +544,44 @@ test("filterSessionHistory keeps index-cache hits for histories larger than the 
     sessions.slice(-(sessionCount - 64)).map((s) => s.id).sort(),
   );
 });
+
+// Regression: hard-rejecting NEW entries once the entry cap is saturated by
+// live sessions froze the cache's membership. New sessions are prepended to
+// the ranked list, so every subsequently created conversation (and its
+// immutable streaming updates) would rebuild its index on every keystroke
+// while stale lower-ranked entries stayed cached — and the end-of-scan prune
+// could not correct it because the cache was already within both bounds.
+test("filterSessionHistory admits a newly created session after the entry cap is saturated", () => {
+  const initial = Array.from({ length: 64 }, (_, i) =>
+    createSession(`s${i}`, `session ${i}`, [{ content: `body ${i} deploy` }]));
+  filterSessionHistory(initial, "deploy");
+
+  // A newly created session is prepended: it ranks above every cached entry.
+  const created = createSession("fresh", "fresh session", [{ content: "body fresh deploy" }]);
+  const sessions = [created, ...initial];
+
+  // Observe corpus (re)builds as in the thrash regression test above.
+  const readSessions = new Set<string>();
+  for (const session of sessions) {
+    const messages = session.messages;
+    Object.defineProperty(session, "messages", {
+      get() {
+        readSessions.add(session.id);
+        return messages;
+      },
+      configurable: true,
+    });
+  }
+
+  // First scan over the new list: "fresh" misses (its index was never cached)
+  // and must be admitted; the prune evicts the lowest-ranked tail instead.
+  filterSessionHistory(sessions, "deploy");
+  readSessions.clear();
+  const third = filterSessionHistory(sessions, "deploy");
+
+  assert.deepEqual(third, sessions);
+  // The fresh, highest-ranked session stays cached; only the evicted tail
+  // above the entry cap is rebuilt.
+  assert.ok(!readSessions.has("fresh"), `expected fresh session to be cached, rebuilt: ${[...readSessions]}`);
+  assert.deepEqual([...readSessions], ["s63"]);
+});

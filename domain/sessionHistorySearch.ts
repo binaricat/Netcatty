@@ -358,19 +358,31 @@ type SessionSearchIndex = {
  * within a `MAX_SESSION_SEARCH_INDEX_CACHE_CHARS` character budget: an
  * unbounded cache would let one entry per live session (several normalized
  * copies of each session's searchable corpus) permanently pin hundreds of
- * megabytes in a long-running process. The bounds hold continuously, including
- * mid-scan: a freshly built index is only cached if it fits both bounds
- * (eviction itself is deferred to the per-scan prune below), so
- * a single search over thousands of uncached sessions cannot transiently pin
- * hundreds of megabytes. Skipping the insert — instead of evicting — keeps
- * the per-scan prune safe for histories longer than the entry cap: nothing
- * already cached is dropped by a miss, so the prune at the end of
- * `filterSessionHistory` cannot cycle-evict entries the same scan still
- * needs. Indexes that skip insertion are simply rebuilt on the next search —
- * the pre-cache per-keystroke cost for that session only.
+ * megabytes in a long-running process. Both bounds hold after every scan's
+ * prune; mid-scan, the char budget is checked eagerly against a running
+ * total (see `canCacheSessionSearchIndex`), so a single search over thousands
+ * of uncached sessions cannot transiently pin hundreds of megabytes — only
+ * the entry count may transiently overshoot (each overshooting insert passed
+ * the char gate first, so the overshoot is bounded by the scanned list's
+ * length and by the char budget) and the prune at the end of
+ * `filterSessionHistory` trims it back. Skipping an insert that fails the
+ * eager char gate — instead of evicting — keeps that prune safe: nothing
+ * already cached is dropped by a miss, so the end-of-scan prune cannot
+ * cycle-evict entries the same scan still needs (which per-miss admission
+ * eviction would). Indexes that skip insertion are simply rebuilt on the next
+ * search — the pre-cache per-keystroke cost for that session only.
  */
 const MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES = 64;
 const MAX_SESSION_SEARCH_INDEX_CACHE_CHARS = 4_000_000;
+
+/**
+ * Running total of the cache's retained characters. Maintained at every
+ * mutation site so the eager insert gate in `canCacheSessionSearchIndex` stays
+ * O(1) per miss instead of re-summing the whole cache on every keystroke
+ * (mid-scan overshoot of the entry cap would otherwise make that sum O(n²)
+ * across a scan).
+ */
+let sessionSearchIndexCacheChars = 0;
 
 /**
  * Sessions in state are updated immutably (`{ ...s, messages: next }`), so
@@ -389,33 +401,38 @@ function indexRetainedChars(index: SessionSearchIndex): number {
 
 /**
  * Whether a freshly built index may be inserted into the cache without
- * pushing it past either bound. New inserts must fit eagerly — the prune that
- * enforces the bounds only runs once per scan, so inserting every prepared
- * index would let a single search over hundreds/thousands of uncached
- * sessions transiently pin the whole corpus (several normalized haystacks per
- * session) before pruning, briefly allocating hundreds of megabytes.
+ * pushing the char budget past its bound. The char budget must fit eagerly —
+ * the prune that enforces the char bound only runs once per scan, so
+ * inserting every prepared index would let a single search over
+ * hundreds/thousands of uncached sessions transiently pin the whole corpus
+ * (several normalized haystacks per session) before pruning, briefly
+ * allocating hundreds of megabytes.
  *
- * The check is only applied to NEW entries: cache hits merely re-append an
- * existing entry (no growth), and a rebuild replaces the same session's entry
- * (no size growth; the char delta against the replaced index is checked), so
- * skipping the insert for an over-budget index drops nothing that is already
- * cached — that is what keeps the deferred per-scan prune from cycle-evicting
- * entries the same scan still needs.
+ * The entry-count bound is intentionally NOT a gate here: hard-rejecting new
+ * entries once `MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES` live sessions are
+ * cached would permanently freeze the cache's membership — since new sessions
+ * are prepended to the ranked list, every subsequently created conversation
+ * (and its immutable streaming updates) would then rebuild its index on every
+ * keystroke while stale lower-ranked entries stay cached. Instead, misses
+ * overshoot the entry cap mid-scan (bounded by the scanned list's length and
+ * the eagerly enforced char budget) and the end-of-scan prune trims the
+ * lowest-ranked tail back under the cap, so the freshest, highest-ranked
+ * prefix is always admitted. No mid-scan entry is ever evicted, which keeps
+ * that prune safe from cycle-evicting entries the same scan still needs.
+ *
+ * The char check is only applied to NEW entries: cache hits merely re-append
+ * an existing entry (no growth), and a rebuild replaces the same session's
+ * entry (no size growth; the char delta against the replaced index is
+ * checked), so skipping the insert for an over-budget index drops nothing
+ * that is already cached.
  */
 function canCacheSessionSearchIndex(
   previous: SessionSearchIndex | undefined,
   index: SessionSearchIndex,
 ): boolean {
-  if (previous === undefined) {
-    if (SESSION_SEARCH_INDEX_CACHE.size >= MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES) return false;
-  }
   const deltaChars = indexRetainedChars(index) - (previous ? indexRetainedChars(previous) : 0);
-  if (deltaChars > 0) {
-    let retained = 0;
-    for (const cachedIndex of SESSION_SEARCH_INDEX_CACHE.values()) {
-      retained += indexRetainedChars(cachedIndex);
-    }
-    if (retained + deltaChars > MAX_SESSION_SEARCH_INDEX_CACHE_CHARS) return false;
+  if (deltaChars > 0 && sessionSearchIndexCacheChars + deltaChars > MAX_SESSION_SEARCH_INDEX_CACHE_CHARS) {
+    return false;
   }
   return true;
 }
@@ -441,6 +458,10 @@ function getSessionSearchIndex(
   };
   if (canCacheSessionSearchIndex(cached, index)) {
     SESSION_SEARCH_INDEX_CACHE.set(session, index);
+    // Keep the eager gate's running total in sync (also covers the
+    // display-title-change rebuild, which replaces an existing entry).
+    sessionSearchIndexCacheChars +=
+      indexRetainedChars(index) - (cached ? indexRetainedChars(cached) : 0);
   }
   return index;
 }
@@ -456,9 +477,10 @@ function getSessionSearchIndex(
  * lowest-ranked entries (the oldest tail of the newest-first ranked list)
  * until both bounds hold, preserving the front of the ranked list.
  *
- * In practice the eviction loop rarely runs: freshly built indexes are only
- * cached while both bounds hold (see `canCacheSessionSearchIndex`), so a scan
- * no longer overshoots them — the prune mainly drops indexes for sessions
+ * In practice the eviction loop is cheap: the char budget is enforced
+ * eagerly (see `canCacheSessionSearchIndex`), so the prune's overshoot is
+ * only the entry count above the entry cap (at most one entry per missed
+ * session in the scan) — it drops that overshoot plus indexes for sessions
  * that left the scanned list.
  */
 function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTarget[]): void {
@@ -470,6 +492,9 @@ function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTar
   for (const cachedIndex of SESSION_SEARCH_INDEX_CACHE.values()) {
     retained += indexRetainedChars(cachedIndex);
   }
+  // Re-sync the eager gate's running total: the sum above is authoritative
+  // here (once per scan), so any drift accumulated mid-scan is corrected.
+  sessionSearchIndexCacheChars = retained;
   // Evict from the END of the Map until both bounds hold. Every scan visits
   // the full ranked session list newest-first and `getSessionSearchIndex`
   // re-appends each visited entry, so after a scan the Map's insertion order
@@ -497,6 +522,7 @@ function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTar
     if (evicted) retained -= indexRetainedChars(evicted);
     SESSION_SEARCH_INDEX_CACHE.delete(evictKey);
   }
+  sessionSearchIndexCacheChars = retained;
 }
 
 export type SessionHistorySearchOptions = {
@@ -516,20 +542,24 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
   const trimmed = query.trim();
   if (!trimmed) return [...sessions];
   const untitledLabel = options.untitledLabel ?? '';
-  // Free slots still held by sessions that left the scan list (e.g. the
-  // history shrank or session objects changed since the previous scan) before
-  // any miss is gated by the bounds; those entries are never visited by this
-  // scan, so dropping them up front cannot break anything below, and it lets
-  // this scan's misses refill capacity that the end-of-scan prune would only
-  // free after the scan. Cheap: one Set plus one pass over the ≤64 cached
-  // keys.
+  // Drop entries still held by sessions that left the scan list (e.g. the
+  // history shrank or session objects changed since the previous scan). Those
+  // entries are never visited by this scan — the end-of-scan prune would
+  // remove them too — but dropping them up front keeps their characters
+  // available to this scan's inserts (via the eager char gate). Cheap: one
+  // Set plus one pass over the cached keys.
   const currentLive = new Set<SessionHistorySearchTarget>(sessions);
   for (const key of [...SESSION_SEARCH_INDEX_CACHE.keys()]) {
-    if (!currentLive.has(key)) SESSION_SEARCH_INDEX_CACHE.delete(key);
+    if (!currentLive.has(key)) {
+      const removed = SESSION_SEARCH_INDEX_CACHE.get(key);
+      if (removed) sessionSearchIndexCacheChars -= indexRetainedChars(removed);
+      SESSION_SEARCH_INDEX_CACHE.delete(key);
+    }
   }
-  // Scan all sessions first (each miss inserts into the cache only if it
-  // still fits within the bounds); pruning of entries
-  // that fell out of the scan list happens at the end of the scan below.
+  // Scan all sessions first (a miss inserts into the cache only if it fits
+  // within the char budget; the entry-count overshoot it may cause mid-scan
+  // is trimmed by the prune below), then prune entries
+  // that fell out of the scan list at the end of the scan.
   const result = sessions.filter((session) => {
     // Pinyin transliteration is too expensive to run over every collected
     // message field on each keystroke; the pinyin fallback is restricted to
