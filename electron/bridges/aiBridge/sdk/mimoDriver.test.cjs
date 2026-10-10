@@ -21,12 +21,16 @@ childProcess.spawnSync = (command, args, options) =>
 
 const {
   MIMO_SERVE_TIMEOUT_MS,
+  MIMO_CATALOG_SETUP_TIMEOUT_MS,
   listMimoModels,
   resolveUsableMimoBinPath,
   runMimoTurn,
   spawnMimoServer,
   stopMimoProcess,
 } = require("./mimoDriver.cjs");
+// Only read for budget ordering; sdkStreamHandlers pulls the driver registry,
+// not the other way around, so this stays acyclic.
+const { MODEL_LIST_TIMEOUT_OVERRIDES_MS } = require("./sdkStreamHandlers.cjs");
 
 function collector() {
   const events = [];
@@ -74,6 +78,79 @@ function tempBinDir() {
 
 test("MIMO_SERVE_TIMEOUT_MS matches the documented cold-start budget", () => {
   assert.equal(MIMO_SERVE_TIMEOUT_MS, 10_000);
+});
+
+test("catalog setup budget stays above the turn budget and below the outer catalog budget", () => {
+  assert.equal(MIMO_CATALOG_SETUP_TIMEOUT_MS, 25_000);
+  assert.ok(MIMO_CATALOG_SETUP_TIMEOUT_MS > MIMO_SERVE_TIMEOUT_MS);
+  assert.ok(MIMO_CATALOG_SETUP_TIMEOUT_MS < MODEL_LIST_TIMEOUT_OVERRIDES_MS.mimo);
+});
+
+test("listMimoModels tolerates a providers() call that needs most of the inner budget", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let factoryOptions;
+  let resolveProvidersNow;
+  let providersStarted;
+  const started = new Promise((resolve) => { providersStarted = resolve; });
+  const providerResult = {
+    providers: [
+      { id: "xiaomi", name: "Xiaomi", models: { "mimo-v2.6-flash": { name: "MiMo V2.6 Flash" } } },
+    ],
+    default: { xiaomi: "mimo-v2.6-flash" },
+  };
+  const running = listMimoModels({
+    mimoFactory: async (options) => {
+      factoryOptions = options;
+      return {
+        client: {
+          config: {
+            providers: () => {
+              // Resolve only after 24s of the mocked clock have passed —
+              // a coldest-boot providers() query that used to lose the old
+              // 10s inner race.
+              return new Promise((resolve) => {
+                resolveProvidersNow = () => resolve(providerResult);
+                providersStarted();
+              });
+            },
+          },
+        },
+        server: { close() {} },
+      };
+    },
+  });
+  await started;
+  t.mock.timers.tick(MIMO_CATALOG_SETUP_TIMEOUT_MS - 1000);
+  resolveProvidersNow();
+  assert.deepEqual(await running, {
+    currentModelId: "xiaomi/mimo-v2.6-flash",
+    models: [{ id: "xiaomi/mimo-v2.6-flash", name: "Xiaomi MiMo V2.6 Flash" }],
+  });
+  assert.equal(factoryOptions.timeout, MIMO_CATALOG_SETUP_TIMEOUT_MS);
+});
+
+test("listMimoModels still returns an empty catalog when providers() exceeds the inner budget", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let closeCount = 0;
+  let providersStarted;
+  const started = new Promise((resolve) => { providersStarted = resolve; });
+  const running = listMimoModels({
+    mimoFactory: async () => ({
+      client: {
+        config: {
+          providers: () => {
+            providersStarted();
+            return new Promise(() => {});
+          },
+        },
+      },
+      server: { close() { closeCount += 1; } },
+    }),
+  });
+  await started;
+  t.mock.timers.tick(MIMO_CATALOG_SETUP_TIMEOUT_MS);
+  assert.deepEqual(await running, { currentModelId: null, models: [] });
+  assert.equal(closeCount, 1);
 });
 
 test("resolveUsableMimoBinPath returns only existing files and honours candidate order", () => {

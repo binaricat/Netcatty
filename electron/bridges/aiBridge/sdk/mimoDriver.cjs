@@ -41,6 +41,11 @@ const DEFAULT_MIMO_PORT = 4096;
 // Give `mimo serve` room to boot on a cold start. The SDK default (5000ms) is
 // too tight for the first launch after install.
 const MIMO_SERVE_TIMEOUT_MS = 10_000;
+// Inner setup budget for the catalog path only: `mimo serve` readiness plus the
+// providers() query. The outer catalog budget in sdkStreamHandlers is 30s; the
+// inner race must lose last, otherwise the coldest boot never even reaches the
+// provider query. The turn path keeps the 10s default.
+const MIMO_CATALOG_SETUP_TIMEOUT_MS = 25_000;
 // `mimo serve` announces readiness as `mimocode server listening on <url>`.
 // Accept the OpenCode spelling too so a rebranded build still connects.
 const MIMO_LISTENING_RE = /server listening on\s+(https?:\/\/\S+)/;
@@ -781,8 +786,14 @@ async function listMimoModels({ env, binPath, cwd, mimoFactory, abortController,
       config: { autoupdate: false },
       port,
       signal: effectiveSignal,
+      timeout: MIMO_CATALOG_SETUP_TIMEOUT_MS,
     });
-    const response = await awaitMimoSetup(instance.client.config.providers(), effectiveSignal, instance.server);
+    const response = await awaitMimoSetup(
+      instance.client.config.providers(),
+      effectiveSignal,
+      instance.server,
+      MIMO_CATALOG_SETUP_TIMEOUT_MS,
+    );
     if (effectiveSignal?.aborted) return emptyMimoModelCatalog();
     if (response?.error) {
       throw new Error(extractMimoErrorMessage(response.error) || "MiMo Code providers unavailable");
@@ -807,5 +818,6 @@ module.exports = {
   spawnMimoServer,
   stopMimoProcess,
   MIMO_SERVE_TIMEOUT_MS,
+  MIMO_CATALOG_SETUP_TIMEOUT_MS,
   MIMO_STOP_GRACE_MS,
 };
