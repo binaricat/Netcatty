@@ -14,6 +14,11 @@ const { probeCodexAppServer } = require("../codexAppServer/probe.cjs");
 const { codebuddySessionManager } = require("./codebuddySessionManager.cjs");
 const codebuddyDriver = require("./codebuddyDriver.cjs");
 const { OPENCODE_SERVER_START_TIMEOUT_MS } = require("./opencodeDriver.cjs");
+const {
+  buildLastKnownCatalogPath,
+  readLastKnownCatalogEntry,
+  writeLastKnownCatalogEntry,
+} = require("./modelCatalogLastKnown.cjs");
 
 const VALID_BACKENDS = new Set(listBackends());
 
@@ -149,6 +154,15 @@ function setSdkModelCacheEntry(cache, key, entry, options) {
 
 function shouldCacheSdkRuntimeModels(_backendKey) {
   return true;
+}
+
+/** Resolve the last-known-good catalog file under userData (null if unknown). */
+function resolveLastKnownCatalogPath(electronModule) {
+  try {
+    return buildLastKnownCatalogPath(electronModule?.getPath?.("userData"));
+  } catch {
+    return null;
+  }
 }
 
 function normalizeSdkListModelsResult(raw) {
@@ -973,6 +987,7 @@ function registerSdkStreamHandlers(ctx) {
         const existing = sdkModelInFlight.get(cacheKey);
         if (existing) return await existing;
 
+        const lastKnownPath = resolveLastKnownCatalogPath(electronModule);
         const loadPromise = (async () => {
           const abortController = new AbortController();
           try {
@@ -1006,9 +1021,36 @@ function registerSdkStreamHandlers(ctx) {
             if (shouldCacheModels && (models.length > 0 || currentModelId)) {
               setSdkModelCacheEntry(sdkModelCache, cacheKey, { at: Date.now(), currentModelId, models });
             }
+            // Persist the good catalog so a later live failure (CLI update,
+            // cold-boot race, dead binary) can serve it instead of presets.
+            // Best-effort: an IO error must never fail the fetch itself.
+            if (models.length > 0) {
+              writeLastKnownCatalogEntry(lastKnownPath, cacheKey, {
+                backend: backendKey,
+                models,
+                currentModelId,
+              });
+            }
             return { ok: true, currentModelId, models };
           } catch (err) {
-            // Degrade to [] so the renderer keeps its curated presets (never empty).
+            // Degrade to curated presets, but first offer the last-known-good
+            // catalog persisted from a prior successful fetch (copilot has no
+            // presets at all). The warning keeps the renderer's retry banner,
+            // and the marker lets the UI say the list is the previous success.
+            const lastKnown = readLastKnownCatalogEntry(lastKnownPath, cacheKey);
+            if (lastKnown) {
+              console.debug(
+                `[sdk] list-models(${backendKey}) unavailable, serving last-known-good catalog from ${lastKnown.fetchedAt}`,
+              );
+              return {
+                ok: true,
+                currentModelId: lastKnown.currentModelId || null,
+                models: lastKnown.models,
+                warning: `${err?.message || String(err)} — serving the last-known-good catalog fetched at ${lastKnown.fetchedAt}`,
+                source: "last-known-good",
+                fetchedAt: lastKnown.fetchedAt,
+              };
+            }
             console.debug(`[sdk] list-models(${backendKey}) unavailable, using curated presets`);
             return {
               ok: true,
@@ -1288,6 +1330,7 @@ function registerSdkStreamHandlers(ctx) {
     ctx.sdkActiveStreams = sdkActiveStreams;
     ctx.sdkRequestSessions = sdkRequestSessions;
     ctx.sdkRequestRuntimes = sdkRequestRuntimes;
+    ctx.sdkModelCache = sdkModelCache; // exposed for catalog tests
     ctx.codexAppServerRuntime = codexAppServerRuntime;
     ctx.codebuddySessionManager = codebuddySessionManager;
   }

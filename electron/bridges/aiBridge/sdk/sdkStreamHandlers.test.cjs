@@ -1072,3 +1072,157 @@ test("OpenCode catalog IPC allows cold startup past 10s and still aborts a stall
 test("model catalog timeout override widens the budget only for mimo", () => {
   assert.deepEqual(MODEL_LIST_TIMEOUT_OVERRIDES_MS, { mimo: 30_000 });
 });
+
+// --- Last-known-good catalog persistence ---
+
+const fs = require("node:fs");
+const os = require("node:os");
+const nodePath = require("node:path");
+const {
+  LAST_KNOWN_MAX_MODELS,
+  buildLastKnownCatalogPath,
+  readLastKnownCatalogEntry,
+  readLastKnownCatalogStore,
+  writeLastKnownCatalogEntry,
+} = require("./modelCatalogLastKnown.cjs");
+
+function makeLastKnownCtx(overrides = {}) {
+  const userDataDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "netcatty-lkg-"));
+  const { handlers, ctx } = registerWithStubbedCtx({
+    electronModule: { getPath: (name) => (name === "userData" ? userDataDir : undefined) },
+    getShellEnv: async () => ({}),
+    normalizeAgentEnv: (env) => env || {},
+    withCliDiscoveryEnv: (env) => env,
+    normalizeClaudeCodeExecutableEnvForSdk: (env) => env,
+    resolveCliFromPath: () => undefined,
+    normalizeCliPathForPlatform: (value) => value,
+    resolveSdkBinPath: () => undefined,
+    resolveClaudeCodeExecutableForSdk: undefined,
+    resolveCodexExecutableForSdk: undefined,
+    resolveCodebuddyExecutableForSdk: undefined,
+    ...overrides,
+  });
+  return {
+    handlers,
+    ctx,
+    userDataDir,
+    catalogFile: buildLastKnownCatalogPath(userDataDir),
+    cleanup() {
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    },
+  };
+}
+
+test("modelCatalogLastKnown caps models, never stores empty catalogs, and keeps keys isolated", () => {
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "netcatty-lkg-unit-"));
+  const file = buildLastKnownCatalogPath(dir);
+  try {
+    const oversized = Array.from({ length: 300 }, (_, index) => ({ id: `m-${index}` }));
+    assert.equal(writeLastKnownCatalogEntry(file, "k1", { backend: "claude", models: oversized }), true);
+    const stored = readLastKnownCatalogEntry(file, "k1");
+    assert.equal(stored.models.length, LAST_KNOWN_MAX_MODELS);
+    assert.equal(stored.backend, "claude");
+    assert.match(stored.fetchedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+    assert.equal(writeLastKnownCatalogEntry(file, "k2", { backend: "claude", models: [] }), false);
+    assert.equal(writeLastKnownCatalogEntry(file, "k3", { backend: "claude", models: [{ name: "no id" }] }), false);
+    assert.equal(readLastKnownCatalogEntry(file, "k2"), null);
+
+    assert.equal(writeLastKnownCatalogEntry(file, "k4", {
+      backend: "mimo",
+      models: [{ id: "xiaomi/mimo-v2.6-flash" }],
+      currentModelId: "xiaomi/mimo-v2.6-flash",
+    }), true);
+    assert.equal(readLastKnownCatalogEntry(file, "k1").backend, "claude");
+    assert.equal(readLastKnownCatalogEntry(file, "k4").currentModelId, "xiaomi/mimo-v2.6-flash");
+    assert.equal(readLastKnownCatalogEntry(file, "missing"), null);
+    assert.equal(writeLastKnownCatalogEntry(null, "k5", { backend: "claude", models: [{ id: "x" }] }), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("modelCatalogLastKnown degrades gracefully on corrupt stores", () => {
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "netcatty-lkg-corrupt-"));
+  const file = buildLastKnownCatalogPath(dir);
+  try {
+    fs.writeFileSync(file, "{corrupt json");
+    assert.deepEqual(readLastKnownCatalogStore(file), {});
+    assert.equal(readLastKnownCatalogEntry(file, "k1"), null);
+    // A later successful fetch repairs the store.
+    assert.equal(writeLastKnownCatalogEntry(file, "k1", { backend: "claude", models: [{ id: "m" }] }), true);
+    assert.deepEqual(readLastKnownCatalogEntry(file, "k1").models, [{ id: "m" }]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("list-models persists a successful live catalog and serves it as last-known-good after failures", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx();
+  try {
+    const driver = getDriver("claude");
+    const liveCatalog = [{ id: "claude-opus-5-5", name: "Opus 5.5" }];
+    t.mock.method(driver, "listModels", async () => liveCatalog);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+
+    // 1. Live success → written to the store, response untouched.
+    const success = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "/test/lkg-success" });
+    assert.deepEqual(success, {
+      ok: true,
+      currentModelId: null,
+      models: liveCatalog,
+    });
+    const entries = Object.values(readLastKnownCatalogStore(catalogFile));
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].backend, "claude");
+    assert.deepEqual(entries[0].models, liveCatalog);
+    assert.match(entries[0].fetchedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+    // 2. Live failure after that success → the persisted catalog is served.
+    ctx.sdkModelCache.clear();
+    driver.listModels.mock.mockImplementation(async () => []);
+    const failed = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "/test/lkg-success" });
+    assert.equal(failed.ok, true);
+    assert.deepEqual(failed.models, liveCatalog);
+    assert.equal(failed.currentModelId, null);
+    assert.equal(failed.source, "last-known-good");
+    assert.equal(failed.fetchedAt, entries[0].fetchedAt);
+    assert.match(failed.warning, /returned no models/);
+    assert.match(failed.warning, /last-known-good/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("list-models without a prior success keeps presets and never persists empty or corrupt stores", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const { handlers, catalogFile, cleanup } = makeLastKnownCtx();
+  try {
+    t.mock.method(getDriver("claude"), "listModels", async () => []);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const degraded = {
+      ok: true,
+      currentModelId: null,
+      models: [],
+      warning: "The live model catalog returned no models",
+    };
+
+    // No store file yet: plain presets fallback, and an empty live catalog
+    // must not create the file.
+    assert.deepEqual(
+      await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "/test/lkg-no-persist" }),
+      degraded,
+    );
+    assert.equal(fs.existsSync(catalogFile), false);
+
+    // A corrupt store must never crash the bridge: presets again.
+    fs.writeFileSync(catalogFile, "{corrupt json");
+    assert.deepEqual(
+      await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "/test/lkg-corrupt" }),
+      degraded,
+    );
+  } finally {
+    cleanup();
+  }
+});
