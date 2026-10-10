@@ -19,9 +19,21 @@ import {
 } from './types';
 
 test('Claude presets advertise effort levels separately from the model id', () => {
-  for (const preset of CLAUDE_MODEL_PRESETS) {
+  assert.equal(CLAUDE_MODEL_PRESETS.length, 13);
+  const withLevels = CLAUDE_MODEL_PRESETS.filter((preset) => preset.thinkingLevels);
+  assert.ok(withLevels.length > 0);
+  for (const preset of withLevels) {
     assert.deepEqual(preset.thinkingLevels, ['low', 'medium', 'high', 'max']);
     assert.ok(preset.defaultThinkingLevel);
+  }
+  // Current-generation entries keep explicit effort levels; older fallback
+  // entries and unverified generations omit them rather than inventing.
+  const byId = new Map(CLAUDE_MODEL_PRESETS.map((preset) => [preset.id, preset]));
+  for (const id of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-haiku-4-5']) {
+    assert.ok(byId.get(id)?.thinkingLevels, `${id} should keep effort levels`);
+  }
+  for (const id of ['claude-fable-5-1', 'claude-sonnet-5', 'claude-opus-4-6']) {
+    assert.equal(byId.get(id)?.thinkingLevels, undefined, `${id} should not invent effort levels`);
   }
   assert.equal(resolveAgentModelSelection(CLAUDE_MODEL_PRESETS[0]!), 'default/medium');
 });
