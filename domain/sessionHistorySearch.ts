@@ -343,23 +343,41 @@ export function collectSessionSearchFields(
 type SessionSearchIndex = {
   /** Displayed title the index was built for (raw title or the fallback). */
   displayTitle: string;
-  fields: string[];
   prepared: PreparedSearchFields;
 };
 
 /**
- * Per-session search index cache. `filterSessionHistory` runs on every search
- * keystroke, but `pruneSessionsForStorage` only bounds the persisted copy —
- * `useAIState` retains hundreds of live sessions in memory, and rebuilding plus
- * re-normalizing each session's (up to 64,000-character) haystack per keystroke
- * scans tens of megabytes and freezes the renderer. Sessions in state are
- * updated immutably (`{ ...s, messages: next }`), so object identity is a
- * reliable cache key: each session's fields and normalized/compact haystacks
- * are built once and reused until that session's object changes. The entry
- * dies with the session object, so no eviction bookkeeping is needed.
+ * Memory bounds for the per-session search index cache. `filterSessionHistory`
+ * runs on every search keystroke, but `pruneSessionsForStorage` only bounds the
+ * persisted copy — `useAIState` retains hundreds of live sessions in memory,
+ * and rebuilding plus re-normalizing each session's (up to 64,000-character)
+ * haystack per keystroke scans tens of megabytes and freezes the renderer.
+ *
+ * The raw collected fields are NOT retained (only the prepared haystacks), and
+ * the cache holds at most `MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES` entries
+ * within a `MAX_SESSION_SEARCH_INDEX_CACHE_CHARS` character budget: an
+ * unbounded cache would let one entry per live session (several normalized
+ * copies of each session's searchable corpus) permanently pin hundreds of
+ * megabytes in a long-running process. Evicted indexes are simply rebuilt on
+ * the next search — the pre-cache per-keystroke cost for that session only.
+ */
+const MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES = 64;
+const MAX_SESSION_SEARCH_INDEX_CACHE_CHARS = 4_000_000;
+
+/**
+ * Sessions in state are updated immutably (`{ ...s, messages: next }`), so
+ * object identity is a reliable cache key: each session's normalized/compact
+ * haystacks are built once and reused until that session's object changes.
  * A changed display title (e.g. a localized fallback switch) forces a rebuild.
  */
-const SESSION_SEARCH_INDEX_CACHE = new WeakMap<SessionHistorySearchTarget, SessionSearchIndex>();
+const SESSION_SEARCH_INDEX_CACHE = new Map<SessionHistorySearchTarget, SessionSearchIndex>();
+
+/** Retained characters of an index (the prepared haystacks; raw fields are dropped). */
+function indexRetainedChars(index: SessionSearchIndex): number {
+  // `haystackCompact` is derived from `haystack`, but both are retained and
+  // their combined length approximates the cache's per-entry memory cost.
+  return index.prepared.haystack.length + index.prepared.haystackCompact.length;
+}
 
 function getSessionSearchIndex(
   session: SessionHistorySearchTarget,
@@ -367,14 +385,36 @@ function getSessionSearchIndex(
 ): SessionSearchIndex {
   const displayTitle = resolveDisplayTitle(session, untitledLabel);
   const cached = SESSION_SEARCH_INDEX_CACHE.get(session);
-  if (cached && cached.displayTitle === displayTitle) return cached;
+  if (cached && cached.displayTitle === displayTitle) {
+    // Refresh recency so hot (recently searched) sessions are evicted last.
+    SESSION_SEARCH_INDEX_CACHE.delete(session);
+    SESSION_SEARCH_INDEX_CACHE.set(session, cached);
+    return cached;
+  }
   const fields = collectSessionSearchFields(session, untitledLabel);
   const index: SessionSearchIndex = {
     displayTitle,
-    fields,
     prepared: prepareSearchFields(fields),
   };
   SESSION_SEARCH_INDEX_CACHE.set(session, index);
+  // Evict least-recently-used entries (Map iteration order) until both bounds
+  // hold. The newest entry is always kept, even if it alone exceeds the char
+  // budget (a single entry is bounded by ~192K chars by the collector caps).
+  let retained = 0;
+  for (const cachedIndex of SESSION_SEARCH_INDEX_CACHE.values()) {
+    retained += indexRetainedChars(cachedIndex);
+  }
+  while (
+    SESSION_SEARCH_INDEX_CACHE.size > MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES
+    || retained > MAX_SESSION_SEARCH_INDEX_CACHE_CHARS
+  ) {
+    const oldestKey = SESSION_SEARCH_INDEX_CACHE.keys().next().value;
+    if (oldestKey === undefined) break;
+    if (oldestKey === session) break;
+    const oldest = SESSION_SEARCH_INDEX_CACHE.get(oldestKey);
+    if (oldest) retained -= indexRetainedChars(oldest);
+    SESSION_SEARCH_INDEX_CACHE.delete(oldestKey);
+  }
   return index;
 }
 
@@ -403,10 +443,9 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
     // query to span fields: "chongqi nginx" matches a session titled
     // "重启服务器" whose message contains "nginx" ("chongqi" via title
     // pinyin, "nginx" literally in the message content).
-    return matchesPreparedSearchQuery(
-      trimmed,
-      getSessionSearchIndex(session, untitledLabel).prepared,
-      { pinyinFields: [resolveDisplayTitle(session, untitledLabel)] },
-    );
+    const index = getSessionSearchIndex(session, untitledLabel);
+    return matchesPreparedSearchQuery(trimmed, index.prepared, {
+      pinyinFields: [index.displayTitle],
+    });
   });
 }
