@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import {
   createSessionHistorySearch,
   type SessionHistorySearch,
-} from '../../domain/sessionHistorySearch';
+} from './sessionHistorySearch';
 
 /**
  * Owns one search instance per mounted session history drawer.

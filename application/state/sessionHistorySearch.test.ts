@@ -3,9 +3,9 @@ import test from "node:test";
 
 import {
   collectSessionSearchFields,
-  createSessionHistorySearch,
   type SessionHistorySearchMessage,
-} from "./sessionHistorySearch.ts";
+} from "../../domain/sessionHistorySearch.ts";
+import { createSessionHistorySearch } from "./sessionHistorySearch.ts";
 
 // One instance for the whole file: it keeps the pre-factory semantics of every
 // test sharing (and clearing) a single cache.
