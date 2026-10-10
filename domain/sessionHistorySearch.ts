@@ -367,7 +367,8 @@ type SessionSearchIndex = {
  * and rebuilding plus re-normalizing each session's (up to 64,000-character)
  * haystack per keystroke scans tens of megabytes and freezes the renderer.
  *
- * The raw collected fields are NOT retained (only the prepared haystacks), and
+ * The raw collected fields are NOT retained (only the prepared search fields),
+ * and
  * the cache holds at most `MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES` entries
  * within a `MAX_SESSION_SEARCH_INDEX_CACHE_CHARS` character budget: an
  * unbounded cache would let one entry per live session (several normalized
@@ -420,9 +421,15 @@ const SESSION_SEARCH_INDEX_CACHE = new Map<SessionHistorySearchTarget, SessionSe
 
 /** Retained characters of an index (the prepared haystacks; raw fields are dropped). */
 function indexRetainedChars(index: SessionSearchIndex): number {
-  // `haystackCompact` is derived from `haystack`, but both are retained and
-  // their combined length approximates the cache's per-entry memory cost.
-  return index.prepared.haystack.length + index.prepared.haystackCompact.length;
+  // `normalizedFields`, `haystack` and `haystackCompact` are all retained
+  // (`haystack` is `normalizedFields` joined, `haystackCompact` is derived
+  // from `haystack`), so their combined length approximates the cache's
+  // per-entry memory cost. Counting only the joined haystacks would
+  // undercount by roughly a full copy of the corpus and let the char budget
+  // retain ~50% more than advertised.
+  let total = index.prepared.haystack.length + index.prepared.haystackCompact.length;
+  for (const field of index.prepared.normalizedFields) total += field.length;
+  return total;
 }
 
 /**
