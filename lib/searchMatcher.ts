@@ -99,6 +99,85 @@ export type SearchMatchOptions = {
   pinyinFields?: string[];
 };
 
+/**
+ * Pre-normalized search haystack. Callers that match the same fields against
+ * many queries (e.g. session-history search fires on every keystroke) can
+ * prepare the haystack once, cache it, and reuse it per query instead of
+ * re-running NFKC normalization and compaction over megabytes each time.
+ */
+export type PreparedSearchFields = {
+  /** Per-field normalized text, in input order. */
+  normalizedFields: string[];
+  /** Normalized fields joined with a single space. */
+  haystack: string;
+  /** Separator-removed form of `haystack` (same as `compactText(haystack)`). */
+  haystackCompact: string;
+};
+
+export function prepareSearchFields(
+  fields: Array<string | null | undefined>,
+): PreparedSearchFields {
+  const normalizedFields = fields
+    .filter((field): field is string => typeof field === "string" && field.trim().length > 0)
+    .map((field) => normalizeText(field));
+  const haystack = normalizedFields.join(" ");
+  return { normalizedFields, haystack, haystackCompact: compactText(haystack) };
+}
+
+export function matchesPreparedSearchQuery(
+  query: string,
+  prepared: PreparedSearchFields,
+  options: SearchMatchOptions = {},
+): boolean {
+  const normalizedQuery = normalizeText(query);
+  if (!normalizedQuery) return true;
+
+  if (prepared.normalizedFields.length === 0) return false;
+
+  // For dotted numeric input (IPv4-like), require contiguous literal match.
+  if (IPV4_LIKE_REGEX.test(normalizedQuery)) {
+    return prepared.normalizedFields.some((field) => field.includes(normalizedQuery));
+  }
+
+  const tokens = tokenizeSearchQuery(normalizedQuery);
+  if (tokens.length === 0) return false;
+
+  const haystack = prepared.haystack;
+  if (haystack.includes(normalizedQuery)) {
+    return true;
+  }
+
+  const compactQuery = compactText(normalizedQuery);
+  if (compactQuery && prepared.haystackCompact.includes(compactQuery)) {
+    return true;
+  }
+
+  if (tokens.every((token) => haystack.includes(token))) {
+    return true;
+  }
+
+  const hasLatinToken = tokens.some((token) => /[a-z]/i.test(token));
+  if (!hasLatinToken || options.allowPinyin === false) return false;
+
+  const pinyinSource = options.pinyinFields === undefined
+    ? haystack
+    : options.pinyinFields
+      .filter((field): field is string => typeof field === "string" && field.trim().length > 0)
+      .map((field) => normalizeText(field))
+      .join(" ");
+  const { full, initials } = getPinyinVariants(pinyinSource);
+  if (!full && !initials) return false;
+
+  return tokens.every((token) => {
+    if (haystack.includes(token)) return true;
+    const compactToken = compactText(token);
+    return (
+      (full && full.includes(compactToken)) ||
+      (initials && initials.includes(compactToken))
+    );
+  });
+}
+
 const DEFAULT_SEARCH_MATCH_OPTIONS: Required<Pick<SearchMatchOptions, "allowPinyin">> = {
   allowPinyin: true,
 };
@@ -115,58 +194,11 @@ export function matchesSearchQuery(
     ? { ...DEFAULT_SEARCH_MATCH_OPTIONS, ...(args.pop() as SearchMatchOptions) }
     : DEFAULT_SEARCH_MATCH_OPTIONS;
   const fields = args as Array<string | null | undefined>;
-  const normalizedQuery = normalizeText(query);
-  if (!normalizedQuery) return true;
-
-  const normalizedFields = fields
-    .filter((field): field is string => typeof field === "string" && field.trim().length > 0)
-    .map((field) => normalizeText(field));
-  if (normalizedFields.length === 0) return false;
-
-  // For dotted numeric input (IPv4-like), require contiguous literal match.
-  if (IPV4_LIKE_REGEX.test(normalizedQuery)) {
-    return normalizedFields.some((field) => field.includes(normalizedQuery));
-  }
-
-  const tokens = tokenizeSearchQuery(normalizedQuery);
-  if (tokens.length === 0) return false;
-
-  const sourceText = normalizedFields.join(" ");
-  const haystack = sourceText;
-  if (haystack.includes(normalizedQuery)) {
-    return true;
-  }
-
-  const haystackCompact = compactText(sourceText);
-  const compactQuery = compactText(normalizedQuery);
-  if (compactQuery && haystackCompact.includes(compactQuery)) {
-    return true;
-  }
-
-  if (tokens.every((token) => haystack.includes(token))) {
-    return true;
-  }
-
-  const hasLatinToken = tokens.some((token) => /[a-z]/i.test(token));
-  if (!hasLatinToken || !options.allowPinyin) return false;
-
-  const pinyinSource = options.pinyinFields === undefined
-    ? sourceText
-    : options.pinyinFields
-      .filter((field): field is string => typeof field === "string" && field.trim().length > 0)
-      .map((field) => normalizeText(field))
-      .join(" ");
-  const { full, initials } = getPinyinVariants(pinyinSource);
-  if (!full && !initials) return false;
-
-  return tokens.every((token) => {
-    if (haystack.includes(token)) return true;
-    const compactToken = compactText(token);
-    return (
-      (full && full.includes(compactToken)) ||
-      (initials && initials.includes(compactToken))
-    );
-  });
+  return matchesPreparedSearchQuery(
+    query,
+    prepareSearchFields(fields),
+    { allowPinyin: options.allowPinyin, pinyinFields: options.pinyinFields },
+  );
 }
 
 /**

@@ -1,6 +1,10 @@
 import type { AgentActivity } from './agentActivity';
 import type { AISession, ChatMessageAttachment } from '../infrastructure/ai/types';
-import { matchesSearchQuery } from '../lib/searchMatcher';
+import {
+  matchesPreparedSearchQuery,
+  prepareSearchFields,
+  type PreparedSearchFields,
+} from '../lib/searchMatcher';
 
 /**
  * Searchable shape for session history search. Pure domain logic consumed by
@@ -292,6 +296,36 @@ export function collectSessionSearchFields(session: SessionHistorySearchTarget):
   return [...head, ...tail];
 }
 
+type SessionSearchIndex = {
+  fields: string[];
+  prepared: PreparedSearchFields;
+};
+
+/**
+ * Per-session search index cache. `filterSessionHistory` runs on every search
+ * keystroke, but `pruneSessionsForStorage` only bounds the persisted copy —
+ * `useAIState` retains hundreds of live sessions in memory, and rebuilding plus
+ * re-normalizing each session's (up to 64,000-character) haystack per keystroke
+ * scans tens of megabytes and freezes the renderer. Sessions in state are
+ * updated immutably (`{ ...s, messages: next }`), so object identity is a
+ * reliable cache key: each session's fields and normalized/compact haystacks
+ * are built once and reused until that session's object changes. The entry
+ * dies with the session object, so no eviction bookkeeping is needed.
+ */
+const SESSION_SEARCH_INDEX_CACHE = new WeakMap<SessionHistorySearchTarget, SessionSearchIndex>();
+
+function getSessionSearchIndex(session: SessionHistorySearchTarget): SessionSearchIndex {
+  const cached = SESSION_SEARCH_INDEX_CACHE.get(session);
+  if (cached) return cached;
+  const fields = collectSessionSearchFields(session);
+  const index: SessionSearchIndex = {
+    fields,
+    prepared: prepareSearchFields(fields),
+  };
+  SESSION_SEARCH_INDEX_CACHE.set(session, index);
+  return index;
+}
+
 export function filterSessionHistory<T extends SessionHistorySearchTarget>(
   sessions: readonly T[],
   query: string,
@@ -306,9 +340,9 @@ export function filterSessionHistory<T extends SessionHistorySearchTarget>(
     // span fields: "chongqi nginx" matches a session titled "重启服务器"
     // whose message contains "nginx" ("chongqi" via title pinyin, "nginx"
     // literally in the message content).
-    matchesSearchQuery(
+    matchesPreparedSearchQuery(
       trimmed,
-      ...collectSessionSearchFields(session),
+      getSessionSearchIndex(session).prepared,
       { pinyinFields: [session.title] },
     ),
   );
