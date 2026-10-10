@@ -40,18 +40,16 @@ function createSearchFieldCollector(): SearchFieldCollector {
     fields,
     push(text: unknown, maxLength: number = MAX_SEARCHABLE_FIELD_LENGTH) {
       if (typeof text !== 'string') return;
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      const effectiveMaxLength = Math.min(maxLength, MAX_SEARCHABLE_FIELD_LENGTH);
-      let capped = trimmed.length > effectiveMaxLength
-        ? trimmed.slice(0, effectiveMaxLength)
-        : trimmed;
       // Fill the remaining per-session budget with the freshest evidence:
       // truncate an oversized field instead of discarding it wholesale (whole-
       // field rejection would let older, smaller fields win the leftover space).
       const remaining = MAX_SESSION_SEARCHABLE_TOTAL_LENGTH - totalLength;
       if (remaining <= 0) return;
-      if (capped.length > remaining) capped = capped.slice(0, remaining);
+      const effectiveMaxLength = Math.min(maxLength, MAX_SEARCHABLE_FIELD_LENGTH, remaining);
+      // Bound the input before trimming so whitespace outside the searchable
+      // window cannot trigger an unbounded scan on every keystroke.
+      const capped = text.slice(0, effectiveMaxLength).trim();
+      if (!capped) return;
       totalLength += capped.length;
       fields.push(capped);
     },

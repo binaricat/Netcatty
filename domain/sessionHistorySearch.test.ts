@@ -35,7 +35,20 @@ test("filterSessionHistory matches titles and keeps order when query is blank", 
     createSession("b", "disk cleanup", []),
   ];
 
-  assert.deepEqual(filterSessionHistory(sessions, "  "), sessions);
+  for (const query of ["", "  \t\n"]) {
+    assert.deepEqual(filterSessionHistory(sessions, query), sessions);
+  }
+});
+
+test("filterSessionHistory handles special characters through the shared matcher", () => {
+  const sessions = [
+    createSession("a", "Ops", [{ content: "check [prod].json at /var/log/nginx" }]),
+    createSession("b", "Deploy", [{ content: "ship it" }]),
+  ];
+
+  assert.deepEqual(filterSessionHistory(sessions, "[prod].json"), [sessions[0]]);
+  assert.deepEqual(filterSessionHistory(sessions, "/var/log/nginx"), [sessions[0]]);
+  assert.deepEqual(filterSessionHistory(sessions, "[](){}"), []);
 });
 
 test("filterSessionHistory matches message content of user and assistant turns", () => {
@@ -229,6 +242,25 @@ test("filterSessionHistory matches CJK titles via the shared pinyin matcher", ()
 
   assert.deepEqual(filterSessionHistory(sessions, "chongqi"), [sessions[0]]);
   assert.deepEqual(filterSessionHistory(sessions, "重启"), [sessions[0]]);
+});
+
+test("search field trimming stays inside the field and remaining session limits", () => {
+  const fieldLimited = createSession("a", "Ops", [
+    { content: " ".repeat(20_000) + "outside-field" },
+    { content: "  recent-match  " + " ".repeat(1_000_000) },
+  ]);
+  assert.deepEqual(collectSessionSearchFields(fieldLimited), ["Ops", "recent-match"]);
+  assert.deepEqual(filterSessionHistory([fieldLimited], "recent-match"), [fieldLimited]);
+  assert.deepEqual(filterSessionHistory([fieldLimited], "outside-field"), []);
+
+  // Title + three full fields leave 3,997 characters for the oldest message.
+  // Trimming must not reach past that window to discover more content.
+  const sessionLimited = createSession("b", "Ops", [
+    { content: " ".repeat(3_997) + "outside-session" },
+    ...Array.from({ length: 3 }, () => ({ content: "x".repeat(20_000) })),
+  ]);
+  assert.equal(collectSessionSearchFields(sessionLimited).join("").length, 60_003);
+  assert.deepEqual(filterSessionHistory([sessionLimited], "outside-session"), []);
 });
 
 test("filterSessionHistory keeps the pinyin fallback on titles only", () => {

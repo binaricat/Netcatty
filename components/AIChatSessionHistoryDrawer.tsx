@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { Search, Trash2, X } from 'lucide-react';
 import type { AISession } from '../infrastructure/ai/types';
 import { useI18n } from '../application/i18n/I18nProvider';
@@ -34,6 +34,7 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   const { t } = useI18n();
   const [renderCount, setRenderCount] = useState(SESSION_RENDER_BATCH);
   const [searchQuery, setSearchQuery] = useState('');
+  const searchHintId = useId();
 
   const filteredSessions = React.useMemo(
     () => filterSessionHistory(sessions, searchQuery),
@@ -70,6 +71,7 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
             type="text"
             value={searchQuery}
             placeholder={t('ai.chat.searchSessions')}
+            aria-describedby={searchHintId}
             onChange={(event) => setSearchQuery(event.target.value)}
             className="h-8 pl-8 pr-7 text-[12px]"
           />
@@ -83,6 +85,9 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
             </button>
           )}
         </div>
+        <p id={searchHintId} className="mt-1.5 text-[11px] text-muted-foreground/60">
+          {t('ai.chat.searchSessionsHint')}
+        </p>
       </div>
       <ScrollArea className="flex-1">
         <div className="px-3">
