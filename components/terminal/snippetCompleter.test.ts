@@ -111,3 +111,31 @@ test("matches Chinese labels by pinyin and initials (smart suggest)", () => {
   assert.equal(getSnippetSuggestions("bushu", [s], {})[0]?.snippet?.id, "zh");
   assert.equal(getSnippetSuggestions("bsfw", [s], {})[0]?.snippet?.id, "zh");
 });
+
+test("prefixOnly mode matches at word boundaries (argument position, #3622)", () => {
+  const s = snip({ id: "mail", label: "set-email", command: "git config user.email a@b.c" });
+  // First 3 letters of the label's last word still match while typing an
+  // argument, e.g. after `git pull `.
+  assert.equal(getSnippetSuggestions("ema", [s], { prefixOnly: true })[0]?.snippet?.id, "mail");
+  // Mid-word substrings do not match.
+  const gmail = snip({ id: "gm", label: "gmail", command: "echo gmail" });
+  assert.deepEqual(getSnippetSuggestions("mai", [gmail], { prefixOnly: true }), []);
+});
+
+test("prefixOnly mode matches Chinese labels via pinyin and initials", () => {
+  const s = snip({ id: "zh", label: "部署服务", command: "kubectl apply" });
+  assert.equal(getSnippetSuggestions("bush", [s], { prefixOnly: true })[0]?.snippet?.id, "zh");
+  const mailbox = snip({ id: "yx", label: "邮箱", command: "user@example.com" });
+  assert.equal(getSnippetSuggestions("yx", [mailbox], { prefixOnly: true })[0]?.snippet?.id, "yx");
+});
+
+test("prefixOnly mode does not match option-prefixed needles (#3623)", () => {
+  // The pinyin fallback must not strip the leading "--"/"-" punctuation:
+  // "--ve" (from `git --ve`) would otherwise match "version", and "-d"
+  // (from `git -d`) match "deploy" via a single typed letter, displacing
+  // the real Fig option completions while typing flags.
+  const version = snip({ id: "v", label: "version", command: "echo version" });
+  const deploy = snip({ id: "d", label: "deploy", command: "kubectl apply" });
+  assert.deepEqual(getSnippetSuggestions("--ve", [version], { prefixOnly: true }), []);
+  assert.deepEqual(getSnippetSuggestions("-d", [deploy], { prefixOnly: true }), []);
+});

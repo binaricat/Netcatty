@@ -406,16 +406,32 @@ export async function getCompletions(
     }
   }
 
-  // Snippets: only at the command position (typing the command name).
+  // Snippets: at the command position the whole typed line is the needle. Once
+  // arguments are present, match against the word being typed so a snippet
+  // (e.g. an email shortcut) stays reachable after a command like `git pull `
+  // (#3622). Argument-position matching is prefix-only, needs at least two
+  // typed characters, and yields when path completion owns the slot.
   // Push without the early seen-text skip: snippets score above history, so if
   // a snippet's label collides with an existing history entry's text, the
   // score-sort + final dedup below keeps the snippet (the higher-scored one).
-  if (options.snippets && options.snippets.length > 0 && ctx.wordIndex === 0) {
-    for (const snippetSuggestion of getSnippetSuggestions(input, options.snippets, {
-      hostId,
-      hostGroup: options.hostGroup,
-    })) {
-      suggestions.push(snippetSuggestion);
+  if (options.snippets && options.snippets.length > 0) {
+    const atCommandPosition = ctx.wordIndex === 0;
+    const argumentNeedle = normalizeHistoryPathPrefix(ctx.currentWord);
+    const snippetArgumentMatch = !atCommandPosition
+      && !preferPathSuggestions
+      && argumentNeedle.trim().length >= 2;
+    if (atCommandPosition || snippetArgumentMatch) {
+      for (const snippetSuggestion of getSnippetSuggestions(
+        atCommandPosition ? input : argumentNeedle,
+        options.snippets,
+        {
+          hostId,
+          hostGroup: options.hostGroup,
+          prefixOnly: !atCommandPosition,
+        },
+      )) {
+        suggestions.push(snippetSuggestion);
+      }
     }
   }
 
