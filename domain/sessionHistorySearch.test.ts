@@ -585,3 +585,55 @@ test("filterSessionHistory admits a newly created session after the entry cap is
   assert.ok(!readSessions.has("fresh"), `expected fresh session to be cached, rebuilt: ${[...readSessions]}`);
   assert.deepEqual([...readSessions], ["s63"]);
 });
+
+// Regression: a hard-reject at the CHAR-budget gate froze cache membership
+// just like the earlier entry-cap bug. With ~31 large sessions (each near the
+// 64,000-character corpus cap) already consuming nearly the 4M-character
+// cache budget, a newly prepended high-ranked session was rejected without
+// evicting anything, and the end-of-scan prune — seeing a cache within both
+// bounds — kept the stale lower-ranked entries: the new large conversation
+// then rebuilt its index on every search keystroke.
+test("filterSessionHistory admits a newly created session after the char budget is saturated", () => {
+  // Corpus exactly 64,000 chars (title + 4 x 15,999-char messages), each
+  // index retaining ~128K chars (haystack + compact haystack): 31 fill
+  // ~3.97M of the 4M budget; a 32nd would overflow it.
+  const createLargeSession = (id: string) =>
+    createSession(id, "sess", [0, 1, 2, 3].map(() => ({ content: "x".repeat(15_999) })));
+
+  const initial = Array.from({ length: 31 }, (_, i) => createLargeSession(`s${i}`));
+  filterSessionHistory(initial, "x");
+
+  // A newly created large session is prepended: it ranks above every cached
+  // entry, and its index can only fit if the stale tail is evicted.
+  const created = createLargeSession("fresh");
+  const sessions = [created, ...initial];
+
+  // Observe corpus (re)builds as in the regression tests above.
+  const readSessions = new Set<string>();
+  for (const session of sessions) {
+    const messages = session.messages;
+    Object.defineProperty(session, "messages", {
+      get() {
+        readSessions.add(session.id);
+        return messages;
+      },
+      configurable: true,
+    });
+  }
+
+  // First scan over the new list: "fresh" misses (its index was never cached)
+  // and must be admitted by evicting the stalest cached tail entry.
+  filterSessionHistory(sessions, "x");
+  readSessions.clear();
+  const second = filterSessionHistory(sessions, "x");
+
+  assert.deepEqual(second, sessions);
+  // The fresh, highest-ranked session stays cached; only the evicted stalest
+  // tail session (which no longer fits the char budget) rebuilds.
+  assert.ok(!readSessions.has("fresh"), `expected fresh session to be cached, rebuilt: ${[...readSessions]}`);
+  assert.deepEqual([...readSessions], ["s30"]);
+  // And the steady state holds on subsequent scans too.
+  readSessions.clear();
+  filterSessionHistory(sessions, "x");
+  assert.deepEqual([...readSessions], ["s30"]);
+});
