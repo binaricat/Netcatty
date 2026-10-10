@@ -223,6 +223,56 @@ test("filterSessionHistory matches persisted error messages and attachment label
   assert.ok(!fields.some((field) => field === "AAAA"));
 });
 
+test("budget exhaustion inside a message keeps the newest tool calls searchable", () => {
+  // One assistant message bearing enough tool calls (each argument capped at
+  // 2,000 chars) to exhaust the remaining session budget: iteration must be
+  // newest-first so the latest calls (appended at the array end) stay
+  // searchable instead of the oldest ones winning the budget.
+  const session = createSession("a", "Ops", [
+    {
+      role: "assistant",
+      content: "y".repeat(20_000),
+      toolCalls: Array.from({ length: 25 }, (_, i) => ({
+        name: `call-${i}`,
+        id: `t${i}`,
+        arguments: { command: `marker-args-${i} ${"z".repeat(20_000)}` },
+      })),
+    },
+  ]);
+
+  const fields = collectSessionSearchFields(session);
+  // The newest call (index 24, appended last) stays searchable along with the
+  // rest of the recent burst; the oldest call is the one dropped.
+  assert.ok(fields.some((field) => field.includes("marker-args-24")));
+  assert.ok(fields.some((field) => field.includes("marker-args-19")));
+  assert.ok(!fields.some((field) => field.includes("marker-args-0")));
+  assert.deepEqual(filterSessionHistory([session], "marker-args-24"), [session]);
+  // Retained call fields are output in chronological order after the
+  // newest-first collection is reversed back (call-10 before call-19).
+  const call10 = fields.findIndex((field) => field.includes("call-10"));
+  const call19 = fields.findIndex((field) => field.includes("call-19"));
+  assert.ok(call10 !== -1 && call19 !== -1 && call10 < call19);
+});
+
+test("later attachment labels stay searchable when the label list overflows the cap", () => {
+  // The joined labels of these attachments exceed the 2,000-character field
+  // cap; feeding labels individually keeps the later (newest) ones findable.
+  const session = createSession("a", "Deploy", [
+    {
+      role: "user",
+      content: "please summarize",
+      attachments: [
+        { base64Data: "", mediaType: "text/plain", filename: `pad-${"a".repeat(2_100)}` },
+        { base64Data: "", mediaType: "text/markdown", filename: "latest-run.log" },
+      ],
+    },
+  ]);
+
+  const fields = collectSessionSearchFields(session);
+  assert.ok(fields.some((field) => field.includes("latest-run.log")));
+  assert.deepEqual(filterSessionHistory([session], "latest-run"), [session]);
+});
+
 test("collectSessionSearchFields skips empty content and caps very long fields", () => {
   const session = createSession("a", "  ", [
     { role: "user", content: "   " },

@@ -73,6 +73,7 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
             type="text"
             value={searchQuery}
             placeholder={t('ai.chat.searchSessions')}
+            aria-label={t('ai.chat.searchSessions')}
             aria-describedby={searchHintId}
             onChange={(event) => setSearchQuery(event.target.value)}
             className="h-8 pl-8 pr-7 text-[12px]"

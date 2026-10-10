@@ -94,6 +94,7 @@ test("history drawer filters, pages, clears and explains the bounded search in e
         assert.ok(messages[key], `${locale} is missing ${key}`);
       }
       assert.equal(input.placeholder, messages["ai.chat.searchSessions"]);
+      assert.equal(input.getAttribute("aria-label"), messages["ai.chat.searchSessions"]);
       assert.equal(hint?.textContent, messages["ai.chat.searchSessionsHint"]);
       assert.ok(renderer.container.textContent?.includes(messages["ai.chat.noMatchingSessions"]));
       await render([], locale);

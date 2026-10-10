@@ -199,21 +199,28 @@ function collectAgentActivityFields(
 }
 
 /**
- * Serialize the human-visible labels of a message's attachments: file names
+ * Collect the human-visible labels of a message's attachments: file names
  * and Vault note titles. Rendered from `message.attachments` when the
  * conversation is reopened (with the legacy `images` field as fallback), so
  * a session whose only mention of a term sits in an attachment label must
  * stay findable. Only the short labels are indexed — never the base64
  * payloads — so attaching files cannot blow up the search haystack.
  */
-function serializeAttachmentLabels(attachments: ChatMessageAttachment[] | undefined): string {
-  if (!attachments?.length) return '';
-  const parts: string[] = [];
-  for (const attachment of attachments) {
-    if (attachment.vaultNoteTitle) parts.push(attachment.vaultNoteTitle);
-    if (attachment.filename) parts.push(attachment.filename);
+function collectAttachmentLabelFields(
+  collector: SearchFieldCollector,
+  attachments: ChatMessageAttachment[],
+): void {
+  // Individual labels are handed to the collector newest-first so the 2,000-
+  // character field cap (and the remaining session budget) can truncate the
+  // list at its oldest end instead of swallowing every later label from the
+  // reopened conversation.
+  for (let i = attachments.length - 1; i >= 0; i--) {
+    if (collector.isFull) return;
+    const attachment = attachments[i];
+    collector.push(attachment.vaultNoteTitle, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
+    if (collector.isFull) return;
+    collector.push(attachment.filename, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
   }
-  return parts.join('\n');
 }
 
 export function collectSessionSearchFields(session: SessionHistorySearchTarget): string[] {
@@ -249,9 +256,15 @@ export function collectSessionSearchFields(session: SessionHistorySearchTarget):
     // conversation, so it must be indexed. Error strings are short, hence the
     // tight cap.
     collector.push(message.errorInfo?.message, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
-    collector.push(serializeAttachmentLabels(message.attachments ?? message.images), MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
-    for (const toolCall of message.toolCalls ?? []) {
+    collectAttachmentLabelFields(collector, message.attachments ?? message.images ?? []);
+    // Tool calls accumulate at the end of `message.toolCalls`, so iterate
+    // newest-first: if a burst of calls from this message exhausts the
+    // remaining session budget, the newest (still visible) calls stay
+    // searchable instead of being dropped in favor of the oldest ones.
+    const toolCalls = message.toolCalls ?? [];
+    for (let i = toolCalls.length - 1; i >= 0; i--) {
       if (collector.isFull) break;
+      const toolCall = toolCalls[i];
       collector.push(toolCall.name);
       collector.push(serializeToolCallArguments(toolCall.arguments), MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
     }
