@@ -1362,8 +1362,7 @@ test("listMimoModels stops when the service exits during provider discovery", as
   assert.equal(closeCount, 1);
 });
 
-test("listMimoModels does not probe skill paths (no `mimo debug config` spawn) before the catalog server", async () => {
-  const spawns = [];
+test("listMimoModels does not probe skill paths (no `mimo debug config` spawn) before the catalog server", async () => {  const spawns = [];
   spawnMock = (command, args) => {
     spawns.push({ command, args });
     return fakeChild();
@@ -1397,4 +1396,96 @@ test("listMimoModels does not probe skill paths (no `mimo debug config` spawn) b
   } finally {
     spawnMock = null;
   }
+});
+
+// Fixture reproducing the live providers() capture from 2026-10-10
+// (D:\Temp\CodeTemp\netcatty-modelcatalog-diag\raw-providers-2026-10-10.json):
+// the six real Xiaomi models, plus the vendor's free auto-routing channel as
+// a second provider with id "mimo" whose zero-cost pseudo-model entries have
+// churned between "MiMo Auto (free)" and raw junk ("/models", "134qwerawdf").
+function liveCatalogFixture() {
+  const realModels = {
+    "mimo-v2.6-pro": { name: "MiMo-V2.6-Pro" },
+    "mimo-v2.5": { name: "MiMo-V2.5" },
+    "mimo-v2.6-pro-ultraspeed": { name: "MiMo-V2.6-Pro-UltraSpeed" },
+    "mimo-v2.5-pro": { name: "MiMo-V2.5-Pro" },
+    "mimo-v2.6-flash": { name: "MiMo-V2.6-Flash" },
+    "mimo-v2.5-pro-ultraspeed": { name: "MiMo-V2.5-Pro-UltraSpeed" },
+  };
+  return {
+    providers: [
+      { id: "xiaomi", name: "Xiaomi", models: realModels },
+      {
+        id: "mimo",
+        name: "mimo",
+        models: {
+          "/models": { name: "/models", cost: { input: 0, output: 0 }, release_date: "" },
+          "134qwerawdf": { name: "134qwerawdf", cost: { input: 0, output: 0 }, release_date: "" },
+          auto: { name: "MiMo Auto (free)", cost: { input: 0, output: 0 }, release_date: "" },
+        },
+      },
+    ],
+    default: { xiaomi: "mimo-v2.6-pro-ultraspeed" },
+  };
+}
+
+test("listMimoModels filters the vendor's free auto-routing channel out of the catalog", async () => {
+  const catalog = await listMimoModels({
+    binPath: "/tmp/mimo-auto-filter-test",
+    mimoFactory: async () => ({
+      client: {
+        config: {
+          providers: async () => liveCatalogFixture(),
+        },
+      },
+      server: { close() {} },
+    }),
+  });
+
+  // All six real Xiaomi models remain; every entry of the `mimo` auto channel
+  // (whatever id/label the vendor currently uses) is gone.
+  assert.deepEqual(catalog.models.map((model) => model.id), [
+    "xiaomi/mimo-v2.6-pro",
+    "xiaomi/mimo-v2.5",
+    "xiaomi/mimo-v2.6-pro-ultraspeed",
+    "xiaomi/mimo-v2.5-pro",
+    "xiaomi/mimo-v2.6-flash",
+    "xiaomi/mimo-v2.5-pro-ultraspeed",
+  ]);
+  assert.equal(catalog.models.every((model) => !model.id.startsWith("mimo/")), true);
+});
+
+test("listMimoModels keeps currentModelId pointing at a filtered auto-channel model", async () => {
+  const fixture = liveCatalogFixture();
+  // The vendor's default map can select the auto channel; currentModelId must
+  // still round-trip even though no picker row exists for it.
+  fixture.default = { xiaomi: "mimo-v2.6-pro-ultraspeed", mimo: "134qwerawdf" };
+  const catalog = await listMimoModels({
+    binPath: "/tmp/mimo-auto-filter-default-test",
+    mimoFactory: async () => ({
+      client: {
+        config: {
+          providers: async () => fixture,
+        },
+      },
+      server: { close() {} },
+    }),
+  });
+
+  assert.equal(catalog.currentModelId, "xiaomi/mimo-v2.6-pro-ultraspeed");
+
+  fixture.default = { mimo: "134qwerawdf" };
+  const autoDefault = await listMimoModels({
+    binPath: "/tmp/mimo-auto-filter-default-2-test",
+    mimoFactory: async () => ({
+      client: {
+        config: {
+          providers: async () => fixture,
+        },
+      },
+      server: { close() {} },
+    }),
+  });
+  assert.equal(autoDefault.currentModelId, "mimo/134qwerawdf");
+  assert.equal(autoDefault.models.some((model) => model.id === "mimo/134qwerawdf"), false);
 });
