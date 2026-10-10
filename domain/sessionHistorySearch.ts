@@ -177,18 +177,18 @@ function collectAgentActivityFields(
     const activity = activities[i];
     switch (activity.type) {
       case 'file_change':
-        for (const change of activity.changes) {
+        for (let j = activity.changes.length - 1; j >= 0; j--) {
           if (collector.isFull) return;
-          collector.push(change.path, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
+          collector.push(activity.changes[j].path, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
         }
         break;
       case 'web_search':
         collector.push(activity.query, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
         break;
       case 'plan_update':
-        for (const item of activity.items) {
+        for (let j = activity.items.length - 1; j >= 0; j--) {
           if (collector.isFull) return;
-          collector.push(item.text, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
+          collector.push(activity.items[j].text, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
         }
         break;
       case 'warning':
