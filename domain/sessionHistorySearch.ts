@@ -389,7 +389,9 @@ function getSessionSearchIndex(
   const displayTitle = resolveDisplayTitle(session, untitledLabel);
   const cached = SESSION_SEARCH_INDEX_CACHE.get(session);
   if (cached && cached.displayTitle === displayTitle) {
-    // Refresh recency so hot (recently searched) sessions are evicted last.
+    // Re-append on every visit so the cache's insertion order mirrors the
+    // latest scan's visitation order (the ranked, newest-first session list);
+    // `pruneSessionSearchIndexCache` relies on that order when evicting.
     SESSION_SEARCH_INDEX_CACHE.delete(session);
     SESSION_SEARCH_INDEX_CACHE.set(session, cached);
     return cached;
@@ -410,8 +412,9 @@ function getSessionSearchIndex(
  * entry cap would cycle-evict the whole cache and rebuild every session's
  * haystack on every keystroke. Deferring eviction keeps every retained entry
  * usable within a scan while still bounding the cache — first by dropping
- * indexes for sessions no longer in the scanned list, then by evicting
- * least-recently-used entries until both bounds hold.
+ * indexes for sessions no longer in the scanned list, then by evicting the
+ * lowest-ranked entries (the oldest tail of the newest-first ranked list)
+ * until both bounds hold, preserving the front of the ranked list.
  */
 function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTarget[]): void {
   const live = new Set<SessionHistorySearchTarget>(sessions);
@@ -422,9 +425,20 @@ function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTar
   for (const cachedIndex of SESSION_SEARCH_INDEX_CACHE.values()) {
     retained += indexRetainedChars(cachedIndex);
   }
-  // Evict least-recently-used entries (Map iteration order) until both bounds
-  // hold. The newest entry is always kept, even if it alone exceeds the char
-  // budget (a single entry is bounded by ~192K chars by the collector caps).
+  // Evict from the END of the Map until both bounds hold. Every scan visits
+  // the full ranked session list newest-first and `getSessionSearchIndex`
+  // re-appends each visited entry, so after a scan the Map's insertion order
+  // mirrors visitation order: the highest-ranked (newest) sessions sit at the
+  // FRONT and the oldest tail at the BACK. Evicting the front (classic LRU on
+  // Map order) would therefore drop the newest, highest-ranked sessions and
+  // retain the stalest tail — every subsequent keystroke would rebuild every
+  // session above the cache cap. Evicting the back instead preserves the
+  // front of the ranked list. The single remaining entry is always kept, even
+  // if it alone exceeds the char budget (a single entry is bounded by ~192K
+  // chars by the collector caps).
+  // Snapshot the keys once: prune only deletes (never inserts), so popping
+  // from this array visits keys exactly in Map order, back to front.
+  const keysInInsertionOrder = [...SESSION_SEARCH_INDEX_CACHE.keys()];
   while (
     SESSION_SEARCH_INDEX_CACHE.size > MAX_SESSION_SEARCH_INDEX_CACHE_ENTRIES
     || retained > MAX_SESSION_SEARCH_INDEX_CACHE_CHARS
@@ -432,11 +446,11 @@ function pruneSessionSearchIndexCache(sessions: readonly SessionHistorySearchTar
     // A single entry can never push the cache past the char budget (it is
     // bounded by ~192K chars by the collector caps), so keep the last entry.
     if (SESSION_SEARCH_INDEX_CACHE.size <= 1) break;
-    const oldestKey = SESSION_SEARCH_INDEX_CACHE.keys().next().value;
-    if (oldestKey === undefined) break;
-    const oldest = SESSION_SEARCH_INDEX_CACHE.get(oldestKey);
-    if (oldest) retained -= indexRetainedChars(oldest);
-    SESSION_SEARCH_INDEX_CACHE.delete(oldestKey);
+    const evictKey = keysInInsertionOrder.pop();
+    if (evictKey === undefined) break;
+    const evicted = SESSION_SEARCH_INDEX_CACHE.get(evictKey);
+    if (evicted) retained -= indexRetainedChars(evicted);
+    SESSION_SEARCH_INDEX_CACHE.delete(evictKey);
   }
 }
 

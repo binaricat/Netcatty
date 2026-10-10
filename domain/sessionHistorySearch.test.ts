@@ -535,4 +535,12 @@ test("filterSessionHistory keeps index-cache hits for histories larger than the 
   const rebuilt = readSessions.size;
   assert.ok(rebuilt <= sessionCount - 64, `expected no cache thrash, rebuilt ${rebuilt}`);
   assert.deepEqual(second, sessions);
+  // Eviction must retain the FRONT of the ranked list (the sessions the next
+  // scan visits first) and rebuild only the oldest tail above the entry cap —
+  // evicting the Map's first key would drop the head and thrash it instead.
+  const rebuiltIds = [...readSessions].sort();
+  assert.deepEqual(
+    rebuiltIds,
+    sessions.slice(-(sessionCount - 64)).map((s) => s.id).sort(),
+  );
 });
