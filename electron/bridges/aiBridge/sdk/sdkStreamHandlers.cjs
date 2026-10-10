@@ -159,7 +159,7 @@ function shouldCacheSdkRuntimeModels(_backendKey) {
 /** Resolve the last-known-good catalog file under userData (null if unknown). */
 function resolveLastKnownCatalogPath(electronModule) {
   try {
-    return buildLastKnownCatalogPath(electronModule?.getPath?.("userData"));
+    return buildLastKnownCatalogPath(electronModule?.app?.getPath?.("userData"));
   } catch {
     return null;
   }

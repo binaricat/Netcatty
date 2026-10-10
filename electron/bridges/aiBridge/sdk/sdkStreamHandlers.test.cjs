@@ -1080,6 +1080,7 @@ const os = require("node:os");
 const nodePath = require("node:path");
 const {
   LAST_KNOWN_MAX_MODELS,
+  LAST_KNOWN_MAX_ENTRIES,
   buildLastKnownCatalogPath,
   readLastKnownCatalogEntry,
   readLastKnownCatalogStore,
@@ -1089,7 +1090,9 @@ const {
 function makeLastKnownCtx(overrides = {}) {
   const userDataDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "netcatty-lkg-"));
   const { handlers, ctx } = registerWithStubbedCtx({
-    electronModule: { getPath: (name) => (name === "userData" ? userDataDir : undefined) },
+    // Mirror the real bootstrap: electronModule is require("electron"), so
+    // userData lives behind .app.
+    electronModule: { app: { getPath: (name) => (name === "userData" ? userDataDir : undefined) } },
     getShellEnv: async () => ({}),
     normalizeAgentEnv: (env) => env || {},
     withCliDiscoveryEnv: (env) => env,
@@ -1137,6 +1140,44 @@ test("modelCatalogLastKnown caps models, never stores empty catalogs, and keeps 
     assert.equal(readLastKnownCatalogEntry(file, "k4").currentModelId, "xiaomi/mimo-v2.6-flash");
     assert.equal(readLastKnownCatalogEntry(file, "missing"), null);
     assert.equal(writeLastKnownCatalogEntry(null, "k5", { backend: "claude", models: [{ id: "x" }] }), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("modelCatalogLastKnown evicts the oldest entries beyond the store cap", () => {
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "netcatty-lkg-cap-"));
+  const file = buildLastKnownCatalogPath(dir);
+  try {
+    // Fill the store to the cap with staggered timestamps.
+    for (let index = 0; index < LAST_KNOWN_MAX_ENTRIES; index += 1) {
+      assert.equal(writeLastKnownCatalogEntry(
+        file,
+        `k-${index}`,
+        { backend: "claude", models: [{ id: "m" }] },
+        { now: Date.parse("2026-01-01T00:00:00Z") + index * 1000 },
+      ), true);
+    }
+    // Writing one more evicts the oldest entry, not the newest.
+    assert.equal(writeLastKnownCatalogEntry(
+      file,
+      "k-new",
+      { backend: "claude", models: [{ id: "m" }] },
+      { now: Date.parse("2026-02-01T00:00:00Z") },
+    ), true);
+    const store = readLastKnownCatalogStore(file);
+    assert.equal(Object.keys(store).length, LAST_KNOWN_MAX_ENTRIES);
+    assert.equal("k-new" in store, true);
+    assert.equal(`k-0` in store, false);
+    assert.equal(`k-${LAST_KNOWN_MAX_ENTRIES - 1}` in store, true);
+    // Re-writing an existing key refreshes it and keeps it in the store.
+    assert.equal(writeLastKnownCatalogEntry(
+      file,
+      "k-1",
+      { backend: "claude", models: [{ id: "m" }] },
+      { now: Date.parse("2026-03-01T00:00:00Z") },
+    ), true);
+    assert.equal("k-1" in readLastKnownCatalogStore(file), true);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
