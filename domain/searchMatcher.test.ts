@@ -125,6 +125,18 @@ test("punctuation-only query does not match every field", () => {
   assert.equal(matchesSearchQuery("-", "some-host"), false);
 });
 
+test("over-limit query keeps its full meaning instead of matching on a truncated prefix", () => {
+  // The shared matcher never truncates: a >256-char query whose distinguishing
+  // suffix is beyond the suggested `MAX_SEARCH_QUERY_LENGTH` cap must not
+  // match a field that only contains the cap-bounded prefix. Callers that
+  // rescan many haystacks (session history) bound their own input instead.
+  const field = "a".repeat(300);
+  const query = `${"a".repeat(300)} missing-suffix`;
+  assert.equal(matchesSearchQuery(query, field), false);
+  // The same query still matches when the whole query is present.
+  assert.equal(matchesSearchQuery(query, `${field} missing-suffix`), true);
+});
+
 test("host search avoids compact hostname false positives on numeric segments", () => {
   assert.equal(
     matchesHostSearchQuery("61", {

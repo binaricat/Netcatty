@@ -100,14 +100,20 @@ export type SearchMatchOptions = {
 };
 
 /**
- * Maximum accepted query length. `matchesPreparedSearchQuery` historically
- * re-normalized, tokenized and compacted the raw query for every haystack it
- * was matched against; capping the input bounds that per-haystack cost even
- * before callers prepare the query once and reuse it.
+ * Suggested query bound for callers that rescan many haystacks per keystroke
+ * (e.g. session-history search). The shared matcher never truncates: callers
+ * apply this cap at their own input so the bound stays local to them and the
+ * global match semantics (full-query meaning) are unchanged for everyone else.
  */
 export const MAX_SEARCH_QUERY_LENGTH = 256;
 
-function truncateQueryForMatch(query: string): string {
+/**
+ * Bound a caller-side search query to `MAX_SEARCH_QUERY_LENGTH` UTF-16 code
+ * units without splitting a UTF-16 surrogate pair when the cap lands mid-pair
+ * (e.g. an astral-plane character such as an emoji; drop the lone high
+ * surrogate). Truncation is a caller concern: see `MAX_SEARCH_QUERY_LENGTH`.
+ */
+export function truncateQueryForMatch(query: string): string {
   if (query.length <= MAX_SEARCH_QUERY_LENGTH) return query;
   const truncated = query.slice(0, MAX_SEARCH_QUERY_LENGTH);
   // Avoid splitting a UTF-16 surrogate pair when the cap lands mid-pair (e.g.
@@ -141,7 +147,11 @@ const EMPTY_PREPARED_QUERY: PreparedSearchQuery = {
 };
 
 export function prepareSearchQuery(query: string): PreparedSearchQuery {
-  const normalized = normalizeText(truncateQueryForMatch(query));
+  // No length cap here: truncating globally would silently change match
+  // semantics for every caller (an over-limit query's tail would be dropped,
+  // so a field containing only the prefix would report a match). Callers that
+  // rescan many haystacks bound their own input via `truncateQueryForMatch`.
+  const normalized = normalizeText(query);
   if (!normalized) return EMPTY_PREPARED_QUERY;
   return {
     normalized,

@@ -702,8 +702,9 @@ test("filterSessionHistory caps the query and matches on its capped prefix", () 
   const session = createSession("a", "nginx restart", [{ content: "reload nginx" }]);
 
   // A pasted multi-megabyte query must not be re-normalized per session: it is
-  // capped (MAX_SEARCH_QUERY_LENGTH) and normalized once per scan, so matching
-  // falls back to the capped prefix (which still spans tokens here).
+  // capped via truncateQueryForMatch (MAX_SEARCH_QUERY_LENGTH) at this scan's
+  // input and normalized once per scan, so matching falls back to the capped
+  // prefix (which still spans tokens here).
   const longQuery = `${"nginx ".repeat(200_000)}zzz-impossible-tail`;
   assert.deepEqual(filterSessionHistory([session], longQuery), [session]);
   // The uncapped-looking but normal query still matches exactly.
