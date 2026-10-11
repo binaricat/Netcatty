@@ -6,7 +6,19 @@ const SEARCH_QUERY_SEGMENT_SPLIT_REGEX = /\s+/u;
 const SEARCH_QUERY_PUNCT_REGEX = /[\p{Pd}_/\\|.,，。;；:：!！?？()（）[\]{}<>《》、"'`~·]/u;
 const DASH_SEPARATOR_REGEX = /[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/gu;
 export const PINYIN_CACHE_MAX_ENTRIES = 16_384;
+/**
+ * Hard cap on the total characters the pinyin cache retains (cache key +
+ * full + initials transliterations per entry, i.e. several copies of the
+ * source text). A per-entry cap alone is not enough: callers transliterate
+ * long fields (e.g. up to 20,000-character session titles), so a scan over
+ * many distinct large fields could retain tens or hundreds of megabytes
+ * within the entry count. Sources whose transliterations alone exceed this
+ * budget are not cached at all — they are simply re-transliterated on the
+ * next lookup instead of pinning memory.
+ */
+export const PINYIN_CACHE_MAX_CHARS = 1_000_000;
 const PINYIN_CACHE = new Map<string, { full: string; initials: string }>();
+let pinyinCacheChars = 0;
 const IPV4_LIKE_REGEX = /^\d{1,3}(?:\.\d{1,3})+$/;
 const HOST_PHASE_SCORE_BONUS = {
   strict: 1_000_000,
@@ -31,6 +43,13 @@ function normalizeText(input: string): string {
 
 function compactText(input: string): string {
   return normalizeText(input).replace(SEARCH_REMOVE_REGEX, "");
+}
+
+function pinyinCacheEntryChars(
+  key: string,
+  entry: { full: string; initials: string },
+): number {
+  return key.length + entry.full.length + entry.initials.length;
 }
 
 function getPinyinVariants(sourceText: string): { full: string; initials: string } {
@@ -62,11 +81,22 @@ function getPinyinVariants(sourceText: string): { full: string; initials: string
   }
 
   const next = { full, initials };
+  const entryChars = pinyinCacheEntryChars(cacheKey, next);
+  // Never cache an entry that by itself exceeds the retained-char budget:
+  // admitting it (and evicting everything older to fit) would still let one
+  // oversized field pin memory above the budget, and skipping keeps it a
+  // simple re-transliteration on the next lookup instead of unbounded decay.
+  if (entryChars > PINYIN_CACHE_MAX_CHARS) return next;
+  pinyinCacheChars += entryChars;
   PINYIN_CACHE.delete(cacheKey);
   PINYIN_CACHE.set(cacheKey, next);
-  while (PINYIN_CACHE.size > PINYIN_CACHE_MAX_ENTRIES) {
+  while (PINYIN_CACHE.size > PINYIN_CACHE_MAX_ENTRIES
+    || pinyinCacheChars > PINYIN_CACHE_MAX_CHARS) {
     const oldestKey = PINYIN_CACHE.keys().next().value as string | undefined;
     if (oldestKey === undefined) break;
+    const oldest = PINYIN_CACHE.get(oldestKey);
+    if (!oldest) break;
+    pinyinCacheChars -= pinyinCacheEntryChars(oldestKey, oldest);
     PINYIN_CACHE.delete(oldestKey);
   }
   return next;
@@ -74,10 +104,19 @@ function getPinyinVariants(sourceText: string): { full: string; initials: string
 
 export function resetPinyinCacheForTests(): void {
   PINYIN_CACHE.clear();
+  pinyinCacheChars = 0;
 }
 
-export function getPinyinCacheStatsForTests(): { size: number; keys: string[] } {
-  return { size: PINYIN_CACHE.size, keys: [...PINYIN_CACHE.keys()] };
+export function getPinyinCacheStatsForTests(): {
+  size: number;
+  chars: number;
+  keys: string[];
+} {
+  return {
+    size: PINYIN_CACHE.size,
+    chars: pinyinCacheChars,
+    keys: [...PINYIN_CACHE.keys()],
+  };
 }
 
 export function tokenizeSearchQuery(query: string): string[] {

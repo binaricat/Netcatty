@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  PINYIN_CACHE_MAX_CHARS,
   PINYIN_CACHE_MAX_ENTRIES,
   getPinyinCacheStatsForTests,
   getHostSearchMatch,
@@ -237,5 +238,24 @@ test("pinyin cache covers 8000 hosts and stays hard-bounded through import/edit 
   assert.equal(stats.size, PINYIN_CACHE_MAX_ENTRIES);
   assert.ok(stats.keys.includes("主机0"));
   assert.ok(!stats.keys.includes("主机1"));
+  resetPinyinCacheForTests();
+});
+
+// Regression: short labels keep the pinyin cache under the entry cap, but the
+// entry cap alone is not a memory bound — a Latin query that matches nothing
+// transliterates every distinct field it scans, so long fields (e.g. up to
+// MAX_SEARCHABLE_FIELD_LENGTH-character session titles) could retain several
+// copies of each source in the global cache. The cache must also be bounded
+// by retained characters.
+test("pinyin cache stays hard-bounded by retained characters, not just entries", () => {
+  resetPinyinCacheForTests();
+  // 17 long CJK titles (~20_000 chars each): their entries can never all fit
+  // under the 1,000,000-char budget, so earlier ones must be evicted instead
+  // of pinning memory within the 16_384-entry cap.
+  for (let index = 0; index < 17; index += 1) {
+    matchesSearchQuery("unmatched-latin", "重启".repeat(10_000) + String(index));
+  }
+  assert.ok(getPinyinCacheStatsForTests().chars <= PINYIN_CACHE_MAX_CHARS);
+  assert.ok(getPinyinCacheStatsForTests().size > 0);
   resetPinyinCacheForTests();
 });
