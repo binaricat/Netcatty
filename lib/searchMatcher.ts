@@ -6,7 +6,19 @@ const SEARCH_QUERY_SEGMENT_SPLIT_REGEX = /\s+/u;
 const SEARCH_QUERY_PUNCT_REGEX = /[\p{Pd}_/\\|.,，。;；:：!！?？()（）[\]{}<>《》、"'`~·]/u;
 const DASH_SEPARATOR_REGEX = /[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/gu;
 export const PINYIN_CACHE_MAX_ENTRIES = 16_384;
+/**
+ * Hard cap on the total characters the pinyin cache retains (cache key +
+ * full + initials transliterations per entry, i.e. several copies of the
+ * source text). A per-entry cap alone is not enough: callers transliterate
+ * long fields (e.g. up to 20,000-character session titles), so a scan over
+ * many distinct large fields could retain tens or hundreds of megabytes
+ * within the entry count. Sources whose transliterations alone exceed this
+ * budget are not cached at all — they are simply re-transliterated on the
+ * next lookup instead of pinning memory.
+ */
+export const PINYIN_CACHE_MAX_CHARS = 1_000_000;
 const PINYIN_CACHE = new Map<string, { full: string; initials: string }>();
+let pinyinCacheChars = 0;
 const IPV4_LIKE_REGEX = /^\d{1,3}(?:\.\d{1,3})+$/;
 const HOST_PHASE_SCORE_BONUS = {
   strict: 1_000_000,
@@ -31,6 +43,13 @@ function normalizeText(input: string): string {
 
 function compactText(input: string): string {
   return normalizeText(input).replace(SEARCH_REMOVE_REGEX, "");
+}
+
+function pinyinCacheEntryChars(
+  key: string,
+  entry: { full: string; initials: string },
+): number {
+  return key.length + entry.full.length + entry.initials.length;
 }
 
 function getPinyinVariants(sourceText: string): { full: string; initials: string } {
@@ -62,11 +81,22 @@ function getPinyinVariants(sourceText: string): { full: string; initials: string
   }
 
   const next = { full, initials };
+  const entryChars = pinyinCacheEntryChars(cacheKey, next);
+  // Never cache an entry that by itself exceeds the retained-char budget:
+  // admitting it (and evicting everything older to fit) would still let one
+  // oversized field pin memory above the budget, and skipping keeps it a
+  // simple re-transliteration on the next lookup instead of unbounded decay.
+  if (entryChars > PINYIN_CACHE_MAX_CHARS) return next;
+  pinyinCacheChars += entryChars;
   PINYIN_CACHE.delete(cacheKey);
   PINYIN_CACHE.set(cacheKey, next);
-  while (PINYIN_CACHE.size > PINYIN_CACHE_MAX_ENTRIES) {
+  while (PINYIN_CACHE.size > PINYIN_CACHE_MAX_ENTRIES
+    || pinyinCacheChars > PINYIN_CACHE_MAX_CHARS) {
     const oldestKey = PINYIN_CACHE.keys().next().value as string | undefined;
     if (oldestKey === undefined) break;
+    const oldest = PINYIN_CACHE.get(oldestKey);
+    if (!oldest) break;
+    pinyinCacheChars -= pinyinCacheEntryChars(oldestKey, oldest);
     PINYIN_CACHE.delete(oldestKey);
   }
   return next;
@@ -74,10 +104,19 @@ function getPinyinVariants(sourceText: string): { full: string; initials: string
 
 export function resetPinyinCacheForTests(): void {
   PINYIN_CACHE.clear();
+  pinyinCacheChars = 0;
 }
 
-export function getPinyinCacheStatsForTests(): { size: number; keys: string[] } {
-  return { size: PINYIN_CACHE.size, keys: [...PINYIN_CACHE.keys()] };
+export function getPinyinCacheStatsForTests(): {
+  size: number;
+  chars: number;
+  keys: string[];
+} {
+  return {
+    size: PINYIN_CACHE.size,
+    chars: pinyinCacheChars,
+    keys: [...PINYIN_CACHE.keys()],
+  };
 }
 
 export function tokenizeSearchQuery(query: string): string[] {
@@ -86,35 +125,132 @@ export function tokenizeSearchQuery(query: string): string[] {
   return normalized.split(SEARCH_SPLIT_REGEX).filter(Boolean);
 }
 
-export function matchesSearchQuery(
-  query: string,
-  ...fields: Array<string | null | undefined>
-): boolean {
-  const normalizedQuery = normalizeText(query);
-  if (!normalizedQuery) return true;
+/**
+ * Optional matching tweaks. Callers with large unbounded haystacks (e.g.
+ * full conversation histories) can keep literal/compact matching global
+ * while restricting the (expensive) pinyin fallback to specific fields via
+ * `pinyinFields`: each token may still match literally anywhere in the
+ * haystack, but is only transliteration-matched against the listed fields.
+ */
+export type SearchMatchOptions = {
+  allowPinyin?: boolean;
+  /** Restrict the pinyin fallback to these fields; defaults to every field. */
+  pinyinFields?: string[];
+};
 
+/**
+ * Suggested query bound for callers that rescan many haystacks per keystroke
+ * (e.g. session-history search). The shared matcher never truncates: callers
+ * apply this cap at their own input so the bound stays local to them and the
+ * global match semantics (full-query meaning) are unchanged for everyone else.
+ */
+export const MAX_SEARCH_QUERY_LENGTH = 256;
+
+/**
+ * Bound a caller-side search query to `MAX_SEARCH_QUERY_LENGTH` UTF-16 code
+ * units without splitting a UTF-16 surrogate pair when the cap lands mid-pair
+ * (e.g. an astral-plane character such as an emoji; drop the lone high
+ * surrogate). Truncation is a caller concern: see `MAX_SEARCH_QUERY_LENGTH`.
+ */
+export function truncateQueryForMatch(query: string): string {
+  if (query.length <= MAX_SEARCH_QUERY_LENGTH) return query;
+  const truncated = query.slice(0, MAX_SEARCH_QUERY_LENGTH);
+  // Avoid splitting a UTF-16 surrogate pair when the cap lands mid-pair (e.g.
+  // an astral-plane character such as an emoji); drop the lone high surrogate.
+  const tail = truncated.charCodeAt(truncated.length - 1);
+  return tail >= 0xd800 && tail <= 0xdbff ? truncated.slice(0, -1) : truncated;
+}
+
+/**
+ * Pre-normalized search query. Callers that match the same query against many
+ * haystacks (e.g. session-history search scans every session per keystroke)
+ * can prepare the query once per scan instead of paying NFKC normalization,
+ * tokenization and compaction once per session.
+ */
+export type PreparedSearchQuery = {
+  /** Normalized (NFKC, dash-folded, lowercased, trimmed) query. */
+  normalized: string;
+  /** Non-empty tokens of `normalized` after separator splitting. */
+  tokens: string[];
+  /** Separator-removed form of `normalized` (same as `compactText(normalized)`). */
+  compact: string;
+  /** `normalized` looks like a dotted IPv4 address (contiguous-literal mode). */
+  ipv4Like: boolean;
+};
+
+const EMPTY_PREPARED_QUERY: PreparedSearchQuery = {
+  normalized: "",
+  tokens: [],
+  compact: "",
+  ipv4Like: false,
+};
+
+export function prepareSearchQuery(query: string): PreparedSearchQuery {
+  // No length cap here: truncating globally would silently change match
+  // semantics for every caller (an over-limit query's tail would be dropped,
+  // so a field containing only the prefix would report a match). Callers that
+  // rescan many haystacks bound their own input via `truncateQueryForMatch`.
+  const normalized = normalizeText(query);
+  if (!normalized) return EMPTY_PREPARED_QUERY;
+  return {
+    normalized,
+    tokens: normalized.split(SEARCH_SPLIT_REGEX).filter(Boolean),
+    compact: compactText(normalized),
+    ipv4Like: IPV4_LIKE_REGEX.test(normalized),
+  };
+}
+
+/**
+ * Pre-normalized search haystack. Callers that match the same fields against
+ * many queries (e.g. session-history search fires on every keystroke) can
+ * prepare the haystack once, cache it, and reuse it per query instead of
+ * re-running NFKC normalization and compaction over megabytes each time.
+ */
+export type PreparedSearchFields = {
+  /** Per-field normalized text, in input order. */
+  normalizedFields: string[];
+  /** Normalized fields joined with a single space. */
+  haystack: string;
+  /** Separator-removed form of `haystack` (same as `compactText(haystack)`). */
+  haystackCompact: string;
+};
+
+export function prepareSearchFields(
+  fields: Array<string | null | undefined>,
+): PreparedSearchFields {
   const normalizedFields = fields
     .filter((field): field is string => typeof field === "string" && field.trim().length > 0)
     .map((field) => normalizeText(field));
-  if (normalizedFields.length === 0) return false;
+  const haystack = normalizedFields.join(" ");
+  return { normalizedFields, haystack, haystackCompact: compactText(haystack) };
+}
+
+export function matchesPreparedSearchQuery(
+  query: string | PreparedSearchQuery,
+  prepared: PreparedSearchFields,
+  options: SearchMatchOptions = {},
+): boolean {
+  // Raw strings are still accepted (and prepared inline) for one-off callers;
+  // repeated-match callers pass `prepareSearchQuery(query)` instead.
+  const { normalized: normalizedQuery, tokens, compact: compactQuery, ipv4Like } =
+    typeof query === "string" ? prepareSearchQuery(query) : query;
+  if (!normalizedQuery) return true;
+
+  if (prepared.normalizedFields.length === 0) return false;
 
   // For dotted numeric input (IPv4-like), require contiguous literal match.
-  if (IPV4_LIKE_REGEX.test(normalizedQuery)) {
-    return normalizedFields.some((field) => field.includes(normalizedQuery));
+  if (ipv4Like) {
+    return prepared.normalizedFields.some((field) => field.includes(normalizedQuery));
   }
 
-  const tokens = tokenizeSearchQuery(normalizedQuery);
   if (tokens.length === 0) return false;
 
-  const sourceText = normalizedFields.join(" ");
-  const haystack = sourceText;
+  const haystack = prepared.haystack;
   if (haystack.includes(normalizedQuery)) {
     return true;
   }
 
-  const haystackCompact = compactText(sourceText);
-  const compactQuery = compactText(normalizedQuery);
-  if (compactQuery && haystackCompact.includes(compactQuery)) {
+  if (compactQuery && prepared.haystackCompact.includes(compactQuery)) {
     return true;
   }
 
@@ -123,9 +259,15 @@ export function matchesSearchQuery(
   }
 
   const hasLatinToken = tokens.some((token) => /[a-z]/i.test(token));
-  if (!hasLatinToken) return false;
+  if (!hasLatinToken || options.allowPinyin === false) return false;
 
-  const { full, initials } = getPinyinVariants(sourceText);
+  const pinyinSource = options.pinyinFields === undefined
+    ? haystack
+    : options.pinyinFields
+      .filter((field): field is string => typeof field === "string" && field.trim().length > 0)
+      .map((field) => normalizeText(field))
+      .join(" ");
+  const { full, initials } = getPinyinVariants(pinyinSource);
   if (!full && !initials) return false;
 
   return tokens.every((token) => {
@@ -136,6 +278,29 @@ export function matchesSearchQuery(
       (initials && initials.includes(compactToken))
     );
   });
+}
+
+const DEFAULT_SEARCH_MATCH_OPTIONS: Required<Pick<SearchMatchOptions, "allowPinyin">> = {
+  allowPinyin: true,
+};
+
+export function matchesSearchQuery(
+  query: string,
+  ...rest: Array<string | null | undefined | SearchMatchOptions>
+): boolean {
+  const args = [...rest];
+  const options: Pick<SearchMatchOptions, "allowPinyin"> & { pinyinFields?: string[] } =
+    args.length > 0
+    && typeof args[args.length - 1] === "object"
+    && args[args.length - 1] !== null
+    ? { ...DEFAULT_SEARCH_MATCH_OPTIONS, ...(args.pop() as SearchMatchOptions) }
+    : DEFAULT_SEARCH_MATCH_OPTIONS;
+  const fields = args as Array<string | null | undefined>;
+  return matchesPreparedSearchQuery(
+    query,
+    prepareSearchFields(fields),
+    { allowPinyin: options.allowPinyin, pinyinFields: options.pinyinFields },
+  );
 }
 
 /**
