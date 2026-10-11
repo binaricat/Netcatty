@@ -608,6 +608,55 @@ test("filterSessionHistory admits a newly created session after the entry cap is
   assert.deepEqual([...readSessions], ["s63"]);
 });
 
+// Regression: the entry cap must be enforced at cache-admission time, not only
+// by the end-of-scan prune. When misses are small (empty/short searchable
+// content), the char budget consumes almost no headroom per insert, so
+// overshooting the entry cap mid-scan and letting the prune trim it made a
+// single keystroke over a very long history build and transiently retain one
+// index + Map entry per live session. Admission must instead evict the stale
+// lowest-ranked untouched tail to make room (the same entry the prune would
+// otherwise drop moments later), keeping the cache within the entry cap
+// throughout the scan.
+test("filterSessionHistory evicts the stale tail at admission instead of overshooting the entry cap", () => {
+  const initial = Array.from({ length: 64 }, (_, i) =>
+    createSession(`s${i}`, `session ${i}`, [{ content: `body ${i} deploy` }]));
+  filterSessionHistory(initial, "deploy");
+
+  // A newly created session is prepended: it ranks above every cached entry.
+  const created = createSession("fresh", "fresh session", [{ content: "body fresh deploy" }]);
+  const sessions = [created, ...initial];
+
+  // Observe corpus (re)builds as in the regression tests above.
+  const readSessions = new Set<string>();
+  for (const session of sessions) {
+    const messages = session.messages;
+    Object.defineProperty(session, "messages", {
+      get() {
+        readSessions.add(session.id);
+        return messages;
+      },
+      configurable: true,
+    });
+  }
+
+  // The single scan over the prepended list must admit "fresh" by evicting
+  // the stalest cached tail entry ("s63") during the scan: under the old
+  // overshoot-then-prune behavior "s63" would stay cached until the prune,
+  // so it would not be rebuilt in this same scan at all. Rebuilding it here
+  // is the (bounded, one-entry) cost of never exceeding the entry cap
+  // mid-scan.
+  filterSessionHistory(sessions, "deploy");
+  assert.deepEqual([...readSessions].sort(), ["fresh", "s63"]);
+
+  // Recovery is unchanged: the fresh session stays cached, and only the
+  // tail displaced below the entry cap rebuilds on the next keystroke.
+  readSessions.clear();
+  const next = filterSessionHistory(sessions, "deploy");
+  assert.deepEqual(next, sessions);
+  assert.ok(!readSessions.has("fresh"), `expected fresh session to be cached, rebuilt: ${[...readSessions]}`);
+  assert.deepEqual([...readSessions], ["s63"]);
+});
+
 // Regression: a hard-reject at the CHAR-budget gate froze cache membership
 // just like the earlier entry-cap bug. With ~20 large sessions (each near the
 // 64,000-character corpus cap) already consuming nearly the 4M-character
