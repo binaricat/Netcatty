@@ -100,6 +100,58 @@ export type SearchMatchOptions = {
 };
 
 /**
+ * Maximum accepted query length. `matchesPreparedSearchQuery` historically
+ * re-normalized, tokenized and compacted the raw query for every haystack it
+ * was matched against; capping the input bounds that per-haystack cost even
+ * before callers prepare the query once and reuse it.
+ */
+export const MAX_SEARCH_QUERY_LENGTH = 256;
+
+function truncateQueryForMatch(query: string): string {
+  if (query.length <= MAX_SEARCH_QUERY_LENGTH) return query;
+  const truncated = query.slice(0, MAX_SEARCH_QUERY_LENGTH);
+  // Avoid splitting a UTF-16 surrogate pair when the cap lands mid-pair (e.g.
+  // an astral-plane character such as an emoji); drop the lone high surrogate.
+  const tail = truncated.charCodeAt(truncated.length - 1);
+  return tail >= 0xd800 && tail <= 0xdbff ? truncated.slice(0, -1) : truncated;
+}
+
+/**
+ * Pre-normalized search query. Callers that match the same query against many
+ * haystacks (e.g. session-history search scans every session per keystroke)
+ * can prepare the query once per scan instead of paying NFKC normalization,
+ * tokenization and compaction once per session.
+ */
+export type PreparedSearchQuery = {
+  /** Normalized (NFKC, dash-folded, lowercased, trimmed) query. */
+  normalized: string;
+  /** Non-empty tokens of `normalized` after separator splitting. */
+  tokens: string[];
+  /** Separator-removed form of `normalized` (same as `compactText(normalized)`). */
+  compact: string;
+  /** `normalized` looks like a dotted IPv4 address (contiguous-literal mode). */
+  ipv4Like: boolean;
+};
+
+const EMPTY_PREPARED_QUERY: PreparedSearchQuery = {
+  normalized: "",
+  tokens: [],
+  compact: "",
+  ipv4Like: false,
+};
+
+export function prepareSearchQuery(query: string): PreparedSearchQuery {
+  const normalized = normalizeText(truncateQueryForMatch(query));
+  if (!normalized) return EMPTY_PREPARED_QUERY;
+  return {
+    normalized,
+    tokens: normalized.split(SEARCH_SPLIT_REGEX).filter(Boolean),
+    compact: compactText(normalized),
+    ipv4Like: IPV4_LIKE_REGEX.test(normalized),
+  };
+}
+
+/**
  * Pre-normalized search haystack. Callers that match the same fields against
  * many queries (e.g. session-history search fires on every keystroke) can
  * prepare the haystack once, cache it, and reuse it per query instead of
@@ -125,21 +177,23 @@ export function prepareSearchFields(
 }
 
 export function matchesPreparedSearchQuery(
-  query: string,
+  query: string | PreparedSearchQuery,
   prepared: PreparedSearchFields,
   options: SearchMatchOptions = {},
 ): boolean {
-  const normalizedQuery = normalizeText(query);
+  // Raw strings are still accepted (and prepared inline) for one-off callers;
+  // repeated-match callers pass `prepareSearchQuery(query)` instead.
+  const { normalized: normalizedQuery, tokens, compact: compactQuery, ipv4Like } =
+    typeof query === "string" ? prepareSearchQuery(query) : query;
   if (!normalizedQuery) return true;
 
   if (prepared.normalizedFields.length === 0) return false;
 
   // For dotted numeric input (IPv4-like), require contiguous literal match.
-  if (IPV4_LIKE_REGEX.test(normalizedQuery)) {
+  if (ipv4Like) {
     return prepared.normalizedFields.some((field) => field.includes(normalizedQuery));
   }
 
-  const tokens = tokenizeSearchQuery(normalizedQuery);
   if (tokens.length === 0) return false;
 
   const haystack = prepared.haystack;
@@ -147,7 +201,6 @@ export function matchesPreparedSearchQuery(
     return true;
   }
 
-  const compactQuery = compactText(normalizedQuery);
   if (compactQuery && prepared.haystackCompact.includes(compactQuery)) {
     return true;
   }

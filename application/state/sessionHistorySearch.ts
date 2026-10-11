@@ -5,6 +5,7 @@ import {
   type SessionHistorySearchTarget,
   type SessionSearchIndex,
 } from '../../domain/sessionHistorySearch';
+import { prepareSearchQuery } from '../../lib/searchMatcher';
 
 /**
  * Memory bounds for the per-session search index cache. `filterSessionHistory`
@@ -286,6 +287,13 @@ function filterSessionHistoryStore<T extends SessionHistorySearchTarget>(
     return [...sessions];
   }
   const untitledLabel = options.untitledLabel ?? '';
+  // Bound and prepare the query once per scan: a pasted-in multi-megabyte
+  // query would otherwise be re-normalized (NFKC), tokenized and compacted
+  // inside `matchesSessionSearchIndex` for every session, freezing the
+  // renderer. `prepareSearchQuery` caps the input (`MAX_SEARCH_QUERY_LENGTH`)
+  // and computes the normalized forms a single time so the per-session work
+  // below only does `includes` scans over the cached haystacks.
+  const preparedQuery = prepareSearchQuery(trimmed);
   // A new scan starts with no visited sessions: the touched set records only
   // this scan's visits so `canCacheSessionSearchIndex` can never mistake a
   // previous scan's keys for keys the current scan still needs.
@@ -312,7 +320,7 @@ function filterSessionHistoryStore<T extends SessionHistorySearchTarget>(
     // the scan.
     const result = sessions.filter((session) => {
       const index = getSessionSearchIndex(store, session, untitledLabel);
-      return matchesSessionSearchIndex(trimmed, index);
+      return matchesSessionSearchIndex(preparedQuery, index);
     });
     // Prune against the full scanned list (not the filtered result): sessions
     // that merely did not match this query must keep their cached indexes.

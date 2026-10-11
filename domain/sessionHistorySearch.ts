@@ -3,6 +3,7 @@ import {
   matchesPreparedSearchQuery,
   prepareSearchFields,
   type PreparedSearchFields,
+  type PreparedSearchQuery,
 } from '../lib/searchMatcher';
 
 /**
@@ -387,7 +388,10 @@ export function prepareSessionSearchIndex(
   };
 }
 
-export function matchesSessionSearchIndex(query: string, index: SessionSearchIndex): boolean {
+export function matchesSessionSearchIndex(
+  query: string | PreparedSearchQuery,
+  index: SessionSearchIndex,
+): boolean {
   // Pinyin transliteration is too expensive to run over every collected
   // message field on each keystroke; the pinyin fallback is restricted to
   // the (small) displayed-title field, while literal/compact matching stays
