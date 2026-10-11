@@ -519,7 +519,7 @@ export const zhTWAiMessages: Messages = {
   'ai.chat.loadMoreSessions': '載入更多工作階段（還有 {n} 條）',
   'ai.chat.searchSessions': '搜尋標題和近期內容…',
   'ai.chat.clearSessionSearch': '清空會話搜尋',
-  'ai.chat.searchSessionsHint': '僅搜尋標題和近期保留的內容，較長內容可能無法完整搜尋。',
+  'ai.chat.searchSessionsHint': '搜尋標題，並優先搜尋較新的訊息與項目；超長訊息與工具輸出僅搜尋開頭的有限部分。這不是全文搜尋。',
   'ai.chat.noMatchingSessions': '標題和近期保留的內容中沒有符合的結果',
   'ai.chat.noSessions': '沒有歷史工作階段',
   'ai.chat.retryHint': '你可以重新發送訊息來重試。',

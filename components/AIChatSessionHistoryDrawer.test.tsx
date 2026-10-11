@@ -74,7 +74,9 @@ test("history drawer filters, pages, clears and explains the bounded search in e
     await enterQuery("[](){}");
     assert.equal(rows().length, 0);
     assert.match(renderer.container.textContent ?? "", /No matches in titles or recent retained content/);
-    assert.match(renderer.container.textContent ?? "", /Long content may not be searched in full/);
+    assert.match(renderer.container.textContent ?? "", /prioritizing newer messages and entries/);
+    assert.match(renderer.container.textContent ?? "", /only a limited portion at the beginning is searched/);
+    assert.match(renderer.container.textContent ?? "", /not full-text search/);
     await click(renderer.container.querySelector("input")?.parentElement?.querySelector("button"));
     assert.equal(renderer.container.querySelector("input")?.value, "");
     assert.equal(rows().length, 80);

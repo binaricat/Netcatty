@@ -529,7 +529,7 @@ export const zhCNAiMessages: Messages = {
   'ai.chat.loadMoreSessions': '加载更多会话（还有 {n} 条）',
   'ai.chat.searchSessions': '搜索标题和近期内容…',
   'ai.chat.clearSessionSearch': '清空会话搜索',
-  'ai.chat.searchSessionsHint': '仅搜索标题和近期保留的内容，较长内容可能无法完整搜索。',
+  'ai.chat.searchSessionsHint': '搜索标题，并优先搜索较新的消息和条目；超长消息及工具输出仅搜索开头的有限部分。这不是全文搜索。',
   'ai.chat.noMatchingSessions': '标题和近期保留的内容中没有匹配结果',
   'ai.chat.noSessions': '没有历史会话',
   'ai.chat.retryHint': '你可以重新发送消息来重试。',

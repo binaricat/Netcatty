@@ -520,7 +520,7 @@ export const esAiMessages: Messages = {
   'ai.chat.loadMoreSessions': 'Cargar más sesiones ({n} más)',
   'ai.chat.searchSessions': 'Buscar títulos y contenido reciente…',
   'ai.chat.clearSessionSearch': 'Borrar la búsqueda de sesiones',
-  'ai.chat.searchSessionsHint': 'Solo se buscan títulos y contenido reciente conservado. Es posible que el contenido extenso no se busque por completo.',
+  'ai.chat.searchSessionsHint': 'Busca en los títulos y da prioridad a los mensajes y entradas más recientes. De los mensajes largos y las salidas de herramientas, solo se busca una parte limitada del comienzo. No es una búsqueda de texto completo.',
   'ai.chat.noMatchingSessions': 'Sin coincidencias en títulos ni contenido reciente conservado',
   'ai.chat.noSessions': 'No hay sesiones anteriores',
   'ai.chat.retryHint': 'Puedes reintentar enviando tu mensaje de nuevo.',
