@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { createSessionIdleManager } from '../../electron/bridges/mcpServerBridge/sessionIdleManager.cjs';
+import { STORAGE_KEY_AI_SESSION_IDLE_TIMEOUT_MINUTES } from '../../infrastructure/config/storageKeys';
+import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import {
   EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS,
   bumpExternalMcpEnableGenerationForTests,
@@ -18,6 +21,7 @@ import {
   resetExternalMcpStartupSyncOnceForTests,
   shouldStartExternalMcpOnStartup,
   shouldWaitForExternalMcpStartupReady,
+  syncExternalMcpConfig,
   syncExternalMcpStartupState,
   syncExternalMcpStartupStateOnce,
   waitForExternalMcpStartupReady,
@@ -63,9 +67,43 @@ describe('useExternalMcpToggleState helpers', () => {
     assert.equal(normalizeExternalMcpIdleTimeoutMinutes(null), 10);
     assert.equal(normalizeExternalMcpIdleTimeoutMinutes(0), 1);
     assert.equal(normalizeExternalMcpIdleTimeoutMinutes(99999), 24 * 60);
-    assert.equal(normalizeSessionIdleTimeoutMinutes(null), 30);
+    assert.equal(normalizeSessionIdleTimeoutMinutes(null), 24 * 60);
     assert.equal(normalizeSessionIdleTimeoutMinutes(0), 1);
   });
+
+  for (const savedMinutes of [null, 30]) {
+    it(`syncs the session idle timeout without replacing saved value ${savedMinutes}`, async () => {
+      const restore = installMemoryLocalStorage();
+      const manager = createSessionIdleManager();
+      try {
+        assert.equal(manager.getTimeoutMinutes(), 24 * 60, 'main-process default');
+        if (savedMinutes !== null) {
+          localStorageAdapter.writeNumber(STORAGE_KEY_AI_SESSION_IDLE_TIMEOUT_MINUTES, savedMinutes);
+        }
+        const expected = savedMinutes ?? manager.getTimeoutMinutes();
+        const received: number[] = [];
+        const bridge = {
+          externalMcpSetConfig: (config: { sessionIdleTimeoutMinutes: number }) => {
+            received.push(config.sessionIdleTimeoutMinutes);
+            manager.setTimeoutMinutes(config.sessionIdleTimeoutMinutes);
+          },
+        };
+        await syncExternalMcpStartupState(bridge);
+        assert.equal(manager.getTimeoutMinutes(), expected, 'startup keeps the intended timeout');
+        syncExternalMcpConfig(bridge);
+        assert.deepEqual(received, [expected, expected]);
+        assert.equal(manager.getTimeoutMinutes(), expected, 'config sync keeps the intended timeout');
+        assert.equal(
+          localStorageAdapter.readNumber(STORAGE_KEY_AI_SESSION_IDLE_TIMEOUT_MINUTES),
+          savedMinutes,
+          'sync does not migrate or overwrite the stored preference',
+        );
+      } finally {
+        manager.clearAll();
+        restore();
+      }
+    });
+  }
 
   it('only starts on launch for persistent+enabled', () => {
     assert.equal(shouldStartExternalMcpOnStartup({ enabled: true, mode: 'persistent' }), true);
