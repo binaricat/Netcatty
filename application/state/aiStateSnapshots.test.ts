@@ -466,6 +466,90 @@ test('writeSessionsForStorage reduces several small sessions to fit a sub-512 KB
   }
 });
 
+test('serializeSessionsForStorage sheds oversized tool output before dropping visible sessions', async () => {
+  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
+  const newest = makeSession('newest', 2, [{
+    id: 'new-message',
+    role: 'assistant',
+    content: 'still-open chat',
+    timestamp: 2,
+  }]);
+  const toolBulk = makeSession('tool-bulk', 1, [{
+    id: 'tool-message',
+    role: 'tool',
+    content: '',
+    timestamp: 1,
+    toolResults: [{ toolCallId: 'call-1', content: 'z'.repeat(400 * 1024) }],
+  }]);
+
+  const result = serializeSessionsForStorage([toolBulk, newest], 100 * 1024);
+
+  // The bloated tool result must not evict the other visible chat.
+  assert.deepEqual(result.sessions.map(session => session.id), ['newest', 'tool-bulk']);
+  assert.ok(result.json.length <= 100 * 1024);
+  const persistedToolContent = result.sessions[1].messages[0].toolResults?.[0].content;
+  assert.ok(persistedToolContent);
+  assert.ok(persistedToolContent.length <= 9 * 1024);
+  assert.ok(persistedToolContent.includes('truncated'));
+  assert.ok(persistedToolContent.startsWith('zzz'));
+  assert.equal(result.sessions[0].messages[0].content, 'still-open chat');
+});
+
+test('writeSessionsForStorage keeps every chat by shedding tool output under quota pressure', async () => {
+  const { writeSessionsForStorage } = await import('./aiStateSnapshots');
+  let stored: string | undefined;
+  const previousLocalStorage = globalThis.localStorage;
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: () => null,
+      setItem: (_key: string, value: string) => {
+        if (value.length > 300 * 1024) {
+          throw new DOMException('quota exceeded', 'QuotaExceededError');
+        }
+        stored = value;
+      },
+      removeItem: () => {},
+    },
+  });
+
+  try {
+    const sessions = Array.from({ length: 10 }, (_, index) => makeSession(
+      `session-${index}`,
+      10 - index,
+      [{
+        id: `message-${index}`,
+        role: 'tool' as const,
+        content: '',
+        timestamp: index,
+        toolResults: [{ toolCallId: `call-${index}`, content: 'z'.repeat(40 * 1024) }],
+      }],
+    ));
+
+    assert.equal(writeSessionsForStorage(sessions), true);
+    assert.ok(stored);
+    assert.ok(stored.length <= 300 * 1024);
+    const persisted = JSON.parse(stored) as AISession[];
+    assert.deepEqual(
+      persisted.map(session => session.id),
+      sessions.map(session => session.id),
+    );
+    // Degradation sheds only as many messages as the budget demands, so at
+    // least one chat keeps its full tool output while the persisted set stays
+    // complete. Assert completion first; truncation second.
+    const shedContents = persisted.map(
+      session => session.messages[0].toolResults?.[0].content ?? '',
+    );
+    assert.ok(shedContents.some(content => content.includes('truncated')));
+    assert.ok(shedContents.some(content => content.startsWith('zzz') && !content.includes('truncated')));
+  } finally {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: previousLocalStorage,
+    });
+  }
+});
+
 test('writeSessionsForStorage makes a final attempt with only the newest session', async () => {
   const { writeSessionsForStorage } = await import('./aiStateSnapshots');
   const writes: string[] = [];

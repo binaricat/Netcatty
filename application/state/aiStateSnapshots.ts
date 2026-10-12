@@ -196,11 +196,28 @@ const RETRY_SESSIONS_JSON_BYTES = [
 ] as const;
 
 /**
+ * Maximum persisted length of a single tool result payload. Terminal tool
+ * output can reach hundreds of KB per command, and AI-driven terminal work
+ * accumulates many of them. When storage pressure forces degradation, shedding
+ * this replay bulk keeps every visible conversation persisted instead of
+ * evicting whole chats that happen to carry it.
+ */
+const MAX_PERSISTED_TOOL_RESULT_CHARS = 8 * 1024;
+
+function truncatePersistedToolResultContent(content: string): string {
+  if (content.length <= MAX_PERSISTED_TOOL_RESULT_CHARS) return content;
+  const half = Math.floor(MAX_PERSISTED_TOOL_RESULT_CHARS / 2);
+  const omitted = content.length - MAX_PERSISTED_TOOL_RESULT_CHARS;
+  return `${content.slice(0, half)}\n[Netcatty] persisted copy truncated; ${omitted} characters of tool output omitted\n${content.slice(content.length - half)}`;
+}
+
+/**
  * Remove `reasoningEncryptedContent` ciphertext from a message's persisted
- * continuation. The ciphertext exists so stateless Responses turns can replay
- * prior reasoning items; it is also by far the largest per-message payload.
- * When storage pressure forces it, dropping the ciphertext keeps the visible
- * conversation intact at the cost of reasoning replay for affected messages.
+ * continuation and shed bulk tool output. The ciphertext exists so stateless
+ * Responses turns can replay prior reasoning items; tool output dominates
+ * persisted size in AI-driven terminal chats. When storage pressure forces
+ * it, shedding this bulk keeps the visible conversation intact at the cost of
+ * reasoning replay and full tool output for affected messages.
  */
 function stripReasoningEncryptedContent(
   options: ProviderContinuationOptions,
@@ -218,7 +235,7 @@ function stripReasoningEncryptedContent(
   return Object.keys(stripped).length ? stripped : undefined;
 }
 
-function stripEncryptedReasoningFromMessage(message: AISession['messages'][number]) {
+function stripReasoningCiphertextFromMessage(message: AISession['messages'][number]) {
   const continuation = message.providerContinuation;
   if (!continuation?.reasoningParts) return message;
   let changed = false;
@@ -237,6 +254,22 @@ function stripEncryptedReasoningFromMessage(message: AISession['messages'][numbe
       reasoningParts: parts,
     },
   };
+}
+
+function stripEncryptedReasoningFromMessage(message: AISession['messages'][number]) {
+  const strippedContinuationMessage = stripReasoningCiphertextFromMessage(message);
+  const toolResults = strippedContinuationMessage.toolResults;
+  if (!toolResults?.length) return strippedContinuationMessage;
+  let toolResultsChanged = false;
+  const nextToolResults = toolResults.map((result) => {
+    const content = truncatePersistedToolResultContent(result.content);
+    if (content === result.content) return result;
+    toolResultsChanged = true;
+    return { ...result, content };
+  });
+  return toolResultsChanged
+    ? { ...strippedContinuationMessage, toolResults: nextToolResults }
+    : strippedContinuationMessage;
 }
 
 function stripEncryptedReasoningFromSession(session: AISession): AISession {
@@ -259,7 +292,7 @@ function stripCompactedEncryptedReasoningFromSession(session: AISession): AISess
   let changed = false;
   const messages = session.messages.map((message, index) => {
     if (index >= compactedMessageCount) return message;
-    const stripped = stripEncryptedReasoningFromMessage(message);
+    const stripped = stripReasoningCiphertextFromMessage(message);
     if (stripped !== message) changed = true;
     return stripped;
   });
@@ -310,6 +343,11 @@ export function pruneSessionsForStorage(sessions: AISession[]): AISession[] {
  * Serialize sessions for localStorage under a byte budget, escalating pruning
  * as needed. Returns the JSON to persist plus the (possibly) further-pruned
  * sessions that JSON represents.
+ *
+ * Degradation ladder, cheapest loss first: strip replay ciphertext, shed bulk
+ * tool output (kept at a bounded head+tail per result), and only then drop
+ * oldest whole sessions. Evicting visible chats to preserve tool bulk is what
+ * emptied history for users under storage pressure.
  */
 export function serializeSessionsForStorage(
   sessions: AISession[],
@@ -321,13 +359,13 @@ export function serializeSessionsForStorage(
     // before deciding whether the newest session deserves full protection;
     // otherwise dead metadata can evict other visible conversations.
     const session = stripCompactedEncryptedReasoningFromSession(rawSession);
-    const ciphertextMessages = session.messages.flatMap((message, index) => {
-      const strippedMessage = stripEncryptedReasoningFromMessage(message);
-      if (strippedMessage === message) return [];
+    const degradableMessages = session.messages.flatMap((message, index) => {
+      const degradedMessage = stripEncryptedReasoningFromMessage(message);
+      if (degradedMessage === message) return [];
       return [{
         index,
-        strippedMessage,
-        jsonLengthDelta: JSON.stringify(strippedMessage).length - JSON.stringify(message).length,
+        degradedMessage,
+        jsonLengthDelta: JSON.stringify(degradedMessage).length - JSON.stringify(message).length,
       }];
     });
     const strippedSession = stripEncryptedReasoningFromSession(session);
@@ -339,7 +377,7 @@ export function serializeSessionsForStorage(
       strippedJson: strippedSession === session
         ? json
         : JSON.stringify(strippedSession),
-      ciphertextMessages,
+      degradableMessages,
     };
   });
 
@@ -364,11 +402,12 @@ export function serializeSessionsForStorage(
     minimalLength -= removed.strippedJson.length + 1;
   }
 
-  // Then keep full continuation data for the retained sessions and remove
-  // replay-only ciphertext from the oldest retained sessions only as needed,
-  // never touching the protected newest session. Within one session, remove
-  // it one message at a time from oldest to newest so a long active chat can
-  // retain its most recent replayable tool exchange when that still fits.
+  // Then keep full continuation data for the retained sessions and shed
+  // replay-only bulk (ciphertext, oversized tool output) from the oldest
+  // retained sessions only as needed, never touching the protected newest
+  // session. Within one session, shed it one message at a time from oldest to
+  // newest so a long active chat can retain its most recent replayable tool
+  // exchange when that still fits.
   let jsonLength = 2 + serialized.reduce((total, entry) => total + entry.json.length, 0)
     + Math.max(0, serialized.length - 1);
   const firstStrippableIndex = protectNewestContinuation ? 1 : 0;
@@ -378,27 +417,27 @@ export function serializeSessionsForStorage(
     index -= 1
   ) {
     const current = serialized[index];
-    let strippedMessageCount = 0;
-    while (jsonLength > budgetBytes && strippedMessageCount < current.ciphertextMessages.length) {
-      jsonLength += current.ciphertextMessages[strippedMessageCount].jsonLengthDelta;
-      strippedMessageCount += 1;
+    let degradedMessageCount = 0;
+    while (jsonLength > budgetBytes && degradedMessageCount < current.degradableMessages.length) {
+      jsonLength += current.degradableMessages[degradedMessageCount].jsonLengthDelta;
+      degradedMessageCount += 1;
     }
-    if (strippedMessageCount > 0) {
-      const strippedMessagesByIndex = new Map(
-        current.ciphertextMessages
-          .slice(0, strippedMessageCount)
-          .map(entry => [entry.index, entry.strippedMessage] as const),
+    if (degradedMessageCount > 0) {
+      const degradedMessagesByIndex = new Map(
+        current.degradableMessages
+          .slice(0, degradedMessageCount)
+          .map(entry => [entry.index, entry.degradedMessage] as const),
       );
       const nextSession = {
         ...current.session,
         messages: current.session.messages.map((message, messageIndex) => (
-          strippedMessagesByIndex.get(messageIndex) ?? message
+          degradedMessagesByIndex.get(messageIndex) ?? message
         )),
       };
       const nextJson = JSON.stringify(nextSession);
       const projectedJsonLength = current.json.length
-        + current.ciphertextMessages
-          .slice(0, strippedMessageCount)
+        + current.degradableMessages
+          .slice(0, degradedMessageCount)
           .reduce((total, entry) => total + entry.jsonLengthDelta, 0);
       jsonLength += nextJson.length - projectedJsonLength;
       serialized[index] = {
