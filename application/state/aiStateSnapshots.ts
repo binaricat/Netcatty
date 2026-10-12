@@ -206,9 +206,20 @@ const MAX_PERSISTED_TOOL_RESULT_CHARS = 8 * 1024;
 
 function truncatePersistedToolResultContent(content: string): string {
   if (content.length <= MAX_PERSISTED_TOOL_RESULT_CHARS) return content;
-  const half = Math.floor(MAX_PERSISTED_TOOL_RESULT_CHARS / 2);
-  const omitted = content.length - MAX_PERSISTED_TOOL_RESULT_CHARS;
-  return `${content.slice(0, half)}\n[Netcatty] persisted copy truncated; ${omitted} characters of tool output omitted\n${content.slice(content.length - half)}`;
+  // The marker consumes budget and must stay single-line: JSON-escaped
+  // newlines would cost 2 characters each, letting a slightly-over-cap
+  // result serialize at the same (or larger) size than the original — the
+  // ladder assumes the degraded form is the smallest. Shrink the retained
+  // head+tail until the whole persisted copy fits the cap.
+  let half = Math.floor(MAX_PERSISTED_TOOL_RESULT_CHARS / 2);
+  let omitted = content.length - 2 * half;
+  let marker = `[Netcatty] persisted copy truncated; ${omitted} characters of tool output omitted`;
+  while (2 * half + marker.length > MAX_PERSISTED_TOOL_RESULT_CHARS) {
+    half -= Math.ceil((2 * half + marker.length - MAX_PERSISTED_TOOL_RESULT_CHARS) / 2);
+    omitted = content.length - 2 * half;
+    marker = `[Netcatty] persisted copy truncated; ${omitted} characters of tool output omitted`;
+  }
+  return `${content.slice(0, half)}${marker}${content.slice(content.length - half)}`;
 }
 
 /**

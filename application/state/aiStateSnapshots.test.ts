@@ -466,6 +466,31 @@ test('writeSessionsForStorage reduces several small sessions to fit a sub-512 KB
   }
 });
 
+test('serializeSessionsForStorage truncates slightly-over-cap tool results to strictly smaller sizes', async () => {
+  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
+  // Just over the 8 KiB cap: the truncation marker must not make the degraded
+  // copy larger than the original, or the ladder could evict a session whose
+  // unmodified JSON would have fit the budget.
+  for (const oversize of [8193, 8266, 20000]) {
+    const session = makeSession('near-cap', 1, [{
+      id: 'tool-message',
+      role: 'tool',
+      content: '',
+      timestamp: 1,
+      toolResults: [{ toolCallId: 'call-1', content: 'z'.repeat(oversize) }],
+    }]);
+    const fullJson = JSON.stringify([session]);
+    const result = serializeSessionsForStorage([session], fullJson.length - 10);
+    const content = result.sessions[0].messages[0].toolResults?.[0].content ?? '';
+    assert.ok(content.length <= 8 * 1024, `cap respected for ${oversize}`);
+    assert.ok(
+      JSON.stringify(result.sessions).length < fullJson.length,
+      `degraded copy smaller than original for ${oversize}`,
+    );
+    assert.ok(content.includes('truncated'));
+  }
+});
+
 test('serializeSessionsForStorage sheds oversized tool output before dropping visible sessions', async () => {
   const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
   const newest = makeSession('newest', 2, [{
