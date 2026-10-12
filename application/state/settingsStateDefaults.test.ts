@@ -9,9 +9,14 @@ import {
   resolveReadableForegroundForHsl,
   resolveThemeAccentForeground,
   migrateIncomingTerminalFontId,
+  migrateMaterializedAutoCloseOnExitDefault,
 } from "./settingsStateDefaults.ts";
 import { TERMINAL_FONT_AUTO } from "../../infrastructure/config/fonts.ts";
-import { STORAGE_KEY_TERM_FONT_FAMILY } from "../../infrastructure/config/storageKeys.ts";
+import {
+  STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED,
+  STORAGE_KEY_TERM_FONT_FAMILY,
+  STORAGE_KEY_TERM_SETTINGS,
+} from "../../infrastructure/config/storageKeys.ts";
 import type { UiThemeTokens } from "../../infrastructure/config/uiThemes.ts";
 
 function installMemoryLocalStorage(): Map<string, string> {
@@ -139,4 +144,73 @@ test("app surface theme vars isolate non-terminal pages from active terminal chr
     "--input": "220 12% 88%",
     "--ring": "270 70% 45%",
   });
+});
+
+test("migrateMaterializedAutoCloseOnExitDefault resets the materialized default-on once", () => {
+  const store = installMemoryLocalStorage();
+  try {
+    store.set(
+      STORAGE_KEY_TERM_SETTINGS,
+      JSON.stringify({ scrollback: 3000, autoCloseOnExit: true }),
+    );
+    migrateMaterializedAutoCloseOnExitDefault();
+    const migrated = JSON.parse(store.get(STORAGE_KEY_TERM_SETTINGS)!);
+    assert.equal(migrated.autoCloseOnExit, false);
+    // Other saved settings pass through untouched.
+    assert.equal(migrated.scrollback, 3000);
+    assert.equal(store.get(STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED), "true");
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+test("migrateMaterializedAutoCloseOnExitDefault runs once and respects later explicit edits", () => {
+  const store = installMemoryLocalStorage();
+  try {
+    store.set(
+      STORAGE_KEY_TERM_SETTINGS,
+      JSON.stringify({ autoCloseOnExit: true }),
+    );
+    migrateMaterializedAutoCloseOnExitDefault();
+    assert.equal(
+      JSON.parse(store.get(STORAGE_KEY_TERM_SETTINGS)!).autoCloseOnExit,
+      false,
+    );
+    // The user re-enables after upgrading: the migration must not undo it again.
+    store.set(
+      STORAGE_KEY_TERM_SETTINGS,
+      JSON.stringify({ autoCloseOnExit: true }),
+    );
+    migrateMaterializedAutoCloseOnExitDefault();
+    assert.equal(
+      JSON.parse(store.get(STORAGE_KEY_TERM_SETTINGS)!).autoCloseOnExit,
+      true,
+    );
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+test("migrateMaterializedAutoCloseOnExitDefault leaves fresh installs and explicit-off alone", () => {
+  const store = installMemoryLocalStorage();
+  try {
+    // Fresh install: no saved settings at all.
+    migrateMaterializedAutoCloseOnExitDefault();
+    assert.equal(store.has(STORAGE_KEY_TERM_SETTINGS), false);
+    assert.equal(store.get(STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED), "true");
+
+    // Explicit-off (or any settings blob without the key) is never rewritten.
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+    const store2 = installMemoryLocalStorage();
+    store2.set(
+      STORAGE_KEY_TERM_SETTINGS,
+      JSON.stringify({ scrollback: 500 }),
+    );
+    migrateMaterializedAutoCloseOnExitDefault();
+    assert.deepEqual(JSON.parse(store2.get(STORAGE_KEY_TERM_SETTINGS)!), {
+      scrollback: 500,
+    });
+  } finally {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
 });

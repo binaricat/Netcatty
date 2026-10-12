@@ -1,5 +1,9 @@
 import type { HotkeyScheme, SessionLogFormat, TerminalSettings } from '../../domain/models';
-import { STORAGE_KEY_TERM_FONT_FAMILY } from '../../infrastructure/config/storageKeys';
+import {
+  STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED,
+  STORAGE_KEY_TERM_FONT_FAMILY,
+  STORAGE_KEY_TERM_SETTINGS,
+} from '../../infrastructure/config/storageKeys';
 import {
   isDeprecatedPrimaryFontId,
   TERMINAL_FONT_AUTO,
@@ -63,6 +67,27 @@ export function migrateIncomingTerminalFontId(raw: string | null | undefined): s
   }
   return raw;
 }
+/**
+ * One-time migration for the autoCloseOnExit default flip (tabs now survive
+ * session exits by default; the old default-on silently deleted tabs whenever
+ * a bastion or idle-harvesting server reported a clean exit). Builds before
+ * the flip shipped autoCloseOnExit: true as the default and materialized it
+ * into STORAGE_KEY_TERM_SETTINGS on any settings write, so most upgraders
+ * carry a value they never chose — leaving it in place would make the new
+ * default unreachable for them. Reset that materialized `true` exactly once
+ * and persist the marker; afterwards every stored value is treated as the
+ * user's own choice and is respected. The cost: a user who deliberately
+ * enabled auto-close before this release must re-enable it once.
+ */
+export function migrateMaterializedAutoCloseOnExitDefault(): void {
+  if (localStorageAdapter.readBoolean(STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED)) return;
+  const stored = localStorageAdapter.read<Partial<TerminalSettings>>(STORAGE_KEY_TERM_SETTINGS);
+  if (stored?.autoCloseOnExit === true) {
+    localStorageAdapter.write(STORAGE_KEY_TERM_SETTINGS, { ...stored, autoCloseOnExit: false });
+  }
+  localStorageAdapter.writeBoolean(STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED, true);
+}
+
 // Auto-detect default hotkey scheme based on platform
 export const DEFAULT_HOTKEY_SCHEME: HotkeyScheme =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
