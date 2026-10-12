@@ -34,7 +34,11 @@ function isConfirmedCleanExit(evt: TerminalSessionExitEvent): boolean {
 
 export function resolveTerminalSessionExitIntent(
   evt: TerminalSessionExitEvent,
-  autoCloseOnExit = true,
+  // Keep-tab is the safe default: a caller that has not loaded the terminal
+  // setting yet must not silently delete a session tab. Remote graceful
+  // channel closes (e.g. a jump host reaping an idle session) are reported
+  // as a clean exit, so an unavailable setting must not re-enable closing.
+  autoCloseOnExit = false,
 ): TerminalSessionExitIntent {
   if (autoCloseOnExit && isConfirmedCleanExit(evt)) {
     return { kind: "closeSession" };

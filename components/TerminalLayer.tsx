@@ -669,7 +669,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleSessionExit = useCallback((sessionId: string, evt: TerminalSessionExitEvent) => {
     const intent = resolveTerminalSessionExitIntent(
       evt,
-      terminalSettings?.autoCloseOnExit ?? true,
+      // No terminal settings loaded yet -> do not close the tab; auto-close is
+      // opt-in via Settings -> Terminal -> Behavior (DEFAULT_TERMINAL_SETTINGS).
+      terminalSettings?.autoCloseOnExit ?? false,
     );
     if (intent.kind === "closeSession") {
       handleCloseSession(sessionId);

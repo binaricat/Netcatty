@@ -8,10 +8,20 @@ import {
   shouldRevealTerminalPopupOnExit,
 } from "./resolveTerminalSessionExitIntent.ts";
 
-test("normal backend exited events close the session tab", () => {
+test("backend exited events close the session tab only when auto-close is enabled", () => {
+  assert.deepEqual(
+    resolveTerminalSessionExitIntent({ reason: "exited", exitCode: 0 }, true),
+    { kind: "closeSession" },
+  );
+});
+
+test("omitted auto-close setting keeps the session tab on a clean exit", () => {
+  // The fallback for callers that have not loaded the terminal setting yet:
+  // keep the tab so a jump host / bastion reaping a session (a clean exit)
+  // never silently deletes the user's scrollback.
   assert.deepEqual(
     resolveTerminalSessionExitIntent({ reason: "exited", exitCode: 0 }),
-    { kind: "closeSession" },
+    { kind: "markDisconnected" },
   );
 });
 
