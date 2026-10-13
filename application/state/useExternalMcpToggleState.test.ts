@@ -67,7 +67,7 @@ describe('useExternalMcpToggleState helpers', () => {
     assert.equal(normalizeExternalMcpIdleTimeoutMinutes(null), 10);
     assert.equal(normalizeExternalMcpIdleTimeoutMinutes(0), 1);
     assert.equal(normalizeExternalMcpIdleTimeoutMinutes(99999), 24 * 60);
-    assert.equal(normalizeSessionIdleTimeoutMinutes(null), 24 * 60);
+    assert.equal(normalizeSessionIdleTimeoutMinutes(null), 8 * 60);
     assert.equal(normalizeSessionIdleTimeoutMinutes(0), 1);
   });
 
@@ -76,7 +76,7 @@ describe('useExternalMcpToggleState helpers', () => {
       const restore = installMemoryLocalStorage();
       const manager = createSessionIdleManager();
       try {
-        assert.equal(manager.getTimeoutMinutes(), 24 * 60, 'main-process default');
+        assert.equal(manager.getTimeoutMinutes(), 8 * 60, 'main-process default');
         if (savedMinutes !== null) {
           localStorageAdapter.writeNumber(STORAGE_KEY_AI_SESSION_IDLE_TIMEOUT_MINUTES, savedMinutes);
         }
