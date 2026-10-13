@@ -553,8 +553,9 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   keepaliveInterval: 30,
   keepaliveCountMax: 10,
   // On by default: unexpected transport drops (VPN / Wi-Fi blips) schedule an
-  // in-place reconnect every 5s with the same session id; clean shell exits
-  // still close the tab. Users on always-stable links can turn it off.
+  // in-place reconnect every 5s with the same session id. Clean shell exits
+  // still close the tab, and administrative idle/timeout exits stay
+  // disconnected. Users on always-stable links can turn it off.
   sshAutoReconnectEnabled: true,
   x11Display: '', // Empty = use DISPLAY/default local X server
   moshClientPath: '', // Legacy mosh-client override; normal UI uses bundled mosh-client
