@@ -73,11 +73,14 @@ export function migrateIncomingTerminalFontId(raw: string | null | undefined): s
  * a bastion or idle-harvesting server reported a clean exit). Builds before
  * the flip shipped autoCloseOnExit: true as the default and materialized it
  * into STORAGE_KEY_TERM_SETTINGS on any settings write, so most upgraders
- * carry a value they never chose — leaving it in place would make the new
+ * carry a value they never chose. Leaving it in place would make the new
  * default unreachable for them. Reset that materialized `true` exactly once
  * and persist the marker; afterwards every stored value is treated as the
- * user's own choice and is respected. The cost: a user who deliberately
- * enabled auto-close before this release must re-enable it once.
+ * user's own choice and is respected. An inbound cloud or backup payload that
+ * still carries the pre-migration materialized true (no
+ * autoCloseOnExitDefaultMigrated flag) is rewritten to false so sync cannot
+ * resurrect auto-close. The cost: a user who deliberately enabled auto-close
+ * before this release must re-enable it once.
  */
 export function migrateMaterializedAutoCloseOnExitDefault(): void {
   if (localStorageAdapter.readBoolean(STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED)) return;

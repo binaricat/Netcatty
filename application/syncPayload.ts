@@ -25,6 +25,7 @@ import {
   SYNC_PAYLOAD_ENTITY_KEYS,
   SYNC_STORAGE_KEYS,
   hasSyncPayloadEntityData,
+  reconcileInboundAutoCloseOnExit,
   retainLocalHostLastConnectedAt,
   sanitizeHostsForSync,
   type SyncPayload,
@@ -62,6 +63,7 @@ import {
 } from './state/customAccentSync';
 import { isValidHslToken } from './state/settingsStateDefaults';
 import {
+  STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED,
   STORAGE_KEY_THEME,
   STORAGE_KEY_UI_THEME_LIGHT,
   STORAGE_KEY_UI_THEME_DARK,
@@ -505,6 +507,9 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
       if (Object.keys(subset).length > 0) settings.terminalSettings = subset;
     } catch { /* ignore corrupt data */ }
   }
+  if (localStorageAdapter.readBoolean(STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED)) {
+    settings.autoCloseOnExitDefaultMigrated = true;
+  }
 
   // Custom terminal themes
   const customThemesRaw = localStorageAdapter.readString(STORAGE_KEY_CUSTOM_THEMES);
@@ -794,6 +799,23 @@ async function applySyncableSettings(
       merged.middleClickBehavior = settings.terminalSettings.middleClickPaste === false
         ? 'disabled'
         : 'paste';
+    }
+    if ('autoCloseOnExit' in settings.terminalSettings) {
+      merged.autoCloseOnExit = reconcileInboundAutoCloseOnExit(
+        settings.terminalSettings.autoCloseOnExit,
+        settings.autoCloseOnExitDefaultMigrated,
+      );
+    }
+    // A legacy true is the old default. A migrated peer's explicit choice must
+    // stick, so record the marker before the next local migration pass.
+    if (
+      settings.autoCloseOnExitDefaultMigrated === true
+      || (
+        settings.terminalSettings.autoCloseOnExit === true
+        && settings.autoCloseOnExitDefaultMigrated !== true
+      )
+    ) {
+      localStorageAdapter.writeBoolean(STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED, true);
     }
     localStorageAdapter.writeString(STORAGE_KEY_TERM_SETTINGS, JSON.stringify(merged));
   }

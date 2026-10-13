@@ -313,6 +313,12 @@ export interface SyncPayload {
     terminalFontFamily?: string;
     terminalFontSize?: number;
     terminalSettings?: Record<string, unknown>;
+    /**
+     * Present once the sender has run the autoCloseOnExit default migration.
+     * Legacy payloads omit it; a materialized `true` in those payloads is the
+     * old default, not an explicit opt-in.
+     */
+    autoCloseOnExitDefaultMigrated?: boolean;
     terminalSidePanelAutoOpen?: boolean;
     terminalSidePanelAutoOpenTab?: import('./terminalSidePanelAutoOpen').TerminalSidePanelAutoOpenTab;
     localShellSidePanelAutoOpen?: boolean;
@@ -388,6 +394,27 @@ export interface SyncPayload {
 
   /** Encrypted convergent-sync metadata. The adjacent fields remain a complete v1 snapshot. */
   convergentSync?: ConvergentSyncEnvelopeV2;
+}
+
+/**
+ * Pre-migration snapshots stored autoCloseOnExit: true as the default and do
+ * not carry `autoCloseOnExitDefaultMigrated`. Rewrite that legacy true to
+ * false. A payload that records the migration keeps an explicit true.
+ */
+export function reconcileInboundAutoCloseOnExit(
+  autoCloseOnExit: unknown,
+  payloadRecordsMigratedChoice: unknown,
+): unknown {
+  if (autoCloseOnExit === true && payloadRecordsMigratedChoice !== true) return false;
+  return autoCloseOnExit;
+}
+
+/** True when this side both migrated and explicitly enabled auto-close. */
+export function payloadOptsIntoAutoClose(
+  settings: SyncPayload['settings'] | undefined,
+): boolean {
+  return settings?.autoCloseOnExitDefaultMigrated === true
+    && settings.terminalSettings?.autoCloseOnExit === true;
 }
 
 /**

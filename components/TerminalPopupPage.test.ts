@@ -162,7 +162,7 @@ test('attach popup close preparation has a bounded timeout', () => {
 test('terminal exit auto-close setting reaches tabs, workspaces, and popups', () => {
   assert.match(
     terminalLayerSource,
-    /resolveTerminalSessionExitIntent\(\s+evt,\s+terminalSettings\?\.autoCloseOnExit \?\? true,\s+\)/,
+    /resolveTerminalSessionExitIntent\(\s+evt,[\s\S]*?terminalSettings\?\.autoCloseOnExit \?\? false,\s+\)/,
   );
   assert.match(
     terminalSource,

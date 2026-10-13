@@ -631,3 +631,44 @@ test("group notes sync edits and clearing without dropping connection settings",
   const cleared = payload({ customGroups: ["Project"], groupConfigs: [{ path: "Project", username: "admin" }] });
   assert.equal(mergeSyncPayloads(merged, merged, cleared).payload.groupConfigs?.[0].notes, undefined);
 });
+
+test("mergeSyncPayloads does not glue a local migration marker onto a legacy auto-close true", () => {
+  const merged = mergeSyncPayloads(
+    null,
+    payload({
+      settings: {
+        autoCloseOnExitDefaultMigrated: true,
+        terminalSettings: { autoCloseOnExit: false, scrollback: 3000 },
+      },
+    }),
+    payload({
+      settings: {
+        terminalSettings: { autoCloseOnExit: true, scrollback: 3000 },
+      },
+    }),
+  ).payload.settings;
+
+  assert.equal(merged?.terminalSettings?.autoCloseOnExit, false);
+  assert.equal(merged?.terminalSettings?.scrollback, 3000);
+});
+
+test("mergeSyncPayloads keeps an explicit auto-close opt-in from a migrated peer", () => {
+  const merged = mergeSyncPayloads(
+    null,
+    payload({
+      settings: {
+        autoCloseOnExitDefaultMigrated: true,
+        terminalSettings: { autoCloseOnExit: false },
+      },
+    }),
+    payload({
+      settings: {
+        autoCloseOnExitDefaultMigrated: true,
+        terminalSettings: { autoCloseOnExit: true },
+      },
+    }),
+  ).payload.settings;
+
+  assert.equal(merged?.autoCloseOnExitDefaultMigrated, true);
+  assert.equal(merged?.terminalSettings?.autoCloseOnExit, true);
+});

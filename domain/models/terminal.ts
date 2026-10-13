@@ -538,7 +538,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   linkModifier: 'none',
   // Off by default: remote graceful channel closes can be reported as a clean
   // exit (code 0), which would auto-close tabs on network drops. Users who
-  // want close-on-exit can enable it in Settings → Terminal → Behavior.
+  // want close-on-exit can enable it in Settings -> Terminal -> Behavior.
   autoCloseOnExit: false,
   // Issue #3087: keep terminal history visible after an established session disconnects.
   disconnectedNoticeMode: 'terminal',

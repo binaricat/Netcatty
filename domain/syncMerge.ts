@@ -21,6 +21,7 @@
 
 import { carryForwardSyncDeletions, getDeletedEntityIds } from './syncReliability';
 import {
+  payloadOptsIntoAutoClose,
   sanitizeHostsForSync,
   type CloudSyncPayloadEntityKey,
   type SyncPayload,
@@ -401,6 +402,24 @@ function mergeSettings(
         merged[key] = lVal;
       }
     }
+  }
+
+  // A three-way merge can keep this device's migration flag while adopting a
+  // legacy remote autoCloseOnExit: true. That true is the old default unless
+  // one of the sides explicitly opted in after migrating.
+  const terminalSettings = merged.terminalSettings;
+  if (
+    terminalSettings
+    && typeof terminalSettings === 'object'
+    && !Array.isArray(terminalSettings)
+    && (terminalSettings as Record<string, unknown>).autoCloseOnExit === true
+    && !payloadOptsIntoAutoClose(local)
+    && !payloadOptsIntoAutoClose(remote)
+  ) {
+    merged.terminalSettings = {
+      ...(terminalSettings as Record<string, unknown>),
+      autoCloseOnExit: false,
+    };
   }
 
   return Object.keys(merged).length > 0 ? (merged as SettingsObj) : undefined;

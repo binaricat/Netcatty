@@ -1667,6 +1667,50 @@ test("terminal auto-close preference survives sync round-trip", async () => {
   assert.equal(restored.autoCloseOnExit, false);
 });
 
+test("inbound sync does not resurrect the materialized auto-close default after the marker", async () => {
+  localStorage.setItem(storageKeys.STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED, "true");
+  try {
+    localStorage.setItem(
+      storageKeys.STORAGE_KEY_TERM_SETTINGS,
+      JSON.stringify({ autoCloseOnExit: false, scrollback: 3000 }),
+    );
+
+    await applySyncPayload({
+      hosts: [],
+      keys: [],
+      identities: [],
+      snippets: [],
+      customGroups: [],
+      syncedAt: 1,
+      settings: { terminalSettings: { autoCloseOnExit: true } },
+    }, { importVaultData: () => {} });
+
+    const resurrected = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS)!);
+    assert.equal(resurrected.autoCloseOnExit, false);
+    assert.equal(resurrected.scrollback, 3000);
+
+    // An explicit opt-in made after the migration round-trips with a marker.
+    localStorage.setItem(
+      storageKeys.STORAGE_KEY_TERM_SETTINGS,
+      JSON.stringify({ autoCloseOnExit: true, scrollback: 3000 }),
+    );
+    const optedIn = buildSyncPayload(vault());
+    assert.equal(optedIn.settings?.autoCloseOnExitDefaultMigrated, true);
+    assert.equal(optedIn.settings?.terminalSettings?.autoCloseOnExit, true);
+
+    localStorage.setItem(
+      storageKeys.STORAGE_KEY_TERM_SETTINGS,
+      JSON.stringify({ autoCloseOnExit: false, scrollback: 3000 }),
+    );
+    await applySyncPayload(optedIn, { importVaultData: () => {} });
+    const restoredChoice = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS)!);
+    assert.equal(restoredChoice.autoCloseOnExit, true);
+    assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED), "true");
+  } finally {
+    localStorage.removeItem(storageKeys.STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED);
+  }
+});
+
 test("terminal disconnected notice preference survives sync round-trip", async () => {
   localStorage.setItem(
     storageKeys.STORAGE_KEY_TERM_SETTINGS,
