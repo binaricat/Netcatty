@@ -90,6 +90,7 @@ import {
   buildUndoLastTurnBranch,
   type UndoLastTurnRestoredDraft,
 } from '../../domain/aiUndoLastTurn';
+import { buildForkedSession, resolveForkBoundary } from '../../domain/aiSessionFork';
 
 
 function providerPatchIsNoop(
@@ -728,6 +729,43 @@ export function useAIState() {
     return { sessionId: branched.id, restored: result.restored };
   }, [persistSessions, setActiveSessionId]);
 
+  // Non-destructive "fork from here": copy the conversation up to a completed
+  // assistant response into an independent session and select it in the panel
+  // that asked for it. The source conversation stays in history untouched.
+  // The fork carries the requesting scope: a workspace member can be looking at
+  // a chat that was created on an older terminal, and a fork inheriting that
+  // stale scope would be filtered out of the workspace history and dropped back
+  // to the draft view.
+  const forkSession = useCallback((
+    sourceSessionId: string,
+    assistantMessageId: string,
+    scope: AISessionScope,
+    scopeKey: string,
+  ): AISession | null => {
+    const source = sessionsRef.current.find(session => session.id === sourceSessionId);
+    if (!source) return null;
+    const boundary = resolveForkBoundary(source, assistantMessageId);
+    if (boundary == null) return null;
+
+    const now = Date.now();
+    const forked = buildForkedSession(source, boundary, {
+      newId: `ai_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      now,
+      scope,
+    });
+    if (!forked) return null;
+
+    setSessionsRaw(prev => {
+      // Keep the fork and its source both within the existing history limit.
+      const next = [forked, { ...source, updatedAt: forked.updatedAt }, ...prev.filter(session => session.id !== source.id)];
+      setLatestAISessionsSnapshot(next);
+      persistSessions(next);
+      return next;
+    });
+    setActiveSessionId(scopeKey, forked.id);
+    return forked;
+  }, [persistSessions, setActiveSessionId]);
+
   const deleteSession = useCallback((sessionId: string, scopeKey?: string) => {
     cleanupDeletedAIChatSessions([sessionId]);
     if (persistTimerRef.current) {
@@ -1307,6 +1345,7 @@ export function useAIState() {
     removeDraftFile,
     createSession,
     undoLastTurnInSession,
+    forkSession,
     deleteSession,
     deleteSessionsByTarget,
     updateSessionTitle,
@@ -1368,6 +1407,7 @@ export function useAIState() {
     removeDraftFile,
     createSession,
     undoLastTurnInSession,
+    forkSession,
     deleteSession,
     deleteSessionsByTarget,
     updateSessionTitle,

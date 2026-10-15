@@ -614,6 +614,8 @@ export const ruAiMessages: Messages = {
   'topTabs.windowOpacity': 'Прозрачность окна',
   'topTabs.openSettings': 'Открыть настройки',
   'ai.chat.sessionHistory': 'История сессий',
+  'ai.chat.forkAfterTurn': 'Создать ветку отсюда',
+  'ai.chat.forkCreated': 'Ветка беседы создана',
   'ai.chat.resizeInput': 'Перетащите, чтобы изменить высоту поля ввода',
   'ai.chat.attach': 'Прикрепить',
   'ai.chat.terminalSelectionAttachment': 'Выделение терминала',

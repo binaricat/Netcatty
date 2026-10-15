@@ -665,6 +665,8 @@ export const esAiMessages: Messages = {
   'topTabs.windowOpacity': 'Opacidad de la ventana',
   'topTabs.openSettings': 'Abrir Configuración',
   'ai.chat.sessionHistory': 'Historial de sesiones',
+  'ai.chat.forkAfterTurn': 'Bifurcar desde aquí',
+  'ai.chat.forkCreated': 'Rama de conversación creada',
   'ai.chat.resizeInput': 'Arrastra para redimensionar el campo de mensaje',
   'ai.chat.attach': 'Adjuntar',
   'ai.chat.terminalSelectionAttachment': 'Selección de la terminal',

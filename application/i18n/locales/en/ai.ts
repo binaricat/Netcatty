@@ -677,6 +677,8 @@ export const enAiMessages: Messages = {
   'topTabs.windowOpacity': 'Window opacity',
   'topTabs.openSettings': 'Open Settings',
   'ai.chat.sessionHistory': 'Session history',
+  'ai.chat.forkAfterTurn': 'Fork from here',
+  'ai.chat.forkCreated': 'Conversation branch created',
   'ai.chat.resizeInput': 'Drag to resize the message input',
   'ai.chat.attach': 'Attach',
   'ai.chat.terminalSelectionAttachment': 'Terminal selection',

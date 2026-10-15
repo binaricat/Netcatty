@@ -40,3 +40,14 @@ test('terminal side panel tools share one primary toolbar height', () => {
     assert.match(source, /TERMINAL_SIDE_PANEL_INNER_HEADER_CLASS/);
   }
 });
+
+test('AI chat panel wires the fork action into the message list', () => {
+  assert.match(panelSource, /onForkAfterTurn\?: \(assistantMessageId: string\) => void/);
+  assert.match(panelSource, /canForkFromMessageIds\?: ReadonlySet<string>/);
+  assert.match(panelSource, /onForkAfterTurn=\{onForkAfterTurn\}/);
+  assert.match(panelSource, /canForkFromMessageIds=\{canForkFromMessageIds\}/);
+  // The panel derives the forkable responses from the domain boundary rule.
+  assert.match(preparingSource, /resolveForkBoundary\(activeSession, message\.id\)/);
+  assert.match(preparingSource, /onForkAfterTurn=\{handleForkAfterTurn\}/);
+  assert.match(preparingSource, /canForkFromMessageIds=\{canForkFromMessageIds\}/);
+});

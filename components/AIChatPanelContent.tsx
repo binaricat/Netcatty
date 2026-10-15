@@ -58,6 +58,10 @@ interface AIChatPanelContentProps {
   /** Undo last turn is offered at a safe boundary (never mid-tool / mid-compaction). */
   canUndoLastTurn?: boolean;
   handleUndoLastTurn?: () => void;
+  /** Fork the displayed conversation after one of these completed responses. */
+  onForkAfterTurn?: (assistantMessageId: string) => void;
+  /** Assistant messages that can anchor a fork in the displayed session. */
+  canForkFromMessageIds?: ReadonlySet<string>;
   canCompact?: boolean;
   handleSteer: () => void;
   handleStop: () => void;
@@ -137,6 +141,8 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   handleCompact,
   canUndoLastTurn = false,
   handleUndoLastTurn,
+  onForkAfterTurn,
+  canForkFromMessageIds,
   canCompact = false,
   handleSteer,
   handleStop,
@@ -318,6 +324,8 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                 onOpenVaultNote={onOpenVaultNote}
                 onOpenVaultHost={onOpenVaultHost}
                 onOpenVaultSection={onOpenVaultSection}
+                onForkAfterTurn={onForkAfterTurn}
+                canForkFromMessageIds={canForkFromMessageIds}
               />
             </React.Profiler>
           )}

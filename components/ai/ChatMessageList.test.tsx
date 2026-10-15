@@ -47,6 +47,49 @@ test("assistant content stays plain only when markdown is hidden", () => {
   }), true);
 });
 
+test("ChatMessageList offers the fork action for messages the scope marks forkable", () => {
+  const messages: ChatMessage[] = [
+    { id: "user-1", role: "user", content: "question", timestamp: 1 },
+    { id: "assistant-1", role: "assistant", content: "answer", timestamp: 2, executionStatus: "completed" },
+    { id: "user-2", role: "user", content: "follow-up", timestamp: 3 },
+    { id: "assistant-2", role: "assistant", content: "second answer", timestamp: 4, executionStatus: "completed" },
+  ];
+
+  const render = (props: Record<string, unknown>) => renderToStaticMarkup(
+    React.createElement(I18nProvider, {
+      locale: "en",
+      children: React.createElement(TooltipProvider, {
+        children: React.createElement(ChatMessageList, { messages, isStreaming: false, ...props } as never),
+      }),
+    }),
+  );
+
+  // Two completed turn-ending responses: the caller decides which can anchor a fork.
+  const forkableMarkup = render({
+    onForkAfterTurn: () => {},
+    canForkFromMessageIds: new Set(["assistant-1", "assistant-2"]),
+  });
+  assert.equal(forkableMarkup.split('aria-label="Fork from here"').length - 1, 2);
+
+  // A response the scope did not mark (streaming, unfinished, unsafe boundary or
+  // inside the compacted prefix) renders no action.
+  const partialMarkup = render({
+    onForkAfterTurn: () => {},
+    canForkFromMessageIds: new Set(["assistant-2"]),
+  });
+  assert.equal(partialMarkup.split('aria-label="Fork from here"').length - 1, 1);
+
+  const emptyMarkup = render({
+    onForkAfterTurn: () => {},
+    canForkFromMessageIds: new Set<string>(),
+  });
+  assert.doesNotMatch(emptyMarkup, /Fork from here/);
+
+  // Without a handler the list stays read-only.
+  const readOnlyMarkup = render({ canForkFromMessageIds: new Set(["assistant-1"]) });
+  assert.doesNotMatch(readOnlyMarkup, /Fork from here/);
+});
+
 test("ChatMessageList renders Streamdown for the streaming assistant message", () => {
   const messages: ChatMessage[] = [
     {

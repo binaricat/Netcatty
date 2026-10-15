@@ -66,6 +66,7 @@ import {
 import { getScopedHistorySessions } from './ai/scopedHistorySessions';
 import { resolveInheritedAIActiveSessionId } from '../domain/aiWorkspaceScopeInherit';
 import { resolveUndoLastTurnBoundary } from '../domain/aiUndoLastTurn';
+import { resolveForkBoundary } from '../domain/aiSessionFork';
 import { aiSessionIdSetEqual, exactScopeAISessionsEqual } from '../domain/aiSessionsForScope';
 import { buildExternalAgentHistoryMessagesForBridge } from './ai/externalAgentHistory';
 import { canSendWithAgent, findEnabledExternalAgent } from './ai/agentSendEligibility';
@@ -271,6 +272,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   removeDraftFile,
   createSession,
   undoLastTurnInSession,
+  forkSession,
   deleteSession,
   updateSessionTitle,
   updateSessionExternalSessionId,
@@ -898,6 +900,45 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     undoLastTurnInSession,
     updateScopeDraft,
     currentAgentId,
+  ]);
+
+  // "Fork from here" is offered on the completed responses that can actually
+  // anchor a fork, so a rendered button never turns into a silent no-op.
+  const canForkFromMessageIds = useMemo(() => {
+    const forkable = new Set<string>();
+    if (!activeSession || isStreaming) return forkable;
+    for (const message of activeSession.messages) {
+      if (message.role !== 'assistant') continue;
+      if (resolveForkBoundary(activeSession, message.id) != null) forkable.add(message.id);
+    }
+    return forkable;
+  }, [activeSession, isStreaming]);
+
+  const handleForkAfterTurn = useCallback((assistantMessageId: string) => {
+    const source = activeSessionRef.current;
+    if (!source || isSending || streamingSessionIds.has(source.id)) return;
+
+    const forked = forkSession(
+      source.id,
+      assistantMessageId,
+      { type: scopeType, targetId: scopeTargetId, hostIds: scopeHostIds },
+      scopeKey,
+    );
+    if (!forked) return;
+
+    setShowHistory(false);
+    showScopeSessionView(forked.id);
+    toast.success(t('ai.chat.forkCreated'));
+  }, [
+    forkSession,
+    isSending,
+    scopeHostIds,
+    scopeKey,
+    scopeTargetId,
+    scopeType,
+    showScopeSessionView,
+    streamingSessionIds,
+    t,
   ]);
 
   const providersRef = useRef(providers);
@@ -1942,6 +1983,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         handleDeleteSession={handleDeleteSession}
         messages={messages}
         isStreaming={isStreaming}
+        onForkAfterTurn={handleForkAfterTurn}
+        canForkFromMessageIds={canForkFromMessageIds}
         activeCompaction={
           activeCompaction?.sessionId === activeSessionId ? activeCompaction : null
         }
@@ -2023,6 +2066,7 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'addDraftFiles',
   'removeDraftFile',
   'createSession',
+  'forkSession',
   'deleteSession',
   'updateSessionTitle',
   'updateSessionExternalSessionId',

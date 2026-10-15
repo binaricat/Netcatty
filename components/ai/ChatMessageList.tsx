@@ -6,7 +6,7 @@
  * No avatars. Thinking blocks are collapsible.
  */
 
-import { AlertCircle, BookOpen, FileText, RotateCcw, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertCircle, BookOpen, FileText, GitFork, RotateCcw, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { ChatMessage, ToolCall as AgentToolCall } from '../../infrastructure/ai/types';
@@ -99,6 +99,10 @@ interface ChatMessageListProps {
   onOpenVaultHost?: (hostId: string) => void;
   onOpenVaultSnippet?: (snippetId: string) => void;
   onOpenVaultSection?: (section: VaultArtifactNavSection) => void;
+  /** Copy the conversation up to a completed response into a new session. */
+  onForkAfterTurn?: (assistantMessageId: string) => void;
+  /** Completed responses that can anchor a fork in the displayed session. */
+  canForkFromMessageIds?: ReadonlySet<string>;
 }
 
 interface VaultArtifactNavigationCallbackOptions {
@@ -187,6 +191,8 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   onOpenVaultHost,
   onOpenVaultSnippet,
   onOpenVaultSection,
+  onForkAfterTurn,
+  canForkFromMessageIds,
 }) => {
   // Track pending approvals from the approval gate
   const [pendingApprovals, setPendingApprovals] = useState<Map<string, ApprovalRequest>>(new Map());
@@ -663,6 +669,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
           const isUser = message.role === 'user';
           const isLastAssistant = message === lastAssistantMessage;
           const isThisStreaming = isStreaming && isLastAssistant;
+          const showForkAction = Boolean(onForkAfterTurn && canForkFromMessageIds?.has(message.id));
 
           return (
             <Message
@@ -796,6 +803,20 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                         <p className="text-muted-foreground text-xs mt-1">{t('ai.chat.retryHint')}</p>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {showForkAction && (
+                  <div className="flex justify-end pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => onForkAfterTurn?.(message.id)}
+                      className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground/55 transition-colors hover:bg-muted/45 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      aria-label={t('ai.chat.forkAfterTurn')}
+                    >
+                      <GitFork size={12} aria-hidden="true" />
+                      <span>{t('ai.chat.forkAfterTurn')}</span>
+                    </button>
                   </div>
                 )}
               </MessageContent>
@@ -1042,6 +1063,8 @@ function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps
   if (prev.onOpenVaultHost !== next.onOpenVaultHost) return false;
   if (prev.onOpenVaultSnippet !== next.onOpenVaultSnippet) return false;
   if (prev.onOpenVaultSection !== next.onOpenVaultSection) return false;
+  if (prev.onForkAfterTurn !== next.onForkAfterTurn) return false;
+  if (prev.canForkFromMessageIds !== next.canForkFromMessageIds) return false;
   if (prev.messages.length !== next.messages.length) return false;
   if (prev.messages === next.messages) return true;
 
