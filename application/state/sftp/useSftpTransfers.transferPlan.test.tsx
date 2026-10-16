@@ -5,6 +5,7 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { PREFLIGHT_STAT_CONCURRENCY, PREFLIGHT_STAT_MAX_FILES, useSftpTransfers } from "./useSftpTransfers";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
+import type { Host } from "../../../domain/models";
 import type { SftpPane } from "./types";
 import { buildCacheKey } from "./sharedRemoteHostCache";
 
@@ -293,8 +294,9 @@ function installGlobals(netty: Record<string, unknown>) {
   };
 }
 
+for (const pinned of [false, true]) {
 for (const direction of ["download", "upload"] as const) {
-  test(`new dual-pane ${direction} uses refreshed transfer acquisition after host edits`, async () => {
+  test(`${pinned ? "existing" : "new"} dual-pane ${direction} preserves its endpoint after host edits`, async () => {
     const acquired: string[] = [];
     const started: StartOptions[] = [];
     const restore = installGlobals({
@@ -319,7 +321,9 @@ for (const direction of ["download", "upload"] as const) {
     const getTabByConnectionId = () => null;
     const updateTab = () => undefined;
     const sftpSessionsRef = { current: new Map([["remote-conn", "browse-session"]]) };
-    const acquire = (endpoint: string) => async () => {
+    const pinnedHost = { id: "host-1", hostname: "old-endpoint" } as Host;
+    const acquire = (savedEndpoint: string) => async (_hostId: string, _jobId: string, connectHost?: Host) => {
+      const endpoint = connectHost?.hostname ?? savedEndpoint;
       acquired.push(endpoint);
       return { sftpId: endpoint, poolKey: endpoint, release: () => undefined, discard: () => undefined };
     };
@@ -336,6 +340,7 @@ for (const direction of ["download", "upload"] as const) {
         connectionCacheKeyMapRef: { current: new Map() },
         listLocalFiles: async () => [], listRemoteFiles: async () => [],
         acquireTransferSession: acquireSession,
+        resolveConnectedHost: () => pinned ? pinnedHost : null,
       });
       return null;
     }
@@ -346,14 +351,16 @@ for (const direction of ["download", "upload"] as const) {
         await ops!.startTransfer([{ name: "aops_dns_view_demo.sh", isDirectory: false }],
           direction === "download" ? "left" : "right", direction === "download" ? "right" : "left");
       });
-      assert.ok(acquired.length > 0, "remote work should acquire a transfer lease");
-      assert.ok(acquired.every((endpoint) => endpoint === "new-endpoint"), JSON.stringify(acquired));
+      assert.equal(acquired.length, 2, "both the work lease and file lease must use the pane endpoint");
+      assert.ok(acquired.every((endpoint) => endpoint === (pinned ? "old-endpoint" : "new-endpoint")), JSON.stringify(acquired));
       assert.equal(started.length, 1);
     } finally {
       await act(async () => { renderer?.unmount(); });
       restore();
     }
   });
+}
+
 }
 
 for (const liveStatAvailable of [true, false]) {

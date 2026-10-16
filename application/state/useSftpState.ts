@@ -557,6 +557,7 @@ export const useSftpState = (
     listRemoteFiles,
     handleSessionError,
     acquireTransferSession,
+    resolveConnectedHost: (tabId) => connectedHostByTabIdRef.current.get(tabId) ?? null,
   });
 
   const {
