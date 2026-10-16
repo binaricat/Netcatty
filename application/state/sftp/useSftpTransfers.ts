@@ -1625,8 +1625,10 @@ export const useSftpTransfers = ({
 
       return [...skippedResults, ...results];
     },
+    // Saved host edits replace acquisition; new transfers must not retain the old endpoint.
+    // Already-running attempts keep the leases they acquired.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [getActivePane, getPaneByConnectionId, getTabByConnectionId, sftpSessionsRef, updateTab],
+    [getActivePane, getPaneByConnectionId, getTabByConnectionId, sftpSessionsRef, updateTab, acquireTransferSession],
   );
 
   const cancelTransfer = useCallback(

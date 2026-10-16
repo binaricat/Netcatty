@@ -293,6 +293,69 @@ function installGlobals(netty: Record<string, unknown>) {
   };
 }
 
+for (const direction of ["download", "upload"] as const) {
+  test(`new dual-pane ${direction} uses refreshed transfer acquisition after host edits`, async () => {
+    const acquired: string[] = [];
+    const started: StartOptions[] = [];
+    const restore = installGlobals({
+      statSftp: async () => direction === "download"
+        ? { name: "aops_dns_view_demo.sh", type: "file", size: 4, sizeKnown: true, lastModified: 1 }
+        : null,
+      statLocal: async () => direction === "upload"
+        ? { name: "aops_dns_view_demo.sh", type: "file", size: 4, sizeKnown: true, lastModified: 1 }
+        : null,
+      startStreamTransfer: async (options: StartOptions) => {
+        started.push(options);
+        sftpTransferCenterStore.ingestBackgroundEvent({
+          type: "completed", transferId: options.transferId,
+          transferred: options.totalBytes ?? 0, totalBytes: options.totalBytes ?? 0, lifecycleEpoch: 0,
+        });
+        return {};
+      },
+    });
+    // These pane callbacks stay stable in the app while the saved hosts change.
+    const getActivePane = (side: "left" | "right") => makePane(side);
+    const getPaneByConnectionId = () => null;
+    const getTabByConnectionId = () => null;
+    const updateTab = () => undefined;
+    const sftpSessionsRef = { current: new Map([["remote-conn", "browse-session"]]) };
+    const acquire = (endpoint: string) => async () => {
+      acquired.push(endpoint);
+      return { sftpId: endpoint, poolKey: endpoint, release: () => undefined, discard: () => undefined };
+    };
+    const original = acquire("old-endpoint");
+    const refreshed = acquire("new-endpoint");
+    let ops: ReturnType<typeof useSftpTransfers> | undefined;
+    let renderer: ReactTestRenderer | undefined;
+    function Probe({ acquireSession }: { acquireSession: typeof original }) {
+      ops = useSftpTransfers({
+        ownerId: `refresh-host-${direction}`,
+        getActivePane, getPaneByConnectionId, getTabByConnectionId, updateTab,
+        refresh: async () => undefined, clearCacheForConnection: () => undefined,
+        handleSessionError: () => undefined, sftpSessionsRef,
+        connectionCacheKeyMapRef: { current: new Map() },
+        listLocalFiles: async () => [], listRemoteFiles: async () => [],
+        acquireTransferSession: acquireSession,
+      });
+      return null;
+    }
+    try {
+      await act(async () => { renderer = create(React.createElement(Probe, { acquireSession: original })); });
+      await act(async () => { renderer!.update(React.createElement(Probe, { acquireSession: refreshed })); });
+      await act(async () => {
+        await ops!.startTransfer([{ name: "aops_dns_view_demo.sh", isDirectory: false }],
+          direction === "download" ? "left" : "right", direction === "download" ? "right" : "left");
+      });
+      assert.ok(acquired.length > 0, "remote work should acquire a transfer lease");
+      assert.ok(acquired.every((endpoint) => endpoint === "new-endpoint"), JSON.stringify(acquired));
+      assert.equal(started.length, 1);
+    } finally {
+      await act(async () => { renderer?.unmount(); });
+      restore();
+    }
+  });
+}
+
 for (const liveStatAvailable of [true, false]) {
   test(
     liveStatAvailable
