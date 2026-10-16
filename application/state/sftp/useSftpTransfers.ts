@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction 
 import {
   FileConflict,
   FileConflictAction,
+  Host,
   SftpFilenameEncoding,
   TransferDirection,
   TransferStatus,
@@ -25,7 +26,10 @@ import { logger } from "../../../lib/logger";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 import { SftpPane } from "./types";
 import { isMissingStatError, unwrapSftpIpcError } from "./errors";
-import { useSftpDirectoryTransferOps } from "./transferDirectoryOps";
+import {
+  useSftpDirectoryTransferOps,
+  type TransferConnectHosts,
+} from "./transferDirectoryOps";
 import { useSftpTransferConflictOps } from "./transferConflictOps";
 import { useSftpTransferTaskOps } from "./transferTaskOps";
 import { globalSftpTransferScheduler } from "./globalTransferScheduler";
@@ -78,6 +82,23 @@ const STAT_SFTP_TIMEOUT_MS = 10_000;
 // makes the bridge measure the live size anyway).
 export const PREFLIGHT_STAT_CONCURRENCY = 8;
 export const PREFLIGHT_STAT_MAX_FILES = 128;
+
+// A "local" or missing resolved host means the dedicated pool should fall
+// back to the saved vault host; only a concrete Host pins the endpoint.
+const toConnectHost = (host: Host | "local" | null | undefined): Host | undefined =>
+  host && host !== "local" ? host : undefined;
+
+// Snapshot the panes' connect-time endpoints. Called before any preflight
+// await: tab ids survive reconnect, so resolving this map later can return a
+// different endpoint under the same host id than the one the pane snapshot,
+// task paths, and transfer plan belong to.
+const captureConnectHosts = (
+  resolveConnectedHost: UseSftpTransfersParams["resolveConnectedHost"],
+  ...panes: SftpPane[]
+): TransferConnectHosts => ({
+  source: panes[0] ? toConnectHost(resolveConnectedHost?.(panes[0].id)) : undefined,
+  target: panes[1] ? toConnectHost(resolveConnectedHost?.(panes[1].id)) : undefined,
+});
 
 /** Keep the MutableRefObject mirror in sync with the process-global latch set. */
 function syncPausedTasksRef(ref: { current: Set<string> }, taskId: string, latched: boolean) {
@@ -642,6 +663,8 @@ export const useSftpTransfers = ({
     sourcePane: SftpPane,
     targetPane: SftpPane,
     targetSide: "left" | "right",
+    /** Connect-time endpoint snapshot captured before any preflight await. */
+    connectHostsOverride?: TransferConnectHosts,
   ): Promise<TransferStatus> => {
     if (cancelledTasksRef.current.has(task.id)) {
       return "cancelled";
@@ -700,7 +723,7 @@ export const useSftpTransfers = ({
 
       let walkStatus: TransferStatus = "transferring";
       await transferRuntime.runWalk(task.id, async () => {
-        walkStatus = await processTransferBody(task, sourcePane, targetPane, targetSide, updateTask);
+        walkStatus = await processTransferBody(task, sourcePane, targetPane, targetSide, updateTask, connectHostsOverride);
       });
       return walkStatus;
     });
@@ -712,6 +735,8 @@ export const useSftpTransfers = ({
     targetPane: SftpPane,
     targetSide: "left" | "right",
     updateTask: (updates: Partial<TransferTask>) => void,
+    /** Connect-time endpoint snapshot. Undefined re-resolves the live map. */
+    connectHostsOverride?: TransferConnectHosts,
   ): Promise<TransferStatus> => {
 
     // Initialize encoding early to avoid temporal dead zone issues
@@ -764,11 +789,15 @@ export const useSftpTransfers = ({
     );
 
     // Keep the pane's connect-time endpoint even when its saved host is edited.
-    const sourceHost = resolveConnectedHost?.(sourcePane.id);
-    const targetHost = resolveConnectedHost?.(targetPane.id);
-    const connectHosts = {
-      source: sourceHost && sourceHost !== "local" ? sourceHost : undefined,
-      target: targetHost && targetHost !== "local" ? targetHost : undefined,
+    // startTransfer snapshots both hosts before its preflight await so a
+    // reconnect (same tab id, same host id, different endpoint) pending when
+    // processing starts cannot redirect the transfer away from the endpoint
+    // its panes, paths, and plan were captured against.
+    const resolvedConnectHosts = connectHostsOverride
+      ?? captureConnectHosts(resolveConnectedHost, sourcePane, targetPane);
+    const connectHosts: TransferConnectHosts = {
+      source: toConnectHost(resolvedConnectHosts.source),
+      target: toConnectHost(resolvedConnectHosts.target),
     };
 
     try {
@@ -1075,7 +1104,7 @@ export const useSftpTransfers = ({
                 : t,
             ),
           );
-          return processTransfer(updatedTask, sourcePane, targetPane, targetSide);
+          return processTransfer(updatedTask, sourcePane, targetPane, targetSide, connectHostsOverride);
         }
 
         if (cancelledTasksRef.current.has(task.id)) return "cancelled";
@@ -1354,6 +1383,12 @@ export const useSftpTransfers = ({
 
       if (!sourcePane?.connection || !targetPane?.connection) return [];
 
+      // Capture the connect-time endpoints before the preflight stat await
+      // below: reconnecting either pane to a different endpoint under the same
+      // host id while stats are pending must not redirect the transfer — the
+      // pane snapshot, task paths, and plan all belong to this endpoint.
+      const connectHosts = captureConnectHosts(resolveConnectedHost, sourcePane, targetPane);
+
       const sourcePath = options?.sourcePath ?? sourcePane.connection.currentPath;
       const targetPath = options?.targetPath ?? targetPane.connection.currentPath;
       const sourceConnectionId = options?.sourceConnectionId ?? sourcePane.connection.id;
@@ -1625,7 +1660,7 @@ export const useSftpTransfers = ({
       }
 
       const results = await Promise.all(runnableTasks.map(async (task): Promise<TransferResult> => {
-        const status = await processTransfer(task, sourcePane, targetPane, targetSide);
+        const status = await processTransfer(task, sourcePane, targetPane, targetSide, connectHosts);
         return {
           id: task.id,
           fileName: task.fileName,
