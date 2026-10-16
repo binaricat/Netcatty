@@ -92,9 +92,18 @@ const toConnectHost = (host: Host | "local" | null | undefined): Host | undefine
 // two panes on the same saved host can share a cache key while pinning
 // different bastion routes (e.g. one connected before a jump-host edit, one
 // after) — those routes may reach different servers. Compare identities, not
-// just cache keys, before allowing any same-host optimization.
+// just cache keys, before allowing any same-host optimization. proxyConfig
+// must be part of the identity: buildSftpHostCredentials forwards it as the
+// hop's proxy transport, so two hops sharing id/hostname/port/username can
+// still dial through different proxies after an edit.
 const chainIdentity = (chain: Host[] | undefined): string =>
-  (chain ?? []).map(h => `${h.id}@${h.hostname}:${h.port ?? ""}:${h.username}`).join("→");
+  (chain ?? []).map(h => {
+    const p = h.proxyConfig;
+    const proxyIdentity = p
+      ? JSON.stringify([p.type, p.host, p.port, p.command ?? "", p.identityId ?? "", p.username ?? "", p.password ?? ""])
+      : "";
+    return `${h.id}@${h.hostname}:${h.port ?? ""}:${h.username}:${proxyIdentity}`;
+  }).join("→");
 
 // Only pin a concrete endpoint while the pane's live connection still belongs
 // to it. connect() records the incoming tab host before it awaits closure of
