@@ -353,6 +353,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     hostId: { type: "string", description: "Vault host ID used for the tunnel." },
     autoStart: { type: "string", optional: true, description: "true or false." },
     autoReconnect: { type: "string", optional: true, description: "true or false. Reconnect automatically after unexpected disconnects." },
+    mappings: { type: "string", optional: true, description: "JSON array of {\"localPort\":n,\"remotePort\":n} for multi-mapping rules (local/remote only, unique local ports, more than one row). Omit for a single mapping." },
   },
   "portforward.rules.update": {
     ruleId: { type: "string", description: "Port forwarding rule ID." },
@@ -365,6 +366,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     hostId: { type: "string", optional: true, description: "Vault host ID used for the tunnel." },
     autoStart: { type: "string", optional: true, description: "true or false." },
     autoReconnect: { type: "string", optional: true, description: "true or false. Reconnect automatically after unexpected disconnects." },
+    mappings: { type: "string", optional: true, description: "JSON array of {\"localPort\":n,\"remotePort\":n} replacing the rule's mappings (local/remote only, unique local ports). Pass [] to collapse to the single localPort/remotePort pair." },
   },
   "portforward.rules.duplicate": {
     ruleId: { type: "string", description: "Port forwarding rule ID to copy." },

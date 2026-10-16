@@ -43,6 +43,7 @@ const STATUS_TEXT = {
     active: "Active",
     connecting: "Connecting",
     inactive: "Inactive",
+    partial: "Partial",
     error: "Error",
   },
 };
@@ -1126,15 +1127,19 @@ function buildTrayMenuTemplate() {
     for (const rule of displayTrayData.portForwardRules) {
       const isActive = rule.status === "active";
       const isConnecting = rule.status === "connecting";
-      const isStoppable = isActive || isConnecting || rule.canStop === true;
+      // A partial rule still holds live listeners for its healthy mappings.
+      const isPartial = rule.status === "partial";
+      const isStoppable = isActive || isConnecting || isPartial || rule.canStop === true;
       const statusText =
         rule.status === "active"
           ? STATUS_TEXT.portForward.active
           : rule.status === "connecting"
             ? STATUS_TEXT.portForward.connecting
-            : rule.status === "error"
-              ? STATUS_TEXT.portForward.error
-              : STATUS_TEXT.portForward.inactive;
+            : rule.status === "partial"
+              ? STATUS_TEXT.portForward.partial
+              : rule.status === "error"
+                ? STATUS_TEXT.portForward.error
+                : STATUS_TEXT.portForward.inactive;
       const typeLabel = rule.type === "local" ? "L" : rule.type === "remote" ? "R" : "D";
       const portInfo = rule.type === "dynamic"
         ? `${rule.localPort}`

@@ -2131,6 +2131,11 @@
         "type": "string",
         "optional": true,
         "description": "true or false. Reconnect automatically after unexpected disconnects."
+      },
+      "mappings": {
+        "type": "string",
+        "optional": true,
+        "description": "JSON array of {\"localPort\":n,\"remotePort\":n} for multi-mapping rules (local/remote only, unique local ports, more than one row). Omit for a single mapping."
       }
     },
     "policy": {
@@ -2200,6 +2205,11 @@
         "type": "string",
         "optional": true,
         "description": "true or false. Reconnect automatically after unexpected disconnects."
+      },
+      "mappings": {
+        "type": "string",
+        "optional": true,
+        "description": "JSON array of {\"localPort\":n,\"remotePort\":n} replacing the rule's mappings (local/remote only, unique local ports). Pass [] to collapse to the single localPort/remotePort pair."
       }
     },
     "policy": {

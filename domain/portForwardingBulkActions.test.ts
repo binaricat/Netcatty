@@ -28,6 +28,7 @@ describe("portForwardingBulkActions", () => {
     assert.equal(isPortForwardingRuntimeBusy({ status: "active" }), true);
     assert.equal(isPortForwardingRuntimeBusy({ status: "connecting" }), true);
     assert.equal(isPortForwardingRuntimeBusy({ status: "error" }), true);
+    assert.equal(isPortForwardingRuntimeBusy({ status: "partial" }), true);
     assert.equal(isPortForwardingRuntimeBusy({ status: "inactive" }), false);
     assert.equal(isPortForwardingRuntimeBusy(undefined), false);
   });
@@ -41,11 +42,13 @@ describe("portForwardingBulkActions", () => {
     assert.equal(isPortForwardingRuleStartable(rule({ status: "inactive" }), true), false);
     assert.equal(isPortForwardingRuleStartable(rule({ status: "active" }), false), false);
     assert.equal(isPortForwardingRuleStartable(rule({ status: "connecting" }), false), false);
+    assert.equal(isPortForwardingRuleStartable(rule({ status: "partial" }), false), false);
   });
 
   it("stops rules that are active, connecting, or have a busy runtime", () => {
     assert.equal(isPortForwardingRuleStoppable(rule({ status: "active" }), false), true);
     assert.equal(isPortForwardingRuleStoppable(rule({ status: "connecting" }), false), true);
+    assert.equal(isPortForwardingRuleStoppable(rule({ status: "partial" }), false), true);
     assert.equal(isPortForwardingRuleStoppable(rule({ status: "inactive" }), true), true);
     assert.equal(isPortForwardingRuleStoppable(rule({ status: "error" }), true), true);
     assert.equal(isPortForwardingRuleStoppable(rule({ status: "error" }), false), false);

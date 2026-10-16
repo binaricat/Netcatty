@@ -22,13 +22,16 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Switch } from '../ui/switch';
+import { getFormRows, type PortForwardingFormDraft } from './utils';
+import { MappingRows } from './MappingRows';
 
 export interface EditPanelProps extends AsidePanelResizeProps {
     rule: PortForwardingRule;
-    draft: Partial<PortForwardingRule>;
+    draft: PortForwardingFormDraft;
     hosts: Host[];
-    onDraftChange: (updates: Partial<PortForwardingRule>) => void;
+    onDraftChange: (updates: PortForwardingFormDraft) => void;
     onSave: () => void;
+    saveDisabled?: boolean;
     onClose: () => void;
     onDuplicate: () => void;
     onDelete: () => void;
@@ -42,6 +45,7 @@ export const EditPanel: React.FC<EditPanelProps> = ({
     hosts,
     onDraftChange,
     onSave,
+    saveDisabled = false,
     onClose,
     onDuplicate,
     onDelete,
@@ -53,6 +57,7 @@ export const EditPanel: React.FC<EditPanelProps> = ({
 }) => {
     const { t } = useI18n();
     const selectedHost = hosts.find(h => h.id === draft.hostId);
+    const mappingRows = getFormRows(draft);
 
     return (
         <AsidePanel
@@ -99,17 +104,19 @@ export const EditPanel: React.FC<EditPanelProps> = ({
                     />
                 </div>
 
-                {/* Local Port */}
-                <div className="space-y-1">
-                    <Label className="text-[10px] text-muted-foreground">{t('pf.wizard.localConfig.localPort')}</Label>
-                    <Input
-                        type="number"
-                        placeholder={t('pf.wizard.placeholders.portExample', { port: 8080 })}
-                        className="h-10"
-                        value={draft.localPort || ''}
-                        onChange={e => onDraftChange({ localPort: parseInt(e.target.value) || undefined })}
-                    />
-                </div>
+                {/* Local Port (dynamic SOCKS listen port only; local/remote use the mapping rows below) */}
+                {(draft.type === 'dynamic') && (
+                    <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground">{t('pf.wizard.localConfig.localPort')}</Label>
+                        <Input
+                            type="number"
+                            placeholder={t('pf.wizard.placeholders.portExample', { port: 8080 })}
+                            className="h-10"
+                            value={draft.localPort || ''}
+                            onChange={e => onDraftChange({ localPort: parseInt(e.target.value) || undefined })}
+                        />
+                    </div>
+                )}
 
                 {/* Bind Address */}
                 <div className="space-y-1">
@@ -159,16 +166,17 @@ export const EditPanel: React.FC<EditPanelProps> = ({
                             />
                         </div>
 
-                        <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground">{t('pf.wizard.destination.port')}</Label>
-                            <Input
-                                type="number"
-                                placeholder={t('pf.wizard.placeholders.portExample', { port: 3306 })}
-                                className="h-10"
-                                value={draft.remotePort || ''}
-                                onChange={e => onDraftChange({ remotePort: parseInt(e.target.value) || undefined })}
-                            />
-                        </div>
+                        <MappingRows
+                            rows={mappingRows}
+                            onChange={(rows) => {
+                                const first = rows[0] ?? {};
+                                onDraftChange({
+                                    mappingRows: rows,
+                                    localPort: first.localPort,
+                                    remotePort: first.remotePort,
+                                });
+                            }}
+                        />
                     </>
                 )}
 
@@ -200,6 +208,7 @@ export const EditPanel: React.FC<EditPanelProps> = ({
                 <Button
                     className="w-full h-10"
                     onClick={onSave}
+                    disabled={saveDisabled}
                 >
                     {t('common.saveChanges')}
                 </Button>

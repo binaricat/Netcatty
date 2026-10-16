@@ -212,6 +212,11 @@ declare global {
     bindAddress?: string;
     remoteHost?: string;
     remotePort?: number;
+    // Multi-mapping rules: one tunnel is started per mapping, all sharing
+    // ruleId, type, bindAddress and remoteHost. The first mapping must match
+    // localPort/remotePort. Omitted (or empty) for single-mapping rules and
+    // rejected for dynamic.
+    mappings?: import("./domain/models").PortForwardingMapping[];
     // SSH connection details
     hostname: string;
     hostId?: string;
@@ -246,6 +251,19 @@ declare global {
     sshAuthReadyTimeoutMs?: number;
   }
 
+  interface PortForwardResultMapping {
+    // Mapping identity: the mapping's localPort, unique within the rule.
+    mappingId: number;
+    localPort: number;
+    remotePort?: number;
+    tunnelId?: string;
+    success: boolean;
+    reused?: boolean;
+    cancelled?: boolean;
+    status?: 'inactive' | 'connecting' | 'active' | 'error';
+    error?: string;
+  }
+
   interface PortForwardResult {
     tunnelId: string;
     success: boolean;
@@ -254,6 +272,10 @@ declare global {
     reused?: boolean;
     status?: 'inactive' | 'connecting' | 'active' | 'error';
     error?: string;
+    // Per-mapping outcomes when the start request carried mappings[].
+    // `success` above is true only when every mapping succeeded; `tunnelId`
+    // and `error` reflect the first mapping.
+    mappings?: PortForwardResultMapping[];
   }
 
   interface PortForwardStatusResult {
@@ -276,6 +298,11 @@ declare global {
     phase: PortForwardRuntimePhase | string;
     error?: string;
     cleanupRequired?: boolean;
+    // Set for tunnels started from a multi-mapping rule: the mapping's
+    // localPort (identity) and its port pair for display.
+    mappingId?: number;
+    localPort?: number;
+    remotePort?: number;
     revision: number;
     updatedAt: number;
   }
