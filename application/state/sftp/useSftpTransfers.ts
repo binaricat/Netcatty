@@ -88,6 +88,16 @@ export const PREFLIGHT_STAT_MAX_FILES = 128;
 const toConnectHost = (host: Host | "local" | null | undefined): Host | undefined =>
   host && host !== "local" ? host : undefined;
 
+// Stable identity of a pinned proxy transport. Two endpoints sharing
+// id/hostname/port/username can still dial through different proxies after an
+// edit; remote DNS behind each proxy may resolve the same hostname to a
+// different server, so a same-host `cp` pinned to the source route could write
+// on the wrong one.
+const proxyIdentity = (p: Host["proxyConfig"]): string =>
+  p
+    ? JSON.stringify([p.type, p.host, p.port, p.command ?? "", p.identityId ?? "", p.username ?? "", p.password ?? ""])
+    : "";
+
 // Stable identity of a pinned jump chain. buildCacheKey omits the chain, so
 // two panes on the same saved host can share a cache key while pinning
 // different bastion routes (e.g. one connected before a jump-host edit, one
@@ -97,13 +107,7 @@ const toConnectHost = (host: Host | "local" | null | undefined): Host | undefine
 // hop's proxy transport, so two hops sharing id/hostname/port/username can
 // still dial through different proxies after an edit.
 const chainIdentity = (chain: Host[] | undefined): string =>
-  (chain ?? []).map(h => {
-    const p = h.proxyConfig;
-    const proxyIdentity = p
-      ? JSON.stringify([p.type, p.host, p.port, p.command ?? "", p.identityId ?? "", p.username ?? "", p.password ?? ""])
-      : "";
-    return `${h.id}@${h.hostname}:${h.port ?? ""}:${h.username}:${proxyIdentity}`;
-  }).join("→");
+  (chain ?? []).map(h => `${h.id}@${h.hostname}:${h.port ?? ""}:${h.username}:${proxyIdentity(h.proxyConfig)}`).join("→");
 
 // Only pin a concrete endpoint while the pane's live connection still belongs
 // to it. connect() records the incoming tab host before it awaits closure of
@@ -895,7 +899,13 @@ export const useSftpTransfers = ({
     // transfer as cross-host unless the pinned routes match (both undefined =
     // both direct, which is equal).
     const sameHostPinnedChains = chainIdentity(connectHosts.sourceChain) === chainIdentity(connectHosts.targetChain);
-    const sameHost = sameHostEndpoints && sameHostPinnedChains && !!sourceSftpId && !!targetSftpId;
+    // buildCacheKey also omits the endpoint's own top-level proxyConfig, and a
+    // proxy edit between the panes' connect times changes the transport (and
+    // possibly the resolved server) without moving the cache key. Compare the
+    // pinned top-level proxy identities too; undefined on both sides means
+    // both dial directly, which is equal.
+    const sameHostPinnedProxies = proxyIdentity(connectHosts.source?.proxyConfig) === proxyIdentity(connectHosts.target?.proxyConfig);
+    const sameHost = sameHostEndpoints && sameHostPinnedChains && sameHostPinnedProxies && !!sourceSftpId && !!targetSftpId;
 
     // Returns the discovered stat so callers that need the size (e.g. the
     // overwrite conflict dialog) can await this instead of reading stale
