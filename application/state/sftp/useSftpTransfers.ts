@@ -88,6 +88,14 @@ export const PREFLIGHT_STAT_MAX_FILES = 128;
 const toConnectHost = (host: Host | "local" | null | undefined): Host | undefined =>
   host && host !== "local" ? host : undefined;
 
+// Stable identity of a pinned jump chain. buildCacheKey omits the chain, so
+// two panes on the same saved host can share a cache key while pinning
+// different bastion routes (e.g. one connected before a jump-host edit, one
+// after) — those routes may reach different servers. Compare identities, not
+// just cache keys, before allowing any same-host optimization.
+const chainIdentity = (chain: Host[] | undefined): string =>
+  (chain ?? []).map(h => `${h.id}@${h.hostname}:${h.port ?? ""}:${h.username}`).join("→");
+
 // Only pin a concrete endpoint while the pane's live connection still belongs
 // to it. connect() records the incoming tab host before it awaits closure of
 // the old session and replaces the pane's connection, so during that window a
@@ -871,7 +879,14 @@ export const useSftpTransfers = ({
       }
     }
 
-    const sameHost = sameHostEndpoints && !!sourceSftpId && !!targetSftpId;
+    // The cache-key equality above omits the jump chain. When the two pinned
+    // chains differ (a bastion edit between the panes' connect times), the
+    // "same" saved host may resolve to different servers behind each bastion;
+    // a same-host `cp` would then write on the source-side server. Treat the
+    // transfer as cross-host unless the pinned routes match (both undefined =
+    // both direct, which is equal).
+    const sameHostPinnedChains = chainIdentity(connectHosts.sourceChain) === chainIdentity(connectHosts.targetChain);
+    const sameHost = sameHostEndpoints && sameHostPinnedChains && !!sourceSftpId && !!targetSftpId;
 
     // Returns the discovered stat so callers that need the size (e.g. the
     // overwrite conflict dialog) can await this instead of reading stale
