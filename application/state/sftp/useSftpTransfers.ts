@@ -88,16 +88,32 @@ export const PREFLIGHT_STAT_MAX_FILES = 128;
 const toConnectHost = (host: Host | "local" | null | undefined): Host | undefined =>
   host && host !== "local" ? host : undefined;
 
+// Only pin a concrete endpoint while the pane's live connection still belongs
+// to it. connect() records the incoming tab host before it awaits closure of
+// the old session and replaces the pane's connection, so during that window a
+// transfer must not capture endpoint B while its pane snapshot, task paths,
+// and plan still belong to endpoint A; the pool then falls back to the saved
+// vault host for the pane's own hostId (mirrors resolveSftpReconnectHost's
+// tab-host-vs-connection guard).
+const toConnectHostForPane = (
+  pane: SftpPane,
+  host: Host | "local" | null | undefined,
+): Host | undefined => {
+  const connection = pane.connection;
+  if (!connection || connection.isLocal) return undefined;
+  return host && host !== "local" && host.id === connection.hostId ? host : undefined;
+};
+
 // Snapshot the panes' connect-time endpoints. Called before any preflight
 // await: tab ids survive reconnect, so resolving this map later can return a
-// different endpoint under the same host id than the one the pane snapshot,
-// task paths, and transfer plan belong to.
+// different endpoint than the one the pane snapshot, task paths, and transfer
+// plan belong to.
 const captureConnectHosts = (
   resolveConnectedHost: UseSftpTransfersParams["resolveConnectedHost"],
   ...panes: SftpPane[]
 ): TransferConnectHosts => ({
-  source: panes[0] ? toConnectHost(resolveConnectedHost?.(panes[0].id)) : undefined,
-  target: panes[1] ? toConnectHost(resolveConnectedHost?.(panes[1].id)) : undefined,
+  source: panes[0] ? toConnectHostForPane(panes[0], resolveConnectedHost?.(panes[0].id)) : undefined,
+  target: panes[1] ? toConnectHostForPane(panes[1], resolveConnectedHost?.(panes[1].id)) : undefined,
 });
 
 /** Keep the MutableRefObject mirror in sync with the process-global latch set. */
