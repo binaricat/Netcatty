@@ -22,6 +22,13 @@ export interface UseSftpTransfersParams {
   /** FileZilla-style dedicated transfer sessions (1–2 per host). */
   acquireTransferSession?: AcquireTransferSessionFn;
   resolveConnectedHost?: (tabId: string) => Host | "local" | null;
+  /**
+   * Jump-host chain snapshots captured when the tab connected. Lets retained
+   * transfers keep dialing the connect-time bastion chain after a chain host
+   * is edited (private hostnames can resolve differently per bastion);
+   * undefined = chain must be re-resolved from the live vault.
+   */
+  resolveConnectedChain?: (tabId: string) => Host[] | null;
 }
 
 export interface UseSftpTransfersResult {

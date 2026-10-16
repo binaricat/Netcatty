@@ -322,9 +322,14 @@ for (const direction of ["download", "upload"] as const) {
     const updateTab = () => undefined;
     const sftpSessionsRef = { current: new Map([["remote-conn", "browse-session"]]) };
     const pinnedHost = { id: "host-1", hostname: "old-endpoint" } as Host;
-    const acquire = (savedEndpoint: string) => async (_hostId: string, _jobId: string, connectHost?: Host) => {
+    const pinnedChain = [{ id: "jump-1", hostname: "old-bastion" } as Host];
+    const acquiredChains: string[] = [];
+    const acquire = (savedEndpoint: string) => async (
+      _hostId: string, _jobId: string, connectHost?: Host, connectChain?: Host[],
+    ) => {
       const endpoint = connectHost?.hostname ?? savedEndpoint;
       acquired.push(endpoint);
+      acquiredChains.push(connectChain?.map((hop) => hop.hostname).join(" -> ") ?? "unpinned");
       return { sftpId: endpoint, poolKey: endpoint, release: () => undefined, discard: () => undefined };
     };
     const original = acquire("old-endpoint");
@@ -341,6 +346,7 @@ for (const direction of ["download", "upload"] as const) {
         listLocalFiles: async () => [], listRemoteFiles: async () => [],
         acquireTransferSession: acquireSession,
         resolveConnectedHost: () => pinned ? pinnedHost : null,
+        resolveConnectedChain: pinned ? () => pinnedChain : undefined,
       });
       return null;
     }
@@ -353,6 +359,17 @@ for (const direction of ["download", "upload"] as const) {
       });
       assert.equal(acquired.length, 2, "both the work lease and file lease must use the pane endpoint");
       assert.ok(acquired.every((endpoint) => endpoint === (pinned ? "old-endpoint" : "new-endpoint")), JSON.stringify(acquired));
+      if (pinned) {
+        assert.ok(
+          acquiredChains.every((chain) => chain === "old-bastion"),
+          `the pinned jump chain must ride along with the pinned endpoint: ${JSON.stringify(acquiredChains)}`,
+        );
+      } else {
+        assert.ok(
+          acquiredChains.every((chain) => chain === "unpinned"),
+          `no chain may attach when the connect host is unresolved: ${JSON.stringify(acquiredChains)}`,
+        );
+      }
       assert.equal(started.length, 1);
     } finally {
       await act(async () => { renderer?.unmount(); });

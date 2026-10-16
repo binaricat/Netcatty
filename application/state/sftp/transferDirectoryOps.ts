@@ -160,6 +160,14 @@ async function tryStatTransferTarget(
 export interface TransferConnectHosts {
   source?: Host;
   target?: Host;
+  /**
+   * Connect-time jump-host chain snapshots. Pinned together with the top-level
+   * host so leases opened after a bastion edit still dial through the chain the
+   * pane's session connected with (private hostnames can resolve differently
+   * per bastion). Present only when the matching endpoint is pinned.
+   */
+  sourceChain?: Host[];
+  targetChain?: Host[];
 }
 
 export type AcquireTransferSessionFn = (
@@ -167,6 +175,8 @@ export type AcquireTransferSessionFn = (
   transferId: string,
   /** Connect-time host (session hostname/port/user overrides). Prefer over vault. */
   connectHost?: Host,
+  /** Connect-time jump-host snapshots; undefined re-resolves the live chain. */
+  jumpHosts?: Host[],
 ) => Promise<TransferConnectionLease>;
 
 interface UseSftpDirectoryTransferOpsParams {
@@ -341,10 +351,14 @@ export function useSftpDirectoryTransferOps({
           // Dedicated pool only for remote ends — panel/browse sessions die when
           // the SFTP tab is closed, which freezes global transfer center rows.
           if (acquireTransferSession && !sourceIsLocal && task.sourceHostId) {
-            sourceLease = await acquireTransferSession(task.sourceHostId, task.id, connectHosts?.source);
+            sourceLease = await acquireTransferSession(
+              task.sourceHostId, task.id, connectHosts?.source, connectHosts?.sourceChain,
+            );
           }
           if (acquireTransferSession && !targetIsLocal && task.targetHostId) {
-            targetLease = await acquireTransferSession(task.targetHostId, task.id, connectHosts?.target);
+            targetLease = await acquireTransferSession(
+              task.targetHostId, task.id, connectHosts?.target, connectHosts?.targetChain,
+            );
           }
         };
 

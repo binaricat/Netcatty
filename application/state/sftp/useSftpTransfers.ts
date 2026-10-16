@@ -110,11 +110,29 @@ const toConnectHostForPane = (
 // plan belong to.
 const captureConnectHosts = (
   resolveConnectedHost: UseSftpTransfersParams["resolveConnectedHost"],
+  resolveConnectedChain: UseSftpTransfersParams["resolveConnectedChain"],
   ...panes: SftpPane[]
-): TransferConnectHosts => ({
-  source: panes[0] ? toConnectHostForPane(panes[0], resolveConnectedHost?.(panes[0].id)) : undefined,
-  target: panes[1] ? toConnectHostForPane(panes[1], resolveConnectedHost?.(panes[1].id)) : undefined,
-});
+): TransferConnectHosts => {
+  const captureEndpoint = (
+    pane: SftpPane | undefined,
+  ): { host?: Host; chain?: Host[] } => {
+    if (!pane) return {};
+    const host = toConnectHostForPane(pane, resolveConnectedHost?.(pane.id));
+    if (!host) return {};
+    // Pin only the chain captured with this tab's connection; a later edit of
+    // its bastion hosts must not redirect retained transfers (private
+    // hostnames can resolve differently behind each bastion).
+    return { host, chain: resolveConnectedChain?.(pane.id) ?? undefined };
+  };
+  const source = captureEndpoint(panes[0]);
+  const target = captureEndpoint(panes[1]);
+  return {
+    source: source.host,
+    sourceChain: source.chain,
+    target: target.host,
+    targetChain: target.chain,
+  };
+};
 
 /** Keep the MutableRefObject mirror in sync with the process-global latch set. */
 function syncPausedTasksRef(ref: { current: Set<string> }, taskId: string, latched: boolean) {
@@ -309,6 +327,7 @@ export const useSftpTransfers = ({
   handleSessionError,
   acquireTransferSession,
   resolveConnectedHost,
+  resolveConnectedChain,
 }: UseSftpTransfersParams): UseSftpTransfersResult => {
   const { t } = useI18n();
   const tRef = useRef(t);
@@ -319,12 +338,12 @@ export const useSftpTransfers = ({
   const acquireTransferSessionRef = useRef(acquireTransferSession);
   acquireTransferSessionRef.current = acquireTransferSession;
   const acquireTransferSessionLive = useCallback<NonNullable<UseSftpTransfersParams["acquireTransferSession"]>>(
-    (hostId, transferId, connectHost) => {
+    (hostId, transferId, connectHost, jumpHosts) => {
       const acquire = acquireTransferSessionRef.current;
       if (!acquire) {
         return Promise.reject(new Error("SFTP transfer session acquisition is unavailable"));
       }
-      return acquire(hostId, transferId, connectHost);
+      return acquire(hostId, transferId, connectHost, jumpHosts);
     },
     [],
   );
@@ -810,10 +829,12 @@ export const useSftpTransfers = ({
     // processing starts cannot redirect the transfer away from the endpoint
     // its panes, paths, and plan were captured against.
     const resolvedConnectHosts = connectHostsOverride
-      ?? captureConnectHosts(resolveConnectedHost, sourcePane, targetPane);
+      ?? captureConnectHosts(resolveConnectedHost, resolveConnectedChain, sourcePane, targetPane);
     const connectHosts: TransferConnectHosts = {
       source: toConnectHost(resolvedConnectHosts.source),
+      sourceChain: resolvedConnectHosts.sourceChain,
       target: toConnectHost(resolvedConnectHosts.target),
+      targetChain: resolvedConnectHosts.targetChain,
     };
 
     try {
@@ -823,7 +844,9 @@ export const useSftpTransfers = ({
       const sourceHostId = task.sourceHostId || sourcePane.connection?.hostId;
       const acquireSourceSession = acquireTransferSessionRef.current;
       if (acquireSourceSession && sourceHostId) {
-        sourceWorkLease = await acquireSourceSession(sourceHostId, `${task.id}:work-source`, connectHosts.source);
+        sourceWorkLease = await acquireSourceSession(
+          sourceHostId, `${task.id}:work-source`, connectHosts.source, connectHosts.sourceChain,
+        );
         sourceSftpId = sourceWorkLease.sftpId;
       }
       if (!sourceSftpId) {
@@ -837,7 +860,9 @@ export const useSftpTransfers = ({
       const targetHostId = task.targetHostId || targetPane.connection?.hostId;
       const acquireTargetSession = acquireTransferSessionRef.current;
       if (acquireTargetSession && targetHostId) {
-        targetWorkLease = await acquireTargetSession(targetHostId, `${task.id}:work-target`, connectHosts.target);
+        targetWorkLease = await acquireTargetSession(
+          targetHostId, `${task.id}:work-target`, connectHosts.target, connectHosts.targetChain,
+        );
         targetSftpId = targetWorkLease.sftpId;
       }
       if (!targetSftpId) {
@@ -1403,7 +1428,7 @@ export const useSftpTransfers = ({
       // below: reconnecting either pane to a different endpoint under the same
       // host id while stats are pending must not redirect the transfer — the
       // pane snapshot, task paths, and plan all belong to this endpoint.
-      const connectHosts = captureConnectHosts(resolveConnectedHost, sourcePane, targetPane);
+      const connectHosts = captureConnectHosts(resolveConnectedHost, resolveConnectedChain, sourcePane, targetPane);
 
       const sourcePath = options?.sourcePath ?? sourcePane.connection.currentPath;
       const targetPath = options?.targetPath ?? targetPane.connection.currentPath;

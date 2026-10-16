@@ -191,6 +191,10 @@ export const useSftpState = (
   // Full Host used when each tab connected (includes session-time overrides).
   // Tab ids are stable across reconnect; connection ids are not.
   const connectedHostByTabIdRef = useRef<Map<string, Host | "local">>(new Map());
+  // Resolved jump-host chain captured at connect time, keyed by tab id.
+  // Retained transfers dial through this pinned chain even when one of the
+  // chain's bastion hosts is edited later.
+  const connectedHostChainByTabIdRef = useRef<Map<string, Host[]>>(new Map());
   const connectInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const connectRequestByTabIdRef = useRef<Map<string, symbol>>(new Map());
 
@@ -227,6 +231,7 @@ export const useSftpState = (
       connectedHostByTabIdRef.current.set(resolvedTabId, host);
     } else {
       connectedHostByTabIdRef.current.delete(resolvedTabId);
+      connectedHostChainByTabIdRef.current.delete(resolvedTabId);
     }
   }, [leftTabsRef, rightTabsRef]);
 
@@ -240,6 +245,7 @@ export const useSftpState = (
       connectRequests: connectRequestByTabIdRef.current,
       connectInFlight: connectInFlightRef.current,
       connectedHosts: connectedHostByTabIdRef.current,
+      connectedHostChains: connectedHostChainByTabIdRef.current,
       closeTab: (liveSide) => closeTab(liveSide, tabId),
       releaseConnection: async () => {
         if (!pane?.connection) return;
@@ -318,7 +324,7 @@ export const useSftpState = (
   const resolveBrowseSourceSessionId = options?.resolveBrowseSourceSessionId;
 
   const openPoolSftpSession = useCallback(
-    async (host: Host) => {
+    async (host: Host, jumpHosts?: Host[]) => {
       // Prefer borrowing the live (or parked) terminal SSH transport so MFA is
       // not repeated. Transport leases keep the shared conn alive after the
       // terminal tab closes until the transfer SFTP lease is returned.
@@ -337,7 +343,7 @@ export const useSftpState = (
               knownHosts: transferKnownHosts,
               terminalSettings: transferTerminalSettings,
             },
-            { dedicated: false, sourceSessionId },
+            { dedicated: false, sourceSessionId, jumpHosts },
           );
         } catch (err) {
           logger.debug(
@@ -361,14 +367,14 @@ export const useSftpState = (
           knownHosts: transferKnownHosts,
           terminalSettings: transferTerminalSettings,
         },
-        { dedicated: false },
+        { dedicated: false, jumpHosts },
       );
     },
     [hosts, identities, keys, resolveTransferSourceSessionId, transferKnownHosts, transferTerminalSettings],
   );
 
   const acquireTransferSession = useCallback(
-    async (hostId: string, transferId: string, connectHost?: Host) => {
+    async (hostId: string, transferId: string, connectHost?: Host, jumpHosts?: Host[]) => {
       // Prefer the connect-time Host (terminal session overrides) so pooled
       // uploads open the same endpoint as the browse tab, not the vault entry.
       const host = connectHost && connectHost.id === hostId
@@ -382,7 +388,11 @@ export const useSftpState = (
           `Transfer connect host id mismatch: expected ${hostId}, got ${connectHost.id}`,
         );
       }
-      const poolKey = await transferPoolKeyCache.get(host, () => ({
+      // Chain-pinned acquisitions key the pool-key cache by the chain snapshot
+      // (stable array captured at connect) so they cannot collide with the
+      // vault-resolved entry for the same host object in the WeakMap.
+      const cacheKey = jumpHosts?.length ? jumpHosts : host;
+      const poolKey = await transferPoolKeyCache.get(cacheKey, () => ({
         hostId: host.id,
         hostname: host.hostname,
         port: host.port,
@@ -396,9 +406,10 @@ export const useSftpState = (
           identities,
           knownHosts: transferKnownHosts,
           terminalSettings: transferTerminalSettings,
+          jumpHostsOverride: jumpHosts,
         }),
       }));
-      return transferPoolRef.current.acquire(poolKey, transferId, () => openPoolSftpSession(host));
+      return transferPoolRef.current.acquire(poolKey, transferId, () => openPoolSftpSession(host, jumpHosts));
     },
     [hosts, identities, keys, openPoolSftpSession, transferKnownHosts, transferPoolKeyCache, transferTerminalSettings],
   );
@@ -443,6 +454,7 @@ export const useSftpState = (
     lastConnectedHostRef,
     connectionCacheKeyMapRef,
     connectedHostByTabIdRef,
+    connectedHostChainByTabIdRef,
     connectInFlightRef,
     connectRequestByTabIdRef,
     makeCacheKey,
@@ -558,6 +570,7 @@ export const useSftpState = (
     handleSessionError,
     acquireTransferSession,
     resolveConnectedHost: (tabId) => connectedHostByTabIdRef.current.get(tabId) ?? null,
+    resolveConnectedChain: (tabId) => connectedHostChainByTabIdRef.current.get(tabId) ?? null,
   });
 
   const {
@@ -622,6 +635,7 @@ export const useSftpState = (
       });
     },
     resolveConnectedHost: (tabId) => connectedHostByTabIdRef.current.get(tabId) ?? null,
+    resolveConnectedChain: (tabId) => connectedHostChainByTabIdRef.current.get(tabId) ?? null,
     acquireTransferSession,
     clearDirCacheEntry,
     useCompressedUpload: options?.useCompressedUpload,
