@@ -6,6 +6,7 @@ const OSC_CONTROL_PATTERN = new RegExp(
   'gu',
 );
 const MAX_PROMPT_SECURITY_TAIL_CHARS = 2_048;
+const ALTERNATE_ROW_START_PATTERN = new RegExp(`${ESCAPE_SEQUENCE}\\[[0-9]+;1H`, "gu");
 
 const SENSITIVE_ENGLISH_LABEL = [
   String.raw`pass(?:word|phrase|code)`,
@@ -197,9 +198,13 @@ export function isUntrustedTerminalInputPrompt(
   const prompt = lastLogicalLine(value).trim();
   if (!prompt) return false;
   if (isSensitiveTerminalChallenge(prompt)) return true;
-  // Vim command-mode entry on the alternate screen. A bare `:` on the
-  // primary screen stays fail-closed (`sudo -p ':'`).
-  if (options.alternateScreen && /^:\s*$/.test(prompt)) return false;
+  // Only Vim's bare Ex prompt may use cursor row boundaries. Preserve the
+  // original text for sensitivity checks and every other prompt classifier.
+  // A bare ':' on the primary screen stays fail-closed (`sudo -p ':'`).
+  if (options.alternateScreen) {
+    const alternatePrompt = lastLogicalLine(value.replace(ALTERNATE_ROW_START_PATTERN, "\n")).trim();
+    if (/^:\s*$/.test(alternatePrompt)) return false;
+  }
   if (!/[:：>›»]\s*$/u.test(prompt)) return false;
   // Mid-command punctuation after a real shell prompt must keep broadcasting
   // (#2709). Standalone `Label:` / `Custom>` challenges still fail closed.
