@@ -38,7 +38,17 @@ export const buildSftpHostCredentials = ({
   identities,
   knownHosts,
   terminalSettings,
-}: UseSftpHostCredentialsParams & { host: Host }): NetcattySSHOptions => {
+  jumpHostsOverride,
+}: UseSftpHostCredentialsParams & {
+  host: Host;
+  /**
+   * Connect-time jump-host snapshots. When set, the chain resolves from these
+   * pinned Host objects instead of the live `hosts` array, so leases opened
+   * after a bastion edit keep connecting through the chain the pane's session
+   * dialed — private hostnames can resolve differently per bastion.
+   */
+  jumpHostsOverride?: Host[];
+}): NetcattySSHOptions => {
   const globalTerminalSettings = { ...FALLBACK_TERMINAL_SETTINGS, ...(terminalSettings ?? {}) };
   if (host.proxyProfileId && !host.proxyConfig) {
     throw new Error(`Saved proxy for host "${host.label || host.hostname}" is missing. Open host settings and select a valid proxy.`);
@@ -57,12 +67,21 @@ export const buildSftpHostCredentials = ({
     ? resolveProxyConfigAuth(host.proxyConfig, identities)
     : undefined;
   let jumpHosts: NetcattyJumpHost[] | undefined;
-  if (host.hostChain?.hostIds && host.hostChain.hostIds.length > 0) {
-    jumpHosts = host.hostChain.hostIds.map((hostId) => {
-      const jumpHost = hosts.find((candidate) => candidate.id === hostId);
-      if (!jumpHost) {
-        throw new Error(`Jump host "${hostId}" is missing. Open host settings and repair the jump host chain.`);
-      }
+  const resolveChainHost = (hostId: string): Host => {
+    const jumpHost = hosts.find((candidate) => candidate.id === hostId);
+    if (!jumpHost) {
+      throw new Error(`Jump host "${hostId}" is missing. Open host settings and repair the jump host chain.`);
+    }
+    return jumpHost;
+  };
+  // A non-empty pinned chain snapshot wins over live hostChain resolution.
+  const chainHosts: Host[] | null = jumpHostsOverride && jumpHostsOverride.length > 0
+    ? jumpHostsOverride
+    : host.hostChain?.hostIds && host.hostChain.hostIds.length > 0
+      ? host.hostChain.hostIds.map(resolveChainHost)
+      : null;
+  if (chainHosts) {
+    jumpHosts = chainHosts.map((jumpHost, index) => {
       if (jumpHost.proxyProfileId && !jumpHost.proxyConfig) {
         throw new Error(`Saved proxy for jump host "${jumpHost.label || jumpHost.hostname}" is missing. Open host settings and select a valid proxy.`);
       }
@@ -72,8 +91,6 @@ export const buildSftpHostCredentials = ({
       if (findIncompleteProxyIdentityId(jumpHost.proxyConfig, identities)) {
         throw new Error(formatIncompleteProxyIdentityMessage(jumpHost.label || jumpHost.hostname));
       }
-      return jumpHost;
-    }).map((jumpHost, index) => {
       const jumpAuth = resolveHostAuth({
         host: jumpHost,
         keys,

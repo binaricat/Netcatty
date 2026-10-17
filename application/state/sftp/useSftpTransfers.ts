@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction 
 import {
   FileConflict,
   FileConflictAction,
+  Host,
   SftpFilenameEncoding,
   TransferDirection,
   TransferStatus,
@@ -25,7 +26,10 @@ import { logger } from "../../../lib/logger";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 import { SftpPane } from "./types";
 import { isMissingStatError } from "./errors";
-import { useSftpDirectoryTransferOps } from "./transferDirectoryOps";
+import {
+  useSftpDirectoryTransferOps,
+  type TransferConnectHosts,
+} from "./transferDirectoryOps";
 import { useSftpTransferConflictOps } from "./transferConflictOps";
 import { useSftpTransferTaskOps } from "./transferTaskOps";
 import { globalSftpTransferScheduler } from "./globalTransferScheduler";
@@ -77,6 +81,78 @@ const STAT_SFTP_TIMEOUT_MS = 10_000;
 // makes the bridge measure the live size anyway).
 export const PREFLIGHT_STAT_CONCURRENCY = 8;
 export const PREFLIGHT_STAT_MAX_FILES = 128;
+
+// A "local" or missing resolved host means the dedicated pool should fall
+// back to the saved vault host; only a concrete Host pins the endpoint.
+const toConnectHost = (host: Host | "local" | null | undefined): Host | undefined =>
+  host && host !== "local" ? host : undefined;
+
+// Stable identity of a pinned proxy transport. Two endpoints sharing
+// id/hostname/port/username can still dial through different proxies after an
+// edit; remote DNS behind each proxy may resolve the same hostname to a
+// different server, so a same-host `cp` pinned to the source route could write
+// on the wrong one.
+const proxyIdentity = (p: Host["proxyConfig"]): string =>
+  p
+    ? JSON.stringify([p.type, p.host, p.port, p.command ?? "", p.identityId ?? "", p.username ?? "", p.password ?? ""])
+    : "";
+
+// Stable identity of a pinned jump chain. buildCacheKey omits the chain, so
+// two panes on the same saved host can share a cache key while pinning
+// different bastion routes (e.g. one connected before a jump-host edit, one
+// after) — those routes may reach different servers. Compare identities, not
+// just cache keys, before allowing any same-host optimization. proxyConfig
+// must be part of the identity: buildSftpHostCredentials forwards it as the
+// hop's proxy transport, so two hops sharing id/hostname/port/username can
+// still dial through different proxies after an edit.
+const chainIdentity = (chain: Host[] | undefined): string =>
+  (chain ?? []).map(h => `${h.id}@${h.hostname}:${h.port ?? ""}:${h.username}:${proxyIdentity(h.proxyConfig)}`).join("→");
+
+// Only pin a concrete endpoint while the pane's live connection still belongs
+// to it. connect() records the incoming tab host before it awaits closure of
+// the old session and replaces the pane's connection, so during that window a
+// transfer must not capture endpoint B while its pane snapshot, task paths,
+// and plan still belong to endpoint A; the pool then falls back to the saved
+// vault host for the pane's own hostId (mirrors resolveSftpReconnectHost's
+// tab-host-vs-connection guard).
+const toConnectHostForPane = (
+  pane: SftpPane,
+  host: Host | "local" | null | undefined,
+): Host | undefined => {
+  const connection = pane.connection;
+  if (!connection || connection.isLocal) return undefined;
+  return host && host !== "local" && host.id === connection.hostId ? host : undefined;
+};
+
+// Snapshot the panes' connect-time endpoints. Called before any preflight
+// await: tab ids survive reconnect, so resolving this map later can return a
+// different endpoint than the one the pane snapshot, task paths, and transfer
+// plan belong to.
+const captureConnectHosts = (
+  resolveConnectedHost: UseSftpTransfersParams["resolveConnectedHost"],
+  resolveConnectedChain: UseSftpTransfersParams["resolveConnectedChain"],
+  ...panes: SftpPane[]
+): TransferConnectHosts => {
+  const captureEndpoint = (
+    pane: SftpPane | undefined,
+  ): { host?: Host; chain?: Host[] } => {
+    if (!pane) return {};
+    const host = toConnectHostForPane(pane, resolveConnectedHost?.(pane.id));
+    if (!host) return {};
+    // Pin only the chain captured with this tab's connection; a later edit of
+    // its bastion hosts must not redirect retained transfers (private
+    // hostnames can resolve differently behind each bastion).
+    return { host, chain: resolveConnectedChain?.(pane.id) ?? undefined };
+  };
+  const source = captureEndpoint(panes[0]);
+  const target = captureEndpoint(panes[1]);
+  return {
+    source: source.host,
+    sourceChain: source.chain,
+    target: target.host,
+    targetChain: target.chain,
+  };
+};
 
 /** Keep the MutableRefObject mirror in sync with the process-global latch set. */
 function syncPausedTasksRef(ref: { current: Set<string> }, taskId: string, latched: boolean) {
@@ -187,6 +263,8 @@ export const useSftpTransfers = ({
   listRemoteFiles,
   handleSessionError,
   acquireTransferSession,
+  resolveConnectedHost,
+  resolveConnectedChain,
 }: UseSftpTransfersParams): UseSftpTransfersResult => {
   const { t } = useI18n();
   const tRef = useRef(t);
@@ -476,6 +554,8 @@ export const useSftpTransfers = ({
     sourcePane: SftpPane,
     targetPane: SftpPane,
     targetSide: "left" | "right",
+    /** Connect-time endpoint snapshot captured before any preflight await. */
+    connectHostsOverride?: TransferConnectHosts,
   ): Promise<TransferStatus> => {
     if (cancelledTasksRef.current.has(task.id)) {
       return "cancelled";
@@ -534,7 +614,7 @@ export const useSftpTransfers = ({
 
       let walkStatus: TransferStatus = "transferring";
       await transferRuntime.runWalk(task.id, async () => {
-        walkStatus = await processTransferBody(task, sourcePane, targetPane, targetSide, updateTask);
+        walkStatus = await processTransferBody(task, sourcePane, targetPane, targetSide, updateTask, connectHostsOverride);
       });
       return walkStatus;
     });
@@ -546,6 +626,8 @@ export const useSftpTransfers = ({
     targetPane: SftpPane,
     targetSide: "left" | "right",
     updateTask: (updates: Partial<TransferTask>) => void,
+    /** Connect-time endpoint snapshot. Undefined re-resolves the live map. */
+    connectHostsOverride?: TransferConnectHosts,
   ): Promise<TransferStatus> => {
 
     // Initialize encoding early to avoid temporal dead zone issues
@@ -597,13 +679,29 @@ export const useSftpTransfers = ({
       && sourceCacheKey === targetCacheKey
     );
 
+    // Keep the pane's connect-time endpoint even when its saved host is edited.
+    // startTransfer snapshots both hosts before its preflight await so a
+    // reconnect (same tab id, same host id, different endpoint) pending when
+    // processing starts cannot redirect the transfer away from the endpoint
+    // its panes, paths, and plan were captured against.
+    const resolvedConnectHosts = connectHostsOverride
+      ?? captureConnectHosts(resolveConnectedHost, resolveConnectedChain, sourcePane, targetPane);
+    const connectHosts: TransferConnectHosts = {
+      source: toConnectHost(resolvedConnectHosts.source),
+      sourceChain: resolvedConnectHosts.sourceChain,
+      target: toConnectHost(resolvedConnectHosts.target),
+      targetChain: resolvedConnectHosts.targetChain,
+    };
+
     try {
     // Prefer dedicated work leases for remote ends so folder walks/listings
     // survive browse park and tab hide (pool holders, not panel map ids).
     if (!sourcePane.connection?.isLocal) {
       const sourceHostId = task.sourceHostId || sourcePane.connection?.hostId;
       if (acquireTransferSession && sourceHostId) {
-        sourceWorkLease = await acquireTransferSession(sourceHostId, `${task.id}:work-source`);
+        sourceWorkLease = await acquireTransferSession(
+          sourceHostId, `${task.id}:work-source`, connectHosts.source, connectHosts.sourceChain,
+        );
         sourceSftpId = sourceWorkLease.sftpId;
       }
       if (!sourceSftpId) {
@@ -616,7 +714,9 @@ export const useSftpTransfers = ({
     if (!targetPane.connection?.isLocal) {
       const targetHostId = task.targetHostId || targetPane.connection?.hostId;
       if (acquireTransferSession && targetHostId) {
-        targetWorkLease = await acquireTransferSession(targetHostId, `${task.id}:work-target`);
+        targetWorkLease = await acquireTransferSession(
+          targetHostId, `${task.id}:work-target`, connectHosts.target, connectHosts.targetChain,
+        );
         targetSftpId = targetWorkLease.sftpId;
       }
       if (!targetSftpId) {
@@ -625,7 +725,20 @@ export const useSftpTransfers = ({
       }
     }
 
-    const sameHost = sameHostEndpoints && !!sourceSftpId && !!targetSftpId;
+    // The cache-key equality above omits the jump chain. When the two pinned
+    // chains differ (a bastion edit between the panes' connect times), the
+    // "same" saved host may resolve to different servers behind each bastion;
+    // a same-host `cp` would then write on the source-side server. Treat the
+    // transfer as cross-host unless the pinned routes match (both undefined =
+    // both direct, which is equal).
+    const sameHostPinnedChains = chainIdentity(connectHosts.sourceChain) === chainIdentity(connectHosts.targetChain);
+    // buildCacheKey also omits the endpoint's own top-level proxyConfig, and a
+    // proxy edit between the panes' connect times changes the transport (and
+    // possibly the resolved server) without moving the cache key. Compare the
+    // pinned top-level proxy identities too; undefined on both sides means
+    // both dial directly, which is equal.
+    const sameHostPinnedProxies = proxyIdentity(connectHosts.source?.proxyConfig) === proxyIdentity(connectHosts.target?.proxyConfig);
+    const sameHost = sameHostEndpoints && sameHostPinnedChains && sameHostPinnedProxies && !!sourceSftpId && !!targetSftpId;
 
     // Returns the discovered stat so callers that need the size (e.g. the
     // overwrite conflict dialog) can await this instead of reading stale
@@ -895,7 +1008,7 @@ export const useSftpTransfers = ({
                 : t,
             ),
           );
-          return processTransfer(updatedTask, sourcePane, targetPane, targetSide);
+          return processTransfer(updatedTask, sourcePane, targetPane, targetSide, connectHostsOverride);
         }
 
         if (cancelledTasksRef.current.has(task.id)) return "cancelled";
@@ -977,6 +1090,7 @@ export const useSftpTransfers = ({
           targetEncoding,
           task.id, // rootTaskId - this is the top-level task
           sameHost,
+          0, false, undefined, undefined, connectHosts,
         );
 
         if (dirErrors > 0) {
@@ -1024,6 +1138,7 @@ export const useSftpTransfers = ({
           targetEncoding,
           task.id, // rootTaskId - this is the top-level task
           sameHost,
+          connectHosts,
         );
       }
 
@@ -1163,6 +1278,12 @@ export const useSftpTransfers = ({
       const targetPane = getActivePane(targetSide);
 
       if (!sourcePane?.connection || !targetPane?.connection) return [];
+
+      // Capture the connect-time endpoints before the preflight stat await
+      // below: reconnecting either pane to a different endpoint under the same
+      // host id while stats are pending must not redirect the transfer — the
+      // pane snapshot, task paths, and plan all belong to this endpoint.
+      const connectHosts = captureConnectHosts(resolveConnectedHost, resolveConnectedChain, sourcePane, targetPane);
 
       const sourcePath = options?.sourcePath ?? sourcePane.connection.currentPath;
       const targetPath = options?.targetPath ?? targetPane.connection.currentPath;
@@ -1391,7 +1512,7 @@ export const useSftpTransfers = ({
       }
 
       const results = await Promise.all(runnableTasks.map(async (task): Promise<TransferResult> => {
-        const status = await processTransfer(task, sourcePane, targetPane, targetSide);
+        const status = await processTransfer(task, sourcePane, targetPane, targetSide, connectHosts);
         return {
           id: task.id,
           fileName: task.fileName,
@@ -1402,8 +1523,10 @@ export const useSftpTransfers = ({
 
       return [...skippedResults, ...results];
     },
+    // Saved host edits replace acquisition; new transfers must not retain the old endpoint.
+    // Already-running attempts keep the leases they acquired.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [getActivePane, getPaneByConnectionId, getTabByConnectionId, sftpSessionsRef, updateTab],
+    [getActivePane, getPaneByConnectionId, getTabByConnectionId, sftpSessionsRef, updateTab, acquireTransferSession, resolveConnectedHost],
   );
 
   const cancelTransfer = useCallback(

@@ -42,6 +42,12 @@ interface UseSftpConnectionsParams {
   lastConnectedHostRef: MutableRefObject<{ left: Host | "local" | null; right: Host | "local" | null }>;
   connectionCacheKeyMapRef: MutableRefObject<Map<string, string>>;
   connectedHostByTabIdRef: MutableRefObject<Map<string, Host | "local">>;
+  /**
+   * Jump-host chain snapshots captured when each tab connected, keyed by tab
+   * id. Same lifecycle as connectedHostByTabIdRef; used to keep transfer
+   * session opens on the pane's connect-time bastion chain after chain edits.
+   */
+  connectedHostChainByTabIdRef?: MutableRefObject<Map<string, Host[]>>;
   connectInFlightRef: MutableRefObject<Map<string, Promise<void>>>;
   connectRequestByTabIdRef: MutableRefObject<Map<string, symbol>>;
   makeCacheKey: (connectionId: string, path: string, encoding?: SftpFilenameEncoding) => string;
@@ -415,12 +421,15 @@ export async function closeSftpTabLifecycle(params: {
   connectRequests: Map<string, symbol>;
   connectInFlight: Map<string, Promise<void>>;
   connectedHosts: { delete: (tabId: string) => boolean };
+  /** Connect-time jump-host chain snapshots, same tab-id lifecycle. */
+  connectedHostChains?: { delete: (tabId: string) => boolean };
   closeTab: (side: "left" | "right") => void;
   releaseConnection: () => Promise<void>;
 }): Promise<void> {
   invalidateSftpTabConnectRequest(params.connectRequests, params.tabId);
   clearSftpConnectInFlightForTab(params.connectInFlight, params.tabId);
   params.connectedHosts.delete(params.tabId);
+  params.connectedHostChains?.delete(params.tabId);
   applyToLiveSftpTabSide({
     requestedSide: params.requestedSide,
     tabId: params.tabId,
@@ -581,6 +590,7 @@ export const useSftpConnections = ({
   lastConnectedHostRef,
   connectionCacheKeyMapRef,
   connectedHostByTabIdRef,
+  connectedHostChainByTabIdRef,
   connectInFlightRef,
   connectRequestByTabIdRef,
   makeCacheKey,
@@ -863,6 +873,24 @@ export const useSftpConnections = ({
       // Always remember the full connect-time Host for this tab so background
       // upload reconnects can restore session-time overrides (not just vault hostId).
       connectedHostByTabIdRef.current.set(activeTabId, host);
+      // Snapshot the resolved jump-host chain so retained transfer leases keep
+      // dialing the chain this tab connected through, even after one of the
+      // bastion hosts is edited (private hostnames can resolve differently
+      // per bastion — the live chain must not silently replace this one).
+      if (connectedHostChainByTabIdRef) {
+        if (host !== "local" && host.hostChain?.hostIds?.length) {
+          const chain = host.hostChain.hostIds
+            .map((chainId) => hosts.find((candidate) => candidate.id === chainId))
+            .filter((candidate): candidate is Host => !!candidate);
+          if (chain.length === host.hostChain.hostIds.length) {
+            connectedHostChainByTabIdRef.current.set(activeTabId, chain);
+          } else {
+            connectedHostChainByTabIdRef.current.delete(activeTabId);
+          }
+        } else {
+          connectedHostChainByTabIdRef.current.delete(activeTabId);
+        }
+      }
       // Store the cache key for this connection so pane actions can look it up
       // by connectionId instead of relying on the per-side lastConnectedHostRef.
       if (host !== "local") {
@@ -1426,6 +1454,7 @@ export const useSftpConnections = ({
 
           lastConnectedHostRef.current[side] = null;
           connectedHostByTabIdRef.current.delete(activeTabId);
+          connectedHostChainByTabIdRef?.current.delete(activeTabId);
 
           if (pane.connection && !pane.connection.isLocal && sftpId) {
             try {

@@ -33,6 +33,12 @@ export interface UseSftpExternalOperationsParams {
    */
   resolveConnectedHost?: (tabId: string) => Host | "local" | null | undefined;
   /**
+   * Jump-host chain snapshots captured when the tab connected, keyed by tab id.
+   * Lets pooled uploads keep dialing the pane's connect-time bastion chain
+   * after a chain host is edited.
+   */
+  resolveConnectedChain?: (tabId: string) => Host[] | null | undefined;
+  /**
    * FileZilla-style dedicated transfer sessions for bulk uploads.
    * When set, remote stream uploads prefer pool connections (1–2/host)
    * over the browse session so interactive listing stays responsive.
@@ -41,6 +47,7 @@ export interface UseSftpExternalOperationsParams {
     hostId: string,
     transferId: string,
     connectHost?: Host,
+    connectChain?: Host[],
   ) => Promise<{ sftpId: string; release: () => void; discard: () => void }>;
   clearDirCacheEntry?: (connectionId: string, path: string) => void;
   useCompressedUpload?: boolean;

@@ -133,6 +133,11 @@ export type OpenTransferSftpSessionOptions = {
    * credentials. When false, try sourceSessionId first (shared transport).
    */
   dedicated?: boolean;
+  /**
+   * Connect-time jump-host snapshots. When set, this session dials through the
+   * pinned chain the pane connected with, not the live (possibly edited) chain.
+   */
+  jumpHosts?: Host[];
 };
 
 /**
@@ -159,6 +164,7 @@ export async function openTransferSftpSession(
       identities: [...deps.identities],
       knownHosts: deps.knownHosts ? [...deps.knownHosts] : undefined,
       terminalSettings: deps.terminalSettings,
+      jumpHostsOverride: options?.jumpHosts,
     });
     // Shared transport path: open an SFTP channel on the already-authenticated
     // terminal connection. The transport registry lease keeps the conn alive
