@@ -12,6 +12,38 @@ export type PromptLineBreakState = {
   pendingCommand: boolean;
   suppressNextPromptCache: boolean;
   pendingCommandCompletions: number;
+  /**
+   * Submissions that invalidated the live cwd and still owe a confirmed shell
+   * completion. Armed on every cwd-invalidating submission (not only trusted
+   * shell prompts), so unconfirmed prompts such as `sftp>` also publish cwd.
+   */
+  pendingCwdCompletions: number;
+  /**
+   * One-shot re-probe armed after a prompt-shaped publication: the
+   * publication (plain-prompt fallback, armed re-probe, or OSC 133;D
+   * confirmation) can be forged by command output, so the next empty prompt
+   * re-probes to correct a stale published value.
+   */
+  cwdRepublishPending: boolean;
+  /**
+   * How many re-probe generations the current chain consumed. A fresh
+   * fallback or OSC 133;D publication restarts the chain; consuming an armed
+   * re-probe advances it. The cap keeps a command that endlessly prints
+   * prompt-shaped chunks from requesting an unlimited number of backend reads.
+   */
+  cwdRepublishDepth: number;
+  /**
+   * Set while the shell keeps sending OSC 133;D completion markers. While it
+   * holds, the plain prompt fallback never publishes cwd — the per-command D
+   * marker is the only event that can correlate the finishes of queued
+   * commands one by one (a prompt cannot, and other OSC 133 payloads can be
+   * forged by arbitrary command output — so can a D printed by a child, which
+   * is why its confirmed publication stays untrusted). The flag degrades back
+   * to heuristic fallback when a bare prompt arrives for an outstanding
+   * command without its D marker (e.g. after stepping into a nested
+   * non-integrated shell), and re-arms on the next D marker.
+   */
+  shellCompletionProtocolSeen: boolean;
 };
 
 type VisibleTextMap = {
@@ -462,6 +494,10 @@ export function createPromptLineBreakState(): PromptLineBreakState {
     pendingCommand: false,
     suppressNextPromptCache: false,
     pendingCommandCompletions: 0,
+    pendingCwdCompletions: 0,
+    cwdRepublishPending: false,
+    cwdRepublishDepth: 0,
+    shellCompletionProtocolSeen: false,
   };
 }
 
@@ -488,6 +524,93 @@ export function consumeOsc133CommandCompletion(
   state: PromptLineBreakState | undefined,
 ): boolean {
   return data.split(";", 1)[0] === "D" && consumeTerminalCommandCompletion(state);
+}
+
+export function markOsc133CompletionProtocol(
+  data: string,
+  state: PromptLineBreakState | undefined,
+): void {
+  // Only the D (command completed) marker proves the shell's completion
+  // protocol. Other OSC 133 payloads (A/B/C) can be forged by arbitrary
+  // command output on a non-integrated shell, and a stray A that never gets
+  // its D would permanently disable the plain-prompt fallback while cwd
+  // completions stay pending.
+  if (data.split(";", 1)[0] !== "D") return;
+  if (state) state.shellCompletionProtocolSeen = true;
+}
+
+/** Arm cwd publication after a submission invalidated the live cwd. */
+export function markTerminalCwdCompletionPending(
+  stateRef?: RefObject<PromptLineBreakState>,
+): void {
+  if (!stateRef?.current) return;
+  stateRef.current.pendingCwdCompletions = Math.min(
+    64,
+    stateRef.current.pendingCwdCompletions + 1,
+  );
+}
+
+/**
+ * Consume one cwd completion for an OSC 133;D. Returns true only when this
+ * completion finished the last outstanding cwd-invalidating command, i.e. the
+ * moment a cwd publication is safe.
+ */
+export function consumeOsc133CwdCompletion(
+  data: string,
+  state: PromptLineBreakState | undefined,
+): boolean {
+  if (data.split(";", 1)[0] !== "D") return false;
+  if (!state || state.pendingCwdCompletions < 1) return false;
+  state.pendingCwdCompletions -= 1;
+  return state.pendingCwdCompletions === 0;
+}
+
+/**
+ * Plain-prompt fallback for cwd completion. Publishes only for a single
+ * outstanding command and only while the shell shows no OSC 133 completion
+ * protocol (where the per-command D marker correlates queued completions one
+ * by one, which a prompt cannot). Prompt-shaped command output cannot be told
+ * apart from a real prompt here, so the confirmation stays
+ * heuristic and callers keep a re-probe armed to self-correct.
+ *
+ * The protocol flag also degrades when a bare prompt arrives for a single
+ * outstanding command without its D marker: the shell may have stopped
+ * reporting completions after the operator stepped into a nested
+ * non-integrated shell (sh, su, sudo -s), where the pending completion would
+ * otherwise never drain. A later D marker re-arms the protocol.
+ */
+export function drainTerminalCwdCompletions(
+  term: XTerm,
+  state: PromptLineBreakState | undefined,
+): boolean {
+  if (!state || state.pendingCwdCompletions < 1) return false;
+  if (state.shellCompletionProtocolSeen) {
+    if (state.pendingCwdCompletions !== 1 || !isAtEmptyPromptForCompletion(term)) {
+      return false;
+    }
+    state.shellCompletionProtocolSeen = false;
+  } else if (!isAtEmptyPromptForCompletion(term)) {
+    return false;
+  }
+  const outstanding = state.pendingCwdCompletions;
+  state.pendingCwdCompletions = 0;
+  return outstanding === 1;
+}
+
+const isAtEmptyPromptForCompletion = (term: XTerm): boolean => {
+  const prompt = detectPrompt(term);
+  return prompt.isAtPrompt && prompt.userInput.length === 0;
+};
+
+/** Consume the one-shot re-probe armed after a fallback cwd publication. */
+export function consumeTerminalCwdRepublish(
+  term: XTerm,
+  state: PromptLineBreakState | undefined,
+): boolean {
+  if (!state || !state.cwdRepublishPending) return false;
+  if (!isAtEmptyPromptForCompletion(term)) return false;
+  state.cwdRepublishPending = false;
+  return true;
 }
 
 export function detectTerminalCommandCompletions(

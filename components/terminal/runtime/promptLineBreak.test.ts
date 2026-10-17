@@ -3,12 +3,17 @@ import assert from "node:assert/strict";
 
 import {
   consumeOsc133CommandCompletion,
+  consumeOsc133CwdCompletion,
+  consumeTerminalCwdRepublish,
   createPromptLineBreakState,
   detectTerminalCommandCompletions,
+  drainTerminalCwdCompletions,
   findTerminalPromptSourceChunkVisibleStarts,
   insertPromptLineBreakBeforePrompt,
+  markOsc133CompletionProtocol,
   markPromptLineBreakCommandPending,
   markTerminalCommandCompletionPending,
+  markTerminalCwdCompletionPending,
   prepareTerminalDataForPromptLineBreak,
   syncPromptLineBreakState,
 } from "./promptLineBreak";
@@ -1231,4 +1236,74 @@ test("finds prompt starts on the display string after identity transforms", () =
     ["file tail".length],
   );
   assert.deepEqual(starts, ["file tail".length]);
+});
+
+test("cwd completion arms on every invalidated submission and publishes only for a single outstanding command", () => {
+  const state = createPromptLineBreakState();
+  const stateRef = { current: state };
+  markTerminalCwdCompletionPending(stateRef);
+  markTerminalCwdCompletionPending(stateRef);
+
+  // Prompt-shaped command output must not confirm a queued batch...
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ ") as never, state), false);
+  assert.equal(state.pendingCwdCompletions, 0, "ambiguous batch drain drops markers without confirming");
+  // ...and it never consumes markers that belong to OSC 133 confirmation.
+  markTerminalCwdCompletionPending(stateRef);
+  state.shellCompletionProtocolSeen = true;
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ echo pending") as never, state), false, "a prompt with user input is not evidence the protocol fell silent");
+  assert.equal(state.pendingCwdCompletions, 1, "OSC 133 shells keep the marker for the authoritative D");
+  // A bare prompt for a single outstanding command without its D marker means
+  // the shell stopped reporting completions (nested non-integrated shell), so
+  // the heuristic fallback degrades the protocol flag and confirms.
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ ") as never, state), true);
+  assert.equal(state.pendingCwdCompletions, 0);
+  assert.equal(state.shellCompletionProtocolSeen, false, "a bare prompt with an outstanding completion degrades the protocol flag");
+
+  // ...but the protocol stays intact while no bare prompt arrives.
+  markTerminalCwdCompletionPending(stateRef);
+  state.shellCompletionProtocolSeen = true;
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ echo pending") as never, state), false);
+  assert.equal(state.pendingCwdCompletions, 1);
+  assert.equal(state.shellCompletionProtocolSeen, true, "non-prompt output must not degrade the protocol flag");
+  state.shellCompletionProtocolSeen = false;
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ ") as never, state), true);
+
+  // A single outstanding command still confirms at an empty prompt.
+  markTerminalCwdCompletionPending(stateRef);
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ echo pending") as never, state), false);
+  assert.equal(state.pendingCwdCompletions, 1);
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ ") as never, state), true);
+  assert.equal(state.pendingCwdCompletions, 0);
+});
+
+test("OSC 133 cwd completion publishes only when the last outstanding command finishes", () => {
+  const state = createPromptLineBreakState();
+  const stateRef = { current: state };
+  markTerminalCwdCompletionPending(stateRef);
+  markTerminalCwdCompletionPending(stateRef);
+
+  assert.equal(consumeOsc133CwdCompletion("C", state), false);
+  assert.equal(consumeOsc133CwdCompletion("D;0", state), false, "queued commands keep the marker pending");
+  assert.equal(state.pendingCwdCompletions, 1);
+  assert.equal(consumeOsc133CwdCompletion("D;1", state), true);
+  assert.equal(state.pendingCwdCompletions, 0);
+  assert.equal(consumeOsc133CwdCompletion("D;0", state), false);
+  assert.equal(markOsc133CompletionProtocol("A", state), undefined);
+  assert.equal(state.shellCompletionProtocolSeen, false, "a stray OSC 133;A does not count as the completion protocol");
+  assert.equal(markOsc133CompletionProtocol("D;0", state), undefined);
+  assert.equal(state.shellCompletionProtocolSeen, true);
+});
+
+test("the fallback publication arms a one-shot re-probe that survives non-prompt output", () => {
+  const state = createPromptLineBreakState();
+  const stateRef = { current: state };
+  markTerminalCwdCompletionPending(stateRef);
+
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ ") as never, state), true);
+  state.cwdRepublishPending = true;
+  assert.equal(consumeTerminalCwdRepublish(createFakeTerm("output$ wait") as never, state), false);
+  assert.equal(state.cwdRepublishPending, true, "non-prompt chunks keep the re-probe armed");
+  assert.equal(consumeTerminalCwdRepublish(createFakeTerm("$ ") as never, state), true);
+  assert.equal(state.cwdRepublishPending, false);
+  assert.equal(consumeTerminalCwdRepublish(createFakeTerm("$ ") as never, state), false);
 });

@@ -262,7 +262,10 @@ export type TerminalSessionStartersContext = {
     hostLabel: string,
     sessionId: string,
   ) => void;
-  onCommandCompleted?: () => void;
+  /** True only when this completion confirms the last outstanding cwd-invalidating command.
+   *  `commandCompleted` defaults to true; the runtime passes false only for a
+   *  cwd-only publication that did not consume a command completion marker. */
+  onCommandCompleted?: (cwdCompletionConfirmed?: boolean, commandCompleted?: boolean) => void;
 };
 
 export type TerminalSessionDataMeta = {

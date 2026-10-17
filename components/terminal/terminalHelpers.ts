@@ -217,6 +217,7 @@ export interface TerminalProps {
     hostLabel: string,
     sessionId: string,
   ) => void;
+  onCommandCompleted?: (sessionId: string) => void;
   onSplitHorizontal?: () => void;
   onSplitVertical?: () => void;
   onOpenSftp?: (
