@@ -634,6 +634,7 @@ export const esVaultMessages: Messages = {
   'sftp.upload.currentFile': 'Actual: {fileName}',
   'sftp.upload.cancelled': 'Subida cancelada',
   'sftp.upload.noFiles': 'No hay archivos para subir',
+  'sftp.upload.virtualFolderError': 'No se pueden subir carpetas arrastradas desde una ventana de archivo comprimido. Extrae el archivo a una carpeta normal y vuelve a subirlo.',
   'sftp.upload.partialSuccess': 'Se subieron {success} archivo(s); {failed} fallaron',
   'sftp.upload.cancel': 'Cancelar',
   'sftp.upload.completedToPath': 'Subido a {path}',

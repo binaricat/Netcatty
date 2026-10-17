@@ -676,6 +676,7 @@ export const ruVaultMessages: Messages = {
   'sftp.upload.currentFile': 'Текущий: {fileName}',
   'sftp.upload.cancelled': 'Загрузка отменена',
   'sftp.upload.noFiles': 'Нет файлов для загрузки',
+  'sftp.upload.virtualFolderError': 'Нельзя загрузить папку, перетащенную из окна архива. Сначала распакуйте архив в обычную папку и загрузите её.',
   'sftp.upload.partialSuccess': 'Загружено: {success}; ошибок: {failed}',
   'sftp.upload.cancel': 'Отмена',
   'sftp.upload.completedToPath': 'Загружено в {path}',
