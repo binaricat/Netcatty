@@ -811,8 +811,8 @@ export const useSftpTransfers = ({
       })();
 
       // For single files: start size discovery without blocking the conflict
-      // check, but keep the promise so an actual conflict can await fresh
-      // size metadata before the dialog is shown.
+      // check, but always settle the promise before any dialog or transfer
+      // launch (bounded per-task; the task is already visible/cancellable).
       const sizeDiscoveryPromise = task.isDirectory ? null : discoverTransferSize();
 
       // Only await conflict check (fast single stat call)
@@ -823,19 +823,23 @@ export const useSftpTransfers = ({
       // null means the plan size is still unknown. A verified 0-byte stat is 0,
       // not null, so an empty file does not pick up a stale listing size.
       let verifiedPlanBytes: number | null = task.totalBytes > 0 ? task.totalBytes : null;
-      if (conflict && sizeDiscoveryPromise) {
+      if (sizeDiscoveryPromise) {
         // The task's totalBytes may still be 0 here because discovery ran
         // deferred and updateTask never mutates the local task copy. Await
-        // discovery (bounded per-task; the task is already visible/cancellable)
-        // so the overwrite dialog shows the real source size, not 0 (#3559).
+        // discovery even without a conflict so its statLocal updateTask cannot
+        // resolve after the transfer finished and overwrite the bridge's
+        // authoritative total with a stale late size (the conflict dialog also
+        // needs it: #3559).
         const discovered = await sizeDiscoveryPromise;
         // Cancel during this stat must win before an apply-to-all Replace
         // deletes an existing symlink.
         if (cancelledTasksRef.current.has(task.id)) return "cancelled";
         if (discovered && discovered.size >= 0) {
-          conflict.newSize = discovered.size;
-          if (discovered.lastModified) conflict.newModified = discovered.lastModified;
-          if (discovered.plan) verifiedPlanBytes = discovered.size;
+          if (conflict) {
+            conflict.newSize = discovered.size;
+            if (discovered.lastModified) conflict.newModified = discovered.lastModified;
+            if (discovered.plan) verifiedPlanBytes = discovered.size;
+          }
         }
       }
 
@@ -1267,25 +1271,24 @@ export const useSftpTransfers = ({
         // Prefer the fresh re-stat for remote files: a cached listing size can
         // be stale and undersized, which would silently truncate downloads
         // (#3559). Remote files without a live stat use plan 0 so the bridge
-        // measures the live size; local sources keep the pane metadata.
+        // measures the live size. Local files also start unknown so deferred
+        // discovery reads their current size after edits, not the cached listing.
         const fileEntry = fileEntryMap?.get(file.name);
         const freshMetadata = freshRemoteMetadata.get(file.name);
         const fileSize = file.isDirectory
           ? 0
           : freshMetadata
             ? freshMetadata.size
-            : sourcePane.connection!.isLocal
-              ? (fileEntry?.size ?? 0)
-              : 0;
-        // Only keep an mtime that is paired with trusted metadata (live re-stat,
-        // local source size, or directory totals). A remote file whose re-stat
-        // failed must stay fully unknown (size 0 AND mtime 0 in the plan):
+            : 0;
+        // Only keep an mtime paired with a live re-stat or directory totals.
+        // A file without a live stat must stay fully unknown
+        // (size 0 AND mtime 0 in the plan):
         // discoverTransferSize and the conflict check both treat a nonzero
         // sourceLastModified as proof the size is already known, so a stale
         // mtime would suppress the deferred source re-stat. The overwrite
         // dialog still gets the pane listing's cached entry via
         // discoverTransferSize's cachedListingStatForDialog fallback.
-        const sourceLastModified = !file.isDirectory && !sourcePane.connection!.isLocal && !freshMetadata
+        const sourceLastModified = !file.isDirectory && !freshMetadata
           ? 0
           : (freshMetadata?.lastModified ?? fileEntry?.lastModified ?? 0);
 
