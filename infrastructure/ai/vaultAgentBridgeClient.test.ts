@@ -1765,6 +1765,22 @@ describe('handleVaultAgentOp vault management gaps', () => {
     assert.equal(deps.getPortForwardingRules().length, 1);
   });
 
+  it('returns mappings for multi-mapping rules from port forwarding tools', async () => {
+    const deps = createDeps({ hosts: [host] });
+    const created = await handleVaultAgentOp('portforward.rules.create', {
+      label: 'Multi', type: 'local', localPort: 8080, bindAddress: '127.0.0.1',
+      remoteHost: '127.0.0.1', remotePort: 80, hostId: 'host-1',
+      mappings: [{ localPort: 8080, remotePort: 80 }, { localPort: 8443, remotePort: 443 }],
+    }, deps);
+    assert.equal(created.ok, true);
+    const returned = (created as { rule?: { mappings?: unknown[]; localPort?: number } }).rule;
+    assert.equal(returned?.localPort, 8080);
+    assert.deepEqual(returned?.mappings, [
+      { localPort: 8080, remotePort: 80 },
+      { localPort: 8443, remotePort: 443 },
+    ]);
+  });
+
   it('reports an inactive rule after changing a running forwarding connection', async () => {
     const rule: PortForwardingRule = {
       id: 'rule-1', label: 'Web', type: 'local', localPort: 8080,

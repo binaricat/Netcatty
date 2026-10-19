@@ -65,7 +65,10 @@ import {
   WizardContent,
 } from "./port-forwarding";
 import type { PortForwardingFormDraft, PortForwardingFormRow } from "./port-forwarding/utils";
-import { getRuleMappings } from "../domain/portForwardingAgentOps";
+import {
+  getRuleMappings,
+  hasPortForwardingConnectionChanged,
+} from "../domain/portForwardingAgentOps";
 
 type WizardStep =
   | "type"
@@ -622,29 +625,58 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
   };
 
   // Save edited rule
-  const saveEditedRule = () => {
-    if (editingRule && editDraft.id) {
-      // Blank or duplicated mapping rows must not persist undefined ports.
-      if (!isEditFormValid()) return;
-      const rows = editDraft.type !== "dynamic" ? (editDraft.mappingRows ?? []) : [];
-      const firstRow = rows[0] ?? {};
-      const { mappingRows: _omittedMappingRows, ...ruleFields } = editDraft;
-      updateRule(editDraft.id, {
-        ...ruleFields,
-        localPort: firstRow.localPort ?? editDraft.localPort,
-        remotePort: firstRow.remotePort ?? editDraft.remotePort,
-        mappings:
-          rows.length > 1
-            ? rows.map((row) => ({
-                localPort: row.localPort!,
-                remotePort: row.remotePort!,
-              }))
-            : undefined,
-      });
-      setShowEditPanel(false);
-      setEditingRule(null);
-      setEditDraft({});
+  const saveEditedRule = async () => {
+    if (!(editingRule && editDraft.id)) return;
+    // Blank or duplicated mapping rows must not persist undefined ports.
+    if (!isEditFormValid()) return;
+    const rows = editDraft.type !== "dynamic" ? (editDraft.mappingRows ?? []) : [];
+    const firstRow = rows[0] ?? {};
+    const { mappingRows: _omittedMappingRows, ...ruleFields } = editDraft;
+    const updatedRule = {
+      ...editingRule,
+      ...ruleFields,
+      localPort: firstRow.localPort ?? editDraft.localPort,
+      remotePort: firstRow.remotePort ?? editDraft.remotePort,
+      mappings:
+        rows.length > 1
+          ? rows.map((row) => ({
+              localPort: row.localPort!,
+              remotePort: row.remotePort!,
+            }))
+          : undefined,
+    };
+    // Connection-changing edits (ports, host, mappings) on a running rule must
+    // not leave the old runtime serving removed listeners while the card shows
+    // the new rows: stop it first, like the agent update path and deletion do.
+    // The cast is safe: isEditFormValid() guaranteed the port fields.
+    if (
+      hasRuntimeTunnel(editingRule.id)
+      && hasPortForwardingConnectionChanged(editingRule, updatedRule as PortForwardingRule)
+    ) {
+      setPendingOperations((prev) => new Set([...prev, editingRule.id]));
+      try {
+        const result = await stopTunnel(editingRule.id);
+        if (!result.success) {
+          if (result.error) {
+            toast.error(
+              result.error,
+              t("pf.toast.titleWithLabel", { label: editingRule.label }),
+            );
+          }
+          return;
+        }
+      } finally {
+        setPendingOperations((prev) => {
+          const next = new Set(prev);
+          next.delete(editingRule.id);
+          return next;
+        });
+      }
     }
+    updateRule(editDraft.id, updatedRule);
+    setShowEditPanel(false);
+    setEditingRule(null);
+    setEditDraft({});
   };
 
   // Close edit panel

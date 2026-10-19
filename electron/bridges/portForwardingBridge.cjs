@@ -1397,12 +1397,13 @@ async function startPortForward(event, payload) {
       }
       return sharedResult;
     } catch (shareErr) {
-      // Local bind failures (port in use, permission) cannot be fixed by a new
-      // SSH dial — re-auth would only re-prompt MFA. Only retry dedicated when
-      // the shared transport itself looks unusable.
-      if (isLocalBindFailure(shareErr)) {
+      // Bind failures cannot be fixed by a new SSH dial — re-auth would only
+      // re-prompt MFA. That covers local EADDR*/listen errors and the server
+      // rejecting a remote listen ("Unable to bind"); only retry dedicated
+      // when the shared transport itself looks unusable.
+      if (isMappingBindFailure(type, shareErr)) {
         console.warn(
-          `[PortForward] Shared transport bind failed for ${hostname} (local bind); not retrying dedicated:`,
+          `[PortForward] Shared transport bind failed for ${hostname} (bind failure); not retrying dedicated:`,
           shareErr?.message || shareErr,
         );
         try { detachSharedTransportLifecycle(tunnelState); } catch { /* ignore */ }

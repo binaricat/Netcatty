@@ -1079,10 +1079,25 @@ export const reconcileWithBackend = async (): Promise<{
               error: record.error,
             });
             changed = true;
-          } else if (currentMapping.status !== backendStatus || currentMapping.error !== record.error) {
-            currentMapping.status = backendStatus;
-            currentMapping.error = record.error;
-            changed = true;
+          } else {
+            // A lost placeholder (empty tunnelId) can come back when another
+            // window (e.g. the tray panel) retries the rule: adopt the
+            // recovered tunnel — and its subscription — so loss detection can
+            // see it disappear again instead of skipping it forever.
+            if (record.tunnelId && currentMapping.tunnelId !== record.tunnelId) {
+              currentMapping.unsubscribe?.();
+              currentMapping.tunnelId = record.tunnelId;
+              currentMapping.unsubscribe = bridge?.onPortForwardStatus?.(
+                record.tunnelId,
+                (status, error) => handleSyncedMappingStatus(ruleId, currentMapping, status, error),
+              );
+              changed = true;
+            }
+            if (currentMapping.status !== backendStatus || currentMapping.error !== record.error) {
+              currentMapping.status = backendStatus;
+              currentMapping.error = record.error;
+              changed = true;
+            }
           }
         }
         if (changed) {
