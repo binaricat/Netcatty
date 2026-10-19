@@ -49,6 +49,10 @@ function createMoshStatsConnectionApi(ctx) {
   // when not wired in (e.g. older callers / some unit tests) the verifier
   // simply skips the system-known_hosts fallback.
   const isHostKeyTrustedBySystem = ctx.isHostKeyTrustedBySystem;
+  // FIDO2 sk-* key handles parse as OpenSSH keys but can never sign locally —
+  // signing stays on the hardware token via ssh-add / the FIDO agent. The
+  // stats companion must not build a software certificate agent from them.
+  const { looksLikeSkOpenSshMaterial } = require("../sshAuthHelper.cjs");
   with (ctx) {
     // Resolve a usable, non-interactive private key (+ passphrase) for the
     // companion connection. Returns null when the key is missing, encrypted
@@ -213,14 +217,24 @@ function createMoshStatsConnectionApi(ctx) {
       const hasCertificate =
         typeof auth.certificate === "string" && auth.certificate.trim().length > 0;
       const allowLocalKeyFallbackWithAgent = auth.authMethod === "auto";
-      const inlineKey = auth.useSshAgent && !allowLocalKeyFallbackWithAgent
+      let inlineKey = auth.useSshAgent && !allowLocalKeyFallbackWithAgent
         ? null
         : resolveNonInteractiveKey(auth.privateKey, auth.passphrase);
+      // SK key handles parse non-interactively but cannot sign locally. A
+      // software NetcattyAgent built around one always fails signing — and its
+      // non-null presence would skip prepareSystemSshAgentForAuth() below, so
+      // the companion would never use the hardware-backed agent that the
+      // Mosh/ET session itself authenticated with. Route SK material to the
+      // prepared agent instead.
+      if (inlineKey && looksLikeSkOpenSshMaterial(inlineKey.privateKey)) {
+        inlineKey = null;
+      }
       const keys = inlineKey
         ? [inlineKey]
         : auth.useSshAgent && !allowLocalKeyFallbackWithAgent
           ? []
-          : await resolveNonInteractiveIdentityFiles(auth.identityFilePaths, auth.passphrase);
+          : (await resolveNonInteractiveIdentityFiles(auth.identityFilePaths, auth.passphrase))
+            .filter((candidate) => !looksLikeSkOpenSshMaterial(candidate.privateKey));
       const key = keys[0] || null;
 
       let agent = null;
@@ -250,7 +264,19 @@ function createMoshStatsConnectionApi(ctx) {
       }
 
       if (!agent && auth.useSshAgent && typeof prepareSystemSshAgentForAuth === "function") {
-        connectOpts.agent = await prepareSystemSshAgentForAuth(auth, `[${label} Stats]`);
+        const prepared = await prepareSystemSshAgentForAuth({
+          ...auth,
+          resolveWebContents: () => auth.webContents && !auth.webContents.isDestroyed?.()
+            ? auth.webContents : null,
+        }, `[${label} Stats]`);
+        connectOpts.agent = prepared;
+        if (typeof prepared?._releaseNetcattyFidoAgent === "function") {
+          // Surface the release hook on connectOpts so establishStatsConnection
+          // can drop the owned FIDO agent / askpass lease on close, error, or
+          // sessionGone — this consumer never attaches the agent to a long-lived
+          // SSHClient lifecycle helper.
+          connectOpts._releaseNetcattyFidoAgent = prepared._releaseNetcattyFidoAgent;
+        }
       }
 
       if (typeof auth.password === "string" && auth.password.length > 0) {
@@ -400,15 +426,30 @@ function createMoshStatsConnectionApi(ctx) {
         ...auth,
         webContents,
       }, opts.label);
+      const releaseStatsFidoAgent = (() => {
+        const releaseFn = connectOpts?._releaseNetcattyFidoAgent;
+        if (typeof releaseFn !== "function") return () => {};
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          try { releaseFn(); } catch { /* ignore */ }
+        };
+      })();
+      // Do not forward the internal release hook into ssh2 connect options.
+      delete connectOpts._releaseNetcattyFidoAgent;
+
       if (!hasAnyAuth) {
         // Nothing we can authenticate with non-interactively (e.g. the user
         // typed a password into the Mosh handshake PTY that we never stored).
+        releaseStatsFidoAgent();
         session[opts.failedProp] = true;
         return null;
       }
 
       // The session may have been closed while we were reading identity files.
       if (sessionGone(session, sessionId)) {
+        releaseStatsFidoAgent();
         return null;
       }
 
@@ -449,6 +490,7 @@ function createMoshStatsConnectionApi(ctx) {
         // retry.
         const fail = (err, permanent) => {
           try { conn.end(); } catch { /* ignore */ }
+          releaseStatsFidoAgent();
           if (permanent) session[opts.failedProp] = true;
           finish(null);
         };
@@ -457,6 +499,7 @@ function createMoshStatsConnectionApi(ctx) {
           // The session may have been closed while we were connecting.
           if (sessionGone(session, sessionId)) {
             try { conn.end(); } catch { /* ignore */ }
+            releaseStatsFidoAgent();
             finish(null);
             return;
           }
@@ -481,6 +524,7 @@ function createMoshStatsConnectionApi(ctx) {
 
         conn.on("close", () => {
           if (session[opts.connProp] === conn) session[opts.connProp] = null;
+          releaseStatsFidoAgent();
           // If the socket closed mid-handshake without ever emitting "ready"
           // or "error", settle the attempt here so the awaiting getServerStats
           // call (and the in-flight promise on opts.promiseProp) don't hang

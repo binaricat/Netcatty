@@ -1,6 +1,5 @@
 import type { ModelMessage } from 'ai';
 import type { ChatMessage, AIPermissionMode } from '../types';
-import { isStepHandleNoticeMessage } from './agentEventAdapter';
 import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   DEFAULT_PROTECT_RECENT_MESSAGES,
@@ -265,7 +264,9 @@ export async function prepareTurnContext(
   }
 
   const reinjection = buildReinjectionMessages(input.reinjection);
-  if (reinjection.length > 0 && didAdjust) {
+  // Routine output cleanup does not discard the conversation or its goals.
+  // Reinserting the latest goal at the front would invalidate every turn.
+  if (reinjection.length > 0 && didAdjust && (underBudgetPressure || didLlmSummarize)) {
     const reinjectionTokens = estimateModelMessagesTokensWithKind({
       messages: reinjection,
       providerId: input.providerId,
@@ -414,22 +415,6 @@ export async function prepareStepContext(
   const typed = compressMessagesForRequestTooLargeRetry(working);
   working = typed.messages;
 
-  const pendingHandles = input.toolOutputStore?.listPendingHandles(input.chatSessionId ?? input.sessionId) ?? [];
-  let didHandleNotice = false;
-  if (pendingHandles.length > 0 && input.stepNumber > 0) {
-    working = working.filter((message) => {
-      if (message.role !== 'user') return true;
-      const content = typeof message.content === 'string' ? message.content : '';
-      return !isStepHandleNoticeMessage(content);
-    });
-    const notice: ModelMessage = {
-      role: 'user',
-      content: `[step ${input.stepNumber}] Tool output handles available: ${pendingHandles.map(h => h.id).join(', ')}`,
-    };
-    working = [notice, ...working];
-    didHandleNotice = true;
-  }
-
   const budgetGuard = applyStepBudgetGuard(working, {
     contextWindow,
     reservedTokens: input.reservedTokens ?? 0,
@@ -438,36 +423,42 @@ export async function prepareStepContext(
     protectRecentMessages: protectRecent,
   });
   working = budgetGuard.messages;
-  if (didHandleNotice && pendingHandles.length > 0) {
-    const hasHandleNotice = working.some(
-      (message) => message.role === 'user' && isStepHandleNoticeMessage(message.content),
-    );
-    if (!hasHandleNotice) {
-      working = [{
-        role: 'user',
-        content: `[step ${input.stepNumber}] Tool output handles available: ${pendingHandles.map(h => h.id).join(', ')}`,
-      }, ...working];
-    }
-  }
-  if (didHandleNotice) {
-    const notices = working.filter(
-      message => message.role === 'user' && isStepHandleNoticeMessage(message.content),
-    );
-    const body = working.filter(
-      message => !(message.role === 'user' && isStepHandleNoticeMessage(message.content)),
-    );
+  const pendingHandles = input.stepNumber > 0
+    ? input.toolOutputStore?.listPendingHandles(input.chatSessionId ?? input.sessionId) ?? []
+    : [];
+  const unannouncedHandles = () => {
+    // Bounded tool results already carry their read handles. Announce only
+    // handles whose result was pruned, so normal history needs no transient
+    // user message that would disappear when the next turn is rebuilt.
+    const visibleContent = working.map(message => typeof message.content === 'string'
+      ? message.content : JSON.stringify(message.content));
+    return pendingHandles.filter(handle => !visibleContent.some(content => content.includes(handle.id)));
+  };
+  let didHandleNotice = false;
+  if (unannouncedHandles().length > 0) {
+    // Reserve the complete list: the guard may remove an older announcement.
+    // New notices belong at the tail; replacing a step-numbered prefix would
+    // invalidate the entire cached conversation on every model call.
     const noticeTokens = estimateModelMessagesTokensWithKind({
-      messages: notices,
+      messages: [{ role: 'user', content: `[Tool output handles available: ${pendingHandles.map(h => h.id).join(', ')}]` }],
       providerId: input.providerId,
     }).tokens;
-    const finalGuard = applyStepBudgetGuard(body, {
+    const finalGuard = applyStepBudgetGuard(working, {
       contextWindow,
       reservedTokens: (input.reservedTokens ?? 0) + noticeTokens,
       maxOutputTokens,
       providerId: input.providerId,
       protectRecentMessages: protectRecent,
     });
-    working = [...notices, ...finalGuard.messages];
+    working = finalGuard.messages;
+    const handles = unannouncedHandles();
+    if (handles.length > 0) {
+      working = [...working, {
+        role: 'user',
+        content: `[Tool output handles available: ${handles.map(h => h.id).join(', ')}]`,
+      }];
+      didHandleNotice = true;
+    }
     budgetGuard.didAdjust = budgetGuard.didAdjust || finalGuard.didAdjust;
   }
   const didBudgetAdjust = integrity.didAdjust || stale.didAdjust || typed.didAdjust || budgetGuard.didAdjust;

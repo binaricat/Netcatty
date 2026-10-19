@@ -123,6 +123,8 @@ interface DropdownContentProps {
   alignToParent?: boolean;
   onMouseEnter?: React.MouseEventHandler<HTMLDivElement>;
   onMouseLeave?: React.MouseEventHandler<HTMLDivElement>;
+  /** Opt in for action menus whose options need keyboard focus and navigation. */
+  keyboardNavigation?: boolean;
 }
 
 const DropdownContent: React.FC<DropdownContentProps> = ({
@@ -134,9 +136,11 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
   alignToParent = false,
   onMouseEnter,
   onMouseLeave,
+  keyboardNavigation = false,
 }) => {
   const { open, setOpen, triggerRef } = useDropdown();
   const contentRef = useRef<HTMLDivElement>(null);
+  const didFocusOnOpen = useRef(false);
   const [position, setPosition] = useState<{
     top: number;
     left: number;
@@ -248,6 +252,17 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
     }
   }, [open, calculatePosition]);
 
+  useLayoutEffect(() => {
+    if (!open) {
+      didFocusOnOpen.current = false;
+      return;
+    }
+    if (keyboardNavigation && position && !didFocusOnOpen.current) {
+      contentRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+      didFocusOnOpen.current = true;
+    }
+  }, [open, position, keyboardNavigation]);
+
   // Close on click outside
   useEffect(() => {
     if (!open) return;
@@ -293,6 +308,46 @@ const DropdownContent: React.FC<DropdownContentProps> = ({
       )}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
+      role={keyboardNavigation ? 'menu' : undefined}
+      onClickCapture={keyboardNavigation ? (event) => {
+        if (event.target instanceof Element && event.target.closest('button:not(:disabled)')) {
+          triggerRef.current?.focus();
+        }
+      } : undefined}
+      onKeyDown={keyboardNavigation ? (event) => {
+        const items = Array.from(
+          event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+        );
+        const index = items.indexOf(document.activeElement as HTMLButtonElement);
+        let nextIndex: number;
+        switch (event.key) {
+          case 'ArrowDown':
+            nextIndex = (index + 1) % items.length;
+            break;
+          case 'ArrowUp':
+            nextIndex = (index - 1 + items.length) % items.length;
+            break;
+          case 'Home':
+            nextIndex = 0;
+            break;
+          case 'End':
+            nextIndex = items.length - 1;
+            break;
+          case 'Escape':
+          case 'Tab':
+            setOpen(false);
+            triggerRef.current?.focus();
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+            return;
+          default:
+            return;
+        }
+        event.preventDefault();
+        items[nextIndex]?.focus();
+      } : undefined}
       style={{
         top: position?.top ?? -9999,
         left: position?.left ?? -9999,

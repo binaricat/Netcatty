@@ -5,6 +5,35 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { ComposerModelPicker } from './ComposerModelPicker';
+import { I18nProvider } from '../../application/i18n/I18nProvider';
+
+for (const [locale, cachedLabel] of [
+  ['en', 'Cached'],
+  ['zh-CN', '缓存'],
+  ['zh-TW', '快取'],
+  ['es', 'En caché'],
+  ['ru', 'Кэш'],
+]) {
+  test(`cached catalog without a usable timestamp has a clean label in ${locale}`, () => {
+    for (const fetchedAt of [undefined, 'invalid-date']) {
+      const html = renderToStaticMarkup(
+        <I18nProvider locale={locale}>
+          <ComposerModelPicker
+            modelPresets={[{ id: 'saved-model', name: 'Saved model' }]}
+            selectedModelId="saved-model"
+            catalogSource="last-known-good"
+            catalogFetchedAt={fetchedAt}
+            prefs={{ recent: [], pinned: [] }}
+            onSelectModel={() => {}}
+            onTogglePinned={() => {}}
+          />
+        </I18nProvider>,
+      );
+      assert.ok(html.includes(`title="${cachedLabel}"`));
+      assert.doesNotMatch(html, /\{time\}|ai\.chat\.modelCatalog/);
+    }
+  });
+}
 
 test('Catty picker keeps a single model list and hides other providers until the submenu opens', () => {
   const html = renderToStaticMarkup(
@@ -123,6 +152,7 @@ test('external agent picker shows the loading row while the live catalog is pend
   );
 
   assert.match(html, /ai\.chat\.loadingModels/);
-  // The host no longer renders built-in presets while loading (#3584).
+  // With no presets the picker renders only the loading row; the host now
+  // keeps built-in presets visible during loading and passes them through.
   assert.doesNotMatch(html, /gpt-5\.1/);
 });

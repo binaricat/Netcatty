@@ -48,6 +48,7 @@ export function inheritOmittedLegacySyncFields(
     ...CONVERGENT_ENTITY_COLLECTIONS,
     ...CONVERGENT_STRING_COLLECTIONS,
     'settings',
+    'aiSessions',
   ]) {
     if (!hasDefinedOwnProperty(legacy, property)) {
       resultRecord[property] = baselineRecord[property];
@@ -127,6 +128,7 @@ export function cloudSyncPayloadsEqual(left: SyncPayload, right: SyncPayload): b
           .map((key) => [key, (sanitized as unknown as Record<string, unknown>)[key] ?? []]),
       ),
       settings: sanitized.settings ?? {},
+      aiSessions: sanitized.aiSessions ?? [],
       // Plugin sidecars are host-owned opaque data on the encrypted blob and
       // must participate in migration freshness / equality checks.
       pluginSidecars: sanitized.pluginSidecars ?? { version: 1, entries: [] },

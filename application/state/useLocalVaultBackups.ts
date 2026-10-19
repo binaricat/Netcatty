@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type LocalVaultBackupPreview,
+  clearLocalVaultBackups,
   getLocalVaultBackupCapabilities,
   getLocalVaultBackupMaxCount,
   listLocalVaultBackups,
@@ -20,13 +21,15 @@ export function useLocalVaultBackups() {
   // a destructive action that might later be disabled.
   const [encryptionAvailable, setEncryptionAvailable] = useState<boolean | null>(null);
 
+  const refreshSequence = useRef(0);
   const refreshBackups = useCallback(async () => {
+    const sequence = ++refreshSequence.current;
     setIsLoading(true);
     try {
       const next = await listLocalVaultBackups();
-      setBackups(next);
+      if (sequence === refreshSequence.current) setBackups(next);
     } finally {
-      setIsLoading(false);
+      if (sequence === refreshSequence.current) setIsLoading(false);
     }
   }, []);
 
@@ -76,6 +79,14 @@ export function useLocalVaultBackups() {
     return sanitized;
   }, [refreshBackups]);
 
+  const clearBackups = useCallback(async () => {
+    try {
+      await clearLocalVaultBackups();
+    } finally {
+      await refreshBackups();
+    }
+  }, [refreshBackups]);
+
   const openBackupDirectory = useCallback(async () => {
     await openLocalVaultBackupDir();
   }, []);
@@ -86,6 +97,7 @@ export function useLocalVaultBackups() {
     maxBackups,
     encryptionAvailable,
     refreshBackups,
+    clearBackups,
     readBackup: readLocalVaultBackup,
     setMaxBackups: updateMaxBackups,
     openBackupDirectory,

@@ -1,3 +1,4 @@
+import { installBrowserLockFixture } from "./testSupport/browserLockFixture";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -37,6 +38,8 @@ function installLocalStorage(): LocalStorageMock {
   });
   return localStorage;
 }
+
+installBrowserLockFixture();
 
 const localStorage = installLocalStorage();
 const {
@@ -1418,6 +1421,26 @@ test("hasCloudSyncEntityData ignores settings-only payloads for empty-vault reco
     }),
     false,
   );
+});
+
+test("surviving browser bookmarks do not suppress empty-vault recovery", () => {
+  const local: SyncPayload = {
+    ...vault([]), syncedAt: 1,
+    browserBookmarks: [{
+      id: "app", title: "App", url: "https://app.example.com/", scope: "all-hosts",
+      hostId: null, icon: "A", color: "#247969", order: 0, createdAt: 1, updatedAt: 1,
+    }],
+  };
+  assert.equal(hasMeaningfulCloudSyncData(local), true, "bookmarks must remain syncable");
+  assert.equal(hasCloudSyncEntityData(local), false);
+  const host = {
+    id: "remote", label: "Remote", hostname: "remote.example.com", username: "test",
+    port: 22, protocol: "ssh" as const, tags: [], os: "linux" as const,
+  };
+  for (const hosts of [[host], [host, { ...host, id: "second" }]]) {
+    assert.equal(shouldPromptCloudVaultRecovery(local, { ...vault([]), hosts, syncedAt: 2 }), true);
+  }
+  assert.equal(shouldPromptCloudVaultRecovery({ ...vault([]), syncedAt: 1 }, local), false);
 });
 
 test("shouldPromptCloudVaultRecovery ignores settings-only remote payloads", () => {

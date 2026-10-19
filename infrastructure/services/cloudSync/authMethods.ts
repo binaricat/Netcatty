@@ -18,7 +18,7 @@ import type {
   SyncPayload,
   WebDAVConfig,
 } from '../../../domain/sync';
-import { normalizeDurablePluginSyncCredentialRef } from '../../../domain/sync';
+import { normalizeDurablePluginSyncCredentialRef, providerConnectionStorageKey } from '../../../domain/sync';
 import { isPluginCloudProviderId } from '../../../domain/cloudProviderIds';
 import type {
   ProviderSyncAnchor,
@@ -518,19 +518,20 @@ export function cancelProviderAuthAttemptImpl(this: any,provider: CloudProvider,
 
 export async function disconnectProviderImpl(this: any,provider: CloudProvider): Promise<void> {
     this.cancelProviderAuthAttempt(provider);
-    const adapter = this.adapters.get(provider);
-    if (adapter) {
-      adapter.signOut();
-      this.adapters.delete(provider);
-    }
-
     ++this.providerDecryptSeq[provider];
-    this.state.providers[provider] = {
+    const disconnected: ProviderConnection = {
       provider,
       status: 'disconnected',
     };
 
-    await this.saveProviderConnection(provider, this.state.providers[provider]);
+    await this.saveProviderConnection(provider, disconnected);
+    // A quota failure returns false from storage without rejecting the save.
+    // Confirm the connection was cleared before reporting disconnect success.
+    const stored = this.loadFromStorage(providerConnectionStorageKey(provider));
+    if (!stored || stored.status !== 'disconnected'
+      || ['tokens', 'config', 'credential', 'account'].some((key) => Object.prototype.hasOwnProperty.call(stored, key))) {
+      throw new Error('Could not remove saved provider connection');
+    }
     // Explicit disconnect removes the dynamic provider from the restart registry.
     // Missing plugins with preserved config remain registered and are not coerced away.
     unregisterPluginProviderIdImpl.call(this, provider);
@@ -538,6 +539,12 @@ export async function disconnectProviderImpl(this: any,provider: CloudProvider):
     // an unrelated snapshot or convergent baseline.
     clearProviderMergeStateImpl.call(this, provider);
     this.removeFromStorage(this.providerAccountIdKey(provider));
+    const adapter = this.adapters.get(provider);
+    if (adapter) {
+      adapter.signOut();
+      this.adapters.delete(provider);
+    }
+    this.state.providers[provider] = disconnected;
     // Drop OS-backed sync secrets so disconnect does not leave reusable passwords.
     if (isPluginCloudProviderId(provider)) {
       try {

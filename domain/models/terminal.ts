@@ -126,6 +126,7 @@ export interface TerminalSettings {
   middleClickPaste: boolean; // Legacy mirror for older settings payloads
   wordSeparators: string; // Characters for word selection
   linkModifier: LinkModifier; // Modifier key to click links
+  linkBrowser?: 'netcatty' | 'system';
   autoCloseOnExit: boolean; // Automatically close terminal UI after eligible session exits
   disconnectedNoticeMode: DisconnectedNoticeMode; // Non-blocking terminal line or legacy dialog after disconnect
   /** Action when double-clicking a terminal session tab. */
@@ -288,6 +289,7 @@ export const DEFAULT_KEYWORD_HIGHLIGHT_RULES: KeywordHighlightRule[] = [
   { id: 'info', label: 'Info', patterns: ['\\[info\\]', '\\[notice\\]', '\\[note\\]', '\\bnotice\\b', '\\bnote\\b'], color: '#3B82F6', enabled: true },
   { id: 'debug', label: 'Debug', patterns: ['\\[debug\\]', '\\[trace\\]', '\\[verbose\\]', '\\bdebug\\b', '\\btrace\\b', '\\bverbose\\b'], color: '#A78BFA', enabled: true },
   { id: 'ip-mac', label: 'URL, IP & MAC', patterns: [URL_HIGHLIGHT_PATTERN, IPV4_HIGHLIGHT_PATTERN, IPV6_HIGHLIGHT_PATTERN, MAC_ADDRESS_HIGHLIGHT_PATTERN], color: '#EC4899', enabled: true },
+  { id: 'unix-path', label: 'Unix paths', patterns: ["(?<=\")(?:/|~/)[^\"\\r\\n]+(?=\")|(?<=')(?:/|~/)[^'\\r\\n]+(?=')|(?<![\\w.:/\"'\\u0080-\\uFFFF])(?:/|~/)[^\\s\"']+"], color: '#A78BFA', enabled: true },
 ];
 
 const cloneKeywordHighlightRule = (rule: KeywordHighlightRule): KeywordHighlightRule => ({
@@ -427,6 +429,7 @@ export const normalizeTerminalSettings = (
     middleClickBehavior,
     middleClickPaste: middleClickBehavior === 'paste',
     wordSeparators,
+    linkBrowser: settings?.linkBrowser === 'system' ? 'system' as const : 'netcatty' as const,
     shiftEnterNewlineText,
     cursorBarWidth: normalizeCursorBarWidth(settings?.cursorBarWidth),
     dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
@@ -536,6 +539,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   middleClickPaste: true,
   wordSeparators: DEFAULT_TERMINAL_WORD_SEPARATORS,
   linkModifier: 'none',
+  linkBrowser: 'netcatty',
   // Off by default: remote graceful channel closes can be reported as a clean
   // exit (code 0), which would auto-close tabs on network drops. Users who
   // want close-on-exit can enable it in Settings -> Terminal -> Behavior.

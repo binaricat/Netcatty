@@ -24,7 +24,10 @@ const OPTIONAL_ENTITY_KEYS = new Set<CloudSyncPayloadEntityKey>([
   'proxyProfiles',
   'snippetPackages',
   'portForwardingRules',
+  'browserBookmarks',
   'groupConfigs',
+  'monitorPanels',
+  'aiSessions',
 ]);
 
 function fingerprint(value: unknown): string {
@@ -70,7 +73,7 @@ function payloadValues(
   if (
     base
     && OPTIONAL_ENTITY_KEYS.has(entityType)
-    && !Object.prototype.hasOwnProperty.call(payload, entityType)
+    && payload[entityType] === undefined
   ) {
     return base[entityType];
   }

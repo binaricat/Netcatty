@@ -7,7 +7,7 @@ import {
 import packageJson from '../../../package.json';
 import { EncryptionService } from '../EncryptionService';
 import { decryptProviderSecrets } from '../../persistence/secureFieldAdapter';
-import { mergeSyncPayloads } from '../../../domain/syncMerge';
+import { mergeAiSessionLists, mergeSyncPayloads } from '../../../domain/syncMerge';
 import { cloudSyncPayloadsEqual } from '../../../domain/convergentSync';
 import { stripSyncPayloadEncryptedCredentials, healPoisonedSecretsForMerge } from '../../../domain/credentials';
 import {
@@ -16,7 +16,7 @@ import {
   withSyncReliabilityMeta,
 } from '../../../domain/syncReliability';
 import { detectSuspiciousShrink, type ShrinkFinding } from '../../../domain/syncGuards';
-import { resolveCloudSyncConflictAction, type CloudSyncConflictAction, type CloudSyncStrategy } from '../../../domain/syncStrategy';
+import { isPreserveDeletionsStrategy, resolveCloudSyncConflictAction, type CloudSyncConflictAction, type CloudSyncStrategy } from '../../../domain/syncStrategy';
 import { assertConvergentSyncWriteCompatible } from '../../../domain/convergentSync';
 import { getConvergentSyncLocalConfig } from '../convergentSyncConfig';
 import { syncAllProvidersConvergentlyImpl } from './convergentSyncRuntimeMethods';
@@ -473,6 +473,27 @@ export async function syncAllProvidersImpl(this: any,
 
     const checkResults = await Promise.all(checkTasks);
 
+    if (payload.aiSessions === undefined) {
+      let remoteSessions: SyncPayload['aiSessions'];
+      for (const entry of checkResults) {
+        if (entry.error || !entry.check?.remoteFile) continue;
+        try {
+          assertConvergentSyncWriteCompatible(entry.check.remoteFile.meta, payload);
+          const remote = await EncryptionService.decryptPayload(entry.check.remoteFile, this.masterPassword);
+          assertSyncSecurityGeneration(this, syncSecurityGeneration);
+          if (remote.aiSessions !== undefined) {
+            remoteSessions = mergeAiSessionLists(remoteSessions, remote.aiSessions);
+          }
+        } catch (error) {
+          assertSyncSecurityGeneration(this, syncSecurityGeneration);
+          // Leave conflicting/decrypt-failed files to the existing conflict
+          // flow, including an explicit password-change overwrite choice.
+          if (!entry.check.conflict) entry.error = String(error);
+        }
+      }
+      if (remoteSessions !== undefined) payload = { ...payload, aiSessions: remoteSessions };
+    }
+
     // 2. Analyze Results & Handle Conflicts — merge ALL conflicting providers
     //
     // Contract: every connected provider is assumed to mirror the *same*
@@ -484,7 +505,9 @@ export async function syncAllProvidersImpl(this: any,
     // see I-1 and `docs/`). Until then, we log a diagnostic warning when
     // we detect cross-provider base divergence so the issue is visible in
     // support logs.
-    const conflicts = checkResults.filter((r) => !r.error && r.check?.conflict && r.check?.remoteFile);
+    const conflicts = checkResults.filter((r) => !r.error && r.check?.remoteFile && (
+      r.check.conflict || isPreserveDeletionsStrategy(this.state.syncStrategy)
+    ));
 
     // Instrumentation only — detect divergent provider bases (an
     // unsupported configuration). Cheap: bases are already persisted
@@ -598,7 +621,9 @@ export async function syncAllProvidersImpl(this: any,
               providerBase,
             );
             assertSyncSecurityGeneration(this, syncSecurityGeneration);
-            const result = mergeSyncPayloads(providerBase, localHealed, remotePayload);
+            const result = mergeSyncPayloads(providerBase, localHealed, remotePayload, {
+              preserveDeletions: isPreserveDeletionsStrategy(this.state.syncStrategy),
+            });
             merged = result.payload;
           }
           const mergeResult = {

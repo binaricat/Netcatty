@@ -1,3 +1,4 @@
+import { esMonitorMessages } from './es/monitor';
 import type { Messages } from './types';
 import { esCoreMessages } from './es/core';
 import { esVaultMessages } from './es/vault';
@@ -9,6 +10,7 @@ import { esScriptsMessages } from './es/scripts';
 export type { Messages } from './types';
 
 const es: Messages = {
+  ...esMonitorMessages,
   ...esCoreMessages,
   ...esVaultMessages,
   ...esTerminalMessages,

@@ -109,6 +109,8 @@ export interface SftpTransferCenterStore {
    */
   subscribeProgress(listener: Listener): () => void;
   getSnapshot(): SftpTransferCenterSnapshot;
+  /** Stable task hierarchy between lifecycle changes; live rows read getTask. */
+  getLifecycleSnapshot(): SftpTransferCenterSnapshot;
   /** Stable identity when badge counts are unchanged (avoids TopTabs thrash). */
   getBadgeSnapshot(): { count: number; hasAttention: boolean };
   /** Single task row — same object identity until that row is patched. */
@@ -211,6 +213,21 @@ function buildBadgeSnapshot(tasks: readonly TransferTask[]): { count: number; ha
       || task.reconnectRequired === true
     ),
   };
+}
+
+/** Fields used by grouping, ordering and batch-action eligibility. */
+function hasTransferListMetadataChange(before: TransferTask | undefined, after: TransferTask | undefined): boolean {
+  if (!before || !after) return before !== after;
+  return before.status !== after.status
+    || before.parentTaskId !== after.parentTaskId
+    || before.background !== after.background
+    || before.startTime !== after.startTime
+    || before.priority !== after.priority
+    || before.ownerId !== after.ownerId
+    || before.resumable !== after.resumable
+    || before.reconnectRequired !== after.reconnectRequired
+    || Boolean(before.conflict) !== Boolean(after.conflict)
+    || (before.status === "failed" && ((before.checkpointBytes ?? 0) > 0) !== ((after.checkpointBytes ?? 0) > 0));
 }
 
 const TERMINAL_OWNER_STATUSES = new Set<TransferTask["status"]>([
@@ -420,6 +437,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     event: BackgroundTransferEvent;
   }>>();
   let snapshot = tasks.length > 0 ? buildSnapshot(tasks) : EMPTY_SNAPSHOT;
+  let lifecycleSnapshot = snapshot;
   let badgeSnapshot = buildBadgeSnapshot(tasks);
   let snapshotDirty = false;
   const listeners = new Set<Listener>();
@@ -695,6 +713,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     }
     snapshotDirty = false;
     snapshot = buildSnapshot(tasks);
+    lifecycleSnapshot = snapshot;
     refreshBadgeSnapshot();
     persist(shouldPersistImmediately);
     notifyDedicatedResumeWaiters();
@@ -707,19 +726,24 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
   };
 
   /** Progress-only: mutate tasks, defer snapshot rebuild, wake progress UI only. */
-  const emitProgress = (persistImmediately = false) => {
+  const emitProgress = (persistImmediately = false, lifecycleChanged = false) => {
     if (deferRestoreReplayEmits) {
       snapshotDirty = true;
       persistenceDirty = persistenceDirty || persistImmediately;
       return;
     }
     snapshotDirty = true;
+    // Admission/late progress may change a row's lifecycle without the costly
+    // prune/persist path. Keep the list hierarchy current, coalescing its UI
+    // notification with progress instead of waking owner lifecycle listeners.
+    if (lifecycleChanged) lifecycleSnapshot = buildSnapshot(tasks);
     // Never JSON.stringify/localStorage on the pure-progress path. Sync storage
     // on large directory histories freezes CSS spinners every few seconds.
     // Pause / complete / fingerprint / lifecycle still force persist below.
     if (persistImmediately) {
       snapshotDirty = false;
       snapshot = buildSnapshot(tasks);
+      lifecycleSnapshot = snapshot;
       refreshBadgeSnapshot();
       persist(true);
       notifyDedicatedResumeWaiters();
@@ -1401,6 +1425,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       return () => progressListeners.delete(listener);
     },
     getSnapshot: () => ensureSnapshot(),
+    getLifecycleSnapshot: () => lifecycleSnapshot,
     getBadgeSnapshot: () => badgeSnapshot,
     admitTaskRun(incoming, pausedAtResume, completedAtRestart) {
       const rootId = incoming.parentTaskId ?? incoming.id;
@@ -1454,7 +1479,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       };
       tasks = next;
       captureObservedTask(next[index]);
-      emitProgress(false);
+      emitProgress(false, hasTransferListMetadataChange(existing, next[index]));
       return "ready";
     },
     observeTaskSettlement(expected, ignoredCompletion, onIdentityConflict) {
@@ -1773,7 +1798,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         if (fingerprintChanged) emit(true);
         else if (directoryCheckpointChanged) emit(true);
         else if (lifecycleChanged) emit();
-        else emitProgress(false);
+        else emitProgress(false, hasTransferListMetadataChange(task, nextTask));
       }
     },
     upsertTasks(incoming) {
@@ -2173,6 +2198,8 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       }
       let existingIndex = tasks.findIndex((task) => task.id === event.transferId);
       let existing = tasks[existingIndex];
+      const beforeEvent = existing;
+      let parentControlsChanged = false;
       const eventParent = event.parentTaskId
         ? tasks.find((task) => task.id === event.parentTaskId)
         : undefined;
@@ -2190,7 +2217,16 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         } : task);
         existing = tasks[existingIndex];
         captureObservedTask(existing);
+        // Structural recovery must survive restart even if an unchanged or
+        // already-terminal event returns before the normal persistence path.
+        persist();
       }
+      // Hierarchy repair has already changed the live row. Even an otherwise
+      // ignored event must publish that change; ordinary progress still emits
+      // only once at the end, without a second directory-sized snapshot build.
+      const publishRepairedHierarchy = () => {
+        if (existing !== beforeEvent) emitProgress(false, true);
+      };
       // A delayed child progress event can arrive after the renderer compacted
       // that completed child into its parent checkpoint. Never resurrect it as
       // a live row, especially after the parent itself has finished.
@@ -2216,9 +2252,11 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         // Allow a late explicit cancel to stick; ignore everything else.
         if (event.type === "completed" || event.type === "failed") {
           // Keep existing terminal state (prefer cancelled over late completed).
+          publishRepairedHierarchy();
           return;
         }
         if (event.type === "queued" || event.type === "started" || event.type === "progress" || event.type === "pausing" || event.type === "resumed" || event.type === "paused") {
+          publishRepairedHierarchy();
           return;
         }
       }
@@ -2263,6 +2301,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           && sameOptional(event.resumable, existing.resumable)
           && sameOptional(event.pauseUnavailableReason, existing.pauseUnavailableReason)
         ) {
+          publishRepairedHierarchy();
           return;
         }
       }
@@ -2452,6 +2491,8 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           };
         });
         if (event.resumable === false && existing.parentTaskId) {
+          const parent = tasks.find((task) => task.id === existing.parentTaskId);
+          parentControlsChanged = parent !== undefined && parent.resumable !== false;
           tasks = tasks.map((task) => task.id === existing.parentTaskId ? {
             ...task,
             resumable: false,
@@ -2508,8 +2549,11 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       if (existingIndex >= 0) captureObservedTask(tasks[existingIndex]);
       // Progress-only ticks skip prune + coalesce listener paints; lifecycle
       // events still take the full emit path so UI never lags on pause/cancel.
+      const currentTask = tasks[existingIndex];
+      const hierarchyOrLifecycleChanged = parentControlsChanged
+        || hasTransferListMetadataChange(beforeEvent, currentTask);
       if (event.type === "progress" && !persistImmediately) {
-        emitProgress(false);
+        emitProgress(false, hierarchyOrLifecycleChanged);
       } else {
         emit(persistImmediately);
       }

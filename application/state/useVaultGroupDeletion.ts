@@ -3,6 +3,7 @@ import { useCallback, useRef } from "react";
 import type { GroupConfig, Host, ManagedSource } from "../../domain/models";
 import { removeSnippetTargetGroupPaths } from "../../domain/hostGroupPathMutations";
 import { buildVaultGroupDeletion } from "../../domain/vaultGroupDeletion";
+import { pruneVaultJumpHostReferences } from "../../domain/vaultJumpGraph";
 import type {
   VaultGroupMutationResult,
   VaultGroupMutationState,
@@ -155,14 +156,30 @@ export function useVaultGroupDeletion({
               )) {
                 throw RETRY_VAULT_GROUP_DELETION;
               }
+              const nextTransactionHosts = currentDeletion.hosts.filter(
+                (host) => !additionallyDeletedHostIds.has(host.id),
+              );
+              // Hosts removed by this transaction must stop being referenced
+              // from other hosts' jump chains (and group config chains), or
+              // those targets keep failing with "A configured jump host is
+              // missing".
+              const retainedHostIds = new Set(
+                nextTransactionHosts.map((host) => host.id),
+              );
+              const removedHostIds = current.hosts
+                .filter((host) => !retainedHostIds.has(host.id))
+                .map((host) => host.id);
+              const prunedReferences = pruneVaultJumpHostReferences({
+                hosts: nextTransactionHosts,
+                groupConfigs: currentDeletion.groupConfigs,
+                removedHostIds,
+              });
               return {
                 ok: true,
                 state: {
                   groups: currentDeletion.customGroups,
-                  hosts: currentDeletion.hosts.filter(
-                    (host) => !additionallyDeletedHostIds.has(host.id),
-                  ),
-                  configs: currentDeletion.groupConfigs,
+                  hosts: prunedReferences.hosts,
+                  configs: prunedReferences.groupConfigs,
                   managedSources: current.managedSources.filter(
                     (source) => !currentDeletion.sourcesToRemove.some(
                       (removed) => removed.id === source.id,

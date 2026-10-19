@@ -7,6 +7,8 @@ import {
 } from './cattyMessageBuilder';
 import type { ChatMessage } from '../../types';
 import { prepareCattyMessagesForStream } from '../cattyRuntime';
+import { mergeAiSessionLists } from '../../../../domain/syncMerge';
+import type { AISession } from '../../types';
 
 function buildHistory(messages: ChatMessage[]) {
   return buildCattySdkMessages({
@@ -19,6 +21,24 @@ function buildHistory(messages: ChatMessage[]) {
     fieldsByMessage: new Map(),
   });
 }
+
+test('merged turns inside a summarized prefix are replayed instead of skipped', () => {
+  const message = (id: string, timestamp: number): ChatMessage => ({ id, role: 'user', content: id, timestamp });
+  const compacted: AISession = {
+    id: 'chat', title: 'Chat', agentId: 'catty', scope: { type: 'global' }, createdAt: 1, updatedAt: 4,
+    messages: [message('first', 1), message('summarized-second', 3), message('recent', 4)],
+    contextCompaction: { summary: 'First and second', compactedMessageCount: 2 },
+  };
+  const incoming = { ...compacted, updatedAt: 2, messages: [message('first', 1), message('remote-added', 2)] };
+  const [merged] = mergeAiSessionLists([compacted], [incoming]);
+  const replay = buildCattySdkMessages({
+    allMessages: merged.messages, contextCompaction: merged.contextCompaction,
+    includeCurrentUserMessage: false, trimmed: '',
+    continuationContext: createContinuationContext('provider-1', 'openai', 'model-1', true),
+    chatSessionId: 'chat', toolOutputStore: new ToolOutputStore(), fieldsByMessage: new Map(),
+  });
+  assert.deepEqual(replay.map(message => message.content), ['first', 'remote-added', 'summarized-second', 'recent']);
+});
 
 test('legacy reasoning parts with an rs_ item id but no encrypted content are dropped from replay', () => {
   const messages: ChatMessage[] = [{

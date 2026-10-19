@@ -245,9 +245,15 @@ function createOpenConnectionApi(ctx) {
           const hasCertificate =
             typeof jump.certificate === "string" && jump.certificate.trim().length > 0;
 
-          const systemAuthAgent = hasCertificate
+          const { enhanceAuthOptionsForFido, looksLikeSkOpenSshMaterial } = require("../sshAuthHelper.cjs");
+          const prep = await enhanceAuthOptionsForFido(jump, sender);
+          const isFido = prep.useFidoAgent === true;
+          const systemAuthAgent = (hasCertificate && !isFido)
             ? null
-            : await prepareSystemSshAgentForAuth(jump, `[SFTP Chain] Hop ${i + 1}:`);
+            : await prepareSystemSshAgentForAuth(
+              prep,
+              `[SFTP Chain] Hop ${i + 1}:`,
+            );
     
           const identityFile = !jump.privateKey && !systemAuthAgent
             ? await loadFirstIdentityFileForAuth({
@@ -264,7 +270,9 @@ function createOpenConnectionApi(ctx) {
               },
             })
             : null;
-          const inlineKey = jump.privateKey && !systemAuthAgent
+          const inlineKey = jump.privateKey
+            && !systemAuthAgent
+            && !looksLikeSkOpenSshMaterial(jump.privateKey)
             ? await preparePrivateKeyForAuth({
               sender,
               privateKey: jump.privateKey,
@@ -281,8 +289,9 @@ function createOpenConnectionApi(ctx) {
           let authAgent = null;
           if (systemAuthAgent) {
             connOpts.agent = systemAuthAgent;
+            require("../attachFidoAgentRelease.cjs").attachFidoAgentRelease(conn, systemAuthAgent);
           }
-          if (hasCertificate) {
+          if (hasCertificate && !isFido) {
             authAgent = new NetcattyAgent({
               mode: "certificate",
               webContents: event.sender,
@@ -294,7 +303,7 @@ function createOpenConnectionApi(ctx) {
               },
             });
             connOpts.agent = authAgent;
-          } else if (effectivePrivateKey) {
+          } else if (effectivePrivateKey && !isFido) {
             connOpts.privateKey = effectivePrivateKey;
             if (effectivePassphrase) {
               connOpts.passphrase = effectivePassphrase;
@@ -999,10 +1008,17 @@ function createOpenConnectionApi(ctx) {
       let identityFile = null;
       let inlineKey = null;
       let systemAuthAgent = null;
+      let isFido = false;
       try {
-        systemAuthAgent = hasCertificate
+        const { enhanceAuthOptionsForFido, looksLikeSkOpenSshMaterial } = require("../sshAuthHelper.cjs");
+        const prep = await enhanceAuthOptionsForFido(options, event.sender);
+        isFido = prep.useFidoAgent === true;
+        systemAuthAgent = (hasCertificate && !isFido)
           ? null
-          : await prepareSystemSshAgentForAuth(options, "[SFTP]");
+          : await prepareSystemSshAgentForAuth(
+            prep,
+            "[SFTP]",
+          );
         identityFile = !options.privateKey && !systemAuthAgent
           ? await loadFirstIdentityFileForAuth({
             sender: event.sender,
@@ -1018,7 +1034,9 @@ function createOpenConnectionApi(ctx) {
             },
           })
           : null;
-        inlineKey = options.privateKey && !systemAuthAgent
+        inlineKey = options.privateKey
+          && !systemAuthAgent
+          && !looksLikeSkOpenSshMaterial(options.privateKey)
           ? await preparePrivateKeyForAuth({
             sender: event.sender,
             privateKey: options.privateKey,
@@ -1040,7 +1058,7 @@ function createOpenConnectionApi(ctx) {
       if (systemAuthAgent) {
         connectOpts.agent = systemAuthAgent;
       }
-      if (hasCertificate) {
+      if (hasCertificate && !isFido) {
         authAgent = new NetcattyAgent({
           mode: "certificate",
           webContents: event.sender,
@@ -1052,7 +1070,7 @@ function createOpenConnectionApi(ctx) {
           },
         });
         connectOpts.agent = authAgent;
-      } else if (effectivePrivateKey) {
+      } else if (effectivePrivateKey && !isFido) {
         connectOpts.privateKey = effectivePrivateKey;
         if (effectivePassphrase) {
           connectOpts.passphrase = effectivePassphrase;
@@ -1150,7 +1168,10 @@ function createOpenConnectionApi(ctx) {
         // By connecting directly, we can filter these non-fatal errors and allow
         // the auth flow to continue to keyboard-interactive/password/etc.
         const sshClient = client.client;
-    
+        if (systemAuthAgent) {
+          require("../attachFidoAgentRelease.cjs").attachFidoAgentRelease(sshClient, systemAuthAgent);
+        }
+
         await new Promise((resolve, reject) => {
           let settled = false;
           let authReadyTimer = null;

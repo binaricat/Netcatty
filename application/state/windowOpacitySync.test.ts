@@ -6,6 +6,8 @@ import {
   serializeWindowOpacityRecord,
   shouldApplyWindowOpacityRecord,
   shouldBroadcastWindowOpacityChange,
+  updateWindowOpacityRecord,
+  toggleWindowOpacityRecord,
   type WindowOpacityMutationSource,
   type WindowOpacityRecord,
 } from './windowOpacitySync.ts';
@@ -196,4 +198,24 @@ test('versioned opacity sync ignores stale peer echoes during a fast drag', () =
 test('serializeWindowOpacityRecord round-trips through parse', () => {
   const raw = serializeWindowOpacityRecord({ opacity: 0.55, version: 9 });
   assert.deepEqual(parseWindowOpacityRecord(JSON.parse(raw)), { opacity: 0.55, version: 9 });
+});
+
+test('toggling off and restarting preserves a legacy selected opacity', () => {
+  const selected = parseWindowOpacityRecord('0.6');
+  const opaque = toggleWindowOpacityRecord(selected);
+  assert.equal(opaque.opacity, 1);
+  const restarted = parseWindowOpacityRecord(serializeWindowOpacityRecord(opaque));
+  assert.equal(toggleWindowOpacityRecord(restarted).opacity, 0.6);
+  assert.equal(toggleWindowOpacityRecord(restarted).version, selected.version + 2);
+});
+
+test('slider changes replace the preferred opacity and toggles use the latest record', () => {
+  const opaque = toggleWindowOpacityRecord({ opacity: 0.6, version: 2 });
+  const slider = updateWindowOpacityRecord(opaque, 0.7);
+  const next = toggleWindowOpacityRecord(toggleWindowOpacityRecord(slider));
+  assert.equal(next.opacity, 0.7);
+  assert.equal(next.preferredOpacity, 0.7);
+  assert.equal(next.version, 6);
+  assert.equal(updateWindowOpacityRecord(next, 0.7), next);
+  assert.equal(toggleWindowOpacityRecord({ opacity: 1, version: 0 }).opacity, 0.85);
 });

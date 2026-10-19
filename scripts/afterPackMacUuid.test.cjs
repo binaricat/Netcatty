@@ -7,6 +7,7 @@ const {
   patchMachOBuffer,
   pruneAsarHeaderEntries,
   pruneCursorSdkPlatformPackages,
+  pruneNativePrebuilds,
   readAsarHeader,
 } = require("./afterPackMacUuid.cjs");
 
@@ -91,6 +92,75 @@ test("deriveUuid is deterministic and 16 bytes", () => {
   assert.equal(a.length, 16);
   assert.ok(a.equals(b));
 });
+
+for (const [platform, arch, keep] of [
+  ["darwin", 3, ["darwin-arm64", "darwin-x64+arm64"]],
+  ["darwin", 1, ["darwin-x64", "darwin-x64+arm64"]],
+  ["darwin", 4, ["darwin-arm64", "darwin-x64", "darwin-x64+arm64"]],
+  ["linux", 3, ["linux-arm64"]],
+  ["linux", 1, ["linux-x64"]],
+  ["linux", 2, ["linux-arm"]],
+  ["win32", 1, ["win32-x64"]],
+  ["win32", 3, ["win32-arm64"]],
+  ["win32", 0, ["win32-ia32"]],
+  ["darwin", "unknown-arch", null],
+  ["darwin", 99, null],
+  ["unknown-platform", 1, null],
+]) {
+  test(`native prebuild pruning preserves the ${platform}/${arch} runtime and ASAR payload`, (t) => {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const { getTempFilePath } = require("../electron/bridges/tempDirBridge.cjs");
+    const tempDir = getTempFilePath("native-prebuild-pruning");
+    t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+    const resources = platform === "darwin"
+      ? path.join(tempDir, "Netcatty.app", "Contents", "Resources")
+      : path.join(tempDir, "resources");
+    const unpacked = path.join(resources, "app.asar.unpacked");
+    const payload = Buffer.from("preserved-packed-payload");
+    const header = { files: { "packed.txt": { size: payload.length, offset: "0" } } };
+    const tuples = [
+      "darwin-arm64", "darwin-x64", "darwin-x64+arm64", "linux-arm64", "linux-x64",
+      "linux-arm", "win32-x64", "win32-arm64", "win32-ia32", "android-arm64", "custom",
+    ];
+    const paths = [];
+    for (const packageName of ["node-pty", "@serialport/bindings-cpp"]) {
+      for (const directory of [...tuples.map((tuple) => `prebuilds/${tuple}`), "build/Release"]) {
+        const relative = `node_modules/${packageName}/${directory}/runtime.node`;
+        const file = path.join(unpacked, relative);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, "native-runtime");
+        let node = header;
+        const segments = relative.split("/");
+        for (const segment of segments.slice(0, -1)) {
+          node.files ??= {};
+          node = node.files[segment] ??= { files: {} };
+        }
+        node.files[segments.at(-1)] = { size: 14, unpacked: true };
+        paths.push(relative);
+      }
+    }
+    const asarPath = path.join(resources, "app.asar");
+    const originalHeaderSize = writeFakeAsar(asarPath, header, payload);
+    const context = {
+      electronPlatformName: platform, arch, appOutDir: tempDir,
+      packager: { appInfo: { productFilename: "Netcatty" } },
+    };
+    const removed = pruneNativePrebuilds(context);
+    const updated = readAsarHeader(asarPath);
+    assert.equal(updated.headerSize, originalHeaderSize);
+    assert.deepEqual(fs.readFileSync(asarPath).subarray(8 + originalHeaderSize), payload);
+    for (const relative of paths) {
+      const tuple = relative.split("/prebuilds/")[1]?.split("/")[0];
+      const retained = keep === null || !tuple || tuple === "custom" || keep.includes(tuple);
+      assert.equal(fs.existsSync(path.join(unpacked, relative)), retained, relative);
+      const entry = relative.split("/").reduce((node, segment) => node?.files?.[segment], updated.header);
+      assert.equal(Boolean(entry), retained, `ASAR ${relative}`);
+    }
+    if (keep === null) assert.deepEqual(removed, []);
+    assert.deepEqual(pruneNativePrebuilds(context), []);
+  });
+}
 
 test("deriveUuid differs per appId and sets version/variant bits", () => {
   const a = deriveUuid("com.netcatty.app");

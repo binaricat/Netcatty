@@ -1,4 +1,5 @@
 import type { Host, SerialConfig, TerminalSession } from "../../domain/models";
+import { classifyLocalShellType } from "../../lib/localShell";
 
 export interface LocalTerminalOptions {
   shellType?: TerminalSession["shellType"];
@@ -17,6 +18,28 @@ export interface LocalTerminalOptions {
  * suggestions never accumulated across opens (issue #2037).
  */
 export const LOCAL_TERMINAL_HOST_ID = "local-terminal";
+
+/**
+ * [] captures the absence of custom arguments instead of inheriting them
+ * from a later host edit. The starter still applies backend defaults to []
+ * and undefined alike. Share the array to preserve pane equality checks.
+ */
+const EMPTY_LOCAL_SHELL_ARGS: string[] = [];
+
+/**
+ * Platform string describing the machine that is launching the session.
+ *
+ * Vault local hosts can be synced/imported from another OS, so their saved
+ * `host.os` describes the source machine. When the host has no explicit
+ * shell (`localShell` empty), `startLocalSession` spawns the current
+ * machine's OS default shell, so classification must fall back to the
+ * runtime platform — not the persisted host OS — or a Windows host opened
+ * on Linux would be tagged "powershell" while Bash actually runs.
+ */
+const runtimePlatformLike = (): string | undefined => {
+  if (typeof navigator === "undefined") return undefined;
+  return navigator.userAgent || navigator.platform || undefined;
+};
 
 export const createLocalTerminalSession = (
   sessionId: string,
@@ -113,6 +136,30 @@ export const createHostTerminalSession = (
     moshEnabled: host.moshEnabled,
     etEnabled: host.etEnabled,
     charset: host.charset,
+    // Local-shell vault hosts carry the per-host shell selection into the
+    // session (the bridge resolves discovered shell ids at spawn time).
+    // shellType matches ordinary local-terminal creation so captured-CWD
+    // restore can reject POSIX injection into CMD/PowerShell sessions.
+    ...(host.protocol === "local" ? {
+      username: "local",
+      // With an explicit shell the basename classifies it on any OS, so the
+      // saved host.os stays the fallback; a default-shell host launches the
+      // current machine's OS default, so classify against the runtime.
+      shellType: classifyLocalShellType(
+        host.localShell,
+        host.localShell?.trim() ? host.os : runtimePlatformLike(),
+      ),
+      localShell: host.localShell ?? "",
+      // Preserve field presence: an edited host must not contribute its args
+      // to a session that was launched with an explicit shell and no args.
+      localShellArgs: host.localShellArgs ?? EMPTY_LOCAL_SHELL_ARGS,
+      localShellName: host.localShellName ?? "",
+      localShellIcon: host.localShellIcon ?? "",
+      // Effective directory from resolveHostDefaultLocalShell, including a
+      // Settings directory the saved host inherits. Copy Tab overlays this
+      // snapshot, so a later settings or vault edit cannot move the relaunch.
+      localStartDir: host.localStartDir || "~",
+    } : {}),
     ...(host.ephemeral ? { ephemeralHost: true } : {}),
     ...(host.autoOpenSftpPanel ? { autoOpenSidePanel: "sftp" as const } : {}),
   };

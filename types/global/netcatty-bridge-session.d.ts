@@ -190,10 +190,18 @@ declare global {
     discoverShells?(): Promise<DiscoveredShell[]>;
     validatePath?(path: string, type?: 'file' | 'directory' | 'any'): Promise<{ exists: boolean; isFile: boolean; isDirectory: boolean; isExecutable: boolean }>;
     generateKeyPair?(options: {
-      type: 'RSA' | 'ECDSA' | 'ED25519';
+      type: 'RSA' | 'ECDSA' | 'ED25519' | 'ED25519-SK' | 'ECDSA-SK';
       bits?: number;
       comment?: string;
-    }): Promise<{ success: boolean; privateKey?: string; publicKey?: string; error?: string }>;
+      resident?: boolean;
+      verifyRequired?: boolean;
+    }): Promise<{
+      success: boolean;
+      privateKey?: string;
+      publicKey?: string;
+      keyType?: 'RSA' | 'ECDSA' | 'ED25519' | 'ED25519-SK' | 'ECDSA-SK';
+      error?: string;
+    }>;
     checkSshAgent?(options?: {
       identityAgent?: string;
       agentForwarding?: boolean;
@@ -319,6 +327,7 @@ declare global {
         netRxSpeed: number;           // Total network receive speed (bytes/sec)
         netTxSpeed: number;           // Total network transmit speed (bytes/sec)
         latencyMs: number | null;     // SSH transport ping on the existing session, not a second TCP dial
+        responseLatencyMs?: number | null; // Existing stats exec response, including remote channel setup
         netInterfaces: Array<{        // Per-interface network stats
           name: string;               // Interface name (e.g., eth0, ens33)
           rxBytes: number;            // Total received bytes
@@ -641,6 +650,31 @@ declare global {
     ): () => void;
     onPassphraseAuthFailed?(
       cb: (event: { keyPaths: string[]; keyIds?: string[] }) => void
+    ): () => void;
+
+    // FIDO2 PIN / touch presence prompts (OpenSSH sk-*)
+    onFidoPromptRequest?(
+      cb: (request: {
+        requestId: string;
+        kind: "pin" | "touch" | "confirm" | "recovery";
+        reason?: "device-unavailable" | "timeout" | "pin-failed" | "failed";
+        allowPasswordFallback?: boolean;
+        notificationOnly?: boolean;
+        message?: string;
+        title?: string;
+        keyName?: string;
+      }) => void
+    ): () => void;
+    respondFidoPrompt?(
+      requestId: string,
+      response: string,
+      cancelled?: boolean
+    ): Promise<{ success: boolean; error?: string }>;
+    onFidoPromptTimeout?(
+      cb: (event: { requestId: string }) => void
+    ): () => void;
+    onFidoPromptCancelled?(
+      cb: (event: { requestId: string; reason?: string }) => void
     ): () => void;
   }
 }

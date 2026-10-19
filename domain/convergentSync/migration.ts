@@ -1,5 +1,4 @@
 import {
-  CLOUD_SYNC_PAYLOAD_ENTITY_KEYS,
   hasSyncPayloadEntityData,
   type CloudProvider,
   type ConvergentMigrationPreview,
@@ -78,6 +77,15 @@ function mergeMigrationSidecarsWithBaselines(options: {
   return { version: 1, entries };
 }
 
+// Chats use their existing transcript merge, not a new CRDT collection. A
+// chat-only difference therefore needs no causal vault baseline to migrate.
+function vaultPayloadsEqual(left: SyncPayload, right: SyncPayload): boolean {
+  return cloudSyncPayloadsEqual(
+    { ...left, aiSessions: undefined },
+    { ...right, aiSessions: undefined },
+  );
+}
+
 /*
  * A local snapshot with no cloud entities and no trusted base is a fresh
  * device, not an untrusted deletion. Settings are intentionally ignored here
@@ -89,7 +97,7 @@ function shouldIncludeLegacyLocalSource(
   trustedBaseline: SyncPayload | null,
 ): boolean {
   return trustedBaseline !== null
-    || hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS);
+    || hasSyncPayloadEntityData(payload, [...CONVERGENT_ENTITY_COLLECTIONS, ...CONVERGENT_STRING_COLLECTIONS]);
 }
 
 export type ConvergentMigrationProviderInput =
@@ -157,6 +165,7 @@ export function planConvergentSyncMigration(options: {
   providers: ConvergentMigrationProviderInput[];
   deviceId: string;
   now: number;
+  preserveDeletions?: boolean;
 }): ConvergentMigrationPlan {
   const providers = [...options.providers].sort((left, right) => left.provider.localeCompare(right.provider));
   const blockedReasons: string[] = [];
@@ -219,6 +228,10 @@ export function planConvergentSyncMigration(options: {
     let merged = seedFromProvider ? v1Inputs[0].payload : options.localPayload;
     if (seedFromProvider) {
       const seed = v1Inputs[0];
+      merged = {
+        ...merged,
+        aiSessions: mergeSyncPayloads(null, options.localPayload, merged).payload.aiSessions,
+      };
       const shrink = detectSuspiciousShrink(
         seed.payload,
         seed.trustedBaseline,
@@ -232,18 +245,30 @@ export function planConvergentSyncMigration(options: {
     const remainingInputs = seedFromProvider ? v1Inputs.slice(1) : v1Inputs;
     for (const input of remainingInputs) {
       if (!input.trustedBaseline) {
-        if (!cloudSyncPayloadsEqual(merged, input.payload)) {
+        if (!vaultPayloadsEqual(merged, input.payload)) {
           blockedReasons.push(`${input.provider}: no trusted legacy baseline is available`);
         }
+        merged = {
+          ...merged,
+          aiSessions: mergeSyncPayloads(null, merged, input.payload).payload.aiSessions,
+        };
         continue;
       }
-      const result = mergeSyncPayloads(input.trustedBaseline, merged, input.payload);
+      const result = mergeSyncPayloads(input.trustedBaseline, merged, input.payload, {
+        preserveDeletions: options.preserveDeletions,
+      });
+      const vaultMerge = mergeSyncPayloads(
+        { ...input.trustedBaseline, aiSessions: undefined },
+        { ...merged, aiSessions: undefined },
+        { ...input.payload, aiSessions: undefined },
+        { preserveDeletions: options.preserveDeletions },
+      );
       const changeSummary = summarizeSyncChanges(
         input.trustedBaseline,
         merged,
         input.payload,
       );
-      if (result.hadConflicts || changeSummary.hasConflicts) {
+      if (vaultMerge.hadConflicts || changeSummary.conflicts.some((conflict) => conflict.entityType !== 'aiSessions')) {
         blockedReasons.push(`${input.provider}: legacy smart merge has unresolved conflicts`);
       }
       const shrink = detectSuspiciousShrink(result.payload, input.trustedBaseline, input.payload);
@@ -268,6 +293,7 @@ export function planConvergentSyncMigration(options: {
         syncedAt: options.now,
         syncMeta: merged.syncMeta,
         ...(migrationSidecars ? { pluginSidecars: migrationSidecars } : {}),
+        ...(merged.aiSessions !== undefined ? { aiSessions: merged.aiSessions } : {}),
       });
     }
   } else if (blockedReasons.length === 0) {
@@ -288,9 +314,22 @@ export function planConvergentSyncMigration(options: {
         })),
       ],
     });
+    let joinedAiPayload = options.localPayload;
+    for (const input of [...v2Inputs, ...v1Inputs]) {
+      joinedAiPayload = {
+        ...joinedAiPayload,
+        aiSessions: mergeSyncPayloads(
+          input.trustedBaseline ?? options.localTrustedBaseline,
+          joinedAiPayload,
+          input.payload,
+          { preserveDeletions: options.preserveDeletions },
+        ).payload.aiSessions,
+      };
+    }
     const joinedPayload = materializeSyncPayloadFromConvergentState(state, {
       syncedAt: options.now,
       ...(joinedSidecars ? { pluginSidecars: joinedSidecars } : {}),
+      ...(joinedAiPayload.aiSessions !== undefined ? { aiSessions: joinedAiPayload.aiSessions } : {}),
     });
     const legacySources: Array<{
       id: string;
@@ -318,13 +357,15 @@ export function planConvergentSyncMigration(options: {
     ];
     const branches: ConvergentSyncStateV2[] = [];
     for (const source of legacySources) {
-      if (cloudSyncPayloadsEqual(source.payload, joinedPayload)) continue;
+      if (vaultPayloadsEqual(source.payload, joinedPayload)) continue;
       if (!source.baseline) {
         blockedReasons.push(`${source.id}: no trusted legacy baseline is available`);
         continue;
       }
       const shrink = detectSuspiciousShrink(
-        inheritOmittedLegacySyncFields(source.baseline, source.payload),
+        options.preserveDeletions
+          ? mergeSyncPayloads(null, source.payload, joinedPayload, { preserveDeletions: true }).payload
+          : inheritOmittedLegacySyncFields(source.baseline, source.payload),
         source.baseline,
       );
       if (shrink.suspicious) {
@@ -344,8 +385,25 @@ export function planConvergentSyncMigration(options: {
       materialized = materializeSyncPayloadFromConvergentState(state, {
         syncedAt: options.now,
         ...(joinedSidecars ? { pluginSidecars: joinedSidecars } : {}),
+        ...(joinedAiPayload.aiSessions !== undefined ? { aiSessions: joinedAiPayload.aiSessions } : {}),
       });
     }
+  }
+
+  if (options.preserveDeletions && state && materialized && blockedReasons.length === 0) {
+    let retained = materialized;
+    for (const source of [options.localPayload, ...v1Inputs.map((input) => input.payload), ...v2Inputs.map((input) => input.payload)]) {
+      retained = mergeSyncPayloads(null, retained, source, { preserveDeletions: true }).payload;
+    }
+    state = applyLegacySyncPayload(state, materialized, {
+      ...retained,
+      settings: materialized.settings,
+    }, options.deviceId, options.now);
+    materialized = materializeSyncPayloadFromConvergentState(state, {
+      syncedAt: options.now,
+      pluginSidecars: materialized.pluginSidecars,
+      aiSessions: retained.aiSessions,
+    });
   }
 
   const conflicts = state ? materializeConvergentSyncState(state).conflicts : [];
@@ -358,6 +416,7 @@ export function planConvergentSyncMigration(options: {
       ...(materialized?.pluginSidecars
         ? { pluginSidecars: materialized.pluginSidecars }
         : {}),
+      ...(materialized?.aiSessions !== undefined ? { aiSessions: materialized.aiSessions } : {}),
     })
     : null;
   const previewPayload = materialized ?? options.localPayload;

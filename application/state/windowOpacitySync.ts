@@ -10,6 +10,7 @@ export type WindowOpacityMutationSource = 'local' | 'incoming';
 export type WindowOpacityRecord = {
   opacity: number;
   version: number;
+  preferredOpacity?: number;
 };
 
 /**
@@ -34,12 +35,16 @@ export function parseWindowOpacityRecord(raw: unknown): WindowOpacityRecord {
   }
 
   if (raw && typeof raw === 'object') {
-    const record = raw as { opacity?: unknown; version?: unknown };
+    const record = raw as { opacity?: unknown; version?: unknown; preferredOpacity?: unknown };
     const opacity = clampWindowOpacity(record.opacity);
     const version = Number(record.version);
+    const preferred = Number(record.preferredOpacity);
     return {
       opacity,
       version: Number.isFinite(version) && version > 0 ? Math.floor(version) : 0,
+      ...(Number.isFinite(preferred) && preferred < 1
+        ? { preferredOpacity: clampWindowOpacity(preferred) }
+        : {}),
     };
   }
 
@@ -50,7 +55,28 @@ export function serializeWindowOpacityRecord(record: WindowOpacityRecord): strin
   return JSON.stringify({
     opacity: clampWindowOpacity(record.opacity),
     version: Math.max(0, Math.floor(record.version) || 0),
+    ...(record.preferredOpacity !== undefined ? { preferredOpacity: record.preferredOpacity } : {}),
   });
+}
+
+/** Slider changes and temporary toggles share the existing versioned setting. */
+export function updateWindowOpacityRecord(
+  current: WindowOpacityRecord,
+  nextValue: number,
+): WindowOpacityRecord {
+  const opacity = clampWindowOpacity(nextValue);
+  if (opacity === current.opacity) return current;
+  const preferredOpacity = opacity < 1 ? opacity
+    : current.opacity < 1 ? current.opacity : current.preferredOpacity;
+  return {
+    opacity,
+    version: current.version + 1,
+    ...(preferredOpacity !== undefined ? { preferredOpacity } : {}),
+  };
+}
+
+export function toggleWindowOpacityRecord(current: WindowOpacityRecord): WindowOpacityRecord {
+  return updateWindowOpacityRecord(current, current.opacity < 1 ? 1 : (current.preferredOpacity ?? 0.85));
 }
 
 /**

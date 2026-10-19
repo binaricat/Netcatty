@@ -66,6 +66,7 @@ export const terminalLayerAreEqual = (
   prev.onUpdateHost === next.onUpdateHost &&
   prev.onAddKnownHost === next.onAddKnownHost &&
   prev.onDeleteShellHistoryEntry === next.onDeleteShellHistoryEntry &&
+  prev.onClearCommandHistory === next.onClearCommandHistory &&
   prev.onToggleWorkspaceViewMode === next.onToggleWorkspaceViewMode &&
   prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
   prev.onReorderWorkspaceSessions === next.onReorderWorkspaceSessions &&

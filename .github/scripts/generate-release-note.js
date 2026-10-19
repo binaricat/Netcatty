@@ -117,5 +117,9 @@ See the
 and [Privacy policy](https://github.com/${repo}/blob/${tag}/PRIVACY.md).
 `;
 
-fs.writeFileSync('release_notes.md', content);
+// Keep editorial highlights scoped to their release so future tags do not
+// accidentally reuse an older version's announcement.
+const highlightsPath = path.join(__dirname, '..', 'release-notes', `${path.basename(tag)}.md`);
+const highlights = fs.existsSync(highlightsPath) ? fs.readFileSync(highlightsPath, 'utf8').trim() : '';
+fs.writeFileSync('release_notes.md', highlights ? `${highlights}\n\n${content.trimStart()}` : content);
 console.log('Generated release_notes.md');

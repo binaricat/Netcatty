@@ -17,7 +17,7 @@ import {
 } from "./promptDetector";
 import { getCompletions, parseCommandLine, type CompletionSuggestion } from "./completionEngine";
 import type { Snippet } from "../../../domain/models";
-import { recordCommand } from "./commandHistoryStore";
+import { recordCommand, subscribeCommandHistoryCleared } from "../../../application/state/commandHistoryStore";
 import { seedLocalShellHistoryFromHistfiles } from "./localShellHistorySeed";
 import { shellEscape } from "./completionEngine";
 import { preloadCommonSpecs } from "./figSpecLoader";
@@ -1312,6 +1312,32 @@ export function useTerminalAutocomplete(
       repositionPopup();
     });
   }, [termRef, writeToTerminal, repositionPopup]);
+
+  /**
+   * Drop every trace of the popup when command history is cleared, including a
+   * clear performed in another renderer (e.g. the main window while this
+   * detached popup is open).
+   *
+   * Mirrors the Escape path: live preview writes the highlighted candidate into
+   * the shell line, so hiding the popup alone would leave the deleted command
+   * ready for Enter, with `lastAcceptedCommandRef` still pointing at it.
+   * Restore the typed baseline and reset the refs first.
+   */
+  const handleCommandHistoryCleared = useCallback(() => {
+    if (previewActiveRef.current) {
+      renderPreviewSelection(-1); // restore the typed baseline
+    }
+    clearState();
+    previewActiveRef.current = false;
+    // Drop a command accepted before the clear so a fast Enter cannot record it
+    // through the accepted-command path (the line buffer is authoritative now).
+    lastAcceptedCommandRef.current = null;
+  }, [clearState, renderPreviewSelection]);
+
+  useEffect(
+    () => subscribeCommandHistoryCleared(handleCommandHistoryCleared),
+    [handleCommandHistoryCleared],
+  );
 
   /** Accept a snippet: clear the user's typed input, then run it via the
    *  host-canonical send path (onAcceptSnippet). */

@@ -1,6 +1,7 @@
 import type { Messages } from '../types';
 
 export const zhTWAiMessages: Messages = {
+  'ai.chat.attachmentContentUnavailable': '附件內容未保留在此裝置',
   // AI Settings
   'ai.agentSettings': 'Agent 設定',
   'ai.chat.preparing': '準備中…',
@@ -503,6 +504,10 @@ export const zhTWAiMessages: Messages = {
   'ai.chat.pinModel': '釘選模型',
   'ai.chat.unpinModel': '取消釘選',
   'ai.chat.loadingModels': '正在載入模型...',
+  'ai.chat.modelCatalogSourceLive': '即時目錄',
+  'ai.chat.modelCatalogSourceCached': '快取 · 上次成功 {time}',
+  'ai.chat.modelCatalogSourceCachedNoTime': '快取',
+  'ai.chat.modelCatalogSourcePresets': '內建預設清單',
   'ai.chat.noMatchingModels': '沒有符合的模型',
   'ai.chat.recent': '最近',
   'ai.chat.viewAll': '檢視全部',
@@ -523,8 +528,11 @@ export const zhTWAiMessages: Messages = {
   'ai.chat.searchSessions': '搜尋標題和近期內容…',
   'ai.chat.clearSessionSearch': '清空會話搜尋',
   'ai.chat.searchSessionsHint': '搜尋標題，並優先搜尋較新的訊息與項目；超長訊息與工具輸出僅搜尋開頭的有限部分。這不是全文搜尋。',
+  'ai.chat.searchingSessions': '搜尋中…',
   'ai.chat.noMatchingSessions': '標題和近期保留的內容中沒有符合的結果',
   'ai.chat.noSessions': '沒有歷史工作階段',
+  'ai.chat.forkFromHere': '從此處分叉',
+  'ai.chat.forkCreated': '已分叉到新對話，原對話保留在歷史中。',
   'ai.chat.retryHint': '你可以重新發送訊息來重試。',
   'ai.chat.approvalTimeout': '工具核准已超時（5 分鐘）。你可以重新發送訊息來重試。',
   'ai.chat.menuHosts': '主機',

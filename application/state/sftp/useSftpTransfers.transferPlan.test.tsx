@@ -7,6 +7,55 @@ import { PREFLIGHT_STAT_CONCURRENCY, PREFLIGHT_STAT_MAX_FILES, useSftpTransfers 
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 import type { SftpPane } from "./types";
 
+for (const direction of ["download", "upload"] as const) {
+test(`failed ${direction} connection replaces Waiting with the actual error (#3698)`, async () => {
+  let streamStarts = 0;
+  const restore = installGlobals({
+    statSftp: async () => ({ type: "file", size: 3626, lastModified: 1758000001000 }),
+    statLocal: async () => null,
+    startStreamTransfer: async () => { streamStarts += 1; return {}; },
+  });
+  let ops: ReturnType<typeof useSftpTransfers> | undefined;
+  let renderer: ReactTestRenderer | undefined;
+  const ownerId = `failed-${direction}-connection-3698`;
+  function Probe() {
+    ops = useSftpTransfers({
+      ownerId,
+      getActivePane: (side) => makePane(direction === "download" ? side : side === "left" ? "right" : "left"),
+      getPaneByConnectionId: () => null,
+      getTabByConnectionId: () => null,
+      updateTab: () => undefined,
+      refresh: async () => undefined,
+      clearCacheForConnection: () => undefined,
+      handleSessionError: () => undefined,
+      sftpSessionsRef: { current: new Map([["remote-conn", "sftp-remote"]]) },
+      connectionCacheKeyMapRef: { current: new Map() },
+      listLocalFiles: async () => [],
+      listRemoteFiles: async () => [],
+      acquireTransferSession: async () => { throw new Error("SFTP channel open timed out after 10000ms"); },
+    });
+    return null;
+  }
+  try {
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    await act(async () => {
+      const results = await ops!.startTransfer(
+        [{ name: "aops_dns_view_demo.sh", isDirectory: false }], "left", "right",
+      );
+      assert.equal(results[0]?.status, "failed");
+    });
+    const task = sftpTransferCenterStore.getOwnerTasks(ownerId)[0];
+    assert.equal(task?.status, "failed");
+    assert.equal(task?.error, "SFTP channel open timed out after 10000ms");
+    assert.ok(task?.endTime);
+    assert.equal(streamStarts, 0);
+  } finally {
+    await act(async () => { renderer?.unmount(); });
+    restore();
+  }
+});
+}
+
 type StartOptions = {
   transferId: string;
   sourcePath: string;

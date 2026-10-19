@@ -5,6 +5,31 @@ import { mergeSyncPayloads } from "./syncMerge.ts";
 import { withSyncReliabilityMeta } from "./syncReliability.ts";
 import type { SyncPayload } from "./sync.ts";
 
+const bookmark = (id: string, title = id) => ({
+  id, title, url: `https://${id}.example.com/`, scope: 'host' as const,
+  hostId: 'host-1', icon: 'A', color: '#247969', order: 0,
+  createdAt: 1, updatedAt: 1,
+});
+
+test('browser bookmark additions from two devices merge by ID', () => {
+  const result = mergeSyncPayloads(
+    payload({ browserBookmarks: [] }),
+    payload({ browserBookmarks: [bookmark('local')] }),
+    payload({ browserBookmarks: [bookmark('remote')] }),
+  );
+  assert.deepEqual(result.payload.browserBookmarks?.map((item) => item.id).sort(), ['local', 'remote']);
+});
+
+test('browser bookmark deletion survives an unchanged remote and legacy omission', () => {
+  const base = payload({ browserBookmarks: [bookmark('app')] });
+  const local = payload({ browserBookmarks: [] });
+  const unchanged = payload({ browserBookmarks: [bookmark('app')] });
+  assert.deepEqual(mergeSyncPayloads(base, local, unchanged).payload.browserBookmarks, []);
+  const legacy = payload();
+  delete legacy.browserBookmarks;
+  assert.deepEqual(mergeSyncPayloads(base, unchanged, legacy).payload.browserBookmarks, [bookmark('app')]);
+});
+
 function payload(overrides: Partial<SyncPayload> = {}): SyncPayload {
   return {
     hosts: [],

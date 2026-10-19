@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isStepCount, streamText, tool } from 'ai';
+import { generateText, isStepCount, streamText, tool } from 'ai';
 import { z } from 'zod';
 import { createBridgeFetchForSDK, createModelFromConfig } from './sdk/providers';
 import type { OpenAIChatAssistantFields } from './providerContinuation';
@@ -1305,3 +1305,25 @@ for (const indexes of [[0], [1], [1, 4], [4, 1]]) {
       indexes.map(index => `call_${index}`).sort());
   });
 }
+
+test('non-streaming DeepSeek usage reaches the SDK as cached input', async t => {
+  const originalWindow = globalThis.window;
+  t.after(() => { globalThis.window = originalWindow; });
+  globalThis.window = { netcatty: {
+    aiFetch: async () => ({ ok: true, status: 200, data: JSON.stringify({
+      id: 'response', object: 'chat.completion', created: 0, model: 'deepseek-chat',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1000, completion_tokens: 1, total_tokens: 1001,
+        prompt_cache_hit_tokens: 900, prompt_cache_miss_tokens: 100 },
+    }) }),
+  } } as unknown as Window & typeof globalThis;
+  const result = await generateText({
+    model: createModelFromConfig({
+      id: 'fixture', providerId: 'custom', name: 'Fixture', enabled: true,
+      baseURL: 'https://provider.example.test/v1', apiKey: 'fixture', defaultModel: 'deepseek-chat',
+    }),
+    prompt: 'hello',
+  });
+  assert.equal(result.usage.inputTokenDetails.cacheReadTokens, 900);
+  assert.equal(result.usage.inputTokenDetails.noCacheTokens, 100);
+});

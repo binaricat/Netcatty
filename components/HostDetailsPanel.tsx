@@ -4,6 +4,7 @@ import {
   EyeOff,
   FileText,
   FolderPlus,
+  PlugZap,
   Plus,
   Settings2,
   Tag,
@@ -23,6 +24,7 @@ import {
   updateProxyConfigField,
 } from "../domain/proxyProfiles";
 import { hasRequiredHostAuthCredential, resolveHostAuth, resolveHostAuthMethodForPersistence } from "../domain/sshAuth";
+import { canServeAsSshJumpHost } from "../domain/terminalProtocol";
 import { customThemeStore } from "../application/state/customThemeStore";
 import {
   hasHostFontSizeOverride,
@@ -60,6 +62,7 @@ import { Combobox, ComboboxOption, MultiCombobox } from "./ui/combobox";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 import { toast } from "./ui/toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 import {
   ChainPanel,
@@ -749,7 +752,13 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
 
   const availableHostsForChain = useMemo(() => {
     const chainedIds = new Set(form.hostChain?.hostIds || []);
-    return allHosts.filter((h) => h.id !== form.id && !chainedIds.has(h.id));
+    // Chain hops are SSH ProxyJump hops; never offer local/serial/telnet/plugin
+    // entries (e.g. saved local shells) as jump hosts.
+    return allHosts.filter((h) =>
+      h.id !== form.id
+      && !chainedIds.has(h.id)
+      && canServeAsSshJumpHost(h),
+    );
   }, [allHosts, form.id, form.hostChain?.hostIds]);
 
   const chainedHosts = useMemo(() => {
@@ -1008,16 +1017,39 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         initialData ? t("hostDetails.title.details") : t("hostDetails.title.new")
       }
       actions={
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={handleSubmit}
-          disabled={!canSaveHost}
-          aria-label={t("hostDetails.saveAria")}
-        >
-          <Check size={16} />
-        </Button>
+        <>
+          {!pluginProtocolActive && form.protocol !== "telnet" && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={handleStartTest}
+                    disabled={!canSaveHost}
+                    aria-label={t("hostConnectionTest.title")}
+                  >
+                    <PlugZap size={16} />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t("hostConnectionTest.title")}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={handleSubmit}
+            disabled={!canSaveHost}
+            aria-label={t("hostDetails.saveAria")}
+          >
+            <Check size={16} />
+          </Button>
+        </>
       }
     >
       <AsidePanelContent>
@@ -1339,19 +1371,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           </Button>
         )}
       </AsidePanelContent>
-      <AsidePanelFooter className="flex flex-row gap-2">
-        {!pluginProtocolActive && form.protocol !== "telnet" && (
-          <Button
-            variant="outline"
-            className="h-10 px-4"
-            onClick={handleStartTest}
-            disabled={!canSaveHost}
-          >
-            {t("hostConnectionTest.test")}
-          </Button>
-        )}
+      <AsidePanelFooter>
         <Button
-          className="flex-1 h-10"
+          className="w-full h-10"
           onClick={handleSubmit}
           disabled={!canSaveHost}
         >

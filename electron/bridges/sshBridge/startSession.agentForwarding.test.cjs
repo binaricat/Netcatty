@@ -138,6 +138,30 @@ test("direct SSH allows only a restricted selected agent-backed key", () => {
   }, { agent: {} }), false);
 });
 
+test("FIDO agent login is offered after path/inline sk detection even when renderer opted out of ssh-agent", () => {
+  const pathOnlySk = {
+    authMethod: "key",
+    useSshAgent: false,
+    useFidoAgent: true,
+    identitiesOnly: true,
+    identityFilePaths: ["~/.ssh/id_ed25519_sk"],
+  };
+  assert.equal(shouldOfferAgentForLogin(pathOnlySk, { agent: {} }), true);
+
+  const inlineSk = {
+    authMethod: "key",
+    useSshAgent: false,
+    useFidoAgent: true,
+  };
+  assert.equal(shouldOfferAgentForLogin(inlineSk, { agent: {} }), true);
+
+  assert.equal(shouldOfferAgentForLogin({
+    authMethod: "password",
+    useSshAgent: false,
+    useFidoAgent: true,
+  }, { agent: {} }), false);
+});
+
 test("strict agent selection excludes unlocked default keys", () => {
   const unlocked = [{ keyName: "id_other", privateKey: "PRIVATE KEY" }];
   assert.deepEqual(resolveUnlockedEncryptedKeysForAuth({

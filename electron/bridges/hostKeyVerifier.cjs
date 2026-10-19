@@ -265,6 +265,11 @@ const registerHandler = (ipcMain) => {
 };
 
 const getRequests = () => hostKeyRequests;
+const cancelRequestsForSession = (sessionId) => {
+  for (const [id, pending] of hostKeyRequests) {
+    if (pending.sessionId === sessionId) settleRequest(id, { accept: false, cancelled: true });
+  }
+};
 
 module.exports = {
   classifyHostKey,
@@ -276,4 +281,5 @@ module.exports = {
   registerHandler,
   requestHostKeyVerification,
   getRequests,
+  cancelRequestsForSession,
 };

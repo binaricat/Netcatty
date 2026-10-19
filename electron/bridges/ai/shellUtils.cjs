@@ -13,7 +13,7 @@ const path = require("node:path");
 // ── ANSI / URL regexes ──
 
 const ANSI_ESCAPE_REGEX = /\u001B\[[0-?]*[ -/]*[@-~]/g;
-const ANSI_OSC_REGEX = /\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g;
+const ANSI_OSC_REGEX = /\u001B\][^\u0007]*?(?:\u0007|\u001B\\)/g;
 const URL_CANDIDATE_REGEX = /https?:\/\/[^\s]+/g;
 const WINDOWS_RUNNABLE_EXTENSIONS = [".exe", ".cmd", ".bat", ".com"];
 const MAX_PROMPT_TRACK_TAIL = 4096;
@@ -620,6 +620,81 @@ function resolveCodebuddyExecutableForSdk(codebuddyExecutablePath, platform = pr
   return ext === ".cmd" || ext === ".bat" || ext === ".ps1" ? null : normalized;
 }
 
+function resolveCopilotExecutableForSdk(copilotExecutablePath, platform = process.platform) {
+  const normalized = String(copilotExecutablePath || "").trim();
+  if (!normalized) return null;
+  if (platform !== "win32") return normalized;
+
+  const ext = path.extname(normalized).toLowerCase();
+  // A native exe or an explicit .js entry can be launched by the SDK as-is.
+  if (ext === ".exe" || ext === ".js") return normalized;
+  // Any other concrete, non-shim extension: leave it untouched. npm also
+  // writes a copilot.ps1 wrapper next to the .cmd one; it cannot be spawned
+  // without a shell either, so it resolves to the JS entry the same way.
+  if (ext && ext !== ".cmd" && ext !== ".bat" && ext !== ".ps1") return normalized;
+
+  // Windows npm globals expose `copilot.cmd` shims that launch node with the
+  // package's npm-loader.js. The Copilot SDK spawns `path` through node
+  // WITHOUT shell:true, and Node >= 18.20 refuses to spawn .cmd/.bat shims
+  // (EINVAL), so resolve the shim to the real JS entry before handing it to
+  // RuntimeConnection.forStdio — same treatment as the other per-CLI resolvers.
+  const shimCandidates = [normalized];
+  if (!ext) shimCandidates.push(`${normalized}.cmd`, `${normalized}.bat`);
+
+  const shimDir = path.dirname(normalized);
+  // npm global layout: <prefix>\copilot.cmd + <prefix>\node_modules\@github\copilot\
+  // Local project layout: node_modules\.bin\copilot.cmd + ..\@github\copilot\
+  const packageRoots = [
+    path.join(shimDir, "node_modules", "@github", "copilot"),
+    path.join(shimDir, "..", "@github", "copilot"),
+  ];
+  // Loader-first is the default for npm shim resolution. The official 1.0.59
+  // loader forwards unchanged arguments to the same platform executable via
+  // spawnSync without windowsHide; it does not add runtime initialization.
+  // The Copilot SDK driver resolves that installed executable after this step
+  // so the SDK can hide and own it directly, retaining the loader as fallback.
+  // This opt-in still selects the native entry at the resolver boundary.
+  const preferNative = process.env.NETCATTY_COPILOT_PREFER_NATIVE === "1";
+  for (const root of packageRoots) {
+    if (preferNative) {
+      const nativeExe = path.join(
+        root, "..", `copilot-${platform}-${process.arch}`, "copilot.exe",
+      );
+      if (existsSync(nativeExe)) return nativeExe;
+    }
+    const loaderJs = path.join(root, "npm-loader.js");
+    if (existsSync(loaderJs)) return loaderJs;
+  }
+
+  // Fall back to parsing the shim for the npm-loader.js path it references.
+  for (const shimPath of shimCandidates) {
+    try {
+      if (!existsSync(shimPath)) continue;
+      const contents = readFileSync(shimPath, "utf8");
+      const match = contents.match(/node_modules[\\/]+@github[\\/]copilot[\\/][\w\\/.-]+\.js/i);
+      if (match) {
+        const loaderJs = path.resolve(path.dirname(shimPath), match[0]);
+        if (existsSync(loaderJs)) {
+          // Same opt-in native preference as the package-root path above.
+          if (preferNative) {
+            const nativeExe = path.join(
+              path.dirname(loaderJs), "..", `copilot-${platform}-${process.arch}`, "copilot.exe",
+            );
+            if (existsSync(nativeExe)) return nativeExe;
+          }
+          return loaderJs;
+        }
+      }
+    } catch {
+      // Try the next shim candidate.
+    }
+  }
+
+  // Could not locate the JS entry — return the original path unchanged so the
+  // caller keeps its previous behavior instead of losing the custom path.
+  return normalized;
+}
+
 function resolveSdkBinPath(command, shellEnv, platform = process.platform) {
   const raw = resolveCliFromPath(command, shellEnv);
   if (!raw) return null;
@@ -1055,6 +1130,7 @@ module.exports = {
   resolveCodexExecutableForSdk,
   addCodexExecutableEnvForSdk,
   resolveCodebuddyExecutableForSdk,
+  resolveCopilotExecutableForSdk,
   resolveSdkBinPath,
   resolveSdkBinPathAsync,
   resolveCliFromPath,

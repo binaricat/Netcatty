@@ -20,8 +20,10 @@ test("vault header collapsed actions cannot retain hidden focus", () => {
   assert.match(vaultViewLayoutSource, /newHostActionsRef\.current\?\.contains\(activeElement\)/);
   assert.match(vaultViewLayoutSource, /sessionActionsRef\.current\?\.contains\(activeElement\)/);
   assert.match(vaultViewLayoutSource, /activeElement\.blur\(\)/);
-  assert.match(vaultViewLayoutSource, /aria-hidden=\{isHostPanelOpen \? true : undefined\}/);
-  assert.match(vaultViewLayoutSource, /inert=\{isHostPanelOpen \? true : undefined\}/);
+  // Both the SSH/new-host panel and the local-shell host panel collapse the
+  // header actions so hidden buttons cannot retain focus.
+  assert.match(vaultViewLayoutSource, /aria-hidden=\{isHostAsideOpen \? true : undefined\}/);
+  assert.match(vaultViewLayoutSource, /inert=\{isHostAsideOpen \? true : undefined\}/);
 });
 
 test("vault sidebar toggle keeps an accessible action label", () => {

@@ -1,6 +1,7 @@
 import type { Messages } from '../types';
 
 export const enAiMessages: Messages = {
+  'ai.chat.attachmentContentUnavailable': 'Content not available on this device',
   // AI Settings
   'ai.agentSettings': 'Agent Settings',
   'ai.chat.preparing': 'Preparing…',
@@ -513,6 +514,10 @@ export const enAiMessages: Messages = {
   'ai.chat.pinModel': 'Pin model',
   'ai.chat.unpinModel': 'Unpin model',
   'ai.chat.loadingModels': 'Loading models...',
+  'ai.chat.modelCatalogSourceLive': 'Live catalog',
+  'ai.chat.modelCatalogSourceCached': 'Cached · last success {time}',
+  'ai.chat.modelCatalogSourceCachedNoTime': 'Cached',
+  'ai.chat.modelCatalogSourcePresets': 'Built-in default list',
   'ai.chat.noMatchingModels': 'No matching models',
   'ai.chat.recent': 'Recent',
   'ai.chat.viewAll': 'View All',
@@ -533,8 +538,11 @@ export const enAiMessages: Messages = {
   'ai.chat.searchSessions': 'Search titles and recent content…',
   'ai.chat.clearSessionSearch': 'Clear session search',
   'ai.chat.searchSessionsHint': 'Searches titles, prioritizing newer messages and entries. For long messages and tool outputs, only a limited portion at the beginning is searched. This is not full-text search.',
+  'ai.chat.searchingSessions': 'Searching...',
   'ai.chat.noMatchingSessions': 'No matches in titles or recent retained content',
   'ai.chat.noSessions': 'No previous sessions',
+  'ai.chat.forkFromHere': 'Fork from here',
+  'ai.chat.forkCreated': 'Branched into a new chat — the original stays in history.',
   'ai.chat.retryHint': 'You can retry by sending your message again.',
   'ai.chat.approvalTimeout': 'Tool approval timed out after 5 minutes. You can retry by sending your message again.',
   'ai.chat.menuHosts': 'Hosts',

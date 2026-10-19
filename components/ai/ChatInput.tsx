@@ -206,8 +206,12 @@ interface ChatInputProps {
   placeholder?: string;
   /** Available model presets for the current agent */
   modelPresets?: AgentModelPreset[];
-  /** Live agent model catalog (OpenCode) is still loading. */
+  /** Live agent model catalog is still loading. */
   modelCatalogLoading?: boolean;
+  /** Provenance of the active model list, rendered as the picker status chip. */
+  modelCatalogSource?: 'live' | 'last-known-good' | 'presets';
+  /** ISO timestamp of the successful fetch backing `modelCatalogSource`. */
+  modelCatalogFetchedAt?: string;
   /**
    * Offer the picker's "use custom model" action. Disable when the current
    * agent locks the model (e.g. managed Codex `model` config overrides the
@@ -280,6 +284,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   placeholder,
   modelPresets = [],
   modelCatalogLoading = false,
+  modelCatalogSource,
+  modelCatalogFetchedAt,
   allowCustomModelEntry = true,
   selectedModelId,
   onModelSelect,
@@ -1000,8 +1006,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     ? providerSwitcherChipLabel
     : (selectedPreset?.name || modelName || providerName || t('ai.chat.noModel'));
   const modelChipMaxWidth = hasProviderSwitcher ? 'max-w-[168px]' : 'max-w-[96px]';
-  // Keep the picker open-able while an OpenCode catalog load is pending so
-  // the user sees the loading row instead of stale built-in presets (#3584).
+  // Keep the picker open-able while an SDK catalog load is pending: the host
+  // now shows build-time presets during loading, with the loading row when
+  // presets are still empty (#3584).
   const hasModelPicker = hasProviderSwitcher
     || ((modelPresets.length > 0 || modelCatalogLoading) && !!onModelSelect);
   const thinkingLevels = useMemo(
@@ -1599,6 +1606,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     selectedModelId={hasProviderSwitcher ? providerSwitcher?.selectedModelId : selectedBaseModelId}
                     modelPresets={hasProviderSwitcher ? undefined : modelPresets}
                     loading={!hasProviderSwitcher ? modelCatalogLoading : undefined}
+                    catalogSource={!hasProviderSwitcher ? modelCatalogSource : undefined}
+                    catalogFetchedAt={!hasProviderSwitcher ? modelCatalogFetchedAt : undefined}
                     allowCustomEntry={allowCustomModelEntry}
                     prefs={modelPrefs}
                     onSelectProviderModel={(providerId, modelId, contextWindow) => {
@@ -1813,6 +1822,8 @@ function chatInputPropsAreEqual(prev: ChatInputProps, next: ChatInputProps): boo
     && prev.placeholder === next.placeholder
     && prev.modelPresets === next.modelPresets
     && prev.modelCatalogLoading === next.modelCatalogLoading
+    && prev.modelCatalogSource === next.modelCatalogSource
+    && prev.modelCatalogFetchedAt === next.modelCatalogFetchedAt
     && prev.allowCustomModelEntry === next.allowCustomModelEntry
     && prev.selectedModelId === next.selectedModelId
     && prev.onModelSelect === next.onModelSelect

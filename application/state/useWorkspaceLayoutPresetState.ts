@@ -35,7 +35,7 @@ export type ResolvedWorkspaceLayoutPreset = {
 export function useWorkspaceLayoutPresetState() {
   /**
    * Resolve the saved default preset into a fresh layout for a newly
-   * connected session. Panes the session cannot serve (SFTP on non-file
+   * connected session. Panes the session cannot serve (SFTP/Browser on non-file
    * protocols) are pruned, and ids are rekeyed so several workspaces can
    * run the same preset in parallel. Returns null when there is no preset
    * or nothing survives availability filtering.
@@ -48,7 +48,7 @@ export function useWorkspaceLayoutPresetState() {
       const proto = session.protocol ?? 'ssh';
       const usable = withoutUnavailableSidePanelTools(
         preset.layout,
-        (tool) => tool !== 'sftp' || canServeSftp(proto),
+        (tool) => (tool !== 'sftp' && tool !== 'browser') || canServeSftp(proto),
       );
       if (!usable) return null;
 

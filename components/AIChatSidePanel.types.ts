@@ -40,6 +40,7 @@ export interface AIChatSidePanelProps {
   /** Non-destructively branch before the last user turn; returns the branch id + restored composer content. */
   undoLastTurnInSession?: (
     sessionId: string,
+    viewingScope?: Pick<AISessionScope, 'type' | 'targetId'>,
   ) => Promise<{ sessionId: string; restored: { text: string; attachments: import('../infrastructure/ai/types').UploadedFile[]; selectedUserSkillSlugs: string[] } } | null>;
   deleteSession: (sessionId: string, scopeKey?: string) => void;
   updateSessionTitle: (sessionId: string, title: string) => void;
@@ -58,6 +59,11 @@ export interface AIChatSidePanelProps {
     sessionId: string,
     compaction: import('../infrastructure/ai/types').AISessionContextCompaction,
   ) => void;
+  forkSessionFromMessage?: (
+    sessionId: string,
+    messageId: string,
+    viewingScope?: Pick<AISessionScope, 'type' | 'targetId'>,
+  ) => Promise<AISession | null>;
   // Provider config
   providers: ProviderConfig[];
   activeProviderId: string;

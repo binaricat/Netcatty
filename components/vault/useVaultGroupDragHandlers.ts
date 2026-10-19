@@ -66,53 +66,40 @@ export function useVaultGroupDragHandlers({
       setDragOverDropTarget(path ? { kind: "group", path } : null);
     }, []);
   
-  const moveHostToGroup = useCallback((hostId: string, groupPath: string | null) => {
+  const moveHostsToGroup = useCallback((hostIds: ReadonlySet<string>, groupPath: string | null) => {
       const targetGroup = groupPath || "";
-      const hostToMove = hosts.find((h) => h.id === hostId);
-      if (!hostToMove || (hostToMove.group || "") === targetGroup) {
-        setDragOverDropTarget(null);
-        return;
-      }
-  
-      // Find the most specific (deepest) managed source that matches the target group
       const targetManagedSource = managedSources
         .filter(s => targetGroup === s.groupName || targetGroup.startsWith(s.groupName + "/"))
         .sort((a, b) => b.groupName.length - a.groupName.length)[0];
-  
-      const movedHost = {
-        ...hostToMove,
-        group: targetGroup,
-      };
-      const updatedHost = (() => {
-          const h = movedHost;
-  
-          // Only SSH hosts can be managed (SSH config only supports SSH)
-          const canBeManaged = !h.protocol || h.protocol === "ssh";
-  
-          // Sanitize label if moving to a managed group (SSH config requires no spaces in Host alias)
-          let label = h.label;
-          if (targetManagedSource && canBeManaged && label) {
-            label = label.replace(/\s/g, '');
-          }
-  
-          return {
-            ...h,
-            label,
-            group: targetGroup,
-            managedSourceId: (targetManagedSource && canBeManaged) ? targetManagedSource.id : undefined,
-          };
-        })();
-      onUpdateHosts(hosts.map((host) => (host.id === hostId ? updatedHost : host)));
+      let movedCount = 0;
+      const updatedHosts = hosts.map(host => {
+        if (!hostIds.has(host.id) || (host.group || "") === targetGroup) return host;
+        movedCount += 1;
+        const canBeManaged = !host.protocol || host.protocol === "ssh";
+        return {
+          ...host,
+          group: targetGroup,
+          label: targetManagedSource && canBeManaged
+            ? host.label.replace(/\s/g, '') : host.label,
+          managedSourceId: targetManagedSource && canBeManaged ? targetManagedSource.id : undefined,
+        };
+      });
       setDragOverDropTarget(null);
+      if (movedCount === 0) return;
+      // Publish the entire selection once; repeated single-host updates would
+      // each start from the same render snapshot and overwrite earlier moves.
+      onUpdateHosts(updatedHosts);
       pulseDropTarget(groupPath ? { kind: "group", path: groupPath } : { kind: "root" });
-      toast.success(
-        t("vault.hosts.moveToGroup.success", {
-          host: hostToMove.label,
-          group: groupPath || t("vault.hosts.allHosts"),
-        }),
-      );
+      toast.success(t("vault.hosts.moveMultiple.success", {
+        count: movedCount,
+        group: groupPath || t("vault.hosts.allHosts"),
+      }));
     }, [hosts, managedSources, onUpdateHosts, pulseDropTarget, t]);
-  
+
+  const moveHostToGroup = useCallback((hostId: string, groupPath: string | null) => {
+      moveHostsToGroup(new Set([hostId]), groupPath);
+    }, [moveHostsToGroup]);
+
   const getDropTargetClasses = (target: DropTarget) =>
       cn(
         isSameDropTarget(dragOverDropTarget, target) &&
@@ -151,6 +138,7 @@ export function useVaultGroupDragHandlers({
     handleUnmanageGroup,
     managedGroupPaths,
     moveHostToGroup,
+    moveHostsToGroup,
     setDragOverDropTarget,
     setGroupDragOverDropTarget,
   };

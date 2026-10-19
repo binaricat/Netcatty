@@ -4,6 +4,7 @@ const { releaseAttachedSessionState } = require("./terminalAttachRestore.cjs");
 
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
+const { isJobDiagEnabled } = require("./ai/jobStartupDiagnostics.cjs");
 const {
   logTerminalInterruptDebug,
   normalizeTrace,
@@ -1233,6 +1234,13 @@ function createTerminalWorkerManager(options = {}) {
   function handleMessage(eventOrMessage) {
     const message = unwrapMessageEvent(eventOrMessage);
     if (!message || typeof message !== "object") return;
+    if (message.kind === "job-diagnostic") {
+      if (isJobDiagEnabled() && typeof message.line === "string"
+        && message.line.startsWith("[Netcatty JobDiag] ")) {
+        try { console.info(message.line); } catch { /* Read-only diagnostics. */ }
+      }
+      return;
+    }
     if (message.kind === "external-session-event") {
       const external = externalSessions.get(message.sessionId);
       if (!external) return;

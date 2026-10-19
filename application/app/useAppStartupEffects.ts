@@ -542,7 +542,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
         }
         return;
       }
-      console.log('[App] Keyboard-interactive request received:', request);
+      console.log('[App] Keyboard-interactive request received:', { sessionId: request.sessionId, scope: request.scope, promptCount: request.prompts?.length });
       // Add to queue instead of replacing - supports multiple concurrent sessions
       setKeyboardInteractiveQueue(prev => [...prev, {
         requestId: request.requestId,

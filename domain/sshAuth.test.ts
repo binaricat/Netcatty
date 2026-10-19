@@ -99,6 +99,36 @@ test("resolveBridgeSshAgentAuth carries system agent settings without private ma
   );
 });
 
+test("resolveBridgeSshAgentAuth forces agent auth for FIDO2 SK vault keys", () => {
+  const skKey: SSHKey = {
+    id: "sk-1",
+    label: "YubiKey",
+    type: "ED25519-SK",
+    privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nsk-ssh-ed25519@openssh.com\n-----END OPENSSH PRIVATE KEY-----",
+    publicKey: "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAABHNzaDo= yubi",
+    source: "imported",
+    category: "key",
+    created: 1,
+  };
+
+  assert.deepEqual(
+    resolveBridgeSshAgentAuth({ ...autofillBaseHost, useSshAgent: false }, skKey, "key"),
+    {
+      useSshAgent: true,
+      identityAgent: undefined,
+      identitiesOnly: true,
+      addKeysToAgent: "yes",
+      useKeychain: undefined,
+      agentPublicKeys: [skKey.publicKey!],
+    },
+  );
+
+  assert.equal(
+    resolveBridgeKeyAuth({ key: skKey }).privateKey?.includes("OPENSSH PRIVATE KEY"),
+    true,
+  );
+});
+
 test("resolveBridgeSshAgentAuth keeps certificate authentication independent", () => {
   assert.deepEqual(
     resolveBridgeSshAgentAuth({
@@ -106,6 +136,85 @@ test("resolveBridgeSshAgentAuth keeps certificate authentication independent", (
       useSshAgent: true,
     }, { certificate: "ssh-ed25519-cert-v01@openssh.com AAAATEST" }),
     { useSshAgent: false },
+  );
+});
+
+test("resolveBridgeSshAgentAuth keeps agent path for FIDO SK certificates", () => {
+  const skCertKey: SSHKey = {
+    id: "sk-cert-1",
+    label: "YubiKey cert",
+    type: "ED25519-SK",
+    privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nsk-ssh-ed25519@openssh.com\n-----END OPENSSH PRIVATE KEY-----",
+    publicKey: "sk-ssh-ed25519-cert-v01@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5LWNlcnQtdjAxQG9wZW5zc2guY29tAAAA yubi",
+    certificate: "sk-ssh-ed25519-cert-v01@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5LWNlcnQtdjAxQG9wZW5zc2guY29tAAAA yubi",
+    source: "imported",
+    category: "certificate",
+    created: 1,
+  };
+
+  assert.deepEqual(
+    resolveBridgeSshAgentAuth({ ...autofillBaseHost, useSshAgent: false }, skCertKey, "certificate"),
+    {
+      useSshAgent: true,
+      identityAgent: undefined,
+      identitiesOnly: true,
+      addKeysToAgent: "yes",
+      useKeychain: undefined,
+      agentPublicKeys: [skCertKey.publicKey!],
+    },
+  );
+});
+
+test("resolveBridgeSshAgentAuth selects staged SK certificate under IdentitiesOnly", () => {
+  const barePub =
+    "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAABHNzaDo= yubi";
+  const cert =
+    "sk-ssh-ed25519-cert-v01@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5LWNlcnQtdjAxQG9wZW5zc2guY29tAAAA yubi";
+  const skCertKey: SSHKey = {
+    id: "sk-cert-bare-1",
+    label: "YubiKey cert staged",
+    type: "ED25519-SK",
+    privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nsk-ssh-ed25519@openssh.com\n-----END OPENSSH PRIVATE KEY-----",
+    publicKey: barePub,
+    certificate: cert,
+    source: "imported",
+    category: "certificate",
+    created: 1,
+  };
+
+  assert.deepEqual(
+    resolveBridgeSshAgentAuth({ ...autofillBaseHost, useSshAgent: false }, skCertKey, "certificate"),
+    {
+      useSshAgent: true,
+      identityAgent: undefined,
+      identitiesOnly: true,
+      addKeysToAgent: "yes",
+      useKeychain: undefined,
+      agentPublicKeys: [barePub, cert],
+    },
+  );
+});
+
+test("resolveBridgeSshAgentAuth forces agent for path-only SK vault type", () => {
+  const skRef: SSHKey = {
+    id: "sk-ref-1",
+    label: "YubiKey file",
+    type: "ED25519-SK",
+    source: "reference",
+    filePath: "/home/user/.ssh/id_ed25519_sk",
+    category: "key",
+    created: 1,
+  };
+
+  assert.deepEqual(
+    resolveBridgeSshAgentAuth({ ...autofillBaseHost, useSshAgent: false }, skRef, "key"),
+    {
+      useSshAgent: true,
+      identityAgent: undefined,
+      identitiesOnly: true,
+      addKeysToAgent: "yes",
+      useKeychain: undefined,
+    },
   );
 });
 

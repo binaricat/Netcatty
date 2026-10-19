@@ -53,6 +53,7 @@ const LEASE_KINDS = Object.freeze({
   sftp: "sftp",
   transfer: "transfer",
   forward: "forward",
+  monitor: "monitor",
 });
 
 /** @type {Map<string, object>} transportId -> transport */

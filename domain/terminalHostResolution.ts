@@ -2,6 +2,8 @@ import type { GroupConfig, Host, ProxyProfile, TerminalSession } from "./models"
 import { applyGroupDefaults, resolveGroupDefaults } from "./groupConfig";
 import { materializeHostProxyProfile } from "./proxyProfiles";
 import { sanitizePluginConnection } from "./pluginConnection";
+import { resolveHostDefaultLocalShell, type ResolveDefaultLocalShellContext } from "./localShellHost";
+import { canServeAsSshJumpHost } from "./terminalProtocol";
 
 type LocalOs = Host["os"];
 
@@ -10,6 +12,8 @@ interface ResolveEffectiveHostOptions {
   groupConfigs: GroupConfig[];
   proxyProfiles: ProxyProfile[];
   validProxyProfileIds?: ReadonlySet<string>;
+  /** When provided, saved local hosts with no shell resolve the Settings shell. */
+  defaultLocalShell?: ResolveDefaultLocalShellContext;
 }
 
 interface ResolveTerminalSessionHostOptions {
@@ -18,6 +22,8 @@ interface ResolveTerminalSessionHostOptions {
   groupConfigs: GroupConfig[];
   proxyProfiles: ProxyProfile[];
   localOs: LocalOs;
+  /** When provided, saved local hosts with no shell resolve the Settings shell. */
+  defaultLocalShell?: ResolveDefaultLocalShellContext;
 }
 
 interface ResolveTerminalChainHostsOptions {
@@ -41,14 +47,18 @@ export function resolveEffectiveTerminalHost({
   groupConfigs,
   proxyProfiles,
   validProxyProfileIds = new Set(proxyProfiles.map((profile) => profile.id)),
+  defaultLocalShell,
 }: ResolveEffectiveHostOptions): Host {
   const groupDefaults = host.group
     ? resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds })
     : {};
-  return materializeHostProxyProfile(
+  const effectiveHost = materializeHostProxyProfile(
     applyGroupDefaults(host, groupDefaults, { validProxyProfileIds }),
     proxyProfiles,
   );
+  return defaultLocalShell
+    ? resolveHostDefaultLocalShell(effectiveHost, defaultLocalShell)
+    : effectiveHost;
 }
 
 const suppressDeviceTypeForShellTransport = (host: Host): Host => {
@@ -86,12 +96,30 @@ function buildFallbackHostFromSession(
   };
 }
 
+// A local session carries a shell snapshot (shell path, args, name, icon,
+// start dir) captured at launch time; the saved host may have been edited
+// since. Popup/clone flows must relaunch the session's shell, not the host's
+// current one, so overlay the snapshot onto the resolved host.
+const overlaySessionLocalShell = (session: TerminalSession, host: Host): Host => {
+  if (session.protocol !== "local") return host;
+  return {
+    ...host,
+    username: session.username,
+    localShell: session.localShell ?? host.localShell,
+    localShellArgs: session.localShellArgs ?? host.localShellArgs,
+    localShellName: session.localShellName ?? host.localShellName,
+    localShellIcon: session.localShellIcon ?? host.localShellIcon,
+    localStartDir: session.localStartDir ?? host.localStartDir,
+  };
+};
+
 export function resolveTerminalSessionHost({
   session,
   hosts,
   groupConfigs,
   proxyProfiles,
   localOs,
+  defaultLocalShell,
 }: ResolveTerminalSessionHostOptions): Host {
   const vaultHost = hosts.find((host) => host.id === session.hostId);
   if (!vaultHost) return buildFallbackHostFromSession(session, localOs);
@@ -100,6 +128,7 @@ export function resolveTerminalSessionHost({
     host: vaultHost,
     groupConfigs,
     proxyProfiles,
+    defaultLocalShell,
   });
 
   const protocol = session.protocol ?? existingHost.protocol;
@@ -126,10 +155,12 @@ export function resolveTerminalSessionHost({
     JSON.stringify(pluginConnection) === JSON.stringify(existingHost.pluginConnection) &&
     backspaceBehavior === existingHost.backspaceBehavior
   ) {
-    return suppressDeviceTypeForShellTransport(existingHost);
+    return suppressDeviceTypeForShellTransport(
+      overlaySessionLocalShell(session, existingHost),
+    );
   }
 
-  return suppressDeviceTypeForShellTransport({
+  return suppressDeviceTypeForShellTransport(overlaySessionLocalShell(session, {
     ...existingHost,
     protocol,
     port,
@@ -137,7 +168,7 @@ export function resolveTerminalSessionHost({
     etEnabled,
     pluginConnection,
     backspaceBehavior,
-  });
+  }));
 }
 
 export function resolveTerminalChainHosts({
@@ -152,7 +183,9 @@ export function resolveTerminalChainHosts({
   return host.hostChain.hostIds
     .map((hostId) => {
       const chainHost = hostMap.get(hostId);
-      if (!chainHost) return undefined;
+      // Jump hops are dialed over SSH; skip local/serial/telnet/plugin entries
+      // that can never serve as a ProxyJump hop (e.g. saved local shells).
+      if (!chainHost || !canServeAsSshJumpHost(chainHost)) return undefined;
       return resolveEffectiveTerminalHost({
         host: chainHost,
         groupConfigs,

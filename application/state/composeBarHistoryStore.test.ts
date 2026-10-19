@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getComposeBarHistory, pruneComposeBarHistory, recordComposeBarHistory } from './composeBarHistoryStore';
+import { getComposeBarHistory, pruneComposeBarHistory, recordComposeBarHistory, clearComposeBarHistory, subscribeComposeBarHistoryCleared } from './composeBarHistoryStore';
 
 test('compose history is isolated per terminal and removed when its session closes', () => {
   pruneComposeBarHistory([]);
@@ -39,4 +39,25 @@ test('failed submissions unblock later successes in submission order', async () 
   failed();
   assert.deepEqual(getComposeBarHistory('a'), ['accepted']);
   pruneComposeBarHistory([]);
+});
+
+test('clearComposeBarHistory drops every session and notifies live compose bars', () => {
+  pruneComposeBarHistory([]);
+  recordComposeBarHistory('a', 'echo a');
+  recordComposeBarHistory('b', 'echo b');
+
+  let notified = 0;
+  const unsubscribe = subscribeComposeBarHistoryCleared(() => {
+    notified += 1;
+  });
+
+  clearComposeBarHistory();
+
+  assert.deepEqual(getComposeBarHistory('a'), []);
+  assert.deepEqual(getComposeBarHistory('b'), []);
+  assert.equal(notified, 1);
+
+  unsubscribe();
+  clearComposeBarHistory();
+  assert.equal(notified, 1);
 });

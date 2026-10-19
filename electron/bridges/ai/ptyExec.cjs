@@ -27,6 +27,8 @@ const {
   stripAnsi,
 } = require("./ptyExecHelpers.cjs");
 const { extractTrailingIdlePrompt } = require("./shellUtils.cjs");
+const { getSessionSnapshot } = require("../terminalInterruptDiagnostics.cjs");
+const { createJobStartupDiag } = require("./jobStartupDiagnostics.cjs");
 
 const { buildLiveShellProbe, buildLiveShellProbeCleanup, parseLiveShellProbe } = require("./liveShellProbe.cjs");
 
@@ -64,6 +66,9 @@ function startPtyJob(ptyStream, command, options) {
     chatSessionId,
     abortSignal,
     expectedPrompt,
+    jobId = null,
+    sessionId = null,
+    diagnosticsSession = null,
     typedInput = false,
     echoCommand,
     onEchoSuppressionPrime,
@@ -169,7 +174,7 @@ function startPtyJob(ptyStream, command, options) {
   function armOutputTimeout() {
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => {
-      sendInterrupt();
+      sendInterrupt("inactivity-timeout");
       if (cancelRequested) {
         armOutputTimeout();
         return;
@@ -192,7 +197,7 @@ function startPtyJob(ptyStream, command, options) {
         finishWithoutReturnedPrompt();
         return;
       }
-      sendInterrupt();
+      sendInterrupt("wall-timeout");
       const timeoutSec = Math.round(timeoutMs / 1000);
       finish(foundStart ? output : preStartOutput, -1, `Command timed out (${timeoutSec}s)`);
     }, timeoutMs);
@@ -213,7 +218,17 @@ function startPtyJob(ptyStream, command, options) {
     const startupMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
     startupTimeoutId = setTimeout(() => {
       if (finished || foundStart) return;
-      sendInterrupt();
+      jobDiag.emit("startup-timeout-fired", {
+        elapsedMs: startupMs,
+        foundStart,
+        probeOutputSeen: jobDiag.stats.probeOutputSeen,
+        probeBytes: jobDiag.stats.probeBytes,
+        outputChunks: jobDiag.stats.outputChunks,
+        outputChars: jobDiag.stats.outputChars,
+        preStartChars: preStartOutput.length,
+        session: diagSnapshot(),
+      });
+      sendInterrupt("startup-timeout");
       const label = maxBufferedChars > 0 ? "Background job startup" : "Command startup";
       finish(preStartOutput, -1, `${label} timed out — start marker never arrived`);
     }, startupMs);
@@ -225,31 +240,60 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
 
-  function sendInterrupt() {
-    try {
-      if (typeof ptyStream.signal === "function") {
-        ptyStream.signal("INT");
-      }
-    } catch {
-      // Ignore signal failures and fall back to ETX.
-    }
+  // Read-only #3443 diagnostics. Created after the SHELL_PROMPT_PENDING
+  // rejection above so "accepted" means the job actually started. The stats
+  // object is updated by onData so the timeout event can report what the
+  // pipeline had seen when the start marker never arrived.
+  const jobDiag = createJobStartupDiag({ sessionId, jobId, chatSessionId });
+  const diagSnapshot = () => getSessionSnapshot(diagnosticsSession || (ptyStream ? { stream: ptyStream } : null));
+  jobDiag.emit("job-start-accepted", {
+    outputMode: maxBufferedChars > 0 ? "background" : "foreground",
+    shellKind: resolvedShellKind,
+    probeLiveShell: usesLiveShellProbe,
+    timeoutMs,
+    startupTimeoutMs: maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs,
+  });
+
+  // Deliver the interrupt as terminal data (ETX). This matches manual Ctrl+C
+  // in the terminal and terminalBridge.interruptSession: the remote line
+  // discipline turns \x03 into SIGINT. Never send an SSH "signal" channel
+  // request here — real OpenSSH rejects it ("session_signal_req: session
+  // signalling requires privilege separation"), which pollutes auth logs and
+  // makes other host-side tooling report brute-force noise (#3577).
+  function sendInterrupt(trigger = null) {
+    let etxWritten = false;
     try {
       if (typeof ptyStream.write === "function") {
         ptyStream.write("\x03");
+        etxWritten = true;
       }
     } catch {
       // Ignore PTY write failures during cancellation.
     }
+    jobDiag.emit("send-interrupt", {
+      trigger,
+      signalSent: false,
+      etxWritten,
+      session: diagSnapshot(),
+    });
     // Cancellation replies use the same readable stream as terminal output.
     // Recover session-owned flow control after sending ETX, otherwise a paused
     // renderer can hide the returned prompt/end marker and trigger retries.
     // Recovery belongs to the session and must still run when a timeout
     // finishes this job before the queued callback executes.
     queueMicrotask(() => {
+      if (!onInterrupt) {
+        jobDiag.emit("interrupt-callback-skipped", { trigger, reason: "no-callback" });
+        return;
+      }
       try {
-        onInterrupt?.();
+        onInterrupt();
+        // finishedAtCallback === true means the job was already finished when
+        // recovery ran (e.g. a startup timeout finished it first) - the exact
+        // ordering the #3443 investigation hinged on.
+        jobDiag.emit("interrupt-callback-invoked", { trigger, finishedAtCallback: finished });
       } catch {
-        // Best-effort recovery must not break cancellation or its deadline.
+        jobDiag.emit("interrupt-callback-skipped", { trigger, reason: "callback-threw" });
       }
     });
   }
@@ -278,15 +322,15 @@ function startPtyJob(ptyStream, command, options) {
       }, 2000);
       cancelOneShotTimers.push(t);
     }
-    sendInterrupt();
+    sendInterrupt("cancel");
     cancelRetryTimerId = setTimeout(function retryCancel() {
       if (finished || !cancelRequested) return;
-      sendInterrupt();
+      sendInterrupt("cancel-retry");
       cancelRetryTimerId = setTimeout(retryCancel, CANCEL_RETRY_MS);
     }, CANCEL_RETRY_MS);
     armOutputTimeout();
     const t150 = setTimeout(() => {
-      if (!finished) sendInterrupt();
+      if (!finished) sendInterrupt("cancel-followup");
     }, 150);
     cancelOneShotTimers.push(t150);
     // Hard wall-clock deadline for cancellation: if the process ignores
@@ -544,8 +588,24 @@ function startPtyJob(ptyStream, command, options) {
       : data instanceof Uint8Array
         ? Buffer.from(data)
         : Buffer.from(String(data ?? ""));
+    // Count what actually arrived before decoding: a chunk that is only an
+    // incomplete UTF-8 prefix yields no text yet but is still probe evidence.
+    if (bytes.length > 0) jobDiag.stats.outputChunks += 1;
+    if (probingShell && bytes.length > 0) {
+      jobDiag.stats.probeBytes += bytes.length;
+      // Raw output may be an incomplete character, an echo or unrelated data;
+      // only probe-reply-parsed proves that the shell replied to the probe.
+      if (!jobDiag.stats.probeOutputSeen) {
+        jobDiag.stats.probeOutputSeen = true;
+        jobDiag.emit("probe-output-arrived", {
+          probeBytes: jobDiag.stats.probeBytes,
+          session: diagSnapshot(),
+        });
+      }
+    }
     const text = outputDecoder.write(bytes);
     if (!text) return;
+    jobDiag.stats.outputChars += text.length;
     if (!pendingEnd && !deliveringInput) armOutputTimeout();
 
     if (probingShell) {
@@ -556,6 +616,10 @@ function startPtyJob(ptyStream, command, options) {
       }
       const probe = parseLiveShellProbe(stripAnsi(probeOutput), marker);
       if (!probe) return;
+      jobDiag.emit("probe-reply-parsed", {
+        shellKind: probe.kind ?? null,
+        probeBytes: jobDiag.stats.probeBytes,
+      });
       probingShell = false;
       probeOutput = "";
       if (probe.kind) resolvedShellKind = probe.kind;
@@ -585,6 +649,9 @@ function startPtyJob(ptyStream, command, options) {
       pendingStart = trailingPartial;
 
       if (foundStart) {
+        jobDiag.emit("start-marker-matched", {
+          preStartChars: preStartOutput.length,
+        });
         clearStartupTimeout();
         // Use the *last* occurrence of the start marker to skip the echoed
         // wrapper command and capture only output after the real printf line.
@@ -831,6 +898,7 @@ function startPtyJob(ptyStream, command, options) {
     const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell, {
       omitBashHistoryCleanup: isZsh,
     });
+    jobDiag.emit("cmd-write", { bytes: Buffer.byteLength(wrapped, "utf8"), shellKind: resolvedShellKind });
     writeInput(`${(skipPendingInputClear ? "" : buildPendingInputClearPrefix(resolvedShellKind))}${probeCleanup}${wrapped}`);
   }
 
@@ -850,6 +918,7 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
   if (probingShell) {
+    jobDiag.emit("probe-write", { bytes: Buffer.byteLength(buildLiveShellProbe(marker), "utf8") });
     writeInput(`${(skipPendingInputClear ? "" : buildPendingInputClearPrefix(resolvedShellKind))}${buildLiveShellProbe(marker)}`);
   } else {
     writeWrappedCommand();
@@ -889,6 +958,9 @@ function startPtyJob(ptyStream, command, options) {
  * @param {string} [options.expectedPrompt] - Last observed idle prompt for exact fallback matching
  * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution
  * @param {(command: string) => void} [options.echoCommand] - Callback used to display synthetic command echo
+ * @param {string} [options.jobId] - Background job ID for #3443 startup diagnostics keying
+ * @param {string} [options.sessionId] - Terminal session ID for #3443 startup diagnostics keying
+ * @param {object} [options.diagnosticsSession] - Session object for flow-control snapshots in #3443 diagnostics
  */
 function execViaPty(ptyStream, command, options) {
   return startPtyJob(ptyStream, command, options).resultPromise;

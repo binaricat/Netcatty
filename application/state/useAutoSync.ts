@@ -1,3 +1,5 @@
+import { readMonitorPanels } from './monitorPanelsStorage';
+import { STORAGE_KEY_MONITOR_PANELS } from '../../infrastructure/config/storageKeys';
 /**
  * useAutoSync - Auto-sync Hook for Cloud Sync
  * 
@@ -21,12 +23,14 @@ import { isProviderReadyForSync, SYNC_STORAGE_KEYS, type CloudProvider, type Syn
 import { mergeSyncPayloads } from '../../domain/syncMerge';
 import { materializeSyncPayloadFromConvergentState } from '../../domain/convergentSync';
 import {
+  isPreserveDeletionsStrategy,
   resolveCloudSyncConflictAction,
   type CloudSyncConflictAction,
 } from '../../domain/syncStrategy';
 import {
   SYNCABLE_SETTING_STORAGE_KEYS,
   collectCloudSyncableSettings,
+  collectAiSessionsForSync,
   getEffectivePortForwardingRulesForSync,
   hasCloudSyncEntityData,
   hasMeaningfulCloudSyncData,
@@ -38,6 +42,8 @@ import { commitPluginSidecarsAfterSuccessfulSync } from '../pluginSyncSidecarBri
 import { readInterruptedVaultApply } from '../localVaultBackups';
 import {
   STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL,
+  STORAGE_KEY_AI_SESSIONS,
+  STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS,
 } from '../../infrastructure/config/storageKeys';
 import {
   LOCAL_STORAGE_ADAPTER_CHANGED_EVENT,
@@ -51,6 +57,7 @@ import {
 } from './autoSyncRemoteSchedule';
 import { resolveAutoSyncHashDecision } from './autoSyncHashDecision';
 import { getNotesSnapshot, subscribeNotes } from './notesStore';
+import { collectHostBrowserBookmarks } from '../hostBrowserBookmarks';
 
 /** Prefer dedicated SYNC_PREFERENCES; fall back to legacy SYNC_CONFIG fields. */
 function isPersistedAutoSyncEnabled(fallback: boolean): boolean {
@@ -146,6 +153,7 @@ const isRestoreInProgress = (): boolean => {
 
 const getSyncPayloadDataHash = (payload: SyncPayload): string => {
   return JSON.stringify({
+    monitorPanels: payload.monitorPanels,
     hosts: sanitizeHostsForSync(payload.hosts),
     keys: payload.keys,
     identities: payload.identities,
@@ -156,9 +164,11 @@ const getSyncPayloadDataHash = (payload: SyncPayload): string => {
     notes: payload.notes,
     noteGroups: payload.noteGroups,
     portForwardingRules: sanitizePortForwardingRulesForSync(payload.portForwardingRules),
+    browserBookmarks: payload.browserBookmarks,
     groupConfigs: payload.groupConfigs,
     settings: payload.settings,
     pluginSidecars: payload.pluginSidecars,
+    aiSessions: payload.aiSessions,
   });
 };
 
@@ -219,6 +229,13 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
   // Listen for SFTP bookmark changes to trigger auto-sync
   const [bookmarksVersion, setBookmarksVersion] = useState(0);
+  const [hostBrowserBookmarksVersion, setHostBrowserBookmarksVersion] = useState(0);
+  useEffect(() => {
+    const unsubscribe = netcattyBridge.get()?.onHostBrowserBookmarksChanged?.(() => {
+      setHostBrowserBookmarksVersion((version) => version + 1);
+    });
+    return () => { unsubscribe?.(); };
+  }, []);
   useEffect(() => {
     const handler = () => setBookmarksVersion((v) => v + 1);
     window.addEventListener('sftp-bookmarks-changed', handler);
@@ -243,7 +260,11 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   const [syncableSettingsStorageVersion, setSyncableSettingsStorageVersion] = useState(0);
   useEffect(() => {
     const bumpIfSyncableSetting = (key: string | null | undefined) => {
-      if (!key || !SYNCABLE_SETTING_STORAGE_KEY_SET.has(key)) return;
+      if (!key) return;
+      const chatChanged = key === STORAGE_KEY_AI_SESSIONS
+        && localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled === true;
+      if (!SYNCABLE_SETTING_STORAGE_KEY_SET.has(key)
+        && key !== STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS && key !== STORAGE_KEY_MONITOR_PANELS && !chatChanged) return;
       setSyncableSettingsStorageVersion((v) => v + 1);
     };
 
@@ -265,6 +286,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
   const getSyncSnapshot = useCallback(() => {
     return {
+      monitorPanels: readMonitorPanels(),
       hosts: sanitizeHostsForSync(config.hosts),
       keys: config.keys,
       identities: config.identities,
@@ -299,8 +321,12 @@ export const useAutoSync = (config: AutoSyncConfig) => {
   const buildPayload = useCallback(async (): Promise<SyncPayload> => {
     const { withPluginSyncSidecars } = await import('../syncPayload');
     const { collectPluginSyncSidecarsFromHost } = await import('../pluginSyncSidecarBridge');
+    const aiSessions = collectAiSessionsForSync();
+    const browserBookmarks = await collectHostBrowserBookmarks();
     const base: SyncPayload = {
       ...getSyncSnapshot(),
+      ...(aiSessions !== undefined ? { aiSessions } : {}),
+      ...(browserBookmarks !== undefined ? { browserBookmarks } : {}),
       settings: await collectCloudSyncableSettings(),
       syncedAt: Date.now(),
     };
@@ -577,7 +603,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     getDataHashRef.current = getDataHash;
   }, [getDataHash]);
 
-  const refreshPendingLocalSync = useCallback(async () => {
+  const refreshPendingLocalSync = useCallback(async (isCurrent = () => true) => {
     if (
       !enabled
       || convergentSyncPaused
@@ -592,6 +618,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     }
     try {
       const currentHash = await getDataHashRef.current();
+      if (!isCurrent()) return;
       const hashDecision = resolveAutoSyncHashDecision({
         currentHash,
         lastSyncedHash: lastSyncedDataRef.current,
@@ -781,7 +808,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       }
 
       const conflictAction = resolveCloudSyncConflictAction(state.syncStrategy, {
-        hasConflict: inspection.remoteChanged,
+        hasConflict: inspection.remoteChanged || isPreserveDeletionsStrategy(state.syncStrategy),
         hasRemoteFile: Boolean(inspection.remoteFile),
       });
 
@@ -850,7 +877,9 @@ export const useAutoSync = (config: AutoSyncConfig) => {
       // upload and wipe usable cloud passwords. Same for remote-side poison.
       const localHealed = healPoisonedSecretsForMerge(localPayload, remoteRaw, base);
       const remoteHealed = healPoisonedSecretsForMerge(remoteRaw, localPayload, base);
-      const mergeResult = mergeSyncPayloads(base, localHealed, remoteHealed);
+      const mergeResult = mergeSyncPayloads(base, localHealed, remoteHealed, {
+        preserveDeletions: isPreserveDeletionsStrategy(state.syncStrategy),
+      });
 
       // Apply merged payload to local state BEFORE committing. If the apply
       // throws, the next startup will re-run the merge with fresh data.
@@ -1112,6 +1141,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     config.settingsVersion,
     enabled,
     bookmarksVersion,
+    hostBrowserBookmarksVersion,
     pluginSidecarsVersion,
     convergentSyncPaused,
     syncableSettingsStorageVersion,
@@ -1119,16 +1149,31 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
   // Reflect unsynced local edits in the top-bar cloud indicator.
   useEffect(() => {
-    void refreshPendingLocalSync();
+    if (!enabled || convergentSyncPaused || !sync.hasAnyConnectedProvider || !sync.isUnlocked) {
+      manager.setPendingLocalSync(false);
+      return;
+    }
+    // Collecting the pending hash builds the same full payload as an upload.
+    // Let rapid edits settle before doing that work, even with auto-sync off.
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void refreshPendingLocalSync(() => !cancelled);
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [
     refreshPendingLocalSync,
     getDataHash,
     sync.hasAnyConnectedProvider,
     sync.isUnlocked,
     sync.isSyncing,
+    convergentSyncPaused,
     config.settingsVersion,
     enabled,
     bookmarksVersion,
+    hostBrowserBookmarksVersion,
     pluginSidecarsVersion,
     syncableSettingsStorageVersion,
   ]);

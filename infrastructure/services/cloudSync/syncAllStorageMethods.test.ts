@@ -74,6 +74,149 @@ function remoteFile(provider: CloudProvider, version: number, updatedAt: number)
   };
 }
 
+for (const syncAll of [false, true]) {
+  test(`${syncAll ? 'all providers' : 'one provider'} preserves a smaller restored vault against a current remote without a base`, async () => {
+    const originalDecrypt = EncryptionService.decryptPayload;
+    const originalEncrypt = EncryptionService.encryptPayload;
+    let remote = payloadWithHosts(['kept', 'survivor']);
+    const local = payload('kept');
+    local.hosts[0].label = 'restored local edit';
+    let uploads = 0;
+    let storedBase: SyncPayload | null = null;
+    let checkedFile = remoteFile('github', 3, 300);
+    EncryptionService.decryptPayload = async () => remote;
+    EncryptionService.encryptPayload = async (outgoing) => ({ ...checkedFile, payload: JSON.stringify(outgoing) });
+    try {
+      const subject = {
+        masterPassword: 'pw',
+        adapters: new Map(),
+        providerDecryptSeq: { github: 0 },
+        state: {
+          securityState: 'UNLOCKED', providers: { github: { status: 'connected' } },
+          syncStrategy: 'smartMergePreserve', syncState: 'IDLE', lastError: null,
+          localVersion: 3, deviceId: 'local', deviceName: 'Local',
+        },
+        getConnectedAdapter: async () => ({}),
+        checkProviderConflict: async () => ({ conflict: false, remoteFile: checkedFile }),
+        loadSyncBase: async () => storedBase,
+        saveSyncBase: async (incoming: SyncPayload) => { storedBase = incoming; },
+        saveSyncAnchor: async () => {}, saveProviderConnection: async () => {},
+        saveSyncConfig: () => {}, notifyStateChange: () => {}, updateProviderStatus: () => {},
+        emit: () => {}, exitBlockedState: () => {}, addSyncHistoryEntry: () => {},
+        uploadToProvider: async (provider: CloudProvider, _adapter: unknown, file: SyncedFile, outgoing: SyncPayload) => {
+          uploads += 1;
+          remote = outgoing;
+          storedBase = outgoing;
+          checkedFile = file;
+          return { success: true, provider, action: 'upload' as const, version: 4 };
+        },
+      };
+      const result = syncAll
+        ? (await syncAllProvidersImpl.call(subject, local)).get('github')!
+        : await syncToProviderImpl.call(subject, 'github', local);
+      assert.equal(result.success, true);
+      assert.deepEqual(remote.hosts.map((host) => host.id).sort(), ['kept', 'survivor']);
+      assert.equal(remote.hosts.find((host) => host.id === 'kept')?.label, 'restored local edit');
+      assert.equal(result.mergedPayload?.hosts.length, 2);
+      assert.equal(uploads, 1);
+      if (syncAll) await syncAllProvidersImpl.call(subject, remote);
+      else await syncToProviderImpl.call(subject, 'github', remote);
+      assert.equal(uploads, 1, 'a second unchanged sync must not upload');
+    } finally {
+      EncryptionService.decryptPayload = originalDecrypt;
+      EncryptionService.encryptPayload = originalEncrypt;
+    }
+  });
+
+  test(`${syncAll ? 'all providers' : 'one provider'} retains cloud chats when the local device opts out`, async () => {
+    const originalDecrypt = EncryptionService.decryptPayload;
+    const originalEncrypt = EncryptionService.encryptPayload;
+    const remote = payload('kept');
+    remote.aiSessions = [{ id: 'chat', title: 'Cloud history', agentId: 'catty', scope: { type: 'global' }, messages: [], createdAt: 0, updatedAt: 1 }];
+    let outgoing: SyncPayload | undefined;
+    EncryptionService.decryptPayload = async () => remote;
+    EncryptionService.encryptPayload = async () => remoteFile('github', 4, 400);
+    try {
+      const subject = {
+        masterPassword: 'pw', adapters: new Map(), providerDecryptSeq: { github: 0 },
+        state: {
+          securityState: 'UNLOCKED', providers: { github: { status: 'connected' } },
+          syncStrategy: 'smartMerge', syncState: 'IDLE', lastError: null,
+          localVersion: 3, deviceId: 'local', deviceName: 'Local',
+        },
+        getConnectedAdapter: async () => ({}),
+        checkProviderConflict: async () => ({ conflict: false, remoteFile: remoteFile('github', 3, 300) }),
+        loadSyncBase: async () => null, updateProviderStatus: () => {},
+        notifyStateChange: () => {}, emit: () => {}, exitBlockedState: () => {},
+        uploadToProvider: async (provider: CloudProvider, _adapter: unknown, _file: SyncedFile, incoming: SyncPayload) => {
+          outgoing = incoming;
+          return { success: true, provider, action: 'upload' as const };
+        },
+      };
+      const local = payloadWithHosts(['kept', 'new-local-host']);
+      const result = syncAll
+        ? (await syncAllProvidersImpl.call(subject, local)).get('github')!
+        : await syncToProviderImpl.call(subject, 'github', local);
+      assert.equal(result.success, true);
+      assert.deepEqual(outgoing?.aiSessions, remote.aiSessions);
+      assert.equal(local.aiSessions, undefined, 'opt-out must not collect or mutate local history');
+    } finally {
+      EncryptionService.decryptPayload = originalDecrypt;
+      EncryptionService.encryptPayload = originalEncrypt;
+    }
+  });
+}
+
+for (const mode of ['provider', 'all', 'override'] as const) {
+  for (const clearChats of [false, true]) {
+    test(`${mode} keep-local ${clearChats ? 'honors explicit chat clearing' : 'retains omitted chats from the newer conflicting remote'}`, async () => {
+      const originalDecrypt = EncryptionService.decryptPayload;
+      const originalEncrypt = EncryptionService.encryptPayload;
+      const session = (id: string): NonNullable<SyncPayload['aiSessions']>[number] => ({
+        id, title: id, agentId: 'catty', scope: { type: 'global' }, createdAt: 0, updatedAt: 1, messages: [],
+      });
+      const base = { ...payload('same-host'), aiSessions: [session('old-chat')] };
+      const remote = { ...payload('same-host'), aiSessions: [session('old-chat'), session('new-cloud-chat')] };
+      remote.hosts[0].label = 'New cloud edit';
+      const local = payload('same-host');
+      local.hosts[0].label = 'Keep this local edit';
+      if (clearChats) local.aiSessions = [];
+      let outgoing: SyncPayload | undefined;
+      EncryptionService.decryptPayload = async () => remote;
+      EncryptionService.encryptPayload = async () => remoteFile('github', 6, 600);
+      try {
+        const subject = {
+          masterPassword: 'pw', adapters: new Map(), providerDecryptSeq: { github: 0 },
+          state: {
+            securityState: 'UNLOCKED', providers: { github: { status: 'connected' } },
+            syncStrategy: mode === 'override' ? 'smartMerge' : 'preferLocal',
+            syncState: 'IDLE', lastError: null, localVersion: 3, deviceId: 'local', deviceName: 'Local',
+          },
+          getConnectedAdapter: async () => ({}),
+          checkProviderConflict: async () => ({ conflict: true, remoteFile: remoteFile('github', 5, 500) }),
+          loadSyncBase: async () => base,
+          updateProviderStatus: () => {}, notifyStateChange: () => {},
+          emit: () => {}, exitBlockedState: () => {},
+          uploadToProvider: async (provider: CloudProvider, _adapter: unknown, _file: SyncedFile, incoming: SyncPayload) => {
+            outgoing = incoming;
+            return { success: true, provider, action: 'upload' as const };
+          },
+        };
+        const result = mode === 'provider'
+          ? await syncToProviderImpl.call(subject, 'github', local)
+          : (await syncAllProvidersImpl.call(subject, local, mode === 'override' ? { conflictActionOverride: 'upload-local' } : {})).get('github');
+        assert.equal(result?.success, true);
+        assert.equal(outgoing?.hosts[0].label, 'Keep this local edit');
+        assert.deepEqual(outgoing?.aiSessions?.map((entry) => entry.id), clearChats ? [] : ['old-chat', 'new-cloud-chat']);
+        assert.deepEqual(local.aiSessions, clearChats ? [] : undefined);
+      } finally {
+        EncryptionService.decryptPayload = originalDecrypt;
+        EncryptionService.encryptPayload = originalEncrypt;
+      }
+    });
+  }
+}
+
 test("provider identity changes clear v1 base, v2 baseline, and remote anchor together", () => {
   const removed: string[] = [];
   const manager = {

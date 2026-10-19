@@ -30,7 +30,7 @@ const {
   buildOpenCodeConfig,
   buildOpenCodePromptParts,
   classifyOpenCodeSpawnError,
-  getOpenCodeDefaultModelId,
+  getOpenCodeDefaultModelIds,
   getOpenCodeSessionIdFromEvent,
   mapOpenCodeModels,
   parseOpenCodeModel,
@@ -41,6 +41,11 @@ const DEFAULT_MIMO_PORT = 4096;
 // Give `mimo serve` room to boot on a cold start. The SDK default (5000ms) is
 // too tight for the first launch after install.
 const MIMO_SERVE_TIMEOUT_MS = 10_000;
+// Inner setup budget for the catalog path only: `mimo serve` readiness plus the
+// providers() query. The outer catalog budget in sdkStreamHandlers is 30s; the
+// inner race must lose last, otherwise the coldest boot never even reaches the
+// provider query. The turn path keeps the 10s default.
+const MIMO_CATALOG_SETUP_TIMEOUT_MS = 25_000;
 // `mimo serve` announces readiness as `mimocode server listening on <url>`.
 // Accept the OpenCode spelling too so a rebranded build still connects.
 const MIMO_LISTENING_RE = /server listening on\s+(https?:\/\/\S+)/;
@@ -761,43 +766,90 @@ function emptyMimoModelCatalog() {
 }
 
 /**
+ * Per-phase budget under a shared outer deadline.
+ *
+ * Cold boot can push `mimo serve` readiness close to its inner cap while the
+ * providers() query still needs real time; each phase fits MIMO_CATALOG_SETUP_
+ * TIMEOUT_MS individually, but the OUTER model-list IPC budget (30s, see
+ * MODEL_LIST_TIMEOUT_OVERRIDES_MS) covers both. So sdkStreamHandlers hands an
+ * absolute deadline down and the two phases draw from one pool: readiness
+ * gets min(25s, remaining), and providers gets only whatever readiness left.
+ * Without a deadline (turn path / direct callers) each phase keeps its full
+ * independent 25s cap.
+ */
+function mimoPhaseTimeoutMs(deadlineTs) {
+  if (!Number.isFinite(deadlineTs)) return MIMO_CATALOG_SETUP_TIMEOUT_MS;
+  return Math.max(0, Math.min(MIMO_CATALOG_SETUP_TIMEOUT_MS, deadlineTs - Date.now()));
+}
+
+// Xiaomi's free auto-routing channel arrives as its own provider (id "mimo",
+// captured live 2026-10-10 with zero-cost pseudo-model entries "/models" and
+// "134qwerawdf"; earlier the same channel surfaced "MiMo Auto (free)"). It
+// reads as a channel category rather than a selectable model, so drop the
+// whole channel from the picker. The vendor keeps renaming its entries, so
+// the filter matches the stable provider id, not a model id or label. This is
+// a mimo-specific quirk and deliberately stays out of the shared OpenCode
+// pipeline. The catalog default must also remain selectable, so the picker
+// and the send-time model adoption agree.
+const MIMO_AUTO_CHANNEL_PROVIDER_ID = "mimo";
+
+function filterMimoAutoChannel(response) {
+  if (!response || !Array.isArray(response.providers)) return response;
+  return {
+    ...response,
+    providers: response.providers.filter(
+      (provider) => (provider?.id || provider?.providerID) !== MIMO_AUTO_CHANNEL_PROVIDER_ID,
+    ),
+  };
+}
+
+/**
  * Read the provider catalog from a short-lived `mimo serve` instance.
  *
  * The OpenCode driver keeps a pooled server because catalog loads are frequent;
  * MiMo Code has no such traffic yet, so spawning per call keeps this simple.
  */
-async function listMimoModels({ env, binPath, cwd, mimoFactory, mimoConfigReader, abortController, signal } = {}) {
+async function listMimoModels({ env, binPath, cwd, mimoFactory, abortController, signal, deadlineTs } = {}) {
   const effectiveSignal = signal || abortController?.signal;
   if (effectiveSignal?.aborted) return emptyMimoModelCatalog();
   let instance = null;
   try {
     const factory = mimoFactory || ((options) => spawnMimoServer({ ...options, cwd, env, binPath }));
-    const configReader = mimoConfigReader || (mimoFactory
-      ? async () => ({ project: [], global: [] })
-      : () => readMimoSkillPaths({ cwd, env, binPath, signal: effectiveSignal }));
-    const skillPaths = await configReader();
-    if (effectiveSignal?.aborted) return emptyMimoModelCatalog();
-    const trustedPaths = filterMimoTrustedSkillPaths(skillPaths.project, {
-      cwd, env: { ...process.env, ...env }, globalSkillPaths: skillPaths.global,
-    });
+    // Deliberately skip readMimoSkillPaths(): it spawns `mimo debug config`
+    // (seconds on a cold CLI) only to seed the server's skills config, which
+    // the provider catalog never reads. Keeping the chain to serve + providers
+    // is what lets the catalog fit its timeout budget at all.
     const port = await getAvailablePort();
     instance = await factory({
-      config: {
-        autoupdate: false,
-        ...(skillPaths.project.length > 0 ? { skills: { paths: trustedPaths } } : {}),
-      },
+      config: { autoupdate: false },
       port,
       signal: effectiveSignal,
+      timeout: mimoPhaseTimeoutMs(deadlineTs),
     });
-    const response = await awaitMimoSetup(instance.client.config.providers(), effectiveSignal, instance.server);
+    const response = await awaitMimoSetup(
+      instance.client.config.providers(),
+      effectiveSignal,
+      instance.server,
+      // Computed after readiness so providers only draws the shared budget
+      // the readiness phase left behind.
+      mimoPhaseTimeoutMs(deadlineTs),
+    );
     if (effectiveSignal?.aborted) return emptyMimoModelCatalog();
     if (response?.error) {
       throw new Error(extractMimoErrorMessage(response.error) || "MiMo Code providers unavailable");
     }
     const data = response?.data || response;
+    const models = mapOpenCodeModels(filterMimoAutoChannel(data));
+    // A multi-key default map can list the hidden auto channel first; pick
+    // the first default id that survives filtering before falling back to
+    // the first model, so a later visible Xiaomi default is not shadowed.
+    const visibleIds = new Set(models.map((model) => model.id));
+    const currentModelId = getOpenCodeDefaultModelIds(data).find((id) => visibleIds.has(id))
+      ?? models[0]?.id
+      ?? null;
     return {
-      currentModelId: getOpenCodeDefaultModelId(data),
-      models: mapOpenCodeModels(data),
+      currentModelId,
+      models,
     };
   } catch {
     return emptyMimoModelCatalog();
@@ -814,5 +866,6 @@ module.exports = {
   spawnMimoServer,
   stopMimoProcess,
   MIMO_SERVE_TIMEOUT_MS,
+  MIMO_CATALOG_SETUP_TIMEOUT_MS,
   MIMO_STOP_GRACE_MS,
 };

@@ -1,6 +1,7 @@
 import type { Messages } from '../types';
 
 export const esAiMessages: Messages = {
+  'ai.chat.attachmentContentUnavailable': 'Contenido no disponible en este dispositivo',
   // AI Settings
   'ai.agentSettings': 'Configuración del agente',
   'ai.chat.preparing': 'Preparando…',
@@ -504,6 +505,10 @@ export const esAiMessages: Messages = {
   'ai.chat.pinModel': 'Fijar modelo',
   'ai.chat.unpinModel': 'Quitar modelo fijado',
   'ai.chat.loadingModels': 'Cargando modelos...',
+  'ai.chat.modelCatalogSourceLive': 'Catálogo en vivo',
+  'ai.chat.modelCatalogSourceCached': 'En caché · último éxito {time}',
+  'ai.chat.modelCatalogSourceCachedNoTime': 'En caché',
+  'ai.chat.modelCatalogSourcePresets': 'Lista predeterminada integrada',
   'ai.chat.noMatchingModels': 'No hay modelos coincidentes',
   'ai.chat.recent': 'Recientes',
   'ai.chat.viewAll': 'Ver todo',
@@ -524,8 +529,11 @@ export const esAiMessages: Messages = {
   'ai.chat.searchSessions': 'Buscar títulos y contenido reciente…',
   'ai.chat.clearSessionSearch': 'Borrar la búsqueda de sesiones',
   'ai.chat.searchSessionsHint': 'Busca en los títulos y da prioridad a los mensajes y entradas más recientes. De los mensajes largos y las salidas de herramientas, solo se busca una parte limitada del comienzo. No es una búsqueda de texto completo.',
+  'ai.chat.searchingSessions': 'Buscando...',
   'ai.chat.noMatchingSessions': 'Sin coincidencias en títulos ni contenido reciente conservado',
   'ai.chat.noSessions': 'No hay sesiones anteriores',
+  'ai.chat.forkFromHere': 'Bifurcar desde aquí',
+  'ai.chat.forkCreated': 'Conversación bifurcada en un chat nuevo; el original permanece en el historial.',
   'ai.chat.retryHint': 'Puedes reintentar enviando tu mensaje de nuevo.',
   'ai.chat.approvalTimeout': 'La aprobación de la herramienta expiró después de 5 minutos. Puedes reintentar enviando tu mensaje de nuevo.',
   'ai.chat.menuHosts': 'Hosts',

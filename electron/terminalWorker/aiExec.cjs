@@ -502,6 +502,9 @@ function createWorkerAiJobStartHandler({
       handle = startPtyJob(ptyStream, command, {
         onInterrupt: () => clearSessionFlowState(session),
         timeoutMs,
+        sessionId,
+        jobId,
+        diagnosticsSession: session,
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
         probeLiveShell: true,

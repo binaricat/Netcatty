@@ -7,9 +7,6 @@ on:
 permissions:
   contents: read
   issues: write
-  # workflow_dispatch is allowed from GITHUB_TOKEN (unlike issues.reopened)
-  # so format recovery can start triage without a human re-dispatch.
-  actions: write
 
 jobs:
   validate:
@@ -23,23 +20,23 @@ jobs:
         uses: actions/checkout@v7
         with:
           sparse-checkout: |
-            scripts/ai-automation.cjs
+            scripts/issue-format.cjs
           sparse-checkout-cone-mode: false
 
       - name: Validate title and body
         uses: actions/github-script@v9
         with:
           script: |
-            const auto = require(`${process.env.GITHUB_WORKSPACE}/scripts/ai-automation.cjs`);
+            const format = require(`${process.env.GITHUB_WORKSPACE}/scripts/issue-format.cjs`);
             const issue = context.payload.issue;
-            const errors = auto.getIssueFormatErrors(issue);
+            const errors = format.getIssueFormatErrors(issue);
             const labels = new Set(
               (issue.labels || []).map((label) =>
                 typeof label === 'string' ? label : label.name
               )
             );
             const formatOk = errors.length === 0;
-            const recovery = auto.shouldRecoverIssueFormat({
+            const recovery = format.shouldRecoverIssueFormat({
               state: issue.state,
               labels: [...labels],
               formatOk,
@@ -47,33 +44,6 @@ jobs:
 
             if (formatOk) {
               if (recovery.recover) {
-                // Dispatch FIRST while invalid-format is still present and the
-                // issue may still be closed. workflow_dispatch sets manual=true
-                // so classify is eligible even with the label. Only after a
-                // successful dispatch do we reopen / clear the label — so a
-                // failed dispatch leaves a recoverable state (Codex P2).
-                const ref =
-                  context.payload.repository?.default_branch || 'main';
-                try {
-                  await github.rest.actions.createWorkflowDispatch({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    workflow_id: 'ai-automation.yml',
-                    ref,
-                    inputs: {
-                      issue_number: String(issue.number),
-                    },
-                  });
-                  core.info(
-                    `Dispatched ai-automation for recovered issue #${issue.number}`,
-                  );
-                } catch (err) {
-                  core.setFailed(
-                    `Triage dispatch failed after format recovery; leaving invalid-format in place for retry: ${err.message}`,
-                  );
-                  return;
-                }
-
                 labels.delete('invalid-format');
                 const update = {
                   owner: context.repo.owner,
@@ -90,8 +60,8 @@ jobs:
                   repo: context.repo.repo,
                   issue_number: issue.number,
                   body: recovery.reopen
-                    ? '<!-- issue-format-bot --> Format looks good now. Reopening this issue and starting triage.'
-                    : '<!-- issue-format-bot --> Format looks good now. Starting triage.',
+                    ? '<!-- issue-format-bot --> Format looks good now. Reopening this issue.'
+                    : '<!-- issue-format-bot --> Format looks good now. Removed the invalid-format label.',
                 });
               } else {
                 core.info('Issue format OK');
@@ -118,7 +88,7 @@ jobs:
               '',
               'For questions and open-ended discussion, use [GitHub Discussions](https://github.com/binaricat/Netcatty/discussions) instead.',
               '',
-              'If you believe this was a mistake, reply here after fixing the title/body and a maintainer can reopen.',
+              'Edit the title/body to fix the errors above. This check will run again and reopen the issue once its format is valid.',
             ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({

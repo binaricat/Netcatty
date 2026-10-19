@@ -690,3 +690,133 @@ test("terminal close cancels a worker job start that finishes late", async () =>
     "netcatty:ai:jobStop",
   ]);
 });
+
+test("job diagnostics tell a scope mismatch from a lost route and log chat cancellation", async (t) => {
+  process.env.NETCATTY_JOB_DIAG = "1";
+  const lines = [];
+  t.mock.method(console, "info", (...args) => { lines.push(args.join(" ")); });
+  t.after(() => { delete process.env.NETCATTY_JOB_DIAG; });
+  const events = () => lines
+    .filter((line) => line.startsWith("[Netcatty JobDiag] "))
+    .map((line) => JSON.parse(line.slice("[Netcatty JobDiag] ".length)));
+
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload) {
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({ ok: true, jobId: "worker-job-1", sessionId: payload.sessionId, status: "running" });
+        }
+        return Promise.resolve({ ok: true, jobId: payload.jobId, status: "running", completed: false });
+      },
+      send() {},
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    { sessionId: "ssh-1", hostname: "host.example", protocol: "ssh", shellType: "bash", connected: true },
+  ], "chat-1");
+  await bridge.dispatchBuiltinRpc("netcatty/jobStart", { sessionId: "ssh-1", command: "sleep 1", chatSessionId: "chat-1" });
+
+  // The route exists but belongs to another chat session: not a lost route.
+  await bridge.dispatchBuiltinRpc("netcatty/jobPoll", { jobId: "worker-job-1", chatSessionId: "chat-2" });
+  bridge.cancelWorkerBackgroundJobsForSession("chat-1");
+  // The worker route is gone now, so these fall through to the main-process
+  // handlers; the miss must still be logged and explained.
+  await bridge.dispatchBuiltinRpc("netcatty/jobPoll", { jobId: "worker-job-1", chatSessionId: "chat-1" });
+  await bridge.dispatchBuiltinRpc("netcatty/jobStop", { jobId: "worker-job-1", chatSessionId: "chat-1" });
+
+  const misses = events().filter((event) => event.event === "job-stop-miss");
+  assert.deepEqual(misses.map((event) => [event.op, event.reason]), [
+    ["poll", "scope-mismatch"],
+    ["poll", "job-missing"],
+    ["stop", "job-missing"],
+  ]);
+  const removed = events().filter((event) => event.event === "route-removed");
+  assert.deepEqual(removed.map((event) => [event.jobId, event.via]), [["worker-job-1", "chat-session-cancel"]]);
+});
+
+test("route-removed is emitted once when a concurrent cancel removes the route during terminal cleanup", async (t) => {
+  process.env.NETCATTY_JOB_DIAG = "1";
+  const lines = [];
+  t.mock.method(console, "info", (...args) => { lines.push(args.join(" ")); });
+  t.after(() => { delete process.env.NETCATTY_JOB_DIAG; });
+  const removedEvents = () => lines
+    .filter((line) => line.startsWith("[Netcatty JobDiag] "))
+    .map((line) => JSON.parse(line.slice("[Netcatty JobDiag] ".length)))
+    .filter((event) => event.event === "route-removed");
+
+  let releaseStop;
+  const stopGate = new Promise((resolve) => { releaseStop = resolve; });
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload) {
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({ ok: true, jobId: "worker-job-1", sessionId: payload.sessionId, status: "running" });
+        }
+        if (channel === "netcatty:ai:jobStop") return stopGate.then(() => ({ ok: true }));
+        return Promise.resolve({ ok: true });
+      },
+      send() {},
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    { sessionId: "ssh-1", hostname: "host.example", protocol: "ssh", shellType: "bash", connected: true },
+  ], "chat-1");
+  await bridge.dispatchBuiltinRpc("netcatty/jobStart", { sessionId: "ssh-1", command: "sleep 1", chatSessionId: "chat-1" });
+
+  const cleanup = bridge.cancelWorkerBackgroundJobsForTerminalSession("ssh-1");
+  bridge.cancelWorkerBackgroundJobsForSession("chat-1");
+  releaseStop();
+  await cleanup;
+
+  assert.deepEqual(removedEvents().map((event) => [event.jobId, event.via]), [["worker-job-1", "chat-session-cancel"]]);
+});
+
+test("job diagnostics log a worker-side miss while the main-process route still exists", async (t) => {
+  process.env.NETCATTY_JOB_DIAG = "1";
+  const lines = [];
+  t.mock.method(console, "info", (...args) => { lines.push(args.join(" ")); });
+  t.after(() => { delete process.env.NETCATTY_JOB_DIAG; });
+  const misses = () => lines
+    .filter((line) => line.startsWith("[Netcatty JobDiag] "))
+    .map((line) => JSON.parse(line.slice("[Netcatty JobDiag] ".length)))
+    .filter((event) => event.event === "job-stop-miss");
+
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload) {
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({ ok: true, jobId: "worker-job-1", sessionId: payload.sessionId, status: "running" });
+        }
+        // The worker evicted the job (pruned or restarted) but the route stays.
+        return Promise.resolve({ ok: false, error: "Background job not found" });
+      },
+      send() {},
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    { sessionId: "ssh-1", hostname: "host.example", protocol: "ssh", shellType: "bash", connected: true },
+  ], "chat-1");
+  await bridge.dispatchBuiltinRpc("netcatty/jobStart", { sessionId: "ssh-1", command: "sleep 1", chatSessionId: "chat-1" });
+  await bridge.dispatchBuiltinRpc("netcatty/jobPoll", { jobId: "worker-job-1", chatSessionId: "chat-1" });
+  await bridge.dispatchBuiltinRpc("netcatty/jobStop", { jobId: "worker-job-1", chatSessionId: "chat-1" });
+
+  assert.deepEqual(misses().map((event) => [event.op, event.reason]), [
+    ["poll", "worker-job-missing"],
+    ["stop", "worker-job-missing"],
+  ]);
+});

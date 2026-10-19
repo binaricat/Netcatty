@@ -86,6 +86,7 @@ test('vault actions register and unregister', () => {
     updateHostLastConnected: noop,
     addShellHistoryEntry: noop,
     removeShellHistoryEntry: noop,
+    clearAllCommandHistory: noop,
   });
   getVaultSnapshotActions()?.updateHosts([]);
   assert.deepEqual(calls, ['hosts']);

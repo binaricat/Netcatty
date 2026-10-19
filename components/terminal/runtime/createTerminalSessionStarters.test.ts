@@ -3653,7 +3653,13 @@ test("restored local reconnect runs the host startup command while automatic ret
   assert.deepEqual(sessionWrites, []);
 });
 
-test("local session start uses per-session directory before global default", async () => {
+for (const { name, hostDirectory, globalDirectory, expectedDirectory } of [
+  { name: "uses saved directory before global default", hostDirectory: "/Users/alice/project", globalDirectory: "/Users/alice/default", expectedDirectory: "/Users/alice/project" },
+  { name: "inherits global directory when unset", hostDirectory: undefined, globalDirectory: "/Users/alice/default", expectedDirectory: "/Users/alice/default" },
+  { name: "inherits global directory when cleared", hostDirectory: "", globalDirectory: "/Users/alice/default", expectedDirectory: "/Users/alice/default" },
+  { name: "leaves directory unset for backend home default", hostDirectory: undefined, globalDirectory: undefined, expectedDirectory: undefined },
+]) {
+test(`local session start ${name}`, async () => {
   let capturedOptions: Record<string, unknown> | null = null;
   const terminalBackend = {
     backendAvailable: () => true,
@@ -3685,16 +3691,17 @@ test("local session start uses per-session directory before global default", asy
       hostname: "local",
       username: "",
       protocol: "local",
-      localStartDir: "/Users/alice/project",
+      localStartDir: hostDirectory,
     },
-    terminalSettings: { localStartDir: "/Users/alice/default" },
+    terminalSettings: { localStartDir: globalDirectory },
     terminalBackend,
   });
 
   await createTerminalSessionStarters(ctx as never).startLocal(createTermStub() as never);
 
-  assert.equal(capturedOptions?.cwd, "/Users/alice/project");
+  assert.equal(capturedOptions?.cwd, expectedDirectory);
 });
+}
 
 test("local session restores cwd before startup command after attaching", async () => {
   const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];

@@ -25,6 +25,7 @@ import {
   formatProxyConfigType,
   updateProxyConfigField,
 } from "../domain/proxyProfiles";
+import { canServeAsSshJumpHost } from "../domain/terminalProtocol";
 import {
   EnvVar,
   GroupConfig,
@@ -333,7 +334,12 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
 
   const availableHostsForChain = useMemo(() => {
     const chainedIds = new Set(form.hostChain?.hostIds || []);
-    return allHosts.filter((h) => !chainedIds.has(h.id));
+    // Chain hops are SSH ProxyJump hops; never offer local/serial/telnet/plugin
+    // entries (e.g. saved local shells) as jump hosts.
+    return allHosts.filter((h) =>
+      !chainedIds.has(h.id)
+      && canServeAsSshJumpHost(h),
+    );
   }, [allHosts, form.hostChain?.hostIds]);
 
   const addHostToChain = (hostId: string) => {

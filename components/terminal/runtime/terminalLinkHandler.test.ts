@@ -11,6 +11,42 @@ const click = {
   shiftKey: false,
 } as MouseEvent;
 
+test("terminal links default to the internal browser and apply settings immediately", async () => {
+  const internal: string[] = [];
+  const external: string[] = [];
+  let systemBrowser = false;
+  const handler = createTerminalLinkHandler({
+    canActivate: () => true,
+    openExternalAvailable: () => true,
+    openExternal: async (url) => { external.push(url); },
+    openInternal: (url) => { internal.push(url); },
+    useInternal: () => !systemBrowser,
+    confirmOscLink: () => true,
+  });
+  await handler.open('http://localhost:3000/');
+  systemBrowser = true;
+  await handler.open('https://example.com/');
+  assert.deepEqual(internal, ['http://localhost:3000/']);
+  assert.deepEqual(external, ['https://example.com/']);
+});
+
+test("internal browser failures never fall back to the local system browser", async () => {
+  const errors: unknown[] = [];
+  let external = 0;
+  const handler = createTerminalLinkHandler({
+    canActivate: () => true,
+    openExternalAvailable: () => true,
+    openExternal: async () => { external += 1; },
+    openInternal: () => { throw new Error('Disconnected'); },
+    confirmOscLink: () => true,
+    onError: (error) => errors.push(error),
+    warn: () => {},
+  });
+  await handler.open('http://localhost:3000/');
+  assert.equal(external, 0);
+  assert.equal(errors.length, 1);
+});
+
 test("OSC 8 links use the Netcatty external browser bridge", async () => {
   const opened: string[] = [];
   const confirmed: string[] = [];

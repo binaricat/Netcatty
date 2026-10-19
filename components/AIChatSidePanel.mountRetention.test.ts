@@ -165,6 +165,18 @@ test('hidden empty AI side panel can release its subtree', () => {
   assert.equal(shouldKeepAIChatSidePanelMounted(props), false);
 });
 
+test('Catty without an SDK catalog request does not claim models are loading', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(I18nProvider, {
+      locale: 'en',
+      children: React.createElement(TooltipProvider, {
+        children: React.createElement(AIChatSidePanel, baseProps({ isVisible: true })),
+      }),
+    }),
+  );
+  assert.doesNotMatch(html, /Loading models|ai\.chat\.loadingModels/);
+});
+
 test('hidden AI side panel is retained when it has draft text', () => {
   const props = baseProps({
     draftsByScope: {

@@ -114,7 +114,7 @@ const {
   clearHistory,
   recordCommand,
   removeCommandHistoryEntry,
-} = await import("./autocomplete/commandHistoryStore.ts");
+} = await import("../../application/state/commandHistoryStore.ts");
 const {
   normalizePathTokenForLookup,
   shouldPreferRemoteShellCwd,

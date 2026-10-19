@@ -1,6 +1,7 @@
 import type { Messages } from '../types';
 
 export const ruAiMessages: Messages = {
+  'ai.chat.attachmentContentUnavailable': 'Содержимое недоступно на этом устройстве',
   'ai.chat.contextUsage': 'Контекст: {used} / {max} токенов',
   // AI Settings
   'ai.agentSettings': 'Настройки агента',
@@ -460,6 +461,10 @@ export const ruAiMessages: Messages = {
   'ai.chat.pinModel': 'Закрепить модель',
   'ai.chat.unpinModel': 'Открепить модель',
   'ai.chat.loadingModels': 'Загрузка моделей...',
+  'ai.chat.modelCatalogSourceLive': 'Актуальный список моделей',
+  'ai.chat.modelCatalogSourceCached': 'Кэш · обновлён {time}',
+  'ai.chat.modelCatalogSourceCachedNoTime': 'Кэш',
+  'ai.chat.modelCatalogSourcePresets': 'Встроенный список моделей',
   'ai.chat.noMatchingModels': 'Нет подходящих моделей',
   'ai.chat.recent': 'Недавние',
   'ai.chat.viewAll': 'Показать всё',
@@ -480,8 +485,11 @@ export const ruAiMessages: Messages = {
   'ai.chat.searchSessions': 'Поиск по заголовкам и недавнему содержимому…',
   'ai.chat.clearSessionSearch': 'Очистить поиск сессий',
   'ai.chat.searchSessionsHint': 'Поиск по заголовкам с приоритетом более новых сообщений и записей. В длинных сообщениях и результатах инструментов поиск охватывает только ограниченную начальную часть. Это не полнотекстовый поиск.',
+  'ai.chat.searchingSessions': 'Поиск...',
   'ai.chat.noMatchingSessions': 'Нет совпадений в заголовках и недавнем сохранённом содержимом',
   'ai.chat.noSessions': 'Предыдущих сессий нет',
+  'ai.chat.forkFromHere': 'Ветвление отсюда',
+  'ai.chat.forkCreated': 'Разговор перенесён в новый чат; оригинал остаётся в истории.',
   'ai.chat.retryHint': 'Вы можете повторить попытку, отправив сообщение ещё раз.',
   'ai.chat.approvalTimeout': 'Время ожидания одобрения инструмента истекло через 5 минут. Вы можете повторить попытку, отправив сообщение ещё раз.',
   'ai.chat.menuHosts': 'Хосты',

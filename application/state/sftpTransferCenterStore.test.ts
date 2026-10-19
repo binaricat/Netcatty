@@ -4007,3 +4007,111 @@ test("partial cancel failure resets recovered folder children so the re-walk can
     assert.equal(afterFullCancel.find((row) => row.id === id)?.status, "cancelled");
   }
 });
+
+test("lifecycle hierarchy snapshot stays stable on bytes and changes on actual state transitions", () => {
+  const store = createSftpTransferCenterStore();
+  store.publishOwner("panel", [makeTask("hierarchy-live")]);
+  const hierarchy = store.getLifecycleSnapshot();
+  store.patchTask("hierarchy-live", { transferredBytes: 5, speed: 3 });
+  assert.equal(store.getLifecycleSnapshot(), hierarchy);
+  assert.equal(store.getTask("hierarchy-live")?.transferredBytes, 5);
+  store.getSnapshot(); // Other progress consumers must not invalidate the hierarchy.
+  assert.equal(store.getLifecycleSnapshot(), hierarchy);
+  store.patchTask("hierarchy-live", { status: "failed", error: "fixture failure" });
+  assert.notEqual(store.getLifecycleSnapshot(), hierarchy);
+  assert.equal(store.getLifecycleSnapshot().tasks[0].status, "failed");
+});
+
+test("progress that admits or changes a task lifecycle also refreshes the hierarchy", () => {
+  const store = createSftpTransferCenterStore();
+  const initial = store.getLifecycleSnapshot();
+  store.ingestBackgroundEvent({ type: "progress", transferId: "late-start", transferred: 1 });
+  const admitted = store.getLifecycleSnapshot();
+  assert.notEqual(admitted, initial);
+  assert.equal(admitted.tasks[0].id, "late-start");
+  store.publishOwner("panel", [makeTask("queued-progress", "queued")]);
+  const queued = store.getLifecycleSnapshot();
+  store.ingestBackgroundEvent({ type: "progress", transferId: "queued-progress", transferred: 3 });
+  assert.notEqual(store.getLifecycleSnapshot(), queued);
+  assert.equal(store.getLifecycleSnapshot().tasks.find((task) => task.id === "queued-progress")?.status, "transferring");
+  const live = store.getLifecycleSnapshot();
+  store.ingestBackgroundEvent({ type: "progress", transferId: "queued-progress", transferred: 4 });
+  assert.equal(store.getLifecycleSnapshot(), live);
+});
+
+test("admission updates hierarchy state without forcing full owner lifecycle work", () => {
+  const store = createSftpTransferCenterStore();
+  const task = makeTask("admitted-hierarchy", "queued");
+  store.publishOwner("panel", [task]);
+  const queued = store.getLifecycleSnapshot();
+  let lifecycleNotifications = 0;
+  store.subscribe(() => { lifecycleNotifications += 1; });
+  assert.equal(store.admitTaskRun(task), "ready");
+  assert.notEqual(store.getLifecycleSnapshot(), queued);
+  assert.equal(store.getLifecycleSnapshot().tasks[0].status, "transferring");
+  assert.equal(lifecycleNotifications, 0, "dispatch admission keeps its existing lightweight fanout");
+});
+
+
+test("same-byte and ignored terminal events publish repaired background hierarchy immediately", () => {
+  for (const { status, type } of [
+    { status: "transferring", type: "progress" },
+    { status: "completed", type: "progress" },
+    { status: "completed", type: "completed" },
+    { status: "failed", type: "failed" },
+  ] as const) {
+    const store = createSftpTransferCenterStore();
+    store.publishOwner("panel", [{ ...makeTask("folder"), isDirectory: true }]);
+    store.publishOwner("background-agent", [{ ...makeTask("orphan", status), background: true }]);
+    const beforeRepair = store.getLifecycleSnapshot();
+    let lifecycleNotifications = 0;
+    store.subscribe(() => { lifecycleNotifications += 1; });
+    store.ingestBackgroundEvent({ type, transferId: "orphan", parentTaskId: "folder", transferred: 2 });
+    const repaired = store.getLifecycleSnapshot();
+    assert.notEqual(repaired, beforeRepair, status);
+    assert.equal(repaired.tasks.find((task) => task.id === "orphan")?.parentTaskId, "folder", status);
+    assert.equal(repaired.tasks.find((task) => task.id === "orphan")?.background, false, status);
+    assert.equal(lifecycleNotifications, 0, "hierarchy repair keeps lightweight owner fanout");
+    store.ingestBackgroundEvent({ type: "progress", transferId: "orphan", parentTaskId: "folder", transferred: 3 });
+    assert.equal(store.getLifecycleSnapshot(), repaired, "subsequent byte ticks preserve the repaired hierarchy without rebuilding it");
+    assert.equal(store.getTask("orphan")?.parentTaskId, "folder");
+  }
+});
+
+test("repaired terminal hierarchy survives restart without another lifecycle event", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  for (const status of ["completed", "failed", "cancelled"] as const) {
+    let persisted = "";
+    let writes = 0;
+    const store = createSftpTransferCenterStore({ read: () => null, write: (value) => { persisted = value; writes += 1; } });
+    store.publishOwner("panel", [{ ...makeTask("folder"), isDirectory: true }]);
+    store.publishOwner("background-agent", [{ ...makeTask("orphan", status), background: true }]);
+    t.mock.timers.tick(300);
+    assert.equal(JSON.parse(persisted).tasks.find((task: TransferTask) => task.id === "orphan")?.parentTaskId, undefined);
+    let lifecycleNotifications = 0;
+    store.subscribe(() => { lifecycleNotifications += 1; });
+    const beforeRepairWrites = writes;
+    store.ingestBackgroundEvent({ type: "progress", transferId: "orphan", parentTaskId: "folder", transferred: 2 });
+    t.mock.timers.tick(300);
+    assert.equal(writes, beforeRepairWrites + 1, "structural repair is saved even when the terminal event is ignored");
+    const savedChild = JSON.parse(persisted).tasks.find((task: TransferTask) => task.id === "orphan");
+    assert.equal(savedChild?.parentTaskId, "folder", status);
+    assert.equal(savedChild?.background, false, status);
+    assert.equal(savedChild?.ownerId, "panel", status);
+    const restored = createSftpTransferCenterStore({ read: () => persisted, write: () => {} });
+    const child = restored.getTask("orphan");
+    if (status === "completed") {
+      assert.equal(child, undefined, "existing restore compaction retains completed children in their folder checkpoint");
+      assert.equal(restored.getTask("folder")?.directoryResumeCheckpoint?.completedEntries, 1);
+    } else {
+      assert.equal(child?.parentTaskId, "folder", status);
+      assert.equal(child?.background, false, status);
+      assert.equal(child?.ownerId, "panel", status);
+    }
+    assert.equal(lifecycleNotifications, 0, "repair retains lightweight owner notifications");
+    const settledWrites = writes;
+    store.ingestBackgroundEvent({ type: "progress", transferId: "orphan", parentTaskId: "folder", transferred: 3 });
+    t.mock.timers.tick(300);
+    assert.equal(writes, settledWrites, "unchanged late progress does not schedule recurring writes");
+  }
+});

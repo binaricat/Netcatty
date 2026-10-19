@@ -24,7 +24,8 @@ export const useSftpPaneVirtualList = ({
   layoutKey,
 }: UseSftpPaneVirtualListParams): UseSftpPaneVirtualListResult => {
   const fileListRef = useRef<HTMLDivElement>(null);
-  const [rowHeight, setRowHeight] = useState(0);
+  // Bound the first commit too; the mounted rows refine this estimate below.
+  const [rowHeight, setRowHeight] = useState(44);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const scrollFrameRef = useRef<number | null>(null);
@@ -32,7 +33,14 @@ export const useSftpPaneVirtualList = ({
   useLayoutEffect(() => {
     const container = fileListRef.current;
     if (!container || !isActive || !enabled) return;
-    const update = () => setViewportHeight(container.clientHeight);
+    const update = () => {
+      const height = container.clientHeight;
+      setViewportHeight(height);
+      // Scroll events are ignored while parked; the browser may still clamp
+      // its position when a refreshed directory becomes shorter. Hidden
+      // elements report zero geometry, so preserve their last visible offset.
+      if (height > 0) setScrollTop(container.scrollTop);
+    };
     update();
     const raf = window.requestAnimationFrame(update);
     const resizeObserver = new ResizeObserver(update);
@@ -82,18 +90,23 @@ export const useSftpPaneVirtualList = ({
 
   const { shouldVirtualize, totalHeight, visibleRows } = useMemo(() => {
     const overscan = 6;
-    const canVirtualize = enabled && isActive && viewportHeight > 0 && rowHeight > 0;
+    // Hidden/unmeasured panes still need a window, rather than all file rows.
+    const canVirtualize = enabled && rowHeight > 0;
     const shouldVirtualizeLocal = canVirtualize && sortedDisplayFiles.length > 50;
     const totalHeightLocal = shouldVirtualizeLocal
       ? sortedDisplayFiles.length * rowHeight
       : 0;
+    const windowTop = Math.max(0, Math.min(
+      scrollTop,
+      totalHeightLocal - viewportHeight,
+    ));
     const startIndex = shouldVirtualizeLocal
-      ? Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
+      ? Math.max(0, Math.floor(windowTop / rowHeight) - overscan)
       : 0;
     const endIndex = shouldVirtualizeLocal
       ? Math.min(
         sortedDisplayFiles.length - 1,
-        Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan,
+        Math.ceil((windowTop + viewportHeight) / rowHeight) + overscan,
       )
       : sortedDisplayFiles.length - 1;
     const visibleRowsLocal = shouldVirtualizeLocal
@@ -115,7 +128,7 @@ export const useSftpPaneVirtualList = ({
       totalHeight: totalHeightLocal,
       visibleRows: visibleRowsLocal,
     };
-  }, [enabled, isActive, rowHeight, scrollTop, sortedDisplayFiles, viewportHeight]);
+  }, [enabled, rowHeight, scrollTop, sortedDisplayFiles, viewportHeight]);
 
   return {
     fileListRef,

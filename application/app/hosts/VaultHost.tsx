@@ -36,6 +36,7 @@ export function VaultHost() {
     return {
       addShellHistoryEntry: actions?.addShellHistoryEntry,
       removeShellHistoryEntry: actions?.removeShellHistoryEntry,
+      clearAllCommandHistory: actions?.clearAllCommandHistory,
       commitPluginImporterData: actions?.commitPluginImporterData,
       commitVaultImportTransaction: actions?.commitVaultImportTransaction,
       commitVaultGroupMutation: actions?.commitVaultGroupMutation,

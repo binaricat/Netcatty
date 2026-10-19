@@ -266,9 +266,9 @@ export function useSystemSettingsEffects({
     notifySettingsChanged(STORAGE_KEY_HTTP_NETWORK_PROXY, normalized);
   }, [enabled, httpNetworkProxy, notifySettingsChanged, persistMountedRef]);
 
-  // Persist and sync window opacity
+  // Window chrome also applies in detached sessions, independently of the
+  // OS-level effects disabled there (tray, global shortcuts, autolaunch, ...).
   useEffect(() => {
-    if (!enabled) return;
     const bridge = netcattyBridge.get();
     bridge?.setWindowOpacity?.(windowOpacityRecord.opacity).catch((err) => {
       console.warn('[WindowOpacity] Failed to apply window opacity:', err);
@@ -294,7 +294,6 @@ export function useSystemSettingsEffects({
     if (!decision.shouldBroadcast) return;
     notifySettingsChanged(STORAGE_KEY_WINDOW_OPACITY, windowOpacityRecord);
   }, [
-    enabled,
     windowOpacityRecord,
     windowOpacityMutationSourceRef,
     notifySettingsChanged,

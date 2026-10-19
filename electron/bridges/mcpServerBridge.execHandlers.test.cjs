@@ -265,3 +265,33 @@ test("MCP exec probes an unclassified PowerShell session before the authoritativ
   assert.equal(result.ok, true);
   assert.equal(session._loginShellKind, "powershell");
 });
+
+
+test("expired local and unknown jobs do not claim a lost worker route", (t) => {
+  const original = process.env.NETCATTY_JOB_DIAG;
+  process.env.NETCATTY_JOB_DIAG = "1";
+  t.after(() => {
+    if (original === undefined) delete process.env.NETCATTY_JOB_DIAG;
+    else process.env.NETCATTY_JOB_DIAG = original;
+  });
+  const events = [];
+  t.mock.method(console, "info", (line) => {
+    events.push(JSON.parse(line.slice("[Netcatty JobDiag] ".length)));
+  });
+  const jobs = new Map([["local-expired", {
+    status: "completed", updatedAt: Date.now() - 20 * 60 * 1000,
+    chatSessionId: "owner",
+  }], ["local-scoped", { status: "running", chatSessionId: "owner" }]]);
+  const ctx = createExecHandlerTestContext({ sessions: new Map(), backgroundJobs: jobs });
+  const api = createExecHandlerApi(ctx);
+  ctx.pruneCompletedBackgroundJobs();
+  assert.equal(jobs.has("local-expired"), false);
+  for (const jobId of ["local-expired", "unknown"]) {
+    assert.equal(api.handleJobPoll({ jobId }).ok, false);
+    assert.equal(api.handleJobStop({ jobId }).ok, false);
+  }
+  api.handleJobPoll({ jobId: "local-scoped", chatSessionId: "other" });
+  assert.deepEqual(events.map(({ reason }) => reason), [
+    "job-missing", "job-missing", "job-missing", "job-missing", "scope-mismatch",
+  ]);
+});

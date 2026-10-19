@@ -81,3 +81,21 @@ test("single-channel / network-device sessions skip remote path listings", () =>
   assert.match(source, /skipPathCompletion: isNetworkDeviceRef\.current,/);
 });
 
+test("clearing command history restores the live-preview baseline (#3632)", () => {
+  const source = readFileSync(
+    fileURLToPath(new URL("./autocomplete/useTerminalAutocomplete.ts", import.meta.url)),
+    "utf8",
+  );
+  // A live-previewed candidate is written into the shell line, so the clear
+  // handler must mirror the Escape path: restore the typed baseline, reset the
+  // preview/accepted refs, and only then hide the popup.
+  assert.match(
+    source,
+    /const handleCommandHistoryCleared = useCallback\(\(\) => \{\s*if \(previewActiveRef\.current\) \{\s*renderPreviewSelection\(-1\);[\s\S]*?clearState\(\);\s*previewActiveRef\.current = false;[\s\S]*?lastAcceptedCommandRef\.current = null;\s*\}, \[clearState, renderPreviewSelection\]\);/,
+  );
+  assert.match(
+    source,
+    /useEffect\(\s*\(\) => subscribeCommandHistoryCleared\(handleCommandHistoryCleared\),\s*\[handleCommandHistoryCleared\],\s*\);/,
+  );
+});
+

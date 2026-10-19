@@ -121,7 +121,11 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const update = () => setViewportHeight(container.clientHeight);
+    const update = () => {
+      const height = container.clientHeight;
+      setViewportHeight(height);
+      if (height > 0) setScrollTop(container.scrollTop);
+    };
     update();
     const raf = window.requestAnimationFrame(update);
     const resizeObserver = new ResizeObserver(update);

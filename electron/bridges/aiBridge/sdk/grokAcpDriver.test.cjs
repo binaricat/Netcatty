@@ -132,6 +132,68 @@ test("parseGrokAcpModelCatalog exposes only each model's advertised reasoning ef
   });
 });
 
+// Regression fixture captured 2026-10-12 from a live `grok agent stdio`
+// initialize (grok 1.0.50): four models, per-model reasoningEfforts options
+// with a `default: true` entry, and currentModelId grok-4.7. The ACP path is
+// the registry's primary catalog source, so every availableModels entry must
+// survive the parse.
+test("parseGrokAcpModelCatalog captures every entry in the live initialize shape", () => {
+  const catalog = parseGrokAcpModelCatalog({
+    _meta: {
+      modelState: {
+        currentModelId: "grok-4.7",
+        availableModels: [
+          {
+            modelId: "grok-4.7",
+            name: "Grok 4.7",
+            description: "SpaceXAI's latest frontier model",
+            _meta: {
+              totalContextTokens: 256000,
+              agentType: "grok-build-plan",
+              supportsReasoningEffort: true,
+              reasoningEffort: "high",
+              reasoningEfforts: [
+                { id: "xhigh", value: "xhigh", label: "Extra High", default: false },
+                { id: "high", value: "high", label: "High", default: true },
+                { id: "medium", value: "medium", label: "Medium", default: false },
+                { id: "low", value: "low", label: "Low", default: false },
+              ],
+              contextWindows: [256000, 500000],
+            },
+          },
+          {
+            modelId: "grok-4.7-build-fast",
+            name: "Grok 4.7 Fast",
+            description: "Fast variant. 2x the price.",
+            _meta: {
+              totalContextTokens: 256000,
+              agentType: "grok-build-plan",
+              supportsReasoningEffort: true,
+              reasoningEffort: "high",
+              reasoningEfforts: [
+                { id: "xhigh", value: "xhigh", label: "Extra High", default: false },
+                { id: "high", value: "high", label: "High", default: true },
+                { id: "medium", value: "medium", label: "Medium", default: false },
+                { id: "low", value: "low", label: "Low", default: false },
+              ],
+            },
+          },
+          { modelId: "grok-4.6", name: "Grok 4.6", _meta: { supportsReasoningEffort: false } },
+          { modelId: "grok-4.5", name: "Grok 4.5", _meta: { supportsReasoningEffort: false } },
+        ],
+      },
+    },
+  });
+
+  assert.equal(catalog.currentModelId, "grok-4.7/high");
+  assert.deepEqual(
+    catalog.models.map((model) => model.id),
+    ["grok-4.7", "grok-4.7-build-fast", "grok-4.6", "grok-4.5"],
+  );
+  assert.deepEqual(catalog.models[0].thinkingLevels, ["xhigh", "high", "medium", "low"]);
+  assert.equal(catalog.models[0].defaultThinkingLevel, "high");
+});
+
 test("parseGrokAcpModelCatalog fills known legacy models without overriding explicit no-reasoning metadata", () => {
   const catalog = parseGrokAcpModelCatalog({
     _meta: {
@@ -1895,3 +1957,133 @@ test("runGrokAcpTurn fails when process is signal-killed mid-turn (code=null)", 
   assert.match(String(err[1]), /SIGTERM|signal/i);
   assert.ok(!emitter.calls.some((c) => c[0] === "done"));
 });
+
+test("registry Grok model discovery unions an ACP subset with the CLI catalog", async () => {
+  const grokModule = require("./grokDriver.cjs");
+  const grokAcpModule = require("./grokAcpDriver.cjs");
+  const originalAcp = grokAcpModule.listGrokAcpModels;
+  const originalLegacy = grokModule.listGrokModels;
+  // Observed session-subset shape: ACP modelState knows only 4.6/4.5 while
+  // `grok models` lists the full account set including the 4.7 family.
+  grokAcpModule.listGrokAcpModels = async () => ({
+    currentModelId: "grok-4.6/high",
+    models: [
+      {
+        id: "grok-4.6",
+        name: "Grok 4.6",
+        description: "From ACP",
+        thinkingLevels: ["xhigh", "high", "medium", "low"],
+        defaultThinkingLevel: "high",
+      },
+      {
+        id: "grok-4.5",
+        name: "Grok 4.5",
+        thinkingLevels: ["high", "medium", "low"],
+        defaultThinkingLevel: "high",
+      },
+    ],
+  });
+  grokModule.listGrokModels = async () => ({
+    currentModelId: "grok-4.7",
+    models: grokModule.parseGrokModelsOutput(
+      "Default model: grok-4.7\n* grok-4.7 (default)\n- grok-4.7-build-fast\n- grok-4.6\n- grok-4.5",
+    ).models,
+  });
+  try {
+    const catalog = await getDriver("grok").listModels({});
+    assert.deepEqual(catalog.models.map((m) => m.id), [
+      "grok-4.6",
+      "grok-4.5",
+      "grok-4.7",
+      "grok-4.7-build-fast",
+    ]);
+    // ACP entry wins for the shared id (vendor name/description survive).
+    assert.equal(catalog.models.find((m) => m.id === "grok-4.6").name, "Grok 4.6");
+    assert.equal(catalog.models.find((m) => m.id === "grok-4.6").description, "From ACP");
+    // ACP's resolved current id survives the merge.
+    assert.equal(catalog.currentModelId, "grok-4.6/high");
+  } finally {
+    grokAcpModule.listGrokAcpModels = originalAcp;
+    grokModule.listGrokModels = originalLegacy;
+  }
+});
+
+test("registry Grok model discovery dedupes when both probes agree", async () => {
+  const grokModule = require("./grokDriver.cjs");
+  const grokAcpModule = require("./grokAcpDriver.cjs");
+  const originalAcp = grokAcpModule.listGrokAcpModels;
+  const originalLegacy = grokModule.listGrokModels;
+  const acpModels = [
+    {
+      id: "grok-4.7",
+      name: "Grok 4.7",
+      thinkingLevels: ["xhigh", "high", "medium", "low"],
+      defaultThinkingLevel: "high",
+    },
+    {
+      id: "grok-4.5",
+      name: "Grok 4.5",
+      thinkingLevels: ["high", "medium", "low"],
+      defaultThinkingLevel: "high",
+    },
+  ];
+  grokAcpModule.listGrokAcpModels = async () => ({
+    currentModelId: "grok-4.7/high",
+    models: acpModels,
+  });
+  grokModule.listGrokModels = async () => ({
+    currentModelId: "grok-4.7",
+    models: [
+      { id: "grok-4.7", name: "grok-4.7", thinkingLevels: ["xhigh", "high", "medium", "low"], defaultThinkingLevel: "high" },
+      { id: "grok-4.5", name: "grok-4.5", thinkingLevels: ["high", "medium", "low"], defaultThinkingLevel: "high" },
+    ],
+  });
+  try {
+    const catalog = await getDriver("grok").listModels({});
+    assert.deepEqual(catalog.models.map((m) => m.id), ["grok-4.7", "grok-4.5"]);
+    assert.equal(catalog.models[0].name, "Grok 4.7");
+  } finally {
+    grokAcpModule.listGrokAcpModels = originalAcp;
+    grokModule.listGrokModels = originalLegacy;
+  }
+});
+
+for (const successfulSide of ["acp", "cli"]) {
+  test(`registry Grok discovery retains ${successfulSide} results when the other probe stalls`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const grokModule = require("./grokDriver.cjs");
+    const grokAcpModule = require("./grokAcpDriver.cjs");
+    const originalAcp = grokAcpModule.listGrokAcpModels;
+    const originalCli = grokModule.listGrokModels;
+    const parentController = new AbortController();
+    const successfulCatalog = {
+      currentModelId: "grok-4.6/high",
+      models: [{ id: "grok-4.6", name: "Live model", thinkingLevels: ["high"] }],
+    };
+    let stalledSignal;
+    const stall = ({ signal }) => new Promise((resolve) => {
+      stalledSignal = signal;
+      signal.addEventListener("abort", () => resolve({ currentModelId: null, models: [] }), { once: true });
+    });
+    grokAcpModule.listGrokAcpModels = successfulSide === "acp" ? async () => successfulCatalog : stall;
+    grokModule.listGrokModels = successfulSide === "cli" ? async () => successfulCatalog : stall;
+    try {
+      let finished = false;
+      const pending = getDriver("grok").listModels({
+        catalogDeadlineTs: Date.now() + 100,
+        abortController: parentController,
+      }).then((catalog) => { finished = true; return catalog; });
+      await Promise.resolve();
+      t.mock.timers.tick(99);
+      await Promise.resolve();
+      assert.equal(finished, false, "allow the other probe its remaining catalog budget");
+      t.mock.timers.tick(1);
+      assert.deepEqual(await pending, successfulCatalog);
+      assert.equal(stalledSignal.aborted, true, "cancel the unfinished child probe");
+      assert.equal(parentController.signal.aborted, false, "a partial success does not abort the whole catalog request");
+    } finally {
+      grokAcpModule.listGrokAcpModels = originalAcp;
+      grokModule.listGrokModels = originalCli;
+    }
+  });
+}

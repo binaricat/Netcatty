@@ -320,6 +320,89 @@ test("automatic stats auth keeps local-key fallback with an explicit agent", asy
   ]);
 });
 
+test("sk-* key handle + certificate routes to the prepared hardware-backed agent, not a software cert agent", async () => {
+  let agentConstructions = 0;
+  const { api, sessions } = makeApi({
+    NetcattyAgent: class {
+      constructor() {
+        agentConstructions += 1;
+      }
+    },
+    prepareSystemSshAgentForAuth: async () => "/tmp/prepared-fido-agent.sock",
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      authMethod: "auto",
+      useSshAgent: true,
+      // SK private material parses non-interactively but can never sign
+      // locally — building a software certificate agent around it fails auth
+      // and blocks prepareSystemSshAgentForAuth below.
+      privateKey: "sk-ssh-ed25519@openssh.com AAAA handle test",
+      certificate: "sk-ssh-ed25519-cert-v01@openssh.com AAAA cert test",
+      identityFilePaths: [],
+    },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  await tick();
+
+  assert.equal(agentConstructions, 0, "software certificate agent must not be built from an SK handle");
+  assert.equal(FakeSSHClient.instances[0].connectOpts.agent, "/tmp/prepared-fido-agent.sock");
+});
+
+test("path-backed sk-* key handles are filtered out of the companion's identity files too", async () => {
+  let agentConstructions = 0;
+  const { api, sessions } = makeApi({
+    NetcattyAgent: class {
+      constructor() {
+        agentConstructions += 1;
+      }
+    },
+    readFileNoFollow: async () => "sk-ecdsa-sha2-nistp256@openssh.com AAAA handle test",
+    prepareSystemSshAgentForAuth: async () => "/tmp/prepared-fido-agent.sock",
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      authMethod: "auto",
+      useSshAgent: true,
+      certificate: "sk-ecdsa-sha2-nistp256-cert-v01@openssh.com AAAA cert test",
+      identityFilePaths: ["~/.ssh/id_sk"],
+    },
+  };
+  sessions.set("sid", session);
+
+  api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  await tick();
+
+  assert.equal(agentConstructions, 0, "software certificate agent must not be built from a path-backed SK handle");
+  assert.equal(FakeSSHClient.instances[0].connectOpts.agent, "/tmp/prepared-fido-agent.sock");
+});
+
+test("FIDO stats preparation resolves only its requesting live window", async () => {
+  let prepared;
+  let destroyed = false;
+  const sender = { id: 2823, isDestroyed: () => destroyed };
+  const { api, sessions } = makeApi({ prepareSystemSshAgentForAuth: async auth => {
+    prepared = auth;
+    return "/tmp/fido-stats.sock";
+  } });
+  const session = { moshStatsAuth: { hostname: "h", username: "u", useSshAgent: true } };
+  sessions.set("sid", session);
+  api.ensureMoshStatsConnection(session, "sid", sender);
+  await tick();
+  assert.equal(prepared.resolveWebContents(), sender);
+  destroyed = true;
+  assert.equal(prepared.resolveWebContents(), null);
+  FakeSSHClient.instances[0].emit("close");
+});
+
 test("falls back to ssh-agent when a socket is available and no inline creds", async () => {
   // The system ssh used by the Mosh handshake authenticates via the local
   // agent by default, so the companion should too — regardless of the
@@ -684,6 +767,70 @@ test("a connection that becomes ready after the session closed is discarded", as
   assert.equal(FakeSSHClient.instances[0].ended, true);
   assert.equal(session.conn, undefined);
   assert.equal(session.moshStatsConn, undefined);
+});
+
+test("releases FIDO agent resources when the stats companion closes", async () => {
+  let releaseCount = 0;
+  const { api, sessions } = makeApi({
+    prepareSystemSshAgentForAuth: async () => ({
+      _releaseNetcattyFidoAgent: () => { releaseCount += 1; },
+    }),
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      useSshAgent: true,
+    },
+  };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  await tick();
+  const client = FakeSSHClient.instances[0];
+  assert.ok(client.connectOpts.agent);
+  assert.equal(typeof client.connectOpts._releaseNetcattyFidoAgent, "undefined");
+  client.emitReady();
+  assert.equal(await pending, client);
+  assert.equal(releaseCount, 0);
+
+  client.emit("close");
+  assert.equal(releaseCount, 1);
+  // close/end fan-out must stay one-shot
+  client.emit("close");
+  assert.equal(releaseCount, 1);
+});
+
+test("releases FIDO agent resources when stats connect is abandoned via sessionGone", async () => {
+  let releaseCount = 0;
+  let resolvePrepare;
+  const prepareGate = new Promise((resolve) => { resolvePrepare = resolve; });
+  const { api, sessions } = makeApi({
+    prepareSystemSshAgentForAuth: async () => {
+      await prepareGate;
+      return {
+        _releaseNetcattyFidoAgent: () => { releaseCount += 1; },
+      };
+    },
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      useSshAgent: true,
+    },
+  };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  session.closed = true;
+  sessions.delete("sid");
+  resolvePrepare();
+  assert.equal(await pending, null);
+  assert.equal(releaseCount, 1);
+  assert.equal(FakeSSHClient.instances.length, 0);
 });
 
 test("honors host algorithm settings via buildAlgorithms", async () => {

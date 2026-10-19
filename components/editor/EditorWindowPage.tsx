@@ -84,7 +84,7 @@ function EditorWindowControls({ onClose }: { onClose: () => void }) {
   );
 }
 
-function EditorWindowPaneHost({
+const EditorWindowPaneHost = React.memo(function EditorWindowPaneHost({
   tabId,
   isVisible,
   settings,
@@ -130,6 +130,16 @@ function EditorWindowPaneHost({
     }
   }, [tabId, t]);
 
+  const handleLanguageChange = useCallback((language: string) => {
+    editorTabStore.setLanguage(tabId, language);
+  }, [tabId]);
+  const handleToggleWordWrap = useCallback(() => {
+    const current = editorTabStore.getTab(tabId);
+    if (current) editorTabStore.setWordWrap(tabId, !current.wordWrap);
+  }, [tabId]);
+  const handleRequestClose = useCallback(() => onRequestClose(tabId), [onRequestClose, tabId]);
+  const handleDock = useCallback(() => onDock(tabId), [onDock, tabId]);
+
   if (!tab) return null;
   const isDirty = tabIsDirty(tab);
   const hostLabel = tab.hostLabel || tab.hostId;
@@ -151,18 +161,35 @@ function EditorWindowPaneHost({
         hotkeyScheme={settings.hotkeyScheme}
         keyBindings={settings.keyBindings}
         onContentChange={handleContentChange}
-        onLanguageChange={(lang) => editorTabStore.setLanguage(tabId, lang)}
-        onToggleWordWrap={() => {
-          const current = editorTabStore.getTab(tabId);
-          if (current) editorTabStore.setWordWrap(tabId, !current.wordWrap);
-        }}
-        onSave={() => { void handleSave(); }}
-        onRequestClose={() => onRequestClose(tabId)}
-        onDockToMain={() => onDock(tabId)}
+        onLanguageChange={handleLanguageChange}
+        onToggleWordWrap={handleToggleWordWrap}
+        onSave={handleSave}
+        onRequestClose={handleRequestClose}
+        onDockToMain={handleDock}
         initialViewState={tab.viewState}
       />
     </div>
   );
+});
+
+/** Keep content/dirty notifications out of the page and inactive editor panes. */
+function EditorWindowTitle({
+  activeTabId,
+  setWindowTitle,
+}: {
+  activeTabId: EditorTabId | null;
+  setWindowTitle: (title: string) => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const activeTab = useEditorTab(activeTabId ?? "");
+  const activeDirty = useEditorTabDirty(activeTabId ?? "");
+  useEffect(() => {
+    const name = activeTab?.fileName;
+    void setWindowTitle(name
+      ? `${activeDirty ? "* " : ""}${name}`
+      : t("sftp.editor.windowTitle"));
+  }, [activeDirty, activeTab?.fileName, setWindowTitle, t]);
+  return null;
 }
 
 function EditorWindowPageInner({ settings }: { settings: SettingsState }) {
@@ -171,22 +198,11 @@ function EditorWindowPageInner({ settings }: { settings: SettingsState }) {
   const { onWindowCommandCloseRequested } = useWindowControls();
   const tabs = useEditorTabChromeList();
   const closeInFlightRef = useRef<Promise<boolean> | null>(null);
-  const activeTab = useEditorTab(activeTabId ?? "");
-  const activeDirty = useEditorTabDirty(activeTabId ?? "");
 
   useEffect(() => {
     if (activeTabId && editorTabStore.getTab(activeTabId)) return;
     if (tabs.length > 0) setActiveTabId(tabs[tabs.length - 1].id);
   }, [activeTabId, setActiveTabId, tabs]);
-
-  useEffect(() => {
-    const name = activeTab?.fileName;
-    if (!name) {
-      void setWindowTitle(t("sftp.editor.windowTitle"));
-      return;
-    }
-    void setWindowTitle(`${activeDirty ? "* " : ""}${name}`);
-  }, [activeDirty, activeTab?.fileName, setWindowTitle, t]);
 
   const saveTab = useCallback(async (tabId: EditorTabId): Promise<boolean> => {
     const result = await saveDetachedEditorTab(tabId);
@@ -221,16 +237,16 @@ function EditorWindowPageInner({ settings }: { settings: SettingsState }) {
         await closeWindow();
         return true;
       }
-      if (activeTabId === tabId) {
-        setActiveTabId(remaining[remaining.length - 1]?.id ?? null);
-      }
+      setActiveTabId((current) => current === tabId
+        ? remaining[remaining.length - 1]?.id ?? null
+        : current);
       return true;
     })().finally(() => {
       closeInFlightRef.current = null;
     });
     closeInFlightRef.current = task;
     return task;
-  }, [activeTabId, closeTab, closeWindow, setActiveTabId]);
+  }, [closeTab, closeWindow, setActiveTabId]);
 
   const handleDock = useCallback(async (tabId: EditorTabId) => {
     const result = await dockDetachedEditorTab(tabId);
@@ -244,10 +260,14 @@ function EditorWindowPageInner({ settings }: { settings: SettingsState }) {
       await closeWindow();
       return;
     }
-    if (activeTabId === tabId) {
-      setActiveTabId(remaining[remaining.length - 1]?.id ?? null);
-    }
-  }, [activeTabId, closeWindow, setActiveTabId, t]);
+    setActiveTabId((current) => current === tabId
+      ? remaining[remaining.length - 1]?.id ?? null
+      : current);
+  }, [closeWindow, setActiveTabId, t]);
+
+  const handleRequestClose = useCallback((tabId: EditorTabId) => {
+    void closeTabAndMaybeWindow(tabId);
+  }, [closeTabAndMaybeWindow]);
 
   const handleWindowClose = useCallback(async () => {
     // Native close owns confirmation and blocks new transfers until it settles.
@@ -296,6 +316,7 @@ function EditorWindowPageInner({ settings }: { settings: SettingsState }) {
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
+      <EditorWindowTitle activeTabId={activeTabId} setWindowTitle={setWindowTitle} />
       <div className="flex h-10 shrink-0 items-center border-b border-border/60 app-drag">
         {isMac ? <div className="w-[72px] shrink-0" /> : null}
         <div className="px-3 text-xs font-semibold text-muted-foreground app-no-drag">
@@ -321,8 +342,8 @@ function EditorWindowPageInner({ settings }: { settings: SettingsState }) {
               tabId={tab.id}
               isVisible={tab.id === activeTabId}
               settings={settings}
-              onRequestClose={(id) => { void closeTabAndMaybeWindow(id); }}
-              onDock={(id) => { void handleDock(id); }}
+              onRequestClose={handleRequestClose}
+              onDock={handleDock}
             />
           ))
         )}

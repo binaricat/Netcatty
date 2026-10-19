@@ -7,6 +7,7 @@ import {
   handleKeyboardInteractiveSubmitImpl,
   handleTrayPanelConnectRequestImpl,
 } from './app/AppHandlers.ts';
+import { resolveShellSetting } from '../lib/useDiscoveredShells.ts';
 import type { Host } from '../types';
 
 const baseHost: Host = {
@@ -397,4 +398,70 @@ test('keyboard-interactive submit keeps the prompt and password unchanged when d
   assert.deepEqual(queue.map((request) => request.requestId), ['ki-failed']);
   assert.equal(hosts[0].password, 'old-password');
   assert.deepEqual(errors, ['Request not found']);
+});
+
+test('local host without explicit shell resolves the configured Settings shell', () => {
+  const connectedHosts: Host[] = [];
+  const localHost: Host = { ...baseHost, id: 'local-1', hostname: 'localhost', protocol: 'local' };
+  const discoveredShells = [
+    { id: 'wsl-ubuntu', name: 'Ubuntu (WSL)', command: 'wsl.exe', args: ['-d', 'Ubuntu'] },
+  ];
+
+  handleConnectToHostImpl(
+    () => ({
+      addConnectionLog: () => {},
+      connectToHost: (host: Host) => {
+        connectedHosts.push(host);
+        return 'local-session';
+      },
+      discoveredShells,
+      identities: [],
+      keys: [],
+      resolveEffectiveHost: (host: Host) => host,
+      resolveHostAuth: () => ({ username: '' }),
+      resolveShellSetting,
+      systemInfoRef: { current: { username: 'local-user', hostname: 'local-host' } },
+      terminalSettings: { localShell: 'wsl-ubuntu' },
+    }) as never,
+    localHost,
+  );
+
+  assert.equal(connectedHosts.length, 1);
+  assert.equal(connectedHosts[0].localShell, 'wsl.exe');
+  assert.deepEqual(connectedHosts[0].localShellArgs, ['-d', 'Ubuntu']);
+  assert.equal(connectedHosts[0].localShellName, 'Ubuntu (WSL)');
+});
+
+test('local host with an explicit shell keeps it (no Settings fallback)', () => {
+  const connectedHosts: Host[] = [];
+  const localHost: Host = {
+    ...baseHost,
+    id: 'local-2',
+    hostname: 'localhost',
+    protocol: 'local',
+    localShell: 'pwsh',
+  };
+
+  handleConnectToHostImpl(
+    () => ({
+      addConnectionLog: () => {},
+      connectToHost: (host: Host) => {
+        connectedHosts.push(host);
+        return 'local-session-2';
+      },
+      discoveredShells: [],
+      identities: [],
+      keys: [],
+      resolveEffectiveHost: (host: Host) => host,
+      resolveHostAuth: () => ({ username: '' }),
+      resolveShellSetting,
+      systemInfoRef: { current: { username: 'local-user', hostname: 'local-host' } },
+      terminalSettings: { localShell: 'wsl-ubuntu' },
+    }) as never,
+    localHost,
+  );
+
+  assert.equal(connectedHosts.length, 1);
+  assert.equal(connectedHosts[0].localShell, 'pwsh');
+  assert.equal(connectedHosts[0].localShellName, undefined);
 });

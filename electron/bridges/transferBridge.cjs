@@ -3058,6 +3058,10 @@ function openSftpHandleForTransfer(sftp, filePath, flags, transfer, options = {}
         transfer.abort = previousAbort;
       }
       try { sftp.removeListener?.("error", onOpenChannelError); } catch { /* ignore */ }
+      if (!isWriteOpen) {
+        sftp.removeListener?.("end", onOpenChannelClosed);
+        sftp.removeListener?.("close", onOpenChannelClosed);
+      }
       fn(value);
     };
 
@@ -3114,6 +3118,10 @@ function openSftpHandleForTransfer(sftp, filePath, flags, transfer, options = {}
       }
     };
 
+    const onOpenChannelClosed = () => {
+      onOpenChannelError(new Error("SFTP channel closed before the source file was opened"));
+    };
+
     if (transfer.cancelled) {
       completeSharedWriteDrain();
       releasePathGate();
@@ -3123,6 +3131,16 @@ function openSftpHandleForTransfer(sftp, filePath, flags, transfer, options = {}
 
     transfer.abort = abortDuringOpen;
     sftp.on?.("error", onOpenChannelError);
+    if (!isWriteOpen) {
+      sftp.on?.("end", onOpenChannelClosed);
+      sftp.on?.("close", onOpenChannelClosed);
+      // A failed isolated download may fall back after the browse channel's
+      // end event already fired. ssh2 never answers a new OPEN on that channel.
+      if (sftp.readable === false) {
+        onOpenChannelClosed();
+        return;
+      }
+    }
 
     try {
       sftp.open(filePath, resolveFlags(), (error, handle) => {

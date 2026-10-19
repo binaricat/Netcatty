@@ -1,0 +1,38 @@
+:root { color-scheme: light; --background: 216 33% 96%; --foreground: 222 47% 12%; --secondary: 220 16% 90%; --muted: 220 16% 90%; --muted-foreground: 220 10% 45%; --border: 220 16% 82%; --primary: 208 100% 50%; --font-sans: "Mona Sans", "PingFang SC", system-ui, sans-serif; }
+.dark { color-scheme: dark; --background: 220 28% 8%; --foreground: 210 40% 95%; --secondary: 220 16% 16%; --muted: 220 16% 16%; --muted-foreground: 220 10% 70%; --border: 220 22% 18%; --primary: 200 100% 61%; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 6px; overflow: hidden; background: transparent; color: hsl(var(--foreground)); font-family: var(--font-sans); font-size: 12px; }
+button { font: inherit; cursor: pointer; }
+button:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 1px; }
+[hidden] { display: none !important; }
+.panel { max-height: 458px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid hsl(var(--border) / .65); border-radius: 10px; background: hsl(var(--background)); }
+.panel-header { height: 52px; flex: none; display: flex; justify-content: space-between; align-items: center; padding: 0 15px 0 18px; }
+h1 { margin: 0; font-size: 14px; font-weight: 650; }
+.header-actions { display: flex; gap: 2px; }
+.icon-button { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: hsl(var(--muted-foreground)); }
+.icon-button:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.download-list { min-height: 0; max-height: 348px; overflow-y: auto; padding: 0 8px 8px; }
+.download-row { position: relative; display: flex; align-items: center; gap: 10px; min-height: 66px; padding: 8px; border-radius: 7px; }
+.download-row:hover { background: hsl(var(--secondary) / .55); }
+.file-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: hsl(var(--secondary) / .8); color: hsl(var(--muted-foreground)); }
+.file-icon svg { width: 19px; height: 19px; }
+.download-detail { flex: 1; min-width: 0; }
+.filename { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 570; }
+.download-status { display: block; overflow: hidden; margin-top: 4px; color: hsl(var(--muted-foreground)); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.download-status.missing, .download-status.interrupted { color: hsl(var(--muted-foreground)); }
+.row-actions { flex: none; display: flex; gap: 1px; }
+.row-actions .icon-button { width: 26px; height: 26px; }
+.progress-track { height: 3px; overflow: hidden; margin-top: 7px; border-radius: 10px; background: hsl(var(--secondary)); }
+.progress-fill { height: 100%; border-radius: inherit; background: hsl(var(--primary)); transition: width .2s ease; }
+.row-menu { position: absolute; z-index: 3; top: 45px; right: 7px; min-width: 134px; padding: 4px; border: 1px solid hsl(var(--border)); border-radius: 7px; background: hsl(var(--background)); box-shadow: 0 6px 18px #0004; }
+.row-menu button { display: block; width: 100%; padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: hsl(var(--foreground)); text-align: left; font-size: 11px; }
+.row-menu button:hover { background: hsl(var(--secondary)); }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 25px 12px 34px; color: hsl(var(--muted-foreground)); text-align: center; }
+.empty-icon { display: grid; place-items: center; width: 34px; height: 34px; margin-bottom: 5px; border-radius: 8px; background: hsl(var(--secondary)); }
+.empty strong { color: hsl(var(--foreground)); font-size: 12px; font-weight: 600; }
+.empty svg { width: 18px; height: 18px; }
+.panel-footer { flex: none; padding: 8px 15px; border-top: 1px solid hsl(var(--border) / .5); text-align: right; }
+.panel-footer button { border: 0; background: transparent; color: hsl(var(--muted-foreground)); font-size: 11px; }
+.panel-footer button:hover { color: hsl(var(--foreground)); }
+.notice { position: fixed; right: 12px; bottom: 12px; max-width: calc(100% - 24px); padding: 7px 10px; border-radius: 6px; background: hsl(var(--foreground)); color: hsl(var(--background)); box-shadow: 0 3px 12px #0004; }

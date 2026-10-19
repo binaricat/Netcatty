@@ -86,7 +86,7 @@ const SessionTabIcon: React.FC<{
   // Local protocol → shell-specific icon if available, else OS-specific icon
   if (protocol === 'local' || host?.protocol === 'local' || (!protocol && !host)) {
     // Use shell icon from discovery when available
-    const iconId = shellIcon || host?.localShellIcon;
+    const iconId = shellIcon ?? host?.localShellIcon;
     if (iconId) {
       return (
         <img

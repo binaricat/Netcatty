@@ -14,6 +14,12 @@ const { probeCodexAppServer } = require("../codexAppServer/probe.cjs");
 const { codebuddySessionManager } = require("./codebuddySessionManager.cjs");
 const codebuddyDriver = require("./codebuddyDriver.cjs");
 const { OPENCODE_SERVER_START_TIMEOUT_MS } = require("./opencodeDriver.cjs");
+const {
+  buildLastKnownCatalogPath,
+  readLastKnownCatalogEntry,
+  refreshLastKnownCatalogCurrentId,
+  writeLastKnownCatalogEntry,
+} = require("./modelCatalogLastKnown.cjs");
 
 const VALID_BACKENDS = new Set(listBackends());
 
@@ -26,6 +32,11 @@ const VALID_BACKENDS = new Set(listBackends());
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MODEL_CACHE_MAX_ENTRIES = 32;
 const MODEL_LIST_TIMEOUT_MS = 10000;
+// Per-backend overrides for the catalog budget above. MiMo cold-boots a
+// dedicated `mimo serve` process for every catalog pull (unlike OpenCode's
+// pooled server), so its server start + provider query needs more than the
+// shared default.
+const MODEL_LIST_TIMEOUT_OVERRIDES_MS = { mimo: 30_000 };
 const sdkModelCache = new Map();
 const sdkModelInFlight = new Map();
 const {
@@ -84,6 +95,8 @@ const SDK_MODEL_CACHE_ENV_KEYS = [
   "CLAUDE_CONFIG_DIR",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
+  // A different endpoint serves a different model list for the same credentials.
+  "ANTHROPIC_BASE_URL",
   "CLAUDE_CODE_OAUTH_TOKEN",
   "OPENCODE_BIN",
   "OPENCODE_CONFIG",
@@ -99,8 +112,34 @@ const SDK_MODEL_CACHE_ENV_KEYS = [
   "XDG_CACHE_HOME",
   "CLAUDE_CODE_EXECUTABLE",
   "CODEBUDDY_CODE_PATH",
+  // CodeBuddy auth and network environment change which models the CLI can
+  // list: two profiles sharing a binary but not credentials must never share
+  // a catalog (cross-profile contamination).
+  "CODEBUDDY_API_KEY",
+  "CODEBUDDY_AUTH_TOKEN",
+  "CODEBUDDY_INTERNET_ENVIRONMENT",
+  // Grok auth switches between env credentials and the cached `grok login`
+  // token without changing the binary, so two accounts sharing one binary
+  // must not share a catalog either.
+  "XAI_API_KEY",
+  // `grok login` credentials live under GROK_CONFIG_DIR (default ~/.grok), so
+  // two login profiles that share HOME and the binary need separate catalogs.
+  "GROK_CONFIG_DIR",
+  "COPILOT_GITHUB_TOKEN",
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_CONFIG_DIR",
   "CURSOR_API_KEY",
 ];
+
+// Margin subtracted from the outer catalog budget before handing the driver
+// an absolute deadline. Small on purpose: the reviewer's cold-boot scenario
+// (~20s `mimo serve` readiness + ~9s providers()) already needs ~29s of the
+// 30s outer budget, so a larger headroom would re-cap the pair below what
+// actually fits. The 1s keeps the inner deadline ahead of the outer
+// withTimeout, so an over-budget run fails inside the driver (clean empty
+// catalog + server teardown) instead of aborting mid-IPC.
+const MODEL_LIST_DEADLINE_HEADROOM_MS = 1_000;
 
 function buildSdkModelCacheKey(backendKey, binPath, env, runtime = "sdk") {
   const envFingerprint = SDK_MODEL_CACHE_ENV_KEYS
@@ -146,6 +185,15 @@ function shouldCacheSdkRuntimeModels(_backendKey) {
   return true;
 }
 
+/** Resolve the last-known-good catalog file under userData (null if unknown). */
+function resolveLastKnownCatalogPath(electronModule) {
+  try {
+    return buildLastKnownCatalogPath(electronModule?.app?.getPath?.("userData"));
+  } catch {
+    return null;
+  }
+}
+
 function normalizeSdkListModelsResult(raw) {
   const rawModels = Array.isArray(raw) ? raw : raw?.models;
   const currentModelId = Array.isArray(raw) ? null : raw?.currentModelId || null;
@@ -170,6 +218,7 @@ async function fetchSdkModelCatalog({
   cursorAuthMode,
   cursorCliBinPath,
   codexAppServerRuntime: appServerRuntime,
+  catalogDeadlineTs,
 }) {
   let raw;
   if (codexRuntime === "app-server") {
@@ -179,6 +228,10 @@ async function fetchSdkModelCatalog({
       binPath,
       env,
       abortController,
+      // Absolute deadline for drivers with multi-phase inner setups (mimo:
+      // server readiness + providers query) to share, so the pair can never
+      // outrun the outer catalog budget. Drivers without such phases ignore it.
+      catalogDeadlineTs,
       cursorAuthMode: backendKey === "cursor" ? cursorAuthMode : undefined,
       cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
     });
@@ -962,15 +1015,31 @@ function registerSdkStreamHandlers(ctx) {
         const shouldCacheModels = shouldCacheSdkRuntimeModels(backendKey);
         const cached = shouldCacheModels ? getSdkModelCacheEntry(sdkModelCache, cacheKey) : null;
         if (cached) {
-          return { ok: true, currentModelId: cached.currentModelId || null, models: cached.models };
+          // A cache hit replays the live fetch that populated the entry, so it
+          // keeps the live provenance (and the original fetchedAt).
+          return {
+            ok: true,
+            currentModelId: cached.currentModelId || null,
+            models: cached.models,
+            ...(cached.fetchedAt ? { source: "live", fetchedAt: cached.fetchedAt } : {}),
+          };
         }
 
         const existing = sdkModelInFlight.get(cacheKey);
         if (existing) return await existing;
 
+        const lastKnownPath = resolveLastKnownCatalogPath(electronModule);
         const loadPromise = (async () => {
           const abortController = new AbortController();
           try {
+            // Include OpenCode cold startup in this single cancellable
+            // catalog budget, then allow the normal provider-query budget.
+            // Per-backend overrides (see MODEL_LIST_TIMEOUT_OVERRIDES_MS)
+            // win over both the shared default and OpenCode's budget.
+            const catalogBudgetMs = MODEL_LIST_TIMEOUT_OVERRIDES_MS[backendKey]
+              ?? (backendKey === "opencode"
+                ? OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
+                : MODEL_LIST_TIMEOUT_MS);
             const raw = await withTimeout(
               fetchSdkModelCatalog({
                 backendKey,
@@ -979,28 +1048,91 @@ function registerSdkStreamHandlers(ctx) {
                 binPath,
                 env,
                 abortController,
+                catalogDeadlineTs: Date.now() + catalogBudgetMs - MODEL_LIST_DEADLINE_HEADROOM_MS,
                 cursorAuthMode: backendKey === "cursor" ? cursorAuthMode : undefined,
                 cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
                 codexAppServerRuntime,
               }),
-              // Include OpenCode cold startup in this single cancellable
-              // catalog budget, then allow the normal provider-query budget.
-              backendKey === "opencode"
-                ? OPENCODE_SERVER_START_TIMEOUT_MS + MODEL_LIST_TIMEOUT_MS
-                : MODEL_LIST_TIMEOUT_MS,
+              catalogBudgetMs,
               abortController,
             );
             const { currentModelId, models } = normalizeSdkListModelsResult(raw);
+            const fetchedAt = new Date().toISOString();
             // Do not cache degraded empty catalogs: listOpenCodeModels and
             // other drivers often return [] on timeout/startup failure, and
             // pinning that for TTL would block recovery (matches renderer
             // sdkRuntimeModelCache behavior).
             if (shouldCacheModels && (models.length > 0 || currentModelId)) {
-              setSdkModelCacheEntry(sdkModelCache, cacheKey, { at: Date.now(), currentModelId, models });
+              setSdkModelCacheEntry(sdkModelCache, cacheKey, { at: Date.now(), currentModelId, models, fetchedAt });
             }
-            return { ok: true, currentModelId, models };
+            // Persist the good catalog so a later live failure (CLI update,
+            // cold-boot race, dead binary) can serve it instead of presets.
+            // Best-effort: an IO error must never fail the fetch itself.
+            if (models.length > 0) {
+              writeLastKnownCatalogEntry(lastKnownPath, cacheKey, {
+                backend: backendKey,
+                models,
+                currentModelId,
+              });
+            } else if (currentModelId) {
+              // A current-only success still advertises a usable selection.
+              // Keep previous rows when available; otherwise persist that
+              // selection as one visible row for a later failed load.
+              if (readLastKnownCatalogEntry(lastKnownPath, cacheKey)) {
+                refreshLastKnownCatalogCurrentId(lastKnownPath, cacheKey, currentModelId);
+              } else {
+                writeLastKnownCatalogEntry(lastKnownPath, cacheKey, {
+                  backend: backendKey,
+                  models: [{ id: currentModelId, name: currentModelId }],
+                  currentModelId,
+                });
+              }
+            }
+            return {
+              ok: true,
+              currentModelId,
+              models,
+              source: "live",
+              fetchedAt,
+            };
           } catch (err) {
-            // Degrade to [] so the renderer keeps its curated presets (never empty).
+            // Degrade to curated presets, but first offer the last-known-good
+            // catalog persisted from a prior successful fetch (preferred over
+            // presets, including copilot's single `auto` entry). The warning
+            // keeps the renderer's retry banner, and the marker lets the UI
+            // say the list is the previous success.
+            const lastKnown = readLastKnownCatalogEntry(lastKnownPath, cacheKey);
+            if (lastKnown) {
+              // Serve a current id the picker can show (visible default, else
+              // first remaining model). A persisted id can be absent from the
+              // persisted rows: mimo entries written before the auto-channel
+              // normalization carry one on the filtered `mimo` provider, and
+              // any backend can advertise a default whose provider returned
+              // no rows. The picker would show the first row while the send
+              // preflight adopted the hidden id, so remap it for every backend.
+              // No persisted current id means "use the backend default": keep null.
+              const lastKnownCurrentModelId = !lastKnown.currentModelId
+                ? null
+                // An effort-decorated id (grok-4.6/high) is served as is when its
+                // base row advertises that level, matching the renderer's
+                // modelPresetsContainId; any other suffix stays a dangling id.
+                : lastKnown.models.some((model) => model.id === lastKnown.currentModelId
+                  || (Array.isArray(model.thinkingLevels)
+                    && model.thinkingLevels.some((level) => `${model.id}/${level}` === lastKnown.currentModelId)))
+                  ? lastKnown.currentModelId
+                  : lastKnown.models[0]?.id ?? null;
+              console.debug(
+                `[sdk] list-models(${backendKey}) unavailable, serving last-known-good catalog from ${lastKnown.fetchedAt}`,
+              );
+              return {
+                ok: true,
+                currentModelId: lastKnownCurrentModelId,
+                models: lastKnown.models,
+                warning: `${err?.message || String(err)} — serving the last-known-good catalog fetched at ${lastKnown.fetchedAt}`,
+                source: "last-known-good",
+                fetchedAt: lastKnown.fetchedAt,
+              };
+            }
             console.debug(`[sdk] list-models(${backendKey}) unavailable, using curated presets`);
             return {
               ok: true,
@@ -1280,6 +1412,7 @@ function registerSdkStreamHandlers(ctx) {
     ctx.sdkActiveStreams = sdkActiveStreams;
     ctx.sdkRequestSessions = sdkRequestSessions;
     ctx.sdkRequestRuntimes = sdkRequestRuntimes;
+    ctx.sdkModelCache = sdkModelCache; // exposed for catalog tests
     ctx.codexAppServerRuntime = codexAppServerRuntime;
     ctx.codebuddySessionManager = codebuddySessionManager;
   }
@@ -1287,10 +1420,12 @@ function registerSdkStreamHandlers(ctx) {
 
 module.exports = {
   registerSdkStreamHandlers,
+  MODEL_LIST_TIMEOUT_OVERRIDES_MS,
   resolveBackendKey,
   resolveSdkBackendBinPath,
   buildSdkSessionKey,
   buildSdkModelCacheKey,
+  SDK_MODEL_CACHE_ENV_KEYS,
   getSdkModelCacheEntry,
   setSdkModelCacheEntry,
   normalizeSdkListModelsResult,

@@ -4,7 +4,7 @@ import React from "react";
 
 import type { AISession } from "../infrastructure/ai/types.ts";
 import { MESSAGES_BY_LOCALE } from "../application/i18n/messages.ts";
-import { createDomRenderer, dispatchDomEvent, installDomEnvironment } from "./test-support/renderReactDom.tsx";
+import { createDomRenderer, dispatchDomEvent, installDomEnvironment, runWithAct } from "./test-support/renderReactDom.tsx";
 
 test("history drawer filters, pages, clears and explains the bounded search in every locale", async () => {
   const dom = installDomEnvironment();
@@ -51,6 +51,10 @@ test("history drawer filters, pages, clears and explains the bounded search in e
     const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!;
     setValue.call(input, query);
     await dispatchDomEvent(input, new dom.window.Event("input", { bubbles: true }));
+    for (let attempt = 0; attempt < 100 && renderer.container.querySelector('[aria-busy="true"]'); attempt += 1) {
+      await runWithAct(() => new Promise((resolve) => setTimeout(resolve, 5)));
+    }
+    assert.equal(renderer.container.querySelector('[aria-busy="true"]'), null, "search must settle");
   };
   const loadMore = () => [...renderer.container.querySelectorAll("button")]
     .find((button) => button.textContent?.includes("Load more"));

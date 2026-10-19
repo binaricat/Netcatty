@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildExternalBridgeContextMessages } from "../../infrastructure/ai/harness/externalBridgeContext.ts";
+import { ToolOutputStore } from "../../infrastructure/ai/harness/toolOutputStore.ts";
+import {
+  buildCattySdkMessages,
+  createContinuationContext,
+} from "../../infrastructure/ai/harness/turnDrivers/cattyMessageBuilder.ts";
 
 import type { ChatMessageAttachment, ToolCall, ToolResult } from "../../infrastructure/ai/types.ts";
 import {
@@ -229,6 +234,59 @@ test("buildHistoricalUserReplayContent replaces historical vault note mentions w
   assert.match(result, /"noteId":"note-123"/);
   assert.match(result, /"title":"Runbook"/);
   assert.doesNotMatch(result, /AAAAAA/);
+});
+
+for (const field of ["attachments", "images"] as const) {
+  test(`restored ${field} keep image, file and terminal metadata usable when continuing a chat`, () => {
+    const attachments: ChatMessageAttachment[] = [
+      { base64Data: "", contentUnavailable: true, mediaType: "image/png", filename: "screenshot.png" },
+      { base64Data: "", contentUnavailable: true, mediaType: "application/pdf", filename: "report.pdf" },
+      { base64Data: "", contentUnavailable: true, mediaType: "text/plain", filename: "selection.log", terminalSelection: true, lineCount: 3 },
+    ];
+    const messages: ChatMessage[] = [{
+      id: "restored-user", role: "user", content: "Inspect these files", timestamp: 1,
+      [field]: attachments,
+    }];
+    const catty = buildCattySdkMessages({
+      allMessages: messages,
+      includeCurrentUserMessage: true,
+      trimmed: "Please continue",
+      continuationContext: createContinuationContext("provider", "openai", "model", false),
+      chatSessionId: "restored-chat",
+      toolOutputStore: new ToolOutputStore(),
+      fieldsByMessage: new Map(),
+    });
+    const external = buildExternalBridgeContextMessages(messages);
+    for (const history of [catty, external]) {
+      const content = String(history.find((message) => message.role === "user")?.content);
+      assert.match(content, /screenshot\.png/);
+      assert.match(content, /report\.pdf/);
+      assert.match(content, /selection\.log/);
+      assert.match(content, /lines=3/);
+      assert.equal(content.match(/content unavailable on this device/g)?.length, 3);
+      assert.doesNotMatch(content, /0 base64 chars|undefined/);
+    }
+    assert.equal(catty.at(-1)?.content, "Please continue");
+  });
+}
+
+test("synced note metadata retains the reference needed to read the note", () => {
+  const replay = buildHistoricalUserReplayContent("check this note", [{
+    base64Data: "", contentUnavailable: true, mediaType: "text/markdown",
+    vaultNoteId: "note-123", vaultNoteTitle: "Runbook",
+  }]);
+  assert.match(replay, /"noteId":"note-123"/);
+  assert.match(replay, /vault_notes_get/);
+});
+
+test("unavailable attachment placeholders do not expose stale local content fields", () => {
+  const replay = buildHistoricalUserReplayContent("check", [{
+    base64Data: "", contentUnavailable: true, mediaType: "text/plain", terminalSelection: true,
+    previewText: "private terminal output",
+  }, {
+    base64Data: "", contentUnavailable: true, mediaType: "application/pdf", filePath: "/private/report.pdf",
+  }]);
+  assert.doesNotMatch(replay, /private terminal output|\/private\//);
 });
 
 test("external recovery retains note identity before truncating a long user request", () => {

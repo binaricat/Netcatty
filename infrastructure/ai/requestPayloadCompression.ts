@@ -158,13 +158,19 @@ function compressContentPartForRequestRetry(part: unknown): unknown {
     const output = record.output;
     if (output && typeof output === "object") {
       const outputRecord = output as Record<string, unknown>;
-      if (outputRecord.type === "text" && typeof outputRecord.value === "string") {
-        const value = compressAndTruncateText(outputRecord.value, RETRY_MAX_TOOL_RESULT_CHARS);
-        if (value === outputRecord.value) return part;
+      const text = outputRecord.type === "text" && typeof outputRecord.value === "string"
+        ? outputRecord.value
+        : outputRecord.type === "json" ? JSON.stringify(outputRecord.value) : undefined;
+      if (text !== undefined) {
+        // Live SDK tool results are JSON, while persisted results replay as
+        // text. Apply the same reduction before their first model request.
+        const value = compressAndTruncateText(text, RETRY_MAX_TOOL_RESULT_CHARS);
+        if (value === text) return part;
         return {
           ...record,
           output: {
             ...outputRecord,
+            type: "text",
             value,
           },
         };

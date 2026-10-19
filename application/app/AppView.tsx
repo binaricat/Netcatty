@@ -13,6 +13,7 @@ import { QuickScriptEditorDialog } from '../../components/scripts/QuickScriptEdi
 import { AddToWorkspaceDialog } from '../../components/workspace/AddToWorkspaceDialog';
 import { KeyboardInteractiveModal } from '../../components/KeyboardInteractiveModal';
 import { PassphraseModal } from '../../components/PassphraseModal';
+import { FidoPromptModal } from '../../components/FidoPromptModal';
 import { UnsavedChangesProvider, promptUnsavedChanges } from '../../components/editor/UnsavedChangesDialog';
 import { SnippetExecutionProvider } from '../../components/SnippetExecutionProvider';
 import { Button } from '../../components/ui/button';
@@ -37,6 +38,7 @@ import { useExternalMcpToggleState } from '../state/useExternalMcpToggleState';
 import { selectPluginThemeTokens } from '../state/pluginContributionEnvironment';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import { resolveEffectiveTerminalHost } from '../../domain/terminalHostResolution';
+import { useDefaultLocalShellContext } from '../../lib/useDiscoveredShells';
 import { getAvailablePaneMagnificationController } from '../../domain/paneMagnification';
 import { pluginViewTabStore, usePluginViewTabs } from '../state/pluginViewTabStore';
 import { buildPluginSettingScopeCatalog } from '../state/usePluginSettingScopeCatalog';
@@ -260,18 +262,18 @@ function AppViewInner({ domains }: AppViewProps) {
   useMainWindowInputFocusRecovery({ onPageHidden: dismissTransientOverlays });
 
   const {
-    addShellHistoryEntry, removeShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace,
+    addShellHistoryEntry, clearAllCommandHistory, removeShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace,
     clearAndRemoveSource, clearAndRemoveSources, closeLogView, closeSession, closeTabsBatch, closeWorkspace, commitPluginImporterData, commitVaultImportTransaction, commitVaultGroupMutation, copySessionToNewWindowWithCurrentShell, copySessionWithCurrentShell, duplicateSessionWithCurrentShell, copyWorkspaceWithCurrentShell,
     convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts,
     customGroups, currentTerminalTheme, deepLinkHostDraft, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict,
     followAppTerminalTheme,
     groupConfigs, handleAddKnownHost, handleConnectSerial, handleConnectToHost, handleCreateLocalTerminal, handleDefaultTerminalThemeChange, handleDeleteHost,
     handleEndSessionDrag, handleFollowAppTerminalThemeChange, handleHostConnectWithProtocolCheck, handleHotkeyAction, handleKeyboardInteractiveCancel, handleKeyboardInteractiveSubmit,
-    handleOpenHostFromVaultNote, handleOpenQuickSwitcher, handleOpenSettings, handleOpenVaultHostFromChat, handleOpenVaultNoteFromChat, handleOpenVaultSectionFromChat, handleOpenVaultSnippetFromChat, handleRootContextMenu, handlePassphraseCancel, handlePassphraseSkip, handlePassphraseSubmit, handleProtocolSelect,
+    handleOpenHostFromVaultNote, handleOpenQuickSwitcher, handleOpenSettings, handleOpenVaultHostFromChat, handleOpenVaultNoteFromChat, handleOpenVaultSectionFromChat, handleOpenVaultSnippetFromChat, handleRootContextMenu, handlePassphraseCancel, handlePassphraseSkip, handlePassphraseSubmit, handleFidoPromptSubmit, handleFidoPromptCancel, handleProtocolSelect,
     handleRequestCloseEditorTabRef, handleSessionStatusChange, handleSyncNowManual, handleTerminalDataCapture, handleUpdateHostFromTerminal,
     hostById, hosts, terminalHosts, updateTerminalHosts, hotkeyScheme, identities, importOrReuseKey, isBroadcastEnabled, isGlobalBroadcastEnabled, onToggleGlobalBroadcast, canUseGlobalBroadcast, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen,
     keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, openLogView, openNoteRequest, orderedTabsWithEditors, orphanSessions,
-    passphraseQueue, protocolSelectHost, proxyProfiles, portForwardingRules, quickResults, quickSearch, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions,
+    passphraseQueue, fidoPromptQueue, protocolSelectHost, proxyProfiles, portForwardingRules, quickResults, quickSearch, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions,
     resolveEmptyVaultConflict, resolveSessionAppearance, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
     sessions, setActiveTabId, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap,
     setNavigateToSection, setTerminalFontFamilyId, setTerminalFontSize, setVaultFocusRequest, updateSessionFontSize, updateSessionRestoreCwd, updateSessionDynamicTitle, updateSessionCodingCliProvider, clearSessionFontSizeOverride,
@@ -354,14 +356,16 @@ function AppViewInner({ domains }: AppViewProps) {
     [proxyProfiles],
   );
 
+  const defaultLocalShell = useDefaultLocalShellContext(terminalSettings);
   const resolveWorkspaceAppendHost = useCallback((host: typeof hosts[number]) => (
     resolveEffectiveTerminalHost({
       host,
       groupConfigs,
       proxyProfiles,
       validProxyProfileIds,
+      defaultLocalShell,
     })
-  ), [groupConfigs, proxyProfiles, validProxyProfileIds]);
+  ), [groupConfigs, proxyProfiles, validProxyProfileIds, defaultLocalShell]);
 
   const handleAppendHostToWorkspace = useCallback((workspaceId: string, hostId: string) => {
     const host = hosts.find((entry) => entry.id === hostId);
@@ -746,6 +750,7 @@ function AppViewInner({ domains }: AppViewProps) {
           onAddKnownHost={handleAddKnownHost}
           onCommandExecuted={handleTerminalCommandExecuted}
           onDeleteShellHistoryEntry={removeShellHistoryEntry}
+          onClearCommandHistory={clearAllCommandHistory}
           onTerminalDataCapture={handleTerminalDataCapture}
           onCreateWorkspaceFromSessions={createWorkspaceFromSessions}
           onAddSessionToWorkspace={addSessionToWorkspace}
@@ -1031,6 +1036,13 @@ function AppViewInner({ domains }: AppViewProps) {
         onSubmit={handlePassphraseSubmit}
         onCancel={handlePassphraseCancel}
         onSkip={handlePassphraseSkip}
+      />
+
+      {/* FIDO2 PIN / touch presence (OpenSSH sk-*) */}
+      <FidoPromptModal
+        request={fidoPromptQueue?.[0] || null}
+        onSubmit={handleFidoPromptSubmit}
+        onCancel={handleFidoPromptCancel}
       />
 
       {/* Empty vault vs cloud data confirmation dialog (#679).

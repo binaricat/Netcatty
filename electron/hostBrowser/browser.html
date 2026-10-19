@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>Netcatty Browser</title>
+  <link rel="stylesheet" href="browser.css">
+  <script defer src="browser.js"></script>
+</head>
+<body class="dark" data-platform="darwin">
+  <header class="chrome">
+    <div class="tab-bar" id="window-drag-region">
+      <div class="tabs" id="tabs" role="tablist"></div>
+      <button id="new-tab" class="icon-button new-tab" title="New tab" aria-label="New tab">+</button>
+      <div class="drag-space"></div>
+      <div class="window-controls">
+        <button id="window-minimize" class="window-control" title="Minimize" aria-label="Minimize">&#8722;</button>
+        <button id="window-maximize" class="window-control" title="Maximize" aria-label="Maximize">&#9633;</button>
+        <button id="window-close" class="window-control close" title="Close" aria-label="Close">&#215;</button>
+      </div>
+    </div>
+    <div class="nav-bar">
+      <button id="back" class="icon-button" title="Back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M5 12h14"/></svg></button>
+      <button id="forward" class="icon-button" title="Forward" aria-label="Forward"><svg viewBox="0 0 24 24"><path d="m12 5 7 7-7 7M19 12H5"/></svg></button>
+      <button id="reload" class="icon-button" title="Reload" aria-label="Reload"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6M20 4v7h-7"/></svg></button>
+      <form id="address-form" class="address-form"><input id="address" autocomplete="off" spellcheck="false" aria-label="Web address" placeholder="Enter a URL"></form>
+      <button id="bookmarks-menu" class="icon-button" title="Apps and bookmarks" aria-label="Apps and bookmarks"><svg viewBox="0 0 24 24"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></button>
+      <button id="downloads-menu" class="icon-button downloads-button" title="Downloads" aria-label="Downloads" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg><span class="download-indicator"></span></button>
+    </div>
+  </header>
+  <main id="home" class="home">
+    <div class="home-content">
+      <div id="connection-message" class="connection-message" hidden><h1 id="home-title">Connection unavailable</h1><p id="home-description"></p><button id="retry" class="retry-button" type="button" hidden>Retry connection</button></div>
+      <section id="apps-section" class="apps-section"><div class="apps-heading"><span>Apps</span><button id="add-app" type="button">+ Add app</button></div><div id="app-grid" class="app-grid"></div><p id="apps-empty" class="apps-empty">Your apps for this host will appear here.</p></section>
+    </div>
+  </main>
+  <aside id="bookmark-panel" class="bookmark-panel" hidden>
+    <div class="panel-head"><strong>Apps &amp; bookmarks</strong><button id="close-bookmarks" class="icon-button" aria-label="Close bookmarks">&#215;</button></div>
+    <button id="add-bookmark" class="add-bookmark" type="button">+ Add bookmark</button>
+    <div id="bookmark-list" class="bookmark-list"></div>
+    <form id="bookmark-form" class="bookmark-form" hidden>
+      <input id="bookmark-id" type="hidden">
+      <div class="bookmark-form-head"><button id="bookmark-back" class="icon-button" type="button" title="Back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button><strong id="bookmark-form-heading">Add app</strong><button id="bookmark-close" class="icon-button" type="button" title="Close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+      <div class="bookmark-form-body">
+        <label class="form-field">Title<input id="bookmark-title" required maxlength="120" placeholder="App name"></label>
+        <label class="form-field">Address<input id="bookmark-url" required type="url" placeholder="https://example.com"></label>
+        <div class="form-field"><span>Icon</span><div class="icon-setting"><span id="bookmark-icon-preview" class="app-icon"></span><div class="icon-setting-copy"><strong>App icon</strong><small>Use the website icon or choose your own.</small></div></div>
+          <div class="choice-group" role="group" aria-label="Icon type"><button id="bookmark-use-site-icon" data-icon-mode="website" type="button">Website</button><button data-icon-mode="text" type="button">Text</button><button data-icon-mode="image" type="button">Image</button></div>
+          <div id="bookmark-text-options" class="icon-options" hidden><input id="bookmark-icon" maxlength="4" placeholder="Icon text" aria-label="Icon text"><div class="color-control"><span>Color</span><button id="bookmark-color-button" type="button" title="Choose icon color" aria-label="Choose icon color"><span id="bookmark-color-swatch"></span></button><input id="bookmark-color" type="color" value="#247969" aria-label="Icon color"></div></div>
+          <div id="bookmark-image-options" class="image-options" hidden><input id="bookmark-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon"><button id="bookmark-choose-image" class="secondary-button" type="button">Choose image</button><small id="bookmark-image-name">PNG, JPEG, WebP, GIF or ICO &#183; max 64 KB</small></div>
+        </div>
+        <div class="form-field"><span>Show on</span><div class="choice-group scope-choices" role="group" aria-label="Show on"><button data-scope="host" type="button">This host</button><button data-scope="all-hosts" type="button">All hosts</button></div><select id="bookmark-scope" hidden><option value="host">This host</option><option value="all-hosts">All hosts</option></select></div>
+      </div>
+      <div class="form-actions bookmark-actions"><button id="cancel-bookmark" class="secondary-button" type="button">Cancel</button><button type="submit">Save app</button></div>
+    </form>
+  </aside>
+  <div id="tab-icon-menu" class="tab-icon-menu" hidden><button id="tab-icon-change" type="button">Change icon&#8230;</button><button id="tab-icon-reset" type="button">Use website icon</button></div>
+  <div id="tab-icon-editor" class="tab-icon-editor" hidden><div class="panel-head"><strong>Tab icon</strong><button id="tab-icon-editor-close" class="icon-button" type="button">&#215;</button></div><p>Choose an icon for this website on this host.</p><label>Icon text<input id="tab-icon-text" maxlength="4" placeholder="&#9671;"></label><label>Color<input id="tab-icon-color" type="color" value="#247969"></label><label>Custom image<input id="tab-icon-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon"></label><div class="form-actions"><button id="tab-icon-cancel" type="button">Cancel</button><button id="tab-icon-save" type="button">Save</button></div></div>
+  <div id="notice" class="notice" hidden></div>
+</body>
+</html>

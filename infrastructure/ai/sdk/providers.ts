@@ -6,6 +6,7 @@ import { resolveOpenAIApi, resolveProviderStyle } from '../types';
 import { normalizeAnthropicSdkBaseURL } from '../anthropicCompatBaseUrl';
 import { buildSdkRequestHeaders } from '../providerRequestHeaders';
 import { normalizeOllamaSdkBaseURL } from '../ollamaCompatBaseUrl';
+import { normalizeOpenAIChatCacheUsage } from '../openAIChatCacheUsage';
 
 export { normalizeOllamaSdkBaseURL };
 import {
@@ -529,7 +530,7 @@ export function createBridgeFetchForSDK(
       };
 
       const unsubData = bridge.onAiStreamData(requestId, (data: string) => {
-        const normalizedData = normalizeOpenAIChatToolCalls(data);
+        const normalizedData = normalizeOpenAIChatCacheUsage(normalizeOpenAIChatToolCalls(data));
         captureOpenAIChatFields(normalizedData);
         // Re-wrap as SSE so the SDK can parse it
         enqueueChunk(encoder.encode(`data: ${normalizedData}\n\n`));
@@ -627,7 +628,7 @@ export function createBridgeFetchForSDK(
     // Non-streaming path
     const result = await bridge.aiFetch(url, method, headers, requestBody, providerId);
 
-    return new Response(result.data, {
+    return new Response(normalizeOpenAIChatCacheUsage(result.data), {
       status: result.status,
       statusText: result.ok ? 'OK' : 'Error',
       headers: { 'content-type': 'application/json' },

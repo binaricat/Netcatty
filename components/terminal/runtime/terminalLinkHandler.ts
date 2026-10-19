@@ -7,6 +7,8 @@ export type TerminalLinkHandlerOptions = {
   canActivate: (event: TerminalLinkClickEvent) => boolean;
   openExternalAvailable: () => boolean;
   openExternal: (uri: string) => Promise<void>;
+  openInternal?: (uri: string) => Promise<void> | void;
+  useInternal?: () => boolean;
   confirmOscLink: (uri: string) => boolean;
   openWindow?: (uri: string) => unknown;
   onError?: (error: unknown) => void;
@@ -31,6 +33,10 @@ export function createTerminalLinkHandler(
     }
 
     try {
+      if (options.openInternal && (options.useInternal?.() ?? true)) {
+        await options.openInternal(uri);
+        return;
+      }
       if (options.openExternalAvailable()) {
         await options.openExternal(uri);
         return;

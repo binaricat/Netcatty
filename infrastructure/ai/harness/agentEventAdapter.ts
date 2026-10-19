@@ -30,7 +30,7 @@ export interface CattyStreamChunk {
   stepNumber?: number;
 }
 
-const STEP_HANDLE_NOTICE_RE = /^\[step \d+\] Tool output handles available:/;
+const STEP_HANDLE_NOTICE_RE = /^(?:\[step \d+\] Tool output handles available:|\[Tool output handles available:)/;
 
 function isStepHandleNoticeMessage(content: unknown): boolean {
   return typeof content === 'string' && STEP_HANDLE_NOTICE_RE.test(content);

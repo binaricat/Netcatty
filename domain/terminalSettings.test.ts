@@ -320,6 +320,11 @@ test("normalizeTerminalSettings preserves intentional custom autocompleteMaxSugg
   );
 });
 
+test("terminal links default to Netcatty and preserve the system browser choice", () => {
+  assert.equal(normalizeTerminalSettings().linkBrowser, 'netcatty');
+  assert.equal(normalizeTerminalSettings({ linkBrowser: 'system' }).linkBrowser, 'system');
+});
+
 test("normalizeTerminalSettings keeps multi-line paste confirmation opt-in", () => {
   assert.equal(normalizeTerminalSettings().confirmBeforeMultilinePaste, false);
   assert.equal(

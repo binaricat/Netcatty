@@ -145,24 +145,69 @@ function createMoshSessionApi(ctx) {
       }
     }
 
-    async function prepareMoshSshAgentOptions(options) {
-      if (options?.useSshAgent !== true && !options?.agentForwarding) return options;
+    async function prepareMoshSshAgentOptions(options, sender, sshExe) {
+      const {
+        enhanceAuthOptionsForFido,
+        resolvePreparedAgentSocket,
+      } = require("../sshAuthHelper.cjs");
+      const prepOptions = await enhanceAuthOptionsForFido(options, sender);
+      const forceFido = prepOptions.useFidoAgent === true && options.authMethod !== "password";
+      if (options?.useSshAgent !== true && !options?.agentForwarding && !forceFido) return options;
       let prepared = options;
-      if (options.useSshAgent === true) {
-        await prepareSystemSshAgentForAuth(options, "[Mosh]");
-        const loginSocketPath = await getAvailableAgentSocket(options.identityAgent, options);
-        if (!loginSocketPath) {
-          throw new Error("System SSH agent is unavailable. Start or unlock it, or configure a valid agent socket.");
+      /** @type {(() => void)|null} */
+      let releasePreparedAgent = null;
+      try {
+        if (options.useSshAgent === true || forceFido) {
+          const agent = await prepareSystemSshAgentForAuth({ ...prepOptions, nativeFidoAgent: true, nativeSshPath: sshExe }, "[Mosh]");
+          if (typeof agent?._releaseNetcattyFidoAgent === "function") {
+            releasePreparedAgent = agent._releaseNetcattyFidoAgent;
+          }
+          const socketPath = resolvePreparedAgentSocket(agent, prepOptions)
+            || await getAvailableAgentSocket(options.identityAgent, options);
+          if (!socketPath) {
+            throw new Error(
+              forceFido
+                ? "FIDO2 SSH agent is unavailable. Install OpenSSH with libfido2 and try again."
+                : "System SSH agent is unavailable. Start or unlock it, or configure a valid agent socket.",
+            );
+          }
+          prepared = {
+            ...prepared,
+            useSshAgent: true,
+            _resolvedSshAgentSocket: socketPath,
+            ...(releasePreparedAgent
+              ? { _releaseNetcattyFidoAgent: releasePreparedAgent }
+              : {}),
+          };
         }
-        prepared = { ...prepared, _resolvedSshAgentSocket: loginSocketPath };
-      }
-      if (options.agentForwarding) {
-        const forwardingSocketPath = await getAvailableForwardingAgentSocket(options.identityAgent, options);
-        if (forwardingSocketPath) {
-          prepared = { ...prepared, _resolvedForwardingAgentSocket: forwardingSocketPath };
+        if (options.agentForwarding) {
+          // May throw (e.g. Windows Pageant/Cygwin rejected for native OpenSSH).
+          // Release any already-acquired FIDO agent/askpass lease before rethrowing.
+          const forwardingSocketPath = await getAvailableForwardingAgentSocket(
+            options.identityAgent,
+            options,
+          );
+          if (forwardingSocketPath) {
+            prepared = { ...prepared, _resolvedForwardingAgentSocket: forwardingSocketPath };
+          }
         }
+        return prepared;
+      } catch (error) {
+        if (typeof releasePreparedAgent === "function") {
+          try { releasePreparedAgent(); } catch { /* ignore */ }
+        }
+        throw error;
       }
-      return prepared;
+    }
+
+    function createOneShotFidoAgentRelease(releaseFn) {
+      if (typeof releaseFn !== "function") return () => {};
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        try { releaseFn(); } catch { /* ignore */ }
+      };
     }
 
     function applyMoshSshAgentEnvironment(env, options) {
@@ -367,7 +412,9 @@ function createMoshSessionApi(ctx) {
         if (options.useSshAgent === false) {
           sshArgs.push("-o", "IdentityAgent=none");
         } else if (options.useSshAgent && options._resolvedSshAgentSocket) {
-          sshArgs.push("-o", `IdentityAgent=${options._resolvedSshAgentSocket}`);
+          // -o is parsed again as ssh_config syntax, even with argv spawning.
+          const quotedSocket = `"${String(options._resolvedSshAgentSocket).replace(/(["\\])/g, "\\$1")}"`;
+          sshArgs.push("-o", `IdentityAgent=${quotedSocket}`);
           if (options.identitiesOnly && !sshArgs.includes("IdentitiesOnly=yes")) {
             sshArgs.push("-o", "IdentitiesOnly=yes");
           }
@@ -480,38 +527,40 @@ function createMoshSessionApi(ctx) {
      */
     async function startMoshSessionViaHandshake(event, options, { bareClient, sshExe }) {
       const sessionId = options.sessionId || randomUUID();
+      const releaseFidoAgent = createOneShotFidoAgentRelease(options._releaseNetcattyFidoAgent);
       const cols = options.cols || 80;
       const rows = options.rows || 24;
       const optionsEnv = options.env || {};
       const lang = optionsEnv.LANG || resolveLangFromCharsetForMosh(options.charset);
-      const moshAuth = await buildMoshSshAuthArgs(options, sessionId);
-    
-      const { args: sshArgs } = moshHandshake.buildSshHandshakeCommand({
-        host: options.hostname,
-        port: options.port,
-        username: options.username,
-        lang,
-        locales: optionsEnv,
-        moshServer: moshHandshake.buildMoshServerCommand(options.moshServerPath),
-        sshArgs: moshAuth.sshArgs,
-      });
-    
-      const { buildTerminalProcessEnv } = require("../httpNetworkProxyBridge.cjs");
-      const sshEnv = { ...buildTerminalProcessEnv(process.env), ...optionsEnv, TERM: "xterm-256color" };
-      // Do not let ssh_config SendEnv force the local locale onto the remote
-      // process. The handshake passes the configured locale variables through
-      // mosh-server's stock `-l` fallback mechanism instead, so a minimal host
-      // can keep its working native C.UTF-8 locale when a requested locale is
-      // not installed.
-      for (const key of Object.keys(sshEnv)) {
-        if (key === "LANG" || key === "LANGUAGE" || key.startsWith("LC_")) {
-          delete sshEnv[key];
-        }
-      }
-      applyMoshSshAgentEnvironment(sshEnv, options);
-    
+      let moshAuth;
       let sshPty;
       try {
+        moshAuth = await buildMoshSshAuthArgs(options, sessionId);
+
+        const { args: sshArgs } = moshHandshake.buildSshHandshakeCommand({
+          host: options.hostname,
+          port: options.port,
+          username: options.username,
+          lang,
+          locales: optionsEnv,
+          moshServer: moshHandshake.buildMoshServerCommand(options.moshServerPath),
+          sshArgs: moshAuth.sshArgs,
+        });
+
+        const { buildTerminalProcessEnv } = require("../httpNetworkProxyBridge.cjs");
+        const sshEnv = { ...buildTerminalProcessEnv(process.env), ...optionsEnv, TERM: "xterm-256color" };
+        // Do not let ssh_config SendEnv force the local locale onto the remote
+        // process. The handshake passes the configured locale variables through
+        // mosh-server's stock `-l` fallback mechanism instead, so a minimal host
+        // can keep its working native C.UTF-8 locale when a requested locale is
+        // not installed.
+        for (const key of Object.keys(sshEnv)) {
+          if (key === "LANG" || key === "LANGUAGE" || key.startsWith("LC_")) {
+            delete sshEnv[key];
+          }
+        }
+        applyMoshSshAgentEnvironment(sshEnv, options);
+
         sshPty = pty.spawn(sshExe, sshArgs, {
           cols,
           rows,
@@ -521,7 +570,8 @@ function createMoshSessionApi(ctx) {
           useConptyDll: process.platform === "win32",
         });
       } catch (err) {
-        cleanupMoshAuthTempFiles(moshAuth.tempFiles);
+        if (moshAuth) cleanupMoshAuthTempFiles(moshAuth.tempFiles);
+        releaseFidoAgent();
         throw err;
       }
     
@@ -564,6 +614,7 @@ function createMoshSessionApi(ctx) {
         if (!claim.ok) {
           try { sshPty.kill(); } catch { /* ignore */ }
           cleanupMoshAuthTempFiles(moshAuth.tempFiles);
+          releaseFidoAgent();
           const supersededError = new Error("Connection superseded by a newer reconnect");
           supersededError.code = "NETCATTY_BOOT_SUPERSEDED";
           throw supersededError;
@@ -641,6 +692,7 @@ function createMoshSessionApi(ctx) {
       });
     
       sshPty.onExit(({ exitCode, signal }) => {
+        releaseFidoAgent();
         if (sessions.get(sessionId) !== session || session.closed) {
           cleanupMoshAuthTempFiles(moshAuth.tempFiles);
           return;
@@ -961,7 +1013,7 @@ function createMoshSessionApi(ctx) {
         throw new Error("OpenSSH client not found. Netcatty needs ssh to start the remote mosh-server handshake.");
       }
     
-      const preparedOptions = await prepareMoshSshAgentOptions(options);
+      const preparedOptions = await prepareMoshSshAgentOptions(options, event?.sender, sshExe);
       return startMoshSessionViaHandshake(event, preparedOptions, { bareClient, sshExe });
     }
 

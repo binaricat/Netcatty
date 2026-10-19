@@ -92,6 +92,66 @@ function meta(overrides: Partial<SyncFileMeta> = {}): SyncFileMeta {
   };
 }
 
+for (const [existingV2, trusted] of [[false, true], [true, true], [false, false], [true, false]]) {
+  test(`${existingV2 ? 'v2 join' : 'v1 migration'} preserves independent chat turns ${trusted ? 'with' : 'without'} a trusted vault baseline`, () => {
+    const baseline = payload();
+    const session = (ids: string[], updatedAt: number): NonNullable<SyncPayload['aiSessions']>[number] => ({
+      id: 'chat', title: 'Chat', agentId: 'catty', scope: { type: 'global' }, createdAt: NOW, updatedAt,
+      messages: ids.map((id, index) => ({ id, role: 'user', content: id, timestamp: NOW + index })),
+    });
+    baseline.aiSessions = [session(['first'], NOW)];
+    const local = { ...baseline, aiSessions: [session(['first', 'local'], NOW + 1)] };
+    const remote = { ...baseline, aiSessions: [session(['first', 'remote'], NOW + 2)] };
+    const state = createConvergentSyncStateFromPayload(remote, 'remote', NOW);
+    const remotePayload = existingV2
+      ? withConvergentSyncEnvelope(state, { syncedAt: NOW, aiSessions: remote.aiSessions })
+      : remote;
+    const plan = planConvergentSyncMigration({
+      localPayload: local, localTrustedBaseline: trusted ? baseline : null,
+      providers: [{ provider: 'github', status: 'ready', meta: meta(existingV2 ? { syncSchemaVersion: 2 } : {}), payload: remotePayload, trustedBaseline: trusted ? baseline : null }],
+      deviceId: 'local', now: NOW + 3,
+    });
+    assert.equal(plan.preview.canInitialize, true, plan.preview.blockedReasons.join('; '));
+    assert.deepEqual(new Set(plan.payload?.aiSessions?.[0].messages.map((message) => message.id)), new Set(['first', 'local', 'remote']));
+    assert.equal(plan.payload?.convergentSync?.state.collections.aiSessions, undefined);
+    assert.ok(validateConvergentSyncPayload({ syncSchemaVersion: 2 }, plan.payload!));
+  });
+}
+
+for (const existingV2 of [false, true]) {
+  test(`${existingV2 ? 'v2 join' : 'v1 migration'} adopts a cloud vault while keeping fresh local chats`, () => {
+    const local = emptyPayload();
+    local.aiSessions = [{ id: 'local-chat', title: 'Local', agentId: 'catty', scope: { type: 'global' }, createdAt: NOW, updatedAt: NOW, messages: [] }];
+    const cloud = payload();
+    const state = createConvergentSyncStateFromPayload(cloud, 'remote', NOW);
+    const plan = planConvergentSyncMigration({
+      localPayload: local, localTrustedBaseline: null,
+      providers: [{ provider: 'github', status: 'ready', meta: meta(existingV2 ? { syncSchemaVersion: 2 } : {}), payload: existingV2 ? withConvergentSyncEnvelope(state, { syncedAt: NOW }) : cloud, trustedBaseline: null }],
+      deviceId: 'local', now: NOW + 1,
+    });
+    assert.equal(plan.preview.canInitialize, true, plan.preview.blockedReasons.join('; '));
+    assert.deepEqual(plan.payload?.hosts, cloud.hosts);
+    assert.deepEqual(plan.payload?.aiSessions, local.aiSessions);
+  });
+
+  test(`${existingV2 ? 'v2 join' : 'v1 migration'} honors preservation when one source deleted a host`, () => {
+    const baseline = payload();
+    baseline.hosts.push({ ...baseline.hosts[0], id: 'survivor', label: 'Survivor' });
+    const smaller = { ...baseline, hosts: baseline.hosts.slice(0, 1) };
+    const state = createConvergentSyncStateFromPayload(baseline, 'seed', NOW);
+    const remotePayload = existingV2
+      ? withConvergentSyncEnvelope(applyLegacySyncPayload(state, baseline, smaller, 'remote', NOW + 1), { syncedAt: NOW })
+      : baseline;
+    const plan = planConvergentSyncMigration({
+      localPayload: existingV2 ? baseline : smaller, localTrustedBaseline: baseline,
+      providers: [{ provider: 'github', status: 'ready', meta: meta(existingV2 ? { syncSchemaVersion: 2 } : {}), payload: remotePayload, trustedBaseline: baseline }],
+      deviceId: 'local', now: NOW + 3, preserveDeletions: true,
+    });
+    assert.equal(plan.preview.canInitialize, true, plan.preview.blockedReasons.join('; '));
+    assert.deepEqual(plan.payload?.hosts.map((host) => host.id).sort(), ['host-1', 'survivor']);
+  });
+}
+
 test('encrypted envelope omits materialized winner values and hydrates exactly', () => {
   const state = createConvergentSyncStateFromPayload(payload(), 'device-a', NOW);
   const materialized = materializeSyncPayloadFromConvergentState(state, { syncedAt: NOW });
@@ -382,6 +442,22 @@ test('trusted legacy diff treats own undefined optional fields as omitted', () =
   assert.equal(materialized.identities?.[0]?.id, 'identity-1');
   assert.deepEqual(materialized.noteGroups, ['operations']);
   assert.equal(materialized.settings?.theme, 'dark');
+});
+
+test('legacy browser clients cannot erase host browser bookmarks they do not know about', () => {
+  const baseline = payload();
+  baseline.browserBookmarks = [{
+    id: 'bookmark-1', title: 'Dashboard', url: 'https://dashboard.example/',
+    scope: 'host', hostId: 'host-1', icon: 'D', color: '#247969',
+    order: 0, createdAt: NOW, updatedAt: NOW,
+  }];
+  const legacy = { ...baseline };
+  delete legacy.browserBookmarks;
+
+  assert.deepEqual(diffLegacySyncPayload(baseline, legacy), []);
+  const state = createConvergentSyncStateFromPayload(baseline, 'seed', NOW);
+  const next = applyLegacySyncPayload(state, baseline, legacy, 'legacy-device', NOW + 1);
+  assert.deepEqual(materializeSyncPayloadFromConvergentState(next, { syncedAt: NOW + 1 }).browserBookmarks, baseline.browserBookmarks);
 });
 
 test('payload conversion still rejects entities that JSON cannot serialize', () => {

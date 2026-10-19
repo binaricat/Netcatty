@@ -2,6 +2,7 @@
 // Module-level require: code inside createExecHandlerApi runs under `with (ctx)`
 // where bare `require` resolves to ctx.require (based in electron/bridges/).
 const { clearSessionFlowState } = require("../terminalFlowAck.cjs");
+const { emitJobDiag } = require("../ai/jobStartupDiagnostics.cjs");
 const {
   ensureSessionShellKind,
   remoteDisallowsExecChannelProbe, sessionDisallowsExtraSshChannel, ensureSessionShellKindForExec,
@@ -319,6 +320,9 @@ function createExecHandlerApi(ctx) {
             // without aborting a long-running build/scan/log stream. The job is
             // managed via terminal_stop and the per-session execution lock.
             timeoutMs,
+            sessionId,
+            jobId,
+            diagnosticsSession: session,
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
             probeLiveShell: true,
@@ -422,11 +426,25 @@ function createExecHandlerApi(ctx) {
       return job;
     }
     
+    // A worker job whose route is gone falls through to these handlers, so the
+    // miss must be logged here as well as in the worker-route handlers.
+    function logJobLookupMiss(op, jobId, chatSessionId) {
+      emitJobDiag("job-stop-miss", {
+        jobId,
+        chatSessionId: chatSessionId || null,
+        op,
+        reason: backgroundJobs.has(jobId) ? "scope-mismatch" : "job-missing",
+      });
+    }
+
     function handleJobPoll(params) {
       const { jobId, offset = 0, chatSessionId, scopedSessionIds } = params || {};
       if (!jobId) throw new Error("jobId is required");
       const job = getScopedJob(jobId, chatSessionId || null);
-      if (!job) return { ok: false, error: "Background job not found" };
+      if (!job) {
+        logJobLookupMiss("poll", jobId, chatSessionId);
+        return { ok: false, error: "Background job not found" };
+      }
       // Re-check session scope so a caller that lost access to the host
       // cannot continue reading output from jobs on that session.
       // Covers dynamic (chatSessionId) and static (scopedSessionIds) modes.
@@ -441,7 +459,10 @@ function createExecHandlerApi(ctx) {
       const { jobId, chatSessionId, scopedSessionIds } = params || {};
       if (!jobId) throw new Error("jobId is required");
       const job = getScopedJob(jobId, chatSessionId || null);
-      if (!job) return { ok: false, error: "Background job not found" };
+      if (!job) {
+        logJobLookupMiss("stop", jobId, chatSessionId);
+        return { ok: false, error: "Background job not found" };
+      }
       // For statically scoped MCP clients, validate that the job's session is
       // within the caller's static scope so a foreign jobId cannot cancel jobs
       // outside the caller's allowed sessions. Dynamic chat scope is already

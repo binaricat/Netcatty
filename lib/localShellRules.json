@@ -3,5 +3,7 @@
   "cmdShells": ["cmd", "cmd.exe"],
   "fishShells": ["fish"],
   "posixShells": ["sh", "bash", "zsh", "ksh", "dash", "ash", "bash.exe"],
-  "wslShells": ["wsl", "wsl.exe"]
+  "wslShells": ["wsl", "wsl.exe"],
+  "discoveredPosixShellIdPrefixes": ["wsl-"],
+  "discoveredPosixShellIds": ["git-bash", "cygwin"]
 }

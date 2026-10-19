@@ -15,6 +15,7 @@ import type { useCloudSync } from '../../application/state/useCloudSync';
 import { storePluginSyncSecretsThenConnect } from '../../application/pluginSyncConnectWithSecrets';
 import { cleanOneDriveErrorMessage, isProviderReadyForSync } from '../../domain/sync';
 import { pluginExtensionBridge } from '../../application/state/pluginExtensionBridge';
+import { Switch } from '../ui/switch';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -92,6 +93,8 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
   onDowngradeConvergent,
   disconnectOtherProviders,
 }) => {
+  const [aiSessionsSyncBusy, setAiSessionsSyncBusy] = useState(false);
+
   const [pluginSyncProviders, setPluginSyncProviders] = useState<Array<{
     id: string;
     title: string;
@@ -554,7 +557,9 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                                     ? t('cloudSync.strategy.preferCloud')
                                     : sync.syncStrategy === 'preferLocal'
                                         ? t('cloudSync.strategy.preferLocal')
-                                        : t('cloudSync.strategy.smartMerge')}
+                                        : sync.syncStrategy === 'smartMergePreserve'
+                                            ? t('cloudSync.strategy.smartMergePreserve')
+                                            : t('cloudSync.strategy.smartMerge')}
                             </SelectTrigger>
                             <SelectContent className="max-w-[min(520px,var(--radix-select-trigger-width))]">
                                 <SelectItem value="smartMerge" className="items-start py-2">
@@ -562,6 +567,14 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                                         <div>{t('cloudSync.strategy.smartMerge')}</div>
                                         <div className="text-xs text-muted-foreground leading-snug">
                                             {t('cloudSync.strategy.smartMergeDesc')}
+                                        </div>
+                                    </div>
+                                </SelectItem>
+                                <SelectItem value="smartMergePreserve" className="items-start py-2">
+                                    <div className="space-y-0.5">
+                                        <div>{t('cloudSync.strategy.smartMergePreserve')}</div>
+                                        <div className="text-xs text-muted-foreground leading-snug">
+                                            {t('cloudSync.strategy.smartMergePreserveDesc')}
                                         </div>
                                     </div>
                                 </SelectItem>
@@ -583,6 +596,29 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                                 </SelectItem>
                             </SelectContent>
                         </Select>
+                    </SettingsAnchor>
+
+                    <SettingsAnchor anchorId="sync-ai-sessions" className="p-4 rounded-lg border bg-card">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="text-sm font-medium">{t('cloudSync.aiSessions.title')}</div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                    {t('cloudSync.aiSessions.desc')}
+                                    {' '}{t('cloudSync.aiSessions.compatibility')}
+                                </div>
+                            </div>
+                            <Switch
+                                aria-label={t('cloudSync.aiSessions.title')}
+                                checked={sync.aiSessionsSyncEnabled}
+                                disabled={aiSessionsSyncBusy}
+                                onCheckedChange={(enabled) => {
+                                    setAiSessionsSyncBusy(true);
+                                    void sync.setAiSessionsSyncEnabled(enabled).catch(() => {
+                                        toast.error(t('cloudSync.aiSessions.enableFailed'));
+                                    }).finally(() => setAiSessionsSyncBusy(false));
+                                }}
+                            />
+                        </div>
                     </SettingsAnchor>
 
                     {sync.hasAnyConnectedProvider && (

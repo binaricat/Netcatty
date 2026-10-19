@@ -16,6 +16,7 @@ for (const keepaliveInterval of [10000, 0]) {
       let connections = 0;
       let authenticated = 0;
       let pings = 0;
+      let statsRequests = 0;
       const peers = new Set();
       const server = new Server({ hostKeys: [hostKey] }, (peer) => {
         peers.add(peer);
@@ -41,6 +42,7 @@ for (const keepaliveInterval of [10000, 0]) {
           });
           peer.on("session", (accept) => {
             accept().on("exec", (acceptExec) => {
+              statsRequests++;
               const stream = acceptExec();
               stream.exit(0);
               stream.end("NC_LATENCY_MARK|CPU:5|CORES:2|MEMINFO:8000 4000 100 900 0 0|DISKS:|NET:");
@@ -84,12 +86,14 @@ for (const keepaliveInterval of [10000, 0]) {
         assert.equal(forwardPort, 43210);
         if (keepaliveInterval > 0) assert.equal(Number.isFinite(stats.stats.latencyMs), true);
         else assert.equal(stats.stats.latencyMs, null);
+        assert.equal(Number.isFinite(stats.stats.responseLatencyMs), true);
         await new Promise((resolve, reject) => conn.unforwardIn("127.0.0.1", forwardPort,
           (err) => err ? reject(err) : resolve()));
       }
       assert.equal(connections, baseline, "stats must not create unauthenticated connections");
       assert.equal(authenticated, 1);
-      assert.equal(pings, keepaliveInterval > 0 ? 3 : 0);
+      assert.equal(pings, keepaliveInterval > 0 ? 1 : 0);
+      assert.equal(statsRequests, 1, "immediate readers share one cached collection");
       assert.equal(conn._callbacks.length, 0);
     });
 }

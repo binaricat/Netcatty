@@ -317,3 +317,18 @@ test("withSyncReliabilityMeta attaches change summary and deletion records", () 
     deviceId: "device-a",
   }]);
 });
+
+
+test("omitted AI sessions are unsupported data, while an explicit empty list records deletion", () => {
+  const sessions = [{ id: "chat-1", messages: [], updatedAt: 1 }] as SyncPayload["aiSessions"];
+  const base = payload({ aiSessions: sessions });
+  const omitted = payload();
+  const cleared = payload({ aiSessions: [] });
+  assert.deepEqual(collectSyncDeletions(base, omitted, { deletedAt: 2 }), []);
+  assert.equal(summarizeSyncChanges(base, omitted, base).hasLocalChanges, false);
+  assert.equal(summarizeSyncChanges(base, base, omitted).hasRemoteChanges, false);
+  assert.deepEqual(collectSyncDeletions(base, cleared, { deletedAt: 2 }), [
+    { entityType: "aiSessions", id: "chat-1", deletedAt: 2 },
+  ]);
+  assert.equal(summarizeSyncChanges(base, cleared).byEntity.aiSessions?.deleted.local, 1);
+});

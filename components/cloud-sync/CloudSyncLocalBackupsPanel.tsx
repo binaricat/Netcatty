@@ -14,9 +14,11 @@ import {
     FolderOpen,
     Loader2,
     RefreshCw,
+    Trash2,
 } from 'lucide-react';
 import { useLocalVaultBackups } from '../../application/state/useLocalVaultBackups';
 import {
+    LocalVaultBackupBusyError,
     MAX_LOCAL_VAULT_BACKUP_MAX_COUNT,
     MIN_LOCAL_VAULT_BACKUP_MAX_COUNT,
     withRestoreBarrier,
@@ -29,6 +31,7 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Input } from '../ui/input';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import { toast } from '../ui/toast';
 
 // ============================================================================
@@ -54,10 +57,13 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
         maxBackups,
         encryptionAvailable,
         refreshBackups,
+        clearBackups,
         readBackup,
         setMaxBackups,
         openBackupDirectory,
     } = useLocalVaultBackups();
+    const [showClearDialog, setShowClearDialog] = useState(false);
+    const [isClearing, setIsClearing] = useState(false);
     const [maxBackupsInput, setMaxBackupsInput] = useState(String(maxBackups));
     const [isSavingMaxBackups, setIsSavingMaxBackups] = useState(false);
     const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
@@ -175,34 +181,34 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
         }
     };
 
-    const restoreAllowed = restoreDisabledReason === null;
-    // While encryptionAvailable is still `null` we're mid-probe — render the
-    // restore button as disabled so the user never sees a path they can't
-    // actually take (I1 surface). Once resolved, `false` hides the panel body
-    // via the unavailable banner below.
-    const encryptionResolved = encryptionAvailable !== null;
-    const encryptionUsable = encryptionAvailable === true;
+    const performClear = async () => {
+        if (isClearing) return;
+        setIsClearing(true);
+        try {
+            await clearBackups();
+            setShowClearDialog(false);
+            toast.success(t('cloudSync.localBackups.clearSuccess'));
+        } catch (error) {
+            toast.error(t(error instanceof LocalVaultBackupBusyError
+                ? 'cloudSync.localBackups.clearBusy'
+                : 'cloudSync.localBackups.clearFailed'), t('sync.toast.errorTitle'));
+        } finally {
+            setIsClearing(false);
+        }
+    };
 
-    // safeStorage probe finished and returned "not available" → disable the
-    // panel entirely; the main process refuses to write in this state (I1).
-    if (encryptionResolved && !encryptionUsable) {
-        return (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
-                <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-                    <AlertTriangle size={16} />
-                    <span className="text-sm font-medium">
-                        {t('cloudSync.localBackups.unavailableTitle')}
-                    </span>
-                </div>
-                <div className="text-xs text-muted-foreground">
-                    {t('cloudSync.localBackups.unavailableDesc')}
-                </div>
-            </div>
-        );
-    }
+    const restoreAllowed = restoreDisabledReason === null && encryptionAvailable === true;
 
     return (
         <div className="space-y-4">
+            {encryptionAvailable === false && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
+                    <div className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                        {t('cloudSync.localBackups.unavailableTitle')}
+                    </div>
+                    <div className="text-xs text-muted-foreground">{t('cloudSync.localBackups.unavailableDesc')}</div>
+                </div>
+            )}
             <div className="rounded-lg border bg-card p-4">
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div className="max-w-lg">
@@ -224,7 +230,7 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                             <Button
                                 variant="outline"
                                 onClick={() => void handleSaveMaxBackups()}
-                                disabled={isSavingMaxBackups}
+                                disabled={isSavingMaxBackups || isClearing || restoringBackupId !== null}
                                 className="gap-2"
                             >
                                 {isSavingMaxBackups && <Loader2 size={14} className="animate-spin" />}
@@ -235,7 +241,7 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                 </div>
             </div>
 
-            {!restoreAllowed && (
+            {restoreDisabledReason !== null && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
                     <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 mb-1">
                         <AlertTriangle size={14} />
@@ -248,19 +254,19 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
             )}
 
             <div className="rounded-lg border bg-card p-4 space-y-4">
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <div className="text-sm font-medium">{t('cloudSync.localBackups.title')}</div>
                         <div className="text-xs text-muted-foreground mt-1">
                             {t('cloudSync.localBackups.desc')}
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => void refreshBackups()}
-                            disabled={isLoading}
+                            disabled={isLoading || isClearing}
                             className="gap-1"
                         >
                             <RefreshCw size={14} className={cn(isLoading && 'animate-spin')} />
@@ -274,6 +280,16 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                         >
                             <FolderOpen size={14} />
                             {t('settings.system.openFolder')}
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowClearDialog(true)}
+                            disabled={isLoading || isClearing || isSavingMaxBackups || restoringBackupId !== null}
+                            className="gap-1 text-destructive hover:text-destructive"
+                        >
+                            <Trash2 size={14} />
+                            {t('cloudSync.localBackups.clear')}
                         </Button>
                     </div>
                 </div>
@@ -339,7 +355,7 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                                         // clicks here would interleave destructive
                                         // writes and the second run's sentinel-clear
                                         // could mask a still-partial first apply.
-                                        disabled={restoringBackupId !== null}
+                                        disabled={restoringBackupId !== null || isClearing}
                                         className="gap-2"
                                     >
                                         {restoringBackupId === backup.id ? (
@@ -355,6 +371,17 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                     </div>
                 )}
             </div>
+
+            <ConfirmDialog
+                open={showClearDialog}
+                title={t('cloudSync.localBackups.clearConfirmTitle')}
+                message={t('cloudSync.localBackups.clearConfirmDesc')}
+                confirmLabel={t('cloudSync.localBackups.clear')}
+                busy={isClearing}
+                destructive
+                onOpenChange={(open) => { if (!isClearing) setShowClearDialog(open); }}
+                onConfirm={() => void performClear()}
+            />
 
             {/* Restore confirmation dialog (I2). Keeps the destructive action
                 gated behind an explicit second click, mirroring the clear-local
@@ -416,7 +443,7 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                         <Button
                             variant="outline"
                             onClick={() => setPendingRestoreBackup(null)}
-                            disabled={restoringBackupId !== null}
+                            disabled={restoringBackupId !== null || isClearing}
                         >
                             {t('cloudSync.localBackups.restoreConfirmCancel')}
                         </Button>
@@ -428,7 +455,7 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                                 setPendingRestoreBackup(null);
                                 await performRestore(target.id);
                             }}
-                            disabled={restoringBackupId !== null}
+                            disabled={restoringBackupId !== null || isClearing}
                             className="gap-2"
                         >
                             {restoringBackupId !== null ? (

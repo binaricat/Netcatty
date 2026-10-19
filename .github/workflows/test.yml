@@ -52,6 +52,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Test browser first-link lifecycle
+        run: xvfb-run -a ./node_modules/.bin/electron --no-sandbox electron/hostBrowser/hostBrowser.firstLink.live.test.cjs
+
       - name: Test terminal background rendering
         run: xvfb-run -a ./node_modules/.bin/electron --no-sandbox --use-angle=swiftshader --enable-unsafe-swiftshader scripts/terminal-background-rendering.live.test.cjs
 
@@ -70,6 +73,47 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  windows-fido:
+    name: windows-fido
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install deps
+        run: npm ci --ignore-scripts
+
+      - name: Apply production dependency patches
+        run: npx patch-package --error-on-fail
+
+      - name: Install user-mode OpenSSH and software authenticator toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: true
+          install: gcc openssl-devel openssh
+
+      - name: Build disposable software authenticator
+        shell: msys2 {0}
+        run: |
+          gcc -shared -DHAVE_STDINT_H scripts/fixtures/fido/provider.c -lcrypto -o /usr/lib/netcatty-fido-test-provider.dll
+          printf 'NETCATTY_WINDOWS_SSH_AGENT=%s\n' "$(cygpath -w /usr/bin/ssh-agent.exe)" >> "$GITHUB_ENV"
+          printf 'NETCATTY_WINDOWS_SSH_KEYGEN=%s\n' "$(cygpath -w /usr/bin/ssh-keygen.exe)" >> "$GITHUB_ENV"
+          cygpath -w /usr/bin >> "$GITHUB_PATH"
+          ssh -V
+
+      - name: Exercise Windows pipes, PIN bridge, SK signatures and cancellation
+        env:
+          NETCATTY_FIDO_WINDOWS: "1"
+        run: node --test scripts/fido-windows.live.test.cjs electron/bridges/fidoNativeAgent.test.cjs electron/bridges/fidoAskpass.winpath.test.cjs
 
   windows-broadcast-ssh:
     name: windows-broadcast-ssh

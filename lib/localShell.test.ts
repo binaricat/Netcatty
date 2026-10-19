@@ -17,7 +17,16 @@ test("local shell classification is shared between renderer and CommonJS bridge"
     ["C:\\Windows\\System32\\cmd.exe", "Win32", "cmd"],
     ["C:\\Windows\\System32\\wsl.exe", "Win32", "posix"],
     ["C:\\msys64\\usr\\bin\\bash.exe", "Win32", "posix"],
+    ["wsl-ubuntu", "Win32", "posix"],
+    ["git-bash", "Win32", "posix"],
+    ["cygwin", "Win32", "posix"],
     ["fish", "linux", "fish"],
+    // Disambiguated Unix discovery IDs are path slugs (shell path with
+    // separators replaced by "-"); classification resolves their basename.
+    ["bin-bash", "Darwin", "posix"],
+    ["opt-homebrew-bin-bash", "Darwin", "posix"],
+    ["usr-local-bin-zsh", "Darwin", "posix"],
+    ["opt-homebrew-bin-fish", "Darwin", "fish"],
     ["", "Win32", "powershell"],
     [undefined, "MacIntel", "posix"],
     ["custom-shell", "linux", "unknown"],

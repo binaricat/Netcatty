@@ -55,6 +55,7 @@ import {
 import { convertFilesToUploads } from './useFileUpload';
 import { removeProviderReferences } from './aiProviderCleanup';
 import { publishAISessionsSnapshot } from './aiSessionsStore';
+import { planSessionFork } from '../../domain/aiSessionFork';
 import {
   AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
   AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE,
@@ -680,6 +681,57 @@ export function useAIState() {
     };
   }, [persistSessions]);
 
+  // "Fork from here": copy the conversation up to a completed assistant
+  // response into a new session and make it the scope's active chat. The
+  // original session stays untouched in history. Pure boundary validation and
+  // plan building live in domain/aiSessionFork; the fork has no original
+  // external session id or pending-turn state. Per-message replay metadata is
+  // preserved; output handles and running jobs remain owned by the source.
+  // Null is returned when the boundary is not forkable.
+  // `viewingScope` is the panel scope the fork was requested from; the branch
+  // is created there so the fork is active and visible in the very scope that
+  // is viewing it, even when the source session carries a stale scope (e.g. a
+  // terminal chat resumed in a reconnected terminal or a merged workspace).
+  const forkSessionFromMessage = useCallback(async (
+    sessionId: string,
+    messageId: string,
+    viewingScope?: Pick<AISessionScope, 'type' | 'targetId'>,
+  ): Promise<AISession | null> => {
+    const source = sessionsRef.current.find(s => s.id === sessionId);
+    if (!source) return null;
+    const plan = planSessionFork(source, messageId);
+    if (!plan.ok) return null;
+    const now = Date.now();
+    const fork: AISession = {
+      id: `ai_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      title: plan.title,
+      agentId: source.agentId,
+      scope: {
+        ...source.scope,
+        // Host membership stays with the source (the messages were produced
+        // there); the scope the fork belongs to is the viewing scope.
+        ...(viewingScope ? { type: viewingScope.type, targetId: viewingScope.targetId } : {}),
+        hostIds: source.scope.hostIds ? [...source.scope.hostIds] : undefined,
+      },
+      messages: plan.messages,
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (plan.contextCompaction) {
+      fork.contextCompaction = plan.contextCompaction;
+    }
+    setSessionsRaw(prev => {
+      // Keep the source alongside its branch within the existing history limit.
+      const next = [fork, { ...source, updatedAt: now }, ...prev.filter(session => session.id !== source.id)];
+      setLatestAISessionsSnapshot(next);
+      persistSessions(next);
+      return next;
+    });
+    const scopeKey = `${fork.scope.type}:${fork.scope.targetId ?? ''}`;
+    setActiveSessionId(scopeKey, fork.id);
+    return fork;
+  }, [persistSessions, setActiveSessionId]);
+
   const createSession = useCallback((scope: AISessionScope, agentId?: string): AISession => {
     const now = Date.now();
     const session: AISession = {
@@ -705,7 +757,10 @@ export function useAIState() {
   // Non-destructive "undo last turn": branch the session at the boundary
   // before the latest user message and keep the original in history intact.
   // Returns the new branch id plus the undone user message for the composer.
-  const undoLastTurnInSession = useCallback(async (sessionId: string): Promise<{
+  const undoLastTurnInSession = useCallback(async (
+    sessionId: string,
+    viewingScope?: Pick<AISessionScope, 'type' | 'targetId'>,
+  ): Promise<{
     sessionId: string;
     restored: UndoLastTurnRestoredDraft;
   } | null> => {
@@ -716,6 +771,11 @@ export function useAIState() {
     if (!result) return null;
 
     const branched = result.session;
+    // Like Fork, Undo belongs to the panel viewing the source, which may have
+    // resumed a chat from a closed terminal or inherited it after a merge.
+    if (viewingScope) {
+      branched.scope = { ...branched.scope, ...viewingScope };
+    }
     setSessionsRaw(prev => {
       // Keep both recently used chats within the existing history limit.
       const next = [branched, { ...source, updatedAt: branched.updatedAt }, ...prev.filter(session => session.id !== source.id)];
@@ -1319,6 +1379,7 @@ export function useAIState() {
     seedWorkspaceActiveSessionFromMembers,
     handoffDissolvedWorkspaceScope,
     retargetWorkspaceActiveChatForMemberLoss,
+    forkSessionFromMessage,
   }), [
     providers,
     setProviders,
@@ -1380,5 +1441,6 @@ export function useAIState() {
     seedWorkspaceActiveSessionFromMembers,
     handoffDissolvedWorkspaceScope,
     retargetWorkspaceActiveChatForMemberLoss,
+    forkSessionFromMessage,
   ]);
 }

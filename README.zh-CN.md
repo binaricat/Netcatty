@@ -29,9 +29,9 @@
 </p>
 
 <p align="center">
-  <a href="https://ko-fi.com/binaricat">
-    <img src="https://cdn.ko-fi.com/cdn/kofi3.png?v=2" width="150" alt="在 Ko-fi 上支持我">
-  </a>
+  <a href="https://github.com/sponsors/binaricat"><img src="https://img.shields.io/badge/GitHub-Sponsors-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" height="28" alt="通过 GitHub 赞助我"></a>
+  &nbsp;
+  <a href="https://ko-fi.com/binaricat"><img src="https://img.shields.io/badge/Ko--fi-Support-29abe0?style=for-the-badge&logo=kofi&logoColor=white" height="28" alt="在 Ko-fi 上支持我"></a>
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@
 
 ---
 
-<img width="3142" height="1764" alt="Screenshot 2026-07-02 at 22 51 24" src="https://github.com/user-attachments/assets/3116165d-623a-4d3a-a28a-914befb9b72d" />
+<img width="3358" height="1984" alt="image" src="https://github.com/user-attachments/assets/e1302660-dece-46be-9857-1678a9b13d00" />
 
 ---
 
@@ -63,13 +63,13 @@
 
 让 Catty Agent 检查服务器健康状态，它会自动运行合适的命令、分析输出并给出清晰总结 —— 几秒内完成。
 
-<img width="1510" height="870" alt="ai-single" src="https://github.com/user-attachments/assets/d3f34e53-8476-4fab-8634-394b931d1ff1" />
+<img width="3302" height="1978" alt="image" src="https://github.com/user-attachments/assets/3ec30145-d226-4e26-834b-52ee75b5e205" />
 
 #### 🚀 多主机 —— Docker Swarm 集群搭建
 
 看 Catty Agent 在一次对话中跨两台服务器编排 Docker Swarm 集群。它负责初始化、令牌交换和节点加入 —— 你只需说出想要的结果。
 
-<img width="1515" height="870" alt="ai-muti" src="https://github.com/user-attachments/assets/ca166fc5-65d9-4d7b-951a-962c2ef230d8" />
+<img width="3294" height="1974" alt="image" src="https://github.com/user-attachments/assets/ca17e857-6163-4067-a615-cacdfd5be4fc" />
 
 ---
 
@@ -82,6 +82,7 @@
 - [界面截图](#界面截图)
   - [主界面](#主界面)
   - [Vault 视图](#vault-视图)
+  - [监控视图](#监控视图)
   - [分屏终端](#分屏终端)
 - [支持的发行版](#支持的发行版)
 - [快速开始](#快速开始)
@@ -148,18 +149,27 @@
 
 主界面围绕长期 SSH 工作流设计：把会话、导航和常用工具集中到同一处，减少切换成本。
 
-<img width="1531" height="875" alt="black-grid" src="https://github.com/user-attachments/assets/004b80f6-5bbb-4f14-b8cd-33a0a5913b8c" />
+<img width="3290" height="1988" alt="image" src="https://github.com/user-attachments/assets/ab3afd3e-a819-46fc-9251-40acb592ba69" />
 
-<img width="1550" height="876" alt="light" src="https://github.com/user-attachments/assets/2b59a999-a25e-4217-944c-9aef0a09f272" />
+<img width="3324" height="1992" alt="image" src="https://github.com/user-attachments/assets/7c7f6e7f-fb20-4574-8e7f-74397682b873" />
 
 <a name="vault-视图"></a>
 ## Vault 视图
 
 用更适合当前任务的方式管理与浏览主机：网格看全局，列表做筛选，树形做整理与层级导航。
 
-<img width="1554" height="882" alt="list" src="https://github.com/user-attachments/assets/03249f15-b5f8-4770-a3c3-d5001636ea00" />
+<img width="3292" height="1984" alt="image" src="https://github.com/user-attachments/assets/29642143-3fd6-4693-a30c-b7f656053ca3" />
 
-<img width="1561" height="878" alt="tree" src="https://github.com/user-attachments/assets/739f7b66-3898-43d0-8dd3-b9b97fd8e8de" />
+<img width="3322" height="1998" alt="image" src="https://github.com/user-attachments/assets/6041efe2-607e-4314-838c-eba3db4c852c" />
+
+<a name="监控视图"></a>
+## 监控视图
+
+查看 CPU、内存、磁盘、网络和延迟数据；支持的环境还可显示 GPU 详情。你可以选择显示的列、调整列宽和刷新设置，并直接从受监控的主机打开终端。
+
+<img width="3364" height="1982" alt="image" src="https://github.com/user-attachments/assets/d0f495b5-25c8-494f-bb9c-8c20b0a921b6" />
+
+<img width="3362" height="1980" alt="image" src="https://github.com/user-attachments/assets/245c234e-2b22-43f2-a4fd-8057d229c56f" />
 
 <a name="分屏终端"></a>
 ## 分屏终端

@@ -10,7 +10,7 @@ import {
   filterVaultImportKeyPassphrasesAgainstExisting,
   resolveVaultImportKeyPassphraseConflicts,
 } from "./vaultImport.ts";
-import { encodeCsvPassphrase } from "./vaultImport/csvCredentialFields.ts";
+import { encodeCsvPassphrase, encodeCsvLocalShell } from "./vaultImport/csvCredentialFields.ts";
 import type { Host } from "./models.ts";
 
 const mobaXtermSshSession = (
@@ -525,6 +525,73 @@ test("applyVaultImportDestination does not override retained key auth with ident
   assert.equal(targeted.hosts.length, 1);
   assert.deepEqual(targeted.hosts[0]?.identityFilePaths, ["~/.ssh/id_ed25519"]);
   assert.equal(targeted.hosts[0]?.identityId, undefined);
+});
+
+test("CSV import keeps default-shell local hosts distinct across OS values", () => {
+  // The merge key for local hosts must include the host OS: two default-shell
+  // entries (no shell/args/name/startDir) in the same group differ only by os,
+  // and dropping the second would silently lose that OS's default shell.
+  const csvQuote = (value: string): string => `"${value.replaceAll('"', '""')}"`;
+  const result = importVaultHostsFromText("csv", [
+    "Label,Hostname,Protocol,Group,LocalShell",
+    `Win,localhost,local,Tools,${csvQuote(encodeCsvLocalShell({ os: "windows" }))}`,
+    `Nix,localhost,local,Tools,${csvQuote(encodeCsvLocalShell({ os: "linux" }))}`,
+  ].join("\n"));
+
+  assert.deepEqual(result.issues, []);
+  assert.equal(result.stats.duplicates, 0);
+  assert.equal(result.hosts.length, 2);
+  assert.deepEqual(
+    result.hosts.map((host) => host.os),
+    ["windows", "linux"],
+  );
+});
+
+test("import destination keeps local shells distinct through the full pipeline", () => {
+  // applyVaultImportDestination re-dedupe and applyVaultHostImport must not
+  // collapse CMD/PowerShell entries back onto the endpoint-only merge key.
+  const csvQuote = (value: string): string => `"${value.replaceAll('"', '""')}"`;
+  const result = importVaultHostsFromText("csv", [
+    "Label,Hostname,Protocol,Group,LocalShell",
+    `CMD,localhost,local,Tools,${csvQuote(encodeCsvLocalShell({ os: "windows", shellName: "CMD" }))}`,
+    `PS,localhost,local,Tools,${csvQuote(encodeCsvLocalShell({ os: "windows", shellName: "PowerShell" }))}`,
+  ].join("\n"));
+  assert.equal(result.hosts.length, 2);
+
+  const targeted = applyVaultImportDestination(result, {
+    mode: "group",
+    group: "Imported",
+  });
+  assert.equal(targeted.hosts.length, 2);
+  assert.deepEqual(
+    targeted.hosts.map((host) => host.localShellName),
+    ["CMD", "PowerShell"],
+  );
+
+  const applied = applyVaultHostImport([], [], targeted);
+  assert.equal(applied.hosts.length, 2);
+  assert.equal(applied.skippedExistingCount, 0);
+
+  // Re-importing the same backup into the same destination must skip both
+  // existing shell entries instead of importing them again.
+  const reapplied = applyVaultHostImport(applied.hosts, [], targeted);
+  assert.equal(reapplied.hosts.length, 2);
+  assert.equal(reapplied.skippedExistingCount, 2);
+});
+
+test("applyVaultHostImport still dedupes identical local shells but keeps different shells", () => {
+  const csvQuote = (value: string): string => `"${value.replaceAll('"', '""')}"`;
+  const result = importVaultHostsFromText("csv", [
+    "Label,Hostname,Protocol,Group,LocalShell",
+    `CMD,localhost,local,Tools,${csvQuote(encodeCsvLocalShell({ os: "windows", shellName: "CMD" }))}`,
+    `PS,localhost,local,Tools,${csvQuote(encodeCsvLocalShell({ os: "windows", shellName: "PowerShell" }))}`,
+  ].join("\n"));
+
+  const existingCmd = result.hosts[0]!;
+  const applied = applyVaultHostImport([existingCmd], [], result);
+  assert.equal(applied.hosts.length, 2);
+  assert.equal(applied.skippedExistingCount, 1);
+  assert.equal(applied.addedHosts[0]?.localShellName, "PowerShell");
 });
 
 test("CSV import keeps working when KeyPath and Passphrase columns are absent", () => {

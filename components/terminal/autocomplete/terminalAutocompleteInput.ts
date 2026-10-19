@@ -3,7 +3,7 @@ import type { Terminal as XTerm } from "@xterm/xterm";
 import type { GhostTextAddon } from "./GhostTextAddon";
 import type { AutocompleteSettings } from "./useTerminalAutocomplete";
 import { getAlignedPrompt } from "./promptDetector";
-import { recordCommand } from "./commandHistoryStore";
+import { recordCommand } from "../../../application/state/commandHistoryStore";
 import { getCommandToRecordOnEnter } from "./terminalAutocompletePrompt";
 
 interface TerminalAutocompleteInputContext {

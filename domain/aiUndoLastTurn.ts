@@ -86,7 +86,12 @@ export function buildRestoredAttachments(
   now: number,
 ): UploadedFile[] {
   const attachments: ChatMessageAttachment[] = message.attachments ?? message.images ?? [];
-  return attachments.map((attachment, index) => ({
+  // Synced files retain display metadata only. They cannot be sent again
+  // until selected locally; note mentions remain usable through their ID.
+  return attachments.filter((attachment) => (
+    Boolean(attachment.vaultNoteId)
+    || (!attachment.contentUnavailable && Boolean(attachment.base64Data))
+  )).map((attachment, index) => ({
     id: `undo_${now}_${index}`,
     filename: attachment.filename ?? '',
     mediaType: attachment.mediaType,

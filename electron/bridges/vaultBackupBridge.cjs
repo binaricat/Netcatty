@@ -312,12 +312,17 @@ function createVaultBackupService({ app, safeStorage, shell }) {
 
   const getBackupDir = () => path.join(app.getPath("userData"), BACKUP_DIR_NAME);
 
-  // Serialize createBackup so two concurrent calls (version-change backup
+  // Serialize backup mutations so two concurrent calls (version-change backup
   // running at startup + an explicit protective-before-restore triggered
   // by the user's click, etc.) observe each other's writes. Without this,
   // both observers would see an empty directory, compute the same
   // fingerprint, skip the dedupe, and write two identical files.
-  let createBackupLock = Promise.resolve();
+  let mutationLock = Promise.resolve();
+  const mutate = (operation) => {
+    const next = mutationLock.then(operation);
+    mutationLock = next.catch(() => undefined);
+    return next;
+  };
   // Monotonically increasing `createdAt` per service instance. `Date.now()`
   // has 1ms resolution and back-to-back async calls (version-change backup
   // followed immediately by a protective backup) can land in the same
@@ -332,12 +337,7 @@ function createVaultBackupService({ app, safeStorage, shell }) {
     },
 
     async createBackup(options = {}) {
-      const next = createBackupLock.then(() => doCreateBackup(options));
-      // Swallow the rejection on the lock chain so one caller's error
-      // does not poison subsequent calls; each individual await sees its
-      // own rejection via the `next` return.
-      createBackupLock = next.catch(() => undefined);
-      return next;
+      return mutate(() => doCreateBackup(options));
     },
 
     async listBackups() {
@@ -364,7 +364,44 @@ function createVaultBackupService({ app, safeStorage, shell }) {
     },
 
     async trimBackups(options = {}) {
-      return pruneBackupRecords(getBackupDir(), options.maxCount);
+      return mutate(() => pruneBackupRecords(getBackupDir(), options.maxCount));
+    },
+
+    async clearBackups() {
+      return mutate(async () => {
+        const dirPath = getBackupDir();
+        await fs.promises.mkdir(dirPath, { recursive: true, mode: 0o700 });
+        const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+        let deletedCount = 0;
+        let failedCount = 0;
+        for (const entry of entries) {
+          // Include unreadable records and interrupted writes without reading
+          // or decrypting them. Preserve unrelated files and directories.
+          if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+          if (!entry.name.startsWith(BACKUP_FILE_PREFIX)) continue;
+          if (!entry.name.endsWith(BACKUP_FILE_EXT)
+            && !entry.name.includes(`${BACKUP_FILE_EXT}.tmp-`)) continue;
+          try {
+            await fs.promises.unlink(path.join(dirPath, entry.name));
+            deletedCount += 1;
+          } catch (error) {
+            if (error.code !== "ENOENT") failedCount += 1;
+          }
+        }
+        // Persist directory changes before reporting success, including on a
+        // retry after a previous sync failure left no backup files to unlink.
+        // Windows does not support opening directory handles this way.
+        if (process.platform !== 'win32') {
+          const dirHandle = await fs.promises.open(dirPath, 'r');
+          try {
+            await dirHandle.sync();
+          } finally {
+            await dirHandle.close();
+          }
+        }
+        if (failedCount) throw new Error(`Could not delete ${failedCount} vault backup file(s).`);
+        return { deletedCount };
+      });
     },
 
     async openBackupDir() {
@@ -576,6 +613,14 @@ function registerHandlers(ipcMain, electronModule) {
       broadcastBackupsChanged();
     }
     return result;
+  });
+  ipcMain.handle("netcatty:vaultBackups:clear", async () => {
+    try {
+      return await service.clearBackups();
+    } finally {
+      // Refresh every window after partial deletion as well as full success.
+      broadcastBackupsChanged();
+    }
   });
   ipcMain.handle("netcatty:vaultBackups:openDir", async () => {
     return service.openBackupDir();

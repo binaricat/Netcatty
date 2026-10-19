@@ -560,6 +560,7 @@ async function runOpenCodeTurn({
   let opencode = null;
   let sessionId = resumeSessionId || null;
   let hasContent = false;
+  let backgroundWarningCount = 0;
   let failed = false;
   let abortSent = false;
   let removeAbortListener = null;
@@ -619,6 +620,13 @@ async function runOpenCodeTurn({
           if (abortController?.signal?.aborted) break;
           const eventSessionId = getOpenCodeSessionIdFromEvent(event);
           if (eventSessionId && eventSessionId !== sessionId) continue;
+          if (!eventSessionId && getOpenCodeEventPayload(event)?.type === "session.error") {
+            const message = extractOpenCodeErrorMessage(getOpenCodeEventPayload(event).properties?.error)
+              || "OpenCode reported a background error";
+            if (emitter.warning) emitter.warning(`opencode-background-error:${++backgroundWarningCount}`, message);
+            else emitter.status(message);
+            continue;
+          }
           const result = translateOpenCodeEvent(event, emitter, state);
           if (result.content) hasContent = true;
           if (result.error) {
@@ -736,6 +744,36 @@ function getOpenCodeDefaultModelId(response) {
     }
   }
   return null;
+}
+
+/**
+ * Every default model id the catalog advertises, in declaration order.
+ * Backends that filter providers (mimo's auto channel) need the full list so
+ * a hidden default cannot shadow a later visible one.
+ */
+function getOpenCodeDefaultModelIds(response) {
+  const value = response?.default;
+  if (!value) return [];
+  if (typeof value === "string") return [value];
+  if (typeof value !== "object") return [];
+  if (typeof value.providerID === "string" && typeof value.modelID === "string") {
+    return [`${value.providerID}/${value.modelID}`];
+  }
+  if (typeof value.provider === "string" && typeof value.model === "string") {
+    // Same rule as getOpenCodeDefaultModelId: keep an already-qualified model.
+    return [value.model.includes("/") ? value.model : `${value.provider}/${value.model}`];
+  }
+  if (typeof value.model === "string") return [value.model];
+  const ids = [];
+  for (const [providerId, modelId] of Object.entries(value)) {
+    if (typeof modelId === "string" && providerId && modelId) {
+      ids.push(modelId.includes("/") ? modelId : `${providerId}/${modelId}`);
+    } else if (modelId && typeof modelId === "object" && typeof modelId.modelID === "string") {
+      const nestedProvider = typeof modelId.providerID === "string" ? modelId.providerID : providerId;
+      ids.push(`${nestedProvider}/${modelId.modelID}`);
+    }
+  }
+  return ids;
 }
 
 function emptyOpenCodeModelCatalog() {
@@ -946,6 +984,7 @@ module.exports = {
   closeOpenCodeInstance,
   createOpenCodeProcessEnv,
   getOpenCodeDefaultModelId,
+  getOpenCodeDefaultModelIds,
   getOpenCodeSessionIdFromEvent,
   withOpenCodeProcessEnv,
   withOpenCodeServerPort,

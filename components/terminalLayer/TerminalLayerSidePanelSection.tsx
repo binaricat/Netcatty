@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Activity, FolderTree, History, Maximize2, MessageSquare, Minimize2, NotebookText, Palette, PanelsTopLeft, Play, Save, SplitSquareHorizontal, SplitSquareVertical, X } from 'lucide-react';
+import { Activity, FolderTree, Globe2, History, Maximize2, MessageSquare, Minimize2, NotebookText, Palette, PanelsTopLeft, Play, Save, SplitSquareHorizontal, SplitSquareVertical, X } from 'lucide-react';
 import {
   buildSidePanelChromeThemeFromTerminalTheme,
   buildTerminalSidePanelCssVars,
@@ -555,6 +555,7 @@ export function getTerminalSidePanelShellWidth({
 function hasMountedSidePanelContent(ctx: SidePanelContext): boolean {
   const {
     mountedAiTabIds,
+    browserMountedTabIds = [],
     mountedSftpTabIds,
     notesMountedTabIds,
     scriptsMountedTabIds,
@@ -569,7 +570,8 @@ function hasMountedSidePanelContent(ctx: SidePanelContext): boolean {
     && Array.from((sidePanelOpenTabs as Map<string, SidePanelTab>).values()).includes('notes');
 
   return !(
-    mountedSftpTabIds.length === 0
+    browserMountedTabIds.length === 0
+    && mountedSftpTabIds.length === 0
     && mountedAiTabIds.length === 0
     && notesMountedTabIds.length === 0
     && scriptsMountedTabIds.length === 0
@@ -628,6 +630,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     handleOpenAI,
     handleOpenHistory,
     handleOpenNotes,
+    handleOpenBrowser,
     handleOpenScripts,
     handleOpenSystem,
     handleOpenTheme,
@@ -1036,6 +1039,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
 
   const sidePanelTabItems = useMemo<SidePanelTabItem[]>(() => [
     { id: 'sftp' as const, label: t('terminal.layer.sftp'), icon: <FolderTree size={15} />, onClick: handleToggleSftpFromBar },
+    { id: 'browser' as const, label: t('terminal.browser.title'), icon: <Globe2 size={15} />, onClick: handleOpenBrowser },
     { id: 'scripts' as const, label: t('terminal.layer.scripts'), icon: <Play size={15} />, onClick: handleOpenScripts },
     { id: 'history' as const, label: t('terminal.layer.history'), icon: <History size={15} />, onClick: handleOpenHistory },
     { id: 'theme' as const, label: t('terminal.layer.theme'), icon: <Palette size={15} />, onClick: handleOpenTheme },
@@ -1046,6 +1050,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     handleOpenAI,
     handleOpenHistory,
     handleOpenNotes,
+    handleOpenBrowser,
     handleOpenScripts,
     handleOpenSystem,
     handleOpenTheme,
@@ -1297,6 +1302,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
                         variant="ghost"
                         size="icon"
                         draggable
+                        aria-label={item.label}
                         data-tab-id={item.id}
                         data-tab-type="sidepanel"
                         data-state={isActive ? 'active' : 'inactive'}

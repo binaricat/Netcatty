@@ -19,6 +19,7 @@ export type TerminalSidePanelTabId = SidePanelTool;
 
 export const TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER: TerminalSidePanelTabId[] = [
   'sftp',
+  'browser',
   'scripts',
   'history',
   'theme',

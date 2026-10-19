@@ -864,3 +864,32 @@ test("resolveInheritedCwdIntent: skips mosh/et and network devices and bad paths
 test("resolveInheritedCwdIntent: skips windows local shells", () => {
   assert.equal(resolveInheritedCwdIntent({ session: { protocol: "local", shellType: "powershell", cwd: "/x" }, isNetworkDevice: false }), null);
 });
+
+test("restore retains an explicit backend-default local shell snapshot", () => {
+  const payload = buildSessionRestorePayload({
+    sessions: [{ ...session("local-default"), protocol: "local", localShell: "", localShellArgs: [], localStartDir: "~" }],
+    workspaces: [], tabOrder: [], activeTabId: "local-default", now: 123,
+  });
+  const restored = sanitizeSessionRestorePayload(JSON.parse(JSON.stringify(payload)));
+  assert.equal(restored.sessions[0].localShell, "");
+  assert.deepEqual(restored.sessions[0].localShellArgs, []);
+  assert.equal(restored.sessions[0].localStartDir, "~");
+});
+
+test("restore retains absent local display snapshots while legacy fields remain absent", () => {
+  const payload = buildSessionRestorePayload({
+    sessions: [
+      { ...session("empty-display"), protocol: "local", localShellName: "", localShellIcon: "" },
+      { ...session("named-display"), protocol: "local", localShellName: "Bash", localShellIcon: "bash" },
+      { ...session("legacy-display"), protocol: "local" },
+    ],
+    workspaces: [], tabOrder: [], activeTabId: "empty-display", now: 123,
+  });
+  const restored = sanitizeSessionRestorePayload(JSON.parse(JSON.stringify(payload)));
+  assert.equal(restored.sessions[0].localShellName, "");
+  assert.equal(restored.sessions[0].localShellIcon, "");
+  assert.equal(restored.sessions[1].localShellName, "Bash");
+  assert.equal(restored.sessions[1].localShellIcon, "bash");
+  assert.equal(restored.sessions[2].localShellName, undefined);
+  assert.equal(restored.sessions[2].localShellIcon, undefined);
+});

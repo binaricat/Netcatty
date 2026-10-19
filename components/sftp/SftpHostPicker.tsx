@@ -10,7 +10,7 @@ import {
     sftpSourceSessionIdForHost,
     type SftpConnectedHostEntry,
 } from '../../domain/sftpConnectedHosts';
-import { isPluginHostProtocol } from '../../domain/pluginConnection';
+import { canOpenDualPaneSftp } from '../../domain/sftpDualPaneOpen';
 import { Host } from '../../types';
 import { DistroAvatar } from '../DistroAvatar';
 import { getQuickSwitcherRowStateClass, shouldUseQuickSwitcherPointerNavigation } from '../QuickSwitcher';
@@ -95,9 +95,11 @@ const SftpHostPickerInner: React.FC<SftpHostPickerProps> = ({
 
     const filteredHosts = useMemo(() => {
         return hosts.filter((h) => {
-            // SFTP is an SSH-specific host capability. Plugin protocols may
-            // provide arbitrary transports and cannot be treated as SSH.
-            if (h.protocol === "serial" || isPluginHostProtocol(h.protocol)) return false;
+            // SFTP is an SSH-specific host capability. Reuse the dual-pane
+            // opener's predicate so serial, local-shell (no SSH channel —
+            // selecting one would SSH into localhost) and plugin protocols
+            // are excluded the same way everywhere.
+            if (!canOpenDualPaneSftp(h)) return false;
             // Hide a saved host only when Connected already shows the same endpoint.
             // If the vault host was edited after connect, keep both: Live (old) + Saved (new).
             const connected = connectedByHostId.get(h.id);

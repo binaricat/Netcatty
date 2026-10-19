@@ -1,3 +1,5 @@
+import { MonitorHostKeyDialog } from './components/vault/MonitorHostKeyDialog';
+import { MonitorRuntimeHost } from './application/app/MonitorRuntimeHost';
 import React, { useEffect } from 'react';
 
 import { initializeFonts } from './application/state/fontStore';
@@ -47,7 +49,9 @@ function SettingsI18nProvider({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <AppLocalStateProvider>
+      <MonitorRuntimeHost />
       <AppSideEffects />
+      <MonitorHostKeyDialog />
       <AppShell />
     </AppLocalStateProvider>
   );

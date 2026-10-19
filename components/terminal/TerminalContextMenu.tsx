@@ -6,6 +6,7 @@ import {
   ClipboardPaste,
   Copy,
   Download,
+  Globe2,
   Pencil,
   RefreshCcw,
   Sparkles,
@@ -65,6 +66,7 @@ export interface TerminalContextMenuProps {
   isReconnectable?: boolean;
   onReconnect?: () => void;
   onClose?: () => void;
+  onOpenBrowser?: () => void;
   onSelectWord?: () => void;
   onAddSelectionToAI?: () => void;
   onRename?: () => void;
@@ -224,6 +226,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   isReconnectable,
   onReconnect,
   onClose,
+  onOpenBrowser,
   onSelectWord,
   onAddSelectionToAI,
   onRename,
@@ -410,6 +413,14 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             {t('terminal.menu.selectAll')}
             <ContextMenuShortcut>{selectAllShortcut}</ContextMenuShortcut>
           </ContextMenuItem>
+          {onOpenBrowser && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={onOpenBrowser}>
+                <Globe2 size={14} className="mr-2" /> {t('terminal.browser.open')}
+              </ContextMenuItem>
+            </>
+          )}
 
           {showReconnectAction && (
             <>

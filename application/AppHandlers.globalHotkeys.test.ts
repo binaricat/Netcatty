@@ -699,6 +699,89 @@ test('connection log host snapshot includes custom host icon fields', () => {
   );
 });
 
+test('toggleOpacity hotkey invokes toggleWindowOpacity', () => {
+  let called = false;
+  const noop = () => {};
+
+  executeHotkeyActionImpl(
+    () => ({
+      IS_DEV: false,
+      MOVE_FOCUS_DEBOUNCE_MS: 0,
+      activeTabStore: { getActiveTabId: () => 'vault' },
+      addConnectionLogRef: { current: noop },
+      closeSession: noop,
+      closeTabInFlightRef: { current: false },
+      closeWorkspace: noop,
+      collectSessionIds: () => [],
+      confirmIfBusyLocalTerminal: async () => true,
+      createLocalTerminalWithCurrentShell: noop,
+      editorTabs: [],
+      fromEditorTabId: () => null,
+      handleOpenSettingsRef: { current: noop },
+      handleRequestCloseEditorTabRef: { current: noop },
+      isEditorTabId: () => false,
+      isQuickSwitcherOpen: false,
+      lastMoveFocusTimeRef: { current: 0 },
+      moveFocusInWorkspace: noop,
+      orderedTabs: [],
+      resolveCloseIntent: () => ({ kind: 'noop' }),
+      resolveSnippetsShortcutIntent: () => ({ kind: 'noop' }),
+      sessions: [],
+      setActiveTabId: noop,
+      setAddToWorkspaceDialog: noop,
+      setIsQuickSwitcherOpen: noop,
+      setNavigateToSection: noop,
+      settings: { showSftpTab: true, shellOnlyTabNumberShortcuts: false },
+      splitSessionWithCurrentShell: noop,
+      systemInfoRef: { current: { username: 'user', hostname: 'host' } },
+      toEditorTabId: (id: string) => `editor:${id}`,
+      toggleBroadcast: noop,
+      toggleScriptsSidePanelRef: { current: noop },
+      toggleSidePanelRef: { current: noop },
+      toggleWindowOpacity: () => { called = true; },
+      toggleWorkspaceViewMode: noop,
+      workspaces: [],
+    }),
+    'toggleOpacity',
+    { key: 'u', code: 'KeyU', ctrlKey: true, shiftKey: true } as KeyboardEvent,
+  );
+
+  assert.equal(called, true);
+});
+
+for (const scenario of [
+  { name: 'IME process key with its original physical code', key: 'Process', keyCode: 229, isComposing: false, expected: false },
+  { name: 'key during composition', key: 'U', keyCode: 85, isComposing: true, expected: false },
+  { name: 'ordinary shortcut', key: 'U', keyCode: 85, isComposing: false, expected: true },
+]) {
+  test(`transparency shortcut respects ${scenario.name}`, () => {
+    const target = new FakeHTMLElement();
+    const actions: string[] = [];
+    let prevented = false;
+    const event = {
+      ...scenario,
+      code: 'KeyU',
+      ctrlKey: true,
+      shiftKey: true,
+      altKey: false,
+      metaKey: false,
+      target,
+      composedPath: () => [target],
+      preventDefault: () => { prevented = true; },
+      stopPropagation: () => {},
+    } as unknown as KeyboardEvent;
+    handleGlobalHotkeyKeyDownImpl(() => ({
+      HOTKEY_DEBUG: false,
+      closeTabKeyStr: 'Ctrl + W',
+      executeHotkeyAction: (action: string) => actions.push(action),
+      hotkeyScheme: 'pc',
+      keyBindings: DEFAULT_KEY_BINDINGS,
+      matchesKeyBinding,
+    }), event);
+    assert.deepEqual(actions, scenario.expected ? ['toggleOpacity'] : []);
+    assert.equal(prevented, scenario.expected);
+  });
+}
 for (const scenario of [
   { name: 'single orphan', active: 'one', sessions: [{ id: 'one' }], available: false, expected: null },
   { name: 'two orphans', active: 'one', sessions: [{ id: 'one' }, { id: 'two' }], available: true, expected: 'global' },

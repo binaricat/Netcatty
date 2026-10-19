@@ -93,3 +93,12 @@ test("explicit per-session SFTP requests take priority on supported transports",
     assert.equal(resolveSessionSidePanelAutoOpen({ ...preferences, terminalTab: "sftp", legacySftpEnabled: true, session: { protocol, autoOpenSidePanel: "sftp" } }), null);
   }
 });
+
+test("Browser auto-open skips unsupported terminal protocols", () => {
+  for (const protocol of ['ssh', 'mosh', 'local', undefined] as const) {
+    assert.equal(resolveSessionSidePanelAutoOpen({ ...preferences, terminalTab: 'browser', localTab: 'browser', session: { protocol } }), 'browser');
+  }
+  for (const protocol of ['telnet', 'serial', 'et', 'plugin:example'] as const) {
+    assert.equal(resolveSessionSidePanelAutoOpen({ ...preferences, terminalTab: 'browser', session: { protocol } }), null);
+  }
+});

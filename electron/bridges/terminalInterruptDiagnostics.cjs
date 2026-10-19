@@ -46,6 +46,9 @@ function getStreamState(stream) {
     destroyed: Boolean(stream.destroyed),
     readableEnded: Boolean(stream.readableEnded),
     readableFlowing: stream.readableFlowing,
+    readableLength: Number.isSafeInteger(stream.readableLength) && stream.readableLength >= 0
+      ? stream.readableLength
+      : null,
     isPaused,
     writableEnded: Boolean(stream.writableEnded),
     writableDestroyed: Boolean(stream.writableDestroyed),

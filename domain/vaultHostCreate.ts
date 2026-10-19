@@ -185,19 +185,36 @@ const parseKeyPath = (draft: VaultHostDraft): string | undefined => {
 export const buildVaultHostEndpointKey = (
   host: Pick<Host, 'hostname' | 'port' | 'username' | 'protocol'>,
 ): string =>
-  `${(host.protocol ?? 'ssh').toLowerCase()}|${host.hostname.toLowerCase()}|${host.port}|${(host.username ?? '').toLowerCase()}`;
+  // Local-shell hosts created by the vault editor omit `port`, but CSV
+  // export/import round-trips store the effective default (22). Normalize so
+  // a local entry keeps a stable dedupe identity in both forms.
+  `${(host.protocol ?? 'ssh').toLowerCase()}|${host.hostname.toLowerCase()}|${host.protocol === 'local' ? (host.port ?? DEFAULT_SSH_PORT) : host.port}|${(host.username ?? '').toLowerCase()}`;
 
 /**
  * Session identity for vault import/create dedupe.
  * Same endpoint in a different group is a distinct connection (e.g. direct vs proxy copy).
+ * Local-shell entries all share an endpoint key (local|localhost|22|<group>), so
+ * their shell identity (shell, args, name, start dir, OS) is part of the key:
+ * CMD and PowerShell entries in the same group must not collapse or skip each
+ * other during any import dedupe stage.
  */
 export const buildVaultHostMergeKey = (
-  host: Pick<Host, 'hostname' | 'port' | 'username' | 'protocol' | 'group'>,
+  host: Pick<Host, 'hostname' | 'port' | 'username' | 'protocol' | 'group'>
+    & Partial<Pick<Host, 'os' | 'localShell' | 'localShellArgs' | 'localShellName' | 'localStartDir'>>,
 ): string => {
   // Keep normalized group spelling (do not case-fold). Vault group paths are
   // compared exactly elsewhere, so Prod vs prod are distinct sessions.
   const group = normalizeGroupPath(host.group) ?? '';
-  return `${buildVaultHostEndpointKey(host)}|${group}`;
+  const endpointGroupKey = `${buildVaultHostEndpointKey(host)}|${group}`;
+  if (host.protocol !== 'local') return endpointGroupKey;
+  const shellIdentity = [
+    host.os ?? '',
+    host.localShell ?? '',
+    host.localShellName ?? '',
+    host.localShellArgs ? JSON.stringify(host.localShellArgs) : '',
+    host.localStartDir ?? '',
+  ].join('|');
+  return `${endpointGroupKey}|${shellIdentity}`;
 };
 
 export function buildVaultHostFromDraft(

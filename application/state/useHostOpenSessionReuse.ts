@@ -17,9 +17,11 @@ type HostOpenSessionReuseInput = {
   resolveEffectiveHost: (host: Host) => Host;
 };
 
+type OpeningConnection = { localHost: Host } | { key: Promise<string | undefined> };
+
 /** Retain the opening connection identity, never credentials in session storage. */
 export function useHostOpenSessionReuse({ sessions, hosts, keys, identities, resolveEffectiveHost }: HostOpenSessionReuseInput) {
-  const openingKeys = useRef(new Map<string, Promise<string | undefined>>());
+  const openingKeys = useRef(new Map<string, OpeningConnection>());
   const connectionKey = useCallback((host: Host) => {
     const protocol = resolveEffectiveTerminalProtocol(host);
     if (protocol === 'local') {
@@ -27,9 +29,10 @@ export function useHostOpenSessionReuse({ sessions, hosts, keys, identities, res
         hostname: host.hostname,
         username: '',
         localShell: host.localShell || undefined,
-        // undefined lets the backend choose login arguments; [] explicitly does not.
-        localShellArgs: host.localShellArgs,
-        localStartDir: host.localStartDir || undefined,
+        // The renderer starter omits both absent and empty args so the
+        // backend chooses its discovered/login defaults for either form.
+        localShellArgs: host.localShellArgs?.length ? host.localShellArgs : undefined,
+        localStartDir: host.localStartDir || '~',
       };
       return buildTransferPoolKey({ hostname: host.hostname, hostId: host.id, protocol, connectionOptions: options });
     }
@@ -95,8 +98,9 @@ export function useHostOpenSessionReuse({ sessions, hosts, keys, identities, res
       const host = hosts.find((candidate) => candidate.id === session.hostId);
       if (!host) continue;
       try {
-        openingKeys.current.set(session.id, connectionKey({
-          ...resolveEffectiveHost(host),
+        const effectiveHost = resolveEffectiveHost(host);
+        const openingHost = {
+          ...effectiveHost,
           hostname: session.hostname,
           username: session.protocol === 'serial' ? resolveEffectiveHost(host).username : session.username,
           port: session.port ?? host.port,
@@ -105,12 +109,18 @@ export function useHostOpenSessionReuse({ sessions, hosts, keys, identities, res
           etEnabled: session.etEnabled ?? host.etEnabled,
           serialConfig: session.serialConfig ?? host.serialConfig,
           pluginConnection: session.pluginConnection ?? host.pluginConnection,
-          localShell: session.localShell ?? host.localShell,
-          localShellArgs: session.localShellArgs ?? host.localShellArgs,
-          localStartDir: session.localStartDir ?? host.localStartDir,
-        }).catch(() => undefined));
+          localShell: session.localShell ?? effectiveHost.localShell,
+          localShellArgs: session.localShellArgs ?? effectiveHost.localShellArgs,
+          localStartDir: session.localStartDir ?? effectiveHost.localStartDir,
+        };
+        // Local IDs may only resolve after renderer discovery completes. Keep
+        // the opening settings so that later discovery can identify the same
+        // executable without replacing them with edited vault/global settings.
+        openingKeys.current.set(session.id, resolveEffectiveTerminalProtocol(openingHost) === 'local'
+          ? { localHost: openingHost }
+          : { key: connectionKey(openingHost).catch(() => undefined) });
       } catch {
-        openingKeys.current.set(session.id, Promise.resolve(undefined));
+        openingKeys.current.set(session.id, { key: Promise.resolve(undefined) });
       }
     }
   }, [sessions, hosts, connectionKey, resolveEffectiveHost]);
@@ -120,9 +130,16 @@ export function useHostOpenSessionReuse({ sessions, hosts, keys, identities, res
     if (!host) return undefined;
     try {
       const requestedKey = await connectionKey(resolveEffectiveHost(host));
-      const matches = await Promise.all(sessions.map(async (session) => (
-        session.hostId === hostId && await openingKeys.current.get(session.id) === requestedKey ? session : undefined
-      )));
+      const matches = await Promise.all(sessions.map(async (session) => {
+        if (session.hostId !== hostId) return undefined;
+        const opening = openingKeys.current.get(session.id);
+        const openingKey = opening && ('localHost' in opening
+          // An explicit empty selector means backend default, not today's
+          // global setting. Nonempty captured IDs can safely resolve now.
+          ? connectionKey(opening.localHost.localShell ? resolveEffectiveHost(opening.localHost) : opening.localHost)
+          : opening.key);
+        return await openingKey === requestedKey ? session : undefined;
+      }));
       return findReusableHostSession(matches.filter((session) => session !== undefined), hostId);
     } catch {
       // An unresolved/changed credential must never select an old transport.

@@ -54,7 +54,7 @@ Object.defineProperty(globalThis, "window", {
   configurable: true,
 });
 
-const { clearHistory, queryHistory } = await import("./commandHistoryStore.ts");
+const { clearHistory, queryHistory } = await import("../../../application/state/commandHistoryStore.ts");
 const { seedLocalShellHistoryFromHistfiles } = await import("./localShellHistorySeed.ts");
 const { getCompletions } = await import("./completionEngine.ts");
 

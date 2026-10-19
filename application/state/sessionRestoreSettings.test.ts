@@ -148,7 +148,8 @@ test("session peer windows do not run main-window startup effects", () => {
   assert.match(settingsStateSource, /const enableSettingsSync = options\.enableSettingsSync !== false/);
   assert.match(settingsStateSource, /useSettingsIpcSync\(\{[^}]*enabled: enableSettingsSync/s);
   assert.match(settingsStateSource, /useSettingsStorageSync\(\{[^}]*enabled: enableSettingsSync/s);
-  assert.match(settingsStateSource, /if \(!enableSettingsSync\) return;\s*try \{\s*netcattyBridge\.get\(\)\?\.notifySettingsChanged/s);
+  // Detached windows share opacity, while general settings broadcasts stay off.
+  assert.match(settingsStateSource, /if \(!enableSettingsSync && key !== STORAGE_KEY_WINDOW_OPACITY\) return;\s*try \{\s*netcattyBridge\.get\(\)\?\.notifySettingsChanged/s);
   assert.match(settingsStateSource, /useSystemSettingsEffects\(\{[^}]*enabled: enableSystemEffects/s);
   assert.match(settingsIpcSyncSource, /enabled\?: boolean/);
   assert.match(settingsIpcSyncSource, /if \(!enabled\) return;/);

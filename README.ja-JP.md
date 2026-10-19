@@ -29,9 +29,9 @@
 </p>
 
 <p align="center">
-  <a href="https://ko-fi.com/binaricat">
-    <img src="https://cdn.ko-fi.com/cdn/kofi3.png?v=2" width="150" alt="Ko-fi でサポート">
-  </a>
+  <a href="https://github.com/sponsors/binaricat"><img src="https://img.shields.io/badge/GitHub-Sponsors-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" height="28" alt="GitHub でスポンサーになる"></a>
+  &nbsp;
+  <a href="https://ko-fi.com/binaricat"><img src="https://img.shields.io/badge/Ko--fi-Support-29abe0?style=for-the-badge&logo=kofi&logoColor=white" height="28" alt="Ko-fi でサポート"></a>
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@
 
 ---
 
-<img width="3142" height="1764" alt="Screenshot 2026-07-02 at 22 51 24" src="https://github.com/user-attachments/assets/3116165d-623a-4d3a-a28a-914befb9b72d" />
+<img width="3358" height="1984" alt="image" src="https://github.com/user-attachments/assets/e1302660-dece-46be-9857-1678a9b13d00" />
 
 ---
 
@@ -63,13 +63,13 @@
 
 Catty Agent にサーバーの健全性チェックを依頼すると、適切なコマンドを実行し、出力を分析して数秒で明確なサマリーを提示します。
 
-<img width="1510" height="870" alt="ai-single" src="https://github.com/user-attachments/assets/d3f34e53-8476-4fab-8634-394b931d1ff1" />
+<img width="3302" height="1978" alt="image" src="https://github.com/user-attachments/assets/3ec30145-d226-4e26-834b-52ee75b5e205" />
 
 #### 🚀 マルチホスト — Docker Swarm クラスターのセットアップ
 
 1 つの会話で 2 台のサーバーをまたいで Docker Swarm クラスターをオーケストレーションする Catty Agent をご覧ください。初期化、トークン交換、ノード参加まですべてこなします — あなたは望む結果を伝えるだけ。
 
-<img width="1515" height="870" alt="ai-muti" src="https://github.com/user-attachments/assets/ca166fc5-65d9-4d7b-951a-962c2ef230d8" />
+<img width="3294" height="1974" alt="image" src="https://github.com/user-attachments/assets/ca17e857-6163-4067-a615-cacdfd5be4fc" />
 
 ---
 
@@ -82,6 +82,7 @@ Catty Agent にサーバーの健全性チェックを依頼すると、適切�
 - [スクリーンショット](#スクリーンショット)
   - [メインウィンドウ](#メインウィンドウ)
   - [Vault ビュー](#vault-ビュー)
+  - [モニタリングビュー](#モニタリングビュー)
   - [分割ターミナル](#分割ターミナル)
 - [対応ディストリビューション](#対応ディストリビューション)
 - [はじめに](#はじめに)
@@ -148,18 +149,27 @@ Catty Agent にサーバーの健全性チェックを依頼すると、適切�
 
 メインウィンドウは、長時間の SSH 作業を前提に設計されています。セッション、ナビゲーション、主要ツールへ素早くアクセスできます。
 
-<img width="1531" height="875" alt="black-grid" src="https://github.com/user-attachments/assets/004b80f6-5bbb-4f14-b8cd-33a0a5913b8c" />
+<img width="3290" height="1988" alt="image" src="https://github.com/user-attachments/assets/ab3afd3e-a819-46fc-9251-40acb592ba69" />
 
-<img width="1550" height="876" alt="light" src="https://github.com/user-attachments/assets/2b59a999-a25e-4217-944c-9aef0a09f272" />
+<img width="3324" height="1992" alt="image" src="https://github.com/user-attachments/assets/7c7f6e7f-fb20-4574-8e7f-74397682b873" />
 
 <a name="vault-ビュー"></a>
 ## Vault ビュー
 
 作業に合わせて見え方を切り替え：グリッドで全体像、リストでスキャン、ツリーで整理と階層ナビゲーション。
 
-<img width="1554" height="882" alt="list" src="https://github.com/user-attachments/assets/03249f15-b5f8-4770-a3c3-d5001636ea00" />
+<img width="3292" height="1984" alt="image" src="https://github.com/user-attachments/assets/29642143-3fd6-4693-a30c-b7f656053ca3" />
 
-<img width="1561" height="878" alt="tree" src="https://github.com/user-attachments/assets/739f7b66-3898-43d0-8dd3-b9b97fd8e8de" />
+<img width="3322" height="1998" alt="image" src="https://github.com/user-attachments/assets/6041efe2-607e-4314-838c-eba3db4c852c" />
+
+<a name="モニタリングビュー"></a>
+## モニタリングビュー
+
+CPU、メモリ、ディスク、ネットワーク、レイテンシーを確認でき、対応する環境では GPU の詳細も表示されます。表示する列の選択、列幅や更新設定の調整ができ、監視対象のホストから直接ターミナルを開くこともできます。
+
+<img width="3364" height="1982" alt="image" src="https://github.com/user-attachments/assets/d0f495b5-25c8-494f-bb9c-8c20b0a921b6" />
+
+<img width="3362" height="1980" alt="image" src="https://github.com/user-attachments/assets/245c234e-2b22-43f2-a4fd-8057d229c56f" />
 
 <a name="分割ターミナル"></a>
 ## 分割ターミナル

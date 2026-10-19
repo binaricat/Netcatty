@@ -379,6 +379,12 @@ echo $3 >> "$FILE"`);
         type: keyType,
         bits: keySize,
         comment: `${draftKey.label.trim()}@netcatty`,
+        resident: keyType === "ED25519-SK" || keyType === "ECDSA-SK"
+          ? !!(draftKey as { resident?: boolean }).resident
+          : undefined,
+        verifyRequired: keyType === "ED25519-SK" || keyType === "ECDSA-SK"
+          ? !!(draftKey as { verifyRequired?: boolean }).verifyRequired
+          : undefined,
       });
       if (!result) {
         throw new Error(
@@ -389,15 +395,17 @@ echo $3 >> "$FILE"`);
         throw new Error(result.error || t("keychain.error.generateKeyPairFailed"));
       }
 
+      const resolvedType = (result.keyType as KeyType | undefined) || keyType;
+      const isFidoSk = resolvedType === "ED25519-SK" || resolvedType === "ECDSA-SK";
       const newKey: SSHKey = {
         id: crypto.randomUUID(),
         label: draftKey.label.trim(),
-        type: keyType,
-        keySize: keyType !== "ED25519" ? keySize : undefined,
+        type: resolvedType,
+        keySize: resolvedType === "ED25519" || isFidoSk ? undefined : keySize,
         privateKey: result.privateKey,
         publicKey: result.publicKey,
-        passphrase: draftKey.passphrase,
-        savePassphrase: draftKey.savePassphrase,
+        passphrase: isFidoSk ? undefined : draftKey.passphrase,
+        savePassphrase: isFidoSk ? undefined : draftKey.savePassphrase,
         source: "generated",
         category: "key",
         created: Date.now(),

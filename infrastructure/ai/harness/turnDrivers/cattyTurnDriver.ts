@@ -37,7 +37,6 @@ import {
   buildCattySdkMessages,
   collectOpenAIChatAssistantFieldsForMessages,
   collectPreservedTerminalWriteFingerprints,
-  collectToolResultsAfterMessage,
   createContinuationContext,
 } from './cattyMessageBuilder';
 import { hadToolProgressBeforeRequestTooLarge, processCattyStream } from './cattyStreamProcessor';
@@ -218,7 +217,6 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     const buildSdkMessages = (
       allMessages: import('../../types').ChatMessage[],
       includeCurrentUserMessage: boolean,
-      options: { preserveTerminalToolResults?: ReadonlySet<import('../../types').ToolResult> } = {},
       sessionContextCompaction = currentSession?.contextCompaction,
     ) => buildCattySdkMessages({
       allMessages,
@@ -227,7 +225,6 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       trimmed: modelUserText,
       attachments: includeCurrentUserMessage ? attachments : undefined,
       continuationContext,
-      preserveTerminalToolResults: options.preserveTerminalToolResults,
       chatSessionId: sessionId,
       toolOutputStore: ctx.toolOutputStore,
       fieldsByMessage: openAIChatAssistantFieldsByMessage,
@@ -399,7 +396,6 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       const headSdkMessages = buildSdkMessages(
         uiMessages.slice(0, compactedMessageCount),
         false,
-        {},
         undefined,
       );
       const compacted = await compactMessages(headSdkMessages, {
@@ -414,7 +410,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         };
         ui.persistContextCompaction?.(sessionId, nextCompaction);
         emitContextSnapshot(prepareMessagesForStream(
-          buildSdkMessages(uiMessages, false, {}, nextCompaction),
+          buildSdkMessages(uiMessages, false, nextCompaction),
         ));
       } else {
         // Non-durable outcome: keep the meter honest (full current context).
@@ -452,6 +448,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       await processCattyStream({
         streamSessionId: sessionId,
         model,
+        providerConfig: context.activeProvider,
         systemPrompt,
         toolsBundle,
         sdkMessages: streamMessages,
@@ -514,12 +511,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
             assistantMsgId,
             sessionId,
           );
-          retryBaseMessages = buildSdkMessages(latestSession.messages, false, {
-            preserveTerminalToolResults: collectToolResultsAfterMessage(
-              latestSession.messages,
-              assistantMsgId,
-            ),
-          }, latestSession.contextCompaction);
+          retryBaseMessages = buildSdkMessages(latestSession.messages, false, latestSession.contextCompaction);
         }
         retryAssistantMsgId = generateId();
         ui.addMessageToSession(sessionId, {

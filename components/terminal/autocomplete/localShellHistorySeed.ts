@@ -20,7 +20,12 @@ import {
   parseZshHistory,
 } from "../../../domain/remoteHistory";
 import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
-import { flushCommandHistoryStore, recordCommand } from "./commandHistoryStore";
+import {
+  flushCommandHistoryStore,
+  getCommandHistoryClearGeneration,
+  hasCommandHistoryBeenCleared,
+  recordCommand,
+} from "../../../application/state/commandHistoryStore";
 
 const SEED_FLAG_PREFIX = "netcatty:localHistSeeded:";
 const MAX_SEED_COMMANDS = 500;
@@ -93,6 +98,18 @@ async function seedLocalShellHistoryFromHistfilesOnce(
 ): Promise<number> {
   if (!hostId || alreadySeeded(hostId)) return 0;
 
+  // A clear is a user decision to delete locally recorded history. Never
+  // re-import histfiles for a host that was not seeded before that clear, or
+  // the deleted commands would reappear on the next Local Terminal open.
+  if (hasCommandHistoryBeenCleared()) {
+    markSeeded(hostId);
+    return 0;
+  }
+
+  // Capture the clear generation before the bridge reads so a clear that lands
+  // while they are in flight can be detected afterwards.
+  const startClearGeneration = getCommandHistoryClearGeneration();
+
   const bridge = getBridge();
   if (!bridge?.getHomeDir || !bridge.readLocalFile) return 0;
 
@@ -110,6 +127,17 @@ async function seedLocalShellHistoryFromHistfilesOnce(
     readTextFile(bridge, joinHomePath(home, ".local/share/fish/fish_history")),
     readTextFile(bridge, joinHomePath(home, ".config/fish/fish_history")),
   ]);
+
+  // The user cleared history while the histfile reads were in flight. Discard
+  // the import and mark this host seeded so a later Local Terminal open cannot
+  // resurrect the commands that were just deleted.
+  if (
+    hasCommandHistoryBeenCleared()
+    || getCommandHistoryClearGeneration() !== startClearGeneration
+  ) {
+    markSeeded(hostId);
+    return 0;
+  }
 
   const lists = [
     zshText ? parseZshHistory(zshText) : [],

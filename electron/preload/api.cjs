@@ -13,6 +13,16 @@ function createPreloadApi(ctx) {
   const globalSftpTransferListeners = ctx.globalSftpTransferListeners || new Set();
   const pluginContributionsChangedListeners = ctx.pluginContributionsChangedListeners || new Set();
   const uploadStageControllers = new Map();
+  const hostBrowserPanelListeners = new Set();
+  const pendingHostBrowserPanels = [];
+  // TerminalLayer mounts lazily; retain incoming requests until it subscribes.
+  ctx.ipcRenderer?.on?.("netcatty:host-browser:request-panel", (_event, request) => {
+    if (!hostBrowserPanelListeners.size) {
+      pendingHostBrowserPanels.push(request);
+      return;
+    }
+    for (const listener of hostBrowserPanelListeners) listener(request);
+  });
   // Lightweight test contexts may omit this map; default so closeSession never throws.
   if (!ctx.moshSessionReadyListeners) {
     ctx.moshSessionReadyListeners = new Map();
@@ -293,6 +303,10 @@ function createPreloadApi(ctx) {
     markTerminalDataSessionOpen(result?.sessionId);
     return result.sessionId;
   },
+  monitorUpdate: (panels) => ipcRenderer.invoke("netcatty:monitor:update", panels),
+  monitorSnapshot: (cursor) => ipcRenderer.invoke("netcatty:monitor:snapshot", cursor),
+  monitorStopAll: () => ipcRenderer.invoke("netcatty:monitor:stop-all"),
+  monitorRetry: (hostId) => ipcRenderer.invoke("netcatty:monitor:retry", hostId),
   testConnection: async (options) => {
     const result = await ipcRenderer.invoke("netcatty:test-connection", options);
     return result.sessionId;
@@ -830,6 +844,26 @@ function createPreloadApi(ctx) {
     passphraseAuthFailedListeners.add(cb);
     return () => passphraseAuthFailedListeners.delete(cb);
   },
+  // FIDO2 PIN / touch presence prompts
+  onFidoPromptRequest: (cb) => {
+    fidoPromptListeners.add(cb);
+    return () => fidoPromptListeners.delete(cb);
+  },
+  respondFidoPrompt: async (requestId, response, cancelled = false) => {
+    return ipcRenderer.invoke("netcatty:fido-prompt:respond", {
+      requestId,
+      response,
+      cancelled,
+    });
+  },
+  onFidoPromptTimeout: (cb) => {
+    fidoPromptTimeoutListeners.add(cb);
+    return () => fidoPromptTimeoutListeners.delete(cb);
+  },
+  onFidoPromptCancelled: (cb) => {
+    fidoPromptCancelledListeners.add(cb);
+    return () => fidoPromptCancelledListeners.delete(cb);
+  },
   openSftp: async (options) => {
       const result = await ipcRenderer.invoke("netcatty:sftp:open", options);
       return result.sftpId;
@@ -1304,6 +1338,36 @@ function createPreloadApi(ctx) {
   
   // Open URL in default browser
   openExternal: (url) => ipcRenderer.invoke("netcatty:openExternal", url),
+  focusHostBrowser: (hostId) => ipcRenderer.invoke("netcatty:host-browser:focus", hostId),
+  setHostBrowserPanelLayout: (options) => ipcRenderer.invoke("netcatty:host-browser:panel-layout", options),
+  closeHostBrowserPanel: (browserId) => ipcRenderer.invoke("netcatty:host-browser:panel-close", browserId),
+  getHostBrowserPanelState: (browserId) => ipcRenderer.invoke("netcatty:host-browser:snapshot", browserId),
+  commandHostBrowserPanel: (browserId, command) => ipcRenderer.invoke("netcatty:host-browser:command", command, browserId),
+  listHostBrowserPanelBookmarks: (browserId) => ipcRenderer.invoke("netcatty:host-browser:bookmarks:list", browserId),
+  saveHostBrowserPanelBookmark: (browserId, bookmark) => ipcRenderer.invoke("netcatty:host-browser:bookmarks:upsert", bookmark, browserId),
+  removeHostBrowserPanelBookmark: (browserId, id) => ipcRenderer.invoke("netcatty:host-browser:bookmarks:remove", id, browserId),
+  listHostBrowserPanelDownloads: (browserId) => ipcRenderer.invoke("netcatty:host-browser:downloads:list", browserId),
+  commandHostBrowserPanelDownload: (browserId, command) => ipcRenderer.invoke("netcatty:host-browser:downloads:command", command, browserId),
+  onHostBrowserPanelEvent: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("netcatty:host-browser:panel-event", listener);
+    return () => ipcRenderer.removeListener("netcatty:host-browser:panel-event", listener);
+  },
+  openHostBrowserUrl: (options) => ipcRenderer.invoke("netcatty:host-browser:panel-url", options),
+  requestHostBrowserPanel: (request) => ipcRenderer.invoke("netcatty:host-browser:request-panel", request),
+  onHostBrowserPanelRequest: (callback) => {
+    hostBrowserPanelListeners.add(callback);
+    for (const request of pendingHostBrowserPanels.splice(0)) callback(request);
+    return () => hostBrowserPanelListeners.delete(callback);
+  },
+  openHostBrowser: (options) => ipcRenderer.invoke("netcatty:host-browser:open", options),
+  getHostBrowserBookmarks: () => ipcRenderer.invoke("netcatty:host-browser:bookmarks:get-all"),
+  applyHostBrowserBookmarks: (items) => ipcRenderer.invoke("netcatty:host-browser:bookmarks:apply", items),
+  onHostBrowserBookmarksChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("netcatty:host-browser:bookmarks-changed", listener);
+    return () => ipcRenderer.removeListener("netcatty:host-browser:bookmarks-changed", listener);
+  },
   openPath: (path) => ipcRenderer.invoke("netcatty:openPath", path),
 
   // App info
@@ -1322,6 +1386,8 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:vaultBackups:read", payload),
   trimVaultBackups: (payload) =>
     ipcRenderer.invoke("netcatty:vaultBackups:trim", payload),
+  clearVaultBackups: () =>
+    ipcRenderer.invoke("netcatty:vaultBackups:clear"),
   openVaultBackupDir: () =>
     ipcRenderer.invoke("netcatty:vaultBackups:openDir"),
   // Subscribe to cross-window "backups changed" events emitted by the

@@ -198,6 +198,7 @@ import {
 } from "./terminalUserPaste";
 import { pasteTextWithMultilineConfirm } from "../terminalClipboardPaste";
 import { requestMultilinePasteConfirm } from "../../../application/state/multilinePasteConfirmStore";
+import { requestHostBrowserPanel } from "../../../application/state/hostBrowserPanelRequests";
 import {
   consumeOsc133CommandCompletion,
   type PromptLineBreakState,
@@ -576,6 +577,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   };
   const terminalLinkHandler = createTerminalLinkHandler({
     canActivate: canActivateTerminalLink,
+    useInternal: () => ctx.terminalSettingsRef.current?.linkBrowser !== 'system',
+    openInternal: ['ssh', 'mosh', 'local'].includes(ctx.host.protocol ?? 'ssh')
+      ? (url) => requestHostBrowserPanel({ host: ctx.host, sessionId: ctx.sessionId, url })
+      : undefined,
     openExternalAvailable: ctx.terminalBackend.openExternalAvailable,
     openExternal: ctx.terminalBackend.openExternal,
     confirmOscLink: (uri) => window.confirm(

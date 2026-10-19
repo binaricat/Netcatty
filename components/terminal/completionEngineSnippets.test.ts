@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { getCompletions } from "./autocomplete/completionEngine";
 import { DEFAULT_AUTOCOMPLETE_SETTINGS } from "./autocomplete/useTerminalAutocomplete";
+import { getPinyinCacheStatsForTests, resetPinyinCacheForTests } from "../../lib/searchMatcher";
 import type { Snippet } from "../../domain/models";
 
 const deploySnippet: Snippet = { id: "d", label: "deploy", command: "kubectl apply -f ." };
@@ -82,4 +83,35 @@ test("getCompletions returns more than 8 snippet matches when default maxSuggest
     `expected more than 8 snippet matches for scrolling popup, got ${snippetMatches.length}`,
   );
   assert.equal(snippetMatches.length, 20);
+});
+
+
+test("argument completion skips ASCII transliteration in a large snippet library", async () => {
+  const snippets: Snippet[] = Array.from({ length: 5000 }, (_, index) => ({
+    id: `snippet-${index}`,
+    label: `deploy-service-${index}`,
+    command: `kubectl --namespace production rollout restart deployment service-${index}`,
+  }));
+  snippets.push({ id: "mail", label: "邮箱", command: "user@example.com" });
+  resetPinyinCacheForTests();
+  try {
+    for (const input of ["git pull zz", "git pull zzq", "git pull zzqx"]) {
+      assert.deepEqual(await getCompletions(input, { snippets, skipPathCompletion: true }), []);
+    }
+    assert.deepEqual(
+      getPinyinCacheStatsForTests().keys,
+      ["邮箱"],
+      "ASCII command tokens cannot produce a new pinyin prefix and must not enter its cache",
+    );
+    const result = await getCompletions("git pull yx", { snippets, skipPathCompletion: true });
+    assert.equal(result.find((suggestion) => suggestion.source === "snippet")?.snippet?.id, "mail");
+  } finally {
+    resetPinyinCacheForTests();
+  }
+});
+
+test("ASCII argument completion retains compact query prefixes", async () => {
+  const snippets: Snippet[] = [{ id: "compact", label: "production-foobar", command: "echo ready" }];
+  const result = await getCompletions("git pull foo_bar", { snippets, skipPathCompletion: true });
+  assert.equal(result.find((suggestion) => suggestion.source === "snippet")?.snippet?.id, "compact");
 });

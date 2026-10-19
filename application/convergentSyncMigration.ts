@@ -14,6 +14,7 @@ import {
   type ConvergentMigrationProviderInput,
 } from '../domain/convergentSync';
 import { isProviderReadyForSync } from '../domain/sync';
+import { isPreserveDeletionsStrategy } from '../domain/syncStrategy';
 import { getCloudSyncManager, type CloudSyncManager } from '../infrastructure/services/CloudSyncManager';
 import { markConvergentSyncInitialized } from '../infrastructure/services/convergentSyncConfig';
 import { applyProtectedSyncPayload } from './localVaultBackups';
@@ -113,6 +114,7 @@ export async function prepareConvergentSyncMigration(
     providers: inputs,
     deviceId: manager.getState().deviceId,
     now,
+    preserveDeletions: isPreserveDeletionsStrategy(manager.getState().syncStrategy),
   });
   if (plan.state) {
     for (const seed of legacyBaselineSeeds) {

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { generateText, streamText } from "ai";
+import { buildCattySdkMessages, createContinuationContext } from "./harness/turnDrivers/cattyMessageBuilder";
+import { ToolOutputStore } from "./harness/toolOutputStore";
 
 import { createModelFromConfig, resolveProviderEndpoint } from "./sdk/providers";
 import type { ProviderConfig } from "./types";
@@ -279,4 +282,44 @@ test("SDK requests forward custom headers and scope OpenCode sessions", async (t
     }
   }
   assert.equal(requests.length, 16);
+});
+
+test("OpenAI Chat sends inline image attachments as data URLs through the bridge", async (t) => {
+  const browserGlobal = globalThis as typeof globalThis & { window?: unknown };
+  const originalWindow = browserGlobal.window;
+  t.after(() => { browserGlobal.window = originalWindow; });
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  Reflect.set(globalThis, "window", { netcatty: {
+    aiFetch: async (url: string, _method: string, _headers: Record<string, string>, body: string) => {
+      requests.push({ url, body: JSON.parse(body) });
+      return { ok: false, status: 400, data: '{"error":{"message":"captured request"}}' };
+    },
+    aiChatStream: async (_requestId: string, url: string, _headers: Record<string, string>, body: string) => {
+      requests.push({ url, body: JSON.parse(body) });
+      return { ok: false, error: "captured request" };
+    },
+    onAiStreamData: () => () => {},
+    onAiStreamEnd: () => () => {},
+    onAiStreamError: () => () => {},
+  } });
+
+  for (const [mediaType, base64Data] of [["image/png", "iVBORw0KGgo="], ["image/jpeg", "/9j/4A=="]]) {
+    const messages = buildCattySdkMessages({
+      allMessages: [], includeCurrentUserMessage: true, trimmed: "Read this image",
+      attachments: [{ mediaType, base64Data }],
+      continuationContext: createContinuationContext("p", "openai", "m", false),
+      chatSessionId: "images", toolOutputStore: new ToolOutputStore(), fieldsByMessage: new Map(),
+    });
+    const model = createModelFromConfig(makeConfig({ openaiApi: "chat", apiKey: "test-key", baseURL: "https://example.test/v1" }));
+    await assert.rejects(generateText({ model, messages, maxRetries: 0 }), /captured request/);
+    await assert.rejects(async () => await streamText({ model, messages, maxRetries: 0, onError: () => {} }).text);
+    for (const request of requests.slice(-2)) {
+      assert.equal(request.url, "https://example.test/v1/chat/completions");
+      assert.deepEqual(request.body.messages, [{ role: "user", content: [
+        { type: "text", text: "Read this image" },
+        { type: "image_url", image_url: { url: `data:${mediaType};base64,${base64Data}` } },
+      ] }]);
+    }
+  }
+  assert.equal(requests.length, 4);
 });

@@ -1,5 +1,6 @@
 export type SidePanelTool =
   | 'sftp'
+  | 'browser'
   | 'scripts'
   | 'history'
   | 'theme'

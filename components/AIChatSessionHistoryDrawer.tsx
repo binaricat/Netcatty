@@ -37,15 +37,10 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const searchHintId = useId();
   const searchInputRef = useRef<HTMLInputElement>(null);
-  // One cache instance per mounted drawer: caches of concurrently mounted
-  // drawers stay independent (no shared state to prune or discard across tabs).
-  const search = useSessionHistorySearch();
-
-  const filteredSessions = React.useMemo(
-    // The localized fallback below is displayed for untitled sessions
-    // (row label), so it must be indexed for search as the displayed title.
-    () => search.filterSessionHistory(sessions, searchQuery, { untitledLabel: t('ai.chat.untitled') }),
-    [sessions, searchQuery, t, search],
+  const { filteredSessions, isSearching } = useSessionHistorySearch(
+    sessions,
+    searchQuery,
+    t('ai.chat.untitled'),
   );
 
   // Reset the render batch when the list scope or query changes so matching
@@ -103,7 +98,12 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
           {t('ai.chat.searchSessionsHint')}
         </p>
       </div>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1" aria-busy={isSearching}>
+        {isSearching && (
+          <p role="status" className="px-4 py-2 text-[12px] text-muted-foreground/60">
+            {t('ai.chat.searchingSessions')}
+          </p>
+        )}
         <div className="px-3">
           {sessions.length === 0 ? (
             <div className="py-12 text-center">
@@ -111,7 +111,7 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
                 {t('ai.chat.noSessions')}
               </p>
             </div>
-          ) : filteredSessions.length === 0 ? (
+          ) : filteredSessions.length === 0 && !isSearching ? (
             <div className="py-12 text-center">
               <p className="text-[13px] text-muted-foreground/40">
                 {t('ai.chat.noMatchingSessions')}

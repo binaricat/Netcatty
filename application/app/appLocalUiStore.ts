@@ -4,6 +4,7 @@ import type { Host, PortForwardingRule } from '../../domain/models';
 import type { VaultSection } from '../../components/VaultView';
 import type { KeyboardInteractiveRequest } from '../../components/KeyboardInteractiveModal';
 import type { PassphraseRequest } from '../../components/PassphraseModal';
+import type { FidoPromptRequest } from '../../components/FidoPromptModal';
 
 type Listener = () => void;
 
@@ -31,6 +32,7 @@ export type AppLocalUiSnapshot = {
   portForwardingRules: readonly PortForwardingRule[];
   keyboardInteractiveQueue: readonly KeyboardInteractiveRequest[];
   passphraseQueue: readonly PassphraseRequest[];
+  fidoPromptQueue: readonly FidoPromptRequest[];
   deleteHostConfirm: { hostId: string; name: string } | null;
   vaultFocusRequest: unknown;
   openNoteRequest: unknown;
@@ -49,6 +51,7 @@ export const EMPTY_APP_LOCAL_UI: AppLocalUiSnapshot = Object.freeze({
   portForwardingRules: Object.freeze([]) as readonly PortForwardingRule[],
   keyboardInteractiveQueue: Object.freeze([]) as readonly KeyboardInteractiveRequest[],
   passphraseQueue: Object.freeze([]) as readonly PassphraseRequest[],
+  fidoPromptQueue: Object.freeze([]) as readonly FidoPromptRequest[],
   deleteHostConfirm: null,
   vaultFocusRequest: null,
   openNoteRequest: null,
@@ -81,6 +84,7 @@ class AppLocalUiStore {
       && prev.portForwardingRules === next.portForwardingRules
       && prev.keyboardInteractiveQueue === next.keyboardInteractiveQueue
       && prev.passphraseQueue === next.passphraseQueue
+      && prev.fidoPromptQueue === next.fidoPromptQueue
       && prev.deleteHostConfirm === next.deleteHostConfirm
       && prev.vaultFocusRequest === next.vaultFocusRequest
       && prev.openNoteRequest === next.openNoteRequest

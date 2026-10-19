@@ -1,6 +1,16 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { approveNetcattyMcpOnly, approveNetcattyCliShellOnly, buildCopilotClientOptions, buildCopilotPermissionHandler, buildCopilotSessionOptions, buildCopilotMessageOptions, copilotBuiltinTools, extractCopilotContent, isLikelyNetcattyCliShellCommand, mapCopilotModels, runCopilotTurn, translateCopilotEvent } = require("./copilotDriver.cjs");
+const fs = require("node:fs");
+const path = require("node:path");
+const tempDirBridge = require("../../tempDirBridge.cjs");
+const { approveNetcattyMcpOnly, approveNetcattyCliShellOnly, buildCopilotClientOptions, buildCopilotPermissionHandler, buildCopilotSessionOptions, buildCopilotMessageOptions, connectCopilotStdioPath, copilotBuiltinTools, extractCopilotContent, isLikelyNetcattyCliShellCommand, listCopilotModels, mapCopilotModels, runCopilotTurn, translateCopilotEvent } = require("./copilotDriver.cjs");
+const { resolveCopilotPlatformExecutable } = require("./copilotHeadlessLoader.cjs");
+
+function createCopilotFixtureDir(name) {
+  const dir = tempDirBridge.getTempFilePath(name);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
+}
 
 function collector() {
   const events = [];
@@ -388,4 +398,246 @@ test("runCopilotTurn passes runtime env and skills permission handler", async ()
   });
   assert.deepEqual(captured.clientOptions.env, { NETCATTY_TOOL_CLI_DISCOVERY_FILE: "/tmp/discovery.json" });
   assert.equal(captured.created.onPermissionRequest, approveNetcattyCliShellOnly);
+});
+
+test("listCopilotModels resolves a Windows .cmd shim to the copilot JS entry before the SDK sees it", async () => {
+  const dir = createCopilotFixtureDir("netcatty-copilot-shim-");
+  try {
+    const shim = path.join(dir, "copilot.cmd");
+    fs.writeFileSync(shim, '@ECHO off\r\n"node"  "%dp0%\node_modules\@github\copilot\npm-loader.js" %*');
+    const loaderJs = path.join(dir, "node_modules", "@github", "copilot", "npm-loader.js");
+    fs.mkdirSync(path.dirname(loaderJs), { recursive: true });
+    fs.writeFileSync(loaderJs, "");
+    const captured = {};
+    const sdkModule = {
+      CopilotClient: class {
+        constructor(options) { captured.options = options; }
+        async start() {}
+        async listModels() { return [{ id: "auto", name: "auto" }]; }
+        async stop() {}
+      },
+      RuntimeConnection: { forStdio: (config) => { captured.forStdio = config; return {}; } },
+    };
+    const models = await listCopilotModels({ cliPath: shim, sdkModule });
+    // With no platform runtime installed, Windows keeps the resolved loader.
+    // Other platforms retain the supplied CLI path.
+    assert.equal(captured.forStdio.path, process.platform === "win32" ? loaderJs : shim);
+    assert.deepEqual(models, [{ id: "auto", name: "auto" }]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("listCopilotModels directly owns the native runtime selected by the official loader", async () => {
+  if (process.platform !== "win32") return; // resolution only special-cases win32
+  const dir = createCopilotFixtureDir("netcatty-copilot-loader-");
+  try {
+    const shim = path.join(dir, "copilot.cmd");
+    fs.writeFileSync(shim, '@ECHO off\r\n"node"  "%dp0%\node_modules\@github\copilot\npm-loader.js" %*');
+    const packageRoot = path.join(dir, "node_modules", "@github", "copilot");
+    fs.mkdirSync(packageRoot, { recursive: true });
+    const loaderJs = path.join(packageRoot, "npm-loader.js");
+    fs.writeFileSync(loaderJs, "");
+    // The official loader forwards to this same binary. The SDK owns it
+    // directly so hiding and forced stop both apply to the actual runtime.
+    const nativeExe = path.join(
+      dir, "node_modules", "@github", `copilot-${process.platform}-${process.arch}`, "copilot.exe",
+    );
+    fs.mkdirSync(path.dirname(nativeExe), { recursive: true });
+    fs.writeFileSync(nativeExe, "");
+    const captured = {};
+    const sdkModule = {
+      CopilotClient: class {
+        constructor(options) { captured.options = options; }
+        async start() {}
+        async listModels() { return [{ id: "auto", name: "auto" }]; }
+        async stop() {}
+      },
+      RuntimeConnection: { forStdio: (config) => { captured.forStdio = config; return {}; } },
+    };
+    const models = await listCopilotModels({ cliPath: shim, sdkModule });
+    assert.equal(captured.forStdio.path, nativeExe, "the SDK owns the native process the official loader would start");
+    assert.deepEqual(models, [{ id: "auto", name: "auto" }]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("listCopilotModels honors native preference when resolving Windows npm shims", async () => {
+  if (process.platform !== "win32") return; // resolution only special-cases win32
+  const dir = createCopilotFixtureDir("netcatty-copilot-native-");
+  const previous = process.env.NETCATTY_COPILOT_PREFER_NATIVE;
+  process.env.NETCATTY_COPILOT_PREFER_NATIVE = "1";
+  try {
+    const shim = path.join(dir, "copilot.cmd");
+    fs.writeFileSync(shim, '@ECHO off\r\n"node"  "%dp0%\node_modules\@github\copilot\npm-loader.js" %*');
+    const packageRoot = path.join(dir, "node_modules", "@github", "copilot");
+    fs.mkdirSync(packageRoot, { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, "npm-loader.js"), "");
+    const nativeExe = path.join(
+      dir, "node_modules", "@github", `copilot-${process.platform}-${process.arch}`, "copilot.exe",
+    );
+    fs.mkdirSync(path.dirname(nativeExe), { recursive: true });
+    fs.writeFileSync(nativeExe, "");
+    const captured = {};
+    const sdkModule = {
+      CopilotClient: class {
+        constructor(options) { captured.options = options; }
+        async start() {}
+        async listModels() { return [{ id: "auto", name: "auto" }]; }
+        async stop() {}
+      },
+      RuntimeConnection: { forStdio: (config) => { captured.forStdio = config; return {}; } },
+    };
+    const models = await listCopilotModels({ cliPath: shim, sdkModule });
+    assert.equal(captured.forStdio.path, nativeExe, "the SDK owns the preferred native process directly");
+    assert.deepEqual(models, [{ id: "auto", name: "auto" }]);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.NETCATTY_COPILOT_PREFER_NATIVE;
+    } else {
+      process.env.NETCATTY_COPILOT_PREFER_NATIVE = previous;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("listCopilotModels retains the official loader when its platform runtime is unavailable", async () => {
+  const dir = createCopilotFixtureDir("netcatty-copilot-loader-fallback-");
+  try {
+    const loader = path.join(dir, "node_modules", "@github", "copilot", "npm-loader.js");
+    fs.mkdirSync(path.dirname(loader), { recursive: true });
+    fs.writeFileSync(loader, "");
+    const captured = {};
+    const sdkModule = {
+      CopilotClient: class {
+        async start() {}
+        async listModels() { return []; }
+        async stop() {}
+      },
+      RuntimeConnection: { forStdio: (config) => { captured.forStdio = config; return {}; } },
+    };
+    await listCopilotModels({ cliPath: loader, sdkModule });
+    assert.equal(captured.forStdio.path, loader);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const outcome of ['success', 'reject', 'throw', 'hang']) {
+  test(`listCopilotModels cleans up shutdown after ${outcome}`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const clearTimer = t.mock.method(global, 'clearTimeout');
+    let forced = 0;
+    let rejectStop;
+    const sdkModule = {
+      CopilotClient: class {
+        async start() {}
+        async listModels() { return [{ id: 'auto', name: 'Auto' }]; }
+        stop() {
+          if (outcome === 'throw') throw new Error('stop failed');
+          if (outcome === 'reject') return Promise.reject(new Error('stop failed'));
+          if (outcome === 'hang') return new Promise((_, reject) => { rejectStop = reject; });
+          return Promise.resolve();
+        }
+        async forceStop() { forced++; }
+      },
+    };
+    assert.deepEqual(await listCopilotModels({ sdkModule }), [{ id: 'auto', name: 'Auto' }]);
+    await new Promise(setImmediate);
+    if (outcome === 'hang') {
+      assert.equal(forced, 0);
+      t.mock.timers.tick(3000);
+      await new Promise(setImmediate);
+      rejectStop(new Error('late stop rejection'));
+      await new Promise(setImmediate);
+    }
+    assert.equal(forced, outcome === 'success' ? 0 : 1);
+    if (outcome !== 'throw') assert.equal(clearTimer.mock.callCount(), 1);
+    t.mock.timers.tick(3000);
+    await new Promise(setImmediate);
+    assert.equal(forced, outcome === 'success' ? 0 : 1);
+  });
+}
+
+test("resolveCopilotPlatformExecutable resolves the platform package exe from the loader root", () => {
+  const dir = createCopilotFixtureDir("netcatty-copilot-platexe-");
+  try {
+    const loaderJs = path.join(dir, "node_modules", "@github", "copilot", "npm-loader.js");
+    const platformPkg = path.join(dir, "node_modules", "@github", `copilot-${process.platform}-${process.arch}`);
+    fs.mkdirSync(platformPkg, { recursive: true });
+    fs.mkdirSync(path.dirname(loaderJs), { recursive: true });
+    fs.writeFileSync(loaderJs, "");
+    const exeName = process.platform === "win32" ? "copilot.exe" : "copilot";
+    const exePath = path.join(platformPkg, exeName);
+    fs.writeFileSync(exePath, "");
+    fs.writeFileSync(path.join(platformPkg, "package.json"), JSON.stringify({
+      name: `@github/copilot-${process.platform}-${process.arch}`,
+      exports: { ".": `./${exeName}` },
+    }));
+    assert.equal(fs.realpathSync(resolveCopilotPlatformExecutable(loaderJs)), fs.realpathSync(exePath));
+    // No platform package reachable from the loader's node_modules chain
+    // (separate tree, so walk-up cannot hoist into the fixture above) -> null;
+    // the SDK then retains the original loader.
+    const lonelyDir = createCopilotFixtureDir("netcatty-copilot-lonely-");
+    try {
+      const lonelyLoader = path.join(lonelyDir, "pkg", "npm-loader.js");
+      fs.mkdirSync(path.dirname(lonelyLoader), { recursive: true });
+      fs.writeFileSync(lonelyLoader, "");
+      assert.equal(resolveCopilotPlatformExecutable(lonelyLoader), null);
+    } finally {
+      fs.rmSync(lonelyDir, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("connectCopilotStdioPath returns null when nothing resolved (parity with the raw resolver)", () => {
+  assert.equal(connectCopilotStdioPath(""), null);
+  assert.equal(connectCopilotStdioPath(null), null);
+});
+
+test("resolveCopilotExecutableForSdk resolves npm's copilot.ps1 wrapper to the JS entry on Windows", () => {
+  const { resolveCopilotExecutableForSdk } = require("../../ai/shellUtils.cjs");
+  const dir = createCopilotFixtureDir("netcatty-copilot-ps1-");
+  try {
+    const shim = path.join(dir, "copilot.ps1");
+    fs.writeFileSync(shim, '#!/usr/bin/env pwsh\r\n& "node$exe" "$basedir/node_modules/@github/copilot/npm-loader.js" $args');
+    const loaderJs = path.join(dir, "node_modules", "@github", "copilot", "npm-loader.js");
+    fs.mkdirSync(path.dirname(loaderJs), { recursive: true });
+    fs.writeFileSync(loaderJs, "");
+    assert.equal(resolveCopilotExecutableForSdk(shim, "win32"), loaderJs);
+    // Other platforms never rewrite the configured path.
+    assert.equal(resolveCopilotExecutableForSdk(shim, "linux"), shim);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("connectCopilotStdioPath keeps POSIX and native Windows executables direct", () => {
+  assert.equal(connectCopilotStdioPath("/usr/local/bin/copilot", "linux"), "/usr/local/bin/copilot");
+  assert.equal(connectCopilotStdioPath("/opt/homebrew/bin/copilot", "darwin"), "/opt/homebrew/bin/copilot");
+  assert.equal(connectCopilotStdioPath("C:\\copilot\\copilot.exe", "win32"), "C:\\copilot\\copilot.exe");
+});
+
+test("connectCopilotStdioPath directly selects the official loader's native runtime", () => {
+  const dir = require("../../tempDirBridge.cjs").getTempFilePath("copilot-loader-fixture");
+  const loader = path.join(dir, "node_modules", "@github", "copilot", "npm-loader.js");
+  const native = path.join(dir, "node_modules", "@github", `copilot-${process.platform}-${process.arch}`, process.platform === "win32" ? "copilot.exe" : "copilot");
+  try {
+    fs.mkdirSync(path.dirname(loader), { recursive: true });
+    fs.mkdirSync(path.dirname(native), { recursive: true });
+    fs.writeFileSync(loader, "", { flag: "wx" });
+    fs.writeFileSync(native, "", { flag: "wx" });
+    assert.equal(connectCopilotStdioPath(loader, "win32"), native);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("connectCopilotStdioPath preserves configured Windows JavaScript launchers", () => {
+  for (const launcher of ["C:\\tools\\copilot\\custom-launcher.js", "/fixture/@github/copilot/custom-launcher.js", "/fixture/other-package/npm-loader.js"]) {
+    assert.equal(connectCopilotStdioPath(launcher, "win32"), launcher);
+  }
 });

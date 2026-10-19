@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <link rel="stylesheet" href="downloads.css">
+  <script defer src="downloads.js"></script>
+</head>
+<body class="dark">
+  <section class="panel" aria-label="Downloads">
+    <header class="panel-header">
+      <h1>Downloads</h1>
+      <div class="header-actions">
+        <button id="open-folder" class="icon-button" type="button" title="Open Downloads folder" aria-label="Open Downloads folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10H3zM3 11h18"/></svg></button>
+        <button id="close" class="icon-button" type="button" title="Close downloads" aria-label="Close downloads"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+    </header>
+    <div id="download-list" class="download-list"></div>
+    <div id="empty" class="empty" hidden><span class="empty-icon"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg></span><strong>No downloads yet</strong><span>Files from this host will appear here.</span></div>
+    <footer id="footer" class="panel-footer" hidden><button id="clear" type="button">Clear finished</button></footer>
+  </section>
+  <div id="notice" class="notice" hidden></div>
+</body>
+</html>

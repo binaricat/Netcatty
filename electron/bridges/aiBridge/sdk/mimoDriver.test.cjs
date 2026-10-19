@@ -21,12 +21,16 @@ childProcess.spawnSync = (command, args, options) =>
 
 const {
   MIMO_SERVE_TIMEOUT_MS,
+  MIMO_CATALOG_SETUP_TIMEOUT_MS,
   listMimoModels,
   resolveUsableMimoBinPath,
   runMimoTurn,
   spawnMimoServer,
   stopMimoProcess,
 } = require("./mimoDriver.cjs");
+// Only read for budget ordering; sdkStreamHandlers pulls the driver registry,
+// not the other way around, so this stays acyclic.
+const { MODEL_LIST_TIMEOUT_OVERRIDES_MS } = require("./sdkStreamHandlers.cjs");
 
 function collector() {
   const events = [];
@@ -74,6 +78,184 @@ function tempBinDir() {
 
 test("MIMO_SERVE_TIMEOUT_MS matches the documented cold-start budget", () => {
   assert.equal(MIMO_SERVE_TIMEOUT_MS, 10_000);
+});
+
+test("catalog setup budget stays above the turn budget and below the outer catalog budget", () => {
+  assert.equal(MIMO_CATALOG_SETUP_TIMEOUT_MS, 25_000);
+  assert.ok(MIMO_CATALOG_SETUP_TIMEOUT_MS > MIMO_SERVE_TIMEOUT_MS);
+  assert.ok(MIMO_CATALOG_SETUP_TIMEOUT_MS < MODEL_LIST_TIMEOUT_OVERRIDES_MS.mimo);
+});
+
+test("listMimoModels tolerates a providers() call that needs most of the inner budget", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let factoryOptions;
+  let resolveProvidersNow;
+  let providersStarted;
+  const started = new Promise((resolve) => { providersStarted = resolve; });
+  const providerResult = {
+    providers: [
+      { id: "xiaomi", name: "Xiaomi", models: { "mimo-v2.6-flash": { name: "MiMo V2.6 Flash" } } },
+    ],
+    default: { xiaomi: "mimo-v2.6-flash" },
+  };
+  const running = listMimoModels({
+    mimoFactory: async (options) => {
+      factoryOptions = options;
+      return {
+        client: {
+          config: {
+            providers: () => {
+              // Resolve only after 24s of the mocked clock have passed --
+              // a coldest-boot providers() query that used to lose the old
+              // 10s inner race.
+              return new Promise((resolve) => {
+                resolveProvidersNow = () => resolve(providerResult);
+                providersStarted();
+              });
+            },
+          },
+        },
+        server: { close() {} },
+      };
+    },
+  });
+  await started;
+  t.mock.timers.tick(MIMO_CATALOG_SETUP_TIMEOUT_MS - 1000);
+  resolveProvidersNow();
+  assert.deepEqual(await running, {
+    currentModelId: "xiaomi/mimo-v2.6-flash",
+    models: [{ id: "xiaomi/mimo-v2.6-flash", name: "Xiaomi MiMo V2.6 Flash" }],
+  });
+  assert.equal(factoryOptions.timeout, MIMO_CATALOG_SETUP_TIMEOUT_MS);
+});
+
+test("listMimoModels still returns an empty catalog when providers() exceeds the inner budget", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let closeCount = 0;
+  let providersStarted;
+  const started = new Promise((resolve) => { providersStarted = resolve; });
+  const running = listMimoModels({
+    mimoFactory: async () => ({
+      client: {
+        config: {
+          providers: () => {
+            providersStarted();
+            return new Promise(() => {});
+          },
+        },
+      },
+      server: { close() { closeCount += 1; } },
+    }),
+  });
+  await started;
+  t.mock.timers.tick(MIMO_CATALOG_SETUP_TIMEOUT_MS);
+  assert.deepEqual(await running, { currentModelId: null, models: [] });
+  assert.equal(closeCount, 1);
+});
+
+test("listMimoModels shares the outer catalog deadline across readiness and providers()", async (t) => {
+  // Date is mocked too so the driver's deadline arithmetic sees the cold
+  // readiness consume real shared-budget time.
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  let factoryOptions;
+  let resolveReady;
+  const ready = new Promise((resolve) => { resolveReady = resolve; });
+  let factoryInvoked;
+  const invoked = new Promise((resolve) => { factoryInvoked = resolve; });
+  let resolveProvidersNow;
+  let providersStarted;
+  const started = new Promise((resolve) => { providersStarted = resolve; });
+  const providerResult = {
+    providers: [
+      { id: "xiaomi", name: "Xiaomi", models: { "mimo-v2.6-flash": { name: "MiMo V2.6 Flash" } } },
+    ],
+    default: { xiaomi: "mimo-v2.6-flash" },
+  };
+  // The caller (sdkStreamHandlers) passes its remaining outer budget minus
+  // headroom: 30s - 1s here. A cold readiness (~20s) plus a slow providers()
+  // (~9s) totals ~29s and must complete inside the 30s outer IPC budget --
+  // under the old independent inner caps the same pair ran on borrowed time
+  // (readiness 25s + providers 25s = 50s possible) and the outer abort
+  // degraded the whole call.
+  const running = listMimoModels({
+    deadlineTs: Date.now() + MODEL_LIST_TIMEOUT_OVERRIDES_MS.mimo - 1_000,
+    mimoFactory: async (options) => {
+      factoryOptions = options;
+      factoryInvoked();
+      await ready;
+      return {
+        client: {
+          config: {
+            providers: () => new Promise((resolve) => {
+              resolveProvidersNow = () => resolve(providerResult);
+              providersStarted();
+            }),
+          },
+        },
+        server: { close() {} },
+      };
+    },
+  });
+  // Wait for the factory (readiness phase start) before advancing the clock,
+  // so the 20s belongs to readiness and not to the pre-factory setup.
+  await invoked;
+  t.mock.timers.tick(20_000);
+  resolveReady();
+  await started;
+  // providers() gets exactly the remaining shared budget (29s - 20s = 9s);
+  // resolve one tick inside it, so the pair finishes by ~29s.
+  t.mock.timers.tick(9_000 - 1);
+  resolveProvidersNow();
+  assert.deepEqual(await running, {
+    currentModelId: "xiaomi/mimo-v2.6-flash",
+    models: [{ id: "xiaomi/mimo-v2.6-flash", name: "Xiaomi MiMo V2.6 Flash" }],
+  });
+  // Readiness still carries the full inner 25s cap (min(25s, 29s shared)).
+  assert.equal(factoryOptions.timeout, MIMO_CATALOG_SETUP_TIMEOUT_MS);
+});
+
+test("listMimoModels bounds providers() to the shared deadline remainder after a cold readiness", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  let factoryOptions;
+  let closeCount = 0;
+  let resolveReady;
+  const ready = new Promise((resolve) => { resolveReady = resolve; });
+  let factoryInvoked;
+  const invoked = new Promise((resolve) => { factoryInvoked = resolve; });
+  let providersStarted;
+  const started = new Promise((resolve) => { providersStarted = resolve; });
+  const running = listMimoModels({
+    deadlineTs: Date.now() + 29_000,
+    mimoFactory: async (options) => {
+      factoryOptions = options;
+      factoryInvoked();
+      await ready;
+      return {
+        client: {
+          config: {
+            providers: () => {
+              providersStarted();
+              return new Promise(() => {});
+            },
+          },
+        },
+        server: { close() { closeCount += 1; } },
+      };
+    },
+  });
+  await invoked;
+  t.mock.timers.tick(20_000);
+  resolveReady();
+  await started;
+  // The old behavior re-armed a fresh 25s for providers() (total 45s), far
+  // past the 30s outer budget -- the outer withTimeout aborted mid-IPC and
+  // degraded to stale models. The shared deadline cuts providers() off at
+  // the 29s mark, returning an empty catalog with the server torn down
+  // cleanly inside the outer budget.
+  t.mock.timers.tick(9_000);
+  assert.deepEqual(await running, { currentModelId: null, models: [] });
+  assert.equal(closeCount, 1);
+  assert.equal(factoryOptions.timeout, MIMO_CATALOG_SETUP_TIMEOUT_MS);
 });
 
 test("resolveUsableMimoBinPath returns only existing files and honours candidate order", () => {
@@ -1283,4 +1465,164 @@ test("listMimoModels stops when the service exits during provider discovery", as
   const result = await Promise.race([running, new Promise((resolve) => setTimeout(() => resolve("timed-out"), 200))]);
   assert.deepEqual(result, { currentModelId: null, models: [] });
   assert.equal(closeCount, 1);
+});
+
+test("listMimoModels does not probe skill paths (no `mimo debug config` spawn) before the catalog server", async () => {  const spawns = [];
+  spawnMock = (command, args) => {
+    spawns.push({ command, args });
+    return fakeChild();
+  };
+  try {
+    const models = await listMimoModels({
+      binPath: "/tmp/mimo-no-skill-probe",
+      mimoFactory: async () => ({
+        client: {
+          config: {
+            providers: async () => ({
+              providers: [
+                { id: "xiaomi", name: "Xiaomi", models: { "mimo-v2.6-flash": { name: "MiMo V2.6 Flash" } } },
+              ],
+              default: { xiaomi: "mimo-v2.6-flash" },
+            }),
+          },
+        },
+        server: { close() {} },
+      }),
+    });
+    // The provider catalog never reads skill paths, so the driver must not
+    // pay the `mimo debug config` spawn (it alone can exceed the catalog
+    // timeout). No child-process spawn may happen at all -- the factory above
+    // stands in for the server.
+    assert.deepEqual(spawns, []);
+    assert.deepEqual(models, {
+      currentModelId: "xiaomi/mimo-v2.6-flash",
+      models: [{ id: "xiaomi/mimo-v2.6-flash", name: "Xiaomi MiMo V2.6 Flash" }],
+    });
+  } finally {
+    spawnMock = null;
+  }
+});
+
+// Fixture reproducing the live providers() capture from 2026-10-10
+// (D:\Temp\CodeTemp\netcatty-modelcatalog-diag\raw-providers-2026-10-10.json):
+// the six real Xiaomi models, plus the vendor's free auto-routing channel as
+// a second provider with id "mimo" whose zero-cost pseudo-model entries have
+// churned between "MiMo Auto (free)" and raw junk ("/models", "134qwerawdf").
+function liveCatalogFixture() {
+  const realModels = {
+    "mimo-v2.6-pro": { name: "MiMo-V2.6-Pro" },
+    "mimo-v2.5": { name: "MiMo-V2.5" },
+    "mimo-v2.6-pro-ultraspeed": { name: "MiMo-V2.6-Pro-UltraSpeed" },
+    "mimo-v2.5-pro": { name: "MiMo-V2.5-Pro" },
+    "mimo-v2.6-flash": { name: "MiMo-V2.6-Flash" },
+    "mimo-v2.5-pro-ultraspeed": { name: "MiMo-V2.5-Pro-UltraSpeed" },
+  };
+  return {
+    providers: [
+      { id: "xiaomi", name: "Xiaomi", models: realModels },
+      {
+        id: "mimo",
+        name: "mimo",
+        models: {
+          "/models": { name: "/models", cost: { input: 0, output: 0 }, release_date: "" },
+          "134qwerawdf": { name: "134qwerawdf", cost: { input: 0, output: 0 }, release_date: "" },
+          auto: { name: "MiMo Auto (free)", cost: { input: 0, output: 0 }, release_date: "" },
+        },
+      },
+    ],
+    default: { xiaomi: "mimo-v2.6-pro-ultraspeed" },
+  };
+}
+
+test("listMimoModels filters the vendor's free auto-routing channel out of the catalog", async () => {
+  const catalog = await listMimoModels({
+    binPath: "/tmp/mimo-auto-filter-test",
+    mimoFactory: async () => ({
+      client: {
+        config: {
+          providers: async () => liveCatalogFixture(),
+        },
+      },
+      server: { close() {} },
+    }),
+  });
+
+  // All six real Xiaomi models remain; every entry of the `mimo` auto channel
+  // (whatever id/label the vendor currently uses) is gone.
+  assert.deepEqual(catalog.models.map((model) => model.id), [
+    "xiaomi/mimo-v2.6-pro",
+    "xiaomi/mimo-v2.5",
+    "xiaomi/mimo-v2.6-pro-ultraspeed",
+    "xiaomi/mimo-v2.5-pro",
+    "xiaomi/mimo-v2.6-flash",
+    "xiaomi/mimo-v2.5-pro-ultraspeed",
+  ]);
+  assert.equal(catalog.models.every((model) => !model.id.startsWith("mimo/")), true);
+});
+
+test("listMimoModels selects a visible model when the default channel is filtered", async () => {
+  const fixture = liveCatalogFixture();
+  // A filtered default must not override the visible selection on send.
+  fixture.default = { xiaomi: "mimo-v2.6-pro-ultraspeed", mimo: "134qwerawdf" };
+  const catalog = await listMimoModels({
+    binPath: "/tmp/mimo-auto-filter-default-test",
+    mimoFactory: async () => ({
+      client: {
+        config: {
+          providers: async () => fixture,
+        },
+      },
+      server: { close() {} },
+    }),
+  });
+
+  assert.equal(catalog.currentModelId, "xiaomi/mimo-v2.6-pro-ultraspeed");
+
+  fixture.default = { mimo: "134qwerawdf" };
+  const autoDefault = await listMimoModels({
+    binPath: "/tmp/mimo-auto-filter-default-2-test",
+    mimoFactory: async () => ({
+      client: {
+        config: {
+          providers: async () => fixture,
+        },
+      },
+      server: { close() {} },
+    }),
+  });
+  assert.equal(autoDefault.currentModelId, autoDefault.models[0].id);
+  assert.equal(autoDefault.models.some((model) => model.id === "mimo/134qwerawdf"), false);
+});
+
+test("listMimoModels picks a hidden-key default before falling back to the first model", async () => {
+  const fixture = liveCatalogFixture();
+  // Same map as above with the auto channel declared first: the visible
+  // Xiaomi default later in the map must still win over models[0].
+  fixture.default = { mimo: "134qwerawdf", xiaomi: "mimo-v2.6-pro-ultraspeed" };
+  const catalog = await listMimoModels({
+    binPath: "/tmp/mimo-auto-filter-default-order-test",
+    mimoFactory: async () => ({
+      client: {
+        config: {
+          providers: async () => fixture,
+        },
+      },
+      server: { close() {} },
+    }),
+  });
+
+  assert.equal(catalog.currentModelId, "xiaomi/mimo-v2.6-pro-ultraspeed");
+});
+
+test("listMimoModels clears the default when only the auto channel remains", async () => {
+  const fixture = liveCatalogFixture();
+  fixture.providers = fixture.providers.filter((provider) => provider.id === "mimo");
+  fixture.default = { mimo: "134qwerawdf" };
+  const result = await listMimoModels({
+    mimoFactory: async () => ({
+      client: { config: { providers: async () => fixture } },
+      server: { close() {} },
+    }),
+  });
+  assert.deepEqual(result, { currentModelId: null, models: [] });
 });

@@ -11,10 +11,16 @@ const strategyKeys = [
   "cloudSync.strategy.desc",
   "cloudSync.strategy.smartMerge",
   "cloudSync.strategy.smartMergeDesc",
+  "cloudSync.strategy.smartMergePreserve",
+  "cloudSync.strategy.smartMergePreserveDesc",
   "cloudSync.strategy.preferCloud",
   "cloudSync.strategy.preferCloudDesc",
   "cloudSync.strategy.preferLocal",
   "cloudSync.strategy.preferLocalDesc",
+  "cloudSync.aiSessions.title",
+  "cloudSync.aiSessions.desc",
+  "cloudSync.aiSessions.compatibility",
+  "cloudSync.aiSessions.enableFailed",
 ] as const;
 
 test("cloud sync strategy copy exists in every bundled locale", () => {

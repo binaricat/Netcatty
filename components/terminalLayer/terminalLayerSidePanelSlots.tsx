@@ -23,9 +23,11 @@ import {
 import { useScriptExecution } from '../../application/state/useScriptExecution';
 import { useRemoteHistoryState } from '../../application/state/useRemoteHistoryState';
 import { resolveSystemSidebarSession } from '../../domain/systemManager/resolveSystemSession';
+import { collectSessionIds } from '../../domain/workspace';
 import { shouldKeepTerminalBackgroundWorkActive } from '../../domain/terminalHibernate';
 import { resolveTerminalFontFamilyId } from '../../infrastructure/config/fonts';
 import type { Host, TerminalSession, Workspace } from '../../types';
+import { HostBrowserSidePanel } from '../HostBrowserSidePanel';
 import { SystemManagerSidePanel } from '../systemManager/SystemManagerSidePanel';
 import { resolveSftpFollowTerminalCwdTargetHost } from '../../domain/sftpFollowTerminalCwd';
 import { AI_PANEL_FORCE_HIDE_SHELL } from '../ai/aiPanelDiagnostics';
@@ -242,6 +244,57 @@ function SidePanelSftpSlotInner({
 
 export const SidePanelSftpSlot = memo(SidePanelSftpSlotInner);
 SidePanelSftpSlot.displayName = 'SidePanelSftpSlot';
+
+function SidePanelBrowserSlot({ tabId, ctx, isVisible }: {
+  tabId: string;
+  ctx: SidePanelStableContext;
+  isVisible: boolean;
+}) {
+  const live = useSidePanelLiveSnapshotForTab(tabId, isVisible);
+  const sessions = ctx.sessions as TerminalSession[];
+  const workspace = (ctx.workspaceById as Map<string, Workspace>).get(tabId);
+  const current = (isVisible ? live.activeTerminalSessionForSystem : null)
+    ?? resolveSystemSidebarSession(sessions, workspace, workspace?.focusedSessionId,
+      sessions.find((session) => session.id === tabId));
+  const retainedSessionIds = useRef(new Set<string>());
+  if (isVisible && current) retainedSessionIds.current.add(current.id);
+  const workspaceSessionIds = workspace ? new Set(collectSessionIds(workspace.root)) : null;
+  for (const id of retainedSessionIds.current) {
+    if (!sessions.some((session) => session.id === id && (workspaceSessionIds
+      ? workspaceSessionIds.has(id) : session.id === tabId && !session.workspaceId))) retainedSessionIds.current.delete(id);
+  }
+  const sessionHosts = ctx.sessionHostsMap as Map<string, Host>;
+  const authHosts = ctx.sftpAuthHostBySessionId as Map<string, Host>;
+  const currentHost = current ? authHosts.get(current.id) ?? sessionHosts.get(current.id) : null;
+  const supportsBrowser = currentHost && ['ssh', 'mosh', 'local'].includes(currentHost.protocol ?? 'ssh');
+  return (
+    <div className={sidePanelHiddenPanelClassName(!isVisible)} data-section="terminal-browser-panel">
+      {workspace && supportsBrowser && <div className="h-8 shrink-0 border-b border-border/50 px-3 flex items-center text-xs text-muted-foreground truncate">
+        {currentHost.label || currentHost.hostname}
+      </div>}
+      <div className={workspace && supportsBrowser ? 'relative h-[calc(100%-2rem)] min-h-0 overflow-hidden' : 'relative h-full min-h-0 overflow-hidden'}>
+        {!supportsBrowser && <p className="p-4 text-sm text-muted-foreground">{ctx.t('terminal.browser.sshOnly')}</p>}
+        {[...retainedSessionIds.current].map((sessionId) => {
+          const host = authHosts.get(sessionId) ?? sessionHosts.get(sessionId);
+          if (!host || !['ssh', 'mosh', 'local'].includes(host.protocol ?? 'ssh')) return null;
+          const visible = isVisible && current?.id === sessionId;
+          return <div key={sessionId} className={visible ? 'absolute inset-0 overflow-hidden' : 'hidden'}>
+            <HostBrowserSidePanel
+              browserId={`${tabId}:${sessionId}`}
+              host={host}
+              hosts={ctx.effectiveHosts}
+              keys={ctx.keys}
+              identities={ctx.identities}
+              knownHosts={ctx.knownHosts}
+              terminalSettings={ctx.terminalSettings}
+              isVisible={visible}
+            />
+          </div>;
+        })}
+      </div>
+    </div>
+  );
+}
 
 function SidePanelSystemSlotInner({
   tabId,
@@ -493,6 +546,7 @@ function SidePanelHistorySlotInner({
     HistorySidePanel,
     handleHistoryPaste,
     handleHistoryDelete,
+    handleHistoryClear,
     handleHistoryRun,
   } = ctx;
 
@@ -507,6 +561,7 @@ function SidePanelHistorySlotInner({
         globalEntries={shellHistory as import('../../domain/models').ShellHistoryEntry[]}
         onFetch={remoteHistory.fetch}
         onDeleteGlobalEntry={handleHistoryDelete}
+        onClearGlobalHistory={handleHistoryClear}
         onPasteToTerminal={handleHistoryPaste}
         onRunInTerminal={handleHistoryRun}
         isVisible
@@ -688,6 +743,7 @@ export function SidePanelMountedContent({
 }) {
   const {
     mountedSftpTabIds,
+    browserMountedTabIds = [],
     systemMountedTabIds,
     scriptsMountedTabIds,
     themeMountedTabIds,
@@ -721,6 +777,11 @@ export function SidePanelMountedContent({
 
   return (
     <>
+      {browserMountedTabIds.map((tabId: string) => (
+        <PersistentSidePanelPortal key={`browser-${tabId}`} portalKey={`browser-${tabId}`} target={portalTarget(tabId, 'browser')}>
+          <SidePanelBrowserSlot tabId={tabId} ctx={ctx} isVisible={isToolVisible(tabId, 'browser')} />
+        </PersistentSidePanelPortal>
+      ))}
       {mountedSftpTabIds.map((tabId: string) => (
         <PersistentSidePanelPortal
           key={`sftp-${tabId}`}

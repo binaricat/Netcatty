@@ -27,7 +27,7 @@ import {
   type AssistantContentPart,
   type CattyProviderContinuationContext,
 } from '../../aiChatStreamingSupport';
-import { redactSecretsInValueForModel } from '../modelSecretRedaction';
+import { redactSecretsForModel, redactSecretsInValueForModel } from '../modelSecretRedaction';
 import { fitLargeUserInputForModel } from '../largeUserInput';
 import type { ToolOutputStore } from '../toolOutputStore';
 
@@ -198,7 +198,6 @@ export interface BuildCattySdkMessagesInput {
   trimmed: string;
   attachments?: ChatMessageAttachment[];
   continuationContext: CattyProviderContinuationContext;
-  preserveTerminalToolResults?: ReadonlySet<ToolResult>;
   chatSessionId: string;
   toolOutputStore: ToolOutputStore;
   fieldsByMessage: Map<ModelMessage, OpenAIChatAssistantFields | undefined>;
@@ -212,7 +211,6 @@ export function buildCattySdkMessages(input: BuildCattySdkMessagesInput): ModelM
     trimmed,
     attachments,
     continuationContext,
-    preserveTerminalToolResults = new Set<ToolResult>(),
     chatSessionId,
     toolOutputStore,
     fieldsByMessage,
@@ -394,9 +392,12 @@ export function buildCattySdkMessages(input: BuildCattySdkMessagesInput): ModelM
               toolName: toolCall?.name ?? 'unknown',
               output: {
                 type: 'text' as const,
-                value: buildHistoricalToolResultReplayText(tr, toolCall, {
-                  preserveTerminalOutput: preserveTerminalToolResults.has(tr),
-                }),
+                // Live results are already bounded. Reformatting them merely
+                // because another user turn arrived breaks the cached prefix.
+                // Context-budget pruning still owns necessary reductions.
+                value: redactSecretsForModel(buildHistoricalToolResultReplayText(tr, toolCall, {
+                  preserveTerminalOutput: true,
+                })),
               },
             };
           }),

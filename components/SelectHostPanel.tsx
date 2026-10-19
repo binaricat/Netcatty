@@ -14,6 +14,7 @@ interface SelectHostPanelProps {
   onSelect: (host: Host) => void;
   onSelectionChange?: (selectedHostIds: string[]) => void;
   onBack: () => void;
+  onClose?: () => void;
   onContinue?: () => void;
   onNewHost?: () => void;
   availableKeys?: SSHKey[];
@@ -25,11 +26,14 @@ interface SelectHostPanelProps {
   title?: string;
   subtitle?: string;
   className?: string;
+  headerClassName?: string;
   width?: string;
   layout?: AsidePanelLayout;
   resizable?: boolean;
   persistWidthStorageKey?: string;
   resizeAriaLabel?: string;
+  /** Allow saved local-shell (CMD/PowerShell/...) hosts as targets, e.g. snippet/script runners. */
+  allowLocalHosts?: boolean;
 }
 
 const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
@@ -40,6 +44,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   onSelect,
   onSelectionChange,
   onBack,
+  onClose,
   onContinue,
   onNewHost,
   availableKeys = [],
@@ -51,11 +56,13 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   title,
   subtitle,
   className,
+  headerClassName,
   width,
   layout = "overlay",
   resizable = false,
   persistWidthStorageKey,
   resizeAriaLabel,
+  allowLocalHosts = false,
 }) => {
   const { t } = useI18n();
   const [newHostPanelOpen, setNewHostPanelOpen] = useState(false);
@@ -75,8 +82,9 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
   return (
     <AsidePanel
       open={true}
-      onClose={onBack}
+      onClose={onClose ?? onBack}
       title={panelTitle}
+      headerClassName={headerClassName}
       subtitle={subtitle}
       showBackButton={true}
       onBack={onBack}
@@ -103,6 +111,7 @@ const SelectHostPanel: React.FC<SelectHostPanelProps> = ({
         onSaveHost={onSaveHost}
         onCreateGroup={onCreateGroup}
         onNewHostPanelOpenChange={setNewHostPanelOpen}
+        allowLocalHosts={allowLocalHosts}
         className="flex-1 min-h-0"
       />
     </AsidePanel>

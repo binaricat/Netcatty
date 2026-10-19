@@ -149,3 +149,48 @@ test("normalize keeps custom (non-built-in) rules verbatim", () => {
   assert.deepEqual(rule.patterns, customRule.patterns);
   assert.equal(rule.label, customRule.label);
 });
+
+test("Unix path highlighting covers terminal paths without matching relative prose or URL slashes", () => {
+  const rule = getRule(DEFAULT_KEYWORD_HIGHLIGHT_RULES, "unix-path");
+  for (const path of ["/sbin/iptables", "/var/log/syslog", "/usr/local/bin/g++", "~/projects/netcatty"]) {
+    const matches = [...`'${path}'`.matchAll(new RegExp(rule.patterns[0], "gi"))];
+    assert.deepEqual(matches.map((match) => match[0]), [path]);
+  }
+  for (const text of ["RELATED,ESTABLISHED", "TCP/IP", "https://example.com/log", " / ", "./foo", "../foo", "../../foo"]) {
+    assert.equal(matchesAny(rule.patterns, text), false, text);
+  }
+});
+
+test("Unix path rule upgrades old settings while preserving disabled highlights and edits", () => {
+  const legacy = DEFAULT_KEYWORD_HIGHLIGHT_RULES.filter((rule) => rule.id !== "unix-path");
+  const upgraded = normalizeTerminalSettings({ keywordHighlightEnabled: false, keywordHighlightRules: legacy });
+  assert.equal(upgraded.keywordHighlightEnabled, false);
+  assert.equal(getRule(upgraded.keywordHighlightRules, "unix-path").enabled, true);
+
+  const edited = { ...getRule(upgraded.keywordHighlightRules, "unix-path"), color: "#123456", enabled: false, customized: true, patterns: ["/chosen/path"] };
+  const restored = normalizeTerminalSettings({ keywordHighlightRules: [...legacy, edited] });
+  assert.deepEqual(getRule(restored.keywordHighlightRules, "unix-path"), edited);
+});
+
+test("Unix path highlighting keeps Unicode paths and quoted spaces together", () => {
+  const rule = getRule(DEFAULT_KEYWORD_HIGHLIGHT_RULES, "unix-path");
+  for (const [text, path] of [
+    ["/home/用户/file", "/home/用户/file"],
+    ['cat "/Users/me/My Projects/app"', "/Users/me/My Projects/app"],
+    ["cat '/home/用户/My Projects/app'", "/home/用户/My Projects/app"],
+  ]) {
+    const matches = [...text.matchAll(new RegExp(rule.patterns[0], "gi"))];
+    assert.deepEqual(matches.map((match) => match[0]), [path]);
+  }
+});
+
+test("Unix path highlighting keeps punctuation up to the text boundary", () => {
+  const rule = getRule(DEFAULT_KEYWORD_HIGHLIGHT_RULES, "unix-path");
+  for (const path of [
+    "/run/user/1000/gvfs/smb-share:server=nas,share=files/report.txt",
+    "/tmp/build=release/output",
+  ]) {
+    const matches = [...path.matchAll(new RegExp(rule.patterns[0], "gi"))];
+    assert.deepEqual(matches.map((match) => match[0]), [path]);
+  }
+});

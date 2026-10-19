@@ -72,6 +72,7 @@ export function VaultPublisher({ children }: VaultPublisherProps) {
     updateHostLastConnected,
     addShellHistoryEntry,
     removeShellHistoryEntry,
+    clearAllCommandHistory,
   } = vault;
 
   useLayoutEffect(() => {
@@ -144,12 +145,14 @@ export function VaultPublisher({ children }: VaultPublisherProps) {
       updateHostLastConnected,
       addShellHistoryEntry,
       removeShellHistoryEntry,
+      clearAllCommandHistory,
     });
     return () => {
       registerVaultSnapshotActions(null);
     };
   }, [
     addShellHistoryEntry,
+    clearAllCommandHistory,
     commitPluginImporterData,
     commitVaultImportTransaction,
     commitVaultGroupMutation,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
-import { createDomRenderer, dispatchDomEvent, flushEffects, installDomEnvironment } from "./test-support/renderReactDom.tsx";
+import { createDomRenderer, dispatchDomEvent, flushEffects, installDomEnvironment, runWithAct } from "./test-support/renderReactDom.tsx";
 
 test("large transfer histories mount only visible rows and can scroll to the last file", async (t) => {
   const env = installDomEnvironment();
@@ -64,6 +64,33 @@ test("large transfer histories mount only visible rows and can scroll to the las
   const lastRow = env.document.querySelector('[role=progressbar][aria-label="file-0.bin"]')?.closest('[data-transfer-status]');
   assert.ok(lastRow?.classList.contains("border-b-0"), "only the actual final row omits its divider");
   assert.equal(store.getSnapshot().tasks.length, 1_000, "offscreen files must remain queued");
+  await runWithAct(() => {
+    store.patchTask("virtual-file-999", { isDirectory: true, progressMode: "files" });
+    store.upsertTasks(Array.from({ length: 100 }, (_, index) => ({
+      id: `nested-file-${index}`, fileName: `nested-${index}.bin`,
+      sourcePath: `/source/999/${index}`, targetPath: `/target/999/${index}`,
+      sourceConnectionId: "source", targetConnectionId: "local", direction: "download" as const,
+      status: "queued" as const, totalBytes: 1_000, transferredBytes: 0, speed: 0,
+      startTime: index + 2_000, isDirectory: false, parentTaskId: "virtual-file-999",
+    })));
+  });
+  scroll.scrollTop = 0;
+  await dispatchDomEvent(scroll, new env.window.Event("scroll"));
+  await flushEffects();
+  const expand = env.document.querySelector('button[aria-label="Show files"]');
+  assert.ok(expand);
+  await dispatchDomEvent(expand, new env.window.MouseEvent("click", { bubbles: true }));
+  await flushEffects();
+  assert.ok(env.document.querySelector('[data-section="global-sftp-transfer-child-list"]'));
+  scroll.scrollTop = 112 * 1_000 - 460;
+  await dispatchDomEvent(scroll, new env.window.Event("scroll"));
+  await flushEffects();
+  scroll.scrollTop = 0;
+  await dispatchDomEvent(scroll, new env.window.Event("scroll"));
+  await flushEffects();
+  assert.ok(env.document.querySelector('button[aria-label="Hide files"]'), "folder expansion survives top-level row recycling");
+  assert.ok(env.document.querySelector('[data-section="global-sftp-transfer-child-list"]'));
+
   await dispatchDomEvent(toggle, new env.window.MouseEvent("click", { bubbles: true }));
   await flushEffects();
 });

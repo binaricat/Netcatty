@@ -1,4 +1,4 @@
-import type { GroupConfig, Host } from './models';
+import type { GroupConfig, Host, HostChainConfig } from './models';
 
 export type VaultJumpGraphIssue = {
   key: string;
@@ -9,6 +9,56 @@ export type VaultJumpGraphIssue = {
 };
 
 const identity = (host: Host): Host => host;
+
+/**
+ * Drop host-chain entries that point at hosts the user removed. Without this,
+ * a deleted jump host stays referenced by its targets and connecting them
+ * keeps failing with "A configured jump host is missing".
+ */
+export function pruneVaultJumpHostReferences({
+  hosts,
+  groupConfigs,
+  removedHostIds,
+}: {
+  hosts: Host[];
+  groupConfigs: GroupConfig[];
+  removedHostIds: Iterable<string>;
+}): {
+  hosts: Host[];
+  groupConfigs: GroupConfig[];
+  changed: boolean;
+} {
+  const removed = removedHostIds instanceof Set
+    ? removedHostIds
+    : new Set(removedHostIds);
+  if (removed.size === 0) return { hosts, groupConfigs, changed: false };
+
+  const buildWithoutRemovedRefs = <Item extends { hostChain?: HostChainConfig }>(
+    items: Item[],
+  ): Item[] => {
+    let next: Item[] | undefined;
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      const hostIds = item.hostChain?.hostIds;
+      if (!hostIds?.length) continue;
+      const nextHostIds = hostIds.filter((hostId) => !removed.has(hostId));
+      if (nextHostIds.length === hostIds.length) continue;
+      if (!next) next = items.slice();
+      next[index] = {
+        ...item,
+        // Keep an explicit empty chain so a host/child group does not start
+        // using a different inherited jump chain after its last hop is removed.
+        hostChain: { hostIds: nextHostIds },
+      };
+    }
+    return next ?? items;
+  };
+
+  const nextHosts = buildWithoutRemovedRefs(hosts);
+  const nextGroupConfigs = buildWithoutRemovedRefs(groupConfigs);
+  const changed = nextHosts !== hosts || nextGroupConfigs !== groupConfigs;
+  return { hosts: nextHosts, groupConfigs: nextGroupConfigs, changed };
+}
 
 export function findVaultGroupConfigJumpReference(
   configs: GroupConfig[],

@@ -15,6 +15,9 @@ function truncateInline(value: string, maxChars: number): string {
 }
 
 function describeAttachmentSize(attachment: ChatMessageAttachment): string {
+  if (attachment.contentUnavailable || !attachment.base64Data) {
+    return "content unavailable on this device";
+  }
   return `${attachment.base64Data.length} base64 chars`;
 }
 
@@ -25,7 +28,7 @@ function formatTerminalSelectionPlaceholder(
   const details = [
     `filename=${attachment.filename || `terminal-selection-${index + 1}.log`}`,
     attachment.lineCount != null ? `lines=${attachment.lineCount}` : undefined,
-    attachment.previewText ? `preview=${truncateInline(attachment.previewText, MAX_ATTACHMENT_PLACEHOLDER_DETAIL_CHARS)}` : undefined,
+    !attachment.contentUnavailable && attachment.previewText ? `preview=${truncateInline(attachment.previewText, MAX_ATTACHMENT_PLACEHOLDER_DETAIL_CHARS)}` : undefined,
     describeAttachmentSize(attachment),
   ].filter(Boolean).join(", ");
 
@@ -39,7 +42,7 @@ function formatAttachmentPlaceholder(
   const label = attachment.mediaType.startsWith("image/") ? "image" : "file";
   const details = [
     attachment.filename ? `filename=${attachment.filename}` : undefined,
-    attachment.filePath ? `path=${attachment.filePath}` : undefined,
+    !attachment.contentUnavailable && attachment.filePath ? `path=${attachment.filePath}` : undefined,
     `mediaType=${attachment.mediaType}`,
     describeAttachmentSize(attachment),
   ].filter(Boolean).join(", ");

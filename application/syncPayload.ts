@@ -1,3 +1,5 @@
+import { readMonitorPanels, applyMonitorPanels } from './state/monitorPanelsStorage';
+import { normalizeMonitorPanels } from '../domain/monitorPanels';
 import { decryptProviderHeaders, encryptProviderHeaders } from '../infrastructure/ai/providerHeaderCredentials';
 /**
  * Sync Payload Builders - Single source of truth for constructing and applying
@@ -47,10 +49,19 @@ import { decryptField, encryptField } from '../infrastructure/persistence/secure
 import { sanitizeQuickMessages } from '../infrastructure/ai/quickMessages';
 import { emitAIStateChanged } from './state/aiStateEvents';
 import {
+  latestAISessionsSnapshot,
+  setLatestAISessionsSnapshot,
+  writeSessionsForStorage,
+  cleanupSdkAgentSessions,
+  cleanupDeletedAIChatSessions,
+} from './state/aiStateSnapshots';
+import { getAISessionsSnapshot, publishAISessionsSnapshot } from './state/aiSessionsStore';
+import {
   persistCommandBlocklistSetting,
   readCommandBlocklistSetting,
 } from './state/commandBlocklistSettings';
 import { rehydrateGlobalSftpBookmarks } from './state/sftp/globalSftpBookmarks';
+import { applyHostBrowserBookmarks, collectHostBrowserBookmarks, getCachedHostBrowserBookmarks } from './hostBrowserBookmarks';
 import {
   clampTerminalFontSizeValue,
   nextTerminalFontSizeSyncVersion,
@@ -64,6 +75,7 @@ import {
 import { isValidHslToken } from './state/settingsStateDefaults';
 import {
   STORAGE_KEY_TERM_AUTO_CLOSE_EXIT_MIGRATED,
+  STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL,
   STORAGE_KEY_THEME,
   STORAGE_KEY_UI_THEME_LIGHT,
   STORAGE_KEY_UI_THEME_DARK,
@@ -125,7 +137,10 @@ import {
   STORAGE_KEY_VAULT_NOTES_FONT_FAMILY,
   STORAGE_KEY_VAULT_NOTES_FONT_SIZE,
   STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE,
+  STORAGE_KEY_AI_SESSIONS,
+  STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS,
 } from '../infrastructure/config/storageKeys';
+import { mergeAiSessionLists, mergeSyncPayloads, stripAiSessionDeviceState, stripAiSessionPayloadForSync } from '../domain/syncMerge';
 import { isTerminalSidePanelAutoOpenTab } from '../domain/terminalSidePanelAutoOpen';
 import { prepareRestoredPayloadConvergentWrites } from './convergentSyncReplica';
 
@@ -171,6 +186,7 @@ function hasMeaningfulPluginSidecars(payload: SyncPayload): boolean {
  */
 export function hasMeaningfulSyncData(payload: SyncPayload): boolean {
   if (hasSyncPayloadEntityData(payload, SYNC_PAYLOAD_ENTITY_KEYS)) return true;
+  if (Array.isArray(payload.aiSessions) && payload.aiSessions.length > 0) return true;
 
   if (
     payload.settings && Object.values(payload.settings).some((value) => value !== undefined)
@@ -200,11 +216,11 @@ export function hasMeaningfulCloudSyncData(payload: SyncPayload): boolean {
 
 /**
  * Returns true only when the payload contains synced vault entities.
- * Settings are intentionally ignored so default settings written on first
- * launch do not make a new device look non-empty during cloud restore checks.
+ * Settings, chat history, and browser bookmarks are ignored: none proves that the vault's
+ * hosts and keys survived local data loss.
  */
 export function hasCloudSyncEntityData(payload: SyncPayload): boolean {
-  return hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS);
+  return hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS.filter((key) => key !== 'aiSessions' && key !== 'browserBookmarks'));
 }
 
 export function shouldPromptCloudVaultRecovery(
@@ -1029,16 +1045,42 @@ function pruneOrphanPerAgentBindings(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a complete `SyncPayload` from local data.
- *
- * Port-forwarding rules are optional because they are managed by a separate
- * state hook (`usePortForwardingState`).  Callers should strip transient
- * runtime fields (status, error, lastUsedAt) before passing them in.
+ * AI chat sessions only leave the device when the user opted in.
+ * Attachments are stripped — see {@link stripAiSessionPayloadForSync}.
  */
+export function collectAiSessionsForSync(): SyncPayload['aiSessions'] {
+  const enabled = localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS);
+  if (enabled?.enabled !== true) return undefined;
+  const sessions = collectLocalAiSessions();
+  if (!writeSessionsForStorage(sessions)) {
+    throw new Error('Unable to persist chat history for cloud sync');
+  }
+  return stripAiSessionPayloadForSync(sessions);
+}
+
+function collectLocalAiSessions(): NonNullable<SyncPayload['aiSessions']> {
+  return latestAISessionsSnapshot
+    ?? localStorageAdapter.read<SyncPayload['aiSessions']>(STORAGE_KEY_AI_SESSIONS)
+    ?? [];
+}
+
+/** Build the portable payload; device-local data is added by the backup builder. */
 export function buildSyncPayload(
   vault: SyncableVaultData,
   portForwardingRules?: PortForwardingRule[],
 ): SyncPayload {
+  const aiSessions = collectAiSessionsForSync();
+  return {
+    ...buildVaultSyncPayload(vault, portForwardingRules),
+    ...(aiSessions !== undefined ? { aiSessions } : {}),
+  };
+}
+
+function buildVaultSyncPayload(
+  vault: SyncableVaultData,
+  portForwardingRules?: PortForwardingRule[],
+): SyncPayload {
+  const browserBookmarks = getCachedHostBrowserBookmarks();
   return {
     hosts: sanitizeHostsForSync(vault.hosts),
     keys: vault.keys,
@@ -1050,7 +1092,9 @@ export function buildSyncPayload(
     notes: vault.notes,
     noteGroups: vault.noteGroups,
     groupConfigs: vault.groupConfigs,
+    monitorPanels: readMonitorPanels(),
     portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
+    ...(browserBookmarks !== undefined ? { browserBookmarks } : {}),
     settings: collectSyncableSettings(),
     syncedAt: Date.now(),
   };
@@ -1124,6 +1168,8 @@ export async function buildCloudSyncPayload(
     collectPluginSidecars?: PluginSyncSidecarCollector;
   },
 ): Promise<SyncPayload> {
+  const aiSessions = collectAiSessionsForSync();
+  const browserBookmarks = await collectHostBrowserBookmarks();
   const base: SyncPayload = {
     hosts: sanitizeHostsForSync(vault.hosts),
     keys: vault.keys,
@@ -1135,7 +1181,10 @@ export async function buildCloudSyncPayload(
     notes: vault.notes,
     noteGroups: vault.noteGroups,
     groupConfigs: vault.groupConfigs,
+    monitorPanels: readMonitorPanels(),
     portForwardingRules: sanitizePortForwardingRulesForSync(portForwardingRules),
+    ...(aiSessions !== undefined ? { aiSessions } : {}),
+    ...(browserBookmarks !== undefined ? { browserBookmarks } : {}),
     settings: await collectCloudSyncableSettings(),
     syncedAt: Date.now(),
   };
@@ -1150,11 +1199,13 @@ export function buildLocalVaultPayload(
   portForwardingRules?: PortForwardingRule[],
 ): SyncPayload {
   const base: SyncPayload = {
-    ...buildSyncPayload(vault, portForwardingRules),
+    ...buildVaultSyncPayload(vault, portForwardingRules),
     // Keep device-local recent-connection timestamps in protective backups.
     hosts: vault.hosts,
     settings: collectLocalBackupSettings(),
     knownHosts: vault.knownHosts,
+    // Cloud consent and cloud attachment stripping do not apply to local backups.
+    aiSessions: collectLocalAiSessions(),
   };
   // Protective backups must capture plugin sidecars so restore can recover
   // plugin settings/baselines. Prefer the last successful host collect cache
@@ -1184,6 +1235,8 @@ export async function buildLocalVaultPayloadAsync(
   portForwardingRules?: PortForwardingRule[],
 ): Promise<SyncPayload> {
   const base = buildLocalVaultPayload(vault, portForwardingRules);
+  const browserBookmarks = await collectHostBrowserBookmarks();
+  if (browserBookmarks !== undefined) base.browserBookmarks = browserBookmarks;
   const {
     collectPluginSyncSidecarsFromHost,
     isPluginSidecarHostUnavailableError,
@@ -1207,12 +1260,96 @@ export async function buildLocalVaultPayloadAsync(
   return base;
 }
 
-/**
- * Apply a downloaded `SyncPayload` to local state via the provided importers.
- *
- * This ensures both vault data and port-forwarding rules are imported
- * consistently across windows.
- */
+/** Merge downloaded chat data through the existing state and persistence boundary. */
+async function applyAiSessionData(sessions: NonNullable<SyncPayload['aiSessions']>, includeLocalOnlyData: boolean): Promise<void> {
+  const incoming = includeLocalOnlyData
+    ? sessions
+    : sessions.map(stripAiSessionDeviceState);
+  const incomingIds = new Set(incoming.map((session) => session.id));
+  const incomingById = new Map(incoming.map((session) => [session.id, session]));
+  const portableMessages = (value: typeof incoming[number]) => stripAiSessionPayloadForSync([value])[0].messages;
+  const affectedIds = collectLocalAiSessions().filter((local) => {
+    const next = incomingById.get(local.id);
+    if (!next) return true;
+    const candidate = includeLocalOnlyData ? next : mergeAiSessionLists([local], [next])[0];
+    return JSON.stringify(portableMessages(local)) !== JSON.stringify(portableMessages(candidate));
+  }).map((session) => session.id);
+  if (affectedIds.length > 0) {
+    const { stopAIChatSessionBeforeReplacement } = await import('./state/useAIChatStreaming');
+    await Promise.all(affectedIds.map(stopAIChatSessionBeforeReplacement));
+  }
+  // Stop finalizers can finish the last local message. Read it again before
+  // merging so the stopped turn cannot write into a replaced/deleted session.
+  const localSessions = collectLocalAiSessions();
+  const localById = new Map(localSessions.map((session) => [session.id, session]));
+  const removedIds = localSessions.filter((session) => !incomingIds.has(session.id)).map((session) => session.id);
+  const resetSdkSessions: string[] = [];
+  // The sync merge has already decided which session IDs survive. Backups
+  // restore their exact transcript; cloud survivors still retain local turns.
+  const candidates = includeLocalOnlyData ? incoming
+    : mergeAiSessionLists(localSessions.filter((session) => incomingIds.has(session.id)), incoming);
+  const mergedSessions = candidates.map((session) => {
+    // Native SDK threads belong to this device. Reuse the local thread
+    // only while it already contains the entire merged transcript.
+    const local = localById.get(session.id);
+    const transcriptChanged = local
+      && JSON.stringify(portableMessages(local)) !== JSON.stringify(portableMessages(session));
+    if (transcriptChanged) resetSdkSessions.push(session.id);
+    const { externalSessionId: _remoteThread, ...portable } = session;
+    return local?.externalSessionId && !transcriptChanged
+      ? { ...portable, externalSessionId: local.externalSessionId }
+      : portable;
+  });
+  if (!writeSessionsForStorage(mergedSessions)) {
+    throw new Error('Unable to save downloaded AI chat history');
+  }
+  cleanupDeletedAIChatSessions(removedIds);
+  await cleanupSdkAgentSessions(resetSdkSessions);
+  setLatestAISessionsSnapshot(mergedSessions);
+  publishAISessionsSnapshot({ ...getAISessionsSnapshot(), sessions: mergedSessions });
+  emitAIStateChanged(STORAGE_KEY_AI_SESSIONS);
+}
+
+/** Read existing cloud chats before an enabled empty local list can overwrite them. */
+export async function setAiSessionsSyncPreference(
+  enabled: boolean,
+  loadRemotePayloads: () => Promise<SyncPayload[]>,
+  preserveDeletions = false,
+): Promise<void> {
+  const wasEnabled = localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled === true;
+  if (enabled && !wasEnabled) {
+    const remotes = await loadRemotePayloads();
+    // Reuse the ordinary no-base deletion rules, including cloud tombstones,
+    // while retaining local-only chats when this is a first-time opt-in.
+    const local: SyncPayload = { hosts: [], keys: [], identities: [], snippets: [], customGroups: [],
+      aiSessions: collectLocalAiSessions(), syncedAt: 0 };
+    const merged = remotes.reduce((current, remote) =>
+      mergeSyncPayloads(null, current, remote, { preserveDeletions }).payload, local);
+    const previous = localStorageAdapter.readString(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS);
+    const { withRestoreBarrier } = await import('./localVaultBackups');
+    await withRestoreBarrier(async () => {
+      if ((localStorageAdapter.readNumber(STORAGE_KEY_VAULT_RESTORE_IN_PROGRESS_UNTIL) ?? 0) <= Date.now()) {
+        throw new Error('Unable to pause sync while enabling chat history');
+      }
+      if (!localStorageAdapter.write(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS, { enabled })) {
+        throw new Error('Unable to save the chat sync preference');
+      }
+      try {
+        await applyAiSessionData(merged.aiSessions ?? [], false);
+      } catch (error) {
+        if (previous === null) localStorageAdapter.remove(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS);
+        else localStorageAdapter.writeString(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS, previous);
+        throw error;
+      }
+    });
+    return;
+  }
+  if (!localStorageAdapter.write(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS, { enabled })) {
+    throw new Error('Unable to save the chat sync preference');
+  }
+}
+
+/** Apply downloaded vault data and supported settings through their state boundaries. */
 async function preparePayloadApply(
   payload: SyncPayload,
   importers: SyncPayloadImporters,
@@ -1226,6 +1363,7 @@ async function preparePayloadApply(
   // so a previously poisoned cloud/backup snapshot can still restore host
   // shells and let the user re-enter secrets (#2702).
   const sanitizedPayload = stripSyncPayloadEncryptedCredentials(payload);
+  const monitorPanelsAtPrepare = readMonitorPanels();
   // Prepare credentials before any vault or settings mutation. Encryption can
   // fail when local credential storage is unavailable; reuse the result below.
   const providers = sanitizedPayload.settings?.ai?.providers;
@@ -1267,12 +1405,24 @@ async function preparePayloadApply(
   }
 
   return () => Promise.resolve(importers.importVaultData(JSON.stringify(vaultImport))).then(async () => {
+    if (sanitizedPayload.monitorPanels !== undefined) await applyMonitorPanels(normalizeMonitorPanels(sanitizedPayload.monitorPanels), monitorPanelsAtPrepare, options.includeLocalOnlyData);
     // Only import port-forwarding rules when the payload explicitly carries
     // them.  Absent field = "payload was created before this feature existed",
     // so local rules are preserved.  Explicitly present [] = "remote has no
     // rules, clear local state".
     if (sanitizedPayload.portForwardingRules !== undefined && importers.importPortForwardingRules) {
       importers.importPortForwardingRules(sanitizedPayload.portForwardingRules);
+    }
+    if (sanitizedPayload.browserBookmarks !== undefined) {
+      await applyHostBrowserBookmarks(sanitizedPayload.browserBookmarks);
+    }
+
+    // AI chat sessions merge append-only: a cloud snapshot may be missing
+    // turns that only exist on this device, so union instead of replace.
+    const applyAiSessions = options.includeLocalOnlyData
+      || localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled === true;
+    if (applyAiSessions && Array.isArray(sanitizedPayload.aiSessions)) {
+      await applyAiSessionData(sanitizedPayload.aiSessions, options.includeLocalOnlyData);
     }
 
     // Apply synced settings

@@ -1,6 +1,11 @@
 import type { S3Config, SyncedFile, WebDAVConfig } from "../../domain/sync";
 import type { AppLockSettings } from "../../domain/appLock";
 
+export interface HostBrowserPanelSnapshotLayer {
+  image: string;
+  bounds: { x: number; y: number; width: number; height: number };
+}
+
 type AppLockRuntimeReason = 'startup' | 'idle' | 'manual' | 'background' | null;
 
 interface AppLockRuntimeState {
@@ -102,6 +107,25 @@ declare global {
 
     // Settings window
     openSettingsWindow?(): Promise<boolean>;
+    setHostBrowserPanelLayout?(options: { browserId: string; visible: boolean; occluded?: boolean; theme?: 'dark' | 'light'; themeTokens?: Record<string, string>; bounds?: { x: number; y: number; width: number; height: number } }): Promise<boolean | { layers: HostBrowserPanelSnapshotLayer[] }>;
+    closeHostBrowserPanel?(browserId: string): Promise<boolean>;
+    getHostBrowserPanelState?(browserId: string): Promise<import('../../domain/hostBrowser').HostBrowserState>;
+    commandHostBrowserPanel?(browserId: string, command: import('../../domain/hostBrowser').HostBrowserCommand): Promise<import('../../domain/hostBrowser').HostBrowserState>;
+    listHostBrowserPanelBookmarks?(browserId: string): Promise<import('../../domain/hostBrowser').HostBrowserBookmark[]>;
+    saveHostBrowserPanelBookmark?(browserId: string, bookmark: Partial<import('../../domain/browserBookmark').BrowserBookmark>): Promise<import('../../domain/browserBookmark').BrowserBookmark>;
+    removeHostBrowserPanelBookmark?(browserId: string, id: string): Promise<boolean>;
+    listHostBrowserPanelDownloads?(browserId: string): Promise<import('../../domain/hostBrowser').HostBrowserDownload[]>;
+    commandHostBrowserPanelDownload?(browserId: string, command: { type: 'open-folder' | 'clear' | 'cancel' | 'remove' | 'open' | 'reveal' | 'save-as'; id?: string }): Promise<boolean>;
+    onHostBrowserPanelEvent?(callback: (event: import('../../domain/hostBrowser').HostBrowserPanelEvent) => void): () => void;
+
+    openHostBrowserUrl?(options: { browserId: string; url: string }): Promise<boolean>;
+    requestHostBrowserPanel?(request: { host: import('../../domain/models').Host; sessionId?: string; url?: string }): Promise<boolean>;
+    onHostBrowserPanelRequest?(callback: (request: { host: import('../../domain/models').Host; sessionId?: string; url?: string }) => void): () => void;
+    focusHostBrowser?(hostId: string): Promise<boolean>;
+    openHostBrowser?(options: { browserId?: string; embedded?: boolean; local?: boolean; hostId: string; label: string; theme: 'dark' | 'light'; themeTokens?: Record<string, string>; connectionOptions?: PortForwardOptions }): Promise<{ reused: boolean }>;
+    getHostBrowserBookmarks?(): Promise<import('../../domain/browserBookmark').BrowserBookmark[]>;
+    applyHostBrowserBookmarks?(items: import('../../domain/browserBookmark').BrowserBookmark[]): Promise<boolean>;
+    onHostBrowserBookmarksChanged?(callback: () => void): () => void;
     closeSettingsWindow?(): Promise<void>;
 
     // Cross-window settings sync
@@ -258,6 +282,7 @@ declare global {
       payload: import('./domain/sync').SyncPayload;
     }>;
     trimVaultBackups?(payload: { maxCount: number }): Promise<{ deletedCount: number; keptCount: number }>;
+    clearVaultBackups?(): Promise<{ deletedCount: number }>;
     openVaultBackupDir?(): Promise<{ success: boolean; path: string }>;
     // Subscribe to main-process-driven "vault backups changed" events.
     // Returns an unsubscribe callback. Undefined in non-Electron builds.

@@ -1,3 +1,5 @@
+import { readMonitorPanels, writeMonitorPanels } from './monitorPanelsStorage';
+import type { MonitorPanel } from '../../domain/monitorPanels';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   hostsEqualForIdentityReuse,
@@ -82,6 +84,10 @@ import {
 import { commitVaultNotesWrite } from "./vaultNotesPersistence";
 import { rebasePendingVaultNotes } from "../../domain/vaultNotesReconciliation";
 import { publishShellHistorySnapshot } from "./shellHistoryStore";
+import {
+  clearHistory as clearAutocompleteHistory,
+  markCommandHistoryCleared,
+} from "./commandHistoryStore";
 import { setVaultInitialized } from "./vaultInitStore";
 import { notify } from "../notification";
 import {
@@ -120,6 +126,7 @@ import {
 import { commitVaultGroupMutationPersistence } from "./vaultGroupMutationPersistence";
 
 type ExportableVaultData = {
+  monitorPanels?: MonitorPanel[];
   hosts: Host[];
   keys: SSHKey[];
   identities?: Identity[];
@@ -1184,6 +1191,7 @@ export const useVaultState = () => {
   }, []);
 
   const clearVaultData = useCallback(() => {
+    void withVaultImportLock('vault', async () => writeMonitorPanels([]));
     updateHosts([]);
     updateKeys([]);
     updateIdentities([]);
@@ -1249,6 +1257,23 @@ export const useVaultState = () => {
     localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, []);
     publishShellHistorySnapshot([]);
   }, []);
+
+  /**
+   * Clear every locally recorded command history: the global shell history, the
+   * terminal autocomplete history, and the in-memory compose-bar recall.
+   *
+   * The autocomplete store persists the clear synchronously and fans it out to
+   * other renderers through its own `storage` listener. The compose-bar store
+   * subscribes to that same clear event, so detached terminal popups drop their
+   * recall too without a separate broadcast.
+   */
+  const clearAllCommandHistory = useCallback(() => {
+    clearShellHistory();
+    clearAutocompleteHistory();
+    // Tombstone so a later first-time histfile import cannot restore the
+    // commands the user just deleted.
+    markCommandHistoryCleared();
+  }, [clearShellHistory]);
 
   const removeShellHistoryEntry = useCallback((entryId: string) => {
     setShellHistory((prev) => {
@@ -1951,6 +1976,7 @@ export const useVaultState = () => {
 
   const exportData = useCallback(
     (): ExportableVaultData => ({
+      monitorPanels: readMonitorPanels(),
       hosts,
       keys,
       identities,
@@ -1969,6 +1995,7 @@ export const useVaultState = () => {
   const importData = useCallback(
     (payload: Partial<ExportableVaultData>): Promise<void> => {
       const encryptedWrites: Promise<void>[] = [];
+      if (payload.monitorPanels !== undefined) encryptedWrites.push(withVaultImportLock('vault', async () => writeMonitorPanels(payload.monitorPanels)));
       if (payload.hosts) {
         // Cloud payloads no longer carry `lastConnectedAt` (#2629), but any
         // remote reconciliation replaces the whole local host array. Re-attach
@@ -2201,6 +2228,7 @@ export const useVaultState = () => {
     updateGroupConfigs,
     addShellHistoryEntry,
     clearShellHistory,
+    clearAllCommandHistory,
     removeShellHistoryEntry,
     addConnectionLog,
     updateConnectionLog,

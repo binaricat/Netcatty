@@ -1,4 +1,5 @@
 import type { TerminalSession } from "../../domain/models";
+import { classifyLocalShellType } from "../../lib/localShell";
 
 type SftpReuseCandidate = Pick<
   TerminalSession,
@@ -44,7 +45,12 @@ function getClonedShellType(
   session: TerminalSession,
   localShellType?: TerminalSession["shellType"],
 ): TerminalSession["shellType"] {
-  return session.protocol === "local" ? localShellType : session.shellType;
+  if (session.protocol !== "local") return session.shellType;
+  // Clones retain an explicit per-session executable, so its shell type must
+  // survive a different global default (e.g. saved CMD with WSL in Settings).
+  return session.localShell !== undefined
+    ? (session.shellType ?? classifyLocalShellType(session.localShell))
+    : localShellType;
 }
 
 function createTerminalSessionClone(

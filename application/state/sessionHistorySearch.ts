@@ -349,6 +349,56 @@ function filterSessionHistoryStore<T extends SessionHistorySearchTarget>(
   }
 }
 
+/** One query retains only match decisions while its indexes stay memory-bounded. */
+export type SessionHistorySearchScan<T extends SessionHistorySearchTarget> = {
+  /** Null means more work remains; each call yields after a short bounded slice. */
+  step: (sessions: readonly T[]) => T[] | null;
+  dispose: () => void;
+};
+
+function createSessionHistorySearchScan<T extends SessionHistorySearchTarget>(
+  store: SessionHistorySearchStore,
+  query: string,
+  options: SessionHistorySearchOptions,
+): SessionHistorySearchScan<T> {
+  const preparedQuery = prepareSearchQuery(truncateQueryForMatch(query.trim()));
+  const matches = new Map<T, boolean>();
+  let disposed = false;
+  store.scanTouched.clear();
+  return {
+    step(sessions) {
+      if (disposed) return null;
+      const live = new Set<SessionHistorySearchTarget>(sessions);
+      for (const session of matches.keys()) {
+        if (!live.has(session)) matches.delete(session);
+      }
+      for (const session of store.scanTouched) {
+        if (!live.has(session)) store.scanTouched.delete(session);
+      }
+      pruneSessionSearchIndexCache(store, sessions);
+      const startedAt = performance.now();
+      let processed = 0;
+      for (const session of sessions) {
+        if (matches.has(session)) continue;
+        const index = getSessionSearchIndex(store, session, options.untitledLabel ?? '');
+        matches.set(session, matchesSessionSearchIndex(preparedQuery, index));
+        processed += 1;
+        // A session already has a bounded searchable corpus. Also cap the
+        // number per slice so a fast clock/cache cannot make a huge task.
+        if (processed >= 16 || performance.now() - startedAt >= 4) return null;
+      }
+      pruneSessionSearchIndexCache(store, sessions);
+      store.scanTouched.clear();
+      return sessions.filter((session) => matches.get(session));
+    },
+    dispose() {
+      disposed = true;
+      matches.clear();
+      store.scanTouched.clear();
+    },
+  };
+}
+
 /**
  * One stateful search instance per consumer (one mounted session history
  * drawer). The cache lives in the returned instance's store instead of module
@@ -362,6 +412,10 @@ export type SessionHistorySearch = {
     query: string,
     options?: SessionHistorySearchOptions,
   ) => T[];
+  createScan: <T extends SessionHistorySearchTarget>(
+    query: string,
+    options?: SessionHistorySearchOptions,
+  ) => SessionHistorySearchScan<T>;
   clearSessionHistorySearchCache: () => void;
 };
 
@@ -374,6 +428,9 @@ export function createSessionHistorySearch(): SessionHistorySearch {
   return {
     filterSessionHistory(sessions, query, options = {}) {
       return filterSessionHistoryStore(store, sessions, query, options);
+    },
+    createScan(query, options = {}) {
+      return createSessionHistorySearchScan(store, query, options);
     },
     clearSessionHistorySearchCache() {
       clearSessionHistorySearchStore(store);

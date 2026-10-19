@@ -274,6 +274,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { id: 'broadcast', action: 'broadcast', label: 'Switch the Broadcast Mode', mac: '⌘ + B', pc: 'Ctrl + B', category: 'app' },
   { id: 'toggle-side-panel', action: 'toggleSidePanel', label: 'Toggle Side Panel', mac: '⌘ + \\', pc: 'Ctrl + \\', category: 'app' },
   { id: 'open-settings', action: 'openSettings', label: 'Open Settings', mac: '⌘ + ,', pc: 'Ctrl + ,', category: 'app' },
+  { id: 'toggle-opacity', action: 'toggleOpacity', label: 'Toggle Window Transparency', mac: '⌘ + U', pc: 'Ctrl + Shift + U', category: 'app' },
 
   // SFTP Operations
   { id: 'sftp-copy', action: 'sftpCopy', label: 'Copy Files', mac: '⌘ + C', pc: 'Ctrl + C', category: 'sftp' },

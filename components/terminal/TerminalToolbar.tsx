@@ -11,6 +11,7 @@ import {
   FileText,
   FolderInput,
   FolderSync,
+  Globe2,
   Highlighter,
   History,
   Languages,
@@ -44,6 +45,7 @@ import { isPluginHostProtocol } from '../../domain/pluginConnection';
 export const TERMINAL_TOOLBAR_ITEM_IDS = [
   'highlight',
   'sftp',
+  'browser',
   'ymodemSend',
   'ymodemReceive',
   'compose',
@@ -65,6 +67,7 @@ export const TERMINAL_TOOLBAR_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
   placement: {
     highlight: 'show',
     sftp: 'show',
+    browser: 'show',
     ymodemSend: 'show',
     ymodemReceive: 'show',
     compose: 'show',
@@ -94,6 +97,7 @@ export interface TerminalToolbarProps {
   /** Popup vault mutation path — compact toolbar has no AppSideEffects listener. */
   onDeleteSnippets?: (ids: ReadonlySet<string>) => void;
   onOpenSFTP: () => void;
+  onOpenBrowser?: () => void;
   onSendYmodem?: () => void;
   onReceiveYmodem?: () => void;
   onOpenScripts: () => void;
@@ -133,6 +137,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   onSnippetClick,
   onDeleteSnippets,
   onOpenSFTP,
+  onOpenBrowser,
   onSendYmodem,
   onReceiveYmodem,
   onOpenScripts,
@@ -238,6 +243,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
       'terminalSettings',
     ];
     if (!hidesSftp) ids.push('sftp');
+    if (onOpenBrowser && (!host?.protocol || ['ssh', 'mosh', 'local'].includes(host.protocol))) ids.push('browser');
     if (isSerialTerminal) {
       ids.push('ymodemSend', 'ymodemReceive');
     }
@@ -253,6 +259,8 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     historySupported,
     isSerialTerminal,
     onConfigureOsc7,
+    onOpenBrowser,
+    host?.protocol,
     onSetTerminalEncoding,
     onStartRecording,
     showLogButton,
@@ -262,6 +270,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     (): Record<TerminalToolbarItemId, string> => ({
       highlight: t('terminal.toolbar.hostHighlight.title'),
       sftp: t('terminal.toolbar.openSftp'),
+      browser: t('terminal.browser.open'),
       ymodemSend: t('terminal.toolbar.sendYmodem'),
       ymodemReceive: t('terminal.toolbar.receiveYmodem'),
       compose: t('terminal.toolbar.composeBar'),
@@ -283,6 +292,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     (): Record<TerminalToolbarItemId, React.ReactNode> => ({
       highlight: <Highlighter size={14} />,
       sftp: <FolderInput size={14} />,
+      browser: <Globe2 size={14} />,
       ymodemSend: <Upload size={14} />,
       ymodemReceive: <Download size={14} />,
       compose: <TextCursorInput size={14} />,
@@ -316,7 +326,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   );
 
   const { shown, collapsed } = useMemo(() => {
-    const available = new Set(availableIds);
+    const available = new Set<string>(availableIds);
     const shownIds: string[] = [];
     const collapsedIds: string[] = [];
     for (const id of toolbarLayout.layout.order) {
@@ -517,6 +527,18 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                 ? t('terminal.toolbar.openSftp')
                 : t('terminal.toolbar.availableAfterConnect')}
             </TooltipContent>
+          </Tooltip>
+        );
+      case 'browser':
+        return (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <Button variant="secondary" size="icon" className={buttonBase}
+                aria-label={t('terminal.browser.open')} onClick={onOpenBrowser}>
+                <Globe2 size={12} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('terminal.browser.open')}</TooltipContent>
           </Tooltip>
         );
       case 'ymodemSend':
@@ -815,6 +837,15 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
                   ? t('terminal.toolbar.openSftp')
                   : t('terminal.toolbar.availableAfterConnect')}
               </span>
+            </button>
+          </PopoverClose>
+        );
+      case 'browser':
+        return (
+          <PopoverClose asChild key={id}>
+            <button type="button" className={menuItemClass} onClick={onOpenBrowser}>
+              <Globe2 size={12} className="shrink-0" />
+              <span className="flex-1 text-left truncate">{t('terminal.browser.open')}</span>
             </button>
           </PopoverClose>
         );

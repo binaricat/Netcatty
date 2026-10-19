@@ -7,7 +7,7 @@ import { mergeSyncPayloads } from '../../../domain/syncMerge';
 import { stripSyncPayloadEncryptedCredentials, healPoisonedSecretsForMerge } from '../../../domain/credentials';
 import { summarizeSyncChanges, withSyncReliabilityMeta } from '../../../domain/syncReliability';
 import { detectSuspiciousShrink, type ShrinkFinding } from '../../../domain/syncGuards';
-import { resolveCloudSyncConflictAction } from '../../../domain/syncStrategy';
+import { isPreserveDeletionsStrategy, resolveCloudSyncConflictAction } from '../../../domain/syncStrategy';
 import { assertConvergentSyncWriteCompatible } from '../../../domain/convergentSync';
 import { getConvergentSyncLocalConfig } from '../convergentSyncConfig';
 import { syncAllProvidersConvergentlyImpl } from './convergentSyncRuntimeMethods';
@@ -67,7 +67,7 @@ async function uploadLocalPayloadImpl(this: any,
   const directBase = await this.loadSyncBase(provider);
   assertSyncSecurityGeneration(this, syncSecurityGeneration);
   let directRemoteRef: SyncPayload | null = null;
-  if (!directBase && remoteFile) {
+  if ((!directBase || payload.aiSessions === undefined) && remoteFile) {
     assertSyncSecurityGeneration(this, syncSecurityGeneration);
     try {
       directRemoteRef = await EncryptionService.decryptPayload(
@@ -78,6 +78,11 @@ async function uploadLocalPayloadImpl(this: any,
       directRemoteRef = null;
     }
     assertSyncSecurityGeneration(this, syncSecurityGeneration);
+  }
+  // Whole-vault keep-local does not authorize deleting a collection this
+  // client omitted. Use the checked remote, which may be newer than the base.
+  if (payload.aiSessions === undefined && directRemoteRef?.aiSessions !== undefined) {
+    payload = { ...payload, aiSessions: directRemoteRef.aiSessions };
   }
   const metadataBase = directBase ?? directRemoteRef;
   const payloadForUpload = withSyncReliabilityMeta(payload, metadataBase, {
@@ -428,6 +433,16 @@ export async function syncToProviderImpl(this: any,
       // unknown remote state.
       const checkResult = await this.checkProviderConflict(provider, adapter);
       assertSyncSecurityGeneration(this, syncSecurityGeneration);
+      assertConvergentSyncWriteCompatible(checkResult.remoteFile?.meta, payload);
+      // Opting out means this device has no chat changes to publish. Retain
+      // the provider's existing history even on a non-conflicting upload.
+      if (payload.aiSessions === undefined && checkResult.remoteFile && !checkResult.conflict) {
+        const remotePayload = await EncryptionService.decryptPayload(checkResult.remoteFile, this.masterPassword);
+        assertSyncSecurityGeneration(this, syncSecurityGeneration);
+        if (remotePayload.aiSessions !== undefined) {
+          payload = { ...payload, aiSessions: remotePayload.aiSessions };
+        }
+      }
       const unchanged = await tryAcceptIdenticalRemoteImpl.call(
         this, provider, adapter, payload, checkResult.remoteFile,
         syncSecurityGeneration, providerIdentity,
@@ -439,9 +454,11 @@ export async function syncToProviderImpl(this: any,
         return unchanged;
       }
 
-      if (checkResult.conflict && checkResult.remoteFile) {
+      if (checkResult.remoteFile && (
+        checkResult.conflict || isPreserveDeletionsStrategy(this.state.syncStrategy)
+      )) {
         const conflictAction = resolveCloudSyncConflictAction(this.state.syncStrategy, {
-          hasConflict: checkResult.conflict,
+          hasConflict: true,
           hasRemoteFile: Boolean(checkResult.remoteFile),
         });
 
@@ -489,7 +506,9 @@ export async function syncToProviderImpl(this: any,
           const localHealed = healPoisonedSecretsForMerge(payload, remotePayload, base);
           remotePayload = healPoisonedSecretsForMerge(remotePayload, payload, base);
           remotePayloadForConflict = remotePayload;
-          const mergeResult = mergeSyncPayloads(base, localHealed, remotePayload);
+          const mergeResult = mergeSyncPayloads(base, localHealed, remotePayload, {
+            preserveDeletions: isPreserveDeletionsStrategy(this.state.syncStrategy),
+          });
           const mergedPayload = withSyncReliabilityMeta(
             stripSyncPayloadEncryptedCredentials(mergeResult.payload),
             base,

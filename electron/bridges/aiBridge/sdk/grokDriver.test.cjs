@@ -8,10 +8,12 @@ const {
   createLineBuffer,
   formatGrokErrorForUser,
   listGrokModels,
+  mergeGrokCatalogModels,
   mergeWorkspaceGrokMcpToml,
   parseGrokModelsOutput,
   resetGrokMcpMergeRefcountsForTests,
   resolveGrokPermissionFlags,
+  resolveGrokCatalogCurrentModelId,
   resolveGrokSpawnSpec,
   resolveGrokToolIntegrationFlags,
   resolveGrokTurnPrompt,
@@ -25,6 +27,7 @@ const {
   stripGrokMcpServerSection,
   translateGrokStreamEvent,
 } = require("./grokDriver.cjs");
+const { parseGrokAcpModelCatalog, buildGrokAcpSpawnArgs } = require("./grokAcpDriver.cjs");
 
 function makeEmitter() {
   const calls = [];
@@ -477,6 +480,54 @@ test("parseGrokModelsOutput reads default and bullet list", () => {
   ]);
 });
 
+// Ground truth captured 2026-10-12 from `grok --no-auto-update models`
+// (grok 1.0.50): non-default entries use "-" bullets, and the previous
+// "*"-only regex silently dropped them so the live catalog shrank to a
+// single model. Every bullet line must be extracted; the "(default)"
+// marker only appears on the "*" line.
+test("parseGrokModelsOutput captures dash-bullet entries (grok 1.0.50 fixture)", () => {
+  const parsed = parseGrokModelsOutput([
+    "You are logged in with grok.com.",
+    "",
+    "Default model: grok-4.7",
+    "",
+    "Available models:",
+    "  * grok-4.7 (default)",
+    "  - grok-4.7-build-fast",
+    "  - grok-4.6",
+    "  - grok-4.5",
+  ].join("\n"));
+  assert.equal(parsed.currentModelId, "grok-4.7");
+  assert.deepEqual(
+    parsed.models.map((model) => model.id),
+    ["grok-4.7", "grok-4.7-build-fast", "grok-4.6", "grok-4.5"],
+  );
+  // Default effort fallback still applies per model id.
+  assert.deepEqual(
+    parsed.models.map((model) => model.thinkingLevels),
+    [
+      ["xhigh", "high", "medium", "low"],
+      ["xhigh", "high", "medium", "low"],
+      ["xhigh", "high", "medium", "low"],
+      ["high", "medium", "low"],
+    ],
+  );
+});
+
+test("parseGrokModelsOutput ignores separator dashes and keeps default detection", () => {
+  const parsed = parseGrokModelsOutput([
+    "Available models:",
+    "-----",
+    "  - grok-4.6",
+    "  * grok-4.7 (default)",
+  ].join("\n"));
+  assert.equal(parsed.currentModelId, "grok-4.7");
+  assert.deepEqual(
+    parsed.models.map((model) => model.id),
+    ["grok-4.6", "grok-4.7"],
+  );
+});
+
 test("runGrokTurn streams fixture lines and emits done", async () => {
   const emitter = makeEmitter();
   const child = new EventEmitter();
@@ -763,4 +814,94 @@ test("listGrokModels parses spawn stdout", async () => {
   });
   assert.equal(result.currentModelId, "grok-4.5");
   assert.equal(result.models[0].id, "grok-4.5");
+});
+
+test("mergeGrokCatalogModels unions an ACP subset with the full CLI catalog", () => {
+  const acpModels = [{
+    id: "grok-4.6",
+    name: "Grok 4.6",
+    description: "From ACP",
+    thinkingLevels: ["xhigh", "high", "medium", "low"],
+    defaultThinkingLevel: "high",
+  }];
+  const cliModels = [
+    { id: "grok-4.7", name: "Grok 4.7", thinkingLevels: ["xhigh", "high", "medium", "low"], defaultThinkingLevel: "high" },
+    { id: "grok-4.7-build-fast", name: "Grok 4.7 Fast", thinkingLevels: ["xhigh", "high", "medium", "low"], defaultThinkingLevel: "high" },
+    { id: "grok-4.6", name: "grok-4.6", thinkingLevels: ["xhigh", "high", "medium", "low"], defaultThinkingLevel: "high" },
+    { id: "grok-4.5", name: "grok-4.5", thinkingLevels: ["high", "medium", "low"], defaultThinkingLevel: "high" },
+  ];
+  const merged = mergeGrokCatalogModels(acpModels, cliModels);
+  assert.deepEqual(merged.map((m) => m.id), [
+    "grok-4.6",
+    "grok-4.7",
+    "grok-4.7-build-fast",
+    "grok-4.5",
+  ]);
+  // ACP wins for shared ids: vendor name/description survive the CLI row.
+  const shared = merged.find((m) => m.id === "grok-4.6");
+  assert.equal(shared.name, "Grok 4.6");
+  assert.equal(shared.description, "From ACP");
+});
+
+test("mergeGrokCatalogModels keeps ACP entries first and never duplicates shared ids", () => {
+  const acpModels = [
+    { id: "grok-4.7", name: "Grok 4.7", thinkingLevels: ["high"], defaultThinkingLevel: "high" },
+    { id: "grok-4.5", name: "Grok 4.5", thinkingLevels: ["high"], defaultThinkingLevel: "high" },
+  ];
+  const cliModels = [
+    { id: "grok-4.7", name: "grok-4.7", thinkingLevels: ["high"], defaultThinkingLevel: "high" },
+    { id: "grok-4.6", name: "grok-4.6", thinkingLevels: ["high"], defaultThinkingLevel: "high" },
+  ];
+  const merged = mergeGrokCatalogModels(acpModels, cliModels);
+  assert.deepEqual(merged.map((m) => m.id), ["grok-4.7", "grok-4.5", "grok-4.6"]);
+  // ACP entry wins outright; missing fields are not invented.
+  assert.equal(merged[0].name, "Grok 4.7");
+});
+
+test("mergeGrokCatalogModels fills descriptive fields without inventing ACP reasoning support", () => {
+  const acpModels = [{ id: "grok-4.6", name: "Grok 4.6" }];
+  const cliModels = [{
+    id: "grok-4.6",
+    name: "grok-4.6",
+    description: "CLI description",
+    thinkingLevels: ["xhigh", "high", "medium", "low"],
+    defaultThinkingLevel: "high",
+  }];
+  const merged = mergeGrokCatalogModels(acpModels, cliModels);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].name, "Grok 4.6");
+  assert.equal(merged[0].description, "CLI description");
+  assert.equal(merged[0].thinkingLevels, undefined);
+  assert.equal(merged[0].defaultThinkingLevel, undefined);
+});
+
+test("Grok catalog union preserves explicit ACP no-reasoning through selection and spawn arguments", () => {
+  const acp = parseGrokAcpModelCatalog({ _meta: { modelState: {
+    currentModelId: "grok-4.6",
+    availableModels: ["grok-4.6", "grok-4.5"].map((modelId) => ({
+      modelId,
+      _meta: { supportsReasoningEffort: false },
+    })),
+  } } });
+  const cli = parseGrokModelsOutput("* grok-4.6 (default)\n- grok-4.5");
+  assert.ok(cli.models.every((model) => model.thinkingLevels.length > 0));
+  const merged = mergeGrokCatalogModels(acp.models, cli.models);
+  for (const model of merged) {
+    assert.equal(model.thinkingLevels, undefined);
+    assert.equal(model.defaultThinkingLevel, undefined);
+    const selection = resolveGrokCatalogCurrentModelId(merged, model.id);
+    assert.equal(selection, model.id);
+    const args = buildGrokAcpSpawnArgs({ model: selection, permissionMode: "confirm" });
+    assert.ok(!args.includes("--reasoning-effort"));
+  }
+});
+
+test("mergeGrokCatalogModels tolerates empty or malformed sides", () => {
+  assert.deepEqual(mergeGrokCatalogModels([], [{ id: "grok-4.5", name: "grok-4.5" }]), [
+    { id: "grok-4.5", name: "grok-4.5" },
+  ]);
+  assert.deepEqual(mergeGrokCatalogModels([{ id: "grok-4.5", name: "grok-4.5" }], null), [
+    { id: "grok-4.5", name: "grok-4.5" },
+  ]);
+  assert.deepEqual(mergeGrokCatalogModels(null, null), []);
 });

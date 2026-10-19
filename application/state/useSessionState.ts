@@ -1098,17 +1098,12 @@ export const useSessionState = ({
     if (targetHosts.length === 0) return;
     const resolvedCommand = commandOverride ?? snippet.command;
 
-    // Create sessions for each target host
-    const newSessions: TerminalSession[] = targetHosts.map(host => ({
-      id: crypto.randomUUID(),
-      hostId: host.id,
-      hostLabel: host.label,
-      hostname: host.hostname,
-      username: host.username,
-      status: 'connecting' as const,
-      charset: host.charset,
-      // workspaceId will be set after workspace is created
-    }));
+    // Create sessions for each target host. createHostTerminalSession copies
+    // protocol, shellType, and local-shell metadata, so local vault hosts keep
+    // their transport info (session consumers treat a missing protocol as SSH).
+    const newSessions: TerminalSession[] = targetHosts.map(host =>
+      createHostTerminalSession(crypto.randomUUID(), host),
+    );
 
     const sessionIds = newSessions.map(s => s.id);
     

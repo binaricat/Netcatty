@@ -2,7 +2,7 @@ import type { GroupConfig, Host, Identity, ProxyProfile } from '../models';
 import { applyGroupDefaults, resolveGroupDefaults } from '../groupConfig';
 import { isPluginHostProtocol } from '../pluginConnection';
 import { hasUnreadableProxyCredential, materializeHostProxyProfile, resolveProxyConfigAuth } from '../proxyProfiles';
-import { encodeCsvKeyPath, encodeCsvPassphrase, encodeCsvProxy } from './csvCredentialFields';
+import { CsvLocalShellSpec, encodeCsvKeyPath, encodeCsvLocalShell, encodeCsvPassphrase, encodeCsvProxy } from './csvCredentialFields';
 import { formatCsvProxy } from './csvProxy';
 
 const UTF8_BOM = "\uFEFF";
@@ -36,7 +36,7 @@ export const getVaultCsvTemplate = (
   opts: VaultCsvTemplateOptions = {},
 ): string => {
   const includeExampleRows = opts.includeExampleRows !== false;
-  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy"];
+  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy", "LocalShell"];
   const rows: string[][] = [header];
   if (includeExampleRows) {
     rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "Dev web tier", "192.168.1.10", "ssh", "22", "root", "", "~/.ssh/id_ed25519", "", "socks5://127.0.0.1:1080"]);
@@ -53,8 +53,32 @@ export const getVaultCsvTemplate = (
   return rows.map((r) => r.map((c) => escapeCsv(c)).join(",")).join("\r\n") + "\r\n";
 };
 
+// The legacy CSV format has no per-host shell columns, so local-shell vault
+// hosts are serialized as one encoded "LocalShell" field; hosts with a
+// non-default shell are otherwise lost on reimport (backup data silently
+// changed). Default-shell Windows/macOS local hosts still export their OS:
+// reimport defaults to Linux, and the OS is part of the reimport dedupe key,
+// so a macOS default-shell entry without an OS field would be reimported as
+// (and collapse with) a Linux host. Linux default-shell hosts match the
+// reimport default and need no field.
+const getLocalShellSpec = (host: Host): CsvLocalShellSpec | null => (
+  host.protocol === "local"
+    && (host.localShell || host.localShellName || host.localShellIcon
+      || host.localStartDir || host.localShellArgs?.length
+      || host.os === "windows" || host.os === "macos")
+    ? {
+        shell: host.localShell || undefined,
+        shellArgs: host.localShellArgs?.length ? host.localShellArgs : undefined,
+        shellName: host.localShellName || undefined,
+        shellIcon: host.localShellIcon || undefined,
+        startDir: host.localStartDir || undefined,
+        os: host.os === "windows" || host.os === "macos" ? host.os : undefined,
+      }
+    : null
+);
+
 const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions) => {
-  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy"];
+  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy", "LocalShell"];
   const rows: string[][] = [header];
   let unreadableProxyCredentialCount = 0;
 
@@ -118,6 +142,7 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions) => {
     const proxyValue = proxyConfig
       ? formatCsvProxy(resolveProxyConfigAuth(proxyConfig, options.identities))
       : "";
+    const localShellSpec = getLocalShellSpec(host);
 
     rows.push([
       host.group ?? "",
@@ -132,6 +157,7 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions) => {
       encodeCsvKeyPath(keyPath),
       encodeCsvPassphrase(passphrase),
       encodeCsvProxy(proxyValue),
+      localShellSpec ? encodeCsvLocalShell(localShellSpec) : "",
     ]);
   }
 

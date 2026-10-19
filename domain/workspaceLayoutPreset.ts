@@ -22,6 +22,7 @@ export type WorkspaceLayoutPreset = {
 
 const SIDE_PANEL_TOOLS: ReadonlySet<SidePanelTool> = new Set([
   'sftp',
+  'browser',
   'scripts',
   'history',
   'theme',

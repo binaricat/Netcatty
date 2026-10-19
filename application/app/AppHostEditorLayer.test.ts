@@ -34,6 +34,17 @@ test('serial targets use the serial editor', () => {
   );
 });
 
+test('local targets use the local shell editor', () => {
+  assert.equal(
+    resolveWorkSurfaceHostEditorKind({
+      mode: 'edit',
+      openedHost: host({ protocol: 'local' }),
+      requestId: 3,
+    }),
+    'local',
+  );
+});
+
 test('new and ssh targets use the standard editor', () => {
   assert.equal(
     resolveWorkSurfaceHostEditorKind({ mode: 'new', defaultGroup: null, requestId: 1 }),
@@ -71,8 +82,8 @@ test('editor overlay leaves the work surface interactive outside the panel', () 
 
   assert.match(source, /pointer-events-none absolute inset-0 z-40/);
   assert.match(source, /\[&>\*\]:pointer-events-auto/);
-  assert.equal((source.match(/className="pointer-events-auto"/g) ?? []).length, 2);
-  assert.equal((source.match(/layout="overlay"/g) ?? []).length, 2);
+  assert.equal((source.match(/className="pointer-events-auto"/g) ?? []).length, 3);
+  assert.equal((source.match(/layout="overlay"/g) ?? []).length, 3);
 });
 
 test('editor host panels share vault resize width persistence', () => {
@@ -81,7 +92,7 @@ test('editor host panels share vault resize width persistence', () => {
   assert.match(source, /STORAGE_KEY_VAULT_HOST_PANEL_WIDTH/);
   assert.match(source, /resizable:\s*true/);
   assert.match(source, /\{\.\.\.hostPanelResizeProps\}/);
-  assert.equal((source.match(/\{\.\.\.hostPanelResizeProps\}/g) ?? []).length, 2);
+  assert.equal((source.match(/\{\.\.\.hostPanelResizeProps\}/g) ?? []).length, 3);
 });
 
 test('editor stays mounted while another app surface is active', () => {

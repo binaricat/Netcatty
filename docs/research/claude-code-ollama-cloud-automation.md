@@ -1,5 +1,10 @@
 # Claude Code + Ollama Cloud 替换 Cursor 自动化 — 可行性调研
 
+> Archived on 2026-10-18: the GitHub Actions AI triage, replies,
+> implementation, and review/fix automation described below has been removed.
+> This document is historical research, not current setup instructions.
+> Future automation will be handled externally through webhooks.
+
 Date: 2026-08-27
 Status: feasible for triage; keep the existing control plane
 Scope: replace Cursor CLI as the agent runner, not rewrite GitHub routing

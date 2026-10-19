@@ -41,6 +41,28 @@ test('buildVaultHostMergeKey treats group as part of session identity', () => {
   );
 });
 
+test('buildVaultHostMergeKey normalizes the local-shell default port', () => {
+  // Vault-editor local hosts omit `port`; CSV export/import round-trips store
+  // the effective default (22). Both forms must dedupe as the same entry.
+  const localBase = {
+    hostname: 'localhost',
+    username: '',
+    protocol: 'local' as const,
+    group: 'lan',
+    os: 'windows' as const,
+    localShellName: 'PowerShell',
+  };
+  assert.equal(
+    buildVaultHostMergeKey({ ...localBase }),
+    buildVaultHostMergeKey({ ...localBase, port: 22 }),
+  );
+  // An explicit non-default port is still a distinct identity.
+  assert.notEqual(
+    buildVaultHostMergeKey({ ...localBase, port: 2222 }),
+    buildVaultHostMergeKey({ ...localBase, port: 22 }),
+  );
+});
+
 test('buildVaultHostFromDraft maps minimal unstructured fields to a vault host', () => {
   const built = buildVaultHostFromDraft({
     hostname: '192.168.1.10',

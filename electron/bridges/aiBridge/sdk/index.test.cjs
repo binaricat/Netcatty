@@ -92,3 +92,24 @@ test("CodeBuddy forwards the explicit bypass opt-in to V2 sessions", async () =>
     codebuddySessionManager.runTurn = originalRunTurn;
   }
 });
+
+
+test("Copilot registry catalog uses the configured profile environment", async (t) => {
+  const copilotDriver = require("./copilotDriver.cjs");
+  const original = copilotDriver.listCopilotModels;
+  let receivedEnv;
+  const sdkModule = {
+    CopilotClient: class {
+      constructor(options) { receivedEnv = options.env; }
+      async start() {}
+      async listModels() { return [{ id: receivedEnv?.GH_TOKEN === "fixture-account" ? "profile-model" : "process-model" }]; }
+      async stop() {}
+    },
+    RuntimeConnection: { forStdio: () => ({}) },
+  };
+  t.mock.method(copilotDriver, "listCopilotModels", (options) => original({ ...options, sdkModule }));
+  const env = { GH_TOKEN: "fixture-account", GH_CONFIG_DIR: "/fixture/profile" };
+  const models = await getDriver("copilot").listModels({ binPath: "/fixture/copilot", env });
+  assert.deepEqual(models, [{ id: "profile-model", name: "profile-model" }]);
+  assert.deepEqual(receivedEnv, env);
+});

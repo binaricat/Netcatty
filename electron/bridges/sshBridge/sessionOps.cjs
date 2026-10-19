@@ -1,4 +1,6 @@
 /* eslint-disable no-undef */
+const { sampleSharedStats } = require("./sharedStats.cjs");
+const { GPU_ASSIGNMENT, parseGpuStats, withCachedMonitorGpu, cacheFullGpuStats, startMonitorGpuProbe } = require("./monitorGpuStats.cjs");
 const { executeBoundedSshCommand } = require("../boundedSshExec.cjs");
 const { listInteractiveShellPids } = require("../sshInteractiveShells.cjs");
 function extraExecUnsupportedError(session) {
@@ -743,7 +745,10 @@ function createSessionOpsApi(ctx) {
     home=$(id -P 2>/dev/null | awk -F: 'NR == 1 { print $9; exit }')
     emit_home "$home"
     emit_home "$HOME"
-    exit 1`;
+    exit 1`.replace(/^[ \t]*#[^\n]*\n/gm, "");
+        // Omit explanatory comments before quoting this static probe. Dropbear
+        // closes the entire transport for exec requests over 9000 bytes (#3731).
+        // Preserve the directory checks above to avoid regressing #3493.
         // Capture sshd's pid in the exec'd POSIX sh (`$PPID` is sshd because
         // `exec` replaced the login shell). Do not `exec` the inner posixScript:
         // that would skip the watchdog cleanup after it.
@@ -1060,10 +1065,26 @@ function createSessionOpsApi(ctx) {
     async function getServerStats(event, payload) {
       const { sessionId } = payload;
       const session = sessions.get(sessionId);
+      if (!session) return { success: false, error: 'Session not found or not connected' };
+      return getStatsForContext(session, event, sessionId);
+    }
 
-      if (!session) {
-        return { success: false, error: 'Session not found or not connected' };
+    async function getStatsForContext(session, event, sessionId) {
+      const result = await sampleSharedStats(session, (context) => collectServerStats(context, event, sessionId));
+      const conn = session.conn || session.moshStatsConn || session.etStatsConn;
+      if (!conn || !result.success || !result.stats) return result;
+      if (!session._monitorStats) {
+        cacheFullGpuStats(conn, result.stats);
+        return result;
       }
+      if (!session.singleChannelSsh) {
+        const command = withPosixRemoteWatchdog(`if [ "$(uname -s 2>/dev/null)" = "Linux" ]; then ${GPU_ASSIGNMENT}; echo "GPU:$gpustat"; fi`, 2500);
+        startMonitorGpuProbe(conn, command, {setTimeoutFn:setTimeout,clearTimeoutFn:clearTimeout});
+      }
+      return withCachedMonitorGpu(conn, result);
+    }
+
+    async function collectServerStats(session, event, sessionId) {
       const bastionStatsBlock = extraExecUnsupportedError(session);
       if (bastionStatsBlock) return bastionStatsBlock;
 
@@ -1182,7 +1203,7 @@ function createSessionOpsApi(ctx) {
         `procs=$(ps -A -o pid=,%mem=,comm= 2>/dev/null | sort -k2 -rn | head -10 | awk '{gsub(/;/,"_",$3);printf "%s;%.1f;%s,",$1,$2,$3}' | sed 's/,$//')`,
         // Disk: -P keeps a stable six-column POSIX layout on macOS.
         `mounts=$(mount 2>/dev/null || true)`,
-        `disks=$({ printf "%s\n" "$mounts"; printf "__NETCATTY_DF__\n"; df -kP 2>/dev/null; } | awk '$0=="__NETCATTY_DF__"{in_df=1;next} !in_df{if($1~/^\/dev\/disk/&&(index($0,"(apfs,")||index($0,"(apfs)"))){key=$1;sub(/s[0-9].*$/,"",key);capacity[$1]="apfs:" key}next} $1=="Filesystem"{next} index($1,"/dev/")==1{m=$6;if(m=="/"||index(m,"/Volumes/")==1){t=$2/1048576;key=(($1 in capacity)?capacity[$1]:$1);if(key~/^apfs:/){u=($2-$4)/1048576;p=(t>0?int(u*100/t+0.5):0)}else{u=$3/1048576;p=$5;gsub(/%/,"",p)}printf "%s:%.6f:%.6f:%s:%s,",m,u,t,p,key}}' | sed 's/,$//')`,
+        `disks=$({ printf "%s\n" "$mounts"; printf "__NETCATTY_DF__\n"; df -kP 2>/dev/null; } | awk '$0=="__NETCATTY_DF__"{in_df=1;next} !in_df{if(index($1,"/dev/disk")==1&&(index($0,"(apfs,")||index($0,"(apfs)"))){key=$1;sub(/s[0-9].*$/,"",key);capacity[$1]="apfs:" key}next} $1=="Filesystem"{next} index($1,"/dev/")==1{m=$6;if(m=="/"||index(m,"/Volumes/")==1){t=$2/1048576;key=(($1 in capacity)?capacity[$1]:$1);if(key~/^apfs:/){u=($2-$4)/1048576;p=(t>0?int(u*100/t+0.5):0)}else{u=$3/1048576;p=$5;gsub(/%/,"",p)}printf "%s:%.6f:%.6f:%s:%s,",m,u,t,p,key}}' | sed 's/,$//')`,
         // Network: Link# lines only, exclude loopback, detect column shift (no MAC addr → cols shift left)
         `net=$(netstat -ibn 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++){if($i=="Ibytes")ib=i;if($i=="Obytes")ob=i}next} ib&&ob&&$1~/^[[:alpha:]]/&&$1!~/^lo/&&$0~/<Link#/{name=$1;gsub(/[*]/,"",name);rx=$(ib)+0;tx=$(ob)+0;if(rx>0||tx>0){seen[name]=rx ":" tx}} END{for(name in seen)printf "%s:%s,",name,seen[name]}' | sed 's/,$//')`,
         `hostname_value=$(hostname 2>/dev/null || uname -n 2>/dev/null || echo "")`,
@@ -1193,7 +1214,7 @@ function createSessionOpsApi(ctx) {
         `uptime=$(awk -v n="$nowsec" -v b="$bootsec" 'BEGIN{if(n>0&&b>0)printf "%.0f",n-b}')`,
         `loadavg=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{print $1" "$2" "$3"}')`,
         `echo "CPU:$cpupct|CORES:$cores|MEMINFO:$memtotal $memfree 0 $memcached $swaptotal $swapfree|PROCS:$procs|DISKS:$disks|NET:$net|HOST:$hostname_value|OS:$osname|KERNEL:$kernel|UPTIME:$uptime|LOAD:$loadavg"`,
-      ].join('; ');
+      ].filter(command => !session._monitorStats || !command.startsWith('procs=')).join('; ');
 
       // Prefer df's filesystem type column so FUSE mounts can be identified
       // even when their source name looks like an ordinary remote path.
@@ -1296,10 +1317,10 @@ function createSessionOpsApi(ctx) {
         // Bound GPU queries independently so a stuck driver cannot stop CPU/memory
         // polling. Hosts without timeout also omit this optional metric.
         // macOS is skipped: powermetrics needs root, which stats must not.
-        `gpustat=$(gpucsv=$(timeout -s KILL 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits 2>/dev/null) && printf '%s\\n' "$gpucsv" | awk -F', *' 'NF >= 4 {g++; if($1 ~ /^[0-9]+$/) {n++; u+=$1} if($2 ~ /^[0-9]+$/) {mu+=$2; uc++} if($3 ~ /^[0-9]+$/) {mt+=$3; tc++} if(name=="") name=$4} END{if(n>0) printf "%.0f %s %s %s", u/n, (uc==g ? sprintf("%.0f",mu) : "N/A"), (tc==g ? sprintf("%.0f",mt) : "N/A"), name}' 2>/dev/null || echo "")`,
+        GPU_ASSIGNMENT,
         // Output all stats (using CPURAW and PERCORERAW instead of CPU and PERCORE)
         `echo "CPURAW:$cpuraw|CORES:$cores|PERCORERAW:$percoreraw|MEMINFO:$meminfo|PROCS:$procs|NET:$net|GPU:$gpustat|HOST:$hostname_value|OS:$osname|KERNEL:$kernel|UPTIME:$uptime|LOAD:$loadavg"`
-      ].join('; ');
+      ].filter(command => !session._monitorStats || (!command.startsWith('procs=') && !command.startsWith('gpustat='))).join('; ');
 
       // Client-side run bound shared by the stats and disk probes; the remote
       // watchdog uses the same value so an abandoned probe self-kills instead
@@ -1329,6 +1350,8 @@ function createSessionOpsApi(ctx) {
         statsRunTimeoutMs,
       );
       const statsExecOptions = {
+        signal: session.statsSignal,
+        invalidateTransportOnAbort: false,
         openingTimeoutMs: statsRunTimeoutMs,
         runTimeoutMs: statsRunTimeoutMs,
         maxOutputBytes: 1024 * 1024,
@@ -1356,6 +1379,12 @@ function createSessionOpsApi(ctx) {
       const pingLatencyPromise = sshStatsConn && !pingDisabled && typeof measureSshPingLatency === 'function'
         ? Promise.resolve(measureSshPingLatency(sshStatsConn)).catch(() => null)
         : Promise.resolve(null);
+      // Observe the exec acknowledgement already needed for this sample. This
+      // remains available when global-request keepalives are disabled, without
+      // sending another ping or opening an additional channel/connection.
+      // Keep it separate from the transport RTT: channel setup also includes
+      // remote processing, and shared terminal readers must retain that distinction.
+      let responseLatencyMs = null;
       const formatStatsError = (error) => (
         error?.code === "SSH_EXEC_OPEN_TIMEOUT" || error?.code === "SSH_EXEC_RUN_TIMEOUT"
           ? "Timeout getting server stats"
@@ -1371,7 +1400,13 @@ function createSessionOpsApi(ctx) {
         };
         void (async () => {
           try {
-            const { stdout } = await executeStatsCommand(statsCommand);
+            const responseStartedAt = performance.now();
+            const { stdout } = await executeStatsCommand(statsCommand, {
+              ...statsExecOptions,
+              onStream: () => {
+                if (sshStatsConn) responseLatencyMs = Math.max(0, Math.round(performance.now() - responseStartedAt));
+              },
+            });
             if (settled) return;
             let combinedStdout = String(stdout || '').trim();
             const primaryOutput = combinedStdout.replace(new RegExp(`^${latencyMarker}\\|?`), '');
@@ -1547,27 +1582,7 @@ function createSessionOpsApi(ctx) {
                   }
                 }
               } else if (part.startsWith('GPU:')) {
-                // Linux: "<avgUtil> <sumMemUsed> <sumMemTotal> <first GPU name>"
-                const gpuStr = part.substring(4).trim();
-                if (gpuStr && gpuStr !== '') {
-                  const gpuFields = gpuStr.split(/\s+/);
-                  const util = parseInt(gpuFields[0], 10);
-                  if (!isNaN(util)) {
-                    gpu = Math.min(100, Math.max(0, util));
-                    if (gpuFields.length >= 2) {
-                      const memUsed = parseInt(gpuFields[1], 10);
-                      if (!isNaN(memUsed)) gpuMemUsed = memUsed;
-                    }
-                    if (gpuFields.length >= 3) {
-                      const memTotal = parseInt(gpuFields[2], 10);
-                      if (!isNaN(memTotal)) gpuMemTotal = memTotal;
-                    }
-                    if (gpuFields.length >= 4) {
-                      const name = gpuFields.slice(3).join(' ').trim();
-                      if (name) gpuName = name;
-                    }
-                  }
-                }
+                ({gpu,gpuName,gpuMemUsed,gpuMemTotal}=parseGpuStats(part));
               } else if (part.startsWith('HOST:')) {
                 hostname = part.substring(5).trim();
               } else if (part.startsWith('OS:')) {
@@ -1732,9 +1747,11 @@ function createSessionOpsApi(ctx) {
                 diskUsed,      // Disk used in GB for root partition (backward compat)
                 diskTotal,     // Total disk in GB for root partition (backward compat)
                 disks,         // Array of all mounted disks
+                networkReady: prevNet.timestamp > 0 && prevNet.interfaces.length > 0,
                 netRxSpeed,    // Total network receive speed (bytes/sec)
                 netTxSpeed,    // Total network transmit speed (bytes/sec)
                 latencyMs,      // SSH transport ping on the existing session (ms); never a second TCP dial (#3630)
+                responseLatencyMs, // Existing stats exec acknowledgement (ms), including remote channel setup
                 netInterfaces, // Per-interface network stats
                 hostname,
                 osName,
@@ -1783,6 +1800,7 @@ function createSessionOpsApi(ctx) {
       restoreRemoteModes,
       listSessionDir,
       getServerStats,
+      getStatsForContext,
       setSessionEncoding,
     };
   }

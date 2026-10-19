@@ -334,6 +334,9 @@ export function matchesWordPrefixQuery(
   return words.some((word) => {
     if (word.startsWith(normalizedQuery)) return true;
     if (!compactQuery) return false;
+    // ASCII command words cannot gain a different pinyin prefix. Avoid the
+    // transliteration/cache work for every token in large snippet libraries.
+    if (/^[\x20-\x7E]+$/.test(word)) return word.startsWith(compactQuery);
     const { full, initials } = getPinyinVariants(word);
     return (
       (full !== "" && full.startsWith(compactQuery))
@@ -451,6 +454,9 @@ function matchSegmentAgainstSource(
   }
 
   if (!source.allowPinyin || !/[a-z]/i.test(segment)) return null;
+  // Literal and compact checks already cover printable ASCII host fields.
+  // Keep their ranking above; skip only redundant transliteration/cache work.
+  if (/^[\x20-\x7E]+$/.test(source.text)) return null;
 
   const { full, initials } = getPinyinVariants(source.text);
   if (full && full.includes(compactSegment)) {

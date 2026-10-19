@@ -86,6 +86,13 @@ test('saved default resolves per session with fresh ids and protocol-aware pruni
     const again = state.resolveDefaultLayoutForSession({ protocol: 'ssh' });
     assert.ok(again);
     assert.notEqual(again.layout.root.id, sshResolved.layout.root.id);
+    await act(async () => {
+      state?.saveWorkspaceLayoutAsDefault(createSidePanelLayout('browser', 'browser-pane'));
+    });
+    assert.equal(state.resolveDefaultLayoutForSession({ protocol: 'telnet' }), null);
+    for (const protocol of ['ssh', 'mosh', 'local']) {
+      assert.equal(state.resolveDefaultLayoutForSession({ protocol })?.focusedTool, 'browser');
+    }
   } finally {
     if (previousLocalStorage) {
       Object.defineProperty(globalThis, 'localStorage', previousLocalStorage);

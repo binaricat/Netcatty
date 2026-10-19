@@ -84,6 +84,7 @@ test('side panel tab order falls back to the default order', () => {
   assert.deepEqual(normalizeTerminalSidePanelTabOrder(['scripts', 'bad-tab']), [
     'scripts',
     'sftp',
+    'browser',
     'history',
     'theme',
     'system',
@@ -93,7 +94,7 @@ test('side panel tab order falls back to the default order', () => {
 });
 
 test('side panel tab order accepts a stored permutation', () => {
-  const stored = ['scripts', 'sftp', 'history', 'theme', 'system', 'notes', 'ai'];
+  const stored = ['scripts', 'sftp', 'browser', 'history', 'theme', 'system', 'notes', 'ai'];
 
   assert.deepEqual(normalizeTerminalSidePanelTabOrder(stored), stored);
 });
@@ -105,7 +106,7 @@ test('side panel tab order moves the dragged tab before the target tab', () => {
       'notes',
       'scripts',
     ),
-    ['sftp', 'notes', 'scripts', 'history', 'theme', 'system', 'ai'],
+    ['sftp', 'browser', 'notes', 'scripts', 'history', 'theme', 'system', 'ai'],
   );
 });
 
@@ -117,7 +118,7 @@ test('side panel tab order can move the dragged tab after the target tab', () =>
       'ai',
       'after',
     ),
-    ['sftp', 'history', 'theme', 'system', 'notes', 'ai', 'scripts'],
+    ['sftp', 'browser', 'history', 'theme', 'system', 'notes', 'ai', 'scripts'],
   );
 });
 
@@ -130,7 +131,7 @@ test('narrow side panels keep the active tool visible and move extra tools into 
   });
 
   assert.deepEqual(fitted.shown, ['sftp', 'ai']);
-  assert.deepEqual(fitted.collapsed, ['scripts', 'history', 'theme', 'system', 'notes']);
+  assert.deepEqual(fitted.collapsed, ['browser', 'scripts', 'history', 'theme', 'system', 'notes']);
 });
 
 test('notes side panel forwards repeated open-note requests', () => {

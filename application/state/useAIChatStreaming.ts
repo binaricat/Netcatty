@@ -18,6 +18,7 @@ import type {
 } from '../../infrastructure/ai/types';
 import type { ExecutorContext } from '../../infrastructure/ai/cattyAgent/executor';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
+import { stopAgentTurn } from '../../infrastructure/ai/harness/agentStop';
 import type {
   TurnSteerInput,
   TurnSteerResult,
@@ -44,6 +45,16 @@ const streamingSubscribers = new Set<() => void>();
 /** Whether a chat session still has an active stream (used to keep panel mounted while hidden). */
 export function isAIChatSessionStreaming(sessionId: string | null | undefined): boolean {
   return !!sessionId && sharedStreamingSessionIds.has(sessionId);
+}
+
+/** Use the same stop entry and controllers as the UI before replacing history. */
+export async function stopAIChatSessionBeforeReplacement(sessionId: string): Promise<void> {
+  const controller = sharedAbortControllers.get(sessionId);
+  if (controller || sharedStreamingSessionIds.has(sessionId)) {
+    await stopAgentTurn({ chatSessionId: sessionId, abortController: controller, bridge: getNetcattyBridge() });
+  }
+  await getAgentRuntime().waitForActiveTurn(sessionId);
+  if (controller && sharedAbortControllers.get(sessionId) === controller) sharedAbortControllers.delete(sessionId);
 }
 
 function emitStreamingStoreChange(): void {

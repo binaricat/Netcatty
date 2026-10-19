@@ -788,3 +788,44 @@ test("history alone bounds title pinyin while retaining literal title and body m
   assert.deepEqual(filterSessionHistory(sessions, "fuwuqi nginx"), [sessions[0]]);
   assert.deepEqual(filterSessionHistory(sessions, "服务器 nginx"), sessions);
 });
+
+test("cooperative search yields and preserves the synchronous matching and order", () => {
+  const search = createSessionHistorySearch();
+  const sessions = Array.from({ length: 90 }, (_, index) => createSession(
+    String(index), `Session ${index}`, [{ content: index % 7 === 0 ? "needle 中文" : "ordinary body" }],
+  ));
+  const expected = search.filterSessionHistory(sessions, "needle");
+  const scan = search.createScan<typeof sessions[number]>("needle");
+  assert.equal(scan.step(sessions), null, "a large cached search still yields between slices");
+  let result: typeof sessions | null = null;
+  for (let step = 0; step < 20 && result === null; step += 1) result = scan.step(sessions);
+  assert.deepEqual(result, expected);
+  scan.dispose();
+  assert.equal(scan.step(sessions), null);
+});
+
+test("cooperative search incorporates live replacements and removals without restarting stable work", () => {
+  let reads = 0;
+  const stable = Array.from({ length: 90 }, (_, index) => {
+    const session = createSession(String(index), `Session ${index}`, []);
+    session.messages = [{ get content() { reads += 1; return index % 7 === 0 ? "needle" : "ordinary"; } }];
+    return session;
+  });
+  const search = createSessionHistorySearch();
+  const scan = search.createScan<typeof stable[number]>("needle");
+  let result: typeof stable | null = null;
+  let sessions = stable;
+  let steps = 0;
+  while (result === null && steps < 30) {
+    // The newest session changes on every slice, like an active stream.
+    const streaming = createSession("streaming", `Streaming ${steps}`, [{ content: "needle" }]);
+    sessions = [streaming, ...stable.slice(0, -1).reverse()];
+    result = scan.step(sessions);
+    steps += 1;
+  }
+  assert.ok(result, "a live stream cannot starve the other sessions");
+  assert.ok(steps < 10, `stable work restarted (${steps} slices)`);
+  assert.deepEqual(result, sessions.filter((session) => session.id === "streaming" || Number(session.id) % 7 === 0));
+  assert.equal(reads, 89, "each retained stable session is indexed only once");
+  scan.dispose();
+});

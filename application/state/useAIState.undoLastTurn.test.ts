@@ -8,6 +8,7 @@ import type { AISession, UploadedFile } from '../../infrastructure/ai/types.ts';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime.ts';
 import { useAIState } from './useAIState.ts';
 import { useAISessionsStore } from './aiSessionsStore.ts';
+import { getSessionScopeMatchRank } from '../../components/ai/sessionScopeMatch.ts';
 import { setLatestAISessionsSnapshot } from './aiStateSnapshots.ts';
 
 const SCOPE_KEY = 'terminal:terminal-a';
@@ -190,5 +191,41 @@ for (const newerCount of [49, 50]) {
     assert.deepEqual(reloaded.capture.sessions.find(item => item.id === branchId)?.messages, SOURCE_SESSION.messages.slice(0, 2));
     await act(async () => reloaded.root.unmount());
     reloaded.container.remove(); reloaded.dom.window.close();
+  });
+}
+
+for (const viewingScope of [
+  { type: 'terminal' as const, targetId: 'terminal-b' },
+  { type: 'workspace' as const, targetId: 'workspace-b' },
+]) {
+  test(`undo stays visible when a ${viewingScope.type} views a chat from a closed terminal`, async () => {
+    const source = {
+      ...structuredClone(SOURCE_SESSION),
+      scope: { type: 'terminal' as const, targetId: 'terminal-closed', hostIds: ['host-a'] },
+    };
+    const { dom, container, root, capture } = await setupAiState([source]);
+    const sourceBefore = structuredClone(source);
+    let branchId: string | undefined;
+    await act(async () => {
+      capture.ai!.setActiveSessionId('terminal:terminal-b', source.id);
+      branchId = (await capture.ai!.undoLastTurnInSession(source.id, viewingScope))?.sessionId;
+    });
+    assert.ok(branchId);
+    const branch = capture.sessions.find(item => item.id === branchId)!;
+    assert.deepEqual(branch.messages, source.messages.slice(0, 2));
+    assert.deepEqual(branch.scope, { ...source.scope, ...viewingScope });
+    assert.equal(capture.activeSessionIdMap[`${viewingScope.type}:${viewingScope.targetId}`], branch.id);
+    // The real history predicate must still include the selected branch after
+    // the source terminal no longer belongs to the current workspace.
+    assert.equal(getSessionScopeMatchRank(
+      branch, viewingScope.type, viewingScope.targetId, ['host-a'],
+      new Set([branch.id]), new Set(['terminal-b']), new Set([source.id]),
+    ), 3);
+    const original = capture.sessions.find(item => item.id === source.id)!;
+    assert.deepEqual({ ...original, updatedAt: sourceBefore.updatedAt }, sourceBefore);
+    const saved = JSON.parse(dom.window.localStorage.getItem('netcatty_ai_sessions_v1')!) as AISession[];
+    assert.deepEqual(saved.find(item => item.id === branchId)?.scope, branch.scope);
+    await act(async () => root.unmount());
+    container.remove(); dom.window.close();
   });
 }

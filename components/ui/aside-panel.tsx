@@ -83,6 +83,7 @@ interface AsidePanelProps extends AsidePanelResizeProps {
     onBack?: () => void;
     children: ReactNode;
     className?: string;
+    headerClassName?: string;
     width?: string;
     layout?: AsidePanelLayout;
     /**
@@ -99,6 +100,7 @@ interface AsidePanelHeaderProps {
     onBack?: () => void;
     onClose: () => void;
     showBackButton?: boolean;
+    className?: string;
 }
 
 // Header Component
@@ -109,9 +111,10 @@ export const AsidePanelHeader: React.FC<AsidePanelHeaderProps> = ({
     onBack,
     onClose,
     showBackButton = false,
+    className,
 }) => {
     return (
-        <div className="px-4 py-3 flex items-center justify-between border-b border-border/60 app-no-drag shrink-0">
+        <div className={cn("px-4 py-3 flex items-center justify-between border-b border-border/60 app-no-drag shrink-0", className)}>
             <div className="flex items-center gap-2 min-w-0">
                 {showBackButton && onBack && (
                     <button
@@ -142,10 +145,16 @@ export const AsidePanelHeader: React.FC<AsidePanelHeaderProps> = ({
 };
 
 // Content Component (wraps children with scroll)
-export const AsidePanelContent: React.FC<{ children: ReactNode; className?: string }> = ({
+export const AsidePanelContent: React.FC<{ children: ReactNode; className?: string; scrollMode?: "custom" | "native" }> = ({
     children,
     className,
+    scrollMode = "custom",
 }) => {
+    if (scrollMode === "native") return (
+        <div data-aside-scroll-viewport className={cn("flex-1 min-h-0 min-w-0 overflow-y-auto overscroll-y-contain host-tree-notes-scroll", className)}>
+            <div className="p-4 space-y-4 min-w-0 overflow-hidden">{children}</div>
+        </div>
+    );
     return (
         <ScrollArea className={cn("flex-1 min-w-0 [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!min-w-0", className)}>
             <div className="p-4 space-y-4 min-w-0 overflow-hidden">
@@ -170,16 +179,18 @@ export const AsidePanelFooter: React.FC<{ children: ReactNode; className?: strin
 // Action Menu Component (for the ... button)
 interface AsideActionMenuProps {
     children: ReactNode;
+    triggerClassName?: string;
+    ariaLabel?: string;
 }
 
-export const AsideActionMenu: React.FC<AsideActionMenuProps> = ({ children }) => {
+export const AsideActionMenu: React.FC<AsideActionMenuProps> = ({ children, triggerClassName, ariaLabel }) => {
     const [open, setOpen] = useState(false);
     const close = useCallback(() => setOpen(false), []);
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
-                <button className="p-1.5 hover:bg-muted rounded-md transition-colors cursor-pointer">
+                <button aria-label={ariaLabel} className={cn("p-1.5 hover:bg-muted rounded-md transition-colors cursor-pointer", triggerClassName)}>
                     <MoreVertical size={18} />
                 </button>
             </PopoverTrigger>
@@ -345,6 +356,7 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
     onBack,
     children,
     className,
+    headerClassName,
     width = 'w-[380px]',
     layout = 'overlay',
     resizable = false,
@@ -414,7 +426,7 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
                 : "absolute right-0 top-0 bottom-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag overflow-hidden",
             layout === 'overlay' && !usesPixelWidth && width,
             isResizing && 'transition-none',
-            className
+            className,
         )}
         style={panelStyle}
         data-section={dataSection}>
@@ -435,6 +447,7 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
             {title && (
                 <AsidePanelHeader
                     title={title}
+                    className={headerClassName}
                     subtitle={subtitle}
                     actions={actions}
                     onClose={onClose}

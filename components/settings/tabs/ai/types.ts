@@ -158,7 +158,7 @@ export interface NetcattyAiBridge {
   aiCodexCancelLogin?: (sessionId: string) => Promise<{ ok: boolean; found?: boolean; session?: CodexLoginSession; error?: string }>;
   aiCodexLogout?: (options?: { codexPath?: string; agentEnv?: Record<string, string> }) => Promise<{ ok: boolean; state?: CodexIntegrationState; isConnected?: boolean; rawOutput?: string; logoutOutput?: string; error?: string }>;
   aiResolveCli?: (params: { command: string; customPath?: string; refreshShellEnv?: boolean; apiKeyPresent?: boolean }) => Promise<AgentPathInfo>;
-  aiSdkAgentListModels?: (sdkBackend: string, cwd?: string, providerId?: string, chatSessionId?: string, agentEnv?: Record<string, string>, agentCommand?: string, codexRuntime?: 'sdk' | 'app-server') => Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[]; defaultThinkingLevel?: string }>; currentModelId?: string | null; error?: string }>;
+  aiSdkAgentListModels?: (sdkBackend: string, cwd?: string, providerId?: string, chatSessionId?: string, agentEnv?: Record<string, string>, agentCommand?: string, codexRuntime?: 'sdk' | 'app-server') => Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[]; defaultThinkingLevel?: string }>; currentModelId?: string | null; warning?: string; source?: 'live' | 'last-known-good'; fetchedAt?: string; error?: string }>;
   codexAppServerGetStatus?: (agentCommand?: string, agentEnv?: Record<string, string>) => Promise<{ ok: boolean; available: boolean; error?: string }>;
   aiUserSkillsGetStatus?: () => Promise<UserSkillsStatusResult>;
   aiUserSkillsOpenFolder?: () => Promise<UserSkillsStatusResult>;

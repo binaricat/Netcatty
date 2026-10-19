@@ -11,6 +11,7 @@ import {
   type ComposerPickerModel,
 } from '../../infrastructure/ai/composerPicker';
 import type { AgentModelPreset, ProviderConfig } from '../../infrastructure/ai/types';
+import { formatRelativeTime } from '../AIChatSessionHistoryDrawer';
 import { ProviderIconBadge } from '../settings/tabs/ai/ProviderIconBadge';
 import { useProviderModelCatalog } from './useProviderModelCatalog';
 
@@ -27,6 +28,15 @@ export interface ComposerModelPickerProps {
    * loading. Show the loading row instead of an empty/placeholder list.
    */
   loading?: boolean;
+  /**
+   * Provenance of the model list behind this picker: a live SDK fetch, the
+   * persisted last-known-good catalog, or the build-time preset fallback.
+   * Rendered as a small muted status footer; omit (provider switcher mode)
+   * to hide the chip.
+   */
+  catalogSource?: 'live' | 'last-known-good' | 'presets';
+  /** ISO timestamp of the successful fetch backing `catalogSource`. */
+  catalogFetchedAt?: string;
   prefs: ComposerModelPrefs;
   /**
    * Offer the "use custom model" action. Disable when the host locks the
@@ -95,6 +105,8 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
   selectedModelId,
   modelPresets = [],
   loading = false,
+  catalogSource,
+  catalogFetchedAt,
   prefs,
   allowCustomEntry = true,
   onSelectProviderModel,
@@ -147,6 +159,21 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
   );
 
   const trimmedQuery = query.trim();
+  // Uniform catalog status chip (all SDK backends). While the live fetch is
+  // in flight the spinner row replaces the chip, so it renders only for a
+  // resolved list; an unknown source renders nothing (provider mode).
+  const catalogChipText = useMemo(() => {
+    if (loading || !catalogSource) return null;
+    if (catalogSource === 'live') return t('ai.chat.modelCatalogSourceLive');
+    if (catalogSource === 'presets') return t('ai.chat.modelCatalogSourcePresets');
+    const parsed = catalogFetchedAt ? new Date(catalogFetchedAt) : null;
+    const time = parsed && !Number.isNaN(parsed.getTime())
+      ? formatRelativeTime(parsed, t)
+      : '';
+    return time
+      ? t('ai.chat.modelCatalogSourceCached').replace('{time}', time)
+      : t('ai.chat.modelCatalogSourceCachedNoTime');
+  }, [loading, catalogSource, catalogFetchedAt, t]);
   // Manual model ids are accepted in both modes: provider-bound catalogs and
   // preset lists from external CLI agents whose catalogs lag new models.
   const showCustom = Boolean(
@@ -356,6 +383,12 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
           </div>
         )}
       </div>
+
+      {catalogChipText && (
+        <div className="border-t border-border/40 px-2.5 py-1 text-[10px] text-muted-foreground/45" title={catalogChipText}>
+          {catalogChipText}
+        </div>
+      )}
     </div>
   );
 };

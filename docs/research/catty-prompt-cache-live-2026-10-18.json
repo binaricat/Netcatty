@@ -1,0 +1,955 @@
+{
+  "date": "2026-10-18",
+  "endpoint": "https://api.deepseek.com",
+  "model": "deepseek-v4-flash",
+  "input": "synthetic prompts and in-memory tool output",
+  "totalTurns": 36,
+  "totalModelCalls": 72,
+  "summary": [
+    {
+      "kind": "chat",
+      "turns": 12,
+      "inputTokens": 162870,
+      "cachedTokens": 160512,
+      "weightedHitRate": 98.55,
+      "minTurnRate": 98.19,
+      "maxTurnRate": 98.92
+    },
+    {
+      "kind": "command",
+      "turns": 12,
+      "inputTokens": 341856,
+      "cachedTokens": 337024,
+      "weightedHitRate": 98.59,
+      "minTurnRate": 98.12,
+      "maxTurnRate": 99.03
+    },
+    {
+      "kind": "large-output",
+      "turns": 12,
+      "inputTokens": 598639,
+      "cachedTokens": 585472,
+      "weightedHitRate": 97.8,
+      "minTurnRate": 97.3,
+      "maxTurnRate": 98.32
+    }
+  ],
+  "runs": [
+    {
+      "model": "deepseek-v4-flash",
+      "rows": [
+        {
+          "kind": "chat",
+          "round": 1,
+          "inputTokens": 13500,
+          "cachedTokens": 13312,
+          "hitRate": 98.61,
+          "outputTokens": 21,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 690
+        },
+        {
+          "kind": "chat",
+          "round": 2,
+          "inputTokens": 13529,
+          "cachedTokens": 13312,
+          "hitRate": 98.4,
+          "outputTokens": 4,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 898
+        },
+        {
+          "kind": "chat",
+          "round": 3,
+          "inputTokens": 13558,
+          "cachedTokens": 13312,
+          "hitRate": 98.19,
+          "outputTokens": 4,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 658
+        },
+        {
+          "kind": "chat",
+          "round": 4,
+          "inputTokens": 13587,
+          "cachedTokens": 13440,
+          "hitRate": 98.92,
+          "outputTokens": 4,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 982
+        },
+        {
+          "kind": "chat",
+          "round": 5,
+          "inputTokens": 13616,
+          "cachedTokens": 13440,
+          "hitRate": 98.71,
+          "outputTokens": 4,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 611
+        },
+        {
+          "kind": "chat",
+          "round": 6,
+          "inputTokens": 13645,
+          "cachedTokens": 13440,
+          "hitRate": 98.5,
+          "outputTokens": 4,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 676
+        },
+        {
+          "kind": "command",
+          "round": 1,
+          "inputTokens": 27473,
+          "cachedTokens": 27008,
+          "hitRate": 98.31,
+          "outputTokens": 384,
+          "modelCalls": 2,
+          "toolResults": 1,
+          "milliseconds": 5711
+        },
+        {
+          "kind": "command",
+          "round": 2,
+          "inputTokens": 28156,
+          "cachedTokens": 27776,
+          "hitRate": 98.65,
+          "outputTokens": 93,
+          "modelCalls": 2,
+          "toolResults": 2,
+          "milliseconds": 4606
+        },
+        {
+          "kind": "command",
+          "round": 3,
+          "inputTokens": 28538,
+          "cachedTokens": 28160,
+          "hitRate": 98.68,
+          "outputTokens": 83,
+          "modelCalls": 2,
+          "toolResults": 3,
+          "milliseconds": 4738
+        },
+        {
+          "kind": "command",
+          "round": 4,
+          "inputTokens": 28940,
+          "cachedTokens": 28544,
+          "hitRate": 98.63,
+          "outputTokens": 113,
+          "modelCalls": 2,
+          "toolResults": 4,
+          "milliseconds": 5000
+        },
+        {
+          "kind": "command",
+          "round": 5,
+          "inputTokens": 29342,
+          "cachedTokens": 29056,
+          "hitRate": 99.03,
+          "outputTokens": 83,
+          "modelCalls": 2,
+          "toolResults": 5,
+          "milliseconds": 5011
+        },
+        {
+          "kind": "command",
+          "round": 6,
+          "inputTokens": 29714,
+          "cachedTokens": 29312,
+          "hitRate": 98.65,
+          "outputTokens": 83,
+          "modelCalls": 2,
+          "toolResults": 6,
+          "milliseconds": 4517
+        },
+        {
+          "kind": "large-output",
+          "round": 1,
+          "inputTokens": 42570,
+          "cachedTokens": 41472,
+          "hitRate": 97.42,
+          "outputTokens": 344,
+          "modelCalls": 3,
+          "toolResults": 2,
+          "milliseconds": 6895
+        },
+        {
+          "kind": "large-output",
+          "round": 2,
+          "inputTokens": 45647,
+          "cachedTokens": 44416,
+          "hitRate": 97.3,
+          "outputTokens": 163,
+          "modelCalls": 3,
+          "toolResults": 4,
+          "milliseconds": 5644
+        },
+        {
+          "kind": "large-output",
+          "round": 3,
+          "inputTokens": 48547,
+          "cachedTokens": 47488,
+          "hitRate": 97.82,
+          "outputTokens": 165,
+          "modelCalls": 3,
+          "toolResults": 6,
+          "milliseconds": 5271
+        },
+        {
+          "kind": "large-output",
+          "round": 4,
+          "inputTokens": 51449,
+          "cachedTokens": 50304,
+          "hitRate": 97.77,
+          "outputTokens": 163,
+          "modelCalls": 3,
+          "toolResults": 8,
+          "milliseconds": 5826
+        },
+        {
+          "kind": "large-output",
+          "round": 5,
+          "inputTokens": 54353,
+          "cachedTokens": 53248,
+          "hitRate": 97.97,
+          "outputTokens": 166,
+          "modelCalls": 3,
+          "toolResults": 10,
+          "milliseconds": 6235
+        },
+        {
+          "kind": "large-output",
+          "round": 6,
+          "inputTokens": 57280,
+          "cachedTokens": 56320,
+          "hitRate": 98.32,
+          "outputTokens": 168,
+          "modelCalls": 3,
+          "toolResults": 12,
+          "milliseconds": 5692
+        }
+      ],
+      "steps": [
+        {
+          "kind": "chat",
+          "round": 1,
+          "promptTokens": 13500,
+          "cachedTokens": 13312,
+          "completionTokens": 21
+        },
+        {
+          "kind": "chat",
+          "round": 2,
+          "promptTokens": 13529,
+          "cachedTokens": 13312,
+          "completionTokens": 4
+        },
+        {
+          "kind": "chat",
+          "round": 3,
+          "promptTokens": 13558,
+          "cachedTokens": 13312,
+          "completionTokens": 4
+        },
+        {
+          "kind": "chat",
+          "round": 4,
+          "promptTokens": 13587,
+          "cachedTokens": 13440,
+          "completionTokens": 4
+        },
+        {
+          "kind": "chat",
+          "round": 5,
+          "promptTokens": 13616,
+          "cachedTokens": 13440,
+          "completionTokens": 4
+        },
+        {
+          "kind": "chat",
+          "round": 6,
+          "promptTokens": 13645,
+          "cachedTokens": 13440,
+          "completionTokens": 4
+        },
+        {
+          "kind": "command",
+          "round": 1,
+          "promptTokens": 13531,
+          "cachedTokens": 13312,
+          "completionTokens": 364
+        },
+        {
+          "kind": "command",
+          "round": 1,
+          "promptTokens": 13942,
+          "cachedTokens": 13696,
+          "completionTokens": 20
+        },
+        {
+          "kind": "command",
+          "round": 2,
+          "promptTokens": 14018,
+          "cachedTokens": 13824,
+          "completionTokens": 73
+        },
+        {
+          "kind": "command",
+          "round": 2,
+          "promptTokens": 14138,
+          "cachedTokens": 13952,
+          "completionTokens": 20
+        },
+        {
+          "kind": "command",
+          "round": 3,
+          "promptTokens": 14214,
+          "cachedTokens": 14080,
+          "completionTokens": 63
+        },
+        {
+          "kind": "command",
+          "round": 3,
+          "promptTokens": 14324,
+          "cachedTokens": 14080,
+          "completionTokens": 20
+        },
+        {
+          "kind": "command",
+          "round": 4,
+          "promptTokens": 14400,
+          "cachedTokens": 14208,
+          "completionTokens": 93
+        },
+        {
+          "kind": "command",
+          "round": 4,
+          "promptTokens": 14540,
+          "cachedTokens": 14336,
+          "completionTokens": 20
+        },
+        {
+          "kind": "command",
+          "round": 5,
+          "promptTokens": 14616,
+          "cachedTokens": 14464,
+          "completionTokens": 63
+        },
+        {
+          "kind": "command",
+          "round": 5,
+          "promptTokens": 14726,
+          "cachedTokens": 14592,
+          "completionTokens": 20
+        },
+        {
+          "kind": "command",
+          "round": 6,
+          "promptTokens": 14802,
+          "cachedTokens": 14592,
+          "completionTokens": 63
+        },
+        {
+          "kind": "command",
+          "round": 6,
+          "promptTokens": 14912,
+          "cachedTokens": 14720,
+          "completionTokens": 20
+        },
+        {
+          "kind": "large-output",
+          "round": 1,
+          "promptTokens": 13558,
+          "cachedTokens": 13312,
+          "completionTokens": 243
+        },
+        {
+          "kind": "large-output",
+          "round": 1,
+          "promptTokens": 14394,
+          "cachedTokens": 13696,
+          "completionTokens": 97
+        },
+        {
+          "kind": "large-output",
+          "round": 1,
+          "promptTokens": 14618,
+          "cachedTokens": 14464,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 2,
+          "promptTokens": 14705,
+          "cachedTokens": 14464,
+          "completionTokens": 63
+        },
+        {
+          "kind": "large-output",
+          "round": 2,
+          "promptTokens": 15360,
+          "cachedTokens": 14720,
+          "completionTokens": 96
+        },
+        {
+          "kind": "large-output",
+          "round": 2,
+          "promptTokens": 15582,
+          "cachedTokens": 15232,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 3,
+          "promptTokens": 15669,
+          "cachedTokens": 15488,
+          "completionTokens": 63
+        },
+        {
+          "kind": "large-output",
+          "round": 3,
+          "promptTokens": 16326,
+          "cachedTokens": 15616,
+          "completionTokens": 98
+        },
+        {
+          "kind": "large-output",
+          "round": 3,
+          "promptTokens": 16552,
+          "cachedTokens": 16384,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 4,
+          "promptTokens": 16639,
+          "cachedTokens": 16384,
+          "completionTokens": 63
+        },
+        {
+          "kind": "large-output",
+          "round": 4,
+          "promptTokens": 17294,
+          "cachedTokens": 16640,
+          "completionTokens": 96
+        },
+        {
+          "kind": "large-output",
+          "round": 4,
+          "promptTokens": 17516,
+          "cachedTokens": 17280,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 5,
+          "promptTokens": 17603,
+          "cachedTokens": 17408,
+          "completionTokens": 63
+        },
+        {
+          "kind": "large-output",
+          "round": 5,
+          "promptTokens": 18261,
+          "cachedTokens": 17536,
+          "completionTokens": 99
+        },
+        {
+          "kind": "large-output",
+          "round": 5,
+          "promptTokens": 18489,
+          "cachedTokens": 18304,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 6,
+          "promptTokens": 18576,
+          "cachedTokens": 18432,
+          "completionTokens": 63
+        },
+        {
+          "kind": "large-output",
+          "round": 6,
+          "promptTokens": 19236,
+          "cachedTokens": 18560,
+          "completionTokens": 101
+        },
+        {
+          "kind": "large-output",
+          "round": 6,
+          "promptTokens": 19468,
+          "cachedTokens": 19328,
+          "completionTokens": 4
+        }
+      ],
+      "errors": []
+    },
+    {
+      "model": "deepseek-v4-flash",
+      "rows": [
+        {
+          "kind": "chat",
+          "round": 1,
+          "inputTokens": 13500,
+          "cachedTokens": 13312,
+          "hitRate": 98.61,
+          "outputTokens": 57,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 1278
+        },
+        {
+          "kind": "chat",
+          "round": 2,
+          "inputTokens": 13529,
+          "cachedTokens": 13312,
+          "hitRate": 98.4,
+          "outputTokens": 4,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 658
+        },
+        {
+          "kind": "chat",
+          "round": 3,
+          "inputTokens": 13558,
+          "cachedTokens": 13312,
+          "hitRate": 98.19,
+          "outputTokens": 4,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 809
+        },
+        {
+          "kind": "chat",
+          "round": 4,
+          "inputTokens": 13587,
+          "cachedTokens": 13440,
+          "hitRate": 98.92,
+          "outputTokens": 4,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 958
+        },
+        {
+          "kind": "chat",
+          "round": 5,
+          "inputTokens": 13616,
+          "cachedTokens": 13440,
+          "hitRate": 98.71,
+          "outputTokens": 4,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 857
+        },
+        {
+          "kind": "chat",
+          "round": 6,
+          "inputTokens": 13645,
+          "cachedTokens": 13440,
+          "hitRate": 98.5,
+          "outputTokens": 4,
+          "modelCalls": 1,
+          "toolResults": 0,
+          "milliseconds": 1061
+        },
+        {
+          "kind": "command",
+          "round": 1,
+          "inputTokens": 27300,
+          "cachedTokens": 26880,
+          "hitRate": 98.46,
+          "outputTokens": 195,
+          "modelCalls": 2,
+          "toolResults": 1,
+          "milliseconds": 4773
+        },
+        {
+          "kind": "command",
+          "round": 2,
+          "inputTokens": 27785,
+          "cachedTokens": 27264,
+          "hitRate": 98.12,
+          "outputTokens": 84,
+          "modelCalls": 2,
+          "toolResults": 2,
+          "milliseconds": 4529
+        },
+        {
+          "kind": "command",
+          "round": 3,
+          "inputTokens": 28142,
+          "cachedTokens": 27776,
+          "hitRate": 98.7,
+          "outputTokens": 67,
+          "modelCalls": 2,
+          "toolResults": 3,
+          "milliseconds": 4584
+        },
+        {
+          "kind": "command",
+          "round": 4,
+          "inputTokens": 28482,
+          "cachedTokens": 28032,
+          "hitRate": 98.42,
+          "outputTokens": 67,
+          "modelCalls": 2,
+          "toolResults": 4,
+          "milliseconds": 4706
+        },
+        {
+          "kind": "command",
+          "round": 5,
+          "inputTokens": 28822,
+          "cachedTokens": 28416,
+          "hitRate": 98.59,
+          "outputTokens": 67,
+          "modelCalls": 2,
+          "toolResults": 5,
+          "milliseconds": 4558
+        },
+        {
+          "kind": "command",
+          "round": 6,
+          "inputTokens": 29162,
+          "cachedTokens": 28800,
+          "hitRate": 98.76,
+          "outputTokens": 67,
+          "modelCalls": 2,
+          "toolResults": 6,
+          "milliseconds": 4496
+        },
+        {
+          "kind": "large-output",
+          "round": 1,
+          "inputTokens": 42428,
+          "cachedTokens": 41344,
+          "hitRate": 97.45,
+          "outputTokens": 270,
+          "modelCalls": 3,
+          "toolResults": 2,
+          "milliseconds": 5945
+        },
+        {
+          "kind": "large-output",
+          "round": 2,
+          "inputTokens": 45447,
+          "cachedTokens": 44416,
+          "hitRate": 97.73,
+          "outputTokens": 164,
+          "modelCalls": 3,
+          "toolResults": 4,
+          "milliseconds": 5125
+        },
+        {
+          "kind": "large-output",
+          "round": 3,
+          "inputTokens": 48356,
+          "cachedTokens": 47232,
+          "hitRate": 97.68,
+          "outputTokens": 166,
+          "modelCalls": 3,
+          "toolResults": 6,
+          "milliseconds": 5238
+        },
+        {
+          "kind": "large-output",
+          "round": 4,
+          "inputTokens": 51279,
+          "cachedTokens": 50176,
+          "hitRate": 97.85,
+          "outputTokens": 167,
+          "modelCalls": 3,
+          "toolResults": 8,
+          "milliseconds": 5535
+        },
+        {
+          "kind": "large-output",
+          "round": 5,
+          "inputTokens": 54195,
+          "cachedTokens": 53120,
+          "hitRate": 98.02,
+          "outputTokens": 164,
+          "modelCalls": 3,
+          "toolResults": 10,
+          "milliseconds": 5977
+        },
+        {
+          "kind": "large-output",
+          "round": 6,
+          "inputTokens": 57088,
+          "cachedTokens": 55936,
+          "hitRate": 97.98,
+          "outputTokens": 162,
+          "modelCalls": 3,
+          "toolResults": 12,
+          "milliseconds": 5391
+        }
+      ],
+      "steps": [
+        {
+          "kind": "chat",
+          "round": 1,
+          "promptTokens": 13500,
+          "cachedTokens": 13312,
+          "completionTokens": 57
+        },
+        {
+          "kind": "chat",
+          "round": 2,
+          "promptTokens": 13529,
+          "cachedTokens": 13312,
+          "completionTokens": 4
+        },
+        {
+          "kind": "chat",
+          "round": 3,
+          "promptTokens": 13558,
+          "cachedTokens": 13312,
+          "completionTokens": 4
+        },
+        {
+          "kind": "chat",
+          "round": 4,
+          "promptTokens": 13587,
+          "cachedTokens": 13440,
+          "completionTokens": 4
+        },
+        {
+          "kind": "chat",
+          "round": 5,
+          "promptTokens": 13616,
+          "cachedTokens": 13440,
+          "completionTokens": 4
+        },
+        {
+          "kind": "chat",
+          "round": 6,
+          "promptTokens": 13645,
+          "cachedTokens": 13440,
+          "completionTokens": 4
+        },
+        {
+          "kind": "command",
+          "round": 1,
+          "promptTokens": 13531,
+          "cachedTokens": 13312,
+          "completionTokens": 191
+        },
+        {
+          "kind": "command",
+          "round": 1,
+          "promptTokens": 13769,
+          "cachedTokens": 13568,
+          "completionTokens": 4
+        },
+        {
+          "kind": "command",
+          "round": 2,
+          "promptTokens": 13829,
+          "cachedTokens": 13568,
+          "completionTokens": 80
+        },
+        {
+          "kind": "command",
+          "round": 2,
+          "promptTokens": 13956,
+          "cachedTokens": 13696,
+          "completionTokens": 4
+        },
+        {
+          "kind": "command",
+          "round": 3,
+          "promptTokens": 14016,
+          "cachedTokens": 13824,
+          "completionTokens": 63
+        },
+        {
+          "kind": "command",
+          "round": 3,
+          "promptTokens": 14126,
+          "cachedTokens": 13952,
+          "completionTokens": 4
+        },
+        {
+          "kind": "command",
+          "round": 4,
+          "promptTokens": 14186,
+          "cachedTokens": 13952,
+          "completionTokens": 63
+        },
+        {
+          "kind": "command",
+          "round": 4,
+          "promptTokens": 14296,
+          "cachedTokens": 14080,
+          "completionTokens": 4
+        },
+        {
+          "kind": "command",
+          "round": 5,
+          "promptTokens": 14356,
+          "cachedTokens": 14208,
+          "completionTokens": 63
+        },
+        {
+          "kind": "command",
+          "round": 5,
+          "promptTokens": 14466,
+          "cachedTokens": 14208,
+          "completionTokens": 4
+        },
+        {
+          "kind": "command",
+          "round": 6,
+          "promptTokens": 14526,
+          "cachedTokens": 14336,
+          "completionTokens": 63
+        },
+        {
+          "kind": "command",
+          "round": 6,
+          "promptTokens": 14636,
+          "cachedTokens": 14464,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 1,
+          "promptTokens": 13558,
+          "cachedTokens": 13312,
+          "completionTokens": 166
+        },
+        {
+          "kind": "large-output",
+          "round": 1,
+          "promptTokens": 14320,
+          "cachedTokens": 13696,
+          "completionTokens": 100
+        },
+        {
+          "kind": "large-output",
+          "round": 1,
+          "promptTokens": 14550,
+          "cachedTokens": 14336,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 2,
+          "promptTokens": 14637,
+          "cachedTokens": 14464,
+          "completionTokens": 63
+        },
+        {
+          "kind": "large-output",
+          "round": 2,
+          "promptTokens": 15293,
+          "cachedTokens": 14592,
+          "completionTokens": 97
+        },
+        {
+          "kind": "large-output",
+          "round": 2,
+          "promptTokens": 15517,
+          "cachedTokens": 15360,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 3,
+          "promptTokens": 15604,
+          "cachedTokens": 15360,
+          "completionTokens": 63
+        },
+        {
+          "kind": "large-output",
+          "round": 3,
+          "promptTokens": 16262,
+          "cachedTokens": 15616,
+          "completionTokens": 99
+        },
+        {
+          "kind": "large-output",
+          "round": 3,
+          "promptTokens": 16490,
+          "cachedTokens": 16256,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 4,
+          "promptTokens": 16577,
+          "cachedTokens": 16384,
+          "completionTokens": 63
+        },
+        {
+          "kind": "large-output",
+          "round": 4,
+          "promptTokens": 17236,
+          "cachedTokens": 16512,
+          "completionTokens": 100
+        },
+        {
+          "kind": "large-output",
+          "round": 4,
+          "promptTokens": 17466,
+          "cachedTokens": 17280,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 5,
+          "promptTokens": 17553,
+          "cachedTokens": 17408,
+          "completionTokens": 63
+        },
+        {
+          "kind": "large-output",
+          "round": 5,
+          "promptTokens": 18209,
+          "cachedTokens": 17536,
+          "completionTokens": 97
+        },
+        {
+          "kind": "large-output",
+          "round": 5,
+          "promptTokens": 18433,
+          "cachedTokens": 18176,
+          "completionTokens": 4
+        },
+        {
+          "kind": "large-output",
+          "round": 6,
+          "promptTokens": 18520,
+          "cachedTokens": 18304,
+          "completionTokens": 63
+        },
+        {
+          "kind": "large-output",
+          "round": 6,
+          "promptTokens": 19174,
+          "cachedTokens": 18432,
+          "completionTokens": 95
+        },
+        {
+          "kind": "large-output",
+          "round": 6,
+          "promptTokens": 19394,
+          "cachedTokens": 19200,
+          "completionTokens": 4
+        }
+      ],
+      "errors": []
+    }
+  ]
+}

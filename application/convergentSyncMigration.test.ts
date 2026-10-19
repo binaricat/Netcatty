@@ -1,8 +1,11 @@
+import { installBrowserLockFixture } from "./testSupport/browserLockFixture";
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { SyncPayload } from '../domain/sync.ts';
 import type { CloudSyncManager } from '../infrastructure/services/CloudSyncManager.ts';
+
+installBrowserLockFixture();
 
 const NOW = 1_700_000_000_000;
 const localStorageValues = new Map<string, string>();

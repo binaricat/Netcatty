@@ -716,3 +716,100 @@ test("readBackupRecord rejects oversized files before buffering them", async () 
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+test('clearBackups removes encrypted, corrupt and interrupted backup files only', async () => {
+  const root = createTempRoot();
+  try {
+    const service = createService(root);
+    await service.createBackup({ payload: samplePayload() });
+    const dir = path.join(root, BACKUP_DIR_NAME);
+    fs.writeFileSync(path.join(dir, 'vault-backup-bad.json'), '{broken');
+    fs.writeFileSync(path.join(dir, 'vault-backup-interrupted.json.tmp-abc'), 'secret');
+    fs.writeFileSync(path.join(dir, 'keep.txt'), 'unrelated');
+    fs.mkdirSync(path.join(dir, 'vault-backup-directory.json'));
+    const unavailable = createService(root, { encrypted: false });
+    assert.deepEqual(await unavailable.clearBackups(), { deletedCount: 3 });
+    assert.deepEqual(await service.listBackups(), []);
+    assert.deepEqual(fs.readdirSync(dir).sort(), ['keep.txt', 'vault-backup-directory.json']);
+    assert.deepEqual(await service.clearBackups(), { deletedCount: 0 });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('clearBackups waits for pending creates and allows future backups', async () => {
+  const root = createTempRoot();
+  try {
+    const service = createService(root);
+    const create = service.createBackup({ payload: samplePayload() });
+    const clear = service.clearBackups();
+    await create;
+    assert.deepEqual(await clear, { deletedCount: 1 });
+    assert.deepEqual(await service.listBackups(), []);
+    const next = await service.createBackup({ payload: samplePayload() });
+    assert.equal(next.created, true);
+    assert.equal((await service.listBackups()).length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('clearBackups reports partial deletion failures and permits retry', async (t) => {
+  const root = createTempRoot();
+  const originalUnlink = fs.promises.unlink;
+  try {
+    const service = createService(root);
+    await service.createBackup({ payload: samplePayload() });
+    const dir = path.join(root, BACKUP_DIR_NAME);
+    const blocked = path.join(dir, 'vault-backup-blocked.json');
+    fs.writeFileSync(blocked, '{broken');
+    const mock = t.mock.method(fs.promises, 'unlink', async (target) => {
+      if (target === blocked) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      return originalUnlink(target);
+    });
+    await assert.rejects(service.clearBackups(), /Could not delete 1 vault backup file/);
+    assert.deepEqual(fs.readdirSync(dir), ['vault-backup-blocked.json']);
+    mock.mock.restore();
+    assert.deepEqual(await service.clearBackups(), { deletedCount: 1 });
+    assert.deepEqual(fs.readdirSync(dir), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('clearBackups persists deletion and retries a failed directory sync even when empty', {
+  skip: process.platform === 'win32',
+}, async (t) => {
+  const root = createTempRoot();
+  try {
+    const service = createService(root);
+    await service.createBackup({ payload: samplePayload() });
+    const dir = path.join(root, BACKUP_DIR_NAME);
+    const originalOpen = fs.promises.open;
+    let syncCalls = 0;
+    let closeCalls = 0;
+    t.mock.method(fs.promises, 'open', async (target, ...args) => {
+      const handle = await originalOpen(target, ...args);
+      if (target !== dir) return handle;
+      return {
+        async sync() {
+          syncCalls += 1;
+          assert.deepEqual(fs.readdirSync(dir), []);
+          if (syncCalls === 1) throw new Error('fixture directory sync failed');
+          await handle.sync();
+        },
+        async close() {
+          closeCalls += 1;
+          await handle.close();
+        },
+      };
+    });
+    await assert.rejects(service.clearBackups(), /fixture directory sync failed/);
+    assert.equal(closeCalls, 1);
+    assert.deepEqual(await service.clearBackups(), { deletedCount: 0 });
+    assert.equal(syncCalls, 2);
+    assert.equal(closeCalls, 2);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -139,7 +139,7 @@ test("failed copy followed by exclusive-open collision leaves that entry intact"
 
 for (const metadataError of ["ENOTSUP", "EPERM", "EACCES"]) {
   test(`rollback retains backup when its original timestamps cannot be restored: ${metadataError}`, async (t) => {
-    const setup = await mountedDestination(t, { existingMode: 0o644, cancelBeforeFinal: true, metadataError });
+    const setup = await mountedDestination(t, { existingMode: 0o644, virtualMode: 0o644, cancelBeforeFinal: true, metadataError });
     await assert.rejects(setup.run, /Recovery files preserved/);
     const backup = fs.readdirSync(setup.root).find(name => name.endsWith(".backup"));
     assert.ok(backup);

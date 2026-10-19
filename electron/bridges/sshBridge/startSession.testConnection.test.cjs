@@ -370,3 +370,13 @@ test("terminal starts keep the default terminal scope for jump-host prompts", as
 
   assert.equal(captured.scope, undefined);
 });
+
+test("monitor authentication returns a pooled transport without a shell, terminal session or test-result event", async () => {
+  const { api, sent, calls, sender } = createHarness({ onConnect: conn => queueMicrotask(() => conn.emit("ready")) });
+  const result = await api.startSSHSession({ sender }, { ...baseOptions(), testMode: false, _monitorMode: true });
+  assert.ok(result.transport?.conn);
+  assert.equal(calls.ends, 0);
+  assert.equal(typeof result.transport.conn.shell, "undefined", "the harness cannot open a shell");
+  assert.equal(sent.some(e => e.channel === "netcatty:test:result" || e.channel === "netcatty:exit"), false);
+  require("../sshConnectionPool.cjs").discardTransport(result.transport);
+});

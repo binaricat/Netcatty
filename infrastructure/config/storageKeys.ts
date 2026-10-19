@@ -38,6 +38,10 @@ export const STORAGE_KEY_PF_PREFER_FORM_MODE = 'netcatty_pf_prefer_form_mode_v1'
 export const STORAGE_KEY_PF_VIEW_MODE = 'netcatty_pf_view_mode_v1';
 export const STORAGE_KEY_KNOWN_HOSTS = 'netcatty_known_hosts_v1';
 export const STORAGE_KEY_SHELL_HISTORY = 'netcatty_shell_history_v1';
+/** Autocomplete command history. Keeps its legacy colon-style key for compatibility. */
+export const STORAGE_KEY_COMMAND_HISTORY = 'netcatty:commandHistory';
+/** Set once the user clears all command history; histfile seeding honors it. */
+export const STORAGE_KEY_COMMAND_HISTORY_CLEARED = 'netcatty:commandHistoryCleared';
 export const STORAGE_KEY_CONNECTION_LOGS = 'netcatty_connection_logs_v1';
 /** Side store for unsaved connection-log terminal replay buffers (main blob omits them for perf). */
 export const STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA = 'netcatty_connection_log_terminal_data_v1';
@@ -199,6 +203,8 @@ export const STORAGE_KEY_AI_COMMAND_TIMEOUT = 'netcatty_ai_command_timeout_v1';
 export const STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT = 'netcatty_ai_response_idle_timeout_v1';
 export const STORAGE_KEY_AI_MAX_ITERATIONS = 'netcatty_ai_max_iterations_v1';
 export const STORAGE_KEY_AI_SESSIONS = 'netcatty_ai_sessions_v1';
+/** Opt-in flag: include AI chat sessions in cloud sync payloads. */
+export const STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS = 'netcatty_cloud_sync_ai_sessions_v1';
 export const STORAGE_KEY_AI_ACTIVE_SESSION_MAP = 'netcatty_ai_active_session_map_v1';
 export const STORAGE_KEY_AI_AGENT_MODEL_MAP = 'netcatty_ai_agent_model_map_v1';
 export const STORAGE_KEY_AI_AGENT_PROVIDER_MAP = 'netcatty_ai_agent_provider_map_v1';
@@ -290,8 +296,6 @@ export const STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB = 'netcatty_local_
 export const STORAGE_KEY_WORKSPACE_FOCUS_SIDEBAR_WIDTH = 'netcatty_workspace_focus_sidebar_width';
 export const STORAGE_KEY_TERMINAL_HOST_TREE_WIDTH = 'netcatty_terminal_host_tree_width_v1';
 export const STORAGE_KEY_TERMINAL_HOST_TREE_COLLAPSED = 'netcatty_terminal_host_tree_collapsed_v1';
-/** Terminal scripts side panel library: 'list' vs 'stacked' view mode. */
-export const STORAGE_KEY_SCRIPTS_SIDE_PANEL_VIEW = 'netcatty:scripts:sidePanelView';
 export const STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN = 'netcatty_terminal_compose_bar_open_v1';
 /** Opt-in "broadcast without password protection" switch (terminal compose bar, issue #3488). */
 export const STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS = 'netcatty_terminal_broadcast_password_bypass_v1';
@@ -314,3 +318,9 @@ export const STORAGE_KEY_AVAILABLE_PLUGIN_SYNC_PROVIDERS = 'netcatty_available_p
 // Debug Flags (no _v1 suffix — developer-only, not persisted data)
 export const STORAGE_KEY_DEBUG_HOTKEYS = 'debug.hotkeys';
 export const STORAGE_KEY_DEBUG_UPDATE_DEMO = 'debug.updateDemo';
+
+// Portable monitor configuration. Runtime samples never use storage.
+export const STORAGE_KEY_MONITOR_PANELS = 'netcatty_monitor_panels_v1';
+export const STORAGE_KEY_MONITOR_TABLE_COLUMNS = 'netcatty_monitor_table_columns_v1';
+
+export const STORAGE_KEY_MONITOR_HIDDEN_COLUMNS = "netcatty_monitor_hidden_columns_v1";

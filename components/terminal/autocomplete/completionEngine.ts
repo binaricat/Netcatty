@@ -14,7 +14,7 @@ import {
   queryRecentHistoryByCommand,
   fuzzyQueryHistory,
   type HistoryQueryOptions,
-} from "./commandHistoryStore";
+} from "../../../application/state/commandHistoryStore";
 import {
   loadSpec,
   hasSpec,

@@ -4944,3 +4944,33 @@ test("worker exit notifies host lifecycle listeners for every active session", a
     { sessionId: "local-2", reason: "worker-exit" },
   ]);
 });
+
+
+test("worker job diagnostics reach the main console with the diagnostic flag", (t) => {
+  const originalJobFlag = process.env.NETCATTY_JOB_DIAG;
+  const originalDebugFlag = process.env.NETCATTY_TERMINAL_DEBUG;
+  t.after(() => {
+    if (originalJobFlag === undefined) delete process.env.NETCATTY_JOB_DIAG;
+    else process.env.NETCATTY_JOB_DIAG = originalJobFlag;
+    if (originalDebugFlag === undefined) delete process.env.NETCATTY_TERMINAL_DEBUG;
+    else process.env.NETCATTY_TERMINAL_DEBUG = originalDebugFlag;
+  });
+  delete process.env.NETCATTY_JOB_DIAG;
+  delete process.env.NETCATTY_TERMINAL_DEBUG;
+  const lines = [];
+  t.mock.method(console, "info", (line) => lines.push(line));
+  const child = new FakeChild();
+  const manager = createTerminalWorkerManager({ utilityProcess: { fork: () => child } });
+  t.after(() => manager.stop());
+  manager.ensureStarted();
+  const line = '[Netcatty JobDiag] {"event":"probe-write","sessionId":"s1","jobId":"j1"}';
+  child.emit("message", { kind: "job-diagnostic", line });
+  assert.deepEqual(lines, []);
+  process.env.NETCATTY_JOB_DIAG = "1";
+  child.emit("message", { data: { kind: "job-diagnostic", line } });
+  assert.deepEqual(lines, [line]);
+  child.emit("message", { kind: "job-diagnostic", line: "unrelated output" });
+  assert.deepEqual(lines, [line]);
+  t.mock.method(console, "info", () => { throw new Error("unavailable log"); });
+  assert.doesNotThrow(() => child.emit("message", { kind: "job-diagnostic", line }));
+});

@@ -368,6 +368,22 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-link-browser"
+          label={t("settings.terminal.behavior.linkBrowser")}
+          description={t("settings.terminal.behavior.linkBrowser.desc")}
+        >
+          <Select
+            value={terminalSettings.linkBrowser ?? 'netcatty'}
+            options={[
+              { value: 'netcatty', label: t('settings.terminal.behavior.linkBrowser.netcatty') },
+              { value: 'system', label: t('settings.terminal.behavior.linkBrowser.system') },
+            ]}
+            onChange={(v) => updateTerminalSetting('linkBrowser', v as 'netcatty' | 'system')}
+            className="w-48"
+          />
+        </SettingRow>
+
+        <SettingRow
           label={t("settings.terminal.behavior.linkModifier")}
           description={t("settings.terminal.behavior.linkModifier.desc")}
         >

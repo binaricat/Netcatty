@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { AISession, ChatMessage } from '../infrastructure/ai/types.ts';
+import { ToolOutputStore } from '../infrastructure/ai/harness/toolOutputStore.ts';
+import {
+  buildCattySdkMessages,
+  createContinuationContext,
+} from '../infrastructure/ai/harness/turnDrivers/cattyMessageBuilder.ts';
+import { stripAiSessionPayloadForSync } from './syncMerge.ts';
 import {
   buildUndoLastTurnBranch,
   hasUnresolvedToolCalls,
@@ -130,6 +136,60 @@ test('buildUndoLastTurnBranch restores message attachments into composer uploads
       lineCount: 3,
     },
   ]);
+});
+
+for (const field of ['attachments', 'images'] as const) {
+  test(`undoing downloaded ${field} restores note mentions but never sends empty file content`, () => {
+    const [downloaded] = stripAiSessionPayloadForSync([session([{
+      ...user('Inspect the attachments'),
+      [field]: [
+        { base64Data: 'cGljdHVyZQ==', mediaType: 'image/png', filename: 'picture.png' },
+        { base64Data: 'ZG9jdW1lbnQ=', mediaType: 'application/pdf', filename: 'document.pdf' },
+        { base64Data: 'bG9n', mediaType: 'text/plain', filename: 'terminal.log', terminalSelection: true },
+        { base64Data: '', mediaType: 'text/markdown', vaultNoteId: 'note-1', vaultNoteTitle: 'Runbook' },
+      ],
+    }, assistant('Done')])]);
+    const result = buildUndoLastTurnBranch(downloaded, { newId: 'branch', now: 42 });
+    assert.ok(result);
+    assert.equal(result.restored.text, 'Inspect the attachments');
+    assert.deepEqual(result.restored.attachments.map((attachment) => attachment.vaultNoteId), ['note-1']);
+
+    const messages = buildCattySdkMessages({
+      allMessages: result.session.messages,
+      includeCurrentUserMessage: true,
+      trimmed: result.restored.text,
+      attachments: result.restored.attachments,
+      continuationContext: createContinuationContext('provider', 'openai', 'model', false),
+      chatSessionId: result.session.id,
+      toolOutputStore: new ToolOutputStore(),
+      fieldsByMessage: new Map(),
+    });
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].role, 'user');
+    assert.equal(typeof messages[0].content, 'string');
+    assert.match(String(messages[0].content), /Inspect the attachments/);
+    assert.match(String(messages[0].content), /"noteId":"note-1"/);
+    assert.doesNotMatch(JSON.stringify(messages), /"type":"file"/);
+  });
+}
+
+test('undo skips attachment records whose body is absent and preserves real local files', () => {
+  const source = session([{
+    ...user('Inspect'),
+    attachments: [
+      // Older downloaded metadata did not retain base64Data or an availability marker.
+      JSON.parse('{"mediaType":"image/png","filename":"missing.png"}'),
+      { base64Data: '', mediaType: 'application/pdf', filename: 'empty.pdf' },
+      { base64Data: 'YWJj', mediaType: 'text/plain', filename: 'local.log', terminalSelection: true },
+    ],
+  }]);
+  const result = buildUndoLastTurnBranch(source, { newId: 'branch', now: 42 });
+  assert.ok(result);
+  assert.equal(result.restored.attachments.length, 1);
+  assert.equal(result.restored.attachments[0].filename, 'local.log');
+  assert.equal(result.restored.attachments[0].base64Data, 'YWJj');
+  assert.equal(result.restored.attachments[0].dataUrl, 'data:text/plain;base64,YWJj');
+  assert.equal(result.restored.attachments[0].terminalSelection, true);
 });
 
 test('buildUndoLastTurnBranch restores the undone turn selected user skills', () => {

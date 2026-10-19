@@ -9,6 +9,7 @@
  */
 
 import type { KeyType } from './models';
+import { detectFidoSshKeyType } from './fidoSsh';
 
 export interface SshKeyTypeInfo {
     type: KeyType;
@@ -154,6 +155,8 @@ export const detectSshKeyType = (
     privateKey?: string | null,
     publicKey?: string | null,
 ): SshKeyTypeInfo => {
+    const fidoType = detectFidoSshKeyType({ privateKey, publicKey });
+    if (fidoType) return { type: fidoType };
     const fromPrivate = privateKey ? detectFromPrivateKey(privateKey) : undefined;
     if (fromPrivate) return fromPrivate;
     const fromPublic = publicKey ? detectFromPublicKey(publicKey) : undefined;

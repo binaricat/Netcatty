@@ -2,6 +2,7 @@ import type { TerminalSession } from "./models";
 
 export const TERMINAL_SIDE_PANEL_AUTO_OPEN_TABS = [
   "sftp",
+  "browser",
   "scripts",
   "history",
   "theme",
@@ -32,7 +33,7 @@ export function resolveTerminalSidePanelAutoOpen({
   sftpAvailable: boolean;
 }): TerminalSidePanelAutoOpenTab | null {
   if (!enabled) return null;
-  if (selectedTab === "sftp" && !sftpAvailable) return null;
+  if ((selectedTab === "sftp" || selectedTab === "browser") && !sftpAvailable) return null;
   return selectedTab;
 }
 

@@ -241,6 +241,121 @@ function installEncryptionDouble() {
   };
 }
 
+function chatSession(messageIds: string[], updatedAt = NOW): NonNullable<SyncPayload['aiSessions']>[number] {
+  return {
+    id: 'chat', title: 'Chat', agentId: 'catty', scope: { type: 'global' },
+    createdAt: NOW, updatedAt,
+    messages: messageIds.map((id, index) => ({ id, role: 'user', content: id, timestamp: NOW + index })),
+  };
+}
+
+test('chat-only convergent changes merge both transcripts, apply them, and remain idle afterwards', async () => {
+  const encryption = installEncryptionDouble();
+  try {
+    const basePayload = payload('base');
+    const state = createConvergentSyncStateFromPayload(basePayload, 'seed', NOW);
+    const remoteChats = [chatSession(['first', 'remote'], NOW + 2)];
+    const github = adapter(encryption.register(withConvergentSyncEnvelope(state, { syncedAt: NOW, aiSessions: remoteChats })));
+    const subject = manager(state, { github });
+    const local = { ...basePayload, aiSessions: [chatSession(['first', 'local'], NOW + 1)] };
+    let applied: SyncPayload | undefined;
+    const results = await syncConvergentProvidersUnlockedImpl.call(subject, local, {
+      now: () => NOW + 10, jitter: async () => {},
+      applyPayload: async (incoming, commit) => { applied = incoming; await commit(); },
+    });
+    assert.equal(results.get('github')?.success, true);
+    assert.deepEqual(new Set(applied?.aiSessions?.[0].messages.map((message) => message.id)), new Set(['first', 'local', 'remote']));
+    const uploaded = await EncryptionService.decryptPayload(github.remote!, 'pw');
+    assert.deepEqual(uploaded.aiSessions, applied?.aiSessions);
+    assert.equal(uploaded.convergentSync?.state.collections.aiSessions, undefined, 'chats must not add an incompatible vault collection');
+    assert.equal(github.uploads, 1);
+    await syncConvergentProvidersUnlockedImpl.call(subject, applied!, { now: () => NOW + 20, jitter: async () => {}, applyPayload: applyAndCommit });
+    assert.equal(github.uploads, 1);
+  } finally { encryption.restore(); }
+});
+
+test('convergent verification rejects an upload whose chat history was dropped', async () => {
+  const encryption = installEncryptionDouble();
+  try {
+    const local = { ...payload('base'), aiSessions: [chatSession(['local'])] };
+    const state = createConvergentSyncStateFromPayload(local, 'seed', NOW);
+    const github = adapter(encryption.register(withConvergentSyncEnvelope(state, { syncedAt: NOW })));
+    github.afterUpload = (file, transport) => {
+      const uploaded = encryption.payloads.get(file.payload)!;
+      transport.remote = encryption.register({ ...uploaded, aiSessions: [] }, file.meta.version);
+    };
+    const subject = manager(state, { github });
+    const results = await syncConvergentProvidersUnlockedImpl.call(subject, local, {
+      now: () => NOW + 10, jitter: async () => {}, applyPayload: applyAndCommit,
+    });
+    assert.equal(results.get('github')?.success, false);
+    assert.match(results.get('github')?.error ?? '', /expected chat history/);
+  } finally { encryption.restore(); }
+});
+
+test('convergent downgrade retains cloud chats for an opted-out local device', async () => {
+  const encryption = installEncryptionDouble();
+  const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  try {
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { locks: { request: async (_name: string, _options: unknown, callback: (lock: object) => unknown) => callback({}) } },
+    });
+    const local = payload('base');
+    const state = createConvergentSyncStateFromPayload(local, 'seed', NOW);
+    const aiSessions = [chatSession(['remote'])];
+    const github = adapter(encryption.register(withConvergentSyncEnvelope(state, { syncedAt: NOW, aiSessions })));
+    const subject = manager(state, { github });
+    let applied: SyncPayload | undefined;
+    const results = await downgradeConvergentSyncImpl.call(subject, true, () => local, async (incoming, commit) => {
+      applied = incoming;
+      await commit();
+    });
+    assert.equal(results.get('github')?.success, true);
+    assert.deepEqual(applied?.aiSessions, aiSessions);
+    const uploaded = await EncryptionService.decryptPayload(github.remote!, 'pw');
+    assert.deepEqual(uploaded.aiSessions, aiSessions);
+    assert.equal(uploaded.convergentSync, undefined);
+    assert.deepEqual(subject.legacyCommits[0].payload.aiSessions, aiSessions);
+  } finally {
+    if (previousNavigator) Object.defineProperty(globalThis, 'navigator', previousNavigator);
+    else Reflect.deleteProperty(globalThis, 'navigator');
+    encryption.restore();
+  }
+});
+
+for (const uploadFails of [false, true]) {
+  test(`preserve strategy restores a survivor suppressed by a remote deletion${uploadFails ? ' even when upload fails' : ''}`, async () => {
+    const encryption = installEncryptionDouble();
+    try {
+      const local = payloadWithHostCount(2);
+      const state = createConvergentSyncStateFromPayload(local, 'seed', NOW);
+      const remotePayload = { ...local, hosts: [{ ...local.hosts[0], label: 'Remote edit' }] };
+      const deleted = remoteState(state, local, remotePayload, 'remote-device', NOW + 1);
+      const github = adapter(encryption.register(withConvergentSyncEnvelope(deleted, { syncedAt: NOW + 1 })));
+      github.failUpload = uploadFails;
+      const subject = manager(state, { github });
+      subject.state.syncStrategy = 'smartMergePreserve';
+      let applied: SyncPayload | undefined;
+      const results = await syncConvergentProvidersUnlockedImpl.call(subject, local, {
+        now: () => NOW + 10, jitter: async () => {},
+        applyPayload: async (incoming, commit) => { applied = incoming; await commit(); },
+      });
+      assert.equal(results.get('github')?.success, !uploadFails);
+      assert.deepEqual(applied?.hosts.map((host) => host.id).sort(), ['host-0', 'host-1']);
+      assert.equal(applied?.hosts[0].label, 'Remote edit');
+      const persisted = materializeSyncPayloadFromConvergentState(subject.persisted.at(-1)!, { syncedAt: NOW });
+      assert.deepEqual(persisted.hosts, applied?.hosts, 'the durable replica must match the protected local apply');
+      if (!uploadFails) {
+        const uploaded = await EncryptionService.decryptPayload(github.remote!, 'pw');
+        assert.deepEqual(uploaded.hosts, applied?.hosts);
+        await syncConvergentProvidersUnlockedImpl.call(subject, applied!, { now: () => NOW + 20, jitter: async () => {}, applyPayload: applyAndCommit });
+        assert.equal(github.uploads, 1);
+      }
+    } finally { encryption.restore(); }
+  });
+}
+
 test('unordered provider join preserves independent offline edits and persists before upload', async () => {
   const encryption = installEncryptionDouble();
   try {
@@ -367,14 +482,15 @@ test('recovery preview joins providers without persisting or uploading state', a
     const base = createConvergentSyncStateFromPayload(basePayload, 'seed', NOW);
     const githubState = remoteState(base, basePayload, payload('remote-label'), 'github-device', NOW + 1);
     const googleState = remoteState(base, basePayload, payload('base', 'remote-user'), 'google-device', NOW + 2);
-    const github = adapter(encryption.register(withConvergentSyncEnvelope(githubState, { syncedAt: NOW }), 2));
-    const google = adapter(encryption.register(withConvergentSyncEnvelope(googleState, { syncedAt: NOW }), 2));
+    const github = adapter(encryption.register(withConvergentSyncEnvelope(githubState, { syncedAt: NOW, aiSessions: [chatSession(['github'])] }), 2));
+    const google = adapter(encryption.register(withConvergentSyncEnvelope(googleState, { syncedAt: NOW, aiSessions: [chatSession(['google'], NOW + 1)] }), 2));
     const subject = manager(base, { github, google });
 
     const preview = await previewConvergentRecoveryImpl.call(subject);
 
     assert.equal(preview?.hosts[0]?.label, 'remote-label');
     assert.equal(preview?.hosts[0]?.username, 'remote-user');
+    assert.deepEqual(new Set(preview?.aiSessions?.[0].messages.map((message) => message.id)), new Set(['github', 'google']));
     assert.equal(subject.persisted.length, 0);
     assert.equal(github.uploads, 0);
     assert.equal(google.uploads, 0);

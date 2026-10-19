@@ -15,15 +15,17 @@ export function useSftpPaneTreeRows(props: SftpPaneTreeRowsProps) {
   const { totalHeight, visibleRange } = useMemo(() => {
     const totalCount = nodeDescriptors.length;
     const total = totalCount * TREE_ROW_HEIGHT;
-    const shouldVirtualize = viewportHeight > 0 && totalCount > 50;
+    // A zero viewport also occurs on first mount and while parked/hidden.
+    const shouldVirtualize = totalCount > 50;
 
     if (!shouldVirtualize) {
       return { totalHeight: 0, visibleRange: { start: 0, end: totalCount - 1, virtualized: false } };
     }
 
     const overscan = 6;
-    const start = Math.max(0, Math.floor(scrollTop / TREE_ROW_HEIGHT) - overscan);
-    const end = Math.min(totalCount - 1, Math.ceil((scrollTop + viewportHeight) / TREE_ROW_HEIGHT) + overscan);
+    const windowTop = Math.max(0, Math.min(scrollTop, total - viewportHeight));
+    const start = Math.max(0, Math.floor(windowTop / TREE_ROW_HEIGHT) - overscan);
+    const end = Math.min(totalCount - 1, Math.ceil((windowTop + viewportHeight) / TREE_ROW_HEIGHT) + overscan);
     return { totalHeight: total, visibleRange: { start, end, virtualized: true } };
   }, [nodeDescriptors.length, scrollTop, viewportHeight]);
 

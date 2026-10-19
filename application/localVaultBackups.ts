@@ -10,6 +10,15 @@ import { getCloudSyncManager } from '../infrastructure/services/CloudSyncManager
 import { netcattyBridge } from '../infrastructure/services/netcattyBridge';
 import { hasMeaningfulSyncData } from './syncPayload';
 
+const BACKUP_APPLY_LOCK = 'netcatty:vault-backup-apply';
+
+export class LocalVaultBackupBusyError extends Error {
+  constructor() {
+    super('Finish restoring or recovering the vault before clearing backups.');
+    this.name = 'LocalVaultBackupBusyError';
+  }
+}
+
 /**
  * Snapshot the current sync data version (the integer that increments
  * on each successful cloud sync). Returns undefined when the value is
@@ -84,6 +93,16 @@ export const setLocalVaultBackupMaxCount = (value: number): number => {
 export async function trimLocalVaultBackups(maxCount = getLocalVaultBackupMaxCount()): Promise<void> {
   const bridge = netcattyBridge.get();
   await bridge?.trimVaultBackups?.({ maxCount });
+}
+
+export async function clearLocalVaultBackups(): Promise<void> {
+  const bridge = netcattyBridge.get();
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+  if (!bridge?.clearVaultBackups || !locks) throw new Error('Local backup cleanup is unavailable.');
+  await locks.request(BACKUP_APPLY_LOCK, { mode: 'exclusive', ifAvailable: true }, async (lock) => {
+    if (!lock || readInterruptedVaultApply()) throw new LocalVaultBackupBusyError();
+    await bridge.clearVaultBackups!();
+  });
 }
 
 export async function getLocalVaultBackupCapabilities(): Promise<{
@@ -265,6 +284,15 @@ export async function withRestoreBarrier<T>(
   task: () => Promise<T>,
   holdMs: number = RESTORE_BARRIER_HOLD_MS,
 ): Promise<T> {
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+  // Shared locks allow existing nested restore helpers. Cleanup never queues
+  // an exclusive lock, so a nested helper cannot wait behind its own cleanup.
+  return locks
+    ? locks.request(BACKUP_APPLY_LOCK, { mode: 'shared' }, () => runWithRestoreBarrier(task, holdMs))
+    : runWithRestoreBarrier(task, holdMs);
+}
+
+async function runWithRestoreBarrier<T>(task: () => Promise<T>, holdMs: number): Promise<T> {
   const writeDeadline = () => {
     try {
       localStorageAdapter.writeNumber(

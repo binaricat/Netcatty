@@ -141,7 +141,6 @@ import {
   DEFAULT_TERMINAL_THEME,
   DEFAULT_THEME,
   DEFAULT_WINDOW_OPACITY,
-  clampWindowOpacity,
   applyThemeTokens,
   areTerminalSettingsEqual,
   createCustomKeyBindingsSyncOrigin,
@@ -180,6 +179,8 @@ import {
 import {
   parseWindowOpacityRecord,
   shouldApplyWindowOpacityRecord,
+  updateWindowOpacityRecord,
+  toggleWindowOpacityRecord,
   type WindowOpacityMutationSource,
   type WindowOpacityRecord,
 } from './windowOpacitySync';
@@ -608,9 +609,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
       const candidate = typeof nextValue === 'function'
         ? (nextValue as (prevState: number) => number)(prev.opacity)
         : nextValue;
-      const nextOpacity = clampWindowOpacity(candidate);
-      if (nextOpacity === prev.opacity) return prev;
-      return { opacity: nextOpacity, version: prev.version + 1 };
+      return updateWindowOpacityRecord(prev, candidate);
     });
   }, []);
   const applyIncomingWindowOpacity = useCallback((raw: unknown) => {
@@ -624,6 +623,10 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
       windowOpacityMutationSourceRef.current = 'incoming';
       return incoming;
     });
+  }, []);
+  const toggleWindowOpacity = useCallback(() => {
+    windowOpacityMutationSourceRef.current = 'local';
+    setWindowOpacityRecord(toggleWindowOpacityRecord);
   }, []);
   const [appIconVariant, setAppIconVariantState] = useState<AppIconVariant>(() => {
     const stored = readStoredString(STORAGE_KEY_APP_ICON_VARIANT);
@@ -785,7 +788,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
 
   // Helper to notify other windows about settings changes via IPC
   const notifySettingsChanged = useCallback((key: string, value: unknown) => {
-    if (!enableSettingsSync) return;
+    if (!enableSettingsSync && key !== STORAGE_KEY_WINDOW_OPACITY) return;
     try {
       netcattyBridge.get()?.notifySettingsChanged?.({ key, value });
     } catch {
@@ -1240,6 +1243,38 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setSftpTransferConcurrencyState,
     setSshTransportIdleTtlMsState,
   });
+
+  // Detached sessions share opacity and the shortcut configuration needed to
+  // operate it. Keep general settings listeners and OS effects disabled there.
+  useEffect(() => {
+    if (enableSettingsSync) return;
+    const applySharedWindowSetting = (key: string, value: unknown) => {
+      if (key === STORAGE_KEY_WINDOW_OPACITY) applyIncomingWindowOpacity(value);
+      if (key === STORAGE_KEY_HOTKEY_SCHEME && (value === 'disabled' || value === 'mac' || value === 'pc')) {
+        setHotkeyScheme(value);
+      }
+      if (key === STORAGE_KEY_CUSTOM_KEY_BINDINGS) {
+        const incoming = parseCustomKeyBindingsStorageRecord(value);
+        if (incoming) applyIncomingCustomKeyBindings(incoming);
+      }
+      if (key === STORAGE_KEY_HOTKEY_RECORDING && typeof value === 'boolean') {
+        setIsHotkeyRecordingState(value);
+      }
+    };
+    const unsubscribe = netcattyBridge.get()?.onSettingsChanged?.(({ key, value }) => {
+      applySharedWindowSetting(key, value);
+    });
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.newValue !== null) {
+        applySharedWindowSetting(event.key, event.newValue);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      unsubscribe?.();
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [enableSettingsSync, applyIncomingWindowOpacity, applyIncomingCustomKeyBindings]);
 
   useEffect(() => {
     if (!enableSettingsSync) return;
@@ -2183,6 +2218,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setGlobalHotkeyEnabled,
     windowOpacity,
     setWindowOpacity,
+    toggleWindowOpacity,
     appIconVariant,
     setAppIconVariant,
     rehydrateAllFromStorage,

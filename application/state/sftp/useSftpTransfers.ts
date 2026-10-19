@@ -721,7 +721,6 @@ export const useSftpTransfers = ({
       }
     };
 
-    try {
       const t0 = performance.now();
       logger.debug(`[SFTP:perf] processTransfer START — file=${task.fileName} isDir=${task.isDirectory}`);
 
@@ -1137,7 +1136,6 @@ export const useSftpTransfers = ({
         }
       }
       return "failed";
-    }
     } finally {
       // Walk registry cleanup is owned by transferRuntime.runWalk.
       // Drop ephemeral pool holds opened when browse was soft-closed.

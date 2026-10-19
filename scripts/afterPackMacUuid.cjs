@@ -294,6 +294,40 @@ function pruneCursorSdkPlatformPackages(context) {
   return removed;
 }
 
+function pruneNativePrebuilds(context) {
+  const platform = context.electronPlatformName;
+  const arch = typeof context.arch === "number" ? ELECTRON_BUILDER_ARCH_NAMES[context.arch] : context.arch;
+  if (!["darwin", "linux", "win32"].includes(platform)) return [];
+  const architectures = platform === "darwin" && arch === "universal"
+    ? ["arm64", "x64"]
+    : [arch === "armv7l" ? "arm" : arch];
+  if (!architectures.every((value) => ["arm", "arm64", "ia32", "x64"].includes(value))) return [];
+
+  const resourcesDir = appResourcesDir(context);
+  const unpackedDir = path.join(resourcesDir, "app.asar.unpacked");
+  const removed = [];
+  for (const packageName of ["node-pty", "@serialport/bindings-cpp"]) {
+    const prebuilds = `node_modules/${packageName}/prebuilds`;
+    const directory = path.join(unpackedDir, prebuilds);
+    if (!fs.existsSync(directory)) continue;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const tuple = /^([a-z0-9]+)-([a-z0-9+]+)$/.exec(entry.name);
+      if (!tuple) continue;
+      const [, buildPlatform, buildArchitectures] = tuple;
+      if (buildPlatform === platform && architectures.some((value) => buildArchitectures.split("+").includes(value))) continue;
+      removed.push(`${prebuilds}/${entry.name}`);
+    }
+  }
+  if (removed.length === 0) return [];
+
+  pruneAsarHeaderEntries(path.join(resourcesDir, "app.asar"), removed);
+  for (const entry of removed) {
+    fs.rmSync(path.join(unpackedDir, entry), { recursive: true, force: true });
+  }
+  return removed;
+}
+
 /** @param {import('electron-builder').AfterPackContext} context */
 async function afterPack(context) {
   const removedCursorPackages = pruneCursorSdkPlatformPackages(context);
@@ -301,6 +335,11 @@ async function afterPack(context) {
     console.log(
       `[afterPack] Removed unused Cursor SDK platform package(s): ${removedCursorPackages.join(", ")}`,
     );
+  }
+
+  const removedPrebuilds = pruneNativePrebuilds(context);
+  if (removedPrebuilds.length > 0) {
+    console.log(`[afterPack] Removed unused native prebuild(s): ${removedPrebuilds.join(", ")}`);
   }
 
   if (context.electronPlatformName === "win32") {
@@ -365,3 +404,4 @@ module.exports.adHocSignAppBundle = adHocSignAppBundle;
 module.exports.readAsarHeader = readAsarHeader;
 module.exports.pruneAsarHeaderEntries = pruneAsarHeaderEntries;
 module.exports.pruneCursorSdkPlatformPackages = pruneCursorSdkPlatformPackages;
+module.exports.pruneNativePrebuilds = pruneNativePrebuilds;

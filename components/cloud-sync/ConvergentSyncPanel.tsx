@@ -11,33 +11,9 @@ import {
   isConvergentConflictSecret,
 } from '../../domain/convergentSync';
 import { Button } from '../ui/button';
+import { Toggle } from '../settings/settings-ui';
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
-
-const ConvergentToggle: React.FC<{
-  checked: boolean;
-  disabled: boolean;
-  label: string;
-  onChange: (checked: boolean) => void | Promise<void>;
-}> = ({ checked, disabled, label, onChange }) => (
-  <button
-    type="button"
-    role="switch"
-    aria-label={label}
-    aria-checked={checked}
-    disabled={disabled}
-    onClick={() => onChange(!checked)}
-    className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 transition-colors ${
-      checked ? 'border-amber-500 bg-amber-500' : 'border-border bg-muted'
-    } disabled:cursor-not-allowed disabled:opacity-50`}
-  >
-    <span
-      className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-        checked ? 'translate-x-4' : 'translate-x-0'
-      }`}
-    />
-  </button>
-);
 
 function conflictLabel(conflict: ConvergentFieldConflict, t: Translate): string {
   const { address } = conflict;
@@ -104,19 +80,19 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
   onResolveConflict,
   onDowngrade,
 }) => (
-  <div className="space-y-4 overflow-hidden rounded-xl border border-amber-500/25 bg-gradient-to-br from-amber-500/[0.07] via-card to-card p-4 shadow-sm">
+  <div className="space-y-4 rounded-lg border bg-card p-4">
     <div className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-start gap-3">
         <div
           data-testid="convergent-sync-icon"
-          className="mt-0.5 flex h-9 w-9 shrink-0 self-start items-center justify-center rounded-lg border border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+          className="mt-0.5 flex h-9 w-9 shrink-0 self-start items-center justify-center rounded-lg bg-muted text-muted-foreground"
         >
           <FlaskConical size={18} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold">{t('cloudSync.convergent.title')}</span>
-            <span className="inline-flex rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300">
+            <span className="text-sm font-medium">{t('cloudSync.convergent.title')}</span>
+            <span className="inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               {t('cloudSync.convergent.experimental')}
             </span>
           </div>
@@ -125,11 +101,11 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
           </div>
         </div>
       </div>
-      <ConvergentToggle
+      <Toggle
         checked={config.enabled}
         onChange={onToggle}
         disabled={busy}
-        label={t('cloudSync.convergent.title')}
+        ariaLabel={t('cloudSync.convergent.title')}
       />
     </div>
 
@@ -143,20 +119,20 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
     )}
 
     {preview && (
-      <div className="space-y-3 rounded-lg border border-border/70 bg-background/65 p-3.5 shadow-sm">
+      <div className="space-y-3 rounded-md bg-muted/40 p-3">
         <div className="text-sm font-semibold">{t('cloudSync.convergent.preview.title')}</div>
         <div className="grid grid-cols-1 gap-2 text-center sm:grid-cols-3">
-          <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2.5">
+          <div className="px-3 py-2">
             <div className="text-lg font-semibold tabular-nums">
               {Object.values(preview.entityCounts).reduce((sum, count) => sum + (count ?? 0), 0)}
             </div>
             <div className="text-[10px] text-muted-foreground">{t('cloudSync.convergent.preview.entities')}</div>
           </div>
-          <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2.5">
+          <div className="px-3 py-2">
             <div className="text-lg font-semibold tabular-nums">{preview.providers.length}</div>
             <div className="text-[10px] text-muted-foreground">{t('cloudSync.convergent.preview.providers')}</div>
           </div>
-          <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2.5">
+          <div className="px-3 py-2">
             <div className="text-lg font-semibold tabular-nums">{preview.conflictCount}</div>
             <div className="text-[10px] text-muted-foreground">{t('cloudSync.convergent.preview.conflicts')}</div>
           </div>
@@ -165,7 +141,7 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
           {t('cloudSync.convergent.preview.compatibility')}
         </div>
         {preview.providers.length > 0 && (
-          <div className="divide-y rounded border text-xs">
+          <div className="divide-y divide-border/40 text-xs">
             {preview.providers.map((provider) => (
               <div key={provider.provider} className="flex items-start justify-between gap-3 px-2 py-1.5">
                 <span className="font-medium">{provider.provider}</span>
@@ -178,11 +154,11 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
           </div>
         )}
         {preview.blockedReasons.length > 0 && (
-          <div className="rounded border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+          <div className="rounded-md bg-destructive/5 p-2 text-xs text-destructive">
             {preview.blockedReasons.join(' · ')}
           </div>
         )}
-        <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 pt-3">
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
           <Button variant="ghost" size="sm" onClick={onCancelMigration} disabled={busy}>
             {t('common.cancel')}
           </Button>
@@ -194,7 +170,7 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
     )}
 
     {error && (
-      <div className="flex gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+      <div className="flex gap-2 rounded-md bg-destructive/5 p-2 text-xs text-destructive">
         <AlertTriangle size={14} className="mt-0.5 shrink-0" />
         <span>{error}</span>
       </div>
@@ -209,13 +185,13 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
           {conflicts.map((conflict) => {
             const addressKey = convergentConflictAddressKey(conflict.address);
             return (
-              <div key={addressKey} className="space-y-2 rounded-lg border border-border/70 bg-background/65 p-3 shadow-sm">
+              <div key={addressKey} className="space-y-2 rounded-md bg-muted/40 p-3">
                 <div className="break-all font-mono text-xs">{conflictLabel(conflict, t)}</div>
                 <div className="space-y-1.5">
                   {conflict.candidates.map((candidate) => (
                     <div
                       key={dotKey(candidate.dot)}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/15 p-2.5"
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-background/60 p-2.5"
                     >
                       <div className="min-w-0">
                         <div className="truncate text-xs font-medium">
@@ -228,7 +204,7 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
                       </div>
                       <Button
                         size="sm"
-                        variant={candidate.selected ? 'secondary' : 'outline'}
+                        variant={candidate.selected ? 'secondary' : 'ghost'}
                         disabled={busy}
                         onClick={() => onResolveConflict(addressKey, dotKey(candidate.dot))}
                       >
@@ -245,7 +221,7 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
     )}
 
     {config.initialized && (
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
         <div className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">{t('cloudSync.convergent.downgrade.desc')}</div>
         <Button variant="ghost" size="sm" className="text-destructive" onClick={onDowngrade} disabled={busy}>
           <RotateCcw size={14} className="mr-1" />

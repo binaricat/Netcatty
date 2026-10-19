@@ -962,6 +962,7 @@ export class CloudSyncManager {
     ) => Promise<void>,
     options?: {
       pluginSidecars?: SyncPayload['pluginSidecars'];
+      aiSessions?: SyncPayload['aiSessions'];
     },
   ): Promise<{ payload: SyncPayload; results: Map<CloudProvider, SyncResult> }> {
     return resolveConvergentConflictAndSyncImpl.call(

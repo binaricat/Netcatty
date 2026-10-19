@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  stripAnsi,
   addCodexExecutableEnvForSdk,
   buildWindowsShellCommandLine,
   extractTrailingIdlePrompt,
@@ -27,6 +28,19 @@ const {
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+
+test("OSC stripping preserves text between independently terminated sequences", () => {
+  for (const firstEnd of ["\x07", "\x1b\\"]) {
+    for (const secondEnd of ["\x07", "\x1b\\"]) {
+      const text = `\x1b]3008;start${firstEnd}\nprobe-reply\n\x1b]3008;end${secondEnd}prompt`;
+      assert.equal(stripAnsi(text), "\nprobe-reply\nprompt");
+    }
+  }
+  assert.equal(
+    stripAnsi("before\x1b[31mcolored\x1b[0m\x1b]0;title\x07after"),
+    "beforecoloredafter",
+  );
+});
 
 test("formatSyntheticEcho normalizes multi-line commands to CRLF so xterm doesn't staircase", () => {
   assert.equal(

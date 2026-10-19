@@ -1,6 +1,10 @@
-import { useCallback, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { navigateComposeBarHistory, type ComposeBarHistoryDirection } from '../../domain/composeBarHistory';
-import { getComposeBarHistory, createComposeBarHistoryRecorder } from './composeBarHistoryStore';
+import {
+  getComposeBarHistory,
+  createComposeBarHistoryRecorder,
+  subscribeComposeBarHistoryCleared,
+} from './composeBarHistoryStore';
 
 export function useComposeBarHistory(sessionId: string, restoreDraft?: (draft: string) => void) {
   const cursor = useRef<{ index: number; draft: string; entries?: readonly string[] }>({ index: Infinity, draft: '' });
@@ -15,6 +19,24 @@ export function useComposeBarHistory(sessionId: string, restoreDraft?: (draft: s
     if (cursor.current.entries) restoreDraft?.(cursor.current.draft);
     reset();
   }, [reset, restoreDraft, sessionId]);
+
+  /**
+   * Restore the pre-walk draft and drop the cached history walk.
+   *
+   * While the user is in an ArrowUp walk the textarea shows the recalled
+   * command, so resetting the cursor alone would leave a deleted command ready
+   * for Enter. Put the saved draft back first, exactly like the session-change
+   * path above.
+   */
+  const handleHistoryCleared = useCallback(() => {
+    if (cursor.current.entries) restoreDraft?.(cursor.current.draft);
+    reset();
+  }, [reset, restoreDraft]);
+
+  useEffect(
+    () => subscribeComposeBarHistoryCleared(handleHistoryCleared),
+    [handleHistoryCleared],
+  );
 
   const prepareRecord = useCallback(() => createComposeBarHistoryRecorder(sessionId), [sessionId]);
 

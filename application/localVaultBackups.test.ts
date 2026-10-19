@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 
 import type { SyncPayload } from '../domain/sync.ts';
 
@@ -132,3 +132,89 @@ for (const localRestore of [false, true]) {
     });
   }
 }
+
+function installBackupLocks(t: TestContext) {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  let readers = 0;
+  let writer: Promise<void> | null = null;
+  const locks = {
+    async request(_name: string, options: { mode: string; ifAvailable?: boolean }, callback: (lock: object | null) => Promise<unknown>) {
+      if (options.mode === 'shared') {
+        if (writer) await writer;
+        readers += 1;
+        try { return await callback({}); } finally { readers -= 1; }
+      }
+      assert.equal(options.ifAvailable, true, 'cleanup must refuse rather than queue behind a restore');
+      if (readers || writer) return callback(null);
+      let release!: () => void;
+      writer = new Promise<void>((resolve) => { release = resolve; });
+      try { return await callback({}); } finally { writer = null; release(); }
+    },
+  };
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks } });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, 'navigator', previous);
+    else Reflect.deleteProperty(globalThis, 'navigator');
+  });
+}
+
+function installClearBridge(t: TestContext, clearVaultBackups: () => Promise<unknown>) {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { netcatty: { clearVaultBackups } } });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, 'window', previous);
+    else Reflect.deleteProperty(globalThis, 'window');
+  });
+}
+
+test('cleanup refuses while another restore is applying, including nested restore helpers', async (t) => {
+  installBackupLocks(t);
+  const { clearLocalVaultBackups, withRestoreBarrier, LocalVaultBackupBusyError } = await import('./localVaultBackups.ts');
+  let clears = 0;
+  installClearBridge(t, async () => { clears += 1; });
+  let finish!: () => void;
+  let entered!: () => void;
+  const active = new Promise<void>((resolve) => { entered = resolve; });
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const restoring = withRestoreBarrier(() => withRestoreBarrier(async () => { entered(); await gate; }));
+  await active;
+  try {
+    await assert.rejects(clearLocalVaultBackups(), LocalVaultBackupBusyError);
+    assert.equal(clears, 0);
+  } finally {
+    finish();
+    await restoring;
+  }
+  await clearLocalVaultBackups();
+  assert.equal(clears, 1);
+});
+
+test('restore waits for an in-progress cleanup before reading or applying data', async (t) => {
+  installBackupLocks(t);
+  const { clearLocalVaultBackups, withRestoreBarrier } = await import('./localVaultBackups.ts');
+  let finish!: () => void;
+  let entered!: () => void;
+  const active = new Promise<void>((resolve) => { entered = resolve; });
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  installClearBridge(t, async () => { entered(); await gate; });
+  const clearing = clearLocalVaultBackups();
+  await active;
+  let applied = false;
+  const restoring = withRestoreBarrier(async () => { applied = true; });
+  await Promise.resolve();
+  assert.equal(applied, false);
+  finish();
+  await Promise.all([clearing, restoring]);
+  assert.equal(applied, true);
+});
+
+test('cleanup retains recovery backups after an interrupted protected apply', async (t) => {
+  installBackupLocks(t);
+  const { clearLocalVaultBackups, LocalVaultBackupBusyError } = await import('./localVaultBackups.ts');
+  const { STORAGE_KEY_VAULT_APPLY_IN_PROGRESS } = await import('../infrastructure/config/storageKeys.ts');
+  let clears = 0;
+  installClearBridge(t, async () => { clears += 1; });
+  localStorageValues.set(STORAGE_KEY_VAULT_APPLY_IN_PROGRESS, JSON.stringify({ startedAt: Date.now(), protectiveBackupId: 'recovery' }));
+  await assert.rejects(clearLocalVaultBackups(), LocalVaultBackupBusyError);
+  assert.equal(clears, 0);
+});

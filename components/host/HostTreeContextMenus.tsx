@@ -1,4 +1,4 @@
-import { Copy, FileSymlink, Files, Folder, FolderOpen, Monitor, Pencil, Plus, Server, Settings2 } from 'lucide-react';
+import { Copy, FileSymlink, Files, Folder, FolderOpen, Globe2, Monitor, Pencil, Plus, Server, Settings2 } from 'lucide-react';
 import React from 'react';
 
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -14,6 +14,7 @@ import { PluginContributionIcon } from '../plugins/PluginContributionIcon';
 
 export interface HostTreeHostContextMenuHandlers {
   onConnect: (host: Host) => void;
+  onOpenBrowser?: (host: Host) => void;
   onEditHost?: (host: Host) => void;
   onRenameHost?: (host: Host) => void;
   onDuplicateHost: (host: Host) => void;
@@ -33,11 +34,18 @@ export const OpenDualPaneSftpMenuItem: React.FC<{ host: Host }> = ({ host }) => 
   );
 };
 
+export const OpenHostBrowserMenuItem: React.FC<{ host: Host; onOpenBrowser?: (host: Host) => void }> = ({ host, onOpenBrowser }) => {
+  const { t } = useI18n();
+  if (!onOpenBrowser || (host.protocol && !['ssh', 'mosh', 'local'].includes(host.protocol))) return null;
+  return <ContextMenuItem onClick={() => onOpenBrowser(host)}><Globe2 className="mr-2 h-4 w-4" /> {t('terminal.browser.open')}</ContextMenuItem>;
+};
+
 export const HostTreeHostContextMenuContent: React.FC<
   HostTreeHostContextMenuHandlers & { host: Host }
 > = ({
   host,
   onConnect,
+  onOpenBrowser,
   onEditHost,
   onRenameHost,
   onDuplicateHost,
@@ -65,6 +73,7 @@ export const HostTreeHostContextMenuContent: React.FC<
         <Monitor className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
       </ContextMenuItem>
       <OpenDualPaneSftpMenuItem host={safeHost} />
+      <OpenHostBrowserMenuItem host={safeHost} onOpenBrowser={onOpenBrowser} />
       {onEditHost && (
         <ContextMenuItem onClick={() => onEditHost(host)}>
           <Settings2 className="mr-2 h-4 w-4" /> {t('terminal.layer.hostTree.editHost')}

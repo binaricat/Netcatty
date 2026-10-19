@@ -457,6 +457,11 @@ function createBridgeRegistrar(context) {
   
     // Register all IPC handlers
     sshBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+    const stopMonitoring = () => terminalWorkerManager
+      ? terminalWorkerManager.request("netcatty:monitor:stop-all", {}, {}).catch(() => {})
+      : sshBridge.stopAllMonitoring();
+    electronModule.powerMonitor?.on("suspend", stopMonitoring);
+    require("../plugins/shutdownCoordinator.cjs").registerPluginShutdown(stopMonitoring);
     sftpBridge.registerHandlers(ipcMain, { terminalWorkerManager });
     localFsBridge.registerHandlers(ipcMain);
     require("../bridges/localFileDragBridge.cjs").registerHandlers(ipcMain, {
@@ -466,6 +471,25 @@ function createBridgeRegistrar(context) {
     });
     transferBridge.registerHandlers(ipcMain, { terminalWorkerManager });
     portForwardingBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+    if (electronModule.WebContentsView && electronModule.session?.fromPartition) {
+      const { createHostBrowserManager } = require("../hostBrowser/hostBrowserManager.cjs");
+      const hostBrowserManager = createHostBrowserManager({
+        electron: electronModule,
+        app,
+        portForwardingBridge,
+      });
+      ipcMain.handle("netcatty:host-browser:request-panel", (event, request) => {
+        const senderWindow = BrowserWindow.fromWebContents(event.sender);
+        const mainWindow = getWindowManager().getMainWindow?.();
+        if (!senderWindow || senderWindow.webContents !== event.sender || !mainWindow || mainWindow.isDestroyed()
+          || typeof request?.host?.id !== "string") throw new Error("Browser opener is unavailable");
+        mainWindow.webContents.send("netcatty:host-browser:request-panel", request);
+        mainWindow.show();
+        mainWindow.focus();
+        return true;
+      });
+      app.once?.("will-quit", () => hostBrowserManager.closeAll());
+    }
     terminalBridge.registerHandlers(ipcMain, { terminalWorkerManager });
 
     const scriptBridge = require("../bridges/scriptBridge.cjs");

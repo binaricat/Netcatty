@@ -29,9 +29,9 @@
 </p>
 
 <p align="center">
-  <a href="https://ko-fi.com/binaricat">
-    <img src="https://cdn.ko-fi.com/cdn/kofi3.png?v=2" width="150" alt="Support on Ko-fi">
-  </a>
+  <a href="https://github.com/sponsors/binaricat"><img src="https://img.shields.io/badge/GitHub-Sponsors-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" height="28" alt="透過 GitHub 贊助我"></a>
+  &nbsp;
+  <a href="https://ko-fi.com/binaricat"><img src="https://img.shields.io/badge/Ko--fi-Support-29abe0?style=for-the-badge&logo=kofi&logoColor=white" height="28" alt="Support on Ko-fi"></a>
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@
 
 ---
 
-<img width="3142" height="1764" alt="Screenshot 2026-07-02 at 22 51 24" src="https://github.com/user-attachments/assets/3116165d-623a-4d3a-a28a-914befb9b72d" />
+<img width="3358" height="1984" alt="image" src="https://github.com/user-attachments/assets/e1302660-dece-46be-9857-1678a9b13d00" />
 
 ---
 
@@ -63,13 +63,13 @@
 
 請 Catty Agent 檢查伺服器健康狀況，它會自動執行合適的指令、分析輸出，並在幾秒內給你一份清楚的總結。
 
-<img width="1510" height="870" alt="ai-single" src="https://github.com/user-attachments/assets/d3f34e53-8476-4fab-8634-394b931d1ff1" />
+<img width="3302" height="1978" alt="image" src="https://github.com/user-attachments/assets/3ec30145-d226-4e26-834b-52ee75b5e205" />
 
 #### 🚀 多主機 —— 建立 Docker Swarm 叢集
 
 看 Catty Agent 在一次對話裡，跨兩台伺服器編排出一個 Docker Swarm 叢集。初始化、權杖交換、節點加入都由它處理 —— 你只要說出你想要的結果。
 
-<img width="1515" height="870" alt="ai-muti" src="https://github.com/user-attachments/assets/ca166fc5-65d9-4d7b-951a-962c2ef230d8" />
+<img width="3294" height="1974" alt="image" src="https://github.com/user-attachments/assets/ca17e857-6163-4067-a615-cacdfd5be4fc" />
 
 ---
 
@@ -82,6 +82,7 @@
 - [介面截圖](#介面截圖)
   - [主視窗](#主視窗)
   - [Vault 檢視](#vault-檢視)
+  - [監控檢視](#監控檢視)
   - [分割終端](#分割終端)
 - [支援的發行版](#支援的發行版)
 - [快速開始](#快速開始)
@@ -148,18 +149,27 @@
 
 主視窗是為了長時間的 SSH 工作流程而設計：工作階段、導覽與常用工具都集中在同一個地方。
 
-<img width="1531" height="875" alt="black-grid" src="https://github.com/user-attachments/assets/004b80f6-5bbb-4f14-b8cd-33a0a5913b8c" />
+<img width="3290" height="1988" alt="image" src="https://github.com/user-attachments/assets/ab3afd3e-a819-46fc-9251-40acb592ba69" />
 
-<img width="1550" height="876" alt="light" src="https://github.com/user-attachments/assets/2b59a999-a25e-4217-944c-9aef0a09f272" />
+<img width="3324" height="1992" alt="image" src="https://github.com/user-attachments/assets/7c7f6e7f-fb20-4574-8e7f-74397682b873" />
 
 <a name="vault-檢視"></a>
 ## Vault 檢視
 
 用最適合當下情境的方式整理與瀏覽主機：網格看全局、清單快速掃視、樹狀理層級。
 
-<img width="1554" height="882" alt="list" src="https://github.com/user-attachments/assets/03249f15-b5f8-4770-a3c3-d5001636ea00" />
+<img width="3292" height="1984" alt="image" src="https://github.com/user-attachments/assets/29642143-3fd6-4693-a30c-b7f656053ca3" />
 
-<img width="1561" height="878" alt="tree" src="https://github.com/user-attachments/assets/739f7b66-3898-43d0-8dd3-b9b97fd8e8de" />
+<img width="3322" height="1998" alt="image" src="https://github.com/user-attachments/assets/6041efe2-607e-4314-838c-eba3db4c852c" />
+
+<a name="監控檢視"></a>
+## 監控檢視
+
+查看 CPU、記憶體、磁碟、網路與延遲資料；支援的環境還可顯示 GPU 詳情。你可以選擇顯示的欄位、調整欄寬與重新整理設定，並直接從受監控的主機開啟終端機。
+
+<img width="3364" height="1982" alt="image" src="https://github.com/user-attachments/assets/d0f495b5-25c8-494f-bb9c-8c20b0a921b6" />
+
+<img width="3362" height="1980" alt="image" src="https://github.com/user-attachments/assets/245c234e-2b22-43f2-a4fd-8057d229c56f" />
 
 <a name="分割終端"></a>
 ## 分割終端
