@@ -5,6 +5,7 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { PREFLIGHT_STAT_CONCURRENCY, PREFLIGHT_STAT_MAX_FILES, useSftpTransfers } from "./useSftpTransfers";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
+import type { Host } from "../../../domain/models";
 import type { SftpPane } from "./types";
 
 for (const direction of ["download", "upload"] as const) {
@@ -130,6 +131,160 @@ function installGlobals(netty: Record<string, unknown>) {
     (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame = previousRaf;
     (globalThis as { cancelAnimationFrame?: unknown }).cancelAnimationFrame = previousCancelRaf;
   };
+}
+
+for (const pinned of [false, true]) {
+for (const direction of ["download", "upload"] as const) {
+  test(`${pinned ? "existing" : "new"} dual-pane ${direction} preserves its endpoint after host edits`, async () => {
+    const acquired: string[] = [];
+    const started: StartOptions[] = [];
+    const restore = installGlobals({
+      statSftp: async () => direction === "download"
+        ? { name: "aops_dns_view_demo.sh", type: "file", size: 4, sizeKnown: true, lastModified: 1 }
+        : null,
+      statLocal: async () => direction === "upload"
+        ? { name: "aops_dns_view_demo.sh", type: "file", size: 4, sizeKnown: true, lastModified: 1 }
+        : null,
+      startStreamTransfer: async (options: StartOptions) => {
+        started.push(options);
+        sftpTransferCenterStore.ingestBackgroundEvent({
+          type: "completed", transferId: options.transferId,
+          transferred: options.totalBytes ?? 0, totalBytes: options.totalBytes ?? 0, lifecycleEpoch: 0,
+        });
+        return {};
+      },
+    });
+    // These pane callbacks stay stable in the app while the saved hosts change.
+    const getActivePane = (side: "left" | "right") => makePane(side);
+    const getPaneByConnectionId = () => null;
+    const getTabByConnectionId = () => null;
+    const updateTab = () => undefined;
+    const sftpSessionsRef = { current: new Map([["remote-conn", "browse-session"]]) };
+    const pinnedHost = { id: "host-1", hostname: "old-endpoint" } as Host;
+    const pinnedChain = [{ id: "jump-1", hostname: "old-bastion" } as Host];
+    const acquiredChains: string[] = [];
+    const acquire = (savedEndpoint: string) => async (
+      _hostId: string, _jobId: string, connectHost?: Host, connectChain?: Host[],
+    ) => {
+      const endpoint = connectHost?.hostname ?? savedEndpoint;
+      acquired.push(endpoint);
+      acquiredChains.push(connectChain?.map((hop) => hop.hostname).join(" -> ") ?? "unpinned");
+      return { sftpId: endpoint, poolKey: endpoint, release: () => undefined, discard: () => undefined };
+    };
+    const original = acquire("old-endpoint");
+    const refreshed = acquire("new-endpoint");
+    let ops: ReturnType<typeof useSftpTransfers> | undefined;
+    let renderer: ReactTestRenderer | undefined;
+    function Probe({ acquireSession }: { acquireSession: typeof original }) {
+      ops = useSftpTransfers({
+        ownerId: `refresh-host-${direction}`,
+        getActivePane, getPaneByConnectionId, getTabByConnectionId, updateTab,
+        refresh: async () => undefined, clearCacheForConnection: () => undefined,
+        handleSessionError: () => undefined, sftpSessionsRef,
+        connectionCacheKeyMapRef: { current: new Map() },
+        listLocalFiles: async () => [], listRemoteFiles: async () => [],
+        acquireTransferSession: acquireSession,
+        resolveConnectedHost: () => pinned ? pinnedHost : null,
+        resolveConnectedChain: pinned ? () => pinnedChain : undefined,
+      });
+      return null;
+    }
+    try {
+      await act(async () => { renderer = create(React.createElement(Probe, { acquireSession: original })); });
+      await act(async () => { renderer!.update(React.createElement(Probe, { acquireSession: refreshed })); });
+      await act(async () => {
+        await ops!.startTransfer([{ name: "aops_dns_view_demo.sh", isDirectory: false }],
+          direction === "download" ? "left" : "right", direction === "download" ? "right" : "left");
+      });
+      assert.equal(acquired.length, 2, "both the work lease and file lease must use the pane endpoint");
+      assert.ok(acquired.every((endpoint) => endpoint === (pinned ? "old-endpoint" : "new-endpoint")), JSON.stringify(acquired));
+      if (pinned) {
+        assert.ok(
+          acquiredChains.every((chain) => chain === "old-bastion"),
+          `the pinned jump chain must ride along with the pinned endpoint: ${JSON.stringify(acquiredChains)}`,
+        );
+      } else {
+        assert.ok(
+          acquiredChains.every((chain) => chain === "unpinned"),
+          `no chain may attach when the connect host is unresolved: ${JSON.stringify(acquiredChains)}`,
+        );
+      }
+      assert.equal(started.length, 1);
+    } finally {
+      await act(async () => { renderer?.unmount(); });
+      restore();
+    }
+  });
+}
+
+}
+
+for (const direction of ["download", "upload"] as const) {
+  test(`dual-pane ${direction} started during a reconnect falls back to the pane endpoint, not the incoming tab host`, async () => {
+    const acquired: string[] = [];
+    const started: StartOptions[] = [];
+    const restore = installGlobals({
+      statSftp: async () => direction === "download"
+        ? { name: "aops_dns_view_demo.sh", type: "file", size: 4, sizeKnown: true, lastModified: 1 }
+        : null,
+      statLocal: async () => direction === "upload"
+        ? { name: "aops_dns_view_demo.sh", type: "file", size: 4, sizeKnown: true, lastModified: 1 }
+        : null,
+      startStreamTransfer: async (options: StartOptions) => {
+        started.push(options);
+        sftpTransferCenterStore.ingestBackgroundEvent({
+          type: "completed", transferId: options.transferId,
+          transferred: options.totalBytes ?? 0, totalBytes: options.totalBytes ?? 0, lifecycleEpoch: 0,
+        });
+        return {};
+      },
+    });
+    const getActivePane = (side: "left" | "right") => makePane(side);
+    const getPaneByConnectionId = () => null;
+    const getTabByConnectionId = () => null;
+    const updateTab = () => undefined;
+    const sftpSessionsRef = { current: new Map([["remote-conn", "browse-session"]]) };
+    // connect() has already recorded the incoming endpoint for this tab id
+    // while the pane still shows the old connection (reconnect in flight).
+    const incomingHost = { id: "host-2", hostname: "reconnect-endpoint" } as Host;
+    const acquire = (savedEndpoint: string) => async (_hostId: string, _jobId: string, connectHost?: Host) => {
+      const endpoint = connectHost?.hostname ?? savedEndpoint;
+      acquired.push(endpoint);
+      return { sftpId: endpoint, poolKey: endpoint, release: () => undefined, discard: () => undefined };
+    };
+    const acquireSession = acquire("saved-endpoint");
+    let ops: ReturnType<typeof useSftpTransfers> | undefined;
+    let renderer: ReactTestRenderer | undefined;
+    function Probe() {
+      ops = useSftpTransfers({
+        ownerId: `reconnect-host-${direction}`,
+        getActivePane, getPaneByConnectionId, getTabByConnectionId, updateTab,
+        refresh: async () => undefined, clearCacheForConnection: () => undefined,
+        handleSessionError: () => undefined, sftpSessionsRef,
+        connectionCacheKeyMapRef: { current: new Map() },
+        listLocalFiles: async () => [], listRemoteFiles: async () => [],
+        acquireTransferSession: acquireSession,
+        resolveConnectedHost: () => incomingHost,
+      });
+      return null;
+    }
+    try {
+      await act(async () => { renderer = create(React.createElement(Probe)); });
+      await act(async () => {
+        await ops!.startTransfer([{ name: "aops_dns_view_demo.sh", isDirectory: false }],
+          direction === "download" ? "left" : "right", direction === "download" ? "right" : "left");
+      });
+      assert.equal(acquired.length, 2, "both the work lease and file lease must be acquired");
+      assert.ok(
+        acquired.every((endpoint) => endpoint === "saved-endpoint"),
+        `the incoming endpoint must not capture the transfer: ${JSON.stringify(acquired)}`,
+      );
+      assert.equal(started.length, 1);
+    } finally {
+      await act(async () => { renderer?.unmount(); });
+      restore();
+    }
+  });
 }
 
 for (const liveStatAvailable of [true, false]) {

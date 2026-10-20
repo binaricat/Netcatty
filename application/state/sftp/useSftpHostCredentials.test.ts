@@ -707,3 +707,30 @@ test("imported IdentityFile paths remain usable when agent login is disabled", (
   assert.equal(credentials.useSshAgent, false);
   assert.deepEqual(credentials.identityFilePaths, ["~/.ssh/id_work"]);
 });
+
+test("buildSftpHostCredentials pins the captured jump chain over edited vault hosts", () => {
+  const oldBastion = host({ id: "jump-1", hostname: "bastion-internal.old" });
+  const editedBastion = host({ id: "jump-1", hostname: "bastion-internal.edited" });
+  const credentials = buildSftpHostCredentials({
+    host: host({ hostChain: { hostIds: ["jump-1"] } }),
+    hosts: [editedBastion],
+    keys: [],
+    identities: [],
+    jumpHostsOverride: [oldBastion],
+  });
+
+  assert.equal(credentials.jumpHosts?.[0]?.hostname, "bastion-internal.old");
+  assert.equal(credentials.jumpHosts?.[0]?.hostId, "jump-1");
+});
+
+test("buildSftpHostCredentials re-resolves the live chain without a pinned snapshot", () => {
+  const editedBastion = host({ id: "jump-1", hostname: "bastion-internal.edited" });
+  const credentials = buildSftpHostCredentials({
+    host: host({ hostChain: { hostIds: ["jump-1"] } }),
+    hosts: [editedBastion],
+    keys: [],
+    identities: [],
+  });
+
+  assert.equal(credentials.jumpHosts?.[0]?.hostname, "bastion-internal.edited");
+});
