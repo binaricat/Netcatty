@@ -90,3 +90,52 @@ test("compressMessagesForRequestTooLargeRetry reports no adjustment for compact 
   assert.equal(result.didAdjust, false);
   assert.deepEqual(result.messages, messages);
 });
+
+test("compressMessagesForRequestTooLargeRetry keeps attachments when preserveAttachments is set", () => {
+  const imageData = "A".repeat(300_000);
+  const fileData = Buffer.from("label,hostname\nprod,prod.example.com\n").toString("base64");
+  const messages: ModelMessage[] = [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "what does this screenshot say?" },
+        { type: "file", data: imageData, mediaType: "image/png" },
+      ],
+    },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "import these hosts" },
+        { type: "file", data: fileData, mediaType: "text/csv", filename: "hosts.csv" },
+      ],
+    },
+    {
+      role: "tool",
+      content: [{
+        type: "tool-result",
+        toolCallId: "call-1",
+        toolName: "terminal_execute",
+        output: { type: "text", value: "X".repeat(200_000) },
+      }],
+    },
+  ];
+
+  const result = compressMessagesForRequestTooLargeRetry(messages, { preserveAttachments: true });
+
+  // Text and tool output are still reduced; only the multimodal parts survive.
+  assert.equal(result.didAdjust, true);
+  assert.doesNotMatch(JSON.stringify(result.messages), /attachment omitted to keep the AI request small/);
+
+  const imageContent = result.messages[0].content;
+  assert.ok(Array.isArray(imageContent));
+  assert.deepEqual(imageContent[1], messages[0].content[1]);
+
+  const fileContent = result.messages[1].content;
+  assert.ok(Array.isArray(fileContent));
+  assert.deepEqual(fileContent[1], messages[1].content[1]);
+
+  const toolContent = result.messages[2].content;
+  assert.ok(Array.isArray(toolContent));
+  const toolPart = toolContent[0] as { output?: { value?: string } };
+  assert.ok((toolPart.output?.value?.length ?? 0) < 5_000);
+});

@@ -363,3 +363,56 @@ test('prepareTurnContext calls summarize when over dynamic threshold', async () 
   assert.equal(prepared.trace?.didLlmSummarize, true);
   assert.match(JSON.stringify(prepared.messages), /summary of earlier work/);
 });
+
+test('normal turn and step preparation keep user attachment parts', async () => {
+  const messages: ModelMessage[] = [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'what does this image say?' },
+        { type: 'file', data: 'QUJD'.repeat(750), mediaType: 'image/png' },
+      ],
+    },
+  ];
+
+  const turn = await prepareTurnContext({
+    messages,
+    backend: 'catty',
+    contextWindow: 1_300_000,
+    trigger: 'pre-turn',
+  });
+  const step = await prepareStepContext({
+    messages: turn.messages,
+    contextWindow: 1_300_000,
+    stepNumber: 0,
+  });
+
+  for (const prepared of [turn, step]) {
+    const content = prepared.messages.find(message => message.role === 'user')?.content;
+    assert.ok(Array.isArray(content));
+    assert.equal(content.some(part => (part as { type?: string }).type === 'file'), true);
+    assert.doesNotMatch(JSON.stringify(prepared.messages), /attachment omitted to keep the AI request small/);
+  }
+});
+
+test('413 retry still trades attachments for a text placeholder', async () => {
+  const messages: ModelMessage[] = [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'what does this image say?' },
+        { type: 'file', data: 'QUJD'.repeat(750), mediaType: 'image/png' },
+      ],
+    },
+  ];
+
+  const prepared = await prepareTurnContext({
+    messages,
+    backend: 'catty',
+    contextWindow: 1_300_000,
+    trigger: '413-retry',
+    compressForRequestTooLargeRetry: true,
+  });
+
+  assert.match(JSON.stringify(prepared.messages), /attachment omitted to keep the AI request small/);
+});

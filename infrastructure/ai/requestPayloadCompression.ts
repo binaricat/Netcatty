@@ -16,6 +16,19 @@ export interface CompressMessagesForRequestTooLargeRetryResult {
   didAdjust: boolean;
 }
 
+export interface CompressMessagesForRequestTooLargeRetryOptions {
+  /**
+   * Keep multimodal `image` / `file` content parts instead of replacing them
+   * with a text placeholder.
+   *
+   * Only the 413 retry should drop attachments: there, a placeholder is better
+   * than a rejected request. Routine pre-turn and step-level typed compression
+   * run on every turn, so dropping attachments there would mean the model never
+   * receives the image or file the user just attached.
+   */
+  preserveAttachments?: boolean;
+}
+
 /**
  * Collapse noisy terminal/build output.
  * Keeps semantics while removing repeated blank lines and long duplicate runs.
@@ -108,10 +121,12 @@ export function truncateTextWithHeadAndTail(
 
 export function compressMessagesForRequestTooLargeRetry(
   messages: ModelMessage[],
+  options: CompressMessagesForRequestTooLargeRetryOptions = {},
 ): CompressMessagesForRequestTooLargeRetryResult {
+  const preserveAttachments = options.preserveAttachments === true;
   let didAdjust = false;
   const compressedMessages = messages.map((message) => {
-    const compressed = compressModelMessageForRequestRetry(message);
+    const compressed = compressModelMessageForRequestRetry(message, preserveAttachments);
     if (compressed !== message) didAdjust = true;
     return compressed;
   });
@@ -122,7 +137,10 @@ export function compressMessagesForRequestTooLargeRetry(
   };
 }
 
-function compressModelMessageForRequestRetry(message: ModelMessage): ModelMessage {
+function compressModelMessageForRequestRetry(
+  message: ModelMessage,
+  preserveAttachments: boolean,
+): ModelMessage {
   if (typeof message.content === "string") {
     // User text is an instruction or exact input, not terminal output. Lossy
     // cleanup can alter commands even when the request is far below its limit.
@@ -136,7 +154,7 @@ function compressModelMessageForRequestRetry(message: ModelMessage): ModelMessag
   let didAdjust = false;
   const content = message.content.map((part) => {
     if (message.role === "user" && part.type === "text") return part;
-    const compressed = compressContentPartForRequestRetry(part);
+    const compressed = compressContentPartForRequestRetry(part, preserveAttachments);
     if (compressed !== part) didAdjust = true;
     return compressed;
   });
@@ -144,7 +162,7 @@ function compressModelMessageForRequestRetry(message: ModelMessage): ModelMessag
   return didAdjust ? ({ ...message, content } as ModelMessage) : message;
 }
 
-function compressContentPartForRequestRetry(part: unknown): unknown {
+function compressContentPartForRequestRetry(part: unknown, preserveAttachments: boolean): unknown {
   if (!part || typeof part !== "object") return part;
   const record = part as Record<string, unknown>;
   const type = record.type;
@@ -178,12 +196,14 @@ function compressContentPartForRequestRetry(part: unknown): unknown {
     }
   }
 
-  if (type === "image" && typeof record.image === "string") {
-    return omittedAttachmentTextPart("image", record.image, record);
-  }
+  if (!preserveAttachments) {
+    if (type === "image" && typeof record.image === "string") {
+      return omittedAttachmentTextPart("image", record.image, record);
+    }
 
-  if (type === "file" && typeof record.data === "string") {
-    return omittedAttachmentTextPart("file", record.data, record);
+    if (type === "file" && typeof record.data === "string") {
+      return omittedAttachmentTextPart("file", record.data, record);
+    }
   }
 
   return part;
