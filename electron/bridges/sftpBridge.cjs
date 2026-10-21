@@ -624,13 +624,159 @@ async function execRemoteShellCommand(sshClient, command, optionsOrSignal = null
           stream.stderr.on("data", (chunk) => { appendOutput("stderr", chunk); });
           stream.stderr.on("error", (streamError) => finish(streamError));
         }
-        stream.on("close", (code) => finish(null, code ?? 0));
+        stream.on("close", (code) => {
+          if (typeof code !== "number") {
+            finish(new Error("Remote command ended without an exit code"));
+            return;
+          }
+          finish(null, code);
+        });
         stream.on("error", (streamError) => finish(streamError));
       });
     } catch (error) {
       finish(error);
     }
   });
+}
+
+function isSingleChannelSftpClient(client) {
+  return client?.__netcattySingleChannelSsh === true
+    || client?.client?.__netcattySingleChannelSsh === true;
+}
+
+/**
+ * 单通道堡垒机一条连接只能有一个通道。
+ * 目录删除不能关掉文件通道，而是写到已经连着的 SSH 终端命令通道。
+ */
+function shellChannelIsIdle(session) {
+  const tail = session?._promptTrackTail;
+  if (typeof tail !== "string" || !tail) return false;
+  const { stripAnsi } = require("./ai/shellUtils.cjs");
+  const visible = stripAnsi(tail).replace(/\r/g, "\n");
+  if (!visible || /\n$/.test(visible)) return false;
+  const lastLine = visible.split("\n").pop().replace(/\s+$/, "");
+  return /[#$]$/.test(lastLine) && lastLine.length > 0 && lastLine.length <= 240;
+}
+
+function shellSessionMatchesSftpClient(session, client) {
+  const endpointKey = client?.__netcattyEndpointKey || null;
+  if (!endpointKey) return false;
+  if (session?.connRef?.endpointKey === endpointKey) return true;
+  const parts = String(endpointKey).split("|");
+  if (parts.length < 4) return false;
+  const sessionHost = String(session?.hostname || session?._reuseEndpoint?.hostname || "");
+  const sessionUser = String(session?.username || session?._reuseEndpoint?.username || "");
+  const sessionPort = String(session?._reuseEndpoint?.port || session?.connRef?.endpoint?.port || 22);
+  if (sessionHost !== parts[1] || sessionUser !== parts[3] || sessionPort !== String(parts[2] || 22)) {
+    return false;
+  }
+  const sessionHostId = String(session?._reuseEndpoint?.hostId || session?.connRef?.endpoint?.hostId || "");
+  const keyHostId = parts[0] && parts[0] !== "-" ? parts[0] : "";
+  if (sessionHostId && keyHostId && sessionHostId !== keyHostId) return false;
+  return true;
+}
+
+function findShellSessionForSftpClient(client) {
+  if (!sessions || typeof sessions.values !== "function") return null;
+  const matches = [];
+  for (const session of sessions.values()) {
+    if (!session?.stream || typeof session.stream.write !== "function") continue;
+    if (!shellSessionMatchesSftpClient(session, client)) continue;
+    matches.push(session);
+  }
+  return matches.find((session) => shellChannelIsIdle(session)) || null;
+}
+
+function runShellChannelCommand(session, command, signal) {
+  const marker = `NETCATTY_RM_${randomUUID().replace(/-/g, "")}`;
+  const script = `${command}; printf '\\n%s\\n' '${marker}':$?\n`;
+  const stream = session.stream;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let buffer = "";
+    const timer = setTimeout(() => {
+      finish(new Error(`Remote command execution timed out after ${REMOTE_DELETE_EXEC_RUN_TIMEOUT_MS} ms`));
+    }, REMOTE_DELETE_EXEC_RUN_TIMEOUT_MS);
+    const finish = (error, code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      stream.removeListener?.("data", onData);
+      if (signal) {
+        try { signal.removeEventListener("abort", onAbort); } catch { /* ignore */ }
+      }
+      if (error) reject(error);
+      else resolve(code);
+    };
+    const onAbort = () => finish(createAbortError(signal, "Remote command was aborted"));
+    const onData = (chunk) => {
+      const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk ?? "");
+      buffer = `${buffer}${text}`.slice(-64 * 1024);
+      const match = buffer.match(new RegExp(`${marker}:(\\d+)`));
+      if (!match) return;
+      const code = Number(match[1]);
+      if (!Number.isInteger(code)) return;
+      finish(null, code);
+    };
+    if (signal) {
+      if (signal.aborted) {
+        finish(createAbortError(signal, "Remote command was aborted"));
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    stream.on?.("data", onData);
+    try {
+      stream.write(script);
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error(String(error || "SSH channel write failed")));
+    }
+  });
+}
+
+async function trySequencedShellDirectoryDelete(client, remotePath, encoding = "utf-8", signal = null) {
+  if (!isSingleChannelSftpClient(client)) return false;
+  const enc = !encoding || encoding === "auto" ? "utf-8" : encoding;
+  if (enc !== "utf-8") return false;
+  if (typeof remotePath !== "string" || !remotePath.startsWith("/") || remotePath === "/") {
+    return false;
+  }
+  if (!hasSftpChannelApi(client?.sftp)) return false;
+
+  let command;
+  try {
+    const { buildDeleteCommand } = require("./sftpBridge/scpShell.cjs");
+    command = buildDeleteCommand(remotePath, { recursive: true, encoding: "utf-8" });
+  } catch {
+    return false;
+  }
+
+  const session = findShellSessionForSftpClient(client);
+  if (!session) {
+    throw new Error("单通道连接不能关掉文件通道再删除。请先打开这台主机的 SSH 终端，再重试。");
+  }
+  if (!shellChannelIsIdle(session)) {
+    throw new Error("SSH 终端不在命令提示符。请先回到提示符，再删除目录。");
+  }
+
+  throwIfAborted(signal);
+  const code = await runShellChannelCommand(session, command, signal);
+  if (typeof code !== "number") {
+    throw new Error("Remote command ended without an exit code");
+  }
+  if (code !== 0) {
+    throw new Error(`Remote command failed (code ${code})`);
+  }
+
+  throwIfAborted(signal);
+  try {
+    await lstatAsync(client.sftp, encodePath(remotePath, "utf-8"));
+    return false;
+  } catch (err) {
+    if (err && (err.code === 2 || err.code === "ENOENT")) return true;
+    if (err && /no such file/i.test(String(err.message || ""))) return true;
+    return false;
+  }
 }
 
 /**
@@ -687,6 +833,9 @@ async function tryFastShellDirectoryDelete(client, remotePath, encoding = "utf-8
 async function removeRemoteDirectory(client, remotePath, encoding = "utf-8", signal = null) {
   throwIfAborted(signal);
   const enc = !encoding || encoding === "auto" ? "utf-8" : encoding;
+  if (await trySequencedShellDirectoryDelete(client, remotePath, enc, signal)) {
+    return;
+  }
   if (await tryFastShellDirectoryDelete(client, remotePath, enc, signal)) {
     return;
   }
