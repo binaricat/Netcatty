@@ -89,6 +89,22 @@ function sftpChannelIsLive(sftp) {
     && typeof sftp.open === "function";
 }
 
+/**
+ * A one-channel login is intentionally not published to the transport registry.
+ * The dial leader must still be settled, or the next open joins that promise
+ * and waits forever without creating a socket.
+ */
+function releaseUnsharedFreshDial(pendingDialCoordination, registered, failTransportDial) {
+  if (registered) return false;
+  if (!pendingDialCoordination || pendingDialCoordination.role !== "leader") return false;
+  if (typeof failTransportDial !== "function") return false;
+  const error = new Error(
+    "This SSH connection cannot be shared. The next session must dial again.",
+  );
+  error.code = "ERR_SFTP_SINGLE_CHANNEL_BASTION";
+  return failTransportDial(pendingDialCoordination, error) === true;
+}
+
 /** Sudo is part of the requested connection contract; never downgrade it. */
 async function openRequiredSudoSftp({
   connectSudoSftp,
@@ -1604,7 +1620,6 @@ function createOpenConnectionApi(ctx) {
             );
           }
         }
-
         client.__netcattySingleChannelSsh = peerSingleChannelSsh;
         if (client.client) {
           client.client.__netcattySingleChannelSsh = peerSingleChannelSsh;
@@ -1628,6 +1643,14 @@ function createOpenConnectionApi(ctx) {
           }
           failTransportDial(pendingDialCoordination, unshared);
         }
+        // Upstream already settles the normal unshared dial. This still
+        // releases a leader that path did not settle, so the next upload
+        // can dial instead of waiting.
+        releaseUnsharedFreshDial(
+          pendingDialCoordination,
+          client.__netcattyTransportManaged === true,
+          failTransportDial,
+        );
     
         // Store jump connections for cleanup when SFTP is closed (legacy path
         // only — transport-managed connections park chain on the registry).
@@ -1675,5 +1698,6 @@ module.exports = {
   createOpenConnectionApi,
   createBoundedProbeSignal,
   shouldRegisterFreshSftpTransport,
+  releaseUnsharedFreshDial,
   SCP_PROBE_TIMEOUT_MS,
 };
