@@ -649,29 +649,7 @@ test("single-channel compressed upload does not probe while the terminal line is
   assert.equal(execCalls, 0);
 });
 
-test("single-channel extraction does not exec while the SFTP channel is still open", async () => {
-  let execCalls = 0;
-  const channel = new EventEmitter();
-  channel.end = () => {};
-  const client = {
-    __netcattySingleChannelSsh: true,
-    sftp: channel,
-    client: {
-      exec() {
-        execCalls += 1;
-        throw new Error("must not exec while the SFTP channel is open");
-      },
-    },
-  };
-  await assert.rejects(
-    compressUploadBridge._closeOpenedSftpChannelForTests(client, 30),
-    /SFTP channel/,
-  );
-  assert.equal(execCalls, 0);
-  assert.equal(client.sftp, channel);
-});
-
-test("single-channel compressed upload extracts after closing the SFTP channel", async (t) => {
+test("single-channel compressed upload extracts on the SSH terminal and keeps SFTP open", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-compress-shell-"));
   const folderPath = path.join(root, "folder");
   fs.mkdirSync(folderPath);
@@ -690,9 +668,9 @@ test("single-channel compressed upload extracts after closing the SFTP channel",
   stream.writable = true;
   stream.write = (line) => {
     writes.push(String(line));
-    const marker = String(line).match(/NETCATTY_EXTRACT_[a-z0-9_]+/i);
+    const marker = String(line).match(/NETCATTY_EXTRACT_[a-f0-9]+/);
     if (!marker) return true;
-    process.nextTick(() => stream.emit("data", Buffer.from("\n" + marker[0] + " 0\n")));
+    process.nextTick(() => stream.emit("data", Buffer.from("\n" + marker[0] + ":0\n")));
     return true;
   };
 
@@ -759,7 +737,9 @@ test("single-channel compressed upload extracts after closing the SFTP channel",
   });
 
   assert.equal(result.success, true);
-  assert.equal(execCalls, 1);
+  assert.equal(execCalls, 0);
   assert.equal(sftpOpen, true);
-  assert.equal(writes.length, 0);
+  assert.equal(writes.length, 1);
+  assert.match(writes[0], /tar -xzf/);
+  assert.match(writes[0], /NETCATTY_EXTRACT_/);
 });

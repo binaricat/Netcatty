@@ -676,27 +676,29 @@ function shellSessionMatchesSftpClient(session, client) {
   return true;
 }
 
-function findShellSessionForSftpClient(client) {
-  if (!sessions || typeof sessions.values !== "function") return null;
+function findShellSessionForSftpClient(client, sessionSource = sessions) {
+  if (!sessionSource || typeof sessionSource.values !== "function") return null;
   const matches = [];
-  for (const session of sessions.values()) {
+  for (const session of sessionSource.values()) {
     if (!session?.stream || typeof session.stream.write !== "function") continue;
     if (!shellSessionMatchesSftpClient(session, client)) continue;
     matches.push(session);
   }
-  return matches.find((session) => shellChannelIsIdle(session)) || null;
+  return matches.find((session) => shellChannelIsIdle(session)) || matches[0] || null;
 }
 
-function runShellChannelCommand(session, command, signal) {
-  const marker = `NETCATTY_RM_${randomUUID().replace(/-/g, "")}`;
+function runShellChannelCommand(session, command, signal, options = {}) {
+  const markerPrefix = String(options.markerPrefix || "NETCATTY_RM").replace(/[^A-Za-z0-9_]/g, "") || "NETCATTY_RM";
+  const marker = `${markerPrefix}_${randomUUID().replace(/-/g, "")}`;
   const script = `${command}; printf '\\n%s\\n' '${marker}':$?\n`;
+  const runTimeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : REMOTE_DELETE_EXEC_RUN_TIMEOUT_MS;
   const stream = session.stream;
   return new Promise((resolve, reject) => {
     let settled = false;
     let buffer = "";
     const timer = setTimeout(() => {
-      finish(new Error(`Remote command execution timed out after ${REMOTE_DELETE_EXEC_RUN_TIMEOUT_MS} ms`));
-    }, REMOTE_DELETE_EXEC_RUN_TIMEOUT_MS);
+      finish(new Error(`Remote command execution timed out after ${runTimeoutMs} ms`));
+    }, runTimeoutMs);
     const finish = (error, code) => {
       if (settled) return;
       settled = true;
@@ -732,6 +734,18 @@ function runShellChannelCommand(session, command, signal) {
       finish(error instanceof Error ? error : new Error(String(error || "SSH channel write failed")));
     }
   });
+}
+
+async function runIdleShellCommand(client, command, options = {}) {
+  const session = findShellSessionForSftpClient(client, options.sessions);
+  if (!session) {
+    throw new Error("单通道连接不能关掉文件通道执行命令。请先打开这台主机的 SSH 终端，再重试。");
+  }
+  if (!shellChannelIsIdle(session)) {
+    throw new Error("SSH 终端不在命令提示符。请先回到提示符，再重试。");
+  }
+  throwIfAborted(options.signal || null);
+  return runShellChannelCommand(session, command, options.signal || null, options);
 }
 
 async function trySequencedShellDirectoryDelete(client, remotePath, encoding = "utf-8", signal = null) {
@@ -2900,5 +2914,6 @@ module.exports = {
   resolveEncodingForRequest,
   _tryFastShellDirectoryDeleteForTests: tryFastShellDirectoryDelete,
   _execRemoteShellCommandForTests: execRemoteShellCommand,
+  runIdleShellCommand,
   _tryRemoteSha256SumForTests: tryRemoteSha256Sum,
 };
