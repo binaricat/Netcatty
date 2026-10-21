@@ -448,14 +448,92 @@ async function checkTarAvailable(signal) {
 /**
  * Check if tar command is available on remote server
  */
+function isSingleChannelSftpClient(client) {
+  return client?.__netcattySingleChannelSsh === true
+    || client?.client?.__netcattySingleChannelSsh === true;
+}
+
+const SFTP_CHANNEL_HANDOFF_TIMEOUT_MS = 5000;
+
+function closeOpenedSftpChannel(client, timeoutMs = SFTP_CHANNEL_HANDOFF_TIMEOUT_MS) {
+  const channel = client?.sftp;
+  if (!channel) {
+    return Promise.reject(new Error("Single-channel extraction cannot start without an open SFTP channel"));
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let channelError = null;
+    const timer = setTimeout(() => {
+      finish(channelError || new Error("Timed out closing the SFTP channel before extraction"));
+    }, Math.max(1, Number(timeoutMs) || SFTP_CHANNEL_HANDOFF_TIMEOUT_MS));
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      channel.removeListener?.("close", onClose);
+      channel.removeListener?.("end", onClose);
+      channel.removeListener?.("error", onError);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onClose = () => finish();
+    const onError = (error) => {
+      channelError = error instanceof Error ? error : new Error(String(error || "SFTP channel error"));
+    };
+    channel.once?.("close", onClose);
+    channel.once?.("end", onClose);
+    channel.once?.("error", onError);
+    try {
+      if (typeof channel.end === "function") channel.end();
+      else if (typeof channel.destroy === "function") channel.destroy();
+      else finish(new Error("SFTP channel cannot be closed"));
+    } catch (error) {
+      finish(error);
+    }
+  }).then(() => {
+    client.sftp = undefined;
+  });
+}
+
+function reopenSftpChannel(client, timeoutMs = SFTP_CHANNEL_HANDOFF_TIMEOUT_MS) {
+  const sshClient = client?.client;
+  if (!sshClient || typeof sshClient.sftp !== "function") return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    }, Math.max(1, Number(timeoutMs) || SFTP_CHANNEL_HANDOFF_TIMEOUT_MS));
+    try {
+      sshClient.sftp((error, stream) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error || !stream) {
+          resolve(false);
+          return;
+        }
+        client.sftp = stream;
+        resolve(true);
+      });
+    } catch {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(false);
+    }
+  });
+}
+
 async function checkRemoteTarAvailable(sftpId, signal) {
   try {
     const client = sftpClients.get(sftpId);
     if (!client) throw new Error("SFTP session not found");
-    // Probing tar would open a second channel and drop this SFTP login.
-    // The renderer then uploads the folder file by file.
-    if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
-      return false;
+    // 探测 tar 会再开一个通道，把这条 SFTP 登录踢掉。
+    // 单通道仍走本地压缩上传；解压时先关掉文件通道，再在同一条连接上执行。
+    if (isSingleChannelSftpClient(client)) {
+      return true;
     }
 
     // Try to execute tar --version via SSH
@@ -573,11 +651,7 @@ async function extractRemoteArchive(
 
   const sshClient = client.client;
   if (!sshClient) throw new Error("SSH client not available");
-  if (client.__netcattySingleChannelSsh === true || sshClient.__netcattySingleChannelSsh === true) {
-    throw new Error(
-      "This host is configured for single-channel SSH. Compressed extraction cannot open a shell on the file-transfer login.",
-    );
-  }
+  const singleChannel = isSingleChannelSftpClient(client);
 
   // Calculate timeout based on archive size
   // Base: 60 seconds minimum
@@ -598,7 +672,13 @@ async function extractRemoteArchive(
     folderName,
   });
   let result;
+  let suspendedChannel = false;
   try {
+    if (singleChannel) {
+      // 堡垒机一条连接只允许一个通道。压缩包已经传完，先交还文件通道再解压。
+      await closeOpenedSftpChannel(client);
+      suspendedChannel = true;
+    }
     result = await runRemoteExec(sshClient, command, {
       timeoutMs: extractionTimeout,
       signal,
@@ -608,6 +688,11 @@ async function extractRemoteArchive(
       throw new Error(`Remote extraction timed out after ${extractionTimeout / 1000} seconds`);
     }
     throw new Error(`Remote extraction failed: ${error?.message || String(error)}`);
+  } finally {
+    if (suspendedChannel) {
+      // 解压结束就把文件通道重新打开，目录浏览不用整段重连。
+      await reopenSftpChannel(client);
+    }
   }
   if (result.code === 0) return;
   throw new Error(`Remote extraction failed: ${result.stderr || `exit code ${result.code}`}`);
@@ -1165,6 +1250,7 @@ module.exports = {
   pauseCompression,
   resumeCompression,
   _checkCompressedUploadSupportForTests: checkCompressedUploadSupport,
+  _closeOpenedSftpChannelForTests: closeOpenedSftpChannel,
   _runRemoteExecForTests: runRemoteExec,
   _buildAtomicRemoteExtractionCommandForTests: buildAtomicRemoteExtractionCommand,
   _buildRemoteArchivePathForTests: buildRemoteArchivePath,

@@ -577,12 +577,12 @@ test("compressed upload skips remote tar exec on single-channel SSH", async () =
     sftpId: "sftp-1",
   });
 
-  assert.equal(result.supported, false);
-  assert.equal(result.remoteTar, false);
+  assert.equal(result.supported, true);
+  assert.equal(result.remoteTar, true);
   assert.equal(execCalls, 0);
 });
 
-test("single-channel compressed upload stays on per-file SFTP even when the terminal is idle", async () => {
+test("single-channel compressed upload does not probe the terminal when it is idle", async () => {
   let execCalls = 0;
   const prompt = "[dev@host ~]$ ";
   compressUploadBridge._resetCompressionSupportCacheForTests();
@@ -614,12 +614,12 @@ test("single-channel compressed upload stays on per-file SFTP even when the term
     sftpId: "sftp-shell",
   });
 
-  assert.equal(result.supported, false);
-  assert.equal(result.remoteTar, false);
+  assert.equal(result.supported, true);
+  assert.equal(result.remoteTar, true);
   assert.equal(execCalls, 0);
 });
 
-test("single-channel compressed upload falls back while the terminal line is busy", async () => {
+test("single-channel compressed upload does not probe while the terminal line is busy", async () => {
   let execCalls = 0;
   compressUploadBridge._resetCompressionSupportCacheForTests();
   compressUploadBridge.init({
@@ -645,11 +645,33 @@ test("single-channel compressed upload falls back while the terminal line is bus
     sftpId: "sftp-busy",
   });
 
-  assert.equal(result.remoteTar, false);
+  assert.equal(result.remoteTar, true);
   assert.equal(execCalls, 0);
 });
 
-test("single-channel compressed upload does not extract through the terminal", async (t) => {
+test("single-channel extraction does not exec while the SFTP channel is still open", async () => {
+  let execCalls = 0;
+  const channel = new EventEmitter();
+  channel.end = () => {};
+  const client = {
+    __netcattySingleChannelSsh: true,
+    sftp: channel,
+    client: {
+      exec() {
+        execCalls += 1;
+        throw new Error("must not exec while the SFTP channel is open");
+      },
+    },
+  };
+  await assert.rejects(
+    compressUploadBridge._closeOpenedSftpChannelForTests(client, 30),
+    /SFTP channel/,
+  );
+  assert.equal(execCalls, 0);
+  assert.equal(client.sftp, channel);
+});
+
+test("single-channel compressed upload extracts after closing the SFTP channel", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-compress-shell-"));
   const folderPath = path.join(root, "folder");
   fs.mkdirSync(folderPath);
@@ -657,6 +679,12 @@ test("single-channel compressed upload does not extract through the terminal", a
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   let execCalls = 0;
+  let sftpOpen = true;
+  const sftpChannel = new EventEmitter();
+  sftpChannel.end = () => {
+    sftpOpen = false;
+    process.nextTick(() => sftpChannel.emit("close"));
+  };
   const writes = [];
   const stream = new EventEmitter();
   stream.writable = true;
@@ -675,11 +703,28 @@ test("single-channel compressed upload does not extract through the terminal", a
       ["sftp-extract", {
         __netcattySingleChannelSsh: true,
         __netcattyEndpointKey: "ep-extract",
+        sftp: sftpChannel,
         client: {
           writable: true,
-          exec() {
+          exec(command, callback) {
             execCalls += 1;
-            throw new Error("must not exec on single-channel SSH");
+            if (sftpOpen) throw new Error("must not exec while the SFTP channel is open");
+            const remote = new EventEmitter();
+            remote.stderr = new EventEmitter();
+            remote.close = () => {};
+            remote.end = () => {};
+            remote.destroy = () => {};
+            callback(null, remote);
+            process.nextTick(() => remote.emit("close", 0));
+          },
+          sftp(callback) {
+            sftpOpen = true;
+            const next = new EventEmitter();
+            next.end = () => {
+              sftpOpen = false;
+              process.nextTick(() => next.emit("close"));
+            };
+            callback(null, next);
           },
         },
       }],
@@ -713,8 +758,8 @@ test("single-channel compressed upload does not extract through the terminal", a
     totalBytes: 7,
   });
 
-  assert.equal(result.success, undefined);
-  assert.match(result.error, /tar command not available on remote server/);
-  assert.equal(execCalls, 0);
+  assert.equal(result.success, true);
+  assert.equal(execCalls, 1);
+  assert.equal(sftpOpen, true);
   assert.equal(writes.length, 0);
 });
