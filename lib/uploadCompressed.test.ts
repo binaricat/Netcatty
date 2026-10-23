@@ -93,3 +93,61 @@ test("compressed folder totals exclude directory entries", async () => {
     }
   }
 });
+
+test("non-ASCII folder names fall back to per-file upload on Windows", async () => {
+  const previousWindow = globalThis.window;
+  const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  let supportChecks = 0;
+  const createdTasks: string[] = [];
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { platform: "Win32" },
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      netcatty: {
+        checkCompressedUploadSupport: async () => {
+          supportChecks += 1;
+          return { supported: true, localTar: true, remoteTar: true };
+        },
+        startCompressedUpload: async (options: { compressionId: string }) => (
+          { compressionId: options.compressionId, success: true }
+        ),
+      },
+    },
+  });
+
+  try {
+    const results = await uploadFoldersCompressed(
+      [
+        ["前端", [{ file: null, localPath: "C:\\Users\\me\\前端\\a.txt", relativePath: "前端/a.txt", isDirectory: false, size: 1 }]],
+        ["mpr", [{ file: null, localPath: "C:\\Users\\me\\等10个文件\\mpr\\a.txt", relativePath: "mpr/a.txt", isDirectory: false, size: 1 }]],
+      ],
+      "/remote",
+      "sftp-1",
+      { onTaskCreated: (task) => createdTasks.push(task.fileName) },
+    );
+
+    assert.deepEqual(results, [
+      { fileName: "前端", success: false, error: "Compressed upload not supported - fallback needed" },
+      { fileName: "mpr", success: true },
+    ]);
+    assert.equal(supportChecks, 1, "the non-ASCII folder must not probe compressed upload support");
+    assert.deepEqual(createdTasks, ["mpr"], "no compressed task is created for the fallback folder");
+  } finally {
+    if (previousNavigator) {
+      Object.defineProperty(globalThis, "navigator", previousNavigator);
+    } else {
+      Reflect.deleteProperty(globalThis, "navigator");
+    }
+    if (previousWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: previousWindow,
+      });
+    }
+  }
+});

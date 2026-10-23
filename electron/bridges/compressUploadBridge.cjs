@@ -484,24 +484,36 @@ async function compressFolder(folderPath, outputPath, compressionId, sendProgres
     }
 
     // Use tar with gzip compression, excluding macOS resource fork files
-    // -czf: create, gzip, file
-    // -C: change to directory (so we don't include the full path in archive)
+    // -czf -: create, gzip, write to stdout (the opened output file)
+    // cwd: run in the parent directory (so we don't include the full path in archive)
     // --exclude='._*': exclude macOS resource fork files
     // --exclude='.DS_Store': exclude macOS folder metadata files
+    // Windows tar.exe converts argv to the ANSI code page, so local paths are
+    // passed via cwd and a file descriptor instead of -C and -f. Since stdout is
+    // the archive file itself, tar still skips it when it lies inside the folder.
     const folderName = path.basename(folderPath);
     const parentDir = path.dirname(folderPath);
-    
+
+    let outputFd;
+    try {
+      outputFd = fs.openSync(outputPath, 'w');
+    } catch (err) {
+      reject(new Error(`Failed to create tar archive: ${err.message}`));
+      return;
+    }
     const tar = spawn('tar', [
-      '-czf', outputPath, 
-      '-C', parentDir, 
+      '-czf', '-',
       '--exclude=._*',
       '--exclude=.DS_Store',
       '--exclude=.Spotlight-V100',
       '--exclude=.Trashes',
       folderName
     ], {
-      stdio: ['ignore', 'pipe', 'pipe']
+      cwd: parentDir,
+      stdio: ['ignore', outputFd, 'pipe']
     });
+    // tar holds its own handle; close ours so the archive can be removed later.
+    fs.closeSync(outputFd);
 
     compression.process = tar;
     const stderr = createBoundedUtf8Collector(MAX_LOCAL_TAR_STDERR_BYTES);
