@@ -150,6 +150,47 @@ test("isDefaultPosixPromptLine matches classic user@host prompts", () => {
   assert.equal(isDefaultPosixPromptLine(""), false);
 });
 
+test("isDefaultPosixPromptLine matches Alpine host:path prompts without a username", () => {
+  for (const prompt of [
+    "localhost:~#",
+    "localhost:~# ",
+    "alpine:~$ ",
+    "alpine-host:~/projects$",
+    "alpine-host:/# ",
+    "alpine.example:/srv/My Project$ ",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+  }
+});
+
+test("Alpine prompt recognition rejects output and partially entered commands", () => {
+  for (const line of [
+    "#",
+    "$",
+    "status: ready#",
+    "progress:100%$",
+    ":~#",
+    "alpine:#",
+    "alpine:relative$",
+    "alpine:~user$",
+    "localhost:~# printf busy",
+    "localhost:/tmp# printf busy#",
+    "alpine:/tmp$ printf busy$",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
+test("extracts an Alpine idle prompt while preserving its trailing whitespace", () => {
+  assert.equal(
+    extractTrailingIdlePrompt("Welcome to Alpine!\r\n\x1b[32mlocalhost:~# \x1b[0m"),
+    "localhost:~# ",
+  );
+  assert.equal(extractTrailingIdlePrompt("alpine:/srv$ "), "alpine:/srv$ ");
+  assert.equal(extractTrailingIdlePrompt("localhost:~# \r\n"), "");
+});
+
 test("extracts a trailing RHEL-family bracketed idle prompt", () => {
   // Oracle Linux / RHEL / CentOS / Fedora default PS1 is `[\u@\h \W]\$ `.
   // Trailing space must round-trip, same as the PowerShell prompt capture.
@@ -708,6 +749,21 @@ test("getFreshIdlePrompt returns empty string when the session has no cached pro
     getFreshIdlePrompt({ lastIdlePrompt: "", _promptTrackTail: "anything" }),
     "",
   );
+});
+
+test("tracks split Alpine prompts and expires them while the shell is busy", () => {
+  const session = {};
+  assert.equal(trackSessionIdlePrompt(session, "Welcome to Alpine!\r\nlocalhost:"), "");
+  assert.equal(trackSessionIdlePrompt(session, "~# "), "localhost:~# ");
+  assert.equal(getFreshIdlePrompt(session), "localhost:~# ");
+
+  assert.equal(trackSessionIdlePrompt(session, "printf busy"), "");
+  assert.equal(getFreshIdlePrompt(session), "");
+
+  trackSessionIdlePrompt(session, "\r\nbusy\r\nlocalhost:/srv# ");
+  assert.equal(getFreshIdlePrompt(session), "localhost:/srv# ");
+  trackSessionIdlePrompt(session, "printf working\r\nworking...");
+  assert.equal(getFreshIdlePrompt(session), "");
 });
 
 test("trackSessionIdlePrompt and getFreshIdlePrompt accept an Oracle/RHEL bracketed bash prompt", () => {

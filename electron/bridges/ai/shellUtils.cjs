@@ -69,6 +69,11 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 //     the final `]` before `$`/`#` is the delimiter.
 const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\n\r]+)?\])[#$]$/;
 
+// Alpine's default ash PS1 omits the username: `\h:\w\$ ` -> `localhost:~# `.
+// Require a hostname and a home/absolute path, excluding prompt delimiters
+// within the path so partially entered commands do not count as idle prompts.
+const ALPINE_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~(?:\/[^#$\n\r]*)?|\/[^#$\n\r]*)[#$]$/;
+
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
 }
@@ -78,7 +83,8 @@ function isDefaultCmdPromptLine(line) {
 }
 
 function isDefaultPosixPromptLine(line) {
-  return POSIX_PROMPT_PATTERN.test(String(line || "").replace(/\s+$/, ""));
+  const normalized = String(line || "").replace(/\s+$/, "");
+  return POSIX_PROMPT_PATTERN.test(normalized) || ALPINE_PROMPT_PATTERN.test(normalized);
 }
 
 function extractTrailingIdlePrompt(output) {
@@ -152,8 +158,9 @@ function trackSessionIdlePrompt(session, chunk) {
 // Return `session.lastIdlePrompt` only if the PTY's recent rolling tail
 // still ends with it. The cached prompt is updated only when
 // extractTrailingIdlePrompt recognizes a known shape (PowerShell, cmd.exe,
-// `user@host[:path][#$]`, or RHEL `[user@host path][#$]`); a remote shell switch into another shell, an
-// oh-my-posh / starship / custom PS1, or any unrecognized prompt would
+// `user@host[:path][#$]`, RHEL `[user@host path][#$]`, or Alpine `host:path[#$]`);
+// a remote shell switch into another shell, an oh-my-posh / starship / custom
+// PS1, or any unrecognized prompt would
 // otherwise leave a stale value behind, which `resolveEffectiveShellKind`
 // would then keep using to coerce future commands into a PowerShell
 // wrapper. By re-checking the live tail we self-correct: if the visible
