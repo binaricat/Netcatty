@@ -840,4 +840,6 @@ export const enAiMessages: Messages = {
   "ai.toolSettings.format": "Format",
   "ai.toolSettings.connectionDetails": "Connection details",
   "ai.toolSettings.conflict": "Settings changed in another window. Your draft is preserved. Cancel and reopen to load the saved settings.",
+  "ai.toolSettings.retry": "Retry",
+  "ai.toolSettings.applyingHttp": "Applying HTTP configuration...",
 };

@@ -57,3 +57,16 @@ MCP behavior keeps immediate persistence. HTTP switches commit immediately, and
 HTTP inputs commit on blur or Enter. These dialogs explicitly say that changes
 apply immediately and use Close. Closing them does not undo saved changes.
 Client registration and token regeneration require their own explicit actions.
+
+## HTTP failure states
+
+Set `window.__aiToolQa.rejectHttp = true` to return a failed HTTP configuration
+result, or `throwHttp = true` to throw instead. For a failure after runtime
+polling, also set `holdHttp = true`, edit a port, and wait for a poll. Release the
+pending write with `window.__aiToolQa.pendingHttp.splice(0).forEach(resolve => resolve())`.
+Set `holdHttp = false` before retrying. These controls affect the in-memory stub.
+
+`rejectRotate` and `throwRotate` cover explicit token regeneration failures.
+Configuration and rotation failures appear in the HTTP dialog and overview.
+Retry resends the saved configuration or repeats the explicit rotation action.
+Clipboard errors appear in their active dialog; the selectable preview remains.

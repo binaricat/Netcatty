@@ -46,16 +46,20 @@ type CopyRowProps = {
 
 const CopyRow: React.FC<CopyRowProps> = ({ value, label, copyLabel, copiedLabel, testId }) => {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const { t } = useI18n();
   const canCopy = Boolean(value);
 
   const handleCopy = async () => {
     if (!value) return;
+    setCopyError(false);
+    setCopied(false);
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
     } catch {
-      // Clipboard may be unavailable; the text stays selectable in the block.
+      setCopyError(true);
     }
   };
 
@@ -83,6 +87,7 @@ const CopyRow: React.FC<CopyRowProps> = ({ value, label, copyLabel, copiedLabel,
           {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
         </button>
       </div>
+      {copyError ? <p role="alert" className="text-xs text-destructive">{t("ai.externalMcp.copyFailed")}</p> : null}
     </div>
   );
 };

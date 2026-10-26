@@ -840,4 +840,6 @@ export const esAiMessages: Messages = {
   "ai.toolSettings.format": "Formato",
   "ai.toolSettings.connectionDetails": "Detalles de conexión",
   "ai.toolSettings.conflict": "La configuración cambió en otra ventana. Se conserva el borrador. Cancela y vuelve a abrir para cargar la configuración guardada.",
+  "ai.toolSettings.retry": "Reintentar",
+  "ai.toolSettings.applyingHttp": "Aplicando la configuración HTTP...",
 };

@@ -1284,9 +1284,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             </SettingCard>
           </SettingsSection>
 
-          <SettingsSection anchorId="ai-external-mcp" title={t('ai.externalMcp.title')}>
-            <ExternalMcpCard />
-          </SettingsSection>
+          <ExternalMcpCard />
 
           <AIPrivacySection />
 

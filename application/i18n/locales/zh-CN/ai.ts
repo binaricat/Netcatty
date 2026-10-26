@@ -840,4 +840,6 @@ export const zhCNAiMessages: Messages = {
   "ai.toolSettings.format": "格式",
   "ai.toolSettings.connectionDetails": "连接详情",
   "ai.toolSettings.conflict": "设置已在另一窗口更改，当前草稿已保留。请取消并重新打开以加载已保存的设置。",
+  "ai.toolSettings.retry": "重试",
+  "ai.toolSettings.applyingHttp": "正在应用 HTTP 配置…",
 };

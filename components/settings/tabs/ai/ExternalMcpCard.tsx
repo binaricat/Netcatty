@@ -33,7 +33,8 @@ import { cn } from "../../../../lib/utils";
 import { Button } from "../../../ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
-import { Select, SettingCard, SettingRow, Toggle } from "../../../settings/settings-ui";
+import { Select, SettingCard, SettingRow, SettingsSection, Toggle } from "../../../settings/settings-ui";
+import { ToolStatusPill, type ToolStatusTone } from "./ToolStatusPill";
 import { ToolSettingsDialog } from "./ToolSettingsDialog";
 import { useOptionalSettingsFocus } from "../../SettingsFocusContext";
 import { SettingsAnchor } from "../../settings-ui";
@@ -76,23 +77,13 @@ type StatusView = {
   className: string;
 };
 
-function getBridgeStatusView(status: ExternalMcpStatus | null, enabled: boolean): StatusView {
-  if (!enabled) {
-    return { labelKey: "ai.externalMcp.status.disabled", className: "text-muted-foreground" };
-  }
-  if (!status || !status.ok) {
-    return { labelKey: "ai.externalMcp.status.unavailable", className: "text-amber-500" };
-  }
-  if (status.state === "running") {
-    return { labelKey: "ai.externalMcp.status.running", className: "text-emerald-500" };
-  }
-  if (status.state === "starting") {
-    return { labelKey: "ai.externalMcp.status.starting", className: "text-amber-500" };
-  }
-  if (status.state === "error") {
-    return { labelKey: "ai.externalMcp.status.error", className: "text-destructive" };
-  }
-  return { labelKey: "ai.externalMcp.status.disabled", className: "text-muted-foreground" };
+function getBridgeStatusView(status: ExternalMcpStatus | null, enabled: boolean): { labelKey: string; tone: ToolStatusTone } {
+  if (!enabled) return { labelKey: "ai.externalMcp.status.disabled", tone: "inactive" };
+  if (!status || !status.ok) return { labelKey: "ai.externalMcp.status.unavailable", tone: status?.error ? "error" : "inactive" };
+  if (status.state === "running") return { labelKey: "ai.externalMcp.status.running", tone: "active" };
+  if (status.state === "starting") return { labelKey: "ai.externalMcp.status.starting", tone: "inactive" };
+  if (status.state === "error") return { labelKey: "ai.externalMcp.status.error", tone: "error" };
+  return { labelKey: "ai.externalMcp.status.disabled", tone: "inactive" };
 }
 
 /** Map bridge permissionMode to a Safety i18n key for display. */
@@ -263,7 +254,8 @@ export const ExternalMcpCard: React.FC = () => {
   }, [focus?.request]);
   const statusGeneration = useRef(0);
   const clientStatusGeneration = useRef(0);
-  useEffect(() => () => { statusGeneration.current += 1; clientStatusGeneration.current += 1; }, []);
+  const httpOperationGeneration = useRef(0);
+  useEffect(() => () => { statusGeneration.current += 1; clientStatusGeneration.current += 1; httpOperationGeneration.current += 1; }, []);
   const { enabled, setEnabled, error: configError } = useExternalMcpToggleState();
   const [mode, setModeRaw] = useState<ExternalMcpMode>(() => readExternalMcpMode());
   const [idleTimeoutMinutes, setIdleTimeoutRaw] = useState<number>(() => readExternalMcpIdleTimeoutMinutes());
@@ -280,6 +272,7 @@ export const ExternalMcpCard: React.FC = () => {
     listenAddress: readExternalMcpHttpListenAddress(),
     clientHost: readExternalMcpHttpClientHost(),
   }));
+  const [isApplyingHttp, setIsApplyingHttp] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
   const [isRotatingHttpToken, setIsRotatingHttpToken] = useState(false);
   const [status, setStatus] = useState<ExternalMcpStatus | null>(null);
@@ -294,6 +287,8 @@ export const ExternalMcpCard: React.FC = () => {
   const [isAddingClaude, setIsAddingClaude] = useState(false);
   const [isAddingGrok, setIsAddingGrok] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [httpCopyError, setHttpCopyError] = useState<string | null>(null);
+  const [httpActionError, setHttpActionError] = useState<{ kind: "config" | "rotate"; message: string } | null>(null);
   const [actionMessage, setActionMessage] = useState<{ tone: "error" | "warning" | "success"; text: string } | null>(null);
   const bridgeUnavailableMessage = t("ai.externalMcp.bridgeUnavailable");
 
@@ -338,7 +333,10 @@ export const ExternalMcpCard: React.FC = () => {
   }, []);
 
   const applyHttpSettings = useCallback(async (next: ExternalMcpHttpSettings) => {
+    const operation = ++httpOperationGeneration.current;
     const generation = ++statusGeneration.current;
+    setHttpActionError(null);
+    setIsApplyingHttp(true);
     const normalized: ExternalMcpHttpSettings = {
       enabled: writeExternalMcpHttpEnabled(next.enabled),
       port: writeExternalMcpHttpPort(next.port),
@@ -348,38 +346,49 @@ export const ExternalMcpCard: React.FC = () => {
     };
     setHttpSettings(normalized);
     try {
-    const nextStatus = await getBridge()?.externalMcpSetConfig?.({
-      httpEnabled: normalized.enabled,
-      httpPort: normalized.port,
-      httpAllowCustomBind: normalized.allowCustomBind,
-      httpListenAddress: normalized.listenAddress,
-      httpClientHost: normalized.clientHost,
-    });
-    if (generation === statusGeneration.current && nextStatus && typeof nextStatus === "object") {
-      setStatus(nextStatus as ExternalMcpStatus);
-    }
+      const nextStatus = await getBridge()?.externalMcpSetConfig?.({
+        httpEnabled: normalized.enabled,
+        httpPort: normalized.port,
+        httpAllowCustomBind: normalized.allowCustomBind,
+        httpListenAddress: normalized.listenAddress,
+        httpClientHost: normalized.clientHost,
+      }) as ExternalMcpStatus | undefined;
+      if (operation !== httpOperationGeneration.current) return;
+      if (!nextStatus?.ok || nextStatus.error || nextStatus.http?.error) {
+        setHttpActionError({ kind: "config", message: nextStatus?.error || nextStatus?.http?.error || bridgeUnavailableMessage });
+        return;
+      }
+      if (generation === statusGeneration.current) setStatus(nextStatus);
     } catch (error) {
-      if (generation === statusGeneration.current) setActionMessage({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      if (operation === httpOperationGeneration.current) {
+        setHttpActionError({ kind: "config", message: error instanceof Error ? error.message : String(error) });
+      }
+    } finally {
+      if (operation === httpOperationGeneration.current) setIsApplyingHttp(false);
     }
-  }, []);
+  }, [bridgeUnavailableMessage]);
 
   const rotateHttpToken = useCallback(async () => {
-    const bridge = getBridge();
-    if (!bridge?.externalMcpSetConfig) return;
+    const operation = ++httpOperationGeneration.current;
     const generation = ++statusGeneration.current;
     setIsRotatingHttpToken(true);
-    setActionMessage(null);
+    setHttpActionError(null);
     try {
-      const nextStatus = await bridge.externalMcpSetConfig({ rotateHttpToken: true });
-      if (generation === statusGeneration.current && nextStatus && typeof nextStatus === "object") {
-        setStatus(nextStatus as ExternalMcpStatus);
+      const nextStatus = await getBridge()?.externalMcpSetConfig?.({ rotateHttpToken: true }) as ExternalMcpStatus | undefined;
+      if (operation !== httpOperationGeneration.current) return;
+      if (!nextStatus?.ok || nextStatus.error || nextStatus.http?.error) {
+        setHttpActionError({ kind: "rotate", message: nextStatus?.error || nextStatus?.http?.error || bridgeUnavailableMessage });
+        return;
       }
+      if (generation === statusGeneration.current) setStatus(nextStatus);
     } catch (error) {
-      setActionMessage({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      if (operation === httpOperationGeneration.current) {
+        setHttpActionError({ kind: "rotate", message: error instanceof Error ? error.message : String(error) });
+      }
     } finally {
       setIsRotatingHttpToken(false);
     }
-  }, []);
+  }, [bridgeUnavailableMessage]);
 
   const refreshStatus = useCallback(async (options?: { quiet?: boolean; clients?: boolean }) => {
     const generation = ++statusGeneration.current;
@@ -511,8 +520,10 @@ export const ExternalMcpCard: React.FC = () => {
   const canAddToClaude = claudeStatus?.state === "not_configured";
   const canAddToGrok = grokStatus?.state === "not_configured";
 
-  const copyText = useCallback(async (key: string, text: string) => {
+  const copyText = useCallback(async (key: string, text: string, scope: "client" | "http" = "client") => {
     if (!text) return;
+    setCopied((current) => current === key ? null : current);
+    if (scope === "http") setHttpCopyError(null);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(key);
@@ -520,7 +531,8 @@ export const ExternalMcpCard: React.FC = () => {
         setCopied((current) => (current === key ? null : current));
       }, 1200);
     } catch {
-      setActionMessage({ tone: "error", text: t("ai.externalMcp.copyFailed") });
+      if (scope === "http") setHttpCopyError(t("ai.externalMcp.copyFailed"));
+      else setActionMessage({ tone: "error", text: t("ai.externalMcp.copyFailed") });
     }
   }, [t]);
 
@@ -664,8 +676,13 @@ export const ExternalMcpCard: React.FC = () => {
   ]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
+    <SettingsSection
+      anchorId="ai-external-mcp"
+      title={t("ai.externalMcp.title")}
+      actions={<ToolStatusPill tone={bridgeStatusView.tone}>{t(bridgeStatusView.labelKey)}</ToolStatusPill>}
+    >
+      <div className="space-y-4">
+      <div className="flex items-start gap-4">
         <div className="min-w-0 flex items-start gap-1.5">
           <p className="min-w-0 text-xs text-muted-foreground leading-5">
             {t("ai.externalMcp.description")}
@@ -694,9 +711,6 @@ export const ExternalMcpCard: React.FC = () => {
               <p>{t("ai.externalMcp.security.description")}</p>
             </TooltipContent>
           </Tooltip>
-        </div>
-        <div className={cn("text-xs font-medium shrink-0", bridgeStatusView.className)}>
-          {t(bridgeStatusView.labelKey)}
         </div>
       </div>
 
@@ -852,7 +866,14 @@ export const ExternalMcpCard: React.FC = () => {
         status={status?.http || null}
         copied={copied}
         rotating={isRotatingHttpToken}
-        onCopy={copyText}
+        onCopy={(key, text) => { void copyText(key, text, "http"); }}
+        applying={isApplyingHttp}
+        operationError={httpActionError?.message ?? null}
+        copyError={httpCopyError}
+        onRetry={httpActionError ? () => {
+          if (httpActionError.kind === "rotate") void rotateHttpToken();
+          else void applyHttpSettings(httpSettings);
+        } : undefined}
         onChange={(next) => { void applyHttpSettings(next); }}
         onRotateToken={() => { void rotateHttpToken(); }}
       />
@@ -987,6 +1008,7 @@ export const ExternalMcpCard: React.FC = () => {
       {configError || status?.error ? (
         <div role="alert" className="text-xs text-destructive">{configError || status?.error}</div>
       ) : null}
-    </div>
+      </div>
+    </SettingsSection>
   );
 };

@@ -4,7 +4,7 @@
 function installAiToolAccessFixture(options = {}) {
   if (location.hostname !== '127.0.0.1' && location.hostname !== 'localhost') throw new Error('QA fixture requires a loopback origin');
   const calls = [];
-  const qa = { calls, rejectPrivacy: false, rejectHttp: false, holdStatus: false, pending: [], holdClients: options.holdClients || false, pendingClients: [] };
+  const qa = { calls, rejectPrivacy: false, rejectHttp: false, throwHttp: false, holdHttp: false, pendingHttp: [], rejectRotate: false, throwRotate: false, holdStatus: false, pending: [], holdClients: options.holdClients || false, pendingClients: [] };
   window.__aiToolQa = qa;
   localStorage.clear();
   localStorage.setItem('netcatty_ui_language_v1', options.locale || 'en');
@@ -19,12 +19,11 @@ function installAiToolAccessFixture(options = {}) {
   };
   const clients = Object.fromEntries(['Codex', 'Claude', 'Grok'].map((name) => [name, { ok: true, state: 'not_configured', launcherPath: status.launcherPath }]));
   const record = (name, fn) => async (...args) => { calls.push({ name, args }); return fn(...args); };
-  const bridge = {
-    getAppLockRuntimeState: async () => ({ initialized: true, locked: false, reason: null, version: 1 }),
-    externalMcpGetStatus: record('status', () => qa.holdStatus ? new Promise((resolve) => qa.pending.push(() => resolve(structuredClone(status)))) : structuredClone(status)),
-    externalMcpSetEnabled: record('enable', (enabled) => { status.enabled = enabled; status.state = enabled ? 'running' : 'disabled'; return structuredClone(status); }),
-    externalMcpSetConfig: record('config', (config) => {
+  const applyConfig = (config) => {
       if (config.redaction && qa.rejectPrivacy) return { ok: false, error: 'Fixture: invalid CIDR or RE2 pattern.' };
+      if ('httpEnabled' in config && qa.throwHttp) throw new Error('Fixture: HTTP configuration threw.');
+      if (config.rotateHttpToken && qa.throwRotate) throw new Error('Fixture: token rotation threw.');
+      if (config.rotateHttpToken && qa.rejectRotate) return { ok: false, error: 'Fixture: token rotation unavailable.' };
       if ('httpEnabled' in config && qa.rejectHttp) return { ...structuredClone(status), ok: false, error: 'Fixture: port unavailable.' };
       if ('httpEnabled' in config) {
         status.http = { ...status.http, enabled: config.httpEnabled, listening: config.httpEnabled && status.enabled,
@@ -34,6 +33,18 @@ function installAiToolAccessFixture(options = {}) {
       }
       if (config.rotateHttpToken) status.http.bearerToken = 'SYNTHETIC_ROTATED_FIXTURE_TOKEN';
       return structuredClone(status);
+  };
+  const bridge = {
+    getAppLockRuntimeState: async () => ({ initialized: true, locked: false, reason: null, version: 1 }),
+    externalMcpGetStatus: record('status', () => qa.holdStatus ? new Promise((resolve) => qa.pending.push(() => resolve(structuredClone(status)))) : structuredClone(status)),
+    externalMcpSetEnabled: record('enable', (enabled) => { status.enabled = enabled; status.state = enabled ? 'running' : 'disabled'; return structuredClone(status); }),
+    externalMcpSetConfig: record('config', (config) => {
+      if ('httpEnabled' in config && qa.holdHttp) {
+        return new Promise((resolve, reject) => qa.pendingHttp.push(() => {
+          try { resolve(applyConfig(config)); } catch (error) { reject(error); }
+        }));
+      }
+      return applyConfig(config);
     }),
     externalMcpGetUniversalSetupPrompt: async () => ({ ok: true, prompt: 'Synthetic setup prompt: register the fixture launcher as netcatty-external.' }),
     aiSkillsCliGetInvocation: async () => ({ ok: true, skillPath: '/fixture/netcatty/skills/SKILL.md', commandPrefix: 'netcatty-tool-cli' }),

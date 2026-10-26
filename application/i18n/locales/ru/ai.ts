@@ -769,4 +769,6 @@ export const ruAiMessages: Messages = {
   "ai.toolSettings.format": "Формат",
   "ai.toolSettings.connectionDetails": "Параметры подключения",
   "ai.toolSettings.conflict": "Настройки изменены в другом окне. Черновик сохранён. Отмените и откройте окно снова, чтобы загрузить сохранённые настройки.",
+  "ai.toolSettings.retry": "Повторить",
+  "ai.toolSettings.applyingHttp": "Применение настроек HTTP...",
 };

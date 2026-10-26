@@ -830,4 +830,6 @@ export const zhTWAiMessages: Messages = {
   "ai.toolSettings.format": "格式",
   "ai.toolSettings.connectionDetails": "連線詳情",
   "ai.toolSettings.conflict": "設定已在其他視窗變更，目前草稿已保留。請取消並重新開啟以載入已儲存的設定。",
+  "ai.toolSettings.retry": "重試",
+  "ai.toolSettings.applyingHttp": "正在套用 HTTP 設定…",
 };
