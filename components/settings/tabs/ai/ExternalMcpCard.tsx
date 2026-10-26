@@ -262,7 +262,8 @@ export const ExternalMcpCard: React.FC = () => {
     if (focus?.request?.anchorId === "ai-external-mcp-approval-alert") setBehaviorOpen(true);
   }, [focus?.request]);
   const statusGeneration = useRef(0);
-  useEffect(() => () => { statusGeneration.current += 1; }, []);
+  const clientStatusGeneration = useRef(0);
+  useEffect(() => () => { statusGeneration.current += 1; clientStatusGeneration.current += 1; }, []);
   const { enabled, setEnabled, error: configError } = useExternalMcpToggleState();
   const [mode, setModeRaw] = useState<ExternalMcpMode>(() => readExternalMcpMode());
   const [idleTimeoutMinutes, setIdleTimeoutRaw] = useState<number>(() => readExternalMcpIdleTimeoutMinutes());
@@ -279,6 +280,7 @@ export const ExternalMcpCard: React.FC = () => {
     listenAddress: readExternalMcpHttpListenAddress(),
     clientHost: readExternalMcpHttpClientHost(),
   }));
+  const [isToggling, setIsToggling] = useState(false);
   const [isRotatingHttpToken, setIsRotatingHttpToken] = useState(false);
   const [status, setStatus] = useState<ExternalMcpStatus | null>(null);
   const [manualFormat, setManualFormat] = useState("command");
@@ -383,6 +385,7 @@ export const ExternalMcpCard: React.FC = () => {
     const generation = ++statusGeneration.current;
     const bridge = getBridge();
     const includeClients = options?.clients !== false;
+    const clientGeneration = includeClients ? ++clientStatusGeneration.current : clientStatusGeneration.current;
     if (
       !bridge?.externalMcpGetStatus
       || !bridge?.externalMcpCodexGetStatus
@@ -432,11 +435,15 @@ export const ExternalMcpCard: React.FC = () => {
           bridge.externalMcpGetUniversalSetupPrompt?.()
             ?? Promise.resolve({ ok: false, prompt: "" }),
         ]);
-        if (generation !== statusGeneration.current) return;
-        setStatus(nextStatus as ExternalMcpStatus);
-        if (enabled && nextStatus?.ok && !nextStatus.enabled) {
-          setEnabled(false);
+        // Runtime polling and CLI/client discovery have separate lifetimes.
+        // A fast quiet poll must not discard a slow, still-current client batch.
+        if (generation === statusGeneration.current) {
+          setStatus(nextStatus as ExternalMcpStatus);
+          if (enabled && nextStatus?.ok && !nextStatus.enabled) {
+            setEnabled(false);
+          }
         }
+        if (clientGeneration !== clientStatusGeneration.current) return;
         setCodexStatus(nextCodexStatus as ClientSetupStatus);
         setClaudeStatus(nextClaudeStatus as ClientSetupStatus);
         setGrokStatus(nextGrokStatus as ClientSetupStatus);
@@ -454,7 +461,7 @@ export const ExternalMcpCard: React.FC = () => {
         }
       }
     } finally {
-      if (!options?.quiet) setIsRefreshing(false);
+      if (!options?.quiet && clientGeneration === clientStatusGeneration.current) setIsRefreshing(false);
     }
   }, [bridgeUnavailableMessage, enabled, setEnabled]);
 
@@ -703,19 +710,21 @@ export const ExternalMcpCard: React.FC = () => {
         </div>
         <Toggle
           checked={enabled}
+          disabled={isToggling}
           ariaLabel={t("ai.externalMcp.title")}
           onChange={(nextEnabled) => {
             statusGeneration.current += 1;
             setActionMessage(null);
-            void setEnabled(nextEnabled).then(() => refreshStatus());
+            setIsToggling(true);
+            void setEnabled(nextEnabled).then(() => refreshStatus()).finally(() => setIsToggling(false));
           }}
         />
       </div>
 
       {/* Permission mode is controlled in Safety settings; surface it here so External MCP
           users see why write tools may still prompt (confirm) or run freely (auto). */}
-      <div className="flex flex-wrap items-start justify-between gap-4 py-3">
-        <div className="min-w-0 space-y-1">
+      <div className="flex items-start justify-between gap-4 py-3">
+        <div className="min-w-0 flex-1 space-y-1">
           <div className="text-sm font-medium">{t("ai.externalMcp.permissionMode.label")}</div>
           <div className="text-xs text-muted-foreground leading-5">
             {t("ai.externalMcp.permissionMode.hint")}
@@ -733,7 +742,7 @@ export const ExternalMcpCard: React.FC = () => {
       </div>
 
       <SettingsAnchor anchorId="ai-external-mcp-approval-alert">
-        <SettingRow label={t("ai.toolSettings.behavior")} description={t(mode === "persistent" ? "ai.externalMcp.mode.persistent" : "ai.externalMcp.mode.temporary")}>
+        <SettingRow className="flex-col items-start md:flex-row md:items-center" label={t("ai.toolSettings.behavior")} description={t(mode === "persistent" ? "ai.externalMcp.mode.persistent" : "ai.externalMcp.mode.temporary")}>
           <ToolSettingsDialog title={t("ai.toolSettings.behavior")} triggerLabel={t("ai.toolSettings.configureBehavior")} immediate open={behaviorOpen} onOpenChange={setBehaviorOpen}>
       <SettingCard divided className="border-0 bg-transparent p-0">
         <SettingRow
@@ -849,14 +858,11 @@ export const ExternalMcpCard: React.FC = () => {
       />
 
       <SettingCard>
-        <SettingRow label={t("ai.externalMcp.clientConfiguration")} description={t("ai.externalMcp.clientConfiguration.description")}>
+        <SettingRow className="flex-col items-start md:flex-row md:items-center" label={t("ai.externalMcp.clientConfiguration")} description={t("ai.externalMcp.clientConfiguration.description")}>
           <ToolSettingsDialog title={t("ai.externalMcp.clientConfiguration")} triggerLabel={t("ai.toolSettings.configureClients")}>
 
       <div className="space-y-2">
         <div className="space-y-1">
-          <div className="text-sm font-semibold text-foreground">
-            {t("ai.externalMcp.clientConfiguration")}
-          </div>
           <p className="text-xs text-muted-foreground leading-5">
             {t("ai.externalMcp.clientConfiguration.description")}
           </p>
@@ -899,7 +905,7 @@ export const ExternalMcpCard: React.FC = () => {
             <summary className="cursor-pointer text-sm font-medium">{t("ai.toolSettings.manualSetup")}</summary>
             <label className="flex flex-wrap items-center justify-between gap-2 text-sm">
               {t("ai.toolSettings.format")}
-              <select className="h-9 max-w-full rounded-md border border-input bg-background px-3 text-sm" value={manualFormat} onChange={(event) => setManualFormat(event.currentTarget.value)}>
+              <select aria-label={t("ai.toolSettings.format")} className="h-9 max-w-full rounded-md border border-input bg-background px-3 text-sm" value={manualFormat} onChange={(event) => setManualFormat(event.currentTarget.value)}>
                 {selectedClientMeta.kind === "installable" ? <option value="command">{t("ai.externalMcp.cliCommand")}</option> : null}
                 <option value="snippet">{t("ai.externalMcp.configSnippet")}</option>
                 {selectedClient === "other" ? <option value="prompt">{t("ai.externalMcp.universalSetupPrompt")}</option> : null}

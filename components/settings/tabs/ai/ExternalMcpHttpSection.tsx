@@ -178,7 +178,7 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
       <p className="text-xs text-muted-foreground leading-5">{t("ai.externalMcp.http.description")}</p>
       <p className="text-xs text-muted-foreground leading-5">{t("ai.externalMcp.http.legacySseNote")}</p>
       <SettingCard>
-        <SettingRow label={t(settings.enabled ? "ai.toolSettings.httpOn" : "ai.toolSettings.httpOff")} description={settings.allowCustomBind ? t("ai.externalMcp.http.warning") : t("ai.toolSettings.loopback")}>
+        <SettingRow className="flex-col items-start md:flex-row md:items-center" label={t(settings.enabled ? "ai.toolSettings.httpOn" : "ai.toolSettings.httpOff")} description={settings.allowCustomBind ? t("ai.externalMcp.http.warning") : t("ai.toolSettings.loopback")}>
           <ToolSettingsDialog title={t("ai.externalMcp.http.title")} triggerLabel={t("ai.toolSettings.configureHttp")} immediate open={open} onOpenChange={changeOpen}>
       <p className="text-xs text-muted-foreground leading-5">{t("ai.externalMcp.http.description")}</p>
       <SettingCard divided className="border-0 bg-transparent p-0">

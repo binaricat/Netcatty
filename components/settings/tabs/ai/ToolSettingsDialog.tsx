@@ -28,12 +28,13 @@ export const ToolSettingsDialog: React.FC<{
       </DialogTrigger>
       <DialogContent
         className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0"
+        aria-busy={busy || undefined}
         hideCloseButton={busy}
         onEscapeKeyDown={(event) => { if (busy) event.preventDefault(); }}
         onInteractOutside={(event) => { if (busy) event.preventDefault(); }}
       >
         <DialogHeader className="shrink-0 px-6 pb-4 pt-6 pr-12 text-left">
-          <DialogTitle className="text-base">{title}</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           {immediate ? <p className="text-xs text-muted-foreground">{t("ai.toolSettings.immediate")}</p> : null}
         </DialogHeader>
         <div className="min-h-0 overflow-y-auto px-6 pb-6 space-y-4">{children}</div>

@@ -14,6 +14,8 @@ export const AIPrivacySection: React.FC = () => {
   const [patterns, setPatterns] = useState(settings.patterns.join("\n"));
   const [applied, setApplied] = useState(false);
   const [open, setOpen] = useState(false);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (open && error) errorRef.current?.focus(); }, [open, error]);
   const [draftBase, setDraftBase] = useState(settings);
   const [conflict, setConflict] = useState(false);
   const dirty = enabled !== draftBase.enabled || privateIps !== draftBase.redactPrivateIps
@@ -62,8 +64,9 @@ export const AIPrivacySection: React.FC = () => {
       <p className="text-xs text-muted-foreground leading-5">{t("ai.privacy.boundary")}</p>
       <SettingCard>
         <SettingRow
+          className="flex-col items-start md:flex-row md:items-center"
           label={t(settings.enabled ? "ai.toolSettings.privacyOn" : "ai.toolSettings.privacyOff")}
-          description={t("ai.toolSettings.ruleSummary", { cidrs: String(settings.cidrs.length), patterns: String(settings.patterns.length) })}
+          description={`${t("ai.privacy.privateIps")}: ${t(settings.redactPrivateIps ? "common.enabled" : "common.disabled")} · ${t("ai.toolSettings.ruleSummary", { cidrs: String(settings.cidrs.length), patterns: String(settings.patterns.length) })}`}
         >
           <ToolSettingsDialog
             title={t("ai.privacy.title")}
@@ -104,7 +107,7 @@ export const AIPrivacySection: React.FC = () => {
       </SettingCard>
       <div className="space-y-4">
         <label className="block space-y-1.5">
-          <span className="text-xs font-medium">{t("ai.privacy.cidrs")}</span>
+          <span className="text-sm font-medium">{t("ai.privacy.cidrs")}</span>
           <span className="block text-xs text-muted-foreground">{t("ai.privacy.cidrs.description")}</span>
           <textarea
             value={cidrs}
@@ -118,7 +121,7 @@ export const AIPrivacySection: React.FC = () => {
           />
         </label>
         <label className="block space-y-1.5">
-          <span className="text-xs font-medium">{t("ai.privacy.patterns")}</span>
+          <span className="text-sm font-medium">{t("ai.privacy.patterns")}</span>
           <span className="block text-xs text-muted-foreground">{t("ai.privacy.patterns.description")}</span>
           <textarea
             value={patterns}
@@ -135,7 +138,7 @@ export const AIPrivacySection: React.FC = () => {
         <p className="text-xs text-amber-500">{t("ai.privacy.reconnect")}</p>
       </div>
             {conflict ? <p role="alert" className="text-xs text-destructive">{t("ai.toolSettings.conflict")}</p> : null}
-            {error ? <p role="alert" className="text-xs text-destructive">{t("ai.privacy.failed")} {error}</p> : null}
+            {error ? <p ref={errorRef} tabIndex={-1} role="alert" className="text-xs text-destructive">{t("ai.privacy.failed")} {error}</p> : null}
           </ToolSettingsDialog>
         </SettingRow>
       </SettingCard>

@@ -4,7 +4,7 @@
 function installAiToolAccessFixture(options = {}) {
   if (location.hostname !== '127.0.0.1' && location.hostname !== 'localhost') throw new Error('QA fixture requires a loopback origin');
   const calls = [];
-  const qa = { calls, rejectPrivacy: false, rejectHttp: false, holdStatus: false, pending: [] };
+  const qa = { calls, rejectPrivacy: false, rejectHttp: false, holdStatus: false, pending: [], holdClients: options.holdClients || false, pendingClients: [] };
   window.__aiToolQa = qa;
   localStorage.clear();
   localStorage.setItem('netcatty_ui_language_v1', options.locale || 'en');
@@ -43,7 +43,7 @@ function installAiToolAccessFixture(options = {}) {
     aiCodexAppServerGetStatus: async () => ({ ok: true, available: false }),
   };
   for (const name of ['Codex', 'Claude', 'Grok']) {
-    bridge[`externalMcp${name}GetStatus`] = record(`${name}Status`, () => structuredClone(clients[name]));
+    bridge[`externalMcp${name}GetStatus`] = record(`${name}Status`, () => qa.holdClients && name === 'Codex' ? new Promise((resolve) => qa.pendingClients.push(() => resolve(structuredClone(clients[name])))) : structuredClone(clients[name]));
     bridge[`externalMcp${name}Add`] = record(`${name}Add`, () => { clients[name].state = 'configured'; return structuredClone(clients[name]); });
   }
   Object.defineProperty(window, 'netcatty', { value: bridge, configurable: true });

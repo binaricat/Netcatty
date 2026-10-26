@@ -1267,7 +1267,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             title={t('ai.toolAccess.title')}
           >
             <SettingCard>
-              <SettingRow description={t('ai.toolAccess.description')}>
+              <SettingRow className="flex-col items-start md:flex-row md:items-center" description={t('ai.toolAccess.description')}>
                 <div className="flex flex-wrap justify-end gap-2">
                 <Select
                   value={toolIntegrationMode}
