@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { useAIPrivacyState } from "../../../../application/state/useExternalMcpToggleState";
 import { Button } from "../../../ui/button";
+import { ToolSettingsDialog } from "./ToolSettingsDialog";
 import { SettingCard, SettingRow, SettingsSection, Toggle } from "../../settings-ui";
 
 export const AIPrivacySection: React.FC = () => {
@@ -12,8 +13,30 @@ export const AIPrivacySection: React.FC = () => {
   const [cidrs, setCidrs] = useState(settings.cidrs.join("\n"));
   const [patterns, setPatterns] = useState(settings.patterns.join("\n"));
   const [applied, setApplied] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [draftBase, setDraftBase] = useState(settings);
+  const [conflict, setConflict] = useState(false);
+  const dirty = enabled !== draftBase.enabled || privateIps !== draftBase.redactPrivateIps
+    || cidrs !== draftBase.cidrs.join("\n") || patterns !== draftBase.patterns.join("\n");
+  const changeOpen = (next: boolean) => {
+    if (applying) return;
+    setDraftBase(settings);
+    setEnabled(settings.enabled);
+    setPrivateIps(settings.redactPrivateIps);
+    setCidrs(settings.cidrs.join("\n"));
+    setPatterns(settings.patterns.join("\n"));
+    setConflict(false);
+    setOpen(next);
+  };
 
+  const draftState = useRef({ open, dirty, applying });
+  draftState.current = { open, dirty, applying };
   useEffect(() => {
+    if (draftState.current.open && draftState.current.dirty && !draftState.current.applying) {
+      setConflict(true);
+      return;
+    }
+    setDraftBase(settings);
     setEnabled(settings.enabled);
     setPrivateIps(settings.redactPrivateIps);
     setCidrs(settings.cidrs.join("\n"));
@@ -21,6 +44,7 @@ export const AIPrivacySection: React.FC = () => {
   }, [settings]);
 
   const onApply = async () => {
+    if (applying || conflict) return;
     setApplied(false);
     const saved = await apply({
       enabled,
@@ -29,13 +53,35 @@ export const AIPrivacySection: React.FC = () => {
       patterns: patterns.split(/\r?\n/).filter((line) => line.trim().length > 0),
     });
     setApplied(saved);
+    if (saved) setOpen(false);
   };
 
   return (
     <SettingsSection anchorId="ai-privacy" title={t("ai.privacy.title")}>
       <p className="text-xs text-muted-foreground leading-5">{t("ai.privacy.description")}</p>
       <p className="text-xs text-muted-foreground leading-5">{t("ai.privacy.boundary")}</p>
-      <SettingCard divided className="rounded-md border-border/60 bg-background/70">
+      <SettingCard>
+        <SettingRow
+          label={t(settings.enabled ? "ai.toolSettings.privacyOn" : "ai.toolSettings.privacyOff")}
+          description={t("ai.toolSettings.ruleSummary", { cidrs: String(settings.cidrs.length), patterns: String(settings.patterns.length) })}
+        >
+          <ToolSettingsDialog
+            title={t("ai.privacy.title")}
+            triggerLabel={t("ai.toolSettings.configurePrivacy")}
+            open={open}
+            onOpenChange={changeOpen}
+            busy={applying}
+            footer={<>
+              {dirty ? <span role="status" className="mr-auto self-center text-xs text-muted-foreground">{t("ai.toolSettings.unsaved")}</span> : null}
+              <Button type="button" variant="outline" onClick={() => changeOpen(false)} disabled={applying}>{t("common.cancel")}</Button>
+              <Button type="button" onClick={() => { void onApply(); }} disabled={applying || conflict || (!dirty && !error)}>
+                {t(applying ? "ai.privacy.applying" : "ai.privacy.apply")}
+              </Button>
+            </>}
+          >
+            <p className="text-xs text-muted-foreground leading-5">{t("ai.privacy.description")}</p>
+            <p className="text-xs text-muted-foreground leading-5">{t("ai.privacy.boundary")}</p>
+      <SettingCard divided className="border-0 rounded-none bg-transparent p-0">
         <SettingRow label={t("ai.privacy.enable")}>
           <Toggle
             checked={enabled}
@@ -56,7 +102,7 @@ export const AIPrivacySection: React.FC = () => {
           />
         </SettingRow>
       </SettingCard>
-      <div className="space-y-3 rounded-md border border-border/60 bg-background/50 p-3">
+      <div className="space-y-4">
         <label className="block space-y-1.5">
           <span className="text-xs font-medium">{t("ai.privacy.cidrs")}</span>
           <span className="block text-xs text-muted-foreground">{t("ai.privacy.cidrs.description")}</span>
@@ -86,20 +132,15 @@ export const AIPrivacySection: React.FC = () => {
           />
         </label>
         <p className="text-xs text-muted-foreground leading-5">{t("ai.privacy.connectionScope")}</p>
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-amber-500">{t("ai.privacy.reconnect")}</p>
-          <Button size="sm" variant="outline" onClick={() => { void onApply(); }} disabled={applying}>
-            {t(applying ? "ai.privacy.applying" : "ai.privacy.apply")}
-          </Button>
-        </div>
-        {error ? (
-          <p role="alert" className="text-xs text-destructive">
-            {t("ai.privacy.failed")} {error}
-          </p>
-        ) : applied ? (
-          <p role="status" className="text-xs text-emerald-500">{t("ai.privacy.applied")}</p>
-        ) : null}
+        <p className="text-xs text-amber-500">{t("ai.privacy.reconnect")}</p>
       </div>
+            {conflict ? <p role="alert" className="text-xs text-destructive">{t("ai.toolSettings.conflict")}</p> : null}
+            {error ? <p role="alert" className="text-xs text-destructive">{t("ai.privacy.failed")} {error}</p> : null}
+          </ToolSettingsDialog>
+        </SettingRow>
+      </SettingCard>
+      {error && !open ? <p role="alert" className="text-xs text-destructive">{t("ai.privacy.failed")} {error}</p>
+        : applied ? <p role="status" className="text-xs text-emerald-500">{t("ai.privacy.applied")}</p> : null}
     </SettingsSection>
   );
 };

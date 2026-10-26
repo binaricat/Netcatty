@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AIToolIntegrationMode } from '../../infrastructure/ai/types';
 import { STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED } from '../../infrastructure/config/storageKeys';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
@@ -38,14 +38,15 @@ export type ToolAccessGuidanceState = {
  * runtime is still starting or after an idle shutdown).
  */
 export function useToolAccessGuidanceState(mode: AIToolIntegrationMode): ToolAccessGuidanceState {
+  const requestGeneration = useRef(0);
   const [skillPath, setSkillPath] = useState<string | null>(null);
   const [commandPrefix, setCommandPrefix] = useState('');
   const [mcpLauncherPath, setMcpLauncherPath] = useState<string | null>(null);
   const [mcpDiscoveryPath, setMcpDiscoveryPath] = useState<string | null>(null);
 
-  const refreshMcpStatus = useCallback(async (): Promise<string | null | undefined> => {
+  const refreshMcpStatus = useCallback(async (isCurrent: () => boolean): Promise<string | null | undefined> => {
     const status = await netcattyBridge.get()?.externalMcpGetStatus?.();
-    if (!status?.ok) return undefined;
+    if (!isCurrent() || !status?.ok) return undefined;
     // Do not trust `enabled` alone: the main process flips `enabled` before
     // host credentials are resolved and the discovery file is written, and it
     // keeps reporting the configured discovery/launcher paths while starting.
@@ -93,9 +94,11 @@ export function useToolAccessGuidanceState(mode: AIToolIntegrationMode): ToolAcc
 
     const refetch = async () => {
       if (cancelled) return;
+      const generation = ++requestGeneration.current;
+      const isCurrent = () => !cancelled && generation === requestGeneration.current;
       const storedEnabled = readExternalMcpStoredEnabled();
-      const readyLauncherPath = await refreshMcpStatus().catch(() => undefined);
-      if (cancelled) return;
+      const readyLauncherPath = await refreshMcpStatus(isCurrent).catch(() => undefined);
+      if (!isCurrent()) return;
       // The persisted switch is off but the status check failed: drop any
       // cached launcher/discovery paths. The stored credentials were revoked
       // by the disable, and falling through to the comparison below would see

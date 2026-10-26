@@ -1260,6 +1260,36 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         </TabsContent>
 
         <TabsContent value="tools" className="m-0 space-y-6">
+
+
+          <SettingsSection
+            anchorId="ai-tool-access-mode"
+            title={t('ai.toolAccess.title')}
+          >
+            <SettingCard>
+              <SettingRow description={t('ai.toolAccess.description')}>
+                <div className="flex flex-wrap justify-end gap-2">
+                <Select
+                  value={toolIntegrationMode}
+                  options={[
+                    { value: 'mcp', label: t('ai.toolAccess.mode.mcp') },
+                    { value: 'skills', label: t('ai.toolAccess.mode.skills') },
+                  ]}
+                  onChange={(value) => setToolIntegrationMode(value as AIToolIntegrationMode)}
+                  className="w-48"
+                />
+                <ToolAccessGuidance mode={toolIntegrationMode} />
+                </div>
+              </SettingRow>
+            </SettingCard>
+          </SettingsSection>
+
+          <SettingsSection anchorId="ai-external-mcp" title={t('ai.externalMcp.title')}>
+            <ExternalMcpCard />
+          </SettingsSection>
+
+          <AIPrivacySection />
+
           <SettingsSection title={t('ai.chatShortcuts.title')}>
             <SettingCard divided>
               <SettingRow
@@ -1274,34 +1304,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
                 />
               </SettingRow>
             </SettingCard>
-          </SettingsSection>
-
-          <SettingsSection
-            anchorId="ai-tool-access-mode"
-            title={t('ai.toolAccess.title')}
-          >
-            <SettingCard>
-              <SettingRow description={t('ai.toolAccess.description')}>
-                <Select
-                  value={toolIntegrationMode}
-                  options={[
-                    { value: 'mcp', label: t('ai.toolAccess.mode.mcp') },
-                    { value: 'skills', label: t('ai.toolAccess.mode.skills') },
-                  ]}
-                  onChange={(value) => setToolIntegrationMode(value as AIToolIntegrationMode)}
-                  className="w-48"
-                />
-              </SettingRow>
-              <div className="pb-4">
-                <ToolAccessGuidance mode={toolIntegrationMode} />
-              </div>
-            </SettingCard>
-          </SettingsSection>
-
-          <AIPrivacySection />
-
-          <SettingsSection anchorId="ai-external-mcp" title={t('ai.externalMcp.title')}>
-            <ExternalMcpCard />
           </SettingsSection>
 
           <SettingsSection

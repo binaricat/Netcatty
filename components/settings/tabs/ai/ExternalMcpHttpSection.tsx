@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import {
   buildClaudeHttpAddCommand,
   buildCodexHttpEnvLine,
@@ -11,6 +11,9 @@ import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { cn } from "../../../../lib/utils";
 import { Button } from "../../../ui/button";
 import { SettingCard, SettingRow, Toggle } from "../../settings-ui";
+import { ToolSettingsDialog } from "./ToolSettingsDialog";
+import { useOptionalSettingsFocus } from "../../SettingsFocusContext";
+import { SettingsAnchor } from "../../settings-ui";
 import { CopyableCodeBlock } from "./CopyableCodeBlock";
 
 export type ExternalMcpHttpViewStatus = {
@@ -78,12 +81,28 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
   onRotateToken,
 }) => {
   const { t } = useI18n();
+  const errorId = useId();
+  const [open, setOpen] = useState(false);
+  const focus = useOptionalSettingsFocus();
+  useEffect(() => {
+    if (focus?.request?.anchorId === "ai-external-mcp-http") setOpen(true);
+  }, [focus?.request]);
   const [portDraft, setPortDraft] = useState(String(settings.port || DEFAULT_EXTERNAL_MCP_HTTP_PORT));
   const [addressDraft, setAddressDraft] = useState(settings.listenAddress || "0.0.0.0");
   const [clientHostDraft, setClientHostDraft] = useState(settings.clientHost || "");
   const [portError, setPortError] = useState(false);
   const [addressError, setAddressError] = useState(false);
   const [clientHostError, setClientHostError] = useState(false);
+
+  const changeOpen = (next: boolean) => {
+    setPortDraft(String(settings.port || DEFAULT_EXTERNAL_MCP_HTTP_PORT));
+    setAddressDraft(settings.listenAddress || "0.0.0.0");
+    setClientHostDraft(settings.clientHost || "");
+    setPortError(false);
+    setAddressError(false);
+    setClientHostError(false);
+    setOpen(next);
+  };
 
   const listenAddress = settings.allowCustomBind
     ? (status?.listenAddress || settings.listenAddress)
@@ -151,16 +170,19 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
   };
 
   return (
-    <div className="space-y-2">
+    <SettingsAnchor anchorId="ai-external-mcp-http" className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-semibold text-foreground">{t("ai.externalMcp.http.title")}</div>
         <div className={cn("text-xs font-medium", statusClass)}>{statusLabel}</div>
       </div>
       <p className="text-xs text-muted-foreground leading-5">{t("ai.externalMcp.http.description")}</p>
       <p className="text-xs text-muted-foreground leading-5">{t("ai.externalMcp.http.legacySseNote")}</p>
-      <SettingCard divided className="rounded-md border-border/60 bg-background/70">
+      <SettingCard>
+        <SettingRow label={t(settings.enabled ? "ai.toolSettings.httpOn" : "ai.toolSettings.httpOff")} description={settings.allowCustomBind ? t("ai.externalMcp.http.warning") : t("ai.toolSettings.loopback")}>
+          <ToolSettingsDialog title={t("ai.externalMcp.http.title")} triggerLabel={t("ai.toolSettings.configureHttp")} immediate open={open} onOpenChange={changeOpen}>
+      <p className="text-xs text-muted-foreground leading-5">{t("ai.externalMcp.http.description")}</p>
+      <SettingCard divided className="border-0 bg-transparent p-0">
         <SettingRow
-          anchorId="ai-external-mcp-http"
           label={t("ai.externalMcp.http.enable")}
         >
           <Toggle
@@ -176,6 +198,8 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
           <input
             type="number"
             aria-label={t("ai.externalMcp.http.port")}
+            aria-invalid={portError}
+            aria-describedby={portError ? errorId : undefined}
             min={1024}
             max={65535}
             value={portDraft}
@@ -207,6 +231,8 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
             <input
               type="text"
               aria-label={t("ai.externalMcp.http.listenAddress")}
+              aria-invalid={addressError}
+              aria-describedby={addressError ? errorId : undefined}
               placeholder={t("ai.externalMcp.http.listenAddress.placeholder")}
               value={addressDraft}
               onChange={(event) => {
@@ -226,6 +252,8 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
             <input
               type="text"
               aria-label={t("ai.externalMcp.http.clientHost")}
+              aria-invalid={clientHostError}
+              aria-describedby={clientHostError ? errorId : undefined}
               placeholder={t("ai.externalMcp.http.clientHost.placeholder")}
               value={clientHostDraft}
               onChange={(event) => {
@@ -245,8 +273,9 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
       {settings.enabled && !externalMcpEnabled ? (
         <p className="text-xs text-amber-500">{t("ai.externalMcp.http.requiresExternalMcp")}</p>
       ) : null}
-      {errorText ? <p className="text-xs text-destructive">{errorText}</p> : null}
-      <div className="space-y-2.5 rounded-md border border-border/60 bg-background/50 p-3">
+      {errorText ? <p id={errorId} role="alert" className="text-xs text-destructive">{errorText}</p> : null}
+      <details className="space-y-4">
+        <summary className="cursor-pointer text-sm font-medium">{t("ai.toolSettings.connectionDetails")}</summary>
         <CopyableCodeBlock
           label={t("ai.externalMcp.http.url")}
           value={url}
@@ -259,6 +288,7 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
         <CopyableCodeBlock
           label={t("ai.externalMcp.http.token")}
           value={token}
+          sensitive
           copyKey="http-token"
           copied={copied}
           onCopy={onCopy}
@@ -290,6 +320,7 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
         <CopyableCodeBlock
           label={t("ai.externalMcp.http.envLine")}
           value={token ? buildCodexHttpEnvLine(token) : ""}
+          sensitive
           copyKey="http-env"
           copied={copied}
           onCopy={onCopy}
@@ -300,6 +331,7 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
         <CopyableCodeBlock
           label={t("ai.externalMcp.http.claudeCommand")}
           value={token ? buildClaudeHttpAddCommand(url, token) : ""}
+          sensitive
           copyKey="http-claude"
           copied={copied}
           onCopy={onCopy}
@@ -310,6 +342,7 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
         <CopyableCodeBlock
           label={t("ai.externalMcp.http.genericSnippet")}
           value={token ? buildGenericHttpMcpJson(url, token) : ""}
+          sensitive
           copyKey="http-json"
           copied={copied}
           onCopy={onCopy}
@@ -317,7 +350,12 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
           copiedLabel={t("ai.externalMcp.copied")}
           emptyLabel={t("ai.externalMcp.unavailable")}
         />
-      </div>
-    </div>
+      </details>
+          </ToolSettingsDialog>
+        </SettingRow>
+      </SettingCard>
+      {settings.enabled && !externalMcpEnabled ? <p className="text-xs text-amber-500">{t("ai.externalMcp.http.requiresExternalMcp")}</p> : null}
+      {status?.error ? <p role="alert" className="text-xs text-destructive">{status.error}</p> : null}
+    </SettingsAnchor>
   );
 };

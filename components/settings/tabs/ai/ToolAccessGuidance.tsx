@@ -4,6 +4,7 @@ import { useI18n } from "../../../../application/i18n/I18nProvider";
 import type { AIToolIntegrationMode } from "../../../../infrastructure/ai/types";
 import { cn } from "../../../../lib/utils";
 import { useToolAccessGuidanceState } from "../../../../application/state/useToolAccessGuidanceState";
+import { ToolSettingsDialog } from "./ToolSettingsDialog";
 import { EXTERNAL_MCP_DISCOVERY_ENV_VAR } from "./ExternalMcpCard";
 
 /** Build a ready-to-paste prompt so an external AI client can register Netcatty MCP itself. */
@@ -93,7 +94,7 @@ export const ToolAccessGuidance: React.FC<{ mode: AIToolIntegrationMode }> = ({ 
 
   if (mode === "skills") {
     return (
-      <div className="rounded-md border border-border/60 bg-background/50 p-3 space-y-2">
+      <ToolSettingsDialog title={t("ai.toolAccess.skills.file")} triggerLabel={t("ai.toolSettings.viewSkills")}>
         <p className="text-xs text-muted-foreground leading-5">
           {t("ai.toolAccess.skills.description")}
         </p>
@@ -110,12 +111,12 @@ export const ToolAccessGuidance: React.FC<{ mode: AIToolIntegrationMode }> = ({ 
         {commandPrefix ? (
           <p className="text-xs text-muted-foreground/80 font-mono break-all">{commandPrefix}</p>
         ) : null}
-      </div>
+      </ToolSettingsDialog>
     );
   }
 
   return (
-    <div className="rounded-md border border-border/60 bg-background/50 p-3 space-y-2">
+    <ToolSettingsDialog title={t("ai.toolAccess.mcpPrompt.title")} triggerLabel={t("ai.toolSettings.viewPrompt")}>
       <p className="text-xs text-muted-foreground leading-5">
         {t("ai.toolAccess.mcpPrompt.description")}
       </p>
@@ -129,6 +130,6 @@ export const ToolAccessGuidance: React.FC<{ mode: AIToolIntegrationMode }> = ({ 
       {!mcpLauncherPath ? (
         <p className="text-xs text-amber-500">{t("ai.toolAccess.mcpPrompt.enableHint")}</p>
       ) : null}
-    </div>
+    </ToolSettingsDialog>
   );
 };

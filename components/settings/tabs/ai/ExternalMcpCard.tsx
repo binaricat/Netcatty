@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HelpCircle, RefreshCw } from "lucide-react";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import {
@@ -31,8 +31,12 @@ import {
 } from "../../../../application/state/useExternalMcpToggleState";
 import { cn } from "../../../../lib/utils";
 import { Button } from "../../../ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
 import { Select, SettingCard, SettingRow, Toggle } from "../../../settings/settings-ui";
+import { ToolSettingsDialog } from "./ToolSettingsDialog";
+import { useOptionalSettingsFocus } from "../../SettingsFocusContext";
+import { SettingsAnchor } from "../../settings-ui";
 import { CopyableCodeBlock } from "./CopyableCodeBlock";
 import { ExternalMcpHttpSection, type ExternalMcpHttpViewStatus } from "./ExternalMcpHttpSection";
 import { getBridge } from "./types";
@@ -252,6 +256,13 @@ export function buildCursorSnippet(launcherPath: string, discoveryPath?: string 
 
 export const ExternalMcpCard: React.FC = () => {
   const { t } = useI18n();
+  const [behaviorOpen, setBehaviorOpen] = useState(false);
+  const focus = useOptionalSettingsFocus();
+  useEffect(() => {
+    if (focus?.request?.anchorId === "ai-external-mcp-approval-alert") setBehaviorOpen(true);
+  }, [focus?.request]);
+  const statusGeneration = useRef(0);
+  useEffect(() => () => { statusGeneration.current += 1; }, []);
   const { enabled, setEnabled, error: configError } = useExternalMcpToggleState();
   const [mode, setModeRaw] = useState<ExternalMcpMode>(() => readExternalMcpMode());
   const [idleTimeoutMinutes, setIdleTimeoutRaw] = useState<number>(() => readExternalMcpIdleTimeoutMinutes());
@@ -270,6 +281,7 @@ export const ExternalMcpCard: React.FC = () => {
   }));
   const [isRotatingHttpToken, setIsRotatingHttpToken] = useState(false);
   const [status, setStatus] = useState<ExternalMcpStatus | null>(null);
+  const [manualFormat, setManualFormat] = useState("command");
   const [selectedClient, setSelectedClient] = useState<ExternalMcpClient>("codex");
   const [codexStatus, setCodexStatus] = useState<ClientSetupStatus | null>(null);
   const [claudeStatus, setClaudeStatus] = useState<ClientSetupStatus | null>(null);
@@ -324,6 +336,7 @@ export const ExternalMcpCard: React.FC = () => {
   }, []);
 
   const applyHttpSettings = useCallback(async (next: ExternalMcpHttpSettings) => {
+    const generation = ++statusGeneration.current;
     const normalized: ExternalMcpHttpSettings = {
       enabled: writeExternalMcpHttpEnabled(next.enabled),
       port: writeExternalMcpHttpPort(next.port),
@@ -332,6 +345,7 @@ export const ExternalMcpCard: React.FC = () => {
       clientHost: writeExternalMcpHttpClientHost(next.clientHost),
     };
     setHttpSettings(normalized);
+    try {
     const nextStatus = await getBridge()?.externalMcpSetConfig?.({
       httpEnabled: normalized.enabled,
       httpPort: normalized.port,
@@ -339,27 +353,34 @@ export const ExternalMcpCard: React.FC = () => {
       httpListenAddress: normalized.listenAddress,
       httpClientHost: normalized.clientHost,
     });
-    if (nextStatus && typeof nextStatus === "object") {
+    if (generation === statusGeneration.current && nextStatus && typeof nextStatus === "object") {
       setStatus(nextStatus as ExternalMcpStatus);
+    }
+    } catch (error) {
+      if (generation === statusGeneration.current) setActionMessage({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     }
   }, []);
 
   const rotateHttpToken = useCallback(async () => {
     const bridge = getBridge();
     if (!bridge?.externalMcpSetConfig) return;
+    const generation = ++statusGeneration.current;
     setIsRotatingHttpToken(true);
     setActionMessage(null);
     try {
       const nextStatus = await bridge.externalMcpSetConfig({ rotateHttpToken: true });
-      if (nextStatus && typeof nextStatus === "object") {
+      if (generation === statusGeneration.current && nextStatus && typeof nextStatus === "object") {
         setStatus(nextStatus as ExternalMcpStatus);
       }
+    } catch (error) {
+      setActionMessage({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     } finally {
       setIsRotatingHttpToken(false);
     }
   }, []);
 
   const refreshStatus = useCallback(async (options?: { quiet?: boolean; clients?: boolean }) => {
+    const generation = ++statusGeneration.current;
     const bridge = getBridge();
     const includeClients = options?.clients !== false;
     if (
@@ -411,6 +432,7 @@ export const ExternalMcpCard: React.FC = () => {
           bridge.externalMcpGetUniversalSetupPrompt?.()
             ?? Promise.resolve({ ok: false, prompt: "" }),
         ]);
+        if (generation !== statusGeneration.current) return;
         setStatus(nextStatus as ExternalMcpStatus);
         if (enabled && nextStatus?.ok && !nextStatus.enabled) {
           setEnabled(false);
@@ -425,6 +447,7 @@ export const ExternalMcpCard: React.FC = () => {
         );
       } else {
         const nextStatus = await bridge.externalMcpGetStatus();
+        if (generation !== statusGeneration.current) return;
         setStatus(nextStatus as ExternalMcpStatus);
         if (enabled && nextStatus?.ok && !nextStatus.enabled) {
           setEnabled(false);
@@ -634,7 +657,7 @@ export const ExternalMcpCard: React.FC = () => {
   ]);
 
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-3">
+    <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex items-start gap-1.5">
           <p className="min-w-0 text-xs text-muted-foreground leading-5">
@@ -670,7 +693,8 @@ export const ExternalMcpCard: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-4 rounded-md border border-border/60 bg-background/70 px-3 py-2">
+      <SettingCard divided>
+      <div className="flex items-center justify-between gap-4 py-3">
         <div className="min-w-0">
           <div className="text-sm font-medium">{t("ai.externalMcp.title")}</div>
           <div className="text-xs text-muted-foreground">
@@ -679,7 +703,9 @@ export const ExternalMcpCard: React.FC = () => {
         </div>
         <Toggle
           checked={enabled}
+          ariaLabel={t("ai.externalMcp.title")}
           onChange={(nextEnabled) => {
+            statusGeneration.current += 1;
             setActionMessage(null);
             void setEnabled(nextEnabled).then(() => refreshStatus());
           }}
@@ -688,7 +714,7 @@ export const ExternalMcpCard: React.FC = () => {
 
       {/* Permission mode is controlled in Safety settings; surface it here so External MCP
           users see why write tools may still prompt (confirm) or run freely (auto). */}
-      <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-background/70 px-3 py-2">
+      <div className="flex flex-wrap items-start justify-between gap-4 py-3">
         <div className="min-w-0 space-y-1">
           <div className="text-sm font-medium">{t("ai.externalMcp.permissionMode.label")}</div>
           <div className="text-xs text-muted-foreground leading-5">
@@ -706,9 +732,11 @@ export const ExternalMcpCard: React.FC = () => {
         </div>
       </div>
 
-      <SettingCard divided className="rounded-md border-border/60 bg-background/70">
+      <SettingsAnchor anchorId="ai-external-mcp-approval-alert">
+        <SettingRow label={t("ai.toolSettings.behavior")} description={t(mode === "persistent" ? "ai.externalMcp.mode.persistent" : "ai.externalMcp.mode.temporary")}>
+          <ToolSettingsDialog title={t("ai.toolSettings.behavior")} triggerLabel={t("ai.toolSettings.configureBehavior")} immediate open={behaviorOpen} onOpenChange={setBehaviorOpen}>
+      <SettingCard divided className="border-0 bg-transparent p-0">
         <SettingRow
-          anchorId="ai-external-mcp-approval-alert"
           label={t("ai.externalMcp.approvalAlert")}
           description={t("ai.externalMcp.approvalAlert.description")}
         >
@@ -804,6 +832,10 @@ export const ExternalMcpCard: React.FC = () => {
           </div>
         </SettingRow>
       </SettingCard>
+          </ToolSettingsDialog>
+        </SettingRow>
+      </SettingsAnchor>
+      </SettingCard>
 
       <ExternalMcpHttpSection
         externalMcpEnabled={enabled}
@@ -816,45 +848,9 @@ export const ExternalMcpCard: React.FC = () => {
         onRotateToken={() => { void rotateHttpToken(); }}
       />
 
-      <div className="space-y-2">
-        <div className="flex min-h-8 items-center justify-between gap-2">
-          <div className="text-sm font-semibold text-foreground">{t("ai.externalMcp.discovery")}</div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void refreshStatus()}
-            disabled={isRefreshing}
-          >
-            <RefreshCw size={14} className={cn("mr-1.5", isRefreshing && "animate-spin")} />
-            {t("ai.externalMcp.refresh")}
-          </Button>
-        </div>
-        <div className="space-y-2.5 rounded-md border border-border/60 bg-background/50 p-3">
-          <CopyableCodeBlock
-            label={t("ai.externalMcp.launcher")}
-            value={launcherPath || ""}
-            copyKey="launcher"
-            copied={copied}
-            onCopy={copyText}
-            copyLabel={t("ai.externalMcp.copy")}
-            copiedLabel={t("ai.externalMcp.copied")}
-            emptyLabel={t("ai.externalMcp.unavailable")}
-          />
-          <CopyableCodeBlock
-            label={t("ai.externalMcp.discovery")}
-            value={status?.discoveryPath || ""}
-            copyKey="discovery"
-            copied={copied}
-            onCopy={copyText}
-            copyLabel={t("ai.externalMcp.copy")}
-            copiedLabel={t("ai.externalMcp.copied")}
-            emptyLabel={t("ai.externalMcp.unavailable")}
-          />
-          {!enabled ? (
-            <p className="text-xs text-amber-500">{t("ai.externalMcp.enableForLauncher")}</p>
-          ) : null}
-        </div>
-      </div>
+      <SettingCard>
+        <SettingRow label={t("ai.externalMcp.clientConfiguration")} description={t("ai.externalMcp.clientConfiguration.description")}>
+          <ToolSettingsDialog title={t("ai.externalMcp.clientConfiguration")} triggerLabel={t("ai.toolSettings.configureClients")}>
 
       <div className="space-y-2">
         <div className="space-y-1">
@@ -866,38 +862,13 @@ export const ExternalMcpCard: React.FC = () => {
           </p>
         </div>
 
-        <div
-          role="tablist"
-          aria-label={t("ai.externalMcp.clientConfiguration")}
-          className="grid grid-cols-5 gap-1 rounded-md bg-muted p-1"
-        >
-          {CLIENT_TABS.map((client) => {
-            const active = selectedClient === client;
-            return (
-              <button
-                key={client}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => {
-                  setSelectedClient(client);
-                  setActionMessage(null);
-                }}
-                className={cn(
-                  "inline-flex h-8 items-center justify-center rounded-sm px-2 text-xs font-medium transition-colors",
-                  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                  active
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {t(`ai.externalMcp.client.${client}`)}
-              </button>
-            );
-          })}
-        </div>
+        <Tabs value={selectedClient} onValueChange={(value) => { setSelectedClient(value as ExternalMcpClient); setManualFormat(value === "other" || value === "cursor" ? "snippet" : "command"); setActionMessage(null); }}>
+          <TabsList aria-label={t("ai.externalMcp.clientConfiguration")} className="flex h-auto flex-wrap justify-start">
+            {CLIENT_TABS.map((client) => <TabsTrigger key={client} value={client}>{t(`ai.externalMcp.client.${client}`)}</TabsTrigger>)}
+          </TabsList>
+          <TabsContent value={selectedClient}>
 
-        <div className="space-y-3 rounded-md border border-border/60 bg-background/50 p-3">
+        <div className="space-y-4">
           {selectedClientMeta.kind === "installable" && selectedClientMeta.statusView ? (
             <div className="flex items-center justify-between gap-3">
               <div className={cn("text-xs font-medium", selectedClientMeta.statusView.className)}>
@@ -924,57 +895,76 @@ export const ExternalMcpCard: React.FC = () => {
             </p>
           )}
 
-          {selectedClientMeta.kind === "installable" ? (
-            <>
-              <CopyableCodeBlock
-                label={t("ai.externalMcp.cliCommand")}
-                value={selectedClientMeta.command}
-                copyKey="command"
-                copied={copied}
-                onCopy={copyText}
-                copyLabel={t("ai.externalMcp.copy")}
-                copiedLabel={t("ai.externalMcp.copied")}
-                emptyLabel={t("ai.externalMcp.unavailable")}
-              />
-              <CopyableCodeBlock
-                label={t("ai.externalMcp.configSnippet")}
-                value={selectedClientMeta.snippet}
-                copyKey="snippet"
-                copied={copied}
-                onCopy={copyText}
-                copyLabel={t("ai.externalMcp.copy")}
-                copiedLabel={t("ai.externalMcp.copied")}
-                emptyLabel={t("ai.externalMcp.unavailable")}
-              />
-            </>
-          ) : (
-            <>
-              <CopyableCodeBlock
-                label={t("ai.externalMcp.configSnippet")}
-                value={selectedClientMeta.snippet}
-                copyKey="cursor"
-                copied={copied}
-                onCopy={copyText}
-                copyLabel={t("ai.externalMcp.copy")}
-                copiedLabel={t("ai.externalMcp.copied")}
-                emptyLabel={t("ai.externalMcp.unavailable")}
-              />
-              {selectedClient === "other" ? (
-                <CopyableCodeBlock
-                  label={t("ai.externalMcp.universalSetupPrompt")}
-                  value={universalSetupPrompt}
-                  copyKey="universal-setup-prompt"
-                  copied={copied}
-                  onCopy={copyText}
-                  copyLabel={t("ai.externalMcp.copy")}
-                  copiedLabel={t("ai.externalMcp.copied")}
-                  emptyLabel={t("ai.externalMcp.unavailable")}
-                />
-              ) : null}
-            </>
-          )}
+          <details className="space-y-3">
+            <summary className="cursor-pointer text-sm font-medium">{t("ai.toolSettings.manualSetup")}</summary>
+            <label className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              {t("ai.toolSettings.format")}
+              <select className="h-9 max-w-full rounded-md border border-input bg-background px-3 text-sm" value={manualFormat} onChange={(event) => setManualFormat(event.currentTarget.value)}>
+                {selectedClientMeta.kind === "installable" ? <option value="command">{t("ai.externalMcp.cliCommand")}</option> : null}
+                <option value="snippet">{t("ai.externalMcp.configSnippet")}</option>
+                {selectedClient === "other" ? <option value="prompt">{t("ai.externalMcp.universalSetupPrompt")}</option> : null}
+              </select>
+            </label>
+            <CopyableCodeBlock
+              label={t(manualFormat === "command" ? "ai.externalMcp.cliCommand" : manualFormat === "prompt" ? "ai.externalMcp.universalSetupPrompt" : "ai.externalMcp.configSnippet")}
+              value={manualFormat === "command" ? selectedClientMeta.command : manualFormat === "prompt" ? universalSetupPrompt : selectedClientMeta.snippet}
+              copyKey={manualFormat}
+              copied={copied}
+              onCopy={copyText}
+              copyLabel={t("ai.externalMcp.copy")}
+              copiedLabel={t("ai.externalMcp.copied")}
+              emptyLabel={t("ai.externalMcp.unavailable")}
+            />
+          </details>
         </div>
+          </TabsContent>
+        </Tabs>
       </div>
+      <details className="space-y-3">
+        <summary className="cursor-pointer text-sm font-medium">{t("ai.toolSettings.connectionDetails")}</summary>
+        <div className="flex min-h-8 items-center justify-between gap-2">
+          <div className="text-sm font-semibold text-foreground">{t("ai.externalMcp.discovery")}</div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void refreshStatus()}
+            disabled={isRefreshing}
+          >
+            <RefreshCw size={14} className={cn("mr-1.5", isRefreshing && "animate-spin")} />
+            {t("ai.externalMcp.refresh")}
+          </Button>
+        </div>
+        <div className="space-y-3">
+          <CopyableCodeBlock
+            label={t("ai.externalMcp.launcher")}
+            value={launcherPath || ""}
+            copyKey="launcher"
+            copied={copied}
+            onCopy={copyText}
+            copyLabel={t("ai.externalMcp.copy")}
+            copiedLabel={t("ai.externalMcp.copied")}
+            emptyLabel={t("ai.externalMcp.unavailable")}
+          />
+          <CopyableCodeBlock
+            label={t("ai.externalMcp.discovery")}
+            value={status?.discoveryPath || ""}
+            copyKey="discovery"
+            copied={copied}
+            onCopy={copyText}
+            copyLabel={t("ai.externalMcp.copy")}
+            copiedLabel={t("ai.externalMcp.copied")}
+            emptyLabel={t("ai.externalMcp.unavailable")}
+          />
+          {!enabled ? (
+            <p className="text-xs text-amber-500">{t("ai.externalMcp.enableForLauncher")}</p>
+          ) : null}
+        </div>
+      </details>
+
+            {actionMessage ? <p role={actionMessage.tone === "error" ? "alert" : "status"} className={cn("text-xs", actionMessage.tone === "error" ? "text-destructive" : "text-muted-foreground")}>{actionMessage.text}</p> : null}
+          </ToolSettingsDialog>
+        </SettingRow>
+      </SettingCard>
 
       {actionMessage ? (
         <div
