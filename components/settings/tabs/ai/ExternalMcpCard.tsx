@@ -730,7 +730,7 @@ export const ExternalMcpCard: React.FC = () => {
             statusGeneration.current += 1;
             setActionMessage(null);
             setIsToggling(true);
-            void setEnabled(nextEnabled).then(() => refreshStatus()).finally(() => setIsToggling(false));
+            void setEnabled(nextEnabled).then(() => { void refreshStatus(); }).finally(() => setIsToggling(false));
           }}
         />
       </div>

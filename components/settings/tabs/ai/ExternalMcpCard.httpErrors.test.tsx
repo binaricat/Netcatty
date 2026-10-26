@@ -14,14 +14,14 @@ const { I18nProvider } = await import('../../../../application/i18n/I18nProvider
 const { TooltipProvider } = await import('../../../ui/tooltip');
 const { ExternalMcpCard } = await import('./ExternalMcpCard');
 
-type FixtureControl = { rejectHttp: boolean; throwHttp: boolean; holdHttp: boolean; pendingHttp: (() => void)[]; rejectRotate: boolean; throwRotate: boolean; calls: { name: string; args: unknown[] }[] };
-async function mount() {
-  installAiToolAccessFixture({ locale: 'en', enabled: true });
+type FixtureControl = { rejectHttp: boolean; throwHttp: boolean; holdHttp: boolean; pendingHttp: (() => void)[]; pendingClients: (() => void)[]; rejectRotate: boolean; throwRotate: boolean; calls: { name: string; args: unknown[] }[] };
+async function mount(options: { enabled?: boolean; holdClients?: boolean } = {}, openHttp = true) {
+  installAiToolAccessFixture({ locale: 'en', enabled: true, ...options });
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } });
   const qa = (window as unknown as { __aiToolQa: FixtureControl }).__aiToolQa;
   const root = createRoot(document.getElementById('root')!);
   await act(async () => root.render(<I18nProvider locale="en"><TooltipProvider><ExternalMcpCard /></TooltipProvider></I18nProvider>));
-  await click('Configure HTTP');
+  if (openHttp) await click('Configure HTTP');
   return { qa, close: async () => { await act(async () => root.unmount()); } };
 }
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]')!;
@@ -116,3 +116,18 @@ for (const failure of ['returned', 'thrown'] as const) {
     } finally { await h.close(); }
   });
 }
+
+test('completed MCP enable can be turned off while unrelated client discovery is still pending', async () => {
+  const h = await mount({ enabled: false, holdClients: true }, false);
+  try {
+    const toggle = document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="External MCP"]')!;
+    await act(async () => toggle.click());
+    assert.equal(toggle.getAttribute('aria-checked'), 'true');
+    assert.ok(h.qa.pendingClients.length > 0, 'client discovery remains intentionally unresolved');
+    assert.equal(toggle.disabled, false, 'successful enable must release the switch before client discovery finishes');
+    await act(async () => toggle.click());
+    assert.equal(toggle.getAttribute('aria-checked'), 'false');
+    assert.equal(toggle.disabled, false);
+    assert.deepEqual(h.qa.calls.filter((call) => call.name === 'enable').map((call) => call.args[0]), [true, false]);
+  } finally { await h.close(); }
+});
