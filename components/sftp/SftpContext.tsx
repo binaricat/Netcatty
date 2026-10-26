@@ -8,6 +8,7 @@
 
 import React, { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import type { SftpConnectedHostEntry } from "../../domain/sftpConnectedHosts";
+import type { SftpArchiveCreationOptions, SftpArchiveCreationResult, SftpArchiveCreationTarget } from "../../domain/sftpArchiveCreation";
 import type { SftpConnectOptions } from "../../application/state/sftp/useSftpConnections";
 import { Host, SftpFileEntry, SftpFilenameEncoding } from "../../types";
 
@@ -63,6 +64,7 @@ export interface SftpPaneCallbacks {
     onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;  // Download to local filesystem
     onDownloadFiles?: (entries: SftpFileEntry[]) => void;  // Batch download — picks one target directory for remote panes
     onExtractArchive?: (entry: SftpFileEntry, fullPath?: string) => void | Promise<void>;
+    onCreateArchive?: (options: SftpArchiveCreationOptions, target: SftpArchiveCreationTarget) => Promise<SftpArchiveCreationResult>;
     // External file upload (supports folders via DataTransfer)
     onUploadExternalFiles?: (dataTransfer: DataTransfer, targetPath?: string) => Promise<void>;
     // External file upload from <input type="file" multiple> picker (FileList).

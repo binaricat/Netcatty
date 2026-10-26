@@ -940,6 +940,9 @@ function createPreloadApi(ctx) {
   extractSftpArchive: async (sftpId, path, encoding) => {
     return ipcRenderer.invoke("netcatty:sftp:extract", { sftpId, path, encoding });
   },
+  createSftpArchive: async (sftpId, options, encoding) => {
+    return ipcRenderer.invoke("netcatty:sftp:createArchive", { sftpId, options, encoding });
+  },
   getSftpHomeDir: async (sftpId, encoding) => {
     return ipcRenderer.invoke("netcatty:sftp:homeDir", { sftpId, encoding });
   },
