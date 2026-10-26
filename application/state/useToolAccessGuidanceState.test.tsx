@@ -52,7 +52,7 @@ test('older MCP guidance response cannot overwrite a newer enable-state refresh'
   const h = await harness();
   try {
     assert.equal(h.requests.length, 1);
-    await act(async () => h.events.dispatchEvent(new CustomEvent(AI_STATE_CHANGED_EVENT, { detail: { key: STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED } })));
+    await act(async () => { h.events.dispatchEvent(new CustomEvent(AI_STATE_CHANGED_EVENT, { detail: { key: STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED } })); });
     assert.equal(h.requests.length, 2);
     await act(async () => h.requests[1].resolve(status('/fixture/new')));
     assert.equal(h.result().mcpLauncherPath, '/fixture/new');
