@@ -14,8 +14,8 @@ const { I18nProvider } = await import('../../../../application/i18n/I18nProvider
 const { AIPrivacySection } = await import('./AIPrivacySection');
 
 async function mount(setConfig: (config: unknown) => Promise<unknown> = async () => ({ ok: true }), saved?: string) {
-  localStorage.clear();
-  if (saved) localStorage.setItem(STORAGE_KEY_AI_PRIVACY, saved);
+  dom.window.localStorage.clear();
+  if (saved) dom.window.localStorage.setItem(STORAGE_KEY_AI_PRIVACY, saved);
   Object.assign(window, { netcatty: { externalMcpSetConfig: setConfig } });
   const root = createRoot(document.getElementById('root')!);
   await act(async () => root.render(<I18nProvider locale="en"><AIPrivacySection /></I18nProvider>));
@@ -62,15 +62,15 @@ test('rejected privacy draft stays open and accepted draft commits once and retu
     await input(0, '192.0.2.0/24\n\n2001:db8::/32');
     await input(1, '[');
     assert.equal(calls.length, 0);
-    assert.equal(localStorage.getItem(STORAGE_KEY_AI_PRIVACY), null);
+    assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_PRIVACY), null);
     await click('Apply');
     assert.match(document.querySelector('[role="alert"]')!.textContent!, /Invalid privacy rules/);
     assert.equal(document.querySelectorAll('textarea')[1].value, '[');
-    assert.equal(localStorage.getItem(STORAGE_KEY_AI_PRIVACY), null);
+    assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_PRIVACY), null);
     accepted = true;
     await input(1, 'INTERNAL_[A-Z0-9]+');
     await click('Apply');
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_AI_PRIVACY)!);
+    const saved = JSON.parse(dom.window.localStorage.getItem(STORAGE_KEY_AI_PRIVACY)!);
     assert.deepEqual(saved, { enabled: true, redactPrivateIps: false, cidrs: ['192.0.2.0/24', '2001:db8::/32'], patterns: ['INTERNAL_[A-Z0-9]+'] });
     assert.deepEqual(calls[1], { redaction: saved });
     assert.equal(document.querySelector('[role="dialog"]'), null);
@@ -98,7 +98,7 @@ test('Cancel, X and Escape discard edits and reopening reads saved values', asyn
       await click('Cancel');
     }
     assert.equal(calls, 0);
-    assert.equal(localStorage.getItem(STORAGE_KEY_AI_PRIVACY), null);
+    assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_PRIVACY), null);
   } finally { await unmount(); }
 });
 
@@ -126,7 +126,7 @@ test('malformed saved settings remain visible and repairable without being rewri
     assert.match(document.querySelector('[role="alert"]')!.textContent!, /Invalid saved AI privacy settings/);
     await click('Configure privacy');
     assert.equal(button('Apply').disabled, false);
-    assert.equal(localStorage.getItem(STORAGE_KEY_AI_PRIVACY), '{');
+    assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_PRIVACY), '{');
   } finally { await unmount(); }
 });
 
@@ -134,7 +134,7 @@ test('cross-window changes refresh clean drafts but preserve dirty drafts with a
   const unmount = await mount();
   const settings = { enabled: true, redactPrivateIps: true, cidrs: ['192.0.2.0/24'], patterns: ['INTERNAL_.*'] };
   const update = async () => {
-    localStorage.setItem(STORAGE_KEY_AI_PRIVACY, JSON.stringify(settings));
+    dom.window.localStorage.setItem(STORAGE_KEY_AI_PRIVACY, JSON.stringify(settings));
     await act(async () => { window.dispatchEvent(new dom.window.StorageEvent('storage', { key: STORAGE_KEY_AI_PRIVACY })); });
   };
   try {
