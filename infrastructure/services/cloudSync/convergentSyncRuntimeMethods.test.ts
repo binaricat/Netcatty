@@ -270,7 +270,7 @@ for (const overrideShrink of [false, true]) {
       if (overrideShrink) {
         assert.equal(result?.success, true);
         assert.equal(applied, true);
-        assert.ok(subject.events.some((event: any) => event.type === 'SYNC_FORCED'));
+        assert.ok(subject.events.some((event) => (event as { type: string }).type === 'SYNC_FORCED'));
       } else {
         assert.equal(result?.success, false);
         assert.equal(result?.shrinkBlocked, true);
