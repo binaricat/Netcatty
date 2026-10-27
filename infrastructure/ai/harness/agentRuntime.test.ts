@@ -109,6 +109,8 @@ test('AgentRuntime records session state from tool call and result events', asyn
 
   const sessionStateStore = new SessionStateStore();
   const runtime = new AgentRuntime({ drivers: [new ToolTurnDriver()], sessionStateStore });
+  const resultNames: Array<string | undefined> = [];
+  runtime.subscribe((event) => { if (event.type === 'tool_result') resultNames.push(event.toolName); });
   await runtime.runTurn({
     backend: 'catty',
     chatSessionId: 'chat-tool',
@@ -135,6 +137,7 @@ test('AgentRuntime records session state from tool call and result events', asyn
     },
   });
 
+  assert.deepEqual(resultNames, ['terminal_execute'], 'listeners receive the same per-turn name resolution as session state');
   const text = sessionStateStore.toReinjectionText('chat-tool');
   assert.ok(text?.includes('uptime'));
   assert.ok(text?.includes('check uptime'));

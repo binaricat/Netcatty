@@ -1,30 +1,42 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import type { PluginAgentHostRequest, PluginAgentHostResult } from '@netcatty/plugin-contract';
+import type { PluginAgentEvent, PluginAgentHostRequest, PluginAgentHostResult } from '@netcatty/plugin-contract';
 import { AgentRuntime } from '../harness/agentRuntime';
 import type { TurnDriver } from '../harness/turnDrivers/types';
 import { ConfiguredPluginAgentBackends } from './configuredBackends';
 import { createTrustedPluginAgentRuntime } from './trustedAgentRuntime';
+import { mapSdkStreamEventToAgentEvents } from '../harness/agentEventAdapter';
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { resolve, promise }; }
-function fixture(t: TestContext, driver: TurnDriver, prepare = async () => {}) {
+function fixture(t: TestContext, driver: TurnDriver, prepare = async () => {}, backend: 'catty' | 'claude' = 'catty') {
   const old = Object.getOwnPropertyDescriptor(globalThis, 'window');
   let revision = '1';
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { netcatty: {
     aiExec: async () => ({ ok: true, stdout: '', stderr: '', exitCode: 0 }), aiSetChatSessionCancelled: async () => ({ ok: true }),
   } } });
-  const backends = new ConfiguredPluginAgentBackends({ getModel: () => ({ config: { id: 'fixture', name: 'Fixture', providerId: 'custom', enabled: true, defaultModel: 'fixture', apiKey: 'FIXTURE_MARKER' }, label: 'Fixture', revision }),
-    prepareModel: prepare, getExternal: () => [] });
+  const backends = new ConfiguredPluginAgentBackends({ getModel: () => backend === 'catty' ? ({ config: { id: 'fixture', name: 'Fixture', providerId: 'custom', enabled: true, defaultModel: 'fixture', apiKey: 'FIXTURE_MARKER' }, label: 'Fixture', revision }) : null,
+    prepareModel: prepare, getExternalModel: () => undefined,
+    getExternal: () => backend === 'claude' ? [{ id: 'synthetic-claude', name: 'Synthetic Claude', command: '/synthetic/claude', sdkBackend: 'claude', enabled: true }] : [] });
   const runtime = createTrustedPluginAgentRuntime({ isActive: () => true, chooseTargets: async () => [], backends, runtime: new AgentRuntime({ drivers: [driver] }) });
-  const session = { conversationRef: crypto.randomUUID(), id: `plugin-agent:${crypto.randomUUID()}`, agentId: 'catty', title: 'Synthetic', scope: { type: 'global' }, messages: [], createdAt: 1, updatedAt: 1 };
+  const session = { conversationRef: crypto.randomUUID(), id: `plugin-agent:${crypto.randomUUID()}`, agentId: backend, title: 'Synthetic', scope: { type: 'global' }, messages: [], createdAt: 1, updatedAt: 1 };
   const call = (kind: string, payload: unknown, requestId: string = crypto.randomUUID(), runtimeId = 'r1', signal = new AbortController().signal): Promise<PluginAgentHostResult> => runtime.handle({ requestId, kind, payload, runtimeId, actionToken: 'fixture' } as PluginAgentHostRequest, signal);
   t.after(() => { runtime.shutdown(); if (old) Object.defineProperty(globalThis, 'window', old); else Reflect.deleteProperty(globalThis, 'window'); });
   const start = async (requestId?: string, signal?: AbortSignal) => {
     const result = await call('agent.backends', {}); assert.ok('backends' in result);
-    return call('agent.run', { session, backendHandle: result.backends[0].hostHandle, terminalSessions: [], text: 'Synthetic user intent', maxIterations: 12, delegationTag: crypto.randomUUID(), capabilities: [] }, requestId, 'r1', signal);
+    const selected = result.backends.find((item) => item.backend === backend); assert.ok(selected);
+    return call('agent.run', { session, backendHandle: selected.hostHandle, terminalSessions: [], text: 'Synthetic user intent', maxIterations: 12, delegationTag: crypto.randomUUID(), capabilities: [] }, requestId, 'r1', signal);
   };
   return { runtime, call, start, modelTo: (value: string) => { revision = value; } };
+}
+
+async function readEvents(f: ReturnType<typeof fixture>, started: PluginAgentHostResult) {
+  const events: PluginAgentEvent[] = [];
+  for (let i = 0; i < 16; i++) {
+    const next = await f.call('agent.next', started); assert.ok('event' in next); events.push(next.event);
+    if (next.event.kind === 'end') break;
+  }
+  return events;
 }
 
 test('trusted runtime reuses actual AgentRuntime and projects bounded events without raw tool data', async (t) => {
@@ -50,6 +62,58 @@ test('trusted runtime reuses actual AgentRuntime and projects bounded events wit
   assert.ok(events.some((item) => item.kind === 'text')); assert.ok(events.some((item) => item.kind === 'activity'));
   assert.doesNotMatch(JSON.stringify(events), /DO_NOT_SERIALIZE|FIXTURE_MARKER|apiKey|command/);
   await assert.rejects(f.call('agent.next', started, undefined, 'foreign-runtime'));
+});
+
+test('delegated Claude translated unnamed tool results retain their call capability and final answer', async (t) => {
+  const require = createRequire(import.meta.url);
+  const { translateClaudeMessage } = require('../../../electron/bridges/aiBridge/sdk/claudeDriver.cjs');
+  const { createStreamEmitter } = require('../../../electron/bridges/aiBridge/sdk/emit.cjs');
+  let aborted = false;
+  const f = fixture(t, { backend: 'external-sdk', run: async (input, context) => {
+    assert.equal(input.backend, 'external-sdk');
+    const emitter = createStreamEmitter({ sender: {}, requestId: 'synthetic-sdk', safeSend: (_sender: unknown, _channel: string, payload: { event: Record<string, unknown> }) => {
+      for (const event of mapSdkStreamEventToAgentEvents(payload.event, { sessionId: input.chatSessionId, chatSessionId: input.chatSessionId, turnId: context.turnId })) context.emit(event);
+    } });
+    // Translate real Claude message shapes; no tool dispatch,CLI or provider.
+    translateClaudeMessage({ type: 'assistant', message: { content: [
+      { type: 'tool_use', id: 'synthetic-call-env', name: 'mcp__netcatty__get_environment', input: { private: 'DO_NOT_SERIALIZE_ARGS' } },
+      { type: 'tool_use', id: 'synthetic-call-terminal', name: 'mcp__netcatty__terminal_execute', input: {} },
+    ] } }, emitter);
+    translateClaudeMessage({ type: 'user', message: { content: [
+      { type: 'tool_result', tool_use_id: 'synthetic-call-terminal', content: 'DO_NOT_SERIALIZE_RESULT' },
+      { type: 'tool_result', tool_use_id: 'synthetic-call-env', content: 'DO_NOT_SERIALIZE_RESULT' },
+    ] } }, emitter);
+    aborted = context.signal.aborted;
+    emitter.text('Synthetic final Claude answer');
+  } }, undefined, 'claude');
+  const events = await readEvents(f, await f.start());
+  assert.equal(aborted, false);
+  assert.ok(events.some((event) => event.kind === 'activity' && event.capabilityId === 'session.environment' && event.state === 'completed'));
+  assert.ok(events.some((event) => event.kind === 'activity' && event.capabilityId === 'terminal.execute' && event.state === 'completed'));
+  assert.ok(events.some((event) => event.kind === 'text' && event.text === 'Synthetic final Claude answer'));
+  assert.deepEqual(events.at(-1), { kind: 'end', reason: 'completed' });
+  assert.doesNotMatch(JSON.stringify(events), /DO_NOT_SERIALIZE|synthetic-call|toolName|toolCallId/);
+});
+
+for (const kind of ['orphan', 'unknown-tool', 'previous-turn'] as const) test(`delegated unnamed result correlation rejects ${kind} metadata`, async (t) => {
+  let starts = 0;
+  const f = fixture(t, { backend: 'external-sdk', run: async (_input, context) => {
+    starts++;
+    if (kind === 'unknown-tool' || (kind === 'previous-turn' && starts === 1)) {
+      context.emit({ id: 'call', type: 'tool_call', toolCallId: 'reused-call',
+        toolName: kind === 'unknown-tool' ? 'Bash' : 'get_environment', args: {} } as Parameters<typeof context.emit>[0]);
+    }
+    if (kind === 'previous-turn' && starts === 1) return;
+    context.emit({ id: 'result', type: 'tool_result', toolCallId: 'reused-call', result: 'DO_NOT_SERIALIZE_RESULT' } as Parameters<typeof context.emit>[0]);
+  } }, undefined, 'claude');
+  if (kind === 'previous-turn') {
+    const first = await f.start(); const events = await readEvents(f, first);
+    assert.deepEqual(events.at(-1), { kind: 'end', reason: 'completed' }); await f.call('agent.release', first);
+  }
+  const events = await readEvents(f, await f.start());
+  assert.deepEqual(events.at(-1), { kind: 'end', reason: 'unavailable' });
+  assert.equal(events.some((event) => event.kind === 'activity' && event.state === 'completed'), false);
+  assert.doesNotMatch(JSON.stringify(events), /DO_NOT_SERIALIZE_RESULT|reused-call|Bash/);
 });
 
 test('plugin backend listing and current checks never invoke Claude native model discovery or repair', async (t) => {
