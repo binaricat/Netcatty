@@ -317,6 +317,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
   const [noteGroups, setNoteGroups] = useState<string[]>([]);
   const [knownHosts, setKnownHosts] = useState<KnownHost[]>([]);
   const [shellHistory, setShellHistory] = useState<ShellHistoryEntry[]>([]);
+  const shellHistoryGenerationRef = useRef(0);
   const [connectionLogs, setConnectionLogs] = useState<ConnectionLog[]>([]);
   const [managedSources, setManagedSources] = useState<ManagedSource[]>([]);
   const [groupConfigs, setGroupConfigs] = useState<GroupConfig[]>([]);
@@ -1433,10 +1434,13 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
 
   const addShellHistoryEntry = useCallback(
     (entry: Omit<ShellHistoryEntry, "id" | "timestamp">) => {
+      const generation = shellHistoryGenerationRef.current;
       // Yield the input turn before history rendering and synchronous storage work.
       // Persist in the next task to keep the crash-loss window small.
       setTimeout(() => {
+        if (generation !== shellHistoryGenerationRef.current) return;
         setShellHistory((prev) => {
+          if (generation !== shellHistoryGenerationRef.current) return prev;
           const updated = mergeGlobalHistoryOnAppend(prev, entry);
           if (updated === prev) return prev;
           localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, updated);
@@ -1448,6 +1452,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
   );
 
   const clearShellHistory = useCallback(() => {
+    shellHistoryGenerationRef.current += 1;
     setShellHistory([]);
     localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, []);
     publishShellHistorySnapshot([]);

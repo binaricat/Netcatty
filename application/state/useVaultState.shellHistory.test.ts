@@ -40,6 +40,17 @@ test("shell history append yields the input turn and persists merged entries", a
     assert.equal(saved[0].command, "echo hello");
     assert.equal(saved[0].sessionId, "two");
     assert.deepEqual(state!.shellHistory, saved);
+
+    for (const clear of [() => state!.clearShellHistory(), () => state!.clearAllCommandHistory()]) {
+      act(() => {
+        state!.addShellHistoryEntry(entry);
+        state!.addShellHistoryEntry({ ...entry, command: "another command" });
+        clear();
+      });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+      assert.deepEqual(state!.shellHistory, []);
+      assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(STORAGE_KEY_SHELL_HISTORY)!), []);
+    }
   } finally {
     await act(async () => { renderer?.unmount(); });
     dom.window.close();
