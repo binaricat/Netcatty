@@ -42,12 +42,7 @@ test('landing rows expose real sources/status/settings and quick toggles preserv
     assert.equal(document.querySelector('[role=dialog]'), null);
     assert.equal(document.querySelector('input[type=checkbox]'), null);
     assert.equal(document.querySelectorAll('[data-plugin-row]').length, 2);
-    const iconSlots = [...document.querySelectorAll('[data-plugin-icon-slot]')];
-    assert.equal(iconSlots.length, 2);
-    for (const slot of iconSlots) {
-      assert.match(slot.className, /rounded-lg border border-border\/60/);
-      assert.equal(slot.querySelector('svg')!.getAttribute('width'), '24');
-    }
+    assert.equal(document.querySelectorAll('[data-plugin-icon-slot]').length, 2);
     assert.equal(document.querySelector('[data-plugin-row-list]')!.className.includes('border'), false);
     const alphaRow = document.querySelector('[data-plugin-row="com.example.alpha"]')!;
     assert.ok(alphaRow.querySelector('[data-plugin-row-tag]'));

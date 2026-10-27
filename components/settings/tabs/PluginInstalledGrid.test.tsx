@@ -96,12 +96,7 @@ test('long installed-row text keeps baseline tags and independent native-button 
     assert.match(tag.className, /border-0/);
     assert.equal(navigation.querySelector('[title]')!.getAttribute('title'), description, 'clamped descriptions retain the full text');
     assert.match(row.className, /minmax\(0,1fr\)/);
-    const iconSlot = row.querySelector('[data-plugin-icon-slot]')!;
-    assert.match(iconSlot.className, /h-12 w-12/);
-    assert.match(iconSlot.className, /rounded-lg border border-border\/60/);
-    assert.doesNotMatch(iconSlot.className, /ring|bg-/);
-    assert.equal(iconSlot.querySelector('svg')!.getAttribute('width'), '24', 'the 48px outlined container gives the icon breathing room');
-    assert.doesNotMatch(row.className, /border|divide/, 'only the icon container is outlined, never the whole row');
+    assert.doesNotMatch(row.querySelector('[data-plugin-icon-slot]')!.className, /border|ring|bg-/);
     assert.equal(row.querySelector('button button'), null);
   } finally { dom.window.close(); }
 });

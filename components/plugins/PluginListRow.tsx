@@ -17,7 +17,7 @@ export function PluginListRow({ plugin, name, description, metadata, actions, op
     {plugin.activeVersion && <span className="inline-flex max-w-full items-center rounded-full border-0 bg-muted/60 px-2 py-0 text-[11px] font-normal leading-5 text-muted-foreground hover:bg-muted/60 [overflow-wrap:anywhere]" data-plugin-row-tag>{plugin.activeVersion}</span>}
   </span>;
   return <article aria-label={name} data-plugin-row={plugin.id} className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)_auto] items-start gap-x-3 rounded-lg py-4 sm:gap-x-4">
-    <div data-plugin-icon-slot className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border/60 text-muted-foreground"><PluginBrandIcon plugin={plugin} size={24} /></div>
+    <div data-plugin-icon-slot className="flex h-12 w-12 shrink-0 items-center justify-center text-muted-foreground"><PluginBrandIcon plugin={plugin} size={32} /></div>
     <div className="min-w-0 space-y-1.5">
       {onOpen ? <button type="button" data-plugin-card={plugin.id} aria-label={openLabel} aria-expanded={false} onClick={onOpen}
         className="group block w-full min-w-0 rounded-md text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
