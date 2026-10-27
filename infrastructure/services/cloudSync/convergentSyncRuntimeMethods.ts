@@ -520,6 +520,37 @@ export async function syncConvergentProvidersUnlockedImpl(
     }
   }
 
+  let chatShrinkForced = false;
+  const blockChatShrink = (aiSessions: SyncPayload['aiSessions'], remotes: ProviderRuntime[]): boolean => {
+    if (aiSessions === undefined || strategy === 'preferCloud' || isPreserveDeletionsStrategy(strategy)) return false;
+    const outgoing = { ...inputPayload, aiSessions };
+    // Keep this gate scoped to chats; the vault has its own pre-merge guard.
+    const chatReference = (reference: SyncPayload | null | undefined) => reference
+      ? { ...outgoing, aiSessions: reference.aiSessions }
+      : null;
+    const checks = [detectSuspiciousShrink(outgoing, inputPayload, null), ...remotes.map((runtime) =>
+      detectSuspiciousShrink(outgoing, chatReference(cyclePayloadBaseByProvider.get(runtime.provider)),
+        chatReference(runtime.latestRemotePayload ?? runtime.verifiedPayload)))];
+    const finding = checks.find((check) => check.suspicious);
+    if (!finding || !finding.suspicious) return false;
+    if (options.overrideShrink) {
+      if (!chatShrinkForced) {
+        for (const provider of providers) this.emit({ type: 'SYNC_FORCED', provider, finding });
+        chatShrinkForced = true;
+      }
+      return false;
+    }
+    this.state.syncState = 'BLOCKED';
+    this.state.lastShrinkFinding = finding;
+    for (const provider of providers) {
+      this.updateProviderStatus(provider, 'error', 'Sync blocked: would delete too much');
+      this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding });
+      results.set(provider, { success: false, provider, action: 'none', shrinkBlocked: true, finding });
+    }
+    this.notifyStateChange();
+    return true;
+  };
+
   for (let round = 0; round < maxRounds && usable.length > 0; round += 1) {
     if (round > 0) await jitter(round);
 
@@ -637,6 +668,7 @@ export async function syncConvergentProvidersUnlockedImpl(
       return providerSidecarMismatch(runtime);
     });
     const aiSessions = mergeRuntimeAiSessions(inputPayload, usable.filter((runtime) => !runtime.error), cyclePayloadBaseByProvider, strategy);
+    if (blockChatShrink(aiSessions, usable)) return results;
     const providerChatMismatch = (runtime: ProviderRuntime) => {
       const decoded = preflightVerified.get(runtime.provider);
       return !decoded || !chatPayloadsEqual(decoded.payload, aiSessions);
@@ -755,6 +787,7 @@ export async function syncConvergentProvidersUnlockedImpl(
   };
   const finalAiSessions = mergeRuntimeAiSessions(inputPayload, successfulRuntimes, cyclePayloadBaseByProvider, strategy);
   if (finalAiSessions !== undefined) mergedPayload.aiSessions = finalAiSessions;
+  if (blockChatShrink(finalAiSessions, runtimes)) return results;
   const localPayloadChanged = !cloudSyncPayloadsEqual(inputPayload, mergedPayload)
     || JSON.stringify(inputPayload.pluginSidecars ?? null)
       !== JSON.stringify(mergedPayload.pluginSidecars ?? null);
