@@ -257,10 +257,18 @@ for (const overrideShrink of [false, true]) {
       const local = { ...payload('base'), aiSessions: chats };
       const state = createConvergentSyncStateFromPayload(local, 'seed', NOW);
       const github = adapter(encryption.register(withConvergentSyncEnvelope(state, { syncedAt: NOW, aiSessions: chats.slice(0, 7) })));
-      const subject = manager(state, { github }, { github: {
+      const baseline: ConvergentProviderBaselineV2 = {
         schemaVersion: 2, provider: 'github', remoteVersion: 1, remoteUpdatedAt: NOW,
         remoteDeviceId: 'remote', materializedPayload: local, state,
-      } });
+      };
+      const baselines = { github: baseline };
+      const subject = manager(state, { github }, baselines);
+      const savedBaselines: ConvergentProviderBaselineV2[] = [];
+      const saveBaseline = subject.saveConvergentProviderBaseline;
+      subject.saveConvergentProviderBaseline = async (saved) => {
+        savedBaselines.push(saved);
+        await saveBaseline(saved);
+      };
       let applied = false;
       const results = await syncConvergentProvidersUnlockedImpl.call(subject, local, {
         overrideShrink, now: () => NOW + 10, jitter: async () => {},
@@ -279,6 +287,8 @@ for (const overrideShrink of [false, true]) {
         assert.equal(subject.state.syncState, 'BLOCKED');
         assert.equal(github.uploads, 0);
         assert.equal(applied, false);
+        assert.deepEqual(savedBaselines, []);
+        assert.equal(baselines.github, baseline);
       }
     } finally { encryption.restore(); }
   });
