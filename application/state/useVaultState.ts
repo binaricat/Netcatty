@@ -1433,14 +1433,16 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
 
   const addShellHistoryEntry = useCallback(
     (entry: Omit<ShellHistoryEntry, "id" | "timestamp">) => {
-      setShellHistory((prev) => {
-        const updated = mergeGlobalHistoryOnAppend(prev, entry);
-        if (updated === prev) return prev;
-        // Persist immediately so crash between commit and layout effect cannot drop history.
-        // Store republish is also done in useLayoutEffect for load/storage-event paths.
-        localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, updated);
-        return updated;
-      });
+      // Yield the input turn before history rendering and synchronous storage work.
+      // Persist in the next task to keep the crash-loss window small.
+      setTimeout(() => {
+        setShellHistory((prev) => {
+          const updated = mergeGlobalHistoryOnAppend(prev, entry);
+          if (updated === prev) return prev;
+          localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, updated);
+          return updated;
+        });
+      }, 0);
     },
     [],
   );
