@@ -263,11 +263,13 @@ function createMainWindowApi(ctx) {
         minWidth: windowMinimumSize.width,
         minHeight: windowMinimumSize.height,
         backgroundColor,
+        transparent: isMac,
         icon: appIcon,
         show: false,
         frame: isMac,
         titleBarStyle: isMac ? "hiddenInset" : undefined,
         trafficLightPosition: isMac ? { x: 12, y: 12 } : undefined,
+        ...(isMac ? { visualEffectState: "active" } : {}),
         ...windowsChrome,
         webPreferences: {
           preload,

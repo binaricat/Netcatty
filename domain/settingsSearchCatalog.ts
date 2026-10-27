@@ -109,6 +109,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     keywords: ["transparency", "透明"],
   },
   {
+    id: "appearance-window-background-blur",
+    tab: "appearance",
+    labelKey: "settings.appearance.windowBackgroundBlur",
+    descriptionKey: "settings.appearance.windowBackgroundBlur.desc",
+    keywords: ["blur", "frosted glass", "vibrancy", "模糊", "毛玻璃"],
+  },
+  {
     id: "appearance-theme",
     tab: "appearance",
     labelKey: "settings.appearance.theme",

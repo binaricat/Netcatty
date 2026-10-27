@@ -525,6 +525,8 @@ export const ruCoreMessages: Messages = {
   'settings.appearance.uiFont.desc': 'Выберите шрифт для интерфейса приложения',
   'settings.appearance.windowOpacity': 'Прозрачность окна',
   'settings.appearance.windowOpacity.desc': 'Настройте прозрачность всего окна приложения. При низких значениях текст терминала тоже бледнеет. В некоторых средах Linux это может не поддерживаться.',
+  'settings.appearance.windowBackgroundBlur': 'Матовое стекло',
+  'settings.appearance.windowBackgroundBlur.desc': 'Размывает рабочий стол за окном. При непрозрачности 100 % эффект не виден, но ваш выбор сохраняется.',
   'settings.appearance.appIcon': 'Значок приложения',
   'settings.appearance.appIcon.desc': 'Выберите стиль значка для Dock/панели задач, чтобы Netcatty было проще найти при переключении приложений. В Windows значок области уведомлений использует тот же стиль. Применяется во время работы; значок установленного пакета не меняется.',
   'settings.appearance.appIcon.original': 'Оригинал',

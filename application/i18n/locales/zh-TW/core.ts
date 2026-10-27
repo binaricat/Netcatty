@@ -562,6 +562,8 @@ Vaults 分頁維持扁平，不使用這塊背景。
   'settings.appearance.uiFont.desc': '選擇軟體介面使用的字型',
   'settings.appearance.windowOpacity': '視窗透明度',
   'settings.appearance.windowOpacity.desc': '調節整個應用程式視窗的透明度，方便疊在其他內容上方。較低時終端文字也會變淡；部分 Linux 桌面環境可能不支援。',
+  'settings.appearance.windowBackgroundBlur': '毛玻璃背景',
+  'settings.appearance.windowBackgroundBlur.desc': '模糊視窗後方的桌面。100% 不透明時效果不可見，但會保留你的開關設定。',
   'settings.appearance.appIcon': '應用程式圖示',
   'settings.appearance.appIcon.desc': '選擇 Dock/工作列圖示風格，切換應用程式時更容易找到 Netcatty。Windows 通知區域圖示會使用同一套風格。執行時生效，安裝檔內的圖示不會改變。',
   'settings.appearance.appIcon.original': '原始',

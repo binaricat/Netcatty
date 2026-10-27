@@ -53,6 +53,7 @@ import {
   STORAGE_KEY_UI_LANGUAGE,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_WINDOW_OPACITY,
+  STORAGE_KEY_WINDOW_BACKGROUND_BLUR,
   STORAGE_KEY_APP_ICON_VARIANT,
 } from '../../infrastructure/config/storageKeys';
 import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
@@ -116,6 +117,7 @@ interface UseSettingsStorageSyncParams {
   globalHotkeyEnabled: boolean;
   autoUpdateEnabled: boolean;
   windowOpacity: number;
+  windowBackgroundBlur: boolean;
   appIconVariant: AppIconVariant;
   setTheme: Dispatch<SetStateAction<'dark' | 'light' | 'system'>>;
   setLightUiThemeId: Dispatch<SetStateAction<string>>;
@@ -166,6 +168,7 @@ interface UseSettingsStorageSyncParams {
   setExplorerContextMenuEnabledState: (enabled: boolean) => void;
   setGlobalHotkeyEnabled: Dispatch<SetStateAction<boolean>>;
   setWindowOpacity: (raw: unknown) => void;
+  setWindowBackgroundBlur: Dispatch<SetStateAction<boolean>>;
   setAppIconVariant: Dispatch<SetStateAction<AppIconVariant>>;
   setAutoUpdateEnabled: Dispatch<SetStateAction<boolean>>;
   setWorkspaceFocusStyleState: Dispatch<SetStateAction<'dim' | 'border'>>;
@@ -184,7 +187,7 @@ export function useSettingsStorageSync({
   sftpUseCompressedUpload, sftpSkipUnchanged, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
   showRecentHosts, hostClickBehavior, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, localShellSidePanelAutoOpen, localShellSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, showTabNumberBadges, disableTerminalFontZoom, restorePreviousSession, restoreTerminalCwd, startupLanding,
   editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, explorerContextMenuEnabled,
-  globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, appIconVariant,
+  globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, windowBackgroundBlur, appIconVariant,
   setTheme, setLightUiThemeId, setDarkUiThemeId, setAccentMode, applyIncomingCustomAccent,
   setCustomCSS, setUiFontFamilyId, setHotkeyScheme, setUiLanguage,
   setTerminalThemeId, setTerminalThemeDarkId, setTerminalThemeLightId,
@@ -193,7 +196,7 @@ export function useSettingsStorageSync({
   setSftpUseCompressedUpload, setSftpSkipUnchanged, setSftpAutoOpenSidebar, setSftpFollowTerminalCwd, setSftpDefaultViewMode,
   setShowRecentHostsState, setHostClickBehaviorState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setTerminalSidePanelAutoOpenState, setTerminalSidePanelAutoOpenTabState, setLocalShellSidePanelAutoOpenState, setLocalShellSidePanelAutoOpenTabState, setShellOnlyTabNumberShortcutsState, setShowTabNumberBadgesState, setDisableTerminalFontZoomState, setRestorePreviousSessionState, setRestoreTerminalCwdState, setStartupLandingState,
   setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled, setSshDebugLogsEnabled, setSshDeepLinkEnabledState, setJmsDeepLinkEnabledState, setExplorerContextMenuEnabledState,
-  setGlobalHotkeyEnabled, setWindowOpacity, setAppIconVariant, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
+  setGlobalHotkeyEnabled, setWindowOpacity, setWindowBackgroundBlur, setAppIconVariant, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
   setSftpTransferConcurrencyState, setSshTransportIdleTtlMsState,
   applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings,
 }: UseSettingsStorageSyncParams) {
@@ -208,7 +211,7 @@ export function useSettingsStorageSync({
     sftpUseCompressedUpload, sftpSkipUnchanged, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
     showRecentHosts, hostClickBehavior, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, localShellSidePanelAutoOpen, localShellSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, showTabNumberBadges, disableTerminalFontZoom, restorePreviousSession, restoreTerminalCwd, startupLanding,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, explorerContextMenuEnabled,
-    globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, appIconVariant,
+    globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, windowBackgroundBlur, appIconVariant,
   });
   settingsSnapshotRef.current = {
     theme, lightUiThemeId, darkUiThemeId, accentMode, customAccent, customAccentVersion,
@@ -218,7 +221,7 @@ export function useSettingsStorageSync({
     sftpUseCompressedUpload, sftpSkipUnchanged, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
     showRecentHosts, hostClickBehavior, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, localShellSidePanelAutoOpen, localShellSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, showTabNumberBadges, disableTerminalFontZoom, restorePreviousSession, restoreTerminalCwd, startupLanding,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, explorerContextMenuEnabled,
-    globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, appIconVariant,
+    globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, windowBackgroundBlur, appIconVariant,
   };
 
   // Listen for storage changes from other windows (cross-window sync)
@@ -523,6 +526,12 @@ export function useSettingsStorageSync({
       if (e.key === STORAGE_KEY_WINDOW_OPACITY && e.newValue !== null) {
         setWindowOpacity(e.newValue);
       }
+      if (e.key === STORAGE_KEY_WINDOW_BACKGROUND_BLUR && e.newValue !== null) {
+        const newValue = e.newValue === 'true';
+        if (newValue !== s.windowBackgroundBlur) {
+          setWindowBackgroundBlur(newValue);
+        }
+      }
       if (e.key === STORAGE_KEY_APP_ICON_VARIANT && e.newValue !== null) {
         const newValue = resolveAppIconVariant(e.newValue);
         if (newValue !== s.appIconVariant) {
@@ -566,6 +575,7 @@ export function useSettingsStorageSync({
     setGlobalHotkeyEnabled,
     setHostClickBehaviorState,
     setWindowOpacity,
+    setWindowBackgroundBlur,
     setAppIconVariant,
     setHotkeyScheme,
     setLightUiThemeId,

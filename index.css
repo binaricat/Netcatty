@@ -2198,3 +2198,12 @@ html[data-theme-transition] *::after {
 @container monitor-main (max-width: 760px) {
   .monitor-header-action-label { display: none; }
 }
+
+html.window-background-blur,
+html.window-background-blur body {
+  background: transparent !important;
+}
+
+html.window-background-blur #root {
+  opacity: var(--window-content-opacity, 1);
+}

@@ -1091,6 +1091,9 @@ function createPreloadApi(ctx) {
   setWindowOpacity: async (opacity) => {
     return ipcRenderer.invoke("netcatty:setWindowOpacity", opacity);
   },
+  setWindowBackgroundBlur: async (enabled) => {
+    return ipcRenderer.invoke("netcatty:setWindowBackgroundBlur", enabled);
+  },
   setAppIconVariant: async (variant) => {
     return ipcRenderer.invoke("netcatty:setAppIconVariant", variant);
   },

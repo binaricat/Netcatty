@@ -570,6 +570,8 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                                 setShowHostTreeSidebar={settings.setShowHostTreeSidebar}
                                 windowOpacity={settings.windowOpacity}
                                 setWindowOpacity={settings.setWindowOpacity}
+                                windowBackgroundBlur={settings.windowBackgroundBlur}
+                                setWindowBackgroundBlur={settings.setWindowBackgroundBlur}
                                 appIconVariant={settings.appIconVariant}
                                 setAppIconVariant={settings.setAppIconVariant}
                             />

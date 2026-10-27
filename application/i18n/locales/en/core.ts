@@ -556,6 +556,8 @@ Highlight the focused split pane:
   'settings.appearance.uiFont.desc': 'Choose the font for the application interface',
   'settings.appearance.windowOpacity': 'Window Opacity',
   'settings.appearance.windowOpacity.desc': 'Adjust the transparency of the entire application window. Lower values also fade terminal text. Some Linux desktop environments may not support this.',
+  'settings.appearance.windowBackgroundBlur': 'Frosted glass background',
+  'settings.appearance.windowBackgroundBlur.desc': 'Blur the desktop behind the window. At 100% opacity the effect is hidden, but your choice is preserved.',
   'settings.appearance.appIcon': 'App Icon',
   'settings.appearance.appIcon.desc': 'Choose a dock/taskbar icon style to make Netcatty easier to spot when switching apps. On Windows, the notification area icon uses the same style. Applies at runtime; the installed app bundle icon is unchanged.',
   'settings.appearance.appIcon.original': 'Original',

@@ -556,6 +556,8 @@ Resalta el panel dividido enfocado:
   'settings.appearance.uiFont.desc': 'Elige la fuente para la interfaz de la aplicación',
   'settings.appearance.windowOpacity': 'Opacidad de la ventana',
   'settings.appearance.windowOpacity.desc': 'Ajusta la transparencia de toda la ventana de la aplicación. Los valores más bajos también atenúan el texto de la terminal. Algunos entornos de escritorio de Linux pueden no admitir esto.',
+  'settings.appearance.windowBackgroundBlur': 'Fondo de cristal esmerilado',
+  'settings.appearance.windowBackgroundBlur.desc': 'Desenfoca el escritorio detrás de la ventana. Con una opacidad del 100 %, el efecto no es visible, pero se conserva tu elección.',
   'settings.appearance.appIcon': 'Ícono de la aplicación',
   'settings.appearance.appIcon.desc': 'Elige un estilo de ícono para el dock o la barra de tareas que haga más fácil distinguir Netcatty al cambiar de aplicación. En Windows, el icono del área de notificación usa el mismo estilo. Se aplica en tiempo de ejecución; el ícono del paquete instalado no cambia.',
   'settings.appearance.appIcon.original': 'Original',

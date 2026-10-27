@@ -39,6 +39,8 @@ let settingsWindow = null;
 let currentTheme = "light";
 let currentLanguage = "en";
 let currentWindowOpacity = 1;
+let currentWindowBackgroundBlurRequested = false;
+let currentWindowBackgroundColor = null;
 let cachedNativeTheme = null;
 
 let handlersRegistered = false; // Prevent duplicate IPC handler registration
@@ -357,6 +359,7 @@ function registerAppContentWindow(win, options = {}) {
   if (!win || win.isDestroyed?.()) return;
   appContentWindows.add(win);
   if (options.queryDirtyEditors === true) dirtyEditorWindows.add(win);
+  applyWindowBackgroundChromeToWindow(win, { applyBackgroundColor: true });
 }
 
 function unregisterAppContentWindow(win) {
@@ -406,19 +409,70 @@ function clampWindowOpacity(opacity) {
 function applyWindowOpacityToWindow(win) {
   if (!win || win.isDestroyed?.()) return;
   try {
-    win.setOpacity?.(currentWindowOpacity);
+    win.setOpacity?.(isWindowBackgroundBlurActive() ? 1 : currentWindowOpacity);
   } catch {
     // ignore
   }
+  applyWindowBackgroundChromeToWindow(win, { applyBackgroundColor: true });
 }
 
 function applyWindowOpacity(opacity) {
   currentWindowOpacity = clampWindowOpacity(opacity);
-  for (const win of getAppContentWindowList()) applyWindowOpacityToWindow(win);
+  for (const win of getAppContentWindowList()) {
+    applyWindowOpacityToWindow(win);
+  }
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     applyWindowOpacityToWindow(settingsWindow);
   }
   return currentWindowOpacity;
+}
+
+function isWindowBackgroundBlurActive() {
+  return process.platform === "darwin"
+    && currentWindowBackgroundBlurRequested
+    && currentWindowOpacity < 1;
+}
+
+function applyWindowBackgroundChromeToWindow(win, options = {}) {
+  if (!win || win.isDestroyed?.()) return;
+  try {
+    if (isWindowBackgroundBlurActive()) {
+      win.setVibrancy?.("hud");
+      win.setBackgroundColor?.("#00000000");
+    } else {
+      if (process.platform === "darwin") win.setVibrancy?.(null);
+      if (options.applyBackgroundColor === true && currentWindowBackgroundColor) {
+        win.setBackgroundColor?.(currentWindowBackgroundColor);
+      }
+    }
+  } catch {
+    // ignore platform-specific chrome failures
+  }
+}
+
+function applyWindowBackgroundColor(color) {
+  const normalized = normalizeBackgroundColor(color);
+  if (!normalized) return false;
+  currentWindowBackgroundColor = normalized;
+  for (const win of getAppContentWindowList()) {
+    applyWindowBackgroundChromeToWindow(win, { applyBackgroundColor: true });
+  }
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    applyWindowBackgroundChromeToWindow(settingsWindow, { applyBackgroundColor: true });
+  }
+  return true;
+}
+
+function applyWindowBackgroundBlur(enabled) {
+  const supported = process.platform === "darwin";
+  currentWindowBackgroundBlurRequested = supported && enabled === true;
+  for (const win of getAppContentWindowList()) {
+    applyWindowOpacityToWindow(win);
+  }
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    applyWindowOpacityToWindow(settingsWindow);
+  }
+  return supported;
 }
 
 function getMainWindowCount() {
@@ -992,7 +1046,12 @@ const { createWindow } = mainWindowApi;
 const { createSettingsWindowApi } = require("./windowManager/settingsWindow.cjs");
 const settingsWindowApi = createSettingsWindowApi({
   get settingsWindow() { return settingsWindow; },
-  set settingsWindow(value) { settingsWindow = value; },
+  set settingsWindow(value) {
+    settingsWindow = value;
+    if (value) {
+      applyWindowBackgroundChromeToWindow(value, { applyBackgroundColor: true });
+    }
+  },
   get mainWindow() { return mainWindow; },
   get currentTheme() { return currentTheme; },
   get isQuitting() { return isQuitting; },
@@ -1181,26 +1240,21 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
       ? (nativeTheme?.shouldUseDarkColors ? "dark" : "light")
       : theme;
     const themeConfig = THEME_COLORS[effectiveTheme] || THEME_COLORS.light;
-    forEachMainWindow((win) => win.setBackgroundColor(themeConfig.background));
-    if (settingsWindow && !settingsWindow.isDestroyed()) {
-      settingsWindow.setBackgroundColor(themeConfig.background);
-    }
+    applyWindowBackgroundColor(themeConfig.background);
     return true;
   });
 
   ipcMain.handle("netcatty:setBackgroundColor", (_event, color) => {
-    const normalized = normalizeBackgroundColor(color);
-    if (!normalized) return false;
-    forEachMainWindow((win) => win.setBackgroundColor(normalized));
-    if (settingsWindow && !settingsWindow.isDestroyed()) {
-      settingsWindow.setBackgroundColor(normalized);
-    }
-    return true;
+    return applyWindowBackgroundColor(color);
   });
 
   ipcMain.handle("netcatty:setWindowOpacity", (_event, opacity) => {
     applyWindowOpacity(opacity);
     return true;
+  });
+
+  ipcMain.handle("netcatty:setWindowBackgroundBlur", (_event, enabled) => {
+    return applyWindowBackgroundBlur(enabled);
   });
 
   ipcMain.handle("netcatty:setAppIconVariant", (_event, variant) => {
@@ -1284,6 +1338,7 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
     try {
       const sharedWindowSetting = [
         "netcatty_window_opacity_v1",
+        "netcatty_window_background_blur_v1",
         "netcatty_hotkey_scheme_v1",
         "netcatty_custom_key_bindings_v1",
         "netcatty_hotkey_recording_v1",
