@@ -4,8 +4,6 @@ import React, { useRef, useState } from 'react';
 import { PluginPermissionPanel } from './PluginPermissionPanel';
 import { PluginBrandIcon } from '../../plugins/PluginBrandIcon';
 import { PluginAuthorRow } from '../../plugins/PluginAuthorRow';
-import { PluginListRow } from '../../plugins/PluginListRow';
-import { Toggle } from '../settings-ui';
 import { ArrowLeft } from 'lucide-react';
 import { usePluginManager } from '../../../application/state/usePluginManager';
 import { useI18n } from '../../../application/i18n/I18nProvider';
@@ -82,25 +80,13 @@ export function PluginPackageManager({ manager, onSelectionChange, initialSelect
   if (!manager.available) return null;
   return <section ref={rootRef} className="space-y-4" aria-label={t('settings.plugins.manager.installed')}>
     {selectedPlugin && <Button variant="ghost" size="sm" onClick={() => choose(null)}><ArrowLeft size={14} className="mr-2" />{t('settings.plugins.manager.installed')}</Button>}
-    {!selectedPlugin && manager.plugins.length > 0 && <select aria-label={t('settings.plugins.sources.source')} value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} className="h-9 max-w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">{t('settings.plugins.sources.all')}</option>{[...new Map(manager.plugins.map((plugin) => [plugin.source?.id ?? 'local', plugin.source])).entries()].map(([id, source]) => <option key={id} value={id}>{source?.origin ?? t('settings.plugins.sources.local')}</option>)}</select>}
+    {!selectedPlugin && manager.plugins.length > 0 && <select aria-label={t('settings.plugins.sources.source')} value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-sm"><option value="">{t('settings.plugins.sources.all')}</option>{[...new Map(manager.plugins.map((plugin) => [plugin.source?.id ?? 'local', plugin.source])).entries()].map(([id, source]) => <option key={id} value={id}>{source?.origin ?? t('settings.plugins.sources.local')}</option>)}</select>}
     {!selectedPlugin && manager.plugins.length > 0 && <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('settings.plugins.market.search')} aria-label={t('settings.plugins.market.search')} />}
     {!selectedPlugin && manager.plugins.length > 0 && visible.length === 0 && <p className="p-6 text-center text-sm text-muted-foreground">{t('settings.plugins.market.noResults')}</p>}
     {manager.error && <p role="alert" className="text-sm text-destructive">{manager.error}</p>}
     {!manager.plugins.length && <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">{t('settings.plugins.manager.empty')}</div>}
-    <div className={selectedPlugin ? 'space-y-4' : 'space-y-1'} data-plugin-row-list={!selectedPlugin || undefined}>
-    {visible.map((plugin) => !selectedPlugin ? <PluginListRow key={plugin.id} plugin={plugin} name={nameOf(plugin)} description={descriptionOf(plugin) || t('settings.plugins.manager.noDescription')}
-      openLabel={`${t('settings.plugins.manager.details')} ${nameOf(plugin)}`} onOpen={() => choose(plugin.id)}
-      metadata={<>
-        {plugin.manifest?.publisher && <PluginAuthorRow plugin={plugin} />}
-        <span>{plugin.source ? `${t('settings.plugins.sources.source')}: ${t(plugin.source.kind === 'official' ? 'settings.plugins.sources.official' : plugin.source.kind === 'third-party' ? 'settings.plugins.sources.thirdparty' : 'settings.plugins.sources.local')}${plugin.source.origin ? ` · ${plugin.source.origin}` : ''}` : t('settings.plugins.landing.sourceUnknown')}</span>
-        {plugin.manifest?.license && <span>{plugin.manifest.license}</span>}
-        {manager.statusKnown === false && <span>{t('settings.plugins.permissions.statusUnknown')}</span>}
-        {plugin.runtime.lastError && <span role="status" className="w-full text-destructive">{t('settings.plugins.manager.lastError')}: {plugin.runtime.lastError}</span>}
-      </>}
-      actions={<Toggle checked={plugin.enabled} disabled={manager.busy || manager.statusKnown === false}
-        ariaLabel={`${t(manager.statusKnown === false ? 'settings.plugins.permissions.statusUnknown' : plugin.enabled ? 'settings.plugins.manager.disable' : 'settings.plugins.manager.enable')} ${nameOf(plugin)}`}
-        onChange={(enabled) => void manager.setEnabled(plugin.id, enabled)} />}
-    /> : <article key={plugin.id} data-plugin-detail={selectedPlugin ? true : undefined} tabIndex={selectedPlugin ? -1 : undefined} aria-label={nameOf(plugin)} className="min-w-0 space-y-4 rounded-lg focus:outline-none">
+    <div className={selectedPlugin ? 'space-y-4' : 'grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-3'}>
+    {visible.map((plugin) => <article key={plugin.id} data-plugin-detail={selectedPlugin ? true : undefined} tabIndex={selectedPlugin ? -1 : undefined} aria-label={nameOf(plugin)} className={`min-w-0 rounded-lg focus:outline-none ${selectedPlugin ? 'space-y-4' : 'plugin-card flex min-h-[200px] flex-col gap-3 bg-card p-4'}`}>
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center"><PluginBrandIcon plugin={plugin} size={32} /></div>
         <button type="button" data-plugin-card={plugin.id} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-expanded={selected === plugin.id} onClick={() => choose(selected === plugin.id ? null : plugin.id)}>
@@ -120,7 +106,10 @@ export function PluginPackageManager({ manager, onSelectionChange, initialSelect
       <p className="break-all text-xs text-muted-foreground">{t('settings.plugins.sources.source')}: {t(plugin.source?.kind === 'official' ? 'settings.plugins.sources.official' : plugin.source?.kind === 'third-party' ? 'settings.plugins.sources.thirdparty' : 'settings.plugins.sources.local')}{plugin.source?.origin ? ` · ${plugin.source.origin}` : ''}</p>
       {plugin.manifest?.publisher && <PluginAuthorRow plugin={plugin} />}
       <p className={`break-words text-sm leading-5 text-muted-foreground ${selectedPlugin ? 'whitespace-pre-wrap' : 'line-clamp-3'}`}>{descriptionOf(plugin) || t('settings.plugins.manager.noDescription')}</p>
-      <p className="text-xs text-muted-foreground">{plugin.activeVersion}{plugin.manifest?.license ? ` · ${plugin.manifest.license}` : ''}</p>
+      {!selectedPlugin ? <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-1">
+        <p className="break-words text-xs text-muted-foreground">{plugin.activeVersion}{plugin.manifest?.license ? ` · ${plugin.manifest.license}` : ''}</p>
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => choose(plugin.id)} aria-label={`${t('settings.plugins.manager.details')} ${nameOf(plugin)}`}>{t('settings.plugins.manager.details')}</Button>
+      </div> : <p className="text-xs text-muted-foreground">{plugin.activeVersion}{plugin.manifest?.license ? ` · ${plugin.manifest.license}` : ''}</p>}
       {plugin.runtime.lastError && <p role="status" className="break-words text-xs text-destructive">{t('settings.plugins.manager.lastError')}: {plugin.runtime.lastError}</p>}
       {selected === plugin.id && <>
         <PluginPackageDetails plugin={plugin} />

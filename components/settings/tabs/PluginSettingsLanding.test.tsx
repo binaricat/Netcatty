@@ -41,13 +41,6 @@ test('landing rows expose real sources/status/settings and quick toggles preserv
     await render();
     assert.equal(document.querySelector('[role=dialog]'), null);
     assert.equal(document.querySelector('input[type=checkbox]'), null);
-    assert.equal(document.querySelectorAll('[data-plugin-row]').length, 2);
-    assert.equal(document.querySelectorAll('[data-plugin-icon-slot]').length, 2);
-    assert.equal(document.querySelector('[data-plugin-row-list]')!.className.includes('border'), false);
-    const alphaRow = document.querySelector('[data-plugin-row="com.example.alpha"]')!;
-    assert.ok(alphaRow.querySelector('[data-plugin-row-tag]'));
-    assert.equal(alphaRow.querySelector('[data-plugin-row-actions] [role=switch]')?.getAttribute('aria-label'), 'Disable Alpha');
-    assert.equal(alphaRow.querySelector('button button'), null, 'quick actions are never nested inside navigation');
     assert.equal(document.querySelectorAll('[role=switch]').length, 2, 'only real plugin toggles appear on landing');
     assert.match(document.body.textContent!, /Running/);
     assert.match(document.body.textContent!, /Source: Official/);

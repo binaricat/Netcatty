@@ -5,7 +5,7 @@ import type { usePluginUpdateCheck } from '../../../application/state/usePluginU
 import type { usePluginManager } from '../../../application/state/usePluginManager';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
-import { PluginListRow } from '../../plugins/PluginListRow';
+import { PluginBrandIcon } from '../../plugins/PluginBrandIcon';
 import { PluginAuthorRow } from '../../plugins/PluginAuthorRow';
 import { SettingCard, SettingRow, SettingsSection, Toggle } from '../settings-ui';
 import { PluginLogSettings } from './PluginLogSettings';
@@ -63,24 +63,28 @@ export function PluginSettingsLanding({ manager, settingsAvailable, settingsErro
       {manager.statusKnown && manager.available && manager.plugins.length === 0 && <p className="text-sm text-muted-foreground">{t('settings.plugins.landing.empty')}</p>}
       {manager.plugins.length > 0 && <>
         <Input aria-label={t('settings.plugins.landing.search')} placeholder={t('settings.plugins.landing.search')} value={search} onChange={(event) => setSearch(event.target.value)} />
-        {visible.length === 0 ? <p role="status" className="text-sm text-muted-foreground">{t('settings.plugins.market.noResults')}</p> : <div className="space-y-1" data-plugin-row-list>
+        {visible.length === 0 ? <p role="status" className="text-sm text-muted-foreground">{t('settings.plugins.market.noResults')}</p> : <SettingCard divided>
           {visible.map((plugin) => {
             const name = nameOf(plugin);
             const description = localized(plugin.manifest?.description);
             const availableUpdate = updates?.result?.updates.find((item) => item.pluginId === plugin.id && item.sourceId === plugin.source?.id);
             const declaredSettings = Boolean(plugin.manifest?.contributes?.settings?.length || plugin.manifest?.contributes?.views?.some((view) => view.location === 'settings'));
-            return <PluginListRow key={plugin.id} plugin={plugin} name={name} description={description || t('settings.plugins.manager.noDescription')} metadata={<>
+            return <SettingRow key={plugin.id} leading={<PluginBrandIcon plugin={plugin} size={24} />} label={<span className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate" title={name}>{name}</span>
+              {plugin.activeVersion && <span className="shrink-0 text-xs font-normal text-muted-foreground">{plugin.activeVersion}</span>}
+            </span>} description={<>
               {plugin.manifest?.publisher && <PluginAuthorRow plugin={plugin} />}
-              <span>{[sourceOf(plugin), statusOf(plugin)].filter(Boolean).join(' · ')}</span>
-              {availableUpdate && <span className="text-primary">{t('settings.plugins.landing.updateAvailable').replace('{version}', availableUpdate.availableVersion)}</span>}
-            </>} actions={
+              <span className="block break-words">{[sourceOf(plugin), statusOf(plugin)].filter(Boolean).join(' · ')}</span>
+              {availableUpdate && <span className="block text-primary">{t('settings.plugins.landing.updateAvailable').replace('{version}', availableUpdate.availableVersion)}</span>}
+              {description && <span className="line-clamp-2 break-words">{description}</span>}
+            </>}>
               <div className="flex items-center gap-3">
                 {declaredSettings && <Button className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" variant="ghost" size="icon" disabled={manager.busy || !manager.statusKnown || !settingsAvailable.has(plugin.id)} aria-label={t('settings.plugins.landing.settingsFor').replace('{name}', name)} title={t(settingsAvailable.has(plugin.id) ? 'common.settings' : !plugin.enabled ? 'settings.plugins.landing.enableSettings' : 'settings.plugins.landing.settingsUnavailable')} onClick={(event) => onManage(plugin.id, event.currentTarget)}><Settings2 size={16} /></Button>}
                 <Toggle checked={plugin.enabled} disabled={manager.busy || !manager.available || !manager.statusKnown} ariaLabel={`${t(plugin.enabled ? 'settings.plugins.manager.disable' : 'settings.plugins.manager.enable')} ${name}`} onChange={(enabled) => void manager.setEnabled(plugin.id, enabled)} />
               </div>
-            } />;
+            </SettingRow>;
           })}
-        </div>}
+        </SettingCard>}
       </>}
     </SettingsSection>
   </>;

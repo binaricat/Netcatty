@@ -6,14 +6,14 @@ import { I18nProvider } from '../../../application/i18n/I18nProvider';
 import { PluginPackageManager } from './PluginPackageManager';
 import type { usePluginManager } from '../../../application/state/usePluginManager';
 
-test('detail state pill exposes actual state, opposite action, focus styling and pending disable without granting permissions', async () => {
+test('state pill exposes actual state, opposite action, focus styling and pending disable without granting permissions', async () => {
   const globals = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
   const previous = globals.IS_REACT_ACT_ENVIRONMENT; globals.IS_REACT_ACT_ENVIRONMENT = true;
   const calls: unknown[] = [];
-  const plugin = { id: 'com.test.pill', activeVersion: '1.0.0', enabled: true, manifest: { name: 'Pill', main: { browser: 'index.js' }, engines: { api: '0.1.0-internal', netcatty: '*' } }, runtime: {} } as NetcattyInstalledPlugin;
+  const plugin = { id: 'com.test.pill', activeVersion: '1.0.0', enabled: true, manifest: { name: 'Pill' }, runtime: {} } as NetcattyInstalledPlugin;
   const manager = { available: true, plugins: [plugin], busy: false, setEnabled: async (...args: unknown[]) => { calls.push(args); } } as unknown as ReturnType<typeof usePluginManager>;
   let renderer: ReactTestRenderer;
-  const render = (enabled: boolean, busy = false) => <I18nProvider locale="en"><PluginPackageManager initialSelectedId={plugin.id} manager={{ ...manager, busy, plugins: [{ ...plugin, enabled }] }} /></I18nProvider>;
+  const render = (enabled: boolean, busy = false) => <I18nProvider locale="en"><PluginPackageManager manager={{ ...manager, busy, plugins: [{ ...plugin, enabled }] }} /></I18nProvider>;
   try {
     await act(async () => { renderer = create(render(true)); });
     const pill = () => renderer.root.findAllByType('button').find((node) => node.props['aria-pressed'] !== undefined)!;

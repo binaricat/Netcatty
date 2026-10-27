@@ -1,16 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { JSDOM } from 'jsdom';
-import { PluginListRow } from '../../plugins/PluginListRow';
-import { Toggle } from '../settings-ui';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { I18nProvider } from '../../../application/i18n/I18nProvider';
 import { PluginPackageManager } from './PluginPackageManager';
 import type { usePluginManager } from '../../../application/state/usePluginManager';
 
-test('installed rows filter, open one detail and restore search, scroll and row focus without toggle navigation', async () => {
+test('installed grid filters, opens one detail and restores search, scroll and card focus without pill navigation', async () => {
   const globals = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
   const previous = globals.IS_REACT_ACT_ENVIRONMENT; globals.IS_REACT_ACT_ENVIRONMENT = true;
   const raf = globalThis.requestAnimationFrame;
@@ -39,14 +35,11 @@ test('installed rows filter, open one detail and restore search, scroll and row 
     const authorRow = alphaCard.findByProps({ 'data-plugin-author-row': true });
     assert.ok(authorRow.findAllByType('span').some((node) => node.children.includes('Example')), 'author has its own compact row');
     assert.ok(authorRow.findByProps({ 'data-plugin-author-placeholder': true }), 'an unverified installed publisher has a default avatar');
-    assert.ok(alphaCard.findAllByType('span').some((node) => node.props.className?.includes('line-clamp-2')), 'row description is bounded');
-    assert.ok(alphaCard.props['data-plugin-row'], 'installed entries use the shared row composition');
-    assert.match(alphaCard.findByProps({ 'data-plugin-row-tag': true }).props.className, /border-0/);
-    assert.doesNotMatch(alphaCard.props.className, /bg-card|border|divide/);
+    assert.ok(alphaCard.findAllByType('p').some((node) => node.props.className?.includes('line-clamp-3')), 'card description is bounded');
     assert.match(JSON.stringify(renderer.toJSON()), /MIT/);
     assert.match(JSON.stringify(renderer.toJSON()), /Incompatible version/);
-    assert.equal(renderer.root.findAllByType('div').some((node) => node.props.className?.includes('repeat(auto-fill')), false, 'installed rows no longer inherit the marketplace grid');
-    const pill = renderer.root.findAllByType('button').find((node) => node.props.role === 'switch')!;
+    assert.ok(renderer.root.findAllByType('div').some((node) => node.props.className?.includes('repeat(auto-fill')));
+    const pill = renderer.root.findAllByType('button').find((node) => node.props['aria-pressed'] !== undefined)!;
     await act(async () => pill.props.onClick());
     assert.deepEqual(toggles, [[plugins[0].id, true]]); assert.deepEqual(selections, []);
     await act(async () => renderer.root.findByType('input').props.onChange({ target: { value: 'Alpha' } }));
@@ -64,39 +57,9 @@ test('installed rows filter, open one detail and restore search, scroll and row 
     assert.equal(cards().length, 0);
     await act(async () => renderer.root.findByType('input').props.onChange({ target: { value: '' } }));
     await act(async () => renderer.update(<I18nProvider locale="en"><PluginPackageManager manager={{ ...manager, statusKnown: false, error: 'synthetic state unavailable' }} onSelectionChange={(id) => selections.push(id)} /></I18nProvider>));
-    const unknown = renderer.root.findAllByType('button').filter((node) => node.props.role === 'switch');
+    const unknown = renderer.root.findAllByType('button').filter((node) => node.children.includes('Status unknown'));
     assert.equal(unknown.length, 2);
-    assert.ok(unknown.every((node) => node.props.disabled === true && node.props['aria-label'].startsWith('Status unknown')));
+    assert.ok(unknown.every((node) => node.props.disabled === true && node.props['aria-pressed'] === undefined));
     await act(async () => renderer.unmount());
   } finally { globals.IS_REACT_ACT_ENVIRONMENT = previous; globalThis.requestAnimationFrame = raf; }
-});
-
-
-test('long installed-row text keeps baseline tags and independent native-button actions', () => {
-  const name = `Long plugin ${'unbroken'.repeat(30)}`;
-  const description = `Description ${'long description '.repeat(30)}`;
-  const plugin = { id: 'com.test.long', activeVersion: '1.2.3-preview.4', enabled: false, runtime: {} } as NetcattyInstalledPlugin;
-  const html = renderToStaticMarkup(<PluginListRow plugin={plugin} name={name} description={description}
-    metadata={<span>{'https://source.example/'.repeat(20)}</span>} openLabel={`Details ${name}`} onOpen={() => {}}
-    actions={<Toggle checked={false} ariaLabel={`Enable ${name}`} onChange={() => {}} />} />);
-  const dom = new JSDOM(html);
-  try {
-    const row = dom.window.document.querySelector('[data-plugin-row]')!;
-    const navigation = row.querySelector<HTMLButtonElement>('[data-plugin-card]')!;
-    const toggle = row.querySelector<HTMLButtonElement>('[role=switch]')!;
-    const tag = row.querySelector('[data-plugin-row-tag]')!;
-    assert.equal(navigation.type, 'button');
-    assert.equal(toggle.type, 'button');
-    assert.equal(navigation.contains(toggle), false, 'Enter/Space on the switch cannot invoke row navigation');
-    assert.match(navigation.className, /focus-visible:ring-2/);
-    assert.match(toggle.className, /focus-visible:ring-2/);
-    assert.match(tag.parentElement!.className, /items-baseline/);
-    assert.equal(tag.previousElementSibling!.textContent, name, 'long names stay available without title truncation');
-    assert.match(tag.previousElementSibling!.className, /overflow-wrap:anywhere/);
-    assert.match(tag.className, /border-0/);
-    assert.equal(navigation.querySelector('[title]')!.getAttribute('title'), description, 'clamped descriptions retain the full text');
-    assert.match(row.className, /minmax\(0,1fr\)/);
-    assert.doesNotMatch(row.querySelector('[data-plugin-icon-slot]')!.className, /border|ring|bg-/);
-    assert.equal(row.querySelector('button button'), null);
-  } finally { dom.window.close(); }
 });
