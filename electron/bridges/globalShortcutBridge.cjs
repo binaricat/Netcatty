@@ -439,6 +439,7 @@ function ensureTrayPanelWindow() {
     // see-through. On Windows, disable OS rounding so it does not stack under
     // the CSS radius (#2505 / Electron #46468).
     ...windowsCssRoundedOverlayChromeOptions(),
+    ...(process.platform === "darwin" ? { visualEffectState: "active" } : {}),
     webPreferences: {
       preload: path.join(__dirname, "../preload.cjs"),
       contextIsolation: true,
@@ -449,6 +450,8 @@ function ensureTrayPanelWindow() {
       zoomFactor: 1,
     },
   });
+
+  require("./windowManager.cjs").applyTrayPanelBackgroundBlur(trayPanelWindow);
 
   trayPanelWindow.webContents.on("console-message", (_event, level, message) => {
     // Forward renderer logs to main process output for easy debugging.
