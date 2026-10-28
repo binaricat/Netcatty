@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
-import { usePortForwardingState } from "../application/state/usePortForwardingState";
+import { usePortForwardingState, getRuleMappingStates } from "../application/state/usePortForwardingState";
 import { STORAGE_KEY_PORT_FORWARDING_PANEL_WIDTH } from "../infrastructure/config/storageKeys";
 import {
   GroupConfig,
@@ -64,6 +64,11 @@ import {
   stopRuntimeTunnelBeforeDelete,
   WizardContent,
 } from "./port-forwarding";
+import type { PortForwardingFormDraft, PortForwardingFormRow } from "./port-forwarding/utils";
+import {
+  getRuleMappings,
+  hasPortForwardingConnectionChanged,
+} from "../domain/portForwardingAgentOps";
 
 type WizardStep =
   | "type"
@@ -368,7 +373,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
   const [showWizard, setShowWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState<WizardStep>("type");
   const [wizardType, setWizardType] = useState<PortForwardingType>("local");
-  const [draftRule, setDraftRule] = useState<Partial<PortForwardingRule>>({
+  const [draftRule, setDraftRule] = useState<PortForwardingFormDraft>({
     label: "",
     type: "local",
     localPort: undefined,
@@ -385,11 +390,11 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
   const [editingRule, setEditingRule] = useState<PortForwardingRule | null>(
     null,
   );
-  const [editDraft, setEditDraft] = useState<Partial<PortForwardingRule>>({});
+  const [editDraft, setEditDraft] = useState<PortForwardingFormDraft>({});
 
   // New forwarding form mode (skip wizard, all-in-one form)
   const [showNewForm, setShowNewForm] = useState(false);
-  const [newFormDraft, setNewFormDraft] = useState<Partial<PortForwardingRule>>(
+  const [newFormDraft, setNewFormDraft] = useState<PortForwardingFormDraft>(
     {
       label: "",
       type: "local",
@@ -398,6 +403,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
       remoteHost: "",
       remotePort: undefined,
       hostId: undefined,
+      mappingRows: [{ localPort: undefined, remotePort: undefined }],
     },
   );
 
@@ -435,6 +441,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
       remoteHost: "",
       remotePort: undefined,
       hostId: undefined,
+      mappingRows: [{ localPort: undefined, remotePort: undefined }],
     });
   };
 
@@ -470,10 +477,13 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
     // Save preference
     setPreferFormMode(true);
 
-    // Transfer current draft to form
+    // Transfer current draft to form. The wizard edits scalar ports only, so
+    // fold them back into row 0 to keep the form's mapping rows current.
+    const rows = getWizardMappingRows();
     setNewFormDraft({
       ...draftRule,
       type: wizardType,
+      ...(rows.length > 0 ? { mappingRows: rows } : {}),
     });
     setShowWizard(false);
     setShowNewForm(true);
@@ -492,18 +502,41 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
     setWizardStep("type");
   };
 
+  // Mapping rows validation: every row needs valid, unique local ports and a
+  // valid destination port (local/remote only).
+  const areMappingRowsValid = (
+    type: PortForwardingType | undefined,
+    rows: PortForwardingFormRow[],
+  ): boolean => {
+    const seenLocalPorts = new Set<number>();
+    for (const row of rows) {
+      if (!row.localPort || row.localPort <= 0 || row.localPort >= 65536) return false;
+      if (seenLocalPorts.has(row.localPort)) return false;
+      seenLocalPorts.add(row.localPort);
+      if (type !== "dynamic") {
+        if (!row.remotePort || row.remotePort <= 0 || row.remotePort >= 65536) return false;
+      }
+    }
+    return true;
+  };
+
   // Save new rule from form
   const saveNewFormRule = () => {
+    const rows =
+      newFormDraft.type !== "dynamic" ? (newFormDraft.mappingRows ?? []) : [];
+    const firstRow = rows[0] ?? {};
+    const localPort = firstRow.localPort ?? newFormDraft.localPort!;
+    const remotePort = firstRow.remotePort ?? newFormDraft.remotePort;
     const label =
       newFormDraft.label?.trim() ||
       (() => {
         switch (newFormDraft.type) {
           case "local":
-            return `Local:${newFormDraft.localPort} → ${newFormDraft.remoteHost}:${newFormDraft.remotePort}`;
+            return `Local:${localPort} → ${newFormDraft.remoteHost}:${remotePort}`;
           case "remote":
-            return `Remote:${newFormDraft.localPort} → ${newFormDraft.remoteHost}:${newFormDraft.remotePort}`;
+            return `Remote:${localPort} → ${newFormDraft.remoteHost}:${remotePort}`;
           case "dynamic":
-            return `SOCKS:${newFormDraft.localPort}`;
+            return `SOCKS:${localPort}`;
           default:
             return "New Rule";
         }
@@ -512,10 +545,18 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
     addRule({
       label,
       type: newFormDraft.type || "local",
-      localPort: newFormDraft.localPort!,
+      localPort,
       bindAddress: newFormDraft.bindAddress || "127.0.0.1",
       remoteHost: newFormDraft.remoteHost,
-      remotePort: newFormDraft.remotePort,
+      remotePort,
+      ...(rows.length > 1
+        ? {
+            mappings: rows.map((row) => ({
+              localPort: row.localPort!,
+              remotePort: row.remotePort!,
+            })),
+          }
+        : {}),
       hostId: newFormDraft.hostId,
       autoStart: newFormDraft.autoStart ?? false,
       autoReconnect: isPortForwardingAutoReconnectEnabled(newFormDraft),
@@ -533,15 +574,40 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
 
   // Check if new form is valid
   const isNewFormValid = (): boolean => {
+    if (!newFormDraft.hostId) return false;
+    const rows = newFormDraft.mappingRows;
+    if (newFormDraft.type !== "dynamic" && rows && rows.length > 0) {
+      if (!newFormDraft.remoteHost) return false;
+      return areMappingRowsValid(newFormDraft.type, rows);
+    }
     if (
       !newFormDraft.localPort ||
       newFormDraft.localPort <= 0 ||
       newFormDraft.localPort >= 65536
     )
       return false;
-    if (!newFormDraft.hostId) return false;
     if (newFormDraft.type !== "dynamic") {
       if (!newFormDraft.remoteHost || !newFormDraft.remotePort) return false;
+    }
+    return true;
+  };
+
+  // Check if edit form is valid (same mapping-row rules as the create form)
+  const isEditFormValid = (): boolean => {
+    if (!editDraft.hostId) return false;
+    const rows = editDraft.mappingRows;
+    if (editDraft.type !== "dynamic" && rows && rows.length > 0) {
+      if (!editDraft.remoteHost) return false;
+      return areMappingRowsValid(editDraft.type, rows);
+    }
+    if (
+      !editDraft.localPort ||
+      editDraft.localPort <= 0 ||
+      editDraft.localPort >= 65536
+    )
+      return false;
+    if (editDraft.type !== "dynamic") {
+      if (!editDraft.remoteHost || !editDraft.remotePort) return false;
     }
     return true;
   };
@@ -549,20 +615,68 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
   // Edit existing rule - open edit panel
   const startEditRule = (rule: PortForwardingRule) => {
     setEditingRule(rule);
-    setEditDraft({ ...rule });
+    setEditDraft({
+      ...rule,
+      mappingRows: getRuleMappings(rule).map((mapping) => ({ ...mapping })),
+    });
     setShowEditPanel(true);
     setShowWizard(false);
     setShowNewForm(false);
   };
 
   // Save edited rule
-  const saveEditedRule = () => {
-    if (editingRule && editDraft.id) {
-      updateRule(editDraft.id, editDraft);
-      setShowEditPanel(false);
-      setEditingRule(null);
-      setEditDraft({});
+  const saveEditedRule = async () => {
+    if (!(editingRule && editDraft.id)) return;
+    // Blank or duplicated mapping rows must not persist undefined ports.
+    if (!isEditFormValid()) return;
+    const rows = editDraft.type !== "dynamic" ? (editDraft.mappingRows ?? []) : [];
+    const firstRow = rows[0] ?? {};
+    const { mappingRows: _omittedMappingRows, ...ruleFields } = editDraft;
+    const updatedRule = {
+      ...editingRule,
+      ...ruleFields,
+      localPort: firstRow.localPort ?? editDraft.localPort,
+      remotePort: firstRow.remotePort ?? editDraft.remotePort,
+      mappings:
+        rows.length > 1
+          ? rows.map((row) => ({
+              localPort: row.localPort!,
+              remotePort: row.remotePort!,
+            }))
+          : undefined,
+    };
+    // Connection-changing edits (ports, host, mappings) on a running rule must
+    // not leave the old runtime serving removed listeners while the card shows
+    // the new rows: stop it first, like the agent update path and deletion do.
+    // The cast is safe: isEditFormValid() guaranteed the port fields.
+    if (
+      hasRuntimeTunnel(editingRule.id)
+      && hasPortForwardingConnectionChanged(editingRule, updatedRule as PortForwardingRule)
+    ) {
+      setPendingOperations((prev) => new Set([...prev, editingRule.id]));
+      try {
+        const result = await stopTunnel(editingRule.id);
+        if (!result.success) {
+          if (result.error) {
+            toast.error(
+              result.error,
+              t("pf.toast.titleWithLabel", { label: editingRule.label }),
+            );
+          }
+          return;
+        }
+      } finally {
+        setPendingOperations((prev) => {
+          const next = new Set(prev);
+          next.delete(editingRule.id);
+          return next;
+        });
+      }
     }
+    updateRule(editDraft.id, updatedRule);
+    setShowEditPanel(false);
+    setEditingRule(null);
+    setEditDraft({});
   };
 
   // Close edit panel
@@ -663,6 +777,28 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
     }
   };
 
+  // Effective wizard mapping rows: rows carried over from the form, with the
+  // first row overridden by the wizard's scalar ports (the wizard edits only
+  // the scalar local/destination fields). Single-row drafts stay scalar-only.
+  const getWizardMappingRows = (): PortForwardingFormRow[] => {
+    if (wizardType === "dynamic") return [];
+    const rows = draftRule.mappingRows ?? [];
+    if (rows.length <= 1) return rows;
+    const first = rows[0] ?? {};
+    return [
+      {
+        localPort: draftRule.localPort ?? first.localPort,
+        remotePort: draftRule.remotePort ?? first.remotePort,
+      },
+      ...rows.slice(1),
+    ];
+  };
+
+  const wizardMappingRowsValid = (): boolean => {
+    const rows = getWizardMappingRows();
+    return rows.length <= 1 || areMappingRowsValid(wizardType, rows);
+  };
+
   const canProceed = (): boolean => {
     switch (wizardStep) {
       case "type":
@@ -689,9 +825,11 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
           draftRule.remotePort > 0
         );
       case "host-selection":
-        return !!draftRule.hostId;
+        // Last step for local/dynamic flows: also gate carried-over rows.
+        return !!draftRule.hostId && wizardMappingRowsValid();
       case "label":
-        return true; // Label is optional
+        // Last step for the remote flow: label is optional, rows are not.
+        return wizardMappingRowsValid();
       default:
         return false;
     }
@@ -709,13 +847,26 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
     if (isEditing && draftRule.id) {
       updateRule(draftRule.id, { ...draftRule, label });
     } else {
+      // Rows carried over from the form must survive the wizard: persist them
+      // as `mappings` exactly like the form's direct save does.
+      const rows = getWizardMappingRows();
+      if (rows.length > 1 && !areMappingRowsValid(wizardType, rows)) return;
+      const firstRow = rows[0] ?? {};
       addRule({
         label,
         type: wizardType,
-        localPort: draftRule.localPort!,
+        localPort: firstRow.localPort ?? draftRule.localPort!,
         bindAddress: draftRule.bindAddress || "127.0.0.1",
         remoteHost: draftRule.remoteHost,
-        remotePort: draftRule.remotePort,
+        remotePort: firstRow.remotePort ?? draftRule.remotePort,
+        ...(rows.length > 1
+          ? {
+              mappings: rows.map((row) => ({
+                localPort: row.localPort!,
+                remotePort: row.remotePort!,
+              })),
+            }
+          : {}),
         hostId: draftRule.hostId,
         autoStart: draftRule.autoStart ?? false,
         autoReconnect: isPortForwardingAutoReconnectEnabled(draftRule),
@@ -938,6 +1089,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
                       startEditRule(rule);
                     }}
                     onEdit={() => startEditRule(rule)}
+                    mappingStates={getRuleMappingStates(rule.id)}
                     onDuplicate={() => duplicateRule(rule.id)}
                     onDelete={() => handleDeleteRule(rule)}
                     onStart={() => handleStartTunnel(rule)}
@@ -960,6 +1112,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
             setEditDraft((prev) => ({ ...prev, ...updates }))
           }
           onSave={saveEditedRule}
+          saveDisabled={!isEditFormValid()}
           onClose={closeEditPanel}
           onDuplicate={() => {
             duplicateRule(editingRule.id);

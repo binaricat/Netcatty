@@ -9,6 +9,9 @@ export const isPortForwardingRuntimeBusy = (
 ): boolean =>
   connection?.status === "active"
   || connection?.status === "connecting"
+  // A partial multi-mapping rule still holds live listeners for its healthy
+  // mappings, so it must count as a busy runtime (stop, quit guards, tray).
+  || connection?.status === "partial"
   || connection?.status === "error";
 
 export const isPortForwardingRuleStartable = (
@@ -19,7 +22,11 @@ export const isPortForwardingRuleStartable = (
 export const isPortForwardingRuleStoppable = (
   rule: Pick<PortForwardingRule, "status">,
   runtimeBusy: boolean,
-): boolean => runtimeBusy || rule.status === "active" || rule.status === "connecting";
+): boolean =>
+  runtimeBusy
+  || rule.status === "active"
+  || rule.status === "connecting"
+  || rule.status === "partial";
 
 export const selectStartablePortForwardingRules = (
   rules: readonly PortForwardingRule[],
