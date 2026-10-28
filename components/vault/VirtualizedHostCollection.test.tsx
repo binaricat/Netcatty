@@ -176,3 +176,34 @@ test("grouped host grid uses one virtual window across every group", () => {
   assert.ok(renderedHosts < 100);
   assert.equal((html.match(/data-vault-virtual-grouped-collection=/g) ?? []).length, 1);
 });
+
+test("pointer focus does not preselect hosts in either collection", async () => {
+  const { act, create } = await import("react-test-renderer");
+  const items = [{ id: "one" }, { id: "two" }];
+  for (const grouped of [false, true]) {
+    const selected: string[] = [];
+    const common = {
+      itemKey: (item: { id: string }) => item.id,
+      scrollRef: React.createRef<HTMLDivElement>(),
+      viewMode: "list" as const,
+      onActiveItemChange: (item: { id: string }) => selected.push(item.id),
+      renderItem: (item: { id: string }) => <div>{item.id}</div>,
+    };
+    let renderer: ReturnType<typeof create>;
+    await act(() => {
+      renderer = create(grouped
+        ? <VirtualizedGroupedHostCollection {...common} groups={[{ name: "group", hosts: items }]} renderGroupHeader={() => null} />
+        : <VirtualizedHostCollection {...common} items={items} />);
+    });
+    const root = renderer!.root.find((node) => Boolean(node.props.onFocusCapture));
+    const target = { closest: () => ({ dataset: { vaultItemKey: "one" } }) };
+    await act(() => {
+      root.props.onPointerDownCapture();
+      root.props.onFocusCapture({ target });
+    });
+    assert.deepEqual(selected, []);
+    await act(() => { root.props.onFocusCapture({ target }); });
+    assert.deepEqual(selected, ["one"]);
+    await act(() => { renderer!.unmount(); });
+  }
+});
