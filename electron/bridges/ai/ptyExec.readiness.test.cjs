@@ -110,7 +110,7 @@ test('zsh spaced-directory prompts with pending input stay unready', async () =>
 });
 
 test('parenthesized Deck prompts allow execution only while idle', async () => {
-  for (const prompt of ['(deck@steamdeck ~)$ ', '(root@steamdeck /home/deck)# ', '(venv) (deck@steamdeck My Project)$ ']) {
+  for (const prompt of ['(deck@steamdeck ~)$ ', '(root@steamdeck /home/deck)# ', '(venv) (deck@steamdeck My Project)$ ', '(deck@steamdeck My Project (1))$ ', '(root@steamdeck /cash$# (old))# ', '(venv) (deck@steamdeck $work#1)$ ']) {
     const session = { _promptTrackTail: '', lastIdlePrompt: '' };
     trackSessionIdlePrompt(session, `Last login\r\n${prompt}`);
     assert.equal(readyPrompt(session), prompt);
@@ -129,6 +129,20 @@ test('parenthesized Deck prompts allow execution only while idle', async () => {
     }).resultPromise;
     assert.equal(pending.code, 'SHELL_NOT_READY');
     assert.deepEqual(pendingPty.writes, []);
+  }
+});
+
+test('parenthesized Deck prompts with pending input do not allow execution', async () => {
+  for (const line of ['(deck@steamdeck ~)$ echo hello', '(deck@steamdeck ~)$ echo $', '(deck@steamdeck ~)$ echo (x)$', '(deck@steamdeck 100%)%']) {
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, line);
+    assert.equal(readyPrompt(session), '', line);
+    const pty = new TestPty();
+    const result = await startPtyJob(pty, 'echo OK', {
+      shellKind: 'posix', getReadyPrompt: () => readyPrompt(session), promptWaitTimeoutMs: 25, timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.code, 'SHELL_NOT_READY', line);
+    assert.deepEqual(pty.writes, [], line);
   }
 });
 

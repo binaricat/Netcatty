@@ -75,9 +75,11 @@ const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s
 // followed by input (`user@host ~ % echo %`) cannot count as idle. Requiring
 // whitespace before the marker also rejects output such as `user@host 100%`.
 const ZSH_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+ [^\s%#$][^%#$\r\n]* [%#]$/;
-// SteamOS/Deck-style prompt: `(user@host path)$`. Exclude prompt markers
-// and parentheses in the path so pending input cannot imitate a prompt.
-const PAREN_POSIX_PROMPT_PATTERN = /^\([^\s@()]+@[^\s:()]+\s+[^()#$\r\n]+\)[#$]$/;
+
+// SteamOS/Deck-style prompt: `(user@host path)$`. Allow markers and balanced
+// single-level parentheses in the path, but not an early closing delimiter:
+// otherwise a prompt followed by pending input could look like an idle prompt.
+const PAREN_POSIX_PROMPT_PATTERN = /^\([^\s@()]+@[^\s:()]+\s+(?:[^()\r\n]|\([^()\r\n]*\))+\)[#$]$/;
 
 // Host line of a two-line bash PS1 (`\u@\h: \w` then a following `$` or `#`).
 // Same user@host[:path] class as POSIX_PROMPT_PATTERN's first alternative,

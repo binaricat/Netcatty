@@ -189,7 +189,7 @@ test("zsh default prompt recognition rejects pending input and non-prompt output
 });
 
 test("recognizes parenthesized Deck prompts without accepting pending input", () => {
-  for (const prompt of ["(deck@steamdeck ~)$ ", "(root@steamdeck /home/deck)#", "(deck@steamdeck My Project)$ ", "(venv) (deck@steamdeck ~)$ "]) {
+  for (const prompt of ["(deck@steamdeck ~)$ ", "(root@steamdeck /home/deck)#", "(deck@steamdeck My Project)$ ", "(venv) (deck@steamdeck ~)$ ", "(deck@steamdeck My Project (1))$ ", "(root@steamdeck /cash$# (old))# ", "(venv) (deck@steamdeck $work#1)$ "]) {
     assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
     assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt);
   }
