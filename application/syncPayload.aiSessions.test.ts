@@ -208,13 +208,15 @@ test('replacement stops active turns and waits for finalizers before persisting 
       globalThis.localStorage.setItem = (key, value) => { if (key === keys.STORAGE_KEY_AI_SESSIONS) order.push('persist'); original(key, value); };
       const incoming = { ...session(), updatedAt: 3, messages: [...session().messages,
         { id: 'remote', role: 'user' as const, content: 'Remote', timestamp: 3 }] };
-      await applySyncPayload(remotePayload(remove ? [] : [incoming]), { importVaultData: () => undefined });
+      await applyLocalVaultPayload(remotePayload(remove ? [] : [incoming]), { importVaultData: () => undefined }, {
+        prepareConvergentRestore: async () => async () => {},
+      });
       assert.ok(order.indexOf('cancel') < order.indexOf('settled'));
       assert.ok(order.indexOf('settled') < order.indexOf('persist'));
       assert.ok(order.indexOf('persist') < order.indexOf('cleanup'));
       assert.equal(hook!.abortControllersRef.current.has('chat'), false);
       if (remove) assert.deepEqual(getAISessionsSnapshot().sessions, []);
-      else assert.ok(getAISessionsSnapshot().sessions[0].messages.some(message => message.content === 'Settled'));
+      else assert.equal(getAISessionsSnapshot().sessions[0].messages.at(-1)?.content, 'Remote');
       wait.mock.restore();
       globalThis.localStorage.setItem = original;
       await act(async () => { hook!.setStreamingForScope('chat', false); });
@@ -223,6 +225,44 @@ test('replacement stops active turns and waits for finalizers before persisting 
     context.mock.restoreAll(); globalThis.localStorage.setItem = original;
     delete (window as unknown as { netcatty?: unknown }).netcatty;
     await act(async () => { renderer!.unmount(); });
+  }
+});
+
+test('cloud sync preserves an active trimmed conversation and its native thread', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  let hook: UseAIChatStreamingReturn;
+  function Harness() {
+    hook = useAIChatStreaming({ maxIterations: 1, addMessageToSession: () => {}, updateLastMessage: () => {}, updateMessageById: () => {} });
+    return null;
+  }
+  let renderer: ReactTestRenderer;
+  await act(async () => { renderer = create(React.createElement(Harness)); });
+  const calls: string[] = [];
+  const controller = new AbortController();
+  const messages = Array.from({ length: 501 }, (_, i) => ({ id: `m-${i}`, role: 'user' as const, content: `Message ${i}`, timestamp: i }));
+  const remote = { ...session(), agentId: 'codex', messages };
+  // Appending the 501st message trims the oldest message locally.
+  const local = { ...remote, messages: messages.slice(-500), externalSessionId: 'native-thread' };
+  save([local]);
+  hook!.abortControllersRef.current.set('chat', controller);
+  await act(async () => { hook!.setStreamingForScope('chat', true); });
+  Object.assign(window, { netcatty: {
+    aiCattyCancelExec: async () => { calls.push('cancel'); },
+    aiSdkAgentCancel: async () => { calls.push('sdk-cancel'); return { ok: true }; },
+    aiSdkAgentCleanup: async () => { calls.push('cleanup'); return { ok: true }; },
+  } });
+  try {
+    for (const incoming of [[remote], []]) {
+      await applySyncPayload(remotePayload(incoming), { importVaultData: () => undefined });
+      assert.equal(controller.signal.aborted, false);
+      assert.deepEqual(calls, []);
+      assert.deepEqual(getAISessionsSnapshot().sessions, [local]);
+      assert.equal(JSON.parse(storage.get(keys.STORAGE_KEY_AI_SESSIONS)!)[0].externalSessionId, 'native-thread');
+    }
+  } finally {
+    hook!.abortControllersRef.current.delete('chat');
+    await act(async () => { hook!.setStreamingForScope('chat', false); renderer!.unmount(); });
+    delete (window as unknown as { netcatty?: unknown }).netcatty;
   }
 });
 
