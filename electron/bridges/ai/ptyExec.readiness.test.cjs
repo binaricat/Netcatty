@@ -109,6 +109,29 @@ test('zsh spaced-directory prompts with pending input stay unready', async () =>
   }
 });
 
+test('parenthesized Deck prompts allow execution only while idle', async () => {
+  for (const prompt of ['(deck@steamdeck ~)$ ', '(root@steamdeck /home/deck)# ', '(venv) (deck@steamdeck My Project)$ ']) {
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, `Last login\r\n${prompt}`);
+    assert.equal(readyPrompt(session), prompt);
+    const pty = new TestPty();
+    const result = await startPtyJob(pty, 'echo OK', {
+      shellKind: 'posix', getReadyPrompt: () => readyPrompt(session), promptWaitTimeoutMs: 25, timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.ok, true, prompt);
+    assert.equal(pty.writes.length, 1);
+
+    trackSessionIdlePrompt(session, 'echo pending');
+    assert.equal(readyPrompt(session), '');
+    const pendingPty = new TestPty();
+    const pending = await startPtyJob(pendingPty, 'echo OK', {
+      shellKind: 'posix', getReadyPrompt: () => readyPrompt(session), promptWaitTimeoutMs: 25, timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(pending.code, 'SHELL_NOT_READY');
+    assert.deepEqual(pendingPty.writes, []);
+  }
+});
+
 test('PTY readiness timeout does not send command or interrupt to a busy program', async () => {
   const pty = new TestPty();
   const job = startPtyJob(pty, 'echo OK', { getReadyPrompt:()=>'', promptWaitTimeoutMs:25, timeoutMs:1000 });

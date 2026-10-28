@@ -188,6 +188,17 @@ test("zsh default prompt recognition rejects pending input and non-prompt output
   }
 });
 
+test("recognizes parenthesized Deck prompts without accepting pending input", () => {
+  for (const prompt of ["(deck@steamdeck ~)$ ", "(root@steamdeck /home/deck)#", "(deck@steamdeck My Project)$ ", "(venv) (deck@steamdeck ~)$ "]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt);
+  }
+  for (const line of ["(deck@steamdeck ~)$ echo hello", "(deck@steamdeck ~)$ echo $", "(deck@steamdeck ~)$ echo (x)$", "(deck@steamdeck 100%)%", "(venv) "]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
 test("extracts the macOS zsh default prompt and preserves trailing whitespace", () => {
   assert.equal(
     extractTrailingIdlePrompt("Last login: Mon Oct 26\r\nhexiao@MacBook-Pro ~ % "),
