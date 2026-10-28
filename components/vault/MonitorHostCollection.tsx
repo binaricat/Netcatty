@@ -32,7 +32,7 @@ export function MonitorHostCollection<T extends { id: string }>({
   layoutKey: string;
   pinnedId?: string;
   renderCard: (item: T) => React.ReactNode;
-  renderCells: (item: T) => Record<MonitorColumn, React.ReactNode>;
+  renderCells: (item: T, visibleColumns: readonly MonitorColumn[]) => Record<MonitorColumn, React.ReactNode>;
   rowProps: (item: T) => React.HTMLAttributes<HTMLTableRowElement>;
   renderMenu: (item: T) => React.ReactNode;
 }) {
@@ -232,7 +232,7 @@ export function MonitorHostCollection<T extends { id: string }>({
                 style={{ height: virtualizer.getTotalSize() }}
               >
                 {virtualizer.getVirtualItems().map((row) => {
-                  const cells = renderCells(items[row.index]);
+                  const cells = renderCells(items[row.index], visibleColumns.map(column => column.key));
                   return (
                     <ContextMenu key={row.key}>
                       <ContextMenuTrigger asChild>

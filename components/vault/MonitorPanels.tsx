@@ -833,7 +833,7 @@ export function MonitorPanels({
                         </Button>
                       </article>
                     )}
-                    renderCells={({ id, host, state }) => {
+                    renderCells={({ id, host, state }, visibleColumns) => {
                       const diskLayout = diskGroups.layoutFor(id, state?.stats);
                       return ({
                       host: (<td>
@@ -906,7 +906,9 @@ export function MonitorPanels({
                           </div>
                         </td>),
                       diskIo: (<td data-monitor-cell="diskIo" className="!items-start">
-                          <MonitorDiskIo stats={state?.stats} listLayout={diskLayout} />
+                          <MonitorDiskIo stats={state?.stats} listLayout={diskLayout}
+                            showSystemToggle={!visibleColumns.includes("disks")}
+                            onToggleSystem={() => diskGroups.toggle(id)} />
                         </td>),
                       network: (<td
                           data-monitor-cell="network"

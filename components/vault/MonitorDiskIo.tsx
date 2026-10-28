@@ -4,6 +4,7 @@ import { useI18n } from "../../application/i18n/I18nProvider";
 import type { MonitorStats } from "../../domain/monitorRuntime";
 import { formatMonitorRate } from "../../domain/monitorFormatting";
 import { buildMonitorDiskListLayout, type MonitorDiskListLayout } from "../../domain/monitorDisks";
+import { MonitorSystemDiskToggle } from "./MonitorSystemDiskToggle";
 
 type DiskRates = { diskReadSpeed?: number | null; diskWriteSpeed?: number | null };
 
@@ -24,16 +25,20 @@ function Rates({ stats }: { stats?: DiskRates | null }) {
 }
 
 /** Same mount order and row height as the adjacent capacity column. */
-export function MonitorDiskIo({ stats, listLayout }: {
+export function MonitorDiskIo({ stats, listLayout, showSystemToggle = false, onToggleSystem }: {
   stats?: (Pick<MonitorStats, "disks"> & DiskRates) | null;
   listLayout?: MonitorDiskListLayout;
+  showSystemToggle?: boolean;
+  onToggleSystem?: () => void;
 }) {
   const { t } = useI18n();
   const layout = listLayout ?? buildMonitorDiskListLayout(stats);
   return (
     <div className="w-full min-w-0 space-y-1.5 text-[10px] tabular-nums text-muted-foreground">
       {layout.rows.map((row, index) => {
-        if (row.kind === "system") return <div key="system" data-monitor-system-io-slot aria-hidden="true" className="h-4" />;
+        if (row.kind === "system") return showSystemToggle
+          ? <MonitorSystemDiskToggle key="system" row={row} onToggle={onToggleSystem} />
+          : <div key="system" data-monitor-system-io-slot aria-hidden="true" className="h-4" />;
         const { disk } = row;
         return (
         <div key={`${disk.mountPoint}-${index}`} data-monitor-disk-io={disk.mountPoint}

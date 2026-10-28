@@ -1571,7 +1571,8 @@ test("shared server stats attach independent block rates to mounted partitions",
   const get = () => api.getServerStats({ sender: {} }, { sessionId: "partition-io" });
   let result = await get();
   assert.equal(result.success, true);
-  assert.equal(result.stats.disks[0].diskReadSpeed, null);
+  assert.equal(result.stats.disks[0].diskReadSpeed, undefined);
+  assert.equal(Object.hasOwn(result.stats.disks[0], "diskReadSpeed"), false);
   now += 1000;
   payload = `${base}|PARTITIONIO:11;8-1:102:204,253-0:20:40,|DISKMOUNTS:/:8-1,/data:253-0,`;
   result = await get();

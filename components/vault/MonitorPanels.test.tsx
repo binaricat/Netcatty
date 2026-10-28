@@ -159,6 +159,15 @@ test("cards show the two largest capacities without changing the source disk ord
   assert.deepEqual(disks.map((disk) => disk.mountPoint), ["/small", "/data", "/backup"]);
 });
 
+test("cards retain aggregate disk I/O while lists keep it in the separate column", () => {
+  const stats = { disks: [], diskPercent: 10, diskReadSpeed: 1000, diskWriteSpeed: 2e6 };
+  const markup = (limit?: number) => new JSDOM(renderToStaticMarkup(
+    <I18nProvider locale="en"><MonitorDiskUsage stats={stats} limit={limit} /></I18nProvider>,
+  )).window.document;
+  assert.match(markup(2).querySelector("[data-disk-io]")!.textContent!, /Read 1.0 KB\/s.*Write 2.0 MB\/s/);
+  assert.equal(markup().querySelector("[data-disk-io]"), null);
+});
+
 for (const view of ["list", "charts"] as const) {
   test(`${view} keeps saved custom icons, colors and OS logos`, (t) => {
     const storage = new Map<string, string>();

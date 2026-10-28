@@ -8,7 +8,7 @@ import { I18nProvider } from "../../application/i18n/I18nProvider";
 import { MonitorDiskUsage } from "./MonitorDiskUsage";
 import { MonitorDiskIo } from "./MonitorDiskIo";
 
-function Harness({ percent }: { percent: number }) {
+function Harness({ percent, hideCapacity = false }: { percent: number; hideCapacity?: boolean }) {
   const groups = useMonitorDiskGroups();
   const stats = { diskPercent: 20, disks: [
     { mountPoint: "/boot/efi", percent, used: 1, total: 2 },
@@ -20,8 +20,8 @@ function Harness({ percent }: { percent: number }) {
   return <I18nProvider locale="en">{["a", "b"].map(id => {
     const layout = groups.layoutFor(id, stats);
     return <div key={id} data-host={id}>
-      <MonitorDiskUsage stats={stats} listLayout={layout} onToggleSystem={() => groups.toggle(id)} />
-      <MonitorDiskIo stats={stats} listLayout={layout} />
+      {!hideCapacity && <MonitorDiskUsage stats={stats} listLayout={layout} onToggleSystem={() => groups.toggle(id)} />}
+      <MonitorDiskIo stats={stats} listLayout={layout} showSystemToggle={hideCapacity} onToggleSystem={() => groups.toggle(id)} />
     </div>;
   })}</I18nProvider>;
 }
@@ -62,6 +62,12 @@ test("system disclosure is per host, aligns both columns, and reacts to the stri
     await act(async () => root.render(<Harness percent={79} />));
     assertAligned("a", ["/", "/bd02", "/bd10"]);
     assert.equal(host("a").querySelector("[data-monitor-disk-alert]"), null);
+    await act(async () => root.render(<Harness percent={79} hideCapacity />));
+    assert.equal(host("a").querySelector("[data-monitor-disk]"), null);
+    assert.equal(button("a").getAttribute("aria-expanded"), "false");
+    await act(async () => button("a").click());
+    assert.deepEqual([...host("a").querySelectorAll("[data-monitor-disk-io]")].map(row => row.getAttribute("data-monitor-disk-io")), ["/", "/bd02", "/bd10", "/boot", "/boot/efi"]);
+    assert.equal(button("b").getAttribute("aria-expanded"), "false");
   } finally {
     await act(async () => root.unmount());
     for (const key of Object.keys(globals)) {

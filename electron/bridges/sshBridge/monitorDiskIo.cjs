@@ -8,7 +8,7 @@ const DISK_IO_ASSIGNMENT = String.raw`diskio=$(if [ -r /proc/uptime ]; then awk 
 
 // Match mounts by kernel device number: aliases, LVM and bind mounts need no
 // /dev name guessing. Keep these counters separate from the physical total.
-const PARTITION_IO_ASSIGNMENT = String.raw`partitionio=$(if [ -r /proc/uptime ]; then awk '{printf "%s;",$1}' /proc/uptime; for d in /sys/dev/block/*; do [ -r "$d/stat" ] || continue; awk -v path="$d" 'NF>=7 {n=split(path,a,"/");gsub(/:/,"-",a[n]);printf "%s:%s:%s,",a[n],$3,$7}' "$d/stat"; done; fi); diskmounts=$(awk '{gsub(/:/,"-",$3);printf "%s:%s,",$5,$3}' /proc/self/mountinfo 2>/dev/null)`;
+const PARTITION_IO_ASSIGNMENT = String.raw`partitionio=$(if [ -r /proc/uptime ]; then awk 'NR==1 {printf "%s;",$1;next} NF>=7 {n=split(FILENAME,a,"/");gsub(/:/,"-",a[n-1]);printf "%s:%s:%s,",a[n-1],$3,$7}' /proc/uptime /sys/dev/block/*/stat 2>/dev/null; fi); diskmounts=$(awk '{gsub(/:/,"-",$3);printf "%s:%s,",$5,$3}' /proc/self/mountinfo 2>/dev/null)`;
 
 function withPartitionIo(disks, mounts, current, previous) {
   const devices = new Map();
@@ -23,7 +23,8 @@ function withPartitionIo(disks, mounts, current, previous) {
     const sample = snapshot => snapshot?.devices.has(name)
       ? { timestamp: snapshot.timestamp, devices: new Map([[name, snapshot.devices.get(name)]]) }
       : null;
-    return { ...disk, ...diskIoRates(sample(current), sample(previous)) };
+    const rates = diskIoRates(sample(current), sample(previous));
+    return rates.diskReadSpeed == null ? disk : { ...disk, ...rates };
   });
 }
 
