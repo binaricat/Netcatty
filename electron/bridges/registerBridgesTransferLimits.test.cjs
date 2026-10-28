@@ -50,6 +50,7 @@ function createBridgeRegistrarForTest({
     ensureTempDir() {},
     registerHandlers() {},
     getTempDir: () => tempDir,
+    getCustomTempDir: () => null,
     getTempFilePath: (fileName) => Promise.resolve(path.join(tempDir, fileName)),
   };
 
