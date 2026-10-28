@@ -166,7 +166,7 @@ export const enCoreMessages: Messages = {
   'settings.system.tempDirApply': 'Apply',
   'settings.system.tempDirReset': 'Reset to default',
   'settings.system.tempDirError': 'Unable to use this folder.',
-  'settings.system.tempDirectoryHint': 'Used for SFTP transfer staging and files opened for external editing. Changing the folder during a transfer may affect that transfer.',
+  'settings.system.tempDirectoryHint': 'Netcatty creates a Netcatty temp subfolder in the chosen folder for SFTP staging and external editing. Changing the folder during a transfer may affect that transfer.',
   'settings.system.credentials.title': 'Credential Protection',
   'settings.system.credentials.status': 'Status',
   'settings.system.credentials.checking': 'Checking...',

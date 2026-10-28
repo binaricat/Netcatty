@@ -170,7 +170,7 @@ export const zhCNCoreMessages: Messages = {
   'settings.system.tempDirApply': '应用',
   'settings.system.tempDirReset': '恢复默认',
   'settings.system.tempDirError': '无法使用此文件夹。',
-  'settings.system.tempDirectoryHint': '用于 SFTP 传输暂存和外部编辑文件。传输期间更改文件夹可能影响该传输。',
+  'settings.system.tempDirectoryHint': 'Netcatty 在所选文件夹中创建 Netcatty 临时子文件夹，用于 SFTP 传输暂存和外部编辑文件。传输期间更改文件夹可能影响该传输。',
   'settings.system.credentials.title': '凭据保护',
   'settings.system.credentials.status': '状态',
   'settings.system.credentials.checking': '检查中...',

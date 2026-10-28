@@ -1049,27 +1049,40 @@ test("custom temp preference validates, creates, persists, and resets roots", as
     assert.equal(bridge.getTempDir(), bridge.resolvePrivateTempDir());
     const existing = path.join(fixture, "existing");
     fs.mkdirSync(existing);
+    fs.chmodSync(existing, 0o755);
+    const sibling = path.join(existing, "keep.txt");
+    fs.writeFileSync(sibling, "keep");
+    const managed = path.join(existing, "Netcatty");
     bridge.setCustomTempDir(existing);
-    assert.equal(bridge.getTempDir(), existing);
+    assert.equal(bridge.getTempDir(), managed);
+    if (process.platform !== "win32") {
+      assert.equal(fs.statSync(existing).mode & 0o777, 0o755);
+      assert.equal(fs.statSync(managed).mode & 0o777, 0o700);
+    }
+    fs.writeFileSync(path.join(managed, "staged.txt"), "staged");
+    await bridge.clearTempDir();
+    assert.equal(fs.readFileSync(sibling, "utf8"), "keep");
+    assert.equal(fs.existsSync(path.join(managed, "staged.txt")), false);
+    assert.equal(bridge.setCustomTempDir(managed), managed);
     assert.equal((await bridge.getTempDirInfo()).isCustom, true);
     const created = path.join(fixture, "new", "nested");
     bridge.setCustomTempDir(created);
-    assert.equal(bridge.getTempDir(), created);
+    assert.equal(bridge.getTempDir(), path.join(created, "Netcatty"));
     assert.equal(fs.statSync(created).isDirectory(), true);
     const file = path.join(fixture, "file");
     fs.writeFileSync(file, "x");
     for (const invalid of ["", "relative", file, path.join(file, "child")]) {
       assert.throws(() => bridge.setCustomTempDir(invalid));
-      assert.equal(bridge.getTempDir(), created);
+      assert.equal(bridge.getTempDir(), path.join(created, "Netcatty"));
     }
     if (process.platform !== "win32") {
       const link = path.join(fixture, "link");
       fs.symlinkSync(existing, link);
       assert.throws(() => bridge.setCustomTempDir(link));
-      assert.equal(bridge.getTempDir(), created);
+      assert.equal(bridge.getTempDir(), path.join(created, "Netcatty"));
     }
     bridge.configureTempDirPreference({ app: { getPath: () => userData } });
-    assert.equal(bridge.getTempDir(), created);
+    assert.equal(bridge.getTempDir(), path.join(created, "Netcatty"));
     bridge.resetCustomTempDir();
     assert.equal(bridge.getTempDir(), bridge.resolvePrivateTempDir());
     assert.equal((await bridge.getTempDirInfo()).isCustom, false);

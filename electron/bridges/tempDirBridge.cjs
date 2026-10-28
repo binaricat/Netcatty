@@ -300,7 +300,9 @@ function validateTempRoot(input) {
   if (typeof input !== "string" || !input.trim() || input.includes("\0") || !path.isAbsolute(input.trim())) {
     throw new Error("Please enter an absolute directory path.");
   }
-  const dir = path.normalize(path.resolve(input.trim()));
+  const selected = path.normalize(path.resolve(input.trim()));
+  const dir = path.basename(selected) === NETCATTY_TEMP_DIR_NAME
+    ? selected : path.join(selected, NETCATTY_TEMP_DIR_NAME);
   // Reject symlinked ancestors before creating anything beneath them.
   let parent = dir;
   while (!fs.existsSync(parent)) {
