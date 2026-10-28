@@ -30,6 +30,8 @@ const TOOL_OUTPUT_SIGNING_KEY_FILE = ".tool-output-signing-key";
 const TOOL_OUTPUT_TEMP_DIR_REBOUND = "NETCATTY_TEMP_DIR_REBOUND";
 
 // Cached temp directory path
+let customTempDir = null;
+let tempDirPreferenceFile = null;
 let cachedTempDir = null;
 let cachedTempDirIdentity = null;
 let tempFileCounter = 0;
@@ -294,6 +296,83 @@ function resolvePrivateTempDir(systemTempDir = os.tmpdir(), homeDir = os.homedir
   return path.join(homeDir, ".netcatty", "tmp", NETCATTY_TEMP_DIR_NAME);
 }
 
+function validateTempRoot(input) {
+  if (typeof input !== "string" || !input.trim() || input.includes("\0") || !path.isAbsolute(input.trim())) {
+    throw new Error("Please enter an absolute directory path.");
+  }
+  const dir = path.normalize(path.resolve(input.trim()));
+  // Reject symlinked ancestors before creating anything beneath them.
+  let parent = dir;
+  while (!fs.existsSync(parent)) {
+    const next = path.dirname(parent);
+    if (next === parent) break;
+    parent = next;
+  }
+  const realParent = fs.realpathSync(parent);
+  if (path.normalize(realParent) !== path.normalize(parent)) {
+    throw new Error("Temporary directory must not traverse symbolic links.");
+  }
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const stat = assertSafeTempDir(dir);
+  return { dir, identity: { dev: stat.dev, ino: stat.ino } };
+}
+
+function rebindTempRoot(custom, validated) {
+  customTempDir = custom;
+  cachedTempDir = validated.dir;
+  cachedTempDirIdentity = validated.identity;
+  tempDirRebindGeneration += 1;
+  toolOutputSigningKeyPromise = Promise.resolve(null);
+}
+
+function configureTempDirPreference(electronModule) {
+  tempDirPreferenceFile = path.join(electronModule.app.getPath("userData"), "temp-dir-pref.json");
+  customTempDir = null;
+  cachedTempDir = null;
+  cachedTempDirIdentity = null;
+  try {
+    const pref = JSON.parse(fs.readFileSync(tempDirPreferenceFile, "utf8"));
+    if (pref.customTempDir != null) {
+      const validated = validateTempRoot(pref.customTempDir);
+      rebindTempRoot(validated.dir, validated);
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") console.error("[TempDir] Invalid temp directory preference:", error.message);
+  }
+}
+
+function writeTempDirPreference(custom) {
+  if (!tempDirPreferenceFile) throw new Error("Temp directory preferences are unavailable.");
+  const pending = `${tempDirPreferenceFile}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.pending`;
+  try {
+    fs.writeFileSync(pending, JSON.stringify({ customTempDir: custom }), { mode: 0o600, flag: "wx" });
+    fs.renameSync(pending, tempDirPreferenceFile);
+  } finally {
+    try { fs.unlinkSync(pending); } catch {}
+  }
+}
+
+function setCustomTempDir(input) {
+  const validated = validateTempRoot(input);
+  assertSafeTempDir(validated.dir, validated.identity);
+  writeTempDirPreference(validated.dir);
+  rebindTempRoot(validated.dir, validated);
+  return validated.dir;
+}
+
+function resetCustomTempDir() {
+  const dir = resolvePrivateTempDir();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const stat = assertSafeTempDir(dir);
+  const validated = { dir, identity: { dev: stat.dev, ino: stat.ino } };
+  writeTempDirPreference(null);
+  rebindTempRoot(null, validated);
+  return dir;
+}
+
+function getCustomTempDir() { return customTempDir; }
+function getDefaultTempDir() { return resolvePrivateTempDir(); }
+
 /**
  * Get the Netcatty temp directory path
  * Creates the directory if it doesn't exist
@@ -318,7 +397,7 @@ function getTempDir() {
     }
   }
   
-  const netcattyTempDir = resolvePrivateTempDir();
+  const netcattyTempDir = customTempDir || resolvePrivateTempDir();
   
   try {
     if (!fs.existsSync(netcattyTempDir)) {
@@ -392,6 +471,8 @@ async function getTempDirInfo() {
     
     return {
       path: tempDir,
+      isCustom: Boolean(customTempDir),
+      defaultPath: resolvePrivateTempDir(),
       totalSize,
       fileCount,
     };
@@ -399,6 +480,8 @@ async function getTempDirInfo() {
     console.error(`[TempDir] Failed to get temp dir info:`, err.message);
     return {
       path: tempDir,
+      isCustom: Boolean(customTempDir),
+      defaultPath: resolvePrivateTempDir(),
       totalSize: 0,
       fileCount: 0,
     };
@@ -1011,6 +1094,19 @@ function registerHandlers(ipcMain, shell, electronModule) {
     return getTempDirInfo();
   });
   
+  ipcMain.handle("netcatty:tempdir:choose", async () => {
+    const result = await electronModule.dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
+    return result.canceled ? null : (result.filePaths[0] || null);
+  });
+  ipcMain.handle("netcatty:tempdir:setCustom", (_event, dir) => {
+    try { return { ok: true, path: setCustomTempDir(dir) }; }
+    catch (error) { return { ok: false, error: error.message }; }
+  });
+  ipcMain.handle("netcatty:tempdir:resetCustom", () => {
+    try { return { ok: true, path: resetCustomTempDir() }; }
+    catch (error) { return { ok: false, error: error.message }; }
+  });
+
   ipcMain.handle("netcatty:tempdir:clear", async () => {
     return clearTempDir();
   });
@@ -1324,6 +1420,11 @@ function registerHandlers(ipcMain, shell, electronModule) {
 
 module.exports = {
   getTempDir,
+  configureTempDirPreference,
+  setCustomTempDir,
+  resetCustomTempDir,
+  getCustomTempDir,
+  getDefaultTempDir,
   getTempDirRebindGeneration,
   ensureTempDir,
   getTempDirInfo,

@@ -464,6 +464,7 @@ function createBridgeRegistrar(context) {
     });
   
     // Initialize temp directory (synchronously)
+    tempDirBridge.configureTempDirPreference?.(electronModule);
     tempDirBridge.ensureTempDir();
   
     // Register all IPC handlers

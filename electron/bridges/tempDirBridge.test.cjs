@@ -1038,3 +1038,42 @@ test("Linux basic_text and unknown backends are not treated as secure storage", 
   assert.equal(tempDirBridge.isSecureToolOutputStorageAvailable(storage("gnome_libsecret"), "linux"), true);
   assert.equal(tempDirBridge.isSecureToolOutputStorageAvailable(storage("basic_text"), "darwin"), true);
 });
+
+test("custom temp preference validates, creates, persists, and resets roots", async () => {
+  const bridge = require("./tempDirBridge.cjs");
+  const fixture = fs.mkdtempSync(tempDirBridge.getTempFilePath("pref-test-"));
+  const userData = path.join(fixture, "prefs");
+  fs.mkdirSync(userData);
+  try {
+    bridge.configureTempDirPreference({ app: { getPath: () => userData } });
+    assert.equal(bridge.getTempDir(), bridge.resolvePrivateTempDir());
+    const existing = path.join(fixture, "existing");
+    fs.mkdirSync(existing);
+    bridge.setCustomTempDir(existing);
+    assert.equal(bridge.getTempDir(), existing);
+    assert.equal((await bridge.getTempDirInfo()).isCustom, true);
+    const created = path.join(fixture, "new", "nested");
+    bridge.setCustomTempDir(created);
+    assert.equal(bridge.getTempDir(), created);
+    assert.equal(fs.statSync(created).isDirectory(), true);
+    const file = path.join(fixture, "file");
+    fs.writeFileSync(file, "x");
+    for (const invalid of ["", "relative", file, path.join(file, "child")]) {
+      assert.throws(() => bridge.setCustomTempDir(invalid));
+      assert.equal(bridge.getTempDir(), created);
+    }
+    if (process.platform !== "win32") {
+      const link = path.join(fixture, "link");
+      fs.symlinkSync(existing, link);
+      assert.throws(() => bridge.setCustomTempDir(link));
+      assert.equal(bridge.getTempDir(), created);
+    }
+    bridge.configureTempDirPreference({ app: { getPath: () => userData } });
+    assert.equal(bridge.getTempDir(), created);
+    bridge.resetCustomTempDir();
+    assert.equal(bridge.getTempDir(), bridge.resolvePrivateTempDir());
+    assert.equal((await bridge.getTempDirInfo()).isCustom, false);
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});

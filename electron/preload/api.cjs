@@ -1716,6 +1716,9 @@ function createPreloadApi(ctx) {
   // Temp directory management
   getTempDirInfo: () =>
     ipcRenderer.invoke("netcatty:tempdir:getInfo"),
+  chooseTempDir: () => ipcRenderer.invoke("netcatty:tempdir:choose"),
+  setCustomTempDir: (dir) => ipcRenderer.invoke("netcatty:tempdir:setCustom", dir),
+  resetCustomTempDir: () => ipcRenderer.invoke("netcatty:tempdir:resetCustom"),
   clearTempDir: () =>
     ipcRenderer.invoke("netcatty:tempdir:clear"),
   getTempDirPath: () =>
