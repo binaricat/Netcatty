@@ -327,6 +327,8 @@ declare global {
         diskUsed: number | null;      // Disk used in GB
         diskTotal: number | null;     // Total disk in GB
         disks: Array<{                // All mounted disks
+          diskReadSpeed?: number | null; // Mounted block-device I/O, bytes/sec
+          diskWriteSpeed?: number | null;
           capacityKey?: string;       // Filesystem or shared-pool identity
           mountPoint: string;
           used: number;               // Used in GB

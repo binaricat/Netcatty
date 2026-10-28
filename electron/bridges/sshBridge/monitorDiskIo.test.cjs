@@ -4,8 +4,53 @@ const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { execFileSync } = require("node:child_process");
-const { DISK_IO_ASSIGNMENT, parseDiskIo, diskIoRates } = require("./monitorDiskIo.cjs");
+const { DISK_IO_ASSIGNMENT, PARTITION_IO_ASSIGNMENT, parseDiskIo, diskIoRates, withPartitionIo } = require("./monitorDiskIo.cjs");
 const unknown = { diskReadSpeed: null, diskWriteSpeed: null };
+
+test("mount rates isolate partitions, support shared devices and escaped mounts, and tolerate unrelated hotplug", () => {
+  const disks = ["/", "/data space", "/bind", "/pool"].map(mountPoint => ({ mountPoint }));
+  const mounts = "/:8-1,/data\\040space:253-0,/bind:8-1,/pool:0-42,";
+  const previous = parseDiskIo("10;8-1:100:200,253-0:10:20,");
+  const current = parseDiskIo("12;8-1:104:208,253-0:30:60,8-2:0:0,");
+  const result = withPartitionIo(disks, mounts, current, previous);
+  assert.deepEqual(result.map(({ diskReadSpeed, diskWriteSpeed }) => ({ diskReadSpeed, diskWriteSpeed })), [
+    { diskReadSpeed: 1024, diskWriteSpeed: 2048 },
+    { diskReadSpeed: 5120, diskWriteSpeed: 10240 },
+    { diskReadSpeed: 1024, diskWriteSpeed: 2048 },
+    unknown,
+  ]);
+  for (const snapshot of [null, parseDiskIo("12;8-1:99:200,253-0:10:20,")]) {
+    assert.deepEqual(withPartitionIo(disks, mounts, snapshot, previous)[0], { mountPoint: "/", ...unknown });
+  }
+  assert.deepEqual(withPartitionIo(disks, mounts, current, null)[0], { mountPoint: "/", ...unknown });
+});
+
+test("partition collection reads kernel device counters and mount identities", () => {
+  const dir = mkdtempSync(join(tmpdir(), "partition-io-"));
+  try {
+    const block = join(dir, "block");
+    mkdirSync(block);
+    writeFileSync(join(dir, "uptime"), "123.45 100.00\n");
+    writeFileSync(join(dir, "mountinfo"), "1 0 8:1 / / rw - ext4 /dev/root rw\n2 0 253:0 / /data rw - ext4 /dev/mapper/data rw\n");
+    for (const name of ["8:1", "253:0"]) {
+      // A colon is legal on Linux, so use directory names safe on Windows
+      // and substitute the separator in the generated fixture command.
+      mkdirSync(join(block, name.replace(":", "-")));
+      writeFileSync(join(block, name.replace(":", "-"), "stat"), "1 2 100 4 5 6 200\n");
+    }
+    const posix = path => path.replaceAll("\\", "/");
+    const command = PARTITION_IO_ASSIGNMENT
+      .replaceAll("/proc/uptime", posix(join(dir, "uptime")))
+      .replaceAll("/sys/dev/block", posix(block))
+      .replaceAll("/proc/self/mountinfo", posix(join(dir, "mountinfo")));
+    const output = execFileSync("sh", ["-c", `${command}; printf '%s|%s' "$partitionio" "$diskmounts"`], { encoding: "utf8" });
+    const [counters, mounts] = output.split("|");
+    assert.deepEqual([...parseDiskIo(counters).devices.keys()].sort(), ["253-0", "8-1"]);
+    assert.equal(mounts, "/:8-1,/data:253-0,");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("disk rates use remote fractional sample time and fixed 512-byte sectors", () => {
   const before = parseDiskIo("100.25;sda:100:200,nvme0n1:50:100,");

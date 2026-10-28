@@ -1,14 +1,8 @@
 import React from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
+import { formatMonitorRate as rate } from "../../domain/monitorFormatting";
 
-function rate(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value) || value < 0) return "--";
-  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MiB/s`;
-  if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB/s`;
-  return `${Math.round(value)} B/s`;
-}
-
-/** Same shared-sampler rates in monitor cards, tables, and terminal overview. */
+/** Shared rate formatting for aggregate summaries and per-mount readings. */
 export function DiskIoSummary({ stats }: {
   stats?: { diskReadSpeed?: number | null; diskWriteSpeed?: number | null } | null;
 }) {
@@ -16,8 +10,8 @@ export function DiskIoSummary({ stats }: {
   return (
     <div data-disk-io className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] tabular-nums text-muted-foreground" title={t("monitor.diskIoHint")}>
       <span>{t("monitor.diskIo")}</span>
-      <span>{t("monitor.diskRead")} {rate(stats?.diskReadSpeed)}</span>
-      <span>{t("monitor.diskWrite")} {rate(stats?.diskWriteSpeed)}</span>
+      <span className="whitespace-nowrap">{t("monitor.diskRead")} {rate(stats?.diskReadSpeed)}</span>
+      <span className="whitespace-nowrap">{t("monitor.diskWrite")} {rate(stats?.diskWriteSpeed)}</span>
     </div>
   );
 }

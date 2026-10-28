@@ -6,6 +6,27 @@
 // No iostat dependency, extra exec, sampling sleep, or privileged access is needed.
 const DISK_IO_ASSIGNMENT = String.raw`diskio=$(if [ -r /proc/uptime ]; then awk '{printf "%s;",$1}' /proc/uptime; for d in /sys/block/*; do [ -e "$d/device" ] && [ -r "$d/stat" ] || continue; awk -v path="$d" 'NF>=7 {n=split(path,a,"/");printf "%s:%s:%s,",a[n],$3,$7}' "$d/stat"; done; fi)`;
 
+// Match mounts by kernel device number: aliases, LVM and bind mounts need no
+// /dev name guessing. Keep these counters separate from the physical total.
+const PARTITION_IO_ASSIGNMENT = String.raw`partitionio=$(if [ -r /proc/uptime ]; then awk '{printf "%s;",$1}' /proc/uptime; for d in /sys/dev/block/*; do [ -r "$d/stat" ] || continue; awk -v path="$d" 'NF>=7 {n=split(path,a,"/");gsub(/:/,"-",a[n]);printf "%s:%s:%s,",a[n],$3,$7}' "$d/stat"; done; fi); diskmounts=$(awk '{gsub(/:/,"-",$3);printf "%s:%s,",$5,$3}' /proc/self/mountinfo 2>/dev/null)`;
+
+function withPartitionIo(disks, mounts, current, previous) {
+  const devices = new Map();
+  for (const entry of (mounts || "").split(",")) {
+    const separator = entry.lastIndexOf(":");
+    if (separator < 0) continue;
+    const mount = entry.slice(0, separator).replace(/\\([0-7]{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)));
+    devices.set(mount, entry.slice(separator + 1));
+  }
+  return disks.map(disk => {
+    const name = devices.get(disk.mountPoint);
+    const sample = snapshot => snapshot?.devices.has(name)
+      ? { timestamp: snapshot.timestamp, devices: new Map([[name, snapshot.devices.get(name)]]) }
+      : null;
+    return { ...disk, ...diskIoRates(sample(current), sample(previous)) };
+  });
+}
+
 function parseDiskIo(text) {
   if (typeof text !== "string") return null;
   const [time, counters, ...extra] = text.trim().split(";");
@@ -40,4 +61,4 @@ function diskIoRates(current, previous) {
   return { diskReadSpeed: read / seconds, diskWriteSpeed: write / seconds };
 }
 
-module.exports = { DISK_IO_ASSIGNMENT, parseDiskIo, diskIoRates };
+module.exports = { DISK_IO_ASSIGNMENT, PARTITION_IO_ASSIGNMENT, parseDiskIo, diskIoRates, withPartitionIo };

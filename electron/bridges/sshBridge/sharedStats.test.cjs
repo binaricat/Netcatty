@@ -125,3 +125,22 @@ test('one-second requests never overlap and keep disk baselines on the physical 
   release();
   assert.equal((await reconnect).stats.diskReadSpeed, null);
 });
+
+test('a newly established companion transport retains partition I/O baselines', async () => {
+  resetSharedStatsForTests();
+  const conn = {};
+  const baseline = { timestamp: 1, devices: new Map() };
+  const session = { _monitorStats: true, _monitorIntervalMs: 1000 };
+  await sampleSharedStats(session, async context => {
+    context.moshStatsConn = conn;
+    context.prevPartitionIo = baseline;
+    return result(42);
+  });
+  let sampled = false;
+  await sampleSharedStats(session, async context => {
+    sampled = true;
+    assert.equal(context.prevPartitionIo, baseline);
+    return result(43);
+  }, Date.now() + 1001);
+  assert.equal(sampled, true);
+});

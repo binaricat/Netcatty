@@ -1,4 +1,8 @@
 export const ruMonitorMessages = {
+  "monitor.systemDisks": "Системные разделы ({count})",
+  "monitor.systemDisksAlert": "Использование системного раздела превышает 80 %; группа раскрыта автоматически.",
+  "monitor.diskIoTotal": "Всего",
+  "monitor.partitionIoHint": "Ввод-вывод блочного устройства точки монтирования. Точки одного устройства показывают одинаковые скорости. Недоступно до двух корректных замеров или без определённого устройства; macOS не поддерживается.",
   "monitor.diskIo": "Дисковый ввод-вывод",
   "monitor.diskRead": "Чтение",
   "monitor.diskWrite": "Запись",

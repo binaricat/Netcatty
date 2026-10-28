@@ -1,4 +1,8 @@
 export const zhTWMonitorMessages = {
+  "monitor.systemDisks": "系統分割區（{count}）",
+  "monitor.systemDisksAlert": "系統分割區使用率超過 80%，已自動展開。",
+  "monitor.diskIoTotal": "彙總",
+  "monitor.partitionIoHint": "此掛載點對應區塊裝置的讀寫速率；共用裝置的掛載點顯示相同速率。取得兩次有效取樣前或無法識別區塊裝置時顯示 --；暫不支援 macOS。",
   "monitor.diskIo": "磁碟 I/O",
   "monitor.diskRead": "讀取",
   "monitor.diskWrite": "寫入",
