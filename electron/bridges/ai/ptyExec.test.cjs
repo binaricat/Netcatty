@@ -920,6 +920,13 @@ test("execViaRawPty does not prepend a line-clear before device commands", async
   assert.equal(result.ok, false);
 });
 
+test("powershell wrapper submits with CR only", () => {
+  const wrapped = buildWrappedCommand("Get-Location", "powershell", "__NCMCP_TEST__");
+  assert.ok(wrapped.endsWith("\r"));
+  assert.ok(!wrapped.endsWith("\r\n"));
+  assert.ok(buildWrappedCommand("echo test", "cmd", "__NCMCP_TEST__").endsWith("\r\n"));
+});
+
 test("cmd wrapper uses interactive cmd variable expansion", () => {
   const wrapped = buildWrappedCommand("ipconfig /all", "cmd", "__NCMCP_TEST__");
   assert.match(wrapped, /"%__NCMCP_TEST___CMD%"/);
