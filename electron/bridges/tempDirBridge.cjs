@@ -14,6 +14,7 @@ const crypto = require("node:crypto");
 // root. Shared temp roots fall back to a stable directory under the user's home
 // so another OS user cannot claim Netcatty's path before startup.
 const NETCATTY_TEMP_DIR_NAME = "Netcatty";
+const MANAGED_TEMP_MARKER = ".netcatty-managed-temp";
 const MAX_TOOL_OUTPUT_TEMP_CHARS = 4_000_000;
 const MAX_TOOL_OUTPUT_TEMP_BYTES = 8_000_000;
 const TOOL_OUTPUT_ORPHAN_TTL_MS = 30 * 60 * 1_000;
@@ -315,7 +316,16 @@ function validateTempRoot(input) {
     throw new Error("Temporary directory must not traverse symbolic links.");
   }
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const entries = fs.readdirSync(dir);
+  const hasMarker = entries.includes(MANAGED_TEMP_MARKER)
+    && fs.lstatSync(path.join(dir, MANAGED_TEMP_MARKER)).isFile();
+  if (entries.length && !hasMarker) {
+    throw new Error("Existing Netcatty directory is not empty and is not managed by Netcatty.");
+  }
   const stat = assertSafeTempDir(dir);
+  if (!hasMarker) {
+    fs.writeFileSync(path.join(dir, MANAGED_TEMP_MARKER), "", { flag: "wx", mode: 0o600 });
+  }
   return { dir, identity: { dev: stat.dev, ino: stat.ino } };
 }
 
@@ -352,6 +362,19 @@ function writeTempDirPreference(custom) {
   } finally {
     try { fs.unlinkSync(pending); } catch {}
   }
+}
+
+function applyCustomTempDir(input) {
+  if (input) {
+    const validated = validateTempRoot(input);
+    rebindTempRoot(validated.dir, validated);
+    return validated.dir;
+  }
+  const dir = resolvePrivateTempDir();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const stat = assertSafeTempDir(dir);
+  rebindTempRoot(null, { dir, identity: { dev: stat.dev, ino: stat.ino } });
+  return dir;
 }
 
 function setCustomTempDir(input) {
@@ -406,6 +429,12 @@ function getTempDir() {
       fs.mkdirSync(netcattyTempDir, { recursive: true, mode: 0o700 });
       console.log(`[TempDir] Created Netcatty temp directory: ${netcattyTempDir}`);
     }
+    if (customTempDir) {
+      const validated = validateTempRoot(customTempDir);
+      cachedTempDir = validated.dir;
+      cachedTempDirIdentity = validated.identity;
+      return validated.dir;
+    }
     const safeStat = assertSafeTempDir(netcattyTempDir);
     cachedTempDir = netcattyTempDir;
     cachedTempDirIdentity = { dev: safeStat.dev, ino: safeStat.ino };
@@ -458,6 +487,7 @@ async function getTempDirInfo() {
     let fileCount = 0;
     
     for (const file of files) {
+      if (file === MANAGED_TEMP_MARKER) continue;
       if (file === TOOL_OUTPUT_SIGNING_KEY_FILE) continue;
       try {
         const filePath = path.join(tempDir, file);
@@ -505,6 +535,7 @@ async function clearTempDir() {
     const files = await fs.promises.readdir(tempDir);
     
     for (const file of files) {
+      if (file === MANAGED_TEMP_MARKER) continue;
       if (file === TOOL_OUTPUT_SIGNING_KEY_FILE && !resetUnavailableSigningKey) continue;
       try {
         const filePath = path.join(tempDir, file);
@@ -1089,7 +1120,7 @@ async function readToolOutputChunk(content, request) {
 /**
  * Register IPC handlers
  */
-function registerHandlers(ipcMain, shell, electronModule) {
+function registerHandlers(ipcMain, shell, electronModule, terminalWorkerManager) {
   configureToolOutputSigningKey(electronModule);
   void cleanupExpiredToolOutputFiles();
   ipcMain.handle("netcatty:tempdir:getInfo", async () => {
@@ -1101,11 +1132,11 @@ function registerHandlers(ipcMain, shell, electronModule) {
     return result.canceled ? null : (result.filePaths[0] || null);
   });
   ipcMain.handle("netcatty:tempdir:setCustom", (_event, dir) => {
-    try { return { ok: true, path: setCustomTempDir(dir) }; }
+    try { const result = setCustomTempDir(dir); terminalWorkerManager?.setCustomTempDir(result); return { ok: true, path: result }; }
     catch (error) { return { ok: false, error: error.message }; }
   });
   ipcMain.handle("netcatty:tempdir:resetCustom", () => {
-    try { return { ok: true, path: resetCustomTempDir() }; }
+    try { const result = resetCustomTempDir(); terminalWorkerManager?.setCustomTempDir(null); return { ok: true, path: result }; }
     catch (error) { return { ok: false, error: error.message }; }
   });
 
@@ -1423,6 +1454,7 @@ function registerHandlers(ipcMain, shell, electronModule) {
 module.exports = {
   getTempDir,
   configureTempDirPreference,
+  applyCustomTempDir,
   setCustomTempDir,
   resetCustomTempDir,
   getCustomTempDir,

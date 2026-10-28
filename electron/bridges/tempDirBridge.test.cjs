@@ -1063,6 +1063,18 @@ test("custom temp preference validates, creates, persists, and resets roots", as
     await bridge.clearTempDir();
     assert.equal(fs.readFileSync(sibling, "utf8"), "keep");
     assert.equal(fs.existsSync(path.join(managed, "staged.txt")), false);
+    assert.equal(fs.existsSync(path.join(managed, ".netcatty-managed-temp")), true);
+    const unsafeParent = path.join(fixture, "unsafe");
+    const unsafe = path.join(unsafeParent, "Netcatty");
+    fs.mkdirSync(unsafe, { recursive: true });
+    fs.writeFileSync(path.join(unsafe, "user.txt"), "keep");
+    fs.writeFileSync(path.join(unsafeParent, "sibling.txt"), "keep");
+    assert.throws(() => bridge.setCustomTempDir(unsafeParent), /not empty/);
+    assert.equal(bridge.getTempDir(), managed);
+    assert.equal(fs.readFileSync(path.join(unsafe, "user.txt"), "utf8"), "keep");
+    assert.equal(fs.readFileSync(path.join(unsafeParent, "sibling.txt"), "utf8"), "keep");
+    bridge.applyCustomTempDir(managed);
+    assert.equal(bridge.getTempDir(), managed);
     assert.equal(bridge.setCustomTempDir(managed), managed);
     assert.equal((await bridge.getTempDirInfo()).isCustom, true);
     const created = path.join(fixture, "new", "nested");

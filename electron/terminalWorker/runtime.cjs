@@ -795,6 +795,10 @@ function createTerminalWorkerRuntime(options = {}) {
       if (entry?.requestId === message.requestId) entry.finish(message.ok === true);
       return;
     }
+    if (message?.kind === "set-custom-temp-dir") {
+      (options.applyCustomTempDir || require("../bridges/tempDirBridge.cjs").applyCustomTempDir)(message.value);
+      return;
+    }
     if (message?.kind === "set-ssh-transport-idle-ttl") {
       setDefaultTransportIdleTtlMs(message.value);
       return;

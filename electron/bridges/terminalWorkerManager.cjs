@@ -440,6 +440,7 @@ function createTerminalWorkerManager(options = {}) {
     ? Math.max(1, Math.floor(Number(options.maxClosedSessionTombstones)))
     : DEFAULT_MAX_CLOSED_SESSION_TOMBSTONES;
   let transportIdleTtlMs = resolveInitialTransportIdleTtlMs(options);
+  let customTempDir = null;
 
   function rejectAllPending(error) {
     for (const { reject } of pending.values()) {
@@ -1855,6 +1856,7 @@ function createTerminalWorkerManager(options = {}) {
       env: {
         ...process.env,
         [SSH_TRANSPORT_IDLE_TTL_ENV]: String(transportIdleTtlMs),
+        NETCATTY_CUSTOM_TEMP_DIR: customTempDir || "",
       },
     });
     child = worker;
@@ -1866,6 +1868,16 @@ function createTerminalWorkerManager(options = {}) {
       if (child === worker) handleExit(code);
     });
     return worker;
+  }
+
+  function setCustomTempDir(value) {
+    customTempDir = value || null;
+    if (!child) return;
+    try {
+      child.postMessage({ kind: "set-custom-temp-dir", value: customTempDir });
+    } catch (error) {
+      retireWorkerAfterIpcFailure(child, error);
+    }
   }
 
   function setDefaultTransportIdleTtlMs(value) {
@@ -2215,6 +2227,7 @@ function createTerminalWorkerManager(options = {}) {
 
   return {
     ensureStarted,
+    setCustomTempDir,
     /** True when the utilityProcess child is currently alive. */
     isRunning() {
       return Boolean(child);
