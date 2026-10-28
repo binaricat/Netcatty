@@ -1039,6 +1039,24 @@ test("Linux basic_text and unknown backends are not treated as secure storage", 
   assert.equal(tempDirBridge.isSecureToolOutputStorageAvailable(storage("basic_text"), "darwin"), true);
 });
 
+test("reapplying the same custom temp root does not rebind it", () => {
+  const fixture = fs.mkdtempSync(tempDirBridge.getTempFilePath("pref-noop-"));
+  const userData = path.join(fixture, "prefs");
+  fs.mkdirSync(userData);
+  try {
+    tempDirBridge.configureTempDirPreference({ app: { getPath: () => userData } });
+    const managed = tempDirBridge.setCustomTempDir(path.join(fixture, "custom"));
+    const generation = tempDirBridge.getTempDirRebindGeneration();
+    assert.equal(tempDirBridge.setCustomTempDir(managed), managed);
+    assert.equal(tempDirBridge.getTempDirRebindGeneration(), generation);
+    assert.equal(tempDirBridge.applyCustomTempDir(managed), managed);
+    assert.equal(tempDirBridge.getTempDirRebindGeneration(), generation);
+  } finally {
+    tempDirBridge.configureTempDirPreference({ app: { getPath: () => fixture } });
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
 test("custom temp preference validates, creates, persists, and resets roots", async () => {
   const bridge = require("./tempDirBridge.cjs");
   const fixture = fs.mkdtempSync(tempDirBridge.getTempFilePath("pref-test-"));

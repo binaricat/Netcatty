@@ -337,6 +337,12 @@ function rebindTempRoot(custom, validated) {
   toolOutputSigningKeyPromise = Promise.resolve(null);
 }
 
+function isCurrentTempRoot(custom, validated) {
+  return customTempDir === custom && cachedTempDir === validated.dir
+    && cachedTempDirIdentity?.dev === validated.identity.dev
+    && cachedTempDirIdentity?.ino === validated.identity.ino;
+}
+
 function configureTempDirPreference(electronModule) {
   tempDirPreferenceFile = path.join(electronModule.app.getPath("userData"), "temp-dir-pref.json");
   customTempDir = null;
@@ -367,6 +373,7 @@ function writeTempDirPreference(custom) {
 function applyCustomTempDir(input) {
   if (input) {
     const validated = validateTempRoot(input);
+    if (isCurrentTempRoot(validated.dir, validated)) return validated.dir;
     rebindTempRoot(validated.dir, validated);
     return validated.dir;
   }
@@ -380,6 +387,7 @@ function applyCustomTempDir(input) {
 function setCustomTempDir(input) {
   const validated = validateTempRoot(input);
   assertSafeTempDir(validated.dir, validated.identity);
+  if (isCurrentTempRoot(validated.dir, validated)) return validated.dir;
   writeTempDirPreference(validated.dir);
   rebindTempRoot(validated.dir, validated);
   return validated.dir;
