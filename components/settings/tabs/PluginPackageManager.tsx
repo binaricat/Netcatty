@@ -103,8 +103,7 @@ export function PluginPackageManager({ manager, onSelectionChange, initialSelect
           {t(manager.statusKnown === false ? 'settings.plugins.permissions.statusUnknown' : plugin.enabled ? 'settings.plugins.manager.enabled' : 'settings.plugins.manager.disabled')}
         </Button>
       </div>
-      <p className="break-all text-xs text-muted-foreground">{t('settings.plugins.sources.source')}: {t(plugin.source?.kind === 'official' ? 'settings.plugins.sources.official' : plugin.source?.kind === 'third-party' ? 'settings.plugins.sources.thirdparty' : 'settings.plugins.sources.local')}{plugin.source?.origin ? ` · ${plugin.source.origin}` : ''}</p>
-      {plugin.manifest?.publisher && <PluginAuthorRow plugin={plugin} />}
+      <PluginAuthorRow plugin={plugin} showSource />
       <p className={`break-words text-sm leading-5 text-muted-foreground ${selectedPlugin ? 'whitespace-pre-wrap' : 'line-clamp-3'}`}>{descriptionOf(plugin) || t('settings.plugins.manager.noDescription')}</p>
       {!selectedPlugin ? <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-1">
         <p className="break-words text-xs text-muted-foreground">{plugin.activeVersion}{plugin.manifest?.license ? ` · ${plugin.manifest.license}` : ''}</p>

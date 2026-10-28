@@ -28,7 +28,7 @@ const entries = ['Alpha', 'Beta'].map((name) => ({
   manifest: { manifestVersion: 1, id: `com.example.${name.toLowerCase()}`, name, version: '1.0.0', publisher: 'Example', engines: { netcatty: '>=1.0.0', api: '0.1.0-internal' }, main: { browser: 'index.js' }, permissions: { required: ['settings.read'] } },
 })) as NetcattyPluginCatalogEntry[];
 const catalog = {
-  entries, source: 'registry', sourceBinding: null, listStatus: 'ready', listError: null, readme: '# Author documentation', readmeStatus: 'ready', readmeError: null,
+  entries, source: 'registry', sourceBinding: null, listStatus: 'ready', listError: null, readmeImages: {}, readme: '# Author documentation', readmeStatus: 'ready', readmeError: null,
   error: null, busy: false, retryList() {}, retryReadme() {}, async install() {},
 } as ReturnType<typeof usePluginCatalog>;
 

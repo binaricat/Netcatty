@@ -12,14 +12,53 @@ const entry = { id: 'com.netcatty.starter', name: 'Starter', author: 'Netcatty',
 const identity = { author: 'Netcatty', avatar: 'data:image/png;base64,eA==', officialMaintained: true,
   sourceId: 'official', version: entry.version, archiveSha256: null };
 
-test('untrusted entry strings and absent imagery produce a compact placeholder without an official badge', () => {
+test('untrusted entry strings and absent imagery show only the author without decoration or an official badge', () => {
   const claimed = { ...entry, author: '<img src="https://avatars.githubusercontent.com/u/1">',
     officialMaintained: true, avatar: 'https://avatars.githubusercontent.com/u/1' };
   const html = renderToStaticMarkup(<I18nProvider locale="en"><PluginAuthorRow entry={claimed} /></I18nProvider>);
-  assert.match(html, /data-plugin-author-placeholder/);
-  assert.doesNotMatch(html, /<img|data-plugin-official-maintainer/);
+  assert.doesNotMatch(html, /<img|<svg|data-plugin-author-placeholder|bg-muted|rounded-full|data-plugin-official-maintainer/);
   assert.match(html, /&lt;img/);
-  assert.match(html, /items-center/);
+});
+
+test('installed authors share a compact row with localized sources and full accessible provenance', () => {
+  const plugin = { id: entry.id, manifest: { publisher: 'An extremely long publisher name' },
+    source: { id: 'third-party:example', kind: 'third-party', name: 'Community packages', origin: 'https://packages.example.org/catalog' },
+  } as NetcattyInstalledPlugin;
+  for (const [locale, label] of [['en', 'Third-party'], ['zh-CN', '第三方']]) {
+    const dom = new JSDOM(renderToStaticMarkup(<I18nProvider locale={locale}><PluginAuthorRow plugin={plugin} showSource /></I18nProvider>));
+    const row = dom.window.document.querySelector('[data-plugin-author-row]')!;
+    const source = row.querySelector<HTMLElement>('[data-plugin-source]')!;
+    assert.ok(source, 'source belongs to the author row');
+    assert.equal(source.textContent, label);
+    assert.match(source.title, /Community packages.*packages\.example\.org/);
+    assert.equal(source.getAttribute('aria-label'), source.title);
+    assert.ok(source.classList.contains('shrink-0'));
+    assert.ok(row.classList.contains('min-w-0'));
+    assert.ok(row.classList.contains('gap-3'), 'author and source are separated by 12px');
+    assert.ok(row.classList.contains('overflow-hidden'), 'metadata is bounded even at extremely narrow widths');
+    const authorGroup = row.querySelector('[data-plugin-author]')!;
+    assert.equal(authorGroup.parentElement, row);
+    assert.equal(source.parentElement, row);
+    assert.ok(authorGroup.classList.contains('min-w-0'));
+    assert.ok(authorGroup.classList.contains('gap-1.5'), 'avatar and author have a 6px gap');
+    assert.ok(source.classList.contains('gap-1'), 'source icon and text have a 4px gap');
+    assert.ok(row.querySelector('[title="An extremely long publisher name"]')?.classList.contains('truncate'));
+    assert.ok(source.querySelector('svg[aria-hidden="true"]'));
+    assert.equal(row.querySelector('[data-plugin-official-maintainer]'), null);
+    dom.window.close();
+  }
+});
+
+test('missing authors and unknown sources do not leave an empty author group or expose translation keys', () => {
+  for (const source of [undefined, { kind: 'unexpected' }]) {
+    const plugin = { id: entry.id, manifest: {}, source } as NetcattyInstalledPlugin;
+    const dom = new JSDOM(renderToStaticMarkup(<I18nProvider locale="en"><PluginAuthorRow plugin={plugin} showSource /></I18nProvider>));
+    const row = dom.window.document.querySelector('[data-plugin-author-row]')!;
+    assert.equal(row.querySelector('[data-plugin-author]'), null);
+    assert.equal(row.textContent, 'Source unknown');
+    assert.equal(row.querySelectorAll('svg').length, 1, 'only the source outline icon remains');
+    dom.window.close();
+  }
 });
 
 test('mounted author rows load only when visible, retain fallbacks, cancel stale results and show a borderless themed maintainer pill', async () => {
@@ -58,12 +97,13 @@ test('mounted author rows load only when visible, retain fallbacks, cancel stale
     });
   };
   try {
-    await render(); assert.equal(calls.length, 0); assert.ok(document.querySelector('[data-plugin-author-placeholder]'));
+    await render(); assert.equal(calls.length, 0); assert.equal(document.querySelector('[data-plugin-author-placeholder]'), null);
     await visible(); assert.deepEqual(calls[0], { kind: 'catalog', pluginId: entry.id, selectionToken: entry.selectionToken, sourceId: 'official' });
-    assert.ok(document.querySelector('[data-plugin-author-placeholder]'), 'loading uses the default placeholder');
+    assert.equal(document.querySelector('img'), null, 'loading does not reserve an empty avatar');
+    assert.equal(document.querySelector('[data-plugin-author]')?.textContent, 'Netcatty');
     await act(async () => pending.shift()!(identity));
     const image = document.querySelector('img')!;
-    assert.equal(image.getAttribute('src'), identity.avatar); assert.equal(image.width, 20); assert.equal(image.height, 20);
+    assert.equal(image.getAttribute('src'), identity.avatar); assert.equal(image.width, 16); assert.equal(image.height, 16);
     const badge = document.querySelector<HTMLElement>('[data-plugin-official-maintainer]')!;
     assert.equal(badge.textContent, 'Official maintainer'); assert.match(badge.title, /not a safety certification/);
     assert.ok(badge.classList.contains('border-0'));
@@ -72,7 +112,7 @@ test('mounted author rows load only when visible, retain fallbacks, cancel stale
     document.documentElement.classList.add('dark');
     assert.ok(document.querySelector('[data-plugin-author-row]')?.classList.contains('items-center'));
     await act(async () => image.dispatchEvent(new Event('error')));
-    assert.equal(document.querySelector('img'), null); assert.ok(document.querySelector('[data-plugin-author-placeholder]'));
+    assert.equal(document.querySelector('img'), null); assert.equal(document.querySelector('[data-plugin-author-placeholder]'), null);
     assert.ok(document.querySelector('[data-plugin-official-maintainer]'), 'image failure does not alter maintenance identity');
 
     const next = { ...entry, selectionToken: 'c'.repeat(64) };
@@ -89,7 +129,7 @@ test('mounted author rows load only when visible, retain fallbacks, cancel stale
 
     await render({ ...entry, selectionToken: 'f'.repeat(64) }); await visible();
     await act(async () => pending.shift()!({ ...identity, avatar: null, officialMaintained: false }));
-    assert.ok(document.querySelector('[data-plugin-author-placeholder]'));
+    assert.equal(document.querySelector('[data-plugin-author-placeholder]'), null);
     const installed = { id: entry.id, activeVersion: entry.version, archiveSha256: 'a'.repeat(64),
       source: { id: 'official', kind: 'official', origin: 'https://plugins.netcatty.app', name: 'Official' },
       manifest: entry.manifest, runtime: {} } as NetcattyInstalledPlugin;

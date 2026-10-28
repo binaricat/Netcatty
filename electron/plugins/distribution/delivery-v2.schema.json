@@ -75,6 +75,20 @@
               }
             }
           },
+          "readmeImages": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "sha256", "size"],
+              "properties": {
+                "path": { "type": "string", "pattern": "^/assets/[a-f0-9]{64}\\.(png|webp)$" },
+                "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                "size": { "type": "integer", "minimum": 1, "maximum": 262144 }
+              }
+            }
+          },
           "iconLight": {
             "oneOf": [
               {

@@ -55,6 +55,35 @@ test("selection binds source and delivery metadata; changes and withdrawal canno
   await assert.rejects(service.install(selected.id, selected.selectionToken), /curated catalog/);
 });
 
+test("README images are resolved only from the selected snapshot", async () => {
+  const bytes = Buffer.from("verified image");
+  const { digest } = require("./fixtures/staticDistributionFixture.cjs");
+  const ref = { path: `/assets/${digest(bytes)}.png`, sha256: digest(bytes), size: bytes.length };
+  const files = makeFiles(catalog, (_index, sidecar) => { sidecar.schemaVersion = 2; sidecar.plugins[0].readmeImages = [ref]; });
+  files.set(ref.path, bytes);
+  const requests = [];
+  const service = new RegistryCatalogService({ fetch: async (url) => { requests.push(url); return responseFor(files, url); },
+    resolveReadmeImage: async ({ read }) => { assert.deepEqual(await read(), bytes); return "data:image/png;base64,c2FmZQ=="; } });
+  const selected = (await service.list()).entries[0];
+  assert.deepEqual(await service.readmeImages(selected.id, selected.selectionToken), { [ref.path]: "data:image/png;base64,c2FmZQ==" });
+  await assert.rejects(service.readmeImages(selected.id, "invalid"), /changed/);
+  assert.equal(requests.filter((url) => url.endsWith(ref.path)).length, 1);
+});
+
+test("README image failures use placeholders and stale or disabled sources cannot return images", async () => {
+  const { digest } = require("./fixtures/staticDistributionFixture.cjs");
+  const bytes = Buffer.from("x");
+  const ref = { path: `/assets/${digest(bytes)}.png`, sha256: digest(bytes), size: 1 };
+  const files = makeFiles(catalog, (_index, sidecar) => { sidecar.schemaVersion = 2; sidecar.plugins[0].readmeImages = [ref]; });
+  files.set(ref.path, bytes);
+  let allowed = true;
+  const service = new RegistryCatalogService({ fetch: async (url) => responseFor(files, url), sourceGuard: () => { if (!allowed) throw new Error("disabled"); }, resolveReadmeImage: async () => { throw new Error("decode failed"); } });
+  const selected = (await service.list()).entries[0];
+  assert.deepEqual(await service.readmeImages(selected.id, selected.selectionToken), {});
+  allowed = false;
+  await assert.rejects(service.readmeImages(selected.id, selected.selectionToken), /disabled/);
+});
+
 test("concurrent list refreshes share one pointer request and complete document set", async () => {
   let finish; const requests = []; const files = realFiles();
   const service = new RegistryCatalogService({ fetch: async (url) => { requests.push(url); if (url === REGISTRY_URL) return new Promise((resolve) => { finish = resolve; }); return responseFor(files, url); } });

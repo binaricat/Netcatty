@@ -49,6 +49,7 @@ class MarketSourcesService {
     });
   }
   readme(id, token, sourceId) { return this.#catalog(sourceId).readme(id, token); }
+  readmeImages(id, token, sourceId) { return this.#catalog(sourceId).readmeImages(id, token); }
   async author(request) {
     if (!request || typeof request !== "object" || Array.isArray(request)
       || typeof request.pluginId !== "string" || !/^[a-z0-9][a-z0-9.-]{1,127}$/u.test(request.pluginId)) throw new TypeError("Invalid plugin author request");

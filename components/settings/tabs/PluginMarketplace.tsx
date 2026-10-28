@@ -103,7 +103,7 @@ export function PluginMarketplaceContent({ catalog, installed, selected, onSelec
         <section><h4 className="mb-3 text-sm font-semibold">{t('settings.plugins.market.manifest')}</h4><PluginPackageDetails plugin={{ id: entry.id, activeVersion: entry.version, enabled: false, manifest: entry.manifest, archiveSha256: entry.artifact?.sha256, runtime: { status: 'stopped', kind: null, lastError: null, quarantinedAt: null } }} /></section>
         <div className="min-w-0 border-t pt-4"><div className="flex items-center gap-1"><h4 className="text-sm font-semibold">README</h4><PluginInfo label={t('settings.plugins.market.readmeInfo')}>{t('settings.plugins.market.readmeNote')}</PluginInfo></div>{catalog.readmeStatus === 'loading' && <p className="mt-3 text-xs text-muted-foreground">{t('settings.plugins.loading')}</p>}
           {catalog.readmeStatus === 'error' && <div role="alert" className="mt-3 space-y-2 text-xs text-destructive"><p>{catalog.readmeError}</p><Button variant="outline" size="sm" onClick={catalog.retryReadme}>{t('settings.plugins.market.retry')}</Button></div>}
-          {catalog.readmeStatus === 'ready' && (catalog.readme?.trim() ? <PluginReadme markdown={catalog.readme} /> : <p className="mt-3 text-xs text-muted-foreground">{t('settings.plugins.market.emptyReadme')}</p>)}
+          {catalog.readmeStatus === 'ready' && (catalog.readme?.trim() ? <PluginReadme markdown={catalog.readme} images={catalog.readmeImages} /> : <p className="mt-3 text-xs text-muted-foreground">{t('settings.plugins.market.emptyReadme')}</p>)}
         </div>
       </article>}
     </div>

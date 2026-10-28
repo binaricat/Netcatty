@@ -113,6 +113,7 @@ function createPreloadApi(ctx) {
     return () => ipcRenderer.removeListener("netcatty:plugins:catalog-changed", listener);
   },
   getPluginCatalogReadme: (id, selectionToken, sourceId) => ipcRenderer.invoke("netcatty:plugins:catalog-readme", { id, selectionToken, sourceId }),
+  getPluginCatalogReadmeImages: (id, selectionToken, sourceId) => ipcRenderer.invoke("netcatty:plugins:catalog-readme-images", { id, selectionToken, sourceId }),
   installCatalogPlugin: (id, selectionToken, sourceId, acceptedSourceId) => ipcRenderer.invoke("netcatty:plugins:catalog-install", { id, selectionToken, sourceId, acceptedSourceId }),
   setPluginAIHostReady: (ready) => ipcRenderer.invoke("netcatty:plugins:ai-host-ready", ready),
   setPluginAgentHostReady: (ready) => ipcRenderer.invoke("netcatty:plugins:agent-host-ready", ready),

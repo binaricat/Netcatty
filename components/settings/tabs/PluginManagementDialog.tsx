@@ -39,7 +39,7 @@ export function PluginManagementDialog({ children, trigger, open: controlledOpen
             target.focus({ preventScroll: true });
           }
         }
-      }} className="flex h-[min(88dvh,900px)] w-[calc(100vw-2rem)] max-w-[1180px] flex-col gap-0 overflow-hidden p-0">
+      }} className="app-no-drag flex h-[min(88dvh,900px)] w-[calc(100vw-2rem)] max-w-[1180px] flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b px-6 py-4 pr-12 text-left">
           <DialogTitle>{t('settings.plugins.title')}</DialogTitle>
         </DialogHeader>

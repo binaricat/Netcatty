@@ -38,6 +38,12 @@ test('plugin manager is single-instance, closes with Escape, restores focus and 
     trigger.focus();
     await click(trigger);
     assert.equal(document.querySelectorAll('[role="dialog"]').length, 1);
+    // JSDOM cannot emulate Electron's native drag hit testing. Protect the
+    // no-drag boundary that keeps the portaled manager above the titlebar clickable.
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    assert.equal(dialog.classList.contains('app-no-drag'), true, 'plugin manager must exclude its content from native window dragging');
+    const visibleClose = dialog.querySelector<HTMLButtonElement>('button[data-dialog-close]:not([aria-hidden])')!;
+    assert.equal(visibleClose.closest('.app-no-drag'), dialog, 'the visible X must be inside the no-drag boundary');
     assert.equal(mounts, 1);
     assert.equal(document.activeElement?.getAttribute('aria-label'), 'Plugin search');
     assert.equal(document.querySelector('[role="dialog"]')?.contains(document.querySelector('[data-settings-scroll-pane]')), true);
@@ -98,6 +104,8 @@ test('plugin manager is single-instance, closes with Escape, restores focus and 
 
   } finally {
     await act(async () => root.unmount());
+    // Let Radix finish deferred focus cleanup before restoring the DOM globals.
+    await settle();
     dom.window.close();
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

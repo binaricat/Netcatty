@@ -93,6 +93,12 @@ function validateSet(pointer, entries, index, delivery, origin = DISTRIBUTION_OR
     const key = tuple(plugin);
     if (!catalogTuples.has(key) || resources.has(key)) throw new Error("Delivery identity does not match catalog tuple");
     assertAsset(plugin.readme, ["md"]);
+    const imagePaths = new Set();
+    for (const image of plugin.readmeImages ?? []) {
+      assertAsset(image, ["png", "webp"]);
+      if (image.size < 1 || imagePaths.has(image.path)) throw new Error("Invalid or duplicate README image");
+      imagePaths.add(image.path);
+    }
     for (const icon of [plugin.iconLight, plugin.iconDark]) if (icon !== null) assertAsset(icon, ["png", "webp"]);
     if (plugin.avatar !== null) assertAsset(plugin.avatar, ["png", "webp"]);
     const entry = entries.find((item) => tuple(item) === key);
