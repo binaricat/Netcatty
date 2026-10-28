@@ -900,7 +900,7 @@ export function MonitorPanels({
                             }
                           />
                         </td>),
-                      disks: (<td className="!items-start">
+                      disks: (<td className={diskLayout.rows.length === 1 && diskLayout.rows[0].kind === "disk" && diskLayout.rows[0].disk.mountPoint === "/" ? undefined : "!items-start"}>
                           <div className="w-full min-w-0">
                             <MonitorDiskUsage stats={state?.stats} listLayout={diskLayout} onToggleSystem={() => diskGroups.toggle(id)} />
                           </div>

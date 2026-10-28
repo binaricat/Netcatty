@@ -32,6 +32,7 @@ export function MonitorDiskUsage({
   const rows: MonitorDiskListRow[] = limit == null ? (listLayout ?? buildMonitorDiskListLayout(stats)).rows
     : [...reported].sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
       .slice(0, limit).map(disk => ({ kind: "disk", disk, alert: false }));
+  const bareRoot = limit == null && rows.length === 1 && rows[0].kind === "disk" && rows[0].disk.mountPoint === "/";
   return (
     <TooltipProvider delayDuration={150}>
       <div className={limit === 2 ? "min-h-[38px] space-y-1.5" : "space-y-1.5"}>
@@ -44,11 +45,11 @@ export function MonitorDiskUsage({
           return (
           <Tooltip key={`${disk.mountPoint}-${index}`}>
             <TooltipTrigger asChild>
-              <div data-monitor-disk={disk.mountPoint} data-monitor-disk-alert={alert || undefined} className={`flex h-4 min-w-0 items-center gap-2 ${alert ? "rounded bg-destructive/10" : ""}`}>
-                <span className={`w-24 shrink-0 truncate text-[10px] ${alert ? "font-medium text-destructive" : "text-muted-foreground"}`}>
+              <div data-monitor-disk={disk.mountPoint} data-monitor-disk-alert={alert || undefined} className={`${limit != null ? "flex h-4 min-w-0 items-center gap-2" : "min-w-0"} ${alert ? "rounded bg-destructive/10" : ""}`}>
+                {!bareRoot && <span data-monitor-disk-label className={`${limit != null ? "w-24 shrink-0" : "block h-3 leading-3"} truncate text-[10px] ${alert ? "font-medium text-destructive" : "text-muted-foreground"}`}>
                   {disk.mountPoint}
-                </span>
-                <ResourceBar label="" value={disk.percent} className="flex-1" danger={alert} />
+                </span>}
+                <ResourceBar label="" value={disk.percent} className={limit != null ? "flex-1" : "h-4 w-full"} danger={alert} />
               </div>
             </TooltipTrigger>
             <TooltipContent className="max-w-80 bg-popover text-popover-foreground shadow-md ring-1 ring-border/40">

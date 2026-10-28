@@ -133,7 +133,7 @@ test("disk usage shows every reported partition, including healthy and empty dis
   const document = new JSDOM(renderToStaticMarkup(
     <MonitorDiskUsage stats={{ disks, diskPercent: 25 }} />,
   )).window.document;
-  assert.deepEqual([...document.querySelectorAll("[data-monitor-disk] > span")].map((e) => e.textContent), ["/", "/backup", "/data"]);
+  assert.deepEqual([...document.querySelectorAll("[data-monitor-disk-label]")].map((e) => e.textContent), ["/", "/backup", "/data"]);
   for (const value of ["25.0%", "95.0%", "0.0%"])
     assert.ok(document.body.textContent!.includes(value));
 });

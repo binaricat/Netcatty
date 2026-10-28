@@ -33,6 +33,7 @@ export function MonitorDiskIo({ stats, listLayout, showSystemToggle = false, onT
 }) {
   const { t } = useI18n();
   const layout = listLayout ?? buildMonitorDiskListLayout(stats);
+  const bareRoot = layout.rows.length === 1 && layout.rows[0].kind === "disk" && layout.rows[0].disk.mountPoint === "/";
   return (
     <div className="w-full min-w-0 space-y-1.5 text-[10px] tabular-nums text-muted-foreground">
       {layout.rows.map((row, index) => {
@@ -42,10 +43,13 @@ export function MonitorDiskIo({ stats, listLayout, showSystemToggle = false, onT
         const { disk } = row;
         return (
         <div key={`${disk.mountPoint}-${index}`} data-monitor-disk-io={disk.mountPoint}
-          className="grid h-4 grid-cols-2 items-center gap-2"
+          className="min-w-0"
           title={`${disk.mountPoint}\n${t("monitor.partitionIoHint")}`}>
-          <span className="sr-only">{disk.mountPoint} </span>
-          <Rates stats={disk} />
+          {!bareRoot && <div aria-hidden="true" className="h-3" />}
+          <div className="grid h-4 grid-cols-2 items-center gap-2">
+            <span className="sr-only">{disk.mountPoint} </span>
+            <Rates stats={disk} />
+          </div>
         </div>
         );
       })}
