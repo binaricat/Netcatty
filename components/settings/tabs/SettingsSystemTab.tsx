@@ -240,6 +240,8 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
     try {
       const info = await bridge.getTempDirInfo();
       setTempDirInfo(info);
+      if (info?.isCustom && info.path) setTempDirInput(info.path);
+      else if (info && !info.isCustom) setTempDirInput("");
     } catch (err) {
       console.error("[SettingsSystemTab] Failed to get temp dir info:", err);
     } finally {
