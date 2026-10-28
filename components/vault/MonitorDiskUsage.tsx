@@ -45,11 +45,11 @@ export function MonitorDiskUsage({
           return (
           <Tooltip key={`${disk.mountPoint}-${index}`}>
             <TooltipTrigger asChild>
-              <div data-monitor-disk={disk.mountPoint} data-monitor-disk-alert={alert || undefined} className={`${limit != null ? "flex h-4 min-w-0 items-center gap-2" : "min-w-0"} ${alert ? "rounded bg-destructive/10" : ""}`}>
-                {!bareRoot && <span data-monitor-disk-label className={`${limit != null ? "w-24 shrink-0" : "block h-3 leading-3"} truncate text-[10px] ${alert ? "font-medium text-destructive" : "text-muted-foreground"}`}>
+              <div data-monitor-disk={disk.mountPoint} data-monitor-disk-alert={alert || undefined} className={`${bareRoot ? "min-w-0" : "flex h-4 min-w-0 items-center gap-2"} ${alert ? "rounded bg-destructive/10" : ""}`}>
+                {!bareRoot && <span data-monitor-disk-label className={`w-24 shrink-0 truncate text-[10px] ${alert ? "font-medium text-destructive" : "text-muted-foreground"}`}>
                   {disk.mountPoint}
                 </span>}
-                <ResourceBar label="" value={disk.percent} className={limit != null ? "flex-1" : "h-4 w-full"} danger={alert} />
+                <ResourceBar label="" value={disk.percent} className={bareRoot ? "h-4 w-full" : "flex-1"} danger={alert} />
               </div>
             </TooltipTrigger>
             <TooltipContent className="max-w-80 bg-popover text-popover-foreground shadow-md ring-1 ring-border/40">
