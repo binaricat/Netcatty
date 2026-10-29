@@ -90,11 +90,8 @@ test('installed global Chat UI reuses actual Catty runtime, configured HTTP tran
       electron: { ipcMain }, getInteractionWindow: () => mainWindow, isAppLocked: () => false, getTerminalWorkerManager: () => worker });
     service.runtimeSupervisor.runtimeFactories.browser = inProcessBrowserRuntime; await service.manager.initialize();
     const sample = path.join(rootPath, 'examples/plugins/global-agent'); const staging = path.join(directory, 'package'); fs.mkdirSync(path.join(staging, 'dist'), { recursive: true });
-    for (const file of ['netcatty.plugin.json', 'panel.html', 'panel.css', 'panel.js', 'README.md']) fs.copyFileSync(path.join(sample, file), path.join(staging, file));
-    fs.copyFileSync(path.join(sample, 'src/index.js'), path.join(staging, 'dist/index.js'));
-    const commandManifest = JSON.parse(fs.readFileSync(path.join(staging, 'netcatty.plugin.json'), 'utf8'));
-    commandManifest.main.browser = 'dist/index.js';
-    fs.writeFileSync(path.join(staging, 'netcatty.plugin.json'), JSON.stringify(commandManifest));
+    for (const file of ['netcatty.plugin.json', 'README.md']) fs.copyFileSync(path.join(sample, file), path.join(staging, file));
+    fs.copyFileSync(path.join(sample, 'dist/host.js'), path.join(staging, 'dist/host.js'));
     const { buildPluginPackage } = await import('@netcatty/plugin-cli'); const archive = path.join(directory, 'global-agent.ncpkg'); await buildPluginPackage(staging, archive);
     await service.manager.install(archive, { enable: true });
     await act(async () => root.render(<I18nProvider locale="en"><PluginAgentHost sessions={[
@@ -107,7 +104,7 @@ test('installed global Chat UI reuses actual Catty runtime, configured HTTP tran
     } };
     let viewOpen = true;
     const mountPanel = async () => {
-      panel = new JSDOM(fs.readFileSync(path.join(sample, 'panel.html'), 'utf8'), { runScripts: 'outside-only' });
+      panel = new JSDOM(fs.readFileSync(path.join(sample, 'view.html'), 'utf8'), { runScripts: 'outside-only' });
       Object.defineProperty(panel.window, 'pluginContext', { value: { commands: { executeCommand: async (name: string, params: unknown) => {
         // PluginViewHost.close removes sender authority before WebContents
         // closes. A pagehide RPC cannot be relied on to reach this relay.

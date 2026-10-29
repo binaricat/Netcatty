@@ -5,6 +5,7 @@ const { validatePluginInlineStyle } = require("./pluginViewStylePolicy.cjs");
 // These are HTML primitives, not a fixed design-system component catalogue.
 // Active elements, custom elements and URL attributes need separate authority.
 const ELEMENTS = new Set(["form", "img", "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "header", "footer", "main", "aside", "nav", "ul", "ol", "li", "dl", "dt", "dd", "strong", "em", "small", "b", "i", "code", "pre", "blockquote", "br", "hr", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "button", "input", "textarea", "label", "select", "option", "fieldset", "legend", "progress", "details", "summary"]);
+const VOID_ELEMENTS = new Set(["br", "hr", "img", "input"]);
 const ATTRIBUTES = new Set(["lang", "dir", "anchor", "src", "alt", "width", "height", "class", "id", "title", "role", "style", "name", "placeholder", "value", "checked", "disabled", "readonly", "required", "multiple", "selected", "type", "for", "tabindex", "min", "max", "step", "minlength", "maxlength", "rows", "cols", "colspan", "rowspan", "scope", "open", "autocomplete"]);
 const INPUT_TYPES = new Set(["text", "search", "email", "url", "tel", "number", "password", "checkbox", "radio", "range", "date", "time", "datetime-local", "color", "button"]);
 const NAME = /^[a-zA-Z0-9_-]{1,80}$/u;
@@ -42,6 +43,7 @@ function validatePluginRemoteTree(root) {
     if (node.type !== 1 || typeof node.element !== "string" || !ELEMENTS.has(node.element)
       || !Array.isArray(node.children) || !record(node.attributes)
       || Object.keys(node).some((key) => !["id", "type", "element", "attributes", "children"].includes(key))) throw new TypeError("Forbidden view element");
+    if (VOID_ELEMENTS.has(node.element) && node.children.length) throw new TypeError("Void view elements cannot have children");
     const attributes = Object.entries(node.attributes);
     if (attributes.length > 64) throw new TypeError("Too many view attributes");
     for (const [name, value] of attributes) {

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { LazyLoadBoundary } from '../ui/lazy-load-boundary';
 import { PluginViewPopover } from './PluginViewPopover';
 import { createPortal } from 'react-dom';
 import { validatePluginRemoteTree } from '@/domain/pluginRemoteTreePolicy.cjs';
@@ -73,7 +74,7 @@ export function PluginRemoteSurface({ tree, css, onEvent, settled = true, loadIm
     } catch { return null; }
   }, [tree, css]);
   if (!checked) return <p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>;
-  return <SurfaceContext.Provider value={{ css: checked.css, onEvent, depth }}><ResourceLoader.Provider value={loadImage}><ValidatedPluginRemoteSurface tree={checked.tree} css={checked.css} onEvent={onEvent} settled={settled} /></ResourceLoader.Provider></SurfaceContext.Provider>;
+  return <LazyLoadBoundary name="Plugin view" fallback={<p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>}><SurfaceContext.Provider value={{ css: checked.css, onEvent, depth }}><ResourceLoader.Provider value={loadImage}><ValidatedPluginRemoteSurface tree={checked.tree} css={checked.css} onEvent={onEvent} settled={settled} /></ResourceLoader.Provider></SurfaceContext.Provider></LazyLoadBoundary>;
 }
 
 function ValidatedPluginRemoteSurface({ tree, css, onEvent, settled }: { settled: boolean; tree: { children: RemoteNode[] }; css: string; onEvent(event: PluginSurfaceEvent): void }) {
@@ -95,6 +96,9 @@ function ValidatedPluginRemoteSurface({ tree, css, onEvent, settled }: { settled
       const target = event.target;
       const view = shadow.ownerDocument.defaultView;
       if (!view || !(target instanceof view.HTMLElement) || !['click', 'input', 'change', 'keydown', 'keyup', 'focusin', 'focusout', 'compositionstart', 'compositionupdate', 'compositionend', 'submit', 'reset'].includes(event.type)) return;
+      // Closed-shadow events hide their editable target from window capture.
+      if (event.type === 'focusin') hostRef.current?.toggleAttribute('data-plugin-editing', target.matches('input, textarea, select, [contenteditable]'));
+      if (event.type === 'focusout') hostRef.current?.removeAttribute('data-plugin-editing');
       if (event.type === 'submit') event.preventDefault();
       const nodeId = target.dataset.netcattyRemoteNode;
       if (!nodeId) return;

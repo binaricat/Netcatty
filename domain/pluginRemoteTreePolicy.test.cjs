@@ -34,3 +34,13 @@ test("remote trees and mutation batches are bounded", () => {
   assert.throws(() => validatePluginMutationBatch(Array.from({ length: 2049 }, () => [2, "1", "x"])));
   assert.throws(() => validatePluginMutationBatch([[2, "1", "x".repeat(8193)]]));
 });
+
+test("void children are rejected in snapshots and mutation insertions", () => {
+  for (const name of ["br", "hr", "img", "input"]) {
+    const node = element("void", name);
+    assert.equal(validatePluginRemoteTree({ children: [node] }), true);
+    node.children.push(text("child", "invalid"));
+    assert.throws(() => validatePluginRemoteTree({ children: [node] }), /Void view elements/);
+    assert.throws(() => validatePluginMutationBatch([[0, "~", node, 0]]), /Void view elements/);
+  }
+});

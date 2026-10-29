@@ -56,3 +56,12 @@ test('removed attributes do not keep checkboxes, menus or old inline styles acti
   const updated = tree.apply([[3, 'control', 'checked', null], [3, 'control', 'style', null]]);
   assert.deepEqual(updated.children[0], { id: 'control', type: 1, element: 'input', attributes: { type: 'checkbox' }, children: [] });
 });
+
+test('inserting a child into an existing void element fails the view', async () => {
+  const { createPluginRemoteTree } = await import('./pluginRemoteTree');
+  const tree = createPluginRemoteTree();
+  tree.apply([[0, '~', { id: 'input', type: 1, element: 'input', attributes: {}, children: [] }, 0]]);
+  assert.throws(() => tree.apply([[0, 'input', { id: 'child', type: 3, data: 'invalid' }, 0]]), /Void view elements/);
+  assert.equal(tree.isFailed(), true);
+  assert.deepEqual(tree.snapshot(), { children: [] });
+});
