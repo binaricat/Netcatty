@@ -21,7 +21,8 @@ test('installed cards and selected details keep author before compact source met
     assert.equal(row.querySelector('[data-plugin-source]')?.textContent, 'Local');
     assert.match(row.textContent!, /PublisherLocal/);
     assert.doesNotMatch(article.textContent!, /Source:/);
-    assert.match(article.textContent!, /Diagnostic remains visible/);
+    assert.doesNotMatch(article.textContent!, /Diagnostic remains visible/);
+    assert.ok(article.querySelector('button[aria-haspopup="dialog"][aria-label$="Synthetic"]'), 'recorded errors are available from the name-adjacent icon');
     dom.window.close();
   }
 });

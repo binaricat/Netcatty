@@ -41,14 +41,17 @@ function decodeRequestPath(pathname) {
   return segments;
 }
 
-async function readContainedFile(root, segments) {
+async function readContainedFile(root, segments, maxBytes = Infinity) {
   const candidate = path.resolve(root, ...segments);
   if (!isPathInside(root, candidate)) throw new Error("Plugin resource escapes its root");
   const [realRoot, realCandidate] = await Promise.all([fs.realpath(root), fs.realpath(candidate)]);
   if (!isPathInside(realRoot, realCandidate)) throw new Error("Plugin resource follows a symlink outside its root");
   const stats = await fs.lstat(realCandidate);
   if (!stats.isFile() || stats.isSymbolicLink()) throw new Error("Plugin resource is not a regular file");
-  return { body: await fs.readFile(realCandidate), filePath: realCandidate };
+  if (stats.size > maxBytes) throw new Error('Plugin resource exceeds size limit');
+  const body = await fs.readFile(realCandidate);
+  if (body.length > maxBytes) throw new Error('Plugin resource exceeds size limit');
+  return { body, filePath: realCandidate };
 }
 
 function htmlForRuntime(token, moduleResources) {
@@ -111,23 +114,6 @@ class PluginProtocol {
     };
   }
 
-  registerView(options) {
-    const token = createRuntimeToken();
-    const entry = options.entry.split("/").map(encodeURIComponent).join("/");
-    this.registrations.set(token, {
-      token,
-      pluginId: options.pluginId,
-      packageRoot: options.packageRoot,
-      config: null,
-      kind: "view",
-    });
-    return {
-      token,
-      url: `${PLUGIN_PROTOCOL_SCHEME}://${token}/package/${entry}`,
-      dispose: () => this.registrations.delete(token),
-    };
-  }
-
   async #handle(request) {
     const headers = {
       "Cache-Control": "no-store",
@@ -145,12 +131,7 @@ class PluginProtocol {
       const registration = this.registrations.get(url.hostname);
       if (!registration) return respond("Not Found", 404);
       const segments = decodeRequestPath(url.pathname);
-      if (registration.kind === "view" && segments[0] !== "package") {
-        return respond("Not Found", 404);
-      }
-      const csp = registration.kind === "view"
-        ? `default-src 'none'; script-src 'self' ${PLUGIN_PROTOCOL_SCHEME}:; connect-src 'none'; img-src 'self' ${PLUGIN_PROTOCOL_SCHEME}: data:; style-src 'self' ${PLUGIN_PROTOCOL_SCHEME}: 'unsafe-inline'; font-src 'self' ${PLUGIN_PROTOCOL_SCHEME}:; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; child-src 'none'; base-uri 'none'; form-action 'none'`
-        : `default-src 'none'; script-src 'self' ${PLUGIN_PROTOCOL_SCHEME}: 'nonce-${registration.token}'; connect-src 'self' ${PLUGIN_PROTOCOL_SCHEME}:; img-src 'self' ${PLUGIN_PROTOCOL_SCHEME}:; style-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; child-src 'none'; base-uri 'none'; form-action 'none'`;
+      const csp = `default-src 'none'; script-src 'self' ${PLUGIN_PROTOCOL_SCHEME}: 'nonce-${registration.token}'; connect-src 'self' ${PLUGIN_PROTOCOL_SCHEME}:; img-src 'self' ${PLUGIN_PROTOCOL_SCHEME}:; style-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; child-src 'none'; base-uri 'none'; form-action 'none'`;
       if (segments.length === 1 && segments[0] === "index.html") {
         return respond(htmlForRuntime(registration.token, this.moduleResources), 200, "text/html; charset=utf-8", {
           "Content-Security-Policy": csp,
@@ -182,11 +163,7 @@ class PluginProtocol {
       const file = await readContainedFile(root, fileSegments);
       const contentType = CONTENT_TYPES.get(path.extname(file.filePath).toLowerCase())
         ?? "application/octet-stream";
-      const viewHeaders = registration.kind === "view" ? {
-        "Content-Security-Policy": csp,
-        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), display-capture=(), usb=(), serial=(), hid=(), payment=(), fullscreen=(), clipboard-read=(), clipboard-write=()",
-      } : {};
-      return respond(file.body, 200, contentType, viewHeaders);
+      return respond(file.body, 200, contentType);
     } catch {
       return respond("Not Found", 404);
     }

@@ -1287,6 +1287,7 @@ Vaults 分頁維持扁平，不使用這塊背景。
   "settings.plugins.sources.local": "本地导入",
   "settings.plugins.sources.all": "全部来源",
   "settings.plugins.title": "插件",
+  "settings.plugins.configuration": "插件設定",
   "settings.plugins.description": "管理已安裝插件，瀏覽精選目錄。",
   'settings.plugins.loading': '正在載入外掛程式設定…',
   "settings.plugins.market.results": "{count} 個插件",

@@ -1,9 +1,11 @@
-/* global window, document */
-'use strict';
-const element = (id) => document.getElementById(id);
-const invoke = (name, params = {}) => window.netcattyView.executeCommand(`com.netcatty.globalagent.${name}`, params);
+export function mount(root, context, viewId) {
+  const cleanup = [];
+  const onDispose = (stop) => cleanup.push(stop);
+  const subscribeMessage = (listener) => { const sub = context.views.onDidReceiveMessage(viewId, listener); cleanup.push(() => sub.dispose()); return sub; };
+const element = (id) => root.querySelector("#" + id);
+const invoke = (name, params = {}) => context.commands.executeCommand(`com.netcatty.globalagent.${name}`, params);
 let chat; let selection; let turn; let busy = false; let generation = 0; let closed = false;
-const option = (value, text) => { const item = document.createElement('option'); item.value = value; item.textContent = text; return item; };
+const option = (value, text) => { const item = root.ownerDocument.createElement('option'); item.value = value; item.textContent = text; return item; };
 const status = (text) => { element('status').textContent = text; };
 function controls(value) {
   busy = value;
@@ -82,13 +84,9 @@ element('stop').addEventListener('click', async () => {
   catch { /* Revocation may already have stopped this exact turn. */ }
   finally { if (!closed && run === generation) { controls(false); status('Stopped'); } }
 });
-const theme = window.netcattyView.onDidChangeEnvironment?.((environment) => {
-  const root = document.documentElement; root.dataset.theme = ['light', 'dark'].includes(environment.theme) ? environment.theme : 'system';
-  root.style.colorScheme = root.dataset.theme === 'system' ? 'light dark' : root.dataset.theme;
-  for (const name of ['--background', '--foreground', '--muted', '--muted-foreground', '--border', '--primary', '--primary-foreground']) {
-    const value = environment.themeTokens?.[name]; if (typeof value === 'string' && value.length <= 96) root.style.setProperty(name, value); else root.style.removeProperty(name);
-  }
-});
-window.netcattyView.onDidReceiveMessage?.((message) => { if (message?.qaFixture === true) element('qa').textContent = 'Isolated deterministic fixture · no real model inference or paid API'; });
-window.addEventListener('pagehide', () => { closed = true; ++generation; theme?.dispose(); if (turn) void invoke('stop', { turnHandle: turn }).catch(() => {}); void closeChat(); });
+subscribeMessage?.((message) => { if (message?.qaFixture === true) element('qa').textContent = 'Isolated deterministic fixture · no real model inference or paid API'; });
+onDispose( () => { closed = true; ++generation;  if (turn) void invoke('stop', { turnHandle: turn }).catch(() => {}); void closeChat(); });
 void refresh();
+
+  return () => { for (const stop of cleanup) stop(); };
+}

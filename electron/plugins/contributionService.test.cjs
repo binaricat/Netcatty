@@ -724,3 +724,19 @@ test("Provider contributions expose a PR 5 lazy activation seam", async (context
   assert.deepEqual(result.identity, identity);
   assert.deepEqual(calls, ["start:com.example.provider"]);
 });
+
+
+test("host settings groups are localized and preferences persist without activating UI code", async (t) => {
+  const pluginManifest = manifest();
+  pluginManifest.contributes.settings[0].group = { en: "General", "zh-CN": "常规" };
+  const { service, database, calls } = setup(t, pluginManifest);
+  const settingId = `${pluginManifest.id}.greeting`;
+  const snapshot = () => service.snapshot().plugins[0].settings[0];
+  assert.equal(snapshot().group, "常规");
+  await service.updateSetting(pluginManifest.id, settingId, "persisted preference");
+  assert.equal(database.getSetting(pluginManifest.id, settingId, "application", "application"), "persisted preference");
+  assert.equal(snapshot().value, "persisted preference");
+  assert.ok(!calls.some(call => call.startsWith("start:")), "editing host settings does not start plugin UI");
+  await service.resetSetting(pluginManifest.id, settingId);
+  assert.equal(snapshot().value, "hello");
+});

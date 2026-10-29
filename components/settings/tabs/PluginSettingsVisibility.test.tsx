@@ -5,8 +5,8 @@ import { createRequire } from 'node:module';
 import { JSDOM } from 'jsdom';
 const require = createRequire(import.meta.url);
 
-test('real Settings landing leaves views visible while idle; log and Ask dialogs suspend and restore them', async () => {
-  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div><div id="native-view-mount"></div></body></html>', { pretendToBeVisual: true, url: 'http://localhost' });
+test('real Settings logging and Ask dialogs open, nest and dismiss correctly', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true, url: 'http://localhost' });
   const previous = new Map<string, PropertyDescriptor | undefined>();
   const install = (key: string, value: unknown) => {
     previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
@@ -22,7 +22,6 @@ test('real Settings landing leaves views visible while idle; log and Ask dialogs
   const { I18nProvider } = await import('../../../application/i18n/I18nProvider');
   const { PluginSettingsLanding } = await import('./PluginSettingsLanding');
   const { PluginPermissionHost } = await import('../../plugins/PluginPermissionHost');
-  const { observePluginHostSecurityVisibility } = await import('../../../application/state/pluginHostSecurityVisibility');
   const { PluginPermissionDecisionHost } = require('../../../electron/plugins/permissionDecisionHost.cjs');
   type Prompt = NetcattyPluginPermissionPrompt | { requestId: string; closed: true };
   const listeners = new Set<(event: Prompt) => void>();
@@ -39,9 +38,6 @@ test('real Settings landing leaves views visible while idle; log and Ask dialogs
   } });
   const manager = { plugins: [], available: true, statusKnown: true, busy: false, error: null, credentialStorageAvailable: true,
     async refresh() {}, async setEnabled() {}, async importPackage() {}, async uninstall() {} };
-  let visible = true;
-  const transitions: boolean[] = [];
-  const stopVisibility = observePluginHostSecurityVisibility(document.getElementById('native-view-mount')!, (next) => { visible = next; transitions.push(next); });
   const root = createRoot(document.getElementById('root')!);
   const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find((element) => element.textContent === label)!;
   const flushVisibility = () => new Promise<void>((resolve) => dom.window.queueMicrotask(resolve));
@@ -50,24 +46,19 @@ test('real Settings landing leaves views visible while idle; log and Ask dialogs
     await flushVisibility();
     assert.equal(document.querySelector('[role="dialog"]'), null);
     assert.ok(button('Configure'), 'real idle logging row is present');
-    assert.equal(visible, true, 'idle Settings landing must not hide the native child');
-    assert.deepEqual(transitions, []);
     await act(async () => button('Configure').click());
     await flushVisibility();
     assert.ok(document.querySelector('[role="dialog"][data-host-security-surface]'));
-    assert.equal(visible, false, 'actual logging security dialog must hide the child');
     await act(async () => document.querySelectorAll<HTMLButtonElement>('[role="switch"]')[0].click());
     await act(async () => document.querySelectorAll<HTMLButtonElement>('[role="switch"]')[1].click());
     await flushVisibility();
     assert.equal(document.querySelectorAll('[role="dialog"]').length, 2);
-    assert.equal(visible, false, 'the verbose security confirmation must also keep the child hidden');
     await act(async () => button('Cancel').click());
     await flushVisibility();
-    assert.equal(visible, false, 'cancelling verbose returns to the protected logging dialog');
+    assert.equal(document.querySelectorAll('[role="dialog"]').length, 1);
     await act(async () => button('Close').click());
     await flushVisibility();
     assert.equal(document.querySelector('[role="dialog"]'), null);
-    assert.equal(visible, true, 'closing logs must restore the child while its idle row remains');
     let pending!: Promise<{ decision: string }>;
     await act(async () => {
       pending = host.request({ requestId: 'settings-visibility-ask', pluginId: 'com.example.settings-visibility', pluginName: 'Settings visibility fixture', pluginVersion: '1.0.0',
@@ -75,14 +66,12 @@ test('real Settings landing leaves views visible while idle; log and Ask dialogs
     });
     await flushVisibility();
     assert.ok(document.querySelector('[role="dialog"][data-host-security-surface]'));
-    assert.equal(visible, false, 'Ask must still hide the child above the real landing');
     await act(async () => { button('Deny').click(); await pending; });
     await flushVisibility();
     assert.equal((await pending).decision, 'deny');
-    assert.equal(visible, true, 'dismissing Ask must restore the same child');
-    assert.deepEqual(transitions, [false, true, false, true]);
+    assert.equal(document.querySelector('[role="dialog"]'), null);
   } finally {
-    await act(async () => root.unmount()); stopVisibility(); host.shutdown(); dom.window.close();
+    await act(async () => root.unmount()); host.shutdown(); dom.window.close();
     for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
   }
 });

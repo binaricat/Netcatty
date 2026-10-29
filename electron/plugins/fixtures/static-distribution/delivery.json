@@ -1,7 +1,7 @@
 {
   "builderSha256": "57199cc6a5d30f5f356adb072d51de9e2283dac6e26c647a4404e4c2261c4a70",
-  "catalogSha256": "47e967516437996e00eac8fbe97699baa72439ba1bf7ae791731e4964bb13774",
-  "indexSha256": "af2e953e3c631b36a0e712806d0dcfb0a058fd02f2051025eddded8cc115d461",
+  "catalogSha256": "85a6b5efbe4fca52d2bce0ae7074b9d33ac876e29a41ae9a6a28be5c7387c8a9",
+  "indexSha256": "f8f81e2f86fd459e061b38e05b8fff3b21b4e660ad06bbd65129f542764c2062",
   "plugins": [
     {
       "artifact": null,

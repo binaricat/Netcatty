@@ -127,6 +127,11 @@ second private RPC shape when extending the host.
 - `PluginRpcRouter` owns correlation, cancellation, deadlines, stream credit and
   protocol-failure containment. Runtime identity is assigned by the host and is
   never accepted from request parameters.
+- Custom views use only host-rendered DOM: plugin scripts stay in the isolated
+  runtime; the host validates incoming trees, styles, resources and events before
+  rendering. Never reintroduce native child views, iframe UI, or plugin code in
+  the host renderer. See `docs/plugin-platform/host-rendered-ui.md` for authoring,
+  lifecycle, limits and verification.
 - App quit goes through `runPluginShutdown()` after the dirty-editor guard; do
   not add another independent quit interception path.
 

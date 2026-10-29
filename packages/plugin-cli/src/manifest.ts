@@ -705,7 +705,6 @@ function validateSemantics(manifest: PluginManifest): string[] {
     ...packageIconPaths(manifest.icon),
     manifest.main.browser,
     manifest.main.node,
-    ...(manifest.contributes?.views ?? []).map(({ entry }) => entry),
     ...(manifest.contributes?.themes ?? []).map(({ entry }) => entry),
     ...(manifest.contributes?.commands ?? []).flatMap(({ icon }) => packageIconPaths(icon)),
     ...(manifest.contributes?.menus ?? []).flatMap(({ icon }) => packageIconPaths(icon)),

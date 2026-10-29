@@ -4,7 +4,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
+const { pathToFileURL } = require("node:url");
 const test = require("node:test");
 
 test("the example clears session passwords before dispatch and renders result text safely", async () => {
@@ -20,19 +20,14 @@ test("the example clears session passwords before dispatch and renders result te
   elements.get("password").value = "synthetic-session-only";
   let settle;
   let submitted;
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "panel.js"), "utf8"), {
-    document: { getElementById: (id) => elements.get(id), documentElement: { style: { setProperty() {}, removeProperty() {} } } },
-    window: { netcattyView: {
-      onDidChangeEnvironment() {},
-      executeCommand: async (name, params) => {
-        if (name.endsWith(".endpoint")) return { endpoint: "tcp://172.30.247.2:3306" };
-        assert.ok(name.endsWith(".query"));
-        assert.equal(elements.get("password").value, "");
-        submitted = params;
-        return new Promise((resolve) => { settle = resolve; });
-      },
-    } },
-  });
+  const { mount } = await import(pathToFileURL(path.join(__dirname, 'panel.js')).href);
+  mount({ querySelector: (selector) => elements.get(selector.slice(1)) }, { commands: {
+    executeCommand: async (name, params) => {
+      if (name.endsWith('.endpoint')) return { endpoint: 'tcp://172.30.247.2:3306' };
+      assert.ok(name.endsWith('.query')); assert.equal(elements.get('password').value, '');
+      submitted = params; return new Promise((resolve) => { settle = resolve; });
+    },
+  } });
   const pending = elements.get("form").listeners.submit({ preventDefault() {} });
   assert.equal(submitted.password, "synthetic-session-only");
   assert.equal(elements.get("query").disabled, true);
@@ -42,6 +37,6 @@ test("the example clears session passwords before dispatch and renders result te
   assert.equal(elements.get("password").value, "");
   assert.equal(elements.get("query").disabled, false);
   assert.match(elements.get("result").textContent, /<img/u);
-  const html = fs.readFileSync(path.join(__dirname, "panel.html"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "view.html"), "utf8");
   assert.match(html, /id="password"[^>]*type="password"/u);
 });

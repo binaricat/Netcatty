@@ -66,20 +66,6 @@ test('plugin manager is single-instance, closes with Escape, restores focus and 
     assert.equal(document.querySelector('[role="dialog"]'), null);
     assert.equal(document.activeElement, trigger);
     assert.equal(unmounts, 2);
-    let handedOff = false;
-    await act(async () => root.render(<I18nProvider locale="en"><PluginManagementDialog>{(handoff) => <button onClick={() => handoff(() => {
-      handedOff = true;
-      assert.equal(document.querySelector('[role="dialog"]'), null);
-      assert.notEqual(document.body.style.pointerEvents, 'none');
-    })}>Open contributed settings view</button>}</PluginManagementDialog></I18nProvider>));
-    await click(trigger);
-    await click(document.querySelector<HTMLButtonElement>('[role="dialog"] button:not([data-dialog-close])')!);
-    // Radix schedules close-focus cleanup after the React close commit. The
-    // settle inside click's act() can precede that commit; observe the actual
-    // handoff instead of assuming the cleanup timer already ran.
-    const handoffDeadline = Date.now() + 2_000;
-    while (!handedOff && Date.now() < handoffDeadline) await act(async () => { await settle(); });
-    assert.equal(handedOff, true, 'external view opens only after modal ownership is released');
     function ControlledEntry() {
       const [open, setOpen] = useState(false);
       const browse = useRef<HTMLButtonElement | null>(null);

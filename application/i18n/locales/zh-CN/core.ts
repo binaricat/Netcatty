@@ -1316,6 +1316,7 @@ Vaults 标签保持扁平，不使用这块背景。
   "settings.plugins.sources.local": "本地导入",
   "settings.plugins.sources.all": "全部来源",
   "settings.plugins.title": "插件",
+  "settings.plugins.configuration": "插件设置",
   "settings.plugins.description": "管理已安装插件，浏览精选目录。",
   'settings.plugins.loading': '正在加载插件设置…',
   'settings.plugins.empty': '当前没有已启用插件提供设置。',

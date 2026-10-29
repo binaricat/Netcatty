@@ -87,7 +87,7 @@ test("Settings-owned installed view can Ask on activation and commands without a
     engines: { netcatty: ">=0.0.0", api: ">=0.1.0-internal <0.2.0" }, main: { browser: "browser.js" },
     activationEvents: [`onView:${id}.panel`], permissions: { required: ["settings.read", "commands", "views"] },
     contributes: { settings: [{ id: `${id}.greeting`, label: "Greeting", control: "text", scope: "application", default: "synthetic greeting" }],
-      commands: [{ id: `${id}.read`, title: "Read own setting" }], views: [{ id: `${id}.panel`, title: "Settings-owned panel", location: "panel", entry: "panel.html" }] } };
+      commands: [{ id: `${id}.read`, title: "Read own setting" }], views: [{ id: `${id}.panel`, title: "Settings-owned panel", location: "panel" }] } };
   const staging = path.join(root, "package"); await fs.mkdir(staging);
   await fs.writeFile(path.join(staging, "netcatty.plugin.json"), JSON.stringify(manifest));
   await fs.writeFile(path.join(staging, "panel.html"), "<!doctype html><p>Synthetic view</p>");
@@ -99,25 +99,26 @@ test("Settings-owned installed view can Ask on activation and commands without a
   const archive = path.join(root, "fixture.ncpkg"); await buildPluginPackage(staging, archive); await service.manager.install(archive, { enable: true });
   const plugin = service.database.getActivePlugin(id); await service.permissionEngine.setMode(plugin, "settings.read", "ask");
   const openedPrompt = nextPrompt(settings);
-  const opening = call(settings.webContents, "open-view", { viewId: `${id}.panel`, scopeId: "window:settings", bounds: { x: 0, y: 0, width: 300, height: 200 } });
+  const opening = call(settings.webContents, "host-ui-open", { viewId: `${id}.panel`, scopeId: "window:settings", instanceId: "settings-view" });
   const prompt = await Promise.race([openedPrompt, opening.then(() => { throw new Error("Activation skipped its settings Ask"); })]);
   assert.equal(prompt.permission, "settings.read"); assert.equal(promptCount(main), 0);
   assert.equal(main.isFocused(), false, "Ask must not steal focus or close the originating view");
   await call(settings.webContents, "permission-response", response(prompt));
   const opened = await opening;
-  const instance = service.viewHost.instances.get(opened.instanceId);
-  assert.equal(instance.owner, settings); assert.equal(instance.state, "open");
-  const read = () => handlers.get("netcatty-plugin-view:execute-command")({ sender: instance.contents }, { command: `${id}.read` });
+  const instance = service.hostDrawnViewHost.instances.get(opened.instanceId);
+  assert.equal(instance.owner, settings); assert.equal(settings.children.length, 0);
+  const read = () => call(settings.webContents, "execute-command", { command: `${id}.read` });
   const asked = nextPrompt(settings); const reading = read(); const commandPrompt = await asked;
   await ready(main, false); // Another renderer's teardown cannot cancel Settings.
   assert.equal(service.permissionDecisionHost.pending.size, 1);
   const foreign = new Window(); foreign.show(); // Same app URL, but unmanaged.
   await assert.rejects(ready(foreign), /sender is invalid/);
-  await assert.rejects(call(instance.contents, "permission-response", response(commandPrompt)), /Untrusted/);
+  const pluginSender = new Contents(); pluginSender.url = "netcatty-plugin://untrusted/index.html"; pluginSender.mainFrame.url = pluginSender.url;
+  await assert.rejects(call(pluginSender, "permission-response", response(commandPrompt)), /Untrusted/);
   const childFrame = { url: settings.webContents.getURL(), parent: settings.webContents.mainFrame };
-  await assert.rejects(handlers.get("netcatty:plugins:permission-ready")({ sender: settings.webContents, senderFrame: childFrame }, { ready: true }), /frame/);
-  await assert.rejects(handlers.get("netcatty:plugins:permission-ready")({ sender: settings.webContents, senderFrame: null }, { ready: true }), /frame/);
-  await assert.rejects(handlers.get("netcatty:plugins:permission-response")({ sender: settings.webContents, senderFrame: childFrame }, response(commandPrompt)), /frame/);
+  await assert.rejects(handlers.get("netcatty:plugins:permission-ready")({ sender: settings.webContents, senderFrame: childFrame }, { ready: true }), /Untrusted|frame/);
+  await assert.rejects(handlers.get("netcatty:plugins:permission-ready")({ sender: settings.webContents, senderFrame: null }, { ready: true }), /Untrusted|frame/);
+  await assert.rejects(handlers.get("netcatty:plugins:permission-response")({ sender: settings.webContents, senderFrame: childFrame }, response(commandPrompt)), /Untrusted|frame/);
   await call(settings.webContents, "permission-response", response(commandPrompt)); assert.equal(await reading, "synthetic greeting");
   await ready(main); main.show(); main.focus();
   const mainPrompt = nextPrompt(main); const mainRead = call(main.webContents, "execute-command", { command: `${id}.read` });
@@ -136,6 +137,6 @@ test("Settings-owned installed view can Ask on activation and commands without a
   assert.equal(await call(settings.webContents, "permission-response", hiddenToken), false, "reopening Settings cannot revive an old decision");
   const closingPrompt = nextPrompt(settings); const cancelled = read(); const rejected = assert.rejects(cancelled, /denied|cancel/i);
   const stale = response(await closingPrompt); settings.destroy(); await rejected;
-  assert.equal(service.permissionDecisionHost.pending.size, 0); assert.equal(service.viewHost.instances.size, 0);
+  assert.equal(service.permissionDecisionHost.pending.size, 0); assert.equal(service.hostDrawnViewHost.instances.size, 0);
   await assert.rejects(call(settings.webContents, "permission-response", stale), /focused unlocked|Untrusted/);
 });

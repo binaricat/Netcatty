@@ -1,0 +1,91 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.hello-world-v2",
+  "name": "hello-world-v2",
+  "displayName": {
+    "en": "Hello World 2",
+    "zh-CN": "你好，世界 2"
+  },
+  "description": "A theme-aware example of plugin view locations. No user data access.",
+  "version": "0.2.0",
+  "publisher": "netcatty",
+  "license": "MIT",
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "features": {
+    "required": [
+      "views.vault-pages",
+      "views.terminal-sidebar"
+    ]
+  },
+  "main": {
+    "browser": "dist/host.js"
+  },
+  "activationEvents": [
+    "onView:com.netcatty.hello-world-v2.vault",
+    "onView:com.netcatty.hello-world-v2.sidebar",
+    "onView:com.netcatty.hello-world-v2.tab",
+    "onView:com.netcatty.hello-world-v2.aside",
+    "onView:com.netcatty.hello-world-v2.panel",
+    "onView:com.netcatty.hello-world-v2.modal"
+  ],
+  "permissions": {
+    "required": [
+      "views"
+    ]
+  },
+  "contributes": {
+    "views": [
+      {
+        "id": "com.netcatty.hello-world-v2.vault",
+        "title": {
+          "en": "Hello · Vault",
+          "zh-CN": "你好 · Vault 页面"
+        },
+        "location": "vault-page"
+      },
+      {
+        "id": "com.netcatty.hello-world-v2.sidebar",
+        "title": {
+          "en": "Hello · Sidebar",
+          "zh-CN": "你好 · 终端侧栏"
+        },
+        "location": "terminal-sidebar"
+      },
+      {
+        "id": "com.netcatty.hello-world-v2.tab",
+        "title": {
+          "en": "Hello · Tab",
+          "zh-CN": "你好 · 独立标签页"
+        },
+        "location": "tab"
+      },
+      {
+        "id": "com.netcatty.hello-world-v2.aside",
+        "title": {
+          "en": "Hello · Aside",
+          "zh-CN": "你好 · 侧边面板"
+        },
+        "location": "aside"
+      },
+      {
+        "id": "com.netcatty.hello-world-v2.panel",
+        "title": {
+          "en": "Hello · Panel",
+          "zh-CN": "你好 · 底部面板"
+        },
+        "location": "panel"
+      },
+      {
+        "id": "com.netcatty.hello-world-v2.modal",
+        "title": {
+          "en": "Hello · Modal",
+          "zh-CN": "你好 · 弹窗"
+        },
+        "location": "modal"
+      }
+    ]
+  }
+}

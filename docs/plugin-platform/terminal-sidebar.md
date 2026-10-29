@@ -7,8 +7,12 @@ Provider subscription, terminal history reader or command execution API.
 
 ## Host-owned navigation
 
-An Extension pages menu in the normal terminal toolbar lists visible pages
-with their plugin source. Selecting one switches the existing focused pane;
+Visible plugin pages also have persistent entries in the side-panel toolbar,
+alongside built-in tools. They support the same ordering, overflow and
+show/hide customization, and reappear after closing and reopening the panel.
+Unavailable contributions are hidden without discarding their saved placement.
+The Extension pages menu in the terminal toolbar remains another entry point.
+Selecting a page switches the existing focused pane;
 selecting an already-open tool focuses that pane. Existing split menus include
 the same contributions and enforce unique tools and the eight-pane limit.
 Host-generated `plugin-view:<namespaced-view-id>` keys cannot replace built-in
@@ -30,45 +34,21 @@ the view context. Internal ownership IDs are used for host state scoping, not
 returned to the page or treated as resource grants. A future selected-session
 data API must establish its own live endpoint authority and permissions.
 
-Changing terminal tabs or workspace focus closes the old native view before
-the new one can receive focus. Session removal, pane close, withdrawal of a
-visible contribution, disable/update/uninstall and runtime loss remove the
-affected page. Unknown saved routes are pruned without opening them; restoring
-a layout never grants the page or any session-data permission. State buckets
-are for the plugin's own UI data, not an isolation boundary against that same
-plugin's already-authorized own-state API. Ordinary KV does not become synced.
+Changing terminal tabs or focused sessions releases the visible surface and
+retains its own logical instance within the bounded cache. Reopening uses the
+matching window/placement/session scope. Pane close changes layout; enabled
+plugin entries remain available. Disable/update/uninstall or runtime loss
+invalidate the affected instances immediately.
 
-PersistentSidePanelPortal moves a stable mount between the actual pane,
-magnification host and hidden parking host. There is no fallback native view
-over the entire terminal layer. Native geometry follows host DOM relocation,
-resize and scrolling; duplicate geometry updates are suppressed. Hidden/inert
-or parked mounts cannot reveal a native view.
+PersistentSidePanelPortal moves the host DOM surface between its actual pane,
+magnification host and hidden parking host. Layout and focus follow the existing
+host pane system; no native geometry or focus bridge is needed. Host dialogs
+appear above the content. Plugin menus use host-owned overlay placement and
+are dismissed when a trusted modal appears.
 
-## Focus and security surfaces
-
-The existing sandbox ViewHost, immutable package/protocol checks, own-command
-and view-state boundaries are reused. Embedded pages start hidden. Host
-dialogs and overlapping portals hide them, and main-process App Lock closes
-them. Escape is host-owned and closes the plugin pane.
-
-Native WebContents focus is reported only to its actual owner's trusted
-renderer using a canonical instance-ID event. It updates the selected pane;
-it does not expose an Electron object to the plugin. Revealing multiple panes
-does not focus all of them: only the host-selected pane can request focus.
-The main process verifies actual owner, visibility, foreground and unlocked
-state before honoring that request. A plugin has no SDK method to invoke the
-host focus bridge. No session or page text is added to focus/audit logs.
-
-## Example and evidence
-
-`com.netcatty.session-scratchpad` 0.1.0 asks only for its own `views`. It saves,
-reopens and clears explicitly typed synthetic text. Package instructions and
-minimal native actions are in its README. Repository tests use real split
-tree, layout state, persistent portal, launcher and embedded-view components;
-host tests cover owner-bound focus, hidden/locked refusal and withdrawal.
-Feature and permission admission, limits, old APIs and previous Vault/command
-fixes are checked on the same stack. Independent review, exact-SHA CI and
-parent native QA remain separate acceptance gates recorded on the Draft PR.
-
-ThemePack, selected context/terminal drafts and SFTP handles remain subsequent
-bounded stages. Adding a sidebar page does not count as implementing them.
+See [host-rendered UI](./host-rendered-ui.md) for authoring, state limits and
+security boundaries. The `session-scratchpad`, `hello-world-v2` and
+`hello-react-host` examples use this placement. Component tests exercise the
+real split tree, toolbar ordering, portal relocation, session switching and
+withdrawal. The Electron examples exercise visible controls through the shared
+host surface. Neither registration nor state retention grants session access.

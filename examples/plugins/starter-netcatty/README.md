@@ -10,7 +10,7 @@ From the repository root:
 ```sh
 npm run build:plugin-packages
 node packages/plugin-cli/dist/cli.js validate examples/plugins/starter-netcatty
-node packages/plugin-cli/dist/cli.js pack examples/plugins/starter-netcatty --out /tmp/starter-netcatty.ncpkg
+node packages/plugin-cli/dist/cli.js pack examples/plugins/starter-netcatty/.package --out /tmp/starter-netcatty.ncpkg
 ```
 
 Start the actual app normally with a fresh test profile; no development flag is
@@ -36,4 +36,11 @@ requires API `>=0.1.0-internal.1 <0.2.0` and `metadata.brand-icon`.
 Older Starter 0.1.1 packages remain compatible with the new host.
 See [brand icon author instructions](../../../docs/plugin-platform/plugin-icons.md).
 
-The page subscribes to `window.netcattyView.onDidChangeEnvironment()` in `theme.js`. It follows the seven public HSL theme variables, including accent changes, without reading host settings or DOM. The subscription is disposed on page hide.
+
+## Current UI build
+
+The page now uses the host-rendered contract. Run `node build.mjs` in this
+example directory, then package `.package/` with the plugin CLI. `host.js`
+registers ordinary DOM views; `view.html` and `view.css` are bundled source
+templates. Theme values are inherited from Netcatty. There is no separate page
+preload or `window.netcattyView` API. See `docs/plugin-platform/host-rendered-ui.md`.

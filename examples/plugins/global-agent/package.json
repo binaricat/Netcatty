@@ -1,1 +1,9 @@
-{"name":"@netcatty/example-global-agent-plugin","version":"0.1.0","private":true,"type":"module","scripts":{"build":"node build.mjs"}}
+{
+  "name": "@netcatty/example-global-agent-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}

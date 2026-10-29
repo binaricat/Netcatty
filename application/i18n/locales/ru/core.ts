@@ -1266,6 +1266,7 @@ export const ruCoreMessages: Messages = {
   "settings.plugins.sources.local": "Local import",
   "settings.plugins.sources.all": "All sources",
   "settings.plugins.title": "Плагины",
+  "settings.plugins.configuration": "Настройки плагина",
   "settings.plugins.description": "Управляйте плагинами и просматривайте каталог.",
   'settings.plugins.loading': 'Загрузка настроек плагинов…',
   'settings.plugins.empty': 'Включённые плагины не предоставляют настройки.',

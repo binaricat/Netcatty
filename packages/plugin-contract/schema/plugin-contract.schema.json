@@ -7,19 +7,36 @@
   "$defs": {
     "JsonPrimitive": {
       "oneOf": [
-        { "type": "string" },
-        { "type": "number" },
-        { "type": "boolean" },
-        { "type": "null" }
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "JsonValue": {
       "oneOf": [
-        { "$ref": "#/$defs/JsonPrimitive" },
-        { "type": "array", "items": { "$ref": "#/$defs/JsonValue" } },
+        {
+          "$ref": "#/$defs/JsonPrimitive"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        },
         {
           "type": "object",
-          "additionalProperties": { "$ref": "#/$defs/JsonValue" }
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          }
         }
       ]
     },
@@ -143,10 +160,20 @@
     "SecretRef": {
       "description": "A host-issued reference to secret material. The random identifier is opaque and never sufficient authority on its own. The non-secret key binds permission authorization to the packaged manifest resource; privileged consumers must revalidate identifier ownership, key binding, and operation scope.",
       "type": "object",
-      "required": ["kind", "id", "key"],
+      "required": [
+        "kind",
+        "id",
+        "key"
+      ],
       "properties": {
-        "kind": { "const": "secret" },
-        "id": { "type": "string", "minLength": 16, "maxLength": 256 },
+        "kind": {
+          "const": "secret"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 256
+        },
         "key": {
           "type": "string",
           "minLength": 1,
@@ -159,22 +186,48 @@
     "CredentialRef": {
       "description": "An opaque host-issued reference to a Netcatty-owned credential. The host validates ownership and provider-operation scope before issuing a plaintext lease.",
       "type": "object",
-      "required": ["kind", "id"],
+      "required": [
+        "kind",
+        "id"
+      ],
       "properties": {
-        "kind": { "const": "credential" },
-        "id": { "type": "string", "minLength": 16, "maxLength": 256 }
+        "kind": {
+          "const": "credential"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 256
+        }
       },
       "additionalProperties": false
     },
     "SecretLeaseRef": {
       "description": "An opaque, operation-bound, single-consumption lease. Only a host capability broker can consume it after revalidating runtime identity and operation scope.",
       "type": "object",
-      "required": ["kind", "id", "operationId", "expiresAt"],
+      "required": [
+        "kind",
+        "id",
+        "operationId",
+        "expiresAt"
+      ],
       "properties": {
-        "kind": { "const": "secret-lease" },
-        "id": { "type": "string", "minLength": 32, "maxLength": 256 },
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "expiresAt": { "$ref": "#/$defs/SafePositiveInteger" }
+        "kind": {
+          "const": "secret-lease"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 256
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/SafePositiveInteger"
+        }
       },
       "additionalProperties": false
     },
@@ -755,7 +808,9 @@
       "const": "commands.interactive"
     },
     "InteractiveCommandLimits": {
-      "const": { "timeoutMs": 180000 }
+      "const": {
+        "timeoutMs": 180000
+      }
     },
     "HostQuickPickItem": {
       "type": "object",
@@ -831,7 +886,9 @@
           "maxLength": 128,
           "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
         },
-        "initialValue": { "$ref": "#/$defs/HostSingleLineInputText" }
+        "initialValue": {
+          "$ref": "#/$defs/HostSingleLineInputText"
+        }
       },
       "additionalProperties": false
     },
@@ -1042,7 +1099,13 @@
         "request"
       ],
       "properties": {
-        "permissionMode": { "enum": ["allow", "ask", "deny"] },
+        "permissionMode": {
+          "enum": [
+            "allow",
+            "ask",
+            "deny"
+          ]
+        },
         "requestId": {
           "type": "string",
           "maxLength": 128
@@ -1684,12 +1747,22 @@
     },
     "LocalizedText": {
       "oneOf": [
-        { "type": "string", "minLength": 1, "maxLength": 512 },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
         {
           "type": "object",
           "minProperties": 1,
-          "propertyNames": { "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$" },
-          "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 512 }
+          "propertyNames": {
+            "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
         }
       ]
     },
@@ -1801,53 +1874,115 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 8192,
-      "not": { "const": "*" }
+      "not": {
+        "const": "*"
+      }
     },
     "PermissionResourceKind": {
       "description": "Whether a canonical resource grant covers only that resource or a filesystem directory subtree.",
       "type": "string",
-      "enum": ["exact", "directory"]
+      "enum": [
+        "exact",
+        "directory"
+      ]
     },
     "PermissionResourceDeclaration": {
       "type": "object",
-      "required": ["permission", "resources"],
+      "required": [
+        "permission",
+        "resources"
+      ],
       "properties": {
-        "permission": { "$ref": "#/$defs/PluginPermission" },
+        "permission": {
+          "$ref": "#/$defs/PluginPermission"
+        },
         "resources": {
           "type": "array",
           "minItems": 1,
           "maxItems": 128,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/PermissionResource" }
+          "items": {
+            "$ref": "#/$defs/PermissionResource"
+          }
         },
-        "reason": { "type": "string", "maxLength": 1024 }
+        "reason": {
+          "type": "string",
+          "maxLength": 1024
+        }
       },
-      "if": { "properties": { "permission": { "const": "network.stream" } } },
-      "then": { "properties": { "resources": { "type": "array", "items": { "$ref": "#/$defs/ByteStreamEndpoint" } } } },
+      "if": {
+        "properties": {
+          "permission": {
+            "const": "network.stream"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ByteStreamEndpoint"
+            }
+          }
+        }
+      },
       "additionalProperties": false
     },
     "PermissionDeclaration": {
       "oneOf": [
-        { "$ref": "#/$defs/PluginPermission", "not": { "const": "network.stream" } },
-        { "$ref": "#/$defs/PermissionResourceDeclaration" }
+        {
+          "$ref": "#/$defs/PluginPermission",
+          "not": {
+            "const": "network.stream"
+          }
+        },
+        {
+          "$ref": "#/$defs/PermissionResourceDeclaration"
+        }
       ]
     },
     "RequiredPermissionResourceDeclaration": {
       "type": "object",
-      "required": ["permission", "resources"],
+      "required": [
+        "permission",
+        "resources"
+      ],
       "properties": {
-        "permission": { "$ref": "#/$defs/ResourceScopedPermission" },
+        "permission": {
+          "$ref": "#/$defs/ResourceScopedPermission"
+        },
         "resources": {
           "type": "array",
           "minItems": 1,
           "maxItems": 128,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/BoundedPermissionResource" }
+          "items": {
+            "$ref": "#/$defs/BoundedPermissionResource"
+          }
         },
-        "reason": { "type": "string", "maxLength": 1024 }
+        "reason": {
+          "type": "string",
+          "maxLength": 1024
+        }
       },
-      "if": { "properties": { "permission": { "const": "network.stream" } } },
-      "then": { "properties": { "resources": { "type": "array", "items": { "$ref": "#/$defs/ByteStreamEndpoint" } } } },
+      "if": {
+        "properties": {
+          "permission": {
+            "const": "network.stream"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ByteStreamEndpoint"
+            }
+          }
+        }
+      },
       "additionalProperties": false
     },
     "RequiredPermissionDeclaration": {
@@ -1873,12 +2008,16 @@
         "required": {
           "type": "array",
           "maxItems": 64,
-          "items": { "$ref": "#/$defs/RequiredPermissionDeclaration" }
+          "items": {
+            "$ref": "#/$defs/RequiredPermissionDeclaration"
+          }
         },
         "optional": {
           "type": "array",
           "maxItems": 64,
-          "items": { "$ref": "#/$defs/PermissionDeclaration" }
+          "items": {
+            "$ref": "#/$defs/PermissionDeclaration"
+          }
         }
       },
       "additionalProperties": false
@@ -1915,19 +2054,33 @@
     },
     "PluginEngines": {
       "type": "object",
-      "required": ["netcatty", "api"],
+      "required": [
+        "netcatty",
+        "api"
+      ],
       "properties": {
-        "netcatty": { "$ref": "#/$defs/SemverRange" },
-        "api": { "$ref": "#/$defs/SemverRange" }
+        "netcatty": {
+          "$ref": "#/$defs/SemverRange"
+        },
+        "api": {
+          "$ref": "#/$defs/SemverRange"
+        }
       },
       "additionalProperties": false
     },
     "PluginEngineHeader": {
       "type": "object",
-      "required": ["netcatty", "api"],
+      "required": [
+        "netcatty",
+        "api"
+      ],
       "properties": {
-        "netcatty": { "$ref": "#/$defs/SemverRange" },
-        "api": { "$ref": "#/$defs/SemverRange" }
+        "netcatty": {
+          "$ref": "#/$defs/SemverRange"
+        },
+        "api": {
+          "$ref": "#/$defs/SemverRange"
+        }
       },
       "additionalProperties": true
     },
@@ -1938,20 +2091,26 @@
           "type": "array",
           "maxItems": 128,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/FeatureId" }
+          "items": {
+            "$ref": "#/$defs/FeatureId"
+          }
         },
         "optional": {
           "type": "array",
           "maxItems": 128,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/FeatureId" }
+          "items": {
+            "$ref": "#/$defs/FeatureId"
+          }
         }
       },
       "additionalProperties": false
     },
     "ActivationEvent": {
       "oneOf": [
-        { "const": "onStartupFinished" },
+        {
+          "const": "onStartupFinished"
+        },
         {
           "type": "string",
           "maxLength": 256,
@@ -1967,9 +2126,14 @@
     },
     "ThemeIcon": {
       "type": "object",
-      "required": ["kind", "name"],
+      "required": [
+        "kind",
+        "name"
+      ],
       "properties": {
-        "kind": { "const": "theme" },
+        "kind": {
+          "const": "theme"
+        },
         "name": {
           "type": "string",
           "minLength": 1,
@@ -1981,23 +2145,42 @@
     },
     "PackageIcon": {
       "type": "object",
-      "required": ["kind", "light"],
+      "required": [
+        "kind",
+        "light"
+      ],
       "properties": {
-        "kind": { "const": "package" },
-        "light": { "$ref": "#/$defs/RelativePackagePath" },
-        "dark": { "$ref": "#/$defs/RelativePackagePath" }
+        "kind": {
+          "const": "package"
+        },
+        "light": {
+          "$ref": "#/$defs/RelativePackagePath"
+        },
+        "dark": {
+          "$ref": "#/$defs/RelativePackagePath"
+        }
       },
       "additionalProperties": false
     },
     "IconReference": {
       "oneOf": [
-        { "$ref": "#/$defs/ThemeIcon" },
-        { "$ref": "#/$defs/PackageIcon" }
+        {
+          "$ref": "#/$defs/ThemeIcon"
+        },
+        {
+          "$ref": "#/$defs/PackageIcon"
+        }
       ]
     },
     "SettingScope": {
       "type": "string",
-      "enum": ["application", "workspace", "host", "session", "device"]
+      "enum": [
+        "application",
+        "workspace",
+        "host",
+        "session",
+        "device"
+      ]
     },
     "SettingControl": {
       "type": "string",
@@ -2022,69 +2205,177 @@
     },
     "SettingOption": {
       "type": "object",
-      "required": ["value", "label"],
+      "required": [
+        "value",
+        "label"
+      ],
       "properties": {
-        "value": { "type": "string", "maxLength": 256 },
-        "label": { "$ref": "#/$defs/LocalizedText" },
-        "description": { "$ref": "#/$defs/LocalizedText" }
+        "value": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "label": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "description": {
+          "$ref": "#/$defs/LocalizedText"
+        }
       },
       "additionalProperties": false
     },
     "SettingContribution": {
       "type": "object",
-      "required": ["id", "label", "control", "scope"],
+      "required": [
+        "id",
+        "label",
+        "control",
+        "scope"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/ContributionId" },
-        "label": { "$ref": "#/$defs/LocalizedText" },
-        "description": { "$ref": "#/$defs/LocalizedText" },
-        "control": { "$ref": "#/$defs/SettingControl" },
-        "scope": { "$ref": "#/$defs/SettingScope" },
-        "default": { "$ref": "#/$defs/JsonValue" },
-        "secret": { "type": "boolean", "default": false },
-        "required": { "type": "boolean", "default": false },
+        "id": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "label": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "description": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "control": {
+          "$ref": "#/$defs/SettingControl"
+        },
+        "scope": {
+          "$ref": "#/$defs/SettingScope"
+        },
+        "default": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "secret": {
+          "type": "boolean",
+          "default": false
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
         "options": {
           "type": "array",
           "maxItems": 256,
-          "items": { "$ref": "#/$defs/SettingOption" }
+          "items": {
+            "$ref": "#/$defs/SettingOption"
+          }
         },
-        "minimum": { "type": "number" },
-        "maximum": { "type": "number" },
-        "step": { "type": "number", "exclusiveMinimum": 0 },
-        "pattern": { "type": "string", "maxLength": 512 },
-        "placeholder": { "$ref": "#/$defs/LocalizedText" },
-        "when": { "$ref": "#/$defs/ContextKeyExpression" },
-        "restartRequired": { "type": "boolean", "default": false },
-        "sync": { "type": "boolean", "default": false },
-        "sortable": { "type": "boolean", "default": false },
-        "valueSchema": { "$ref": "#/$defs/JsonValue" }
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        },
+        "step": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "pattern": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "placeholder": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "when": {
+          "$ref": "#/$defs/ContextKeyExpression"
+        },
+        "restartRequired": {
+          "type": "boolean",
+          "default": false
+        },
+        "sync": {
+          "type": "boolean",
+          "default": false
+        },
+        "sortable": {
+          "type": "boolean",
+          "default": false
+        },
+        "valueSchema": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "group": {
+          "$ref": "#/$defs/LocalizedText",
+          "description": "Host-rendered section heading. Settings and groups retain declaration order; no custom markup or styles."
+        }
       },
       "additionalProperties": false
     },
     "CommandContribution": {
       "type": "object",
-      "required": ["id", "title"],
+      "required": [
+        "id",
+        "title"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/ContributionId" },
-        "title": { "$ref": "#/$defs/LocalizedText" },
-        "category": { "$ref": "#/$defs/LocalizedText" },
-        "description": { "$ref": "#/$defs/LocalizedText" },
-        "icon": { "$ref": "#/$defs/IconReference" },
-        "enablement": { "$ref": "#/$defs/ContextKeyExpression" },
-        "interactive": { "type": "boolean", "default": false, "description": "Require commands.interactive for this command's fixed bounded host interaction budget. Does not grant UI or clipboard permissions." }
+        "id": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "title": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "category": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "description": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "icon": {
+          "$ref": "#/$defs/IconReference"
+        },
+        "enablement": {
+          "$ref": "#/$defs/ContextKeyExpression"
+        },
+        "interactive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Require commands.interactive for this command's fixed bounded host interaction budget. Does not grant UI or clipboard permissions."
+        }
       },
       "additionalProperties": false
     },
     "KeybindingContribution": {
       "type": "object",
-      "required": ["command", "key"],
+      "required": [
+        "command",
+        "key"
+      ],
       "properties": {
-        "command": { "$ref": "#/$defs/ContributionId" },
-        "key": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "mac": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "linux": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "windows": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "when": { "$ref": "#/$defs/ContextKeyExpression" },
-        "args": { "$ref": "#/$defs/JsonValue" }
+        "command": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "mac": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "linux": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "windows": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "when": {
+          "$ref": "#/$defs/ContextKeyExpression"
+        },
+        "args": {
+          "$ref": "#/$defs/JsonValue"
+        }
       },
       "additionalProperties": false
     },
@@ -2101,25 +2392,59 @@
     },
     "MenuContribution": {
       "type": "object",
-      "required": ["command", "location"],
+      "required": [
+        "command",
+        "location"
+      ],
       "properties": {
-        "command": { "$ref": "#/$defs/ContributionId" },
-        "alt": { "$ref": "#/$defs/ContributionId" },
-        "location": { "$ref": "#/$defs/MenuLocation" },
-        "title": { "$ref": "#/$defs/LocalizedText" },
-        "icon": { "$ref": "#/$defs/IconReference" },
-        "group": { "type": "string", "maxLength": 128 },
-        "order": { "type": "number" },
-        "when": { "$ref": "#/$defs/ContextKeyExpression" },
-        "enablement": { "$ref": "#/$defs/ContextKeyExpression" },
-        "checked": { "$ref": "#/$defs/ContextKeyExpression" },
-        "showKeybinding": { "type": "boolean", "default": true }
+        "command": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "alt": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "location": {
+          "$ref": "#/$defs/MenuLocation"
+        },
+        "title": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "icon": {
+          "$ref": "#/$defs/IconReference"
+        },
+        "group": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "order": {
+          "type": "number"
+        },
+        "when": {
+          "$ref": "#/$defs/ContextKeyExpression"
+        },
+        "enablement": {
+          "$ref": "#/$defs/ContextKeyExpression"
+        },
+        "checked": {
+          "$ref": "#/$defs/ContextKeyExpression"
+        },
+        "showKeybinding": {
+          "type": "boolean",
+          "default": true
+        }
       },
       "additionalProperties": false
     },
     "ViewLocation": {
       "type": "string",
-      "enum": ["aside", "panel", "tab", "modal", "settings", "vault-page", "terminal-sidebar"]
+      "enum": [
+        "aside",
+        "panel",
+        "tab",
+        "modal",
+        "vault-page",
+        "terminal-sidebar"
+      ]
     },
     "VaultPagesFeature": {
       "const": "views.vault-pages"
@@ -2127,25 +2452,264 @@
     "TerminalSidebarFeature": {
       "const": "views.terminal-sidebar"
     },
-    "PluginViewFocusEvent": {
+    "PluginViewResourceRequest": {
       "type": "object",
-      "required": ["instanceId"],
-      "properties": { "instanceId": { "type": "string", "minLength": 1, "maxLength": 128 } },
+      "required": [
+        "instanceId",
+        "path"
+      ],
+      "properties": {
+        "instanceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "path": {
+          "$ref": "#/$defs/RelativePackagePath"
+        }
+      },
       "additionalProperties": false
     },
-    "PluginViewFocusRequest": { "$ref": "#/$defs/PluginViewFocusEvent" },
+    "PluginViewResourceResult": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 5592500,
+          "pattern": "^data:image/png;base64,"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostDrawnViewsFeature": {
+      "const": "views.host-drawn"
+    },
+    "HostDrawnViewMessage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "instanceId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "host-ui.open"
+            },
+            "instanceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "stateScope": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "instanceId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "host-ui.close"
+            },
+            "instanceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "instanceId",
+            "sequence",
+            "mutations",
+            "css"
+          ],
+          "properties": {
+            "kind": {
+              "const": "host-ui.update"
+            },
+            "instanceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "acknowledgedEvent": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "mutations": {
+              "type": "array",
+              "maxItems": 2048,
+              "items": {
+                "$ref": "#/$defs/JsonValue"
+              }
+            },
+            "css": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "instanceId",
+            "event"
+          ],
+          "properties": {
+            "kind": {
+              "const": "host-ui.event"
+            },
+            "instanceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "event": {
+              "$ref": "#/$defs/HostDrawnViewEvent"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "HostDrawnViewEvent": {
+      "type": "object",
+      "required": [
+        "nodeId",
+        "type"
+      ],
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "type": {
+          "enum": [
+            "click",
+            "input",
+            "change",
+            "keydown",
+            "keyup",
+            "focusin",
+            "focusout",
+            "compositionstart",
+            "compositionupdate",
+            "compositionend",
+            "dismiss",
+            "submit",
+            "reset"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "checked": {
+          "type": "boolean"
+        },
+        "eventId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "key": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "ctrlKey": {
+          "type": "boolean"
+        },
+        "metaKey": {
+          "type": "boolean"
+        },
+        "altKey": {
+          "type": "boolean"
+        },
+        "shiftKey": {
+          "type": "boolean"
+        },
+        "values": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginViewFocusEvent": {
+      "type": "object",
+      "required": [
+        "instanceId"
+      ],
+      "properties": {
+        "instanceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginViewFocusRequest": {
+      "$ref": "#/$defs/PluginViewFocusEvent"
+    },
     "ViewContribution": {
       "type": "object",
-      "required": ["id", "title", "location", "entry"],
+      "required": [
+        "id",
+        "title",
+        "location"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/ContributionId" },
-        "title": { "$ref": "#/$defs/LocalizedText" },
-        "location": { "$ref": "#/$defs/ViewLocation" },
-        "entry": { "$ref": "#/$defs/RelativePackagePath" },
-        "icon": { "$ref": "#/$defs/IconReference" },
-        "order": { "type": "number" },
-        "when": { "$ref": "#/$defs/ContextKeyExpression" },
-        "retainContextWhenHidden": { "type": "boolean", "default": false }
+        "id": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "title": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "location": {
+          "$ref": "#/$defs/ViewLocation"
+        },
+        "icon": {
+          "$ref": "#/$defs/IconReference"
+        },
+        "order": {
+          "type": "number"
+        },
+        "when": {
+          "$ref": "#/$defs/ContextKeyExpression"
+        }
       },
       "additionalProperties": false
     },
@@ -2171,120 +2735,292 @@
     },
     "ProviderContribution": {
       "type": "object",
-      "required": ["id", "label", "kind"],
+      "required": [
+        "id",
+        "label",
+        "kind"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/ContributionId" },
-        "label": { "$ref": "#/$defs/LocalizedText" },
-        "description": { "$ref": "#/$defs/LocalizedText" },
-        "kind": { "$ref": "#/$defs/ProviderKind" },
+        "id": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "label": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "description": {
+          "$ref": "#/$defs/LocalizedText"
+        },
+        "kind": {
+          "$ref": "#/$defs/ProviderKind"
+        },
         "capabilities": {
           "type": "array",
           "maxItems": 64,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/FeatureId" }
+          "items": {
+            "$ref": "#/$defs/FeatureId"
+          }
         },
-        "configurationSchema": { "$ref": "#/$defs/JsonValue" }
+        "configurationSchema": {
+          "$ref": "#/$defs/JsonValue"
+        }
       },
       "additionalProperties": false
     },
     "ProviderValidationIssue": {
       "type": "object",
-      "required": ["severity", "message"],
+      "required": [
+        "severity",
+        "message"
+      ],
       "properties": {
-        "path": { "type": "string", "maxLength": 1024 },
-        "severity": { "type": "string", "enum": ["warning", "error"] },
-        "message": { "type": "string", "minLength": 1, "maxLength": 2048 }
+        "path": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "warning",
+            "error"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
       },
       "additionalProperties": false
     },
     "ConnectionConfigurationPayload": {
       "type": "object",
-      "required": ["configuration"],
-      "properties": { "configuration": { "$ref": "#/$defs/JsonValue" } },
+      "required": [
+        "configuration"
+      ],
+      "properties": {
+        "configuration": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
       "additionalProperties": false
     },
     "ConnectionValidateResult": {
       "type": "object",
-      "required": ["valid", "issues"],
+      "required": [
+        "valid",
+        "issues"
+      ],
       "properties": {
-        "valid": { "type": "boolean" },
-        "issues": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/ProviderValidationIssue" } }
+        "valid": {
+          "type": "boolean"
+        },
+        "issues": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/ProviderValidationIssue"
+          }
+        }
       },
       "additionalProperties": false
     },
     "ConnectionProbeResult": {
       "type": "object",
-      "required": ["available"],
+      "required": [
+        "available"
+      ],
       "properties": {
-        "available": { "type": "boolean" },
-        "message": { "type": "string", "maxLength": 2048 },
+        "available": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2048
+        },
         "capabilities": {
           "type": "object",
           "maxProperties": 64,
-          "additionalProperties": { "$ref": "#/$defs/JsonValue" }
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          }
         }
       },
       "additionalProperties": false
     },
     "ConnectionOpenPayload": {
       "type": "object",
-      "required": ["configuration", "operationId", "columns", "rows", "inputStreamId", "outputStreamId", "windowBytes"],
+      "required": [
+        "configuration",
+        "operationId",
+        "columns",
+        "rows",
+        "inputStreamId",
+        "outputStreamId",
+        "windowBytes"
+      ],
       "properties": {
-        "configuration": { "$ref": "#/$defs/JsonValue" },
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "columns": { "type": "integer", "minimum": 1, "maximum": 16384 },
-        "rows": { "type": "integer", "minimum": 1, "maximum": 16384 },
-        "inputStreamId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "outputStreamId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "windowBytes": { "type": "integer", "minimum": 1024, "maximum": 16777216 },
+        "configuration": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "inputStreamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "outputStreamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "windowBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 16777216
+        },
         "credential": {
           "oneOf": [
-            { "$ref": "#/$defs/SecretRef" },
-            { "$ref": "#/$defs/CredentialRef" },
-            { "$ref": "#/$defs/SecretLeaseRef" }
+            {
+              "$ref": "#/$defs/SecretRef"
+            },
+            {
+              "$ref": "#/$defs/CredentialRef"
+            },
+            {
+              "$ref": "#/$defs/SecretLeaseRef"
+            }
           ]
         },
-        "authenticationProviderId": { "$ref": "#/$defs/ContributionId" }
+        "authenticationProviderId": {
+          "$ref": "#/$defs/ContributionId"
+        }
       },
       "additionalProperties": false
     },
     "ConnectionOpenResult": {
       "type": "object",
-      "required": ["connectionId", "status"],
+      "required": [
+        "connectionId",
+        "status"
+      ],
       "properties": {
-        "connectionId": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "status": { "type": "string", "enum": ["connecting", "connected"] },
-        "diagnostics": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/ProviderValidationIssue" } }
+        "connectionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "connecting",
+            "connected"
+          ]
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/ProviderValidationIssue"
+          }
+        }
       },
       "additionalProperties": false
     },
     "ConnectionControlPayload": {
       "type": "object",
-      "required": ["connectionId", "operationId"],
+      "required": [
+        "connectionId",
+        "operationId"
+      ],
       "properties": {
-        "connectionId": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "connectionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       },
       "additionalProperties": false
     },
     "ConnectionResizePayload": {
       "type": "object",
-      "required": ["connectionId", "operationId", "columns", "rows"],
+      "required": [
+        "connectionId",
+        "operationId",
+        "columns",
+        "rows"
+      ],
       "properties": {
-        "connectionId": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "columns": { "type": "integer", "minimum": 1, "maximum": 16384 },
-        "rows": { "type": "integer", "minimum": 1, "maximum": 16384 }
+        "connectionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        }
       },
       "additionalProperties": false
     },
     "ConnectionSignalPayload": {
       "type": "object",
-      "required": ["connectionId", "operationId", "signal"],
+      "required": [
+        "connectionId",
+        "operationId",
+        "signal"
+      ],
       "properties": {
-        "connectionId": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "signal": { "type": "string", "enum": ["interrupt", "terminate", "kill", "eof", "break"] }
+        "connectionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "signal": {
+          "type": "string",
+          "enum": [
+            "interrupt",
+            "terminate",
+            "kill",
+            "eof",
+            "break"
+          ]
+        }
       },
       "additionalProperties": false
     },
@@ -2294,12 +3030,34 @@
     },
     "ConnectionStatusResult": {
       "type": "object",
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "properties": {
-        "status": { "type": "string", "enum": ["connecting", "connected", "reconnecting", "closed", "error"] },
-        "message": { "type": "string", "maxLength": 2048 },
-        "retryable": { "type": "boolean" },
-        "diagnostics": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/ProviderValidationIssue" } }
+        "status": {
+          "type": "string",
+          "enum": [
+            "connecting",
+            "connected",
+            "reconnecting",
+            "closed",
+            "error"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/ProviderValidationIssue"
+          }
+        }
       },
       "additionalProperties": false
     },
@@ -2307,76 +3065,217 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["id", "kind", "title"],
+          "required": [
+            "id",
+            "kind",
+            "title"
+          ],
           "properties": {
-            "id": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "kind": { "type": "string", "enum": ["text", "password", "otp"] },
-            "title": { "type": "string", "minLength": 1, "maxLength": 512 },
-            "message": { "type": "string", "maxLength": 2048 },
-            "placeholder": { "type": "string", "maxLength": 512 }
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "text",
+                "password",
+                "otp"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "placeholder": {
+              "type": "string",
+              "maxLength": 512
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["id", "kind", "title", "choices"],
+          "required": [
+            "id",
+            "kind",
+            "title",
+            "choices"
+          ],
           "properties": {
-            "id": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "kind": { "const": "choice" },
-            "title": { "type": "string", "minLength": 1, "maxLength": 512 },
-            "message": { "type": "string", "maxLength": 2048 },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "kind": {
+              "const": "choice"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 2048
+            },
             "choices": {
-              "type": "array", "minItems": 1, "maxItems": 64,
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
               "items": {
-                "type": "object", "required": ["id", "label"],
+                "type": "object",
+                "required": [
+                  "id",
+                  "label"
+                ],
                 "properties": {
-                  "id": { "type": "string", "minLength": 1, "maxLength": 128 },
-                  "label": { "type": "string", "minLength": 1, "maxLength": 512 },
-                  "description": { "type": "string", "maxLength": 2048 }
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2048
+                  }
                 },
                 "additionalProperties": false
               }
             },
-            "multiple": { "type": "boolean" }
+            "multiple": {
+              "type": "boolean"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["id", "kind", "title"],
+          "required": [
+            "id",
+            "kind",
+            "title"
+          ],
           "properties": {
-            "id": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "kind": { "const": "confirmation" },
-            "title": { "type": "string", "minLength": 1, "maxLength": 512 },
-            "message": { "type": "string", "maxLength": 2048 },
-            "confirmLabel": { "type": "string", "maxLength": 128 },
-            "cancelLabel": { "type": "string", "maxLength": 128 }
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "kind": {
+              "const": "confirmation"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "confirmLabel": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "cancelLabel": {
+              "type": "string",
+              "maxLength": 128
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["id", "kind", "title", "url"],
+          "required": [
+            "id",
+            "kind",
+            "title",
+            "url"
+          ],
           "properties": {
-            "id": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "kind": { "const": "browser" },
-            "title": { "type": "string", "minLength": 1, "maxLength": 512 },
-            "url": { "type": "string", "format": "uri", "maxLength": 8192 },
-            "callbackUri": { "type": "string", "format": "uri", "maxLength": 8192 }
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "kind": {
+              "const": "browser"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 8192
+            },
+            "callbackUri": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 8192
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["id", "kind", "title", "verificationUri", "userCode", "expiresAt"],
+          "required": [
+            "id",
+            "kind",
+            "title",
+            "verificationUri",
+            "userCode",
+            "expiresAt"
+          ],
           "properties": {
-            "id": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "kind": { "const": "deviceCode" },
-            "title": { "type": "string", "minLength": 1, "maxLength": 512 },
-            "verificationUri": { "type": "string", "format": "uri", "maxLength": 8192 },
-            "userCode": { "type": "string", "minLength": 1, "maxLength": 256 },
-            "expiresAt": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-            "intervalMs": { "type": "integer", "minimum": 100, "maximum": 300000 }
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "kind": {
+              "const": "deviceCode"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "verificationUri": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 8192
+            },
+            "userCode": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "expiresAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "intervalMs": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 300000
+            }
           },
           "additionalProperties": false
         }
@@ -2384,27 +3283,79 @@
     },
     "AuthenticationBeginPayload": {
       "type": "object",
-      "required": ["operationId", "connectionProviderId", "configuration"],
+      "required": [
+        "operationId",
+        "connectionProviderId",
+        "configuration"
+      ],
       "properties": {
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "connectionProviderId": { "$ref": "#/$defs/ContributionId" },
-        "configuration": { "$ref": "#/$defs/JsonValue" },
-        "credential": { "oneOf": [{ "$ref": "#/$defs/SecretRef" }, { "$ref": "#/$defs/CredentialRef" }, { "$ref": "#/$defs/SecretLeaseRef" }] }
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "connectionProviderId": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "configuration": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "credential": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SecretRef"
+            },
+            {
+              "$ref": "#/$defs/CredentialRef"
+            },
+            {
+              "$ref": "#/$defs/SecretLeaseRef"
+            }
+          ]
+        }
       },
       "additionalProperties": false
     },
     "AuthenticationResponsePayload": {
       "type": "object",
-      "required": ["operationId", "challengeId", "response"],
+      "required": [
+        "operationId",
+        "challengeId",
+        "response"
+      ],
       "properties": {
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "challengeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "challengeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
         "response": {
           "oneOf": [
-            { "type": "string", "minLength": 1, "maxLength": 8192 },
-            { "type": "boolean" },
-            { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "maxLength": 128 } },
-            { "$ref": "#/$defs/SecretLeaseRef" }
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            {
+              "$ref": "#/$defs/SecretLeaseRef"
+            }
           ]
         }
       },
@@ -2414,37 +3365,71 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["status", "challenge"],
+          "required": [
+            "status",
+            "challenge"
+          ],
           "properties": {
-            "status": { "const": "challenge" },
-            "challenge": { "$ref": "#/$defs/AuthenticationChallenge" }
+            "status": {
+              "const": "challenge"
+            },
+            "challenge": {
+              "$ref": "#/$defs/AuthenticationChallenge"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["status"],
+          "required": [
+            "status"
+          ],
           "properties": {
-            "status": { "const": "authenticated" },
-            "credential": { "oneOf": [{ "$ref": "#/$defs/SecretRef" }, { "$ref": "#/$defs/CredentialRef" }] }
+            "status": {
+              "const": "authenticated"
+            },
+            "credential": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SecretRef"
+                },
+                {
+                  "$ref": "#/$defs/CredentialRef"
+                }
+              ]
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["status"],
+          "required": [
+            "status"
+          ],
           "properties": {
-            "status": { "const": "cancelled" },
-            "message": { "type": "string", "maxLength": 2048 }
+            "status": {
+              "const": "cancelled"
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 2048
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["status"],
+          "required": [
+            "status"
+          ],
           "properties": {
-            "status": { "const": "failed" },
-            "message": { "type": "string", "maxLength": 2048 }
+            "status": {
+              "const": "failed"
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 2048
+            }
           },
           "additionalProperties": false
         }
@@ -2452,15 +3437,32 @@
     },
     "ImporterDetectPayload": {
       "type": "object",
-      "required": ["sample"],
+      "required": [
+        "sample"
+      ],
       "properties": {
-        "fileName": { "type": "string", "maxLength": 1024 },
-        "mediaType": { "type": "string", "maxLength": 256 },
+        "fileName": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "mediaType": {
+          "type": "string",
+          "maxLength": 256
+        },
         "sample": {
-          "type": "object", "required": ["encoding", "data"],
+          "type": "object",
+          "required": [
+            "encoding",
+            "data"
+          ],
           "properties": {
-            "encoding": { "const": "base64" },
-            "data": { "type": "string", "maxLength": 174764 }
+            "encoding": {
+              "const": "base64"
+            },
+            "data": {
+              "type": "string",
+              "maxLength": 174764
+            }
           },
           "additionalProperties": false
         }
@@ -2469,45 +3471,111 @@
     },
     "ImporterDetectResult": {
       "type": "object",
-      "required": ["confidence"],
+      "required": [
+        "confidence"
+      ],
       "properties": {
-        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-        "format": { "type": "string", "maxLength": 256 },
-        "reason": { "type": "string", "maxLength": 2048 }
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "format": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 2048
+        }
       },
       "additionalProperties": false
     },
     "ImporterParsePayload": {
       "type": "object",
-      "required": ["operationId", "inputStreamId", "outputStreamId", "windowBytes"],
+      "required": [
+        "operationId",
+        "inputStreamId",
+        "outputStreamId",
+        "windowBytes"
+      ],
       "properties": {
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "fileName": { "type": "string", "maxLength": 1024 },
-        "mediaType": { "type": "string", "maxLength": 256 },
-        "inputStreamId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "outputStreamId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "windowBytes": { "type": "integer", "minimum": 1024, "maximum": 16777216 },
-        "options": { "$ref": "#/$defs/JsonValue" }
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "fileName": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "mediaType": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "inputStreamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "outputStreamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "windowBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 16777216
+        },
+        "options": {
+          "$ref": "#/$defs/JsonValue"
+        }
       },
       "additionalProperties": false
     },
     "ImporterParseResult": {
       "type": "object",
-      "required": ["parsed", "warnings", "errors"],
+      "required": [
+        "parsed",
+        "warnings",
+        "errors"
+      ],
       "properties": {
-        "parsed": { "type": "integer", "minimum": 0, "maximum": 10000 },
-        "warnings": { "type": "integer", "minimum": 0, "maximum": 10000 },
-        "errors": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        "parsed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "warnings": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
       },
       "additionalProperties": false
     },
     "ImporterPluginConnectionDraft": {
       "type": "object",
-      "required": ["providerId", "configuration"],
+      "required": [
+        "providerId",
+        "configuration"
+      ],
       "properties": {
-        "providerId": { "$ref": "#/$defs/ContributionId" },
-        "configuration": { "$ref": "#/$defs/JsonValue" },
-        "authenticationProviderId": { "$ref": "#/$defs/ContributionId" },
+        "providerId": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "configuration": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "authenticationProviderId": {
+          "$ref": "#/$defs/ContributionId"
+        },
         "credentialId": {
           "type": "string",
           "minLength": 1,
@@ -2522,166 +3590,461 @@
       "type": "object",
       "anyOf": [
         {
-          "required": ["hostname"],
+          "required": [
+            "hostname"
+          ],
           "properties": {
-            "hostname": { "type": "string", "minLength": 1, "maxLength": 1024 }
+            "hostname": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
           }
         },
         {
-          "required": ["protocol", "pluginConnection"],
+          "required": [
+            "protocol",
+            "pluginConnection"
+          ],
           "properties": {
-            "protocol": { "$ref": "#/$defs/PluginHostProtocol" },
-            "pluginConnection": { "$ref": "#/$defs/ImporterPluginConnectionDraft" }
+            "protocol": {
+              "$ref": "#/$defs/PluginHostProtocol"
+            },
+            "pluginConnection": {
+              "$ref": "#/$defs/ImporterPluginConnectionDraft"
+            }
           }
         }
       ],
       "if": {
         "type": "object",
-        "required": ["protocol"],
-        "properties": { "protocol": { "$ref": "#/$defs/PluginHostProtocol" } }
+        "required": [
+          "protocol"
+        ],
+        "properties": {
+          "protocol": {
+            "$ref": "#/$defs/PluginHostProtocol"
+          }
+        }
       },
-      "then": { "required": ["pluginConnection"] },
+      "then": {
+        "required": [
+          "pluginConnection"
+        ]
+      },
       "dependentRequired": {
-        "pluginConnection": ["protocol"]
+        "pluginConnection": [
+          "protocol"
+        ]
       },
       "dependentSchemas": {
         "pluginConnection": {
           "type": "object",
-          "required": ["protocol"],
-          "properties": { "protocol": { "$ref": "#/$defs/PluginHostProtocol" } }
+          "required": [
+            "protocol"
+          ],
+          "properties": {
+            "protocol": {
+              "$ref": "#/$defs/PluginHostProtocol"
+            }
+          }
         }
       },
       "properties": {
-        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "label": { "type": "string", "minLength": 1, "maxLength": 512 },
-        "hostname": { "type": "string", "minLength": 1, "maxLength": 1024 },
-        "username": { "type": "string", "maxLength": 512 },
-        "group": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "hostname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "username": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
         "tags": {
           "type": "array",
           "maxItems": 128,
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
         },
-        "os": { "type": "string", "enum": ["linux", "windows", "macos"] },
-        "deviceType": { "type": "string", "enum": ["general", "network"] },
-        "identityId": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "identityFileId": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "telnetIdentityId": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "protocol": {
-          "oneOf": [
-            { "type": "string", "enum": ["ssh", "telnet", "mosh", "et", "local", "serial"] },
-            { "$ref": "#/$defs/PluginHostProtocol" }
+        "os": {
+          "type": "string",
+          "enum": [
+            "linux",
+            "windows",
+            "macos"
           ]
         },
-        "pluginConnection": { "$ref": "#/$defs/ImporterPluginConnectionDraft" },
-        "notes": { "type": "string", "maxLength": 65536 },
-        "theme": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "sftpEncoding": { "type": "string", "minLength": 1, "maxLength": 64 },
-        "sftpFileProtocol": { "type": "string", "enum": ["auto", "sftp", "scp"] },
-        "moshEnabled": { "type": "boolean" },
-        "etEnabled": { "type": "boolean" },
-        "telnetEnabled": { "type": "boolean" },
-        "sftpSudo": { "type": "boolean" },
-        "requiresMfa": { "type": "boolean" },
-        "useSshAgent": { "type": "boolean" },
-        "identitiesOnly": { "type": "boolean" },
-        "agentForwarding": { "type": "boolean" },
-        "x11Forwarding": { "type": "boolean" },
-        "showLineTimestamps": { "type": "boolean" },
-        "disableDynamicTabTitle": { "type": "boolean" },
-        "pinned": { "type": "boolean" },
-        "autoOpenSftpPanel": { "type": "boolean" },
-        "sftpFollowTerminalCwd": { "type": "boolean" },
-        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "telnetPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "etPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "keepaliveInterval": { "type": "integer", "minimum": 0, "maximum": 3600 },
-        "keepaliveCountMax": { "type": "integer", "minimum": 1, "maximum": 100 }
+        "deviceType": {
+          "type": "string",
+          "enum": [
+            "general",
+            "network"
+          ]
+        },
+        "identityId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "identityFileId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "telnetIdentityId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "protocol": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "ssh",
+                "telnet",
+                "mosh",
+                "et",
+                "local",
+                "serial"
+              ]
+            },
+            {
+              "$ref": "#/$defs/PluginHostProtocol"
+            }
+          ]
+        },
+        "pluginConnection": {
+          "$ref": "#/$defs/ImporterPluginConnectionDraft"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "theme": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "sftpEncoding": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "sftpFileProtocol": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "sftp",
+            "scp"
+          ]
+        },
+        "moshEnabled": {
+          "type": "boolean"
+        },
+        "etEnabled": {
+          "type": "boolean"
+        },
+        "telnetEnabled": {
+          "type": "boolean"
+        },
+        "sftpSudo": {
+          "type": "boolean"
+        },
+        "requiresMfa": {
+          "type": "boolean"
+        },
+        "useSshAgent": {
+          "type": "boolean"
+        },
+        "identitiesOnly": {
+          "type": "boolean"
+        },
+        "agentForwarding": {
+          "type": "boolean"
+        },
+        "x11Forwarding": {
+          "type": "boolean"
+        },
+        "showLineTimestamps": {
+          "type": "boolean"
+        },
+        "disableDynamicTabTitle": {
+          "type": "boolean"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "autoOpenSftpPanel": {
+          "type": "boolean"
+        },
+        "sftpFollowTerminalCwd": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "telnetPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "etPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "keepaliveInterval": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600
+        },
+        "keepaliveCountMax": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
       },
       "additionalProperties": false
     },
     "ImporterIdentityDraft": {
       "type": "object",
-      "required": ["label", "username", "authMethod"],
+      "required": [
+        "label",
+        "username",
+        "authMethod"
+      ],
       "properties": {
-        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "label": { "type": "string", "minLength": 1, "maxLength": 512 },
-        "username": { "type": "string", "minLength": 1, "maxLength": 512 },
-        "authMethod": { "type": "string", "enum": ["password", "key", "certificate"] },
-        "password": { "type": "string", "maxLength": 65536 },
-        "keyId": { "type": "string", "minLength": 1, "maxLength": 256 }
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "authMethod": {
+          "type": "string",
+          "enum": [
+            "password",
+            "key",
+            "certificate"
+          ]
+        },
+        "password": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "keyId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
       },
       "additionalProperties": false
     },
     "ImporterKeyDraft": {
       "type": "object",
-      "required": ["label", "type"],
+      "required": [
+        "label",
+        "type"
+      ],
       "oneOf": [
         {
-          "required": ["privateKey"],
+          "required": [
+            "privateKey"
+          ],
           "properties": {
-            "privateKey": { "type": "string", "minLength": 1, "maxLength": 2097152 }
+            "privateKey": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2097152
+            }
           }
         },
         {
-          "required": ["filePath"],
+          "required": [
+            "filePath"
+          ],
           "properties": {
-            "filePath": { "type": "string", "minLength": 1, "maxLength": 8192 }
+            "filePath": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192
+            }
           }
         }
       ],
       "properties": {
-        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "label": { "type": "string", "minLength": 1, "maxLength": 512 },
-        "type": { "type": "string", "enum": ["RSA", "ECDSA", "ED25519"] },
-        "privateKey": { "type": "string", "minLength": 1, "maxLength": 2097152 },
-        "publicKey": { "type": "string", "maxLength": 1048576 },
-        "certificate": { "type": "string", "maxLength": 1048576 },
-        "passphrase": { "type": "string", "maxLength": 65536 },
-        "filePath": { "type": "string", "minLength": 1, "maxLength": 8192 },
-        "category": { "type": "string", "enum": ["key", "certificate", "identity"] }
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "RSA",
+            "ECDSA",
+            "ED25519"
+          ]
+        },
+        "privateKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2097152
+        },
+        "publicKey": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "certificate": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "passphrase": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "filePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "key",
+            "certificate",
+            "identity"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "ImporterSnippetDraft": {
       "type": "object",
-      "required": ["label", "command"],
+      "required": [
+        "label",
+        "command"
+      ],
       "properties": {
-        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "label": { "type": "string", "minLength": 1, "maxLength": 512 },
-        "command": { "type": "string", "minLength": 1, "maxLength": 1048576 },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1048576
+        },
         "tags": {
           "type": "array",
           "maxItems": 128,
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
         },
-        "kind": { "type": "string", "enum": ["snippet", "script"] },
-        "description": { "type": "string", "maxLength": 4096 }
+        "kind": {
+          "type": "string",
+          "enum": [
+            "snippet",
+            "script"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4096
+        }
       },
       "additionalProperties": false
     },
     "ImporterGroupDraft": {
       "oneOf": [
-        { "type": "string", "minLength": 1, "maxLength": 512 },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
         {
           "type": "object",
           "properties": {
-            "path": { "type": "string", "minLength": 1, "maxLength": 512 },
-            "label": { "type": "string", "minLength": 1, "maxLength": 512 }
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
           },
           "anyOf": [
             {
-              "required": ["path"],
+              "required": [
+                "path"
+              ],
               "properties": {
-                "path": { "type": "string", "minLength": 1, "maxLength": 512 }
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
               }
             },
             {
-              "required": ["label"],
+              "required": [
+                "label"
+              ],
               "properties": {
-                "label": { "type": "string", "minLength": 1, "maxLength": 512 }
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
               }
             }
           ],
@@ -2692,48 +4055,94 @@
     "ImporterRecord": {
       "oneOf": [
         {
-          "type": "object", "required": ["type", "draft"],
+          "type": "object",
+          "required": [
+            "type",
+            "draft"
+          ],
           "properties": {
-            "type": { "const": "draft" },
+            "type": {
+              "const": "draft"
+            },
             "draft": {
               "oneOf": [
                 {
-                  "type": "object", "required": ["kind", "value"],
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "value"
+                  ],
                   "properties": {
-                    "kind": { "const": "host" },
-                    "value": { "$ref": "#/$defs/ImporterHostDraft" }
+                    "kind": {
+                      "const": "host"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/ImporterHostDraft"
+                    }
                   },
                   "additionalProperties": false
                 },
                 {
-                  "type": "object", "required": ["kind", "value"],
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "value"
+                  ],
                   "properties": {
-                    "kind": { "const": "identity" },
-                    "value": { "$ref": "#/$defs/ImporterIdentityDraft" }
+                    "kind": {
+                      "const": "identity"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/ImporterIdentityDraft"
+                    }
                   },
                   "additionalProperties": false
                 },
                 {
-                  "type": "object", "required": ["kind", "value"],
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "value"
+                  ],
                   "properties": {
-                    "kind": { "const": "key" },
-                    "value": { "$ref": "#/$defs/ImporterKeyDraft" }
+                    "kind": {
+                      "const": "key"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/ImporterKeyDraft"
+                    }
                   },
                   "additionalProperties": false
                 },
                 {
-                  "type": "object", "required": ["kind", "value"],
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "value"
+                  ],
                   "properties": {
-                    "kind": { "const": "snippet" },
-                    "value": { "$ref": "#/$defs/ImporterSnippetDraft" }
+                    "kind": {
+                      "const": "snippet"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/ImporterSnippetDraft"
+                    }
                   },
                   "additionalProperties": false
                 },
                 {
-                  "type": "object", "required": ["kind", "value"],
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "value"
+                  ],
                   "properties": {
-                    "kind": { "const": "group" },
-                    "value": { "$ref": "#/$defs/ImporterGroupDraft" }
+                    "kind": {
+                      "const": "group"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/ImporterGroupDraft"
+                    }
                   },
                   "additionalProperties": false
                 }
@@ -2743,28 +4152,64 @@
           "additionalProperties": false
         },
         {
-          "type": "object", "required": ["type", "message"],
+          "type": "object",
+          "required": [
+            "type",
+            "message"
+          ],
           "properties": {
-            "type": { "type": "string", "enum": ["warning", "error"] },
-            "code": { "type": "string", "maxLength": 128 },
-            "message": { "type": "string", "minLength": 1, "maxLength": 2048 },
-            "path": { "type": "string", "maxLength": 1024 }
+            "type": {
+              "type": "string",
+              "enum": [
+                "warning",
+                "error"
+              ]
+            },
+            "code": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 1024
+            }
           },
           "additionalProperties": false
         },
         {
-          "type": "object", "required": ["type", "completed"],
+          "type": "object",
+          "required": [
+            "type",
+            "completed"
+          ],
           "properties": {
-            "type": { "const": "progress" },
-            "completed": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-            "total": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-            "message": { "type": "string", "maxLength": 2048 }
+            "type": {
+              "const": "progress"
+            },
+            "completed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 2048
+            }
           },
           "additionalProperties": false
         }
       ]
     },
-
     "SyncObjectKey": {
       "type": "string",
       "minLength": 1,
@@ -2777,26 +4222,56 @@
     },
     "SyncAccount": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
-        "id": { "type": "string", "minLength": 1, "maxLength": 512 },
-        "email": { "type": "string", "maxLength": 512 },
-        "name": { "type": "string", "maxLength": 512 },
-        "avatarUrl": { "type": "string", "maxLength": 2048 }
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "avatarUrl": {
+          "type": "string",
+          "maxLength": 2048
+        }
       },
       "additionalProperties": false
     },
     "SyncConnectPayload": {
       "type": "object",
-      "required": ["configuration", "operationId"],
+      "required": [
+        "configuration",
+        "operationId"
+      ],
       "properties": {
-        "configuration": { "$ref": "#/$defs/JsonValue" },
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "configuration": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
         "credential": {
           "oneOf": [
-            { "$ref": "#/$defs/SecretRef" },
-            { "$ref": "#/$defs/CredentialRef" },
-            { "$ref": "#/$defs/SecretLeaseRef" }
+            {
+              "$ref": "#/$defs/SecretRef"
+            },
+            {
+              "$ref": "#/$defs/CredentialRef"
+            },
+            {
+              "$ref": "#/$defs/SecretLeaseRef"
+            }
           ]
         }
       },
@@ -2804,16 +4279,24 @@
     },
     "SyncConnectResult": {
       "type": "object",
-      "required": ["account"],
+      "required": [
+        "account"
+      ],
       "properties": {
-        "account": { "$ref": "#/$defs/SyncAccount" }
+        "account": {
+          "$ref": "#/$defs/SyncAccount"
+        }
       },
       "additionalProperties": false
     },
     "SyncDisconnectPayload": {
       "type": "object",
       "properties": {
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       },
       "additionalProperties": false
     },
@@ -2823,18 +4306,28 @@
     "SyncGetAccountPayload": {
       "type": "object",
       "properties": {
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       },
       "additionalProperties": false
     },
     "SyncGetAccountResult": {
       "type": "object",
-      "required": ["account"],
+      "required": [
+        "account"
+      ],
       "properties": {
         "account": {
           "oneOf": [
-            { "$ref": "#/$defs/SyncAccount" },
-            { "type": "null" }
+            {
+              "$ref": "#/$defs/SyncAccount"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -2843,30 +4336,69 @@
     "SyncGetCapabilitiesPayload": {
       "type": "object",
       "properties": {
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       },
       "additionalProperties": false
     },
     "SyncCapabilitiesResult": {
       "type": "object",
-      "required": ["revisions", "conditionalWrites", "atomicReplacement"],
+      "required": [
+        "revisions",
+        "conditionalWrites",
+        "atomicReplacement"
+      ],
       "properties": {
-        "revisions": { "type": "boolean" },
-        "conditionalWrites": { "type": "boolean" },
-        "atomicReplacement": { "type": "boolean" },
-        "maxObjectBytes": { "type": "integer", "minimum": 1, "maximum": 67108864 },
-        "maxObjects": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+        "revisions": {
+          "type": "boolean"
+        },
+        "conditionalWrites": {
+          "type": "boolean"
+        },
+        "atomicReplacement": {
+          "type": "boolean"
+        },
+        "maxObjectBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "maxObjects": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
       },
       "additionalProperties": false
     },
     "SyncReadObjectPayload": {
       "type": "object",
-      "required": ["key", "operationId"],
+      "required": [
+        "key",
+        "operationId"
+      ],
       "properties": {
-        "key": { "$ref": "#/$defs/SyncObjectKey" },
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "outputStreamId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "windowBytes": { "type": "integer", "minimum": 1024, "maximum": 16777216 }
+        "key": {
+          "$ref": "#/$defs/SyncObjectKey"
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "outputStreamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "windowBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 16777216
+        }
       },
       "additionalProperties": false
     },
@@ -2874,34 +4406,76 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["found"],
+          "required": [
+            "found"
+          ],
           "properties": {
-            "found": { "const": false }
+            "found": {
+              "const": false
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["found", "byteLength", "encoding", "data"],
+          "required": [
+            "found",
+            "byteLength",
+            "encoding",
+            "data"
+          ],
           "properties": {
-            "found": { "const": true },
-            "byteLength": { "type": "integer", "minimum": 0, "maximum": 67108864 },
-            "encoding": { "const": "base64" },
-            "data": { "type": "string", "maxLength": 9007199254740991 },
-            "revision": { "$ref": "#/$defs/SyncObjectRevision" },
-            "contentType": { "type": "string", "maxLength": 256 }
+            "found": {
+              "const": true
+            },
+            "byteLength": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "encoding": {
+              "const": "base64"
+            },
+            "data": {
+              "type": "string",
+              "maxLength": 9007199254740991
+            },
+            "revision": {
+              "$ref": "#/$defs/SyncObjectRevision"
+            },
+            "contentType": {
+              "type": "string",
+              "maxLength": 256
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["found", "byteLength", "streamed"],
+          "required": [
+            "found",
+            "byteLength",
+            "streamed"
+          ],
           "properties": {
-            "found": { "const": true },
-            "byteLength": { "type": "integer", "minimum": 0, "maximum": 67108864 },
-            "streamed": { "const": true },
-            "revision": { "$ref": "#/$defs/SyncObjectRevision" },
-            "contentType": { "type": "string", "maxLength": 256 }
+            "found": {
+              "const": true
+            },
+            "byteLength": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "streamed": {
+              "const": true
+            },
+            "revision": {
+              "$ref": "#/$defs/SyncObjectRevision"
+            },
+            "contentType": {
+              "type": "string",
+              "maxLength": 256
+            }
           },
           "additionalProperties": false
         }
@@ -2909,48 +4483,100 @@
     },
     "SyncWriteObjectPayload": {
       "type": "object",
-      "required": ["key", "operationId", "byteLength"],
+      "required": [
+        "key",
+        "operationId",
+        "byteLength"
+      ],
       "properties": {
-        "key": { "$ref": "#/$defs/SyncObjectKey" },
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "byteLength": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+        "key": {
+          "$ref": "#/$defs/SyncObjectKey"
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 67108864
+        },
         "expectedRevision": {
           "oneOf": [
-            { "$ref": "#/$defs/SyncObjectRevision" },
-            { "type": "null" }
+            {
+              "$ref": "#/$defs/SyncObjectRevision"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
-        "encoding": { "const": "base64" },
-        "data": { "type": "string", "maxLength": 9007199254740991 },
-        "inputStreamId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "windowBytes": { "type": "integer", "minimum": 1024, "maximum": 16777216 }
+        "encoding": {
+          "const": "base64"
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 9007199254740991
+        },
+        "inputStreamId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "windowBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 16777216
+        }
       },
       "additionalProperties": false
     },
     "SyncWriteObjectResult": {
       "type": "object",
-      "required": ["created"],
+      "required": [
+        "created"
+      ],
       "properties": {
-        "created": { "type": "boolean" },
-        "revision": { "$ref": "#/$defs/SyncObjectRevision" }
+        "created": {
+          "type": "boolean"
+        },
+        "revision": {
+          "$ref": "#/$defs/SyncObjectRevision"
+        }
       },
       "additionalProperties": false
     },
     "SyncDeleteObjectPayload": {
       "type": "object",
-      "required": ["key", "operationId"],
+      "required": [
+        "key",
+        "operationId"
+      ],
       "properties": {
-        "key": { "$ref": "#/$defs/SyncObjectKey" },
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "expectedRevision": { "$ref": "#/$defs/SyncObjectRevision" }
+        "key": {
+          "$ref": "#/$defs/SyncObjectKey"
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/SyncObjectRevision"
+        }
       },
       "additionalProperties": false
     },
     "SyncDeleteObjectResult": {
       "type": "object",
-      "required": ["deleted"],
+      "required": [
+        "deleted"
+      ],
       "properties": {
-        "deleted": { "type": "boolean" }
+        "deleted": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
@@ -2967,36 +4593,56 @@
     },
     "CompanionExecutableVariant": {
       "type": "object",
-      "required": ["path", "platforms", "sha256"],
+      "required": [
+        "path",
+        "platforms",
+        "sha256"
+      ],
       "properties": {
-        "path": { "$ref": "#/$defs/RelativePackagePath" },
+        "path": {
+          "$ref": "#/$defs/RelativePackagePath"
+        },
         "platforms": {
           "type": "array",
           "minItems": 1,
           "maxItems": 6,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/CompanionPlatform" }
+          "items": {
+            "$ref": "#/$defs/CompanionPlatform"
+          }
         },
-        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
       },
       "additionalProperties": false
     },
     "CompanionExecutable": {
       "type": "object",
-      "required": ["id", "variants"],
+      "required": [
+        "id",
+        "variants"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/ContributionId" },
+        "id": {
+          "$ref": "#/$defs/ContributionId"
+        },
         "variants": {
           "type": "array",
           "minItems": 1,
           "maxItems": 12,
-          "items": { "$ref": "#/$defs/CompanionExecutableVariant" }
+          "items": {
+            "$ref": "#/$defs/CompanionExecutableVariant"
+          }
         },
         "permissions": {
           "type": "array",
           "maxItems": 32,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/PluginPermission" }
+          "items": {
+            "$ref": "#/$defs/PluginPermission"
+          }
         }
       },
       "additionalProperties": false
@@ -3059,13 +4705,31 @@
     },
     "PluginManifestHeader": {
       "type": "object",
-      "required": ["manifestVersion", "id", "version", "engines"],
+      "required": [
+        "manifestVersion",
+        "id",
+        "version",
+        "engines"
+      ],
       "properties": {
-        "$schema": { "type": "string", "format": "uri-reference" },
-        "manifestVersion": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "id": { "$ref": "#/$defs/PluginId" },
-        "version": { "$ref": "#/$defs/SemanticVersion" },
-        "engines": { "$ref": "#/$defs/PluginEngineHeader" }
+        "$schema": {
+          "type": "string",
+          "format": "uri-reference"
+        },
+        "manifestVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "id": {
+          "$ref": "#/$defs/PluginId"
+        },
+        "version": {
+          "$ref": "#/$defs/SemanticVersion"
+        },
+        "engines": {
+          "$ref": "#/$defs/PluginEngineHeader"
+        }
       },
       "additionalProperties": true
     },
@@ -3204,32 +4868,73 @@
     },
     "RpcId": {
       "oneOf": [
-        { "type": "string", "minLength": 1, "maxLength": 128 },
-        { "$ref": "#/$defs/SafeUnsignedInteger" }
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        {
+          "$ref": "#/$defs/SafeUnsignedInteger"
+        }
       ]
     },
     "NullableRpcId": {
       "oneOf": [
-        { "$ref": "#/$defs/RpcId" },
-        { "type": "null" }
+        {
+          "$ref": "#/$defs/RpcId"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "RpcRequest": {
       "type": "object",
       "description": "A generic request. Reserved methods with dedicated schemas are excluded and must validate against their exact contract.",
-      "required": ["jsonrpc", "id", "method"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "id": { "$ref": "#/$defs/RpcId" },
-        "method": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "params": { "$ref": "#/$defs/JsonValue" },
-        "deadlineMs": { "type": "integer", "minimum": 1, "maximum": 300000 },
-        "cancellationId": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/RpcId"
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "params": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "deadlineMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300000
+        },
+        "cancellationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       },
       "not": {
-        "required": ["method"],
+        "required": [
+          "method"
+        ],
         "properties": {
-          "method": { "enum": ["plugin.initialize", "plugin.terminal.interceptor.attach", "$/cancelRequest", "$/progress"] }
+          "method": {
+            "enum": [
+              "plugin.initialize",
+              "plugin.terminal.interceptor.attach",
+              "$/cancelRequest",
+              "$/progress"
+            ]
+          }
         }
       },
       "additionalProperties": false
@@ -3237,37 +4942,90 @@
     "RpcNotification": {
       "type": "object",
       "description": "A generic notification. Reserved notifications with dedicated schemas are excluded and must validate against their exact contract.",
-      "required": ["jsonrpc", "method"],
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "method": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "params": { "$ref": "#/$defs/JsonValue" }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "params": {
+          "$ref": "#/$defs/JsonValue"
+        }
       },
       "not": {
-        "required": ["method"],
+        "required": [
+          "method"
+        ],
         "properties": {
-          "method": { "enum": ["plugin.initialize", "plugin.terminal.interceptor.attach", "$/cancelRequest", "$/progress"] }
+          "method": {
+            "enum": [
+              "plugin.initialize",
+              "plugin.terminal.interceptor.attach",
+              "$/cancelRequest",
+              "$/progress"
+            ]
+          }
         }
       },
       "additionalProperties": false
     },
     "RpcSuccess": {
       "type": "object",
-      "required": ["jsonrpc", "id", "result"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "id": { "$ref": "#/$defs/RpcId" },
-        "result": { "$ref": "#/$defs/JsonValue" }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/RpcId"
+        },
+        "result": {
+          "$ref": "#/$defs/JsonValue"
+        }
       },
       "additionalProperties": false
     },
     "JsonRpcStandardErrorCode": {
       "type": "integer",
-      "enum": [-32700, -32600, -32601, -32602, -32603]
+      "enum": [
+        -32700,
+        -32600,
+        -32601,
+        -32602,
+        -32603
+      ]
     },
     "PluginWireErrorCode": {
       "type": "integer",
-      "enum": [-32001, -32002, -32003, -32004, -32005, -32006, -32007, -32008, -32009, -32010, -32011, -32012, -32013, -32014, -32015, -32016]
+      "enum": [
+        -32001,
+        -32002,
+        -32003,
+        -32004,
+        -32005,
+        -32006,
+        -32007,
+        -32008,
+        -32009,
+        -32010,
+        -32011,
+        -32012,
+        -32013,
+        -32014,
+        -32015,
+        -32016
+      ]
     },
     "PluginErrorName": {
       "type": "string",
@@ -3292,36 +5050,67 @@
     },
     "PluginErrorData": {
       "type": "object",
-      "required": ["pluginCode"],
+      "required": [
+        "pluginCode"
+      ],
       "properties": {
-        "pluginCode": { "$ref": "#/$defs/PluginErrorName" },
-        "details": { "$ref": "#/$defs/JsonValue" }
+        "pluginCode": {
+          "$ref": "#/$defs/PluginErrorName"
+        },
+        "details": {
+          "$ref": "#/$defs/JsonValue"
+        }
       },
       "additionalProperties": false
     },
     "RpcErrorCode": {
       "oneOf": [
-        { "$ref": "#/$defs/JsonRpcStandardErrorCode" },
-        { "$ref": "#/$defs/PluginWireErrorCode" }
+        {
+          "$ref": "#/$defs/JsonRpcStandardErrorCode"
+        },
+        {
+          "$ref": "#/$defs/PluginWireErrorCode"
+        }
       ]
     },
     "RpcErrorObject": {
       "type": "object",
-      "required": ["code", "message"],
+      "required": [
+        "code",
+        "message"
+      ],
       "properties": {
-        "code": { "$ref": "#/$defs/RpcErrorCode" },
-        "message": { "type": "string", "minLength": 1, "maxLength": 2048 },
-        "data": { "$ref": "#/$defs/JsonValue" }
+        "code": {
+          "$ref": "#/$defs/RpcErrorCode"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "data": {
+          "$ref": "#/$defs/JsonValue"
+        }
       },
       "additionalProperties": false
     },
     "RpcFailure": {
       "type": "object",
-      "required": ["jsonrpc", "id", "error"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "error"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "id": { "$ref": "#/$defs/NullableRpcId" },
-        "error": { "$ref": "#/$defs/RpcErrorObject" }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/NullableRpcId"
+        },
+        "error": {
+          "$ref": "#/$defs/RpcErrorObject"
+        }
       },
       "additionalProperties": false
     },
@@ -3330,27 +5119,63 @@
     },
     "ProgressBegin": {
       "type": "object",
-      "required": ["kind", "title"],
+      "required": [
+        "kind",
+        "title"
+      ],
       "properties": {
-        "kind": { "const": "begin" },
-        "title": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "message": { "type": "string", "maxLength": 1024 },
-        "percentage": { "type": "number", "minimum": 0, "maximum": 100 },
-        "cancellable": { "type": "boolean" }
+        "kind": {
+          "const": "begin"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "percentage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "cancellable": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "ProgressReport": {
       "type": "object",
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
-        "kind": { "const": "report" },
-        "message": { "type": "string", "maxLength": 1024 },
-        "percentage": { "type": "number", "minimum": 0, "maximum": 100 },
-        "increment": { "type": "number", "minimum": 0, "maximum": 100 }
+        "kind": {
+          "const": "report"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "percentage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "increment": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
       },
       "not": {
-        "required": ["percentage", "increment"],
+        "required": [
+          "percentage",
+          "increment"
+        ],
         "properties": {
           "percentage": true,
           "increment": true
@@ -3360,32 +5185,60 @@
     },
     "ProgressEnd": {
       "type": "object",
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
-        "kind": { "const": "end" },
-        "message": { "type": "string", "maxLength": 1024 }
+        "kind": {
+          "const": "end"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 1024
+        }
       },
       "additionalProperties": false
     },
     "ProgressValue": {
       "oneOf": [
-        { "$ref": "#/$defs/ProgressBegin" },
-        { "$ref": "#/$defs/ProgressReport" },
-        { "$ref": "#/$defs/ProgressEnd" }
+        {
+          "$ref": "#/$defs/ProgressBegin"
+        },
+        {
+          "$ref": "#/$defs/ProgressReport"
+        },
+        {
+          "$ref": "#/$defs/ProgressEnd"
+        }
       ]
     },
     "RpcProgressNotification": {
       "type": "object",
-      "required": ["jsonrpc", "method", "params"],
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "method": { "const": "$/progress" },
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "method": {
+          "const": "$/progress"
+        },
         "params": {
           "type": "object",
-          "required": ["token", "value"],
+          "required": [
+            "token",
+            "value"
+          ],
           "properties": {
-            "token": { "$ref": "#/$defs/ProgressToken" },
-            "value": { "$ref": "#/$defs/ProgressValue" }
+            "token": {
+              "$ref": "#/$defs/ProgressToken"
+            },
+            "value": {
+              "$ref": "#/$defs/ProgressValue"
+            }
           },
           "additionalProperties": false
         }
@@ -3394,15 +5247,29 @@
     },
     "RpcCancel": {
       "type": "object",
-      "required": ["jsonrpc", "method", "params"],
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "method": { "const": "$/cancelRequest" },
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "method": {
+          "const": "$/cancelRequest"
+        },
         "params": {
           "type": "object",
-          "required": ["cancellationId"],
+          "required": [
+            "cancellationId"
+          ],
           "properties": {
-            "cancellationId": { "type": "string", "minLength": 1, "maxLength": 128 }
+            "cancellationId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
           },
           "additionalProperties": false
         }
@@ -3413,34 +5280,59 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["encoding", "value", "byteLength"],
+          "required": [
+            "encoding",
+            "value",
+            "byteLength"
+          ],
           "properties": {
-            "encoding": { "const": "json" },
-            "value": { "$ref": "#/$defs/JsonValue" },
-            "byteLength": { "$ref": "#/$defs/StreamChunkByteLength" }
+            "encoding": {
+              "const": "json"
+            },
+            "value": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "byteLength": {
+              "$ref": "#/$defs/StreamChunkByteLength"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["encoding", "value", "byteLength"],
+          "required": [
+            "encoding",
+            "value",
+            "byteLength"
+          ],
           "properties": {
-            "encoding": { "const": "base64" },
+            "encoding": {
+              "const": "base64"
+            },
             "value": {
               "type": "string",
               "maxLength": 22369624,
               "contentEncoding": "base64"
             },
-            "byteLength": { "$ref": "#/$defs/StreamChunkByteLength" }
+            "byteLength": {
+              "$ref": "#/$defs/StreamChunkByteLength"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["encoding", "byteLength"],
+          "required": [
+            "encoding",
+            "byteLength"
+          ],
           "properties": {
-            "encoding": { "const": "transfer" },
-            "byteLength": { "$ref": "#/$defs/StreamChunkByteLength" }
+            "encoding": {
+              "const": "transfer"
+            },
+            "byteLength": {
+              "$ref": "#/$defs/StreamChunkByteLength"
+            }
           },
           "additionalProperties": false
         }
@@ -3450,55 +5342,120 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["streamId", "sequence", "kind", "windowBytes"],
+          "required": [
+            "streamId",
+            "sequence",
+            "kind",
+            "windowBytes"
+          ],
           "properties": {
-            "streamId": { "$ref": "#/$defs/StreamId" },
-            "sequence": { "const": 0 },
-            "kind": { "const": "open" },
-            "windowBytes": { "$ref": "#/$defs/StreamWindowBytes" }
+            "streamId": {
+              "$ref": "#/$defs/StreamId"
+            },
+            "sequence": {
+              "const": 0
+            },
+            "kind": {
+              "const": "open"
+            },
+            "windowBytes": {
+              "$ref": "#/$defs/StreamWindowBytes"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["streamId", "sequence", "kind", "data"],
+          "required": [
+            "streamId",
+            "sequence",
+            "kind",
+            "data"
+          ],
           "properties": {
-            "streamId": { "$ref": "#/$defs/StreamId" },
-            "sequence": { "$ref": "#/$defs/SafePositiveInteger" },
-            "kind": { "const": "chunk" },
-            "data": { "$ref": "#/$defs/StreamChunkData" }
+            "streamId": {
+              "$ref": "#/$defs/StreamId"
+            },
+            "sequence": {
+              "$ref": "#/$defs/SafePositiveInteger"
+            },
+            "kind": {
+              "const": "chunk"
+            },
+            "data": {
+              "$ref": "#/$defs/StreamChunkData"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["streamId", "sequence", "kind"],
+          "required": [
+            "streamId",
+            "sequence",
+            "kind"
+          ],
           "properties": {
-            "streamId": { "$ref": "#/$defs/StreamId" },
-            "sequence": { "$ref": "#/$defs/SafePositiveInteger" },
-            "kind": { "enum": ["end", "cancel"] }
+            "streamId": {
+              "$ref": "#/$defs/StreamId"
+            },
+            "sequence": {
+              "$ref": "#/$defs/SafePositiveInteger"
+            },
+            "kind": {
+              "enum": [
+                "end",
+                "cancel"
+              ]
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["streamId", "sequence", "kind", "error"],
+          "required": [
+            "streamId",
+            "sequence",
+            "kind",
+            "error"
+          ],
           "properties": {
-            "streamId": { "$ref": "#/$defs/StreamId" },
-            "sequence": { "$ref": "#/$defs/SafePositiveInteger" },
-            "kind": { "const": "error" },
-            "error": { "$ref": "#/$defs/RpcErrorObject" }
+            "streamId": {
+              "$ref": "#/$defs/StreamId"
+            },
+            "sequence": {
+              "$ref": "#/$defs/SafePositiveInteger"
+            },
+            "kind": {
+              "const": "error"
+            },
+            "error": {
+              "$ref": "#/$defs/RpcErrorObject"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["streamId", "sequence", "kind", "creditBytes"],
+          "required": [
+            "streamId",
+            "sequence",
+            "kind",
+            "creditBytes"
+          ],
           "properties": {
-            "streamId": { "$ref": "#/$defs/StreamId" },
-            "sequence": { "$ref": "#/$defs/SafeUnsignedInteger" },
-            "kind": { "const": "windowUpdate" },
-            "creditBytes": { "$ref": "#/$defs/StreamCreditBytes" }
+            "streamId": {
+              "$ref": "#/$defs/StreamId"
+            },
+            "sequence": {
+              "$ref": "#/$defs/SafeUnsignedInteger"
+            },
+            "kind": {
+              "const": "windowUpdate"
+            },
+            "creditBytes": {
+              "$ref": "#/$defs/StreamCreditBytes"
+            }
           },
           "additionalProperties": false
         }
@@ -3506,7 +5463,10 @@
     },
     "TerminalInterceptorDirection": {
       "type": "string",
-      "enum": ["input", "output"]
+      "enum": [
+        "input",
+        "output"
+      ]
     },
     "TerminalInterceptorChunkByteLength": {
       "type": "integer",
@@ -3525,261 +5485,612 @@
     },
     "TerminalInterceptorReadyFrame": {
       "type": "object",
-      "required": ["type", "sessionId", "direction", "windowBytes"],
+      "required": [
+        "type",
+        "sessionId",
+        "direction",
+        "windowBytes"
+      ],
       "properties": {
-        "type": { "const": "netcatty:terminal-interceptor:ready" },
-        "sessionId": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000]+$" },
-        "direction": { "$ref": "#/$defs/TerminalInterceptorDirection" },
-        "windowBytes": { "$ref": "#/$defs/TerminalInterceptorWindowBytes" }
+        "type": {
+          "const": "netcatty:terminal-interceptor:ready"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000]+$"
+        },
+        "direction": {
+          "$ref": "#/$defs/TerminalInterceptorDirection"
+        },
+        "windowBytes": {
+          "$ref": "#/$defs/TerminalInterceptorWindowBytes"
+        }
       },
       "additionalProperties": false
     },
     "TerminalInterceptorChunkFrame": {
       "type": "object",
-      "required": ["type", "sequence", "direction", "creditBytes", "byteLength"],
+      "required": [
+        "type",
+        "sequence",
+        "direction",
+        "creditBytes",
+        "byteLength"
+      ],
       "properties": {
-        "type": { "const": "netcatty:terminal-interceptor:chunk" },
-        "sequence": { "$ref": "#/$defs/SafePositiveInteger" },
-        "direction": { "$ref": "#/$defs/TerminalInterceptorDirection" },
-        "creditBytes": { "$ref": "#/$defs/TerminalInterceptorCreditBytes" },
-        "byteLength": { "$ref": "#/$defs/TerminalInterceptorChunkByteLength" }
+        "type": {
+          "const": "netcatty:terminal-interceptor:chunk"
+        },
+        "sequence": {
+          "$ref": "#/$defs/SafePositiveInteger"
+        },
+        "direction": {
+          "$ref": "#/$defs/TerminalInterceptorDirection"
+        },
+        "creditBytes": {
+          "$ref": "#/$defs/TerminalInterceptorCreditBytes"
+        },
+        "byteLength": {
+          "$ref": "#/$defs/TerminalInterceptorChunkByteLength"
+        }
       },
       "additionalProperties": false
     },
     "TerminalInterceptorOkResultFrame": {
       "type": "object",
-      "required": ["type", "sequence", "status", "creditBytes", "byteLength"],
+      "required": [
+        "type",
+        "sequence",
+        "status",
+        "creditBytes",
+        "byteLength"
+      ],
       "properties": {
-        "type": { "const": "netcatty:terminal-interceptor:result" },
-        "sequence": { "$ref": "#/$defs/SafePositiveInteger" },
-        "status": { "const": "ok" },
-        "creditBytes": { "$ref": "#/$defs/TerminalInterceptorChunkByteLength" },
-        "byteLength": { "$ref": "#/$defs/TerminalInterceptorChunkByteLength" }
+        "type": {
+          "const": "netcatty:terminal-interceptor:result"
+        },
+        "sequence": {
+          "$ref": "#/$defs/SafePositiveInteger"
+        },
+        "status": {
+          "const": "ok"
+        },
+        "creditBytes": {
+          "$ref": "#/$defs/TerminalInterceptorChunkByteLength"
+        },
+        "byteLength": {
+          "$ref": "#/$defs/TerminalInterceptorChunkByteLength"
+        }
       },
       "additionalProperties": false
     },
     "TerminalInterceptorFailedResultFrame": {
       "type": "object",
-      "required": ["type", "sequence", "status"],
+      "required": [
+        "type",
+        "sequence",
+        "status"
+      ],
       "properties": {
-        "type": { "const": "netcatty:terminal-interceptor:result" },
-        "sequence": { "$ref": "#/$defs/SafePositiveInteger" },
-        "status": { "const": "failed" }
+        "type": {
+          "const": "netcatty:terminal-interceptor:result"
+        },
+        "sequence": {
+          "$ref": "#/$defs/SafePositiveInteger"
+        },
+        "status": {
+          "const": "failed"
+        }
       },
       "additionalProperties": false
     },
     "TerminalInterceptorFrame": {
       "oneOf": [
-        { "$ref": "#/$defs/TerminalInterceptorReadyFrame" },
-        { "$ref": "#/$defs/TerminalInterceptorChunkFrame" },
-        { "$ref": "#/$defs/TerminalInterceptorOkResultFrame" },
-        { "$ref": "#/$defs/TerminalInterceptorFailedResultFrame" }
+        {
+          "$ref": "#/$defs/TerminalInterceptorReadyFrame"
+        },
+        {
+          "$ref": "#/$defs/TerminalInterceptorChunkFrame"
+        },
+        {
+          "$ref": "#/$defs/TerminalInterceptorOkResultFrame"
+        },
+        {
+          "$ref": "#/$defs/TerminalInterceptorFailedResultFrame"
+        }
       ]
     },
     "RuntimeInitializeParams": {
       "type": "object",
-      "required": ["netcattyVersion", "apiVersion", "supportedFeatures"],
+      "required": [
+        "netcattyVersion",
+        "apiVersion",
+        "supportedFeatures"
+      ],
       "properties": {
-        "netcattyVersion": { "$ref": "#/$defs/SemanticVersion" },
-        "apiVersion": { "$ref": "#/$defs/SemanticVersion" },
+        "netcattyVersion": {
+          "$ref": "#/$defs/SemanticVersion"
+        },
+        "apiVersion": {
+          "$ref": "#/$defs/SemanticVersion"
+        },
         "supportedFeatures": {
           "type": "array",
           "maxItems": 256,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/FeatureId" }
+          "items": {
+            "$ref": "#/$defs/FeatureId"
+          }
         }
       },
       "additionalProperties": false
     },
     "RuntimeInitializeResult": {
       "type": "object",
-      "required": ["pluginId", "pluginVersion", "apiVersion", "enabledFeatures"],
+      "required": [
+        "pluginId",
+        "pluginVersion",
+        "apiVersion",
+        "enabledFeatures"
+      ],
       "properties": {
-        "pluginId": { "$ref": "#/$defs/PluginId" },
-        "pluginVersion": { "$ref": "#/$defs/SemanticVersion" },
-        "apiVersion": { "$ref": "#/$defs/SemanticVersion" },
+        "pluginId": {
+          "$ref": "#/$defs/PluginId"
+        },
+        "pluginVersion": {
+          "$ref": "#/$defs/SemanticVersion"
+        },
+        "apiVersion": {
+          "$ref": "#/$defs/SemanticVersion"
+        },
         "enabledFeatures": {
           "type": "array",
           "maxItems": 256,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/FeatureId" }
+          "items": {
+            "$ref": "#/$defs/FeatureId"
+          }
         }
       },
       "additionalProperties": false
     },
     "RuntimeInitializeRequest": {
       "type": "object",
-      "required": ["jsonrpc", "id", "method", "params"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "id": { "$ref": "#/$defs/RpcId" },
-        "method": { "const": "plugin.initialize" },
-        "params": { "$ref": "#/$defs/RuntimeInitializeParams" },
-        "deadlineMs": { "type": "integer", "minimum": 1, "maximum": 300000 },
-        "cancellationId": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/RpcId"
+        },
+        "method": {
+          "const": "plugin.initialize"
+        },
+        "params": {
+          "$ref": "#/$defs/RuntimeInitializeParams"
+        },
+        "deadlineMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300000
+        },
+        "cancellationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       },
       "additionalProperties": false
     },
     "RuntimeInitializeSuccess": {
       "type": "object",
-      "required": ["jsonrpc", "id", "result"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "id": { "$ref": "#/$defs/RpcId" },
-        "result": { "$ref": "#/$defs/RuntimeInitializeResult" }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/RpcId"
+        },
+        "result": {
+          "$ref": "#/$defs/RuntimeInitializeResult"
+        }
       },
       "additionalProperties": false
     },
     "TerminalSessionSnapshot": {
       "type": "object",
-      "required": ["sessionId", "protocol", "status"],
+      "required": [
+        "sessionId",
+        "protocol",
+        "status"
+      ],
       "properties": {
-        "sessionId": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000]+$" },
-        "hostId": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000]+$" },
-        "workspaceId": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000]+$" },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000]+$"
+        },
+        "hostId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000]+$"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000]+$"
+        },
         "protocol": {
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
         },
-        "status": { "type": "string", "enum": ["connecting", "connected", "disconnected"] },
-        "cwd": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000]+$" },
-        "title": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[^\\u0000]+$" },
-        "shellType": { "type": "string", "enum": ["posix", "fish", "powershell", "cmd", "unknown"] },
-        "cols": { "type": "integer", "minimum": 1, "maximum": 16384 },
-        "rows": { "type": "integer", "minimum": 1, "maximum": 16384 },
-        "alternateScreen": { "type": "boolean" }
+        "status": {
+          "type": "string",
+          "enum": [
+            "connecting",
+            "connected",
+            "disconnected"
+          ]
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^[^\\u0000]+$"
+        },
+        "shellType": {
+          "type": "string",
+          "enum": [
+            "posix",
+            "fish",
+            "powershell",
+            "cmd",
+            "unknown"
+          ]
+        },
+        "cols": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16384
+        },
+        "alternateScreen": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "TerminalInterceptorAttachmentDescriptor": {
       "type": "object",
-      "required": ["providerId", "direction", "session"],
+      "required": [
+        "providerId",
+        "direction",
+        "session"
+      ],
       "properties": {
-        "providerId": { "$ref": "#/$defs/ContributionId" },
-        "direction": { "type": "string", "enum": ["input", "output"] },
-        "session": { "$ref": "#/$defs/TerminalSessionSnapshot" }
+        "providerId": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "input",
+            "output"
+          ]
+        },
+        "session": {
+          "$ref": "#/$defs/TerminalSessionSnapshot"
+        }
       },
       "additionalProperties": false
     },
     "TerminalInterceptorAttachmentParams": {
       "type": "object",
-      "required": ["descriptor"],
+      "required": [
+        "descriptor"
+      ],
       "properties": {
-        "descriptor": { "$ref": "#/$defs/TerminalInterceptorAttachmentDescriptor" }
+        "descriptor": {
+          "$ref": "#/$defs/TerminalInterceptorAttachmentDescriptor"
+        }
       },
       "additionalProperties": false
     },
     "TerminalInterceptorAttachmentResult": {
       "type": "object",
-      "required": ["accepted"],
+      "required": [
+        "accepted"
+      ],
       "properties": {
-        "accepted": { "const": true }
+        "accepted": {
+          "const": true
+        }
       },
       "additionalProperties": false
     },
     "TerminalInterceptorAttachmentRequest": {
       "type": "object",
-      "required": ["jsonrpc", "id", "method", "params"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "id": { "$ref": "#/$defs/RpcId" },
-        "method": { "const": "plugin.terminal.interceptor.attach" },
-        "params": { "$ref": "#/$defs/TerminalInterceptorAttachmentParams" },
-        "deadlineMs": { "type": "integer", "minimum": 1, "maximum": 300000 },
-        "cancellationId": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/RpcId"
+        },
+        "method": {
+          "const": "plugin.terminal.interceptor.attach"
+        },
+        "params": {
+          "$ref": "#/$defs/TerminalInterceptorAttachmentParams"
+        },
+        "deadlineMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300000
+        },
+        "cancellationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       },
       "additionalProperties": false
     },
     "TerminalInterceptorAttachmentSuccess": {
       "type": "object",
-      "required": ["jsonrpc", "id", "result"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "id": { "$ref": "#/$defs/RpcId" },
-        "result": { "$ref": "#/$defs/TerminalInterceptorAttachmentResult" }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/RpcId"
+        },
+        "result": {
+          "$ref": "#/$defs/TerminalInterceptorAttachmentResult"
+        }
       },
       "additionalProperties": false
     },
     "RpcMessage": {
       "description": "A mutually exclusive RPC wire envelope. Reserved inbound methods use their exact schemas. Successful responses require method-specific validation through request correlation.",
       "oneOf": [
-        { "$ref": "#/$defs/RpcRequest" },
-        { "$ref": "#/$defs/RpcNotification" },
-        { "$ref": "#/$defs/RpcSuccess" },
-        { "$ref": "#/$defs/RpcFailure" },
-        { "$ref": "#/$defs/RpcCancel" },
-        { "$ref": "#/$defs/RpcProgressNotification" },
-        { "$ref": "#/$defs/RuntimeInitializeRequest" },
-        { "$ref": "#/$defs/TerminalInterceptorAttachmentRequest" }
+        {
+          "$ref": "#/$defs/RpcRequest"
+        },
+        {
+          "$ref": "#/$defs/RpcNotification"
+        },
+        {
+          "$ref": "#/$defs/RpcSuccess"
+        },
+        {
+          "$ref": "#/$defs/RpcFailure"
+        },
+        {
+          "$ref": "#/$defs/RpcCancel"
+        },
+        {
+          "$ref": "#/$defs/RpcProgressNotification"
+        },
+        {
+          "$ref": "#/$defs/RuntimeInitializeRequest"
+        },
+        {
+          "$ref": "#/$defs/TerminalInterceptorAttachmentRequest"
+        }
       ]
     },
     "PermissionGrantScope": {
       "type": "string",
-      "enum": ["once", "session", "application", "always"]
+      "enum": [
+        "once",
+        "session",
+        "application",
+        "always"
+      ]
     },
     "PermissionRequest": {
       "type": "object",
-      "required": ["requestId", "pluginId", "permission", "reason"],
+      "required": [
+        "requestId",
+        "pluginId",
+        "permission",
+        "reason"
+      ],
       "properties": {
-        "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "pluginId": { "$ref": "#/$defs/PluginId" },
-        "pluginVersion": { "$ref": "#/$defs/SemanticVersion" },
-        "pluginName": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "publisher": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "runtimeId": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
-        "runtimeKind": { "type": ["string", "null"], "enum": ["browser", "utility", null] },
-        "permission": { "$ref": "#/$defs/PluginPermission" },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "pluginId": {
+          "$ref": "#/$defs/PluginId"
+        },
+        "pluginVersion": {
+          "$ref": "#/$defs/SemanticVersion"
+        },
+        "pluginName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "publisher": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "runtimeId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "runtimeKind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "browser",
+            "utility",
+            null
+          ]
+        },
+        "permission": {
+          "$ref": "#/$defs/PluginPermission"
+        },
         "resources": {
           "type": "array",
           "maxItems": 128,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/PermissionResource" }
+          "items": {
+            "$ref": "#/$defs/PermissionResource"
+          }
         },
         "resourceKinds": {
           "type": "array",
           "maxItems": 128,
-          "items": { "$ref": "#/$defs/PermissionResourceKind" }
+          "items": {
+            "$ref": "#/$defs/PermissionResourceKind"
+          }
         },
         "displayContext": {
-          "type": "object", "additionalProperties": false,
+          "type": "object",
+          "additionalProperties": false,
           "properties": {
-            "action": { "$ref": "#/$defs/PluginAgentActionPreview" },
-            "modelLabel": { "type": "string", "minLength": 1, "maxLength": 160 },
+            "action": {
+              "$ref": "#/$defs/PluginAgentActionPreview"
+            },
+            "modelLabel": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
             "selections": {
-              "type": "array", "maxItems": 32,
+              "type": "array",
+              "maxItems": 32,
               "items": {
-                "type": "object", "required": ["title", "scope", "version"], "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "title",
+                  "scope",
+                  "version"
+                ],
+                "additionalProperties": false,
                 "properties": {
-                  "title": { "type": "string", "maxLength": 160 },
-                  "scope": { "enum": ["workspace", "tab", "session", "host", "note"] },
-                  "version": { "type": "string", "minLength": 1, "maxLength": 128 }
+                  "title": {
+                    "type": "string",
+                    "maxLength": 160
+                  },
+                  "scope": {
+                    "enum": [
+                      "workspace",
+                      "tab",
+                      "session",
+                      "host",
+                      "note"
+                    ]
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
                 }
               }
             }
           }
         },
         "relatedPermissions": {
-          "type": "array", "maxItems": 5,
+          "type": "array",
+          "maxItems": 5,
           "items": {
-            "type": "object", "required": ["permission", "resources"],
+            "type": "object",
+            "required": [
+              "permission",
+              "resources"
+            ],
             "properties": {
-              "permission": { "$ref": "#/$defs/PluginPermission" },
-              "resources": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/PermissionResource" } }
+              "permission": {
+                "$ref": "#/$defs/PluginPermission"
+              },
+              "resources": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 128,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/PermissionResource"
+                }
+              }
             },
             "additionalProperties": false
           }
         },
-        "reason": { "type": "string", "minLength": 1, "maxLength": 1024 },
-        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
         "allowedScopes": {
           "type": "array",
           "minItems": 1,
           "maxItems": 4,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/PermissionGrantScope" }
+          "items": {
+            "$ref": "#/$defs/PermissionGrantScope"
+          }
         }
       },
       "additionalProperties": false
@@ -3788,26 +6099,52 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["requestId", "decision", "scope"],
+          "required": [
+            "requestId",
+            "decision",
+            "scope"
+          ],
           "properties": {
-            "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "decision": { "const": "allow" },
-            "scope": { "$ref": "#/$defs/PermissionGrantScope" },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "decision": {
+              "const": "allow"
+            },
+            "scope": {
+              "$ref": "#/$defs/PermissionGrantScope"
+            },
             "resources": {
               "type": "array",
               "maxItems": 128,
               "uniqueItems": true,
-              "items": { "$ref": "#/$defs/PermissionResource" }
+              "items": {
+                "$ref": "#/$defs/PermissionResource"
+              }
             }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["requestId", "decision"],
+          "required": [
+            "requestId",
+            "decision"
+          ],
           "properties": {
-            "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "decision": { "enum": ["deny", "cancel"] }
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "decision": {
+              "enum": [
+                "deny",
+                "cancel"
+              ]
+            }
           },
           "additionalProperties": false
         }
@@ -3815,14 +6152,38 @@
     },
     "ProviderRequest": {
       "type": "object",
-      "required": ["providerId", "operation", "requestId"],
+      "required": [
+        "providerId",
+        "operation",
+        "requestId"
+      ],
       "properties": {
-        "providerId": { "$ref": "#/$defs/ContributionId" },
-        "operation": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "payload": { "$ref": "#/$defs/JsonValue" },
-        "deadlineMs": { "type": "integer", "minimum": 1, "maximum": 300000 },
-        "cancellationId": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "providerId": {
+          "$ref": "#/$defs/ContributionId"
+        },
+        "operation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "payload": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "deadlineMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300000
+        },
+        "cancellationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       },
       "additionalProperties": false
     },
@@ -3830,30 +6191,63 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["requestId", "status", "result"],
+          "required": [
+            "requestId",
+            "status",
+            "result"
+          ],
           "properties": {
-            "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "status": { "const": "ok" },
-            "result": { "$ref": "#/$defs/JsonValue" }
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "status": {
+              "const": "ok"
+            },
+            "result": {
+              "$ref": "#/$defs/JsonValue"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["requestId", "status"],
+          "required": [
+            "requestId",
+            "status"
+          ],
           "properties": {
-            "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "status": { "const": "cancelled" }
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "status": {
+              "const": "cancelled"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["requestId", "status", "error"],
+          "required": [
+            "requestId",
+            "status",
+            "error"
+          ],
           "properties": {
-            "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "status": { "const": "failed" },
-            "error": { "$ref": "#/$defs/RpcErrorObject" }
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "status": {
+              "const": "failed"
+            },
+            "error": {
+              "$ref": "#/$defs/RpcErrorObject"
+            }
           },
           "additionalProperties": false
         }
@@ -6191,6 +8585,45 @@
         "text": {
           "type": "string",
           "maxLength": 98304
+        }
+      }
+    },
+    "HostDrawnViewOpenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "viewId",
+        "instanceId",
+        "scopeId"
+      ],
+      "properties": {
+        "viewId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "instanceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "scopeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "context": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ],
+            "maxLength": 8192
+          }
         }
       }
     }

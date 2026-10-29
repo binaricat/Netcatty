@@ -19,5 +19,5 @@ test("trusted AI preload uses dedicated typed channels and disposes subscription
   ipcRenderer.emit("netcatty:plugins:ai-host-request", {}, request); off();
   ipcRenderer.emit("netcatty:plugins:ai-host-request", {}, { kind: "context.select" });
   assert.deepEqual(received, [request]);
-  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../plugins/runtime/viewPreload.cjs"), "utf8"), /ai-host-|PluginAIHost/);
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../plugins/runtime/browserPreload.cjs"), "utf8"), /ai-host-|PluginAIHost/);
 });

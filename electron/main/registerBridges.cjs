@@ -235,7 +235,7 @@ function createBridgeRegistrar(context) {
       resolveContributionIcon: (payload) => pluginHostService?.contributionIconService?.resolve(payload),
       themeService: pluginHostService?.themeService,
       logService: pluginHostService?.logService,
-      viewHost: pluginHostService?.viewHost,
+      hostDrawnViewHost: pluginHostService?.hostDrawnViewHost,
       env: process.env,
       isTrustedSender: createTrustedPluginBridgeSender({ devServerUrl: effectiveDevServerUrl }),
       broadcast: (channel, payload) => {

@@ -78,8 +78,7 @@
               "en": "Starter: Greeting Panel",
               "zh-CN": "入门：问候面板"
             },
-            "location": "modal",
-            "entry": "panel.html"
+            "location": "modal"
           }
         ]
       },

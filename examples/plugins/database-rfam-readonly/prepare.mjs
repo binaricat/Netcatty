@@ -14,11 +14,11 @@ export async function prepareRfamExample(targetEndpoint, outputPath) {
   if (targetEndpoint !== RFAM_ENDPOINT) throw new Error("Use only the documented exact Rfam sample endpoint");
   const temporary = await fs.mkdtemp(path.join(path.dirname(outputPath), ".rfam-example-"));
   try {
-    for (const file of ["netcatty.plugin.json", "panel.html", "panel.css", "panel.js"]) {
+    for (const file of ["netcatty.plugin.json"]) {
       await fs.copyFile(path.join(root, file), path.join(temporary, file));
     }
-    const bundle = await build({ entryPoints: [path.join(root, "browser.js")], write: false,
-      bundle: true, minify: true, platform: "browser", format: "esm", nodePaths: [path.resolve(root, "../../../node_modules")] });
+    const bundle = await build({ entryPoints: [path.join(root, "host.js")], write: false,
+      loader: { ".html": "text", ".css": "text" }, bundle: true, minify: true, platform: "browser", format: "esm", nodePaths: [path.resolve(root, "../../../node_modules")] });
     await fs.writeFile(path.join(temporary, "browser.js"), bundle.outputFiles[0].contents);
     return await buildPluginPackage(temporary, outputPath);
   } finally { await fs.rm(temporary, { recursive: true, force: true }); }

@@ -6,9 +6,9 @@ const { RegistryCatalogService, REGISTRY_URL } = require("./registryCatalogServi
 const { fetchVerified, assertAsset } = require("./distributionSnapshot.cjs");
 const { read, digest, catalog, delivery, realFiles, makeFiles, responseFor } = require("./fixtures/staticDistributionFixture.cjs");
 
-test("exact registry PR3 bootstrap hashes and all README/icon assets verify without GitHub requests", async () => {
-  assert.equal(digest(read("snapshot.json")), "2878885057a01585e34897c226bcfd81615345d843ea94297980de7e397b4617");
-  assert.equal(digest(read("delivery.json")), "53e5189d2cb58a02826931d5d6321ad3e556b924ef80d38636dc9e66a7df8c55");
+test("current-contract fixture hashes and all README/icon assets verify without GitHub requests", async () => {
+  assert.equal(digest(read("snapshot.json")), "25400e152accb1faa3cb28d86cf423569fa02db250397e0816c275c72d201705");
+  assert.equal(digest(read("delivery.json")), "dd5c2e20defbbf2126541de40d8f59d5a77f146c83e0e0cda8d3c4054a472988");
   const requests = []; const files = realFiles();
   const fetch = async (url, options) => {
     requests.push(url); assert.equal(new URL(url).origin, "https://plugins.netcatty.app");

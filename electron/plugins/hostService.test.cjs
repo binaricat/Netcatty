@@ -29,6 +29,19 @@ function transportContext() {
   };
 }
 
+test("host-drawn views are available without a development gate", (context) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-plugin-host-preview-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const preview = createPluginHostService(createOptions(path.join(root, "preview")));
+  const normal = createPluginHostService({ ...createOptions(path.join(root, "normal")), env: {} });
+  context.after(() => { preview.database.close(); normal.database.close(); });
+  for (const service of [preview, normal]) {
+    const expected = true;
+    assert.equal(service.runtimeSupervisor.supportedFeatures.includes("views.host-drawn"), expected);
+    assert.equal(service.packageStore.supportedFeatures.includes("views.host-drawn"), expected);
+  }
+});
+
 test("host RPC registry configuration is complete before runtime initialization", (context) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-plugin-host-service-"));
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -85,7 +85,7 @@ export default defineConfig(() => {
       build: {
         // The shared runtime is also required by Electron; convert it for browser builds.
         commonjsOptions: {
-          include: [/node_modules/, /domain\/systemManager\/containerRuntime\.shared\.cjs$/, /domain\/plugin(?:RuntimePolicy|PermissionDescriptions|ThemePack)\.cjs$/],
+          include: [/node_modules/, /domain\/systemManager\/containerRuntime\.shared\.cjs$/, /domain\/plugin(?:RuntimePolicy|PermissionDescriptions|ThemePack|RemoteTreePolicy|ViewStylePolicy)\.cjs$/],
         },
         chunkSizeWarningLimit: 3000,
         target: 'esnext', // Required for top-level await in WASM modules
@@ -133,6 +133,8 @@ export default defineConfig(() => {
           '@/domain/pluginRuntimePolicy.cjs',
           '@/domain/pluginPermissionDescriptions.cjs',
           '@/domain/pluginThemePack.cjs',
+          '@/domain/pluginRemoteTreePolicy.cjs',
+          '@/domain/pluginViewStylePolicy.cjs',
           'ai',
           '@ai-sdk/openai',
           '@ai-sdk/anthropic',

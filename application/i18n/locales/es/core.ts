@@ -1401,6 +1401,7 @@ Resalta el panel dividido enfocado:
   "settings.plugins.sources.local": "Local import",
   "settings.plugins.sources.all": "All sources",
   "settings.plugins.title": "Plugins",
+  "settings.plugins.configuration": "Ajustes del plugin",
   "settings.plugins.description": "Gestiona tus plugins y explora el catálogo.",
   'settings.plugins.loading': 'Cargando ajustes del plugin…',
   'settings.plugins.empty': 'Ningún plugin activado aporta ajustes.',

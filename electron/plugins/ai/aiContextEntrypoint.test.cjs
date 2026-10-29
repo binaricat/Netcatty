@@ -40,13 +40,16 @@ if (!schema.$defs.PluginAIChatResult) {
     service.runtimeSupervisor.runtimeFactories.browser = inProcessBrowserRuntime;
     await service.manager.initialize();
     const sample = path.resolve(__dirname, "../../../examples/plugins/assistant");
-    // Use an explicit six-file fixture snapshot, not source/build tooling.
+    // This command-only fixture excludes view assets; UI runs in the Electron suite.
     const staging = path.join(root, "package"); await fs.mkdir(path.join(staging, "dist"), { recursive: true });
-    for (const file of ["netcatty.plugin.json", "panel.html", "panel.css", "panel.js", "README.md"]) await fs.copyFile(path.join(sample, file), path.join(staging, file));
+    for (const file of ["netcatty.plugin.json", "README.md"]) await fs.copyFile(path.join(sample, file), path.join(staging, file));
     await fs.copyFile(path.join(sample, "src/index.js"), path.join(staging, "dist/index.js"));
+    const commandManifest = JSON.parse(await fs.readFile(path.join(staging, 'netcatty.plugin.json'), 'utf8'));
+    commandManifest.main.browser = 'dist/index.js';
+    await fs.writeFile(path.join(staging, 'netcatty.plugin.json'), JSON.stringify(commandManifest));
     const { buildPluginPackage, validatePluginPackage } = await import("@netcatty/plugin-cli");
     const archive = path.join(root, "assistant.ncpkg"); const built = await buildPluginPackage(staging, archive);
-    assert.equal(built.fileCount, 6); assert.equal((await validatePluginPackage(archive)).manifest.id, "com.netcatty.assistant");
+    assert.equal(built.fileCount, 3); assert.equal((await validatePluginPackage(archive)).manifest.id, "com.netcatty.assistant");
     await service.manager.install(archive, { enable: true });
     const id = "com.netcatty.assistant";
     const run = (name, args) => service.contributionService.executeCommand(`${id}.${name}`, args);

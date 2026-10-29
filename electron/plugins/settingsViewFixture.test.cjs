@@ -7,10 +7,14 @@ const { MessageChannel } = require('node:worker_threads');
 const { PluginRpcRouter } = require('./rpcRouter.cjs');
 
 test('actual settings-view fixture default export initializes and activates through the runtime peer', async (t) => {
+  const { JSDOM } = require('jsdom'); const dom = new JSDOM('');
+  const previous = globalThis.MutationObserver; globalThis.MutationObserver = dom.window.MutationObserver;
+  t.after(() => { globalThis.MutationObserver = previous; dom.window.close(); });
   const root = resolve(__dirname, '../../examples/plugins/settings-view-fixture');
   const manifest = JSON.parse(await readFile(resolve(root, 'netcatty.plugin.json'), 'utf8'));
-  assert.deepEqual(manifest.permissions.required, ['views']);
-  assert.equal(manifest.contributes.views[0].location, 'settings');
+  assert.deepEqual(manifest.permissions.required, ['views', 'settings.read']);
+  assert.equal(manifest.contributes.views[0].location, 'modal');
+  assert.equal(manifest.contributes.settings[0].control, 'text');
   const html = await readFile(resolve(root, 'view.html'), 'utf8');
   assert.doesNotMatch(html, /<script|https?:\/\/|<iframe/i);
   const { startPluginRuntime } = await import('./runtime/runtimePeer.mjs');

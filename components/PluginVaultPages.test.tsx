@@ -21,24 +21,19 @@ test('Vault navigation mounts a real content slot, yields to host dialogs, and w
   const { activeTabStore } = await import('../application/state/activeTabStore');
   const { requestOpenPluginView } = await import('../application/state/usePluginViewLifecycle');
   const { I18nProvider } = await import('../application/i18n/I18nProvider');
-  const page = { id: 'com.example.page.main', title: 'Synthetic page', location: 'vault-page', entry: 'page.html', visible: true };
+  const page = { id: 'com.example.page.main', title: 'Synthetic page', location: 'vault-page', visible: true };
   let snapshot = { locale: 'en', plugins: [{ id: 'com.example.page', version: '1.0.0', displayName: 'Synthetic plugin', commands: [], keybindings: [], menus: [], settings: [], views: [page] }] };
   let changed: (() => void) | undefined;
   const listeners = new Set<(event: NetcattyPluginViewClosedEvent) => void>();
-  const opens: NetcattyPluginViewOpenRequest[] = [], closes: string[] = [], visibility: boolean[] = [];
-  let defer: ((value: { instanceId: string }) => void) | undefined;
-  let deferOpen = false;
-  let delayLayout = false;
-  const rejectOldLayout: Array<(error: Error) => void> = [];
-  const layoutResult = () => delayLayout ? new Promise<void>((_resolve, reject) => { rejectOldLayout.push(reject); }) : Promise.resolve();
+  const opens: NetcattyPluginViewOpenRequest[] = [], closes: string[] = [];
   Object.assign(dom.window, { netcatty: {
     async getPluginRuntimeStatus() { return { available: true }; },
     async getPluginContributions() { return snapshot; },
     onPluginContributionsChanged(fn: () => void) { changed = fn; return () => { changed = undefined; }; },
     onPluginViewClosed(fn: (event: NetcattyPluginViewClosedEvent) => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
-    async openPluginView(payload: NetcattyPluginViewOpenRequest) { opens.push(payload); return deferOpen ? new Promise<{ instanceId: string }>((resolve) => { defer = resolve; }) : { instanceId: payload.instanceId! }; },
-    async closePluginView(id: string) { closes.push(id); }, async setPluginViewBounds() { await layoutResult(); },
-    async setPluginViewVisibility(_id: string, visible: boolean) { visibility.push(visible); await layoutResult(); },
+    onHostDrawnPluginViewUpdate() { return () => {}; },
+    async openHostDrawnPluginView(payload: NetcattyPluginViewOpenRequest) { opens.push(payload); return { instanceId: payload.instanceId! }; },
+    async closeHostDrawnPluginView(id: string) { closes.push(id); },
   } });
   let selectSection!: (section: 'hosts' | `plugin-vault:${string}`) => void;
   function Fixture() {
@@ -58,44 +53,26 @@ test('Vault navigation mounts a real content slot, yields to host dialogs, and w
     assert.ok(document.querySelector('[data-section="vault-main"] [data-plugin-view-slot="vault-page"]'));
     assert.equal(opens.length, 1);
     assert.deepEqual(opens[0].context, { 'netcatty.surface': 'vault-page' }, 'no Vault/session data accompanies navigation');
-    assert.equal(visibility.at(-1), true);
-    const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true');
-    await act(async () => { document.body.append(dialog); await settle(); });
-    assert.equal(visibility.at(-1), false, 'native content yields to host security/settings dialogs');
-    await act(async () => { dialog.remove(); await settle(); });
-    assert.equal(visibility.at(-1), true);
-    await act(async () => { activeTabStore.setActiveTabId('terminal:synthetic'); assert.ok(closes.includes(opens[0].instanceId!)); await settle(); });
+    await act(async () => { activeTabStore.setActiveTabId('terminal:synthetic'); await settle(); });
+    assert.equal(closes.length, 0, 'hiding keeps the logical view available');
     await act(async () => { activeTabStore.setActiveTabId('vault'); await settle(); });
-    assert.equal(opens.length, 2);
+    assert.equal(opens.length, 1, 'returning to Vault reuses the same plugin state');
     await act(async () => { snapshot = { ...snapshot, plugins: [] }; changed?.(); await settle(); });
     await act(async () => { await settle(); });
-    assert.ok(closes.includes(opens[1].instanceId!));
+    // The main process owns immediate invalidation on disable/uninstall.
+    await act(async () => { for (const listener of listeners) listener({ instanceId: opens[0].instanceId!, viewId: page.id, pluginId: 'com.example.page', reason: 'plugin-disabled' }); });
+    assert.ok(closes.includes(opens[0].instanceId!));
     assert.equal(document.querySelector('[data-plugin-vault-page]'), null);
     assert.equal(document.activeElement?.textContent, 'Hosts');
     await act(async () => { selectSection('plugin-vault:missing'); await settle(); });
     assert.match(document.querySelector('main')!.textContent!, /Built-in hosts/);
     await act(async () => { snapshot = { ...snapshot, plugins: [{ id: 'com.example.page', version: '1.0.0', displayName: 'Synthetic plugin', commands: [], keybindings: [], menus: [], settings: [], views: [page] }] }; changed?.(); await settle(); });
-    deferOpen = true;
     await act(async () => { requestOpenPluginView({ viewId: page.id }); await settle(); });
-    assert.equal(opens.length, 3);
+    assert.equal(opens.length, 2);
     await act(async () => { selectSection('hosts'); await settle(); });
-    assert.ok(closes.includes(opens[2].instanceId!), 'cancel reserved instance before its open response');
-    await act(async () => { defer!({ instanceId: opens[2].instanceId! }); await settle(); });
-    assert.equal(document.querySelector('[data-plugin-vault-page]'), null, 'late open cannot restore withdrawn page');
-    assert.ok(closes.filter((id) => id === opens[2].instanceId).length >= 2, 'late native response is also closed');
-    deferOpen = false;
-    const second = { ...page, id: 'com.example.page.second', title: 'Second page' };
-    await act(async () => { snapshot = { ...snapshot, plugins: [{ ...snapshot.plugins[0], views: [page, second] }] }; changed?.(); await settle(); });
-    delayLayout = true;
-    await clickPage();
-    assert.ok(rejectOldLayout.length >= 2, 'old page has both bounds and visibility IPC in flight');
-    await act(async () => { selectSection('hosts'); await settle(); });
-    delayLayout = false;
-    await act(async () => { document.querySelector<HTMLButtonElement>('button[aria-label="Second page — Synthetic plugin"]')!.click(); await settle(); });
-    await act(async () => { for (const reject of rejectOldLayout) reject(new Error('old page layout failed')); await settle(); });
-    assert.equal(document.querySelector('[data-plugin-vault-page]')?.getAttribute('aria-label'), 'Second page', 'old bounds/visibility failures cannot withdraw the newly selected page');
+    assert.equal(document.querySelector('[data-plugin-vault-page]'), null);
   } finally {
-    await act(async () => { root.unmount(); await settle(); }); dom.window.close();
+    await act(async () => { root.unmount(); (await import('../application/state/pluginViewSession')).pluginViewSessions.dispose(); await settle(); }); dom.window.close();
     for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
   }
 });

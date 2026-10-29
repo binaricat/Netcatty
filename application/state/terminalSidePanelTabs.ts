@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import {
   normalizeToolbarItemLayout,
@@ -13,7 +13,7 @@ import {
 } from '../../infrastructure/config/storageKeys';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { useToolbarItemLayout } from './useToolbarItemLayout';
-import type { BuiltinSidePanelTool, SidePanelTool } from '../../domain/sidePanelLayout';
+import { isPluginSidePanelTool, type BuiltinSidePanelTool, type SidePanelTool } from '../../domain/sidePanelLayout';
 
 export type TerminalSidePanelTabId = SidePanelTool;
 
@@ -101,7 +101,7 @@ function migrateSidePanelTabLayoutIfNeeded(): void {
 
 migrateSidePanelTabLayoutIfNeeded();
 
-export function useTerminalSidePanelTabOrder(): {
+export function useTerminalSidePanelTabOrder(pluginTools: readonly SidePanelTool[] = []): {
   sidePanelTabOrder: TerminalSidePanelTabId[];
   setSidePanelTabOrder: (order: TerminalSidePanelTabId[]) => void;
   layout: ToolbarItemLayout;
@@ -111,6 +111,23 @@ export function useTerminalSidePanelTabOrder(): {
   resetLayout: () => void;
   partition: ReturnType<typeof useToolbarItemLayout>['partition'];
 } {
+  // Keep preferences for temporarily unavailable/disabled plugins, including
+  // across a cold start before the contribution catalog finishes loading.
+  const knownPluginTools = useRef<Set<string> | null>(null);
+  if (!knownPluginTools.current) {
+    let stored: unknown;
+    try { stored = localStorageAdapter.read(STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_LAYOUT); } catch { stored = null; }
+    const order = stored && typeof stored === 'object' && !Array.isArray(stored)
+      ? (stored as { order?: unknown }).order : [];
+    knownPluginTools.current = new Set(Array.isArray(order)
+      ? order.filter((id): id is string => typeof id === 'string' && isPluginSidePanelTool(id)) : []);
+  }
+  for (const tool of pluginTools) if (isPluginSidePanelTool(tool)) knownPluginTools.current.add(tool);
+  const pluginKey = [...knownPluginTools.current].join('\0');
+  const defaults = useMemo<ToolbarItemLayoutDefaults>(() => {
+    const plugins = pluginKey ? pluginKey.split('\0') : [];
+    return { order: [TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER[0], ...plugins, ...TERMINAL_SIDE_PANEL_TAB_DEFAULT_ORDER.slice(1)] };
+  }, [pluginKey]);
   const {
     layout,
     setPlacement,
@@ -121,8 +138,27 @@ export function useTerminalSidePanelTabOrder(): {
     partition,
   } = useToolbarItemLayout(
     STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_LAYOUT,
-    TERMINAL_SIDE_PANEL_TAB_LAYOUT_DEFAULTS,
+    defaults,
   );
+
+  // Newly installed plugins get a visible slot near the start even when an
+  // older saved layout already exists. Existing choices always keep their order.
+  const activePluginKey = pluginTools.filter(isPluginSidePanelTool).join('\0');
+  useEffect(() => {
+    const active = activePluginKey ? activePluginKey.split('\0') : [];
+    if (!active.length || active.some((id) => !layout.order.includes(id))) return;
+    let stored: unknown;
+    try { stored = localStorageAdapter.read(STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_LAYOUT); } catch { return; }
+    const storedOrder = stored && typeof stored === 'object' && !Array.isArray(stored)
+      ? (stored as { order?: unknown }).order : null;
+    const saved = new Set(Array.isArray(storedOrder) ? storedOrder : []);
+    const fresh = active.filter((id) => !saved.has(id));
+    if (!fresh.length) return;
+    const rest = layout.order.filter((id) => !fresh.includes(id));
+    const index = Math.max(0, rest.indexOf('sftp') + 1);
+    const next = [...rest.slice(0, index), ...fresh, ...rest.slice(index)];
+    if (next.some((id, i) => id !== layout.order[i])) setOrder(next);
+  }, [activePluginKey, layout.order, setOrder]);
 
   const sidePanelTabOrder = layout.order as TerminalSidePanelTabId[];
 

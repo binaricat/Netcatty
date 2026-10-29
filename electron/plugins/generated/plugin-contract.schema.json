@@ -2299,6 +2299,10 @@
         },
         "valueSchema": {
           "$ref": "#/$defs/JsonValue"
+        },
+        "group": {
+          "$ref": "#/$defs/LocalizedText",
+          "description": "Host-rendered section heading. Settings and groups retain declaration order; no custom markup or styles."
         }
       },
       "additionalProperties": false
@@ -2438,7 +2442,6 @@
         "panel",
         "tab",
         "modal",
-        "settings",
         "vault-page",
         "terminal-sidebar"
       ]
@@ -2448,6 +2451,221 @@
     },
     "TerminalSidebarFeature": {
       "const": "views.terminal-sidebar"
+    },
+    "PluginViewResourceRequest": {
+      "type": "object",
+      "required": [
+        "instanceId",
+        "path"
+      ],
+      "properties": {
+        "instanceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "path": {
+          "$ref": "#/$defs/RelativePackagePath"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PluginViewResourceResult": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 5592500,
+          "pattern": "^data:image/png;base64,"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostDrawnViewsFeature": {
+      "const": "views.host-drawn"
+    },
+    "HostDrawnViewMessage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "instanceId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "host-ui.open"
+            },
+            "instanceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "stateScope": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "instanceId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "host-ui.close"
+            },
+            "instanceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "instanceId",
+            "sequence",
+            "mutations",
+            "css"
+          ],
+          "properties": {
+            "kind": {
+              "const": "host-ui.update"
+            },
+            "instanceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "acknowledgedEvent": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "mutations": {
+              "type": "array",
+              "maxItems": 2048,
+              "items": {
+                "$ref": "#/$defs/JsonValue"
+              }
+            },
+            "css": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "instanceId",
+            "event"
+          ],
+          "properties": {
+            "kind": {
+              "const": "host-ui.event"
+            },
+            "instanceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "event": {
+              "$ref": "#/$defs/HostDrawnViewEvent"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "HostDrawnViewEvent": {
+      "type": "object",
+      "required": [
+        "nodeId",
+        "type"
+      ],
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "type": {
+          "enum": [
+            "click",
+            "input",
+            "change",
+            "keydown",
+            "keyup",
+            "focusin",
+            "focusout",
+            "compositionstart",
+            "compositionupdate",
+            "compositionend",
+            "dismiss",
+            "submit",
+            "reset"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "checked": {
+          "type": "boolean"
+        },
+        "eventId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "key": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "ctrlKey": {
+          "type": "boolean"
+        },
+        "metaKey": {
+          "type": "boolean"
+        },
+        "altKey": {
+          "type": "boolean"
+        },
+        "shiftKey": {
+          "type": "boolean"
+        },
+        "values": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "PluginViewFocusEvent": {
       "type": "object",
@@ -2471,8 +2689,7 @@
       "required": [
         "id",
         "title",
-        "location",
-        "entry"
+        "location"
       ],
       "properties": {
         "id": {
@@ -2484,9 +2701,6 @@
         "location": {
           "$ref": "#/$defs/ViewLocation"
         },
-        "entry": {
-          "$ref": "#/$defs/RelativePackagePath"
-        },
         "icon": {
           "$ref": "#/$defs/IconReference"
         },
@@ -2495,10 +2709,6 @@
         },
         "when": {
           "$ref": "#/$defs/ContextKeyExpression"
-        },
-        "retainContextWhenHidden": {
-          "type": "boolean",
-          "default": false
         }
       },
       "additionalProperties": false
@@ -8375,6 +8585,45 @@
         "text": {
           "type": "string",
           "maxLength": 98304
+        }
+      }
+    },
+    "HostDrawnViewOpenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "viewId",
+        "instanceId",
+        "scopeId"
+      ],
+      "properties": {
+        "viewId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "instanceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "scopeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "context": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ],
+            "maxLength": 8192
+          }
         }
       }
     }

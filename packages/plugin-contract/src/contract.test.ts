@@ -907,7 +907,7 @@ test("UI contribution shapes cover conditional menus, icons, and platform keybin
     id: "com.example.contract-test.panel",
     title: "Panel",
     location: "panel",
-    entry: "dist/panel.html",
+
     icon: { kind: "package", light: "assets/panel.svg" },
     order: 20,
   }), true, JSON.stringify(view.errors));
@@ -1154,7 +1154,7 @@ test("semantic namespacing covers every contribution registry and near-prefix co
       id: "com.example.contract-test.panel",
       title: "Panel",
       location: "panel",
-      entry: "dist/panel.html",
+
     }],
     providers: [{
       id: "com.example.contract-test.completion",
@@ -1220,7 +1220,7 @@ test("contribution IDs are globally unique across registry kinds", async () => {
         id: sharedId,
         title: "Shared view",
         location: "panel",
-        entry: "dist/shared.html",
+
       }],
       providers: validManifest.contributes.providers,
     },
@@ -1336,7 +1336,7 @@ test("planned phase consumers are representable without private application type
           id: "com.example.contract-test.panel",
           title: "Panel",
           location: "panel",
-          entry: "dist/panel.html",
+
         }],
       },
     },
@@ -1475,5 +1475,20 @@ test("planned phase consumers are representable without private application type
   for (const manifest of manifests) {
     const result = validateManifestValue(manifest);
     assert.equal(result.valid, true, result.errors.join("\n"));
+  }
+});
+
+
+test("settings accept host-owned groups but reject custom rendering and settings view placement", () => {
+  const validate = validator("SettingContribution");
+  const setting = { id: "com.example.contract-test.name", label: "Name", group: { en: "General", "zh-CN": "常规" }, control: "text", scope: "application", default: "" };
+  assert.equal(validate(setting), true, JSON.stringify(validate.errors));
+  for (const field of ["html", "css", "render", "entry"]) {
+    assert.equal(validate({ ...setting, [field]: "plugin controlled" }), false, field);
+  }
+  const view = validator("ViewContribution");
+  assert.equal(view({ id: "com.example.contract-test.view", title: "Custom", location: "settings" }), false);
+  for (const location of ["vault-page", "terminal-sidebar", "tab", "aside", "panel", "modal"]) {
+    assert.equal(view({ id: "com.example.contract-test.view", title: "Custom", location }), true, JSON.stringify(view.errors));
   }
 });

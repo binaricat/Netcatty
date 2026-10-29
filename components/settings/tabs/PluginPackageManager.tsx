@@ -9,6 +9,8 @@ import { usePluginManager } from '../../../application/state/usePluginManager';
 import { useI18n } from '../../../application/i18n/I18nProvider';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
+import { PluginInfo } from './PluginInfo';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../../ui/dialog';
 
 export function PluginPackageDetails({ plugin }: { plugin: NetcattyInstalledPlugin }) {
   const { t, resolvedLocale } = useI18n();
@@ -50,7 +52,7 @@ export function PluginPackageDetails({ plugin }: { plugin: NetcattyInstalledPlug
   </div>;
 }
 
-export function PluginPackageManager({ manager, onSelectionChange, initialSelectedId }: { initialSelectedId?: string | null; manager: ReturnType<typeof usePluginManager>; onSelectionChange?: (id: string | null) => void }) {
+export function PluginPackageManager({ manager, onSelectionChange, initialSelectedId, detailActions }: { initialSelectedId?: string | null; manager: ReturnType<typeof usePluginManager>; onSelectionChange?: (id: string | null) => void; detailActions?: React.ReactNode }) {
   const { t, resolvedLocale } = useI18n();
   const [selected, setSelected] = useState<string | null>(initialSelectedId ?? null);
   const [search, setSearch] = useState('');
@@ -77,6 +79,7 @@ export function PluginPackageManager({ manager, onSelectionChange, initialSelect
   const visible = selectedPlugin ? [selectedPlugin] : manager.plugins.filter((plugin) => (!sourceFilter || (plugin.source?.id ?? 'local') === sourceFilter) && [nameOf(plugin), plugin.manifest?.publisher, plugin.manifest?.description, plugin.id].some((value) => JSON.stringify(value ?? '').toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())));
   const [removing, setRemoving] = useState<string | null>(null);
   const [clearSource, setClearSource] = useState(false);
+  const [uninstallError, setUninstallError] = useState<string | null>(null);
   if (!manager.available) return null;
   return <section ref={rootRef} className="space-y-4" aria-label={t('settings.plugins.manager.installed')}>
     {selectedPlugin && <Button variant="ghost" size="sm" onClick={() => choose(null)}><ArrowLeft size={14} className="mr-2" />{t('settings.plugins.manager.installed')}</Button>}
@@ -89,10 +92,18 @@ export function PluginPackageManager({ manager, onSelectionChange, initialSelect
     {visible.map((plugin) => <article key={plugin.id} data-plugin-detail={selectedPlugin ? true : undefined} tabIndex={selectedPlugin ? -1 : undefined} aria-label={nameOf(plugin)} className={`min-w-0 rounded-lg focus:outline-none ${selectedPlugin ? 'space-y-4' : 'plugin-card flex min-h-[200px] flex-col gap-3 bg-card p-4'}`}>
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center"><PluginBrandIcon plugin={plugin} size={32} /></div>
-        <button type="button" data-plugin-card={plugin.id} className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-expanded={selected === plugin.id} onClick={() => choose(selected === plugin.id ? null : plugin.id)}>
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+        <button type="button" data-plugin-card={plugin.id} className="min-w-0 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-expanded={selected === plugin.id} onClick={() => choose(selected === plugin.id ? null : plugin.id)}>
           <div className="break-words text-sm font-medium">{nameOf(plugin)}</div>
 
         </button>
+        {plugin.runtime.lastError && <PluginInfo variant="error" label={`${t('settings.plugins.manager.lastError')} — ${nameOf(plugin)}`}>
+          <p className="font-medium">{t('settings.plugins.manager.lastError')}</p>
+          <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{plugin.runtime.lastError}</p>
+        </PluginInfo>}
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2" data-plugin-header-actions="">
+        {selected === plugin.id && detailActions}
         <Button variant="ghost" size="sm" type="button"
           className={`h-7 shrink-0 rounded-full border-0 px-3 text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${manager.statusKnown !== false && plugin.enabled ? 'bg-primary/10 hover:bg-primary/15' : 'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground'}`}
           style={manager.statusKnown !== false && plugin.enabled ? { color: 'color-mix(in srgb, hsl(var(--primary)) 40%, hsl(var(--foreground)))' } : undefined}
@@ -102,6 +113,7 @@ export function PluginPackageManager({ manager, onSelectionChange, initialSelect
           disabled={manager.busy || manager.statusKnown === false} onClick={() => void manager.setEnabled(plugin.id, !plugin.enabled)}>
           {t(manager.statusKnown === false ? 'settings.plugins.permissions.statusUnknown' : plugin.enabled ? 'settings.plugins.manager.enabled' : 'settings.plugins.manager.disabled')}
         </Button>
+        </div>
       </div>
       <PluginAuthorRow plugin={plugin} showSource />
       <p className={`break-words text-sm leading-5 text-muted-foreground ${selectedPlugin ? 'whitespace-pre-wrap' : 'line-clamp-3'}`}>{descriptionOf(plugin) || t('settings.plugins.manager.noDescription')}</p>
@@ -109,16 +121,31 @@ export function PluginPackageManager({ manager, onSelectionChange, initialSelect
         <p className="break-words text-xs text-muted-foreground">{plugin.activeVersion}{plugin.manifest?.license ? ` · ${plugin.manifest.license}` : ''}</p>
         <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => choose(plugin.id)} aria-label={`${t('settings.plugins.manager.details')} ${nameOf(plugin)}`}>{t('settings.plugins.manager.details')}</Button>
       </div> : <p className="text-xs text-muted-foreground">{plugin.activeVersion}{plugin.manifest?.license ? ` · ${plugin.manifest.license}` : ''}</p>}
-      {plugin.runtime.lastError && <p role="status" className="break-words text-xs text-destructive">{t('settings.plugins.manager.lastError')}: {plugin.runtime.lastError}</p>}
       {selected === plugin.id && <>
         <PluginPackageDetails plugin={plugin} />
-        <PluginPermissionPanel key={plugin.id} pluginId={plugin.id} onChanged={async () => { await manager.refresh(); }} />
-        {removing === plugin.id ? <div className="space-y-2 rounded-lg border border-destructive/30 p-3">
-          <p className="text-xs">{t('settings.plugins.manager.removeNote')}</p>
-          <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={clearSource} onChange={(event) => setClearSource(event.target.checked)} />{t('settings.plugins.sources.clearPrivate')}</label>
-          <Button variant="destructive" size="sm" disabled={manager.busy} onClick={() => { void manager.uninstall(plugin.id, clearSource); setRemoving(null); }}>{t('settings.plugins.manager.remove')}</Button>
-          <Button variant="ghost" size="sm" onClick={() => setRemoving(null)}>{t('common.cancel')}</Button>
-        </div> : <Button variant="ghost" size="sm" disabled={manager.busy} onClick={() => { setClearSource(false); setRemoving(plugin.id); }}>{t('settings.plugins.manager.remove')}</Button>}
+        <PluginPermissionPanel key={plugin.id} pluginId={plugin.id} onChanged={async () => { await manager.refresh(); }}
+          actions={<Dialog open={removing === plugin.id} onOpenChange={(open) => {
+            if (manager.busy) return;
+            setRemoving(open ? plugin.id : null);
+            if (open) { setClearSource(false); setUninstallError(null); }
+          }}>
+            <DialogTrigger asChild><Button variant="destructive" size="sm" disabled={manager.busy}>{t('settings.plugins.manager.remove')}</Button></DialogTrigger>
+            <DialogContent hideCloseButton={manager.busy} className="max-h-[85dvh] w-[calc(100vw-2rem)] max-w-md overflow-y-auto" data-plugin-uninstall-confirm="">
+              <DialogHeader className="pr-6"><DialogTitle>{t('settings.plugins.manager.remove')} · {nameOf(plugin)}</DialogTitle></DialogHeader>
+              <p className="text-sm text-muted-foreground">{t('settings.plugins.manager.removeNote')}</p>
+              <label className="flex items-start gap-2 text-sm"><input className="mt-1" type="checkbox" checked={clearSource} disabled={manager.busy} onChange={(event) => setClearSource(event.target.checked)} />{t('settings.plugins.sources.clearPrivate')}</label>
+              {uninstallError && <p role="alert" className="break-words text-sm text-destructive">{uninstallError}</p>}
+              <DialogFooter>
+                <Button variant="outline" disabled={manager.busy} onClick={() => setRemoving(null)}>{t('common.cancel')}</Button>
+                <Button variant="destructive" disabled={manager.busy} aria-busy={manager.busy} onClick={async () => {
+                  setUninstallError(null);
+                  try { await manager.uninstall(plugin.id, clearSource); choose(null); }
+                  catch (cause) { setUninstallError(cause instanceof Error ? cause.message : String(cause)); }
+                }}>{t('settings.plugins.manager.remove')}</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>}
+        />
       </>}
     </article>)}
     </div>

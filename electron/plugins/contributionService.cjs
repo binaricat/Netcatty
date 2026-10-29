@@ -567,6 +567,7 @@ class PluginContributionService {
         return {
           ...setting,
           label: localize(setting.label),
+          group: setting.group == null ? undefined : localize(setting.group),
           description: setting.description == null ? undefined : localize(setting.description),
           placeholder: setting.placeholder == null ? undefined : localize(setting.placeholder),
           options: setting.options?.map((option) => ({

@@ -101,6 +101,15 @@ test("plugin management bridge checks sender ownership before invoking manager",
   );
 });
 
+test("plugin bridge refuses embedded frames even at an app URL", () => {
+  const trusted = createTrustedPluginBridgeSender({ devServerUrl: "http://localhost:5173" });
+  const mainFrame = { url: "http://localhost:5173/" };
+  const sender = { mainFrame };
+  assert.equal(trusted({ sender, senderFrame: mainFrame }), true);
+  assert.equal(trusted({ sender, senderFrame: { url: mainFrame.url } }), false);
+  assert.equal(trusted({ sender, senderFrame: null }), false);
+});
+
 test("author presentation is a trusted-app-only route and forwards no invented authority", async () => {
   const ipcMain = createIpcMain(); const calls = [];
   registerPluginBridge(ipcMain, { manager: { initialize: async () => {} }, isTrustedSender: createTrustedPluginBridgeSender({ devServerUrl: "http://localhost:5173" }),
@@ -160,28 +169,16 @@ test("plugin management availability follows asynchronous host initialization", 
   assert.equal(listCalls, 0);
 });
 
-test("plugin view host closures are broadcast to renderer windows", async () => {
-  const ipcMain = createIpcMain();
-  const broadcasts = [];
-  let closeListener;
+test("plugin view events are routed with their owning sender and never globally broadcast", async () => {
+  const ipcMain = createIpcMain(); const calls = []; const broadcasts = []; const sender = {};
   registerPluginBridge(ipcMain, {
-    manager: { initialize: async () => {} },
-    contributionService: {},
-    viewHost: {
-      onDidClose(listener) { closeListener = listener; return { dispose() {} }; },
-    },
-    env: { NETCATTY_PLUGIN_DEV: "1" },
-    isTrustedSender: () => true,
-    broadcast: (...args) => broadcasts.push(args),
+    manager: { initialize: async () => {} }, contributionService: {},
+    hostDrawnViewHost: { event: async (...args) => calls.push(args) },
+    isTrustedSender: () => true, broadcast: (...args) => broadcasts.push(args),
   });
-  const event = {
-    instanceId: "view-1",
-    pluginId: "com.example.view",
-    viewId: "com.example.view.panel",
-    reason: "runtime-error",
-  };
-  closeListener(event);
-  assert.deepEqual(broadcasts, [[CHANNELS.viewClosed, event]]);
+  const event = { nodeId: "button", type: "click" };
+  await ipcMain.handlers.get(CHANNELS.hostDrawnEvent)({ sender }, { instanceId: "view-1", event });
+  assert.deepEqual(calls, [["view-1", event, sender]]); assert.deepEqual(broadcasts, []);
 });
 
 test("plugin contribution icon requests use the host-owned resolver", async () => {

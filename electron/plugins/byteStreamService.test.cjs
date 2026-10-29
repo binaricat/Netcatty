@@ -41,8 +41,10 @@ const { PluginHostRpcRegistry } = require("./hostRpcRegistry.cjs");
 
 async function fixture(t, options = {}) {
   let peer;
+  let accepted;
+  const peerReady = new Promise((resolve) => { accepted = resolve; });
   const sockets = new Set();
-  const server = net.createServer((socket) => { peer = socket; sockets.add(socket); socket.on("error", () => {}); });
+  const server = net.createServer((socket) => { peer = socket; accepted(socket); sockets.add(socket); socket.on("error", () => {}); });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   let service;
@@ -78,7 +80,7 @@ async function fixture(t, options = {}) {
   service.register(registry);
   const routes = registry.createRoutes({ ...identity, assertCurrent() {} });
   const call = (method, params) => routes.requestHandlers[method](params, { signal: new AbortController().signal });
-  return { service, call, endpoint, audit, writes, swap: () => { source = "second"; }, peer: () => peer };
+  return { service, call, endpoint, audit, writes, swap: () => { source = "second"; }, peerReady, peer: () => peer };
 }
 
 test("source changes before grant publication cannot create a socket or grant", async (t) => {
@@ -104,7 +106,7 @@ test("source changes during a real pending read discard bytes and skip the new s
   const descriptor = await f.call("network.stream.connect", { endpoint: f.endpoint });
   await f.call("network.stream.attach", { handleId: descriptor.handleId });
   f.swap();
-  f.peer().write("synthetic old-source bytes");
+  (await f.peerReady).write("synthetic old-source bytes");
   for (let attempt = 0; attempt < 100 && f.service.records.size; attempt++) await new Promise((resolve) => setImmediate(resolve));
   assert.equal(f.writes.length, 0);
   assert.equal(f.service.records.size, 0);

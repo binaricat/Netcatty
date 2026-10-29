@@ -19,7 +19,7 @@
     ]
   },
   "main": {
-    "browser": "browser.js"
+    "browser": "dist/host.js"
   },
   "activationEvents": [
     "onView:com.netcatty.session-scratchpad.page"
@@ -38,7 +38,6 @@
           "zh-CN": "会话草稿板"
         },
         "location": "terminal-sidebar",
-        "entry": "page.html",
         "order": 10
       }
     ]

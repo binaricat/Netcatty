@@ -11,3 +11,14 @@ Import the package through Settings > Plugins, review it, enable it, and open
 prompted. The page should display `Hello, world!`.
 
 Based on the MIT-licensed [Netcatty plugin examples](https://github.com/binaricat/netcatty-plugin-examples).
+
+The page follows the host's light, dark and accent colors. Add your own page
+heading and controls as needed. See `docs/plugin-platform/vault-pages.md`.
+
+## Current UI build
+
+The page now uses the host-rendered contract. Run `node build.mjs` in this
+example directory, then package `.package/` with the plugin CLI. `host.js`
+registers ordinary DOM views; `view.html` and `view.css` are bundled source
+templates. Theme values are inherited from Netcatty. There is no separate page
+preload or `window.netcattyView` API. See `docs/plugin-platform/host-rendered-ui.md`.

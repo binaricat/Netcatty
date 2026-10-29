@@ -4,7 +4,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { I18nProvider } from '../../../application/i18n/I18nProvider';
-import { PluginSettingField } from './SettingsPluginsTab';
+import { PluginSettingField } from '../../plugins/PluginSettingsForm';
 
 test('plugin setting cards retain localized descriptions alongside structured controls', () => {
   const setting = {

@@ -7,20 +7,58 @@
   "version": "0.1.0",
   "publisher": "netcatty",
   "license": "GPL-3.0-or-later",
-  "engines": { "netcatty": ">=0.0.0", "api": ">=0.1.0-internal.1 <0.2.0" },
-  "features": { "required": ["network.byte-streams"] },
-  "main": { "browser": "browser.js" },
-  "activationEvents": ["onCommand:com.netcatty.database-rfam-readonly.query", "onView:com.netcatty.database-rfam-readonly.panel"],
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "features": {
+    "required": [
+      "network.byte-streams"
+    ]
+  },
+  "main": {
+    "browser": "browser.js"
+  },
+  "activationEvents": [
+    "onCommand:com.netcatty.database-rfam-readonly.query",
+    "onView:com.netcatty.database-rfam-readonly.panel"
+  ],
   "permissions": {
-    "required": ["commands", "views"],
-    "optional": [{ "permission": "network.stream", "resources": ["tcp://mysql-rfam-public.ebi.ac.uk:4497"], "reason": "Run the fixed public Rfam acceptance query only after explicit authorization." }]
+    "required": [
+      "commands",
+      "views"
+    ],
+    "optional": [
+      {
+        "permission": "network.stream",
+        "resources": [
+          "tcp://mysql-rfam-public.ebi.ac.uk:4497"
+        ],
+        "reason": "Run the fixed public Rfam acceptance query only after explicit authorization."
+      }
+    ]
   },
   "contributes": {
     "commands": [
-      { "id": "com.netcatty.database-rfam-readonly.query", "title": "Run public Rfam SELECT 1" },
-      { "id": "com.netcatty.database-rfam-readonly.cancel", "title": "Cancel public Rfam sample" },
-      { "id": "com.netcatty.database-rfam-readonly.endpoint", "title": "Show public Rfam endpoint" }
+      {
+        "id": "com.netcatty.database-rfam-readonly.query",
+        "title": "Run public Rfam SELECT 1"
+      },
+      {
+        "id": "com.netcatty.database-rfam-readonly.cancel",
+        "title": "Cancel public Rfam sample"
+      },
+      {
+        "id": "com.netcatty.database-rfam-readonly.endpoint",
+        "title": "Show public Rfam endpoint"
+      }
     ],
-    "views": [{ "id": "com.netcatty.database-rfam-readonly.panel", "title": "Rfam public read-only sample", "location": "modal", "entry": "panel.html" }]
+    "views": [
+      {
+        "id": "com.netcatty.database-rfam-readonly.panel",
+        "title": "Rfam public read-only sample",
+        "location": "modal"
+      }
+    ]
   }
 }

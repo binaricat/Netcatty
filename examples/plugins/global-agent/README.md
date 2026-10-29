@@ -23,3 +23,11 @@ through Settings → Plugins. This is a minimal example, not a background servic
 Real provider/Claude usage requires a user's already configured backend and
 separate approval for paid acceptance testing. Automated tests use synthetic
 fixtures and do not establish authenticated Claude service/native acceptance.
+
+## Current UI build
+
+The page now uses the host-rendered contract. Run `node build.mjs` in this
+example directory, then package `.package/` with the plugin CLI. `host.js`
+registers ordinary DOM views; `view.html` and `view.css` are bundled source
+templates. Theme values are inherited from Netcatty. There is no separate page
+preload or `window.netcattyView` API. See `docs/plugin-platform/host-rendered-ui.md`.

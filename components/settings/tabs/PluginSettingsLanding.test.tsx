@@ -47,7 +47,7 @@ test('landing rows expose real sources/status/settings and quick toggles preserv
     const sourceRows = [...document.querySelectorAll('[data-plugin-author-row]')];
     assert.equal(sourceRows[0].querySelector('[data-plugin-source]')?.textContent, 'Official');
     const content = sourceRows[0].parentElement!;
-    assert.ok(content.classList.contains('gap-1.5'), 'title, metadata and description have 6px vertical gaps');
+    assert.ok(content.classList.contains('gap-1'), 'title, metadata and description have 4px vertical gaps');
     assert.ok(content.classList.contains('flex-col'));
     assert.ok(content.classList.contains('min-w-0'));
     assert.equal(content.firstElementChild?.querySelector('[title="Alpha"]')?.textContent, 'Alpha');

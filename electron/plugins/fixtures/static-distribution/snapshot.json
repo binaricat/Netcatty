@@ -1,20 +1,20 @@
 {
   "catalog": {
-    "path": "/snapshots/53e5189d2cb58a02826931d5d6321ad3e556b924ef80d38636dc9e66a7df8c55/catalog.json",
-    "sha256": "47e967516437996e00eac8fbe97699baa72439ba1bf7ae791731e4964bb13774",
-    "size": 5739
+    "path": "/snapshots/dd5c2e20defbbf2126541de40d8f59d5a77f146c83e0e0cda8d3c4054a472988/catalog.json",
+    "size": 5704,
+    "sha256": "85a6b5efbe4fca52d2bce0ae7074b9d33ac876e29a41ae9a6a28be5c7387c8a9"
   },
   "delivery": {
-    "path": "/snapshots/53e5189d2cb58a02826931d5d6321ad3e556b924ef80d38636dc9e66a7df8c55/delivery.json",
-    "sha256": "53e5189d2cb58a02826931d5d6321ad3e556b924ef80d38636dc9e66a7df8c55",
-    "size": 1869
+    "path": "/snapshots/dd5c2e20defbbf2126541de40d8f59d5a77f146c83e0e0cda8d3c4054a472988/delivery.json",
+    "size": 1869,
+    "sha256": "dd5c2e20defbbf2126541de40d8f59d5a77f146c83e0e0cda8d3c4054a472988"
   },
   "index": {
-    "path": "/snapshots/53e5189d2cb58a02826931d5d6321ad3e556b924ef80d38636dc9e66a7df8c55/index.json",
-    "sha256": "af2e953e3c631b36a0e712806d0dcfb0a058fd02f2051025eddded8cc115d461",
-    "size": 7726
+    "path": "/snapshots/dd5c2e20defbbf2126541de40d8f59d5a77f146c83e0e0cda8d3c4054a472988/index.json",
+    "size": 7683,
+    "sha256": "f8f81e2f86fd459e061b38e05b8fff3b21b4e660ad06bbd65129f542764c2062"
   },
   "registryCommit": "32578ae27ff86f0151511478d698a1cdc12fb2e0",
   "schemaVersion": 1,
-  "snapshotId": "53e5189d2cb58a02826931d5d6321ad3e556b924ef80d38636dc9e66a7df8c55"
+  "snapshotId": "dd5c2e20defbbf2126541de40d8f59d5a77f146c83e0e0cda8d3c4054a472988"
 }

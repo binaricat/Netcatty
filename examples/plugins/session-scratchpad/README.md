@@ -6,7 +6,7 @@ feature: `views.terminal-sidebar`. No terminal/session read, clipboard, network,
 Vault, filesystem, credential or shell permission is requested.
 
 ```sh
-node packages/plugin-cli/dist/cli.js pack examples/plugins/session-scratchpad --out /tmp/session-scratchpad.ncpkg
+node packages/plugin-cli/dist/cli.js pack examples/plugins/session-scratchpad/.package --out /tmp/session-scratchpad.ncpkg
 ```
 
 Import disabled through normal Settings, inspect and enable. Parent native QA
@@ -29,4 +29,11 @@ Settings/permission dialogs and overlapping menus must stay above native
 content. No new native target or persistent grant should be inferred from this
 README; parent coordinates the exact test and records source SHA/package hash.
 
-The page subscribes to `window.netcattyView.onDidChangeEnvironment()` in `theme.js`. It follows the seven public HSL theme variables, including accent changes, without reading host settings or DOM. The subscription is disposed on page hide.
+
+## Current UI build
+
+The page now uses the host-rendered contract. Run `node build.mjs` in this
+example directory, then package `.package/` with the plugin CLI. `host.js`
+registers ordinary DOM views; `view.html` and `view.css` are bundled source
+templates. Theme values are inherited from Netcatty. There is no separate page
+preload or `window.netcattyView` API. See `docs/plugin-platform/host-rendered-ui.md`.

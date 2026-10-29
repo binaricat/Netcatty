@@ -207,6 +207,50 @@ export type HostClipboardWriteRequest = {
   text: string;
 };
 
+export type HostDrawnViewEvent = {
+  nodeId: string;
+  type: "click" | "input" | "change" | "keydown" | "keyup" | "focusin" | "focusout" | "compositionstart" | "compositionupdate" | "compositionend" | "dismiss" | "submit" | "reset";
+  value?: string;
+  checked?: boolean;
+  eventId?: number;
+  data?: string;
+  key?: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  values?: Array<string>;
+};
+
+export type HostDrawnViewMessage = ({
+  kind: "host-ui.open";
+  instanceId: string;
+  stateScope?: string;
+}) | ({
+  kind: "host-ui.close";
+  instanceId: string;
+}) | ({
+  kind: "host-ui.update";
+  instanceId: string;
+  sequence: number;
+  acknowledgedEvent?: number;
+  mutations: Array<JsonValue>;
+  css: string;
+}) | ({
+  kind: "host-ui.event";
+  instanceId: string;
+  event: HostDrawnViewEvent;
+});
+
+export type HostDrawnViewOpenRequest = {
+  viewId: string;
+  instanceId: string;
+  scopeId: string;
+  context?: { [key: string]: string | number | boolean | null };
+};
+
+export type HostDrawnViewsFeature = "views.host-drawn";
+
 export type HostInputRequest = {
   kind: "input";
   title: string;
@@ -1124,6 +1168,15 @@ export type PluginViewFocusEvent = {
 
 export type PluginViewFocusRequest = PluginViewFocusEvent;
 
+export type PluginViewResourceRequest = {
+  instanceId: string;
+  path: RelativePackagePath;
+};
+
+export type PluginViewResourceResult = {
+  url: string;
+};
+
 export type PluginWireErrorCode = -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016;
 
 export type ProgressBegin = {
@@ -1328,6 +1381,7 @@ export type SettingContribution = {
   sync?: boolean;
   sortable?: boolean;
   valueSchema?: JsonValue;
+  group?: LocalizedText;
 };
 
 export type SettingControl = "switch" | "radio" | "select" | "multiselect" | "text" | "textarea" | "number" | "slider" | "password" | "color" | "font" | "file" | "directory" | "keybinding" | "list" | "table";
@@ -1786,13 +1840,11 @@ export type ViewContribution = {
   id: ContributionId;
   title: LocalizedText;
   location: ViewLocation;
-  entry: RelativePackagePath;
   icon?: IconReference;
   order?: number;
   when?: ContextKeyExpression;
-  retainContextWhenHidden?: boolean;
 };
 
-export type ViewLocation = "aside" | "panel" | "tab" | "modal" | "settings" | "vault-page" | "terminal-sidebar";
+export type ViewLocation = "aside" | "panel" | "tab" | "modal" | "vault-page" | "terminal-sidebar";
 
 export type WireIntegerLimits = {"maxSafeInteger":9007199254740991};

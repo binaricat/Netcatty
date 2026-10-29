@@ -4,17 +4,38 @@
   "private": true,
   "type": "module",
   "license": "GPL-3.0-or-later",
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "view"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./view/netcatty.css": "./view/netcatty.css",
+    "./host-react": {
+      "types": "./dist/hostReact.d.ts",
+      "import": "./dist/hostReact.js"
+    },
+    "./host-dom": {
+      "types": "./dist/hostDom.d.ts",
+      "import": "./dist/hostDom.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@netcatty/plugin-contract": "0.1.0-internal.1"
+    "@netcatty/plugin-contract": "0.1.0-internal.1",
+    "@remote-dom/core": "^1.12.0"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
   }
 }

@@ -1,32 +1,9 @@
-/* global document, window */
-'use strict';
-const element = (id) => document.getElementById(id);
-const invoke = (operation, params = {}) => window.netcattyView.executeCommand(`com.netcatty.assistant.${operation}`, params);
-// Follow the same seven public semantic tokens as the other browser samples.
-// Only this page's own DOM is updated; no host settings or DOM access is used.
-(() => {
-  const names = ['--background', '--foreground', '--muted', '--muted-foreground', '--border', '--primary', '--primary-foreground'];
-  let subscription;
-  const subscribe = () => {
-    if (subscription) return;
-    subscription = window.netcattyView.onDidChangeEnvironment?.((environment) => {
-      const root = document.documentElement;
-      const theme = ['light', 'dark'].includes(environment.theme) ? environment.theme : 'system';
-      root.dataset.theme = theme;
-      root.style.colorScheme = theme === 'system' ? 'light dark' : theme;
-      root.dataset.reducedMotion = String(Boolean(environment.reducedMotion));
-      root.dataset.highContrast = String(Boolean(environment.highContrast));
-      for (const name of names) {
-        const value = environment.themeTokens?.[name];
-        if (typeof value === 'string' && value.length > 0 && value.length <= 96) root.style.setProperty(name, value);
-        else root.style.removeProperty(name);
-      }
-    });
-  };
-  subscribe();
-  window.addEventListener('pagehide', () => { subscription?.dispose(); subscription = undefined; });
-  window.addEventListener('pageshow', subscribe);
-})();
+export function mount(root, context, viewId) {
+  const cleanup = [];
+  const onDispose = (stop) => cleanup.push(stop);
+  const subscribeMessage = (listener) => { const sub = context.views.onDidReceiveMessage(viewId, listener); cleanup.push(() => sub.dispose()); return sub; };
+const element = (id) => root.querySelector("#" + id);
+const invoke = (operation, params = {}) => context.commands.executeCommand(`com.netcatty.assistant.${operation}`, params);
 let chat;
 let turn;
 let generation = 0;
@@ -57,13 +34,13 @@ async function selectReferences(run) {
   const summaries = await invoke('contexts');
   if (closed || run !== generation) return false;
   references.clear();
-  const placeholder = document.createElement('option');
+  const placeholder = root.ownerDocument.createElement('option');
   placeholder.value = ''; placeholder.textContent = 'No reference';
   element('context').replaceChildren(placeholder);
   for (const reference of summaries) {
     if (reference.scope !== 'note') continue;
     references.set(reference.handle, { handle: reference.handle, version: reference.version, expiresAt: reference.expiresAt });
-    const option = document.createElement('option');
+    const option = root.ownerDocument.createElement('option');
     option.value = reference.handle; option.textContent = reference.title;
     element('context').append(option);
   }
@@ -151,12 +128,15 @@ element('stop').addEventListener('click', async () => {
   finally { if (run === generation) { element('status').textContent = 'Stopped'; busy(false); } }
 });
 // QA supplies this text through the regular view message surface.
-window.netcattyView.onDidReceiveMessage((message) => {
+subscribeMessage((message) => {
   if (message?.qaFixture === true) element('qa').textContent = 'Isolated QA · deterministic local provider · no model inference or paid API';
 });
-window.addEventListener('pagehide', () => {
+onDispose( () => {
   closed = true; ++generation;
   if (turn) invoke('stop', { turnHandle: turn }).catch(() => {});
   if (chat) invoke('close', { chatHandle: chat.chatHandle }).catch(() => {});
 });
 void initialize();
+
+  return () => { for (const stop of cleanup) stop(); };
+}

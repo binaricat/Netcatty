@@ -641,16 +641,13 @@ declare global {
     onPluginAuthenticationChallenge?(callback: (event: NetcattyPluginAuthenticationChallengeEvent) => void): () => void;
     onPluginConnectionData?(callback: (event: { sessionId: string; data: Uint8Array }) => void): () => void;
     onPluginConnectionClosed?(callback: (event: { sessionId: string; reason: string }) => void): () => void;
-    openPluginView?(payload: NetcattyPluginViewOpenRequest): Promise<{ instanceId: string }>;
-    closePluginView?(instanceId: string): Promise<void>;
-    setPluginViewBounds?(instanceId: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
-    setPluginViewVisibility?(instanceId: string, visible: boolean): Promise<void>;
-    focusPluginView?(payload: import('@netcatty/plugin-contract').PluginViewFocusRequest): Promise<void>;
-    postPluginViewMessage?(instanceId: string, message: unknown): Promise<void>;
+    getPluginViewResource?(payload: import('@netcatty/plugin-contract').PluginViewResourceRequest): Promise<import('@netcatty/plugin-contract').PluginViewResourceResult>;
+    openHostDrawnPluginView?(payload: NetcattyPluginViewOpenRequest): Promise<{ instanceId: string }>;
+    closeHostDrawnPluginView?(instanceId: string): Promise<void>;
+    sendHostDrawnPluginViewEvent?(instanceId: string, event: import('@netcatty/plugin-contract').HostDrawnViewEvent): Promise<void>;
+    onHostDrawnPluginViewUpdate?(callback: (event: import('@netcatty/plugin-contract').HostDrawnViewMessage & { viewId: string }) => void): () => void;
     onPluginContributionsChanged?(callback: (event: { reason: string; pluginId: string | null; revision: number }) => void): () => void;
-    onPluginViewMessage?(callback: (event: { pluginId: string; viewId: string; message: unknown }) => void): () => void;
     onPluginViewClosed?(callback: (event: NetcattyPluginViewClosedEvent) => void): () => void;
-    onPluginViewFocused?(callback: (event: import('@netcatty/plugin-contract').PluginViewFocusEvent) => void): () => void;
     getPluginScopeCatalog?(): Promise<NetcattyPluginScopeCatalog>;
     setPluginScopeCatalog?(catalog: NetcattyPluginScopeCatalog): Promise<void>;
     onPluginScopeCatalogChanged?(callback: (catalog: NetcattyPluginScopeCatalog) => void): () => void;
@@ -664,6 +661,7 @@ declare global {
   }
 
   interface NetcattyPluginSettingContribution {
+    group?: string;
     id: string;
     label: string;
     description?: string;
@@ -714,7 +712,7 @@ declare global {
         icon?: NetcattyPluginIconReference;
       }>;
       settings: ReadonlyArray<NetcattyPluginSettingContribution>;
-      views: ReadonlyArray<{ id: string; title: string; location: string; entry: string; icon?: NetcattyPluginIconReference; order?: number; visible: boolean; retainContextWhenHidden?: boolean }>;
+      views: ReadonlyArray<{ id: string; title: string; location: string; icon?: NetcattyPluginIconReference; order?: number; visible: boolean }>;
     }>;
   }
 
@@ -828,13 +826,7 @@ declare global {
     error: { code: number; message: string; data?: unknown };
   };
 
-  interface NetcattyPluginViewOpenRequest {
-    viewId: string;
-    instanceId?: string;
-    scopeId: string;
-    bounds?: { x: number; y: number; width: number; height: number };
-    context?: Record<string, unknown>;
-  }
+  type NetcattyPluginViewOpenRequest = import('@netcatty/plugin-contract').HostDrawnViewOpenRequest;
 
   interface NetcattyPluginViewClosedEvent {
     instanceId: string;

@@ -1401,6 +1401,7 @@ Highlight the focused split pane:
   "settings.plugins.sources.local": "Local import",
   "settings.plugins.sources.all": "All sources",
   "settings.plugins.title": "Plugins",
+  "settings.plugins.configuration": "Plugin settings",
   "settings.plugins.description": "Manage your plugins and explore the catalog.",
   'settings.plugins.loading': 'Loading plugin settings…',
   'settings.plugins.empty': 'No enabled plugin contributes settings.',
