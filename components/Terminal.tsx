@@ -1267,6 +1267,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     !isSerialConnection &&
     !isPluginConnection &&
     host.protocol !== 'telnet';
+  // tmux/zellij quick buttons additionally cover local terminals: the system
+  // manager backend executes locally for protocol 'local' sessions.
+  const isMuxSidebarEligible =
+    !!onOpenSystem &&
+    isSupportedOs &&
+    !isSerialConnection &&
+    !isPluginConnection &&
+    host.protocol !== 'telnet';
   // Server-stats polling now lives inside <TerminalServerStats> (rendered by
   // TerminalView) so its ~5s refresh only re-renders that widget, not the whole
   // terminal. We just forward `isSupportedOs` via ctx.
@@ -4379,8 +4387,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       onDeleteSnippets={onDeleteSnippets}
       onOpenSFTP={handleOpenSFTP}
       onOpenBrowser={(!host.protocol || ['ssh', 'mosh', 'local'].includes(host.protocol)) ? () => { void handleOpenHostBrowser(); } : undefined}
-      onOpenTmux={isSystemSidebarEligible ? () => onOpenSystem?.('tmux') : undefined}
-      onOpenZellij={isSystemSidebarEligible ? () => onOpenSystem?.('zellij') : undefined}
+      onOpenTmux={isMuxSidebarEligible ? () => onOpenSystem?.('tmux') : undefined}
+      onOpenZellij={isMuxSidebarEligible ? () => onOpenSystem?.('zellij') : undefined}
       onSendYmodem={isSerialConnection ? handleSendYmodem : undefined}
       onReceiveYmodem={isSerialConnection ? handleReceiveYmodem : undefined}
       onOpenScripts={onOpenScripts ?? (() => {})}
@@ -4454,7 +4462,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     isSearchOpen,
     isSessionLogging,
     isWorkspaceComposeBarOpen,
-    isSystemSidebarEligible,
+    isMuxSidebarEligible,
     onCloseSession,
     onDeleteSnippets,
     onOpenScripts,

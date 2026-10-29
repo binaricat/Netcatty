@@ -10,6 +10,7 @@ const { parseRuntimeProbe } = require("../../domain/systemManager/containerRunti
 const { createGpuOpsApi } = require("./systemManager/gpuOps.cjs");
 const { createPortOpsApi } = require("./systemManager/portOps.cjs");
 const { createServiceOpsApi } = require("./systemManager/serviceOps.cjs");
+const { MUX_PATH_AUGMENT } = require("./systemManager/tmuxEnv.cjs");
 
 function nerdctlUsableClause(markCommand) {
   // Offer nerdctl only when `nerdctl info` works. A socket permission error
@@ -28,6 +29,7 @@ function nerdctlUsableClause(markCommand) {
 const CAPABILITY_SCRIPT_POSIX = [
   "exec sh -c ",
   "'",
+  `${MUX_PATH_AUGMENT}; `,
   'printf "%s\\n" "__NC_OS__=$(uname -s)"; ',
   'command -v tmux >/dev/null 2>&1 && printf "%s\\n" __NC_TMUX__=1; ',
   'command -v zellij >/dev/null 2>&1 && printf "%s\\n" __NC_ZELLIJ__=1; ',
@@ -269,6 +271,7 @@ function createSystemManagerBridge(deps) {
       if (!result.success) {
         const fallback = await execOnLocalMachine(
           [
+            `${MUX_PATH_AUGMENT}; `,
             "uname -s; ",
             "command -v tmux; ",
             "command -v zellij >/dev/null 2>&1 && echo zellij_ok; ",

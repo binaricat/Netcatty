@@ -12,6 +12,7 @@ const {
   buildTmuxInvocation,
   parseListOutput,
   isTmuxDiagnosticLine,
+  MUX_PATH_AUGMENT,
 } = require("./tmuxEnv.cjs");
 const { execScopedOnSession } = require("./muxScope.cjs");
 
@@ -381,12 +382,12 @@ function createTmuxOpsApi({ execOnSession }) {
 
     const probeOptions = scope?.user ? { scope } : {};
 
-    const versionResult = await execShell(event, sessionId, "tmux -V 2>&1", 5000, probeOptions);
+    const versionResult = await execShell(event, sessionId, `${MUX_PATH_AUGMENT}; tmux -V 2>&1`, 5000, probeOptions);
     if (versionResult.success && versionResult.stdout) {
       env.version = parseTmuxVersionString(versionResult.stdout);
     }
 
-    const binResult = await execShell(event, sessionId, "command -v tmux 2>/dev/null || which tmux 2>/dev/null", 5000, probeOptions);
+    const binResult = await execShell(event, sessionId, `${MUX_PATH_AUGMENT}; command -v tmux 2>/dev/null || which tmux 2>/dev/null`, 5000, probeOptions);
     if (binResult.success && binResult.stdout) {
       const bin = binResult.stdout.split("\n").map((l) => l.trim()).find(Boolean);
       if (bin) env.binary = bin;

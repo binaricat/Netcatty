@@ -62,13 +62,22 @@ function getListSessionsFormat(version) {
   return fields.join("\\t");
 }
 
+// Homebrew / user-local bin dirs are missing from the PATH of GUI-launched
+// apps and non-login SSH shells (notably on macOS), so a bare
+// `command -v tmux` probe would miss them. Prepend to any script that
+// resolves tmux/zellij binaries by name.
+const MUX_PATH_AUGMENT =
+  'PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin:$HOME/bin"; export PATH';
+
 // Single-line script — multiline strings break when passed through bash -lc JSON quoting.
+// Note: no element may END in `do` — the "; " join would produce `do;`, which
+// is a syntax error in POSIX sh.
 const TMUX_DETECT_SCRIPT = [
+  MUX_PATH_AUGMENT,
   "uid=$(id -u 2>/dev/null || echo 0)",
   "echo \"__TMUX_VERSION__=$(tmux -V 2>/dev/null || true)\"",
   "echo \"__TMUX_BIN__=$(command -v tmux 2>/dev/null || which tmux 2>/dev/null || true)\"",
-  "for d in \"${TMUX_TMPDIR:-/tmp}/tmux-$uid\" \"/tmp/tmux-$uid\"; do",
-  "[ -d \"$d\" ] || continue",
+  "for d in \"${TMUX_TMPDIR:-/tmp}/tmux-$uid\" \"/tmp/tmux-$uid\"; do [ -d \"$d\" ] || continue",
   "for s in \"$d\"/*; do [ -S \"$s\" ] && echo \"__SOCKET__=$s\"; done",
   "done",
 ].join("; ");
@@ -199,4 +208,5 @@ module.exports = {
   parseListOutput,
   isTmuxDiagnosticLine,
   TMUX_DIAGNOSTIC_LINE,
+  MUX_PATH_AUGMENT,
 };

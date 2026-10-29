@@ -1,6 +1,6 @@
 /* eslint-disable no-undef */
 
-const { stripAnsi } = require("./tmuxEnv.cjs");
+const { stripAnsi, MUX_PATH_AUGMENT } = require("./tmuxEnv.cjs");
 const { execScopedOnSession, shQuote } = require("./muxScope.cjs");
 
 const ZELLIJ_DIAGNOSTIC_LINE = /^(error|usage:|unknown command|no such session)/i;
@@ -42,7 +42,10 @@ function parseZellijSessions(stdout) {
 function createZellijOpsApi({ execOnSession }) {
   async function execZellij(event, sessionId, args, timeoutMs = 8000, options = {}) {
     const { scope = null, retryOnEmptyOutput = true } = options;
-    const runScoped = () => execScopedOnSession(execOnSession, event, sessionId, args, timeoutMs, scope);
+    // zellij is commonly installed via Homebrew on macOS, which is absent from
+    // the PATH of GUI apps / non-login SSH shells — augment before resolving.
+    const script = `${MUX_PATH_AUGMENT}; ${args}`;
+    const runScoped = () => execScopedOnSession(execOnSession, event, sessionId, script, timeoutMs, scope);
 
     if (scope?.user) {
       const scoped = await runScoped();
@@ -51,9 +54,9 @@ function createZellijOpsApi({ execOnSession }) {
     }
 
     const attempts = [
-      `exec sh -c ${JSON.stringify(args)}`,
-      `bash -lc ${JSON.stringify(args)}`,
-      args,
+      `exec sh -c ${JSON.stringify(script)}`,
+      `bash -lc ${JSON.stringify(script)}`,
+      script,
     ];
     let last = { success: false, error: "No exec result", stdout: "", stderr: "" };
     for (const cmd of attempts) {

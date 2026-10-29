@@ -67,6 +67,15 @@ test("parseListOutput parses default tmux ls line", () => {
   assert.equal(sessions[0].windows, 1);
 });
 
+test("TMUX_DETECT_SCRIPT is valid single-line sh and augments PATH", () => {
+  const { TMUX_DETECT_SCRIPT, MUX_PATH_AUGMENT } = require("./tmuxEnv.cjs");
+  // Elements are joined with "; " — an element ending in `do` would produce
+  // `do;`, a syntax error in POSIX sh (this silently broke socket scans).
+  assert.ok(!TMUX_DETECT_SCRIPT.includes("do;"), TMUX_DETECT_SCRIPT);
+  assert.ok(TMUX_DETECT_SCRIPT.startsWith(MUX_PATH_AUGMENT));
+  assert.ok(MUX_PATH_AUGMENT.includes("/opt/homebrew/bin"));
+});
+
 test("getListSessionsFormat omits session_group before tmux 3.2", () => {
   const fmt = getListSessionsFormat({ major: 3, minor: 0 });
   assert.ok(fmt.includes("session_name"));
