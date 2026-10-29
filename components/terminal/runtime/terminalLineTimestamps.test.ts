@@ -143,6 +143,36 @@ test("real xterm does not treat OSC payloads or alternate-screen redraws as clea
   }
 });
 
+test("standalone cursor moves keep untouched suffix timestamps", async () => {
+  for (const position of ["\x1b[H", "\x1b[1;1f"]) {
+    const fixture = createRealTimestampTerm();
+    try {
+      await fixture.write("first\r\nsecond\r\n", 0);
+      await fixture.write(position + "new", 1);
+      assert.equal(fixture.term.buffer.active.getLine(1)?.translateToString(true), "second");
+      assert.equal(getVisibleTerminalLineTimestampRows(fixture.term).find(({ row }) => row === 1)?.label, "12:00:00");
+      assert.equal(fixture.writes.length, 2, "a standalone move does not split the write");
+    } finally {
+      fixture.dispose();
+    }
+  }
+});
+
+test("normal-screen cursor-heavy frames remain a single write", async () => {
+  const fixture = createRealTimestampTerm();
+  let notifications = 0;
+  const unsubscribe = onTerminalLineTimestampsChange(fixture.term, () => { notifications += 1; });
+  try {
+    const frame = Array.from({ length: 1000 }, (_, row) => `\x1b[${row % 6 + 1};1Hrow`).join("");
+    await fixture.write(frame);
+    assert.deepEqual(fixture.writes, [frame]);
+    assert.equal(notifications, 1, "one ledger notification per frame");
+  } finally {
+    unsubscribe();
+    fixture.dispose();
+  }
+});
+
 const createFakeTerm = (options: {
   cols?: number;
   wraparoundMode?: boolean;

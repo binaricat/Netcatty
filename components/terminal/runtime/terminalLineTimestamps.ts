@@ -1769,15 +1769,16 @@ const writeTerminalDataWithSecondLedger = (
 };
 
 /**
- * Normal-screen positioning and erasure need real parser coordinates. Keep
- * their writes separate from text so anchors are attached before an erase,
+ * Normal-screen erasure needs real parser coordinates. Keep erase writes
+ * separate from text so anchors are attached before an erase,
  * and subsequent stamps are seeded after xterm has moved/trimmed the buffer.
+ * Standalone cursor moves stay on the bulk path: a backwards sparse stamp
+ * would overwrite the fill-forward time of untouched rows below it.
  * Skip alternate-screen programs and string controls (OSC/DCS payloads).
  */
 const findTimestampCursorBoundary = (term: XTerm, data: string): {
   start: number;
   end: number;
-  erase: boolean;
 } | null => {
   const prefix = getTimestampStore(term).timestampOnlyPrefix;
   const input = prefix + data;
@@ -1790,11 +1791,10 @@ const findTimestampCursorBoundary = (term: XTerm, data: string): {
     if (action) altActive = action === "enter";
     const final = getCsiFinal(sequence);
     const params = sequence.slice(2, -1);
-    if (!altActive && (final === "H" || final === "f" || final === "J") && /^[\d;]*$/.test(params)) {
+    if (!altActive && final === "J" && /^[\d;]*$/.test(params)) {
       return {
         start: Math.max(0, index - prefix.length),
         end: parsed.endIndex + 1 - prefix.length,
-        erase: final === "J",
       };
     }
     index = input.indexOf("\x1b", parsed.endIndex + 1);
@@ -1857,7 +1857,7 @@ export const writeTerminalDataWithLineTimestamps = (
         store.timestampOnlyPrefix = "";
         // Erasure can dispose the current second's anchor. A redraw must be
         // allowed to stamp again even when its arrival time is the same second.
-        if (boundary.erase) store.lastStampSecondKey = null;
+        store.lastStampSecondKey = null;
         rebaseLedgerForScrollback(term, store);
         notifyTimestampStore(store);
         if (boundary.end < remaining.length) {
