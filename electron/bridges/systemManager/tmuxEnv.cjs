@@ -67,7 +67,7 @@ function getListSessionsFormat(version) {
 // `command -v tmux` probe would miss them. Prepend to any script that
 // resolves tmux/zellij binaries by name.
 const MUX_PATH_AUGMENT =
-  'PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin:$HOME/bin"; export PATH';
+  'PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin:$HOME/.local/bin:$HOME/bin"; export PATH';
 
 // Single-line script — multiline strings break when passed through bash -lc JSON quoting.
 // Note: no element may END in `do` — the "; " join would produce `do;`, which
