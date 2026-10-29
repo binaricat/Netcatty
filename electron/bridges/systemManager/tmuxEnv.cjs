@@ -62,19 +62,53 @@ function getListSessionsFormat(version) {
   return fields.join("\\t");
 }
 
-// Homebrew / user-local bin dirs are missing from the PATH of GUI-launched
-// apps and non-login SSH shells (notably on macOS), so a bare
-// `command -v tmux` probe would miss them. Without a UTF-8 locale tmux also
-// sanitizes control characters in -F output (tabs become `_`), so seed a
-// fallback locale too. Prepend to any script that runs tmux/zellij.
-const MUX_PATH_AUGMENT =
-  'PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin:$HOME/.local/bin:$HOME/bin:$HOME/.cargo/bin:$HOME/go/bin"; export PATH; if [ -z "$LC_ALL" ] && [ -z "$LANG" ]; then LC_ALL=C.UTF-8; export LC_ALL; fi';
+// Without a UTF-8 locale tmux sanitizes control characters in -F output
+// (tabs become `_`), and GUI-launched apps / bare sshd sessions usually have
+// no locale at all. Seed a fallback locale in every mux script.
+const MUX_ENV_PREAMBLE =
+  'if [ -z "$LC_ALL" ] && [ -z "$LANG" ]; then LC_ALL=C.UTF-8; export LC_ALL; fi';
+
+/**
+ * Locate a mux binary (tmux/zellij) by absolute path instead of relying on
+ * the caller's PATH: plain `command -v` first (fast path — SSH sessions and
+ * servers have sane PATHs), then the user's login shell (picks up
+ * ~/.zprofile / ~/.bash_profile setup such as Homebrew), then a zsh login
+ * fallback for macOS GUI apps whose SHELL may be unset, then a handful of
+ * well-known install locations checked by absolute path (e.g. cargo, whose
+ * env often lives in interactive-only ~/.zshrc). Callers should fall back to
+ * the bare name when nothing resolves.
+ */
+function buildMuxBinaryProbe(name) {
+  const plain = `command -v ${name} 2>/dev/null`;
+  const login = '"${SHELL:-/bin/sh}" -lc ' + `'command -v ${name}'` + " 2>/dev/null";
+  const zsh = `/bin/zsh -lc 'command -v ${name}' 2>/dev/null`;
+  const knownDirs = [
+    "$HOME/.cargo/bin",
+    "$HOME/.local/bin",
+    "$HOME/bin",
+    "$HOME/go/bin",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/opt/local/bin",
+  ].join(" ");
+  const known = `for _nc_d in ${knownDirs}; do [ -x "$_nc_d/${name}" ] && { printf '%s\\n' "$_nc_d/${name}"; break; }; done`;
+  return `${plain} || ${login} || ${zsh} || ${known}`;
+}
+
+/** First absolute-path line of probe output, or null when unresolved. */
+function parseMuxBinaryPath(stdout) {
+  for (const line of String(stdout || "").split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("/") && !/\s/.test(trimmed)) return trimmed;
+  }
+  return null;
+}
 
 // Single-line script — multiline strings break when passed through bash -lc JSON quoting.
 // Note: no element may END in `do` — the "; " join would produce `do;`, which
 // is a syntax error in POSIX sh.
 const TMUX_DETECT_SCRIPT = [
-  MUX_PATH_AUGMENT,
+  MUX_ENV_PREAMBLE,
   "uid=$(id -u 2>/dev/null || echo 0)",
   "echo \"__TMUX_VERSION__=$(tmux -V 2>/dev/null || true)\"",
   "echo \"__TMUX_BIN__=$(command -v tmux 2>/dev/null || which tmux 2>/dev/null || true)\"",
@@ -209,5 +243,7 @@ module.exports = {
   parseListOutput,
   isTmuxDiagnosticLine,
   TMUX_DIAGNOSTIC_LINE,
-  MUX_PATH_AUGMENT,
+  MUX_ENV_PREAMBLE,
+  buildMuxBinaryProbe,
+  parseMuxBinaryPath,
 };

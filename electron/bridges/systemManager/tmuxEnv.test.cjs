@@ -67,13 +67,26 @@ test("parseListOutput parses default tmux ls line", () => {
   assert.equal(sessions[0].windows, 1);
 });
 
-test("TMUX_DETECT_SCRIPT is valid single-line sh and augments PATH", () => {
-  const { TMUX_DETECT_SCRIPT, MUX_PATH_AUGMENT } = require("./tmuxEnv.cjs");
+test("TMUX_DETECT_SCRIPT is valid single-line sh and carries the locale preamble", () => {
+  const { TMUX_DETECT_SCRIPT, MUX_ENV_PREAMBLE } = require("./tmuxEnv.cjs");
   // Elements are joined with "; " — an element ending in `do` would produce
   // `do;`, a syntax error in POSIX sh (this silently broke socket scans).
   assert.ok(!TMUX_DETECT_SCRIPT.includes("do;"), TMUX_DETECT_SCRIPT);
-  assert.ok(TMUX_DETECT_SCRIPT.startsWith(MUX_PATH_AUGMENT));
-  assert.ok(MUX_PATH_AUGMENT.includes("/opt/homebrew/bin"));
+  assert.ok(TMUX_DETECT_SCRIPT.startsWith(MUX_ENV_PREAMBLE));
+  assert.ok(MUX_ENV_PREAMBLE.includes("LC_ALL"));
+});
+
+test("buildMuxBinaryProbe resolves tmux/zellij by absolute path via login shell", () => {
+  const { buildMuxBinaryProbe, parseMuxBinaryPath } = require("./tmuxEnv.cjs");
+  const probe = buildMuxBinaryProbe("zellij");
+  assert.ok(probe.startsWith("command -v zellij"));
+  assert.ok(probe.includes(' -lc ' + "'command -v zellij'"));
+  assert.ok(probe.includes("/bin/zsh -lc"));
+  // Absolute-path lines win; noise and multi-word output are rejected.
+  assert.equal(parseMuxBinaryPath("/home/u/.cargo/bin/zellij\n"), "/home/u/.cargo/bin/zellij");
+  assert.equal(parseMuxBinaryPath("No active zellij sessions found.\n"), null);
+  assert.equal(parseMuxBinaryPath("/some dir with spaces/zellij\n"), null);
+  assert.equal(parseMuxBinaryPath(""), null);
 });
 
 test("getListSessionsFormat omits session_group before tmux 3.2", () => {

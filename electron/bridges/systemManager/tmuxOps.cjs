@@ -12,7 +12,9 @@ const {
   buildTmuxInvocation,
   parseListOutput,
   isTmuxDiagnosticLine,
-  MUX_PATH_AUGMENT,
+  MUX_ENV_PREAMBLE,
+  buildMuxBinaryProbe,
+  parseMuxBinaryPath,
 } = require("./tmuxEnv.cjs");
 const { execScopedOnSession } = require("./muxScope.cjs");
 
@@ -335,11 +337,10 @@ function createTmuxOpsApi({ execOnSession }) {
     // split-window…) succeed silently — retrying them re-executes the mutation,
     // so they must pass retryOnEmptyOutput: false.
     const { retryOnEmptyOutput = true, scope = null } = options;
-    // Every tmux command runs with the mux env preamble: GUI apps and
-    // non-login SSH shells lack Homebrew/cargo dirs in PATH, and without a
-    // UTF-8 locale tmux sanitizes control characters in -F output (tabs
-    // become `_`). Idempotent when the script already carries it.
-    script = `${MUX_PATH_AUGMENT}; ${script}`;
+    // Every tmux command runs with the locale preamble: without a UTF-8
+    // locale tmux sanitizes control characters in -F output (tabs become
+    // `_`). Idempotent when the script already carries it.
+    script = `${MUX_ENV_PREAMBLE}; ${script}`;
     if (scope?.user) {
       if (scope.directAsRoot) {
         // Root opens the target user's tmux socket directly: no sudo wrapper,
@@ -379,7 +380,7 @@ function createTmuxOpsApi({ execOnSession }) {
 
     const env = {
       version: { raw: "", major: 0, minor: 0, patch: "" },
-      binary: "tmux",
+      binary: cached?.binary && cached.binary !== "tmux" ? cached.binary : "tmux",
       sockets: [],
       preferredSocket: cached?.preferredSocket ?? null,
       detectedAt: Date.now(),
@@ -387,15 +388,20 @@ function createTmuxOpsApi({ execOnSession }) {
 
     const probeOptions = scope?.user ? { scope } : {};
 
-    const versionResult = await execShell(event, sessionId, `${MUX_PATH_AUGMENT}; tmux -V 2>&1`, 5000, probeOptions);
-    if (versionResult.success && versionResult.stdout) {
-      env.version = parseTmuxVersionString(versionResult.stdout);
+    // Resolve the binary by absolute path (plain PATH, then login shell) so
+    // GUI apps / bare sshd sessions find Homebrew/cargo installs; all later
+    // invocations use the resolved path instead of relying on PATH.
+    if (env.binary === "tmux") {
+      const binResult = await execShell(event, sessionId, buildMuxBinaryProbe("tmux"), 8000, probeOptions);
+      if (binResult.success && !binResult.errorCode) {
+        const bin = parseMuxBinaryPath(binResult.stdout);
+        if (bin) env.binary = bin;
+      }
     }
 
-    const binResult = await execShell(event, sessionId, `${MUX_PATH_AUGMENT}; command -v tmux 2>/dev/null || which tmux 2>/dev/null`, 5000, probeOptions);
-    if (binResult.success && binResult.stdout) {
-      const bin = binResult.stdout.split("\n").map((l) => l.trim()).find(Boolean);
-      if (bin) env.binary = bin;
+    const versionResult = await execShell(event, sessionId, `${MUX_ENV_PREAMBLE}; ${env.binary} -V 2>&1`, 5000, probeOptions);
+    if (versionResult.success && versionResult.stdout) {
+      env.version = parseTmuxVersionString(versionResult.stdout);
     }
 
     if (scope?.user) {

@@ -10,7 +10,7 @@ const { parseRuntimeProbe } = require("../../domain/systemManager/containerRunti
 const { createGpuOpsApi } = require("./systemManager/gpuOps.cjs");
 const { createPortOpsApi } = require("./systemManager/portOps.cjs");
 const { createServiceOpsApi } = require("./systemManager/serviceOps.cjs");
-const { MUX_PATH_AUGMENT } = require("./systemManager/tmuxEnv.cjs");
+const { MUX_ENV_PREAMBLE, buildMuxBinaryProbe } = require("./systemManager/tmuxEnv.cjs");
 
 function nerdctlUsableClause(markCommand) {
   // Offer nerdctl only when `nerdctl info` works. A socket permission error
@@ -29,10 +29,10 @@ function nerdctlUsableClause(markCommand) {
 const CAPABILITY_SCRIPT_POSIX = [
   "exec sh -c ",
   "'",
-  `${MUX_PATH_AUGMENT}; `,
+  `${MUX_ENV_PREAMBLE}; `,
   'printf "%s\\n" "__NC_OS__=$(uname -s)"; ',
-  'command -v tmux >/dev/null 2>&1 && printf "%s\\n" __NC_TMUX__=1; ',
-  'command -v zellij >/dev/null 2>&1 && printf "%s\\n" __NC_ZELLIJ__=1; ',
+  `( ${buildMuxBinaryProbe("tmux")} ) >/dev/null 2>&1 && printf "%s\\n" __NC_TMUX__=1; `,
+  `( ${buildMuxBinaryProbe("zellij")} ) >/dev/null 2>&1 && printf "%s\\n" __NC_ZELLIJ__=1; `,
   'command -v docker >/dev/null 2>&1 && printf "%s\\n" __NC_DOCKER__=1; ',
   'command -v podman >/dev/null 2>&1 && printf "%s\\n" __NC_PODMAN__=1; ',
   nerdctlUsableClause('printf "%s\\n" __NC_NERDCTL__=1'),
@@ -271,11 +271,11 @@ function createSystemManagerBridge(deps) {
       if (!result.success) {
         const fallback = await execOnLocalMachine(
           [
-            `${MUX_PATH_AUGMENT}; `,
+            `${MUX_ENV_PREAMBLE}; `,
             "uname -s; ",
-            "command -v tmux; ",
-            "command -v zellij >/dev/null 2>&1 && echo zellij_ok; ",
-            "command -v docker >/dev/null 2>&1 && echo docker_ok; ",
+            `${buildMuxBinaryProbe("tmux")}; `,
+            `( ${buildMuxBinaryProbe("zellij")} ) >/dev/null 2>&1 && echo zellij_ok; `,
+            'command -v docker >/dev/null 2>&1 && echo docker_ok; ',
             "command -v podman >/dev/null 2>&1 && echo podman_ok; ",
             nerdctlUsableClause("echo nerdctl_ok"),
             "command -v kubectl >/dev/null 2>&1 && echo kubectl_ok; ",

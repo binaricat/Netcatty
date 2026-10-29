@@ -1,6 +1,6 @@
 /* eslint-disable no-undef */
 
-const { stripAnsi, MUX_PATH_AUGMENT } = require("./tmuxEnv.cjs");
+const { stripAnsi, MUX_ENV_PREAMBLE, buildMuxBinaryProbe, parseMuxBinaryPath } = require("./tmuxEnv.cjs");
 const { execScopedOnSession, shQuote } = require("./muxScope.cjs");
 
 const ZELLIJ_DIAGNOSTIC_LINE = /^(error|usage:|unknown command|no such session|.*command not found)/i;
@@ -40,11 +40,48 @@ function parseZellijSessions(stdout) {
 }
 
 function createZellijOpsApi({ execOnSession }) {
+  /** @type {Map<string, { binary: string, resolvedAt: number }>} */
+  const binaryCache = new Map();
+  const BINARY_TTL_MS = 60_000;
+
+  /**
+   * Resolve the zellij binary by absolute path (see buildMuxBinaryProbe):
+   * GUI apps and non-login SSH shells often cannot see cargo/Homebrew
+   * installs through their bare PATH. Falls back to the bare "zellij" name.
+   */
+  async function resolveBinary(event, sessionId, scope = null) {
+    const cacheKey = scope?.user ? `${sessionId}::${scope.user}` : sessionId;
+    const cached = binaryCache.get(cacheKey);
+    if (cached && Date.now() - cached.resolvedAt < BINARY_TTL_MS) {
+      return cached.binary;
+    }
+    const probe = `${MUX_ENV_PREAMBLE}; ${buildMuxBinaryProbe("zellij")}`;
+    let result;
+    if (scope?.user) {
+      result = await execScopedOnSession(execOnSession, event, sessionId, probe, 8000, scope);
+    } else {
+      const attempts = [
+        `exec sh -c ${JSON.stringify(probe)}`,
+        `bash -lc ${JSON.stringify(probe)}`,
+        probe,
+      ];
+      for (const cmd of attempts) {
+        result = await execOnSession(event, sessionId, cmd, 8000);
+        if (result?.success && String(result?.stdout || "").trim()) break;
+      }
+    }
+    const binary = (!result?.errorCode && parseMuxBinaryPath(result?.stdout)) || "zellij";
+    binaryCache.set(cacheKey, { binary, resolvedAt: Date.now() });
+    return binary;
+  }
+
   async function execZellij(event, sessionId, args, timeoutMs = 8000, options = {}) {
     const { scope = null, retryOnEmptyOutput = true } = options;
-    // zellij is commonly installed via Homebrew on macOS, which is absent from
-    // the PATH of GUI apps / non-login SSH shells — augment before resolving.
-    const script = `${MUX_PATH_AUGMENT}; ${args}`;
+    // Invoke the resolved absolute path; the locale preamble keeps tmux-style
+    // sanitization of control characters away from zellij output too.
+    const binary = await resolveBinary(event, sessionId, scope);
+    const command = args.startsWith("zellij ") ? `${binary} ${args.slice("zellij ".length)}` : args;
+    const script = `${MUX_ENV_PREAMBLE}; ${command}`;
     const runScoped = () => execScopedOnSession(execOnSession, event, sessionId, script, timeoutMs, scope);
 
     if (scope?.user) {
