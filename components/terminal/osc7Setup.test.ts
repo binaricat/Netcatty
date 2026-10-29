@@ -1,4 +1,5 @@
 import test from "node:test";
+import * as pty from "node-pty";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -17,15 +18,22 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
+import { isIdleShellReadyForCommandInjection } from "../../domain/terminalCommandInjectionReady";
+import {
+  isTerminalReadyForCommandInjection,
+  registerTerminalCommandInjectionReadyReader,
+} from "./runtime/terminalCommandInjectionReadyRegistry";
+
 import {
   OSC7_MARKER,
   OSC7_SETUP_OTHER_USER_MARKER,
   OSC7_SETUP_STAGED_MARKER,
   OSC7_PTY_SHELL_MARKER,
+  OSC7_PTY_ACK_MARKER,
   OSC7_PTY_DONE_MARKER,
   OSC7_PTY_FAILED_MARKER,
   buildOsc7PtyShellProbeCommand,
-  buildOsc7InlinePtySetupCommand,
+  buildOsc7PtySetupCommands,
   buildOsc7ReloadCommand,
   buildOsc7SetupCommand,
   buildOsc7SetupExecCommand,
@@ -208,7 +216,7 @@ const createExit4PtyHarness = (shell: string | null = "bash", completion: "done"
   const timeouts: number[] = [];
   let onData: ((chunk: string) => void) | undefined;
   let disposed = 0;
-  let pendingInputLength = 0;
+  let ready = true;
   const options: RunOsc7SetupActionOptions = {
     status: "connected",
     sessionId: "pty-session",
@@ -217,7 +225,7 @@ const createExit4PtyHarness = (shell: string | null = "bash", completion: "done"
       setupCommands.push(command);
       return { success: false, code: 4, error: "exec identity mismatch" };
     },
-    getPendingInputLength: () => pendingInputLength,
+    isTerminalReadyForCommandInjection: () => ready,
     waitForSessionOutput: (id, predicate, timeout) => {
       timeouts.push(timeout);
       return waitForOsc7SessionOutput((observedId, callback) => {
@@ -234,9 +242,11 @@ const createExit4PtyHarness = (shell: string | null = "bash", completion: "done"
       writes.push(command);
       onData(`prompt> ${command.replace(/\r$/, "\r\n")}`);
       assert.ok(onData, "input echo must not satisfy the output predicate");
+      const final = command.includes("base64 -d");
       const marker = writes.length === 1 ? OSC7_PTY_SHELL_MARKER
+        : !final ? OSC7_PTY_ACK_MARKER
         : completion === "failed" ? OSC7_PTY_FAILED_MARKER : OSC7_PTY_DONE_MARKER;
-      const value = writes.length === 1 ? shell : completion && shell;
+      const value = writes.length === 1 ? shell : !final ? String(writes.length - 2) : completion && shell;
       if (value) {
         onData(`\r\n${marker.slice(0, 12)}`);
         onData?.(`${marker.slice(12)}${value}\r`);
@@ -247,12 +257,12 @@ const createExit4PtyHarness = (shell: string | null = "bash", completion: "done"
   };
   return {
     options, writes, setupCommands, timeouts,
-    setPendingInputLength: (length: number) => { pendingInputLength = length; },
+    setReady: (value: boolean) => { ready = value; },
     disposed: () => disposed,
   };
 };
 
-test("exit 4 probes the foreground shell and waits for inline installation DONE, without staging", async () => {
+test("exit 4 probes the foreground shell and waits for chunked installation DONE, without exec staging", async () => {
   for (const shell of ["bash", "zsh"]) {
     const h = createExit4PtyHarness(shell);
     const result = await runOsc7SetupAction(h.options);
@@ -260,12 +270,13 @@ test("exit 4 probes the foreground shell and waits for inline installation DONE,
     assert.equal(result.sentToTerminal, true);
     assert.equal(result.error, undefined);
     assert.deepEqual(h.setupCommands, ["exec-only-setup"]);
-    assert.equal(h.writes.length, 2);
+    assert.deepEqual(h.writes, [buildOsc7PtyShellProbeCommand(), ...buildOsc7PtySetupCommands(shell as "bash" | "zsh")]);
     assert.match(h.writes[0], /ZSH_VERSION.*BASH_VERSION/);
-    assert.match(h.writes[1], new RegExp(`NETCATTY_OSC7_FORCE_SHELL=${shell}`));
-    for (const command of h.writes) assert.doesNotMatch(command, /mktemp|\/tmp\/\.netcatty-osc7-setup/);
-    assert.deepEqual(h.timeouts, [5000, 20000]);
-    assert.equal(h.disposed(), 2);
+    assert.match(h.writes[1], /mktemp/);
+    assert.match(h.writes.at(-1)!, new RegExp(`NETCATTY_OSC7_FORCE_SHELL=${shell}`));
+    for (const command of h.writes) assert.ok(Buffer.byteLength(command) < 3000);
+    assert.deepEqual(h.timeouts, h.writes.map((_, i) => i === h.writes.length - 1 ? 20000 : 5000));
+    assert.equal(h.disposed(), h.writes.length);
   }
 });
 
@@ -277,14 +288,14 @@ test("exit-4 stderr messages also select the dedicated PTY path", async () => {
     const h = createExit4PtyHarness();
     h.options.setupOsc7Tracking = async () => ({ success: false, stderr: `${stderr}\n` });
     assert.equal((await runOsc7SetupAction(h.options)).success, true);
-    assert.equal(h.writes.length, 2);
+    assert.equal(h.writes.length, 1 + buildOsc7PtySetupCommands("bash").length);
   }
 });
 
-test("exit 4 fails closed with pending input or missing safety callbacks", async () => {
-  for (const missing of ["pending", "getPendingInputLength", "waitForSessionOutput"] as const) {
+test("exit 4 fails closed with an unsafe prompt or missing safety callbacks", async () => {
+  for (const missing of ["unsafe", "isTerminalReadyForCommandInjection", "waitForSessionOutput"] as const) {
     const h = createExit4PtyHarness();
-    if (missing === "pending") h.setPendingInputLength(3);
+    if (missing === "unsafe") h.setReady(false);
     else delete h.options[missing];
     const result = await runOsc7SetupAction(h.options);
     assert.equal(result.success, false);
@@ -292,6 +303,37 @@ test("exit 4 fails closed with pending input or missing safety callbacks", async
     assert.deepEqual(h.writes, []);
     assert.deepEqual(h.timeouts, []);
   }
+});
+
+test("exit 4 blocks recalled input, editors, alt-screen and sensitive prompts with an empty command buffer", async () => {
+  for (const unsafe of [
+    { userInputLength: 12 }, // ESC-prefixed history recall need not enter commandBufferRef.
+    { isAtPrompt: false },
+    { alternateScreenActive: true },
+    { sensitiveInputActive: true },
+    { hasLiveTerminal: false },
+  ]) {
+    const h = createExit4PtyHarness();
+    const unregister = registerTerminalCommandInjectionReadyReader(h.options.sessionId, () =>
+      isIdleShellReadyForCommandInjection({
+        hasLiveTerminal: true, isAtPrompt: true, userInputLength: 0,
+        pendingTypedInputLength: 0, alternateScreenActive: false,
+        sensitiveInputActive: false, ...unsafe,
+      }));
+    h.options.isTerminalReadyForCommandInjection = () => isTerminalReadyForCommandInjection(h.options.sessionId);
+    try {
+      assert.equal((await runOsc7SetupAction(h.options)).success, false);
+      assert.deepEqual(h.writes, []);
+    } finally {
+      unregister();
+    }
+    assert.equal(isTerminalReadyForCommandInjection(h.options.sessionId), false);
+  }
+});
+
+test("Terminal wires the live command-injection readiness registry into OSC7 setup", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  assert.match(source, /runOsc7SetupAction\(\{[^]*?isTerminalReadyForCommandInjection: \(\) => isTerminalReadyForCommandInjection\(sessionId\)/);
 });
 
 test("exit 4 refuses installation after probe timeout, unknown shell, or unsupported fish", async () => {
@@ -305,13 +347,18 @@ test("exit 4 refuses installation after probe timeout, unknown shell, or unsuppo
   }
 });
 
-test("exit 4 rechecks pending input after probing before typing the installer", async () => {
-  const h = createExit4PtyHarness();
-  const write = h.options.writeToSession;
-  h.options.writeToSession = (...args) => { write(...args); h.setPendingInputLength(1); };
-  const result = await runOsc7SetupAction(h.options);
-  assert.equal(result.success, false);
-  assert.equal(h.writes.length, 1);
+test("exit 4 rechecks prompt readiness after the probe and between payload chunks", async () => {
+  for (const stopAfter of [1, 3]) {
+    const h = createExit4PtyHarness();
+    const write = h.options.writeToSession;
+    h.options.writeToSession = (...args) => {
+      write(...args);
+      if (h.writes.length === stopAfter) h.setReady(false);
+    };
+    const result = await runOsc7SetupAction(h.options);
+    assert.equal(result.success, false);
+    assert.equal(h.writes.length, stopAfter);
+  }
 });
 
 test("exit 4 does not claim success when installation times out or reports failure", async () => {
@@ -321,8 +368,36 @@ test("exit 4 does not claim success when installation times out or reports failu
     assert.equal(result.success, false);
     assert.notEqual(result.sentToTerminal, true);
     assert.match(result.error || "", /failed or did not finish/);
-    assert.equal(h.writes.length, 2);
-    assert.equal(h.disposed(), 2);
+    assert.equal(h.writes.length, 1 + buildOsc7PtySetupCommands("bash").length);
+    assert.equal(h.disposed(), h.writes.length);
+  }
+});
+
+test("exit 4 stops on a missing, stale or failed chunk acknowledgement", async () => {
+  for (const reply of [null, `${OSC7_PTY_ACK_MARKER}0`, `${OSC7_PTY_FAILED_MARKER}bash`]) {
+    const h = createExit4PtyHarness();
+    let count = 0;
+    let observer: ((chunk: string) => void) | undefined;
+    h.options.waitForSessionOutput = (id, predicate) => waitForOsc7SessionOutput((_id, callback) => {
+      observer = callback;
+      return () => { observer = undefined; };
+    }, id, predicate, 10);
+    h.options.writeToSession = (id, command, options) => {
+      count += 1;
+      if (count === 3) {
+        observer?.(`prompt> ${command}\r\n`);
+        if (reply) observer?.(`\r\n${reply}\r\n`);
+      } else {
+        observer?.(`prompt> ${command}\r\n`);
+        observer?.(`\r\n${count === 1 ? OSC7_PTY_SHELL_MARKER + "bash" : OSC7_PTY_ACK_MARKER + "0"}\r\n`);
+      }
+      assert.equal(id, h.options.sessionId);
+      assert.equal(options?.automated, true);
+    };
+    const result = await runOsc7SetupAction(h.options);
+    assert.equal(result.success, false);
+    assert.equal(count, 3, "no later chunk or final installer after a failed ack");
+    assert.match(result.error || "", /failed or did not finish/);
   }
 });
 
@@ -939,19 +1014,82 @@ const withStagedSetupScript = (fn: (scriptPath: string) => void) => {
   }
 };
 
-test("inline PTY builders embed the shared script with FORCE_SHELL, without staging or EXPECTED_CWD", () => {
+test("PTY builders chunk the exact shared script into lines below the canonical limit", () => {
   for (const shell of ["bash", "zsh"] as const) {
-    const command = buildOsc7InlinePtySetupCommand(shell);
-    assert.ok(command.startsWith(" "));
-    assert.ok(command.endsWith("\r"));
-    assert.doesNotMatch(command.slice(0, -1), /[\r\n]/);
-    assert.match(command, new RegExp(`NETCATTY_OSC7_FORCE_SHELL=${shell}`));
-    assert.doesNotMatch(command, /NETCATTY_OSC7_EXPECTED_CWD|mktemp|\/tmp\/\.netcatty-osc7-setup/);
-    const payload = command.match(/sh '([A-Za-z0-9+/=]+)'/);
-    assert.ok(payload, "expected inline base64 payload");
-    const script = Buffer.from(payload[1], "base64").toString("utf8");
+    const commands = buildOsc7PtySetupCommands(shell);
+    assert.ok(commands.length > 3);
+    for (const command of commands) {
+      assert.ok(command.startsWith(" "));
+      assert.ok(command.endsWith("\r"));
+      assert.doesNotMatch(command.slice(0, -1), /[\r\n]/);
+      assert.ok(Buffer.byteLength(command) < 3000);
+    }
+    assert.match(commands[0], /mktemp/);
+    assert.match(commands.at(-1)!, new RegExp(`NETCATTY_OSC7_FORCE_SHELL=${shell}`));
+    assert.doesNotMatch(commands.join(""), /NETCATTY_OSC7_EXPECTED_CWD/);
+    const payload = commands.flatMap((command) => {
+      const match = command.match(/printf '%s' '([A-Za-z0-9+/=]+)'/);
+      return match ? [match[1]] : [];
+    }).join("");
+    const script = Buffer.from(payload, "base64").toString("utf8");
     assert.ok(buildOsc7SetupExecCommand().includes(quoteShellArg(script)), "reuse exact POSIX setup script");
     assert.match(script, /netcatty-osc7-version: 2/);
+  }
+});
+
+test("exit-4 transport installs through a real canonical Bash PTY without exceeding its line limit", { timeout: 30000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), "netcatty-osc7-canonical-"));
+  const prompt = "__NETCATTY_TEST_PROMPT__> ";
+  const terminal = pty.spawn("/bin/bash", ["--noprofile", "--norc", "--noediting", "-i"], {
+    name: "xterm", cols: 120, rows: 24,
+    env: { ...process.env, HOME: home, SHELL: "/bin/unknown", PS1: prompt, PS2: "CONTINUATION> ", PROMPT_COMMAND: "", ZDOTDIR: "", XDG_CONFIG_HOME: "" },
+  });
+  let screen = "";
+  let transcript = "";
+  const capture = terminal.onData((chunk) => { screen += chunk; transcript += chunk; });
+  const wait = (predicate: (output: string) => boolean, timeout = 5000) =>
+    waitForOsc7SessionOutput((_id, callback) => {
+      const listener = terminal.onData(callback);
+      return () => listener.dispose();
+    }, "real-pty", predicate, timeout);
+  try {
+    assert.ok(await wait((output) => output.endsWith(prompt)), "initial Bash prompt");
+    // --noediting keeps Bash on the kernel's canonical input path, unlike Readline.
+    const canonical = wait((output) => output.endsWith(prompt));
+    screen = "";
+    terminal.write("stty icanon; stty -a\r");
+    assert.match(await canonical || "", /(?:^|[;\s])icanon(?:[;\s]|$)/);
+    const writes: string[] = [];
+    const result = await runOsc7SetupAction({
+      status: "connected", sessionId: "real-pty", setupCommand: "exec-only-setup",
+      setupOsc7Tracking: async () => ({ success: false, code: 4 }),
+      isTerminalReadyForCommandInjection: () => screen.endsWith(prompt),
+      waitForSessionOutput: (_id, predicate, timeout) => wait(predicate, timeout),
+      writeToSession: (_id, command) => {
+        assert.ok(Buffer.byteLength(command) < 3000, "each typed line fits canonical input");
+        writes.push(command);
+        screen = "";
+        // Preserve the path for a shell-side cleanup assertion after the final command.
+        terminal.write(command.includes("base64 -d")
+          ? ` __netcatty_test_file="$__netcatty_osc7_pty_file"; ${command}` : command);
+      },
+    });
+    assert.equal(result.success, true, `${result.error}\n${transcript.slice(-4000)}`);
+    assert.ok(writes.length > 3);
+    assert.ok(writes.reduce((total, command) => total + command.length, 0) > 4096);
+    assert.equal(markerCount(readFileSync(join(home, ".bashrc"), "utf8")), 2);
+    assert.ok(transcript.includes("\u001b]7;file://"));
+    assert.match(transcript, new RegExp(`\r?\n${OSC7_PTY_DONE_MARKER}bash\r?\n`));
+    assert.doesNotMatch(transcript, /CONTINUATION> /);
+    // A final shell assertion covers cleanup without exec sharing any staging file.
+    if (!screen.endsWith(prompt)) assert.ok(await wait((output) => output.endsWith(prompt)));
+    const cleaned = wait((output) => output.includes("\r\nCLEANED\r\n"));
+    terminal.write("test -n \"$__netcatty_test_file\" && test ! -e \"$__netcatty_test_file\" && test -z \"${__netcatty_osc7_pty_file-}\" && printf '\\n%s\\n' CLEANED\r");
+    assert.ok(await cleaned, "transport removes the PTY-local file and unsets its path");
+  } finally {
+    capture.dispose();
+    terminal.kill();
+    rmSync(home, { recursive: true, force: true });
   }
 });
 
@@ -964,11 +1102,11 @@ test("PTY probe recognizes interactive bash and rejects a noninteractive shell",
   }
 });
 
-test("inline PTY installer runs locally in bash, preserves hooks and stays idempotent with DONE ack", () => {
+test("chunked PTY installer runs locally in bash, preserves hooks and stays idempotent with DONE ack", () => {
   withTempHome("netcatty-osc7-inline-bash-", (home) => {
     const rcPath = join(home, ".bashrc");
     writeFileSync(rcPath, 'PROMPT_COMMAND="printf existing-title"\n');
-    const command = buildOsc7InlinePtySetupCommand("bash").replace(/\r$/, "\n");
+    const command = buildOsc7PtySetupCommands("bash").join("").replace(/\r/g, "\n");
     for (let run = 0; run < 2; run += 1) {
       const output = execFileSync("/bin/bash", ["--noprofile", "--norc", "-i", "-c", command], {
         env: { ...process.env, HOME: home, SHELL: "/bin/unknown", ZDOTDIR: "", XDG_CONFIG_HOME: "" },
@@ -985,14 +1123,14 @@ test("inline PTY installer runs locally in bash, preserves hooks and stays idemp
   });
 });
 
-test("inline PTY installer emits failure instead of DONE when install or reload fails", () => {
+test("chunked PTY installer emits failure instead of DONE when install or reload fails", () => {
   withTempHome("netcatty-osc7-inline-fail-", (home) => {
     const blockedHome = join(home, "not-a-directory");
     writeFileSync(blockedHome, "file");
     writeFileSync(join(home, ".bashrc"), "return 1\n");
     for (const targetHome of [blockedHome, home]) {
       const output = execFileSync("/bin/bash", ["--noprofile", "--norc", "-c",
-        buildOsc7InlinePtySetupCommand("bash").replace(/\r$/, "\n")], {
+        buildOsc7PtySetupCommands("bash").join("").replace(/\r/g, "\n")], {
         env: { ...process.env, HOME: targetHome, ZDOTDIR: "", XDG_CONFIG_HOME: "" },
         stdio: "pipe",
       }).toString("utf8");
@@ -1002,7 +1140,7 @@ test("inline PTY installer emits failure instead of DONE when install or reload 
   });
 });
 
-test("PTY probe and inline installer remove their bash history entries", () => {
+test("PTY probe and chunked installer remove their bash history entries", () => {
   withTempHome("netcatty-osc7-inline-history-", (home) => {
     const output = runInteractiveHistoryProbe({
       shellPath: "/bin/bash",
@@ -1010,19 +1148,19 @@ test("PTY probe and inline installer remove their bash history entries", () => {
       dumpHistoryCommand: `history > ${quoteShellArg(join(home, "history"))}`,
       dumpPath: join(home, "history"),
       env: { HOME: home, HISTFILE: join(home, ".bash_history"), SHELL: "/bin/bash" },
-      input: `echo keepme\n${buildOsc7PtyShellProbeCommand()}${buildOsc7InlinePtySetupCommand("bash")}`,
+      input: `echo keepme\n${buildOsc7PtyShellProbeCommand()}${buildOsc7PtySetupCommands("bash").join("")}`,
     });
     assert.match(output, /echo keepme/);
     assert.doesNotMatch(output, /NETCATTY_OSC7|base64|history -d/);
   });
 });
 
-test("PTY probe and inline installer support zsh with shell-local ZDOTDIR", (t) => {
+test("PTY probe and chunked installer support zsh with shell-local ZDOTDIR", (t) => {
   const shellPath = existingShells(["/bin/zsh", "/usr/bin/zsh"])[0];
   if (!shellPath) return t.skip("zsh is not installed on this runner");
   withTempHome("netcatty-osc7-inline-zsh-", (home) => {
     const zdotdir = join(home, "custom-zsh");
-    const command = `ZDOTDIR=${quoteShellArg(zdotdir)}; ${buildOsc7PtyShellProbeCommand()}${buildOsc7InlinePtySetupCommand("zsh")}`;
+    const command = `ZDOTDIR=${quoteShellArg(zdotdir)}; ${buildOsc7PtyShellProbeCommand()}${buildOsc7PtySetupCommands("zsh").join("")}`;
     const output = execFileSync(shellPath, ["-f", "-i", "-c", command.replace(/\r/g, "\n")], {
       env: { ...process.env, HOME: home, SHELL: "/bin/unknown", ZDOTDIR: undefined },
       stdio: "pipe",

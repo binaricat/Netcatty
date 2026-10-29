@@ -167,7 +167,7 @@ import {
 } from "./terminal/runtime/createXTermRuntime";
 import { clearKittyKeyboardBroadcastSession } from "./terminal/runtime/kittyKeyboardBroadcast";
 import { registerTerminalSensitiveInputReader } from "./terminal/runtime/terminalSensitiveInputRegistry";
-import { registerTerminalCommandInjectionReadyReader } from "./terminal/runtime/terminalCommandInjectionReadyRegistry";
+import { isTerminalReadyForCommandInjection, registerTerminalCommandInjectionReadyReader } from "./terminal/runtime/terminalCommandInjectionReadyRegistry";
 import {
   isIdleShellReadyForCommandInjection,
   isShellPromptReadyForInsertion,
@@ -1390,7 +1390,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       setupOsc7Tracking: terminalBackend.setupOsc7Tracking,
       writeToSession: terminalBackend.writeToSession,
       writeLocalTerminalData,
-      getPendingInputLength: () => commandBufferRef.current.length,
+      isTerminalReadyForCommandInjection: () => isTerminalReadyForCommandInjection(sessionId),
       waitForSessionOutput: (id, predicate, timeoutMs) =>
         waitForOsc7SessionOutput(terminalBackend.onSessionData, id, predicate, timeoutMs),
     }).then((result) => {
