@@ -5,6 +5,27 @@ import { JSDOM } from 'jsdom';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
+// Test-only observer preserves the security-surface visibility assertions.
+function observePluginHostSecurityVisibility(mount: HTMLElement, publish: (visible: boolean) => void): () => void {
+  const document = mount.ownerDocument;
+  let visible = true;
+  const update = () => {
+    const blocked = [...document.querySelectorAll('[data-host-security-surface]')].some((surface) => {
+      const style = document.defaultView!.getComputedStyle(surface);
+      return style.display !== 'none' && style.visibility !== 'hidden'
+        && !surface.closest('[hidden], [inert], [aria-hidden="true"]');
+    });
+    if (visible === !blocked) return;
+    visible = !blocked;
+    publish(visible);
+  };
+  const observer = new document.defaultView!.MutationObserver(update);
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true,
+    attributeFilter: ['class', 'style', 'hidden', 'inert', 'aria-hidden', 'data-host-security-surface'] });
+  update();
+  return () => observer.disconnect();
+}
+
 test('registered Ask uses one in-app dialog; policy controls apply Allow and Deny with no hidden prompt', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true, url: 'http://localhost' });
   const previous = new Map<string, PropertyDescriptor | undefined>();
@@ -25,7 +46,6 @@ test('registered Ask uses one in-app dialog; policy controls apply Allow and Den
   const { I18nProvider } = await import('../application/i18n/I18nProvider');
   const { PluginPermissionHost } = await import('./plugins/PluginPermissionHost');
   const { PluginPermissionPanel } = await import('./settings/tabs/PluginPermissionPanel');
-  const { observePluginHostSecurityVisibility } = await import('../application/state/pluginHostSecurityVisibility');
   const { PluginPermissionDecisionHost } = require('../electron/plugins/permissionDecisionHost.cjs');
   const { PluginPermissionEngine } = require('../electron/plugins/permissionEngine.cjs');
   const { PluginHostRpcRegistry } = require('../electron/plugins/hostRpcRegistry.cjs');

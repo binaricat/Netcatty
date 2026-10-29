@@ -69,8 +69,8 @@ test('registered selected-summary Ask is one host chooser; Allow still selects a
     await service.manager.initialize();
     const stage = path.join(fixtureRoot, 'package'); fs.mkdirSync(path.join(stage, 'dist'), { recursive: true });
     const sample = path.resolve('examples/plugins/assistant');
-    for (const file of ['netcatty.plugin.json', 'panel.html', 'panel.css', 'panel.js', 'README.md']) fs.copyFileSync(path.join(sample, file), path.join(stage, file));
-    fs.copyFileSync(path.join(sample, 'src/index.js'), path.join(stage, 'dist/index.js'));
+    for (const file of ['netcatty.plugin.json', 'README.md']) fs.copyFileSync(path.join(sample, file), path.join(stage, file));
+    fs.copyFileSync(path.join(sample, 'dist/host.js'), path.join(stage, 'dist/host.js'));
     const { buildPluginPackage } = await import('@netcatty/plugin-cli');
     const archive = path.join(fixtureRoot, 'assistant.ncpkg'); await buildPluginPackage(stage, archive); await service.manager.install(archive, { enable: true });
     await act(async () => root.render(<I18nProvider locale="en"><PluginPermissionHost /><PluginAIContextHost sessions={[]} workspaces={[]} /></I18nProvider>));
