@@ -396,11 +396,20 @@ function init(deps) {
 }
 
 /**
+ * Resolve Windows tar before switching to an upload-controlled directory.
+ */
+function resolveLocalTarCommand() {
+  return process.platform === 'win32'
+    ? path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar';
+}
+
+/**
  * Check if tar command is available on the system
  */
 async function checkTarAvailable(signal) {
   return new Promise((resolve) => {
-    const tar = spawn('tar', ['--version'], { stdio: 'ignore' });
+    const tar = spawn(resolveLocalTarCommand(), ['--version'], { stdio: 'ignore' });
     let settled = false;
     let childClosed = false;
     let forceKillTimer = null;
@@ -513,7 +522,7 @@ async function compressFolder(folderPath, outputPath, compressionId, sendProgres
       tarArgs.push(`--exclude=${path.relative(parentDir, outputPath).split(path.sep).join('/')}`);
     }
     tarArgs.push(folderName);
-    const tar = spawn('tar', tarArgs, {
+    const tar = spawn(resolveLocalTarCommand(), tarArgs, {
       cwd: parentDir,
       stdio: ['ignore', outputFd, 'pipe']
     });

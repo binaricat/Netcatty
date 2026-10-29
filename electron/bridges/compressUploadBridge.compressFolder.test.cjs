@@ -9,6 +9,10 @@ const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const test = require("node:test");
 
+const localTarCommand = process.platform === "win32"
+  ? path.join(process.env.SystemRoot || process.env.windir || "C:\\Windows", "System32", "tar.exe")
+  : "tar";
+
 // The bridge destructures spawn and getTempFilePath at load time, so record
 // tar calls and redirect temp archives before requiring it.
 let tempDir = null;
@@ -91,7 +95,7 @@ async function compressAndList(folderPath) {
     folderName: "folder",
     totalBytes: 7,
   });
-  const tarCall = spawnCalls.find((call) => call.command === "tar" && call.args.includes("-czf"));
+  const tarCall = spawnCalls.find((call) => call.command === localTarCommand && call.args.includes("-czf"));
   return { result, archiveEntries, tarCall };
 }
 
@@ -103,6 +107,7 @@ test("local tar gets its paths through cwd and stdout instead of argv", async (t
   const { result, archiveEntries, tarCall } = await compressAndList(folderPath);
 
   assert.equal(result.success, true);
+  assert.equal(spawnCalls.find((call) => call.args.includes("--version"))?.command, localTarCommand);
   assert.ok(tarCall, "local tar compression must be spawned");
   assert.equal(tarCall.options.cwd, path.dirname(folderPath));
   assert.equal(tarCall.args.includes("-C"), false, "parent directory must not be passed through argv");
