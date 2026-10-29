@@ -36,7 +36,7 @@ export type Osc7SetupRunResult = {
   code?: number | null;
   error?: string;
   reloadCommand?: string;
-  /** Setup was retyped into the terminal for a user-switched (su/sudo) shell. */
+  /** Setup was sent through the foreground terminal. */
   sentToTerminal?: boolean;
 };
 
@@ -57,6 +57,13 @@ export type RunOsc7SetupActionOptions = {
     },
   ) => void;
   writeLocalTerminalData?: (data: string) => void;
+  getPendingInputLength?: () => number;
+  /** Subscribe synchronously (throw if unavailable); resolve null on timeout. */
+  waitForSessionOutput?: (
+    sessionId: string,
+    predicate: (output: string) => boolean,
+    timeoutMs: number,
+  ) => Promise<string | null>;
 };
 
 export const shouldOfferOsc7SetupAction = ({
@@ -675,6 +682,72 @@ export const buildOsc7TypedSetupCommand = (
   return ` ${run}; source (test -n "${DOLLAR}XDG_CONFIG_HOME"; and echo "${DOLLAR}XDG_CONFIG_HOME"; or echo "${DOLLAR}HOME/.config")/fish/config.fish >/dev/null 2>&1; __netcatty_osc7_cwd 2>/dev/null; true\r`;
 };
 
+export const OSC7_PTY_SHELL_MARKER = "__NETCATTY_OSC7_PTY_SHELL__=";
+export const OSC7_PTY_DONE_MARKER = "__NETCATTY_OSC7_PTY_DONE__=";
+export const OSC7_PTY_FAILED_MARKER = "__NETCATTY_OSC7_PTY_FAILED__=";
+
+type Osc7PtyShell = "bash" | "zsh";
+
+// Split marker and value in printf so terminal input echo cannot acknowledge
+// the probe/install. A leading newline separates markers from prompt/OSC data.
+const ptyMarkerCommand = (marker: string, value: string): string =>
+  `printf '\\n%s%s\\n' '${marker}' ${value}`;
+
+export const buildOsc7PtyShellProbeCommand = (): string =>
+  ` case "$-" in *i*) if test -n "${DOLLAR}{ZSH_VERSION-}"; then ${ptyMarkerCommand(OSC7_PTY_SHELL_MARKER, "zsh")}; elif test -n "${DOLLAR}{BASH_VERSION-}"; then ${ptyMarkerCommand(OSC7_PTY_SHELL_MARKER, "bash")}; else ${ptyMarkerCommand(OSC7_PTY_SHELL_MARKER, "unknown")}; fi;; *) ${ptyMarkerCommand(OSC7_PTY_SHELL_MARKER, "unknown")};; esac; ${BASH_DELETE_MARKED_HISTORY_COMMAND}\r`;
+
+/** Independent foreground transport: no exec-side file or shell identity. */
+export const buildOsc7InlinePtySetupCommand = (shell: Osc7PtyShell): string => {
+  // The shared script is ASCII; base64 keeps it one readline/history entry.
+  const payload = btoa(POSIX_SETUP_SCRIPT);
+  const runner = 'c=$(printf "%s" "$1" | base64 -d) && printf "%s\\n" "$c" | sh';
+  const shellEnv = shell === "zsh" ? ' NETCATTY_ZDOTDIR="${ZDOTDIR:-}"' : "";
+  const run = `env NETCATTY_OSC7_FORCE_SHELL=${shell}${shellEnv} sh -c ${quoteForSingleQuotedShellString(runner)} sh '${payload}'`;
+  const rc = shell === "bash" ? '$HOME/.bashrc' : '${ZDOTDIR:-$HOME}/.zshrc';
+  const cleanup = shell === "bash" ? `; ${BASH_DELETE_MARKED_HISTORY_COMMAND}` : "";
+  return ` if ${run} && . "${rc}" >/dev/null 2>&1 && osc7_cwd 2>/dev/null; then ${ptyMarkerCommand(OSC7_PTY_DONE_MARKER, shell)}; else ${ptyMarkerCommand(OSC7_PTY_FAILED_MARKER, shell)}; fi${cleanup}\r`;
+};
+
+// Only accept complete output lines, including when a marker spans chunks.
+const readPtyMarker = (output: string, marker: string): string | null =>
+  readMarkerLine(output.slice(0, output.lastIndexOf("\n") + 1), marker);
+
+/** Short-lived observer; never consume/replay terminal backlog or flow acks. */
+export const waitForOsc7SessionOutput = (
+  subscribe: (sessionId: string, onData: (chunk: string) => void) => () => void,
+  sessionId: string,
+  predicate: (output: string) => boolean,
+  timeoutMs: number,
+): Promise<string | null> => {
+  let output = "";
+  let dispose: (() => void) | undefined;
+  let settled = false;
+  let result: string | null = null;
+  let resolveOutput: ((value: string | null) => void) | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const finish = (value: string | null) => {
+    settled = true;
+    result = value;
+    clearTimeout(timer);
+    dispose?.();
+    resolveOutput?.(value);
+  };
+  // Let subscription errors throw before runOsc7SetupAction sends any input.
+  dispose = subscribe(sessionId, (chunk) => {
+    if (settled) return;
+    output = (output + chunk).slice(-65536);
+    if (predicate(output)) finish(output);
+  });
+  if (settled) {
+    dispose();
+    return Promise.resolve(result);
+  }
+  return new Promise((resolve) => {
+    resolveOutput = resolve;
+    timer = setTimeout(() => finish(null), timeoutMs);
+  });
+};
+
 const isOsc7SetupShell = (value: string): value is Osc7SetupShell =>
   value === "bash" || value === "zsh" || value === "fish";
 
@@ -744,6 +817,8 @@ export const runOsc7SetupAction = async ({
   setupOsc7Tracking,
   writeToSession,
   writeLocalTerminalData,
+  getPendingInputLength,
+  waitForSessionOutput,
 }: RunOsc7SetupActionOptions): Promise<Osc7SetupRunResult> => {
   if (status !== "connected") {
     return { success: false, error: "Terminal is not connected" };
@@ -786,6 +861,50 @@ export const runOsc7SetupAction = async ({
       logRewrite: { sentCommand: typedCommand, displayCommand: "" },
     });
     return { ...result, success: true, sentToTerminal: true };
+  }
+
+  // Only this confirmed action may use foreground setup on exec identity
+  // failures (#4052). Keep the OTHER_USER staged transport above unchanged.
+  const identityErrors = [
+    "Netcatty OSC 7 setup: could not identify the active terminal shell",
+    "Netcatty OSC 7 setup: active terminal shell did not match the current tab",
+  ];
+  if (result.code === 4 || identityErrors.includes(result.stderr?.trim() || "")) {
+    const idleError = "Configure directory tracking needs an idle bash/zsh prompt with empty input. Clear pending input and try again, or configure OSC 7 manually.";
+    if (!waitForSessionOutput || !getPendingInputLength || getPendingInputLength() !== 0) {
+      return { ...result, success: false, error: idleError };
+    }
+    const probeOutput = waitForSessionOutput(
+      sessionId,
+      (output) => readPtyMarker(output, OSC7_PTY_SHELL_MARKER) !== null,
+      5000,
+    );
+    const probe = buildOsc7PtyShellProbeCommand();
+    writeToSession(sessionId, probe, {
+      automated: true,
+      logRewrite: { sentCommand: probe, displayCommand: "" },
+    });
+    const shell = readPtyMarker(await probeOutput || "", OSC7_PTY_SHELL_MARKER);
+    if ((shell !== "bash" && shell !== "zsh") || getPendingInputLength() !== 0) {
+      return { ...result, success: false, error: idleError };
+    }
+    const completed = (output: string) => readPtyMarker(output, OSC7_PTY_DONE_MARKER) === shell;
+    const failed = (output: string) => readPtyMarker(output, OSC7_PTY_FAILED_MARKER) === shell;
+    const installOutput = waitForSessionOutput(sessionId, (output) => completed(output) || failed(output), 20000);
+    const install = buildOsc7InlinePtySetupCommand(shell);
+    writeToSession(sessionId, install, {
+      automated: true,
+      logRewrite: { sentCommand: install, displayCommand: "" },
+    });
+    const output = await installOutput;
+    if (!output || failed(output) || !completed(output)) {
+      return {
+        ...result,
+        success: false,
+        error: "Foreground directory tracking setup failed or did not finish within 20 seconds. Check the terminal; manual OSC 7 configuration is also available.",
+      };
+    }
+    return { ...result, success: true, sentToTerminal: true, error: undefined };
   }
 
   if (!result.success || (typeof result.code === "number" && result.code !== 0)) {
