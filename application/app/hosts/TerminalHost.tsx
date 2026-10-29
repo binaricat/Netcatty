@@ -178,6 +178,7 @@ export function TerminalHost() {
       copySessionWithCurrentShell: handlers.copySessionWithCurrentShell,
       copyWorkspaceWithCurrentShell: handlers.copyWorkspaceWithCurrentShell,
       copySessionToNewWindowWithCurrentShell: handlers.copySessionToNewWindowWithCurrentShell,
+      openMuxAttachTab: handlers.openMuxAttachTab,
       duplicateSessionWithCurrentShell: handlers.duplicateSessionWithCurrentShell,
       closeWorkspace: sessionActions?.closeWorkspace,
       createWorkspaceFromSessions: sessionActions?.createWorkspaceFromSessions,

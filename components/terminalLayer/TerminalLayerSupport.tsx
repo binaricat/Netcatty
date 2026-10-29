@@ -40,6 +40,7 @@ import Terminal from '../Terminal';
 import { removePaneVisible, setPaneVisible } from '../terminal/paneVisibilityStore';
 import type { TerminalBroadcastInputOptions } from '../terminal/terminalHelpers';
 import type { TerminalContextReader } from '../../domain/terminalContextRead';
+import type { SystemManagerSubTab } from '../../domain/systemManager/types';
 import {
   getTerminalPaneRenderSnapshot,
   parseTerminalPaneRenderSnapshot,
@@ -728,6 +729,8 @@ export interface TerminalLayerProps {
   onCopySession?: (sessionId: string) => void;
   onDuplicateSession?: (sessionId: string) => void;
   onCopySessionToNewWindow?: (sessionId: string) => void;
+  /** Attach a tmux/zellij session in a new main-window tab instead of a popup. */
+  onOpenMuxAttachTab?: (sessionId: string, payload: { title: string; startupCommand: string }) => void;
   onRemoveSessionFromWorkspace?: (
     sessionId: string,
     tabInsertionTarget?: { tabId: string; position: 'before' | 'after'; additionalTabIds?: readonly string[] },
@@ -833,7 +836,7 @@ interface TerminalPaneProps {
   onOpenScripts: () => void;
   onOpenHistory?: () => void;
   onOpenTheme: () => void;
-  onOpenSystem?: () => void;
+  onOpenSystem?: (subTab?: SystemManagerSubTab) => void;
   onCloseSession: (sessionId: string) => void;
   onStatusChange: (sessionId: string, status: TerminalSession['status'], sftpHost?: Host) => void;
   onSessionExit: (sessionId: string, evt: TerminalSessionExitEvent) => void;
@@ -1547,11 +1550,11 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     }
     workspaceFocusHandler?.();
   }, [handleTogglePaneMagnification, isMagnified, workspaceFocusHandler]);
-  const handleOpenSystemForPane = useCallback(() => {
+  const handleOpenSystemForPane = useCallback((subTab?: SystemManagerSubTab) => {
     if (activeWorkspaceId && !isFocusMode) {
       onSetWorkspaceFocusedSession?.(activeWorkspaceId, session.id);
     }
-    onOpenSystem?.();
+    onOpenSystem?.(subTab);
   }, [activeWorkspaceId, isFocusMode, onOpenSystem, onSetWorkspaceFocusedSession, session.id]);
   const handleRename = useCallback(() => {
     onStartSessionRename?.(session.id);
@@ -1752,7 +1755,7 @@ interface TerminalPanesHostProps {
   onOpenScripts: () => void;
   onOpenHistory?: () => void;
   onOpenTheme: () => void;
-  onOpenSystem?: () => void;
+  onOpenSystem?: (subTab?: SystemManagerSubTab) => void;
   onCloseSession: (sessionId: string) => void;
   onStatusChange: (sessionId: string, status: TerminalSession['status'], sftpHost?: Host) => void;
   onSessionExit: (sessionId: string, evt: TerminalSessionExitEvent) => void;

@@ -502,6 +502,8 @@ export const zhTWVaultMessages: Messages = {
 
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': '開啟 SFTP',
+  'terminal.toolbar.tmux': 'tmux 工作階段',
+  'terminal.toolbar.zellij': 'zellij 工作階段',
   'terminal.browser.title': '瀏覽器',
   'terminal.browser.sshOnly': '請聚焦 SSH 終端以開啟瀏覽器。',
   'terminal.browser.open': '開啟瀏覽器',

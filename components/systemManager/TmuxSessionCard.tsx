@@ -6,6 +6,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
 import { buildTmuxAttachCommand } from '../../domain/systemManager/tmuxShell';
 import type {
+  MultiplexerScope,
   TmuxManageAction,
   TmuxSessionInfo,
 } from '../../domain/systemManager/types';
@@ -66,6 +67,15 @@ interface TmuxSessionCardProps {
   sessionId: string;
   parentSession: TerminalSession;
   backend: Backend;
+  /** Runs an action scoped to the user selected in the manager tab. */
+  runScoped?: <T extends { success: boolean; error?: string; errorCode?: string }>(
+    fn: (scope?: MultiplexerScope) => Promise<T>,
+  ) => Promise<T>;
+  /** Target login user for interactive attach commands (empty when current user). */
+  attachTargetUser?: string;
+  /** Where attach opens: new main-window tab or a popup window (default popup). */
+  muxAttachTarget?: 'tab' | 'window';
+  onOpenMuxAttachTab?: (sessionId: string, payload: { title: string; startupCommand: string }) => void;
   detailsRecord?: AsyncRecordState<TmuxSessionDetails>;
   onLoadDetails: (session: TmuxSessionInfo, options?: { force?: boolean; urgent?: boolean }) => Promise<void>;
   onRefreshDetails: (session: TmuxSessionInfo) => Promise<void>;
@@ -78,6 +88,10 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
   sessionId,
   parentSession,
   backend,
+  runScoped,
+  attachTargetUser,
+  muxAttachTarget,
+  onOpenMuxAttachTab,
   detailsRecord,
   onLoadDetails,
   onRefreshDetails,
@@ -131,14 +145,15 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
     setActionError(null);
     try {
       const cardWillRemount = action.action === 'killSession' || action.action === 'renameSession';
-      const result = await runTmuxSessionAction({
+      const execute = (scope?: MultiplexerScope) => runTmuxSessionAction({
         sessionId,
         action,
-        tmuxAction: backend.tmuxAction,
+        tmuxAction: (payload) => backend.tmuxAction({ ...payload, scope }),
         onRefreshDetails: !cardWillRemount && expanded ? () => onRefreshDetails(session) : undefined,
         onSessionsChanged,
         onRequestTerminalFocus,
       });
+      const result = runScoped ? await runScoped(execute) : await execute(undefined);
       if (!result.success) throw new Error(result.error || t('systemManager.errors.actionFailed'));
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t('systemManager.errors.actionFailed'));
@@ -158,8 +173,14 @@ export const TmuxSessionCard = memo(function TmuxSessionCard({
       backend,
       parentSession,
       windowIndex !== undefined ? `tmux: ${session.name}:${windowIndex}` : `tmux: ${session.name}`,
-      buildTmuxAttachCommand(session.name, windowIndex),
-      { icon: TMUX_POPUP_ICON },
+      buildTmuxAttachCommand(session.name, windowIndex, attachTargetUser),
+      {
+        icon: TMUX_POPUP_ICON,
+        target: muxAttachTarget === 'tab' ? 'tab' : 'popup',
+        onOpenTab: onOpenMuxAttachTab
+          ? (payload) => onOpenMuxAttachTab(sessionId, payload)
+          : undefined,
+      },
     );
     if (!result.success) {
       const message = result.error || t('systemManager.errors.actionFailed');

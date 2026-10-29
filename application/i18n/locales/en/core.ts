@@ -897,6 +897,12 @@ Highlight the focused split pane:
   'settings.terminal.systemManager.processRefreshInterval.desc': 'How often to refresh the process list in the system manager side panel.',
   'settings.terminal.systemManager.tmuxRefreshInterval': 'tmux session refresh',
   'settings.terminal.systemManager.tmuxRefreshInterval.desc': 'How often to refresh the tmux session list.',
+  'settings.terminal.systemManager.tmuxAutoSync': 'Auto-sync current user\'s tmux sessions',
+  'settings.terminal.systemManager.tmuxAutoSync.desc': 'When enabled, tmux/zellij session lists refresh automatically; when disabled, refresh manually.',
+  'settings.terminal.systemManager.muxAttachTarget': 'Attach tmux/zellij sessions in',
+  'settings.terminal.systemManager.muxAttachTarget.desc': 'Choose whether attaching a tmux/zellij session opens a new tab in the main window or a separate window.',
+  'settings.terminal.systemManager.muxAttachTarget.tab': 'New tab',
+  'settings.terminal.systemManager.muxAttachTarget.window': 'New window',
   'settings.terminal.systemManager.dockerListRefreshInterval': 'Container list refresh',
   'settings.terminal.systemManager.dockerListRefreshInterval.desc': 'How often to refresh container and pod lists.',
   'settings.terminal.systemManager.dockerStatsRefreshInterval': 'Docker stats refresh',
@@ -974,6 +980,7 @@ Highlight the focused split pane:
   'settings.terminal.passwordPromptAssist.off': 'Off',
   'settings.terminal.passwordPromptAssist.hint': 'Quick fill (Enter)',
   'settings.terminal.passwordPromptAssist.picker': 'Credential picker',
+  'settings.terminal.passwordPromptAssist.auto': 'Auto fill (sudo)',
 
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': 'Hotkey Scheme',

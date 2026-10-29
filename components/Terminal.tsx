@@ -4379,6 +4379,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       onDeleteSnippets={onDeleteSnippets}
       onOpenSFTP={handleOpenSFTP}
       onOpenBrowser={(!host.protocol || ['ssh', 'mosh', 'local'].includes(host.protocol)) ? () => { void handleOpenHostBrowser(); } : undefined}
+      onOpenTmux={isSystemSidebarEligible ? () => onOpenSystem?.('tmux') : undefined}
+      onOpenZellij={isSystemSidebarEligible ? () => onOpenSystem?.('zellij') : undefined}
       onSendYmodem={isSerialConnection ? handleSendYmodem : undefined}
       onReceiveYmodem={isSerialConnection ? handleReceiveYmodem : undefined}
       onOpenScripts={onOpenScripts ?? (() => {})}
@@ -4452,10 +4454,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     isSearchOpen,
     isSessionLogging,
     isWorkspaceComposeBarOpen,
+    isSystemSidebarEligible,
     onCloseSession,
     onDeleteSnippets,
     onOpenScripts,
     onOpenHistory,
+    onOpenSystem,
     onOpenTheme,
     onToggleComposeBar,
     onTogglePaneMagnification,

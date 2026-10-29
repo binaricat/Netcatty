@@ -502,6 +502,8 @@ export const zhCNVaultMessages: Messages = {
 
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': '打开 SFTP',
+  'terminal.toolbar.tmux': 'tmux 会话',
+  'terminal.toolbar.zellij': 'zellij 会话',
   'terminal.browser.title': '浏览器',
   'terminal.browser.sshOnly': '请聚焦 SSH 终端以打开浏览器。',
   'terminal.browser.open': '打开浏览器',

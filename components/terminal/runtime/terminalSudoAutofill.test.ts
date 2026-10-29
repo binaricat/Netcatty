@@ -118,6 +118,72 @@ test("cancelHint clears the hint without filling", () => {
   assert.equal(autofill.isPromptPending(), false);
 });
 
+// --- auto mode: fill armed sudo prompts without confirmation ---
+
+const makeAuto = (password = "secret") => {
+  const writes: string[] = [];
+  const hints: boolean[] = [];
+  const autofill = createSudoPasswordAutofill({
+    mode: "auto",
+    password,
+    write: (d) => writes.push(d),
+    onHint: (active) => {
+      hints.push(active);
+      return true;
+    },
+  });
+  return { autofill, writes, hints };
+};
+
+test("auto mode fills an armed sudo prompt without showing a hint", () => {
+  const { autofill, writes, hints } = makeAuto();
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(writes, ["secret\n"]);
+  assert.deepEqual(hints, []);
+  assert.equal(autofill.isPromptPending(), false);
+});
+
+test("auto mode only hints on an unarmed explicit sudo prompt", () => {
+  // No arm: a remote could print a forged "[sudo] password …" line, so the
+  // password must never be sent without the user having just run sudo here.
+  const { autofill, writes, hints } = makeAuto();
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(writes, []);
+  assert.deepEqual(hints, [true]);
+  assert.equal(autofill.isPromptPending(), true);
+});
+
+test("auto mode falls back to the hint for armed su prompts", () => {
+  const { autofill, writes, hints } = makeAuto();
+  autofill.armForCommand("su root");
+  autofill.handleOutput("Password: ");
+  assert.deepEqual(writes, []);
+  assert.deepEqual(hints, [true]);
+});
+
+test("auto mode does not loop credentials into an auth retry", () => {
+  const { autofill, writes, hints } = makeAuto();
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(writes, ["secret\n"]);
+  // Wrong password: sudo rejects and re-prompts. The retry shows a hint
+  // instead of re-sending the same secret.
+  autofill.handleOutput("Sorry, try again.\r\n[sudo] password for alice: ");
+  assert.deepEqual(writes, ["secret\n"]);
+  assert.deepEqual(hints, [true]);
+  assert.equal(autofill.isPromptPending(), true);
+});
+
+test("auto mode stays silent without a session password", () => {
+  const { autofill, writes, hints } = makeAuto("");
+  autofill.armForCommand("sudo whoami");
+  autofill.handleOutput("[sudo] password for alice: ");
+  assert.deepEqual(writes, []);
+  assert.deepEqual(hints, []);
+  assert.equal(autofill.isPromptPending(), false);
+});
+
 // --- paste dismisses assist so Enter is not hijacked (#2198) ---
 
 test("shouldDismissPasswordAssistOnInput detects paste and typed content", () => {

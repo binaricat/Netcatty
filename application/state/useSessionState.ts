@@ -1227,6 +1227,12 @@ export const useSessionState = ({
     inheritedCwd?: string;
     /** When false, open a brand-new connection instead of reusing the source's SSH channel. */
     reuseConnection?: boolean;
+    /** Command sent once the cloned shell is ready (e.g. `tmux attach …`). */
+    startupCommand?: string;
+    /** Tab title override for the cloned session. */
+    customName?: string;
+    /** Downgrade mosh/et sources to plain ssh so `startupCommand` can run. */
+    forcePlainSshShell?: boolean;
   }) => {
     // Pre-allocate the new id outside the updater so StrictMode's
     // double-invocation of the functional updater doesn't mint two ids.
@@ -1243,6 +1249,9 @@ export const useSessionState = ({
         localShellType: options?.localShellType,
         inheritedCwd: options?.inheritedCwd,
         reuseConnection: options?.reuseConnection,
+        startupCommand: options?.startupCommand,
+        customName: options?.customName,
+        forcePlainSshShell: options?.forcePlainSshShell,
       });
 
       // Schedule the activeTab + tabOrder updates only when creation

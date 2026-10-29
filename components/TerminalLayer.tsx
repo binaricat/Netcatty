@@ -162,6 +162,7 @@ import {
   type SnippetExecutor,
   type TerminalLayerProps,
 } from './terminalLayer/TerminalLayerSupport';
+import type { SystemManagerSubTab } from '../domain/systemManager/types';
 
 const addMountedSidePanelTabId = (
   tabIds: string[],
@@ -256,6 +257,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onCopySession,
   onDuplicateSession,
   onCopySessionToNewWindow,
+  onOpenMuxAttachTab,
   onSplitSession,
   onConnectToHost,
   onCreateLocalTerminal,
@@ -824,6 +826,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     useState<PendingTerminalSelectionForAI | null>(null);
   const [notesOpenNoteByTab, setNotesOpenNoteByTab] = useState<Map<string, { noteId: string; requestId: number }>>(new Map());
   const notesOpenRequestIdRef = useRef(0);
+  const [systemSubTabByTab, setSystemSubTabByTab] = useState<Map<string, { tab: SystemManagerSubTab; requestId: number }>>(new Map());
+  const systemSubTabRequestIdRef = useRef(0);
   const sftpHostForTabRef = useRef(sftpHostForTab);
   sftpHostForTabRef.current = sftpHostForTab;
   const sftpHostSourceSessionForTabRef = useRef(sftpHostSourceSessionForTab);
@@ -2012,7 +2016,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSwitchSidePanelTab('ai');
   }, [handleSwitchSidePanelTab]);
 
-  const handleOpenSystem = useCallback(() => {
+  const handleOpenSystem = useCallback((subTab?: SystemManagerSubTab) => {
+    const tabId = activeTabIdRef.current;
+    if (subTab && tabId) {
+      systemSubTabRequestIdRef.current += 1;
+      const request = { tab: subTab, requestId: systemSubTabRequestIdRef.current };
+      setSystemSubTabByTab((prev) => {
+        const next = new Map(prev);
+        next.set(tabId, request);
+        return next;
+      });
+    }
     handleSwitchSidePanelTab('system');
   }, [handleSwitchSidePanelTab]);
 
@@ -2704,6 +2718,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     notesMountedTabIds,
     browserMountedTabIds,
     notesOpenNoteByTab,
+    systemSubTabByTab,
     scriptsMountedTabIds,
     systemMountedTabIds,
     themeMountedTabIds,
@@ -2717,6 +2732,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onCopySession,
     onDuplicateSession,
     onCopySessionToNewWindow,
+    onOpenMuxAttachTab,
     onRequestAddToWorkspace,
     onAppendHostToWorkspace,
     onSessionData,

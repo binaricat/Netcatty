@@ -496,8 +496,20 @@ function createPreloadApi(ctx) {
   setupOsc7Tracking: async (sessionId, command) => {
     return ipcRenderer.invoke("netcatty:system:setupOsc7Tracking", { sessionId, command });
   },
-  listTmuxSessions: async (sessionId) => {
-    return ipcRenderer.invoke("netcatty:system:listTmuxSessions", { sessionId });
+  listTmuxSessions: async (sessionId, scope) => {
+    return ipcRenderer.invoke("netcatty:system:listTmuxSessions", { sessionId, scope });
+  },
+  listTmuxSnapshot: async (sessionId, scope) => {
+    return ipcRenderer.invoke("netcatty:system:listTmuxSnapshot", { sessionId, scope });
+  },
+  listMultiplexerUsers: async (sessionId) => {
+    return ipcRenderer.invoke("netcatty:system:listMultiplexerUsers", { sessionId });
+  },
+  listZellijSessions: async (sessionId, scope) => {
+    return ipcRenderer.invoke("netcatty:system:listZellijSessions", { sessionId, scope });
+  },
+  zellijAction: async (options) => {
+    return ipcRenderer.invoke("netcatty:system:zellijAction", options);
   },
   createTmuxSession: async (options) => {
     return ipcRenderer.invoke("netcatty:system:createTmuxSession", options);

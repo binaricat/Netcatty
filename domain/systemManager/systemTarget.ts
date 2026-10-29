@@ -44,6 +44,19 @@ export function shouldShowTmuxTab(
   return false;
 }
 
+export function shouldShowZellijTab(
+  host: Host | null | undefined,
+  capabilities: SessionCapabilities | undefined,
+  session: TerminalSession | null | undefined,
+): boolean {
+  // Same visibility model as tmux: detect-first on network appliances.
+  if (isNetworkDeviceTarget(host)) return capabilities?.hasZellij === true;
+  if (isDefiniteLinuxTarget(host, capabilities, session)) return true;
+  if (capabilities?.targetOs === 'darwin') return true;
+  if (resolveHostOs(host) === 'macos') return true;
+  return false;
+}
+
 export function hasContainerSource(capabilities: SessionCapabilities | undefined): boolean {
   return capabilities?.hasDocker === true
     || capabilities?.hasPodman === true
@@ -118,6 +131,7 @@ export function buildSystemManagerTabs(
   if (shouldShowPortsTab(capabilities)) tabs.push('ports');
   if (shouldShowServicesTab(capabilities)) tabs.push('services');
   if (shouldShowTmuxTab(host, capabilities, session)) tabs.push('tmux');
+  if (shouldShowZellijTab(host, capabilities, session)) tabs.push('zellij');
   if (shouldShowDockerTab(host, capabilities, session)) tabs.push('docker');
   if (shouldShowGpuTab(capabilities)) tabs.push('gpu');
   return tabs;

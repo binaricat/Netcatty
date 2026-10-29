@@ -4,24 +4,26 @@ function shQuote(str) {
   return `'${String(str).replace(/'/g, `'\"'\"'`)}'`;
 }
 
-function wrapLoginShell(command) {
-  const oneLine = String(command || "")
+function oneLineScript(command) {
+  return String(command || "")
     .replace(/\r\n/g, "\n")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
     .join("; ");
-  return `bash -lc ${JSON.stringify(oneLine)}`;
+}
+
+// Single-quote the script so it reaches the inner shell byte-for-byte.
+// JSON.stringify double-quoting was wrong here: the outer shell command-
+// substitutes $(printf '\t…') inside "…" with a doubled backslash, so tmux
+// received a literal \t in -F format strings and emitted rows like
+// "7\t1\t0\t1787039458…" as one giant field.
+function wrapLoginShell(command) {
+  return `bash -lc ${shQuote(oneLineScript(command))}`;
 }
 
 function wrapShExec(command) {
-  const oneLine = String(command || "")
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join("; ");
-  return `exec sh -c ${JSON.stringify(oneLine)}`;
+  return `exec sh -c ${shQuote(oneLineScript(command))}`;
 }
 
 function stripAnsi(text) {
@@ -151,7 +153,13 @@ function parseListOutput(stdout) {
       });
       continue;
     }
-    const parts = trimmed.split("\t");
+    // Tolerate a literal "\t" separator for remotes where the printf wrapping
+    // still fails; otherwise the whole row would surface as the session name.
+    const parts = trimmed.includes("\t")
+      ? trimmed.split("\t")
+      : trimmed.includes("\\t")
+        ? trimmed.split("\\t")
+        : [trimmed];
     if (parts.length >= 4) {
       plain.push({
         name: parts[0].trim(),

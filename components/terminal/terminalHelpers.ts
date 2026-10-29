@@ -3,6 +3,7 @@ import type { DragEvent, PointerEvent } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 
 import type { TerminalContextReader } from "../../domain/terminalContextRead";
+import type { SystemManagerSubTab } from "../../domain/systemManager/types";
 import type { TerminalSessionExitEvent } from "../../application/state/resolveTerminalSessionExitIntent";
 import { resolveSessionTabTitle } from "../../domain/sessionTabTitle";
 import { logger } from "../../lib/logger";
@@ -239,7 +240,7 @@ export interface TerminalProps {
   onOpenScripts?: () => void;
   onOpenHistory?: () => void;
   onOpenTheme?: () => void;
-  onOpenSystem?: () => void;
+  onOpenSystem?: (subTab?: SystemManagerSubTab) => void;
   isBroadcastEnabled?: boolean;
   /** Compose-bar send target for solo sessions. Workspace compose lives on the layer. */
   composeSendToAll?: boolean;

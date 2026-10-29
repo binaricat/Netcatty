@@ -2,8 +2,8 @@ import { Plus, TerminalSquare } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
-import type { Snippet, TerminalSession } from '../../types';
-import type { TmuxClientInfo, TmuxSessionInfo, TmuxWindowInfo } from '../../domain/systemManager/types';
+import type { Host, Identity, Snippet, SSHKey, TerminalSession } from '../../types';
+import type { TmuxClientInfo, TmuxSessionInfo, TmuxSnapshot, TmuxWindowInfo } from '../../domain/systemManager/types';
 import { tmuxSessionInfoEqual } from '../../domain/systemManager/pollEquals';
 import {
   SystemPanelEmpty,
@@ -17,11 +17,13 @@ import {
   SystemPanelShell,
   SystemPanelToolbar,
 } from './SystemPanelUi';
-import { useAsyncRecordCache } from '../../application/state/systemManager/useAsyncRecordCache';
+import type { AsyncRecordState } from '../../application/state/systemManager/useAsyncRecordCache';
 import { usePolling, useStableTranslate } from '../../application/state/useSystemManager';
 import { TmuxNewSessionModal } from './TmuxNewSessionModal';
 import { TmuxSessionCard } from './TmuxSessionCard';
 import { useStableListOrder, mergePollListByKey } from './listStable';
+import { useMultiplexerScope } from './useMultiplexerScope';
+import { MultiplexerUserSelect } from './MultiplexerUserSelect';
 
 type Backend = ReturnType<typeof useSystemManagerBackend>;
 
@@ -37,8 +39,16 @@ interface TmuxManagerTabProps {
   warmupEnabled?: boolean;
   backend: Backend;
   refreshIntervalSec: number;
+  autoSync?: boolean;
   snippets: Snippet[];
+  host?: Host | null;
+  keys?: SSHKey[];
+  identities?: Identity[];
+  onUpdateHost?: (host: Host) => void;
   onRequestTerminalFocus?: () => void;
+  /** Where attach opens: new main-window tab or a popup window (default popup). */
+  muxAttachTarget?: 'tab' | 'window';
+  onOpenMuxAttachTab?: (sessionId: string, payload: { title: string; startupCommand: string }) => void;
 }
 
 export const TmuxManagerTab = memo(function TmuxManagerTab({
@@ -48,8 +58,15 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
   warmupEnabled = false,
   backend,
   refreshIntervalSec,
+  autoSync = true,
   snippets,
+  host = null,
+  keys = [],
+  identities,
+  onUpdateHost,
   onRequestTerminalFocus,
+  muxAttachTarget,
+  onOpenMuxAttachTab,
 }: TmuxManagerTabProps) {
   const { t } = useI18n();
   const stableT = useStableTranslate();
@@ -62,13 +79,34 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
   const currentSessionIdRef = useRef(sessionId);
   currentSessionIdRef.current = sessionId;
 
+  const {
+    users,
+    currentUser,
+    selectedUser,
+    setSelectedUser,
+    needsSudo,
+    runScoped,
+    passwordDialog,
+  } = useMultiplexerScope({
+    sessionId,
+    host,
+    keys,
+    identities,
+    onUpdateHost,
+    fallbackUser: host?.username,
+    isVisible,
+    backend,
+  });
+
   useEffect(() => {
     setTmuxVersion(null);
   }, [sessionId]);
 
   const fetcher = useCallback(async () => {
     const fetchSessionId = sessionId;
-    const result = await backend.listTmuxSessions(sessionId);
+    // One round trip per poll: sessions + all windows + clients together, so a
+    // sudo-scoped poll pays PAM auth once instead of once per session record.
+    const result = await runScoped((scope) => backend.listTmuxSnapshot(sessionId, scope));
     const version = result.tmuxVersion ?? null;
     if (currentSessionIdRef.current === fetchSessionId) {
       setTmuxVersion((prev) => (prev === version ? prev : version));
@@ -76,17 +114,34 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
     if (!result.success) {
       throw new Error(result.error || stableT('systemManager.errors.loadTmux'));
     }
-    return result.sessions ?? [];
-  }, [backend, sessionId, stableT]);
+    return {
+      sessions: result.sessions ?? [],
+      windowsBySession: result.windowsBySession ?? {},
+      clients: result.clients ?? [],
+      tmuxVersion: result.tmuxVersion,
+    } satisfies TmuxSnapshot;
+  }, [backend, runScoped, sessionId, stableT]);
 
   const intervalMs = Math.max(2, refreshIntervalSec) * 1000;
-  const { data: sessions, error, loading, refresh } = usePolling<TmuxSessionInfo[]>(
+  const { data: snapshotData, error, loading, refresh } = usePolling<TmuxSnapshot>(
     fetcher,
     intervalMs,
     isVisible || warmupEnabled,
-    (prev, next) => mergePollListByKey(prev, next, (s) => s.name, tmuxSessionInfoEqual),
-    { poll: isVisible, resetKey: sessionId },
+    (prev, next) => ({
+      ...next,
+      sessions: mergePollListByKey(prev?.sessions ?? null, next.sessions, (s) => s.name, tmuxSessionInfoEqual),
+    }),
+    { poll: isVisible && autoSync, resetKey: `${sessionId}:${selectedUser}` },
   );
+
+  // Stale-while-revalidate per user: switching back to a previously viewed
+  // user shows its last snapshot instantly while the poll refreshes.
+  const snapshotCacheRef = useRef(new Map<string, TmuxSnapshot>());
+  useEffect(() => {
+    if (snapshotData) snapshotCacheRef.current.set(selectedUser, snapshotData);
+  }, [selectedUser, snapshotData]);
+  const snapshot = snapshotData ?? snapshotCacheRef.current.get(selectedUser) ?? null;
+  const sessions = snapshot?.sessions ?? null;
 
   const filtered = useMemo<TmuxSessionInfo[]>(() => {
     const q = query.trim().toLowerCase();
@@ -106,71 +161,40 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
     compareSessions,
   );
 
-  const formatTmuxLoadError = useCallback((
-    message: string,
-    debug?: { lastOutput?: string; tried?: string[] },
-  ) => {
-    const parts = [message];
-    if (debug?.lastOutput) parts.push(debug.lastOutput);
-    if (debug?.tried?.length) {
-      parts.push(t('systemManager.tmux.lastCommand', { command: debug.tried[debug.tried.length - 1] ?? '' }));
+  const detailsByName = useMemo(() => {
+    if (!snapshot) return null;
+    const map: Record<string, AsyncRecordState<TmuxSessionDetails>> = {};
+    for (const session of snapshot.sessions) {
+      map[session.name] = {
+        data: {
+          windows: snapshot.windowsBySession[session.name] ?? [],
+          clients: snapshot.clients.filter((client) => client.session === session.name),
+        },
+        loading: false,
+        error: null,
+        updatedAt: null,
+      };
     }
-    return parts.filter(Boolean).join(' · ');
-  }, [t]);
+    return map;
+  }, [snapshot]);
 
-  const getTmuxDetailsKey = useCallback((session: TmuxSessionInfo) => (
-    `${sessionId}:${session.name}:${session.created}`
-  ), [sessionId]);
-  const fetchTmuxDetails = useCallback(async (session: TmuxSessionInfo): Promise<TmuxSessionDetails> => {
-    const [windowsResult, clientsResult] = await Promise.all([
-      backend.listTmuxWindows({ sessionId, sessionName: session.name }),
-      backend.listTmuxClients({ sessionId, sessionName: session.name }),
-    ]);
-    if (!windowsResult.success) {
-      throw new Error(formatTmuxLoadError(
-        windowsResult.error || stableT('systemManager.errors.loadTmuxWindows'),
-        windowsResult.debug,
-      ));
-    }
-    if (!clientsResult.success) {
-      throw new Error(clientsResult.error || stableT('systemManager.errors.loadTmuxClients'));
-    }
-    const freshWindows = windowsResult.windows ?? [];
-    if (freshWindows.length === 0 && session.windows > 0) {
-      throw new Error(formatTmuxLoadError(
-        stableT('systemManager.tmux.windowsMismatch', { count: String(session.windows) }),
-        windowsResult.debug,
-      ));
-    }
-    return {
-      windows: freshWindows,
-      clients: clientsResult.clients ?? [],
-    };
-  }, [backend, formatTmuxLoadError, sessionId, stableT]);
-
-  const {
-    records: tmuxDetailsByName,
-    loadRecord: loadTmuxDetails,
-    refreshRecord: refreshTmuxDetails,
-  } = useAsyncRecordCache<TmuxSessionInfo, TmuxSessionDetails>({
-    items: sessions ?? [],
-    enabled: isVisible && (sessions?.length ?? 0) > 0,
-    getKey: getTmuxDetailsKey,
-    fetchRecord: fetchTmuxDetails,
-    prefetchLimit: 16,
-    prefetchDelayMs: 40,
-    staleTimeMs: 20_000,
-  });
+  // Details ride along with every snapshot poll, so expand needs no fetch and
+  // a post-action refresh simply repolls the snapshot.
+  const loadDetailsNoop = useCallback(async () => {}, []);
+  const handleRefreshDetails = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
 
   const handleCreate = useCallback(async (name: string, command: string) => {
     setCreating(true);
     setModalError(null);
     try {
-      const result = await backend.createTmuxSession({
+      const result = await runScoped((scope) => backend.createTmuxSession({
         sessionId,
         name,
         command: command || undefined,
-      });
+        scope,
+      }));
       if (!result.success) throw new Error(result.error);
       setModalOpen(false);
       await refresh();
@@ -179,7 +203,7 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
     } finally {
       setCreating(false);
     }
-  }, [backend, refresh, sessionId, t]);
+  }, [backend, refresh, runScoped, sessionId, t]);
 
   return (
     <SystemPanelShell section="system-manager-tmux">
@@ -203,6 +227,12 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
           </>
         )}
       >
+        <MultiplexerUserSelect
+          users={users}
+          currentUser={currentUser}
+          value={selectedUser}
+          onChange={(user) => setSelectedUser(user === currentUser ? '' : user)}
+        />
         <SystemPanelSearch
           value={query}
           onChange={setQuery}
@@ -233,9 +263,13 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
             sessionId={sessionId}
             parentSession={parentSession}
             backend={backend}
-            detailsRecord={tmuxDetailsByName[getTmuxDetailsKey(session)]}
-            onLoadDetails={loadTmuxDetails}
-            onRefreshDetails={refreshTmuxDetails}
+            runScoped={runScoped}
+            attachTargetUser={needsSudo ? selectedUser : undefined}
+            muxAttachTarget={muxAttachTarget}
+            onOpenMuxAttachTab={onOpenMuxAttachTab}
+            detailsRecord={detailsByName?.[session.name]}
+            onLoadDetails={loadDetailsNoop}
+            onRefreshDetails={handleRefreshDetails}
             onSessionsChanged={refresh}
             onRequestTerminalFocus={onRequestTerminalFocus}
           />
@@ -250,6 +284,7 @@ export const TmuxManagerTab = memo(function TmuxManagerTab({
         creating={creating}
         error={modalError}
       />
+      {passwordDialog}
     </SystemPanelShell>
   );
 });

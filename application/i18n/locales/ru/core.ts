@@ -824,6 +824,12 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.systemManager.processRefreshInterval.desc': 'Как часто обновлять список процессов в боковой панели системного менеджера.',
   'settings.terminal.systemManager.tmuxRefreshInterval': 'Обновление сессий tmux',
   'settings.terminal.systemManager.tmuxRefreshInterval.desc': 'Как часто обновлять список сессий tmux.',
+  'settings.terminal.systemManager.tmuxAutoSync': 'Автосинхронизация tmux-сессий текущего пользователя',
+  'settings.terminal.systemManager.tmuxAutoSync.desc': 'Если включено, списки сессий tmux/zellij обновляются автоматически; если выключено — только вручную.',
+  'settings.terminal.systemManager.muxAttachTarget': 'Подключать сессии tmux/zellij в',
+  'settings.terminal.systemManager.muxAttachTarget.desc': 'Выберите, где открывать подключение к сессии tmux/zellij: в новой вкладке главного окна или в отдельном окне.',
+  'settings.terminal.systemManager.muxAttachTarget.tab': 'Новая вкладка',
+  'settings.terminal.systemManager.muxAttachTarget.window': 'Новое окно',
   'settings.terminal.systemManager.dockerListRefreshInterval': 'Обновление списка контейнеров',
   'settings.terminal.systemManager.dockerListRefreshInterval.desc': 'Как часто обновлять списки контейнеров и подов.',
   'settings.terminal.systemManager.dockerStatsRefreshInterval': 'Обновление статистики Docker',
@@ -889,6 +895,7 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.passwordPromptAssist.off': 'Выкл.',
   'settings.terminal.passwordPromptAssist.hint': 'Быстрая вставка (Enter)',
   'settings.terminal.passwordPromptAssist.picker': 'Список учётных данных',
+  'settings.terminal.passwordPromptAssist.auto': 'Автозаполнение (sudo)',
 
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': 'Схема горячих клавиш',

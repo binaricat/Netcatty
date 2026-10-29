@@ -14,7 +14,7 @@ import {
 test('system manager tab layout defaults include every known section', () => {
   assert.deepEqual(
     [...SYSTEM_MANAGER_TAB_DEFAULT_ORDER],
-    ['overview', 'processes', 'ports', 'services', 'tmux', 'docker', 'gpu'],
+    ['overview', 'processes', 'ports', 'services', 'tmux', 'zellij', 'docker', 'gpu'],
   );
   assert.deepEqual(SYSTEM_MANAGER_TAB_LAYOUT_DEFAULTS.lockedIds, ['overview']);
 });
