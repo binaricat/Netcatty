@@ -118,8 +118,9 @@ test("an archive written inside the source folder is excluded from itself", asyn
   tempDir = path.join(folderPath, "tmp");
   fs.mkdirSync(tempDir);
 
-  const { result, archiveEntries } = await compressAndList(folderPath);
+  const { result, archiveEntries, tarCall } = await compressAndList(folderPath);
 
   assert.equal(result.success, true);
+  assert.ok(tarCall.args.includes("--exclude=folder/tmp/1_1_folder.tar.gz"));
   assert.deepEqual(archiveEntries, ["folder", "folder/file.txt", "folder/tmp"]);
 });
