@@ -3,7 +3,7 @@
 const { stripAnsi, MUX_PATH_AUGMENT } = require("./tmuxEnv.cjs");
 const { execScopedOnSession, shQuote } = require("./muxScope.cjs");
 
-const ZELLIJ_DIAGNOSTIC_LINE = /^(error|usage:|unknown command|no such session)/i;
+const ZELLIJ_DIAGNOSTIC_LINE = /^(error|usage:|unknown command|no such session|.*command not found)/i;
 
 const NO_SESSIONS_RE = /no active zellij sessions found/i;
 

@@ -64,10 +64,11 @@ function getListSessionsFormat(version) {
 
 // Homebrew / user-local bin dirs are missing from the PATH of GUI-launched
 // apps and non-login SSH shells (notably on macOS), so a bare
-// `command -v tmux` probe would miss them. Prepend to any script that
-// resolves tmux/zellij binaries by name.
+// `command -v tmux` probe would miss them. Without a UTF-8 locale tmux also
+// sanitizes control characters in -F output (tabs become `_`), so seed a
+// fallback locale too. Prepend to any script that runs tmux/zellij.
 const MUX_PATH_AUGMENT =
-  'PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin:$HOME/.local/bin:$HOME/bin"; export PATH';
+  'PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin:$HOME/.local/bin:$HOME/bin:$HOME/.cargo/bin:$HOME/go/bin"; export PATH; if [ -z "$LC_ALL" ] && [ -z "$LANG" ]; then LC_ALL=C.UTF-8; export LC_ALL; fi';
 
 // Single-line script — multiline strings break when passed through bash -lc JSON quoting.
 // Note: no element may END in `do` — the "; " join would produce `do;`, which

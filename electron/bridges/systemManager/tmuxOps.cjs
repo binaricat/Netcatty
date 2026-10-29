@@ -335,6 +335,11 @@ function createTmuxOpsApi({ execOnSession }) {
     // split-window…) succeed silently — retrying them re-executes the mutation,
     // so they must pass retryOnEmptyOutput: false.
     const { retryOnEmptyOutput = true, scope = null } = options;
+    // Every tmux command runs with the mux env preamble: GUI apps and
+    // non-login SSH shells lack Homebrew/cargo dirs in PATH, and without a
+    // UTF-8 locale tmux sanitizes control characters in -F output (tabs
+    // become `_`). Idempotent when the script already carries it.
+    script = `${MUX_PATH_AUGMENT}; ${script}`;
     if (scope?.user) {
       if (scope.directAsRoot) {
         // Root opens the target user's tmux socket directly: no sudo wrapper,
