@@ -9,6 +9,7 @@ import {
   uploadFromFileList,
 } from "../../lib/uploadService.ts";
 import { DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY } from "../../domain/sftpTransferConcurrency.ts";
+import { SFTP_VIRTUAL_FOLDER_UPLOAD_ERROR } from "../../domain/sftpVirtualDrop.ts";
 
 function createDataTransfer(files: File[]): DataTransfer {
   return {
@@ -1195,4 +1196,87 @@ test("does not restart a direct upload that was already cancelled", async () => 
   assert.deepEqual(results, [
     { fileName: "", success: false, cancelled: true },
   ]);
+});
+
+test("archive-window folder drags (path-less empty pseudo-files) fail fast without a conflict dialog", async () => {
+  const dialogConflicts: unknown[] = [];
+  const uploadedPaths: string[] = [];
+  const stagedFiles: string[] = [];
+  // Chromium presents an archive folder as an extension-less, empty,
+  // path-less pseudo-file with no entry.
+  const pseudoFolder = new File([], "folder");
+
+  const results = await uploadEntriesDirect(
+    [{ file: pseudoFolder, relativePath: "folder", isDirectory: false }],
+    {
+      targetPath: "/target",
+      sftpId: "sftp-1",
+      isLocal: false,
+      bridge: {
+        mkdirSftp: async () => {},
+        statSftp: async () => ({ type: "directory", size: 0, lastModified: 1000 }),
+        stageUploadFile: async (stagedFile) => {
+          stagedFiles.push(stagedFile.name);
+          return "/netcatty-temp/folder";
+        },
+        startStreamTransfer: async (payload) => {
+          uploadedPaths.push(payload.sourcePath);
+          return { transferId: payload.transferId };
+        },
+      },
+      joinPath: (base, name) => `${base}/${name}`,
+      resolveConflict: async (conflict) => {
+        dialogConflicts.push(conflict);
+        return "duplicate";
+      },
+    },
+  );
+
+  // Pseudo folders must never reach the conflict dialog or the transfer path.
+  assert.deepEqual(dialogConflicts, []);
+  assert.deepEqual(stagedFiles, []);
+  assert.deepEqual(uploadedPaths, []);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].fileName, "folder");
+  assert.equal(results[0].success, false);
+  assert.equal(results[0].error, SFTP_VIRTUAL_FOLDER_UPLOAD_ERROR);
+});
+
+test("mixed drops upload real files and only refuse the pseudo archive folder", async () => {
+  const uploadedPaths: string[] = [];
+  const pseudoFolder = new File([], "folder");
+  const realFile = new File(["payload"], "notes.txt");
+
+  const results = await uploadEntriesDirect(
+    [
+      { file: pseudoFolder, relativePath: "folder", isDirectory: false },
+      { file: realFile, relativePath: "notes.txt", isDirectory: false },
+    ],
+    {
+      targetPath: "/target",
+      sftpId: "sftp-1",
+      isLocal: false,
+      bridge: {
+        mkdirSftp: async () => {},
+        statSftp: async () => null,
+        stageUploadFile: async () => "/netcatty-temp/notes.txt",
+        deleteTempFile: async () => {},
+        startStreamTransfer: async (payload) => {
+          uploadedPaths.push(payload.sourcePath);
+          return { transferId: payload.transferId };
+        },
+      },
+      joinPath: (base, name) => `${base}/${name}`,
+    },
+  );
+
+  assert.deepEqual(uploadedPaths, ["/netcatty-temp/notes.txt"]);
+  assert.deepEqual(
+    results.map((result) => ({ fileName: result.fileName, success: result.success })),
+    [
+      { fileName: "folder", success: false },
+      { fileName: "notes.txt", success: true },
+    ],
+  );
+  assert.equal(results[0].error, SFTP_VIRTUAL_FOLDER_UPLOAD_ERROR);
 });
