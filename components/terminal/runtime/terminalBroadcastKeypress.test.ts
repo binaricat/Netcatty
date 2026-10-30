@@ -20,7 +20,7 @@ function section(start: string, end: string): string {
 }
 const declarations = section("  let suppressNextTerminalDataBroadcast =", "  const broadcastKittyInput =");
 const keyboardCallback = section("  term.attachCustomKeyEventHandler((e: KeyboardEvent) => {", "  const handleMiddleClick =");
-const dataCallback = section("  term.onData((data) => {", "  const handleKittyKeyboardBroadcast =");
+const dataCallback = section("  term.onData((data) => {", "  term.onBinary((data) => {");
 const compositionMarker = section("  const markKittyCompositionPending =", "  const finishKittyComposition =");
 const textInputMarker = section("  const markKittyTextInput =", '  textarea?.addEventListener("compositionstart"');
 const suppression = section("    const suppressTerminalBroadcast =", "    // skipBroadcast");

@@ -359,6 +359,8 @@ declare global {
       sessionId: string,
       data: string,
       options?: {
+        /** Byte-valued xterm onBinary string; bypasses text charset encoding. */
+        binary?: boolean;
         automated?: boolean;
         pasteRequestId?: string;
         /** Host-classified secret/no-echo input; always bypasses plugin observers and interceptors. */

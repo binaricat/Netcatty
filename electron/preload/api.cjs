@@ -422,6 +422,7 @@ function createPreloadApi(ctx) {
     ipcRenderer.send("netcatty:write", {
       sessionId,
       data,
+      binary: options?.binary === true,
       automated: Boolean(options?.automated),
       pasteRequestId: typeof options?.pasteRequestId === "string" ? options.pasteRequestId : undefined,
       sensitive: options?.sensitive === true,

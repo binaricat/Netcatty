@@ -3168,6 +3168,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     });
   });
 
+  term.onBinary((data) => {
+    // Legacy mouse reports are wire bytes, not text input or broadcast keys.
+    const id = ctx.sessionRef.current;
+    if (id) ctx.terminalBackend.writeToSession(id, data, { binary: true });
+  });
+
   const handleKittyKeyboardBroadcast = createKittyKeyboardBroadcastHandler({
     resolveOptions: () => ({
       kittyProtocolEnabled: kittyKeyboardProtocolEnabled,
