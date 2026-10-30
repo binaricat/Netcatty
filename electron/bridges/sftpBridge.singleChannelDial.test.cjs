@@ -5,6 +5,45 @@ const assert = require("node:assert/strict");
 const bridge = require("./sftpBridge.cjs");
 const { buildConnectionReuseEndpoint, normalizeEndpoint } = require("./sshConnectionPool.cjs");
 
+test('exact-session-only browse refuses the dedicated-login path on single-channel hosts', async () => {
+  let dialed = false;
+  bridge.init({ sessions: new Map([['terminal', {
+    singleChannelSsh: true, conn: { sftp() { throw new Error('must not borrow'); } },
+    async _openDedicatedSftp() { dialed = true; return { sftpId: 'wrong' }; },
+  }]]), sftpClients: new Map(), electronModule: {} });
+  await assert.rejects(bridge.openSftpForSession(null, { sessionId: 'terminal', reuseExactSessionOnly: true }),
+    { code: 'ERR_SFTP_SINGLE_CHANNEL_BASTION' });
+  assert.equal(dialed, false);
+});
+
+test('exact-session-only browse never borrows a different live session', async () => {
+  let borrowed = false;
+  bridge.init({ sessions: new Map([['other', { conn: { sftp() { borrowed = true; } } }]]),
+    sftpClients: new Map(), electronModule: {} });
+  await assert.rejects(bridge.openSftpForSession(null, { sessionId: 'missing', reuseExactSessionOnly: true }), /not found/);
+  assert.equal(borrowed, false);
+});
+
+test('exact-session-only browse uses authenticated password/proxy identity without reconstructing credentials', async () => {
+  const options = { hostname: 'host', username: 'me', password: 'test-only-password',
+    authMethod: 'password', proxy: { type: 'socks5', host: 'proxy', port: 1080 } };
+  let opened = 0; let ended = false;
+  const channel = { readdir() {}, stat() {}, mkdir() {}, unlink() {}, end() { ended = true; } };
+  const conn = { sftp(callback) { opened++; callback(null, channel); } };
+  const clients = new Map();
+  bridge.init({ sessions: new Map([['terminal', {
+    conn, _reuseEndpoint: normalizeEndpoint(buildConnectionReuseEndpoint(options)),
+  }]]), sftpClients: clients, electronModule: {} });
+  const result = await bridge.openSftpForSession(null, {
+    sessionId: 'terminal', reuseExactSessionOnly: true, fileProtocol: 'sftp',
+    expectedEndpoint: { hostname: 'host', username: 'me' },
+  });
+  assert.equal(result.sourceSessionId, 'terminal');
+  assert.equal(opened, 1);
+  await bridge.closeSftp(null, { sftpId: result.sftpId });
+  assert.equal(ended, true);
+});
+
 test("GUI vault reconnect finds the dedicated terminal dial without a source-session hint", async (t) => {
   t.mock.method(require("node:net").Socket.prototype, "connect", () => {
     throw new Error("Unexpected fresh vault dial instead of the terminal profile");

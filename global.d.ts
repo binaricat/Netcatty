@@ -182,6 +182,8 @@ declare global {
     sourceSessionId?: string;
     /** Require openSftpForSession to use exactly the requested live session. */
     requireExactSourceSession?: boolean;
+    /** Use the named live terminal only; never open a dedicated/fresh login. */
+    reuseExactSessionOnly?: boolean;
     // Skip POSIX process discovery when copying a network-device session.
     skipShellPidDiscovery?: boolean;
     /**
