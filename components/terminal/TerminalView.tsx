@@ -1430,6 +1430,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
         {/* Compose Bar (solo sessions only; workspace uses TerminalLayer's global bar) */}
         {isComposeBarOpen && !inWorkspace && (
           <TerminalComposeBar
+            contextChipsEnabled={terminalSettings?.contextChipsEnabled !== false}
             key={sessionId}
             sessionId={sessionId}
             onSend={async (text) => {

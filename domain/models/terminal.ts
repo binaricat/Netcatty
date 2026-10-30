@@ -71,6 +71,8 @@ export interface KeywordHighlightRule {
 export type TerminalTabDoubleClickBehavior = 'duplicate' | 'copy' | 'disabled';
 
 export interface TerminalSettings {
+  /** Context chips below quick commands in the compose bar. */
+  contextChipsEnabled?: boolean;
   // Rendering
   scrollback: number; // Number of lines kept in buffer
   drawBoldInBrightColors: boolean; // Draw bold text in bright colors
@@ -438,6 +440,7 @@ export const normalizeTerminalSettings = (
   const mergedSettings = {
     ...DEFAULT_TERMINAL_SETTINGS,
     ...(settings ?? {}),
+    contextChipsEnabled: settings?.contextChipsEnabled !== false,
     middleClickBehavior,
     middleClickPaste: middleClickBehavior === 'paste',
     wordSeparators,
@@ -531,6 +534,7 @@ export function isLegacyDefaultShiftEnterNewlineText(value: unknown): boolean {
 }
 
 const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
+  contextChipsEnabled: true,
   scrollback: DEFAULT_TERMINAL_SCROLLBACK,
   drawBoldInBrightColors: true,
   terminalEmulationType: 'xterm-256color',

@@ -1,6 +1,24 @@
 import type { Messages } from '../types';
 
 export const esTerminalMessages: Messages = {
+  'terminal.directory.open': 'Directorio actual: {path}. Cambiar directorio',
+  'terminal.directory.unknown': 'Directorio desconocido',
+  'terminal.directory.search': 'Buscar subdirectorios...',
+  'terminal.directory.directories': 'Directorios',
+  'terminal.directory.parent': '.. (Directorio padre)',
+  'terminal.directory.loading': 'Leyendo directorios...',
+  'terminal.directory.empty': 'Sin subdirectorios',
+  'terminal.directory.noMatches': 'Sin directorios coincidentes',
+  'terminal.directory.hidden': 'Mostrar directorios ocultos',
+  'terminal.directory.refresh': 'Actualizar',
+  'terminal.directory.unavailable': 'La navegación de directorios no está disponible para esta sesión.',
+  'terminal.directory.busy': 'Espera a que el prompt esté vacío.',
+  'terminal.directory.readFailed': 'No se pudo leer el directorio. Actualiza e inténtalo de nuevo.',
+  'terminal.directory.changeFailed': 'No se pudo confirmar el cambio. Actualiza antes de reintentar.',
+  'terminal.directory.unsupportedPath': 'No se puede enviar este nombre de directorio de forma segura.',
+  'settings.terminal.behavior.contextChips': 'Context Chips',
+  'settings.terminal.behavior.contextChips.desc': 'Mostrar la barra de contexto debajo de los comandos rápidos.',
+
   'terminal.toolbar.openSessionLog': 'Abrir registro de sesión',
   'terminal.toolbar.sessionLogActions': 'Acciones del registro',
   'terminal.toolbar.sessionLog.menu': 'Registro de sesión',

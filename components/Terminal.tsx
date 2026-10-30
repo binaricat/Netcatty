@@ -1,3 +1,6 @@
+import { terminalCwdStore } from '../application/state/terminalCwdStore';
+import { useTerminalDirectorySession } from '../application/state/useTerminalDirectorySession';
+import { refreshObservedTerminalDirectory } from '../application/state/terminalDirectoryRegistry';
 import { publishTerminalSelectionTarget } from "../infrastructure/plugins/terminalSelectionRegistry";
 import { usePluginTerminalSelection } from "../application/state/usePluginTerminalSelection";
 import { clearTerminalBroadcastUserInput, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
@@ -1223,6 +1226,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const clearTerminalCwd = useCallback((options?: { persistRestoreMetadata?: boolean }) => {
     terminalCwdTracker.clearRendererCwd();
+    terminalCwdStore.setCwd(sessionId, null);
     knownCwdRef.current = undefined;
     if (options?.persistRestoreMetadata === false) return;
     onTerminalCwdChange?.(sessionId, null);
@@ -2558,6 +2562,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [host, onCommandSubmitted, onTerminalCwdChange, sessionId, terminalCwdTracker]);
   const pluginAwareOnCommandCompleted = useCallback(() => {
     pluginTerminalLifecycle.onCommandCompleted();
+    refreshObservedTerminalDirectory(sessionId);
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
     // Hibernate wake builds its runtime from this callback. Same local
     // prompt-return refresh as useTerminalEffects (#1952).
@@ -2570,6 +2575,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     cwd: string | null,
     meta?: TerminalCwdChangeMeta,
   ) => {
+    terminalCwdStore.setCwd(changedSessionId, cwd, meta?.source);
     pluginTerminalLifecycle.onCwdChanged(cwd);
     onTerminalCwdChange?.(changedSessionId, cwd, meta);
   }, [onTerminalCwdChange, pluginTerminalLifecycle]);
@@ -2585,6 +2591,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     pluginAwareOnTerminalCwdChange(sessionId, normalizedCwd ?? null, meta);
     void refreshProviderOutputs('cwd-changed');
   }, [pluginAwareOnTerminalCwdChange, refreshProviderOutputs, sessionId, terminalCwdTracker]);
+  useTerminalDirectorySession({
+    sessionId, status, host, shellType,
+    getBackendId: () => sessionRef.current,
+    isReady: () => isTerminalReadyForCommandInjection(sessionId),
+    publish: cwd => pluginAwareOnRuntimeCwdChange(cwd, { source: 'backend-strict' }),
+  });
+
   const pluginAwareOnTerminalTitleChange = useCallback((changedSessionId: string, title: string | null) => {
     terminalTitleRef.current = title || undefined;
     pluginTerminalLifecycle.onTitleChanged(title);

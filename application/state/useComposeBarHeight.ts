@@ -2,8 +2,8 @@ import { useCallback } from 'react';
 import { STORAGE_KEY_COMPOSE_BAR_HEIGHT } from '../../infrastructure/config/storageKeys';
 import { useStoredNumber } from './useStoredNumber';
 
-export const COMPOSE_BAR_HEIGHT_DEFAULT = 120;
-export const COMPOSE_BAR_HEIGHT_MIN = 72;
+export const COMPOSE_BAR_HEIGHT_DEFAULT = 144;
+export const COMPOSE_BAR_HEIGHT_MIN = 104;
 export const COMPOSE_BAR_HEIGHT_MAX = 360;
 
 const HEIGHT_CLAMP = { min: COMPOSE_BAR_HEIGHT_MIN, max: COMPOSE_BAR_HEIGHT_MAX };

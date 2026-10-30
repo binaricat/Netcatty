@@ -142,6 +142,7 @@ function createSessionOpsApi(ctx) {
       return {
         success: true,
         remoteSshVersion: session.remoteSshVersion || '',
+        singleChannelSsh: session.singleChannelSsh === true,
       };
     }
     

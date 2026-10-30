@@ -12,6 +12,16 @@ function quoteShellArg(value) {
   return "'" + String(value).replace(/'/g, "'\\''") + "'";
 }
 
+test('session metadata exposes runtime single-channel restrictions without opening exec', async () => {
+  let execCount = 0;
+  const api = makeApi({ singleChannelSsh: true, remoteSshVersion: 'OpenSSH_9.6',
+    conn: { exec() { execCount++; } } });
+  assert.deepEqual(await api.getSessionRemoteInfo(null, { sessionId: 'session-1' }), {
+    success: true, singleChannelSsh: true, remoteSshVersion: 'OpenSSH_9.6',
+  });
+  assert.equal(execCount, 0);
+});
+
 function makePwdStream(cwd, loginPid) {
   const stream = new EventEmitter();
   stream.stderr = new EventEmitter();
