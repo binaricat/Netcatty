@@ -81,9 +81,11 @@ test("zellijAction builds kill and delete commands", async () => {
   const api = createZellijOpsApi({ execOnSession });
   await api.zellijAction(null, { sessionId: "s1", action: "killSession", sessionName: "work" });
   await api.zellijAction(null, { sessionId: "s1", action: "deleteSession", sessionName: "old", force: true });
-  // Binary-resolution probes run before the action command.
-  assert.ok(seen.some((cmd) => cmd.includes("zellij kill-session 'work'")));
-  assert.ok(seen.some((cmd) => cmd.includes("zellij delete-session --force 'old'")));
+  // Binary-resolution probes run before the action command. The action may be
+  // wrapped via shQuote, which escapes inner quotes as '"'"' — match on the
+  // args rather than the exact quoting.
+  assert.ok(seen.some((cmd) => cmd.includes("kill-session") && cmd.includes("work")));
+  assert.ok(seen.some((cmd) => cmd.includes("delete-session --force") && cmd.includes("old")));
 });
 
 test("zellijAction rejects unknown actions and missing names", async () => {

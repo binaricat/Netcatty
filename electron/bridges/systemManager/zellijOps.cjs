@@ -61,8 +61,8 @@ function createZellijOpsApi({ execOnSession }) {
       result = await execScopedOnSession(execOnSession, event, sessionId, probe, 8000, scope);
     } else {
       const attempts = [
-        `exec sh -c ${JSON.stringify(probe)}`,
-        `bash -lc ${JSON.stringify(probe)}`,
+        `exec sh -c ${shQuote(probe)}`,
+        `bash -lc ${shQuote(probe)}`,
         probe,
       ];
       for (const cmd of attempts) {
@@ -90,9 +90,12 @@ function createZellijOpsApi({ execOnSession }) {
       return scoped;
     }
 
+    // shQuote (single-quote escaping), not JSON.stringify (double quotes):
+    // the script contains `$` and `"`, which a double-quoted wrapper would
+    // expand or terminate prematurely.
     const attempts = [
-      `exec sh -c ${JSON.stringify(script)}`,
-      `bash -lc ${JSON.stringify(script)}`,
+      `exec sh -c ${shQuote(script)}`,
+      `bash -lc ${shQuote(script)}`,
       script,
     ];
     let last = { success: false, error: "No exec result", stdout: "", stderr: "" };

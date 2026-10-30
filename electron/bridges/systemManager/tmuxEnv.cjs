@@ -77,11 +77,17 @@ const MUX_ENV_PREAMBLE =
  * well-known install locations checked by absolute path (e.g. cargo, whose
  * env often lives in interactive-only ~/.zshrc). Callers should fall back to
  * the bare name when nothing resolves.
+ *
+ * The probe MUST NOT contain single quotes: it is embedded raw inside the
+ * single-quoted `exec sh -c '...'` capability script that sshd parses as a
+ * command line remotely — a nested `'` would close that wrapper and truncate
+ * the script (double quotes are safe: they pass through literally and are
+ * parsed by the inner shell instead).
  */
 function buildMuxBinaryProbe(name) {
   const plain = `command -v ${name} 2>/dev/null`;
-  const login = '"${SHELL:-/bin/sh}" -lc ' + `'command -v ${name}'` + " 2>/dev/null";
-  const zsh = `/bin/zsh -lc 'command -v ${name}' 2>/dev/null`;
+  const login = `"\${SHELL:-/bin/sh}" -lc "command -v ${name}" 2>/dev/null`;
+  const zsh = `/bin/zsh -lc "command -v ${name}" 2>/dev/null`;
   const knownDirs = [
     "$HOME/.cargo/bin",
     "$HOME/.local/bin",
@@ -91,7 +97,7 @@ function buildMuxBinaryProbe(name) {
     "/usr/local/bin",
     "/opt/local/bin",
   ].join(" ");
-  const known = `for _nc_d in ${knownDirs}; do [ -x "$_nc_d/${name}" ] && { printf '%s\\n' "$_nc_d/${name}"; break; }; done`;
+  const known = `for _nc_d in ${knownDirs}; do [ -x "$_nc_d/${name}" ] && { printf "%s\\n" "$_nc_d/${name}"; break; }; done`;
   return `${plain} || ${login} || ${zsh} || ${known}`;
 }
 

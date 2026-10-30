@@ -80,8 +80,12 @@ test("buildMuxBinaryProbe resolves tmux/zellij by absolute path via login shell"
   const { buildMuxBinaryProbe, parseMuxBinaryPath } = require("./tmuxEnv.cjs");
   const probe = buildMuxBinaryProbe("zellij");
   assert.ok(probe.startsWith("command -v zellij"));
-  assert.ok(probe.includes(' -lc ' + "'command -v zellij'"));
+  assert.ok(probe.includes(' -lc "command -v zellij"'));
   assert.ok(probe.includes("/bin/zsh -lc"));
+  // The probe is embedded raw inside the single-quoted `sh -c '...'`
+  // capability script that sshd parses remotely — a single quote would
+  // close that wrapper and truncate the script.
+  assert.ok(!probe.includes("'"), probe);
   // Absolute-path lines win; noise and multi-word output are rejected.
   assert.equal(parseMuxBinaryPath("/home/u/.cargo/bin/zellij\n"), "/home/u/.cargo/bin/zellij");
   assert.equal(parseMuxBinaryPath("No active zellij sessions found.\n"), null);
