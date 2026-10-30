@@ -29,17 +29,28 @@ export function useTerminalDirectorySession(options: {
     if (!bridge || !backendId || status !== 'connected' || !supported) return;
     let active = true;
     const isCurrent = () => active && live.current.status === 'connected' && live.current.getBackendId() === backendId;
-    const controller = createTerminalDirectoryController({
-      sessionId,
-      io: createTerminalDirectoryIO(bridge, backendId, {
-        local, hostname: host.hostname, username: host.username || 'root', port: host.port,
-        encoding: host.sftpEncoding,
-      }, isCurrent),
-      isCurrent,
-      isReady: () => live.current.isReady(),
-      publish: cwd => live.current.publish(cwd),
-    });
-    const unregister = registerTerminalDirectory(sessionId, controller);
+    let unregister = () => {};
+    const register = () => {
+      if (!isCurrent()) return;
+      const controller = createTerminalDirectoryController({
+        sessionId,
+        io: createTerminalDirectoryIO(bridge, backendId, {
+          local, hostname: host.hostname, username: host.username || 'root', port: host.port,
+          encoding: host.sftpEncoding,
+        }, isCurrent),
+        isCurrent,
+        isReady: () => live.current.isReady(),
+        publish: cwd => live.current.publish(cwd),
+      });
+      unregister = registerTerminalDirectory(sessionId, controller);
+    };
+    if (local) {
+      // POSIX wrappers on Windows still use win32 PTYs. Neither their cwd nor
+      // their path namespace is supported by readLocalSessionCwd/local FS.
+      void bridge.getAppInfo?.().then(info => {
+        if (info.platform === 'darwin' || info.platform === 'linux') register();
+      }).catch(() => {});
+    } else register();
     return () => { active = false; unregister(); };
   }, [sessionId, status, supported, local, host.hostname, host.username, host.port, host.sftpEncoding, shellType]);
 }

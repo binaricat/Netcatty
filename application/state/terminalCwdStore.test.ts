@@ -30,3 +30,20 @@ test('terminalCwdStore bumps version only when cwd or provenance changes', () =>
   unsubscribe();
   assert.ok(versions.length >= 2);
 });
+
+test('session revisions isolate terminals and retain identical OSC 7 reports without rerendering', () => {
+  const a = 'revision-a'; const b = 'revision-b';
+  terminalCwdStore.setCwd(a, '/same', 'osc7');
+  const revisionA = terminalCwdStore.getSessionRevision(a);
+  terminalCwdStore.setCwd(b, '/elsewhere', 'osc7');
+  assert.equal(terminalCwdStore.getSessionRevision(a), revisionA);
+  const globalVersion = terminalCwdStore.getVersion();
+  assert.equal(terminalCwdStore.setCwd(a, '/same', 'osc7'), false);
+  assert.ok(terminalCwdStore.getSessionRevision(a) > revisionA);
+  assert.equal(terminalCwdStore.getVersion(), globalVersion);
+  const revisionB = terminalCwdStore.getSessionRevision(b);
+  terminalCwdStore.prune(new Set([b]));
+  assert.equal(terminalCwdStore.getSessionRevision(a), 0);
+  assert.equal(terminalCwdStore.getSessionRevision(b), revisionB);
+  terminalCwdStore.prune(new Set());
+});

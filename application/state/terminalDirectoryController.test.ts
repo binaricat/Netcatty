@@ -84,3 +84,44 @@ test('output arriving during an old cwd query retains one fresh follow-up query'
   assert.equal(ctx.published.at(-1), '/after-cd');
   ctx.controller.dispose();
 });
+
+test('another terminal updating cannot override the current terminal strict cwd result', async t => {
+  const id = 'strict-after-other-session';
+  let finish!: (cwd: string) => void;
+  const published: string[] = [];
+  terminalCwdStore.setCwd(id, '/stale-osc7', 'osc7');
+  const controller = createTerminalDirectoryController({
+    sessionId: id, isCurrent: () => true, isReady: () => true,
+    io: { cwd: () => new Promise(resolve => { finish = resolve; }),
+      list: async () => ({ entries: [], home: null }), realpath: async value => value, write() {} },
+    publish: value => { published.push(value); terminalCwdStore.setCwd(id, value, 'backend-strict'); },
+  });
+  t.after(() => controller.dispose());
+  const pending = controller.refresh();
+  terminalCwdStore.setCwd('unrelated-session', '/other', 'osc7');
+  finish('/actual-after-cd');
+  assert.equal(await pending, '/actual-after-cd');
+  assert.deepEqual(published, ['/actual-after-cd']);
+  assert.equal(terminalCwdStore.getCwd(id), '/actual-after-cd');
+});
+
+for (const nextCwd of ['/new-osc7', '/original']) {
+  test(`a later OSC 7 report from this terminal wins (${nextCwd})`, async t => {
+    const id = 'same-session-osc7-' + nextCwd;
+    let finish!: (cwd: string) => void;
+    const published: string[] = [];
+    terminalCwdStore.setCwd(id, '/original', 'osc7');
+    const controller = createTerminalDirectoryController({
+      sessionId: id, isCurrent: () => true, isReady: () => true,
+      io: { cwd: () => new Promise(resolve => { finish = resolve; }),
+        list: async () => ({ entries: [], home: null }), realpath: async value => value, write() {} },
+      publish: value => { published.push(value); },
+    });
+    t.after(() => controller.dispose());
+    const pending = controller.refresh();
+    terminalCwdStore.setCwd(id, nextCwd, 'osc7');
+    finish('/older-backend-result');
+    assert.equal(await pending, nextCwd);
+    assert.deepEqual(published, []);
+  });
+}

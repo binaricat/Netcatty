@@ -10,10 +10,15 @@ export type TerminalCwdSource = "osc7" | "inferred" | "backend-strict" | "backen
 class TerminalCwdStore {
   private cwdBySession = new Map<string, string>();
   private sourceBySession = new Map<string, TerminalCwdSource>();
+  private revisionBySession = new Map<string, number>();
+  private revision = 0;
   private version = 0;
   private listeners = new Set<Listener>();
 
   getVersion = (): number => this.version;
+
+  /** Tracks reports for one session, including unchanged authoritative OSC 7. */
+  getSessionRevision = (sessionId: string): number => this.revisionBySession.get(sessionId) ?? 0;
 
   getCwd = (sessionId: string | null | undefined): string | null => {
     if (!sessionId) return null;
@@ -39,7 +44,10 @@ class TerminalCwdStore {
     const nextSource = next
       ? (source ?? (current === next ? currentSource : undefined) ?? "unknown")
       : undefined;
-    if (current === next && currentSource === nextSource) return false;
+    if (current === next && currentSource === nextSource) {
+      if (nextSource === 'osc7') this.revisionBySession.set(sessionId, ++this.revision);
+      return false;
+    }
 
     if (next) {
       this.cwdBySession.set(sessionId, next);
@@ -48,6 +56,7 @@ class TerminalCwdStore {
       this.cwdBySession.delete(sessionId);
       this.sourceBySession.delete(sessionId);
     }
+    this.revisionBySession.set(sessionId, ++this.revision);
     this.version += 1;
     for (const listener of this.listeners) {
       listener();
@@ -61,8 +70,12 @@ class TerminalCwdStore {
       if (!validSessionIds.has(sessionId)) {
         this.cwdBySession.delete(sessionId);
         this.sourceBySession.delete(sessionId);
+        this.revisionBySession.delete(sessionId);
         changed = true;
       }
+    }
+    for (const id of this.revisionBySession.keys()) {
+      if (!validSessionIds.has(id)) this.revisionBySession.delete(id);
     }
     if (!changed) return;
     this.version += 1;
