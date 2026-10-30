@@ -52,14 +52,14 @@ export function createTerminalDirectoryController(options: {
       refreshAgain = true;
       return refreshing;
     }
-    const revision = terminalCwdStore.getVersion();
+    const revision = terminalCwdStore.getSessionRevision(options.sessionId);
     const pending = (async () => {
       const cwd = await bounded(options.io.cwd());
       check();
       // A later OSC 7 report wins over a slower backend query.
       const live = terminalCwdStore.getCwd(options.sessionId);
       confirmed = true;
-      if (revision !== terminalCwdStore.getVersion() && live && terminalCwdStore.getSource(options.sessionId) === 'osc7') return live;
+      if (revision !== terminalCwdStore.getSessionRevision(options.sessionId) && live && terminalCwdStore.getSource(options.sessionId) === 'osc7') return live;
       if (live !== cwd || terminalCwdStore.getSource(options.sessionId) === 'stale') options.publish(cwd);
       return cwd;
     })();

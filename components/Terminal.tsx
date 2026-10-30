@@ -2739,8 +2739,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     },
     onTerminalDataCapture: handleTerminalDataCaptureOnce,
     onTerminalOutput: (chunk: string, meta?: TerminalSessionDataMeta) => {
-      scheduleObservedTerminalDirectoryRefresh(sessionId);
       observeTerminalInputPrompt(chunk, meta);
+      scheduleObservedTerminalDirectoryRefresh(sessionId);
       appendOutputTriggerOutputRef.current(chunk, meta);
       if (onTerminalOutput) {
         onTerminalOutput(sessionId, chunk);
