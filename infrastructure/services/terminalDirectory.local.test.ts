@@ -5,6 +5,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createTerminalDirectoryIO } from './terminalDirectory';
 import { createTerminalDirectoryController } from '../../application/state/terminalDirectoryController';
+import {
+  observeTerminalDirectory, registerTerminalDirectory, scheduleObservedTerminalDirectoryRefresh,
+} from '../../application/state/terminalDirectoryRegistry';
 
 const require = createRequire(import.meta.url);
 
@@ -50,4 +53,50 @@ test('directory picker changes a real POSIX PTY cwd with quoted names and direct
   await waitReady();
   await controller.change(path.join(fixture, 'link'), new AbortController().signal, () => {});
   assert.equal(await io.cwd(), fs.realpathSync(target));
+});
+
+test('manual cd and delayed shell functions update the observed cwd without shell integration', {
+  skip: process.platform === 'win32', timeout: 20000,
+}, async t => {
+  const tempDirBridge = require('../../electron/bridges/tempDirBridge.cjs');
+  const { readLocalSessionCwd } = require('../../electron/bridges/localSessionCwd.cjs');
+  const pty = require('node-pty') as typeof import('node-pty');
+  tempDirBridge.ensureTempDir();
+  const fixture = fs.mkdtempSync(tempDirBridge.getTempFilePath('manual-directory-cd-'));
+  const first = path.join(fixture, 'first'); const second = path.join(fixture, 'second');
+  fs.mkdirSync(first); fs.mkdirSync(second);
+  const id = 'manual-cd-shell';
+  // An intentionally non-standard PS1: no trusted prompt/completion callback
+  // or OSC directory reporting is available to drive chip updates.
+  const shell = pty.spawn('/bin/bash', ['--noprofile', '--norc', '-i'], {
+    cwd: fixture, env: { ...process.env, PS1: 'custom input: ', PROMPT_COMMAND: '' }, cols: 100, rows: 24,
+  });
+  let output = ''; let published = '';
+  const subscription = shell.onData(data => {
+    output += data;
+    scheduleObservedTerminalDirectoryRefresh(id);
+  });
+  const controller = createTerminalDirectoryController({
+    sessionId: id, isCurrent: () => true, isReady: () => false,
+    io: { cwd: async () => {
+      const result = await readLocalSessionCwd({ pty: shell });
+      assert.ok(result.success); return result.cwd;
+    }, list: async () => ({ entries: [], home: null }), realpath: async value => value,
+    write() { assert.fail('manual navigation must not use the picker write action'); } },
+    publish: cwd => { published = cwd; },
+  });
+  const unregister = registerTerminalDirectory(id, controller);
+  const stopObserving = observeTerminalDirectory(id);
+  t.after(() => { stopObserving(); unregister(); subscription.dispose(); shell.kill(); fs.rmSync(fixture, { recursive: true, force: true }); });
+  const waitFor = async (condition: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (!condition() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.ok(condition(), 'cwd followed actual shell output');
+  };
+  await waitFor(() => output.includes('custom input: '));
+  shell.write(`cd -- '${first}'\r`);
+  await waitFor(() => published === fs.realpathSync(first));
+  // The directory changes well after a fixed post-Enter timer would fire.
+  shell.write(`go_later() { sleep 0.6; cd -- '${second}'; }; go_later\r`);
+  await waitFor(() => published === fs.realpathSync(second));
 });

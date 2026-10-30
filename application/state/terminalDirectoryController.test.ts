@@ -67,3 +67,20 @@ test('directory symlinks confirm against physical cwd', async () => {
   await ctx.controller.change('/link', new AbortController().signal, () => {});
   assert.equal(ctx.published.at(-1), '/real');
 });
+
+test('output arriving during an old cwd query retains one fresh follow-up query', async () => {
+  let finish!: (cwd: string) => void;
+  let reads = 0;
+  const ctx = setup({ cwd: () => {
+    reads++;
+    return reads === 1 ? new Promise(resolve => { finish = resolve; }) : Promise.resolve('/after-cd');
+  } });
+  const oldRead = ctx.controller.refresh();
+  const queued = ctx.controller.refresh();
+  finish('/before-cd');
+  await Promise.all([oldRead, queued]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reads, 2);
+  assert.equal(ctx.published.at(-1), '/after-cd');
+  ctx.controller.dispose();
+});

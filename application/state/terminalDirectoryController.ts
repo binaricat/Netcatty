@@ -18,6 +18,7 @@ export function createTerminalDirectoryController(options: {
   let changing = false;
   let confirmed = false;
   let refreshing: Promise<string> | null = null;
+  let refreshAgain = false;
   const lifetime = new AbortController();
   const current = () => !disposed && options.isCurrent();
   function check(signal?: AbortSignal) {
@@ -45,7 +46,12 @@ export function createTerminalDirectoryController(options: {
   }
   async function refresh() {
     check();
-    if (refreshing) return refreshing;
+    if (refreshing) {
+      // Output may settle while a pre-cd query is still in flight. Keep one
+      // follow-up query so that its older result cannot be the last update.
+      refreshAgain = true;
+      return refreshing;
+    }
     const revision = terminalCwdStore.getVersion();
     const pending = (async () => {
       const cwd = await bounded(options.io.cwd());
@@ -58,7 +64,13 @@ export function createTerminalDirectoryController(options: {
       return cwd;
     })();
     refreshing = pending;
-    try { return await pending; } finally { if (refreshing === pending) refreshing = null; }
+    try { return await pending; } finally {
+      if (refreshing === pending) refreshing = null;
+      if (refreshAgain && current()) {
+        refreshAgain = false;
+        void refresh().catch(() => {});
+      }
+    }
   }
   async function change(path: string, signal: AbortSignal, accepted: () => void, expectedCwd?: string) {
     ready();

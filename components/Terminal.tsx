@@ -1,6 +1,6 @@
 import { terminalCwdStore } from '../application/state/terminalCwdStore';
 import { useTerminalDirectorySession } from '../application/state/useTerminalDirectorySession';
-import { refreshObservedTerminalDirectory } from '../application/state/terminalDirectoryRegistry';
+import { refreshObservedTerminalDirectory, scheduleObservedTerminalDirectoryRefresh } from '../application/state/terminalDirectoryRegistry';
 import { publishTerminalSelectionTarget } from "../infrastructure/plugins/terminalSelectionRegistry";
 import { usePluginTerminalSelection } from "../application/state/usePluginTerminalSelection";
 import { clearTerminalBroadcastUserInput, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
@@ -2549,6 +2549,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const cwdAwareOnCommandSubmitted = useCallback((
     ...args: Parameters<NonNullable<typeof onCommandSubmitted>>
   ) => {
+    scheduleObservedTerminalDirectoryRefresh(sessionId);
     if (!shouldPreserveTerminalCwdAcrossCommand(hostRestrictsExtraSshChannels(host))) {
       invalidateTerminalCwdAfterCommand(
         terminalCwdTracker,
@@ -2738,6 +2739,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     },
     onTerminalDataCapture: handleTerminalDataCaptureOnce,
     onTerminalOutput: (chunk: string, meta?: TerminalSessionDataMeta) => {
+      scheduleObservedTerminalDirectoryRefresh(sessionId);
       observeTerminalInputPrompt(chunk, meta);
       appendOutputTriggerOutputRef.current(chunk, meta);
       if (onTerminalOutput) {
