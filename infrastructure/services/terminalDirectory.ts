@@ -28,7 +28,7 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
     if (!bridge.openSftpForSession) throw new DirectoryPickerError('unavailable');
     const id = await bridge.openSftpForSession(sessionId, {
       hostname: endpoint.hostname, username: endpoint.username, port: endpoint.port,
-      requireExactSourceSession: true, fileProtocol: 'sftp',
+      requireExactSourceSession: true, reuseExactSessionOnly: true, fileProtocol: 'sftp',
     });
     try { check(signal); return await run(id); }
     finally { await bridge.closeSftp(id).catch(() => {}); }

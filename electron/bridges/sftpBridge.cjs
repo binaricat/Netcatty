@@ -1985,7 +1985,9 @@ async function openSftpForSession(_event, payload) {
   throwIfAborted(payload?.abortSignal);
   let sourceSessionId = sessionId;
   let source;
-  if (payload?.expectedEndpoint) {
+  if (payload?.reuseExactSessionOnly === true) {
+    source = { sessionId, ...ensureRemoteSftpSupport(sessionId) };
+  } else if (payload?.expectedEndpoint) {
     const expectedEndpoint = buildConnectionReuseEndpoint(payload.expectedEndpoint);
     source = findRemoteSftpSourceByEndpoint(
       sessionId,
@@ -2006,7 +2008,7 @@ async function openSftpForSession(_event, payload) {
     session.singleChannelSsh
     || remoteSoftwareRequiresSingleChannel(session.remoteSshVersion || sshClient?._remoteVer)
   ) {
-    if (typeof session._openDedicatedSftp === "function") {
+    if (payload?.reuseExactSessionOnly !== true && typeof session._openDedicatedSftp === "function") {
       const opened = await session._openDedicatedSftp(payload);
       const client = sftpClients?.get(opened.sftpId);
       if (client) client.__netcattySourceSessionId = sourceSessionId;

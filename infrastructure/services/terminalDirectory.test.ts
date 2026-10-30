@@ -12,7 +12,7 @@ test('remote reads use only the exact terminal connection and always close their
   } as unknown as NetcattyBridge;
   const io = createTerminalDirectoryIO(bridge, 'terminal-a', { local: false, hostname: 'remote', username: 'me', port: 2222 });
   await assert.rejects(io.list('/project'), /denied/);
-  assert.deepEqual(calls, [['terminal-a', { hostname: 'remote', username: 'me', port: 2222, requireExactSourceSession: true, fileProtocol: 'sftp' }], ['close', 'owned-channel']]);
+  assert.deepEqual(calls, [['terminal-a', { hostname: 'remote', username: 'me', port: 2222, requireExactSourceSession: true, reuseExactSessionOnly: true, fileProtocol: 'sftp' }], ['close', 'owned-channel']]);
 });
 
 test('cwd probes forbid home/login-shell fallbacks, and writes are addressed to one session', async () => {
