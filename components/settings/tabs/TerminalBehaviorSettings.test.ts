@@ -35,6 +35,17 @@ test("terminal behavior settings expose disabled auto-close", () => {
   );
 });
 
+test('Context Chips default on for old settings and preserve an explicit off preference', () => {
+  assert.equal(normalizeTerminalSettings({ scrollback: 5000 }).contextChipsEnabled, true);
+  const disabled = normalizeTerminalSettings({ contextChipsEnabled: false });
+  assert.equal(normalizeTerminalSettings(JSON.parse(JSON.stringify(disabled))).contextChipsEnabled, false);
+  const markup = renderToStaticMarkup(React.createElement(TerminalBehaviorSettings, {
+    t: (key: string) => key, terminalSettings: disabled, updateTerminalSetting: () => {},
+  }));
+  assert.match(markup, /settings-anchor-terminal-context-chips/);
+  assert.match(markup, /settings\.terminal\.behavior\.contextChips[\s\S]*?role="switch" aria-checked="false"/);
+});
+
 test("terminal behavior settings expose OSC desktop notification mode", () => {
   const markup = renderSettings(true);
   assert.match(markup, /settings-anchor-terminal-osc-notifications/);

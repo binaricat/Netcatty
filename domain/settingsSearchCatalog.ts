@@ -430,6 +430,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.terminal.section.behavior",
   },
   {
+    id: "terminal-context-chips",
+    tab: "terminal",
+    labelKey: "settings.terminal.behavior.contextChips",
+    descriptionKey: "settings.terminal.behavior.contextChips.desc",
+    sectionKey: "settings.terminal.section.behavior",
+  },
+  {
     id: "terminal-clear-wipes-scrollback",
     tab: "terminal",
     labelKey: "settings.terminal.behavior.clearWipesScrollback",
