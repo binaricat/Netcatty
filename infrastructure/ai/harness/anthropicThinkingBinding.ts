@@ -65,3 +65,25 @@ export function hasAnthropicThinkingSignature(part: {
   const signature = (anthropic as { signature?: unknown }).signature;
   return typeof signature === 'string' && signature.length > 0;
 }
+
+/**
+ * Official Anthropic allows removing thinking blocks wholesale after a prefix
+ * mutate (#4073). DeepSeek's Anthropic-compatible endpoint does NOT — it
+ * requires thinking blocks to accompany replayed tool calls. Return false when
+ * the active provider/model looks like DeepSeek so callers keep signed thinking.
+ */
+export function providerAllowsAnthropicSignedThinkingRemoval(
+  provider: { providerId?: string; baseURL?: string; defaultModel?: string } | null | undefined,
+  modelId?: string | null,
+): boolean {
+  const providerId = String(provider?.providerId ?? '').toLowerCase();
+  if (providerId === 'deepseek') return false;
+  const baseURL = String(provider?.baseURL ?? '').toLowerCase();
+  if (baseURL.includes('deepseek.com')) return false;
+  const models = [modelId, provider?.defaultModel]
+    .map((value) => String(value ?? '').toLowerCase())
+    .filter(Boolean);
+  if (models.some((value) => value.includes('deepseek'))) return false;
+  return true;
+}
+

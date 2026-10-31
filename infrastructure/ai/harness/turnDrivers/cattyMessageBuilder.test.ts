@@ -743,3 +743,79 @@ test('durable summary skips Anthropic signed thinking on the retained tail (#407
     }
   }
 });
+
+test('durable summary keeps Anthropic signed thinking for DeepSeek (#4074 P2)', () => {
+  // DeepSeek Anthropic-compat requires thinking blocks with replayed tool calls.
+  // Even with a durable summary (prefix mutate), do not strip signed thinking.
+  const messages: ChatMessage[] = [
+    {
+      id: 'assistant-old',
+      role: 'assistant',
+      content: 'Earlier.',
+      timestamp: 1,
+      providerContinuation: {
+        source: { providerConfigId: 'anthropic-1', providerType: 'anthropic', modelId: 'deepseek-v4-flash' },
+        reasoningParts: [{
+          text: 'compacted thinking',
+          providerOptions: { anthropic: { signature: 'sig-old' } },
+        }],
+      },
+    },
+    {
+      id: 'assistant-tail',
+      role: 'assistant',
+      content: 'Recent reply.',
+      timestamp: 2,
+      providerContinuation: {
+        source: { providerConfigId: 'anthropic-1', providerType: 'anthropic', modelId: 'deepseek-v4-flash' },
+        reasoningParts: [
+          {
+            text: 'signed recent',
+            providerOptions: { anthropic: { signature: 'sig-tail' } },
+          },
+          { text: 'unsigned recent' },
+        ],
+      },
+      toolCalls: [{ id: 'call-1', name: 'terminal_execute', arguments: { command: 'ls' } }],
+    },
+    {
+      id: 'tool-1',
+      role: 'tool',
+      content: '',
+      timestamp: 3,
+      toolResults: [{ toolCallId: 'call-1', content: 'ok' }],
+    },
+  ];
+
+  const built = buildCattySdkMessages({
+    allMessages: messages,
+    contextCompaction: {
+      summary: 'Earlier work finished.',
+      compactedMessageCount: 1,
+    },
+    includeCurrentUserMessage: false,
+    trimmed: '',
+    continuationContext: createContinuationContext('anthropic-1', 'anthropic', 'deepseek-v4-flash'),
+    chatSessionId: 'chat-1',
+    toolOutputStore: new ToolOutputStore(),
+    fieldsByMessage: new Map(),
+    allowStripAnthropicSignedThinking: false,
+  });
+
+  assert.match(String(built[0].content), /Earlier work finished/);
+  const tailAssistant = built.find((m) => m.role === 'assistant' && Array.isArray(m.content)
+    && (m.content as { type?: string }[]).some((p) => p.type === 'tool-call'));
+  assert.ok(tailAssistant);
+  const parts = tailAssistant!.content as {
+    type: string;
+    text?: string;
+    providerOptions?: { anthropic?: { signature?: string } };
+  }[];
+  const reasoning = parts.filter((p) => p.type === 'reasoning');
+  assert.equal(reasoning.length, 2, 'signed + unsigned reasoning must both remain for DeepSeek');
+  const signed = reasoning.find((p) => p.providerOptions?.anthropic?.signature === 'sig-tail');
+  assert.ok(signed, 'signed thinking must survive when allowStrip is false');
+  assert.equal(signed!.text, 'signed recent');
+  assert.ok(reasoning.some((p) => p.text === 'unsigned recent'));
+});
+

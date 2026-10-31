@@ -4,6 +4,7 @@ import type { ModelMessage } from 'ai';
 
 import {
   hasAnthropicThinkingSignature,
+  providerAllowsAnthropicSignedThinkingRemoval,
   stripAnthropicSignedReasoningParts,
 } from './anthropicThinkingBinding.ts';
 
@@ -114,11 +115,13 @@ test('prepareStep strip condition: signed after long tool_result + didAdjust →
     ]),
   ];
 
-  // Simulate the turn-driver wiring: when didAdjust, strip before returning.
+  // Simulate the turn-driver wiring: when didAdjust and provider allows
+  // removal, strip before returning (official Anthropic).
   const didAdjust = true;
   const preserveAnthropicThinkingReplay = true;
+  const allowStripSignedThinking = true;
   let stepMessages = messages;
-  if (preserveAnthropicThinkingReplay && didAdjust) {
+  if (preserveAnthropicThinkingReplay && didAdjust && allowStripSignedThinking) {
     stepMessages = stripAnthropicSignedReasoningParts(stepMessages).messages;
   }
 
@@ -137,4 +140,52 @@ test('prepareStep strip condition: signed after long tool_result + didAdjust →
   // Unsigned-looking text / tool-call parts still present
   const first = stepMessages[0].content as { type: string }[];
   assert.deepEqual(first.map((p) => p.type), ['text', 'tool-call']);
+});
+
+test('providerAllowsAnthropicSignedThinkingRemoval is false for DeepSeek identities', () => {
+  assert.equal(providerAllowsAnthropicSignedThinkingRemoval({ providerId: 'deepseek' }), false);
+  assert.equal(providerAllowsAnthropicSignedThinkingRemoval({
+    providerId: 'custom',
+    baseURL: 'https://api.deepseek.com/anthropic',
+  }), false);
+  assert.equal(providerAllowsAnthropicSignedThinkingRemoval(
+    { providerId: 'anthropic' },
+    'deepseek-v4-flash',
+  ), false);
+  assert.equal(providerAllowsAnthropicSignedThinkingRemoval({
+    providerId: 'custom',
+    defaultModel: 'DeepSeek-V3',
+  }), false);
+  assert.equal(providerAllowsAnthropicSignedThinkingRemoval({
+    providerId: 'anthropic',
+    defaultModel: 'claude-opus-4-5',
+  }), true);
+  assert.equal(providerAllowsAnthropicSignedThinkingRemoval({
+    providerId: 'anthropic',
+    baseURL: 'https://api.anthropic.com',
+  }, 'claude-sonnet-4'), true);
+});
+
+test('prepareStep strip is skipped when provider forbids thinking removal (DeepSeek)', () => {
+  const messages: ModelMessage[] = [
+    assistantWithParts([
+      { type: 'reasoning', text: 'plan', providerOptions: { anthropic: { signature: 'keep-me' } } },
+      { type: 'text', text: 'running' },
+      { type: 'tool-call', toolCallId: 'c1', toolName: 'terminal_execute', input: { command: 'ls' } },
+    ]),
+  ];
+  const didAdjust = true;
+  const preserveAnthropicThinkingReplay = true;
+  const allowStripSignedThinking = providerAllowsAnthropicSignedThinkingRemoval(
+    { providerId: 'deepseek' },
+    'deepseek-v4-flash',
+  );
+  let stepMessages = messages;
+  if (preserveAnthropicThinkingReplay && didAdjust && allowStripSignedThinking) {
+    stepMessages = stripAnthropicSignedReasoningParts(stepMessages).messages;
+  }
+  assert.equal(allowStripSignedThinking, false);
+  assert.equal(stepMessages, messages);
+  const first = stepMessages[0].content as { type: string; providerOptions?: { anthropic?: { signature?: string } } }[];
+  assert.equal(first[0].providerOptions?.anthropic?.signature, 'keep-me');
 });

@@ -32,7 +32,10 @@ import {
 import { computeTotalInputTokens, DEFAULT_MAX_OUTPUT_TOKENS } from '../contextBudget';
 import { clearChatSessionCancelled } from '../agentStop';
 import { isInvalidAnthropicThinkingSignatureError, isRequestTooLargeError } from '../../errorClassifier';
-import { stripAnthropicSignedReasoningParts } from '../anthropicThinkingBinding';
+import {
+  providerAllowsAnthropicSignedThinkingRemoval,
+  stripAnthropicSignedReasoningParts,
+} from '../anthropicThinkingBinding';
 import { getNetcattyBridge, generateId, resolveUserSkillsContext } from '../../aiChatStreamingSupport';
 import {
   buildCattySdkMessages,
@@ -218,6 +221,10 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
 
   try {
     const openAIChatAssistantFieldsByMessage = new Map<ModelMessage, OpenAIChatAssistantFields | undefined>();
+    const allowStripSignedThinking = providerAllowsAnthropicSignedThinkingRemoval(
+      context.activeProvider,
+      activeModelId,
+    );
 
     const buildSdkMessages = (
       allMessages: import('../../types').ChatMessage[],
@@ -233,6 +240,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       chatSessionId: sessionId,
       toolOutputStore: ctx.toolOutputStore,
       fieldsByMessage: openAIChatAssistantFieldsByMessage,
+      allowStripAnthropicSignedThinking: allowStripSignedThinking,
     });
 
     const responseIdleTimeoutSeconds = normalizeResponseIdleTimeoutSeconds(
@@ -299,6 +307,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     // Keep the reasoning parts buildCattySdkMessages replayed instead of
     // pruning them like generic Chat Completions histories.
     const preserveAnthropicThinkingReplay = resolveProviderStyle(context.activeProvider) === 'anthropic';
+    // allowStripSignedThinking computed once above (DeepSeek must keep signed thinking).
     const preserveReasoningForStream = preserveStatelessResponsesReasoning || preserveAnthropicThinkingReplay;
     const reasoningReserveTokens = estimateReasoningOutputReserve(reasoningProviderOptions);
     // Fold thinking budget into compaction maxOutput only. reservedTokens is
@@ -502,7 +511,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
           // invalidates Anthropic preserved-thinking signatures on the retained
           // tail (#4073). Strip signed reasoning when we know the prefix changed.
           let stepMessages = prepared.messages;
-          if (preserveAnthropicThinkingReplay && prepared.didAdjust) {
+          if (preserveAnthropicThinkingReplay && prepared.didAdjust && allowStripSignedThinking) {
             const stripped = stripAnthropicSignedReasoningParts(stepMessages);
             if (stripped.didStrip) {
               console.warn('[Catty] Stripped Anthropic signed thinking after step context mutate (#4073)');
