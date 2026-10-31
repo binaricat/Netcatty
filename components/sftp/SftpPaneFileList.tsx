@@ -68,6 +68,7 @@ interface SftpPaneFileListProps {
   onDownloadFile?: (entry: SftpFileEntry) => void;
   onDownloadFiles?: (entries: SftpFileEntry[]) => void;
   onExtractArchive?: (entry: SftpFileEntry) => void;
+  onCreateArchive?: (sourcePaths: string[]) => void;
   onEditPermissions?: (entry: SftpFileEntry) => void;
   onUploadExternalFileList?: (fileList: FileList, targetPath?: string) => Promise<void> | void;
   onUploadExternalFolder?: (targetPath?: string) => Promise<void> | void;
@@ -158,6 +159,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   onDownloadFile,
   onDownloadFiles,
   onExtractArchive,
+  onCreateArchive,
   onEditPermissions,
   onUploadExternalFileList,
   onUploadExternalFolder,
@@ -376,6 +378,17 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
                 {t("sftp.context.extract")}
               </ContextMenuItem>
             )}
+            {!isLocal && onCreateArchive && (
+              <ContextMenuItem onClick={() => {
+                const selected = selectedFilesRef.current;
+                const names = selected.has(entry.name) ? Array.from(selected) : [entry.name];
+                onCreateArchive(names.filter((name) => name !== "..").map((name) =>
+                  joinPath(pane.connection.currentPath, name),
+                ));
+              }}>
+                <Archive size={14} className="mr-2" />{t("sftp.archive.action")}
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator />
             <ContextMenuItem
               onClick={() => {
@@ -497,11 +510,13 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       handleRowSelect,
       dragOverEntry,
       isPaneFocused,
+      isLocal,
       onCopyToOtherPane,
       onMoveEntriesToPath,
       onDownloadFile,
       onDownloadFiles,
       onExtractArchive,
+      onCreateArchive,
       onDragEnd,
       onEditFile,
       onEditPermissions,

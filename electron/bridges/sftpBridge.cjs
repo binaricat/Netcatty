@@ -2525,6 +2525,7 @@ const {
   lstatSftp,
   chmodSftp,
   extractSftpArchive,
+  createSftpArchive,
   getSftpHomeDir,
 } = fileOpsApi;
 
@@ -2721,6 +2722,7 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:sftp:lstat",
       "netcatty:sftp:chmod",
       "netcatty:sftp:extract",
+      "netcatty:sftp:createArchive",
       "netcatty:sftp:homeDir",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel, ownership));
     return;
@@ -2744,6 +2746,7 @@ function registerHandlers(ipcMain, options = {}) {
     ["netcatty:sftp:lstat", lstatSftp],
     ["netcatty:sftp:chmod", chmodSftp],
     ["netcatty:sftp:extract", extractSftpArchive],
+    ["netcatty:sftp:createArchive", createSftpArchive],
     ["netcatty:sftp:homeDir", getSftpHomeDir],
   ].forEach(([channel, handler]) => registerActivityHandle(ipcMain, channel, handler, ownership));
 }
@@ -2792,6 +2795,7 @@ module.exports = {
   lstatSftp,
   chmodSftp,
   extractSftpArchive,
+  createSftpArchive,
   getSftpHomeDir,
   resolveEncodingForRequest,
   _tryFastShellDirectoryDeleteForTests: tryFastShellDirectoryDelete,

@@ -16,7 +16,7 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     executeMoveAction, triggerUploadPicker, onUploadExternalFolder, uploadEnabled, folderUploadEnabled,
     setMoveTargetPaths, setMoveToPath, setMoveToError, setMoveToSuggestions, setMoveToSuggestionIndex,
     setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef,
-    onEditFileRef, onDownloadFileRef, onExtractArchiveRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
+    onEditFileRef, onDownloadFileRef, onExtractArchiveRef, onCreateArchiveRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
     openNewFolderDialogRef, openNewFileDialogRef,
   } = props;
 
@@ -86,6 +86,11 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
         {!isDir && onExtractArchiveRef.current && isExtractableArchive(entry.name) && (
           <ContextMenuItem onClick={() => onExtractArchiveRef.current?.(entry, entryPath)}>
             <Archive size={14} className="mr-2" />{tRef.current('sftp.context.extract')}
+          </ContextMenuItem>
+        )}
+        {!isLocal && entry.name !== '..' && onCreateArchiveRef?.current && (
+          <ContextMenuItem onClick={() => onCreateArchiveRef.current?.(getActionPaths(entryPath))}>
+            <Archive size={14} className="mr-2" />{tRef.current('sftp.archive.action')}
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
@@ -182,6 +187,7 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     onCopyToOtherPaneRef,
     onDownloadFileRef,
     onExtractArchiveRef,
+    onCreateArchiveRef,
     onEditFileRef,
     onEditPermissionsRef,
     onNavigateToRef,

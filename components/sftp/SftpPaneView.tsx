@@ -5,6 +5,8 @@ import { useRenderTracker } from "../../lib/useRenderTracker";
 import { cn } from "../../lib/utils";
 import { SftpPaneDialogs } from "./SftpPaneDialogs";
 import { SftpClipboardUploadDialog } from "./SftpClipboardUploadDialog";
+import { SftpCreateArchiveDialog } from "./SftpCreateArchiveDialog";
+import { useSftpArchiveDialog } from "../../application/state/sftp/useSftpArchiveDialog";
 import { SftpPaneEmptyState } from "./SftpPaneEmptyState";
 import { SftpPaneFileList } from "./SftpPaneFileList";
 import { SftpPaneToolbar } from "./SftpPaneToolbar";
@@ -152,6 +154,16 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
       requestTreeReload(targets);
     }
   }, [requestTreeReload]);
+
+  const archiveDialog = useSftpArchiveDialog({
+    paneId: pane.id,
+    connectionId: pane.connection?.id,
+    isLocal: !!pane.connection?.isLocal,
+    isActive: !!isActive,
+    t,
+    onCreateArchive: callbacks.onCreateArchive,
+    onCreated: (directory) => requestNestedTreeReload([directory]),
+  });
 
   useRenderTracker(`SftpPaneView[${side}]`, {
     side,
@@ -642,6 +654,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
             onEditFile={callbacks.onEditFile}
             onDownloadFile={callbacks.onDownloadFile}
             onExtractArchive={callbacks.onExtractArchive ? handleExtractArchive : undefined}
+            onCreateArchive={callbacks.onCreateArchive && !pane.connection?.isLocal ? archiveDialog.open : undefined}
             onEditPermissions={callbacks.onEditPermissions}
             draggedFiles={draggedFiles}
             openNewFolderDialog={openNewFolderDialogAtPath}
@@ -694,6 +707,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           onDownloadFile={callbacks.onDownloadFile}
           onDownloadFiles={callbacks.onDownloadFiles}
           onExtractArchive={callbacks.onExtractArchive ? handleExtractArchive : undefined}
+          onCreateArchive={callbacks.onCreateArchive && !pane.connection?.isLocal ? archiveDialog.open : undefined}
           onEditPermissions={callbacks.onEditPermissions}
           onUploadExternalFileList={handleUploadExternalFileList}
           onUploadExternalFolder={handleUploadExternalFolder}
@@ -705,6 +719,15 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           listDensity={listDensity}
         />
       </div>
+
+      <SftpCreateArchiveDialog
+        state={archiveDialog.state}
+        t={t}
+        onClose={archiveDialog.close}
+        onNameChange={archiveDialog.setArchiveName}
+        onFormatChange={archiveDialog.setFormat}
+        onSubmit={archiveDialog.submit}
+      />
 
       <SftpPaneDialogs
         t={t}
