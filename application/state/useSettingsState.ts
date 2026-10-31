@@ -1231,6 +1231,15 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     return () => mql.removeEventListener('change', handler);
   }, []);
 
+  // Listen for system theme changes from main process (fallback when matchMedia doesn't fire)
+  useEffect(() => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.onSystemThemeChanged) return;
+    return bridge.onSystemThemeChanged((payload) => {
+      setSystemPreference(payload.isDark ? 'dark' : 'light');
+    });
+  }, []);
+
   useLayoutEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_UI_LANGUAGE, uiLanguage);
     document.documentElement.lang = uiLanguage;
