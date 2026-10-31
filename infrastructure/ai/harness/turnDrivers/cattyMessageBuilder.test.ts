@@ -665,3 +665,81 @@ test('Anthropic-format signed thinking survives build and stream preparation', (
   assert.equal(plainThinking?.text, 'final thinking');
   assert.deepEqual(plainThinking?.providerOptions?.anthropic, { signature: 'sig-xyz' });
 });
+
+test('durable summary skips Anthropic signed thinking on the retained tail (#4073)', () => {
+  // Durable compaction injects a synthetic summary and keeps the recent tail.
+  // Replaying signed thinking on that tail would 400 (prefix binding). Unsigned
+  // reasoning may still be replayed.
+  const messages: ChatMessage[] = [
+    {
+      id: 'assistant-old',
+      role: 'assistant',
+      content: 'Earlier.',
+      timestamp: 1,
+      providerContinuation: {
+        source: { providerConfigId: 'anthropic-1', providerType: 'anthropic', modelId: 'claude-opus-4-5' },
+        reasoningParts: [{
+          text: 'compacted thinking',
+          providerOptions: { anthropic: { signature: 'sig-old' } },
+        }],
+      },
+    },
+    {
+      id: 'assistant-tail',
+      role: 'assistant',
+      content: 'Recent reply.',
+      timestamp: 2,
+      providerContinuation: {
+        source: { providerConfigId: 'anthropic-1', providerType: 'anthropic', modelId: 'claude-opus-4-5' },
+        reasoningParts: [
+          {
+            text: 'signed recent',
+            providerOptions: { anthropic: { signature: 'sig-tail' } },
+          },
+          { text: 'unsigned recent' },
+        ],
+      },
+      toolCalls: [{ id: 'call-1', name: 'terminal_execute', arguments: { command: 'ls' } }],
+    },
+    {
+      id: 'tool-1',
+      role: 'tool',
+      content: '',
+      timestamp: 3,
+      toolResults: [{ toolCallId: 'call-1', content: 'ok' }],
+    },
+  ];
+
+  const built = buildCattySdkMessages({
+    allMessages: messages,
+    contextCompaction: {
+      summary: 'Earlier work finished.',
+      compactedMessageCount: 1,
+    },
+    includeCurrentUserMessage: false,
+    trimmed: '',
+    continuationContext: createContinuationContext('anthropic-1', 'anthropic', 'claude-opus-4-5'),
+    chatSessionId: 'chat-1',
+    toolOutputStore: new ToolOutputStore(),
+    fieldsByMessage: new Map(),
+  });
+
+  assert.match(String(built[0].content), /Earlier work finished/);
+  const tailAssistant = built.find((m) => m.role === 'assistant' && Array.isArray(m.content)
+    && (m.content as { type?: string }[]).some((p) => p.type === 'tool-call'));
+  assert.ok(tailAssistant);
+  const parts = tailAssistant!.content as {
+    type: string;
+    text?: string;
+    providerOptions?: { anthropic?: { signature?: string } };
+  }[];
+  const reasoning = parts.filter((p) => p.type === 'reasoning');
+  assert.equal(reasoning.length, 1, 'only unsigned reasoning should remain');
+  assert.equal(reasoning[0].text, 'unsigned recent');
+  assert.equal(reasoning[0].providerOptions?.anthropic?.signature, undefined);
+  for (const part of parts) {
+    if (part.type === 'reasoning') {
+      assert.equal(part.providerOptions?.anthropic?.signature, undefined);
+    }
+  }
+});

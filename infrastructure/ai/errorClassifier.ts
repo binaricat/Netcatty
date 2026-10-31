@@ -72,6 +72,25 @@ export function isRequestTooLargeError(error: unknown): boolean {
   );
 }
 
+/**
+ * Anthropic preserved-thinking prefix-binding failure (#4073):
+ * "Invalid signature in thinking block. The block is bound to a different conversation."
+ * Triggered when client history mutates an earlier tool_result / drops early turns /
+ * injects a durable summary while still replaying later signed thinking blocks.
+ */
+export function isInvalidAnthropicThinkingSignatureError(error: unknown): boolean {
+  const message = extractMessage(error).trim();
+  const responseBody = extractResponseBody(error) ?? "";
+  const combined = `${message}\n${responseBody}`;
+  const statusCode = extractStatusCode(error, combined);
+  const looksLikeSignature = /Invalid[\s\S]*signature[\s\S]*thinking|bound to a different conversation/i.test(combined);
+  if (!looksLikeSignature) return false;
+  // Prefer structured 400 when present; still match when only the text is available
+  // (some SDK shims omit statusCode and put the body in the message).
+  if (statusCode !== undefined && statusCode !== 400) return false;
+  return true;
+}
+
 function looksLikeHtml(text: string): boolean {
   if (!text) return false;
   const lower = text.toLowerCase();
