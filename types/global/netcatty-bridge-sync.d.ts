@@ -132,6 +132,7 @@ declare global {
     // Cross-window settings sync
     notifySettingsChanged?(payload: { key: string; value: unknown }): void;
     onSettingsChanged?(cb: (payload: { key: string; value: unknown }) => void): () => void;
+    onSystemThemeChanged?(cb: (payload: { isDark: boolean }) => void): () => void;
     getAppLockRuntimeState?(): Promise<AppLockRuntimeState>;
     getAppLockSettings?(): Promise<AppLockSettings>;
     setAppLockTimeoutMinutes?(timeoutMinutes: number): Promise<AppLockSettings>;

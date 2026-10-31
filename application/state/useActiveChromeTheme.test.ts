@@ -98,6 +98,130 @@ test("syncActiveChromeTheme skips surface refresh when the active theme fingerpr
   }
 });
 
+// A hanging jsdom/React render must fail this test quickly instead of
+// consuming the whole CI job budget.
+test("terminal chrome never replaces the application native theme policy", { timeout: 15000 }, async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM('<!doctype html><html><head></head><body><div data-top-tabs-root></div></body></html>');
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const themeSources: string[] = [];
+  const backgrounds: string[] = [];
+  const testWindow = dom.window as unknown as Window & typeof globalThis;
+  testWindow.netcatty = {
+    setTheme: async (source: string) => { themeSources.push(source); return true; },
+    setBackgroundColor: async (background: string) => { backgrounds.push(background); return true; },
+  } as unknown as NetcattyBridge;
+  globalThis.window = testWindow;
+  globalThis.document = testWindow.document;
+  try {
+    for (const type of ['light', 'dark'] as const) {
+      const theme = TERMINAL_THEMES.find((candidate) => candidate.type === type);
+      assert.ok(theme);
+      syncActiveChromeTheme(theme, () => {});
+      assert.equal(document.documentElement.classList.contains(type), true);
+      assert.equal(backgrounds.at(-1), theme.colors.background);
+    }
+    assert.deepEqual(themeSources, [], 'terminal colors must not pin nativeTheme.themeSource to light/dark');
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+    dom.window.close();
+  }
+});
+
+test("system preference refresh reapplies an unchanged independent terminal chrome", { timeout: 15000 }, async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM('<!doctype html><html><head></head><body><div data-top-tabs-root></div></body></html>');
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const backgrounds: string[] = [];
+  const testWindow = dom.window as unknown as Window & typeof globalThis;
+  testWindow.netcatty = {
+    setTheme: async () => { throw new Error('chrome refresh must not change native theme policy'); },
+    setBackgroundColor: async (background: string) => { backgrounds.push(background); return true; },
+  } as unknown as NetcattyBridge;
+  globalThis.window = testWindow;
+  globalThis.document = testWindow.document;
+  try {
+    for (const type of ['light', 'dark'] as const) {
+      const theme = TERMINAL_THEMES.find((candidate) => candidate.type === type);
+      assert.ok(theme);
+      syncActiveChromeTheme(theme, () => {});
+      // The application settings effect runs first on an OS preference change.
+      document.documentElement.className = type === 'dark' ? 'light' : 'dark';
+      backgrounds.push('application-background');
+      syncActiveChromeTheme(theme, () => {}, { refreshSurfaces: true });
+      assert.equal(document.documentElement.classList.contains(type), true);
+      assert.equal(backgrounds.at(-1), theme.colors.background);
+    }
+    syncActiveChromeTheme(null, () => {
+      document.documentElement.className = 'light';
+      backgrounds.push('application-background');
+    });
+    assert.equal(document.documentElement.className, 'light');
+    assert.equal(document.documentElement.dataset.activeChromeTheme, undefined);
+    assert.equal(document.getElementById('netcatty-active-chrome-theme'), null);
+    assert.equal(backgrounds.at(-1), 'application-background');
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+    dom.window.close();
+  }
+});
+
+test("chrome hook reacts to OS preference changes with stable terminal props", { timeout: 15000 }, async () => {
+  const { JSDOM } = await import('jsdom');
+  const { act, createElement } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { useActiveChromeTheme } = await import('./useActiveChromeTheme');
+  const { getSettingsChromeSnapshot, publishSettingsChromeSnapshot } = await import('./settingsChromeStore');
+  const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>');
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalSnapshot = getSettingsChromeSnapshot();
+  const environment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const originalActEnvironment = environment.IS_REACT_ACT_ENVIRONMENT;
+  environment.IS_REACT_ACT_ENVIRONMENT = true;
+  const backgrounds: string[] = [];
+  const testWindow = dom.window as unknown as Window & typeof globalThis;
+  globalThis.window = testWindow;
+  globalThis.document = dom.window.document;
+  testWindow.netcatty = {
+    setBackgroundColor: async (color: string) => { backgrounds.push(color); return true; },
+  } as unknown as NetcattyBridge;
+  const theme = TERMINAL_THEMES.find((candidate) => candidate.type === 'dark');
+  assert.ok(theme);
+  const applyAppTheme = () => {};
+  function Harness() {
+    useActiveChromeTheme({ activeTheme: theme!, applyAppTheme });
+    return null;
+  }
+  publishSettingsChromeSnapshot({ ...originalSnapshot, resolvedTheme: 'dark' });
+  let renderer: ReturnType<typeof createRoot> | undefined;
+  try {
+    await act(async () => {
+      renderer = createRoot(document.createElement('div'));
+      renderer.render(createElement(Harness));
+    });
+    assert.equal(document.documentElement.classList.contains('dark'), true);
+    document.documentElement.className = 'light';
+    backgrounds.push('application-background');
+    await act(async () => {
+      publishSettingsChromeSnapshot({ ...originalSnapshot, resolvedTheme: 'light' });
+    });
+    assert.equal(document.documentElement.classList.contains('dark'), true);
+    assert.equal(backgrounds.at(-1), theme.colors.background);
+  } finally {
+    await act(async () => { renderer?.unmount(); });
+    environment.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
+    publishSettingsChromeSnapshot(originalSnapshot);
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+    dom.window.close();
+  }
+});
+
 test("active chrome theme foreground uses contrast calculation", () => {
   const source = readFileSync(new URL("./useActiveChromeTheme.ts", import.meta.url), "utf8");
 

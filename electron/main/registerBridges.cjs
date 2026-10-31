@@ -332,6 +332,11 @@ function createBridgeRegistrar(context) {
         windowManager.setPluginApplicationMenuProvider?.(applicationMenuProvider);
       });
     }
+    const { registerSystemThemeListener } = require("../bridges/systemTheme.cjs");
+    registerSystemThemeListener({
+      nativeTheme: electronModule.nativeTheme,
+      getWindows: () => BrowserWindow.getAllWindows(),
+    });
   
     const getCloudSyncPasswordPath = () => {
       try {
