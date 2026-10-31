@@ -1,4 +1,5 @@
 import { TerminalSession } from '../../types';
+import { resolveSessionGroupSession } from '../../domain/sessionGroup';
 
 type SessionActivityMap = Record<string, boolean>;
 
@@ -8,8 +9,9 @@ export const getValidSessionActivityIds = (sessions: TerminalSession[]): Set<str
 
 export const shouldMarkSessionActivity = (
   activeTabId: string | null,
-  session: Pick<TerminalSession, 'id' | 'workspaceId'>,
+  session: Pick<TerminalSession, 'id' | 'workspaceId' | 'sessionGroupId' | 'sessionGroupFocused'>,
 ): boolean => {
+  if (activeTabId === session.sessionGroupId) return !session.sessionGroupFocused;
   return activeTabId !== session.id && activeTabId !== session.workspaceId;
 };
 
@@ -21,7 +23,7 @@ export const getSessionActivityIdsToClear = (
     return [];
   }
 
-  const activeSession = sessions.find((session) => session.id === activeTabId);
+  const activeSession = resolveSessionGroupSession(sessions, activeTabId);
   if (activeSession) {
     return [activeSession.id];
   }

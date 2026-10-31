@@ -143,6 +143,20 @@ test('focus restoration and its 50ms retry do not refit unchanged bounds', t => 
   assert.equal(h.calls.clear, 1);
 });
 
+test('restore focus events leave inline rename input focused until editing finishes', t => {
+  const h = harness(t);
+  h.advance(4000); h.reveal(); h.advance(600);
+  let editing = true;
+  t.mock.method(document as any, 'querySelector', (selector: string) => (
+    editing && selector === '[data-session-inline-rename="true"]' ? {} : null
+  ));
+  h.focus(); h.advance(50); h.focus();
+  assert.equal(h.calls.focus, 0);
+  editing = false;
+  h.focus();
+  assert.equal(h.calls.focus, 1);
+});
+
 test('focus restoration still recovers changed bounds', t => {
   const h = harness(t);
   h.advance(4000); h.reveal(); h.advance(600);

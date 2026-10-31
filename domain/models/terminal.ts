@@ -687,6 +687,10 @@ export interface TerminalSession {
   hostname: string;
   status: 'connecting' | 'connected' | 'disconnected';
   workspaceId?: string;
+  /** Stable top-level tab identity for standalone session groups. */
+  sessionGroupId?: string;
+  /** Selection within a flat group; workspace focus is managed separately. */
+  sessionGroupFocused?: boolean;
   /** Script to auto-run after connect (multi-host script runner). */
   pendingScriptId?: string;
   /** Snapshot used by "Run now" so unsaved editor changes run exactly as shown. */

@@ -18,7 +18,7 @@ test("focusTerminalSessionInput focuses the xterm helper textarea immediately an
   const doc = {
     querySelector: (selector: string) => {
       queriedSelectors.push(selector);
-      if (selector === '[role="dialog"][data-state="open"]') return null;
+      if (selector === '[role="dialog"][data-state="open"]' || selector === '[data-session-inline-rename="true"]') return null;
       return pane;
     },
   };
@@ -37,12 +37,7 @@ test("focusTerminalSessionInput focuses the xterm helper textarea immediately an
     },
   });
 
-  assert.deepEqual(queriedSelectors, [
-    '[role="dialog"][data-state="open"]',
-    '[data-session-id="session-1"]',
-    '[role="dialog"][data-state="open"]',
-    '[data-session-id="session-1"]',
-  ]);
+  assert.equal(queriedSelectors.filter(selector => selector === '[data-session-id="session-1"]').length, 2);
   assert.deepEqual(timeouts, [50]);
   assert.deepEqual(focusCalls, ["focus", "focus"]);
 });
@@ -130,7 +125,7 @@ test("focusTerminalSessionInput dispatches a terminal restore focus event", () =
     focusTerminalSessionInput("session-1", {
       document: {
         querySelector: (selector) => {
-          if (selector === '[role="dialog"][data-state="open"]') return null;
+          if (selector === '[role="dialog"][data-state="open"]' || selector === '[data-session-inline-rename="true"]') return null;
           return {
             querySelector: () => ({ focus: () => undefined }),
           };
@@ -169,4 +164,31 @@ test("focusTerminalSessionInput ignores empty or unavailable targets", () => {
       },
     });
   });
+});
+
+test("delayed terminal refocus preserves an inline rename editor opened after selection", () => {
+  let editing = false;
+  let focused = 0;
+  const retries: (() => void)[] = [];
+  const options = {
+    document: {
+      querySelector: (selector: string) => {
+        if (selector === '[data-session-inline-rename="true"]') return editing ? {} : null;
+        if (selector === '[role="dialog"][data-state="open"]') return null;
+        return { querySelector: () => ({ focus: () => { focused += 1; } }) };
+      },
+    },
+    requestAnimationFrame: (callback: () => void) => { callback(); },
+    setTimeout: (callback: () => void) => { retries.push(callback); },
+  };
+  focusTerminalSessionInput('selected', options);
+  assert.equal(focused, 1);
+  editing = true;
+  retries.shift()!();
+  focusTerminalSessionInput('previous', options);
+  retries.shift()!();
+  assert.equal(focused, 1, 'pending and cross-session focus requests leave the editor focused');
+  editing = false;
+  focusTerminalSessionInput('selected', options);
+  assert.equal(focused, 2, 'normal terminal refocus resumes after editing');
 });

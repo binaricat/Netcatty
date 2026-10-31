@@ -61,7 +61,7 @@ class ActiveTabStore {
     return () => this.listeners.delete(listener);
   };
 
-  subscribeSync = (listener: SyncListener) => {
+  subscribeSync = (listener: SyncListener): (() => void) => {
     this.syncListeners.add(listener);
     return () => this.syncListeners.delete(listener);
   };

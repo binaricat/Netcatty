@@ -1,10 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, splitSessionWithCurrentShellImpl } from "./AppHandlers";
+import { collectBatchBusyProbeSessionIds, copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, splitSessionWithCurrentShellImpl } from "./AppHandlers";
 import { createCopiedTerminalSessionClone } from "../state/terminalConnectionReuse";
 import type { TerminalSession } from "../../domain/models";
 
 type CloneOpts = { localShellType?: string; inheritedCwd?: string; reuseConnection?: boolean };
+
+test('closing a group probes every member even after its original session is gone', () => {
+  const sessions = [
+    { id: 'second', sessionGroupId: 'closed-original' },
+    { id: 'third', sessionGroupId: 'closed-original' },
+    { id: 'other', sessionGroupId: 'other' },
+    { id: 'pane', workspaceId: 'workspace' },
+  ];
+  assert.deepEqual(collectBatchBusyProbeSessionIds(sessions, [{ id: 'workspace' }], ['closed-original']), ['second', 'third']);
+  assert.deepEqual(collectBatchBusyProbeSessionIds(sessions, [{ id: 'workspace' }], ['workspace']), ['pane']);
+});
 type Calls = {
   copy?: { id: string; opts: CloneOpts };
   split?: { id: string; dir: string; opts: CloneOpts };

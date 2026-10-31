@@ -28,6 +28,16 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
+  "exclude": [
+    "**/node_modules",
+    "**/dist",
+    "dist-ssr",
+    ".artifacts",
+    ".worktrees",
+    "release",
+    "release-build",
+    "public/monaco"
+  ],
   "include": [
     "global.d.ts",
     "**/*.ts",

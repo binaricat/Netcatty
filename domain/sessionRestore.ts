@@ -1,5 +1,6 @@
 import type { PluginConnectionConfig, SerialConfig, TerminalSession, Workspace, WorkspaceNode } from "./models";
 import { isPluginHostProtocol, sanitizePluginConnection } from "./pluginConnection";
+import { getSessionTabId, normalizeSessionGroups } from './sessionGroup';
 
 export const SESSION_RESTORE_VERSION = 1 as const;
 
@@ -11,6 +12,8 @@ export type RestoredTerminalSession = {
   username: string;
   status: "disconnected";
   workspaceId?: string;
+  sessionGroupId?: string;
+  sessionGroupFocused?: boolean;
   protocol?: TerminalSession["protocol"];
   pluginConnection?: PluginConnectionConfig;
   port?: number;
@@ -144,6 +147,7 @@ const restoreSession = (session: TerminalSession): RestoredTerminalSession => {
     hostname: session.hostname,
     username: session.username,
     ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.sessionGroupId ? { sessionGroupId: session.sessionGroupId, sessionGroupFocused: session.sessionGroupFocused === true } : {}),
     ...(protocol ? { protocol } : {}),
     ...(pluginConnection ? { pluginConnection } : {}),
     ...(session.port !== undefined ? { port: session.port } : {}),
@@ -187,6 +191,7 @@ const restoreSessionFromUnknown = (value: unknown): RestoredTerminalSession | nu
     hostname,
     username,
     ...(readString(value, "workspaceId") ? { workspaceId: readString(value, "workspaceId") } : {}),
+    ...(readString(value, "sessionGroupId") ? { sessionGroupId: readString(value, "sessionGroupId"), sessionGroupFocused: readBoolean(value, "sessionGroupFocused") === true } : {}),
     ...(protocol ? { protocol } : {}),
     ...(pluginConnection ? { pluginConnection } : {}),
     ...(readNumber(value, "port") !== undefined ? { port: readNumber(value, "port") } : {}),
@@ -404,12 +409,12 @@ const restoreWorkspace = (workspace: Workspace, root: WorkspaceNode, sessionIds:
 export function resolveRestoredActiveTabId(
   activeTabId: string,
   tabOrder: readonly string[],
-  sessions: readonly Pick<TerminalSession, "id" | "workspaceId">[],
+  sessions: readonly Pick<TerminalSession, "id" | "workspaceId" | "sessionGroupId">[],
   workspaces: readonly Pick<Workspace, "id">[],
 ): string {
   const valid = new Set([
     "vault",
-    ...sessions.filter((session) => !session.workspaceId).map((session) => session.id),
+    ...sessions.filter((session) => !session.workspaceId).map(getSessionTabId),
     ...workspaces.map((workspace) => workspace.id),
   ]);
   if (valid.has(activeTabId)) return activeTabId;
@@ -444,20 +449,40 @@ export function sanitizeSessionRestorePayload(payload: unknown): SessionRestoreP
     const root = pruneNode(workspace.root, workspaceSessionIds);
     if (!root) continue;
     const sessionIds = collectNodeSessionIds(root);
+    // Migrate the experimental workspace-backed session tabs into flat groups.
+    // Preserve their old top-level id so restore does not change tab order.
+    if (workspace.focusLayout === 'tabs') {
+      const ordered = uniqueStrings([
+        ...(Array.isArray(workspace.focusSessionOrder) ? workspace.focusSessionOrder.filter((id): id is string => typeof id === 'string' && sessionIds.includes(id)) : []),
+        ...sessionIds,
+      ]);
+      const selected = ordered.includes(String(workspace.focusedSessionId)) ? workspace.focusedSessionId : ordered[0];
+      for (const session of sessions) {
+        if (!ordered.includes(session.id)) continue;
+        delete session.workspaceId;
+        session.sessionGroupId = workspace.id;
+        session.sessionGroupFocused = session.id === selected;
+      }
+      const members = ordered.map(id => sessions.find(session => session.id === id)!);
+      const start = Math.min(...members.map(session => sessions.indexOf(session)));
+      for (const member of members) sessions.splice(sessions.indexOf(member), 1);
+      sessions.splice(start, 0, ...members);
+      continue;
+    }
     workspaceRootSessionIds.set(workspace.id, new Set(sessionIds));
     workspaces.push(restoreWorkspace(workspace, root, sessionIds));
   }
 
   const validWorkspaceIds = new Set(workspaces.map((workspace) => workspace.id));
-  const sanitizedSessions = sessions.filter((session) => (
+  const sanitizedSessions = normalizeSessionGroups(sessions.filter((session) => (
     !session.workspaceId
     || (
       validWorkspaceIds.has(session.workspaceId)
       && (workspaceRootSessionIds.get(session.workspaceId)?.has(session.id) ?? false)
     )
-  ));
+  ))) as RestoredTerminalSession[];
   const validTabIds = new Set([
-    ...sanitizedSessions.filter((session) => !session.workspaceId).map((session) => session.id),
+    ...sanitizedSessions.filter((session) => !session.workspaceId).map(getSessionTabId),
     ...workspaces.map((workspace) => workspace.id),
   ]);
   const tabOrder = uniqueStrings(Array.isArray(record.tabOrder) ? record.tabOrder.filter((id): id is string => typeof id === "string") : [])

@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createTerminalSessionStarters } from "./createTerminalSessionStarters";
+import { createSplitTerminalSessionClone } from "../../../application/state/terminalConnectionReuse";
+import type { TerminalSession } from "../../../domain/models";
 
 const noop = () => undefined;
 const ENCRYPTED_CREDENTIAL_PLACEHOLDER = "enc:v1:djEwdGVzdAAAAAAAAAAAAAAAAA==";
@@ -99,6 +101,47 @@ test("startSerial passes saved host credentials for auto-login", async () => {
   assert.ok(capturedOptions);
   assert.equal(capturedOptions.username, "admin");
   assert.equal(capturedOptions.password, "secret");
+});
+
+test("startSerial opens a session-tab clone with the source serial configuration", async () => {
+  const source: TerminalSession = {
+    id: "serial-source",
+    hostId: "serial-1",
+    hostLabel: "Serial",
+    hostname: "COM5",
+    username: "",
+    status: "connected",
+    protocol: "serial",
+    serialConfig: {
+      path: "COM5",
+      baudRate: 57600,
+      dataBits: 7,
+      stopBits: 2,
+      parity: "even",
+      flowControl: "rts/cts",
+    },
+  };
+  const clone = createSplitTerminalSessionClone(source, { id: "serial-tab" });
+  const opened: Record<string, unknown>[] = [];
+  const errors: (string | null)[] = [];
+  const backend = buildBackend({
+    startSerialSession: async (options: Record<string, unknown>) => {
+      opened.push(options);
+      return "serial-tab";
+    },
+  });
+
+  await createTerminalSessionStarters(buildCtx(backend, {
+    sessionId: clone.id,
+    serialConfig: clone.serialConfig,
+    setError: (error: string | null) => errors.push(error),
+  }) as never).startSerial(term as never);
+
+  assert.equal(opened.length, 1);
+  for (const [key, value] of Object.entries(source.serialConfig!)) {
+    assert.equal(opened[0][key], value, key);
+  }
+  assert.ok(!errors.some(Boolean));
 });
 
 test("startSerial omits credentials when none are saved", async () => {

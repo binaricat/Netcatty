@@ -1,6 +1,9 @@
 import type { Messages } from '../types';
 
 export const enTerminalMessages: Messages = {
+  'terminal.sessions.title': 'Terminal',
+  'terminal.sessions.add': 'New terminal session',
+  'terminal.sessions.close': 'Close terminal session',
   'terminal.toolbar.openSessionLog': 'Open session log',
   'terminal.toolbar.sessionLogActions': 'Session log actions',
   'terminal.toolbar.sessionLog.menu': 'Session log',

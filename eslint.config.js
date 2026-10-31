@@ -16,7 +16,7 @@ export default [
   // every other electron/ file matches no config and stays unlinted as before.
   { ...js.configs.recommended, ignores: ["electron/**"] },
   {
-    ignores: ["node_modules/**", "**/dist/**", "scripts/**", "public/monaco/**", ".github/**", ".claude/**", "release/**", "release-build/**", ".worktrees/**"],
+    ignores: ["node_modules/**", "**/dist/**", "scripts/**", "public/monaco/**", ".github/**", ".claude/**", "release/**", "release-build/**", ".worktrees/**", ".artifacts/**"],
   },
   {
     files: ["**/*.{ts,tsx}"],

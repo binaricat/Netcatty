@@ -1,3 +1,4 @@
+import { getSessionTabId } from '../domain/sessionGroup';
 import { Folder, FolderLock, Lock, Menu, MoreHorizontal, Plus, Settings, Sparkles } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { fromEditorTabId, isEditorTabId, toEditorTabId, useActiveTabId } from '../application/state/activeTabStore';
@@ -190,7 +191,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   orderedTabs,
   draggingSessionId,
   isMacClient,
-  onCloseSession,
+  onCloseSession: _onCloseSession,
   onRenameSession,
   onCopySession,
   onDuplicateSession,
@@ -345,7 +346,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   const orphanSessionMap = useMemo(() => {
     const map = new Map<string, TerminalSession>();
     for (const s of orphanSessions) {
-      map.set(s.id, s);
+      map.set(getSessionTabId(s), s);
     }
     return map;
   }, [orphanSessions]);
@@ -529,7 +530,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
       // Also set session-id for backward compatibility with workspace split functionality
       // Only orphan sessions can be dragged to create workspaces
       if (orphanSessionMap.has(tabId)) {
-        e.dataTransfer.setData('session-id', tabId);
+        e.dataTransfer.setData('session-id', orphanSessionMap.get(tabId)!.id);
       }
     } catch (error) {
       if (!(error instanceof DOMException)) throw error;
@@ -540,7 +541,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     setTimeout(() => {
       setIsDraggingForReorder(true);
     }, 0);
-    onStartSessionDrag(tabId);
+    onStartSessionDrag(orphanSessionMap.get(tabId)?.id ?? tabId);
   }, [orphanSessionMap, onStartSessionDrag]);
 
   const handleTabDragEnd = useCallback(() => {
@@ -886,14 +887,14 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
 
       if (item.type === 'session') {
         const session = item.session;
-        const isBeingDragged = draggingSessionId === session.id;
-        const shiftStyle = tabShiftStyles[session.id] || emptyTabStyle;
-        const showDropIndicatorBefore = dropIndicator?.tabId === session.id && dropIndicator.position === 'before';
-        const showDropIndicatorAfter = dropIndicator?.tabId === session.id && dropIndicator.position === 'after';
+        const isBeingDragged = draggingSessionId === item.id || draggingSessionId === session.id;
+        const shiftStyle = tabShiftStyles[item.id] || emptyTabStyle;
+        const showDropIndicatorBefore = dropIndicator?.tabId === item.id && dropIndicator.position === 'before';
+        const showDropIndicatorAfter = dropIndicator?.tabId === item.id && dropIndicator.position === 'after';
 
         return (
           <SessionTopTab
-            key={session.id}
+            key={item.id}
             session={session}
             host={hostMap.get(session.hostId)}
             isBeingDragged={isBeingDragged}
@@ -906,7 +907,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             onTabDragOver={handleTabDragOver}
             onTabDragLeave={handleTabDragLeave}
             onTabDrop={handleTabDrop}
-            onCloseSession={onCloseSession}
+            onCloseSession={() => onCloseTabsBatch([item.id])}
             onRenameSession={onRenameSession}
             onCopySession={onCopySession}
             onDuplicateSession={onDuplicateSession}
@@ -916,8 +917,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             dynamicTabTitleMode={dynamicTabTitleMode}
             tabDoubleClickBehavior={tabDoubleClickBehavior}
             t={t}
-            tabAnimationClass={getTabAnimationClass(session.id)}
-            shortcutNumber={tabShortcutNumbers?.get(session.id)}
+            tabAnimationClass={getTabAnimationClass(item.id)}
+            shortcutNumber={tabShortcutNumbers?.get(item.id)}
           />
         );
       }

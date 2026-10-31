@@ -13,6 +13,8 @@ export type TerminalPaneSessionFields = Pick<
   | 'id'
   | 'hostId'
   | 'workspaceId'
+  | 'sessionGroupId'
+  | 'sessionGroupFocused'
   | 'status'
   | 'protocol'
   | 'hostname'
@@ -52,6 +54,8 @@ function paneFieldEqual(
   return a.id === b.id
     && a.hostId === b.hostId
     && a.workspaceId === b.workspaceId
+    && a.sessionGroupId === b.sessionGroupId
+    && a.sessionGroupFocused === b.sessionGroupFocused
     && a.status === b.status
     && a.protocol === b.protocol
     && a.hostname === b.hostname

@@ -1,3 +1,4 @@
+import { resolveSessionGroupSession } from '../../domain/sessionGroup';
 import { collectSessionIds } from '../../domain/workspace';
 import type { TerminalSession, Workspace } from '../../types';
 
@@ -52,9 +53,7 @@ export function resolveActivePluginKeybindingContext({
   const workspace = workspaces.find((candidate) => candidate.id === activeTabId);
   const activeSessionId = workspace
     ? (workspace.focusedSessionId ?? collectSessionIds(workspace.root)[0])
-    : sessions.some((candidate) => candidate.id === activeTabId)
-      ? activeTabId
-      : undefined;
+    : resolveSessionGroupSession(sessions, activeTabId)?.id;
   const session = activeSessionId
     ? sessions.find((candidate) => candidate.id === activeSessionId)
     : undefined;

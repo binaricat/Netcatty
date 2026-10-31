@@ -1,3 +1,4 @@
+import { getSessionTabId } from '../domain/sessionGroup';
 import { subscribeHostBrowserPanelRequests } from '../application/state/hostBrowserPanelRequests';
 import { openHostBrowserPanelUrl } from '../application/hostBrowser';
 import { captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
@@ -330,7 +331,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setMagnifiedPane((current) => {
       if (!current) return current;
       const terminalPanes = sessions.map((session) => ({
-        tabId: session.workspaceId ?? session.id,
+        tabId: getSessionTabId(session),
         sessionId: session.id,
       }));
       const sidePanelPanes = Array.from(sidePanelLayouts.entries()).flatMap(([tabId, layout]) => (
@@ -578,7 +579,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const session = sessionsRef.current.find(s => s.id === sessionId);
     if (!session) return;
     const workspaceId = session.workspaceId;
-    const tabId = workspaceId || sessionId;
+    const tabId = getSessionTabId(session);
 
     // Within a workspace every member session maps to the same tab id, so the
     // preset (and any auto-open host binding) must come from the workspace's
@@ -1470,7 +1471,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   const validAIScopeTargetIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const session of sessions) ids.add(session.id);
+    for (const session of sessions) { ids.add(session.id); ids.add(getSessionTabId(session)); }
     for (const workspace of workspaces) ids.add(workspace.id);
     return ids;
   }, [sessions, workspaces]);
@@ -2026,7 +2027,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         && (!candidate.protocol || ['ssh', 'mosh', 'local'].includes(candidate.protocol)));
     let tabId: string | null = null;
     if (session) {
-      tabId = session.workspaceId ?? session.id;
+      tabId = getSessionTabId(session);
       if (session.workspaceId) onSetWorkspaceFocusedSessionRef.current?.(session.workspaceId, session.id);
       activeTabStore.setActiveTabId(tabId);
     } else {

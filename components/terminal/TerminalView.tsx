@@ -442,7 +442,8 @@ export function resolveTerminalTopOffsets({
   terminalBodyInset?: number;
   networkDeviceTipHeight?: number;
 }): { toolbarOffset: number; contentTop: string } {
-  const toolbarOffset = isSearchOpen ? 64 : showHostInfoBar ? 30 : 0;
+  void showHostInfoBar;
+  const toolbarOffset = isSearchOpen ? 34 : 0;
   return {
     toolbarOffset,
     // The tip strip stacks directly below the toolbar, so the terminal
@@ -570,7 +571,8 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
     isSearchOpen,
     terminalBodyInset,
   });
-  const terminalBottomInset = terminalBodyInset + (showDisconnectedTerminalNotice ? 28 : 0);
+  const statusBarHeight = showHostInfoBar || isSearchOpen ? 30 : 0;
+  const terminalBottomInset = terminalBodyInset + statusBarHeight + (showDisconnectedTerminalNotice ? 28 : 0);
   const disconnectedTerminalNoticeMessage = resolveTerminalDisconnectedNoticeMessage({
     status,
     error,
@@ -768,9 +770,15 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
             </div>
           </div>
         )}
+
+        <div
+          className="flex-1 min-h-0 min-w-0 relative overflow-hidden"
+          style={{ backgroundColor: 'var(--terminal-ui-bg)' }}
+        >
         <div
           ref={compactActionsRef}
-          className="absolute left-0 right-0 top-0 z-20 pointer-events-none"
+          className="absolute left-0 right-0 z-20 pointer-events-none"
+          style={showHostInfoBar || isSearchOpen ? { bottom: 0 } : { top: 0 }}
           onMouseDownCapture={handleTopOverlayMouseDownCapture}
         >
           {(() => {
@@ -1119,7 +1127,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
               <div
                 id={`terminal-actions-${sessionId}`}
                 className={cn(
-                  "terminal-topbar flex items-center gap-1 py-0.5 backdrop-blur-md min-w-0",
+                  "terminal-topbar flex h-[30px] items-center gap-1 py-0.5 backdrop-blur-md min-w-0",
                   showHostInfoBar
                     ? "px-2 pointer-events-auto"
                     : "ml-auto w-fit rounded-bl-md px-1 pointer-events-auto",
@@ -1132,8 +1140,11 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
               </div>
             );
           })()}
+
+        </div>
+
           {isSearchOpen && (
-            <div className="pointer-events-auto">
+            <div className="absolute left-0 right-0 top-0 z-20 pointer-events-auto">
               <TerminalSearchBar
                 isOpen={isSearchOpen}
                 focusToken={searchFocusToken}
@@ -1145,15 +1156,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
               />
             </div>
           )}
-        </div>
 
-        <div
-          className={cn(
-            "flex-1 min-h-0 min-w-0 relative overflow-hidden",
-            showHostInfoBar && "pt-8",
-          )}
-          style={{ backgroundColor: 'var(--terminal-ui-bg)' }}
-        >
           {showNetworkDeviceTip && (
             <div
               className="absolute left-0 z-20 flex items-center gap-2 px-3 border-b border-border/60 bg-card/95 backdrop-blur-sm text-[11px]"
@@ -1216,7 +1219,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
             <TerminalDisconnectedNotice
               message={disconnectedTerminalNoticeMessage}
               reconnectHint={showEnterReconnectHint ? t('terminal.progress.enterReconnectHint') : undefined}
-              bottom={terminalBodyInset}
+              bottom={terminalBodyInset + statusBarHeight}
               left={terminalBodyInset}
               right={terminalRightInset}
               onPointerDown={(event) => focusTerminalFromDisconnectedNotice(
@@ -1404,7 +1407,10 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
 
           {/* ZMODEM transfer progress indicator */}
           {zmodem.active && (
-            <div className="absolute bottom-4 right-4 z-[25] pointer-events-auto">
+            <div
+              className="absolute right-4 z-[25] pointer-events-auto"
+              style={{ bottom: terminalBottomInset + 16 }}
+            >
               <ZmodemProgressIndicator
                 transferType={zmodem.transferType}
                 filename={zmodem.filename}

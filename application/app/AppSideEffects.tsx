@@ -251,6 +251,7 @@ export function AppSideEffects() {
   knownHostsRef.current = effectiveKnownHosts;
 
   const sessionState = useAppSessionRuntime();
+  const { selectSessionTab } = sessionState;
   const {
     sessions,
     workspaces,
@@ -602,6 +603,7 @@ export function AppSideEffects() {
     return handleTrayJumpToSessionImpl(() => ({
       sessionId,
       sessions,
+      selectSessionTab,
       setActiveTabId,
       setWorkspaceFocusedSession,
       getActiveTabId: () => activeTabStore.getActiveTabId(),

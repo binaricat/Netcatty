@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { resolveSessionGroupSession } from '../../domain/sessionGroup';
 
 import { useActiveTabId } from '../../application/state/activeTabStore';
 import { sessionCapabilitiesStore } from '../../application/state/sessionCapabilitiesStore';
@@ -60,7 +61,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     [activeTabId, workspaceById],
   );
   const activeSession = useMemo(
-    () => sessions.find((session) => session.id === activeTabId),
+    () => resolveSessionGroupSession(sessions, activeTabId),
     [activeTabId, sessions],
   );
   const isFocusMode = activeWorkspace?.viewMode === 'focus';

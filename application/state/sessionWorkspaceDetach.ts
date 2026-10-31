@@ -1,4 +1,5 @@
 import type { TerminalSession, Workspace } from "../../domain/models";
+import { getSessionTabId, normalizeSessionGroups } from '../../domain/sessionGroup';
 import { collectSessionIds, pruneWorkspaceNode } from "../../domain/workspace";
 
 export type DetachSessionFromWorkspaceStateResult = {
@@ -170,7 +171,7 @@ export function isPreferredTabAvailableAfterClose(
   if (preferredTabId === "vault" || preferredTabId === "sftp") return true;
   if (layoutResult.workspaces.some((workspace) => workspace.id === preferredTabId)) return true;
   return remainingSessions.some((session) => (
-    session.id === preferredTabId
+    getSessionTabId(session) === preferredTabId
     && !session.workspaceId
     && !session.hiddenFromTabs
   ));
@@ -205,7 +206,7 @@ export function resolveActiveTabAfterCloseSession({
   const fallback = layoutResult.lastRemainingSessionId
     ?? preferredFallback
     ?? fallbackWorkspace?.id
-    ?? fallbackSolo?.id
+    ?? (fallbackSolo ? getSessionTabId(fallbackSolo) : undefined)
     ?? "vault";
 
   if (
@@ -253,6 +254,7 @@ export function closeSessionsState({
     );
     nextWorkspaces = layoutResult.workspaces;
     nextSessions = applyCloseSessionToSessions(nextSessions, sessionId, layoutResult);
+    nextSessions = normalizeSessionGroups(nextSessions);
 
     if (layoutResult.dissolvedWorkspaceId && layoutResult.lastRemainingSessionId) {
       nextTabOrder = replaceDissolvedWorkspaceTabOrder(
@@ -262,9 +264,12 @@ export function closeSessionsState({
       );
     }
 
-    const activeTabAfterClose = resolveActiveTabAfterCloseSession({
+    const groupId = getSessionTabId(targetSession);
+    const groupSurvives = !workspaceId && nextSessions.some(session => !session.workspaceId && getSessionTabId(session) === groupId);
+    const closingActiveGroup = !workspaceId && (nextActiveTabId === groupId || nextActiveTabId === sessionId);
+    const activeTabAfterClose = closingActiveGroup && groupSurvives ? groupId : resolveActiveTabAfterCloseSession({
       currentActiveTabId: nextActiveTabId,
-      closedSessionId: sessionId,
+      closedSessionId: !workspaceId ? groupId : sessionId,
       workspaceId,
       layoutResult,
       remainingSessions: nextSessions,

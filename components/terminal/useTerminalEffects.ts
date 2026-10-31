@@ -18,6 +18,7 @@ import {
 } from './runtime/middleClickBehavior';
 import {
   hasOpenAppDialog,
+  hasInlineSessionRename,
   TERMINAL_SESSION_RESTORE_FOCUS_EVENT,
   type TerminalSessionRestoreFocusDetail,
 } from './focusTerminalSession';
@@ -1342,7 +1343,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       if (!term) return;
 
       applyUserCursorBlinkPreference(term, terminalSettingsRef.current);
-      if (hasOpenAppDialog()) return;
+      if (hasOpenAppDialog() || hasInlineSessionRename()) return;
       term.focus();
       // Tab focus retries do not imply a lost renderer or a changed layout.
       // Leave explicit app-resume/fullscreen recovery timers untouched when

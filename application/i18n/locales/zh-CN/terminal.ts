@@ -1,6 +1,9 @@
 import type { Messages } from '../types';
 
 export const zhCNTerminalMessages: Messages = {
+  'terminal.sessions.title': '终端',
+  'terminal.sessions.add': '新建终端会话',
+  'terminal.sessions.close': '关闭终端会话',
   'terminal.toolbar.openSessionLog': '打开会话日志',
   'terminal.toolbar.sessionLogActions': '会话日志操作',
   'terminal.toolbar.sessionLog.menu': '会话日志',

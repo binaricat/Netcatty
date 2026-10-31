@@ -13,6 +13,13 @@ import {
 } from "./terminalPaneVisibility";
 import type { Workspace } from "../types";
 
+test('a flat group renders only its selected member without workspace focus mode', () => {
+  const options = { activeTabId: 'original', sessionGroupId: 'original', workspaceById: new Map<string, Workspace>(), isTerminalLayerVisible: true };
+  assert.equal(getTerminalPaneSnapshot({ ...options, sessionId: 'original', sessionGroupFocused: false }), HIDDEN_TERMINAL_PANE_SNAPSHOT);
+  assert.equal(getTerminalPaneSnapshot({ ...options, sessionId: 'second', sessionGroupFocused: true }), 'solo|second');
+  assert.equal(getTerminalPaneSnapshot({ ...options, sessionId: 'second', sessionGroupFocused: false }), HIDDEN_TERMINAL_PANE_SNAPSHOT);
+});
+
 const createWorkspace = (
   id: string,
   sessionIds: string[],

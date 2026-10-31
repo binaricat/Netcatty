@@ -1,3 +1,4 @@
+import { getSessionTabId } from '../../domain/sessionGroup';
 import React, { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { activeTabStore } from '../../application/state/activeTabStore';
@@ -1308,10 +1309,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       activeTabId: activeTabStore.getActiveTabId(),
       sessionId: session.id,
       sessionWorkspaceId: session.workspaceId,
+      sessionGroupId: session.sessionGroupId,
+      sessionGroupFocused: session.sessionGroupFocused,
       workspaceById,
       isTerminalLayerVisible,
     }),
-    [isTerminalLayerVisible, session.id, session.workspaceId, workspaceById],
+    [isTerminalLayerVisible, session.id, session.workspaceId, session.sessionGroupId, session.sessionGroupFocused, workspaceById],
   );
   const renderSnapshot = useSyncExternalStore(activeTabStore.subscribe, getRenderSnapshot, getRenderSnapshot);
   const parsedPane = parseTerminalPaneRenderSnapshot(renderSnapshot);
@@ -1401,9 +1404,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const isMagnified = isVisible
     && magnifiedPane?.target.kind === 'terminal'
     && magnifiedPane.target.sessionId === session.id
-    && magnifiedPane.tabId === (activeWorkspaceId ?? session.id);
+    && magnifiedPane.tabId === (activeWorkspaceId ?? getSessionTabId(session));
   const isCoveredByMagnification = isVisible
-    && magnifiedPane?.tabId === (activeWorkspaceId ?? session.id)
+    && magnifiedPane?.tabId === (activeWorkspaceId ?? getSessionTabId(session))
     && !isMagnified;
   const [magnifiedSurfaceBounds, setMagnifiedSurfaceBounds] = useState<{
     left: number;
@@ -1532,15 +1535,15 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const sessionAppearanceTheme = sessionAppearance.theme;
 
   const handlePaneClick = useCallback(() => {
-    const tabId = activeWorkspaceId ?? session.id;
+    const tabId = activeWorkspaceId ?? getSessionTabId(session);
     onTerminalPaneInteraction(tabId, session.id);
     if (activeWorkspaceId && !isFocusMode) {
       onSetWorkspaceFocusedSession?.(activeWorkspaceId, session.id);
     }
-  }, [activeWorkspaceId, isFocusMode, onSetWorkspaceFocusedSession, onTerminalPaneInteraction, session.id]);
+  }, [activeWorkspaceId, isFocusMode, onSetWorkspaceFocusedSession, onTerminalPaneInteraction, session]);
   const handleTogglePaneMagnification = useCallback(() => {
-    onMagnifyTerminalPane(activeWorkspaceId ?? session.id, session.id);
-  }, [activeWorkspaceId, onMagnifyTerminalPane, session.id]);
+    onMagnifyTerminalPane(activeWorkspaceId ?? getSessionTabId(session), session.id);
+  }, [activeWorkspaceId, onMagnifyTerminalPane, session]);
   const handleExpandToFocus = useCallback(() => {
     if (isMagnified) {
       handleTogglePaneMagnification();

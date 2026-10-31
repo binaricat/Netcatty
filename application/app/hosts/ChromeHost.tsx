@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { getSessionGroups } from '../../../domain/sessionGroup';
 
 import { TERMINAL_THEMES } from '../../../infrastructure/config/terminalThemes';
 import { retainStableSessionsIgnoringPresentation } from '../../../domain/terminalPaneSessionsEqual';
@@ -76,7 +77,13 @@ export function ChromeHost() {
   );
 
   const sessionById = useMemo(
-    () => new Map(session.sessions.map((s) => [s.id, s])),
+    () => {
+      const map = new Map(session.sessions.map((s) => [s.id, s]));
+      for (const group of getSessionGroups(session.sessions)) {
+        map.set(group.id, map.get(group.activeSessionId)!);
+      }
+      return map;
+    },
     [session.sessions],
   );
 

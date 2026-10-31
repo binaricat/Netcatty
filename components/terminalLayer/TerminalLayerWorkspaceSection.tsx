@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { memo, useEffect, useState, useSyncExternalStore } from 'react';
+import { TerminalSessionGroupSection } from './TerminalSessionGroupSection';
 import { createPortal } from 'react-dom';
 
 import {
@@ -151,6 +152,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
 
   return (
     <div data-section="terminal-workspace-column" className="flex-1 min-h-0 flex flex-col">
+    <TerminalSessionGroupSection theme={live.resolvedPreviewTheme || terminalTheme} t={t} />
     <div ref={workspaceInnerRef} className="flex-1 min-h-0 overflow-hidden relative">
         {draggingSessionId && !isFocusMode && (
           <div

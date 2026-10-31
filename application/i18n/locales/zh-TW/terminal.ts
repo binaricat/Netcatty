@@ -1,6 +1,9 @@
 import type { Messages } from '../types';
 
 export const zhTWTerminalMessages: Messages = {
+  'terminal.sessions.title': '終端',
+  'terminal.sessions.add': '新增終端工作階段',
+  'terminal.sessions.close': '關閉終端工作階段',
   'terminal.toolbar.openSessionLog': '開啟工作階段日誌',
   'terminal.toolbar.sessionLogActions': '工作階段日誌操作',
   'terminal.toolbar.sessionLog.menu': '工作階段日誌',
