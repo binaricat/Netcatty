@@ -261,6 +261,70 @@ test("extracts an Alpine idle prompt while preserving its trailing whitespace", 
   assert.equal(extractTrailingIdlePrompt("localhost:~# \r\n"), "");
 });
 
+test("isDefaultPosixPromptLine matches Powerlevel10k ❯ idle prompts", () => {
+  for (const prompt of [
+    "~ ❯",
+    "~ ❯ ",
+    "~/proj ❯",
+    "~/git/Netcatty ❯ ",
+    "/tmp ❯",
+    "proj ❯",
+    "alice@host ~ ❯",
+    "alice@host ~/src ❯ ",
+    "(venv) ~ ❯ ",
+    "(venv) alice@host ~ ❯",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+  }
+});
+
+test("Powerlevel10k ❯ recognition rejects pending input and bare ❯", () => {
+  for (const line of [
+    "❯",
+    "❯ ",
+    "❯ vim",
+    "~ ❯ echo READY",
+    "~ ❯echo",
+    "alice@host ~ ❯ ls",
+    "proj ❯ vim",
+    "(venv) ~ ❯ echo hi",
+    // Must not treat a lone marker as idle (same rationale as bare $/).
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
+test("extractTrailingIdlePrompt recognizes Powerlevel10k ❯ and preserves trailing space", () => {
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n~ ❯"), "~ ❯");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n~ ❯ "), "~ ❯ ");
+  assert.equal(
+    extractTrailingIdlePrompt("Last login...\r\nalice@host ~/src ❯ "),
+    "alice@host ~/src ❯ ",
+  );
+  assert.equal(extractTrailingIdlePrompt("welcome\r\nproj ❯"), "proj ❯");
+  assert.equal(extractTrailingIdlePrompt("(venv) ~ ❯ "), "(venv) ~ ❯ ");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n~ ❯ echo READY"), "");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n❯ "), "");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n~ ❯\r\n"), "");
+});
+
+test("trackSessionIdlePrompt and getFreshIdlePrompt accept a Powerlevel10k ❯ prompt", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "Last login...\r\n~ ❯ ");
+  assert.equal(session.lastIdlePrompt, "~ ❯ ");
+  assert.equal(getFreshIdlePrompt(session), "~ ❯ ");
+  assert.equal(getVisibleIdlePrompt(session), "~ ❯ ");
+
+  trackSessionIdlePrompt(session, "printf busy");
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getVisibleIdlePrompt(session), "");
+
+  trackSessionIdlePrompt(session, "\r\nbusy\r\nalice@host ~/src ❯ ");
+  assert.equal(getFreshIdlePrompt(session), "alice@host ~/src ❯ ");
+  assert.equal(getVisibleIdlePrompt(session), "alice@host ~/src ❯ ");
+});
+
 test("extracts a trailing RHEL-family bracketed idle prompt", () => {
   // Oracle Linux / RHEL / CentOS / Fedora default PS1 is `[\u@\h \W]\$ `.
   // Trailing space must round-trip, same as the PowerShell prompt capture.

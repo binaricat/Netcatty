@@ -99,6 +99,15 @@ const OH_MY_ZSH_YS_HOST_LINE_PATTERN = /^#\s+[^\s@]+\s+@\s+[^\s]+(?:\s+[^\n\r]+)
 // within the path so partially entered commands do not count as idle prompts.
 const ALPINE_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~(?:\/[^#$\n\r]*)?|\/[^#$\n\r]*)[#$]$/;
 
+// Powerlevel10k / similar Unicode prompt-ending ❯ (U+276F). Common idle forms:
+// `~ ❯`, `~/path ❯`, `/tmp ❯`, short-dir `proj ❯`, optional `user@host `
+// prefix (`alice@host ~ ❯`). Require a non-empty prefix and whitespace before
+// ❯ so pending input (`~ ❯ echo READY`, `❯ vim`) cannot match. Bare `❯` alone
+// is intentionally rejected — too ambiguous without a path/host prefix
+// (same rationale as bare `$`/`#`). Do not attempt two-line bare-❯ here.
+const POWERLEVEL10K_PROMPT_PATTERN =
+  /^(?:[^\s@]+@[^\s:]+\s+)?[^\s❯][^❯\r\n]*\s+❯$/;
+
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
 }
@@ -117,7 +126,8 @@ function isDefaultPosixPromptLine(line) {
     POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     PAREN_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ALPINE_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    ZSH_PROMPT_PATTERN.test(withoutEnvPrefix)
+    ZSH_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    POWERLEVEL10K_PROMPT_PATTERN.test(withoutEnvPrefix)
   );
 }
 
@@ -234,8 +244,8 @@ function trackSessionIdlePrompt(session, chunk) {
 // still ends with it. The cached prompt is updated only when
 // extractTrailingIdlePrompt recognizes a known shape (PowerShell, cmd.exe,
 // `user@host[:path][#$]`, two-line classic `user@host[:path]` or Oh My Zsh
-// `ys` (`# user @ host ...`) + `$`/`#`, RHEL `[user@host path][#$]`, or
-// Alpine `host:path[#$]`);
+// `ys` (`# user @ host ...`) + `$`/`#`, RHEL `[user@host path][#$]`,
+// Alpine `host:path[#$]`, or Powerlevel10k-style `... ❯`);
 // a remote shell switch into another shell, an oh-my-posh / starship / custom
 // PS1, or any unrecognized prompt would
 // otherwise leave a stale value behind, which `resolveEffectiveShellKind`
