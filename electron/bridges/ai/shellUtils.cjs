@@ -108,6 +108,17 @@ const ALPINE_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~(?:\/[^#$\n\r]*)
 const POWERLEVEL10K_PROMPT_PATTERN =
   /^(?:[^\s@]+@[^\s:]+\s+)?[^\s❯][^❯\r\n]*\s+❯$/;
 
+// Oh My Zsh default theme (robbyrussell): leading ➜ (U+279C) then cwd (%c),
+// optionally ` git:(branch)` and a dirty/clean marker. Idle forms look like
+// `➜  ~`, `➜  netcatty`, `➜  ~ git:(main)`, `➜  ~ git:(main) ✗`.
+// The theme emits two spaces between ➜ and %c (`➜ ` + ` %c`); require that
+// so one-space pending input like `➜ ls` cannot match. Also accept the common
+// single-space home form `➜ ~` (+ optional git). Only the optional git
+// decoration may follow the cwd — `➜  ~ ls` / `➜  ~ echo hi` fail.
+// Do not broaden to arbitrary starship themes.
+const OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN =
+  /^➜(?:\s{2,}[^\s➜][^\s➜]*|\s~)(?:\s+git:\([^)\r\n]+\))?(?:\s+[✗✓])?$/;
+
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
 }
@@ -127,7 +138,8 @@ function isDefaultPosixPromptLine(line) {
     PAREN_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ALPINE_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ZSH_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    POWERLEVEL10K_PROMPT_PATTERN.test(withoutEnvPrefix)
+    POWERLEVEL10K_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN.test(withoutEnvPrefix)
   );
 }
 
@@ -245,7 +257,8 @@ function trackSessionIdlePrompt(session, chunk) {
 // extractTrailingIdlePrompt recognizes a known shape (PowerShell, cmd.exe,
 // `user@host[:path][#$]`, two-line classic `user@host[:path]` or Oh My Zsh
 // `ys` (`# user @ host ...`) + `$`/`#`, RHEL `[user@host path][#$]`,
-// Alpine `host:path[#$]`, or Powerlevel10k-style `... ❯`);
+// Alpine `host:path[#$]`, Powerlevel10k-style `... ❯`, or Oh My Zsh
+// robbyrussell `➜  …`);
 // a remote shell switch into another shell, an oh-my-posh / starship / custom
 // PS1, or any unrecognized prompt would
 // otherwise leave a stale value behind, which `resolveEffectiveShellKind`

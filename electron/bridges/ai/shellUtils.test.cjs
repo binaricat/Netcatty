@@ -325,6 +325,65 @@ test("trackSessionIdlePrompt and getFreshIdlePrompt accept a Powerlevel10k ❯ p
   assert.equal(getVisibleIdlePrompt(session), "alice@host ~/src ❯ ");
 });
 
+test("isDefaultPosixPromptLine matches Oh My Zsh robbyrussell ➜ idle prompts", () => {
+  for (const line of [
+    "➜  ~",
+    "➜  ~ ",
+    "➜ ~",
+    "➜  netcatty",
+    "➜  ~/proj",
+    "➜  ~ git:(main)",
+    "➜  ~ git:(main) ",
+    "➜  ~ git:(main) ✗",
+    "➜  netcatty git:(main) ✓",
+    "(venv) ➜  ~ ",
+    "(venv) ➜  ~ git:(main) ✗",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), true, JSON.stringify(line));
+  }
+});
+
+test("Oh My Zsh ➜ recognition rejects pending input and bare ➜", () => {
+  for (const line of [
+    "➜",
+    "➜ ",
+    "➜  ~ ls",
+    "➜  ~ echo hi",
+    "➜  netcatty vim",
+    "➜ ls",
+    "➜  ~ git status",
+    "(venv) ➜  ~ echo hi",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, JSON.stringify(line));
+  }
+});
+
+test("extractTrailingIdlePrompt recognizes Oh My Zsh ➜ and preserves trailing space", () => {
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n➜  ~"), "➜  ~");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n➜  ~ "), "➜  ~ ");
+  assert.equal(
+    extractTrailingIdlePrompt("Last login...\r\n➜  ~ git:(main) ✗"),
+    "➜  ~ git:(main) ✗",
+  );
+  assert.equal(extractTrailingIdlePrompt("(venv) ➜  ~ "), "(venv) ➜  ~ ");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n➜  ~ ls"), "");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n➜ "), "");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n➜  ~\r\n"), "");
+});
+
+test("trackSessionIdlePrompt and getFreshIdlePrompt accept an Oh My Zsh ➜ prompt", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "Last login...\r\n➜  ~ ");
+  assert.equal(session.lastIdlePrompt, "➜  ~ ");
+  assert.equal(getFreshIdlePrompt(session), "➜  ~ ");
+  assert.equal(getVisibleIdlePrompt(session), "➜  ~ ");
+
+  trackSessionIdlePrompt(session, "\r\nbusy\r\n➜  ~ git:(main) ✗");
+  assert.equal(getFreshIdlePrompt(session), "➜  ~ git:(main) ✗");
+  assert.equal(getVisibleIdlePrompt(session), "➜  ~ git:(main) ✗");
+});
+
+
 test("extracts a trailing RHEL-family bracketed idle prompt", () => {
   // Oracle Linux / RHEL / CentOS / Fedora default PS1 is `[\u@\h \W]\$ `.
   // Trailing space must round-trip, same as the PowerShell prompt capture.
