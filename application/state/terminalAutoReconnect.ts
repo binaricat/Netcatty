@@ -1,7 +1,14 @@
 import type { TerminalSettings } from "../../domain/models";
+import { normalizeSshAutoReconnectInterval } from "../../domain/models/terminal";
 import type { TerminalSessionExitEvent } from "./resolveTerminalSessionExitIntent";
 
 export const TERMINAL_AUTO_RECONNECT_DELAY_MS = 5000;
+
+export function getTerminalAutoReconnectDelayMs(
+  settings?: Partial<Pick<TerminalSettings, "sshAutoReconnectInterval">> | null,
+): number {
+  return normalizeSshAutoReconnectInterval(settings?.sshAutoReconnectInterval) * 1000;
+}
 
 type AutoReconnectHost = {
   protocol?: "ssh" | "telnet" | "local" | "serial" | "mosh" | "et";

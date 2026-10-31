@@ -539,6 +539,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.terminal.section.connection",
   },
   {
+    id: "terminal-ssh-auto-reconnect-interval",
+    tab: "terminal",
+    labelKey: "settings.terminal.connection.sshAutoReconnectInterval",
+    descriptionKey: "settings.terminal.connection.sshAutoReconnectInterval.desc",
+    sectionKey: "settings.terminal.section.connection",
+  },
+  {
     id: "terminal-keepalive-interval",
     tab: "terminal",
     labelKey: "settings.terminal.connection.keepaliveInterval",

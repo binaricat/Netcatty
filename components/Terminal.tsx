@@ -68,7 +68,7 @@ import {
 import { listPasswordPromptFillCandidates } from "../domain/passwordPromptAssist";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import {
-  TERMINAL_AUTO_RECONNECT_DELAY_MS,
+  getTerminalAutoReconnectDelayMs,
   canAttemptTerminalAutoReconnect,
   shouldAutoReconnectAfterExit,
   shouldContinueAutoReconnectAfterFailure,
@@ -1557,7 +1557,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     autoReconnectAttemptRef.current += 1;
     const attempt = autoReconnectAttemptRef.current;
-    const seconds = Math.round(TERMINAL_AUTO_RECONNECT_DELAY_MS / 1000);
+    const delayMs = getTerminalAutoReconnectDelayMs(terminalSettings);
+    const seconds = delayMs / 1000;
     const scheduledMessage = t("terminal.progress.autoReconnectScheduled", { seconds, attempt });
     setReconnectNoticeMessage(scheduledMessage);
 
@@ -1570,7 +1571,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     autoReconnectTimerRef.current = setTimeout(() => {
       autoReconnectTimerRef.current = null;
       startReconnectRef.current?.("auto");
-    }, TERMINAL_AUTO_RECONNECT_DELAY_MS);
+    }, delayMs);
 
     return true;
   }, [attachExistingSession, host, t, terminalSettings, updateStatus]);

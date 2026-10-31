@@ -10,6 +10,11 @@ import type {
   TerminalSettings,
 } from "../../../domain/models";
 import { useI18n } from "../../../application/i18n/I18nProvider";
+import {
+  normalizeSshAutoReconnectInterval,
+  SSH_AUTO_RECONNECT_INTERVAL_MIN,
+  SSH_AUTO_RECONNECT_INTERVAL_MAX,
+} from "../../../domain/models/terminal";
 import { localStorageAdapter, LOCAL_STORAGE_ADAPTER_CHANGED_EVENT } from "../../../infrastructure/persistence/localStorageAdapter";
 import { STORAGE_KEY_PROXY_PROFILES } from "../../../infrastructure/config/storageKeys";
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, resolveTerminalFontFamilyId, type TerminalFont } from "../../../infrastructure/config/fonts";
@@ -1026,6 +1031,31 @@ function SettingsTerminalTab(props: {
           <Toggle
             checked={terminalSettings.sshAutoReconnectEnabled}
             onChange={(v) => updateTerminalSetting("sshAutoReconnectEnabled", v)}
+          />
+        </SettingRow>
+        <SettingRow
+          anchorId="terminal-ssh-auto-reconnect-interval"
+          label={t("settings.terminal.connection.sshAutoReconnectInterval")}
+          description={t("settings.terminal.connection.sshAutoReconnectInterval.desc")}
+        >
+          <Input
+            key={terminalSettings.sshAutoReconnectInterval}
+            type="number"
+            min={SSH_AUTO_RECONNECT_INTERVAL_MIN}
+            max={SSH_AUTO_RECONNECT_INTERVAL_MAX}
+            step={1}
+            aria-label={t("settings.terminal.connection.sshAutoReconnectInterval")}
+            disabled={!terminalSettings.sshAutoReconnectEnabled}
+            defaultValue={terminalSettings.sshAutoReconnectInterval}
+            onBlur={(e) => {
+              const seconds = normalizeSshAutoReconnectInterval(e.currentTarget.valueAsNumber);
+              e.currentTarget.value = String(seconds);
+              updateTerminalSetting("sshAutoReconnectInterval", seconds);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+            className="w-24"
           />
         </SettingRow>
         <SettingRow

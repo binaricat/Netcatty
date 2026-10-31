@@ -3,6 +3,23 @@ import assert from "node:assert/strict";
 
 import { normalizeTerminalSettings } from "./models";
 
+test("SSH reconnect interval upgrades old settings to five seconds and preserves custom intervals", () => {
+  assert.equal(normalizeTerminalSettings().sshAutoReconnectInterval, 5);
+  for (const seconds of [5, 30, 300, 3600]) {
+    const restored = JSON.parse(JSON.stringify({ sshAutoReconnectInterval: seconds }));
+    assert.equal(normalizeTerminalSettings(restored).sshAutoReconnectInterval, seconds);
+  }
+});
+
+test("SSH reconnect interval clamps finite values and rejects corrupt persisted values", () => {
+  for (const [input, expected] of [[0, 5], [-10, 5], [7200, 3600], [30.4, 30], [30.7, 31]]) {
+    assert.equal(normalizeTerminalSettings({ sshAutoReconnectInterval: input }).sshAutoReconnectInterval, expected);
+  }
+  for (const input of [undefined, null, NaN, Infinity, '300', {}, true]) {
+    assert.equal(normalizeTerminalSettings({ sshAutoReconnectInterval: input as never }).sshAutoReconnectInterval, 5);
+  }
+});
+
 test("normalizeTerminalSettings disables cursor line highlight by default", () => {
   assert.equal(normalizeTerminalSettings().highlightCursorLine, false);
 });
