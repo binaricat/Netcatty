@@ -62,3 +62,38 @@ test("createCattyAnthropicSignatureRetryError defaults status 400 and no progres
   assert.equal(hadToolProgressBeforeRequestTooLarge(retryError), false);
   assert.equal(isInvalidAnthropicThinkingSignatureError(retryError), true);
 });
+
+test("createCattyAnthropicSignatureRetryError preserves plain-object SSE signature message", () => {
+  const source = {
+    type: "invalid_request_error",
+    message: "Invalid signature in thinking block",
+    status: 400,
+  };
+
+  const retryError = createCattyAnthropicSignatureRetryError(source, false);
+
+  assert.equal(retryError.message, "Invalid signature in thinking block");
+  assert.notEqual(retryError.message, "[object Object]");
+  assert.equal(retryError.statusCode, 400);
+  assert.equal(retryError.status, 400);
+  assert.equal(retryError.cause, source);
+  assert.equal(isInvalidAnthropicThinkingSignatureError(retryError), true);
+});
+
+test("createCattyAnthropicSignatureRetryError preserves plain-object message with statusCode", () => {
+  const source = {
+    type: "invalid_request_error",
+    message: "Invalid signature in thinking block. The block is bound to a different conversation.",
+    statusCode: 400,
+  };
+
+  const retryError = createCattyAnthropicSignatureRetryError(source, true);
+
+  assert.equal(
+    retryError.message,
+    "Invalid signature in thinking block. The block is bound to a different conversation.",
+  );
+  assert.equal(retryError.statusCode, 400);
+  assert.equal(hadToolProgressBeforeRequestTooLarge(retryError), true);
+  assert.equal(isInvalidAnthropicThinkingSignatureError(retryError), true);
+});
