@@ -1,6 +1,24 @@
 import type { Messages } from '../types';
 
 export const ruTerminalMessages: Messages = {
+  'terminal.directory.open': 'Текущий каталог: {path}. Сменить каталог',
+  'terminal.directory.unknown': 'Каталог неизвестен',
+  'terminal.directory.search': 'Поиск подкаталогов...',
+  'terminal.directory.directories': 'Каталоги',
+  'terminal.directory.parent': '.. (Родительский каталог)',
+  'terminal.directory.loading': 'Чтение каталогов...',
+  'terminal.directory.empty': 'Нет подкаталогов',
+  'terminal.directory.noMatches': 'Нет подходящих каталогов',
+  'terminal.directory.hidden': 'Показывать скрытые каталоги',
+  'terminal.directory.refresh': 'Обновить',
+  'terminal.directory.unavailable': 'Навигация по каталогам недоступна для этого сеанса.',
+  'terminal.directory.busy': 'Дождитесь пустой командной строки.',
+  'terminal.directory.readFailed': 'Не удалось прочитать каталог. Попробуйте обновить.',
+  'terminal.directory.changeFailed': 'Не удалось подтвердить смену каталога. Обновите перед повтором.',
+  'terminal.directory.unsupportedPath': 'Это имя каталога нельзя безопасно передать в терминал.',
+  'settings.terminal.behavior.contextChips': 'Context Chips',
+  'settings.terminal.behavior.contextChips.desc': 'Показывать панель контекста под быстрыми командами.',
+
   'terminal.toolbar.openSessionLog': 'Открыть журнал сессии',
   'terminal.toolbar.sessionLogActions': 'Действия с журналом',
   'terminal.toolbar.sessionLog.menu': 'Журнал сессии',

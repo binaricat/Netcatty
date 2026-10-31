@@ -1,3 +1,4 @@
+import { refreshObservedTerminalDirectory } from '../../application/state/terminalDirectoryRegistry';
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import { useRef } from 'react';
 import { publishTerminalSelectionTarget } from '../../infrastructure/plugins/terminalSelectionRegistry';
@@ -240,6 +241,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   onCommandSettledRef.current = ctx.onCommandSettled;
   const pluginAwareOnCommandCompleted = () => {
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandCompleted');
+    refreshObservedTerminalDirectory(sessionId);
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
     // Stock local shells update cwd when the command finishes, which can be
     // long after the 150ms post-submit probe. Prompt return (and OSC 133)

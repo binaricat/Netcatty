@@ -261,6 +261,7 @@ declare global {
     getSessionRemoteInfo?(sessionId: string): Promise<{
       success: boolean;
       remoteSshVersion?: string;
+      singleChannelSsh?: boolean;
       error?: string;
     }>;
     /**

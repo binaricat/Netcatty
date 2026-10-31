@@ -1,6 +1,24 @@
 import type { Messages } from '../types';
 
 export const enTerminalMessages: Messages = {
+  'terminal.directory.open': 'Current directory: {path}. Change directory',
+  'terminal.directory.unknown': 'Directory unknown',
+  'terminal.directory.search': 'Search child directories...',
+  'terminal.directory.directories': 'Directories',
+  'terminal.directory.parent': '.. (Parent directory)',
+  'terminal.directory.loading': 'Reading directories...',
+  'terminal.directory.empty': 'No child directories',
+  'terminal.directory.noMatches': 'No matching directories',
+  'terminal.directory.hidden': 'Show hidden directories',
+  'terminal.directory.refresh': 'Refresh',
+  'terminal.directory.unavailable': 'Directory navigation is unavailable for this session.',
+  'terminal.directory.busy': 'Wait for an empty shell prompt.',
+  'terminal.directory.readFailed': 'Could not read this directory. Try refreshing.',
+  'terminal.directory.changeFailed': 'Could not confirm the directory change. Refresh before retrying.',
+  'terminal.directory.unsupportedPath': 'This directory name cannot be sent safely to the terminal.',
+  'settings.terminal.behavior.contextChips': 'Context Chips',
+  'settings.terminal.behavior.contextChips.desc': 'Show the context toolbar below quick commands in the compose bar.',
+
   'terminal.toolbar.openSessionLog': 'Open session log',
   'terminal.toolbar.sessionLogActions': 'Session log actions',
   'terminal.toolbar.sessionLog.menu': 'Session log',

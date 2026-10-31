@@ -938,10 +938,10 @@ function createPreloadApi(ctx) {
     const result = await ipcRenderer.invoke("netcatty:sftp:openForSession", {
       ...(options || {}),
       sessionId,
-      expectedEndpoint: options,
+      expectedEndpoint: options?.reuseExactSessionOnly === true ? undefined : options,
     });
     if (
-      options?.requireExactSourceSession === true
+      (options?.requireExactSourceSession === true || options?.reuseExactSessionOnly === true)
       && result.sourceSessionId !== sessionId
     ) {
       if (result.sftpId) {
