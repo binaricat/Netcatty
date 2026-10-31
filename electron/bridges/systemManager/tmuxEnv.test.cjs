@@ -24,12 +24,73 @@ test("wrapLoginShell flattens multiline scripts", () => {
   assert.ok(wrapped.includes("; echo two"));
 });
 
+test("wrapShExec/wrapLoginShell pass $(printf ...) through verbatim", () => {
+  const { wrapShExec, shQuote } = require("./tmuxEnv.cjs");
+  const script = `tmux list-sessions -F "$(printf '#{session_name}\\t#{session_windows}')" 2>&1`;
+  // Single-quote wrapping: the outer shell must not command-substitute or
+  // backslash-mangle the script, or printf receives a doubled backslash and
+  // tmux emits literal \t separators.
+  assert.equal(wrapShExec(script), `exec sh -c ${shQuote(script)}`);
+  assert.equal(wrapLoginShell(script), `bash -lc ${shQuote(script)}`);
+});
+
+test("wrapped script keeps real tab separators through /bin/sh", () => {
+  const { wrapShExec } = require("./tmuxEnv.cjs");
+  const { execFileSync } = require("node:child_process");
+  const script = `printf '%s\\n' "$(printf 'a\\tb')"`;
+  const output = execFileSync("/bin/sh", ["-c", wrapShExec(script)], { encoding: "utf8" });
+  assert.equal(output, "a\tb\n");
+});
+
+test("parseListOutput splits literal \\t rows when remote printf fails", () => {
+  const sessions = parseListOutput("7\\t1\\t0\\t1787039458\\t1787039477\\t\n");
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].name, "7");
+  assert.equal(sessions[0].windows, 1);
+  assert.equal(sessions[0].attached, false);
+  assert.equal(sessions[0].created, 1787039458);
+});
+
+test("parseTmuxClients splits literal \\t rows", () => {
+  const { parseTmuxClients } = require("./tmuxOps.cjs");
+  const clients = parseTmuxClients("dev\\t/dev/ttys001\\t1787039477\\twork\n");
+  assert.equal(clients.length, 1);
+  assert.equal(clients[0].name, "dev");
+  assert.equal(clients[0].session, "work");
+});
+
 test("parseListOutput parses default tmux ls line", () => {
   const sample = "test-session: 1 windows (created Thu Jun 11 00:38:14 2026)\n";
   const sessions = parseListOutput(sample);
   assert.equal(sessions.length, 1);
   assert.equal(sessions[0].name, "test-session");
   assert.equal(sessions[0].windows, 1);
+});
+
+test("TMUX_DETECT_SCRIPT is valid single-line sh and carries the locale preamble", () => {
+  const { TMUX_DETECT_SCRIPT, MUX_ENV_PREAMBLE } = require("./tmuxEnv.cjs");
+  // Elements are joined with "; " — an element ending in `do` would produce
+  // `do;`, a syntax error in POSIX sh (this silently broke socket scans).
+  assert.ok(!TMUX_DETECT_SCRIPT.includes("do;"), TMUX_DETECT_SCRIPT);
+  assert.ok(TMUX_DETECT_SCRIPT.startsWith(MUX_ENV_PREAMBLE));
+  assert.ok(MUX_ENV_PREAMBLE.includes("LC_ALL"));
+});
+
+test("buildMuxBinaryProbe resolves tmux/zellij by absolute path via login shell", () => {
+  const { buildMuxBinaryProbe, parseMuxBinaryPath } = require("./tmuxEnv.cjs");
+  const probe = buildMuxBinaryProbe("zellij");
+  assert.ok(probe.startsWith("command -v zellij"));
+  assert.ok(probe.includes(' -lc "command -v zellij"'));
+  assert.ok(probe.includes("/bin/zsh -lc"));
+  // The probe is embedded raw inside the single-quoted `sh -c '...'`
+  // capability script that sshd parses remotely — a single quote would
+  // close that wrapper and truncate the script.
+  assert.ok(!probe.includes("'"), probe);
+  // Absolute-path lines win; noise and multi-word output are rejected.
+  assert.equal(parseMuxBinaryPath("/home/u/.cargo/bin/zellij\n"), "/home/u/.cargo/bin/zellij");
+  assert.equal(parseMuxBinaryPath("No active zellij sessions found.\n"), null);
+  assert.equal(parseMuxBinaryPath("/some dir with spaces/zellij\n"), null);
+  assert.equal(parseMuxBinaryPath(""), null);
 });
 
 test("getListSessionsFormat omits session_group before tmux 3.2", () => {

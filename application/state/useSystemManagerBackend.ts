@@ -3,9 +3,11 @@ import type { ContainerRuntimeId } from '../../domain/systemManager/containerRun
 import type {
   DockerContainerAction,
   DockerImageManageAction,
+  MultiplexerScope,
   SystemdUnitAction,
   SystemdUnitInfo,
   TmuxManageAction,
+  ZellijManageAction,
 } from '../../domain/systemManager/types';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
@@ -39,18 +41,54 @@ export function useSystemManagerBackend() {
     return bridge.signalSystemProcess(options);
   }, []);
 
-  const listTmuxSessions = useCallback(async (sessionId: string) => {
+  const listTmuxSessions = useCallback(async (sessionId: string, scope?: MultiplexerScope) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.listTmuxSessions) {
       return { success: false as const, error: 'listTmuxSessions unavailable' };
     }
-    return bridge.listTmuxSessions(sessionId);
+    return bridge.listTmuxSessions(sessionId, scope);
+  }, []);
+
+  const listTmuxSnapshot = useCallback(async (sessionId: string, scope?: MultiplexerScope) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.listTmuxSnapshot) {
+      return { success: false as const, error: 'listTmuxSnapshot unavailable' };
+    }
+    return bridge.listTmuxSnapshot(sessionId, scope);
+  }, []);
+
+  const listMultiplexerUsers = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.listMultiplexerUsers) {
+      return { success: false as const, error: 'listMultiplexerUsers unavailable' };
+    }
+    return bridge.listMultiplexerUsers(sessionId);
+  }, []);
+
+  const listZellijSessions = useCallback(async (sessionId: string, scope?: MultiplexerScope) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.listZellijSessions) {
+      return { success: false as const, error: 'listZellijSessions unavailable' };
+    }
+    return bridge.listZellijSessions(sessionId, scope);
+  }, []);
+
+  const zellijAction = useCallback(async (options: {
+    sessionId: string;
+    scope?: MultiplexerScope;
+  } & ZellijManageAction) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.zellijAction) {
+      return { success: false as const, error: 'zellijAction unavailable' };
+    }
+    return bridge.zellijAction(options);
   }, []);
 
   const createTmuxSession = useCallback(async (options: {
     sessionId: string;
     name: string;
     command?: string;
+    scope?: MultiplexerScope;
   }) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.createTmuxSession) {
@@ -59,7 +97,11 @@ export function useSystemManagerBackend() {
     return bridge.createTmuxSession(options);
   }, []);
 
-  const listTmuxWindows = useCallback(async (options: { sessionId: string; sessionName: string }) => {
+  const listTmuxWindows = useCallback(async (options: {
+    sessionId: string;
+    sessionName: string;
+    scope?: MultiplexerScope;
+  }) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.listTmuxWindows) {
       return { success: false as const, error: 'listTmuxWindows unavailable' };
@@ -71,6 +113,7 @@ export function useSystemManagerBackend() {
     sessionId: string;
     sessionName: string;
     windowIndex: number;
+    scope?: MultiplexerScope;
   }) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.listTmuxPanes) {
@@ -79,7 +122,11 @@ export function useSystemManagerBackend() {
     return bridge.listTmuxPanes(options);
   }, []);
 
-  const listTmuxClients = useCallback(async (options: { sessionId: string; sessionName?: string }) => {
+  const listTmuxClients = useCallback(async (options: {
+    sessionId: string;
+    sessionName?: string;
+    scope?: MultiplexerScope;
+  }) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.listTmuxClients) {
       return { success: false as const, error: 'listTmuxClients unavailable' };
@@ -87,7 +134,10 @@ export function useSystemManagerBackend() {
     return bridge.listTmuxClients(options);
   }, []);
 
-  const tmuxAction = useCallback(async (options: { sessionId: string } & TmuxManageAction) => {
+  const tmuxAction = useCallback(async (options: {
+    sessionId: string;
+    scope?: MultiplexerScope;
+  } & TmuxManageAction) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.tmuxAction) {
       return { success: false as const, error: 'tmuxAction unavailable' };
@@ -239,6 +289,10 @@ export function useSystemManagerBackend() {
     listSystemProcesses,
     signalSystemProcess,
     listTmuxSessions,
+    listTmuxSnapshot,
+    listMultiplexerUsers,
+    listZellijSessions,
+    zellijAction,
     createTmuxSession,
     listTmuxWindows,
     listTmuxPanes,
@@ -262,6 +316,10 @@ export function useSystemManagerBackend() {
     listSystemProcesses,
     signalSystemProcess,
     listTmuxSessions,
+    listTmuxSnapshot,
+    listMultiplexerUsers,
+    listZellijSessions,
+    zellijAction,
     createTmuxSession,
     listTmuxWindows,
     listTmuxPanes,

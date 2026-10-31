@@ -496,6 +496,12 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.systemManager.processRefreshInterval.desc': '系統管理側欄中程序列表的重新整理頻率。',
   'settings.terminal.systemManager.tmuxRefreshInterval': 'tmux 工作階段重新整理間隔',
   'settings.terminal.systemManager.tmuxRefreshInterval.desc': 'tmux 工作階段列表的重新整理頻率。',
+  'settings.terminal.systemManager.tmuxAutoSync': '自動同步目前使用者的 tmux 工作階段',
+  'settings.terminal.systemManager.tmuxAutoSync.desc': '啟用後自動重新整理 tmux/zellij 工作階段列表；停用後需手動重新整理。',
+  'settings.terminal.systemManager.muxAttachTarget': '附加 tmux/zellij 工作階段的方式',
+  'settings.terminal.systemManager.muxAttachTarget.desc': '選擇附加 tmux/zellij 工作階段時，在主視窗中開啟新分頁，還是開啟獨立視窗。',
+  'settings.terminal.systemManager.muxAttachTarget.tab': '新分頁',
+  'settings.terminal.systemManager.muxAttachTarget.window': '新視窗',
   'settings.terminal.systemManager.dockerListRefreshInterval': '容器列表重新整理間隔',
   'settings.terminal.systemManager.dockerListRefreshInterval.desc': '容器與 Pod 列表的重新整理頻率。',
   'settings.terminal.systemManager.dockerStatsRefreshInterval': 'Docker 效能資料重新整理間隔',
@@ -566,6 +572,7 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.passwordPromptAssist.off': '關閉',
   'settings.terminal.passwordPromptAssist.hint': '快速填入（Enter）',
   'settings.terminal.passwordPromptAssist.picker': '憑證選擇列表',
+  'settings.terminal.passwordPromptAssist.auto': '自動填入（sudo）',
 
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': '快速鍵方案',

@@ -1,4 +1,4 @@
-import { Activity, Box, CircuitBoard, Cog, Gauge, LayoutList, Loader2, Network, TerminalSquare } from 'lucide-react';
+import { Activity, Box, CircuitBoard, Cog, Gauge, LayoutGrid, LayoutList, Loader2, Network, TerminalSquare } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -21,6 +21,7 @@ import {
 import { partitionToolbarItems } from '../../domain/toolbarItemLayout';
 import { STORAGE_KEY_SYSTEM_MANAGER_TAB_LAYOUT } from '../../infrastructure/config/storageKeys';
 import type { Snippet, TerminalSession } from '../../types';
+import type { Identity, SSHKey } from '../../types';
 import { cn } from '../../lib/utils';
 import { DockerManagerTab } from './DockerManagerTab';
 import { GpuManagerTab } from './GpuManagerTab';
@@ -29,6 +30,7 @@ import { ProcessManagerTab } from './ProcessManagerTab';
 import { ServicesManagerTab } from './ServicesManagerTab';
 import { SystemOverviewTab } from './SystemOverviewTab';
 import { TmuxManagerTab } from './TmuxManagerTab';
+import { ZellijManagerTab } from './ZellijManagerTab';
 import { WorkspaceSidebarHostHeader } from '../terminalLayer/WorkspaceSidebarHostHeader';
 import { TERMINAL_SIDE_PANEL_INNER_HEADER_CLASS } from '../terminalLayer/terminalSidePanelChrome';
 import { SystemPanelEmpty, SystemPanelShell } from './SystemPanelUi';
@@ -68,7 +70,14 @@ interface SystemManagerSidePanelProps {
   isVisible: boolean;
   terminalSettings: TerminalSettings;
   snippets: Snippet[];
+  keys?: SSHKey[];
+  identities?: Identity[];
+  onUpdateHost?: (host: Host) => void;
+  /** External request to jump to a sub-tab (bumped requestId re-applies). */
+  requestedSubTab?: { tab: SystemManagerSubTab; requestId: number };
   onRequestTerminalFocus?: () => void;
+  /** Opens a mux attach command in a new main-window tab (setting-dependent). */
+  onOpenMuxAttachTab?: (sessionId: string, payload: { title: string; startupCommand: string }) => void;
 }
 
 export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
@@ -78,7 +87,12 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   isVisible,
   terminalSettings,
   snippets,
+  keys,
+  identities,
+  onUpdateHost,
+  requestedSubTab,
   onRequestTerminalFocus,
+  onOpenMuxAttachTab,
 }: SystemManagerSidePanelProps) {
   const { t } = useI18n();
   const backend = useSystemManagerBackend();
@@ -144,6 +158,7 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
       { id: 'ports', icon: Network, label: t('systemManager.tabs.ports') },
       { id: 'services', icon: Cog, label: t('systemManager.tabs.services') },
       { id: 'tmux', icon: TerminalSquare, label: t('systemManager.tabs.tmux') },
+      { id: 'zellij', icon: LayoutGrid, label: t('systemManager.tabs.zellij') },
       { id: 'docker', icon: Box, label: t('systemManager.tabs.docker') },
       { id: 'gpu', icon: CircuitBoard, label: t('systemManager.tabs.gpu') },
     ],
@@ -190,6 +205,17 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   const resolvedTab = reachableTabs.includes(activeTab)
     ? activeTab
     : (shownTabs[0] ?? collapsedTabs[0] ?? 'overview');
+
+  // External requests (e.g. the terminal toolbar tmux/zellij buttons) jump
+  // straight to a sub-tab once that tab is reachable on this host.
+  const appliedSubTabRequestRef = React.useRef(0);
+  React.useEffect(() => {
+    if (!requestedSubTab) return;
+    if (appliedSubTabRequestRef.current === requestedSubTab.requestId) return;
+    if (!reachableTabs.includes(requestedSubTab.tab)) return;
+    appliedSubTabRequestRef.current = requestedSubTab.requestId;
+    setActiveTab(requestedSubTab.tab);
+  }, [reachableTabs, requestedSubTab]);
 
   const [tabBarEl, setTabBarEl] = useState<HTMLDivElement | null>(null);
   const tabBarRef = useCallback((node: HTMLDivElement | null) => {
@@ -299,6 +325,8 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
       }
     } else if (resolvedTab === 'tmux' && capabilities?.hasTmux !== true) {
       void refreshCapabilities();
+    } else if (resolvedTab === 'zellij' && capabilities?.hasZellij !== true) {
+      void refreshCapabilities();
     }
   }, [resolvedTab, capabilities, containerSourceReady, refreshCapabilities]);
 
@@ -400,6 +428,7 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   }
 
   const tmuxReady = capabilities?.hasTmux === true;
+  const zellijReady = capabilities?.hasZellij === true;
   const dockerReady = containerSourceReady;
   const gpuReady = capabilities?.hasNvidiaSmi === true || capabilities?.hasNpuSmi === true;
   const portsReady = (
@@ -411,6 +440,11 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   const tmuxPanelState = resolveCapabilityPanelState({
     isActive: resolvedTab === 'tmux',
     ready: tmuxReady,
+    capabilitiesKnown: capabilities !== undefined,
+  });
+  const zellijPanelState = resolveCapabilityPanelState({
+    isActive: resolvedTab === 'zellij',
+    ready: zellijReady,
     capabilitiesKnown: capabilities !== undefined,
   });
   const dockerPanelState = resolveCapabilityPanelState({
@@ -607,8 +641,42 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
               warmupEnabled={isVisible && resolvedTab !== 'tmux'}
               backend={backend}
               refreshIntervalSec={terminalSettings.systemManagerTmuxRefreshInterval}
+              autoSync={terminalSettings.systemManagerTmuxAutoSync}
               snippets={snippets}
+              host={sessionHost}
+              keys={keys}
+              identities={identities}
+              onUpdateHost={onUpdateHost}
               onRequestTerminalFocus={onRequestTerminalFocus}
+              muxAttachTarget={terminalSettings.systemManagerMuxAttachTarget}
+              onOpenMuxAttachTab={onOpenMuxAttachTab}
+            />
+          </div>
+        ) : null}
+        {zellijPanelState === 'unavailable' ? (
+          <div className="flex-1 min-h-0">
+            <SystemPanelEmpty icon={LayoutGrid} message={t('systemManager.zellij.unavailable')} />
+          </div>
+        ) : zellijPanelState === 'checking' ? (
+          <div className="flex-1 min-h-0">
+            <SystemPanelChecking message={t('systemManager.common.checkingAvailability')} />
+          </div>
+        ) : zellijPanelState === 'ready' ? (
+          <div className={cn('flex-1 min-h-0 flex flex-col', resolvedTab !== 'zellij' && 'hidden')}>
+            <ZellijManagerTab
+              sessionId={sessionId}
+              parentSession={session}
+              isVisible={isVisible && resolvedTab === 'zellij'}
+              warmupEnabled={isVisible && resolvedTab !== 'zellij'}
+              backend={backend}
+              refreshIntervalSec={terminalSettings.systemManagerTmuxRefreshInterval}
+              autoSync={terminalSettings.systemManagerTmuxAutoSync}
+              host={sessionHost}
+              keys={keys}
+              identities={identities}
+              onUpdateHost={onUpdateHost}
+              muxAttachTarget={terminalSettings.systemManagerMuxAttachTarget}
+              onOpenMuxAttachTab={onOpenMuxAttachTab}
             />
           </div>
         ) : null}

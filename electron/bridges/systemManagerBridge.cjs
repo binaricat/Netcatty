@@ -2,12 +2,15 @@
 
 const { createExecOnSessionApi } = require("./systemManager/execOnSession.cjs");
 const { createTmuxOpsApi } = require("./systemManager/tmuxOps.cjs");
+const { createZellijOpsApi } = require("./systemManager/zellijOps.cjs");
+const { MUX_LIST_USERS_SCRIPT, parseListUsersOutput } = require("./systemManager/muxScope.cjs");
 const { createDockerOpsApi } = require("./systemManager/dockerOps.cjs");
 const { createKubectlOpsApi } = require("./systemManager/kubectlOps.cjs");
 const { parseRuntimeProbe } = require("../../domain/systemManager/containerRuntime.shared.cjs");
 const { createGpuOpsApi } = require("./systemManager/gpuOps.cjs");
 const { createPortOpsApi } = require("./systemManager/portOps.cjs");
 const { createServiceOpsApi } = require("./systemManager/serviceOps.cjs");
+const { MUX_ENV_PREAMBLE, buildMuxBinaryProbe } = require("./systemManager/tmuxEnv.cjs");
 
 function nerdctlUsableClause(markCommand) {
   // Offer nerdctl only when `nerdctl info` works. A socket permission error
@@ -26,8 +29,10 @@ function nerdctlUsableClause(markCommand) {
 const CAPABILITY_SCRIPT_POSIX = [
   "exec sh -c ",
   "'",
+  `${MUX_ENV_PREAMBLE}; `,
   'printf "%s\\n" "__NC_OS__=$(uname -s)"; ',
-  'command -v tmux >/dev/null 2>&1 && printf "%s\\n" __NC_TMUX__=1; ',
+  `( ${buildMuxBinaryProbe("tmux")} ) >/dev/null 2>&1 && printf "%s\\n" __NC_TMUX__=1; `,
+  `( ${buildMuxBinaryProbe("zellij")} ) >/dev/null 2>&1 && printf "%s\\n" __NC_ZELLIJ__=1; `,
   'command -v docker >/dev/null 2>&1 && printf "%s\\n" __NC_DOCKER__=1; ',
   'command -v podman >/dev/null 2>&1 && printf "%s\\n" __NC_PODMAN__=1; ',
   nerdctlUsableClause('printf "%s\\n" __NC_NERDCTL__=1'),
@@ -67,6 +72,7 @@ function parseCapabilities(stdout, isLocal, localPlatform) {
   // noisy shells / vendor CLIs that reprint the command text.
   const hasFlag = (name) => new RegExp(`(?:^|\\r?\\n)${name}=1(?:\\r?\\n|$)`).test(text);
   const hasTmux = hasFlag("__NC_TMUX__");
+  const hasZellij = hasFlag("__NC_ZELLIJ__");
   const runtimeProbe = parseRuntimeProbe(text);
   const hasDocker = runtimeProbe.docker;
   const hasPodman = runtimeProbe.podman;
@@ -81,6 +87,7 @@ function parseCapabilities(stdout, isLocal, localPlatform) {
   return {
     targetOs,
     hasTmux,
+    hasZellij,
     hasDocker,
     hasPodman,
     hasNerdctl,
@@ -210,6 +217,7 @@ function createSystemManagerBridge(deps) {
   const { execOnSession, execOnLocalMachine, isLocalSession, getSession } = execApi;
 
   const tmuxOps = createTmuxOpsApi({ execOnSession });
+  const zellijOps = createZellijOpsApi({ execOnSession });
   const dockerOps = createDockerOpsApi({ execOnSession, getSession });
   const kubectlOps = createKubectlOpsApi({ execOnSession, isLocalSession, process });
   const gpuOps = createGpuOpsApi({
@@ -238,6 +246,7 @@ function createSystemManagerBridge(deps) {
           [
             'Write-Output "__NC_OS__=Windows"; ',
             "if (Get-Command tmux -ErrorAction SilentlyContinue) { Write-Output '__NC_TMUX__=1' }; ",
+            "if (Get-Command zellij -ErrorAction SilentlyContinue) { Write-Output '__NC_ZELLIJ__=1' }; ",
             "docker info 2>$null; if ($LASTEXITCODE -eq 0) { Write-Output '__NC_DOCKER__=1' }; ",
             "if (Get-Command podman -ErrorAction SilentlyContinue) { Write-Output '__NC_PODMAN__=1' }; ",
             "if (Get-Command nerdctl -ErrorAction SilentlyContinue) { nerdctl info 2>$null; if ($LASTEXITCODE -eq 0) { Write-Output '__NC_NERDCTL__=1' } }; ",
@@ -262,9 +271,11 @@ function createSystemManagerBridge(deps) {
       if (!result.success) {
         const fallback = await execOnLocalMachine(
           [
+            `${MUX_ENV_PREAMBLE}; `,
             "uname -s; ",
-            "command -v tmux; ",
-            "command -v docker >/dev/null 2>&1 && echo docker_ok; ",
+            `${buildMuxBinaryProbe("tmux")}; `,
+            `( ${buildMuxBinaryProbe("zellij")} ) >/dev/null 2>&1 && echo zellij_ok; `,
+            'command -v docker >/dev/null 2>&1 && echo docker_ok; ',
             "command -v podman >/dev/null 2>&1 && echo podman_ok; ",
             nerdctlUsableClause("echo nerdctl_ok"),
             "command -v kubectl >/dev/null 2>&1 && echo kubectl_ok; ",
@@ -284,6 +295,7 @@ function createSystemManagerBridge(deps) {
           capabilities: {
             targetOs: platform === "linux" ? "linux" : platform === "darwin" ? "darwin" : "unknown",
             hasTmux: text.includes("tmux") && !text.includes("not found"),
+            hasZellij: text.includes("zellij_ok"),
             hasDocker: text.includes("docker_ok"),
             hasPodman: text.includes("podman_ok"),
             hasNerdctl: text.includes("nerdctl_ok"),
@@ -429,7 +441,40 @@ function createSystemManagerBridge(deps) {
   async function listTmuxSessions(event, payload) {
     const sessionId = typeof payload === "string" ? payload : payload?.sessionId;
     if (!sessionId) return { success: false, error: "Missing sessionId" };
-    return tmuxOps.listSessions(event, sessionId);
+    const scope = typeof payload === "string" ? null : payload?.scope;
+    return tmuxOps.listSessions(event, sessionId, scope);
+  }
+
+  async function listTmuxSnapshot(event, payload) {
+    const sessionId = typeof payload === "string" ? payload : payload?.sessionId;
+    if (!sessionId) return { success: false, error: "Missing sessionId" };
+    const scope = typeof payload === "string" ? null : payload?.scope;
+    return tmuxOps.listTmuxSnapshot(event, sessionId, scope);
+  }
+
+  async function listMultiplexerUsers(event, payload) {
+    const sessionId = typeof payload === "string" ? payload : payload?.sessionId;
+    if (!sessionId) return { success: false, error: "Missing sessionId" };
+    const result = await execOnSession(event, sessionId, MUX_LIST_USERS_SCRIPT, 8000);
+    if (result.pending) return { success: false, pending: true };
+    if (!result.success) return { success: false, error: result.error || "Failed to list users" };
+    const parsed = parseListUsersOutput(result.stdout);
+    return { success: true, ...parsed };
+  }
+
+  async function listZellijSessions(event, payload) {
+    const sessionId = typeof payload === "string" ? payload : payload?.sessionId;
+    if (!sessionId) return { success: false, error: "Missing sessionId" };
+    const scope = typeof payload === "string" ? null : payload?.scope;
+    return zellijOps.listSessions(event, sessionId, scope);
+  }
+
+  async function zellijAction(event, payload) {
+    const result = await zellijOps.zellijAction(event, payload);
+    if (result.success === false) {
+      return { success: false, error: result.error || "zellij command failed", errorCode: result.errorCode };
+    }
+    return { success: true };
   }
 
   async function createTmuxSession(event, payload) {
@@ -451,10 +496,10 @@ function createSystemManagerBridge(deps) {
   async function tmuxAction(event, payload) {
     const result = await tmuxOps.tmuxAction(event, payload);
     if (result.success === false && result.error) {
-      return { success: false, error: result.error || result.stderr };
+      return { success: false, error: result.error || result.stderr, errorCode: result.errorCode };
     }
     if (result.success === false) {
-      return { success: false, error: result.stderr || "tmux command failed" };
+      return { success: false, error: result.stderr || "tmux command failed", errorCode: result.errorCode };
     }
     return { success: true };
   }
@@ -546,11 +591,15 @@ function createSystemManagerBridge(deps) {
         "netcatty:system:signalProcess",
         "netcatty:system:setupOsc7Tracking",
         "netcatty:system:listTmuxSessions",
+        "netcatty:system:listTmuxSnapshot",
         "netcatty:system:createTmuxSession",
         "netcatty:system:listTmuxWindows",
         "netcatty:system:listTmuxPanes",
         "netcatty:system:listTmuxClients",
         "netcatty:system:tmuxAction",
+        "netcatty:system:listMultiplexerUsers",
+        "netcatty:system:listZellijSessions",
+        "netcatty:system:zellijAction",
         "netcatty:system:listDockerContainers",
         "netcatty:system:listDockerImages",
         "netcatty:system:dockerStats",
@@ -571,11 +620,15 @@ function createSystemManagerBridge(deps) {
     ipcMain.handle("netcatty:system:signalProcess", signalProcess);
     ipcMain.handle("netcatty:system:setupOsc7Tracking", setupOsc7Tracking);
     ipcMain.handle("netcatty:system:listTmuxSessions", listTmuxSessions);
+    ipcMain.handle("netcatty:system:listTmuxSnapshot", listTmuxSnapshot);
     ipcMain.handle("netcatty:system:createTmuxSession", createTmuxSession);
     ipcMain.handle("netcatty:system:listTmuxWindows", listTmuxWindows);
     ipcMain.handle("netcatty:system:listTmuxPanes", listTmuxPanes);
     ipcMain.handle("netcatty:system:listTmuxClients", listTmuxClients);
     ipcMain.handle("netcatty:system:tmuxAction", tmuxAction);
+    ipcMain.handle("netcatty:system:listMultiplexerUsers", listMultiplexerUsers);
+    ipcMain.handle("netcatty:system:listZellijSessions", listZellijSessions);
+    ipcMain.handle("netcatty:system:zellijAction", zellijAction);
     ipcMain.handle("netcatty:system:listDockerContainers", listDockerContainers);
     ipcMain.handle("netcatty:system:listDockerImages", listDockerImages);
     ipcMain.handle("netcatty:system:dockerStats", dockerStats);

@@ -3,6 +3,8 @@ export type TargetOs = 'linux' | 'darwin' | 'win32' | 'unknown';
 export interface SessionCapabilities {
   targetOs: TargetOs;
   hasTmux: boolean;
+  /** `zellij` binary present. */
+  hasZellij?: boolean;
   hasDocker: boolean;
   /** `podman` binary present. A podman-docker shim may also set hasDocker. */
   hasPodman?: boolean;
@@ -152,6 +154,56 @@ export type TmuxManageAction =
   | { action: 'selectWindow'; sessionName: string; windowIndex: number }
   | { action: 'killServer' };
 
+/** A login user on the remote host that may own tmux/zellij sessions. */
+export interface MultiplexerUser {
+  name: string;
+  uid: number;
+  /** True when a tmux socket directory (`/tmp/tmux-<uid>`) exists for this user. */
+  hasTmuxSockets?: boolean;
+}
+
+/**
+ * Scope for running multiplexer (tmux/zellij) commands as another host user
+ * via sudo. Undefined `user` means the current connection user (no sudo).
+ */
+export interface MultiplexerScope {
+  user?: string;
+  /** Saved SSH/sudo password piped to `sudo -S`; omitted for passwordless `sudo -n`. */
+  sudoPassword?: string;
+  /** UID of `user`; lets a root connection open `/tmp/tmux-<uid>` sockets directly. */
+  targetUid?: number;
+  /**
+   * Root fast path (tmux only): the connection user is uid 0, so the target
+   * user's sockets are readable without sudo — no PAM round trip per command.
+   */
+  directAsRoot?: boolean;
+}
+
+/** One round trip worth of tmux state: sessions + every window + client. */
+export interface TmuxSnapshot {
+  sessions: TmuxSessionInfo[];
+  /** Windows grouped by owning session name. */
+  windowsBySession: Record<string, TmuxWindowInfo[]>;
+  clients: TmuxClientInfo[];
+  tmuxVersion?: string;
+}
+
+export interface ZellijSessionInfo {
+  name: string;
+  /** Raw "[Created …]" text reported by `zellij list-sessions`. */
+  createdText: string;
+  /** Session has at least one attached client. */
+  attached: boolean;
+  /** Session is exited but kept for resurrection. */
+  exited: boolean;
+  /** This session is the one the probing client is attached to. */
+  isCurrent: boolean;
+}
+
+export type ZellijManageAction =
+  | { action: 'killSession'; sessionName: string }
+  | { action: 'deleteSession'; sessionName: string; force?: boolean };
+
 export interface DockerContainerInfo {
   id: string;
   name: string;
@@ -210,6 +262,7 @@ export type SystemManagerSubTab =
   | 'ports'
   | 'services'
   | 'tmux'
+  | 'zellij'
   | 'docker'
   | 'gpu';
 

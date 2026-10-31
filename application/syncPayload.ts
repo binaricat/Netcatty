@@ -294,7 +294,8 @@ const SYNCABLE_TERMINAL_KEYS = [
   'autoCloseOnExit', 'disconnectedNoticeMode',
   'showHostInfoBar', 'hostInfoBarTitleMode', 'showServerStats',
   'serverStatsRefreshInterval',
-  'systemManagerProcessRefreshInterval', 'systemManagerTmuxRefreshInterval',
+  'systemManagerProcessRefreshInterval', 'systemManagerTmuxRefreshInterval', 'systemManagerTmuxAutoSync',
+  'systemManagerMuxAttachTarget',
   'systemManagerDockerListRefreshInterval', 'systemManagerDockerStatsRefreshInterval',
   'rendererType',
   // Inline image protocol switches are a preference and sync; the per-terminal

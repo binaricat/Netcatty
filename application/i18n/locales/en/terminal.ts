@@ -29,6 +29,8 @@ export const enTerminalMessages: Messages = {
   'terminal.networkDevice.tip.enabled': 'Network Device Mode enabled for {host}',
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': 'Open SFTP',
+  'terminal.toolbar.tmux': 'tmux sessions',
+  'terminal.toolbar.zellij': 'zellij sessions',
   'terminal.browser.title': 'Browser',
   'terminal.browser.sshOnly': 'Focus an SSH terminal to open its browser.',
   'terminal.browser.open': 'Open Browser',

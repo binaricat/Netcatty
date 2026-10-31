@@ -4,24 +4,26 @@ function shQuote(str) {
   return `'${String(str).replace(/'/g, `'\"'\"'`)}'`;
 }
 
-function wrapLoginShell(command) {
-  const oneLine = String(command || "")
+function oneLineScript(command) {
+  return String(command || "")
     .replace(/\r\n/g, "\n")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
     .join("; ");
-  return `bash -lc ${JSON.stringify(oneLine)}`;
+}
+
+// Single-quote the script so it reaches the inner shell byte-for-byte.
+// JSON.stringify double-quoting was wrong here: the outer shell command-
+// substitutes $(printf '\t…') inside "…" with a doubled backslash, so tmux
+// received a literal \t in -F format strings and emitted rows like
+// "7\t1\t0\t1787039458…" as one giant field.
+function wrapLoginShell(command) {
+  return `bash -lc ${shQuote(oneLineScript(command))}`;
 }
 
 function wrapShExec(command) {
-  const oneLine = String(command || "")
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join("; ");
-  return `exec sh -c ${JSON.stringify(oneLine)}`;
+  return `exec sh -c ${shQuote(oneLineScript(command))}`;
 }
 
 function stripAnsi(text) {
@@ -60,13 +62,63 @@ function getListSessionsFormat(version) {
   return fields.join("\\t");
 }
 
+// Without a UTF-8 locale tmux sanitizes control characters in -F output
+// (tabs become `_`), and GUI-launched apps / bare sshd sessions usually have
+// no locale at all. Seed a fallback locale in every mux script.
+const MUX_ENV_PREAMBLE =
+  'if [ -z "$LC_ALL" ] && [ -z "$LANG" ]; then LC_ALL=C.UTF-8; export LC_ALL; fi';
+
+/**
+ * Locate a mux binary (tmux/zellij) by absolute path instead of relying on
+ * the caller's PATH: plain `command -v` first (fast path — SSH sessions and
+ * servers have sane PATHs), then the user's login shell (picks up
+ * ~/.zprofile / ~/.bash_profile setup such as Homebrew), then a zsh login
+ * fallback for macOS GUI apps whose SHELL may be unset, then a handful of
+ * well-known install locations checked by absolute path (e.g. cargo, whose
+ * env often lives in interactive-only ~/.zshrc). Callers should fall back to
+ * the bare name when nothing resolves.
+ *
+ * The probe MUST NOT contain single quotes: it is embedded raw inside the
+ * single-quoted `exec sh -c '...'` capability script that sshd parses as a
+ * command line remotely — a nested `'` would close that wrapper and truncate
+ * the script (double quotes are safe: they pass through literally and are
+ * parsed by the inner shell instead).
+ */
+function buildMuxBinaryProbe(name) {
+  const plain = `command -v ${name} 2>/dev/null`;
+  const login = `"\${SHELL:-/bin/sh}" -lc "command -v ${name}" 2>/dev/null`;
+  const zsh = `/bin/zsh -lc "command -v ${name}" 2>/dev/null`;
+  const knownDirs = [
+    "$HOME/.cargo/bin",
+    "$HOME/.local/bin",
+    "$HOME/bin",
+    "$HOME/go/bin",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/opt/local/bin",
+  ].join(" ");
+  const known = `for _nc_d in ${knownDirs}; do [ -x "$_nc_d/${name}" ] && { printf "%s\\n" "$_nc_d/${name}"; break; }; done`;
+  return `${plain} || ${login} || ${zsh} || ${known}`;
+}
+
+/** First absolute-path line of probe output, or null when unresolved. */
+function parseMuxBinaryPath(stdout) {
+  for (const line of String(stdout || "").split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("/") && !/\s/.test(trimmed)) return trimmed;
+  }
+  return null;
+}
+
 // Single-line script — multiline strings break when passed through bash -lc JSON quoting.
+// Note: no element may END in `do` — the "; " join would produce `do;`, which
+// is a syntax error in POSIX sh.
 const TMUX_DETECT_SCRIPT = [
+  MUX_ENV_PREAMBLE,
   "uid=$(id -u 2>/dev/null || echo 0)",
   "echo \"__TMUX_VERSION__=$(tmux -V 2>/dev/null || true)\"",
   "echo \"__TMUX_BIN__=$(command -v tmux 2>/dev/null || which tmux 2>/dev/null || true)\"",
-  "for d in \"${TMUX_TMPDIR:-/tmp}/tmux-$uid\" \"/tmp/tmux-$uid\"; do",
-  "[ -d \"$d\" ] || continue",
+  "for d in \"${TMUX_TMPDIR:-/tmp}/tmux-$uid\" \"/tmp/tmux-$uid\"; do [ -d \"$d\" ] || continue",
   "for s in \"$d\"/*; do [ -S \"$s\" ] && echo \"__SOCKET__=$s\"; done",
   "done",
 ].join("; ");
@@ -151,7 +203,13 @@ function parseListOutput(stdout) {
       });
       continue;
     }
-    const parts = trimmed.split("\t");
+    // Tolerate a literal "\t" separator for remotes where the printf wrapping
+    // still fails; otherwise the whole row would surface as the session name.
+    const parts = trimmed.includes("\t")
+      ? trimmed.split("\t")
+      : trimmed.includes("\\t")
+        ? trimmed.split("\\t")
+        : [trimmed];
     if (parts.length >= 4) {
       plain.push({
         name: parts[0].trim(),
@@ -191,4 +249,7 @@ module.exports = {
   parseListOutput,
   isTmuxDiagnosticLine,
   TMUX_DIAGNOSTIC_LINE,
+  MUX_ENV_PREAMBLE,
+  buildMuxBinaryProbe,
+  parseMuxBinaryPath,
 };

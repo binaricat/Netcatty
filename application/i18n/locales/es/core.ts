@@ -897,6 +897,12 @@ Resalta el panel dividido enfocado:
   'settings.terminal.systemManager.processRefreshInterval.desc': 'Con qué frecuencia actualizar la lista de procesos en el panel lateral del administrador del sistema.',
   'settings.terminal.systemManager.tmuxRefreshInterval': 'Actualización de sesiones tmux',
   'settings.terminal.systemManager.tmuxRefreshInterval.desc': 'Con qué frecuencia actualizar la lista de sesiones tmux.',
+  'settings.terminal.systemManager.tmuxAutoSync': 'Sincronizar automáticamente las sesiones tmux del usuario actual',
+  'settings.terminal.systemManager.tmuxAutoSync.desc': 'Si está activado, las listas de sesiones tmux/zellij se actualizan automáticamente; si no, se actualizan manualmente.',
+  'settings.terminal.systemManager.muxAttachTarget': 'Adjuntar sesiones tmux/zellij en',
+  'settings.terminal.systemManager.muxAttachTarget.desc': 'Elige si al adjuntar una sesión tmux/zellij se abre una pestaña nueva en la ventana principal o una ventana independiente.',
+  'settings.terminal.systemManager.muxAttachTarget.tab': 'Pestaña nueva',
+  'settings.terminal.systemManager.muxAttachTarget.window': 'Ventana nueva',
   'settings.terminal.systemManager.dockerListRefreshInterval': 'Actualización de la lista de contenedores',
   'settings.terminal.systemManager.dockerListRefreshInterval.desc': 'Con qué frecuencia actualizar las listas de contenedores y pods.',
   'settings.terminal.systemManager.dockerStatsRefreshInterval': 'Actualización de estadísticas Docker',
@@ -974,6 +980,7 @@ Resalta el panel dividido enfocado:
   'settings.terminal.passwordPromptAssist.off': 'Desactivado',
   'settings.terminal.passwordPromptAssist.hint': 'Relleno rápido (Enter)',
   'settings.terminal.passwordPromptAssist.picker': 'Selector de credenciales',
+  'settings.terminal.passwordPromptAssist.auto': 'Rellenado automático (sudo)',
 
   // Settings > Shortcuts
   'settings.shortcuts.section.scheme': 'Esquema de teclas de acceso',

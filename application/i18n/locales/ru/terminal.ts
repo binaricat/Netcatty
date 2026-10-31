@@ -50,6 +50,8 @@ export const ruTerminalMessages: Messages = {
 
   // Terminal toolbar / search / context menu / auth
   'terminal.toolbar.openSftp': 'Открыть SFTP',
+  'terminal.toolbar.tmux': 'Сессии tmux',
+  'terminal.toolbar.zellij': 'Сессии zellij',
   'terminal.browser.title': 'Браузер',
   'terminal.browser.sshOnly': 'Выберите SSH-терминал, чтобы открыть его браузер.',
   'terminal.browser.open': 'Открыть браузер',

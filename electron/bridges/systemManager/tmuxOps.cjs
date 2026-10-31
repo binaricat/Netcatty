@@ -12,7 +12,11 @@ const {
   buildTmuxInvocation,
   parseListOutput,
   isTmuxDiagnosticLine,
+  MUX_ENV_PREAMBLE,
+  buildMuxBinaryProbe,
+  parseMuxBinaryPath,
 } = require("./tmuxEnv.cjs");
+const { execScopedOnSession } = require("./muxScope.cjs");
 
 function shQuoteLocal(str) {
   return shQuote(str);
@@ -243,7 +247,7 @@ function parseTmuxClients(stdout, sessionName) {
   for (const line of (stdout || "").split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const parts = trimmed.split("\t");
+    const parts = splitTmuxFields(trimmed);
     if (parts.length < 4) continue;
     if (sessionName && parts[3] !== sessionName) continue;
     clients.push({
@@ -274,6 +278,54 @@ function tmuxFormatArg(format) {
   return `"$(printf '${format}')"`;
 }
 
+const SNAPSHOT_WINDOWS_MARKER = "__NC_SNAP_WINDOWS__";
+const SNAPSHOT_CLIENTS_MARKER = "__NC_SNAP_CLIENTS__";
+
+/**
+ * One round trip for the whole tmux panel: sessions + all windows + clients
+ * in a single exec, so a scoped (sudo) poll pays PAM auth once per cycle
+ * instead of once per session record.
+ */
+function buildSnapshotScript(binary, socketPath, version) {
+  const inv = (args) => buildTmuxInvocation(binary, socketPath, args);
+  const sessionsFormat = getListSessionsFormat(version);
+  const listSessionsCmd = sessionsFormat
+    ? inv(`list-sessions -F ${tmuxFormatArg(sessionsFormat)} 2>&1`)
+    : inv("list-sessions 2>&1");
+  return [
+    listSessionsCmd,
+    `printf '%s\\n' '${SNAPSHOT_WINDOWS_MARKER}'`,
+    inv(`list-windows -a -F ${tmuxFormatArg(TMUX_LIST_ALL_WINDOWS_FMT)} 2>&1`),
+    `printf '%s\\n' '${SNAPSHOT_CLIENTS_MARKER}'`,
+    inv(`list-clients -F ${tmuxFormatArg(TMUX_LIST_CLIENTS_FMT)} 2>&1`),
+  ].join("; ");
+}
+
+function parseTmuxSnapshot(stdout) {
+  const text = String(stdout || "");
+  const windowsSplit = text.split(SNAPSHOT_WINDOWS_MARKER);
+  const sessionsSection = windowsSplit[0] || "";
+  const rest = windowsSplit.length > 1 ? windowsSplit.slice(1).join(SNAPSHOT_WINDOWS_MARKER) : "";
+  const clientsSplit = rest.split(SNAPSHOT_CLIENTS_MARKER);
+  const windowsSection = clientsSplit[0] || "";
+  const clientsSection = clientsSplit.length > 1 ? clientsSplit.slice(1).join(SNAPSHOT_CLIENTS_MARKER) : "";
+
+  const sessions = parseListOutput(sessionsSection);
+  const windowsBySession = {};
+  for (const row of parseTmuxWindowsAll(windowsSection)) {
+    const { session, ...windowInfo } = row;
+    if (!windowsBySession[session]) windowsBySession[session] = [];
+    windowsBySession[session].push(windowInfo);
+  }
+  return {
+    sessions,
+    windowsBySession,
+    clients: parseTmuxClients(clientsSection),
+    // Markers prove the remote script actually ran (vs. a wrapper swallow).
+    markersSeen: windowsSplit.length > 1 && clientsSplit.length > 1,
+  };
+}
+
 function createTmuxOpsApi({ execOnSession }) {
   /** @type {Map<string, { version: object, binary: string, sockets: string[], detectedAt: number }>} */
   const envCache = new Map();
@@ -284,7 +336,24 @@ function createTmuxOpsApi({ execOnSession }) {
     // wrapper swallowed the output. Mutating commands (kill-session, send-keys,
     // split-window…) succeed silently — retrying them re-executes the mutation,
     // so they must pass retryOnEmptyOutput: false.
-    const { retryOnEmptyOutput = true } = options;
+    const { retryOnEmptyOutput = true, scope = null } = options;
+    // Every tmux command runs with the locale preamble: without a UTF-8
+    // locale tmux sanitizes control characters in -F output (tabs become
+    // `_`). Idempotent when the script already carries it.
+    script = `${MUX_ENV_PREAMBLE}; ${script}`;
+    if (scope?.user) {
+      if (scope.directAsRoot) {
+        // Root opens the target user's tmux socket directly: no sudo wrapper,
+        // no PAM round trip per command.
+        return normalizeExecResult(await execOnSession(event, sessionId, script, timeoutMs));
+      }
+      // Scoped (other-user) exec goes through sudo once — no wrapper retries,
+      // and sudo auth failures surface their errorCode without being flipped
+      // into a "successful" output result by normalizeExecResult.
+      const scoped = await execScopedOnSession(execOnSession, event, sessionId, script, timeoutMs, scope);
+      if (scoped?.errorCode) return scoped;
+      return normalizeExecResult(scoped);
+    }
     const attempts = [
       wrapShExec(script),
       wrapLoginShell(script),
@@ -298,29 +367,63 @@ function createTmuxOpsApi({ execOnSession }) {
     return last;
   }
 
-  async function detectTmuxEnv(event, sessionId, force = false) {
-    const cached = envCache.get(sessionId);
+  function envCacheKey(sessionId, scope) {
+    return scope?.user ? `${sessionId}::${scope.user}` : sessionId;
+  }
+
+  async function detectTmuxEnv(event, sessionId, force = false, scope = null) {
+    const cacheKey = envCacheKey(sessionId, scope);
+    const cached = envCache.get(cacheKey);
     if (!force && cached && Date.now() - cached.detectedAt < ENV_TTL_MS) {
       return cached;
     }
 
     const env = {
       version: { raw: "", major: 0, minor: 0, patch: "" },
-      binary: "tmux",
+      binary: cached?.binary && cached.binary !== "tmux" ? cached.binary : "tmux",
       sockets: [],
       preferredSocket: cached?.preferredSocket ?? null,
       detectedAt: Date.now(),
     };
 
-    const versionResult = await execShell(event, sessionId, "tmux -V 2>&1", 5000);
+    const probeOptions = scope?.user ? { scope } : {};
+
+    // Resolve the binary by absolute path (plain PATH, then login shell) so
+    // GUI apps / bare sshd sessions find Homebrew/cargo installs; all later
+    // invocations use the resolved path instead of relying on PATH.
+    if (env.binary === "tmux") {
+      const binResult = await execShell(event, sessionId, buildMuxBinaryProbe("tmux"), 8000, probeOptions);
+      if (binResult.success && !binResult.errorCode) {
+        const bin = parseMuxBinaryPath(binResult.stdout);
+        if (bin) env.binary = bin;
+      }
+    }
+
+    const versionResult = await execShell(event, sessionId, `${MUX_ENV_PREAMBLE}; ${env.binary} -V 2>&1`, 5000, probeOptions);
     if (versionResult.success && versionResult.stdout) {
       env.version = parseTmuxVersionString(versionResult.stdout);
     }
 
-    const binResult = await execShell(event, sessionId, "command -v tmux 2>/dev/null || which tmux 2>/dev/null", 5000);
-    if (binResult.success && binResult.stdout) {
-      const bin = binResult.stdout.split("\n").map((l) => l.trim()).find(Boolean);
-      if (bin) env.binary = bin;
+    if (scope?.user) {
+      if (scope.directAsRoot && Number.isFinite(scope.targetUid)) {
+        // Root fast path: enumerate the target user's live sockets directly.
+        const scan = await execShell(
+          event,
+          sessionId,
+          `for _nc_f in /tmp/tmux-${Math.floor(scope.targetUid)}/*; do [ -S "$_nc_f" ] && printf '%s\\n' "$_nc_f"; done; true`,
+          5000,
+          { scope },
+        );
+        if (scan.success && scan.stdout) {
+          env.sockets = String(scan.stdout).split("\n").map((l) => l.trim()).filter(Boolean);
+        }
+        envCache.set(cacheKey, env);
+        return env;
+      }
+      // Socket dirs live under /tmp/tmux-<uid of the target user>; when scoped
+      // we rely on that user's default socket instead of scanning our own uid.
+      envCache.set(cacheKey, env);
+      return env;
     }
 
     const socketResult = await execShell(
@@ -336,7 +439,7 @@ function createTmuxOpsApi({ execOnSession }) {
       env.sockets = parsed.sockets;
     }
 
-    envCache.set(sessionId, env);
+    envCache.set(cacheKey, env);
     return env;
   }
 
@@ -350,13 +453,27 @@ function createTmuxOpsApi({ execOnSession }) {
     return order;
   }
 
-  function rememberPreferredSocket(sessionId, env, socketPath) {
+  /**
+   * Socket candidates for a scoped call. The root fast path must NOT include
+   * the default (null) socket — that would hit root's own tmux server.
+   */
+  function scopedSocketOrder(env, scope) {
+    if (!scope?.directAsRoot) return buildSocketOrder(env);
+    const order = [];
+    if (env.preferredSocket) order.push(env.preferredSocket);
+    for (const socket of env.sockets || []) {
+      if (socket && !order.includes(socket)) order.push(socket);
+    }
+    return order;
+  }
+
+  function rememberPreferredSocket(sessionId, env, socketPath, scope = null) {
     const next = {
       ...env,
       preferredSocket: socketPath ?? env.preferredSocket ?? null,
       detectedAt: Date.now(),
     };
-    envCache.set(sessionId, next);
+    envCache.set(envCacheKey(sessionId, scope), next);
     return next;
   }
 
@@ -399,8 +516,9 @@ function createTmuxOpsApi({ execOnSession }) {
   }
 
   async function execTmux(event, sessionId, args, timeoutMs = 8000, options = {}) {
-    const env = options.env || await detectTmuxEnv(event, sessionId);
-    const shellOptions = { retryOnEmptyOutput: options.retryOnEmptyOutput ?? true };
+    const scope = options.scope ?? null;
+    const env = options.env || await detectTmuxEnv(event, sessionId, false, scope);
+    const shellOptions = { retryOnEmptyOutput: options.retryOnEmptyOutput ?? true, scope };
 
     if (Object.prototype.hasOwnProperty.call(options, "socketPath")) {
       const cmd = buildTmuxInvocation(env.binary, options.socketPath, args);
@@ -408,19 +526,23 @@ function createTmuxOpsApi({ execOnSession }) {
       return { ...result, socketPath: options.socketPath ?? null, env };
     }
 
-    const attempts = buildSocketOrder(env);
+    const attempts = scopedSocketOrder(env, scope);
+    if (attempts.length === 0) {
+      return { success: false, error: "No tmux server socket for the target user", env };
+    }
     let lastResult = null;
     for (const socketPathResolved of attempts) {
       const cmd = buildTmuxInvocation(env.binary, socketPathResolved, args);
       const result = await execShell(event, sessionId, cmd, timeoutMs, shellOptions);
       lastResult = result;
+      if (result?.errorCode) return { ...result, env };
       if (!result.success) continue;
 
       const combined = `${result.stderr || ""}\n${result.stdout || ""}`;
       if (isNoTmuxServerMessage(combined, result.code)) continue;
       const hasOutput = Boolean((result.stdout || "").trim());
       if (hasOutput || result.code === 0) {
-        if (hasOutput) rememberPreferredSocket(sessionId, env, socketPathResolved);
+        if (hasOutput) rememberPreferredSocket(sessionId, env, socketPathResolved, scope);
         return { ...result, socketPath: socketPathResolved, env };
       }
     }
@@ -428,10 +550,10 @@ function createTmuxOpsApi({ execOnSession }) {
     return lastResult || { success: false, error: "tmux command failed" };
   }
 
-  async function runTmux(event, sessionId, args, timeoutMs = 8000) {
+  async function runTmux(event, sessionId, args, timeoutMs = 8000, scope = null) {
     // No empty-output retry here: runTmux carries every mutating tmux command,
     // and list-* commands routed through it may legitimately print nothing.
-    const result = await execTmux(event, sessionId, args, timeoutMs, { retryOnEmptyOutput: false });
+    const result = await execTmux(event, sessionId, args, timeoutMs, { retryOnEmptyOutput: false, scope });
     if (!result.success) return result;
     if (result.code !== 0 && result.code !== null && result.code !== undefined) {
       return {
@@ -443,9 +565,15 @@ function createTmuxOpsApi({ execOnSession }) {
     return result;
   }
 
-  async function listSessions(event, sessionId) {
-    const env = await detectTmuxEnv(event, sessionId, true);
-    const socketPaths = buildSocketOrder(env);
+  async function listSessions(event, sessionId, scope = null) {
+    // Scoped (sudo) execs pay full PAM auth per call — no tty timestamp reuse —
+    // so honor the env TTL cache instead of force-probing on every poll.
+    const env = await detectTmuxEnv(event, sessionId, !scope?.user, scope);
+    const socketPaths = scopedSocketOrder(env, scope);
+    if (socketPaths.length === 0) {
+      // Root fast path with no live socket directory: the user has no server.
+      return { success: true, sessions: [], tmuxVersion: env.version.raw || undefined };
+    }
     let lastOutput = "";
 
     const buildListCommands = (binary, socketPath) => {
@@ -459,7 +587,15 @@ function createTmuxOpsApi({ execOnSession }) {
 
     for (const socketPath of socketPaths) {
       for (const cmd of buildListCommands(env.binary, socketPath)) {
-        const result = await execShell(event, sessionId, cmd, 8000);
+        const result = await execShell(event, sessionId, cmd, 8000, { scope });
+        if (result?.errorCode) {
+          return {
+            success: false,
+            error: result.error || "sudo authentication failed",
+            errorCode: result.errorCode,
+            tmuxVersion: env.version.raw || undefined,
+          };
+        }
         const output = String(result.stdout || result.stderr || "").trim();
         if (output) lastOutput = output;
         if (!result.success) continue;
@@ -467,7 +603,7 @@ function createTmuxOpsApi({ execOnSession }) {
 
         const sessions = parseListOutput(output);
         if (sessions.length > 0) {
-          rememberPreferredSocket(sessionId, env, socketPath);
+          rememberPreferredSocket(sessionId, env, socketPath, scope);
           return {
             success: true,
             sessions,
@@ -496,14 +632,14 @@ function createTmuxOpsApi({ execOnSession }) {
   }
 
   async function createSession(event, payload) {
-    const { sessionId, name, command } = payload || {};
+    const { sessionId, name, command, scope } = payload || {};
     if (!sessionId || !name) return { success: false, error: "Missing sessionId or name" };
     const safeName = sanitizeNewSessionName(name);
     if (!safeName) return { success: false, error: "Invalid session name" };
 
-    envCache.delete(sessionId);
-    const result = await runTmux(event, sessionId, `new-session -d -s ${shQuoteLocal(safeName)}`, 8000);
-    if (!result.success) return { success: false, error: result.error || result.stderr };
+    envCache.delete(envCacheKey(sessionId, scope));
+    const result = await runTmux(event, sessionId, `new-session -d -s ${shQuoteLocal(safeName)}`, 8000, scope);
+    if (!result.success) return { success: false, error: result.error || result.stderr, errorCode: result.errorCode };
     const cmd = String(command || "").trim();
     if (cmd) {
       const sendResult = await runTmux(
@@ -511,25 +647,28 @@ function createTmuxOpsApi({ execOnSession }) {
         sessionId,
         `send-keys -t ${shQuoteLocal(safeName)} ${shQuoteLocal(cmd)} C-m`,
         8000,
+        scope,
       );
       if (!sendResult.success) {
-        return { success: false, error: sendResult.error || sendResult.stderr };
+        return { success: false, error: sendResult.error || sendResult.stderr, errorCode: sendResult.errorCode };
       }
     }
-    envCache.delete(sessionId);
+    envCache.delete(envCacheKey(sessionId, scope));
     return { success: true, name: safeName };
   }
 
   async function listWindows(event, payload) {
-    const { sessionId, sessionName } = payload || {};
+    const { sessionId, sessionName, scope } = payload || {};
     if (!sessionId || !sessionName) return { success: false, error: "Missing params" };
     const name = String(sessionName).trim();
     const target = tmuxTarget(name);
     const targetExact = tmuxTarget(`=${name}`);
 
-    // Mirror listSessions: force-refresh env and walk the same socket order.
-    const env = await detectTmuxEnv(event, sessionId, true);
-    const socketPaths = buildSocketOrder(env);
+    // Mirror listSessions: honor the env cache for scoped calls (sudo PAM tax)
+    // and walk the same socket order.
+    const env = await detectTmuxEnv(event, sessionId, !scope?.user, scope);
+    const socketPaths = scopedSocketOrder(env, scope);
+    if (socketPaths.length === 0) return { success: true, windows: [] };
     let lastOutput = "";
     let lastError = "Cannot list tmux windows";
     const tried = [];
@@ -551,7 +690,15 @@ function createTmuxOpsApi({ execOnSession }) {
     for (const socketPath of socketPaths) {
       for (const cmd of buildCommands(env.binary, socketPath)) {
         tried.push(cmd);
-        const result = await execShell(event, sessionId, cmd, 8000);
+        const result = await execShell(event, sessionId, cmd, 8000, { scope });
+        if (result?.errorCode) {
+          return {
+            success: false,
+            error: result.error || "sudo authentication failed",
+            errorCode: result.errorCode,
+            debug: { lastOutput, tried: tried.slice(-8), sockets: socketPaths },
+          };
+        }
         const output = String(result.stdout || result.stderr || "").trim();
         if (output) lastOutput = output.slice(0, 500);
         if (!result.success && !output) {
@@ -571,7 +718,7 @@ function createTmuxOpsApi({ execOnSession }) {
         }
 
         if (windows.length > 0) {
-          rememberPreferredSocket(sessionId, env, socketPath);
+          rememberPreferredSocket(sessionId, env, socketPath, scope);
           return { success: true, windows };
         }
         if (output) lastError = output.slice(0, 240);
@@ -586,15 +733,16 @@ function createTmuxOpsApi({ execOnSession }) {
   }
 
   async function listPanes(event, payload) {
-    const { sessionId, sessionName, windowIndex } = payload || {};
+    const { sessionId, sessionName, windowIndex, scope } = payload || {};
     if (!sessionId || !sessionName || windowIndex === undefined) {
       return { success: false, error: "Missing params" };
     }
     const name = String(sessionName).trim();
     const target = tmuxTarget(name, windowIndex);
 
-    const env = await detectTmuxEnv(event, sessionId, true);
-    const socketPaths = buildSocketOrder(env);
+    const env = await detectTmuxEnv(event, sessionId, !scope?.user, scope);
+    const socketPaths = scopedSocketOrder(env, scope);
+    if (socketPaths.length === 0) return { success: true, panes: [] };
     let lastOutput = "";
     let lastError = "Cannot list tmux panes";
     const tried = [];
@@ -612,7 +760,15 @@ function createTmuxOpsApi({ execOnSession }) {
     for (const socketPath of socketPaths) {
       for (const cmd of buildCommands(env.binary, socketPath)) {
         tried.push(cmd);
-        const result = await execShell(event, sessionId, cmd, 8000);
+        const result = await execShell(event, sessionId, cmd, 8000, { scope });
+        if (result?.errorCode) {
+          return {
+            success: false,
+            error: result.error || "sudo authentication failed",
+            errorCode: result.errorCode,
+            debug: { lastOutput, tried: tried.slice(-8), sockets: socketPaths },
+          };
+        }
         const output = String(result.stdout || result.stderr || "").trim();
         if (output) lastOutput = output.slice(0, 500);
         if (!result.success && !output) {
@@ -623,7 +779,7 @@ function createTmuxOpsApi({ execOnSession }) {
 
         const panes = parseTmuxPanes(output);
         if (panes.length > 0) {
-          rememberPreferredSocket(sessionId, env, socketPath);
+          rememberPreferredSocket(sessionId, env, socketPath, scope);
           return { success: true, panes };
         }
         if (output) lastError = output.slice(0, 240);
@@ -638,46 +794,94 @@ function createTmuxOpsApi({ execOnSession }) {
   }
 
   async function listClients(event, payload) {
-    const { sessionId, sessionName } = payload || {};
+    const { sessionId, sessionName, scope } = payload || {};
     if (!sessionId) return { success: false, error: "Missing sessionId" };
     const result = await runTmux(
       event,
       sessionId,
       `list-clients -F ${tmuxFormatArg(TMUX_LIST_CLIENTS_FMT)}`,
       8000,
+      scope,
     );
-    if (!result.success) return { success: false, error: result.error };
+    if (!result.success) return { success: false, error: result.error, errorCode: result.errorCode };
     return {
       success: true,
       clients: parseTmuxClients(result.stdout, sessionName || undefined),
     };
   }
 
+  async function listTmuxSnapshot(event, sessionId, scope = null) {
+    const env = await detectTmuxEnv(event, sessionId, !scope?.user, scope);
+    const socketPaths = scopedSocketOrder(env, scope);
+    const empty = {
+      success: true,
+      sessions: [],
+      windowsBySession: {},
+      clients: [],
+      tmuxVersion: env.version.raw || undefined,
+    };
+    if (socketPaths.length === 0) return empty;
+
+    let lastOutput = "";
+    for (const socketPath of socketPaths) {
+      const script = buildSnapshotScript(env.binary, socketPath, env.version);
+      const result = await execShell(event, sessionId, script, 10000, { scope });
+      if (result?.errorCode) {
+        return {
+          success: false,
+          error: result.error || "sudo authentication failed",
+          errorCode: result.errorCode,
+          tmuxVersion: env.version.raw || undefined,
+        };
+      }
+      const output = String(result.stdout || result.stderr || "").trim();
+      if (output) lastOutput = output;
+      if (!result.success && !output) continue;
+      // No server on this socket: tmux prints the error before the markers.
+      const head = output.split(SNAPSHOT_WINDOWS_MARKER)[0] || "";
+      if (isNoTmuxServerMessage(head, result.code) || isNoTmuxServerMessage(head, 1)) {
+        return empty;
+      }
+      const snapshot = parseTmuxSnapshot(result.stdout || "");
+      if (!snapshot.markersSeen) continue;
+      if (output) rememberPreferredSocket(sessionId, env, socketPath, scope);
+      return {
+        success: true,
+        sessions: snapshot.sessions,
+        windowsBySession: snapshot.windowsBySession,
+        clients: snapshot.clients,
+        tmuxVersion: env.version.raw || undefined,
+      };
+    }
+
+    return {
+      success: false,
+      error: `Cannot snapshot tmux sessions (${lastOutput ? lastOutput.slice(0, 240) : "no output"})`,
+      tmuxVersion: env.version.raw || undefined,
+    };
+  }
+
   async function tmuxAction(event, payload) {
-    const { sessionId, action } = payload || {};
+    const { sessionId, action, scope } = payload || {};
     if (!sessionId || !action) return { success: false, error: "Missing sessionId or action" };
+    const run = (args) => runTmux(event, sessionId, args, 8000, scope);
 
     switch (action) {
       case "killSession": {
         const { sessionName } = payload;
         if (!sessionName) return { success: false, error: "Missing sessionName" };
-        return runTmux(event, sessionId, `kill-session -t ${tmuxTarget(sessionName)}`, 8000);
+        return run(`kill-session -t ${tmuxTarget(sessionName)}`);
       }
       case "renameSession": {
         const { sessionName, newName } = payload;
         const next = sanitizeNewSessionName(newName);
         if (!sessionName || !next) return { success: false, error: "Missing params" };
-        return runTmux(
-          event,
-          sessionId,
-          `rename-session -t ${tmuxTarget(sessionName)} ${shQuote(next)}`,
-          8000,
-        );
+        return run(`rename-session -t ${tmuxTarget(sessionName)} ${shQuote(next)}`);
       }
       case "detachSession": {
         const { sessionName } = payload;
         if (!sessionName) return { success: false, error: "Missing sessionName" };
-        return runTmux(event, sessionId, `detach-client -s ${tmuxTarget(sessionName)}`, 8000);
+        return run(`detach-client -s ${tmuxTarget(sessionName)}`);
       }
       case "createWindow": {
         const { sessionName, windowName } = payload;
@@ -685,22 +889,12 @@ function createTmuxOpsApi({ execOnSession }) {
         const nameArg = windowName && String(windowName).trim()
           ? ` -n ${shQuote(String(windowName).trim().slice(0, 64))}`
           : "";
-        return runTmux(
-          event,
-          sessionId,
-          `new-window -t ${tmuxTarget(sessionName)}${nameArg}`,
-          8000,
-        );
+        return run(`new-window -t ${tmuxTarget(sessionName)}${nameArg}`);
       }
       case "killWindow": {
         const { sessionName, windowIndex } = payload;
         if (!sessionName || windowIndex === undefined) return { success: false, error: "Missing params" };
-        return runTmux(
-          event,
-          sessionId,
-          `kill-window -t ${tmuxTarget(sessionName, windowIndex)}`,
-          8000,
-        );
+        return run(`kill-window -t ${tmuxTarget(sessionName, windowIndex)}`);
       }
       case "renameWindow": {
         const { sessionName, windowIndex, newName } = payload;
@@ -708,24 +902,14 @@ function createTmuxOpsApi({ execOnSession }) {
         if (!sessionName || windowIndex === undefined || !next) {
           return { success: false, error: "Missing params" };
         }
-        return runTmux(
-          event,
-          sessionId,
-          `rename-window -t ${tmuxTarget(sessionName, windowIndex)} ${shQuote(next)}`,
-          8000,
-        );
+        return run(`rename-window -t ${tmuxTarget(sessionName, windowIndex)} ${shQuote(next)}`);
       }
       case "killPane": {
         const { sessionName, windowIndex, paneIndex } = payload;
         if (!sessionName || windowIndex === undefined || paneIndex === undefined) {
           return { success: false, error: "Missing params" };
         }
-        return runTmux(
-          event,
-          sessionId,
-          `kill-pane -t ${tmuxTarget(sessionName, windowIndex, paneIndex)}`,
-          8000,
-        );
+        return run(`kill-pane -t ${tmuxTarget(sessionName, windowIndex, paneIndex)}`);
       }
       case "splitPane": {
         const { sessionName, windowIndex, paneIndex, direction } = payload;
@@ -736,7 +920,7 @@ function createTmuxOpsApi({ execOnSession }) {
         const target = paneIndex !== undefined && paneIndex !== null
           ? tmuxTarget(sessionName, windowIndex, paneIndex)
           : tmuxTarget(sessionName, windowIndex);
-        return runTmux(event, sessionId, `split-window -t ${target} ${flag}`, 8000);
+        return run(`split-window -t ${target} ${flag}`);
       }
       case "sendKeys": {
         const { sessionName, windowIndex, paneIndex, keys, enter } = payload;
@@ -745,25 +929,17 @@ function createTmuxOpsApi({ execOnSession }) {
         }
         const keyText = String(keys ?? "");
         const enterSuffix = enter !== false ? " C-m" : "";
-        return runTmux(
-          event,
-          sessionId,
+        return run(
           `send-keys -t ${tmuxTarget(sessionName, windowIndex, paneIndex)} ${shQuote(keyText)}${enterSuffix}`,
-          8000,
         );
       }
       case "selectWindow": {
         const { sessionName, windowIndex } = payload;
         if (!sessionName || windowIndex === undefined) return { success: false, error: "Missing params" };
-        return runTmux(
-          event,
-          sessionId,
-          `select-window -t ${tmuxTarget(sessionName, windowIndex)}`,
-          8000,
-        );
+        return run(`select-window -t ${tmuxTarget(sessionName, windowIndex)}`);
       }
       case "killServer": {
-        return runTmux(event, sessionId, "kill-server", 8000);
+        return run("kill-server");
       }
       default:
         return { success: false, error: `Unknown tmux action: ${action}` };
@@ -772,6 +948,7 @@ function createTmuxOpsApi({ execOnSession }) {
 
   return {
     listSessions,
+    listTmuxSnapshot,
     createSession,
     listWindows,
     listPanes,
@@ -786,6 +963,7 @@ module.exports = {
   createTmuxOpsApi,
   shQuote,
   tmuxTarget,
+  parseTmuxSnapshot,
   parseTmuxSessions,
   parseTmuxSessionsPlain,
   parseTmuxSessionNames,

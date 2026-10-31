@@ -10,6 +10,8 @@ export interface SystemPanelPromptField {
   placeholder?: string;
   initialValue?: string;
   mono?: boolean;
+  /** Renders the input as a password field. */
+  masked?: boolean;
   /** Defaults to true; optional fields may be submitted empty. */
   required?: boolean;
 }
@@ -17,6 +19,8 @@ export interface SystemPanelPromptField {
 interface SystemPanelPromptDialogProps {
   open: boolean;
   title: string;
+  /** Optional helper text rendered under the title. */
+  description?: string;
   fields: SystemPanelPromptField[];
   confirmLabel: string;
   busy?: boolean;
@@ -34,6 +38,7 @@ interface SystemPanelPromptDialogProps {
 export const SystemPanelPromptDialog = memo(function SystemPanelPromptDialog({
   open,
   title,
+  description,
   fields,
   confirmLabel,
   busy = false,
@@ -81,6 +86,9 @@ export const SystemPanelPromptDialog = memo(function SystemPanelPromptDialog({
       <DialogContent className="sm:max-w-[380px]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
+          {description && (
+            <p className="text-xs text-muted-foreground">{description}</p>
+          )}
         </DialogHeader>
 
         <div className="space-y-4 py-1">
@@ -91,6 +99,7 @@ export const SystemPanelPromptDialog = memo(function SystemPanelPromptDialog({
               </label>
               <Input
                 id={`system-prompt-${field.id}`}
+                type={field.masked ? 'password' : 'text'}
                 value={values[field.id] ?? ''}
                 onChange={(e) => setValues((prev) => ({ ...prev, [field.id]: e.target.value }))}
                 placeholder={field.placeholder}
