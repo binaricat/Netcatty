@@ -580,29 +580,58 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         && isInvalidAnthropicThinkingSignatureError(streamErr)
       ) {
         // Once per turn: strip signed thinking and retry. Nested failure throws
-        // to the outer catch (no loop).
+        // to the outer catch (no loop). Mirror the 413 progress-aware path so
+        // completed tool calls/results are retained and write replay is enabled
+        // (#4074 P1) instead of clearing the initial assistant and restarting.
         console.warn(
           '[Catty] Anthropic thinking signature invalid after prefix mutate; stripping signed reasoning and retrying once (#4073).',
           streamErr,
         );
-        const stripped = stripAnthropicSignedReasoningParts(messagesForStream);
+        const hadToolProgress = hadToolProgressBeforeRequestTooLarge(streamErr);
+        let retryBaseMessages = messagesForStream;
+        let retryAssistantMsgId = assistantMsgId;
+        let preservedWriteFingerprints: string[] = [];
+        if (hadToolProgress) {
+          const latestSession = ui.getLatestSession?.(sessionId);
+          if (latestSession) {
+            preservedWriteFingerprints = collectPreservedTerminalWriteFingerprints(
+              latestSession.messages,
+              assistantMsgId,
+              sessionId,
+            );
+            retryBaseMessages = buildSdkMessages(latestSession.messages, false, latestSession.contextCompaction);
+            retryBaseMessages = prepareMessagesForStream(retryBaseMessages);
+          }
+          retryAssistantMsgId = generateId();
+          ui.addMessageToSession(sessionId, {
+            id: retryAssistantMsgId,
+            role: 'assistant',
+            content: '',
+            timestamp: Date.now(),
+            model: activeModelId || context.activeProvider?.defaultModel || '',
+            providerId: context.activeProvider?.providerId,
+          });
+        } else {
+          ui.updateMessageById(sessionId, assistantMsgId, msg => ({
+            ...msg,
+            content: '',
+            thinking: undefined,
+            thinkingDurationMs: undefined,
+            providerContinuation: undefined,
+            toolCalls: undefined,
+            errorInfo: undefined,
+            executionStatus: undefined,
+            pendingApproval: undefined,
+          }));
+        }
+        const stripped = stripAnthropicSignedReasoningParts(retryBaseMessages);
         if (!stripped.didStrip) {
           throw streamErr;
         }
-        ui.updateMessageById(sessionId, assistantMsgId, msg => ({
-          ...msg,
-          content: '',
-          thinking: undefined,
-          thinkingDurationMs: undefined,
-          providerContinuation: undefined,
-          toolCalls: undefined,
-          errorInfo: undefined,
-          executionStatus: undefined,
-          pendingApproval: undefined,
-        }));
+        ctx.toolResultDedup.enableWriteReplay(preservedWriteFingerprints);
         const retryMessages = stripped.messages;
         emitContextSnapshot(retryMessages);
-        await runStream(retryMessages, assistantMsgId);
+        await runStream(retryMessages, retryAssistantMsgId);
       } else {
         throw streamErr;
       }
