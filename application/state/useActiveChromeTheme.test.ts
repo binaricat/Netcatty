@@ -156,7 +156,9 @@ for (const preference of ["system", "light", "dark"] as const) {
   }
 }
 
-test("terminal chrome never replaces the application native theme policy", async () => {
+// A hanging jsdom/React render must fail this test quickly instead of
+// consuming the whole CI job budget.
+test("terminal chrome never replaces the application native theme policy", { timeout: 15000 }, async () => {
   const { JSDOM } = await import("jsdom");
   const dom = new JSDOM('<!doctype html><html><head></head><body><div data-top-tabs-root></div></body></html>');
   const originalWindow = globalThis.window;
@@ -189,7 +191,7 @@ test("terminal chrome never replaces the application native theme policy", async
   }
 });
 
-test("system preference refresh reapplies an unchanged independent terminal chrome", async () => {
+test("system preference refresh reapplies an unchanged independent terminal chrome", { timeout: 15000 }, async () => {
   const { JSDOM } = await import("jsdom");
   const dom = new JSDOM('<!doctype html><html><head></head><body><div data-top-tabs-root></div></body></html>');
   const originalWindow = globalThis.window;
@@ -235,7 +237,7 @@ test("system preference refresh reapplies an unchanged independent terminal chro
   }
 });
 
-test("chrome hook reacts to OS preference changes with stable terminal props", async () => {
+test("chrome hook reacts to OS preference changes with stable terminal props", { timeout: 15000 }, async () => {
   const { JSDOM } = await import('jsdom');
   const { act, createElement } = await import('react');
   const { createRoot } = await import('react-dom/client');
