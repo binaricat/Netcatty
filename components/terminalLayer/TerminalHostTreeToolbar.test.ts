@@ -49,7 +49,7 @@ test('host tree toolbar uses shared show/collapse/hide layout like terminal tool
 test('host tree toolbar keeps every default primary action reachable at min width', () => {
   assert.ok(TERMINAL_HOST_TREE_TOOLBAR_MIN_REQUIRED_WIDTH <= 176);
   assert.match(toolbarSource, /aria-label=\{itemLabels\.localShell\}/);
-  assert.match(toolbarSource, /onClick=\{onCreateLocalTerminal\}/);
+  assert.match(toolbarSource, /onClick=\{\(\) => onCreateLocalTerminal\(\)\}/);
   assert.match(toolbarSource, /<Terminal size=\{14\} \/>/);
   assert.doesNotMatch(toolbarSource, /import \{[^}]*TerminalSquare[^}]*\} from 'lucide-react'/);
   assert.doesNotMatch(toolbarSource, /<TerminalSquare\b/);
