@@ -1138,11 +1138,18 @@ export function handleCreateLocalTerminalImpl(
   const { addConnectionLog, classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, systemInfoRef, terminalSettings } = getCtx();
 {
     const { username, hostname } = systemInfoRef.current;
-    const resolved = shell ?? resolveShellSetting(terminalSettings.localShell, discoveredShells, terminalSettings.localShellArgs);
+    // Vault/header buttons historically wired `onClick={handleCreateLocalTerminal}`.
+    // React then passes the MouseEvent as the first arg; treat only real shell
+    // objects (string command) as explicit so Settings localShell still applies (#4085).
+    const explicitShell = shell && typeof shell.command === 'string' ? shell : undefined;
+    const resolved = explicitShell
+      ?? resolveShellSetting(terminalSettings.localShell, discoveredShells, terminalSettings.localShellArgs);
     // Match by ID (not command) to avoid WSL distros all sharing wsl.exe
-    const matchedShell = !shell ? discoveredShells.find(s => s.id === terminalSettings.localShell) : undefined;
-    const shellName = shell?.name ?? matchedShell?.name;
-    const shellIcon = shell?.icon ?? matchedShell?.icon;
+    const matchedShell = !explicitShell
+      ? discoveredShells.find(s => s.id === terminalSettings.localShell)
+      : undefined;
+    const shellName = explicitShell?.name ?? matchedShell?.name;
+    const shellIcon = explicitShell?.icon ?? matchedShell?.icon;
     const sessionId = createLocalTerminal({
       shellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, navigator.userAgent),
       shell: resolved?.command,

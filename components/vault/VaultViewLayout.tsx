@@ -1071,7 +1071,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   size="sm"
                   variant="secondary"
                   className={vaultHeaderSecondaryButtonClass}
-                  onClick={onCreateLocalTerminal}
+                  onClick={() => onCreateLocalTerminal()}
                   tabIndex={isHostAsideOpen ? -1 : 0}
                 >
                   <TerminalSquare size={14} className="mr-2" />{" "}
