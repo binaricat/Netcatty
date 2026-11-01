@@ -1466,14 +1466,15 @@ function registerHandlers(ipcMain) {
   });
 
   ipcMain.handle("netcatty:trayPanel:startPortForward", async (_event, ruleId) => {
-    const win = await openMainWindowReady();
-    if (!win) return { success: false, error: "Main window is not available" };
     if (isAppRuntimeLocked()) {
+      const win = await openMainWindowReady();
+      if (!win) return { success: false, error: "Main window is not available" };
       sendOrQueuePortForwardToggle(win, ruleId, true);
       return { success: true };
     }
     const delivered = await sendToMainWindow("netcatty:trayPanel:startPortForward", ruleId, {
       focus: false,
+      createIfMissing: true,
     });
     return delivered
       ? { success: true }
