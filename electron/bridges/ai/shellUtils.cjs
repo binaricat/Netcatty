@@ -224,6 +224,50 @@ function looksLikeIdleAutoLogout(outputTail) {
   return false;
 }
 
+// ── OSC 133 (shell-integration) readiness ──
+//
+// Shell-integration scripts emit FinalTerm markers at deterministic lifecycle
+// points, independent of prompt text, colors, or themes:
+//   `ESC]133;A` — prompt start (shell is accepting input)
+//   `ESC]133;B` — command start
+//   `ESC]133;C` — output start
+//   `ESC]133;D` — command finished
+// with a BEL (`\x07`) or ST (`\x1b\\`) terminator. The frontend already parses
+// these (createXTermRuntime registerOscHandler(133)); the electron-side
+// readiness path can reuse the same signal from the RAW prompt-tracking tail.
+//
+// State semantics (stored on `session.osc133Ready`):
+//   true  — last marker in the tail is `A`: the shell is at a prompt,
+//           accepting input. Overrides the text whitelist (the marker is
+//           emitted at the exact point the shell starts accepting input,
+//           regardless of how the prompt is themed).
+//   false — last marker is `C` or `D`: a command is in flight, or finished
+//           but no new prompt marker has arrived yet. Overrides text-ready:
+//           a whitelisted-looking last line at this point is exactly the case
+//           where text lies (a running program echoing prompt-shaped output,
+//           the false-ready risk #4048 was rejected for).
+//   null  — no markers in the tail: non-integrated shell, fall back to the
+//           existing whitelist behavior unchanged.
+//
+// Only markers within the 4KB rolling window are visible. Integration scripts
+// emit markers on every prompt cycle, so the most recent cycle is within the
+// window in practice.
+const OSC133_A_MARKER = "\u001B]133;A";
+const OSC133_C_MARKER = "\u001B]133;C";
+const OSC133_D_MARKER = "\u001B]133;D";
+
+// lastIndexOf on the marker prefix matches both BEL- and ST-terminated
+// sequences (the terminator follows the opcode), and also accepts parameter
+// forms such as `133;D;0`.
+function computeOsc133ReadyState(tail) {
+  if (typeof tail !== "string" || !tail) return null;
+  const lastA = tail.lastIndexOf(OSC133_A_MARKER);
+  const lastC = tail.lastIndexOf(OSC133_C_MARKER);
+  const lastD = tail.lastIndexOf(OSC133_D_MARKER);
+  if (lastA < 0 && lastC < 0 && lastD < 0) return null;
+  return lastA >= lastC && lastA >= lastD;
+}
+
 function trackSessionIdlePrompt(session, chunk) {
   if (!session || typeof chunk !== "string" || !chunk) return "";
 
@@ -242,6 +286,7 @@ function trackSessionIdlePrompt(session, chunk) {
   }
   const nextTail = overflow > 0 ? combined.slice(overflow) : combined;
   session._promptTrackTail = nextTail;
+  session.osc133Ready = computeOsc133ReadyState(nextTail);
 
   const prompt = extractTrailingIdlePrompt(nextTail);
   if (prompt) {
@@ -269,11 +314,25 @@ function trackSessionIdlePrompt(session, chunk) {
 // back to `shellKind` alone.
 function getFreshIdlePrompt(session) {
   if (!session) return "";
+
+  // OSC 133 markers, when present, override the text whitelist: `C`/`D` as
+  // the last marker means the shell is not at a prompt even if the partial
+  // text looks like one, and `A` means it is accepting input regardless of
+  // how the prompt is themed. `null` (no markers) keeps the whitelist path.
+  if (session.osc133Ready === false) return "";
+
   const cached = session.lastIdlePrompt;
   if (!cached) return "";
 
   const tail = session._promptTrackTail;
   if (typeof tail !== "string" || !tail) return "";
+
+  if (session.osc133Ready === true) {
+    // A fresh `133;A` marker confirms the shell started a new prompt; bypass
+    // the endsWith expiry that exists to detect unrecognized output, since
+    // the marker — not the text — is the readiness proof here.
+    return cached;
+  }
 
   const normalizedTail = stripAnsi(tail).replace(/\r/g, "\n");
   const normalizedCached = stripAnsi(cached).replace(/\r/g, "\n");
@@ -292,12 +351,20 @@ function getVisibleIdlePrompt(session) {
   const tail = session?._promptTrackTail;
   if (typeof tail !== "string" || !tail) return "";
 
+  // Mirror getFreshIdlePrompt: markers override text; no markers → whitelist.
+  if (session.osc133Ready === false) return "";
+
   const { terminalCursorLine } = require("../terminalLogSanitizer.cjs");
   const cursorLine = terminalCursorLine(tail, {
     alternateScreenActive: session._promptTrackAltScreenAtTailStart === true,
   });
   const rightTrimmed = cursorLine.replace(/\s+$/, "");
   if (!rightTrimmed) return "";
+  if (session.osc133Ready === true) {
+    // Marker-confirmed prompt start: accept the cursor line without the
+    // whitelist shape check (custom / colored prompts qualify too).
+    return /\s$/.test(cursorLine) ? `${rightTrimmed} ` : rightTrimmed;
+  }
   if (
     !isDefaultPowerShellPromptLine(rightTrimmed)
     && !isDefaultPosixPromptLine(rightTrimmed)
@@ -1251,6 +1318,7 @@ module.exports = {
   extractTrailingIdlePrompt,
   getFreshIdlePrompt,
   getVisibleIdlePrompt,
+  computeOsc133ReadyState,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,

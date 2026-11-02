@@ -393,3 +393,46 @@ test('real pending PowerShell input is still not sent', async (t) => {
   assert.match(result.error, /no command was sent/);
   assert.deepEqual(pty.writes, []);
 });
+
+test('OSC 133 A marker readies exec for a colored P10k prompt the whitelist rejects', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  // Colored P10k-style prompt after a prompt-start marker; the SGR codes and
+  // ❯ shape are irrelevant — the marker proves the shell accepts input.
+  trackSessionIdlePrompt(
+    session,
+    '\x1b]133;A\x07\x1b[38;5;39m~/src\x1b[0m \x1b[38;5;213m❯\x1b[0m ',
+  );
+  assert.equal(readyPrompt(session), '~/src ❯ ');
+  const result = await startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  }).resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
+test('OSC 133 C/D markers keep exec gated even when output echoes a known prompt', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  trackSessionIdlePrompt(session, '\x1b]133;A\x07PS C:\\Users\\alice> ');
+  assert.equal(readyPrompt(session), 'PS C:\\Users\\alice> ');
+  // Command in flight; the program echoes prompt-shaped text. Text says
+  // ready, the last marker says otherwise — markers override.
+  trackSessionIdlePrompt(session, '\x1b]133;C\x07build running...\r\nPS C:\\Users\\alice> ');
+  assert.equal(readyPrompt(session), '');
+  const job = startPtyJob(pty, 'echo OK', {
+    shellKind: 'powershell',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 50,
+    timeoutMs: 1000,
+  });
+  t.mock.timers.tick(50);
+  const result = await job.resultPromise;
+  assert.equal(result.code, 'SHELL_NOT_READY');
+  assert.match(result.error, /no command was sent/);
+  assert.deepEqual(pty.writes, []);
+});
