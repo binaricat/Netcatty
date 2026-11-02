@@ -99,6 +99,7 @@ export const enAiMessages: Messages = {
   'ai.providers.advancedParams.hint': 'Leave blank to use provider defaults.',
   'ai.providers.advancedParams.maxTokens.placeholder': 'e.g. 4096',
   'ai.providers.advancedParams.default': 'Provider default',
+  'ai.providers.advancedParams.reasoningEffort.help': 'xhigh and max are only sent when the selected model supports them; otherwise they are clamped to the deepest supported level.',
 
   // AI Codex
   'ai.codex': 'Codex',

@@ -7,8 +7,11 @@ import {
   buildCattyReasoningProviderOptions,
   cattyReasoningLevelsForSelection,
   estimateReasoningOutputReserve,
+  isProviderReasoningEffort,
   openaiModelLikelySupportsReasoning,
+  openaiModelSupportsExtraHighReasoning,
   openaiModelSupportsNoneReasoning,
+  PROVIDER_REASONING_EFFORT_OPTIONS,
   resolveEffectiveCattyReasoningEffort,
   resolveVisibleCattyThinkingLevel,
 } from './cattyReasoning';
@@ -124,9 +127,10 @@ test('cattyReasoningLevelsForSelection hides the chip unless the model can take 
   );
   assert.ok(cattyReasoningLevelsForSelection({ providerId: 'anthropic' }, 'claude-opus-4-6').includes('high'));
   assert.ok(cattyReasoningLevelsForSelection({ providerId: 'anthropic' }, 'claude-sonnet-5').includes('high'));
+  // Fable 5 supports all five effort levels but is always-on, so no `off`.
   assert.deepEqual(
     cattyReasoningLevelsForSelection({ providerId: 'anthropic' }, 'claude-fable-5'),
-    ['low', 'medium', 'high'],
+    ['low', 'medium', 'high', 'xhigh', 'max'],
   );
   assert.deepEqual(
     cattyReasoningLevelsForSelection({ providerId: 'anthropic' }, 'claude-3-haiku-20240307'),
@@ -362,6 +366,130 @@ test('explicit provider effort exposes controls for a custom OpenAI model', () =
   const provider = { providerId: 'custom' as const, style: 'openai' as const, advancedParams: { reasoningEffort: 'low' } };
   assert.deepEqual(cattyReasoningLevelsForSelection(provider, 'relay-model'), ['low', 'medium', 'high']);
   assert.deepEqual(cattyReasoningLevelsForSelection({ ...provider, advancedParams: {} }, 'relay-model'), []);
+});
+
+test('the provider default select accepts every documented effort level', () => {
+  assert.deepEqual(PROVIDER_REASONING_EFFORT_OPTIONS, ['low', 'medium', 'high', 'xhigh', 'max']);
+  for (const level of ['low', 'medium', 'high', 'xhigh', 'max']) {
+    assert.equal(isProviderReasoningEffort(level), true, level);
+  }
+  // Persisted values that predate the graded scale must still be honored.
+  for (const level of ['default', '', 'MAX', 'ultra', null, undefined]) {
+    assert.equal(isProviderReasoningEffort(level), false, String(level));
+  }
+});
+
+test('DeepSeek V4 grades reasoning effort up to max', () => {
+  const provider = { providerId: 'deepseek' as const };
+  for (const model of ['deepseek-v4.1-flash', 'deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4.1-pro']) {
+    assert.equal(openaiModelLikelySupportsReasoning(model), true, model);
+    assert.deepEqual(
+      cattyReasoningLevelsForSelection(provider, model),
+      ['low', 'medium', 'high', 'xhigh', 'max'],
+      model,
+    );
+    for (const level of ['high', 'xhigh', 'max']) {
+      assert.deepEqual(
+        buildCattyReasoningProviderOptions(provider, level, model),
+        { openai: { reasoningEffort: level } },
+        `${model} ${level}`,
+      );
+    }
+  }
+});
+
+test('DeepSeek keeps sending max from a provider default on a custom alias', () => {
+  const provider = {
+    providerId: 'custom' as const,
+    style: 'openai' as const,
+    advancedParams: { reasoningEffort: 'max' },
+  };
+  assert.deepEqual(
+    buildCattyReasoningProviderOptions(provider, resolveEffectiveCattyReasoningEffort(undefined, 'max'), 'deepseek-v4.1-flash'),
+    { openai: { reasoningEffort: 'max' } },
+  );
+});
+
+test('OpenAI models that stop at high clamp xhigh and max instead of dropping them', () => {
+  for (const model of ['gpt-5.5', 'o3', 'o4-mini']) {
+    for (const level of ['xhigh', 'max']) {
+      assert.deepEqual(
+        buildCattyReasoningProviderOptions({ providerId: 'openai' }, level, model),
+        { openai: { reasoningEffort: 'high' } },
+        `${model} ${level}`,
+      );
+    }
+  }
+  assert.deepEqual(
+    cattyReasoningLevelsForSelection({ providerId: 'openai' }, 'gpt-5.5'),
+    ['off', 'low', 'medium', 'high'],
+  );
+});
+
+test('only the Codex Max line advertises xhigh for OpenAI', () => {
+  assert.equal(openaiModelSupportsExtraHighReasoning('gpt-5.1-codex-max'), true);
+  assert.equal(openaiModelSupportsExtraHighReasoning('gpt-5.5'), false);
+  assert.deepEqual(
+    buildCattyReasoningProviderOptions({ providerId: 'openai' }, 'xhigh', 'gpt-5.1-codex-max'),
+    { openai: { reasoningEffort: 'xhigh' } },
+  );
+});
+
+test('Anthropic adaptive thinking exposes max, and xhigh from 4.7 onward', () => {
+  // 4.6 documents low|medium|high|max.
+  assert.deepEqual(
+    cattyReasoningLevelsForSelection({ providerId: 'anthropic' }, 'claude-opus-4-6'),
+    ['off', 'low', 'medium', 'high', 'max'],
+  );
+  assert.deepEqual(
+    buildCattyReasoningProviderOptions({ providerId: 'anthropic' }, 'max', 'claude-opus-4-6'),
+    { anthropic: { thinking: { type: 'adaptive' }, effort: 'max' } },
+  );
+  // 4.6 has no `xhigh`, so it lands on its ceiling rather than being dropped.
+  assert.deepEqual(
+    buildCattyReasoningProviderOptions({ providerId: 'anthropic' }, 'xhigh', 'claude-opus-4-6'),
+    { anthropic: { thinking: { type: 'adaptive' }, effort: 'max' } },
+  );
+  // 4.7 and 5.x accept xhigh.
+  for (const model of ['claude-opus-4-7', 'claude-sonnet-5']) {
+    assert.deepEqual(
+      cattyReasoningLevelsForSelection({ providerId: 'anthropic' }, model),
+      ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
+      model,
+    );
+    assert.deepEqual(
+      buildCattyReasoningProviderOptions({ providerId: 'anthropic' }, 'xhigh', model),
+      { anthropic: { thinking: { type: 'adaptive' }, effort: 'xhigh' } },
+      model,
+    );
+  }
+});
+
+test('Anthropic always-on families never advertise off alongside xhigh and max', () => {
+  assert.deepEqual(
+    cattyReasoningLevelsForSelection({ providerId: 'anthropic' }, 'claude-fable-5'),
+    ['low', 'medium', 'high', 'xhigh', 'max'],
+  );
+  // Legacy budgeted thinking has no tier above high.
+  assert.deepEqual(
+    buildCattyReasoningProviderOptions({ providerId: 'anthropic' }, 'max', 'claude-sonnet-4-5'),
+    { anthropic: { thinking: { type: 'enabled', budgetTokens: 20_000 } } },
+  );
+});
+
+test('Gemini clamps xhigh and max onto its highest thinking level', () => {
+  for (const level of ['xhigh', 'max'] as const) {
+    assert.deepEqual(
+      buildCattyReasoningProviderOptions({ providerId: 'google' }, level, 'gemini-3-flash'),
+      { google: { thinkingConfig: { thinkingLevel: 'high', includeThoughts: true } } },
+      `gemini-3-flash ${level}`,
+    );
+    assert.deepEqual(
+      buildCattyReasoningProviderOptions({ providerId: 'google' }, level, 'gemini-2.5-pro'),
+      { google: { thinkingConfig: { thinkingBudget: 16_384, includeThoughts: true } } },
+      `gemini-2.5-pro ${level}`,
+    );
+  }
 });
 
 test('custom model requests send explicit effort for Chat and Responses and omit it by default', async () => {

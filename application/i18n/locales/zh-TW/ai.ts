@@ -90,6 +90,7 @@ export const zhTWAiMessages: Messages = {
   'ai.providers.advancedParams.hint': '留空則使用供應商預設值。',
   'ai.providers.advancedParams.maxTokens.placeholder': '例如 4096',
   'ai.providers.advancedParams.default': '供應商預設',
+  'ai.providers.advancedParams.reasoningEffort.help': '僅當所選模型支援時才會送出 xhigh 與 max，否則自動收斂到該模型支援的最高檔位。',
 
   // AI Codex
   'ai.codex': 'Codex',

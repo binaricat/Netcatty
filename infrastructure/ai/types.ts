@@ -42,7 +42,7 @@ export interface ProviderAdvancedParams {
   frequencyPenalty?: number;  // -2–2
   presencePenalty?: number;   // -2–2
   /** Provider-level default thinking depth; omitted = API default (not sent). */
-  reasoningEffort?: string;   // 'low' | 'medium' | 'high'
+  reasoningEffort?: string;   // 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 
 export interface ProviderConfig {

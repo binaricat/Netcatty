@@ -71,6 +71,7 @@ export const ruAiMessages: Messages = {
   'ai.providers.advancedParams.hint': 'Оставьте пустым, чтобы использовать настройки провайдера по умолчанию.',
   'ai.providers.advancedParams.maxTokens.placeholder': 'например, 4096',
   'ai.providers.advancedParams.default': 'По умолчанию у провайдера',
+  'ai.providers.advancedParams.reasoningEffort.help': 'xhigh и max отправляются только если выбранная модель их поддерживает; иначе значение понижается до максимального поддерживаемого уровня.',
 
   // AI Codex
   'ai.codex': 'Codex',
