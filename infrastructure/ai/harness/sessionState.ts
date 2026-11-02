@@ -1,4 +1,5 @@
 import { redactSecretsForModel } from './modelSecretRedaction';
+import { sliceHead } from '../textBoundaries';
 
 const MAX_DECISIONS = 15;
 const MAX_BLOCKERS = 10;
@@ -80,7 +81,7 @@ export class SessionStateStore {
   mergeFromUserGoal(chatSessionId: string, goal: string | undefined): void {
     if (!goal?.trim()) return;
     const state = { ...this.get(chatSessionId) };
-    state.userGoal = goal.trim().slice(0, 500);
+    state.userGoal = sliceHead(goal.trim(), 500);
     state.updatedAt = Date.now();
     this.bySession.set(chatSessionId, state);
   }
@@ -118,7 +119,7 @@ export class SessionStateStore {
   mergePlan(chatSessionId: string, items: Array<{ text: string; completed: boolean }>): void {
     const state = { ...this.get(chatSessionId) };
     state.planItems = items.slice(-30).map(item => ({
-      text: item.text.slice(0, 300),
+      text: sliceHead(item.text, 300),
       completed: item.completed,
     }));
     state.updatedAt = Date.now();
@@ -241,7 +242,7 @@ export class SessionStateStore {
     }
 
     if (isError) {
-      const preview = resultText.slice(0, 160).replace(/\s+/g, ' ').trim();
+      const preview = sliceHead(resultText, 160).replace(/\s+/g, ' ').trim();
       if (preview) {
         state.blockers = pushUnique(state.blockers, `${toolName}: ${preview}`, MAX_BLOCKERS);
       }

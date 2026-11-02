@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../types';
 import type { ExternalBridgeHistoryMessage } from './types';
+import { sliceHead } from '../textBoundaries';
 import { buildHistoricalToolResultReplayText, buildHistoricalUserReplayContent } from '../../../components/ai/cattyHistoryReplay';
 import { formatVaultNoteReferences, isVaultNoteAttachment } from '../../../application/state/vaultNoteAttachment';
 
@@ -47,7 +48,7 @@ const TRIVIAL_ASSISTANT_MESSAGE_PATTERNS = [
 
 function truncateText(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
-  return `${value.slice(0, Math.max(0, maxChars - 24)).trimEnd()}\n[truncated]`;
+  return `${sliceHead(value, Math.max(0, maxChars - 24)).trimEnd()}\n[truncated]`;
 }
 
 function normalizeWhitespace(value: string): string {
