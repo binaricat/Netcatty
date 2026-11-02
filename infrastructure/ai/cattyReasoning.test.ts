@@ -364,7 +364,12 @@ test('applyResponsesApiStatelessStoreOption always requests encrypted reasoning 
 
 test('explicit provider effort exposes controls for a custom OpenAI model', () => {
   const provider = { providerId: 'custom' as const, style: 'openai' as const, advancedParams: { reasoningEffort: 'low' } };
-  assert.deepEqual(cattyReasoningLevelsForSelection(provider, 'relay-model'), ['low', 'medium', 'high']);
+  // An explicit default is the user's assertion that this unclassifiable
+  // alias takes reasoning_effort, so the full ladder is offered.
+  assert.deepEqual(
+    cattyReasoningLevelsForSelection(provider, 'relay-model'),
+    ['low', 'medium', 'high', 'xhigh', 'max'],
+  );
   assert.deepEqual(cattyReasoningLevelsForSelection({ ...provider, advancedParams: {} }, 'relay-model'), []);
 });
 
@@ -408,6 +413,33 @@ test('DeepSeek keeps sending max from a provider default on a custom alias', () 
     buildCattyReasoningProviderOptions(provider, resolveEffectiveCattyReasoningEffort(undefined, 'max'), 'deepseek-v4.1-flash'),
     { openai: { reasoningEffort: 'max' } },
   );
+});
+
+test('custom relay aliases keep the extended tier the provider default asserts', () => {
+  // `relay-model` matches no capability pattern, so the explicit provider
+  // default is the only signal that it accepts reasoning_effort. Advertising
+  // just low/medium/high would downgrade a configured xhigh/max to high.
+  for (const level of ['low', 'medium', 'high', 'xhigh', 'max'] as const) {
+    const provider = {
+      providerId: 'custom' as const,
+      style: 'openai' as const,
+      advancedParams: { reasoningEffort: level },
+    };
+    assert.deepEqual(
+      cattyReasoningLevelsForSelection(provider, 'relay-model'),
+      ['low', 'medium', 'high', 'xhigh', 'max'],
+      level,
+    );
+    assert.deepEqual(
+      buildCattyReasoningProviderOptions(
+        provider,
+        resolveEffectiveCattyReasoningEffort(undefined, level),
+        'relay-model',
+      ),
+      { openai: { reasoningEffort: level } },
+      level,
+    );
+  }
 });
 
 test('OpenAI models that stop at high clamp xhigh and max instead of dropping them', () => {

@@ -360,8 +360,13 @@ export function cattyReasoningLevelsForSelection(
   if (style === 'openai') {
     if (!modelId || openaiModelKnownUnsupportedReasoning(modelId)) return [];
     if (!openaiModelLikelySupportsReasoning(modelId)) {
+      // A custom provider with an explicit default is the escape hatch for
+      // relay aliases we cannot classify. Advertising only the legacy three
+      // levels would let resolveVisibleCattyThinkingLevel downgrade a
+      // configured `xhigh`/`max` to `high`, so the user's own assertion about
+      // the alias becomes the capability signal instead.
       return provider.providerId === 'custom' && isProviderReasoningEffort(provider.advancedParams?.reasoningEffort)
-        ? LEVELS_LOW_MEDIUM_HIGH
+        ? LEVELS_LOW_MEDIUM_HIGH_XHIGH_MAX
         : [];
     }
     // DeepSeek grades `reasoning_effort` continuously and `none` is not part of
