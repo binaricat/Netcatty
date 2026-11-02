@@ -4,7 +4,7 @@ import React from 'react';
 import { I18nProvider } from '../application/i18n/I18nProvider';
 import { createDomRenderer, dispatchDomEvent, flushEffects, installDomEnvironment, runWithAct } from './test-support/renderReactDom';
 
-test('backup cleanup confirms, preserves data on cancel, reports errors and refreshes after retry', async () => {
+test('backup cleanup confirms, preserves data on cancel, refreshes after retry and explains decrypt failures', async () => {
   const dom = installDomEnvironment();
   const globals = {
     localStorage: dom.window.localStorage,
@@ -37,6 +37,9 @@ test('backup cleanup confirms, preserves data on cancel, reports errors and refr
       id: 'fixture', createdAt: 1, reason: 'before_restore', fingerprint: 'fixture',
       preview: { hostCount: 1, keyCount: 0, snippetCount: 0, noteCount: 0, identityCount: 0, portForwardingRuleCount: 0 },
     }] : [],
+    readVaultBackup: async () => {
+      throw new Error("Error invoking remote method 'netcatty:vaultBackups:read': Error: VAULT_BACKUP_DECRYPT_FAILED");
+    },
     clearVaultBackups: async () => {
       calls += 1;
       if (fail) throw new Error('access denied');
@@ -57,6 +60,8 @@ test('backup cleanup confirms, preserves data on cancel, reports errors and refr
   try {
     await renderer.render(<I18nProvider locale="en"><LocalBackupsPanel onApplyPayload={() => { throw new Error('must not restore'); }} /></I18nProvider>);
     await flushEffects();
+    assert.match(dom.document.body.textContent ?? '', /This folder alone is not a complete, portable backup/);
+    assert.match(dom.document.body.textContent ?? '', /Deleting or wiping the app profile \(userData\)/);
     assert.doesNotMatch(dom.document.body.textContent ?? '', /Master key required/);
     assert.equal([...dom.document.querySelectorAll('button')].some((el) => el.textContent === 'Restore'), false);
     await runWithAct(async () => { finishProbe?.({ encryptionAvailable: false }); });
@@ -90,6 +95,19 @@ test('backup cleanup confirms, preserves data on cancel, reports errors and refr
     assert.equal(dom.document.querySelector('[role="dialog"]'), null);
     assert.match(dom.document.body.textContent ?? '', /No local backups yet/);
     assert.match(notices[1], /^success:/);
+
+    hasBackup = true;
+    await renderer.render(<I18nProvider locale="zh-CN"><LocalBackupsPanel key="restore" onApplyPayload={() => { throw new Error('must not apply unreadable backup'); }} /></I18nProvider>);
+    await runWithAct(async () => { finishProbe?.({ encryptionAvailable: true }); });
+    await flushEffects();
+    assert.match(dom.document.body.textContent ?? '', /仅复制此文件夹并不构成完整、可迁移的备份/);
+    await click(button('恢复'));
+    dialog = dom.document.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    await click(button('恢复', dialog));
+    assert.match(notices[2], /当前应用配置无法解密此备份/);
+    assert.match(notices[2], /可能是加密密钥丢失、应用配置已更改，或备份已损坏/);
+    assert.doesNotMatch(notices[2], /VAULT_BACKUP_DECRYPT_FAILED|decryptString/);
   } finally {
     toast.success = success;
     toast.error = error;
