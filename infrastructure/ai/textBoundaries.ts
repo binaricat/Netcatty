@@ -74,11 +74,14 @@ export function toWellFormedValue<T>(value: T): T {
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return value;
   let changed = false;
-  const next: Record<string, unknown> = {};
+  // Keep the source prototype and define own properties: plain assignment of
+  // an own `__proto__` key (e.g. from JSON.parse) would hit the inherited
+  // setter, dropping the field and swapping the clone's prototype.
+  const next = Object.create(prototype) as Record<string, unknown>;
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
     const fitted = toWellFormedValue(entry);
     if (fitted !== entry) changed = true;
-    next[key] = fitted;
+    Object.defineProperty(next, key, { value: fitted, enumerable: true, writable: true, configurable: true });
   }
   return (changed ? next : value) as T;
 }

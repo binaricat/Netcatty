@@ -54,6 +54,20 @@ test("toWellFormedValue rewrites nested strings and keeps clean subtrees", () =>
   assert.equal(toWellFormedValue(clean), clean);
 });
 
+test("toWellFormedValue keeps an own __proto__ key as data", () => {
+  const input = JSON.parse('{"__proto__":{"polluted":true},"text":"\\udfc6x"}') as Record<string, unknown>;
+  const output = toWellFormedValue(input);
+  assert.notEqual(output, input);
+  assert.equal(output.text, "�x");
+  assert.equal(Object.getPrototypeOf(output), Object.prototype);
+  assert.ok(Object.hasOwn(output, "__proto__"));
+  assert.deepEqual(Object.getOwnPropertyDescriptor(output, "__proto__")?.value, { polluted: true });
+  assert.equal(JSON.stringify(output), '{"__proto__":{"polluted":true},"text":"�x"}');
+
+  const bare = Object.assign(Object.create(null), { text: "\ud83c" });
+  assert.equal(Object.getPrototypeOf(toWellFormedValue(bare)), null);
+});
+
 // Regression: a mihomo log tail with 🏆 on every line was JSON-stringified
 // into one long line; shortening it cut the emoji in half and DeepSeek
 // rejected every later request with "lone leading surrogate in hex escape".
