@@ -199,6 +199,7 @@ function registerProviderHandlers(ctx) {
     "api.exa.ai",
     "api.bochaai.com",
     "open.bigmodel.cn",
+    "api.keenable.ai",
   ]);
   // Dynamically populated from configured provider baseURLs
   const providerFetchHosts = new Set();

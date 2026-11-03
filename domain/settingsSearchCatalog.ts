@@ -812,7 +812,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     labelKey: "ai.webSearch.enable",
     descriptionKey: "ai.webSearch.enable.description",
     sectionKey: "ai.webSearch.title",
-    keywords: ["tavily", "brave", "web search"],
+    keywords: ["tavily", "brave", "keenable", "web search"],
   },
   {
     id: "ai-web-search-provider",

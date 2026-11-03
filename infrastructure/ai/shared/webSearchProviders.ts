@@ -181,6 +181,34 @@ async function searchSearxng(
 }
 
 // ---------------------------------------------------------------------------
+// Keenable (keyless public endpoint)
+// ---------------------------------------------------------------------------
+
+const KEENABLE_SNIPPET_MAX_CHARS = 500;
+
+async function searchKeenable(
+  bridge: NetcattyBridge,
+  config: WebSearchConfig,
+  query: string,
+  maxResults: number,
+): Promise<WebSearchResult[]> {
+  const host = resolveApiHost(config);
+  const data = await fetchJson(bridge, `${host}/v1/search/public`, 'POST', {
+    'Content-Type': 'application/json',
+    'X-Keenable-Title': 'Netcatty',
+  }, JSON.stringify({
+    query,
+    max_results: maxResults,
+  })) as { results?: Array<{ title?: string; url?: string; description?: string; snippet?: string }> };
+
+  return (data.results || []).map(r => ({
+    title: r.title || '',
+    url: r.url || '',
+    content: r.description || (r.snippet || '').slice(0, KEENABLE_SNIPPET_MAX_CHARS),
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
 
@@ -190,6 +218,7 @@ const PROVIDER_SEARCH_FNS: Record<string, typeof searchTavily> = {
   bocha: searchBocha,
   zhipu: searchZhipu,
   searxng: searchSearxng,
+  keenable: searchKeenable,
 };
 
 /**

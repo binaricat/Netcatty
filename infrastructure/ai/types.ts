@@ -368,7 +368,7 @@ export interface DiscoveredAgent {
 }
 
 // Web Search types
-export type WebSearchProviderId = 'tavily' | 'exa' | 'bocha' | 'zhipu' | 'searxng';
+export type WebSearchProviderId = 'tavily' | 'exa' | 'bocha' | 'zhipu' | 'searxng' | 'keenable';
 
 export interface WebSearchConfig {
   providerId: WebSearchProviderId;
@@ -384,6 +384,8 @@ export const WEB_SEARCH_PROVIDER_PRESETS: Record<WebSearchProviderId, { name: st
   bocha: { name: 'Bocha', defaultApiHost: 'https://api.bochaai.com', requiresApiKey: true },
   zhipu: { name: 'Zhipu', defaultApiHost: 'https://open.bigmodel.cn/api/paas/v4', requiresApiKey: true },
   searxng: { name: 'SearXNG', defaultApiHost: '', requiresApiKey: false },
+  // Keyless public endpoint; no API key needed.
+  keenable: { name: 'Keenable', defaultApiHost: 'https://api.keenable.ai', requiresApiKey: false },
 };
 
 /** Check if a WebSearchConfig is fully configured and ready to use. */

@@ -12,6 +12,7 @@ const SEARCH_ICON_PATHS: Record<WebSearchProviderId, string> = {
   bocha: "/ai/search/bocha.webp",
   zhipu: "/ai/search/zhipu.png",
   searxng: "/ai/search/searxng.svg",
+  keenable: "/ai/search/keenable.svg",
 };
 
 const SearchProviderIcon: React.FC<{ providerId: WebSearchProviderId }> = ({ providerId }) => (
