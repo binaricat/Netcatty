@@ -132,6 +132,9 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
   } = input;
 
   let runtimeContext = initialRuntimeContext;
+  if (!Array.isArray(sdkMessages) || sdkMessages.length === 0) {
+    throw new Error('Invalid prompt: Catty refused an empty messages array (#4102).');
+  }
   const { tools, toolsContext } = toolsBundle;
   const endpoint = input.providerConfig
     ? resolveProviderEndpoint(input.providerConfig, resolveProviderStyle(input.providerConfig), undefined)

@@ -518,6 +518,12 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
               stepMessages = stripped.messages;
             }
           }
+          // Never replace the step prompt with [] (#4102). Prefer the SDK's
+          // pre-prepare messages over an emptied prepareStepContext result.
+          if (stepMessages.length === 0 && messages.length > 0) {
+            console.warn('[Catty] prepareStep produced empty messages; keeping prior step messages (#4102)');
+            stepMessages = messages;
+          }
           emitContextSnapshot(stepMessages);
           return {
             messages: stepMessages,

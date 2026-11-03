@@ -819,3 +819,55 @@ test('durable summary keeps Anthropic signed thinking for DeepSeek (#4074 P2)', 
   assert.ok(reasoning.some((p) => p.text === 'unsigned recent'));
 });
 
+
+test('prepareCattyMessagesForStream does not return [] when prune empties reasoning-only history (#4102)', () => {
+  const reasoningOnly = [
+    {
+      role: 'assistant' as const,
+      content: [{ type: 'reasoning' as const, text: 'plan the ping' }],
+    },
+    {
+      role: 'assistant' as const,
+      content: [{ type: 'reasoning' as const, text: 'then run it' }],
+    },
+  ];
+  const prepared = prepareCattyMessagesForStream(reasoningOnly);
+  assert.ok(prepared.length > 0, 'must not hand AI SDK an empty messages array');
+  assert.equal(prepared.length, reasoningOnly.length);
+  assert.equal(
+    (prepared[0].content as { type: string }[]).some((part) => part.type === 'reasoning'),
+    true,
+    'fallback keeps original reasoning when strip-all would empty the prompt',
+  );
+});
+
+test('prepareCattyMessagesForStream still strips reasoning when other content remains (#4102)', () => {
+  const mixed = [
+    { role: 'user' as const, content: 'ping www.baidu.com -c 4' },
+    {
+      role: 'assistant' as const,
+      content: [
+        { type: 'reasoning' as const, text: 'plan' },
+        { type: 'text' as const, text: 'running it' },
+        {
+          type: 'tool-call' as const,
+          toolCallId: 'call-1',
+          toolName: 'terminal_execute',
+          input: { command: 'ping www.baidu.com -c 4' },
+        },
+      ],
+    },
+  ];
+  const prepared = prepareCattyMessagesForStream(mixed);
+  assert.equal(prepared.length, 2);
+  assert.equal(prepared[0].role, 'user');
+  const assistantContent = prepared[1].content;
+  assert.ok(Array.isArray(assistantContent));
+  assert.equal(assistantContent.some((part) => part.type === 'reasoning'), false);
+  assert.equal(assistantContent.some((part) => part.type === 'text'), true);
+  assert.equal(assistantContent.some((part) => part.type === 'tool-call'), true);
+});
+
+test('prepareCattyMessagesForStream leaves a true empty input empty', () => {
+  assert.deepEqual(prepareCattyMessagesForStream([]), []);
+});
