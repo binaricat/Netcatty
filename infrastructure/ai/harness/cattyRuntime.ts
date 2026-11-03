@@ -273,9 +273,18 @@ export function prepareCattyMessagesForStream(
   messages: ModelMessage[],
   options: { preserveReasoning?: boolean } = {},
 ): ModelMessage[] {
-  return pruneMessages({
+  const pruned = pruneMessages({
     messages,
     reasoning: options.preserveReasoning ? 'none' : 'all',
     emptyMessages: 'remove',
   });
+  // pruneMessages({ emptyMessages: 'remove' }) can yield [] when every message
+  // was reasoning-only (or otherwise empty after stripping). AI SDK
+  // standardizePrompt then throws "Invalid prompt: messages must not be empty"
+  // (#4102). Refuse to hand an emptied list downstream when we still had input.
+  if (pruned.length === 0 && messages.length > 0) {
+    console.warn('[Catty] prepareCattyMessagesForStream refused empty prune result (#4102)');
+    return messages;
+  }
+  return pruned;
 }
