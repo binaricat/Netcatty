@@ -145,6 +145,7 @@ If you regularly work with a fleet of servers, Netcatty is built for speed and f
 - **File workflows** — drag & drop uploads/downloads
 - **Edit in place** — built-in editor for quick changes
 - **Create remote archives** — select files or folders, right-click **Compress...**, and create a named `.tar.gz` or `.zip` archive in the displayed destination directory; the server needs `tar`/`gzip` or `zip` for the chosen format.
+- **Packed downloads** — download folders or multiple items in one stream, then automatically restore their original layout locally without leaving an archive on the server. Enabled by default in SFTP settings; unsupported connections use regular downloads. [Details and compatibility](docs/features/sftp-packed-download.md).
 
 ### 🎨 Personalization
 - **Custom themes** — tune the app appearance to your taste

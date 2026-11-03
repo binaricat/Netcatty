@@ -316,6 +316,12 @@ export const enVaultMessages: Messages = {
   'sftp.extract.extracting': 'Extracting {fileName}...',
   'sftp.extract.success': 'Extracted {fileName}',
   'sftp.extract.error': 'Failed to extract {fileName}: {error}',
+  'sftp.packedDownload.receiving': 'Receiving packed download…',
+  'sftp.packedDownload.extracting': 'Restoring files…',
+  'sftp.packedDownload.fallback': 'Packed download is unavailable. Downloading files individually.',
+  'sftp.packedDownload.selection': '{count} selected items',
+  'sftp.packedDownload.conflict': 'An item with the same name already exists. Choose a different destination folder?',
+
   'sftp.archive.action': 'Compress...',
   'sftp.archive.title': 'Compress files',
   'sftp.archive.description': 'Create an archive on the server from {count} selected items.',
@@ -682,6 +688,10 @@ export const enVaultMessages: Messages = {
   'settings.sftp.compressedUpload.desc': 'Compress folders before uploading to significantly reduce transfer time.',
   'settings.sftp.compressedUpload.enable': 'Enable folder compression',
   'settings.sftp.compressedUpload.enableDesc': 'Automatically compress folders using tar before transfer. Requires tar support on the server. Falls back to regular transfer if not available.',
+
+  'settings.sftp.packedDownload': 'Packed downloads',
+  'settings.sftp.packedDownload.enable': 'Pack folders and multiple items for download',
+  'settings.sftp.packedDownload.enableDesc': 'Download the selection in one stream and restore its original layout on this device. If the server cannot pack it, download files individually.',
 
   'settings.sftp.skipUnchanged.enable': 'Skip unchanged files',
   'settings.sftp.skipUnchanged.enableDesc': 'Skip files whose size and modification time already match the destination (rsync-style). Disabled when replacing a folder into a staging path.',

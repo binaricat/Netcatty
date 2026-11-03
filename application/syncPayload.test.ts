@@ -2241,6 +2241,44 @@ test("missing local shell settings and invalid tabs preserve existing settings",
   assert.equal((await buildSyncPayload(vault())).settings?.localShellSidePanelAutoOpenTab, undefined);
 });
 
+test("packed download preferences round-trip independently of upload compression", async () => {
+  const downloadKey = storageKeys.STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD;
+  const uploadKey = storageKeys.STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD;
+  assert.ok((SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(downloadKey));
+
+  for (const enabled of [true, false]) {
+    localStorage.clear();
+    localStorage.setItem(downloadKey, String(enabled));
+    localStorage.setItem(uploadKey, String(!enabled));
+    const payload = buildSyncPayload(vault());
+    assert.equal(payload.settings?.sftpUsePackedDownload, enabled);
+    assert.equal(payload.settings?.sftpUseCompressedUpload, !enabled);
+
+    localStorage.clear();
+    await applySyncPayload(payload, { importVaultData: () => {} });
+    assert.equal(localStorage.getItem(downloadKey), String(enabled));
+    assert.equal(localStorage.getItem(uploadKey), String(!enabled));
+  }
+});
+
+test("legacy and invalid packed download settings preserve the local preference", async () => {
+  const key = storageKeys.STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD;
+  const payload = buildSyncPayload(vault());
+  assert.equal(payload.settings?.sftpUsePackedDownload, undefined);
+
+  localStorage.setItem(key, "false");
+  await applySyncPayload(payload, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(key), "false");
+
+  for (const invalid of ["true", "false", 1, null]) {
+    await applySyncPayload({
+      ...payload,
+      settings: { sftpUsePackedDownload: invalid },
+    } as unknown as SyncPayload, { importVaultData: () => {} });
+    assert.equal(localStorage.getItem(key), "false");
+  }
+});
+
 test("old bottom tab preference is ignored by settings export and import", async () => {
   localStorage.clear();
   const legacyKey = "netcatty_tab_bar_position_v1";

@@ -56,6 +56,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onOpenFileWith,
   onEditFile,
   onDownloadFile,
+  onDownloadFiles,
   onExtractArchive,
   onCreateArchive,
   onEditPermissions,
@@ -217,6 +218,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onEditFileRef.current = onEditFile;
   const onDownloadFileRef = useRef(onDownloadFile);
   onDownloadFileRef.current = onDownloadFile;
+  const onDownloadFilesRef = useRef(onDownloadFiles);
+  onDownloadFilesRef.current = onDownloadFiles;
   const onExtractArchiveRef = useRef(onExtractArchive);
   onExtractArchiveRef.current = onExtractArchive;
   const onCreateArchiveRef = useRef(onCreateArchive);
@@ -950,6 +953,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     onOpenFileWithRef,
     onEditFileRef,
     onDownloadFileRef,
+    onDownloadFilesRef,
+    entryByPathRef,
     onExtractArchiveRef,
     onCreateArchiveRef,
     onEditPermissionsRef,

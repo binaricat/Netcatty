@@ -360,6 +360,12 @@ export const ruVaultMessages: Messages = {
   'sftp.extract.extracting': 'Распаковка {fileName}...',
   'sftp.extract.success': 'Распакован {fileName}',
   'sftp.extract.error': 'Не удалось распаковать {fileName}: {error}',
+  'sftp.packedDownload.receiving': 'Получение архива…',
+  'sftp.packedDownload.extracting': 'Распаковка файлов…',
+  'sftp.packedDownload.fallback': 'Упаковка недоступна. Файлы будут скачаны по отдельности.',
+  'sftp.packedDownload.selection': 'Выбрано элементов: {count}',
+  'sftp.packedDownload.conflict': 'Элемент с таким именем уже существует. Выбрать другую папку назначения?',
+
   'sftp.archive.action': 'Сжать...',
   'sftp.archive.title': 'Сжать файлы',
   'sftp.archive.description': 'Создать архив на сервере из выбранных объектов: {count}.',
@@ -725,6 +731,10 @@ export const ruVaultMessages: Messages = {
   'settings.sftp.compressedUpload.desc': 'Сжимать папки перед загрузкой, чтобы значительно сократить время передачи.',
   'settings.sftp.compressedUpload.enable': 'Включить сжатие папок',
   'settings.sftp.compressedUpload.enableDesc': 'Автоматически сжимать папки с помощью tar перед передачей. Требует поддержки tar на сервере. Если она недоступна, будет использована обычная передача.',
+
+  'settings.sftp.packedDownload': 'Скачивание архивом',
+  'settings.sftp.packedDownload.enable': 'Упаковывать папки и выбранные вместе файлы перед скачиванием',
+  'settings.sftp.packedDownload.enableDesc': 'Выбранные файлы передаются одним потоком и распаковываются с сохранением структуры папок. Если сервер не поддерживает упаковку, файлы скачиваются по отдельности.',
 
   'settings.sftp.skipUnchanged.enable': 'Пропускать неизменённые файлы',
   'settings.sftp.skipUnchanged.enableDesc': 'Пропускать файлы, у которых размер и время изменения уже совпадают с назначением (в стиле rsync). Отключается при замене папки во временный путь.',

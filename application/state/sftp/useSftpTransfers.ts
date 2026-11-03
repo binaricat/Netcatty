@@ -40,6 +40,7 @@ import {
 } from "./transferPauseLatch";
 import { bumpTransferControlEpoch } from "./transferControlEpoch";
 import { transferRuntime } from "./transferRuntime";
+import { runPackedDownload } from "./packedDownload";
 import {
   clearTransferCancelled,
   clearTransferCancelledTree,
@@ -577,6 +578,7 @@ export const useSftpTransfers = ({
   }, [getActivePane, getTabByConnectionId]);
 
   const cleanupTaskArtifacts = useCallback(async (task: TransferTask) => {
+    if (task.controlKind === "packed-download") return; // Backend owns its private staging directory.
     const endpoints = resolveTaskEndpoints(task);
     const targetPane = endpoints?.targetPane;
     const targetSftpId = targetPane?.connection && !targetPane.connection.isLocal
@@ -2126,6 +2128,11 @@ export const useSftpTransfers = ({
       && ["pending", "queued", "transferring", "pausing"].includes(t.status),
   ).length, [transfers]);
 
+  const tryPackedDownload = useCallback<UseSftpTransfersResult["tryPackedDownload"]>(
+    (request) => runPackedDownload(ownerId, request),
+    [ownerId],
+  );
+
   const downloadToLocal = useCallback(
     async (params: {
       fileName: string;
@@ -2492,6 +2499,7 @@ export const useSftpTransfers = ({
     activeTransfersCount,
     startTransfer,
     downloadToLocal,
+    tryPackedDownload,
     cancelTransfer: transferRuntime.cancel,
     // Single process-level control surface (TransferRuntime).
     pauseTransfer: async (transferId: string) => {

@@ -12,7 +12,7 @@ declare global {
     writeSftp(sftpId: string, path: string, content: string, encoding?: SftpFilenameEncoding): Promise<void>;
     writeSftpBinary?(sftpId: string, path: string, content: ArrayBuffer, encoding?: SftpFilenameEncoding): Promise<void>;
     closeSftp(sftpId: string): Promise<void | { success?: boolean; deferred?: boolean; leaseCount?: number }>;
-    retainSftpTransferSession?(sftpId: string, leaseId: string): Promise<{ success: boolean; reason?: string }>;
+    retainSftpTransferSession?(sftpId: string, leaseId: string, options?: { cancelOnOwnerGone?: boolean }): Promise<{ success: boolean; reason?: string }>;
     releaseSftpTransferSession?(sftpId: string, leaseId: string): Promise<{ success: boolean; reason?: string }>;
     mkdirSftp(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<void>;
     deleteSftp?(
@@ -47,6 +47,12 @@ declare global {
     /** Clear a pre-start cancel latch so intentional same-id resume/retry can run. */
     clearPendingTransferCancel?(transferId: string): Promise<{ success: boolean } | void>;
     sameHostCopyDirectory?(sftpId: string, sourcePath: string, targetPath: string, encoding?: SftpFilenameEncoding, transferId?: string): Promise<{ success: boolean }>;
+
+    downloadPackedSftp?(
+      options: { sftpId: string; transferId: string; remoteDirectory: string; names: string[]; localDirectory: string; encoding?: SftpFilenameEncoding },
+      onProgress?: (progress: { phase: "receiving" | "extracting"; bytes: number }) => void,
+    ): Promise<{ status: "completed" | "fallback" | "cancelled"; reason?: string }>;
+    cancelPackedSftp?(transferId: string): Promise<void>;
 
     // Compressed folder upload
     startCompressedUpload?(

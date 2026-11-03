@@ -1405,7 +1405,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
               try { await netcattyBridge.get()?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
             }));
           }
-        } else if (tasks.find((candidate) => candidate.id === taskId)?.status === "cancelled") {
+        } else if (task.controlKind !== "packed-download" && tasks.find((candidate) => candidate.id === taskId)?.status === "cancelled") {
           try {
             await netcattyBridge.get()?.cleanupTransferArtifacts?.({
               transferId: taskId,

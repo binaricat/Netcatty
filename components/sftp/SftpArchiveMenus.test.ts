@@ -16,10 +16,10 @@ environment.IS_REACT_ACT_ENVIRONMENT = true;
 after(() => { environment.IS_REACT_ACT_ENVIRONMENT = previous; });
 
 type MenuItem = React.ReactElement<{ children?: React.ReactNode; onClick: () => void }>;
-function archiveAction(children: React.ReactNode) {
+function menuAction(children: React.ReactNode, label = "sftp.archive.action") {
   return React.Children.toArray(children).find((child): child is MenuItem =>
     React.isValidElement<{ children?: React.ReactNode }>(child)
-    && React.Children.toArray(child.props.children).includes("sftp.archive.action"),
+    && React.Children.toArray(child.props.children).includes(label),
   );
 }
 
@@ -62,7 +62,7 @@ test("list archive menu includes files and folders and respects the clicked sele
     environment.IS_REACT_ACT_ENVIRONMENT = true;
   });
   const actions = () => renderer.root.findAllByType(ContextMenuContent)
-    .map((menu) => archiveAction(menu.props.children)).filter((item): item is MenuItem => !!item);
+    .map((menu) => menuAction(menu.props.children)).filter((item): item is MenuItem => !!item);
   assert.equal(actions().length, 2, "both a folder and a file offer compression");
   actions()[0].props.onClick();
   assert.deepEqual(captured, [["/srv/site/assets", "/srv/site/config.json"]]);
@@ -75,8 +75,10 @@ test("list archive menu includes files and folders and respects the clicked sele
   assert.equal(actions().length, 0, "remote archive commands are not exposed on a local pane");
 });
 
-test("tree archive menu passes full paths for nested multiselection and hides local and parent entries", async (t) => {
+test("tree archive, download and duplicate menus preserve selection and parent-entry safety", async (t) => {
   const captured: string[][] = [];
+  const downloads: string[][] = [];
+  const duplicates: string[][] = [];
   const selected = new Set(["/srv/site/assets", "/srv/site/assets/logo.png", "/srv/config.json"]);
   const emptyRef = { current: undefined };
   let props: Parameters<typeof useSftpPaneTreeContextMenu>[0] = {
@@ -84,8 +86,13 @@ test("tree archive menu passes full paths for nested multiselection and hides lo
     pane: { connection: { id: "conn", isLocal: false } },
     tRef: { current: (key: string) => key },
     onOpenFileWithSystemDefaultRef: emptyRef, onOpenFileWithRef: emptyRef,
-    onEditFileRef: emptyRef, onDownloadFileRef: emptyRef,
-    onExtractArchiveRef: emptyRef, onEditPermissionsRef: emptyRef, onDuplicateEntriesRef: emptyRef,
+    onEditFileRef: emptyRef,
+    onDownloadFileRef: { current: (_item: SftpFileEntry, path: string) => downloads.push([path]) },
+    onDownloadFilesRef: { current: (_items: SftpFileEntry[], paths: string[]) => downloads.push(paths) },
+    entryByPathRef: { current: new Map([["/srv/site/assets", folder], ["/srv/site/assets/logo.png", { ...file, name: "logo.png" }], ["/srv/config.json", file]]) },
+    onExtractArchiveRef: emptyRef, onEditPermissionsRef: emptyRef,
+    onDuplicateEntriesRef: { current: (items: Array<{ sourcePath: string }>) => duplicates.push(items.map((item) => item.sourcePath)) },
+    toTransferSources: (paths: string[]) => paths.map((sourcePath) => ({ sourcePath })),
     onCreateArchiveRef: { current: (paths: string[]) => { captured.push(paths); } },
     getActionPaths: (path: string) => selected.has(path) ? [...selected] : [path],
   };
@@ -97,18 +104,26 @@ test("tree archive menu passes full paths for nested multiselection and hides lo
   let renderer!: ReactTestRenderer;
   await act(async () => { renderer = create(React.createElement(Probe)); });
   t.after(async () => { await act(async () => { renderer.unmount(); }); });
-  const action = () => archiveAction((menu as React.ReactElement<{ children: React.ReactNode }>).props.children);
+  const action = (label?: string) => menuAction((menu as React.ReactElement<{ children: React.ReactNode }>).props.children, label);
   assert.ok(action());
   action()!.props.onClick();
   assert.deepEqual(captured[0], [...selected]);
+  action("sftp.context.download")!.props.onClick();
+  assert.deepEqual(downloads[0], ["/srv/site/assets", "/srv/config.json"]);
+  action("sftp.context.duplicate")!.props.onClick();
+  assert.deepEqual(duplicates[0], [...selected], "Duplicate keeps its existing selected-source handling");
   props = { ...props, contextTarget: { entry: file, entryPath: "/srv/unselected.json" } };
   await act(async () => { renderer.update(React.createElement(Probe)); });
   action()!.props.onClick();
   assert.deepEqual(captured[1], ["/srv/unselected.json"]);
+  action("sftp.context.download")!.props.onClick();
+  assert.deepEqual(downloads[1], ["/srv/unselected.json"]);
   props = { ...props, pane: { connection: { id: "local", isLocal: true } } };
   await act(async () => { renderer.update(React.createElement(Probe)); });
   assert.equal(action(), undefined);
   props = { ...props, pane: { connection: { id: "conn", isLocal: false } }, contextTarget: { entry: { ...folder, name: ".." }, entryPath: "/srv" } };
   await act(async () => { renderer.update(React.createElement(Probe)); });
   assert.equal(action(), undefined);
+  assert.equal(action("sftp.context.download"), undefined);
+  assert.equal(action("sftp.context.duplicate"), undefined);
 });

@@ -85,6 +85,10 @@ function isTransferTargetPathDescendant(existingPath: string, candidatePath: str
   return candidate.startsWith(descendantPrefix);
 }
 
+function touchesTarget(task: TransferTask, predicate: (path: string) => boolean): boolean {
+  return task.packedTargetPaths ? task.packedTargetPaths.some(predicate) : predicate(task.targetPath);
+}
+
 /**
  * Find another active transfer that reserves the candidate destination. File
  * tasks reserve their exact path; directory tasks reserve their path and all
@@ -107,15 +111,15 @@ export function findActivePathConflict(
 
   return tasks.find((task) => (
     conflictsAtEndpoint(task)
-    && sameTransferTargetPath(task.targetPath, candidate.targetPath)
+    && touchesTarget(task, (path) => sameTransferTargetPath(path, candidate.targetPath))
   )) ?? tasks.find((task) => (
     conflictsAtEndpoint(task)
     && task.isDirectory
-    && isTransferTargetPathDescendant(task.targetPath, candidate.targetPath)
+    && touchesTarget(task, (path) => isTransferTargetPathDescendant(path, candidate.targetPath))
   )) ?? (candidate.isDirectory
     ? tasks.find((task) => (
       conflictsAtEndpoint(task)
-      && isTransferTargetPathDescendant(candidate.targetPath, task.targetPath)
+      && touchesTarget(task, (path) => isTransferTargetPathDescendant(candidate.targetPath, path))
     ))
     : undefined);
 }

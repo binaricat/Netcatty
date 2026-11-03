@@ -109,6 +109,7 @@
     "serialport": "^13.0.0",
     "socks-proxy-agent": "^8.0.5",
     "ssh2-sftp-client": "^12.0.1",
+    "tar-stream": "3.2.2",
     "webdav": "^5.8.0",
     "zmodem.js": "^0.1.10",
     "zod": "^4.3.6"

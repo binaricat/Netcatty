@@ -104,6 +104,7 @@ import {
   STORAGE_KEY_SFTP_AUTO_SYNC,
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
+  STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD,
   STORAGE_KEY_SFTP_SKIP_UNCHANGED,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
@@ -337,6 +338,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_SFTP_AUTO_SYNC,
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
+  STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD,
   STORAGE_KEY_SFTP_SKIP_UNCHANGED,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
@@ -561,6 +563,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (hidden === 'true' || hidden === 'false') settings.sftpShowHiddenFiles = hidden === 'true';
   const compress = localStorageAdapter.readString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD);
   if (compress === 'true' || compress === 'false') settings.sftpUseCompressedUpload = compress === 'true';
+  const packedDownload = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD);
+  if (packedDownload != null) settings.sftpUsePackedDownload = packedDownload;
   const skipUnchanged = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_SKIP_UNCHANGED);
   if (skipUnchanged != null) settings.sftpSkipUnchanged = skipUnchanged;
   const autoOpenSidebar = localStorageAdapter.readString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
@@ -877,6 +881,7 @@ async function applySyncableSettings(
   if (settings.sftpAutoSync != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_SYNC, String(settings.sftpAutoSync));
   if (settings.sftpShowHiddenFiles != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES, String(settings.sftpShowHiddenFiles));
   if (settings.sftpUseCompressedUpload != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD, String(settings.sftpUseCompressedUpload));
+  if (typeof settings.sftpUsePackedDownload === 'boolean') localStorageAdapter.writeBoolean(STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD, settings.sftpUsePackedDownload);
   if (settings.sftpSkipUnchanged != null) localStorageAdapter.writeBoolean(STORAGE_KEY_SFTP_SKIP_UNCHANGED, settings.sftpSkipUnchanged);
   if (settings.sftpAutoOpenSidebar != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR, String(settings.sftpAutoOpenSidebar));
   if (settings.sftpFollowTerminalCwd != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD, String(settings.sftpFollowTerminalCwd));

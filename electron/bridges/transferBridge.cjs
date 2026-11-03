@@ -7714,6 +7714,7 @@ async function startInternalTransfer(event, payload, onProgress) {
  */
 async function cancelTransfer(event, payload) {
   const { transferId } = payload;
+  if (require("./sftpBridge/packedDownload.cjs").cancelActive(transferId, event?.sender?.id)) return { success: true };
   rememberPendingCancel(transferId);
   if (cancelQueuedTransfer(transferId)) {
     // Queued cancel already settled the job; clear pending so a later retry
@@ -8465,12 +8466,13 @@ function registerHandlers(ipcMain, options = {}) {
           return { success: true };
         })
     ));
-    ipcMain.handle("netcatty:transfer:retain-sftp-session", (event, payload) => (
-      workerRequest(event, "netcatty:transfer:retain-sftp-session", payload)
-    ));
-    ipcMain.handle("netcatty:transfer:release-sftp-session", (event, payload) => (
-      workerRequest(event, "netcatty:transfer:release-sftp-session", payload)
-    ));
+    const packedLeaseOwners = require("./sftpBridge/packedDownload.cjs").createRendererLeaseHandlers({
+      retain: (event, payload) => workerRequest(event, "netcatty:transfer:retain-sftp-session", payload),
+      release: (event, payload) => workerRequest(event, "netcatty:transfer:release-sftp-session", payload),
+      cancel: (event, payload) => workerRequest(event, "netcatty:sftp:cancelPacked", { transferId: payload.leaseId }),
+    });
+    ipcMain.handle("netcatty:transfer:retain-sftp-session", packedLeaseOwners.retain);
+    ipcMain.handle("netcatty:transfer:release-sftp-session", packedLeaseOwners.release);
     return;
   }
   ipcMain.handle("netcatty:transfer:start", startTransfer);
@@ -8488,8 +8490,13 @@ function registerHandlers(ipcMain, options = {}) {
     clearPendingCancel(payload?.transferId);
     return { success: true };
   });
-  ipcMain.handle("netcatty:transfer:retain-sftp-session", retainSftpTransferSession);
-  ipcMain.handle("netcatty:transfer:release-sftp-session", releaseSftpTransferSession);
+  const packedLeaseOwners = require("./sftpBridge/packedDownload.cjs").createRendererLeaseHandlers({
+    retain: retainSftpTransferSession,
+    release: releaseSftpTransferSession,
+    cancel: (event, payload) => require("./sftpBridge/packedDownload.cjs").cancelActive(payload.leaseId, event?.sender?.id),
+  });
+  ipcMain.handle("netcatty:transfer:retain-sftp-session", packedLeaseOwners.retain);
+  ipcMain.handle("netcatty:transfer:release-sftp-session", packedLeaseOwners.release);
 }
 
 module.exports = {

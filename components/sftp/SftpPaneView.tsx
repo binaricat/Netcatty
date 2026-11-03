@@ -654,6 +654,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
             onOpenFileWith={callbacks.onOpenFileWith}
             onEditFile={callbacks.onEditFile}
             onDownloadFile={callbacks.onDownloadFile}
+            onDownloadFiles={callbacks.onDownloadFiles}
             onExtractArchive={callbacks.onExtractArchive ? handleExtractArchive : undefined}
             onCreateArchive={callbacks.onCreateArchive && !pane.connection?.isLocal ? archiveDialog.open : undefined}
             onEditPermissions={callbacks.onEditPermissions}
