@@ -143,7 +143,7 @@ test('OSC empty input recovers from backspace-space-backspace padding without ac
   }
 });
 
-test('real Bash TERM=dumb deletion recovers readiness while pending spaces and quotes stay gated', (t) => {
+test('real Bash line editing gates ambiguous blanks and supports confirmed text deletion', (t) => {
   if (process.platform === 'win32') return t.skip('requires a POSIX Bash PTY');
   const probe = spawnSync('python3', ['-c', 'import pty']);
   if (probe.error?.code === 'ENOENT') return t.skip('python3 is unavailable');
@@ -151,34 +151,29 @@ test('real Bash TERM=dumb deletion recovers readiness while pending spaces and q
   const result = spawnSync('python3', [path.resolve(__dirname, '../../../scripts/fixtures/osc133-erase-input.py')],
     { encoding: 'utf8', timeout: 10_000 });
   assert.equal(result.status, 0, result.stderr);
-  const chunks = JSON.parse(result.stdout);
-  assert.ok(chunks[2].includes('\b \b'), 'Bash must emit actual erase-padding bytes');
-  const session = {};
-  assert.ok(chunks[6].includes('\b'.repeat(5) + ' '.repeat(5) + '\b'.repeat(5)),
-    'Ctrl-W must emit actual multi-cell erase-padding bytes');
-  assert.ok(chunks[11].includes('\b'.repeat(11) + ' '.repeat(11) + '\b'.repeat(11)),
-    'Ctrl-U must emit actual full-line erase-padding bytes');
-  // Blank-only deletion is indistinguishable from cursor movement over blanks;
-  // conservatively wait for a new prompt instead of accepting pending spaces.
-  // A redraw may omit the old suffix too; unknown blank padding after that
-  // stays gated until Ctrl-C produces a fresh prompt cycle.
-  const expected = [true, false, true, false, false,
-    false, true, false, false, true, false, true,
-    false, false, true,
-    false, false, false, true,
-    false, false, false, false, false, true,
-    false, false, false, false, false,
-    false];
-  assert.equal(chunks.length, expected.length);
-  chunks.forEach((chunk, index) => {
-    trackSessionIdlePrompt(session, chunk);
-    assert.equal(Boolean(ready(session)), expected[index], `Bash stage ${index}: ${JSON.stringify(chunk)}`);
-  });
-  const splitSession = {};
-  chunks.forEach((chunk, index) => {
-    for (const ch of chunk) trackSessionIdlePrompt(splitSession, ch);
-    assert.equal(Boolean(ready(splitSession)), expected[index], `byte-split Bash stage ${index}`);
-  });
+  const scenarios = JSON.parse(result.stdout);
+  assert.equal(scenarios.length, 14);
+  const word = scenarios.find(({ name }) => name === 'Ctrl-W whole word');
+  assert.ok(word.states.at(-1).raw.includes('\b'.repeat(5) + ' '.repeat(5) + '\b'.repeat(5)));
+  const forward = scenarios.find(({ name }) => name === 'mixed forward delete');
+  const kill = scenarios.find(({ name }) => name === 'indistinguishable mixed line kill');
+  // The first leaves a genuine blank; the second empties input. Identical
+  // output cannot certify which happened, so both must stay conservatively gated.
+  assert.equal(forward.states.slice(1).map(({ raw }) => raw).join(''),
+    kill.states.slice(1).map(({ raw }) => raw).join(''));
+  for (const scenario of scenarios) {
+    const session = {}, splitSession = {};
+    for (const { step, raw, ready: expected } of scenario.states) {
+      trackSessionIdlePrompt(session, raw);
+      for (const ch of raw) {
+        trackSessionIdlePrompt(splitSession, ch);
+        if (!expected) assert.equal(Boolean(ready(splitSession)), false,
+          `intermediate byte of ${scenario.name}: ${step}`);
+      }
+      assert.equal(Boolean(ready(session)), expected, `${scenario.name}: ${step}`);
+      assert.equal(Boolean(ready(splitSession)), expected, `byte-split ${scenario.name}: ${step}`);
+    }
+  }
 });
 
 test('OSC repeats complete execution and prompt cycles without stale prompt state', async () => {

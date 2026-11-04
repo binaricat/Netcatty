@@ -58,6 +58,18 @@ test("moving across genuinely pending blanks never certifies erased padding", ()
   }
 });
 
+test("mixed repaint never certifies ordinary blanks just because it erased text", () => {
+  const prompt = "prompt> ";
+  for (const blanks of [1, 2, 3]) {
+    const width = blanks + 1;
+    const mixed = prompt + "x" + " ".repeat(blanks) + "\b".repeat(width)
+      + " ".repeat(width) + "\b".repeat(width);
+    const cursor = terminalCursorState(mixed);
+    assert.equal(cursor.column, prompt.length);
+    assert.equal(cursor.lineWithoutErasedPadding, prompt + " ".repeat(width));
+  }
+});
+
 test("plain text rendering applies carriage-return overwrites", () => {
   assert.equal(terminalDataToPlainText("progress 10%\rprogress 100%\n"), "progress 100%");
 });

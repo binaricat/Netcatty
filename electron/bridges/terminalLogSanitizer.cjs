@@ -79,21 +79,25 @@ class TerminalTextRenderer {
     if (!mainText) { this.erasePadding = null; return; }
     let pending = this.erasePadding;
     if (ch === " ") {
-      if (!pending || pending.returned > 0) pending = { width: 0, returned: 0, overwroteText: false };
+      if (!pending || pending.returned > 0) {
+        pending = { width: 0, returned: 0, hasTextEvidence: false, erasedCells: [] };
+      }
       pending.width += 1;
-      pending.overwroteText ||= !!previousCell && previousCell.ch !== " ";
+      pending.hasTextEvidence ||= !!previousCell && previousCell.ch !== " ";
+      if (previousCell && (previousCell.ch !== " " || this.erasedPaddingCells.has(previousCell))) {
+        pending.erasedCells.push(this.lines[this.row]?.[this.col - 1]);
+      }
       this.erasePadding = pending;
       return;
     }
     if (ch === "\b" && pending) {
       pending.returned += 1;
       if (pending.returned < pending.width) return;
-      // Ctrl-W/U/K paint spaces over removed text, then move back. Require
-      // overwritten visible text: deleting only blanks and moving across
-      // genuinely pending blanks can produce identical terminal output.
-      if (pending.overwroteText) {
-        for (let i = this.col; i < this.col + pending.width; i += 1) {
-          const cell = this.lines[this.row]?.[i];
+      // A mixed repaint can preserve genuine blanks (e.g. forward-delete x
+      // from "x "). Certify each cell separately; one overwritten character
+      // does not prove every blank in the repaint was removed from input.
+      if (pending.hasTextEvidence) {
+        for (const cell of pending.erasedCells) {
           if (cell?.ch === " ") this.erasedPaddingCells.add(cell);
         }
       }
