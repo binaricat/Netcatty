@@ -11,12 +11,15 @@ suggestion descriptions are localized for `zh-CN` and generated into `zh-TW`.
 | `@withfig/autocomplete` | `2.692.3`, npm `gitHead` `aef52acff84c45edde61ae610cc2c964802b9a38`; `src/{zip,unzip,make,nano}.ts` and compiled `build/*.js` | English keys, option names, and arguments |
 | `jaywcjlove/linux-command` | repository HEAD `8041aeda04762e136078decb2de201ec4348527c` (2026-10-31); `command/zip.md`, `command/unzip.md`, `command/make.md`, `command/nano.md` | Simplified-Chinese terminology and common examples |
 | GNU Make | local `GNU Make 3.81`, `make --help` and `make(1)` | Make option semantics |
+| Apple gnumake | tag `gnumake-136`, commit `d16cdb2067133c031532d19c5a06d2e74993ef2a`, [`main.c`](https://github.com/apple-oss-distributions/gnumake/blob/d16cdb2067133c031532d19c5a06d2e74993ef2a/main.c) | `-N` NeXT compatibility extension |
 | Info-ZIP | local `zip 3.0` and `unzip 6.00` (Apple builds), `-h`/manual output | ZIP option semantics |
 | ArchWiki | `Character encoding`, checked 2026-11-04, `https://wiki.archlinux.org/title/Character_encoding` | Confirm patched unzip uses `-O gbk` for legacy Windows filenames |
 
 Checked on 2026-11-04. Every adopted English key below occurs only in the
 `zip`, `unzip`, `make`, or `nano` spec in the bundled Fig package and local
-`electron/specs`; no other command shares these keys.
+`electron/specs`; no other command shares these keys. Where the Fig English text
+conflicts with the verified implementation, the zh-CN text follows the verified
+behavior and the discrepancy is recorded below.
 
 ## Adopted entries
 
@@ -27,7 +30,7 @@ Checked on 2026-11-04. Every adopted English key below occurs only in the
 | command | Package and compress (archive) files into zip file | 将文件打包并压缩为 zip 文件 |
 | argument | Name of archive | 压缩包名称 |
 | `-r` | Package and compress a directory and its contents, recursively | 递归打包并压缩目录及其内容 |
-| `-9` | Archive a directory and its contents with the highest level [9] of compression | 以最高压缩级别 [9] 打包目录及其内容 |
+| `-9` | Archive a directory and its contents with the highest level [9] of compression | 使用最高压缩级别 9 |
 
 ### unzip
 
@@ -35,7 +38,7 @@ Checked on 2026-11-04. Every adopted English key below occurs only in the
 | --- | --- | --- |
 | command | Extract compressed files in a ZIP archive | 解压 ZIP 压缩包中的文件 |
 | `-l` | List the contents of a zip file without extracting | 列出 zip 文件内容而不解压 |
-| `-0` | Extract a zip file created in windows, containing files with non-ascii (chinese) filenames | 解压 Windows 创建且含非 ASCII（中文）文件名的 zip 文件 |
+| `-0` | Extract a zip file created in windows, containing files with non-ascii (chinese) filenames | 上游选项疑似错误，请核对当前 unzip 支持（Windows 中文文件名通常用 -O gbk） |
 
 ### make
 
@@ -64,7 +67,7 @@ Checked on 2026-11-04. Every adopted English key below occurs only in the
 | `--no-print-directory` | Turn off -w, even if it was turned on implicitly | 关闭 -w，即使它是被隐式启用的 |
 | `-W`, `--what-if`, `--new-file`, `--assume-new` | Consider file to be infinitely new | 将文件视为永远最新 |
 | `--warn-undefined-variables` | Warn when an undefined variable is referenced | 引用未定义变量时发出警告 |
-| `-N`, `--Next-option` | Turn on value of next option | 启用下一个选项的值 |
+| `-N`, `--Next-option` | Turn on value of next option | 启用指定的 NeXT 兼容选项（Apple 扩展） |
 
 ### nano
 
@@ -78,19 +81,24 @@ edited by hand. Spot checks include `遞迴`, `檔案`, `資訊`, and `除錯`.
 
 ## Semantic notes
 
-- `zip -r` and `zip -9` match `linux-command`: recursive directory archiving and
-  the highest compression level.
+- `zip -r` enables recursive directory archiving. `zip -9` only selects the
+  highest compression level 9; it does not recurse by itself. The Fig English
+  description mentions archiving a directory, but `zip -h2` separates the two,
+  so the zh-CN text is limited to the compression level.
 - `unzip -l` matches `linux-command` and the local manual: list archive contents
   without extracting.
 - `unzip -0` is a Fig-only entry in this package. The local `unzip 6.00` and
   `linux-command` do not list `-0`; patched Linux builds use `-O gbk` for
   Windows/GBK filenames (confirmed against the ArchWiki character-encoding
-  notes). The translation keeps the Fig option name and argument structure and
-  records the upstream discrepancy; no platform detection or option rename was
-  added.
+  notes). The zh-CN text now starts with an upstream-error warning and points to
+  `-O gbk`; the Fig option name and argument structure are unchanged, and no
+  platform detection or option rename was added.
 - Make options were checked against the local GNU Make 3.81 help/man output.
-  `-N`/`--Next-option` is a real GNU Make option; Fig spells the long form
-  `--Next-option`, which is preserved.
+  `-N`/`--NeXT-option` is an Apple/NeXT compatibility extension, not a generic
+  GNU Make option: Apple's source enables NeXT features such as `vpath`,
+  `quiet`, `makefiles`, and `errexit`. Fig spells the long form
+  `--Next-option` (lowercase `next`); the option name is preserved while the
+  zh-CN text describes the NeXT compatibility purpose.
 - `unzip`/`zip` entry semantics match the local Apple Info-ZIP builds and
   `linux-command`; no platform-specific text was added.
 - `nano`'s description is a recursive wordplay ("Nano's ANOther editor"); the

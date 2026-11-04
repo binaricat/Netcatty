@@ -99,17 +99,32 @@ test("batch specs have complete zh-CN and zh-TW description coverage", async () 
   }
 });
 
+test("batch zh-TW spot checks cover corrected semantics", () => {
+  assert.equal(
+    traditional["Archive a directory and its contents with the highest level [9] of compression"],
+    "使用最高壓縮級別 9",
+  );
+  assert.equal(
+    traditional["Extract a zip file created in windows, containing files with non-ascii (chinese) filenames"],
+    "上游選項疑似錯誤，請核對當前 unzip 支援（Windows 中文檔名通常用 -O gbk）",
+  );
+  assert.equal(
+    traditional["Turn on value of next option"],
+    "啟用指定的 NeXT 相容選項（Apple 擴充套件）",
+  );
+});
+
 test("zip, unzip, and make options localize without changing insertion text", async () => {
   const cases = [
     { input: "zip -", option: "-r", zhCn: "递归打包并压缩目录及其内容" },
-    { input: "zip -", option: "-9", zhCn: "以最高压缩级别 [9] 打包目录及其内容" },
+    { input: "zip -", option: "-9", zhCn: "使用最高压缩级别 9" },
     { input: "unzip -", option: "-l", zhCn: "列出 zip 文件内容而不解压" },
     {
       input: "unzip -",
       option: "-0",
-      zhCn: "解压 Windows 创建且含非 ASCII（中文）文件名的 zip 文件",
+      zhCn: "上游选项疑似错误，请核对当前 unzip 支持（Windows 中文文件名通常用 -O gbk）",
     },
-    { input: "make -", option: "-N", zhCn: "启用下一个选项的值" },
+    { input: "make -", option: "-N", zhCn: "启用指定的 NeXT 兼容选项（Apple 扩展）" },
     { input: "make --", option: "--warn-undefined-variables", zhCn: "引用未定义变量时发出警告" },
   ];
 
