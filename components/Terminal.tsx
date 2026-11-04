@@ -4583,6 +4583,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onAutocompleteReposition: () => autocompleteRepositionRef.current?.(),
     terminalContextActionsRef,
     isRestoringSelectionRef,
+    isPaneVisibleRef: isVisibleRef,
   };
 
   const safeFitRef = useRef(safeFit);

@@ -109,6 +109,7 @@ import {
   terminalFontLigaturesEnabled,
 } from "./terminalFontLigatures";
 import { createWebglRendererController } from "./webglRendererController";
+import { getSharedWebglContextBudget } from "./webglContextBudget";
 import {
   captureMiddleClickTerminalMouseEvent,
   markMiddleClickContextMenuEvent,
@@ -306,6 +307,12 @@ export type XTermRuntime = {
   /** Drop the WebGL addon while keeping the terminal alive (soft-hide). */
   suspendWebglRenderer: () => void;
   /**
+   * Re-read isPaneVisibleRef after the pane is shown or hidden. Hidden panes
+   * wait for the reveal path to rebuild a lost WebGL renderer, and past the
+   * shared context budget they give theirs up (see webglContextBudget).
+   */
+  syncPaneVisibility: () => void;
+  /**
    * Turn programming ligatures on or off. An active WebGL renderer is rebuilt
    * because its glyph atlas captures font-feature-settings only at creation.
    */
@@ -472,9 +479,18 @@ export type CreateXTermRuntimeContext = {
   // background tabs) to avoid spinning up many WebGL contexts at once. Defaults
   // to visible (immediate WebGL) when omitted.
   initiallyVisible?: boolean;
+  /**
+   * Whether the pane is on screen right now. Unlike initiallyVisible, which
+   * stays true for hidden panes unless hibernation is on, this feeds the WebGL
+   * context budget. Treated as always visible when omitted.
+   */
+  isPaneVisibleRef?: RefObject<boolean>;
   /** When true, keep the DOM renderer until replay completes (hibernate wake). */
   deferWebglUntilReplayComplete?: boolean;
 };
+
+/** Private xterm fields used to release a disposed renderer's WebGL context. */
+type WebglAddonInternals = { _renderer?: { _gl?: WebGL2RenderingContext } };
 
 const detectPlatform = (): XTermPlatform => {
   if (
@@ -899,10 +915,27 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
   };
 
+  // Disposing the addon leaves its WebGL context alive until the canvas is
+  // garbage collected, still holding GPU memory and one of Chromium's 16
+  // context slots. Lose it explicitly so both come back right away.
+  const disposeWebglAddon = (addon: WebglAddon) => {
+    const gl = (addon as unknown as WebglAddonInternals)._renderer?._gl;
+    addon.dispose();
+    try {
+      if (gl && !gl.isContextLost()) gl.getExtension("WEBGL_lose_context")?.loseContext();
+    } catch (err) {
+      logger.warn("[XTerm] Failed to release WebGL context", err);
+    }
+  };
+
+  const isPaneVisibleRef = ctx.isPaneVisibleRef;
   const webglController = createWebglRendererController({
     enabled: performanceConfig.useWebGLAddon,
+    budget: getSharedWebglContextBudget(),
+    isVisible: isPaneVisibleRef ? () => isPaneVisibleRef.current !== false : undefined,
     createAddon: () => new WebglAddon(),
     loadAddon: (addon) => term.loadAddon(addon),
+    disposeAddon: disposeWebglAddon,
     repaint: repaintTerminal,
     setLoaded: (loaded) => {
       webglLoaded = loaded;
@@ -3500,6 +3533,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     clearTextureAtlas: clearWebglTextureAtlas,
     ensureWebglRenderer: loadWebglRenderer,
     suspendWebglRenderer,
+    syncPaneVisibility: webglController.syncVisibility,
     syncFontLigatures: (enabled: boolean) => {
       ligatures.apply(enabled);
     },
