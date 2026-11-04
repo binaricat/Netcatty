@@ -48,6 +48,16 @@ test("multi-cell erase padding is tracked across chunks without accepting typed 
   }
 });
 
+test("moving across genuinely pending blanks never certifies erased padding", () => {
+  const prompt = "prompt> ";
+  for (const width of [1, 3]) {
+    const blankMoves = " ".repeat(width) + "\b".repeat(width)
+      + " ".repeat(width) + "\b".repeat(width);
+    assert.equal(terminalCursorState(prompt + blankMoves).lineWithoutErasedPadding,
+      prompt + " ".repeat(width));
+  }
+});
+
 test("plain text rendering applies carriage-return overwrites", () => {
   assert.equal(terminalDataToPlainText("progress 10%\rprogress 100%\n"), "progress 100%");
 });

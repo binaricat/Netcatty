@@ -121,7 +121,7 @@ test('OSC prompt recovery after erased input accepts only the original empty pro
 
 test('OSC empty input recovers from backspace-space-backspace padding without accepting typed spaces', async () => {
   for (const prompt of ['review@local:~$ ', 'custom \u03bb ']) {
-    for (const erased of ['x\b \b', ' \b \b', 'xy\b \b\b \b',
+    for (const erased of ['x\b \b', 'xy\b \b\b \b',
       'hello' + '\b'.repeat(5) + ' '.repeat(5) + '\b'.repeat(5)]) {
       const session = {};
       trackSessionIdlePrompt(session, A + prompt + B);
@@ -137,6 +137,8 @@ test('OSC empty input recovers from backspace-space-backspace padding without ac
       assert.equal(ready(session), '', 'a new space advances the input cursor');
       trackSessionIdlePrompt(session, '\b');
       assert.equal(ready(session), '', 'moving left must not erase a genuinely pending space');
+      trackSessionIdlePrompt(session, ' \b');
+      assert.equal(ready(session), '', 'moving right and left across a blank must remain pending');
     }
   }
 });
@@ -156,10 +158,26 @@ test('real Bash TERM=dumb deletion recovers readiness while pending spaces and q
     'Ctrl-W must emit actual multi-cell erase-padding bytes');
   assert.ok(chunks[11].includes('\b'.repeat(11) + ' '.repeat(11) + '\b'.repeat(11)),
     'Ctrl-U must emit actual full-line erase-padding bytes');
-  const expected = [true, false, true, false, true, false, true, false, false, true, false, true, false];
+  // Blank-only deletion is indistinguishable from cursor movement over blanks;
+  // conservatively wait for a new prompt instead of accepting pending spaces.
+  // A redraw may omit the old suffix too; unknown blank padding after that
+  // stays gated until Ctrl-C produces a fresh prompt cycle.
+  const expected = [true, false, true, false, false,
+    false, true, false, false, true, false, true,
+    false, false, true,
+    false, false, false, true,
+    false, false, false, false, false, true,
+    false, false, false, false, false,
+    false];
+  assert.equal(chunks.length, expected.length);
   chunks.forEach((chunk, index) => {
     trackSessionIdlePrompt(session, chunk);
     assert.equal(Boolean(ready(session)), expected[index], `Bash stage ${index}: ${JSON.stringify(chunk)}`);
+  });
+  const splitSession = {};
+  chunks.forEach((chunk, index) => {
+    for (const ch of chunk) trackSessionIdlePrompt(splitSession, ch);
+    assert.equal(Boolean(ready(splitSession)), expected[index], `byte-split Bash stage ${index}`);
   });
 });
 

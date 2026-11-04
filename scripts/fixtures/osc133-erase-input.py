@@ -42,6 +42,20 @@ try:
                            (b"\x15", b"\b" * 6 + b" " * 6 + b"\b" * 6),
                            (b"hello world", b"hello world"),
                            (b"\x15", b"\b" * 11 + b" " * 11 + b"\b" * 11),
+                           (b"hello", b"hello"), (b"\x01", b"\b" * 5),
+                           (b"\x0b", b" " * 5 + b"\b" * 5),
+                           (b"hello world", b"hello world"),
+                           (b"\x02" * 5, b"\b" * 5),
+                           (b"\x0b", b" " * 5 + b"\b" * 5),
+                           (b"\x15", b"\b" * 6 + b" " * 6 + b"\b" * 6),
+                           (b"hello world", b"hello world"), (b"\x01", b"\b" * 11),
+                           (b"\x06" * 6, b"hello "),
+                           (b"\x0b", b" " * 5 + b"\b" * 5),
+                           (b"\x15", b"\b" * 6 + b" " * 6 + b"\b" * 6),
+                           (b"\x03", b"\x1b]133;B\x07"),
+                           (b"   ", b"   "), (b"\x02" * 3, b"\b" * 3),
+                           (b"\x06" * 3, b"   "), (b"\x02" * 3, b"\b" * 3),
+                           (b"\x0b", b" " * 3 + b"\b" * 3),
                            (b'echo "unfinished\n', b"> ")]:
         os.write(master, keys)
         chunks.append(drain(expected))

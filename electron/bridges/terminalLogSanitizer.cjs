@@ -69,41 +69,35 @@ class TerminalTextRenderer {
     for (const ch of input) {
       const mainText = this.state === "normal" && !this.alternateScreenActive;
       const previousColumn = this.col;
+      const previousCell = this.lines[this.row]?.[this.col];
       this.#consume(ch);
-      this.#trackErasedPadding(ch, mainText && (ch !== "\b" || this.col < previousColumn));
+      this.#trackErasedPadding(ch, mainText && (ch !== "\b" || this.col < previousColumn), previousCell);
     }
   }
 
-  #trackErasedPadding(ch, mainText) {
+  #trackErasedPadding(ch, mainText, previousCell) {
     if (!mainText) { this.erasePadding = null; return; }
     let pending = this.erasePadding;
-    if (ch === "\b") {
-      if (!pending || pending.phase === "backward") {
-        pending ??= { phase: "backward", width: 0, spaces: 0, returned: 0 };
-        pending.width += 1;
-        this.erasePadding = pending;
-        return;
-      }
-      if (pending.phase === "spaces" && pending.spaces === pending.width) pending.phase = "return";
-      if (pending.phase === "return") {
-        pending.returned += 1;
-        if (pending.returned < pending.width) return;
-        // Readline erases words/lines with BS^N, space^N, BS^N. Mark only
-        // those painted cells; a later overwrite creates an unmarked cell.
+    if (ch === " ") {
+      if (!pending || pending.returned > 0) pending = { width: 0, returned: 0, overwroteText: false };
+      pending.width += 1;
+      pending.overwroteText ||= !!previousCell && previousCell.ch !== " ";
+      this.erasePadding = pending;
+      return;
+    }
+    if (ch === "\b" && pending) {
+      pending.returned += 1;
+      if (pending.returned < pending.width) return;
+      // Ctrl-W/U/K paint spaces over removed text, then move back. Require
+      // overwritten visible text: deleting only blanks and moving across
+      // genuinely pending blanks can produce identical terminal output.
+      if (pending.overwroteText) {
         for (let i = this.col; i < this.col + pending.width; i += 1) {
           const cell = this.lines[this.row]?.[i];
           if (cell?.ch === " ") this.erasedPaddingCells.add(cell);
         }
       }
-    } else if (ch === " " && pending
-      && (pending.phase === "backward" || pending.phase === "spaces")
-      && pending.spaces < pending.width) {
-      pending.phase = "spaces";
-      pending.spaces += 1;
-      return;
     }
-    // Never reuse closing backspaces as a new prefix: genuinely typed spaces
-    // followed by cursor-left must remain pending, even just after deletion.
     this.erasePadding = null;
   }
 
