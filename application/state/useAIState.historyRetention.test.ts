@@ -381,6 +381,34 @@ for (const mutation of ['rename', 'create', 'delete', 'delete-pending'] as const
   });
 }
 
+test('count-cap eviction clears a loaded disk-only marker and resumes backup mirroring', () => {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
+  for (const name of ['window', 'document', 'localStorage', 'CustomEvent', 'Event'] as const) {
+    Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? dom.window : dom.window[name] });
+  }
+  const source: AISession[] = Array.from({ length: 51 }, (_, index) => ({
+    id: `chat-${index}`, title: `Chat ${index}`, agentId: 'catty', scope: { type: 'global' },
+    createdAt: 1, updatedAt: 51 - index, messages: [],
+  }));
+  dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify([source[50].id]));
+  const backups: string[] = [];
+  Object.assign(dom.window, { netcatty: { aiSessionsBackupWrite: async ({ json }: { json: string }) => {
+    backups.push(json);
+    return { ok: true };
+  } } });
+  __resetBackupMirrorForTests();
+  try {
+    assert.equal(writeSessionsForStorage(source), true);
+    assert.deepEqual(readSessionsFromStorage(), source.slice(0, 50));
+    assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW), null);
+    flushBackupMirror();
+    assert.deepEqual(backups.map(json => JSON.parse(json)), [source.slice(0, 50)]);
+  } finally {
+    __resetBackupMirrorForTests();
+    dom.window.close();
+  }
+});
+
 for (const keepPrimary of [true, false]) {
   test(`deletion clears disk-only recovery and remains authoritative (keep primary ${keepPrimary})`, async () => {
     const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });

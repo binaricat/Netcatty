@@ -651,16 +651,17 @@ export function writeSessionsForStorage(
       if (!syncedOk) replaceOverflowChunks(previousChunks);
     }
   }
+  const inputIds = new Set(sessions.map(session => session.id));
   const pruned = pruneSessionsForStorage(sessions);
   const retainedIds = new Set(pruned.map(session => session.id));
   const deletedIds = new Set(options.deletedSessionIds);
-  // A live write can race startup's backup read. Missing marker IDs have not
-  // been recovered yet; only a written record or explicit deletion resolves
-  // them. Never mirror this partial history over their recovery backup.
+  // A live write can race startup's backup read. Preserve marker IDs absent
+  // from the live input unless explicitly deleted. IDs present in the input
+  // are resolved even if the count cap evicts them; pending IDs block mirroring.
   const diskOverflowIds = localStorageAdapter.read<unknown>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW);
   const unresolvedDiskIds: string[] = Array.isArray(diskOverflowIds)
     ? diskOverflowIds.filter((id): id is string => (
-      typeof id === 'string' && !retainedIds.has(id) && !deletedIds.has(id)
+      typeof id === 'string' && !retainedIds.has(id) && !deletedIds.has(id) && !inputIds.has(id)
     ))
     : [];
   let fullBackupScheduled = false;
