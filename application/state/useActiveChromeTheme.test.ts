@@ -11,6 +11,10 @@ import {
 } from "./useActiveChromeTheme.ts";
 import { TERMINAL_THEMES } from "../../infrastructure/config/terminalThemes.ts";
 import { readFileSync } from "node:fs";
+import {
+  getSettingsChromeSnapshot,
+  publishSettingsChromeSnapshot,
+} from "./settingsChromeStore.ts";
 
 function createInlineStyle() {
   const values = new Map<string, string>();
@@ -97,6 +101,60 @@ test("syncActiveChromeTheme skips surface refresh when the active theme fingerpr
     }
   }
 });
+
+for (const preference of ["system", "light", "dark"] as const) {
+  for (const chromeType of ["light", "dark"] as const) {
+    test(`syncActiveChromeTheme uses ${preference === "system" ? "system" : chromeType} native theme for ${preference} preference and ${chromeType} chrome`, () => {
+      const globals = globalThis as typeof globalThis & { document?: Document; window?: Window };
+      const originalDocument = globals.document;
+      const originalWindow = globals.window;
+      const originalSnapshot = getSettingsChromeSnapshot();
+      const theme = TERMINAL_THEMES.find((candidate) => candidate.type === chromeType);
+      assert.ok(theme);
+      const themeCalls: string[] = [];
+      const backgroundCalls: string[] = [];
+      globals.document = {
+        documentElement: {
+          dataset: {},
+          classList: { remove: () => {}, add: () => {} },
+          removeAttribute: () => {},
+        },
+        getElementById: () => null,
+        createElement: () => ({}),
+        head: { appendChild: () => {} },
+        querySelector: () => null,
+      } as unknown as Document;
+      globals.window = {
+        netcatty: {
+          setTheme: (value: string) => themeCalls.push(value),
+          setBackgroundColor: (value: string) => backgroundCalls.push(value),
+        },
+      } as unknown as Window & typeof globalThis;
+
+      try {
+        publishSettingsChromeSnapshot({ ...originalSnapshot, theme: preference });
+        syncActiveChromeTheme(theme, () => {
+          throw new Error("app theme should not be restored for an active chrome theme");
+        });
+
+        assert.deepEqual(themeCalls, [preference === "system" ? "system" : chromeType]);
+        assert.deepEqual(backgroundCalls, [theme.colors.background]);
+      } finally {
+        publishSettingsChromeSnapshot(originalSnapshot);
+        if (originalDocument) {
+          globals.document = originalDocument;
+        } else {
+          delete globals.document;
+        }
+        if (originalWindow) {
+          globals.window = originalWindow;
+        } else {
+          delete globals.window;
+        }
+      }
+    });
+  }
+}
 
 test("active chrome theme foreground uses contrast calculation", () => {
   const source = readFileSync(new URL("./useActiveChromeTheme.ts", import.meta.url), "utf8");
