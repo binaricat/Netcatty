@@ -68,11 +68,13 @@ import {
   getAIBridge,
   getDraftUploadGeneration,
   getPersistedAiSessionsSnapshot,
+  isAiSessionsHydrationComplete,
   latestAIActiveSessionMapSnapshot,
   latestAIActiveTargetIdsSnapshot,
   latestAIDraftsByScopeSnapshot,
   latestAIPanelViewByScopeSnapshot,
   latestAISessionsSnapshot,
+  markAiSessionsHydrationComplete,
   prepareRestoredSessions,
   readAiSessionMessageCap,
   rebindActiveSessionMap,
@@ -87,9 +89,16 @@ import {
   type PanelViewByScope,
 } from './aiStateSnapshots';
 import {
+  AI_SESSIONS_IDB_VERSION,
+  AI_SESSIONS_META_LAST_WRITE_KEY,
+  AI_SESSIONS_META_SCHEMA_VERSION_KEY,
   idbGetAllSessions,
+  idbPutMeta,
+  idbPutSessions,
   loadOrMigrateAiSessions,
   mirrorActiveSessionMapToIdb,
+  openAiSessionsIdb,
+  publishAiSessionsIdbChange,
   readActiveSessionMapFromIdb,
   subscribeAiSessionsIdbChange,
 } from './aiSessionIdbStorage';
@@ -191,6 +200,10 @@ export function useAIState() {
   // asynchronously in the boot effect below (issue #4123). The legacy
   // localStorage key is read-only fallback and must not pre-seed stale data.
   const [sessions, setSessionsRaw] = useState<AISession[]>(() => latestAISessionsSnapshot ?? []);
+  // Issue #4125 review P2②: flips true when the boot load settles. The
+  // active-pointer validation effect waits for it — the initially-empty
+  // in-memory session array must never null the persisted pointers.
+  const [sessionsHydrated, setSessionsHydrated] = useState(() => isAiSessionsHydrationComplete());
   // An explicit empty array is authoritative, even if the backup is stale.
   // Only a missing or corrupt store can be restored from disk.
   useEffect(() => {
@@ -206,7 +219,32 @@ export function useAIState() {
           () => localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS),
         );
         if (cancelled) return;
-        seedLastPersistedSessions(boot.sessions);
+        if (boot.idbFailed && boot.sessions.length > 0) {
+          // Issue #4125 review P2①: the legacy set is not in IndexedDB yet.
+          // Persist it best-effort (one re-open retry) BEFORE seeding the
+          // diff baseline; if the store is still unreachable, leave the
+          // baseline unset so the next edit performs a full write instead of
+          // a diff that would drop the un-persisted sessions after IndexedDB
+          // recovers.
+          try {
+            const db = await openAiSessionsIdb();
+            if (!cancelled) {
+              await idbPutSessions(db, boot.sessions);
+              await idbPutMeta(db, AI_SESSIONS_META_SCHEMA_VERSION_KEY, AI_SESSIONS_IDB_VERSION);
+              await idbPutMeta(db, AI_SESSIONS_META_LAST_WRITE_KEY, Date.now());
+              publishAiSessionsIdbChange();
+              seedLastPersistedSessions(boot.sessions);
+            }
+          } catch (error) {
+            console.warn(
+              '[AIState] Could not persist the legacy sessions after an IndexedDB failure;'
+              + ' the diff baseline stays unset so the next edit rewrites every record:',
+              error,
+            );
+          }
+        } else {
+          seedLastPersistedSessions(boot.sessions);
+        }
 
         // Restore the mirrored active-pointer map when the localStorage key
         // is missing (fresh profile restored from IndexedDB).
@@ -265,7 +303,19 @@ export function useAIState() {
         // createSession updates the snapshot before the debounced disk write.
         if ((latestAISessionsSnapshot?.length ?? 0) > 0) return;
         if (sessionsRef.current.length > 0) return;
-        if ((await idbGetAllSessions()).length > 0) return;
+        // Issue #4125 review P2③: one open retry already happened inside
+        // the boot load. If the store is still unopenable, do not let the
+        // recheck rejection reach the outer catch — the disk backup below
+        // is the recovery source.
+        try {
+          if ((await idbGetAllSessions()).length > 0) return;
+        } catch (error) {
+          console.warn(
+            '[AIState] IndexedDB recheck failed during the disk-backup restore;'
+            + ' applying the newest backup generation as the recovery source:',
+            error,
+          );
+        }
         if (!isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS))) {
           return;
         }
@@ -290,8 +340,13 @@ export function useAIState() {
         console.info(
           `[AIState] Restored ${nextSessions.length} AI session(s) from the disk backup.`,
         );
-      } catch {
-        // Boot load must never break startup.
+      } catch (error) {
+        // Boot load must never break startup — but it must not vanish
+        // silently either (issue #4125 review P2③).
+        console.warn('[AIState] AI session boot load failed:', error);
+      } finally {
+        markAiSessionsHydrationComplete();
+        if (!cancelled) setSessionsHydrated(true);
       }
     })();
     return () => {
@@ -374,6 +429,11 @@ export function useAIState() {
   }, [panelViewByScope]);
 
   useEffect(() => {
+    // Issue #4125 review P2②: before boot hydration settles, `sessions` is
+    // the initially-empty in-memory array; validating pointers against it
+    // would null every pointer and break workspace restore. No pointer
+    // writes before hydration completes.
+    if (!sessionsHydrated) return;
     const validSessionIds = new Set<string>(sessions.map((session) => session.id));
     let changed = false;
     const nextActiveSessionIdMap: Record<string, string | null> = {};
@@ -402,7 +462,7 @@ export function useAIState() {
       emitAIStateChanged(AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE);
       return next;
     });
-  }, [sessions, activeSessionIdMap]);
+  }, [sessions, activeSessionIdMap, sessionsHydrated]);
 
   const setActiveSessionId = useCallback((scopeKey: string, id: string | null) => {
     let nextActiveSessionIdMap: Record<string, string | null> | null = null;
@@ -767,7 +827,20 @@ export function useAIState() {
     void (async () => {
       try {
         const next = await idbGetAllSessions();
-        if (next.length === 0) return;
+        if (next.length === 0) {
+          if (!isAiSessionsHydrationComplete()) return;
+          // Issue #4125 review P2④: after hydration an empty store is an
+          // intentional cross-window deletion — adopt it instead of keeping
+          // the deleted session alive locally (its next edit would
+          // resurrect it). The pointer-validation effect clears the
+          // now-stale pointers. Only the pre-hydration window keeps the
+          // early-return: the boot load owns the store view until it
+          // settles.
+          setLatestAISessionsSnapshot([]);
+          seedLastPersistedSessions([]);
+          setSessionsRaw([]);
+          return;
+        }
         setLatestAISessionsSnapshot(next);
         seedLastPersistedSessions(next);
         setSessionsRaw(next);

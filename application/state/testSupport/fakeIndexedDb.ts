@@ -171,7 +171,7 @@ export interface FakeIndexedDbHandle {
   restore: () => void;
 }
 
-export function installFakeIndexedDb(options: { failOpen?: boolean; onOperation?: (storeName: string, op: 'put' | 'delete') => void } = {}): FakeIndexedDbHandle {
+export function installFakeIndexedDb(options: { failOpen?: boolean; failOpenTimes?: number; onOperation?: (storeName: string, op: 'put' | 'delete') => void } = {}): FakeIndexedDbHandle {
   const previous = (globalThis as { indexedDB?: IDBFactory }).indexedDB;
   const handle: FakeIndexedDbHandle = {
     db: new FakeIndexedDb(),
@@ -202,6 +202,10 @@ export function installFakeIndexedDb(options: { failOpen?: boolean; onOperation?
     open(_name: string, _version: number) {
       handle.openCount += 1;
       if (options.failOpen) {
+        return new FakeRequest<IDBDatabase>(null as unknown as IDBDatabase, 'failure', new Error('fake open failure'));
+      }
+      if (options.failOpenTimes != null && handle.openCount <= options.failOpenTimes) {
+        // Fail only the first N opens, then recover (boot-retry scenarios).
         return new FakeRequest<IDBDatabase>(null as unknown as IDBDatabase, 'failure', new Error('fake open failure'));
       }
       return new FakeRequest<IDBDatabase>(handle.db as unknown as IDBDatabase, 'upgrade');
