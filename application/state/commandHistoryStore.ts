@@ -68,33 +68,75 @@ function loadStore(): HistoryStore {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let saveIdleHandle: number | null = null;
+
+const CLEAR_GENERATION_PREFIX = /^\{"clearGeneration":(\d+)[,}]/;
+
+/**
+ * The store's clear generation, read from its raw JSON without parsing the
+ * whole history (up to 10k entries, ~1.5 MB). Stores are serialized with
+ * clearGeneration first (serializeStore); other layouts fall back to a parse.
+ */
+function readRawClearGeneration(raw: string | null): number | null {
+  if (!raw) return null;
+  const match = CLEAR_GENERATION_PREFIX.exec(raw.slice(0, 48));
+  if (match) return Number(match[1]);
+  try {
+    return readClearGeneration(JSON.parse(raw) as HistoryStore);
+  } catch {
+    return null;
+  }
+}
+
+function serializeStore(store: HistoryStore): HistoryStore {
+  // Keep clearGeneration first so readRawClearGeneration can find it.
+  return { clearGeneration: readClearGeneration(store), version: store.version, entries: store.entries };
+}
 
 function persistStoreNow(store: HistoryStore): boolean {
   // A peer clear is visible in storage before its queued event is handled.
   // Never flush a cached pre-clear snapshot over that newer empty store.
-  const persisted = localStorageAdapter.read<HistoryStore>(STORAGE_KEY);
-  if (persisted && readClearGeneration(persisted) > readClearGeneration(store)) {
-    cachedStore = persisted;
-    knownClearGeneration = readClearGeneration(persisted);
-    notifyCommandHistoryCleared();
-    return true;
+  // Only the generation is needed on this per-command path; parse the stored
+  // history just in the rare case where it must be adopted.
+  const persistedGeneration = readRawClearGeneration(localStorageAdapter.readString(STORAGE_KEY));
+  if (persistedGeneration !== null && persistedGeneration > readClearGeneration(store)) {
+    const persisted = localStorageAdapter.read<HistoryStore>(STORAGE_KEY);
+    if (persisted && readClearGeneration(persisted) > readClearGeneration(store)) {
+      cachedStore = persisted;
+      knownClearGeneration = readClearGeneration(persisted);
+      notifyCommandHistoryCleared();
+      return true;
+    }
   }
-  const ok = localStorageAdapter.write(STORAGE_KEY, store);
+  const ok = localStorageAdapter.write(STORAGE_KEY, serializeStore(store));
   if (ok) return true;
   // Storage full — evict lowest scored entries (not just oldest by insertion)
   const now = Date.now();
   store.entries.sort((a, b) => scoreEntryAt(b, now) - scoreEntryAt(a, now));
   store.entries = store.entries.slice(0, Math.floor(MAX_ENTRIES / 2));
-  return localStorageAdapter.write(STORAGE_KEY, store);
+  return localStorageAdapter.write(STORAGE_KEY, serializeStore(store));
+}
+
+function hasPendingSave(): boolean {
+  return saveTimer !== null || saveIdleHandle !== null;
 }
 
 function saveStore(store: HistoryStore): void {
   cachedStore = store;
-  // Debounce saves to avoid excessive writes
-  if (saveTimer) clearTimeout(saveTimer);
+  // Debounce saves, then write when the renderer is idle: serializing the
+  // history right after Enter used to land in the middle of command output.
+  cancelPendingSave();
   saveTimer = setTimeout(() => {
-    persistStoreNow(store);
     saveTimer = null;
+    const persist = () => {
+      saveIdleHandle = null;
+      persistStoreNow(store);
+    };
+    if (typeof requestIdleCallback === "function") {
+      saveIdleHandle = requestIdleCallback(persist, { timeout: 2000 });
+    } else {
+      persist();
+    }
   }, 500);
 }
 
@@ -102,6 +144,10 @@ function cancelPendingSave(): void {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
+  }
+  if (saveIdleHandle !== null) {
+    if (typeof cancelIdleCallback === "function") cancelIdleCallback(saveIdleHandle);
+    saveIdleHandle = null;
   }
 }
 
@@ -129,26 +175,14 @@ function applyExternalCommandHistoryWrite(
   rawNewValue: string | null,
   rawOldValue: string | null,
 ): void {
-  let incomingGeneration: number | null = null;
-  if (rawNewValue) {
-    try {
-      incomingGeneration = readClearGeneration(JSON.parse(rawNewValue) as HistoryStore);
-    } catch {
-      incomingGeneration = null;
-    }
-  }
+  // Fires in every other window for each save; read just the generation.
+  const incomingGeneration = readRawClearGeneration(rawNewValue);
 
   let previousGeneration = knownClearGeneration;
   if (previousGeneration === null) {
     // A fresh popup can have compose recall before its first autocomplete query.
     // The event's old value is its baseline, even after an earlier global clear.
-    try {
-      previousGeneration = rawOldValue
-        ? readClearGeneration(JSON.parse(rawOldValue) as HistoryStore)
-        : 0;
-    } catch {
-      previousGeneration = 0;
-    }
+    previousGeneration = readRawClearGeneration(rawOldValue) ?? 0;
   }
   if (incomingGeneration !== null && incomingGeneration > previousGeneration) {
     cancelPendingSave();
@@ -156,7 +190,7 @@ function applyExternalCommandHistoryWrite(
     knownClearGeneration = incomingGeneration;
     notifyCommandHistoryCleared();
   } else {
-    if (!saveTimer) cachedStore = null;
+    if (!hasPendingSave()) cachedStore = null;
     if (incomingGeneration !== null && knownClearGeneration === null) {
       knownClearGeneration = incomingGeneration;
     }

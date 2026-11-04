@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { registerAppHandlers } from './appHandlersBridge';
+import { registerAppHandlers, stabilizeAppHandlers, type StableAppHandlerCache } from './appHandlersBridge';
 import { publishAppLocalUi } from './appLocalUiStore';
 import { activeTabStore, toEditorTabId, fromEditorTabId, isEditorTabId } from '../state/activeTabStore';
 import { useAutoSync } from '../state/useAutoSync';
@@ -2031,8 +2031,11 @@ export function AppSideEffects() {
 
   // Hosts assemble domain bags from stores + this flat glue. Do NOT register
   // catalog arrays or prepared vault/terminal/chrome/dialogs domain bags here.
+  // Handlers are registered behind stable per-key wrappers so session/host
+  // churn does not re-notify every Host (see stabilizeAppHandlers).
+  const appHandlerCacheRef = useRef<StableAppHandlerCache>(new Map());
   useLayoutEffect(() => {
-    registerAppHandlers({
+    registerAppHandlers(stabilizeAppHandlers(appHandlerCacheRef.current, {
       // Vault glue
       handleAddKnownHost,
       handleDeleteHost,
@@ -2094,7 +2097,7 @@ export function AppSideEffects() {
       setProtocolSelectHost,
       handleCancelDeleteHost,
       handleConfirmDeleteHost,
-    });
+    }));
     publishAppLocalUi({
       isQuickSwitcherOpen,
       isCreateWorkspaceOpen,

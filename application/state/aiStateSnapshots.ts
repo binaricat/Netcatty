@@ -530,12 +530,47 @@ export function scheduleBackupMirror(json: string) {
   }
 }
 
+/**
+ * Last successful write: the same immutable sessions array is written again by
+ * the debounced save path and by cloud-sync collection, and each write used to
+ * re-serialize the whole (often multi-MB) history.
+ */
+let lastSessionsWrite: { sessions: AISession[]; synced: boolean; json: string } | null = null;
+
+function rememberSessionsWrite(sessions: AISession[], synced: boolean, json: string): void {
+  lastSessionsWrite = { sessions, synced, json };
+}
+
+function storedSessionsJsonEquals(json: string): boolean {
+  try {
+    return localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS) === json;
+  } catch {
+    return false;
+  }
+}
+
 export function writeSessionsForStorage(sessions: AISession[]): boolean {
+  const synced = Boolean(
+    localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled,
+  );
+  // Nothing to do when this exact array was already written in this mode and
+  // storage still holds that write (another window may have replaced it).
+  if (
+    lastSessionsWrite?.sessions === sessions
+    && lastSessionsWrite.synced === synced
+    && storedSessionsJsonEquals(lastSessionsWrite.json)
+  ) {
+    return true;
+  }
   // Synced records are authoritative after restart: silently evicting a
   // session or turn here would turn local retention into cloud deletion.
-  if (localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled) {
-    const syncedOk = localStorageAdapter.write(STORAGE_KEY_AI_SESSIONS, sessions);
-    if (syncedOk) scheduleBackupMirror(JSON.stringify(sessions));
+  if (synced) {
+    const json = JSON.stringify(sessions);
+    const syncedOk = localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, json);
+    if (syncedOk) {
+      scheduleBackupMirror(json);
+      rememberSessionsWrite(sessions, true, json);
+    }
     return syncedOk;
   }
   let previousLength = Number.POSITIVE_INFINITY;
@@ -553,6 +588,7 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
     if (candidate.json.length >= previousLength) continue;
     if (localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, candidate.json)) {
       scheduleBackupMirror(candidate.json);
+      rememberSessionsWrite(sessions, false, candidate.json);
       return true;
     }
     previousLength = candidate.json.length;
@@ -566,6 +602,7 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
     && localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, minimalCandidate.json)
   ) {
     scheduleBackupMirror(minimalCandidate.json);
+    rememberSessionsWrite(sessions, false, minimalCandidate.json);
     return true;
   }
   console.warn(

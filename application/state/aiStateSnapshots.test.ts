@@ -899,18 +899,17 @@ test('synced storage bypasses fit-first pruning and non-quota failures still pro
   const { writeSessionsForStorage } = await import('./aiStateSnapshots');
   const sessions = freezeHistory(makePersistenceHistory(51, 201));
   const read = t.mock.method(localStorageAdapter, 'read', () => ({ enabled: true }));
-  const write = t.mock.method(localStorageAdapter, 'write', () => false);
-  const writeString = t.mock.method(localStorageAdapter, 'writeString', () => true);
+  const writeString = t.mock.method(localStorageAdapter, 'writeString', () => false);
   assert.equal(writeSessionsForStorage(sessions), false);
-  assert.equal(write.mock.callCount(), 1);
-  assert.equal(write.mock.calls[0].arguments[1], sessions);
-  assert.equal(writeString.mock.callCount(), 0);
+  // Synced: one write of the complete, unpruned history (serialized once).
+  assert.equal(writeString.mock.callCount(), 1);
+  assert.equal(writeString.mock.calls[0].arguments[1], JSON.stringify(sessions));
 
   read.mock.mockImplementation(() => ({ enabled: false }));
   const error = new Error('non-quota storage failure');
   writeString.mock.mockImplementation(() => { throw error; });
   assert.throws(() => writeSessionsForStorage(sessions), candidate => candidate === error);
-  assert.equal(writeString.mock.callCount(), 1);
+  assert.equal(writeString.mock.callCount(), 2);
 });
 
 for (const [budget, expectedCalls] of [[128 * 1024, 160], [0, 161]]) {
@@ -986,4 +985,26 @@ test('rebindActiveSessionMap drops stale pointers and sets the new scope', () =>
     rebindActiveSessionMap({ 'terminal:new-ws': 'chat-1' }, 'chat-1', 'terminal:new-ws'),
     { 'terminal:new-ws': 'chat-1' },
   );
+});
+
+test('rewriting the same sessions array skips re-serialization while storage still holds it', async (t) => {
+  const { writeSessionsForStorage } = await import('./aiStateSnapshots');
+  const sessions = freezeHistory(makePersistenceHistory(3, 10));
+  let stored: string | null = null;
+  t.mock.method(localStorageAdapter, 'read', () => ({ enabled: true }));
+  const writeString = t.mock.method(localStorageAdapter, 'writeString', (_key: string, value: string) => {
+    stored = value;
+    return true;
+  });
+  t.mock.method(localStorageAdapter, 'readString', () => stored);
+  assert.equal(writeSessionsForStorage(sessions), true);
+  const stringify = t.mock.method(JSON, 'stringify');
+  // Cloud-sync collection writes the same immutable array again.
+  assert.equal(writeSessionsForStorage(sessions), true);
+  assert.equal(writeString.mock.callCount(), 1);
+  assert.equal(stringify.mock.callCount(), 0);
+  // Another window replaced the store: write again.
+  stored = '[]';
+  assert.equal(writeSessionsForStorage(sessions), true);
+  assert.equal(writeString.mock.callCount(), 2);
 });

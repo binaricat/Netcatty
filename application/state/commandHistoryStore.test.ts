@@ -326,3 +326,20 @@ test("an external clear also drops in-memory compose-bar recall", async () => {
 
   unsubscribe();
 });
+
+test("saving after a command and peer writes read the clear generation without parsing the history", async (t) => {
+  clearHistory();
+  recordCommand("echo fast-path", "host-fast", "linux");
+  assert.equal(flushCommandHistoryStore(), true);
+  const raw = storage.get(COMMAND_HISTORY_STORAGE_KEY)!;
+  assert.match(raw, /^\{"clearGeneration":\d+,/, "generation is serialized first");
+
+  const parse = t.mock.method(JSON, "parse");
+  recordCommand("echo fast-path-2", "host-fast", "linux");
+  assert.equal(flushCommandHistoryStore(), true);
+  // A peer window's save only needs the generation as well.
+  dispatchStorageEvent(COMMAND_HISTORY_STORAGE_KEY, storage.get(COMMAND_HISTORY_STORAGE_KEY)!, raw);
+  assert.equal(parse.mock.callCount(), 0);
+  parse.mock.restore();
+  assert.ok(queryHistory("echo fast", { hostId: "host-fast" }).some((entry) => entry.command === "echo fast-path-2"));
+});
