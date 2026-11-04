@@ -105,6 +105,27 @@ test('another terminal updating cannot override the current terminal strict cwd 
   assert.equal(terminalCwdStore.getCwd(id), '/actual-after-cd');
 });
 
+test('another terminal cannot turn this submission pre-write OSC 7 into a fresh report', async t => {
+  const id = 'pre-write-osc7-after-other-session';
+  let finish!: (cwd: string) => void;
+  const published: string[] = [];
+  terminalCwdStore.setCwd(id, '/before', 'osc7');
+  const controller = createTerminalDirectoryController({
+    sessionId: id, confirmationMs: 20, isCurrent: () => true, isReady: () => true,
+    io: { cwd: () => new Promise(resolve => { finish = resolve; }),
+      list: async () => ({ entries: [], home: null }), realpath: async value => value, write() {} },
+    publish: cwd => { published.push(cwd); terminalCwdStore.setCwd(id, cwd, 'backend-strict'); },
+  });
+  t.after(() => controller.dispose());
+  const changing = controller.change('/after', new AbortController().signal, () => {});
+  await new Promise(resolve => setImmediate(resolve));
+  terminalCwdStore.setCwd(id + '-other', '/other', 'osc7');
+  finish('/after');
+  await changing;
+  assert.deepEqual(published, ['/after']);
+  assert.equal(terminalCwdStore.getCwd(id), '/after');
+});
+
 for (const nextCwd of ['/new-osc7', '/original']) {
   test(`a later OSC 7 report from this terminal wins (${nextCwd})`, async t => {
     const id = 'same-session-osc7-' + nextCwd;
