@@ -38,7 +38,7 @@ behavior and the discrepancy is recorded below.
 | --- | --- | --- |
 | command | Extract compressed files in a ZIP archive | 解压 ZIP 压缩包中的文件 |
 | `-l` | List the contents of a zip file without extracting | 列出 zip 文件内容而不解压 |
-| `-0` | Extract a zip file created in windows, containing files with non-ascii (chinese) filenames | 上游选项疑似错误，请核对当前 unzip 支持（Windows 中文文件名通常用 -O gbk） |
+| `-0` | Extract a zip file created in windows, containing files with non-ascii (chinese) filenames | 上游选项疑似错误，请核对当前 unzip 版本支持的参数 |
 
 ### make
 
@@ -88,17 +88,21 @@ edited by hand. Spot checks include `遞迴`, `檔案`, `資訊`, and `除錯`.
 - `unzip -l` matches `linux-command` and the local manual: list archive contents
   without extracting.
 - `unzip -0` is a Fig-only entry in this package. The local `unzip 6.00` and
-  `linux-command` do not list `-0`; patched Linux builds use `-O gbk` for
-  Windows/GBK filenames (confirmed against the ArchWiki character-encoding
-  notes). The zh-CN text now starts with an upstream-error warning and points to
-  `-O gbk`; the Fig option name and argument structure are unchanged, and no
-  platform detection or option rename was added.
+  `linux-command` do not list `-0`. Some Linux builds with filename-encoding
+  patches use `-O gbk` for Windows/GBK filenames (confirmed against the ArchWiki
+  character-encoding notes), but that support is not universal and must be
+  checked against the installed build. The zh-CN text therefore only warns that
+  the upstream option looks wrong and asks users to verify the current unzip
+  version; `-O gbk` remains in this research note. The Fig option name and
+  argument structure are unchanged, and no platform detection or option rename
+  was added.
 - Make options were checked against the local GNU Make 3.81 help/man output.
   `-N`/`--NeXT-option` is an Apple/NeXT compatibility extension, not a generic
   GNU Make option: Apple's source enables NeXT features such as `vpath`,
   `quiet`, `makefiles`, and `errexit`. Fig spells the long form
-  `--Next-option` (lowercase `next`); the option name is preserved while the
-  zh-CN text describes the NeXT compatibility purpose.
+  `--Next-option`, which differs in capitalization from Apple's
+  `--NeXT-option`; the option name is preserved while the zh-CN text describes
+  the NeXT compatibility purpose.
 - `unzip`/`zip` entry semantics match the local Apple Info-ZIP builds and
   `linux-command`; no platform-specific text was added.
 - `nano`'s description is a recursive wordplay ("Nano's ANOther editor"); the

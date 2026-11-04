@@ -1328,7 +1328,7 @@
   "Extra URLs of package indexes to use in addition to --index-url. Should follow the same rules as --index-url": "除 --index-url 之外额外使用的软件包索引 URL。应遵循与 --index-url 相同的规则",
   "Extra full format": "额外的完整格式",
   "Extra global options to be supplied to the setup.py call before the install command": "在 install 命令之前提供给 setup.py 调用的额外全局选项",
-  "Extract a zip file created in windows, containing files with non-ascii (chinese) filenames": "上游选项疑似错误，请核对当前 unzip 支持（Windows 中文文件名通常用 -O gbk）",
+  "Extract a zip file created in windows, containing files with non-ascii (chinese) filenames": "上游选项疑似错误，请核对当前 unzip 版本支持的参数",
   "Extract all files into DIR": "将所有文件解压到 DIR",
   "Extract compressed files in a ZIP archive": "解压 ZIP 压缩包中的文件",
   "Extract files as yourself": "以当前用户身份解压文件",
