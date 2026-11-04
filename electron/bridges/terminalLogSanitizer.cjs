@@ -57,7 +57,7 @@ class TerminalTextRenderer {
     this.hasPreservedScreenHistory = false;
     this.pendingClearedScreen = null;
     this.erasedPaddingCells = new WeakSet();
-    this.erasePaddingPrefix = "";
+    this.erasePadding = null;
     // Seed when a session log starts while vim/less is already on the alternate buffer.
     this.alternateScreenActive = options.alternateScreenActive === true;
   }
@@ -68,21 +68,43 @@ class TerminalTextRenderer {
 
     for (const ch of input) {
       const mainText = this.state === "normal" && !this.alternateScreenActive;
-      const prefix = this.erasePaddingPrefix;
+      const previousColumn = this.col;
       this.#consume(ch);
-      // Readline's BS-space-BS deletes a cell but leaves it painted blank.
-      // Track that cell separately from a user-typed space. A later overwrite
-      // creates a new cell and therefore cannot inherit erased-padding status.
-      const erased = mainText && prefix === "\b " && ch === "\b";
-      if (erased) {
-        const cell = this.lines[this.row]?.[this.col];
-        if (cell?.ch === " ") this.erasedPaddingCells.add(cell);
-      }
-      // Do not reuse the closing BS as a new erase prefix: a newly typed
-      // space followed by cursor-left must stay distinguishable from deletion.
-      this.erasePaddingPrefix = erased ? "" : mainText && ch === "\b" ? "\b"
-        : mainText && ch === " " && prefix === "\b" ? "\b " : "";
+      this.#trackErasedPadding(ch, mainText && (ch !== "\b" || this.col < previousColumn));
     }
+  }
+
+  #trackErasedPadding(ch, mainText) {
+    if (!mainText) { this.erasePadding = null; return; }
+    let pending = this.erasePadding;
+    if (ch === "\b") {
+      if (!pending || pending.phase === "backward") {
+        pending ??= { phase: "backward", width: 0, spaces: 0, returned: 0 };
+        pending.width += 1;
+        this.erasePadding = pending;
+        return;
+      }
+      if (pending.phase === "spaces" && pending.spaces === pending.width) pending.phase = "return";
+      if (pending.phase === "return") {
+        pending.returned += 1;
+        if (pending.returned < pending.width) return;
+        // Readline erases words/lines with BS^N, space^N, BS^N. Mark only
+        // those painted cells; a later overwrite creates an unmarked cell.
+        for (let i = this.col; i < this.col + pending.width; i += 1) {
+          const cell = this.lines[this.row]?.[i];
+          if (cell?.ch === " ") this.erasedPaddingCells.add(cell);
+        }
+      }
+    } else if (ch === " " && pending
+      && (pending.phase === "backward" || pending.phase === "spaces")
+      && pending.spaces < pending.width) {
+      pending.phase = "spaces";
+      pending.spaces += 1;
+      return;
+    }
+    // Never reuse closing backspaces as a new prefix: genuinely typed spaces
+    // followed by cursor-left must remain pending, even just after deletion.
+    this.erasePadding = null;
   }
 
   finish() {

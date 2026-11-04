@@ -30,6 +30,24 @@ test("cursor state distinguishes erased padding from a typed trailing space", ()
   });
 });
 
+test("multi-cell erase padding is tracked across chunks without accepting typed spaces", () => {
+  const prompt = "prompt> ";
+  for (const width of [1, 2, 5, 11]) {
+    const erased = prompt + "x".repeat(width) + "\b".repeat(width)
+      + " ".repeat(width) + "\b".repeat(width);
+    assert.deepEqual(terminalCursorState(erased), {
+      line: prompt + " ".repeat(width), column: prompt.length, lineWithoutErasedPadding: prompt,
+    });
+    const renderer = createTerminalTextRenderer();
+    for (const ch of erased) renderer.feed(ch);
+    assert.equal(renderer.getCursorLine({ trimErasedPadding: true }), prompt);
+    for (const pending of [" ", "  ", " ".repeat(width + 1)]) {
+      const typed = erased + pending + "\b".repeat(pending.length);
+      assert.equal(terminalCursorState(typed).lineWithoutErasedPadding, prompt + pending);
+    }
+  }
+});
+
 test("plain text rendering applies carriage-return overwrites", () => {
   assert.equal(terminalDataToPlainText("progress 10%\rprogress 100%\n"), "progress 100%");
 });

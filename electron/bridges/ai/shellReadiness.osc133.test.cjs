@@ -121,7 +121,8 @@ test('OSC prompt recovery after erased input accepts only the original empty pro
 
 test('OSC empty input recovers from backspace-space-backspace padding without accepting typed spaces', async () => {
   for (const prompt of ['review@local:~$ ', 'custom \u03bb ']) {
-    for (const erased of ['x\b \b', ' \b \b', 'xy\b \b\b \b']) {
+    for (const erased of ['x\b \b', ' \b \b', 'xy\b \b\b \b',
+      'hello' + '\b'.repeat(5) + ' '.repeat(5) + '\b'.repeat(5)]) {
       const session = {};
       trackSessionIdlePrompt(session, A + prompt + B);
       trackSessionIdlePrompt(session, erased);
@@ -151,7 +152,11 @@ test('real Bash TERM=dumb deletion recovers readiness while pending spaces and q
   const chunks = JSON.parse(result.stdout);
   assert.ok(chunks[2].includes('\b \b'), 'Bash must emit actual erase-padding bytes');
   const session = {};
-  const expected = [true, false, true, false, true, false];
+  assert.ok(chunks[6].includes('\b'.repeat(5) + ' '.repeat(5) + '\b'.repeat(5)),
+    'Ctrl-W must emit actual multi-cell erase-padding bytes');
+  assert.ok(chunks[11].includes('\b'.repeat(11) + ' '.repeat(11) + '\b'.repeat(11)),
+    'Ctrl-U must emit actual full-line erase-padding bytes');
+  const expected = [true, false, true, false, true, false, true, false, false, true, false, true, false];
   chunks.forEach((chunk, index) => {
     trackSessionIdlePrompt(session, chunk);
     assert.equal(Boolean(ready(session)), expected[index], `Bash stage ${index}: ${JSON.stringify(chunk)}`);

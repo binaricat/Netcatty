@@ -35,7 +35,14 @@ chunks = []
 try:
     chunks.append(drain(b"\x1b]133;B\x07"))
     for keys, expected in [(b"x", b"x"), (b"\x7f", b"\b \b"), (b" ", b" "),
-                           (b"\x7f", b"\b \b"), (b'echo "unfinished\n', b"> ")]:
+                           (b"\x7f", b"\b \b"), (b"hello", b"hello"),
+                           (b"\x17", b"\b" * 5 + b" " * 5 + b"\b" * 5),
+                           (b"hello world", b"hello world"),
+                           (b"\x17", b"\b" * 5 + b" " * 5 + b"\b" * 5),
+                           (b"\x15", b"\b" * 6 + b" " * 6 + b"\b" * 6),
+                           (b"hello world", b"hello world"),
+                           (b"\x15", b"\b" * 11 + b" " * 11 + b"\b" * 11),
+                           (b'echo "unfinished\n', b"> ")]:
         os.write(master, keys)
         chunks.append(drain(expected))
 finally:
