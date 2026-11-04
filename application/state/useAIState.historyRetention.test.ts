@@ -171,6 +171,73 @@ test('startup recovers disk-only chats before mirroring a valid partial primary'
   }
 });
 
+for (const scopeType of ['terminal', 'workspace'] as const) {
+  test(`startup orphan cleanup preserves pending disk-only recovery (${scopeType})`, async () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
+    for (const name of ['window', 'document', 'localStorage', 'CustomEvent', 'Event'] as const) {
+      Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? dom.window : dom.window[name] });
+    }
+    Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+    const primary: AISession = {
+      id: 'closed-primary', title: 'Closed primary', agentId: 'catty',
+      scope: { type: scopeType, targetId: 'closed-target' },
+      createdAt: 1, updatedAt: 2, messages: [],
+    };
+    const diskOnly: AISession = {
+      ...primary, id: 'disk-only', title: 'Disk only', updatedAt: 1,
+      scope: { type: scopeType, targetId: 'another-closed-target' },
+    };
+    dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS, JSON.stringify([primary]));
+    dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify([diskOnly.id]));
+    setLatestAISessionsSnapshot(null as unknown as AISession[]);
+    __resetBackupMirrorForTests();
+    const backups: string[] = [];
+    let reads = 0;
+    let resolveRead!: (backup: { ok: boolean; json: string }) => void;
+    Object.assign(dom.window, { netcatty: {
+      aiSessionsBackupWrite: async ({ json }: { json: string }) => { backups.push(json); return { ok: true }; },
+      aiSessionsBackupReadLatest: () => {
+        reads += 1;
+        return new Promise(resolve => { resolveRead = resolve; });
+      },
+    } });
+    let sessions: readonly AISession[] = [];
+    function Harness() {
+      const ai = useAIState();
+      sessions = useAISessionsStore().sessions;
+      // TerminalLayerSupport performs this cleanup on mount, while the disk
+      // backup IPC read can still be pending.
+      React.useEffect(() => { ai.cleanupOrphanedSessions(new Set()); }, [ai.cleanupOrphanedSessions]);
+      return null;
+    }
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => { root.render(React.createElement(Harness)); });
+      assert.equal(reads, 1);
+      assert.deepEqual(sessions, [{ ...primary, scopeDangling: true }]);
+      assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)!), [diskOnly.id]);
+      flushBackupMirror();
+      assert.deepEqual(backups, []);
+
+      await act(async () => { resolveRead({ ok: true, json: JSON.stringify([primary, diskOnly]) }); });
+      const expected = [primary, diskOnly].map(session => ({ ...session, scopeDangling: true }));
+      assert.deepEqual(sessions, expected);
+      assert.deepEqual(readSessionsFromStorage(), expected);
+      assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW), null);
+      flushBackupMirror();
+      assert.deepEqual(JSON.parse(backups.at(-1)!), expected);
+    } finally {
+      await act(async () => { root.unmount(); });
+      __resetBackupMirrorForTests();
+      setLatestAISessionsSnapshot([]);
+      container.remove();
+      dom.window.close();
+    }
+  });
+}
+
 for (const keepPrimary of [true, false]) {
   test(`deletion clears disk-only recovery and remains authoritative (keep primary ${keepPrimary})`, async () => {
     const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });

@@ -147,7 +147,14 @@ export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
 
   if (sessionsMarked) {
     setLatestAISessionsSnapshot(markedSessions);
-    writeSessionsForStorage(markedSessions);
+    // Startup cleanup can run before the disk backup read resolves. Defer
+    // persistence until those chats are merged, preserving their recovery
+    // marker and avoiding a partial backup of only the loaded sessions.
+    const diskOnlyIds = localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) ?? [];
+    const loadedIds = new Set(markedSessions.map(session => session.id));
+    if (!diskOnlyIds.some(id => !loadedIds.has(id))) {
+      writeSessionsForStorage(markedSessions);
+    }
     emitAIStateChanged(STORAGE_KEY_AI_SESSIONS);
   }
 
