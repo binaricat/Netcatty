@@ -71,8 +71,6 @@ class TerminalTextRenderer {
     this.justStartedLogScreen = false;
     this.hasPreservedScreenHistory = false;
     this.pendingClearedScreen = null;
-    this.erasedPaddingCells = new WeakSet();
-    this.erasePadding = null;
     // Seed when a session log starts while vim/less is already on the alternate buffer.
     this.alternateScreenActive = options.alternateScreenActive === true;
   }
@@ -81,44 +79,7 @@ class TerminalTextRenderer {
     if (!input) return;
     this.timestamp = timestamp;
 
-    for (const ch of input) {
-      const mainText = this.state === "normal" && !this.alternateScreenActive;
-      const previousColumn = this.col;
-      const previousCell = this.lines[this.row]?.[this.col];
-      this.#consume(ch);
-      this.#trackErasedPadding(ch, mainText && (ch !== "\b" || this.col < previousColumn), previousCell);
-    }
-  }
-
-  #trackErasedPadding(ch, mainText, previousCell) {
-    if (!mainText) { this.erasePadding = null; return; }
-    let pending = this.erasePadding;
-    if (ch === " ") {
-      if (!pending || pending.returned > 0) {
-        pending = { width: 0, returned: 0, hasTextEvidence: false, erasedCells: [] };
-      }
-      pending.width += 1;
-      const wasText = !!previousCell && (previousCell.ch !== " " || previousCell.wasWideText === true);
-      pending.hasTextEvidence ||= wasText;
-      if (previousCell && (wasText || this.erasedPaddingCells.has(previousCell))) {
-        pending.erasedCells.push(this.lines[this.row]?.[this.col - 1]);
-      }
-      this.erasePadding = pending;
-      return;
-    }
-    if (ch === "\b" && pending) {
-      pending.returned += 1;
-      if (pending.returned < pending.width) return;
-      // A mixed repaint can preserve genuine blanks (e.g. forward-delete x
-      // from "x "). Certify each cell separately; one overwritten character
-      // does not prove every blank in the repaint was removed from input.
-      if (pending.hasTextEvidence) {
-        for (const cell of pending.erasedCells) {
-          if (cell?.ch === " ") this.erasedPaddingCells.add(cell);
-        }
-      }
-    }
-    this.erasePadding = null;
+    for (const ch of input) this.#consume(ch);
   }
 
   finish() {
@@ -128,13 +89,8 @@ class TerminalTextRenderer {
     return this.toString();
   }
 
-  getCursorLine({ trimErasedPadding = false } = {}) {
-    const line = this.lines[this.row] || [];
-    let end = line.length;
-    if (trimErasedPadding) {
-      while (end > this.col && this.erasedPaddingCells.has(line[end - 1])) end -= 1;
-    }
-    return line.slice(0, end).map(cellText).join("");
+  getCursorLine() {
+    return (this.lines[this.row] || []).map(cellText).join("");
   }
 
   toString({ includePendingClearedScreen = false, formatLine = (line) => line } = {}) {
@@ -451,7 +407,7 @@ class TerminalTextRenderer {
     // Overwriting either half removes the glyph. Preserve evidence that both
     // blank cells came from text, so a following readline erase can certify it.
     for (let i = start; i <= start + 1; i += 1) {
-      line[i] = createCell(" ", createDefaultStyle(), { wasWideText: true });
+      line[i] = createCell(" ", createDefaultStyle());
     }
   }
 
@@ -627,11 +583,10 @@ function terminalCursorState(terminalData, options) {
   renderer.finish();
   // A full-screen program owns the display. The main buffer may still hold
   // the shell prompt from before the alternate screen was entered.
-  if (renderer.alternateScreenActive) return { line: "", column: 0, lineWithoutErasedPadding: "" };
+  if (renderer.alternateScreenActive) return { line: "", column: 0 };
   return {
     line: renderer.getCursorLine(),
     column: renderer.col,
-    lineWithoutErasedPadding: renderer.getCursorLine({ trimErasedPadding: true }),
   };
 }
 

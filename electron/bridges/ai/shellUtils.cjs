@@ -267,10 +267,10 @@ function matchesOsc133EmptyPrompt(session, view) {
   if (session._osc133PromptContinued) return false;
   const { terminalCursorState } = require("../terminalLogSanitizer.cjs");
   const cursor = terminalCursorState(view.tail, view);
-  // Ignore only cells known to be BS-space-BS padding. Ordinary spaces must
-  // remain input even when the user moves the cursor back to the prompt.
+  // Readline deletion and vi replacement can emit identical BS-space-BS
+  // bytes. Preserve every displayed blank; output cannot certify its removal.
   return cursor.column === session._osc133PromptColumn
-    && cursor.lineWithoutErasedPadding === session._osc133PromptLine;
+    && cursor.line === session._osc133PromptLine;
 }
 
 function trackSessionIdlePrompt(session, chunk) {
@@ -288,12 +288,12 @@ function trackSessionIdlePrompt(session, chunk) {
       const { alternateScreenActiveAfter } = require("../terminalLogSanitizer.cjs");
       const beforeMarker = combined.slice(0, marker.index);
       const priorSession = { ...session, _promptTrackTail: beforeMarker };
-      const priorStart = Math.max(0, session._osc133PromptStart ?? 0);
-      // Readline redraws PS1 (including A/B) before echoing pending input.
-      // A packet ending at B must not briefly unlock that still-pending line.
-      session._osc133PromptRedrawPending = session.osc133Ready === true
+      // A/B also occur during redraw, including multiline PS1 and packets
+      // ending before pending input is re-echoed. Neither A nor a newline
+      // proves cancellation. Keep uncertain input gated until C/D establishes
+      // a new command lifecycle; a redraw cannot clear this latch.
+      session._osc133PromptRedrawPending ||= session.osc133Ready === true
         && session._osc133PromptLine != null
-        && !beforeMarker.slice(priorStart).includes("\n")
         && !matchesOsc133EmptyPrompt(priorSession, promptTrackingView(priorSession));
       session.osc133Ready = true;
       session._osc133PromptStart = end;
@@ -310,11 +310,13 @@ function trackSessionIdlePrompt(session, chunk) {
           combined.slice(session._osc133PromptStart, end),
           { alternateScreenActive: session._osc133PromptAltScreenAtStart === true },
         );
-        session._osc133PromptLine = cursor.lineWithoutErasedPadding;
+        session._osc133PromptLine = cursor.line;
         session._osc133PromptColumn = cursor.column;
         session._osc133PromptEnd = end;
       }
     } else {
+      // Secondary prompts continue input; only C/D establish a new lifecycle.
+      session._osc133PromptRedrawPending = marker[1] === "A";
       session.osc133Ready = false;
       session._osc133PromptLine = null;
       session._osc133PromptStart = -1;

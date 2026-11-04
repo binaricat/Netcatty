@@ -12,67 +12,23 @@ test("plain text rendering applies backspace edits", () => {
   assert.equal(terminalDataToPlainText("hellp\bo\n"), "hello");
 });
 
-test("cursor state distinguishes erased padding from a typed trailing space", () => {
-  const prompt = "prompt> ";
-  const erased = `${prompt}x\b \b`;
-  assert.equal(terminalCursorLine(erased), `${prompt} `);
-  assert.deepEqual(terminalCursorState(erased), {
-    line: `${prompt} `, column: prompt.length, lineWithoutErasedPadding: prompt,
-  });
-  assert.deepEqual(terminalCursorState(`${prompt} `), {
-    line: `${prompt} `, column: prompt.length + 1, lineWithoutErasedPadding: `${prompt} `,
-  });
-  assert.deepEqual(terminalCursorState(`${prompt} \b`), {
-    line: `${prompt} `, column: prompt.length, lineWithoutErasedPadding: `${prompt} `,
-  });
-  assert.deepEqual(terminalCursorState(`${prompt}\x1b[?1049halt`), {
-    line: "", column: 0, lineWithoutErasedPadding: "",
-  });
-});
-
-test("multi-cell erase padding is tracked across chunks without accepting typed spaces", () => {
+test("cursor state preserves ambiguous blank replacement output", () => {
   const prompt = "prompt> ";
   for (const width of [1, 2, 5, 11]) {
-    const erased = prompt + "x".repeat(width) + "\b".repeat(width)
+    const output = prompt + "x".repeat(width) + "\b".repeat(width)
       + " ".repeat(width) + "\b".repeat(width);
-    assert.deepEqual(terminalCursorState(erased), {
-      line: prompt + " ".repeat(width), column: prompt.length, lineWithoutErasedPadding: prompt,
-    });
+    const expected = { line: prompt + " ".repeat(width), column: prompt.length };
+    assert.deepEqual(terminalCursorState(output), expected);
     const renderer = createTerminalTextRenderer();
-    for (const ch of erased) renderer.feed(ch);
-    assert.equal(renderer.getCursorLine({ trimErasedPadding: true }), prompt);
-    for (const pending of [" ", "  ", " ".repeat(width + 1)]) {
-      const typed = erased + pending + "\b".repeat(pending.length);
-      assert.equal(terminalCursorState(typed).lineWithoutErasedPadding, prompt + pending);
-    }
+    for (const ch of output) renderer.feed(ch);
+    assert.equal(renderer.getCursorLine(), expected.line);
   }
-});
-
-test("moving across genuinely pending blanks never certifies erased padding", () => {
-  const prompt = "prompt> ";
-  for (const width of [1, 3]) {
-    const blankMoves = " ".repeat(width) + "\b".repeat(width)
-      + " ".repeat(width) + "\b".repeat(width);
-    assert.equal(terminalCursorState(prompt + blankMoves).lineWithoutErasedPadding,
-      prompt + " ".repeat(width));
-  }
-});
-
-test("mixed repaint never certifies ordinary blanks just because it erased text", () => {
-  const prompt = "prompt> ";
-  for (const blanks of [1, 2, 3]) {
-    const width = blanks + 1;
-    const mixed = prompt + "x" + " ".repeat(blanks) + "\b".repeat(width)
-      + " ".repeat(width) + "\b".repeat(width);
-    const cursor = terminalCursorState(mixed);
-    assert.equal(cursor.column, prompt.length);
-    assert.equal(cursor.lineWithoutErasedPadding, prompt + " ".repeat(width));
-  }
+  assert.deepEqual(terminalCursorState(`${prompt}\x1b[?1049halt`), { line: "", column: 0 });
 });
 
 test("cursor columns use display widths without inserting padding into log text", () => {
   const text = "\u754c\u{1f600}e\u0301";
-  assert.deepEqual(terminalCursorState(text), { line: text, column: 5, lineWithoutErasedPadding: text });
+  assert.deepEqual(terminalCursorState(text), { line: text, column: 5 });
   assert.equal(terminalDataToPlainText(text), text);
   const renderer = createTerminalTextRenderer();
   for (const ch of text) renderer.feed(ch);
@@ -88,18 +44,18 @@ test("wide-cell overwrites, erases and preserved screens render complete glyphs"
   assert.equal(terminalDataToPlainText("\u754c\x1b[2J\x1b[H\u65b0"), "\u754c\n\u65b0");
 });
 
-test("wide erasures recover while partial emoji sequences remain input", () => {
+test("wide and combining erasures preserve displayed blanks", () => {
   const prompt = "\u754c> ";
   for (const text of ["\u754c", "\u{1f600}"]) {
     const erased = prompt + text + "\b\b  \b\b";
     assert.deepEqual(terminalCursorState(erased), {
-      line: prompt + "  ", column: 4, lineWithoutErasedPadding: prompt,
+      line: prompt + "  ", column: 4,
     });
   }
-  assert.equal(terminalCursorState(prompt + "e\u0301\b \b").lineWithoutErasedPadding, prompt);
+  assert.equal(terminalCursorState(prompt + "e\u0301\b \b").line, prompt + " ");
   const partial = terminalCursorState(prompt + "\u{1f44d}\u{1f3fd}\b\b  \b\b");
   assert.equal(partial.column, 6);
-  assert.equal(partial.lineWithoutErasedPadding, prompt + "\u{1f44d}");
+  assert.equal(partial.line, prompt + "\u{1f44d}  ");
 });
 
 test("spacing marks and soft hyphens remain separate input cells", () => {
@@ -107,7 +63,7 @@ test("spacing marks and soft hyphens remain separate input cells", () => {
     assert.equal(terminalCursorState("x" + suffix).column, 2);
     const afterDelete = terminalCursorState("x" + suffix + "\b \b");
     assert.equal(afterDelete.column, 1);
-    assert.equal(afterDelete.lineWithoutErasedPadding, "x");
+    assert.equal(afterDelete.line, "x ");
   }
   assert.equal(terminalCursorState("\u1100\u1161\u11a8").column, 2);
 });
