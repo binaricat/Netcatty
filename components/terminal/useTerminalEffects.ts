@@ -577,6 +577,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           promptLineBreakStateRef,
           scriptRecorderRef,
           passwordPromptActiveRef,
+          isPromptSecurityAlternateScreenActive: ctx.isPromptSecurityAlternateScreenActive,
           allowHostStyleGreaterThanPrompt: isNetworkDevice,
           onOutputTriggerUserInputRef,
           sudoAutofillRef,

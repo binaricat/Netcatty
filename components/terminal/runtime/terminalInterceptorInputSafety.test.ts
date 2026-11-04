@@ -34,11 +34,11 @@ test("password-prompt input is classified before prompt state reset and cannot b
   );
   assert.match(
     terminalSource,
-    /typeof meta\?\.pluginPipelineSensitiveInput === "boolean"[\s\S]*?passwordPromptActiveRef\.current = meta\.pluginPipelineSensitiveInput[\s\S]*?sensitivePromptOutputTailRef\.current = "";[\s\S]*?return;[\s\S]*?else if \(isUntrustedTerminalInputPrompt/u,
+    /typeof meta\?\.pluginPipelineSensitiveInput === "boolean"[\s\S]*?passwordPromptActiveRef\.current = meta\.pluginPipelineSensitiveInput[\s\S]*?sensitivePromptOutputTailRef\.current = "";[\s\S]*?return;[\s\S]*?isUntrustedTerminalInputPrompt/u,
   );
   assert.match(
     runtimeSource,
-    /const sensitive = ctx\.passwordPromptActiveRef\?\.current === true[\s\S]*?const canBroadcastInput = \(!sensitive\s*\|\|\s*\(ctx\.broadcastPasswordBypassRef\?\.current === true && options\?\.sensitive !== true\)\) &&[\s\S]*?const willBroadcastInput = canBroadcastInput && options\?\.skipBroadcast !== true;/u,
+    /const sensitive = ctx\.passwordPromptActiveRef\?\.current === true[\s\S]*?const canBroadcastInput = shouldBroadcastDuringSensitivePrompt\(\{\s*sensitivePromptActive: sensitive,[\s\S]*?broadcastPasswordBypass: ctx\.broadcastPasswordBypassRef\?\.current === true && options\?\.sensitive !== true,[\s\S]*?\}\) &&[\s\S]*?const willBroadcastInput = canBroadcastInput && options\?\.skipBroadcast !== true;/u,
   );
   assert.match(
     runtimeSource,
@@ -50,7 +50,7 @@ test("password-prompt input is classified before prompt state reset and cannot b
   );
   assert.match(
     runtimeSource,
-    /const broadcastUserPasteData = \(\s*data: string,\s*options\?: TerminalBroadcastInputOptions,\s*\) => \{[\s\S]*?const dispatchingFromPasswordPrompt = ctx\.passwordPromptActiveRef\?\.current === true;[\s\S]*?const sourceSensitive = dispatchingFromPasswordPrompt \|\| options\?\.sensitive === true;[\s\S]*?\|\| ctx\.broadcastPasswordBypassRef\?\.current === true\)[\s\S]*?onBroadcastInputRef\.current\(\s*data,\s*ctx\.sessionId,\s*sourceSensitive[\s\S]*?sourceSensitive: true/u,
+    /const broadcastUserPasteData = \(\s*data: string,\s*options\?: TerminalBroadcastInputOptions,\s*\) => \{[\s\S]*?const dispatchingFromPasswordPrompt = ctx\.passwordPromptActiveRef\?\.current === true;[\s\S]*?const sourceSensitive = dispatchingFromPasswordPrompt \|\| options\?\.sensitive === true;[\s\S]*?broadcastPasswordBypass: ctx\.broadcastPasswordBypassRef\?\.current === true,[\s\S]*?onBroadcastInputRef\.current\(\s*data,\s*ctx\.sessionId,\s*sourceSensitive[\s\S]*?sourceSensitive: true/u,
   );
   assert.match(
     terminalSource,
@@ -141,7 +141,7 @@ test("explicit plugin sensitivity is not treated as the heuristic prompt latch",
 test("active and hibernated output share host-owned sensitive prompt classification", () => {
   assert.match(
     terminalSource,
-    /const observeTerminalInputPrompt = useCallback[\s\S]*?typeof meta\?\.pluginPipelineSensitiveInput === "boolean"[\s\S]*?passwordPromptActiveRef\.current = meta\.pluginPipelineSensitiveInput[\s\S]*?sensitivePromptOutputTailRef\.current = "";[\s\S]*?return;[\s\S]*?isConfirmedTerminalShellPrompt[\s\S]*?passwordPromptActiveRef\.current = false/u,
+    /const observeTerminalInputPrompt = useCallback[\s\S]*?typeof meta\?\.pluginPipelineSensitiveInput === "boolean"[\s\S]*?passwordPromptActiveRef\.current = meta\.pluginPipelineSensitiveInput[\s\S]*?sensitivePromptOutputTailRef\.current = "";[\s\S]*?return;[\s\S]*?isUntrustedTerminalInputPrompt[\s\S]*?passwordPromptActiveRef\.current = false/u,
   );
   assert.match(
     terminalSource,

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
+import ts from 'typescript';
+import { foldTerminalPromptSecurityOutput, isUntrustedTerminalInputPrompt } from '../../domain/terminalPromptSecurity.ts';
+import { probeAltScreenScheduling } from './runtime/terminalWriteCoalescer.ts';
+import type { SensitiveInputActiveRef } from './autocomplete/terminalAutocompletePrompt.ts';
 
 import { applyTerminalKeywordHighlightRules } from './terminalKeywordHighlightRules.ts';
 
@@ -170,11 +175,11 @@ test('password-prompt input is consumed before every semantic command callback',
 test('terminal output treats unknown prompt-shaped input boundaries as sensitive', () => {
   assert.match(
     terminalSource,
-    /const promptSecurityOptions = \{\s*allowHostStyleGreaterThan: isNetworkDevice,\s*alternateScreen: termRef\.current\s*\? isTerminalAlternateScreenActive\(termRef\.current\)\s*: false,\s*\};/,
+    /const promptSecurityOptions = \{\s*allowHostStyleGreaterThan: isNetworkDevice,\s*alternateScreen: promptSecurityScreenRef\.current\.active \|\| \(termRef\.current\s*\? isTerminalAlternateScreenActive\(termRef\.current\)\s*: false\),\s*\};/,
   );
   assert.match(terminalSource, /isUntrustedTerminalInputPrompt\([\s\S]*?promptSecurityOptions/);
   assert.match(terminalSource, /passwordPromptActiveRef\.current = true;[\s\S]*?autocompleteCloseRef\.current\?\.\(\);/);
-  assert.match(terminalSource, /isConfirmedTerminalShellPrompt\([\s\S]*?passwordPromptActiveRef\.current = false;/);
+  assert.match(terminalSource, /isUntrustedTerminalInputPrompt\([\s\S]*?\} else \{[\s\S]*?passwordPromptActiveRef\.current = false;/);
 });
 
 test('terminal view derives the network-device prompt policy before autocomplete renders', () => {
@@ -237,4 +242,91 @@ test('normal boot and hibernate wake share terminal link error feedback', () => 
     effectsSource,
     /createXTermRuntime\(\{[\s\S]*?onOpenExternalError,/,
   );
+});
+
+// Exercise the actual observer without mounting the terminal renderer/addon stack.
+const observerStart = terminalSource.indexOf('  const observeTerminalInputPrompt = useCallback(');
+const observerEnd = terminalSource.indexOf('  const beginHibernatedSessionListeners', observerStart);
+assert.ok(observerStart > 0 && observerEnd > observerStart);
+const observerCode = ts.transpileModule(
+  terminalSource.slice(observerStart, observerEnd) + '\nobserveTerminalInputPrompt;',
+  { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+).outputText;
+
+function promptObserver(bufferAlternate = false) {
+  const latch: SensitiveInputActiveRef = { current: false, source: 'heuristic' };
+  const screen = { current: { active: false, incomplete: null } };
+  const observe = runInNewContext(observerCode, {
+    useCallback: (callback: unknown) => callback,
+    isNetworkDevice: false,
+    promptSecurityScreenRef: screen,
+    sensitivePromptOutputTailRef: { current: '' },
+    heredocPromptOriginRef: { current: '' },
+    promptSecurityPendingCrRef: { current: false },
+    passwordPromptActiveRef: latch,
+    autocompleteCloseRef: { current: () => {} },
+    termRef: { current: {} },
+    isTerminalAlternateScreenActive: () => bufferAlternate,
+    probeAltScreenScheduling,
+    foldTerminalPromptSecurityOutput,
+    isUntrustedTerminalInputPrompt,
+  }) as (chunk: string, meta?: { pluginPipelineSensitiveInput: boolean }) => void;
+  return { latch, screen, observe };
+}
+
+test('raw alternate-screen entry clears a sticky vim latch before xterm parses (#4107)', () => {
+  for (const mode of ['47', '1047', '1049']) {
+    const entry = `\x1b[?${mode}h`;
+    for (let split = 1; split < entry.length; split++) {
+      const { latch, screen, observe } = promptObserver();
+      observe(':');
+      assert.equal(latch.current, true, 'primary-screen sudo colon stays closed');
+      observe(entry.slice(0, split));
+      observe(entry.slice(split) + '\r:');
+      assert.equal(screen.current.active, true);
+      assert.equal(latch.current, false, `${mode} entry split at ${split}`);
+      for (const output of ['q', '!', '\r:q:', '\r-- INSERT --', 'text']) {
+        observe(output);
+        assert.equal(latch.current, false, output);
+      }
+      observe(`\x1b[?${mode}l\rPassword:`);
+      assert.equal(screen.current.active, false);
+      assert.equal(latch.current, true, 'password protection resumes after vim exits');
+    }
+  }
+});
+
+test('parsed alternate-screen vim ex and primary-screen non-prompt echoes clear only heuristic latches', () => {
+  const alternate = promptObserver(true);
+  alternate.latch.current = true;
+  alternate.observe(':');
+  assert.equal(alternate.latch.current, false);
+
+  const primary = promptObserver();
+  primary.observe(':');
+  assert.equal(primary.latch.current, true);
+  primary.observe('q');
+  assert.equal(primary.latch.current, false, 'primary-screen vim echo must not leave a sticky latch');
+  for (const label of ['Password:', 'Token:']) {
+    primary.observe('\r' + label);
+    assert.equal(primary.latch.current, true);
+    primary.observe('secret');
+    assert.equal(primary.latch.current, true);
+  }
+});
+
+test('explicit plugin sensitivity survives vim ex, redraws and shell prompts', () => {
+  const { latch, screen, observe } = promptObserver();
+  observe('Password:', { pluginPipelineSensitiveInput: true });
+  for (const output of ['\x1b[?1049h\r:', 'q!', '\r-- INSERT --', '\x1b[?1049l\ruser@host:~$ ']) {
+    observe(output);
+    assert.equal(latch.current, true);
+    assert.equal(latch.source, 'explicit');
+  }
+  assert.equal(screen.current.active, false, 'screen tracking also runs under explicit metadata');
+  observe('', { pluginPipelineSensitiveInput: false });
+  assert.equal(latch.current, false);
+  observe(':');
+  assert.equal(latch.current, true);
+  assert.equal(latch.source, 'heuristic');
 });

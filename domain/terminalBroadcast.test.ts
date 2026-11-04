@@ -161,3 +161,16 @@ test('sensitive prompts pause broadcasting unless the password bypass is on', ()
     true,
   );
 });
+
+test('alternate-screen broadcast ignores only heuristic prompt latches (#4107)', () => {
+  for (const sensitivePromptSource of [undefined, 'heuristic', 'explicit'] as const) {
+    for (const alternateScreen of [false, true]) {
+      assert.equal(shouldBroadcastDuringSensitivePrompt({
+        sensitivePromptActive: true,
+        broadcastPasswordBypass: false,
+        sensitivePromptSource,
+        alternateScreen,
+      }), alternateScreen && sensitivePromptSource !== 'explicit');
+    }
+  }
+});

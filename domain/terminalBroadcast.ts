@@ -11,8 +11,12 @@ type BroadcastSession = Pick<TerminalSession, 'id' | 'workspaceId' | 'hiddenFrom
 export function shouldBroadcastDuringSensitivePrompt(input: {
   sensitivePromptActive: boolean;
   broadcastPasswordBypass: boolean;
+  sensitivePromptSource?: 'heuristic' | 'explicit';
+  alternateScreen?: boolean;
 }): boolean {
-  return !input.sensitivePromptActive || input.broadcastPasswordBypass;
+  return !input.sensitivePromptActive || input.broadcastPasswordBypass
+    // A stale prompt heuristic must not freeze keystrokes in vim (#4107).
+    || (input.alternateScreen === true && input.sensitivePromptSource !== 'explicit');
 }
 
 export type ComposeSendTarget = 'all' | 'active';

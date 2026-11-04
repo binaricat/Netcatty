@@ -1,3 +1,5 @@
+import { shouldBroadcastDuringSensitivePrompt } from "../../../domain/terminalBroadcast";
+import type { SensitiveInputActiveRef } from "../autocomplete/terminalAutocompletePrompt";
 import { clearTerminalBroadcastUserInput, captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent, markTerminalBroadcastUserInput, type TerminalPacedBroadcast } from "./terminalPacedBroadcast";
 import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
@@ -408,7 +410,9 @@ export type CreateXTermRuntimeContext = {
     recordEnter: (options?: { sensitive?: boolean }) => Promise<void>;
     captureSubmittedLineRecorder?: () => ((line: string, options?: { sensitive?: boolean; includePendingInput?: boolean; consumePendingInput?: boolean }) => Promise<void>) | undefined;
   } | undefined>;
-  passwordPromptActiveRef?: RefObject<boolean>;
+  passwordPromptActiveRef?: SensitiveInputActiveRef;
+  /** Includes raw PTY screen transitions not yet parsed by xterm. */
+  isPromptSecurityAlternateScreenActive?: () => boolean;
   /**
    * Opt-in "broadcast without password protection" (#3488). When true, an
    * active password prompt no longer pauses raw-string broadcast fan-out.
@@ -1054,8 +1058,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // classification carried in the paste options must still tag the fan-out.
     const sourceSensitive = dispatchingFromPasswordPrompt || options?.sensitive === true;
     if (
-      (!dispatchingFromPasswordPrompt
-        || ctx.broadcastPasswordBypassRef?.current === true)
+      shouldBroadcastDuringSensitivePrompt({
+        sensitivePromptActive: dispatchingFromPasswordPrompt,
+        broadcastPasswordBypass: ctx.broadcastPasswordBypassRef?.current === true,
+        sensitivePromptSource: ctx.passwordPromptActiveRef?.source,
+        alternateScreen: ctx.isPromptSecurityAlternateScreenActive?.() || term.buffer?.active.type === "alternate",
+      })
       && ctx.isBroadcastEnabledRef.current
       && ctx.onBroadcastInputRef.current
     ) {
@@ -1380,9 +1388,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // reconnect may have cleared passwordPromptActiveRef while the dialog was
     // open, so the live ref alone would downgrade the secret to nonsensitive.
     // The override is consumed only for the flagged paste data.
-    const sensitive = ctx.passwordPromptActiveRef?.current === true
-      || options?.sensitive === true
+    const carriedSensitive = options?.sensitive === true
       || shouldOverrideTerminalUserPasteSensitivity(term, logicalData ?? data);
+    const sensitive = ctx.passwordPromptActiveRef?.current === true || carriedSensitive;
     if (!options?.lineDelayMs && logicalData !== null
       && !isPrintableInput(logicalData) && !isTerminalReportSequence(logicalData)) {
       commandBufferRevision += 1;
@@ -1411,8 +1419,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // The password bypass (#3488) only lifts the live password-prompt pause.
     // Explicitly classified sensitive payloads (confirmed pastes, preloaded
     // sudo credentials) stay non-broadcastable regardless of the opt-in.
-    const canBroadcastInput = (!sensitive
-      || (ctx.broadcastPasswordBypassRef?.current === true && options?.sensitive !== true)) &&
+    const canBroadcastInput = shouldBroadcastDuringSensitivePrompt({
+      sensitivePromptActive: sensitive,
+      broadcastPasswordBypass: ctx.broadcastPasswordBypassRef?.current === true && options?.sensitive !== true,
+      sensitivePromptSource: carriedSensitive ? "explicit" : ctx.passwordPromptActiveRef?.source,
+      alternateScreen: ctx.isPromptSecurityAlternateScreenActive?.() || term.buffer?.active.type === "alternate",
+    }) &&
       inputSource !== "kitty" &&
       !handlingKittyBroadcast &&
       !suppressTerminalBroadcast &&
@@ -1746,8 +1758,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     isHandlingBroadcast: () => handlingKittyBroadcast,
     isBroadcastEnabled: () => ctx.isBroadcastEnabledRef.current,
     // The #3488 bypass lifts the password-prompt pause for Kitty key fan-out too.
-    isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true
-      && ctx.broadcastPasswordBypassRef?.current !== true,
+    isSensitiveInput: () => !shouldBroadcastDuringSensitivePrompt({
+      sensitivePromptActive: ctx.passwordPromptActiveRef?.current === true,
+      broadcastPasswordBypass: ctx.broadcastPasswordBypassRef?.current === true,
+      sensitivePromptSource: ctx.passwordPromptActiveRef?.source,
+      alternateScreen: ctx.isPromptSecurityAlternateScreenActive?.() || term.buffer?.active.type === "alternate",
+    }),
     // Dispatching from an active prompt under the bypass must tag the payload
     // so peer writes keep input interceptors skipped.
     isSensitivePromptSource: () => ctx.passwordPromptActiveRef?.current === true,
