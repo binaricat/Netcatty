@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   normalizeAppLockSettings,
@@ -131,6 +131,8 @@ export function createOptimisticUnlockedRuntimeState(
   };
 }
 
+
+export const APP_LOCK_ACTIVITY_REPORT_INTERVAL_MS = 1000;
 export function useAppLockState(settings: AppLockSettings) {
   const normalizedSettings = useMemo(() => normalizeAppLockSettings(settings), [settings]);
   const systemUnlockRefreshKey = `${normalizedSettings.enabled}:${normalizedSettings.systemUnlockEnabled}:${Boolean(normalizedSettings.passwordVerifier)}`;
@@ -160,8 +162,14 @@ export function useAppLockState(settings: AppLockSettings) {
     void bridge?.setAppLockRuntimeLocked?.(reason);
   }, [bridge, normalizedSettings]);
 
+  // Activity only resets a minutes-long idle timer; one report per second is
+  // enough instead of an IPC per keystroke, wheel tick and pointer event.
+  const lastActivityReportAtRef = useRef(0);
   const recordActivity = useCallback(() => {
     if (effectiveRuntimeState.locked) return;
+    const now = Date.now();
+    if (now - lastActivityReportAtRef.current < APP_LOCK_ACTIVITY_REPORT_INTERVAL_MS) return;
+    lastActivityReportAtRef.current = now;
     void bridge?.reportAppLockActivity?.();
   }, [bridge, effectiveRuntimeState.locked]);
 

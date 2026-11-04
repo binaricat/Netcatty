@@ -293,7 +293,10 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
     terminalSettings,
   });
 
-  // Sync tray menu data + handle tray actions
+  // Sync tray menu data + handle tray actions. Hosts are only re-sent when the
+  // host list changed: session status updates (connect bursts) used to resend
+  // and re-serialize every host and rebuild the macOS Dock menu each time.
+  const lastTrayHostsRef = useRef<unknown>(null);
   useEffect(() => {
     if (!enabled) return;
     const bridge = netcattyBridge.get();
@@ -316,17 +319,21 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
         };
       });
 
-      const hostsForSystemMenu = hosts
-        .filter((host: any) => typeof host?.id === "string" && host.id.length > 0)
-        .map((host: any) => ({
-          id: host.id,
-          label: host.label,
-          hostname: host.hostname,
-          group: host.group,
-          pinned: host.pinned,
-          lastConnectedAt: host.lastConnectedAt,
-          protocol: host.protocol,
-        }));
+      const hostsChanged = lastTrayHostsRef.current !== hosts;
+      lastTrayHostsRef.current = hosts;
+      const hostsForSystemMenu = hostsChanged
+        ? hosts
+          .filter((host: any) => typeof host?.id === "string" && host.id.length > 0)
+          .map((host: any) => ({
+            id: host.id,
+            label: host.label,
+            hostname: host.hostname,
+            group: host.group,
+            pinned: host.pinned,
+            lastConnectedAt: host.lastConnectedAt,
+            protocol: host.protocol,
+          }))
+        : undefined;
 
       void bridge.updateTrayMenuData({
         sessions: sessionsForTray,
@@ -334,7 +341,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
           ...rule,
           canStop: hasRuntimeTunnel(rule.id),
         })),
-        hosts: hostsForSystemMenu,
+        ...(hostsForSystemMenu ? { hosts: hostsForSystemMenu } : {}),
       });
     }, 250);
 

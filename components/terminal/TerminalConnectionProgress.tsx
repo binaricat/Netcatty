@@ -5,13 +5,17 @@
 import { Loader2, Play } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { useConnectionCountdownSeconds } from './connectionTicker';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 
 export interface TerminalConnectionProgressProps {
     status: 'connecting' | 'connected' | 'disconnected';
     error: string | null;
+    /** Seconds shown before a deadline is known; also used as-is when `deadlineAt` is omitted. */
     timeLeft: number;
+    /** Connection timeout deadline (epoch ms). When provided, counts down locally. */
+    deadlineAt?: number | null;
     isAwaitingUserInput?: boolean;
     showEnterReconnectHint?: boolean;
     isCancelling: boolean;
@@ -56,7 +60,8 @@ export const TerminalConnectionLogList: React.FC<TerminalConnectionLogListProps>
 export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProps> = ({
     status,
     error,
-    timeLeft,
+    timeLeft: timeLeftProp,
+    deadlineAt,
     isAwaitingUserInput = false,
     showEnterReconnectHint = false,
     isCancelling: _isCancelling,
@@ -69,6 +74,8 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
     closeLabel,
 }) => {
     const { t } = useI18n();
+    const countdownSeconds = useConnectionCountdownSeconds(deadlineAt ?? null, timeLeftProp);
+    const timeLeft = deadlineAt === undefined ? timeLeftProp : countdownSeconds;
 
     return (
         <>
