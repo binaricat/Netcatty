@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-import { foldTerminalPromptSecurityOutput, isUntrustedTerminalInputPrompt } from '../../domain/terminalPromptSecurity.ts';
+import { foldTerminalPromptSecurityOutput, isConfirmedTerminalShellPrompt, isUntrustedTerminalInputPrompt } from '../../domain/terminalPromptSecurity.ts';
 import { probeAltScreenScheduling } from './runtime/terminalWriteCoalescer.ts';
 import type { SensitiveInputActiveRef } from './autocomplete/terminalAutocompletePrompt.ts';
 
@@ -179,7 +179,6 @@ test('terminal output treats unknown prompt-shaped input boundaries as sensitive
   );
   assert.match(terminalSource, /isUntrustedTerminalInputPrompt\([\s\S]*?promptSecurityOptions/);
   assert.match(terminalSource, /passwordPromptActiveRef\.current = true;[\s\S]*?autocompleteCloseRef\.current\?\.\(\);/);
-  assert.match(terminalSource, /isUntrustedTerminalInputPrompt\([\s\S]*?\} else \{[\s\S]*?passwordPromptActiveRef\.current = false;/);
 });
 
 test('terminal view derives the network-device prompt policy before autocomplete renders', () => {
@@ -269,6 +268,7 @@ function promptObserver(bufferAlternate = false) {
     isTerminalAlternateScreenActive: () => bufferAlternate,
     probeAltScreenScheduling,
     foldTerminalPromptSecurityOutput,
+    isConfirmedTerminalShellPrompt,
     isUntrustedTerminalInputPrompt,
   }) as (chunk: string, meta?: { pluginPipelineSensitiveInput: boolean }) => void;
   return { latch, screen, observe };
@@ -296,22 +296,47 @@ test('raw alternate-screen entry clears a sticky vim latch before xterm parses (
   }
 });
 
-test('parsed alternate-screen vim ex and primary-screen non-prompt echoes clear only heuristic latches', () => {
-  const alternate = promptObserver(true);
-  alternate.latch.current = true;
-  alternate.observe(':');
-  assert.equal(alternate.latch.current, false);
+test('parsed alternate-screen vim ex and redraws clear stale heuristic latches (#4107)', () => {
+  for (const output of [':', ':q:', '\r-- INSERT --', '\r\x1b[2K']) {
+    const alternate = promptObserver(true);
+    alternate.latch.current = true;
+    alternate.observe(output);
+    assert.equal(alternate.latch.current, false, output);
+  }
+});
 
+test('primary-screen colon prompts retain protection through unrelated echo', () => {
   const primary = promptObserver();
   primary.observe(':');
   assert.equal(primary.latch.current, true);
   primary.observe('q');
-  assert.equal(primary.latch.current, false, 'primary-screen vim echo must not leave a sticky latch');
+  assert.equal(primary.latch.current, true, 'unrelated echo must not clear primary-screen protection');
+});
+
+test('primary-screen background output retains sensitivity until a confirmed shell prompt', () => {
+  const primary = promptObserver();
   for (const label of ['Password:', 'Token:']) {
     primary.observe('\r' + label);
     assert.equal(primary.latch.current, true);
-    primary.observe('secret');
-    assert.equal(primary.latch.current, true);
+    for (const output of ['secret', '\r\n[1] background job completed\r\n', '\x1b[2K', 'ordinary output']) {
+      primary.observe(output);
+      assert.equal(primary.latch.current, true, output);
+    }
+    primary.observe('\r\nuser@host:~$ ');
+    assert.equal(primary.latch.current, false, 'a confirmed shell prompt clears the heuristic latch');
+  }
+});
+
+test('alternate-screen password prompts retain heuristic protection while awaiting input', () => {
+  for (const bufferAlternate of [false, true]) {
+    const { latch, observe } = promptObserver(bufferAlternate);
+    if (!bufferAlternate) observe('\x1b[?1049h');
+    observe('\rPass');
+    for (const output of ['word: ', 'secret']) {
+      observe(output);
+      assert.equal(latch.current, true, output);
+      assert.equal(latch.source, 'heuristic');
+    }
   }
 });
 

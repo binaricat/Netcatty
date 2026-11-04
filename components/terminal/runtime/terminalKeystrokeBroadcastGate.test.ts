@@ -65,20 +65,25 @@ for (const alternateScreen of [false, true]) {
         term: { buffer: { active: { type: alternateScreen ? 'alternate' : 'normal' } } },
         sensitive: true, carriedSensitive: false,
         options: undefined, inputSource: 'terminal', handlingKittyBroadcast: false,
-        suppressTerminalBroadcast: false, id: 'session', broadcastDataBeforeSudo: 'q!',
+        suppressTerminalBroadcast: false, id: 'session', broadcastDataBeforeSudo: 'password',
         onBroadcastInput: () => {},
         shouldBroadcastDuringSensitivePrompt, shouldBroadcastTerminalUserInput,
       };
-      const expected = alternateScreen && source === 'heuristic';
-      assert.equal(runInNewContext(gateCode, context), expected);
-      assert.equal(runInNewContext(kittyCode, context), !expected);
+      assert.equal(runInNewContext(gateCode, context), false);
+      assert.equal(runInNewContext(kittyCode, context), true);
       const pendingParseContext = {
         ...context,
         term: { buffer: { active: { type: 'normal' } } },
         ctx: { ...context.ctx, isPromptSecurityAlternateScreenActive: () => true },
       };
-      assert.equal(runInNewContext(gateCode, pendingParseContext), source === 'heuristic');
-      assert.equal(runInNewContext(kittyCode, pendingParseContext), source !== 'heuristic');
+      assert.equal(runInNewContext(gateCode, pendingParseContext), false);
+      assert.equal(runInNewContext(kittyCode, pendingParseContext), true);
+      const bypassContext = {
+        ...context,
+        ctx: { ...context.ctx, broadcastPasswordBypassRef: { current: true } },
+      };
+      assert.equal(runInNewContext(gateCode, bypassContext), true);
+      assert.equal(runInNewContext(kittyCode, bypassContext), false);
       assert.equal(runInNewContext(gateCode, { ...context, carriedSensitive: true }), false,
         'a carried sensitive paste stays closed even on the alternate screen');
     });

@@ -14,9 +14,7 @@ export function shouldBroadcastDuringSensitivePrompt(input: {
   sensitivePromptSource?: 'heuristic' | 'explicit';
   alternateScreen?: boolean;
 }): boolean {
-  return !input.sensitivePromptActive || input.broadcastPasswordBypass
-    // A stale prompt heuristic must not freeze keystrokes in vim (#4107).
-    || (input.alternateScreen === true && input.sensitivePromptSource !== 'explicit');
+  return !input.sensitivePromptActive || input.broadcastPasswordBypass;
 }
 
 export type ComposeSendTarget = 'all' | 'active';

@@ -63,6 +63,7 @@ import { isPluginHostProtocol } from "../domain/pluginConnection";
 import { clearTerminalBootEpoch, setTerminalBootEpoch } from "../domain/terminalBootEpoch";
 import {
   foldTerminalPromptSecurityOutput,
+  isConfirmedTerminalShellPrompt,
   isUntrustedTerminalInputPrompt,
 } from "../domain/terminalPromptSecurity";
 import { listPasswordPromptFillCandidates } from "../domain/passwordPromptAssist";
@@ -2119,9 +2120,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       passwordPromptActiveRef.current = true;
       passwordPromptActiveRef.source = "heuristic";
       autocompleteCloseRef.current?.();
-    } else {
-      // Non-prompt output (including vim :q / Esc redraws) ends a heuristic
-      // latch too; waiting for a shell PS1 leaves broadcast stuck in vim.
+    } else if (promptSecurityOptions.alternateScreen || isConfirmedTerminalShellPrompt(
+      folded.promptText,
+      promptSecurityOptions,
+    )) {
+      // Vim ex/redraw output can end a stale heuristic latch on the alternate
+      // screen (#4107). Primary-screen output must confirm a shell prompt:
+      // background job output can arrive while a password is still expected.
       passwordPromptActiveRef.current = false;
       passwordPromptActiveRef.source = "heuristic";
     }
