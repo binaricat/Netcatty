@@ -305,11 +305,39 @@ export function __resetIdbPersistenceForTests() {
   // Tests swap the fake indexedDB factory between cases; the cached open
   // handle must not survive the swap.
   resetAiSessionsIdbForTests();
+  // Tests simulate the post-boot state by default; the boot-gating cases
+  // call __resetAiSessionsHydrationForTests() to go back to pending.
+  markAiSessionsHydrationComplete();
 }
 
 /** Test hook: resolve once every queued IndexedDB sync has settled. */
 export function __flushIdbWritesForTests(): Promise<void> {
   return idbWriteQueue.then(() => undefined, () => undefined);
+}
+
+// ── Boot hydration signal (issue #4125 review) ──
+//
+// Settles once useAIState's boot load has finished (IndexedDB read, legacy
+// migration, disk-backup restore). Sync collection and the active-pointer
+// validation must not run before it: a pre-hydration collect reads the
+// stale legacy localStorage store and would overwrite newer IndexedDB
+// records, and pointer validation against the initially-empty in-memory
+// array would null every pointer before the real sessions arrive.
+
+let aiSessionsHydrationComplete = false;
+
+export function isAiSessionsHydrationComplete(): boolean {
+  return aiSessionsHydrationComplete;
+}
+
+/** Called by useAIState's boot effect when the boot load settles. */
+export function markAiSessionsHydrationComplete(): void {
+  aiSessionsHydrationComplete = true;
+}
+
+/** Test hook: return the hydration signal to the pre-boot (pending) state. */
+export function __resetAiSessionsHydrationForTests(): void {
+  aiSessionsHydrationComplete = false;
 }
 
 /** Seed the diff baseline after a boot load or migration. */

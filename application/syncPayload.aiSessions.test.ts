@@ -9,6 +9,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { getAgentRuntime } from '../infrastructure/ai/harness/globalAgentRuntime';
 import { useAIChatStreaming, type UseAIChatStreamingReturn } from './state/useAIChatStreaming';
 import { installFakeIndexedDb } from './state/testSupport/fakeIndexedDb';
+import { idbPutSessions, openAiSessionsIdb } from './state/aiSessionIdbStorage';
 
 installBrowserLockFixture();
 
@@ -51,6 +52,39 @@ test.beforeEach(() => {
 });
 test.afterEach(() => {
   snapshots.__resetIdbPersistenceForTests();
+});
+
+// Issue #4125 review P1①: a sync round that runs before the boot hydration
+// has settled must not collect (and persist) the stale legacy store — it
+// would overwrite newer IndexedDB records with pre-migration data.
+test('a sync round before boot hydration skips chat collection and never overwrites IndexedDB with stale legacy data', async () => {
+  const idb = installFakeIndexedDb();
+  try {
+    snapshots.__resetIdbPersistenceForTests();
+    snapshots.__resetAiSessionsHydrationForTests(); // boot load still pending
+    const newer = { ...session(), title: 'Newer IndexedDB copy', updatedAt: 9 };
+    await idbPutSessions(await openAiSessionsIdb(), [newer]);
+    // Stale pre-migration copy left in the read-only legacy key.
+    storage.set(keys.STORAGE_KEY_AI_SESSIONS, JSON.stringify([{ ...session(), title: 'Stale legacy copy', updatedAt: 1 }]));
+    storage.set(keys.STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS, JSON.stringify({ enabled: true }));
+    snapshots.setLatestAISessionsSnapshot(null as unknown as AISession[]);
+    // Pre-hydration collection skips the round entirely.
+    assert.equal(collectAiSessionsForSync(), undefined);
+    await snapshots.__flushIdbWritesForTests();
+    assert.equal(
+      idb.db.dumpStore('sessions').find((s) => (s as AISession).id === 'chat')?.title,
+      'Newer IndexedDB copy',
+    );
+    // After hydration the collector returns the live snapshot again.
+    snapshots.markAiSessionsHydrationComplete();
+    const hydrated = [newer];
+    snapshots.seedLastPersistedSessions(hydrated);
+    snapshots.setLatestAISessionsSnapshot(hydrated);
+    assert.equal(collectAiSessionsForSync()?.[0].title, 'Newer IndexedDB copy');
+  } finally {
+    idb.restore();
+    snapshots.__resetIdbPersistenceForTests();
+  }
 });
 
 test('actual manual upload and auto collector honor consent and explicit empty', async () => {
