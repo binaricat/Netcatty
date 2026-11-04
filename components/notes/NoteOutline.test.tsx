@@ -4,9 +4,12 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { I18nProvider } from "../../application/i18n/I18nProvider.tsx";
+import { loadLocaleMessages } from "../../application/i18n/messages.ts";
 import { NoteOutline } from "./NoteOutline.tsx";
 
-test("note outline renders a borderless hierarchy without heading-level labels", () => {
+test("note outline renders a borderless hierarchy without heading-level labels", async () => {
+  // Static rendering runs no effects, so load the dictionary explicitly.
+  await loadLocaleMessages("zh-CN");
   const markup = renderToStaticMarkup(
     <I18nProvider locale="zh-CN">
       <NoteOutline
