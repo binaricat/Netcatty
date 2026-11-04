@@ -315,13 +315,14 @@ export function openaiModelSupportsGradedReasoningEffort(modelId: string): boole
 }
 
 /**
- * OpenAI's own `xhigh` tier. Only the Codex Max line documents it; plain GPT-5
- * and o-series stop at `high`, so advertising it elsewhere would produce 400s.
+ * Explicitly supported OpenAI `xhigh` families. GPT-5.5 accepts xhigh (not
+ * max); keep older families and unverified variants at their existing ceiling.
  */
 export function openaiModelSupportsExtraHighReasoning(modelId: string): boolean {
   const id = modelId.trim().toLowerCase();
   if (!id || openaiModelIsChatSnapshot(id)) return false;
-  return /gpt-5(?:\.\d+)?-codex-max/.test(id);
+  return /gpt-5(?:\.\d+)?-codex-max/.test(id)
+    || /(?:^|\/)gpt-5\.5(?:-\d{4}-\d{2}-\d{2})?$/.test(id);
 }
 
 /** OpenAI-compat models that accept `reasoning_effort` (o-series, GPT-5, reasoners). */
