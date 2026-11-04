@@ -1,3 +1,5 @@
+import type { WebglContextBudget, WebglContextBudgetMember } from "./webglContextBudget";
+
 export interface WebglRendererAddon {
   onContextLoss(callback: () => void): unknown;
   dispose(): void;
@@ -8,6 +10,12 @@ export interface WebglRendererController<TAddon extends WebglRendererAddon> {
   suspend(): void;
   dispose(): void;
   getAddon(): TAddon | null;
+  /**
+   * Re-read isVisible() after the pane is shown or hidden. Hidden panes do not
+   * rebuild a lost renderer and can give theirs up to the context budget; the
+   * reveal path's ensure() brings it back.
+   */
+  syncVisibility(): void;
 }
 
 interface WebglRendererControllerOptions<TAddon extends WebglRendererAddon> {
@@ -23,6 +31,12 @@ interface WebglRendererControllerOptions<TAddon extends WebglRendererAddon> {
   recoveryDelayMs?: number;
   recoveryWindowMs?: number;
   maxRecoveriesPerWindow?: number;
+  /** Shared cap on live WebGL contexts. Omit to create renderers freely. */
+  budget?: WebglContextBudget;
+  /** Live pane visibility. Omit to treat the pane as always on screen. */
+  isVisible?: () => boolean;
+  /** Tear a renderer down. Defaults to addon.dispose(). */
+  disposeAddon?: (addon: TAddon) => void;
 }
 
 /** Owns WebGL addon recovery without depending on xterm or browser globals. */
@@ -30,7 +44,8 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
   options: WebglRendererControllerOptions<TAddon>,
 ): WebglRendererController<TAddon> {
   const now = options.now ?? Date.now;
-  const setTimer = options.setTimer ?? setTimeout;
+  const setTimer = options.setTimer
+    ?? ((callback: () => void, delayMs: number) => setTimeout(callback, delayMs));
   const clearTimer = options.clearTimer ?? clearTimeout;
   const recoveryDelayMs = options.recoveryDelayMs ?? 50;
   // Keep a wide enough window that periodic GPU context loss (commonly ~15s on
@@ -44,6 +59,27 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
   let circuitBroken = false;
   let disposed = false;
   let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  let hiddenSince: number | null = null;
+  const budget = options.budget;
+  const disposeAddon = options.disposeAddon ?? ((target: TAddon) => target.dispose());
+
+  // isVisible() is the source of truth; hiddenSince only remembers when the
+  // pane was last seen. Re-reading it at every decision keeps a pane that is
+  // on screen from being refused or released even if a sync was missed.
+  const readVisibility = () => {
+    if (!options.isVisible) return;
+    if (options.isVisible()) hiddenSince = null;
+    else hiddenSince ??= now();
+  };
+  readVisibility();
+
+  const budgetMember: WebglContextBudgetMember = {
+    getHiddenSince: () => {
+      readVisibility();
+      return hiddenSince;
+    },
+    release: () => suspend(),
+  };
 
   const publishLoaded = (value: boolean) => {
     loaded = value;
@@ -58,21 +94,38 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
 
   const ensure = () => {
     if (loaded || circuitBroken || disposed || !options.enabled) return;
+    // A hidden pane past the budget keeps the DOM renderer until it is shown.
+    if (budget && !budget.tryAcquire(budgetMember)) return;
     let nextAddon: TAddon | null = null;
     try {
       nextAddon = options.createAddon();
       const ownedAddon = nextAddon;
       ownedAddon.onContextLoss(() => {
         if (addon !== ownedAddon || disposed) return;
-        options.warn("[XTerm] WebGL context loss detected, rebuilding renderer");
+        readVisibility();
+        const lostWhileHidden = hiddenSince !== null;
+        options.warn(lostWhileHidden
+          ? "[XTerm] WebGL context lost while hidden, rebuilding when shown"
+          : "[XTerm] WebGL context loss detected, rebuilding renderer");
         try {
-          ownedAddon.dispose();
+          disposeAddon(ownedAddon);
         } catch (error) {
           options.warn("[XTerm] Failed to dispose lost WebGL renderer", error);
         }
         addon = null;
+        budget?.forget(budgetMember);
         publishLoaded(false);
         options.repaint();
+
+        // A hidden pane draws nothing, so its rebuild waits for the reveal
+        // path's ensure(). Rebuilding right away is what turned Chromium's
+        // context cap into a loop: each new context evicted another hidden
+        // one. Chromium evicts contexts that have not drawn lately, so these
+        // losses say nothing about the driver and skip the breaker.
+        if (lostWhileHidden) {
+          cancelRecovery();
+          return;
+        }
 
         const lossTime = now();
         while (contextLosses.length > 0 && lossTime - contextLosses[0] > recoveryWindowMs) {
@@ -89,7 +142,8 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
         cancelRecovery();
         recoveryTimer = setTimer(() => {
           recoveryTimer = null;
-          if (disposed) return;
+          readVisibility();
+          if (disposed || hiddenSince !== null) return;
           ensure();
           options.repaint();
         }, recoveryDelayMs);
@@ -99,11 +153,12 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
       publishLoaded(true);
     } catch (error) {
       try {
-        nextAddon?.dispose();
+        if (nextAddon) disposeAddon(nextAddon);
       } catch {
         // Preserve the original load failure.
       }
       if (addon === nextAddon) addon = null;
+      budget?.forget(budgetMember);
       publishLoaded(false);
       options.warn(
         "[XTerm] WebGL addon failed, using DOM renderer. Error:",
@@ -116,13 +171,21 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
     cancelRecovery();
     const currentAddon = addon;
     addon = null;
+    budget?.forget(budgetMember);
     publishLoaded(false);
     if (!currentAddon) return;
     try {
-      currentAddon.dispose();
+      disposeAddon(currentAddon);
     } catch (error) {
       options.warn("[XTerm] Failed to suspend WebGL renderer", error);
     }
+  };
+
+  const syncVisibility = () => {
+    if (disposed) return;
+    const wasHidden = hiddenSince !== null;
+    readVisibility();
+    if (!wasHidden && hiddenSince !== null && addon) budget?.noteHidden(budgetMember);
   };
 
   return {
@@ -133,13 +196,15 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
       cancelRecovery();
       const currentAddon = addon;
       addon = null;
+      budget?.forget(budgetMember);
       publishLoaded(false);
       try {
-        currentAddon?.dispose();
+        if (currentAddon) disposeAddon(currentAddon);
       } catch (error) {
         options.warn("[XTerm] webglAddon dispose failed", error);
       }
     },
     getAddon: () => addon,
+    syncVisibility,
   };
 }

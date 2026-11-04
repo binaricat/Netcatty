@@ -625,6 +625,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           // Defer WebGL context creation for panes that mount hidden (e.g. the
           // background tabs of a batch connect) until they first become visible.
           initiallyVisible: isRendererActive,
+          isPaneVisibleRef: isVisibleRef,
         });
 
         if (disposed) {
@@ -1429,6 +1430,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       && currentContainerSizeAlreadyFit()
     ) {
       lastWebglRecoveryLayoutKeyRef.current = paneLayoutKey;
+      // Even a short hide can cost the renderer: Chromium reclaims a hidden
+      // pane's WebGL context when it runs short. No-op while it is still live.
+      xtermRuntimeRef.current?.ensureWebglRenderer();
       flushPendingOutputScroll();
       commitVisibleLayout();
       return;
@@ -1452,6 +1456,12 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     commitVisibleLayout();
     scheduleLayoutRecoveryRefit([100, 350]);
   };
+
+  // Lets the WebGL context budget note when this pane was hidden, so a pane
+  // that stays hidden can give its renderer up while the budget is over.
+  useLayoutEffect(() => {
+    xtermRuntimeRef.current?.syncPaneVisibility();
+  }, [isVisible]);
 
   // Refit synchronously when a split pane becomes visible or its bounds change.
   // Tab switches hide inactive panes without resizing xterm; becoming visible
