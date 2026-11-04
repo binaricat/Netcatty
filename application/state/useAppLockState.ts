@@ -249,7 +249,9 @@ export function useAppLockState(settings: AppLockSettings) {
     void refreshSystemUnlockStatus();
   }, [refreshSystemUnlockStatus, systemUnlockRefreshKey]);
 
-  return {
+  // Stable identity: AppLockGate passes this to <App>, whose provider tree
+  // re-renders whenever it changes.
+  return useMemo(() => ({
     initialized: effectiveRuntimeState.initialized,
     locked: effectiveRuntimeState.locked,
     lockReason: effectiveRuntimeState.reason,
@@ -261,5 +263,17 @@ export function useAppLockState(settings: AppLockSettings) {
     reset,
     recordActivity,
     resync: refreshRuntimeState,
-  };
+  }), [
+    effectiveRuntimeState.initialized,
+    effectiveRuntimeState.locked,
+    effectiveRuntimeState.reason,
+    lockNow,
+    unlock,
+    unlockWithSystemAuth,
+    systemUnlockStatus,
+    refreshSystemUnlockStatus,
+    reset,
+    recordActivity,
+    refreshRuntimeState,
+  ]);
 }

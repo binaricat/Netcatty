@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 
 import { parseKeyCombo, type HotkeyScheme } from '../../domain/models/keyBindings';
 
@@ -70,26 +70,55 @@ export function shouldReleaseShortcutModifier(
   return !isShortcutModifierHeld(event, requirements);
 }
 
-export function useShortcutModifierHeld(
+// The held flag lives in a tiny store so only the tab icon slots re-render when
+// it flips. It used to be TopTabs state, which re-rendered the whole tab bar
+// twice for every Ctrl/⌘ shortcut typed in a terminal (Ctrl+C, ⌘V, ...).
+let modifierHeld = false;
+const modifierHeldListeners = new Set<() => void>();
+
+function publishModifierHeld(next: boolean): void {
+  if (modifierHeld === next) return;
+  modifierHeld = next;
+  for (const listener of modifierHeldListeners) listener();
+}
+
+function subscribeModifierHeld(listener: () => void): () => void {
+  modifierHeldListeners.add(listener);
+  return () => {
+    modifierHeldListeners.delete(listener);
+  };
+}
+
+const getModifierHeld = () => modifierHeld;
+
+/** Whether the tab-switch modifier combination is currently held. */
+export function useShortcutModifierHeldValue(): boolean {
+  return useSyncExternalStore(subscribeModifierHeld, getModifierHeld, getModifierHeld);
+}
+
+/**
+ * Track the modifiers of the effective [1...9] tab-switch binding and publish
+ * whether they are held. Pass a null binding to stop tracking.
+ */
+export function useTrackShortcutModifierHeld(
   keyBinding: string | null,
   scheme: HotkeyScheme,
-): boolean {
-  const [isHeld, setIsHeld] = useState(false);
+): void {
   const requirements = useMemo(
     () => getShortcutModifierRequirements(keyBinding, scheme),
     [keyBinding, scheme],
   );
 
   useEffect(() => {
-    setIsHeld(false);
+    publishModifierHeld(false);
     if (!requirements) return;
 
     // Sync on every modifier transition so extras clear the preview and
     // releasing an extra modifier can re-arm when the exact combo remains.
     const syncHeldState = (event: KeyboardEvent) => {
-      setIsHeld(isShortcutModifierHeld(event, requirements));
+      publishModifierHeld(isShortcutModifierHeld(event, requirements));
     };
-    const clearHeldState = () => setIsHeld(false);
+    const clearHeldState = () => publishModifierHeld(false);
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         clearHeldState();
@@ -106,8 +135,7 @@ export function useShortcutModifierHeld(
       window.removeEventListener('keyup', syncHeldState, true);
       window.removeEventListener('blur', clearHeldState);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      publishModifierHeld(false);
     };
   }, [requirements]);
-
-  return isHeld;
 }

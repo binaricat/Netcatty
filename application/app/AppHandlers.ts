@@ -1279,16 +1279,14 @@ export function hasMultipleProtocolsImpl(getCtx: AppContextGetter, host: Host) {
 }
 
 export function handleHostConnectWithProtocolCheckImpl(getCtx: AppContextGetter, host: Host) {
-  const { handleConnectToHost, hasMultipleProtocols, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost, setQuickSearch } = getCtx();
+  const { handleConnectToHost, hasMultipleProtocols, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost } = getCtx();
 {
     if (hasMultipleProtocols(host)) {
       setProtocolSelectHost(resolveEffectiveHost(host));
       setIsQuickSwitcherOpen(false);
-      setQuickSearch('');
     } else {
       handleConnectToHost(host);
       setIsQuickSwitcherOpen(false);
-      setQuickSearch('');
     }
   }
 }

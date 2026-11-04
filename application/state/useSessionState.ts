@@ -21,6 +21,7 @@ getNextFocusSessionId,
 insertPaneIntoWorkspace,
 pruneWorkspaceNode,
 reorderWorkspaceFocusSessionOrder,
+setWorkspaceFocusedSessionId,
 SplitDirection,
 SplitHint,
 updateWorkspaceSplitSizes,
@@ -1097,10 +1098,10 @@ export const useSessionState = ({
 
   // Set the focused session in a workspace (for focus mode)
   const setWorkspaceFocusedSession = useCallback((workspaceId: string, sessionId: string) => {
-    setWorkspaces(prev => prev.map(ws => {
-      if (ws.id !== workspaceId) return ws;
-      return { ...ws, focusedSessionId: sessionId };
-    }));
+    // Pane click and focus both land here; an unchanged focus must keep the
+    // same array or every click re-renders the whole shell (and re-saves the
+    // session restore snapshot).
+    setWorkspaces(prev => setWorkspaceFocusedSessionId(prev, workspaceId, sessionId));
   }, []);
 
   const reorderWorkspaceSessions = useCallback((
@@ -1147,10 +1148,7 @@ export const useSessionState = ({
     }
     
     // Update focused session
-    setWorkspaces(prev => prev.map(ws => {
-      if (ws.id !== workspaceId) return ws;
-      return { ...ws, focusedSessionId: nextSessionId };
-    }));
+    setWorkspaces(prev => setWorkspaceFocusedSessionId(prev, workspaceId, nextSessionId));
     
     return true;
   }, [workspaces]);
