@@ -2,8 +2,13 @@ import { localStorageAdapter } from '../../infrastructure/persistence/localStora
 import {
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_SESSIONS,
+  STORAGE_KEY_AI_SESSION_MESSAGE_CAP,
   STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS,
 } from '../../infrastructure/config/storageKeys';
+import {
+  DEFAULT_AI_SESSION_MESSAGE_CAP,
+  normalizeAiSessionMessageCap,
+} from '../../domain/aiSessionMessageCap';
 import type {
   AIDraft,
   AIPanelView,
@@ -215,8 +220,23 @@ export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
  * to keep history from growing without bound.
  */
 const MAX_STORED_SESSIONS = 1000;
-/** Maximum number of messages per session when persisting. */
-const MAX_SESSION_MESSAGES = 200;
+
+/**
+ * Per-session message cap, read from user settings (clamped to 50–2000,
+ * default 200). Read on every write so a lowered cap trims the oldest
+ * messages on the next write; a raised cap stops further trimming.
+ * Best-effort: an unavailable storage layer keeps the default cap.
+ */
+export function readAiSessionMessageCap(): number {
+  try {
+    return normalizeAiSessionMessageCap(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_SESSION_MESSAGE_CAP)
+        ?? DEFAULT_AI_SESSION_MESSAGE_CAP,
+    );
+  } catch {
+    return DEFAULT_AI_SESSION_MESSAGE_CAP;
+  }
+}
 
 /**
  * Prune sessions before writing to the persisted store to bound retention.
@@ -224,20 +244,23 @@ const MAX_SESSION_MESSAGES = 200;
  * until the session is reloaded.
  *
  * - Keeps only the MAX_STORED_SESSIONS most-recently-updated sessions.
- * - Trims each session's messages to the last MAX_SESSION_MESSAGES.
+ * - Trims each session's messages to the last `messageCap` messages.
  */
-export function pruneSessionsForStorage(sessions: AISession[]): AISession[] {
+export function pruneSessionsForStorage(
+  sessions: AISession[],
+  messageCap: number = readAiSessionMessageCap(),
+): AISession[] {
   // Sort by updatedAt descending so we keep the newest
   const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
   const limited = sorted.slice(0, MAX_STORED_SESSIONS);
   return limited.map(s => {
-    if (s.messages.length > MAX_SESSION_MESSAGES) {
+    if (s.messages.length > messageCap) {
       // Do not start the retained tail with a tool result whose assistant call
       // was just trimmed. Reuse the same tool-safe boundary logic as context
       // compaction, even if that retains a few more than the nominal cap.
       const removedMessageCount = findSafeChatMessageCompactionSplitIndex(
         s.messages,
-        MAX_SESSION_MESSAGES,
+        messageCap,
       );
       const contextCompaction = s.contextCompaction
         ? {

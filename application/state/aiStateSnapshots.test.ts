@@ -364,6 +364,66 @@ test('pruneSessionsForStorage keeps only the newest 1000 sessions', () => {
   assert.equal(persisted.some((session) => session.id === 'session-1000'), true);
 });
 
+test('pruneSessionsForStorage honors a lowered explicit message cap', () => {
+  const messages = Array.from({ length: 250 }, (_, index) => ({
+    id: `message-${index}`,
+    role: 'user' as const,
+    content: `turn ${index}`,
+    timestamp: index,
+  }));
+  const persisted = pruneSessionsForStorage(
+    [makeSession('capped-low', 1, messages)],
+    50,
+  );
+  assert.equal(persisted[0].messages.length, 50);
+  assert.equal(persisted[0].messages[0].id, 'message-200');
+});
+
+test('pruneSessionsForStorage honors a raised explicit message cap', () => {
+  const messages = Array.from({ length: 1200 }, (_, index) => ({
+    id: `message-${index}`,
+    role: 'user' as const,
+    content: `turn ${index}`,
+    timestamp: index,
+  }));
+  const persisted = pruneSessionsForStorage(
+    [makeSession('capped-high', 1, messages)],
+    1000,
+  );
+  assert.equal(persisted[0].messages.length, 1000);
+  assert.equal(persisted[0].messages[0].id, 'message-200');
+});
+
+test('pruneSessionsForStorage defaults to the stored aiSessionMessageCap setting', (t) => {
+  const messages = Array.from({ length: 250 }, (_, index) => ({
+    id: `message-${index}`,
+    role: 'user' as const,
+    content: `turn ${index}`,
+    timestamp: index,
+  }));
+  let storedCap: number | null = null;
+  t.mock.method(localStorageAdapter, 'readNumber', () => storedCap);
+
+  // Unset → legacy default of 200.
+  const defaultTrimmed = pruneSessionsForStorage([makeSession('cap-default', 1, messages)]);
+  assert.equal(defaultTrimmed[0].messages.length, 200);
+
+  // Stored setting drives the trim on the next write.
+  storedCap = 60;
+  const lowered = pruneSessionsForStorage([makeSession('cap-lowered', 1, messages)]);
+  assert.equal(lowered[0].messages.length, 60);
+  assert.equal(lowered[0].messages[0].id, 'message-190');
+
+  // Values outside the allowed range clamp to it.
+  storedCap = 10;
+  const clampedLow = pruneSessionsForStorage([makeSession('cap-clamp-low', 1, messages)]);
+  assert.equal(clampedLow[0].messages.length, 50);
+
+  storedCap = 5000;
+  const clampedHigh = pruneSessionsForStorage([makeSession('cap-clamp-high', 1, messages)]);
+  assert.equal(clampedHigh[0].messages.length, 250);
+});
+
 test('writeSessionsForStorage persists per record to IndexedDB and never touches the legacy localStorage key', async (t) => {
   const { writeSessionsForStorage, __flushIdbWritesForTests, __resetIdbPersistenceForTests, getPersistedAiSessionsSnapshot } =
     await import('./aiStateSnapshots');

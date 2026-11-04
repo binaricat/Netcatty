@@ -660,6 +660,10 @@ export const esAiMessages: Messages = {
   'ai.chatShortcuts.title': 'Atajos de chat',
   'ai.chatShortcuts.selectionAction': 'Mostrar "Agregar a la conversación" al seleccionar texto de la terminal',
   'ai.chatShortcuts.selectionAction.description': 'Muestra un pequeño botón de IA junto al texto seleccionado de la terminal.',
+  'ai.chatHistory.title': 'Historial de chat',
+  'ai.chatHistory.messageCap': 'Mensajes conservados por chat',
+  'ai.chatHistory.messageCap.description': 'Número máximo de mensajes almacenados por chat (50–2000). Al reducirlo, los mensajes más antiguos se descartan del almacenamiento en la siguiente escritura. Los valores más altos aumentan el almacenamiento y el tamaño de la sincronización en la nube.',
+  'ai.chatHistory.messageCap.unit': 'mensajes',
 
   // AI Error
   'ai.codex.bridgeError': 'Los controladores del proceso principal de Codex aún no están cargados. Reinicia Netcatty por completo o reinicia el proceso de desarrollo de Electron y vuelve a intentarlo.',

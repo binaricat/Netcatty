@@ -55,6 +55,10 @@ import { AIPrivacySection } from "./ai/AIPrivacySection";
 import { ToolAccessGuidance } from "./ai/ToolAccessGuidance";
 import { PermissionGrantsSettings } from "./ai/PermissionGrantsSettings";
 import { useAIPermissionGrantsState } from "../../../application/state/useAIPermissionGrantsState";
+import {
+  MAX_AI_SESSION_MESSAGE_CAP,
+  MIN_AI_SESSION_MESSAGE_CAP,
+} from "../../../domain/aiSessionMessageCap";
 import { WebSearchSettings } from "./ai/WebSearchSettings";
 import { QuickMessagesSettings } from "./ai/QuickMessagesSettings";
 import type { AIQuickMessage } from "../../../infrastructure/ai/quickMessages";
@@ -159,6 +163,8 @@ interface SettingsAITabProps {
   setResponseIdleTimeout: (value: number) => void;
   maxIterations: number;
   setMaxIterations: (value: number) => void;
+  aiSessionMessageCap: number;
+  setAiSessionMessageCap: (value: number) => void;
   webSearchConfig: WebSearchConfig | null;
   setWebSearchConfig: (config: WebSearchConfig | null) => void;
   quickMessages: AIQuickMessage[];
@@ -196,6 +202,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   setResponseIdleTimeout,
   maxIterations,
   setMaxIterations,
+  aiSessionMessageCap,
+  setAiSessionMessageCap,
   webSearchConfig,
   setWebSearchConfig,
   quickMessages,
@@ -1300,6 +1308,35 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
                   onChange={setShowTerminalSelectionAIAction}
                   ariaLabel={t('ai.chatShortcuts.selectionAction')}
                 />
+              </SettingRow>
+            </SettingCard>
+          </SettingsSection>
+
+          <SettingsSection
+            anchorId="ai-chat-history"
+            title={t('ai.chatHistory.title')}
+          >
+            <SettingCard>
+              <SettingRow
+                anchorId="ai-chat-history-message-cap"
+                label={t('ai.chatHistory.messageCap')}
+                description={t('ai.chatHistory.messageCap.description')}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    aria-label={t('ai.chatHistory.messageCap')}
+                    value={aiSessionMessageCap}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val)) setAiSessionMessageCap(val);
+                    }}
+                    min={MIN_AI_SESSION_MESSAGE_CAP}
+                    max={MAX_AI_SESSION_MESSAGE_CAP}
+                    className="w-20 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                  <span className="text-xs text-muted-foreground">{t('ai.chatHistory.messageCap.unit')}</span>
+                </div>
               </SettingRow>
             </SettingCard>
           </SettingsSection>

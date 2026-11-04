@@ -217,6 +217,7 @@ export const STORAGE_KEY_AI_COMMAND_BLOCKLIST = 'netcatty_ai_command_blocklist_v
 export const STORAGE_KEY_AI_COMMAND_TIMEOUT = 'netcatty_ai_command_timeout_v1';
 export const STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT = 'netcatty_ai_response_idle_timeout_v1';
 export const STORAGE_KEY_AI_MAX_ITERATIONS = 'netcatty_ai_max_iterations_v1';
+export const STORAGE_KEY_AI_SESSION_MESSAGE_CAP = 'netcatty_ai_session_message_cap_v1';
 export const STORAGE_KEY_AI_SESSIONS = 'netcatty_ai_sessions_v1';
 /** Byte-budget overflow JSON; further chunks use suffixes _2, _3, etc. */
 export const STORAGE_KEY_AI_SESSIONS_OVERFLOW = 'netcatty_ai_sessions_overflow_v1';

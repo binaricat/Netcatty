@@ -650,6 +650,10 @@ export const zhTWAiMessages: Messages = {
   'ai.chatShortcuts.title': '聊天快捷入口',
   'ai.chatShortcuts.selectionAction': '選取終端內容時顯示「新增到對話」',
   'ai.chatShortcuts.selectionAction.description': '在終端裡選取文字後顯示 AI 快捷按鈕。',
+  'ai.chatHistory.title': '聊天歷史',
+  'ai.chatHistory.messageCap': '每個會話保留的訊息數',
+  'ai.chatHistory.messageCap.description': '每個會話最多儲存的訊息數（50–2000）。調低後會在下一次寫入時從儲存中捨棄最舊的訊息。數值越大，儲存空間與雲端同步體積也越大。',
+  'ai.chatHistory.messageCap.unit': '則訊息',
 
   // AI Error
   'ai.codex.bridgeError': 'Codex 主程序處理器尚未載入。請完全重新啟動 Netcatty 或重新啟動 Electron 開發程序，然後重試。',

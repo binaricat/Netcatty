@@ -74,6 +74,7 @@ import {
   latestAIPanelViewByScopeSnapshot,
   latestAISessionsSnapshot,
   prepareRestoredSessions,
+  readAiSessionMessageCap,
   rebindActiveSessionMap,
   scheduleBackupMirror,
   seedLastPersistedSessions,
@@ -1123,22 +1124,27 @@ export function useAIState() {
     });
   }, [debouncedPersistSessions]);
 
-  // Local-only retention. Synced history must match the full-history storage policy.
-  const MAX_MESSAGES_PER_SESSION = 500;
+  // Local-only retention. Synced history must match the full-history storage
+  // policy. The in-memory bound follows the user-configurable per-session cap
+  // (see aiStateSnapshots.readAiSessionMessageCap) but never below this floor,
+  // so the default behavior is unchanged and RAM stays bounded when the user
+  // lowers the persisted cap.
+  const MIN_IN_MEMORY_MESSAGES_PER_SESSION = 500;
 
   const addMessageToSession = useCallback((sessionId: string, message: ChatMessage) => {
     const syncEnabled = localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled === true;
+    const inMemoryCap = Math.max(readAiSessionMessageCap(), MIN_IN_MEMORY_MESSAGES_PER_SESSION);
     setSessionsRaw(prev => {
       const next = prev.map(s => {
         if (s.id !== sessionId) return s;
         let msgs = [...s.messages, message];
         // Dropping synced prefixes makes the next cloud merge add them back.
-        if (!syncEnabled && msgs.length > MAX_MESSAGES_PER_SESSION) {
+        if (!syncEnabled && msgs.length > inMemoryCap) {
           const systemMsgs = msgs.filter(m => m.role === 'system');
           const nonSystemMsgs = msgs.filter(m => m.role !== 'system');
-          const dropped = nonSystemMsgs.length - (MAX_MESSAGES_PER_SESSION - systemMsgs.length);
-          console.warn(`[useAIState] Session ${sessionId}: trimmed ${dropped} oldest non-system message(s) to stay within ${MAX_MESSAGES_PER_SESSION} limit`);
-          msgs = [...systemMsgs, ...nonSystemMsgs.slice(-MAX_MESSAGES_PER_SESSION + systemMsgs.length)];
+          const dropped = nonSystemMsgs.length - (inMemoryCap - systemMsgs.length);
+          console.warn(`[useAIState] Session ${sessionId}: trimmed ${dropped} oldest non-system message(s) to stay within ${inMemoryCap} limit`);
+          msgs = [...systemMsgs, ...nonSystemMsgs.slice(-inMemoryCap + systemMsgs.length)];
         }
         return { ...s, messages: msgs, updatedAt: Date.now() };
       });
