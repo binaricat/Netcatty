@@ -2,21 +2,22 @@
 
 const { createHash } = require("node:crypto");
 const { isDeepStrictEqual } = require("node:util");
-const Ajv2020 = require("ajv/dist/2020").default;
-const addFormats = require("ajv-formats").default;
 const { assertPluginJsonValue } = require("./jsonBoundary.cjs");
 const { fetchBounded, validateCatalog, DISTRIBUTION_ORIGIN, MAX_CATALOG_BYTES } = require("./catalogService.cjs");
-const { formatValidationErrors } = require("./contractValidator.cjs");
+const { formatValidationErrors, getContractAjv } = require("./contractValidator.cjs");
 const REGISTRY_URL = `${DISTRIBUTION_ORIGIN}/v1/snapshot.json`;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const COMMIT = /^[a-f0-9]{40}$/u;
-const ajv = new Ajv2020({ allErrors: true, strict: false, validateFormats: true });
-addFormats(ajv);
-ajv.addSchema(require("./generated/plugin-contract.schema.json"));
-const validateIndex = ajv.compile(require("./distribution/index.schema.json"));
-const deliverySchema = require("./distribution/delivery.schema.json");
-const validateDelivery = ajv.compile(deliverySchema);
-const validateDeliveryV2 = ajv.compile(require("./distribution/delivery-v2.schema.json"));
+// Compiled on first use against the shared contract Ajv: the plugin host loads
+// this module at startup, but snapshots are only validated when a market
+// source is refreshed.
+function lazyDistributionValidator(loadSchema) {
+  let compiled = null;
+  return () => (compiled ??= getContractAjv().compile(loadSchema()));
+}
+const getIndexValidator = lazyDistributionValidator(() => require("./distribution/index.schema.json"));
+const getDeliveryValidator = lazyDistributionValidator(() => require("./distribution/delivery.schema.json"));
+const getDeliveryV2Validator = lazyDistributionValidator(() => require("./distribution/delivery-v2.schema.json"));
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const tuple = (entry) => JSON.stringify([entry.id, entry.version, entry.repository, entry.commit]);
 
@@ -60,8 +61,9 @@ async function fetchVerified(ref, fetchImpl, origin = DISTRIBUTION_ORIGIN) {
 }
 function validateSet(pointer, entries, index, delivery, origin = DISTRIBUTION_ORIGIN) {
   validateCatalog(entries, origin);
+  const validateIndex = getIndexValidator();
   if (!validateIndex(index)) throw new Error(`Invalid distribution index: ${formatValidationErrors(validateIndex.errors)}`);
-  const validator = delivery.schemaVersion === 2 ? validateDeliveryV2 : validateDelivery;
+  const validator = delivery.schemaVersion === 2 ? getDeliveryV2Validator() : getDeliveryValidator();
   if (!validator(delivery)) throw new Error(`Invalid static delivery: ${formatValidationErrors(validator.errors)}`);
   if (delivery.registryCommit !== pointer.registryCommit || delivery.catalogSha256 !== pointer.catalog.sha256
     || delivery.indexSha256 !== pointer.index.sha256) throw new Error("Static snapshot documents do not match");

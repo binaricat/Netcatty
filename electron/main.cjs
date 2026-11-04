@@ -128,6 +128,10 @@ try {
         supportFetchAPI: true,
         corsEnabled: true,
         stream: true,
+        // Let V8 reuse compiled code for the renderer bundles across launches
+        // and windows (requires `standard`). Without it every window
+        // recompiles the multi-megabyte entry chunk from scratch.
+        codeCache: true,
       },
     },
     {

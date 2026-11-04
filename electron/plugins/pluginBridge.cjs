@@ -5,6 +5,7 @@ const { randomUUID } = require("node:crypto");
 
 const { createDefinitionValidator } = require("./contractValidator.cjs");
 const validateManagedPluginId = createDefinitionValidator("PluginId");
+const validatePluginViewResourceRequest = createDefinitionValidator("PluginViewResourceRequest");
 
 const { raceWithAbort } = require("./rpcRouter.cjs");
 const {
@@ -1679,7 +1680,7 @@ function registerPluginBridge(ipcMain, options) {
   });
   handle("netcatty:plugins:host-ui-resource", async (_activeManager, payload, event) => {
     if (!hostDrawnViewHost) throw new Error("Plugin views unavailable");
-    if (!createDefinitionValidator("PluginViewResourceRequest")(payload)) throw new TypeError("Invalid plugin resource request");
+    if (!validatePluginViewResourceRequest(payload)) throw new TypeError("Invalid plugin resource request");
     return hostDrawnViewHost.resource(payload.instanceId, payload.path, event.sender);
   });
   handle(CHANNELS.hostDrawnEvent, async (_activeManager, payload, event) => {
