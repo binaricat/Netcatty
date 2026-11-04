@@ -2120,13 +2120,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       passwordPromptActiveRef.current = true;
       passwordPromptActiveRef.source = "heuristic";
       autocompleteCloseRef.current?.();
-    } else if (promptSecurityOptions.alternateScreen || isConfirmedTerminalShellPrompt(
+    } else if ((promptSecurityOptions.alternateScreen && /^:/.test(folded.promptText.trimStart())) || isConfirmedTerminalShellPrompt(
       folded.promptText,
       promptSecurityOptions,
     )) {
-      // Vim ex/redraw output can end a stale heuristic latch on the alternate
-      // screen (#4107). Primary-screen output must confirm a shell prompt:
-      // background job output can arrive while a password is still expected.
+      // Vim ex can end a stale heuristic latch on the alternate screen (#4107).
+      // Other output must confirm a shell prompt: background job output can
+      // arrive while a password is still expected, including inside tmux.
       passwordPromptActiveRef.current = false;
       passwordPromptActiveRef.source = "heuristic";
     }

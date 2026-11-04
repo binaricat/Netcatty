@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { shouldBroadcastDuringSensitivePrompt } from '../../domain/terminalBroadcast.ts';
 import { foldTerminalPromptSecurityOutput, isConfirmedTerminalShellPrompt, isUntrustedTerminalInputPrompt } from '../../domain/terminalPromptSecurity.ts';
 import { probeAltScreenScheduling } from './runtime/terminalWriteCoalescer.ts';
 import type { SensitiveInputActiveRef } from './autocomplete/terminalAutocompletePrompt.ts';
@@ -296,12 +297,23 @@ test('raw alternate-screen entry clears a sticky vim latch before xterm parses (
   }
 });
 
-test('parsed alternate-screen vim ex and redraws clear stale heuristic latches (#4107)', () => {
-  for (const output of [':', ':q:', '\r-- INSERT --', '\r\x1b[2K']) {
+test('parsed alternate-screen vim ex clears stale heuristic latches and keeps broadcasting (#4107)', () => {
+  for (const output of [':', ':q:']) {
     const alternate = promptObserver(true);
     alternate.latch.current = true;
     alternate.observe(output);
     assert.equal(alternate.latch.current, false, output);
+    alternate.observe('\r:'); // Delayed echo of the broadcast ex command opener.
+    for (const input of ['q!', '\r', '\x1b', 'i']) {
+      assert.equal(shouldBroadcastDuringSensitivePrompt({
+        sensitivePromptActive: alternate.latch.current,
+        broadcastPasswordBypass: false,
+      }), true, input);
+      alternate.observe(input === 'i' ? '\r-- INSERT --' : input);
+      assert.equal(alternate.latch.current, false, input);
+    }
+    alternate.observe('\r\x1b[2K');
+    assert.equal(alternate.latch.current, false, 'redraw after ex keeps the latch clear');
   }
 });
 
@@ -327,15 +339,19 @@ test('primary-screen background output retains sensitivity until a confirmed she
   }
 });
 
-test('alternate-screen password prompts retain heuristic protection while awaiting input', () => {
+test('alternate-screen password prompts block broadcast through background output', () => {
   for (const bufferAlternate of [false, true]) {
     const { latch, observe } = promptObserver(bufferAlternate);
     if (!bufferAlternate) observe('\x1b[?1049h');
     observe('\rPass');
-    for (const output of ['word: ', 'secret']) {
+    for (const output of ['word: ', '\r\nbackground job output\r\n', '\x1b[2K', 'ordinary output', 'secret']) {
       observe(output);
       assert.equal(latch.current, true, output);
       assert.equal(latch.source, 'heuristic');
+      assert.equal(shouldBroadcastDuringSensitivePrompt({
+        sensitivePromptActive: latch.current,
+        broadcastPasswordBypass: false,
+      }), false, 'password keystrokes must not reach peers');
     }
   }
 });
