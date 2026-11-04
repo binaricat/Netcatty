@@ -31,7 +31,7 @@ export function useComposeDirectoryPicker(sessionId: string) {
     const stopObserving = observeTerminalDirectory(sessionId);
     lifetime.current = new AbortController();
     sending.current = false;
-    setConfirmed(false); setOpen(false); setPending(false); setHome(null); setError(null); setEntries([]);
+    setConfirmed(false); setOpen(false); setPending(false); setLoading(false); setHome(null); setError(null); setEntries([]);
     listingBase.current = null;
     if (controller) void Promise.all([controller.refresh(), controller.home()]).then(([, nextHome]) => {
       if (generation.current === id) { setConfirmed(true); setHome(nextHome); }

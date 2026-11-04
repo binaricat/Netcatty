@@ -125,3 +125,70 @@ for (const nextCwd of ['/new-osc7', '/original']) {
     assert.deepEqual(published, []);
   });
 }
+
+for (const probe of ['fails', 'stalls'] as const) {
+  test(`a fresh post-write OSC 7 confirms navigation when the strict cwd probe ${probe}`, { timeout: 2000 }, async t => {
+    const id = 'osc7-confirm-' + probe;
+    const writes: string[] = [];
+    terminalCwdStore.setCwd(id, '/old', 'osc7');
+    const controller = createTerminalDirectoryController({
+      sessionId: id, confirmationMs: 1000, isCurrent: () => true, isReady: () => true,
+      io: {
+        cwd: () => probe === 'fails' ? Promise.reject(new Error('no process cwd support')) : new Promise(() => {}),
+        list: async () => ({ entries: [], home: null }), realpath: async value => value,
+        write: data => {
+          writes.push(data);
+          setImmediate(() => terminalCwdStore.setCwd(id, '/next', 'osc7'));
+        },
+      },
+      publish() { assert.fail('an unavailable probe must not publish a guessed cwd'); },
+    });
+    t.after(() => controller.dispose());
+    await controller.change('/next', new AbortController().signal, () => {});
+    assert.deepEqual(writes, ["cd -- '/next'\r"]);
+    assert.equal(controller.hasConfirmedCwd(), true);
+  });
+}
+
+for (const report of ['stale', 'other-session', 'other-source', 'fresh-unchanged'] as const) {
+  test(`OSC 7 confirmation uses this submission's session revision (${report})`, { timeout: 2000 }, async t => {
+    const id = 'osc7-revision-confirm-' + report;
+    terminalCwdStore.setCwd(id, '/next', 'osc7');
+    const controller = createTerminalDirectoryController({
+      sessionId: id, confirmationMs: 20, isCurrent: () => true, isReady: () => true,
+      io: {
+        cwd: async () => { throw new Error('no process cwd support'); },
+        list: async () => ({ entries: [], home: null }), realpath: async value => value,
+        write() {
+          if (report !== 'stale') setImmediate(() => terminalCwdStore.setCwd(
+            report === 'other-session' ? id + '-other' : id, '/next', report === 'other-source' ? 'inferred' : 'osc7',
+          ));
+        },
+      },
+      publish() {},
+    });
+    t.after(() => controller.dispose());
+    const change = controller.change('/next', new AbortController().signal, () => {});
+    if (report === 'fresh-unchanged') await change;
+    else await assert.rejects(change, { code: 'changeFailed' });
+  });
+}
+
+for (const cancellation of ['abort', 'dispose'] as const) {
+  test(`a fresh OSC 7 cannot confirm a cancelled directory change (${cancellation})`, { timeout: 2000 }, async t => {
+    const id = 'osc7-cancel-' + cancellation;
+    const abort = new AbortController();
+    const controller = createTerminalDirectoryController({
+      sessionId: id, isCurrent: () => true, isReady: () => true,
+      io: { cwd: () => new Promise(() => {}), list: async () => ({ entries: [], home: null }),
+        realpath: async value => value,
+        write() { setImmediate(() => {
+          if (cancellation === 'abort') abort.abort(); else controller.dispose();
+          terminalCwdStore.setCwd(id, '/next', 'osc7');
+        }); } },
+      publish() {},
+    });
+    t.after(() => controller.dispose());
+    await assert.rejects(controller.change('/next', abort.signal, () => {}), { code: 'unavailable' });
+  });
+}

@@ -78,33 +78,58 @@ export function createTerminalDirectoryController(options: {
     const intent = isDirectoryPath(path) ? resolveInteractiveTerminalCdIntent(path) : null;
     if (!intent) throw new DirectoryPickerError('unsupportedPath');
     changing = true;
+    let confirmationFinished = false;
     try {
       const canonical = await bounded(options.io.realpath(path, signal), signal);
       check(signal);
       ready(); // The shell can become busy while resolving a remote symlink.
       if (expectedCwd && terminalCwdStore.getCwd(options.sessionId) !== expectedCwd) throw new DirectoryPickerError('unavailable');
+      const submittedRevision = terminalCwdStore.getSessionRevision(options.sessionId);
       options.io.write(intent.command + '\r');
       accepted();
       const deadline = Date.now() + (options.confirmationMs ?? 8000);
-      while (Date.now() < deadline) {
-        check(signal);
-        if (options.isReady()) {
-          try {
-            const cwd = await refresh();
-            check(signal);
-            if (cwd === path || cwd === canonical || await bounded(options.io.realpath(cwd, signal), signal) === canonical) return;
-          } catch (error) {
-            if (!current() || signal.aborted) throw error;
+      const hasFreshOsc7 = () => {
+        const cwd = terminalCwdStore.getCwd(options.sessionId);
+        return terminalCwdStore.getSessionRevision(options.sessionId) !== submittedRevision
+          && terminalCwdStore.getSource(options.sessionId) === 'osc7'
+          && (cwd === path || cwd === canonical);
+      };
+      const pause = () => new Promise<void>(resolve => {
+        const done = () => { clearTimeout(timer); lifetime.signal.removeEventListener('abort', done); resolve(); };
+        const timer = setTimeout(done, 200);
+        lifetime.signal.addEventListener('abort', done, { once: true });
+      });
+      const confirmFromProbe = async () => {
+        while (!confirmationFinished && Date.now() < deadline) {
+          check(signal);
+          if (hasFreshOsc7()) return;
+          if (options.isReady()) {
+            try {
+              const cwd = await refresh();
+              check(signal);
+              if (cwd === path || cwd === canonical || await bounded(options.io.realpath(cwd, signal), signal) === canonical) return;
+            } catch (error) {
+              if (!current() || signal.aborted) throw error;
+            }
           }
+          await pause();
         }
-        await new Promise<void>(resolve => {
-          const done = () => { clearTimeout(timer); lifetime.signal.removeEventListener('abort', done); resolve(); };
-          const timer = setTimeout(done, 200);
-          lifetime.signal.addEventListener('abort', done, { once: true });
-        });
-      }
-      throw new DirectoryPickerError('changeFailed');
-    } finally { changing = false; }
+        if (!confirmationFinished) throw new DirectoryPickerError('changeFailed');
+      };
+      // OSC 7 is authoritative even when process cwd lookup is unavailable or
+      // stalled. Poll revisions too: an unchanged OSC 7 path emits no store event.
+      const confirmFromOsc7 = async () => {
+        while (!confirmationFinished) {
+          check(signal);
+          if (hasFreshOsc7()) return;
+          if (Date.now() >= deadline) throw new DirectoryPickerError('changeFailed');
+          await pause();
+        }
+      };
+      await Promise.race([confirmFromProbe(), confirmFromOsc7()]);
+      check(signal);
+      confirmed = true;
+    } finally { confirmationFinished = true; changing = false; }
   }
   return {
     refresh,
