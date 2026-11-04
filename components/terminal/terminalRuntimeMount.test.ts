@@ -177,7 +177,7 @@ test('password-prompt input is consumed before every semantic command callback',
 test('terminal output treats unknown prompt-shaped input boundaries as sensitive', () => {
   assert.match(
     terminalSource,
-    /const promptSecurityOptions = \{\s*allowHostStyleGreaterThan: isNetworkDevice,\s*alternateScreen: promptSecurityScreenRef\.current\.active \|\| \(termRef\.current\s*\? isTerminalAlternateScreenActive\(termRef\.current\)\s*: false\),\s*\};/,
+    /const promptSecurityOptions = \{\s*allowHostStyleGreaterThan: isNetworkDevice,\s*alternateScreen: promptSecurityScreenRef\.current\.active \?\? \(termRef\.current\s*\? isTerminalAlternateScreenActive\(termRef\.current\)\s*: false\),\s*\};/,
   );
   assert.match(terminalSource, /isUntrustedTerminalInputPrompt\([\s\S]*?promptSecurityOptions/);
   assert.match(terminalSource, /passwordPromptActiveRef\.current = true;[\s\S]*?autocompleteCloseRef\.current\?\.\(\);/);
@@ -256,7 +256,7 @@ const observerCode = ts.transpileModule(
 
 function promptObserver(bufferAlternate = false) {
   const latch: SensitiveInputActiveRef = { current: false, source: 'heuristic' };
-  const screen = { current: { active: false, incomplete: null } };
+  const screen = { current: { active: null as boolean | null, incomplete: null } };
   const context = {
     useCallback: (callback: unknown) => callback,
     isNetworkDevice: false,
@@ -319,6 +319,27 @@ test('parsed alternate-screen vim ex clears stale heuristic latches and keeps br
     }
     alternate.observe('\r\x1b[2K');
     assert.equal(alternate.latch.current, false, 'redraw after ex keeps the latch clear');
+  }
+});
+
+test('raw screen exits retain primary-screen colon protection while xterm still reports alternate', () => {
+  for (const mode of ['47', '1047', '1049']) {
+    const exit = `\x1b[?${mode}l`;
+    for (let split = 0; split < exit.length; split++) {
+      const { latch, screen, observe } = promptObserver(true);
+      observe(`\x1b[?${mode}h\rPassword: `);
+      assert.equal(latch.current, true);
+      observe(exit.slice(0, split));
+      observe(exit.slice(split) + '\r:');
+      assert.equal(screen.current.active, false);
+      assert.equal(latch.current, true, `${mode} exit split at ${split}`);
+      observe('q');
+      assert.equal(latch.current, true, 'the observed exit remains authoritative on later output');
+      assert.equal(shouldBroadcastDuringSensitivePrompt({
+        sensitivePromptActive: latch.current,
+        broadcastPasswordBypass: false,
+      }), false, 'primary-screen colon input must not reach peers');
+    }
   }
 });
 

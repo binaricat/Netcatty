@@ -467,9 +467,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const heredocPromptOriginRef = useRef("");
   const promptSecurityPendingCrRef = useRef(false);
   const promptSecurityScreenRef = useRef<{
-    active: boolean;
+    // Null until a raw transition or snapshot establishes authoritative screen state.
+    active: boolean | null;
     incomplete: Parameters<typeof probeAltScreenScheduling>[1];
-  }>({ active: false, incomplete: null });
+  }>({ active: null, incomplete: null });
   const [activeScriptRun, setActiveScriptRun] = useState<import('@/types/global/netcatty-bridge-script.d.ts').ScriptRun | undefined>(undefined);
   const dismissedScriptRunIdsRef = useRef(new Set<string>());
 
@@ -514,7 +515,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const termRef = useRef<XTerm | null>(null);
   const isPromptSecurityAlternateScreenActive = useCallback(() => (
     promptSecurityScreenRef.current.active
-    || (termRef.current ? isTerminalAlternateScreenActive(termRef.current) : false)
+    ?? (termRef.current ? isTerminalAlternateScreenActive(termRef.current) : false)
   ), []);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const serializeAddonRef = useRef<SerializeAddon | null>(null);
@@ -1520,7 +1521,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const updateStatus = useCallback((next: TerminalSession["status"]) => {
     if (next === "disconnected") {
-      promptSecurityScreenRef.current = { active: false, incomplete: null };
+      promptSecurityScreenRef.current = { active: null, incomplete: null };
     }
     statusRef.current = next;
     setStatus(next);
@@ -2098,7 +2099,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     promptSecurityPendingCrRef.current = folded.pendingCr;
     const promptSecurityOptions = {
       allowHostStyleGreaterThan: isNetworkDevice,
-      alternateScreen: promptSecurityScreenRef.current.active || (termRef.current
+      alternateScreen: promptSecurityScreenRef.current.active ?? (termRef.current
         ? isTerminalAlternateScreenActive(termRef.current)
         : false),
     };
