@@ -44,6 +44,7 @@ function createBridgeRegistrarForTest({
   sshBridge = null,
   terminalBridge = null,
   electronModuleOverrides = {},
+  windows = [],
 }) {
   const noopBridge = createNoopBridge();
   const tempDirBridge = {
@@ -61,6 +62,7 @@ function createBridgeRegistrarForTest({
         isEncryptionAvailable: () => false,
       },
       dialog: {},
+      nativeTheme: new EventEmitter(),
       ...electronModuleOverrides,
     },
     app: {
@@ -68,7 +70,7 @@ function createBridgeRegistrarForTest({
       getVersion: () => "0.0.0",
       getName: () => "Netcatty",
     },
-    BrowserWindow: { getAllWindows: () => [] },
+    BrowserWindow: { getAllWindows: () => windows },
     shell: { openExternal() {}, openPath() {} },
     clipboard: { readText: () => "", writeText() {} },
     path,
@@ -111,6 +113,36 @@ function createBridgeRegistrarForTest({
     isPathInside: () => true,
   });
 }
+
+test("registrar broadcasts system theme updates when plugin host initialization fails", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-theme-registrar-test-"));
+  t.after(() => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const nativeTheme = new EventEmitter();
+  const messages = [];
+  const registerBridges = createBridgeRegistrarForTest({
+    ipcMain: createIpcMainStub(),
+    tempDir,
+    electronModuleOverrides: { nativeTheme },
+    windows: [{
+      isDestroyed: () => false,
+      webContents: {
+        isDestroyed: () => false,
+        send: (channel, payload) => messages.push({ channel, payload }),
+      },
+    }],
+  });
+
+  // This fixture intentionally lacks app.getAppPath, so the optional plugin
+  // host fails to initialize. Native theme delivery must remain independent.
+  registerBridges({});
+  assert.equal(nativeTheme.listenerCount("updated"), 1);
+  nativeTheme.shouldUseDarkColors = true;
+  nativeTheme.emit("updated");
+  assert.deepEqual(messages, [{
+    channel: "netcatty:system-theme-changed",
+    payload: { isDark: true },
+  }]);
+});
 
 test("the single temp-download entry routes direct downloads through the shared transfer bridge", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-download-temp-test-"));
