@@ -85,6 +85,7 @@ import {
 } from './aiStateSnapshots';
 import {
   isMissingOrCorruptSessionsStore,
+  parseSessionsStore,
   mergeImportedSessions,
   parseBackupSessions,
   readLiveSessionsArray,
@@ -190,8 +191,9 @@ export function useAIState() {
   }, []);
   useEffect(() => {
     const liveRaw = localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS);
-    if (!isMissingOrCorruptSessionsStore(liveRaw)) {
-      if (readLiveSessionsArray(liveRaw).length > 0 && liveRaw != null) scheduleBackupMirror(liveRaw);
+    const liveStore = parseSessionsStore(liveRaw);
+    if (liveStore.valid) {
+      if (liveStore.sessions.length > 0 && liveRaw != null) scheduleBackupMirror(liveRaw);
       return;
     }
     if (latestAISessionsSnapshot && latestAISessionsSnapshot.length > 0) return;
