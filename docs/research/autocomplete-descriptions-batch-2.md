@@ -20,7 +20,7 @@ adopts 177 unique English keys and deliberately defers one shared `node` key.
 | GNU Coreutils | 9.12, `sort invocation` (`https://www.gnu.org/software/coreutils/manual/html_node/sort-invocation.html`) | GNU sort options |
 | macOS `sort(1)` | local macOS 26.7 manual and `sort --help` | BSD/macOS sort options |
 | gawk | Debian bookworm `gawk(1)` (`https://manpages.debian.org/bookworm/gawk/gawk.1.en.html`) | gawk-specific options |
-| GNU sed | `https://www.gnu.org/software/sed/manual/sed.html` | GNU sed extensions |
+| GNU sed | `https://www.gnu.org/software/sed/manual/sed.html` | GNU sed extensions and automatic-print semantics |
 | macOS `sed(1)` | local macOS 26.7 manual | BSD/Apple sed options |
 
 Checked on 2026-11-04. `linux-command` has no `command/python.md`, `command/node.md`,
@@ -35,7 +35,7 @@ and the local tool help instead.
 | `python3` | 24 | 23 shared keys plus `-m` |
 | `node` | 12 | 1 shared key deferred |
 | `vim` | 39 | includes keys shared with `nvim`/`lvim` |
-| `sort` | 37 | Fig mixes GNU and BSD/macOS options |
+| `sort` | 37 | Fig mixes shared and BSD/macOS-only options |
 | `awk` | 23 | local spec; gawk-specific options are marked |
 | `sed` | 42 | Fig mixes BSD/Apple and GNU options |
 
@@ -56,11 +56,12 @@ Total adopted: 177 unique English keys.
   options.
 - **Vim**: the adopted startup options match the local Vim 9.1 `--help` output.
   Keys shared with `nvim`/`lvim` use wording valid for all three.
-- **sort**: Fig mixes shared options with GNU-only options (`--sort`, `--debug`)
-  and BSD/macOS-only options (`--radixsort`, `--mergesort`, `--qsort`,
-  `--heapsort`, `--mmap`). `--parallel` is present in both the GNU manual and the
-  local BSD/macOS help. The translations describe each entry without asserting
-  that every option exists on every platform.
+- **sort**: Fig mixes shared options (including `--sort`, `--debug`, and
+  `--parallel`) with BSD/macOS-only options (`--radixsort`, `--mergesort`,
+  `--qsort`, `--heapsort`, `--mmap`). The GNU manual caps its default
+  `--parallel` value at 8, while the local BSD/macOS manual says the default is
+  the number of CPUs; the zh-CN text therefore only says that the option sets
+  the number of parallel sorting threads, without a universal default.
 - **awk**: the local macOS `awk` is BSD awk, while the spec also exposes
   gawk-specific options. The gawk manual confirms that `-c` is traditional
   compatibility mode (not POSIX), `-n` is `--non-decimal-data`, and `-t` is
@@ -70,7 +71,9 @@ Total adopted: 177 unique English keys.
   (`-a`, `-I`, `-i`, `-l`) with GNU extensions (`e`, `F`, `v`, `z`) and shared
   options. In particular, BSD `-i` requires an extension while GNU `-i` treats
   it as optional; the Fig description follows the BSD form and the difference is
-  recorded here.
+  recorded here. The `n` command prints the pattern space only when automatic
+  printing has not been suppressed by `-n`; the zh-CN text states that
+  condition.
 
 ## Unresolved
 
@@ -188,7 +191,7 @@ unique English strings.
 | sed | Prints the pattern space | 打印模式空间 |
 | sed | Prints the pattern space in an unambiguous form | 以无歧义的形式打印模式空间 |
 | sed | Prints the pattern space up to the first newline | 打印模式空间中第一个换行符之前的部分 |
-| sed | Prints the pattern space, then, regardless, replaces the pattern space with the next line of input. If there is no more input then sed exits without processing any more commands | 打印模式空间，然后无条件用下一行输入替换模式空间；若没有更多输入，sed 退出，不再处理任何命令 |
+| sed | Prints the pattern space, then, regardless, replaces the pattern space with the next line of input. If there is no more input then sed exits without processing any more commands | 未禁用自动打印时，先打印模式空间；随后用下一行输入替换模式空间。若无更多输入则退出。 |
 | sed | Queue a line of filename to be read and inserted into the output stream at the end of the current cycle, or when the next input line is read | 排队读取 filename 的一行，并在当前循环结束或读取下一行输入时插入输出流 |
 | sed | Reads file | 读取文件 |
 | sed | Replace (change) lines with `text` | 用 `text` 替换（更改）行 |
@@ -212,135 +215,7 @@ unique English strings.
 | sort | Print some extra information about the sorting process to the standard output | 将排序过程的一些额外信息输出到标准输出 |
 | sort | Print the output to the output file instead of the standard output | 将输出写入输出文件而不是标准输出 |
 | sort | Select how to sort values | 选择排序类型 |
-| sort | Set the maximum number of execution threads.  Default number equals to the number of CPUs | 设置最大执行线程数。默认值等于 CPU 数量 |
-| sort | Shows help message | 显示帮助信息 |
-| sort | Sort by a random order | 按随机顺序排序 |
-| sort | Sort by general numerical value | 按通用数值排序 |
-| sort | Sort by month abbreviations.  Unknown strings are considered smaller than the month names | 按月份缩写排序。未知字符串视为小于月份名称 |
-| sort | Sort by numerical value, but take into account the SI suffix, if present | 按数值排序，但考虑存在的 SI 后缀 |
-| sort | Sort fields numerically by arithmetic value | 按算术值对字段进行数值排序 |
-| sort | Sort in reverse order | 按逆序排序 |
-| sort | Sort or merge records (lines) of text and binary files | 对文本和二进制文件中的记录（行）进行排序或合并 |
-| sort | Sort version numbers | 对版本号排序 |
-| sort | Specify maximum number of files that can be opened by sort at once | 指定 sort 一次最多可打开的文件数 |
-| sort | Stable sort. This option maintains the original record order of records that have an equal key | 稳定排序。保持键相等的记录原有的相对顺序 |
-| sort | Store temporary files in the directory dir | 将临时文件存储在目录 dir 中 |
-| sort | Suppress errors on false check | 检查失败时不报告错误 |
-| sort | Take the input file list from the file filename | 从文件 filename 中读取输入文件列表 |
-| sort | Try to use file memory mapping system call.  It may increase speed in some cases | 尝试使用文件内存映射系统调用。在某些情况下可提高速度 |
-| sort | Try to use heap sort, if the sort specifications allow.  This sort algorithm cannot be used with -u and -s | 若排序规范允许，尝试使用堆排序。此算法不能与 -u 和 -s 一起使用 |
-| sort | Try to use quick sort, if the sort specifications allow.  This sort algorithm cannot be used with -u and -s | 若排序规范允许，尝试使用快速排序。此算法不能与 -u 和 -s 一起使用 |
-| sort | Try to use radix sort, if the sort specifications allow | 若排序规范允许，尝试使用基数排序 |
-| sort | Unique keys. Suppress all lines that have a key that is equal to an already processed one | 仅保留唯一键：丢弃键与已处理行相同的所有行 |
-| sort | Use char as a field separator character | 使用 char 作为字段分隔符 |
-| sort | Use mergesort.  This is a universal algorithm that can always be used, but it is not always the fastest | 使用归并排序。这是一种通用算法，但未必最快 |
-| sort | Use NUL as record separator | 使用 NUL 作为记录分隔符 |
-| sort | Use PROGRAM to compress temporary files (eg. bzip2) | 使用 PROGRAM 压缩临时文件（例如 bzip2） |
-| sort | Use size for the maximum size of the memory buffer | 将 size 用作内存缓冲区的最大大小 |
-| vim | 'nocompatible', Vim defaults, no plugins, no viminfo | 'nocompatible'、Vim 默认值、不加载插件、不使用 viminfo |
-| vim | Append all typed commands to file <scriptout> | 将所有输入的命令追加到文件 <scriptout> |
-| vim | Be verbose [level N] [log messages to fname] | 详细输出 [级别 N] [将日志消息写入 fname] |
-| vim | Binary mode | 二进制模式 |
-| vim | Compatible with Vi: 'compatible' | 与 Vi 兼容：'compatible' |
-| vim | Debugging mode | 调试模式 |
-| vim | Diff mode (like 'vimdiff') | 差异模式（类似 'vimdiff'） |
-| vim | Don't load plugin scripts | 不加载插件脚本 |
-| vim | Easy mode (like 'evim', modeless) | 简易模式（类似 'evim'，无模式） |
-| vim | Edit encrypted files | 编辑加密文件 |
-| vim | Enable silent mode (when in ex mode), or Read Normal mode commands from file | 启用静默模式（在 Ex 模式下），或从文件读取普通模式命令 |
-| vim | Ex mode (like 'ex') | Ex 模式（类似 'ex'） |
-| vim | Execute <command> after loading the first file | 在加载第一个文件后执行 <command> |
-| vim | Execute <command> before loading any vimrc file | 在加载任何 vimrc 文件前执行 <command> |
-| vim | Exit if input or output is not a terminal | 输入或输出不是终端时退出 |
-| vim | Improved Ex mode | 改进的 Ex 模式 |
-| vim | Like -o but split vertically | 类似 -o，但垂直分割 |
-| vim | Lisp mode | Lisp 模式 |
-| vim | Modifications (writing files) not allowed | 不允许修改（写入文件） |
-| vim | Modifications in text not allowed | 不允许修改文本 |
-| vim | No swap file, use memory only | 不使用交换文件，仅使用内存 |
-| vim | Not fully Vi compatible: 'nocompatible' | 不完全兼容 Vi：'nocompatible' |
-| vim | Open N tab pages (default: one for each file) | 打开 N 个标签页（默认：每个文件一个） |
-| vim | Open N windows (default: one for each file) | 打开 N 个窗口（默认：每个文件一个） |
-| vim | Print Help message and exit | 显示帮助信息并退出 |
-| vim | Readonly mode (like 'view') | 只读模式（类似 'view'） |
-| vim | Recover crashed session if filename is specified, otherwise list swap files and exit | 若指定文件名则恢复崩溃的会话，否则列出交换文件并退出 |
-| vim | Restricted mode (like 'rvim') | 受限模式（类似 'rvim'） |
-| vim | Same as -r | 与 -r 相同 |
-| vim | Set terminal type to <terminal> | 将终端类型设为 <terminal> |
-| vim | Skip warning for input/output not being a terminal | 跳过输入/输出不是终端的警告 |
-| vim | Source file <session> after loading the first file | 在加载第一个文件后执行会话文件 <session> |
-| vim | Start at end of file, if line number is specified, start at that line | 从文件末尾开始；若指定行号，则从该行开始 |
-| vim | Use <viminfo> instead of .viminfo | 使用 <viminfo> 代替 .viminfo |
-| vim | Use <vimrc> instead of any .vimrc | 使用 <vimrc> 代替任何 .vimrc |
-| vim | Vi IMproved, a programmer's text editor | Vi IMproved，程序员的文本编辑器 |
-| vim | Vi mode (like 'vi') | Vi 模式（类似 'vi'） |
-| vim | Write all typed commands to file <scriptout> | 将所有输入的命令写入文件 <scriptout> |
-| vim | Write startup timing messages to <file> | 将启动计时消息写入 <file> |
-`zh-TW` is generated from these values with
-`node scripts/generate-autocomplete-descriptions-zh-TW.mjs` (OpenCC s2twp), not
-edited by hand.
-
-## License notices
-
-The English description strings are derived from `@withfig/autocomplete`, and
-the terminology review used `jaywcjlove/linux-command` where available. Both are
-MIT licensed: Copyright (c) 2021 Hercules Labs Inc. (Fig); Copyright © 2019
-小弟调调™. The full MIT text is preserved in
-`docs/research/autocomplete-descriptions-touch.md#license-notices`.
-' address matches the last line of the current file, and address ranges are limited to the current file | 类似 `-I` 就地编辑文件，但将每个文件独立处理。具体而言，每个文件的行号从 1 开始，``
-
-`zh-TW` is generated from these values with
-`node scripts/generate-autocomplete-descriptions-zh-TW.mjs` (OpenCC s2twp), not
-edited by hand.
-
-## License notices
-
-The English description strings are derived from `@withfig/autocomplete`, and
-the terminology review used `jaywcjlove/linux-command` where available. Both are
-MIT licensed: Copyright (c) 2021 Hercules Labs Inc. (Fig); Copyright © 2019
-小弟调调™. The full MIT text is preserved in
-`docs/research/autocomplete-descriptions-touch.md#license-notices`.
-' 地址匹配当前文件的最后一行，地址范围限于当前文件 |
-| sed | Edits files in-place, saving backups with the specified extension.  If a zero-length extension is given, no backup will be saved | 就地编辑文件，并使用指定扩展名保存备份。若扩展名为空，则不保存备份 |
-| sed | Exchanges the contents of the hold and pattern spaces | 交换保持空间和模式空间的内容 |
-| sed | Executes the command that is found in pattern space and replaces the pattern space with the output; a trailing newline is suppressed | 执行模式空间中的命令，并用命令输出替换模式空间；末尾换行符会被抑制 |
-| sed | Exit sed without processing any more commands or input | 退出 sed，不再处理任何命令或输入 |
-| sed | If pattern space contains newlines, delete text in the pattern space up to the first newline, and restart cycle with the resultant pattern space, without reading a new line of input. If pattern space contains no newline, start a normal new cycle as if the d command was issued | 若模式空间包含换行符，删除模式空间中第一个换行符之前的文本，并用剩余的模式空间重新开始循环，不读取新的输入行；若模式空间不含换行符，则像执行 d 命令一样开始正常的下一轮循环 |
-| sed | Insert text before a line | 在行前插入文本 |
-| sed | Interprets regular expressions as extended (modern) regular expressions rather than basic regular expressions | 将正则表达式解释为扩展（现代）正则表达式，而不是基本正则表达式 |
-| sed | Makes output line buffered | 使输出行缓冲 |
-| sed | Makes output unbuffered | 使输出不缓冲 |
-| sed | Makes sed fail if GNU sed extensions are not supported, or if the requested version is not available | 若当前 sed 不支持 GNU sed 扩展或请求的版本不可用，则使 sed 失败 |
-| sed | Match the regular-expression against the content of the pattern space. If found, replace matched string with replacement | 用正则表达式匹配模式空间内容；若匹配，将匹配到的字符串替换为 replacement |
-| sed | Prints the file name of the current input file | 打印当前输入文件的文件名 |
-| sed | Prints the pattern space | 打印模式空间 |
-| sed | Prints the pattern space in an unambiguous form | 以无歧义的形式打印模式空间 |
-| sed | Prints the pattern space up to the first newline | 打印模式空间中第一个换行符之前的部分 |
-| sed | Prints the pattern space, then, regardless, replaces the pattern space with the next line of input. If there is no more input then sed exits without processing any more commands | 打印模式空间，然后无条件用下一行输入替换模式空间；若没有更多输入，sed 退出，不再处理任何命令 |
-| sed | Queue a line of filename to be read and inserted into the output stream at the end of the current cycle, or when the next input line is read | 排队读取 filename 的一行，并在当前循环结束或读取下一行输入时插入输出流 |
-| sed | Reads file | 读取文件 |
-| sed | Replace (change) lines with `text` | 用 `text` 替换（更改）行 |
-| sed | Replaces the contents of the hold space with the contents of the pattern space | 用模式空间的内容替换保持空间的内容 |
-| sed | Replaces the contents of the pattern space with the contents of the hold space | 用保持空间的内容替换模式空间的内容 |
-| sed | Same as `-E` for compatibility with GNU sed | 与 `-E` 相同，用于兼容 GNU sed |
-| sed | Stream editor | 流编辑器 |
-| sed | This command is the same as q, but will not print the contents of pattern space | 与 q 相同，但不打印模式空间的内容 |
-| sed | Transliterate any characters in the pattern space which match any of the source-chars with the corresponding character in dest-chars | 将模式空间中与 source-chars 中任一字符匹配的字符转换为 dest-chars 中对应的字符 |
-| sed | Writes the pattern space to the file | 将模式空间写入文件 |
-| sed | Writes to the given filename the portion of the pattern space up to the first newline | 将模式空间中第一个换行符之前的部分写入指定文件 |
-| sort | Check that the single input file is sorted | 检查单个输入文件是否已排序 |
-| sort | Consider only blank spaces and alphanumeric characters in comparisons | 比较时仅考虑空白字符和字母数字字符 |
-| sort | Convert all lowercase characters to their upper case equivalent before comparison | 比较前将所有小写字符转换为对应的大写形式 |
-| sort | Define a restricted sort key that has the starting position field1, and optional ending position field2 | 定义受限排序键，包含起始位置 field1 和可选的结束位置 field2 |
-| sort | Displays the current version of sort | 显示 sort 的当前版本 |
-| sort | Ignore all non-printable characters | 忽略所有不可打印字符 |
-| sort | Ignore leading blank characters when comparing lines | 比较行时忽略前导空白字符 |
-| sort | In random sort, the file content is used as the source of the 'seed' data for the hash function choice | 随机排序时，使用文件内容作为哈希函数选择所需的 'seed' 数据来源 |
-| sort | Merge only.  The input files are assumed to be pre-sorted.  If they are not sorted the output order is undefined | 仅合并。假定输入文件已预先排序；若未排序，输出顺序未定义 |
-| sort | Print some extra information about the sorting process to the standard output | 将排序过程的一些额外信息输出到标准输出 |
-| sort | Print the output to the output file instead of the standard output | 将输出写入输出文件而不是标准输出 |
-| sort | Select how to sort values | 选择排序类型 |
-| sort | Set the maximum number of execution threads.  Default number equals to the number of CPUs | 设置最大执行线程数。默认值等于 CPU 数量 |
+| sort | Set the maximum number of execution threads.  Default number equals to the number of CPUs | 设置并行排序的线程数 |
 | sort | Shows help message | 显示帮助信息 |
 | sort | Sort by a random order | 按随机顺序排序 |
 | sort | Sort by general numerical value | 按通用数值排序 |

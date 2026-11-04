@@ -109,7 +109,11 @@ test("batch zh-TW spot checks cover generated terminology", () => {
   );
   assert.equal(
     traditional["Set the maximum number of execution threads.  Default number equals to the number of CPUs"],
-    "設定最大執行執行緒數。預設值等於 CPU 數量",
+    "設定並行排序的執行緒數",
+  );
+  assert.equal(
+    traditional["Prints the pattern space, then, regardless, replaces the pattern space with the next line of input. If there is no more input then sed exits without processing any more commands"],
+    "未停用自動列印時，先列印模式空間；隨後用下一行輸入替換模式空間。若無更多輸入則退出。",
   );
   assert.equal(
     traditional["Run in POSIX compatibility mode (gawk)"],
@@ -187,7 +191,7 @@ test("python, node, vim, sort, awk, and sed options localize without changing in
       input: "sort -",
       option: "--parallel",
       key: "Set the maximum number of execution threads.  Default number equals to the number of CPUs",
-      zhCn: "设置最大执行线程数。默认值等于 CPU 数量",
+      zhCn: "设置并行排序的线程数",
     },
     {
       input: "sort -",
@@ -224,6 +228,12 @@ test("python, node, vim, sort, awk, and sed options localize without changing in
       option: "-r",
       key: "Same as `-E` for compatibility with GNU sed",
       zhCn: "与 `-E` 相同，用于兼容 GNU sed",
+    },
+    {
+      input: "sed ",
+      option: "n",
+      key: "Prints the pattern space, then, regardless, replaces the pattern space with the next line of input. If there is no more input then sed exits without processing any more commands",
+      zhCn: "未禁用自动打印时，先打印模式空间；随后用下一行输入替换模式空间。若无更多输入则退出。",
     },
   ];
 
