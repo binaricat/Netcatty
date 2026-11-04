@@ -51,6 +51,7 @@ import { sanitizeQuickMessages } from '../infrastructure/ai/quickMessages';
 import { emitAIStateChanged } from './state/aiStateEvents';
 import {
   latestAISessionsSnapshot,
+  readSessionsFromStorage,
   setLatestAISessionsSnapshot,
   writeSessionsForStorage,
   cleanupSdkAgentSessions,
@@ -1073,8 +1074,7 @@ export function collectAiSessionsForSync(): SyncPayload['aiSessions'] {
 
 function collectLocalAiSessions(): NonNullable<SyncPayload['aiSessions']> {
   return latestAISessionsSnapshot
-    ?? localStorageAdapter.read<SyncPayload['aiSessions']>(STORAGE_KEY_AI_SESSIONS)
-    ?? [];
+    ?? readSessionsFromStorage();
 }
 
 /** Build the portable payload; device-local data is added by the backup builder. */

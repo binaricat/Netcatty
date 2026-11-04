@@ -79,6 +79,17 @@ test('sync persistence survives restart beyond the local-only history limits', (
   assert.equal(localOnly[0].messages.length, 200);
 });
 
+test('sync collection after restart includes overflow before clearing it', () => {
+  const primary = session();
+  const overflow = { ...session(), id: 'overflow-chat', updatedAt: 1 };
+  save([primary], true);
+  storage.set(keys.STORAGE_KEY_AI_SESSIONS_OVERFLOW, JSON.stringify([overflow]));
+  snapshots.setLatestAISessionsSnapshot(null as unknown as AISession[]);
+  assert.deepEqual(collectAiSessionsForSync()?.map(value => value.id), [primary.id, overflow.id]);
+  assert.equal(storage.has(keys.STORAGE_KEY_AI_SESSIONS_OVERFLOW), false);
+  assert.deepEqual(JSON.parse(storage.get(keys.STORAGE_KEY_AI_SESSIONS)!).map((value: AISession) => value.id), [primary.id, overflow.id]);
+});
+
 test('failed history persistence refuses upload without pruning the cloud representation', async () => {
   save([session()]);
   const original = globalThis.localStorage.setItem;

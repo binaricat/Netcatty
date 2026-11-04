@@ -218,6 +218,10 @@ export const STORAGE_KEY_AI_COMMAND_TIMEOUT = 'netcatty_ai_command_timeout_v1';
 export const STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT = 'netcatty_ai_response_idle_timeout_v1';
 export const STORAGE_KEY_AI_MAX_ITERATIONS = 'netcatty_ai_max_iterations_v1';
 export const STORAGE_KEY_AI_SESSIONS = 'netcatty_ai_sessions_v1';
+/** Byte-budget overflow JSON; further chunks use suffixes _2, _3, etc. */
+export const STORAGE_KEY_AI_SESSIONS_OVERFLOW = 'netcatty_ai_sessions_overflow_v1';
+/** IDs intentionally retained only in the disk backup after aggregate quota exhaustion. */
+export const STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW = 'netcatty_ai_sessions_disk_overflow_v1';
 /** Opt-in flag: include AI chat sessions in cloud sync payloads. */
 export const STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS = 'netcatty_cloud_sync_ai_sessions_v1';
 export const STORAGE_KEY_AI_ACTIVE_SESSION_MAP = 'netcatty_ai_active_session_map_v1';
