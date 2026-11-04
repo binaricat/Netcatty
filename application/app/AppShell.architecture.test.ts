@@ -139,12 +139,21 @@ test('ChromeHost builds from chrome settings + session/vault snapshots', () => {
   assert.doesNotMatch(source, /\buseAppSettingsRuntime\s*\(/);
 });
 
-test('DialogsHost builds from local dialog state + selective vault snapshot', () => {
+test('DialogsHost builds from local dialog state without vault runtime hooks', () => {
   const source = hostSources['DialogsHost.tsx'];
   assert.ok(source, 'application/app/hosts/DialogsHost.tsx must exist');
-  assert.match(source, /useVaultSnapshot|useVaultSnapshotField|getVaultSnapshot/);
   assert.doesNotMatch(source, /\buseVaultState\s*\(/);
   assert.doesNotMatch(source, /\buseAppVaultRuntime\s*\(/);
+  // Quick switcher search is owned by QuickSwitcherOverlay; republishing the
+  // dialogs bag per keystroke re-rendered the whole shell.
+  assert.doesNotMatch(source, /quickSearch|getHostSearchMatch/);
+});
+
+test('QuickSwitcherOverlay owns the quick switcher query', () => {
+  const overlay = readFileSync(join(here, 'QuickSwitcherOverlay.tsx'), 'utf8');
+  assert.match(overlay, /useState\(''\)/);
+  const store = readFileSync(join(here, 'appLocalUiStore.ts'), 'utf8');
+  assert.doesNotMatch(store, /quickSearch/);
 });
 
 test('AppSideEffects may use runtime hooks; App must not', () => {

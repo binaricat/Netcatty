@@ -319,6 +319,23 @@ export const cloneWorkspaceTree = (
 /**
  * Collect all session IDs from a workspace node tree.
  */
+/**
+ * Point a workspace's focus at `sessionId`. Returns the same array when the
+ * workspace is missing or already focused there, so React state setters can
+ * bail out instead of re-rendering the whole shell on every pane click/focus.
+ */
+export const setWorkspaceFocusedSessionId = (
+  workspaces: Workspace[],
+  workspaceId: string,
+  sessionId: string,
+): Workspace[] => {
+  const index = workspaces.findIndex((ws) => ws.id === workspaceId);
+  if (index < 0 || workspaces[index].focusedSessionId === sessionId) return workspaces;
+  const next = workspaces.slice();
+  next[index] = { ...workspaces[index], focusedSessionId: sessionId };
+  return next;
+};
+
 export const collectSessionIds = (node: WorkspaceNode): string[] => {
   if (node.type === 'pane') {
     return [node.sessionId];

@@ -4,7 +4,7 @@ import { fromEditorTabId, isEditorTabId, toEditorTabId, useActiveTabId } from '.
 import { topTabsSessionsEqual } from '../domain/topTabsSessionsEqual';
 import { isHostTreeWorkTabSurface } from '../application/app/workTabSurface';
 import { buildTabShortcutNumberById } from '../application/app/tabShortcutTargets';
-import { useShortcutModifierHeld } from '../application/state/useShortcutModifierHeld';
+import { useTrackShortcutModifierHeld } from '../application/state/useShortcutModifierHeld';
 import type { EditorTabChrome } from '../application/state/editorTabStore';
 import { collectSessionIds } from '../domain/workspace';
 import {
@@ -56,6 +56,11 @@ const dragRegionStyle = { WebkitAppRegion: 'drag' } as React.CSSProperties;
 const dragRegionNoSelect = { WebkitAppRegion: 'drag', userSelect: 'none' } as React.CSSProperties;
 const noDragRegionStyle = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
 const emptyTabStyle: React.CSSProperties = {};
+// Hoisted so the memoized root tabs see a stable icon element every render.
+const VAULT_TAB_ICON = <FolderLock size={14} />;
+const SFTP_TAB_ICON = <Folder size={14} />;
+type WorkspaceTabSessions = { ids: string[]; sessions: TerminalSession[] };
+const EMPTY_WORKSPACE_TAB_SESSIONS: WorkspaceTabSessions = { ids: [], sessions: [] };
 
 export function computeHostTreeTabGutter(hostTreeLayoutWidth: number, toggleRight: number): number {
   return Math.max(0, hostTreeLayoutWidth - toggleRight);
@@ -242,18 +247,19 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     : hotkeyScheme === 'pc'
       ? switchTabKeyBinding?.pc ?? null
       : null;
-  const shortcutModifierHeld = useShortcutModifierHeld(switchTabKey, hotkeyScheme);
+  // Badges only appear while the switch modifier is held. The held flag is a
+  // small store read by each tab's TabIconSlot, so pressing Ctrl/⌘ does not
+  // re-render the tab bar; the numbers themselves only change with the tabs.
+  useTrackShortcutModifierHeld(showTabNumberBadges ? switchTabKey : null, hotkeyScheme);
   const tabShortcutNumbers = useMemo(() => {
-    // Keep the tab bar quiet until the modifier for the active shortcut scheme
-    // is held, while retaining the existing setting as the master toggle.
-    if (!showTabNumberBadges || hotkeyScheme === 'disabled' || !shortcutModifierHeld) return null;
+    if (!showTabNumberBadges || hotkeyScheme === 'disabled') return null;
     return buildTabShortcutNumberById({
       showSftpTab,
       shellOnlyTabNumberShortcuts,
       orderedTabs,
       editorTabIds: editorTabs.map((tab) => toEditorTabId(tab.id)),
     });
-  }, [hotkeyScheme, showTabNumberBadges, showSftpTab, shellOnlyTabNumberShortcuts, shortcutModifierHeld, orderedTabs, editorTabs]);
+  }, [hotkeyScheme, showTabNumberBadges, showSftpTab, shellOnlyTabNumberShortcuts, orderedTabs, editorTabs]);
   const isHostTreeOpen = useTerminalHostTreeOpen();
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
   const toggleHostTree = useToggleTerminalHostTree();
@@ -519,6 +525,26 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     effectiveShowHostTreeToggle,
     isHostTreeOpen,
   ]);
+
+  // Per-workspace session lists, rebuilt only when workspaces/sessions change
+  // (not on every tab switch, drag frame or modifier change) so the memoized
+  // WorkspaceTopTab keeps its props.
+  const workspaceTabSessions = useMemo(() => {
+    const sessionById = new Map(sessions.map((session) => [session.id, session]));
+    return new Map(workspaces.map((workspace): [string, WorkspaceTabSessions] => {
+      const ids = collectSessionIds(workspace.root);
+      // Detach-menu labels resolve presentation inside WorkspaceTopTab so
+      // dynamic title updates stay live without remapping the whole bar.
+      const workspaceSessions = ids
+        .map((sessionId) => sessionById.get(sessionId))
+        .filter((session): session is TerminalSession => Boolean(session));
+      return [workspace.id, { ids, sessions: workspaceSessions }];
+    }));
+  }, [sessions, workspaces]);
+  const handleDetachSessionFromWorkspace = useCallback(
+    (_workspaceId: string, sessionId: string) => onRemoveSessionFromWorkspace(sessionId),
+    [onRemoveSessionFromWorkspace],
+  );
 
   const handleTabDragStart = useCallback((e: React.DragEvent, tabId: string) => {
     // Payload must be written on the original dragstart. A slow reorder calls
@@ -929,20 +955,15 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         const shiftStyle = tabShiftStyles[workspace.id] || emptyTabStyle;
         const showDropIndicatorBefore = dropIndicator?.tabId === workspace.id && dropIndicator.position === 'before';
         const showDropIndicatorAfter = dropIndicator?.tabId === workspace.id && dropIndicator.position === 'after';
-        const workspaceSessionIds = collectSessionIds(workspace.root);
-        // Detach-menu labels resolve presentation inside WorkspaceTopTab so
-        // dynamic title updates stay live without remapping the whole bar.
-        const workspaceSessions = workspaceSessionIds
-          .map((sessionId) => sessions.find((s) => s.id === sessionId))
-          .filter((s): s is TerminalSession => Boolean(s));
+        const workspaceSessionLists = workspaceTabSessions.get(workspace.id) ?? EMPTY_WORKSPACE_TAB_SESSIONS;
 
         return (
           <WorkspaceTopTab
             key={workspace.id}
             workspace={workspace}
             paneCount={paneCount}
-            workspaceSessionIds={workspaceSessionIds}
-            workspaceSessions={workspaceSessions}
+            workspaceSessionIds={workspaceSessionLists.ids}
+            workspaceSessions={workspaceSessionLists.sessions}
             dynamicTabTitleMode={dynamicTabTitleMode}
             isBeingDragged={isBeingDragged}
             isDraggingForReorder={isDraggingForReorder}
@@ -958,7 +979,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             onRenameWorkspace={onRenameWorkspace}
             onCopyWorkspace={onCopyWorkspace}
             onCloseWorkspace={onCloseWorkspace}
-            onDetachSessionFromWorkspace={(_workspaceId, sessionId) => onRemoveSessionFromWorkspace(sessionId)}
+            onDetachSessionFromWorkspace={handleDetachSessionFromWorkspace}
             renderBulkCloseItems={renderBulkCloseItems}
             t={t}
             tabAnimationClass={getTabAnimationClass(workspace.id)}
@@ -1040,7 +1061,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           <RootTopTab
             tabId="vault"
             label="Vaults"
-            icon={<FolderLock size={14} />}
+            icon={VAULT_TAB_ICON}
             className="rounded"
             compact={rootTabsCompact}
             shortcutNumber={tabShortcutNumbers?.get('vault')}
@@ -1049,7 +1070,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             <RootTopTab
               tabId="sftp"
               label="SFTP"
-              icon={<Folder size={14} />}
+              icon={SFTP_TAB_ICON}
               className="rounded-t-md"
               compact={rootTabsCompact}
               shortcutNumber={tabShortcutNumbers?.get('sftp')}

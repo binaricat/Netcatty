@@ -8,6 +8,7 @@ import {
 } from '../../application/state/sidePanelLiveStore';
 import { getPaneMagnificationShortcutLabel } from '../../domain/paneMagnification';
 import { terminalLayerWorkspaceCtxEqual } from './terminalLayerViewMemo';
+import { isSameSplitHint } from './splitHintEquality';
 
 type WorkspaceContext = Record<string, any>;
 
@@ -162,7 +163,8 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
               e.preventDefault();
               e.stopPropagation();
               const hint = computeSplitHint(e);
-              setDropHint(hint);
+              // Only re-render the workspace when the preview actually moves.
+              setDropHint((prev) => (isSameSplitHint(prev, hint) ? prev : hint));
             }}
             onDragLeave={(e) => {
               if (!e.dataTransfer.types.includes('session-id')) return;

@@ -150,7 +150,7 @@ export function getQuickSwitcherVisualRowHeight(row: QuickSwitcherVisualRow): nu
   return QS_ROW_HEIGHT;
 }
 
-interface QuickSwitcherProps {
+export interface QuickSwitcherProps {
   isOpen: boolean;
   query: string;
   results: Host[];
