@@ -2,6 +2,7 @@
 
 let bridgesRegistered = false;
 let cloudSyncSessionPassword = null;
+const perfTrace = require("../perfTrace.cjs");
 const { readClipboardFiles, readClipboardImage, hasClipboardImage } = require("../bridges/clipboardFiles.cjs");
 const { registerSystemNotificationHandlers } = require("../bridges/systemNotification.cjs");
 const {
@@ -149,6 +150,7 @@ function createBridgeRegistrar(context) {
     let terminalWorkerManager = null;
     const { toElectronAccelerator } = require("../plugins/keybindings.cjs");
     const { startPluginHost } = require("../plugins/hostBootstrap.cjs");
+    perfTrace.mark("main:plugin-host:start");
     const pluginHostService = startPluginHost({
       env: process.env,
       createService: () => {
@@ -206,6 +208,7 @@ function createBridgeRegistrar(context) {
       },
       logger: console,
     });
+    perfTrace.mark("main:plugin-host:end");
     registerPluginBridge(ipcMain, {
       manager: pluginHostService?.manager,
       interactionService: pluginHostService?.interactionService,
