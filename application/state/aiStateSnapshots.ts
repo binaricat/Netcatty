@@ -3,6 +3,7 @@ import {
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_SESSIONS,
   STORAGE_KEY_AI_SESSIONS_OVERFLOW,
+  STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW,
   STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS,
 } from '../../infrastructure/config/storageKeys';
 import type {
@@ -618,6 +619,9 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
       syncedOk = localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, json);
       if (syncedOk) {
         clearOverflowChunks();
+        if (localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) != null) {
+          localStorageAdapter.remove(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW);
+        }
         scheduleBackupMirror(json);
         rememberSessionsWrite(sessions, true, json);
       }
@@ -654,16 +658,32 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
       chunks.push(overflowJson.slice(offset, offset + chunkSize));
     }
     const previousChunks = readOverflowChunks();
+    const previousPrimary = localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS);
+    let primaryWritten = false;
     let persisted = false;
     try {
-      if (!replaceOverflowChunks(chunks)) return false;
+      // Reclaim both old slices before writing overflow: the final history may
+      // fit even when overflow plus the old, larger primary would exceed quota.
+      clearOverflowChunks();
       if (!localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, candidate.json)) return false;
+      primaryWritten = true;
+      if (!replaceOverflowChunks(chunks)) return false;
       persisted = true;
+      if (localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) != null) {
+        localStorageAdapter.remove(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW);
+      }
       if (!fullBackupScheduled) scheduleBackupMirror(candidate.json);
       rememberSessionsWrite(sessions, false, candidate.json);
       return true;
     } finally {
-      if (!persisted) replaceOverflowChunks(previousChunks);
+      if (!persisted) {
+        clearOverflowChunks();
+        if (primaryWritten) {
+          if (previousPrimary == null) localStorageAdapter.remove(STORAGE_KEY_AI_SESSIONS);
+          else localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, previousPrimary);
+        }
+        replaceOverflowChunks(previousChunks);
+      }
     }
   };
   const primaryCandidates: { json: string; sessions: AISession[] }[] = [];
@@ -697,10 +717,14 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
   // old valid primary block persistence of every subsequent conversation turn.
   ensureFullBackup();
   const previousChunks = readOverflowChunks();
+  const previousDiskOverflow = localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW);
   clearOverflowChunks();
   let primaryPersisted = false;
   try {
     for (const candidate of primaryCandidates) {
+      const primaryIds = new Set(candidate.sessions.map(session => session.id));
+      const diskOnlyIds = pruned.filter(session => !primaryIds.has(session.id)).map(session => session.id);
+      if (!localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify(diskOnlyIds))) continue;
       if (localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, candidate.json)) {
         primaryPersisted = true;
         rememberSessionsWrite(sessions, false, candidate.json);
@@ -708,7 +732,14 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
       }
     }
   } finally {
-    if (!primaryPersisted) replaceOverflowChunks(previousChunks);
+    if (!primaryPersisted) {
+      if (previousDiskOverflow != null) {
+        localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, previousDiskOverflow);
+      } else if (localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) != null) {
+        localStorageAdapter.remove(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW);
+      }
+      replaceOverflowChunks(previousChunks);
+    }
   }
   console.warn(
     '[AIState] Failed to persist AI sessions within the storage quota; recent chat history may not survive a restart.',

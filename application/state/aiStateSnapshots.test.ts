@@ -8,6 +8,7 @@ import {
 import {
   STORAGE_KEY_AI_SESSIONS,
   STORAGE_KEY_AI_SESSIONS_OVERFLOW,
+  STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW,
   STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS,
 } from '../../infrastructure/config/storageKeys';
 import type { AISession } from '../../infrastructure/ai/types';
@@ -289,6 +290,42 @@ test('aggregate quota retries shed replay bulk from overflow and retain every ch
   assert.deepEqual(loaded.map(session => session.messages[0].content), sessions.map(session => session.messages[0].content));
 });
 
+test('a smaller primary reclaims quota before overflow when the final history fits', (t) => {
+  const storage = installSessionStorage(t, 5 * 1024 * 1024);
+  const chat = (id: string, updatedAt: number, mib: number) => makeSession(id, updatedAt, [{
+    id: 'm', role: 'user', content: 'x'.repeat(Math.floor(mib * 1024 * 1024)), timestamp: 0,
+  }]);
+  const previous = [chat('old-primary', 2, 1.9), chat('old-overflow', 1, 1.5)];
+  assert.equal(writeSessionsForStorage(previous), true);
+  const next = [chat('new-primary', 3, 1.1), ...previous];
+  assert.equal(writeSessionsForStorage(next), true);
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEY_AI_SESSIONS)!), [next[0]]);
+  assert.deepEqual(readSessionsFromStorage(), next);
+  assert.equal(storage.has(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW), false);
+});
+
+test('overflow failure rolls back a replaced primary and the previous overflow', (t) => {
+  const storage = installSessionStorage(t, 5 * 1024 * 1024);
+  const previous = makeLargeSessions();
+  assert.equal(writeSessionsForStorage(previous), true);
+  const before = new Map(storage);
+  const writeString = localStorageAdapter.writeString;
+  const error = new Error('overflow write failed');
+  let failOnce = true;
+  t.mock.method(localStorageAdapter, 'writeString', (key: string, value: string) => {
+    if (failOnce && key === STORAGE_KEY_AI_SESSIONS_OVERFLOW) {
+      failOnce = false;
+      assert.notEqual(storage.get(STORAGE_KEY_AI_SESSIONS), before.get(STORAGE_KEY_AI_SESSIONS));
+      throw error;
+    }
+    return writeString(key, value);
+  });
+  assert.throws(() => writeSessionsForStorage([
+    { ...previous[0], title: 'New primary' }, ...previous.slice(1),
+  ]), candidate => candidate === error);
+  assert.deepEqual(storage, before);
+});
+
 test('aggregate quota falls back to a current primary with full backup and persists later turns', (t) => {
   const storage = installSessionStorage(t, 5 * 1024 * 1024);
   assert.equal(writeSessionsForStorage([makeSession('previous-primary', 0, [])]), true);
@@ -319,6 +356,7 @@ test('aggregate quota falls back to a current primary with full backup and persi
   flushBackupMirror();
   assert.deepEqual(JSON.parse(backupWrites.at(-1)!), sessions);
   assert.deepEqual(readSessionsFromStorage(), [sessions[0]]);
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)!), sessions.slice(1).map(session => session.id));
   assert.equal([...storage.keys()].some(key => key.startsWith(STORAGE_KEY_AI_SESSIONS_OVERFLOW)), false);
 
   const updated = sessions.map((session, index) => index === 0 ? {

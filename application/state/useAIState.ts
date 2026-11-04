@@ -15,6 +15,7 @@ import {
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_SESSIONS,
   STORAGE_KEY_AI_SESSIONS_OVERFLOW,
+  STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW,
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
@@ -185,7 +186,7 @@ export function useAIState() {
       ?? readSessionsFromStorage()
   );
   // An explicit empty array is authoritative, even if the backup is stale.
-  // Only a missing or corrupt store can be restored from disk.
+  // Disk-only overflow IDs also permit recovery, without reviving deleted chats.
   useEffect(() => {
     window.addEventListener('beforeunload', flushBackupMirror);
     return () => window.removeEventListener('beforeunload', flushBackupMirror);
@@ -194,39 +195,43 @@ export function useAIState() {
     const liveRaw = localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS);
     const liveStore = parseSessionsStore(liveRaw);
     const liveSessions = readSessionsFromStorage();
-    if (liveStore.valid || liveSessions.length > 0) {
+    const diskOnlyRecovery = (localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)?.length ?? 0) > 0;
+    if (!diskOnlyRecovery && (liveStore.valid || liveSessions.length > 0)) {
       if (liveSessions.length > 0) scheduleBackupMirror(JSON.stringify(liveSessions));
       return;
     }
-    if (latestAISessionsSnapshot && latestAISessionsSnapshot.length > 0) return;
+    if (!diskOnlyRecovery && latestAISessionsSnapshot && latestAISessionsSnapshot.length > 0) return;
     const bridge = getAIBridge();
     if (!bridge?.aiSessionsBackupReadLatest) return;
     let cancelled = false;
+    const canRestore = () => diskOnlyRecovery
+      ? (localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)?.length ?? 0) > 0
+      : isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS))
+        && readSessionsFromStorage().length === 0
+        && (latestAISessionsSnapshot?.length ?? 0) === 0
+        && sessionsRef.current.length === 0;
     void (async () => {
       try {
-        const liveRaw = localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS);
-        if (!isMissingOrCorruptSessionsStore(liveRaw) || readSessionsFromStorage().length > 0) return;
+        if (!canRestore()) return;
         const backup = await bridge.aiSessionsBackupReadLatest?.();
         if (cancelled || !backup?.ok) return;
-        // Re-check after the async gap: a session may have been created
-        // while the backup was being read; never restore over live state.
-        // Cover both persisted storage and in-memory snapshot/React state —
-        // createSession updates the snapshot before the debounced disk write.
-        if (!isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS)) || readSessionsFromStorage().length > 0) {
-          return;
-        }
-        if ((latestAISessionsSnapshot?.length ?? 0) > 0) return;
+        // Re-check after the async gap so live mutations and deletions win.
+        if (!canRestore()) return;
+        const backupSessions = parseBackupSessions(backup.json);
+        if (!backupSessions) return;
+        const diskOnlyIds = new Set(localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) ?? []);
+        const recovered = diskOnlyRecovery
+          ? mergeImportedSessions(
+            backupSessions.filter(session => diskOnlyIds.has(session.id)),
+            latestAISessionsSnapshot ?? readSessionsFromStorage(),
+          )
+          : backupSessions;
         const syncEnabled = !!localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled;
-        const restored = prepareRestoredSessions(parseBackupSessions(backup.json) ?? [], syncEnabled);
+        const restored = prepareRestoredSessions(recovered, syncEnabled);
         if (restored.length === 0) return;
         // Apply restore synchronously (not inside a setState updater). A
         // deferred updater would leave didRestore false and skip dangling
         // marking even when the records later land in React state.
-        if ((latestAISessionsSnapshot?.length ?? 0) > 0) return;
-        if (sessionsRef.current.length > 0) return;
-        if (!isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS)) || readSessionsFromStorage().length > 0) {
-          return;
-        }
         setLatestAISessionsSnapshot(restored);
         writeSessionsForStorage(restored);
         emitAIStateChanged(STORAGE_KEY_AI_SESSIONS);
