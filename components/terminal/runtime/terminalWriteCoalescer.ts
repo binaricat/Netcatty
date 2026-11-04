@@ -67,7 +67,7 @@ type AltScreenProbeResult = {
  * DECSET modes that enter/leave the alternate screen. Resumes from incomplete
  * parser state so long param lists can span PTY/schedule flushes.
  */
-const probeAltScreenScheduling = (
+export const probeAltScreenScheduling = (
   data: string,
   resume: IncompletePrivateCsi | null,
 ): AltScreenProbeResult => {
