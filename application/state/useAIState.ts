@@ -14,6 +14,7 @@ import {
   STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_SESSIONS,
+  STORAGE_KEY_AI_SESSIONS_OVERFLOW,
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
@@ -73,6 +74,7 @@ import {
   latestAIPanelViewByScopeSnapshot,
   latestAISessionsSnapshot,
   prepareRestoredSessions,
+  readSessionsFromStorage,
   scheduleBackupMirror,
   rebindActiveSessionMap,
   writeSessionsForStorage,
@@ -88,7 +90,6 @@ import {
   parseSessionsStore,
   mergeImportedSessions,
   parseBackupSessions,
-  readLiveSessionsArray,
 } from './aiSessionsBackup';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
 import {
@@ -181,7 +182,7 @@ export function useAIState() {
   // ── Sessions ──
   const [sessions, setSessionsRaw] = useState<AISession[]>(() =>
     latestAISessionsSnapshot
-      ?? readLiveSessionsArray(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS))
+      ?? readSessionsFromStorage()
   );
   // An explicit empty array is authoritative, even if the backup is stale.
   // Only a missing or corrupt store can be restored from disk.
@@ -192,8 +193,9 @@ export function useAIState() {
   useEffect(() => {
     const liveRaw = localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS);
     const liveStore = parseSessionsStore(liveRaw);
-    if (liveStore.valid) {
-      if (liveStore.sessions.length > 0 && liveRaw != null) scheduleBackupMirror(liveRaw);
+    const liveSessions = readSessionsFromStorage();
+    if (liveStore.valid || liveSessions.length > 0) {
+      if (liveSessions.length > 0) scheduleBackupMirror(JSON.stringify(liveSessions));
       return;
     }
     if (latestAISessionsSnapshot && latestAISessionsSnapshot.length > 0) return;
@@ -203,14 +205,14 @@ export function useAIState() {
     void (async () => {
       try {
         const liveRaw = localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS);
-        if (!isMissingOrCorruptSessionsStore(liveRaw)) return;
+        if (!isMissingOrCorruptSessionsStore(liveRaw) || readSessionsFromStorage().length > 0) return;
         const backup = await bridge.aiSessionsBackupReadLatest?.();
         if (cancelled || !backup?.ok) return;
         // Re-check after the async gap: a session may have been created
         // while the backup was being read; never restore over live state.
         // Cover both persisted storage and in-memory snapshot/React state —
         // createSession updates the snapshot before the debounced disk write.
-        if (!isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS))) {
+        if (!isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS)) || readSessionsFromStorage().length > 0) {
           return;
         }
         if ((latestAISessionsSnapshot?.length ?? 0) > 0) return;
@@ -222,7 +224,7 @@ export function useAIState() {
         // marking even when the records later land in React state.
         if ((latestAISessionsSnapshot?.length ?? 0) > 0) return;
         if (sessionsRef.current.length > 0) return;
-        if (!isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS))) {
+        if (!isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS)) || readSessionsFromStorage().length > 0) {
           return;
         }
         setLatestAISessionsSnapshot(restored);
@@ -545,7 +547,9 @@ export function useAIState() {
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       try {
-        switch (e.key) {
+        const key = e.key === STORAGE_KEY_AI_SESSIONS_OVERFLOW || e.key?.startsWith(`${STORAGE_KEY_AI_SESSIONS_OVERFLOW}_`)
+          ? STORAGE_KEY_AI_SESSIONS : e.key;
+        switch (key) {
           case STORAGE_KEY_AI_PROVIDERS: {
             const parsed = localStorageAdapter.read<ProviderConfig[]>(STORAGE_KEY_AI_PROVIDERS);
             if (parsed != null && !Array.isArray(parsed)) {
@@ -637,7 +641,7 @@ export function useAIState() {
             break;
           }
           case STORAGE_KEY_AI_SESSIONS: {
-            const nextSessions = localStorageAdapter.read<AISession[]>(STORAGE_KEY_AI_SESSIONS) ?? [];
+            const nextSessions = readSessionsFromStorage();
             setLatestAISessionsSnapshot(nextSessions);
             setSessionsRaw(nextSessions);
             break;
@@ -679,8 +683,7 @@ export function useAIState() {
         case STORAGE_KEY_AI_SESSIONS:
           setSessionsRaw(
             latestAISessionsSnapshot
-              ?? localStorageAdapter.read<AISession[]>(STORAGE_KEY_AI_SESSIONS)
-              ?? [],
+              ?? readSessionsFromStorage(),
           );
           return;
         case STORAGE_KEY_AI_ACTIVE_SESSION_MAP:
@@ -1018,7 +1021,7 @@ export function useAIState() {
     const syncEnabled = !!localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled;
     const next = prepareRestoredSessions(mergeImportedSessions(sessionsRef.current, imported), syncEnabled);
     if (!writeSessionsForStorage(next)) return 0;
-    const persisted = readLiveSessionsArray(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS));
+    const persisted = readSessionsFromStorage();
     const importedIds = new Set(imported.map(session => session.id));
     sessionsRef.current = persisted;
     setLatestAISessionsSnapshot(persisted);
@@ -1311,8 +1314,7 @@ export function useAIState() {
 
     const nextSessions =
       latestAISessionsSnapshot
-      ?? localStorageAdapter.read<AISession[]>(STORAGE_KEY_AI_SESSIONS)
-      ?? [];
+      ?? readSessionsFromStorage();
     sessionsRef.current = nextSessions;
     setSessionsRaw(nextSessions);
     setActiveSessionIdMapRaw(
@@ -1364,8 +1366,7 @@ export function useAIState() {
       ?? {};
     const currentSessions =
       latestAISessionsSnapshot
-      ?? localStorageAdapter.read<AISession[]>(STORAGE_KEY_AI_SESSIONS)
-      ?? [];
+      ?? readSessionsFromStorage();
     const currentPanelViewByScope = latestAIPanelViewByScopeSnapshot ?? {};
     const result = handoffDissolvedWorkspaceAIScope({
       activeSessionIdMap: currentMap,
@@ -1410,8 +1411,7 @@ export function useAIState() {
       ?? {};
     const currentSessions =
       latestAISessionsSnapshot
-      ?? localStorageAdapter.read<AISession[]>(STORAGE_KEY_AI_SESSIONS)
-      ?? [];
+      ?? readSessionsFromStorage();
     const result = retargetWorkspaceActiveChatAfterMemberLoss({
       activeSessionIdMap: currentMap,
       sessions: currentSessions,

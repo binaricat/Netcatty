@@ -4,10 +4,10 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { JSDOM } from 'jsdom';
 import type { AISession } from '../../infrastructure/ai/types';
-import { STORAGE_KEY_AI_SESSIONS, STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS } from '../../infrastructure/config/storageKeys';
+import { STORAGE_KEY_AI_SESSIONS, STORAGE_KEY_AI_SESSIONS_OVERFLOW, STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS } from '../../infrastructure/config/storageKeys';
 import { useAIState } from './useAIState';
 import { useAISessionsStore } from './aiSessionsStore';
-import { setLatestAISessionsSnapshot } from './aiStateSnapshots';
+import { __resetBackupMirrorForTests, flushBackupMirror, setLatestAISessionsSnapshot } from './aiStateSnapshots';
 
 for (const enabled of [true, false]) {
   test(`appending to long history preserves the synced prefix (chat sync ${enabled})`, async () => {
@@ -53,3 +53,52 @@ for (const enabled of [true, false]) {
     }
   });
 }
+
+test('startup and cross-window updates load overflow chats and mirror the merged history', async () => {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
+  for (const name of ['window', 'document', 'localStorage', 'CustomEvent', 'Event'] as const) {
+    Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? dom.window : dom.window[name] });
+  }
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+  const primary: AISession = {
+    id: 'primary', title: 'Primary', agentId: 'catty', scope: { type: 'global' },
+    createdAt: 1, updatedAt: 2, messages: [],
+  };
+  const overflow = { ...primary, id: 'overflow', title: 'Overflow', updatedAt: 1 };
+  dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS, JSON.stringify([primary]));
+  dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS_OVERFLOW, JSON.stringify([overflow]));
+  setLatestAISessionsSnapshot(null as unknown as AISession[]);
+  __resetBackupMirrorForTests();
+  const backups: string[] = [];
+  Object.assign(dom.window, { netcatty: { aiSessionsBackupWrite: async ({ json }: { json: string }) => {
+    backups.push(json);
+    return { ok: true };
+  } } });
+  let sessions: readonly AISession[] = [];
+  function Harness() {
+    useAIState();
+    sessions = useAISessionsStore().sessions;
+    return null;
+  }
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(React.createElement(Harness)); });
+    assert.deepEqual(sessions, [primary, overflow]);
+    flushBackupMirror();
+    assert.deepEqual(JSON.parse(backups[0]), [primary, overflow]);
+    const updatedOverflow = { ...overflow, title: 'Updated elsewhere', updatedAt: 3 };
+    await act(async () => {
+      dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS_OVERFLOW, JSON.stringify([updatedOverflow]));
+      dom.window.dispatchEvent(new dom.window.StorageEvent('storage', { key: STORAGE_KEY_AI_SESSIONS_OVERFLOW }));
+    });
+    assert.deepEqual(sessions, [updatedOverflow, primary]);
+  } finally {
+    await act(async () => { root.unmount(); });
+    __resetBackupMirrorForTests();
+    setLatestAISessionsSnapshot([]);
+    container.remove();
+    dom.window.close();
+  }
+});
