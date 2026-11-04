@@ -134,6 +134,8 @@ test('OSC empty input recovers from backspace-space-backspace padding without ac
       assert.equal(pty.writes.length, 1);
       trackSessionIdlePrompt(session, ' ');
       assert.equal(ready(session), '', 'a new space advances the input cursor');
+      trackSessionIdlePrompt(session, '\b');
+      assert.equal(ready(session), '', 'moving left must not erase a genuinely pending space');
     }
   }
 });

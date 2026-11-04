@@ -56,6 +56,8 @@ class TerminalTextRenderer {
     this.justStartedLogScreen = false;
     this.hasPreservedScreenHistory = false;
     this.pendingClearedScreen = null;
+    this.erasedPaddingCells = new WeakSet();
+    this.erasePaddingPrefix = "";
     // Seed when a session log starts while vim/less is already on the alternate buffer.
     this.alternateScreenActive = options.alternateScreenActive === true;
   }
@@ -65,7 +67,21 @@ class TerminalTextRenderer {
     this.timestamp = timestamp;
 
     for (const ch of input) {
+      const mainText = this.state === "normal" && !this.alternateScreenActive;
+      const prefix = this.erasePaddingPrefix;
       this.#consume(ch);
+      // Readline's BS-space-BS deletes a cell but leaves it painted blank.
+      // Track that cell separately from a user-typed space. A later overwrite
+      // creates a new cell and therefore cannot inherit erased-padding status.
+      const erased = mainText && prefix === "\b " && ch === "\b";
+      if (erased) {
+        const cell = this.lines[this.row]?.[this.col];
+        if (cell?.ch === " ") this.erasedPaddingCells.add(cell);
+      }
+      // Do not reuse the closing BS as a new erase prefix: a newly typed
+      // space followed by cursor-left must stay distinguishable from deletion.
+      this.erasePaddingPrefix = erased ? "" : mainText && ch === "\b" ? "\b"
+        : mainText && ch === " " && prefix === "\b" ? "\b " : "";
     }
   }
 
@@ -76,9 +92,13 @@ class TerminalTextRenderer {
     return this.toString();
   }
 
-  getCursorLine() {
+  getCursorLine({ trimErasedPadding = false } = {}) {
     const line = this.lines[this.row] || [];
-    return line.map((cell) => cell?.ch || " ").join("");
+    let end = line.length;
+    if (trimErasedPadding) {
+      while (end > this.col && this.erasedPaddingCells.has(line[end - 1])) end -= 1;
+    }
+    return line.slice(0, end).map((cell) => cell?.ch || " ").join("");
   }
 
   toString({ includePendingClearedScreen = false, formatLine = (line) => line } = {}) {
@@ -536,8 +556,12 @@ function terminalCursorState(terminalData, options) {
   renderer.finish();
   // A full-screen program owns the display. The main buffer may still hold
   // the shell prompt from before the alternate screen was entered.
-  if (renderer.alternateScreenActive) return { line: "", column: 0 };
-  return { line: renderer.getCursorLine(), column: renderer.col };
+  if (renderer.alternateScreenActive) return { line: "", column: 0, lineWithoutErasedPadding: "" };
+  return {
+    line: renderer.getCursorLine(),
+    column: renderer.col,
+    lineWithoutErasedPadding: renderer.getCursorLine({ trimErasedPadding: true }),
+  };
 }
 
 // Alternate-screen transitions from TerminalTextRenderer, without a text

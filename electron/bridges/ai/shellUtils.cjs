@@ -266,11 +266,10 @@ function matchesOsc133EmptyPrompt(session, view) {
   if (session._osc133PromptContinued) return false;
   const { terminalCursorState } = require("../terminalLogSanitizer.cjs");
   const cursor = terminalCursorState(view.tail, view);
-  // BS-space-BS leaves a blank cell after the cursor. Compare the input cursor
-  // as well as visible text so erased padding can recover, but typed spaces
-  // (which advance the cursor) cannot qualify as empty input.
+  // Ignore only cells known to be BS-space-BS padding. Ordinary spaces must
+  // remain input even when the user moves the cursor back to the prompt.
   return cursor.column === session._osc133PromptColumn
-    && cursor.line.trimEnd() === session._osc133PromptLine.trimEnd();
+    && cursor.lineWithoutErasedPadding === session._osc133PromptLine;
 }
 
 function trackSessionIdlePrompt(session, chunk) {
@@ -301,7 +300,7 @@ function trackSessionIdlePrompt(session, chunk) {
           combined.slice(session._osc133PromptStart, end),
           { alternateScreenActive: session._osc133PromptAltScreenAtStart === true },
         );
-        session._osc133PromptLine = cursor.line;
+        session._osc133PromptLine = cursor.lineWithoutErasedPadding;
         session._osc133PromptColumn = cursor.column;
         session._osc133PromptEnd = end;
       }

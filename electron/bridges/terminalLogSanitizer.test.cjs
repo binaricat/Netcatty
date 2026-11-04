@@ -16,9 +16,18 @@ test("cursor state distinguishes erased padding from a typed trailing space", ()
   const prompt = "prompt> ";
   const erased = `${prompt}x\b \b`;
   assert.equal(terminalCursorLine(erased), `${prompt} `);
-  assert.deepEqual(terminalCursorState(erased), { line: `${prompt} `, column: prompt.length });
-  assert.deepEqual(terminalCursorState(`${prompt} `), { line: `${prompt} `, column: prompt.length + 1 });
-  assert.deepEqual(terminalCursorState(`${prompt}\x1b[?1049halt`), { line: "", column: 0 });
+  assert.deepEqual(terminalCursorState(erased), {
+    line: `${prompt} `, column: prompt.length, lineWithoutErasedPadding: prompt,
+  });
+  assert.deepEqual(terminalCursorState(`${prompt} `), {
+    line: `${prompt} `, column: prompt.length + 1, lineWithoutErasedPadding: `${prompt} `,
+  });
+  assert.deepEqual(terminalCursorState(`${prompt} \b`), {
+    line: `${prompt} `, column: prompt.length, lineWithoutErasedPadding: `${prompt} `,
+  });
+  assert.deepEqual(terminalCursorState(`${prompt}\x1b[?1049halt`), {
+    line: "", column: 0, lineWithoutErasedPadding: "",
+  });
 });
 
 test("plain text rendering applies carriage-return overwrites", () => {
