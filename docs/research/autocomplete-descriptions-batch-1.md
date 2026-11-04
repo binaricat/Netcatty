@@ -108,23 +108,12 @@ edited by hand. Spot checks include `遞迴`, `檔案`, `資訊`, and `除錯`.
 - `nano`'s description is a recursive wordplay ("Nano's ANOther editor"); the
   translation keeps `ANOther` and describes it as an enhanced free Pico clone.
 
-## Other commands still missing
+## Later batches
 
-After this batch, the overlay covers `zip`, `unzip`, `make`, and `nano` in
-addition to the earlier commands. Remaining preloaded common commands:
-
-| Command | Missing | Total |
-| --- | ---: | ---: |
-| `python` | 23 | 23 |
-| `python3` | 23 | 23 |
-| `node` | 13 | 13 |
-| `vim` | 39 | 40 |
-| `sort` | 37 | 37 |
-| `awk` | 23 | 24 |
-| `sed` | 42 | 42 |
-
-The maintenance script intentionally scans only `COVERED_COMMANDS`; expand that
-list one batch at a time. `ip`, `netstat`, and `ss` remain listed without a
+This batch completed `zip`, `unzip`, `make`, and `nano`. The remaining preloaded
+common commands were completed in batch 2; see
+`docs/research/autocomplete-descriptions-batch-2.md` for the current unresolved
+item and overall counts. `ip`, `netstat`, and `ss` remain listed without a
 bundled Fig spec in `2.692.3`.
 
 ## License notices
