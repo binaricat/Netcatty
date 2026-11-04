@@ -1,0 +1,292 @@
+import type { AISession } from '../../infrastructure/ai/types';
+
+/**
+ * IndexedDB persistence for AI chat sessions (issue #4123).
+ *
+ * The legacy store kept every session as one JSON blob in localStorage under
+ * a 2 MB byte budget. Each write re-serialized the whole store, and when the
+ * budget was exceeded the degradation ladder dropped whole oldest sessions —
+ * silently destroying capped chats (~1 MB each) on every write.
+ *
+ * IndexedDB removes both halves of that failure mode: records are written
+ * per session (no global re-serialization), and there is no shared byte
+ * quota to defend, so byte-driven eviction disappears entirely.
+ *
+ * Layout:
+ * - db `netcatty_ai_sessions`
+ *   - object store `sessions` (keyPath `id`): one record per AISession
+ *   - object store `meta` (keyPath `key`): schemaVersion, lastWriteAt and the
+ *     migrated `netcatty_ai_active_session_map_v1` active-pointer map
+ *
+ * The legacy localStorage key `netcatty_ai_sessions_v1` is kept UNTOUCHED for
+ * one release as a read-only fallback; it is no longer written or pruned.
+ */
+
+export const AI_SESSIONS_IDB_NAME = 'netcatty_ai_sessions';
+export const AI_SESSIONS_IDB_VERSION = 1;
+export const AI_SESSIONS_IDB_SESSION_STORE = 'sessions';
+export const AI_SESSIONS_IDB_META_STORE = 'meta';
+export const AI_SESSIONS_META_SCHEMA_VERSION_KEY = 'schemaVersion';
+export const AI_SESSIONS_META_LAST_WRITE_KEY = 'lastWriteAt';
+export const AI_SESSIONS_META_ACTIVE_MAP_KEY = 'activeSessionMap';
+
+/** Cross-window change notification (replaces the localStorage `storage` event for sessions). */
+const AI_SESSIONS_IDB_CHANGE_CHANNEL = 'netcatty_ai_sessions_changed';
+
+export function isIndexedDbAvailable(): boolean {
+  return typeof indexedDB !== 'undefined' && indexedDB !== null;
+}
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
+  });
+}
+
+function transactionDone(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted'));
+    transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB transaction failed'));
+  });
+}
+
+let openPromise: Promise<IDBDatabase> | null = null;
+
+function upgradeDatabase(db: IDBDatabase) {
+  if (!db.objectStoreNames.contains(AI_SESSIONS_IDB_SESSION_STORE)) {
+    db.createObjectStore(AI_SESSIONS_IDB_SESSION_STORE, { keyPath: 'id' });
+  }
+  if (!db.objectStoreNames.contains(AI_SESSIONS_IDB_META_STORE)) {
+    db.createObjectStore(AI_SESSIONS_IDB_META_STORE, { keyPath: 'key' });
+  }
+}
+
+export function openAiSessionsIdb(): Promise<IDBDatabase> {
+  if (!isIndexedDbAvailable()) {
+    return Promise.reject(new Error('IndexedDB is not available'));
+  }
+  if (!openPromise) {
+    openPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(AI_SESSIONS_IDB_NAME, AI_SESSIONS_IDB_VERSION);
+      request.onupgradeneeded = () => upgradeDatabase(request.result);
+      request.onsuccess = () => {
+        const db = request.result;
+        // Drop the cached handle so a later open() re-establishes it instead
+        // of handing out a closed connection.
+        db.onclose = () => { openPromise = null; };
+        db.onversionchange = () => {
+          db.close();
+          openPromise = null;
+        };
+        resolve(db);
+      };
+      request.onerror = () => {
+        openPromise = null;
+        reject(request.error ?? new Error('Failed to open IndexedDB'));
+      };
+      request.onblocked = () => {
+        openPromise = null;
+      };
+    });
+  }
+  return openPromise;
+}
+
+export function resetAiSessionsIdbForTests() {
+  openPromise = null;
+}
+
+export async function idbGetAllSessions(db?: IDBDatabase): Promise<AISession[]> {
+  const database = db ?? await openAiSessionsIdb();
+  const transaction = database.transaction(AI_SESSIONS_IDB_SESSION_STORE, 'readonly');
+  const result = await requestToPromise(
+    transaction.objectStore(AI_SESSIONS_IDB_SESSION_STORE).getAll() as IDBRequest<AISession[]>,
+  );
+  return Array.isArray(result) ? result : [];
+}
+
+export async function idbPutSessions(db: IDBDatabase, sessions: AISession[]): Promise<void> {
+  if (sessions.length === 0) return;
+  const transaction = db.transaction(AI_SESSIONS_IDB_SESSION_STORE, 'readwrite');
+  const store = transaction.objectStore(AI_SESSIONS_IDB_SESSION_STORE);
+  for (const session of sessions) store.put(session);
+  await transactionDone(transaction);
+}
+
+export async function idbPutSession(db: IDBDatabase, session: AISession): Promise<void> {
+  await idbPutSessions(db, [session]);
+}
+
+export async function idbDeleteSessionIds(db: IDBDatabase, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const transaction = db.transaction(AI_SESSIONS_IDB_SESSION_STORE, 'readwrite');
+  const store = transaction.objectStore(AI_SESSIONS_IDB_SESSION_STORE);
+  for (const id of ids) store.delete(id);
+  await transactionDone(transaction);
+}
+
+export async function idbClearSessions(db: IDBDatabase): Promise<void> {
+  const transaction = db.transaction(AI_SESSIONS_IDB_SESSION_STORE, 'readwrite');
+  transaction.objectStore(AI_SESSIONS_IDB_SESSION_STORE).clear();
+  await transactionDone(transaction);
+}
+
+export async function idbGetMeta<T>(db: IDBDatabase, key: string): Promise<T | undefined> {
+  const transaction = db.transaction(AI_SESSIONS_IDB_META_STORE, 'readonly');
+  const record = await requestToPromise(
+    transaction.objectStore(AI_SESSIONS_IDB_META_STORE).get(key) as IDBRequest<{ key: string; value: T } | undefined>,
+  );
+  return record?.value;
+}
+
+export async function idbPutMeta<T>(db: IDBDatabase, key: string, value: T): Promise<void> {
+  const transaction = db.transaction(AI_SESSIONS_IDB_META_STORE, 'readwrite');
+  transaction.objectStore(AI_SESSIONS_IDB_META_STORE).put({ key, value });
+  await transactionDone(transaction);
+}
+
+// ── Cross-window change notification ──
+
+let changeChannel: BroadcastChannel | null = null;
+
+function getChangeChannel(): BroadcastChannel | null {
+  if (typeof BroadcastChannel === 'undefined') return null;
+  try {
+    if (!changeChannel) {
+      changeChannel = new BroadcastChannel(AI_SESSIONS_IDB_CHANGE_CHANNEL);
+      // The channel must never keep the process alive (Node exposes unref).
+      (changeChannel as unknown as { unref?: () => void }).unref?.();
+    }
+    return changeChannel;
+  } catch {
+    return null;
+  }
+}
+
+/** Announce a session-store change to OTHER windows (never the sender). */
+export function publishAiSessionsIdbChange(): void {
+  try {
+    getChangeChannel()?.postMessage(Date.now());
+  } catch {
+    // Notification is best-effort; the write itself already succeeded.
+  }
+}
+
+export function subscribeAiSessionsIdbChange(listener: () => void): () => void {
+  const channel = getChangeChannel();
+  if (!channel) return () => {};
+  const handler = () => listener();
+  channel.addEventListener('message', handler);
+  return () => channel.removeEventListener('message', handler);
+}
+
+// ── Boot load + one-release legacy migration ──
+
+export interface AiSessionsBootLoadResult {
+  sessions: AISession[];
+  /** Where the returned sessions came from. */
+  source: 'indexeddb' | 'legacy-localstorage' | 'none';
+  /** True when IndexedDB itself could not be opened (corrupt/blocked). */
+  idbFailed: boolean;
+}
+
+/**
+ * Boot-time store resolution, shared with tests:
+ * 1. IndexedDB `getAll()` — the primary store.
+ * 2. If empty, migrate the legacy localStorage store into IndexedDB (the
+ *    legacy key itself stays untouched as a read-only fallback for one
+ *    release).
+ * 3. If IndexedDB is corrupt/unavailable, fall back to legacy localStorage.
+ *
+ * Callers decide what to do when both sources are empty (the #4018 backup
+ * generations remain the last restore step in useAIState).
+ */
+export async function loadOrMigrateAiSessions(
+  readLegacyRaw: () => string | null | undefined,
+): Promise<AiSessionsBootLoadResult> {
+  if (!isIndexedDbAvailable()) {
+    const legacy = parseLegacySessions(readLegacyRaw());
+    return { sessions: legacy, source: legacy.length > 0 ? 'legacy-localstorage' : 'none', idbFailed: false };
+  }
+  let db: IDBDatabase;
+  try {
+    db = await openAiSessionsIdb();
+  } catch (error) {
+    console.warn('[AIState] IndexedDB unavailable, falling back to the legacy localStorage store:', error);
+    const legacy = parseLegacySessions(readLegacyRaw());
+    return { sessions: legacy, source: legacy.length > 0 ? 'legacy-localstorage' : 'none', idbFailed: true };
+  }
+  let sessions: AISession[];
+  try {
+    sessions = await idbGetAllSessions(db);
+  } catch (error) {
+    console.warn('[AIState] IndexedDB read failed, falling back to the legacy localStorage store:', error);
+    const legacy = parseLegacySessions(readLegacyRaw());
+    return { sessions: legacy, source: legacy.length > 0 ? 'legacy-localstorage' : 'none', idbFailed: true };
+  }
+  if (sessions.length > 0) {
+    return { sessions, source: 'indexeddb', idbFailed: false };
+  }
+  // Empty IndexedDB + a populated legacy store → one-time migration. The
+  // legacy key is intentionally NOT removed: it stays as a read-only
+  // fallback for one release so a downgrade can still see history.
+  const legacy = parseLegacySessions(readLegacyRaw());
+  if (legacy.length === 0) {
+    return { sessions: [], source: 'none', idbFailed: false };
+  }
+  try {
+    await idbPutSessions(db, legacy);
+    await idbPutMeta(db, AI_SESSIONS_META_SCHEMA_VERSION_KEY, AI_SESSIONS_IDB_VERSION);
+    await idbPutMeta(db, AI_SESSIONS_META_LAST_WRITE_KEY, Date.now());
+  } catch (error) {
+    console.warn('[AIState] IndexedDB migration write failed; keeping legacy store authoritative:', error);
+    return { sessions: legacy, source: 'legacy-localstorage', idbFailed: true };
+  }
+  console.info(`[AIState] Migrated ${legacy.length} AI session(s) from localStorage to IndexedDB.`);
+  return { sessions: legacy, source: 'legacy-localstorage', idbFailed: false };
+}
+
+function parseLegacySessions(raw: string | null | undefined): AISession[] {
+  if (raw == null || raw === '') return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as AISession[] : [];
+  } catch {
+    return [];
+  }
+}
+
+// ── Active-session map mirror (meta store) ──
+
+/**
+ * Mirror the active-pointer map into the IndexedDB meta store. The
+ * localStorage key remains written as before (small, quota-safe) and stays
+ * the read-mostly authority for this release; the mirror makes the pointer
+ * available to future store work without another migration.
+ */
+export async function mirrorActiveSessionMapToIdb(
+  map: Record<string, string | null>,
+): Promise<void> {
+  try {
+    const db = await openAiSessionsIdb();
+    await idbPutMeta(db, AI_SESSIONS_META_ACTIVE_MAP_KEY, map);
+  } catch (error) {
+    console.warn('[AIState] Failed to mirror the active-session map to IndexedDB:', error);
+  }
+}
+
+/**
+ * Read the mirrored active-pointer map (boot restore aid when the
+ * localStorage key is missing).
+ */
+export async function readActiveSessionMapFromIdb(): Promise<Record<string, string | null> | null> {
+  try {
+    const db = await openAiSessionsIdb();
+    const value = await idbGetMeta<Record<string, string | null>>(db, AI_SESSIONS_META_ACTIVE_MAP_KEY);
+    return value && typeof value === 'object' ? value : null;
+  } catch {
+    return null;
+  }
+}
