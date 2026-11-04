@@ -20,6 +20,8 @@
  *   --settle-ms N   wait after renderer-ready before sampling memory (default 3000)
  *   --json          print the summary as JSON instead of a table
  *   --keep-profile  keep the temporary profile for inspection
+ *   --profile DIR   reuse (or create) DIR as the profile and keep it, e.g. to
+ *                   compare warm V8 code caches across builds
  */
 
 const fs = require("node:fs");
@@ -33,7 +35,7 @@ const HOSTS_STORAGE_KEY = "netcatty_hosts_v1";
 const LAUNCH_TIMEOUT_MS = 120_000;
 
 function parseArgs(argv) {
-  const options = { runs: 10, hosts: 0, settleMs: 3000, json: false, keepProfile: false };
+  const options = { runs: 10, hosts: 0, settleMs: 3000, json: false, keepProfile: false, profile: null };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = () => Number(argv[++index]);
@@ -42,6 +44,7 @@ function parseArgs(argv) {
     else if (arg === "--settle-ms") options.settleMs = next();
     else if (arg === "--json") options.json = true;
     else if (arg === "--keep-profile") options.keepProfile = true;
+    else if (arg === "--profile") options.profile = path.resolve(String(argv[++index] || ""));
     else throw new Error(`Unknown option: ${arg}`);
   }
   if (!Number.isInteger(options.runs) || options.runs < 1) throw new Error("--runs must be a positive integer");
@@ -276,7 +279,10 @@ async function main() {
   if (!fs.existsSync(path.join(repoRoot, "dist", "index.html"))) {
     throw new Error("dist/index.html not found. Run `npm run build` first.");
   }
-  const profileDir = fs.mkdtempSync(`${tempDirBridge.getTempFilePath("perf-startup")}-`);
+  const profileDir = options.profile
+    ? (fs.mkdirSync(options.profile, { recursive: true }), options.profile)
+    : fs.mkdtempSync(`${tempDirBridge.getTempFilePath("perf-startup")}-`);
+  if (options.profile) options.keepProfile = true;
   const logFile = path.join(profileDir, "electron.log");
   // Keep the throwaway profile from becoming the OS ssh:// / telnet:// handler.
   fs.writeFileSync(path.join(profileDir, "ssh-deep-link-preferences.json"), JSON.stringify({ enabled: false }));
