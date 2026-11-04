@@ -9,7 +9,7 @@ import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRunt
 import { useAIState } from './useAIState.ts';
 import { useAISessionsStore } from './aiSessionsStore.ts';
 import { getSessionScopeMatchRank } from '../../components/ai/sessionScopeMatch.ts';
-import { setLatestAISessionsSnapshot } from './aiStateSnapshots.ts';
+import { getPersistedAiSessionsSnapshot, setLatestAISessionsSnapshot } from './aiStateSnapshots.ts';
 
 const SCOPE_KEY = 'terminal:terminal-a';
 
@@ -175,17 +175,21 @@ for (const newerCount of [49, 50]) {
       branchId = (await capture.ai!.undoLastTurnInSession(SOURCE_SESSION.id))?.sessionId;
     });
     assert.ok(branchId);
-    const saved: AISession[] = JSON.parse(dom.window.localStorage.getItem('netcatty_ai_sessions_v1')!);
-    assert.equal(saved.length, 50);
+    // Issue #4123: the persisted set lives in IndexedDB (count cap 1000, so
+    // nothing is evicted at these sizes) — not in a 50-capped localStorage blob.
+    const saved: AISession[] = getPersistedAiSessionsSnapshot();
+    assert.equal(saved.length, newerCount + 2);
     const original = saved.find(item => item.id === SOURCE_SESSION.id);
     assert.ok(original, 'the original must survive updatedAt-based history pruning');
     assert.deepEqual({ ...original, updatedAt: SOURCE_SESSION.updatedAt }, SOURCE_SESSION);
     assert.deepEqual(saved.find(item => item.id === branchId)?.messages, SOURCE_SESSION.messages.slice(0, 2));
     assert.ok(original.updatedAt >= newer.at(-1)!.updatedAt);
     await act(async () => root.unmount());
-    container.remove(); dom.window.close();
-
-    // Remount the actual hook from the persisted records, as on app reload.
+    container.remove();
+    // Seed the read-only legacy store with the persisted set (the stand-in
+    // for what the migration persists on a profile without IndexedDB).
+    dom.window.localStorage.setItem('netcatty_ai_sessions_v1', JSON.stringify(saved));
+    dom.window.close();
     const reloaded = await setupAiState(saved);
     assert.deepEqual(reloaded.capture.sessions.find(item => item.id === SOURCE_SESSION.id)?.messages, SOURCE_SESSION.messages);
     assert.deepEqual(reloaded.capture.sessions.find(item => item.id === branchId)?.messages, SOURCE_SESSION.messages.slice(0, 2));
@@ -223,7 +227,7 @@ for (const viewingScope of [
     ), 3);
     const original = capture.sessions.find(item => item.id === source.id)!;
     assert.deepEqual({ ...original, updatedAt: sourceBefore.updatedAt }, sourceBefore);
-    const saved = JSON.parse(dom.window.localStorage.getItem('netcatty_ai_sessions_v1')!) as AISession[];
+    const saved = getPersistedAiSessionsSnapshot();
     assert.deepEqual(saved.find(item => item.id === branchId)?.scope, branch.scope);
     await act(async () => root.unmount());
     container.remove(); dom.window.close();
