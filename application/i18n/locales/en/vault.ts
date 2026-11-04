@@ -317,6 +317,7 @@ export const enVaultMessages: Messages = {
   'sftp.extract.success': 'Extracted {fileName}',
   'sftp.extract.error': 'Failed to extract {fileName}: {error}',
   'sftp.context.copyToOtherPane': 'Copy to other pane',
+  'sftp.context.duplicate': 'Duplicate',
   'sftp.copyToOtherPane.unavailable': 'Open the two-pane SFTP view and connect the destination pane before copying files.',
   'sftp.copyCurrentPath': 'Copy current path',
   'sftp.copyCurrentPath.success': 'Current path copied',

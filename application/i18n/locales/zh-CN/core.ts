@@ -1016,6 +1016,7 @@ Vaults 标签保持扁平，不使用这块背景。
   'sftp.extract.success': '已解压 {fileName}',
   'sftp.extract.error': '解压 {fileName} 失败：{error}',
   'sftp.context.copyToOtherPane': '复制到另一侧',
+  'sftp.context.duplicate': '创建副本',
   'sftp.copyToOtherPane.unavailable': '请打开双栏 SFTP 文件管理，并连接目标侧后再复制文件。',
   'sftp.copyCurrentPath': '复制当前路径',
   'sftp.copyCurrentPath.success': '已复制当前路径',

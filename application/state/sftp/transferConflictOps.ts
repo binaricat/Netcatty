@@ -61,7 +61,7 @@ export function useSftpTransferConflictOps() {
 
   const getDuplicateTarget = useCallback(
     async (
-      task: TransferTask,
+      task: Pick<TransferTask, "fileName" | "isDirectory" | "targetPath">,
       targetPane: SftpPane,
       targetSftpId: string | null,
       targetEncoding: SftpFilenameEncoding,

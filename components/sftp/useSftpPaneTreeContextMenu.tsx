@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AppWindow, Archive, ArrowRight, ArrowUp, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Trash2, Upload } from 'lucide-react';
+import { AppWindow, Archive, ArrowRight, ArrowUp, ClipboardCopy, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Trash2, Upload } from 'lucide-react';
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '../ui/context-menu';
 import { getParentPath } from '../../application/state/sftp/utils';
 import { isKnownBinaryFile } from '../../lib/sftpFileUtils';
@@ -15,7 +15,7 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     contextTarget, pane, toggleExpand, stableOnOpenEntry, stableOnRefresh, getActionPaths, toTransferSources,
     executeMoveAction, triggerUploadPicker, onUploadExternalFolder, uploadEnabled, folderUploadEnabled,
     setMoveTargetPaths, setMoveToPath, setMoveToError, setMoveToSuggestions, setMoveToSuggestionIndex,
-    setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef,
+    setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onDuplicateEntriesRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef,
     onEditFileRef, onDownloadFileRef, onExtractArchiveRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
     openNewFolderDialogRef, openNewFileDialogRef,
   } = props;
@@ -45,6 +45,21 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
         });
       }
       onCopyToOtherPaneRef.current(files);
+    };
+
+    const handleDuplicate = () => {
+      if (!onDuplicateEntriesRef.current) return;
+      const paths = getActionPaths(entryPath);
+      const files = toTransferSources(paths);
+      if (files.length === 0) {
+        files.push({
+          name: entry.name,
+          isDirectory: isDir,
+          sourceConnectionId: pane.connection?.id,
+          sourcePath: getParentPath(entryPath),
+        });
+      }
+      onDuplicateEntriesRef.current(files);
     };
 
     const handleDelete = () => {
@@ -92,6 +107,11 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
         <ContextMenuItem onClick={handleCopyToOtherPane}>
           <Copy size={14} className="mr-2" />{tRef.current('sftp.context.copyToOtherPane')}
         </ContextMenuItem>
+        {onDuplicateEntriesRef.current && (
+          <ContextMenuItem onClick={handleDuplicate}>
+            <CopyPlus size={14} className="mr-2" />{tRef.current('sftp.context.duplicate')}
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onClick={() => navigator.clipboard.writeText(entryPath)}>
           <ClipboardCopy size={14} className="mr-2" />{tRef.current('sftp.context.copyPath')}
         </ContextMenuItem>
@@ -180,6 +200,7 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     folderUploadEnabled,
     onUploadExternalFolder,
     onCopyToOtherPaneRef,
+    onDuplicateEntriesRef,
     onDownloadFileRef,
     onExtractArchiveRef,
     onEditFileRef,
