@@ -4,7 +4,8 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { shouldBroadcastDuringSensitivePrompt } from '../../domain/terminalBroadcast.ts';
-import { foldTerminalPromptSecurityOutput, isConfirmedTerminalShellPrompt, isUntrustedTerminalInputPrompt } from '../../domain/terminalPromptSecurity.ts';
+import { foldTerminalPromptSecurityOutput, isConfirmedTerminalShellPrompt, isSensitiveTerminalChallenge, isUntrustedTerminalInputPrompt } from '../../domain/terminalPromptSecurity.ts';
+import { applyAuthoritativeHibernateSnapshot } from './terminalHibernateRuntime.ts';
 import { probeAltScreenScheduling } from './runtime/terminalWriteCoalescer.ts';
 import type { SensitiveInputActiveRef } from './autocomplete/terminalAutocompletePrompt.ts';
 
@@ -256,7 +257,7 @@ const observerCode = ts.transpileModule(
 function promptObserver(bufferAlternate = false) {
   const latch: SensitiveInputActiveRef = { current: false, source: 'heuristic' };
   const screen = { current: { active: false, incomplete: null } };
-  const observe = runInNewContext(observerCode, {
+  const context = {
     useCallback: (callback: unknown) => callback,
     isNetworkDevice: false,
     promptSecurityScreenRef: screen,
@@ -270,9 +271,13 @@ function promptObserver(bufferAlternate = false) {
     probeAltScreenScheduling,
     foldTerminalPromptSecurityOutput,
     isConfirmedTerminalShellPrompt,
+    isSensitiveTerminalChallenge,
     isUntrustedTerminalInputPrompt,
-  }) as (chunk: string, meta?: { pluginPipelineSensitiveInput: boolean }) => void;
-  return { latch, screen, observe };
+  };
+  const observe = runInNewContext(observerCode, context) as (
+    chunk: string, meta?: { pluginPipelineSensitiveInput: boolean },
+  ) => void;
+  return { latch, screen, observe, context };
 }
 
 test('raw alternate-screen entry clears a sticky vim latch before xterm parses (#4107)', () => {
@@ -352,6 +357,82 @@ test('alternate-screen password prompts block broadcast through background outpu
         sensitivePromptActive: latch.current,
         broadcastPasswordBypass: false,
       }), false, 'password keystrokes must not reach peers');
+    }
+  }
+});
+
+test('colon-prefixed authentication prompts take precedence over alternate-screen vim ex', () => {
+  for (const bufferAlternate of [false, true]) {
+    for (const label of [': Password: ', ': Passphrase: ', ': Verification code: ', ': Token: ']) {
+      const { latch, observe } = promptObserver(bufferAlternate);
+      if (!bufferAlternate) observe('\x1b[?1049h');
+      observe('\r\n' + label);
+      assert.equal(latch.current, true, label);
+      assert.equal(latch.source, 'heuristic');
+      for (const output of ['secret', '\r\nbackground job output\r\n', '\x1b[2K']) {
+        observe(output);
+        assert.equal(latch.current, true, output);
+        assert.equal(shouldBroadcastDuringSensitivePrompt({
+          sensitivePromptActive: latch.current,
+          broadcastPasswordBypass: false,
+        }), false, 'colon-prefixed password input must not reach peers');
+      }
+    }
+  }
+});
+
+test('authoritative display snapshots synchronize the prompt screen probe before subsequent output', async () => {
+  const handlerStart = terminalSource.indexOf('async (payload) => {',
+    terminalSource.indexOf('if (bridge?.onTerminalSessionApplySnapshot)'));
+  const handlerEnd = terminalSource.indexOf('}));', handlerStart);
+  assert.ok(handlerStart > 0 && handlerEnd > handlerStart);
+  const handlerCode = ts.transpileModule(
+    'const applySnapshot = ' + terminalSource.slice(handlerStart, handlerEnd + 1) + ';\napplySnapshot;',
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+  ).outputText;
+  for (const mounted of [true, false]) {
+    for (const alternateScreen of [false, true]) {
+      const { latch, screen, observe, context } = promptObserver();
+      observe('\x1b[?1049h\r:');
+      observe('\x1b[?1049'); // A snapshot must also discard a partial pre-snapshot transition.
+      assert.equal(screen.current.active, true);
+      assert.notEqual(screen.current.incomplete, null);
+      const parsed = { alternate: true };
+      context.isTerminalAlternateScreenActive = () => parsed.alternate;
+      const term = {
+        reset: () => { parsed.alternate = false; },
+        write: (_snapshot: string, done: () => void) => {
+          parsed.alternate = alternateScreen;
+          done();
+        },
+      };
+      Object.assign(context.termRef, { current: mounted ? term : null });
+      const applySnapshot = runInNewContext(handlerCode, {
+        ...context,
+        sessionId: 'session',
+        flushPendingTerminalWritesBeforeHibernate: async () => true,
+        resetTerminalLineTimestamps: () => {},
+        xtermRuntimeRef: { current: null },
+        hibernatedRef: { current: !mounted },
+        ...Object.fromEntries([
+          'Snapshot', 'ViewportSnapshot', 'ScrollbackSnapshot', 'ContextSnapshot',
+          'ContextViewportSnapshot', 'ContextScrollbackSnapshot', 'PendingBuffer', 'AlternateScreen',
+        ].map(name => [`hibernate${name}Ref`, { current: '' }])),
+        applyAuthoritativeHibernateSnapshot,
+      }) as (payload: unknown) => Promise<boolean>;
+      assert.equal(await applySnapshot({
+        sessionId: 'session', snapshot: 'restored display',
+        contextSnapshot: '', contextViewportSnapshot: '', contextScrollbackSnapshot: '',
+        alternateScreen, passwordPromptActive: false,
+      }), true);
+      assert.equal(screen.current.active, alternateScreen);
+      assert.equal(screen.current.incomplete, null);
+      observe('\r\n:');
+      assert.equal(latch.current, !alternateScreen, 'primary-screen sudo colon must stay protected');
+      assert.equal(shouldBroadcastDuringSensitivePrompt({
+        sensitivePromptActive: latch.current,
+        broadcastPasswordBypass: false,
+      }), alternateScreen);
     }
   }
 });

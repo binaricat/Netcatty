@@ -64,6 +64,7 @@ import { clearTerminalBootEpoch, setTerminalBootEpoch } from "../domain/terminal
 import {
   foldTerminalPromptSecurityOutput,
   isConfirmedTerminalShellPrompt,
+  isSensitiveTerminalChallenge,
   isUntrustedTerminalInputPrompt,
 } from "../domain/terminalPromptSecurity";
 import { listPasswordPromptFillCandidates } from "../domain/passwordPromptAssist";
@@ -1742,6 +1743,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             throw new Error("Terminal output did not settle before applying the snapshot");
           }
         }
+        promptSecurityScreenRef.current = {
+          active: payload.alternateScreen,
+          incomplete: null,
+        };
         if (typeof payload.perCharacterInput === "boolean") {
           restoreTerminalPerCharacterInput(terminalSettingsRef, payload.perCharacterInput);
           xtermRuntimeRef.current?.restorePerCharacterInput(payload.perCharacterInput);
@@ -2112,11 +2117,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       return;
     } else if (passwordPromptActiveRef.current && passwordPromptActiveRef.source === "explicit") {
       return;
-    } else if (!(promptSecurityOptions.alternateScreen && /^:/.test(folded.promptText.trimStart()))
-      && isUntrustedTerminalInputPrompt(
-        folded.promptText,
-        promptSecurityOptions,
-      )) {
+    } else if (isSensitiveTerminalChallenge(folded.promptText)
+      || (!(promptSecurityOptions.alternateScreen && /^:/.test(folded.promptText.trimStart()))
+        && isUntrustedTerminalInputPrompt(
+          folded.promptText,
+          promptSecurityOptions,
+        ))) {
       passwordPromptActiveRef.current = true;
       passwordPromptActiveRef.source = "heuristic";
       autocompleteCloseRef.current?.();
