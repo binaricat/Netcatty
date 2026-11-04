@@ -322,6 +322,65 @@ test('parsed alternate-screen vim ex clears stale heuristic latches and keeps br
   }
 });
 
+test('real vim CUP/EL redraws keep ex input broadcasting and clear stale heuristic latches (#4107)', () => {
+  const colon = '\x1b[?25l\x1b[24;1H\x1b[K\x1b[24;1H:\x1b[?25h';
+  const redraws = [
+    [colon],
+    ['\x1b[?25l\x1b[24;', '1H', '\x1b[', 'K', ':', '\x1b[?25h'],
+    ...Array.from({ length: colon.length - 1 }, (_, i) => [colon.slice(0, i + 1), colon.slice(i + 1)]),
+  ];
+  for (const stale of [false, true]) {
+    for (const chunks of redraws) {
+      const { latch, screen, observe, context } = promptObserver();
+      observe('\x1b[?1049h~\x1b[2;1H~\x1b[24;1Hsmoke4107-broadcast\b');
+      assert.equal(screen.current.active, true);
+      assert.equal(latch.current, false, 'vim chrome alone is not a prompt');
+      if (stale) observe('\x1b[24;1HPassword:');
+      assert.equal(latch.current, stale);
+      for (const chunk of chunks) observe(chunk);
+      assert.equal(latch.current, false, JSON.stringify(chunks));
+      assert.equal(context.sensitivePromptOutputTailRef.current.includes('smoke4107'), false);
+      for (const input of ['q', '!', '\r']) {
+        assert.equal(shouldBroadcastDuringSensitivePrompt({
+          sensitivePromptActive: latch.current,
+          broadcastPasswordBypass: false,
+        }), true, input);
+        observe(input);
+        assert.equal(latch.current, false);
+      }
+      observe('\x1b[?1049l\x1b[24;1H\x1b[K:');
+      assert.equal(screen.current.active, false);
+      assert.equal(latch.current, true, 'raw screen leave restores primary colon protection');
+      assert.equal(shouldBroadcastDuringSensitivePrompt({
+        sensitivePromptActive: latch.current,
+        broadcastPasswordBypass: false,
+      }), false);
+    }
+  }
+});
+
+test('CUP/EL redraws retain alternate-screen challenge and explicit plugin protection', () => {
+  for (const label of [': Password: ', ': Verification code: ', 'Custom authentication> ']) {
+    const { latch, observe } = promptObserver();
+    observe('\x1b[?1049h~smoke4107-broadcast\b');
+    for (const chunk of ['\x1b[24;', '1H\x1b[', 'K', label]) observe(chunk);
+    assert.equal(latch.current, true, label);
+    assert.equal(shouldBroadcastDuringSensitivePrompt({
+      sensitivePromptActive: latch.current,
+      broadcastPasswordBypass: false,
+    }), false, label);
+  }
+  const { latch, observe } = promptObserver();
+  observe('\x1b[?1049h~smoke4107-broadcast\b', { pluginPipelineSensitiveInput: true });
+  for (const chunk of ['\x1b[24;', '1H\x1b[K', ':', 'q!']) observe(chunk);
+  assert.equal(latch.current, true);
+  assert.equal(latch.source, 'explicit');
+  assert.equal(shouldBroadcastDuringSensitivePrompt({
+    sensitivePromptActive: latch.current,
+    broadcastPasswordBypass: false,
+  }), false);
+});
+
 test('raw screen exits retain primary-screen colon protection while xterm still reports alternate', () => {
   for (const mode of ['47', '1047', '1049']) {
     const exit = `\x1b[?${mode}l`;
