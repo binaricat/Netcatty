@@ -95,7 +95,6 @@ test("merging a workspace tab with a standalone tab reuses the workspace id (iss
   // standalone on the opposite side of the drop hint (hint describes where
   // the dragged member should appear relative to the standalone).
   let orientationStandaloneId = "";
-  let orientationMemberId = "";
   await act(async () => {
     orientationStandaloneId = current().createLocalTerminal({ shellName: "orient-standalone" });
   });
