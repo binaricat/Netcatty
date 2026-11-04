@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { I18nProvider } from '../application/i18n/I18nProvider';
+import { loadLocaleMessages } from '../application/i18n/messages';
 import { createDomRenderer, dispatchDomEvent, flushEffects, installDomEnvironment, runWithAct } from './test-support/renderReactDom';
 
 test('backup cleanup confirms, preserves data on cancel, refreshes after retry and explains decrypt failures', async () => {
+  await loadLocaleMessages('zh-CN');
   const dom = installDomEnvironment();
   const globals = {
     localStorage: dom.window.localStorage,

@@ -25,12 +25,14 @@ import {
   pruneInactiveScopedState,
 } from './aiScopeCleanup';
 import { emitAIStateChanged } from './aiStateEvents';
-import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
+import { peekAgentRuntimeCleanup } from '../../infrastructure/ai/harness/agentRuntimeHandle';
+import { setReversibleModelPrivacy } from '../../infrastructure/ai/harness/modelSecretRedaction';
 import { DebouncedBackupMirror, mergeImportedSessions, readLiveSessionsArray } from './aiSessionsBackup';
 
 /** Typed accessor for the Electron IPC bridge exposed on `window.netcatty`. */
 export interface AIBridge {
   aiSdkAgentCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
+  aiPrivacyClearSession?: (chatSessionId: string) => Promise<{ ok: boolean; error?: string }>;
   deleteChatToolOutputsTemp?: (chatSessionId: string) => Promise<{ deletedCount: number }>;
   deleteTerminalToolOutputsEverywhereTemp?: (terminalSessionId: string) => Promise<{ deletedCount: number }>;
   aiMcpSetPermissionMode?: (mode: AIPermissionMode) => Promise<unknown> | unknown;
@@ -65,8 +67,18 @@ export async function cleanupSdkAgentSessions(sessionIds: string[]): Promise<voi
 export function cleanupDeletedAIChatSessions(sessionIds: string[]) {
   const bridge = getAIBridge();
   if (sessionIds.length === 0) return;
+  // Only the startup-light handle is imported here; the runtime registers it
+  // when created. Without a runtime there is no in-memory runtime state, but
+  // the reversible-privacy flag (set outside the runtime) and the
+  // main-process privacy mapping may still exist, so always clear those.
+  const runtime = peekAgentRuntimeCleanup();
   for (const sessionId of sessionIds) {
-    getAgentRuntime().clearChatSession(sessionId);
+    if (runtime) {
+      runtime.clearChatSession(sessionId);
+    } else {
+      setReversibleModelPrivacy(sessionId, false);
+      void bridge?.aiPrivacyClearSession?.(sessionId).catch(() => {});
+    }
     void bridge?.aiSdkAgentCleanup?.(sessionId).catch(() => {});
     void bridge?.deleteChatToolOutputsTemp?.(sessionId).catch(() => {});
   }
@@ -74,8 +86,9 @@ export function cleanupDeletedAIChatSessions(sessionIds: string[]) {
 
 export function cleanupClosedTerminalSessions(terminalSessionIds: string[]) {
   const bridge = getAIBridge();
+  const runtime = peekAgentRuntimeCleanup();
   for (const terminalSessionId of new Set(terminalSessionIds)) {
-    getAgentRuntime().clearTerminalSession(terminalSessionId);
+    runtime?.clearTerminalSession(terminalSessionId);
     void bridge?.deleteTerminalToolOutputsEverywhereTemp?.(terminalSessionId).catch(() => {});
   }
 }

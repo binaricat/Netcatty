@@ -3,7 +3,7 @@ import test from "node:test";
 import React from "react";
 
 import type { AISession } from "../infrastructure/ai/types.ts";
-import { MESSAGES_BY_LOCALE } from "../application/i18n/messages.ts";
+import { getLoadedLocaleMessages, loadLocaleMessages } from "../application/i18n/messages.ts";
 import { createDomRenderer, dispatchDomEvent, installDomEnvironment, runWithAct } from "./test-support/renderReactDom.tsx";
 
 test("history drawer filters, pages, clears and explains the bounded search in every locale", async () => {
@@ -107,9 +107,11 @@ test("history drawer filters, pages, clears and explains the bounded search in e
     assert.equal(closed, 1);
 
     for (const locale of ["en", "zh-CN", "zh-TW", "es", "ru"]) {
+      // Non-English dictionaries load on demand.
+      await loadLocaleMessages(locale);
       await render(sessions, locale);
       await enterQuery("no-such-content");
-      const messages = MESSAGES_BY_LOCALE[locale];
+      const messages = getLoadedLocaleMessages(locale)!;
       const input = renderer.container.querySelector("input")!;
       const hint = dom.document.getElementById(input.getAttribute("aria-describedby")!);
       for (const key of ["ai.chat.searchSessions", "ai.chat.searchSessionsHint", "ai.chat.noMatchingSessions"]) {

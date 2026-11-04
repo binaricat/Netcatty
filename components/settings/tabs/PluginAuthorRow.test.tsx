@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { JSDOM } from 'jsdom';
 import { PluginAuthorRow } from '../../plugins/PluginAuthorRow';
 import { I18nProvider } from '../../../application/i18n/I18nProvider';
+import { loadLocaleMessages } from '../../../application/i18n/messages';
 
 const entry = { id: 'com.netcatty.starter', name: 'Starter', author: 'Netcatty', version: '0.1.2',
   repository: 'binaricat/Netcatty', commit: 'a'.repeat(40), selectionToken: 'b'.repeat(64),
@@ -20,11 +21,13 @@ test('untrusted entry strings and absent imagery show only the author without de
   assert.match(html, /&lt;img/);
 });
 
-test('installed authors share a compact row with localized sources and full accessible provenance', () => {
+test('installed authors share a compact row with localized sources and full accessible provenance', async () => {
   const plugin = { id: entry.id, manifest: { publisher: 'An extremely long publisher name' },
     source: { id: 'third-party:example', kind: 'third-party', name: 'Community packages', origin: 'https://packages.example.org/catalog' },
   } as NetcattyInstalledPlugin;
   for (const [locale, label] of [['en', 'Third-party'], ['zh-CN', '第三方']]) {
+    // Static rendering runs no effects, so load the dictionary explicitly.
+    await loadLocaleMessages(locale);
     const dom = new JSDOM(renderToStaticMarkup(<I18nProvider locale={locale}><PluginAuthorRow plugin={plugin} showSource /></I18nProvider>));
     const row = dom.window.document.querySelector('[data-plugin-author-row]')!;
     const source = row.querySelector<HTMLElement>('[data-plugin-source]')!;
