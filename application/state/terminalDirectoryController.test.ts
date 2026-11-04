@@ -89,7 +89,7 @@ test('another terminal updating cannot override the current terminal strict cwd 
   const id = 'strict-after-other-session';
   let finish!: (cwd: string) => void;
   const published: string[] = [];
-  terminalCwdStore.setCwd(id, '/stale-osc7', 'osc7');
+  terminalCwdStore.setCwd(id, '/stale-osc7', 'stale');
   const controller = createTerminalDirectoryController({
     sessionId: id, isCurrent: () => true, isReady: () => true,
     io: { cwd: () => new Promise(resolve => { finish = resolve; }),
@@ -110,7 +110,7 @@ for (const nextCwd of ['/new-osc7', '/original']) {
     const id = 'same-session-osc7-' + nextCwd;
     let finish!: (cwd: string) => void;
     const published: string[] = [];
-    terminalCwdStore.setCwd(id, '/original', 'osc7');
+    terminalCwdStore.setCwd(id, '/original', 'stale');
     const controller = createTerminalDirectoryController({
       sessionId: id, isCurrent: () => true, isReady: () => true,
       io: { cwd: () => new Promise(resolve => { finish = resolve; }),
@@ -149,6 +149,21 @@ for (const probe of ['fails', 'stalls'] as const) {
     assert.equal(controller.hasConfirmedCwd(), true);
   });
 }
+
+test('navigation can probe past its pre-write OSC 7 when the shell stops reporting', async t => {
+  const id = 'probe-after-pre-write-osc7';
+  terminalCwdStore.setCwd(id, '/before', 'osc7');
+  const controller = createTerminalDirectoryController({
+    sessionId: id, isCurrent: () => true, isReady: () => true,
+    io: { cwd: async () => '/after', list: async () => ({ entries: [], home: null }),
+      realpath: async value => value, write() {} },
+    publish: cwd => terminalCwdStore.setCwd(id, cwd, 'backend-strict'),
+  });
+  t.after(() => controller.dispose());
+  await controller.change('/after', new AbortController().signal, () => {});
+  assert.equal(terminalCwdStore.getCwd(id), '/after');
+  assert.equal(terminalCwdStore.getSource(id), 'backend-strict');
+});
 
 for (const report of ['stale', 'other-session', 'other-source', 'fresh-unchanged'] as const) {
   test(`OSC 7 confirmation uses this submission's session revision (${report})`, { timeout: 2000 }, async t => {

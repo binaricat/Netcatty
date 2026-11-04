@@ -45,7 +45,8 @@ export function refreshObservedTerminalDirectory(id: string) {
 /**
  * Shells with custom prompts may emit neither OSC 7/133 nor a trusted command
  * completion. Debounce actual output/submission activity instead of polling or
- * interpreting `cd` text. This only reads the bound shell's real cwd.
+ * interpreting `cd` text. The controller prefers active-shell OSC 7 and uses
+ * the bound shell's process cwd only as a fallback.
  */
 export function scheduleObservedTerminalDirectoryRefresh(id: string) {
   if (!consumers.has(id) || !sessions.has(id)) return;

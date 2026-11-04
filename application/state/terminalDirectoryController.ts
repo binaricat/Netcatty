@@ -44,22 +44,33 @@ export function createTerminalDirectoryController(options: {
       task.then(value => finish(undefined, value), error => finish(error));
     });
   }
-  async function refresh() {
+  async function refresh(submittedRevision?: number): Promise<string> {
     check();
+    const activeShellCwd = () => {
+      const cwd = terminalCwdStore.getCwd(options.sessionId);
+      return cwd && terminalCwdStore.getSource(options.sessionId) === 'osc7'
+        && (submittedRevision === undefined || terminalCwdStore.getSessionRevision(options.sessionId) !== submittedRevision)
+        ? cwd : null;
+    };
+    // A process probe may read the outer PTY shell while a nested shell is
+    // active. OSC 7 remains authoritative across debounce delays, completion
+    // events and picker remounts. Only a cd submission may probe past its own
+    // pre-write report while waiting for fresh confirmation.
+    const reported = activeShellCwd();
+    if (reported) { confirmed = true; return reported; }
     if (refreshing) {
       // Output may settle while a pre-cd query is still in flight. Keep one
       // follow-up query so that its older result cannot be the last update.
       refreshAgain = true;
       return refreshing;
     }
-    const revision = terminalCwdStore.getSessionRevision(options.sessionId);
     const pending = (async () => {
       const cwd = await bounded(options.io.cwd());
       check();
-      // A later OSC 7 report wins over a slower backend query.
+      const reported = activeShellCwd();
       const live = terminalCwdStore.getCwd(options.sessionId);
       confirmed = true;
-      if (revision !== terminalCwdStore.getSessionRevision(options.sessionId) && live && terminalCwdStore.getSource(options.sessionId) === 'osc7') return live;
+      if (reported) return reported;
       if (live !== cwd || terminalCwdStore.getSource(options.sessionId) === 'stale') options.publish(cwd);
       return cwd;
     })();
@@ -105,7 +116,7 @@ export function createTerminalDirectoryController(options: {
           if (hasFreshOsc7()) return;
           if (options.isReady()) {
             try {
-              const cwd = await refresh();
+              const cwd = await refresh(submittedRevision);
               check(signal);
               if (cwd === path || cwd === canonical || await bounded(options.io.realpath(cwd, signal), signal) === canonical) return;
             } catch (error) {
@@ -132,7 +143,7 @@ export function createTerminalDirectoryController(options: {
     } finally { confirmationFinished = true; changing = false; }
   }
   return {
-    refresh,
+    refresh: () => refresh(),
     hasConfirmedCwd: () => confirmed,
     async home() {
       check();

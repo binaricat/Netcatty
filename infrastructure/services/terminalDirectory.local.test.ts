@@ -5,8 +5,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createTerminalDirectoryIO } from './terminalDirectory';
 import { createTerminalDirectoryController } from '../../application/state/terminalDirectoryController';
+import { terminalCwdStore } from '../../application/state/terminalCwdStore';
 import {
-  observeTerminalDirectory, registerTerminalDirectory, scheduleObservedTerminalDirectoryRefresh,
+  observeTerminalDirectory, registerTerminalDirectory, refreshObservedTerminalDirectory, scheduleObservedTerminalDirectoryRefresh,
 } from '../../application/state/terminalDirectoryRegistry';
 
 const require = createRequire(import.meta.url);
@@ -53,6 +54,64 @@ test('directory picker changes a real POSIX PTY cwd with quoted names and direct
   await waitReady();
   await controller.change(path.join(fixture, 'link'), new AbortController().signal, () => {});
   assert.equal(await io.cwd(), fs.realpathSync(target));
+});
+
+test('a real nested Bash OSC 7 cwd survives outer PTY probes after output settles', {
+  skip: process.platform !== 'linux', timeout: 20000,
+}, async t => {
+  const tempDirBridge = require('../../electron/bridges/tempDirBridge.cjs');
+  const { readLocalSessionCwd } = require('../../electron/bridges/localSessionCwd.cjs');
+  const pty = require('node-pty') as typeof import('node-pty');
+  tempDirBridge.ensureTempDir();
+  const fixture = fs.mkdtempSync(tempDirBridge.getTempFilePath('nested-directory-shell-'));
+  const id = 'nested-directory-shell';
+  const shell = pty.spawn('/bin/bash', ['--noprofile', '--norc', '-i'], {
+    cwd: fixture, env: { ...process.env, PS1: '__OUTER_READY__ ', PROMPT_COMMAND: '' }, cols: 100, rows: 24,
+  });
+  let output = '';
+  let reports = 0;
+  const published: string[] = [];
+  const subscription = shell.onData(data => {
+    output += data;
+    scheduleObservedTerminalDirectoryRefresh(id);
+    // Parse actual bytes from the child shell, including split OSC chunks.
+    const paths = output.split('\x1b]7;file://localhost').slice(1)
+      .filter(chunk => chunk.includes('\x07')).map(chunk => chunk.split('\x07')[0]);
+    if (paths.length > reports) {
+      reports = paths.length;
+      terminalCwdStore.setCwd(id, paths.at(-1)!, 'osc7');
+    }
+  });
+  const controller = createTerminalDirectoryController({
+    sessionId: id, isCurrent: () => true, isReady: () => true,
+    io: { cwd: async () => {
+      const result = await readLocalSessionCwd({ pty: shell });
+      assert.ok(result.success); return result.cwd;
+    }, list: async () => ({ entries: [], home: null }), realpath: async value => value, write() {} },
+    publish: cwd => { published.push(cwd); terminalCwdStore.setCwd(id, cwd, 'backend-strict'); },
+  });
+  const unregister = registerTerminalDirectory(id, controller);
+  const stopObserving = observeTerminalDirectory(id);
+  t.after(() => { stopObserving(); unregister(); subscription.dispose(); shell.kill(); fs.rmSync(fixture, { recursive: true, force: true }); });
+  const waitFor = async (condition: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (!condition() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+    assert.ok(condition(), 'nested shell reached the expected prompt/cwd');
+  };
+  await waitFor(() => output.includes('__OUTER_READY__ '));
+  shell.write('PS1="__CHILD_READY__ " PROMPT_COMMAND=\'printf "\\033]7;file://localhost%s\\007" "$PWD"\' bash --noprofile --norc -i\r');
+  await waitFor(() => reports > 0);
+  shell.write('cd /\r');
+  await waitFor(() => terminalCwdStore.getCwd(id) === '/');
+  // Demonstrate the original lookup really observes the outer shell, then
+  // let the real 150 ms debounce expire before checking the picker/tracker.
+  assert.equal((await readLocalSessionCwd({ pty: shell })).cwd, fs.realpathSync(fixture));
+  await new Promise(resolve => setTimeout(resolve, 350));
+  assert.equal(terminalCwdStore.getCwd(id), '/');
+  refreshObservedTerminalDirectory(id);
+  assert.equal(await controller.refresh(), '/');
+  assert.equal(terminalCwdStore.getSource(id), 'osc7');
+  assert.ok(!published.includes(fs.realpathSync(fixture)), 'outer cwd never overwrote the child report');
 });
 
 test('manual cd and delayed shell functions update the observed cwd without shell integration', {
