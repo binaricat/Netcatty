@@ -3,6 +3,7 @@ const {
   windowsFramelessContentChromeOptions,
 } = require("./windowsWindowChrome.cjs");
 const { attachDisplayRecovery } = require("./displayRecovery.cjs");
+const perfTrace = require("../../perfTrace.cjs");
 
 const TERMINAL_KEYBOARD_FOCUS = Symbol("netcattyTerminalKeyboardFocus");
 
@@ -258,6 +259,7 @@ function createMainWindowApi(ctx) {
     
       const windowsChrome = !isMac ? windowsFramelessContentChromeOptions() : {};
 
+      perfTrace.mark("main:create-window");
       const win = new BrowserWindow({
         ...windowBounds,
         minWidth: windowMinimumSize.width,
@@ -692,7 +694,9 @@ function createMainWindowApi(ctx) {
     
       // Register IPC handlers BEFORE loading any URL so the renderer never
       // calls a handler that hasn't been registered yet.
+      perfTrace.mark("main:register-bridges:start");
       onRegisterBridge?.(win);
+      perfTrace.mark("main:register-bridges:end");
 
       if (startHidden) {
         // Belt-and-suspenders: guarantee a tray icon exists as soon as
@@ -718,6 +722,10 @@ function createMainWindowApi(ctx) {
       }
     
       // Production mode - load via custom protocol.
+      if (perfTrace.isEnabled()) {
+        win.webContents.once("did-finish-load", () => perfTrace.mark("main:did-finish-load"));
+      }
+      perfTrace.mark("main:load-url");
       await win.loadURL(`app://netcatty/index.html${rendererHash}`);
       return win;
     }

@@ -50,6 +50,9 @@ function SettingsI18nProvider({ children }: { children: React.ReactNode }) {
  * shell bags; AppSideEffects owns reactive effects + local UI publishing.
  */
 function App() {
+  useEffect(() => {
+    performance.mark('netcatty:renderer:app-mounted');
+  }, []);
   return (
     <AppLocalStateProvider>
       <MonitorRuntimeHost />

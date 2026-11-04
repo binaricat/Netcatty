@@ -14,7 +14,22 @@ function loadComponent(path: string, name: string, bindings: Record<string, unkn
   const code = ts.transpile(declaration.getText(ast).replace(/^export /, ''), {
     target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React,
   });
-  return vm.runInNewContext(`${code}; ${name}`, { React, ...bindings }) as React.ComponentType;
+  // Extracting the function drops imports, so inject bare React hooks/APIs into the sandbox.
+  return vm.runInNewContext(`${code}; ${name}`, {
+    React,
+    useState: React.useState,
+    useEffect: React.useEffect,
+    useLayoutEffect: React.useLayoutEffect,
+    useMemo: React.useMemo,
+    useCallback: React.useCallback,
+    useRef: React.useRef,
+    useReducer: React.useReducer,
+    useContext: React.useContext,
+    memo: React.memo,
+    createElement: React.createElement,
+    Fragment: React.Fragment,
+    ...bindings,
+  }) as React.ComponentType;
 }
 
 test('monitor controls update their runtime without rendering unrelated app siblings', async () => {
@@ -32,6 +47,7 @@ test('monitor controls update their runtime without rendering unrelated app sibl
   };
   const MonitorRuntimeHost = loadComponent('./MonitorRuntimeHost.tsx', 'MonitorRuntimeHost', { useMonitorRuntime });
   const App = loadComponent('../../App.tsx', 'App', {
+    performance: { mark: () => {} },
     useMonitorRuntime,
     MonitorRuntimeHost,
     AppLocalStateProvider: ({ children }: { children: React.ReactNode }) => children,
