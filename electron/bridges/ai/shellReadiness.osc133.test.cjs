@@ -148,32 +148,50 @@ test('real Bash line editing gates ambiguous blanks and supports confirmed text 
   const probe = spawnSync('python3', ['-c', 'import pty']);
   if (probe.error?.code === 'ENOENT') return t.skip('python3 is unavailable');
   assert.equal(probe.status, 0, probe.stderr?.toString());
-  const result = spawnSync('python3', [path.resolve(__dirname, '../../../scripts/fixtures/osc133-erase-input.py')],
-    { encoding: 'utf8', timeout: 10_000 });
-  assert.equal(result.status, 0, result.stderr);
-  const scenarios = JSON.parse(result.stdout);
-  assert.equal(scenarios.length, 14);
-  const word = scenarios.find(({ name }) => name === 'Ctrl-W whole word');
-  assert.ok(word.states.at(-1).raw.includes('\b'.repeat(5) + ' '.repeat(5) + '\b'.repeat(5)));
-  const forward = scenarios.find(({ name }) => name === 'mixed forward delete');
-  const kill = scenarios.find(({ name }) => name === 'indistinguishable mixed line kill');
-  // The first leaves a genuine blank; the second empties input. Identical
-  // output cannot certify which happened, so both must stay conservatively gated.
-  assert.equal(forward.states.slice(1).map(({ raw }) => raw).join(''),
-    kill.states.slice(1).map(({ raw }) => raw).join(''));
-  for (const scenario of scenarios) {
-    const session = {}, splitSession = {};
-    for (const { step, raw, ready: expected } of scenario.states) {
-      trackSessionIdlePrompt(session, raw);
-      for (const ch of raw) {
-        trackSessionIdlePrompt(splitSession, ch);
-        if (!expected) assert.equal(Boolean(ready(splitSession)), false,
-          `intermediate byte of ${scenario.name}: ${step}`);
+  for (const args of [[], ['--wide-prompt']]) {
+    const result = spawnSync('python3', [path.resolve(__dirname, '../../../scripts/fixtures/osc133-erase-input.py'), ...args],
+      { encoding: 'utf8', timeout: 10_000 });
+    if (result.status === 77) return t.skip('a UTF-8 locale is unavailable');
+    assert.equal(result.status, 0, result.stderr);
+    const scenarios = JSON.parse(result.stdout);
+    assert.equal(scenarios.length, 27);
+    const word = scenarios.find(({ name }) => name === 'Ctrl-W whole word');
+    assert.ok(word.states.at(-1).raw.includes('\b'.repeat(5) + ' '.repeat(5) + '\b'.repeat(5)));
+    const forward = scenarios.find(({ name }) => name === 'mixed forward delete');
+    const kill = scenarios.find(({ name }) => name === 'indistinguishable mixed line kill');
+    // The first leaves a genuine blank; the second empties input. Identical
+    // output cannot certify which happened, so both must stay conservatively gated.
+    assert.equal(forward.states.slice(1).map(({ raw }) => raw).join(''),
+      kill.states.slice(1).map(({ raw }) => raw).join(''));
+    for (const scenario of scenarios) {
+      const session = {}, splitSession = {};
+      for (const { step, raw, ready: expected } of scenario.states) {
+        trackSessionIdlePrompt(session, raw);
+        for (const ch of raw) {
+          trackSessionIdlePrompt(splitSession, ch);
+          if (!expected) assert.equal(Boolean(ready(splitSession)), false,
+            `intermediate byte of ${scenario.name}: ${step}`);
+        }
+        assert.equal(Boolean(ready(session)), expected, `${scenario.name}: ${step}`);
+        assert.equal(Boolean(ready(splitSession)), expected, `byte-split ${scenario.name}: ${step}`);
       }
-      assert.equal(Boolean(ready(session)), expected, `${scenario.name}: ${step}`);
-      assert.equal(Boolean(ready(splitSession)), expected, `byte-split ${scenario.name}: ${step}`);
     }
   }
+});
+
+test('same-row OSC redraw stays gated until a fresh prompt lifecycle', () => {
+  const session = {}, prompt = 'review@local:~$ ';
+  trackSessionIdlePrompt(session, A + prompt + B + 'x ');
+  for (const ch of '\r' + A + prompt + B) {
+    trackSessionIdlePrompt(session, ch);
+    assert.equal(ready(session), '');
+  }
+  trackSessionIdlePrompt(session, '\r\n' + A + prompt + B);
+  assert.equal(ready(session), prompt);
+  trackSessionIdlePrompt(session, 'x' + '\r' + A + prompt + B);
+  assert.equal(ready(session), '');
+  trackSessionIdlePrompt(session, C + D + A + prompt + B);
+  assert.equal(ready(session), prompt);
 });
 
 test('OSC repeats complete execution and prompt cycles without stale prompt state', async () => {

@@ -70,6 +70,48 @@ test("mixed repaint never certifies ordinary blanks just because it erased text"
   }
 });
 
+test("cursor columns use display widths without inserting padding into log text", () => {
+  const text = "\u754c\u{1f600}e\u0301";
+  assert.deepEqual(terminalCursorState(text), { line: text, column: 5, lineWithoutErasedPadding: text });
+  assert.equal(terminalDataToPlainText(text), text);
+  const renderer = createTerminalTextRenderer();
+  for (const ch of text) renderer.feed(ch);
+  assert.equal(renderer.getCursorLine(), text);
+  assert.equal(renderer.toHtmlContent().replace(/<[^>]*>/g, ""), text);
+});
+
+test("wide-cell overwrites, erases and preserved screens render complete glyphs", () => {
+  assert.equal(terminalDataToPlainText("\u754cA\rX"), "X A");
+  assert.equal(terminalDataToPlainText("\u754cA\r\x1b[CX"), " XA");
+  assert.equal(terminalDataToPlainText("A\u754cB\r\x1b[2CX"), "A XB");
+  assert.equal(terminalDataToPlainText("\u754cA\r\x1b[C\x1b[K"), "");
+  assert.equal(terminalDataToPlainText("\u754c\x1b[2J\x1b[H\u65b0"), "\u754c\n\u65b0");
+});
+
+test("wide erasures recover while partial emoji sequences remain input", () => {
+  const prompt = "\u754c> ";
+  for (const text of ["\u754c", "\u{1f600}"]) {
+    const erased = prompt + text + "\b\b  \b\b";
+    assert.deepEqual(terminalCursorState(erased), {
+      line: prompt + "  ", column: 4, lineWithoutErasedPadding: prompt,
+    });
+  }
+  assert.equal(terminalCursorState(prompt + "e\u0301\b \b").lineWithoutErasedPadding, prompt);
+  const partial = terminalCursorState(prompt + "\u{1f44d}\u{1f3fd}\b\b  \b\b");
+  assert.equal(partial.column, 6);
+  assert.equal(partial.lineWithoutErasedPadding, prompt + "\u{1f44d}");
+});
+
+test("spacing marks and soft hyphens remain separate input cells", () => {
+  for (const suffix of ["\u093e", "\u00ad"]) {
+    assert.equal(terminalCursorState("x" + suffix).column, 2);
+    const afterDelete = terminalCursorState("x" + suffix + "\b \b");
+    assert.equal(afterDelete.column, 1);
+    assert.equal(afterDelete.lineWithoutErasedPadding, "x");
+  }
+  assert.equal(terminalCursorState("\u1100\u1161\u11a8").column, 2);
+});
+
 test("plain text rendering applies carriage-return overwrites", () => {
   assert.equal(terminalDataToPlainText("progress 10%\rprogress 100%\n"), "progress 100%");
 });
