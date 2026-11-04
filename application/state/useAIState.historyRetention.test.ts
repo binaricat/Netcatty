@@ -4,10 +4,10 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { JSDOM } from 'jsdom';
 import type { AISession } from '../../infrastructure/ai/types';
-import { STORAGE_KEY_AI_SESSIONS, STORAGE_KEY_AI_SESSIONS_OVERFLOW, STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS } from '../../infrastructure/config/storageKeys';
+import { STORAGE_KEY_AI_ACTIVE_SESSION_MAP, STORAGE_KEY_AI_SESSIONS, STORAGE_KEY_AI_SESSIONS_OVERFLOW, STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS } from '../../infrastructure/config/storageKeys';
 import { useAIState } from './useAIState';
 import { useAISessionsStore } from './aiSessionsStore';
-import { __resetBackupMirrorForTests, flushBackupMirror, readSessionsFromStorage, setLatestAISessionsSnapshot, writeSessionsForStorage } from './aiStateSnapshots';
+import { __resetBackupMirrorForTests, flushBackupMirror, readSessionsFromStorage, setLatestAIActiveSessionMapSnapshot, setLatestAISessionsSnapshot, writeSessionsForStorage } from './aiStateSnapshots';
 
 for (const enabled of [true, false]) {
   test(`appending to long history preserves the synced prefix (chat sync ${enabled})`, async () => {
@@ -238,6 +238,76 @@ for (const scopeType of ['terminal', 'workspace'] as const) {
   });
 }
 
+for (const mutation of ['rename', 'create', 'delete', 'delete-pending'] as const) {
+  test(`live ${mutation} preserves intended history across pending disk recovery`, async () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
+    for (const name of ['window', 'document', 'localStorage', 'CustomEvent', 'Event'] as const) {
+      Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? dom.window : dom.window[name] });
+    }
+    Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+    const primary: AISession = {
+      id: 'primary', title: 'Primary', agentId: 'catty', scope: { type: 'global' },
+      createdAt: 1, updatedAt: 2, messages: [],
+    };
+    const diskOnly = { ...primary, id: 'disk-only', updatedAt: 1 };
+    dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS, JSON.stringify([primary]));
+    dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify([diskOnly.id]));
+    dom.window.localStorage.setItem(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, JSON.stringify({ 'global:': diskOnly.id }));
+    setLatestAIActiveSessionMapSnapshot({ 'global:': diskOnly.id });
+    setLatestAISessionsSnapshot(null as unknown as AISession[]);
+    __resetBackupMirrorForTests();
+    const backups: string[] = [];
+    let resolveRead!: (backup: { ok: boolean; json: string }) => void;
+    Object.assign(dom.window, { netcatty: {
+      aiSessionsBackupWrite: async ({ json }: { json: string }) => { backups.push(json); return { ok: true }; },
+      aiSessionsBackupReadLatest: () => new Promise(resolve => { resolveRead = resolve; }),
+    } });
+    let ai!: ReturnType<typeof useAIState>;
+    let snapshot!: ReturnType<typeof useAISessionsStore>;
+    function Harness() {
+      ai = useAIState();
+      snapshot = useAISessionsStore();
+      return null;
+    }
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => { root.render(React.createElement(Harness)); });
+      assert.equal(snapshot.activeSessionIdMap['global:'], diskOnly.id);
+      await act(async () => {
+        if (mutation === 'rename') ai.updateSessionTitle(primary.id, 'Renamed before recovery');
+        else if (mutation === 'create') ai.createSession({ type: 'global' }, 'catty');
+        else ai.deleteSession(mutation === 'delete-pending' ? diskOnly.id : primary.id);
+      });
+      const liveBeforeRecovery = [...snapshot.sessions];
+      const expectedActiveId = mutation === 'create' ? liveBeforeRecovery[0].id
+        : mutation === 'delete-pending' ? null : diskOnly.id;
+      assert.equal(snapshot.activeSessionIdMap['global:'], expectedActiveId);
+      assert.deepEqual(readSessionsFromStorage(), liveBeforeRecovery);
+      const recoveryMarker = dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW);
+      assert.deepEqual(recoveryMarker == null ? null : JSON.parse(recoveryMarker), mutation === 'delete-pending' ? null : [diskOnly.id]);
+      flushBackupMirror();
+      assert.deepEqual(backups.map(json => JSON.parse(json)), mutation === 'delete-pending' ? [liveBeforeRecovery] : []);
+
+      await act(async () => { resolveRead({ ok: true, json: JSON.stringify([primary, diskOnly]) }); });
+      const expected = mutation === 'delete-pending' ? liveBeforeRecovery : [...liveBeforeRecovery, diskOnly];
+      assert.deepEqual(snapshot.sessions, expected);
+      assert.deepEqual(readSessionsFromStorage(), expected);
+      assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW), null);
+      flushBackupMirror();
+      assert.deepEqual(JSON.parse(backups.at(-1)!), expected);
+    } finally {
+      await act(async () => { root.unmount(); });
+      __resetBackupMirrorForTests();
+      setLatestAISessionsSnapshot([]);
+      setLatestAIActiveSessionMapSnapshot({});
+      container.remove();
+      dom.window.close();
+    }
+  });
+}
+
 for (const keepPrimary of [true, false]) {
   test(`deletion clears disk-only recovery and remains authoritative (keep primary ${keepPrimary})`, async () => {
     const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
@@ -252,7 +322,7 @@ for (const keepPrimary of [true, false]) {
     dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS, JSON.stringify([primary]));
     dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify(['deleted-chat']));
     const remaining = keepPrimary ? [primary] : [];
-    assert.equal(writeSessionsForStorage(remaining), true);
+    assert.equal(writeSessionsForStorage(remaining, { deletedSessionIds: ['deleted-chat'] }), true);
     assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW), null);
     __resetBackupMirrorForTests();
     setLatestAISessionsSnapshot(null as unknown as AISession[]);

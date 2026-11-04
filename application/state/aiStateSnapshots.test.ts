@@ -373,6 +373,97 @@ test('aggregate quota falls back to a current primary with full backup and persi
   assert.deepEqual(readSessionsFromStorage(), [updated[0]]);
 });
 
+test('live writes resolve only the disk-only IDs included in primary or overflow', (t) => {
+  const storage = installSessionStorage(t);
+  const sessions = makeLargeSessions();
+  storage.set(STORAGE_KEY_AI_SESSIONS, JSON.stringify([sessions[0]]));
+  storage.set(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify([
+    sessions[0].id, sessions[1].id, 'unrecovered', 'deleted',
+  ]));
+  assert.equal(writeSessionsForStorage(sessions, { deletedSessionIds: ['deleted'] }), true);
+  assert.deepEqual(readSessionsFromStorage(), sessions);
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)!), ['unrecovered']);
+
+  // Reusing the same immutable array must still process explicit deletion,
+  // including when the primary itself has not changed.
+  assert.equal(writeSessionsForStorage(sessions, { deletedSessionIds: ['unrecovered'] }), true);
+  assert.equal(storage.has(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW), false);
+});
+
+test('same-array primary writes preserve pending recovery until explicit deletion or sync', (t) => {
+  const storage = installSessionStorage(t);
+  const sessions = [makeSession('primary', 1, [])];
+  assert.equal(writeSessionsForStorage(sessions), true);
+  storage.set(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify(['unrecovered']));
+  assert.equal(writeSessionsForStorage(sessions), true);
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)!), ['unrecovered']);
+  assert.equal(writeSessionsForStorage(sessions, { deletedSessionIds: ['unrecovered'] }), true);
+  assert.equal(storage.has(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW), false);
+
+  storage.set(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify(['unrecovered']));
+  storage.set(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS, JSON.stringify({ enabled: true }));
+  assert.equal(writeSessionsForStorage(sessions), true);
+  assert.equal(storage.has(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW), false);
+});
+
+test('tiny newest chat bounds overflow writes under aggregate quota and preserves unresolved IDs', (t) => {
+  const storage = installSessionStorage(t, 512 * 1024);
+  const sessions = [makeSession('empty-newest', 10, []), ...Array.from({ length: 3 }, (_, index) => (
+    makeSession(`huge-older-${index}`, 3 - index, [{
+      id: 'm', role: 'user', content: 'x'.repeat(768 * 1024), timestamp: 0,
+    }])
+  ))];
+  storage.set(STORAGE_KEY_AI_SESSIONS, JSON.stringify([sessions[0]]));
+  storage.set(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify(['unrecovered']));
+  const writes = t.mock.method(globalThis.localStorage, 'setItem');
+  assert.equal(writeSessionsForStorage(sessions), true);
+  assert.ok(writes.mock.callCount() < 150, `bounded writes: ${writes.mock.callCount()}`);
+  assert.deepEqual(readSessionsFromStorage(), [sessions[0]]);
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)!), [
+    'unrecovered', ...sessions.slice(1).map(session => session.id),
+  ]);
+});
+
+test('primary-only fallback frees primary quota before writing recovery metadata', (t) => {
+  const storage = installSessionStorage(t);
+  const previous = [makeSession('old-primary', 1, [{
+    id: 'm', role: 'user', content: 'x'.repeat(64 * 1024), timestamp: 0,
+  }])];
+  const previousJson = JSON.stringify(previous);
+  const sessions = [makeSession('empty-newest', 10, []), ...makeLargeSessions(2)];
+  storage.set(STORAGE_KEY_AI_SESSIONS, previousJson);
+  // The old primary fills the quota. Metadata fits only after it is replaced.
+  const aggregateQuota = [...storage].reduce((total, [key, value]) => total + key.length + value.length, 0);
+  const setItem = globalThis.localStorage.setItem;
+  t.mock.method(globalThis.localStorage, 'setItem', (key: string, value: string) => {
+    const total = [...storage].reduce((sum, [storedKey, storedValue]) => (
+      sum + (storedKey === key ? 0 : storedKey.length + storedValue.length)
+    ), key.length + value.length);
+    if (total > aggregateQuota) throw new DOMException('aggregate quota exceeded', 'QuotaExceededError');
+    setItem(key, value);
+  });
+  assert.equal(writeSessionsForStorage(sessions), true);
+  assert.deepEqual(readSessionsFromStorage(), [sessions[0]]);
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)!), sessions.slice(1).map(session => session.id));
+});
+
+test('primary-only fallback rolls back when recovery metadata cannot be written', (t) => {
+  const storage = installSessionStorage(t);
+  const previous = [makeSession('previous', 0, [])];
+  assert.equal(writeSessionsForStorage(previous), true);
+  storage.set(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify(['unrecovered']));
+  const before = new Map(storage);
+  const setItem = globalThis.localStorage.setItem;
+  t.mock.method(globalThis.localStorage, 'setItem', (key: string, value: string) => {
+    if (key.startsWith(STORAGE_KEY_AI_SESSIONS_OVERFLOW) || key === STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) {
+      throw new DOMException('quota exceeded', 'QuotaExceededError');
+    }
+    setItem(key, value);
+  });
+  assert.equal(writeSessionsForStorage([makeSession('new', 1, []), ...makeLargeSessions(2)]), false);
+  assert.deepEqual(storage, before);
+});
+
 test('unchanged primary does not hide modified overflow from the write cache', (t) => {
   const storage = installSessionStorage(t);
   const sessions = freezeHistory(makeLargeSessions());

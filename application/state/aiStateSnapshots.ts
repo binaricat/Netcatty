@@ -577,6 +577,16 @@ function clearOverflowChunks(startIndex = 0) {
   }
 }
 
+function writeDiskOverflowIds(ids: string[]): boolean {
+  if (ids.length > 0) {
+    return localStorageAdapter.write(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, ids);
+  }
+  if (localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) != null) {
+    localStorageAdapter.remove(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW);
+  }
+  return true;
+}
+
 /** Replace the entire overflow blob; never leave a partially written JSON array. */
 function replaceOverflowChunks(chunks: string[]): boolean {
   clearOverflowChunks();
@@ -599,7 +609,10 @@ export function readSessionsFromStorage(): AISession[] {
   );
 }
 
-export function writeSessionsForStorage(sessions: AISession[]): boolean {
+export function writeSessionsForStorage(
+  sessions: AISession[],
+  options: { deletedSessionIds?: readonly string[] } = {},
+): boolean {
   const synced = Boolean(
     localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled,
   );
@@ -611,6 +624,7 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
     && storedSessionsJsonEquals(lastSessionsWrite.json)
     // A matching primary alone cannot establish that overflow is intact.
     && localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS_OVERFLOW) == null
+    && localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) == null
   ) {
     return true;
   }
@@ -638,9 +652,20 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
     }
   }
   const pruned = pruneSessionsForStorage(sessions);
+  const retainedIds = new Set(pruned.map(session => session.id));
+  const deletedIds = new Set(options.deletedSessionIds);
+  // A live write can race startup's backup read. Missing marker IDs have not
+  // been recovered yet; only a written record or explicit deletion resolves
+  // them. Never mirror this partial history over their recovery backup.
+  const diskOverflowIds = localStorageAdapter.read<unknown>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW);
+  const unresolvedDiskIds: string[] = Array.isArray(diskOverflowIds)
+    ? diskOverflowIds.filter((id): id is string => (
+      typeof id === 'string' && !retainedIds.has(id) && !deletedIds.has(id)
+    ))
+    : [];
   let fullBackupScheduled = false;
   const ensureFullBackup = () => {
-    if (!fullBackupScheduled) {
+    if (!fullBackupScheduled && unresolvedDiskIds.length === 0) {
       scheduleBackupMirror(JSON.stringify(pruned));
       fullBackupScheduled = true;
     }
@@ -660,7 +685,9 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
     // Split the array's JSON string, so even one oversized session can span
     // chunks without losing messages. Concatenate all chunks before parsing.
     const chunks: string[] = [];
-    const chunkSize = Math.max(2, chunkBudget);
+    // Primary budgets can shrink to a tiny empty chat. Keep overflow writes
+    // bounded independently while still supporting small per-key quotas.
+    const chunkSize = Math.max(32 * 1024, chunkBudget);
     for (let offset = 0; offset < overflowJson.length; offset += chunkSize) {
       chunks.push(overflowJson.slice(offset, offset + chunkSize));
     }
@@ -675,11 +702,9 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
       if (!localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, candidate.json)) return false;
       primaryWritten = true;
       if (!replaceOverflowChunks(chunks)) return false;
+      if (!writeDiskOverflowIds(unresolvedDiskIds)) return false;
       persisted = true;
-      if (localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) != null) {
-        localStorageAdapter.remove(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW);
-      }
-      if (!fullBackupScheduled) scheduleBackupMirror(candidate.json);
+      if (!fullBackupScheduled && unresolvedDiskIds.length === 0) scheduleBackupMirror(candidate.json);
       rememberSessionsWrite(sessions, false, candidate.json);
       return true;
     } finally {
@@ -724,15 +749,23 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
   // old valid primary block persistence of every subsequent conversation turn.
   ensureFullBackup();
   const previousChunks = readOverflowChunks();
+  const previousPrimary = localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS);
   const previousDiskOverflow = localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW);
   clearOverflowChunks();
+  let primaryWritten = false;
   let primaryPersisted = false;
   try {
     for (const candidate of primaryCandidates) {
       const primaryIds = new Set(candidate.sessions.map(session => session.id));
-      const diskOnlyIds = pruned.filter(session => !primaryIds.has(session.id)).map(session => session.id);
-      if (!localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify(diskOnlyIds))) continue;
-      if (localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, candidate.json)) {
+      const diskOnlyIds = [...new Set([
+        ...unresolvedDiskIds,
+        ...pruned.filter(session => !primaryIds.has(session.id)).map(session => session.id),
+      ])];
+      // Replacing a large old primary can free the space needed by metadata.
+      // Roll it back below if the recovery marker still cannot be persisted.
+      if (!localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, candidate.json)) continue;
+      primaryWritten = true;
+      if (writeDiskOverflowIds(diskOnlyIds)) {
         primaryPersisted = true;
         rememberSessionsWrite(sessions, false, candidate.json);
         return true;
@@ -740,6 +773,10 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
     }
   } finally {
     if (!primaryPersisted) {
+      if (primaryWritten) {
+        if (previousPrimary == null) localStorageAdapter.remove(STORAGE_KEY_AI_SESSIONS);
+        else localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, previousPrimary);
+      }
       if (previousDiskOverflow != null) {
         localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, previousDiskOverflow);
       } else if (localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) != null) {

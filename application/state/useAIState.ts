@@ -333,6 +333,11 @@ export function useAIState() {
 
   useEffect(() => {
     const validSessionIds = new Set<string>(sessions.map((session) => session.id));
+    // Disk-only chats may not have arrived from the startup backup read yet.
+    // Keep their active pointers and panel views until recovery or deletion.
+    for (const id of localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) ?? []) {
+      validSessionIds.add(id);
+    }
     let changed = false;
     const nextActiveSessionIdMap: Record<string, string | null> = {};
 
@@ -740,8 +745,8 @@ export function useAIState() {
   }, []);
 
   // ── Session CRUD ──
-  const persistSessions = useCallback((next: AISession[]) => {
-    writeSessionsForStorage(next);
+  const persistSessions = useCallback((next: AISession[], deletedSessionIds?: readonly string[]) => {
+    writeSessionsForStorage(next, { deletedSessionIds });
   }, []);
 
   // Debounced version of persistSessions for high-frequency updates (e.g. streaming)
@@ -886,7 +891,7 @@ export function useAIState() {
     setSessionsRaw(prev => {
       const next = prev.filter(s => s.id !== sessionId);
       setLatestAISessionsSnapshot(next);
-      persistSessions(next);
+      persistSessions(next, [sessionId]);
       return next;
     });
     if (scopeKey) {
@@ -930,7 +935,7 @@ export function useAIState() {
         return !(s.scope.type === scopeType && s.scope.targetId === targetId);
       });
       setLatestAISessionsSnapshot(next);
-      persistSessions(next);
+      persistSessions(next, removedSessionIds);
       return next;
     });
     const scopeKey = `${scopeType}:${targetId}`;
