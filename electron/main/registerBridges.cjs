@@ -985,8 +985,19 @@ function createBridgeRegistrar(context) {
     });
   
     // PTY child process list for busy-check before close
-    ipcMain.handle("netcatty:pty:childProcesses", async (_event, sessionId) => {
+    ipcMain.handle("netcatty:pty:childProcesses", async (event, sessionId) => {
       if (typeof sessionId !== "string") return [];
+      if (terminalWorkerManager) {
+        try {
+          const result = await terminalWorkerManager.request("netcatty:pty:childProcesses", { sessionId }, {
+            webContentsId: event?.sender?.id,
+          });
+          const children = Array.isArray(result) ? result : result?.children;
+          if (Array.isArray(children)) return children;
+        } catch {
+          // Fall back to main-owned sessions when the worker is unavailable.
+        }
+      }
       return ptyProcessTree.getChildProcesses(sessionId);
     });
   
