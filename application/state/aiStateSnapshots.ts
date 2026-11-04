@@ -493,8 +493,8 @@ export function serializeSessionsForStorage(
 
 /**
  * Persist sessions to localStorage with byte-budgeted primary/overflow slices.
- * Returns true when every slice succeeded; a false result means the payload
- * could not be persisted even after escalation (it stays memory-only).
+ * Returns true when local history was saved, possibly as a newest-primary
+ * fallback with the full history scheduled for disk backup under quota pressure.
  */
 
 // Durability mirror (issue #4015 follow-up): every successful store write
@@ -569,6 +569,20 @@ function clearOverflowChunks(startIndex = 0) {
   }
 }
 
+/** Replace the entire overflow blob; never leave a partially written JSON array. */
+function replaceOverflowChunks(chunks: string[]): boolean {
+  clearOverflowChunks();
+  let complete = false;
+  try {
+    complete = chunks.every((chunk, index) => (
+      localStorageAdapter.writeString(overflowChunkKey(index), chunk)
+    ));
+    return complete;
+  } finally {
+    if (!complete) clearOverflowChunks();
+  }
+}
+
 /** Read both local retention slices; newer copies win if a session is duplicated. */
 export function readSessionsFromStorage(): AISession[] {
   return mergeImportedSessions(
@@ -596,47 +610,63 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
   // session or turn here would turn local retention into cloud deletion.
   if (synced) {
     const json = JSON.stringify(sessions);
-    const syncedOk = localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, json);
-    if (syncedOk) {
-      clearOverflowChunks();
-      scheduleBackupMirror(json);
-      rememberSessionsWrite(sessions, true, json);
+    const previousChunks = readOverflowChunks();
+    // The authoritative primary replaces overflow, so free its quota first.
+    clearOverflowChunks();
+    let syncedOk = false;
+    try {
+      syncedOk = localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, json);
+      if (syncedOk) {
+        clearOverflowChunks();
+        scheduleBackupMirror(json);
+        rememberSessionsWrite(sessions, true, json);
+      }
+      return syncedOk;
+    } finally {
+      if (!syncedOk) replaceOverflowChunks(previousChunks);
     }
-    return syncedOk;
   }
   const pruned = pruneSessionsForStorage(sessions);
   let fullBackupScheduled = false;
-  const persistCandidate = (candidate: { json: string; sessions: AISession[] }, budget: number): boolean => {
-    const primaryIds = new Set(candidate.sessions.map(session => session.id));
-    const overflow = pruned.filter(session => !primaryIds.has(session.id));
-    if (overflow.length > 0 && !fullBackupScheduled) {
+  const ensureFullBackup = () => {
+    if (!fullBackupScheduled) {
       scheduleBackupMirror(JSON.stringify(pruned));
       fullBackupScheduled = true;
     }
+  };
+  const persistCandidate = (
+    candidate: { json: string; sessions: AISession[] },
+    budget: number,
+    chunkBudget = budget,
+  ): boolean => {
+    const primaryIds = new Set(candidate.sessions.map(session => session.id));
+    const omitted = pruned.filter(session => !primaryIds.has(session.id));
+    if (omitted.length > 0) ensureFullBackup();
+    // Apply the same replay-bulk ladder to every overflow chat as budgets
+    // tighten. Chunking alone cannot reduce an origin's aggregate quota use.
+    const overflow = omitted.map(session => serializeSessionsForStorage([session], budget).sessions[0]);
     const overflowJson = overflow.length > 0 ? JSON.stringify(overflow) : '';
     // Split the array's JSON string, so even one oversized session can span
     // chunks without losing messages. Concatenate all chunks before parsing.
     const chunks: string[] = [];
-    const chunkSize = Math.max(2, budget);
+    const chunkSize = Math.max(2, chunkBudget);
     for (let offset = 0; offset < overflowJson.length; offset += chunkSize) {
       chunks.push(overflowJson.slice(offset, offset + chunkSize));
     }
     const previousChunks = readOverflowChunks();
-    const overflowOk = chunks.every((chunk, index) => (
-      localStorageAdapter.writeString(overflowChunkKey(index), chunk)
-    ));
-    if (!overflowOk || !localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, candidate.json)) {
-      // Keep the previous overflow readable if a chunk or the primary write
-      // fails. Do not report success for a primary-only partial save.
-      clearOverflowChunks();
-      previousChunks.forEach((chunk, index) => localStorageAdapter.writeString(overflowChunkKey(index), chunk));
-      return false;
+    let persisted = false;
+    try {
+      if (!replaceOverflowChunks(chunks)) return false;
+      if (!localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, candidate.json)) return false;
+      persisted = true;
+      if (!fullBackupScheduled) scheduleBackupMirror(candidate.json);
+      rememberSessionsWrite(sessions, false, candidate.json);
+      return true;
+    } finally {
+      if (!persisted) replaceOverflowChunks(previousChunks);
     }
-    clearOverflowChunks(chunks.length);
-    if (!fullBackupScheduled) scheduleBackupMirror(candidate.json);
-    rememberSessionsWrite(sessions, false, candidate.json);
-    return true;
   };
+  const primaryCandidates: { json: string; sessions: AISession[] }[] = [];
   let previousLength = Number.POSITIVE_INFINITY;
   for (const configuredBudget of [MAX_SESSIONS_JSON_BYTES, ...RETRY_SESSIONS_JSON_BYTES]) {
     // A real quota failure means the next attempt must be smaller even when
@@ -649,7 +679,9 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
     const budget = Math.min(configuredBudget, reducedBudget);
     if (budget < 2) break;
     const candidate = serializeSessionsForStorage(pruned, budget);
-    if (candidate.json.length >= previousLength) continue;
+    primaryCandidates.push(candidate);
+    // Even an unchanged primary can succeed with smaller overflow chunks or
+    // more degraded overflow replay data at this retry budget.
     if (persistCandidate(candidate, budget)) return true;
     previousLength = candidate.json.length;
   }
@@ -657,11 +689,26 @@ export function writeSessionsForStorage(sessions: AISession[]): boolean {
   // with replay-only bulk removed), retaining other chats in overflow.
   const minimalCandidate = serializeSessionsForStorage(pruned, 0);
   const minimalChunkBudget = Math.min(minimalCandidate.json.length, RETRY_SESSIONS_JSON_BYTES[RETRY_SESSIONS_JSON_BYTES.length - 1]);
-  if (
-    minimalCandidate.json.length < previousLength
-    && persistCandidate(minimalCandidate, minimalChunkBudget)
-  ) {
-    return true;
+  primaryCandidates.push(minimalCandidate);
+  if (persistCandidate(minimalCandidate, 0, minimalChunkBudget)) return true;
+
+  // If the complete retained set cannot fit, save the newest primary anyway.
+  // Schedule the full disk mirror before discarding overflow; do not let an
+  // old valid primary block persistence of every subsequent conversation turn.
+  ensureFullBackup();
+  const previousChunks = readOverflowChunks();
+  clearOverflowChunks();
+  let primaryPersisted = false;
+  try {
+    for (const candidate of primaryCandidates) {
+      if (localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, candidate.json)) {
+        primaryPersisted = true;
+        rememberSessionsWrite(sessions, false, candidate.json);
+        return true;
+      }
+    }
+  } finally {
+    if (!primaryPersisted) replaceOverflowChunks(previousChunks);
   }
   console.warn(
     '[AIState] Failed to persist AI sessions within the storage quota; recent chat history may not survive a restart.',

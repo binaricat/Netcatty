@@ -83,14 +83,22 @@ function makeSession(id: string, updatedAt: number, messages: unknown[]): AISess
   } as never;
 }
 
-function installSessionStorage(t: TestContext) {
+function installSessionStorage(t: TestContext, aggregateQuota = Number.POSITIVE_INFINITY) {
   const storage = new Map<string, string>();
   const previousStorage = globalThis.localStorage;
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
     value: {
       getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => { storage.set(key, value); },
+      setItem: (key: string, value: string) => {
+        const storedBytes = [...storage].reduce((total, [storedKey, storedValue]) => (
+          total + (storedKey === key ? 0 : Buffer.byteLength(storedKey + storedValue))
+        ), 0);
+        if (storedBytes + Buffer.byteLength(key + value) > aggregateQuota) {
+          throw new DOMException('aggregate quota exceeded', 'QuotaExceededError');
+        }
+        storage.set(key, value);
+      },
       removeItem: (key: string) => { storage.delete(key); },
     },
   });
@@ -103,9 +111,9 @@ function installSessionStorage(t: TestContext) {
   return storage;
 }
 
-function makeLargeSessions() {
-  return Array.from({ length: 4 }, (_, index) => makeSession(
-    `large-${index}`, 4 - index,
+function makeLargeSessions(count = 4) {
+  return Array.from({ length: count }, (_, index) => makeSession(
+    `large-${index}`, count - index,
     Array.from({ length: 200 }, (_, messageIndex) => ({
       id: `message-${messageIndex}`,
       role: messageIndex % 2 ? 'assistant' : 'user',
@@ -206,18 +214,133 @@ test('the 50-session count cap still applies to primary plus overflow', (t) => {
   assert.deepEqual(loaded.map(session => session.id), sessions.slice(1).reverse().map(session => session.id));
 });
 
-test('cloud sync clears overflow only after its full authoritative write succeeds', (t) => {
+test('cloud sync restores overflow if its full authoritative write fails', (t) => {
   const storage = installSessionStorage(t);
   assert.equal(writeSessionsForStorage(makeLargeSessions()), true);
   const originalOverflow = storage.get(STORAGE_KEY_AI_SESSIONS_OVERFLOW);
   storage.set(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS, JSON.stringify({ enabled: true }));
+  const before = new Map(storage);
   const sessions = [makeSession('synced', 5, [])];
-  const write = t.mock.method(localStorageAdapter, 'writeString', () => false);
+  const writeString = localStorageAdapter.writeString;
+  const write = t.mock.method(localStorageAdapter, 'writeString', (key: string, value: string) => (
+    key === STORAGE_KEY_AI_SESSIONS ? false : writeString(key, value)
+  ));
   assert.equal(writeSessionsForStorage(sessions), false);
   assert.equal(storage.get(STORAGE_KEY_AI_SESSIONS_OVERFLOW), originalOverflow);
+  assert.deepEqual(storage, before);
+  const error = new Error('unexpected primary write failure');
+  write.mock.mockImplementation((key: string, value: string) => {
+    if (key === STORAGE_KEY_AI_SESSIONS) throw error;
+    return writeString(key, value);
+  });
+  assert.throws(() => writeSessionsForStorage(sessions), candidate => candidate === error);
+  assert.deepEqual(storage, before);
   write.mock.restore();
   assert.equal(writeSessionsForStorage(sessions), true);
   assert.equal([...storage.keys()].some(key => key.startsWith(STORAGE_KEY_AI_SESSIONS_OVERFLOW)), false);
+  assert.deepEqual(readSessionsFromStorage(), sessions);
+});
+
+test('enabling cloud sync frees overflow quota for the authoritative primary', (t) => {
+  const storage = installSessionStorage(t, 5 * 1024 * 1024);
+  const sessions = freezeHistory(makeLargeSessions());
+  assert.equal(writeSessionsForStorage(sessions), true);
+  assert.ok(storage.has(STORAGE_KEY_AI_SESSIONS_OVERFLOW));
+  storage.set(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS, JSON.stringify({ enabled: true }));
+  assert.equal(writeSessionsForStorage(sessions), true);
+  assert.equal([...storage.keys()].some(key => key.startsWith(STORAGE_KEY_AI_SESSIONS_OVERFLOW)), false);
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEY_AI_SESSIONS)!), sessions);
+  assert.deepEqual(readSessionsFromStorage(), sessions);
+});
+
+test('aggregate quota retries shed replay bulk from overflow and retain every chat', (t) => {
+  const storage = installSessionStorage(t, 5 * 1024 * 1024);
+  const sessions = freezeHistory(Array.from({ length: 6 }, (_, index) => makeSession(
+    `bulk-${index}`, 6 - index, [{
+      id: `message-${index}`,
+      role: 'assistant',
+      content: 'x'.repeat(700 * 1024),
+      timestamp: index,
+      toolResults: [{ toolCallId: `call-${index}`, content: 'z'.repeat(300 * 1024) }],
+      providerContinuation: {
+        reasoningParts: [{ text: '', providerOptions: { openai: {
+          reasoningEncryptedContent: 'c'.repeat(100 * 1024),
+        } } }],
+      },
+    }],
+  )));
+  assert.ok(JSON.stringify(sessions).length > 5 * 1024 * 1024);
+  const writes = t.mock.method(localStorageAdapter, 'writeString');
+  assert.equal(writeSessionsForStorage(sessions), true);
+  assert.ok(writes.mock.calls.some(call => call.result === false));
+  const primary = JSON.parse(storage.get(STORAGE_KEY_AI_SESSIONS)!) as AISession[];
+  assert.equal(primary[0].id, sessions[0].id);
+  const overflow = JSON.parse([...storage]
+    .filter(([key]) => key.startsWith(STORAGE_KEY_AI_SESSIONS_OVERFLOW))
+    .map(([, value]) => value).join('')) as AISession[];
+  assert.ok(overflow.length > 0);
+  assert.ok(overflow.every(session => {
+    const message = session.messages[0];
+    return (message.toolResults?.[0].content.length ?? 0) <= 8 * 1024
+      && !JSON.stringify(message.providerContinuation).includes('reasoningEncryptedContent');
+  }));
+  const loaded = readSessionsFromStorage();
+  assert.deepEqual(loaded.map(session => session.id), sessions.map(session => session.id));
+  assert.deepEqual(loaded.map(session => session.messages[0].content), sessions.map(session => session.messages[0].content));
+});
+
+test('aggregate quota falls back to a current primary with full backup and persists later turns', (t) => {
+  const storage = installSessionStorage(t, 5 * 1024 * 1024);
+  assert.equal(writeSessionsForStorage([makeSession('previous-primary', 0, [])]), true);
+  __resetBackupMirrorForTests();
+  const backupWrites: string[] = [];
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { netcatty: { aiSessionsBackupWrite: async ({ json }: { json: string }) => {
+      backupWrites.push(json);
+      return { ok: true };
+    } } },
+  });
+  t.after(() => Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow }));
+  const sessions = freezeHistory(makeLargeSessions(6));
+  assert.ok(JSON.stringify(sessions).length > 5 * 1024 * 1024);
+  const setItem = globalThis.localStorage.setItem;
+  t.mock.method(globalThis.localStorage, 'setItem', (key: string, value: string) => {
+    if (key === STORAGE_KEY_AI_SESSIONS) {
+      // The full intended history must be scheduled before replacing the old
+      // valid primary, including on the subsequent mutation of the same chat.
+      flushBackupMirror();
+      assert.equal((JSON.parse(backupWrites.at(-1)!) as AISession[]).length, 6);
+    }
+    setItem(key, value);
+  });
+  assert.equal(writeSessionsForStorage(sessions), true);
+  flushBackupMirror();
+  assert.deepEqual(JSON.parse(backupWrites.at(-1)!), sessions);
+  assert.deepEqual(readSessionsFromStorage(), [sessions[0]]);
+  assert.equal([...storage.keys()].some(key => key.startsWith(STORAGE_KEY_AI_SESSIONS_OVERFLOW)), false);
+
+  const updated = sessions.map((session, index) => index === 0 ? {
+    ...session,
+    updatedAt: session.updatedAt + 1,
+    messages: [...session.messages.slice(1), {
+      id: 'new-turn', role: 'user' as const, content: 'Latest turn survives reload', timestamp: 1000,
+    }],
+  } : session);
+  assert.equal(writeSessionsForStorage(updated), true);
+  flushBackupMirror();
+  assert.deepEqual(JSON.parse(backupWrites.at(-1)!), updated);
+  assert.deepEqual(JSON.parse(storage.get(STORAGE_KEY_AI_SESSIONS)!), [updated[0]]);
+  assert.deepEqual(readSessionsFromStorage(), [updated[0]]);
+});
+
+test('unchanged primary does not hide modified overflow from the write cache', (t) => {
+  const storage = installSessionStorage(t);
+  const sessions = freezeHistory(makeLargeSessions());
+  assert.equal(writeSessionsForStorage(sessions), true);
+  storage.set(STORAGE_KEY_AI_SESSIONS_OVERFLOW, 'corrupt overflow');
+  assert.equal(writeSessionsForStorage(sessions), true);
   assert.deepEqual(readSessionsFromStorage(), sessions);
 });
 
