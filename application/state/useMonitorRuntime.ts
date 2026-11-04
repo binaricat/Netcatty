@@ -13,6 +13,7 @@ import { useMonitorPanels } from "./monitorPanelsStorage";
 import {
   monitorActions,
   getMonitorHistoryCursor,
+  isIdleMonitorSnapshot,
   publishMonitorSnapshot,
   publishMonitorUnavailable,
 } from "./monitorRuntimeStore";
@@ -157,16 +158,24 @@ export function useMonitorRuntime() {
     isInitialized,
     retryVersion,
   ]);
+  // Poll every second while anything is monitored (here or in another window);
+  // otherwise only every 10 s to notice monitors started elsewhere. Starting a
+  // panel here publishes demand and reads a snapshot immediately, and flipping
+  // `hasRunningPanels` restarts this loop at the fast cadence.
+  const hasRunningPanels = running.size > 0;
   useEffect(() => {
     const bridge = netcattyBridge.get();
     let disposed = false;
     let pending = false;
+    let remoteRunning = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
       if (pending || !bridge?.monitorSnapshot) return;
       pending = true;
       try {
         const snapshot = await bridge.monitorSnapshot(getMonitorHistoryCursor());
         if (disposed) return;
+        remoteRunning = !isIdleMonitorSnapshot(snapshot);
         if (
           (epoch.current !== null && epoch.current !== snapshot.epoch) ||
           (runtimeId.current !== null &&
@@ -186,13 +195,16 @@ export function useMonitorRuntime() {
         pending = false;
       }
     };
-    void poll();
-    const timer = setInterval(() => {
-      void poll();
-    }, 1000);
+    const schedule = () => {
+      if (disposed) return;
+      timer = setTimeout(() => {
+        void poll().finally(schedule);
+      }, hasRunningPanels || remoteRunning ? 1000 : 10_000);
+    };
+    void poll().finally(schedule);
     return () => {
       disposed = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [hasRunningPanels]);
 }

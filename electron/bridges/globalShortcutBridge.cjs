@@ -1269,12 +1269,16 @@ function setTrayMenuData(data) {
   if (data.portForwardRules !== undefined) {
     trayMenuData.portForwardRules = data.portForwardRules;
   }
-  if (data.hosts !== undefined) {
+  const hostsChanged = data.hosts !== undefined;
+  if (hostsChanged) {
     trayMenuData.hosts = data.hosts;
   }
-  // Rebuild menu with new data
+  // Rebuild menu with new data. The Dock menu only lists hosts, and rebuilding
+  // it sorts every host and creates one native item per host, so skip it for
+  // the frequent session/port-forward-only updates (lock changes rebuild it
+  // separately).
   updateTrayMenu();
-  updateDockMenu();
+  if (hostsChanged) updateDockMenu();
   pushTrayMenuDataToPanel();
 }
 
