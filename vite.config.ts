@@ -65,6 +65,32 @@ const warnOnOutdatedOptimizeDep = (): Plugin => ({
   },
 });
 
+const VENDOR_CHUNK_PACKAGES: Array<[chunk: string, packages: string[]]> = [
+  ['vendor-radix', ['@radix-ui/']],
+  ['vendor-xterm', ['@xterm/']],
+  ['vendor-ai', ['ai', '@ai-sdk/', 'zod']],
+];
+
+/** Group node_modules packages into the vendor chunks; leave everything else to Rollup. */
+function resolveVendorChunk(id: string): string | undefined {
+  // Rollup also moves unassigned dependencies of manual-chunk modules into
+  // that chunk. Vite's dynamic-import preload helper is needed by the startup
+  // entry, so give it its own tiny chunk instead of letting it ride along
+  // with the (lazily used) AI SDK.
+  if (id.includes('vite/preload-helper')) return 'preload-helper';
+  const marker = '/node_modules/';
+  const index = id.lastIndexOf(marker);
+  if (index < 0) return undefined;
+  const packagePath = id.slice(index + marker.length);
+  for (const [chunk, packages] of VENDOR_CHUNK_PACKAGES) {
+    const matches = packages.some((name) => (name.endsWith('/')
+      ? packagePath.startsWith(name)
+      : packagePath === name || packagePath.startsWith(`${name}/`)));
+    if (matches) return chunk;
+  }
+  return undefined;
+}
+
 export default defineConfig(() => {
     return {
       base: "./",
@@ -93,35 +119,13 @@ export default defineConfig(() => {
         // Optimize chunk splitting for faster initial load
         rollupOptions: {
           output: {
-            manualChunks: {
-              // Vendor chunks - rarely change, can be cached aggressively
-              'vendor-radix': [
-                '@radix-ui/react-collapsible',
-                '@radix-ui/react-context-menu',
-                '@radix-ui/react-dialog',
-                '@radix-ui/react-popover',
-                '@radix-ui/react-scroll-area',
-                '@radix-ui/react-select',
-                '@radix-ui/react-tabs',
-              ],
-              'vendor-xterm': [
-                '@xterm/xterm',
-                '@xterm/addon-fit',
-                '@xterm/addon-image',
-                '@xterm/addon-ligatures',
-                '@xterm/addon-search',
-                '@xterm/addon-serialize',
-                '@xterm/addon-web-links',
-                '@xterm/addon-webgl',
-              ],
-              'vendor-ai': [
-                'ai',
-                '@ai-sdk/openai',
-                '@ai-sdk/anthropic',
-                '@ai-sdk/google',
-                'zod',
-              ],
-            },
+            // Vendor chunks - rarely change, can be cached aggressively.
+            // Function form on purpose: the object form also moves every
+            // dependency of the listed packages into the chunk, including
+            // Vite's shared preload helper (the AI SDK uses import()). The
+            // startup entry then imported that helper from vendor-ai and the
+            // whole AI SDK chunk was preloaded and evaluated on every launch.
+            manualChunks: resolveVendorChunk,
           },
         },
       },
