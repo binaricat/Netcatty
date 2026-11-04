@@ -103,6 +103,79 @@ test('startup and cross-window updates load overflow chats and mirror the merged
   }
 });
 
+for (const scopeType of ['global', 'terminal'] as const) {
+  test(`import retains disk-only chats in live history across rename and deletion (${scopeType})`, async () => {
+    const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+      url: 'http://localhost', storageQuota: 5 * 1024 * 1024,
+    });
+    const previousDOMException = globalThis.DOMException;
+    for (const name of ['window', 'document', 'localStorage', 'CustomEvent', 'Event', 'DOMException'] as const) {
+      Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? dom.window : dom.window[name] });
+    }
+    Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+    const source: AISession[] = Array.from({ length: 6 }, (_, index) => ({
+      id: `imported-${index}`, title: `Imported ${index}`, agentId: 'catty',
+      scope: scopeType === 'global' ? { type: 'global' } : { type: 'terminal', targetId: 'closed-terminal' },
+      createdAt: 1, updatedAt: 6 - index,
+      messages: [{ id: 'm', role: 'user', content: 'x'.repeat(Math.floor(1.1 * 1024 * 1024)), timestamp: 1 }],
+    }));
+    const ids = source.map(session => session.id);
+    const backups: string[] = [];
+    Object.assign(dom.window, { netcatty: {
+      aiSessionsBackupImport: async () => ({ success: true, json: JSON.stringify(source) }),
+      aiSessionsBackupWrite: async ({ json }: { json: string }) => { backups.push(json); return { ok: true }; },
+    } });
+    dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS, '[]');
+    setLatestAISessionsSnapshot([]);
+    setLatestAIActiveSessionMapSnapshot({});
+    __resetBackupMirrorForTests();
+    let ai!: ReturnType<typeof useAIState>;
+    let sessions: readonly AISession[] = [];
+    function Harness() {
+      ai = useAIState();
+      sessions = useAISessionsStore().sessions;
+      return null;
+    }
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => { root.render(React.createElement(Harness)); });
+      await act(async () => { ai.cleanupOrphanedSessions(new Set()); });
+      let importedCount = 0;
+      await act(async () => { importedCount = await ai.importSessionsBackup(); });
+      assert.equal(importedCount, source.length);
+      assert.deepEqual(sessions.map(session => session.id), ids);
+      assert.deepEqual(readSessionsFromStorage().map(session => session.id), [ids[0]]);
+      assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)!), ids.slice(1));
+      assert.equal(sessions.every(session => !!session.scopeDangling === (scopeType === 'terminal')), true);
+      flushBackupMirror();
+      assert.deepEqual(JSON.parse(backups.at(-1)!), sessions);
+
+      await act(async () => { ai.updateSessionTitle(ids[0], 'Renamed after import'); });
+      assert.deepEqual(sessions.map(session => session.id), ids);
+      assert.equal(sessions[0].title, 'Renamed after import');
+      assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)!), ids.slice(1));
+      flushBackupMirror();
+      assert.deepEqual(JSON.parse(backups.at(-1)!), sessions);
+
+      await act(async () => { ai.deleteSession(ids[5]); });
+      assert.deepEqual(sessions.map(session => session.id), ids.slice(0, 5));
+      assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)!), ids.slice(1, 5));
+      flushBackupMirror();
+      assert.deepEqual(JSON.parse(backups.at(-1)!), sessions);
+    } finally {
+      await act(async () => { root.unmount(); });
+      __resetBackupMirrorForTests();
+      setLatestAISessionsSnapshot([]);
+      setLatestAIActiveSessionMapSnapshot({});
+      container.remove();
+      dom.window.close();
+      Object.defineProperty(globalThis, 'DOMException', { configurable: true, value: previousDOMException });
+    }
+  });
+}
+
 test('startup recovers disk-only chats before mirroring a valid partial primary', async () => {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
     url: 'http://localhost', storageQuota: 5 * 1024 * 1024,

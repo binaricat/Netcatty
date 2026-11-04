@@ -1031,11 +1031,12 @@ export function useAIState() {
     const syncEnabled = !!localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled;
     const next = prepareRestoredSessions(mergeImportedSessions(sessionsRef.current, imported), syncEnabled);
     if (!writeSessionsForStorage(next)) return 0;
-    const persisted = readSessionsFromStorage();
+    // Local readback can omit disk-only overflow chats. Keep the complete
+    // prepared history live so cleanup and later writes retain those chats.
     const importedIds = new Set(imported.map(session => session.id));
-    sessionsRef.current = persisted;
-    setLatestAISessionsSnapshot(persisted);
-    setSessionsRaw(persisted);
+    sessionsRef.current = next;
+    setLatestAISessionsSnapshot(next);
+    setSessionsRaw(next);
     emitAIStateChanged(STORAGE_KEY_AI_SESSIONS);
     // Import does not change live terminals/workspaces, so the orphan-cleanup
     // effect will not run. Reuse the last known live target set (empty is
@@ -1044,7 +1045,7 @@ export function useAIState() {
     cleanupOrphanedAISessions(latestAIActiveTargetIdsSnapshot);
     const nextSessions =
       latestAISessionsSnapshot
-      ?? persisted;
+      ?? next;
     sessionsRef.current = nextSessions;
     setSessionsRaw(nextSessions);
     setActiveSessionIdMapRaw(
@@ -1052,7 +1053,7 @@ export function useAIState() {
         ?? localStorageAdapter.read<Record<string, string | null>>(STORAGE_KEY_AI_ACTIVE_SESSION_MAP)
         ?? {},
     );
-    return persisted.filter(session => importedIds.has(session.id)).length;
+    return nextSessions.filter(session => importedIds.has(session.id)).length;
   }, []);
 
   const updateSessionExternalSessionId = useCallback((sessionId: string, externalSessionId: string | undefined) => {
