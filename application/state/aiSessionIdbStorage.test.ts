@@ -4,6 +4,7 @@ import type { AISession } from '../../infrastructure/ai/types';
 import { installFakeIndexedDb } from './testSupport/fakeIndexedDb';
 import {
   AI_SESSIONS_META_LAST_WRITE_KEY,
+  AI_SESSIONS_META_MIGRATION_KEY,
   AI_SESSIONS_META_SCHEMA_VERSION_KEY,
   idbClearSessions,
   idbDeleteSessionIds,
@@ -175,6 +176,68 @@ test('loadOrMigrateAiSessions falls back to legacy localStorage when IndexedDB i
     assert.deepEqual(result.sessions, legacy);
   } finally {
     (globalThis as { indexedDB?: unknown }).indexedDB = previous;
+    resetAiSessionsIdbForTests();
+  }
+});
+
+// ── Issue #4125 review P1②: the migration is one-shot via a persisted marker ──
+
+test('a completed migration is one-shot: a chat deleted afterwards stays deleted on the next boot', async () => {
+  const idb = installFakeIndexedDb();
+  try {
+    const legacyRaw = JSON.stringify([makeSession('legacy-1', 2), makeSession('legacy-2', 1)]);
+    const first = await loadOrMigrateAiSessions(() => legacyRaw);
+    assert.equal(first.source, 'legacy-localstorage');
+    // The marker was persisted after the migration data became durable.
+    let db = await openAiSessionsIdb();
+    assert.ok(await idbGetMeta(db, AI_SESSIONS_META_MIGRATION_KEY));
+    // The user deletes a chat; the legacy key stays behind by design.
+    await idbDeleteSessionIds(db, ['legacy-1']);
+    // Next boot: the marker is present, so the legacy key is never
+    // re-migrated and the deletion is not resurrected.
+    const second = await loadOrMigrateAiSessions(() => legacyRaw);
+    assert.equal(second.source, 'indexeddb');
+    assert.deepEqual(second.sessions.map((s) => s.id), ['legacy-2']);
+    assert.equal((await openAiSessionsIdb()).objectStoreNames.contains('sessions'), true);
+    db = await openAiSessionsIdb();
+    assert.deepEqual((await idbGetAllSessions(db)).map((s) => s.id), ['legacy-2']);
+  } finally {
+    idb.restore();
+    resetAiSessionsIdbForTests();
+  }
+});
+
+test('an empty IndexedDB store with the migration marker ignores a populated legacy key', async () => {
+  const idb = installFakeIndexedDb();
+  try {
+    // First boot with nothing anywhere records the marker.
+    const first = await loadOrMigrateAiSessions(() => null);
+    assert.equal(first.source, 'none');
+    assert.ok(await idbGetMeta(await openAiSessionsIdb(), AI_SESSIONS_META_MIGRATION_KEY));
+    // The user deleted every chat, but the stale legacy key is still there.
+    const second = await loadOrMigrateAiSessions(
+      () => JSON.stringify([makeSession('resurrected', 1)]),
+    );
+    assert.equal(second.source, 'none');
+    assert.deepEqual(second.sessions, []);
+    assert.equal(idb.db.dumpStore('sessions').length, 0);
+  } finally {
+    idb.restore();
+    resetAiSessionsIdbForTests();
+  }
+});
+
+test('a pre-marker store that already holds sessions records the marker on boot', async () => {
+  const idb = installFakeIndexedDb();
+  try {
+    const db = await openAiSessionsIdb();
+    await idbPutSessions(db, [makeSession('already-here', 1)]);
+    const result = await loadOrMigrateAiSessions(() => JSON.stringify([makeSession('legacy', 2)]));
+    assert.equal(result.source, 'indexeddb');
+    assert.ok(await idbGetMeta(db, AI_SESSIONS_META_MIGRATION_KEY));
+    assert.equal(idb.db.dumpStore('sessions').length, 1);
+  } finally {
+    idb.restore();
     resetAiSessionsIdbForTests();
   }
 });

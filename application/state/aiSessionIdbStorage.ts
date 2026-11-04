@@ -29,6 +29,7 @@ export const AI_SESSIONS_IDB_META_STORE = 'meta';
 export const AI_SESSIONS_META_SCHEMA_VERSION_KEY = 'schemaVersion';
 export const AI_SESSIONS_META_LAST_WRITE_KEY = 'lastWriteAt';
 export const AI_SESSIONS_META_ACTIVE_MAP_KEY = 'activeSessionMap';
+export const AI_SESSIONS_META_MIGRATION_KEY = 'migrationCompleted';
 
 /** Cross-window change notification (replaces the localStorage `storage` event for sessions). */
 const AI_SESSIONS_IDB_CHANGE_CHANNEL = 'netcatty_ai_sessions_changed';
@@ -200,6 +201,14 @@ export interface AiSessionsBootLoadResult {
  *    release).
  * 3. If IndexedDB is corrupt/unavailable, fall back to legacy localStorage.
  *
+ * The migration is one-shot (issue #4125 review P1②): a `migrationCompleted`
+ * marker is persisted in the meta store after the first successful boot
+ * resolution. Once present, the legacy key is never consulted again —
+ * otherwise a boot whose migration ran while the legacy key could not be
+ * removed would re-migrate the stale legacy list and resurrect deleted
+ * chats. The marker also distinguishes "intentionally empty" (the user
+ * deleted every chat) from "uninitialized".
+ *
  * Callers decide what to do when both sources are empty (the #4018 backup
  * generations remain the last restore step in useAIState).
  */
@@ -226,26 +235,63 @@ export async function loadOrMigrateAiSessions(
     const legacy = parseLegacySessions(readLegacyRaw());
     return { sessions: legacy, source: legacy.length > 0 ? 'legacy-localstorage' : 'none', idbFailed: true };
   }
+  let marker: AiSessionsMigrationMarker | undefined;
+  try {
+    marker = await idbGetMeta<AiSessionsMigrationMarker>(db, AI_SESSIONS_META_MIGRATION_KEY);
+  } catch {
+    marker = undefined;
+  }
   if (sessions.length > 0) {
+    if (!marker) {
+      // First boot on a store that already holds sessions (e.g. migrated by
+      // a build without the marker): record one-shot completion so the
+      // legacy key can never re-seed the store.
+      await writeMigrationMarker(db).catch(() => {});
+    }
     return { sessions, source: 'indexeddb', idbFailed: false };
   }
-  // Empty IndexedDB + a populated legacy store → one-time migration. The
-  // legacy key is intentionally NOT removed: it stays as a read-only
-  // fallback for one release so a downgrade can still see history.
+  if (marker) {
+    // Migration already ran once: an empty store is authoritative (the user
+    // deleted every chat, or there was never anything to migrate). Never
+    // resurrect from the still-present legacy key.
+    return { sessions: [], source: 'none', idbFailed: false };
+  }
+  // Empty, un-migrated IndexedDB → one-time migration. The legacy key is
+  // intentionally NOT removed: it stays as a read-only fallback for one
+  // release.
   const legacy = parseLegacySessions(readLegacyRaw());
   if (legacy.length === 0) {
+    // Nothing to migrate: mark the store initialized so this state is
+    // distinguishable from "uninitialized" on the next boot.
+    await writeMigrationMarker(db).catch(() => {});
     return { sessions: [], source: 'none', idbFailed: false };
   }
   try {
     await idbPutSessions(db, legacy);
     await idbPutMeta(db, AI_SESSIONS_META_SCHEMA_VERSION_KEY, AI_SESSIONS_IDB_VERSION);
     await idbPutMeta(db, AI_SESSIONS_META_LAST_WRITE_KEY, Date.now());
+    // Written AFTER the migration data is durable: a crash before this point
+    // leaves the marker absent and the next boot safely re-migrates.
+    await writeMigrationMarker(db);
   } catch (error) {
     console.warn('[AIState] IndexedDB migration write failed; keeping legacy store authoritative:', error);
     return { sessions: legacy, source: 'legacy-localstorage', idbFailed: true };
   }
   console.info(`[AIState] Migrated ${legacy.length} AI session(s) from localStorage to IndexedDB.`);
   return { sessions: legacy, source: 'legacy-localstorage', idbFailed: false };
+}
+
+interface AiSessionsMigrationMarker {
+  migrationCompleted: true;
+  migrationAt: number;
+}
+
+async function writeMigrationMarker(db: IDBDatabase): Promise<void> {
+  await idbPutMeta<AiSessionsMigrationMarker>(
+    db,
+    AI_SESSIONS_META_MIGRATION_KEY,
+    { migrationCompleted: true, migrationAt: Date.now() },
+  );
 }
 
 function parseLegacySessions(raw: string | null | undefined): AISession[] {
