@@ -264,8 +264,13 @@ function promptTrackingView(session) {
 function matchesOsc133EmptyPrompt(session, view) {
   if (session._osc133PromptLine == null) return true;
   if (session._osc133PromptContinued) return false;
-  const { terminalCursorLine } = require("../terminalLogSanitizer.cjs");
-  return terminalCursorLine(view.tail, view) === session._osc133PromptLine;
+  const { terminalCursorState } = require("../terminalLogSanitizer.cjs");
+  const cursor = terminalCursorState(view.tail, view);
+  // BS-space-BS leaves a blank cell after the cursor. Compare the input cursor
+  // as well as visible text so erased padding can recover, but typed spaces
+  // (which advance the cursor) cannot qualify as empty input.
+  return cursor.column === session._osc133PromptColumn
+    && cursor.line.trimEnd() === session._osc133PromptLine.trimEnd();
 }
 
 function trackSessionIdlePrompt(session, chunk) {
@@ -291,11 +296,13 @@ function trackSessionIdlePrompt(session, chunk) {
       session._osc133PromptContinued = false;
     } else if (marker[1] === "B") {
       if (session.osc133Ready === true && session._osc133PromptStart >= 0) {
-        const { terminalCursorLine } = require("../terminalLogSanitizer.cjs");
-        session._osc133PromptLine = terminalCursorLine(
+        const { terminalCursorState } = require("../terminalLogSanitizer.cjs");
+        const cursor = terminalCursorState(
           combined.slice(session._osc133PromptStart, end),
           { alternateScreenActive: session._osc133PromptAltScreenAtStart === true },
         );
+        session._osc133PromptLine = cursor.line;
+        session._osc133PromptColumn = cursor.column;
         session._osc133PromptEnd = end;
       }
     } else {

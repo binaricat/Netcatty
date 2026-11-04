@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const { spawnSync } = require('node:child_process');
+const path = require('node:path');
 const { trackSessionIdlePrompt, getFreshIdlePrompt, getVisibleIdlePrompt, computeOsc133ReadyState } = require('./shellUtils.cjs');
 const { startPtyJob, resolveEffectiveShellKind } = require('./ptyExec.cjs');
 
@@ -115,6 +117,43 @@ test('OSC prompt recovery after erased input accepts only the original empty pro
   assert.equal(ready(session), '', 'continuation requires a new prompt cycle');
   trackSessionIdlePrompt(session, '\r\n' + A + 'custom λ ' + B);
   assert.equal(ready(session), 'custom λ ');
+});
+
+test('OSC empty input recovers from backspace-space-backspace padding without accepting typed spaces', async () => {
+  for (const prompt of ['review@local:~$ ', 'custom \u03bb ']) {
+    for (const erased of ['x\b \b', ' \b \b', 'xy\b \b\b \b']) {
+      const session = {};
+      trackSessionIdlePrompt(session, A + prompt + B);
+      trackSessionIdlePrompt(session, erased);
+      assert.equal(ready(session), prompt, JSON.stringify({ prompt, erased }));
+      const pty = new TestPty();
+      const result = await startPtyJob(pty, 'echo OK', {
+        shellKind: 'posix', getReadyPrompt: () => ready(session), promptWaitTimeoutMs: 5, timeoutMs: 200,
+      }).resultPromise;
+      assert.equal(result.ok, true);
+      assert.equal(pty.writes.length, 1);
+      trackSessionIdlePrompt(session, ' ');
+      assert.equal(ready(session), '', 'a new space advances the input cursor');
+    }
+  }
+});
+
+test('real Bash TERM=dumb deletion recovers readiness while pending spaces and quotes stay gated', (t) => {
+  if (process.platform === 'win32') return t.skip('requires a POSIX Bash PTY');
+  const probe = spawnSync('python3', ['-c', 'import pty']);
+  if (probe.error?.code === 'ENOENT') return t.skip('python3 is unavailable');
+  assert.equal(probe.status, 0, probe.stderr?.toString());
+  const result = spawnSync('python3', [path.resolve(__dirname, '../../../scripts/fixtures/osc133-erase-input.py')],
+    { encoding: 'utf8', timeout: 10_000 });
+  assert.equal(result.status, 0, result.stderr);
+  const chunks = JSON.parse(result.stdout);
+  assert.ok(chunks[2].includes('\b \b'), 'Bash must emit actual erase-padding bytes');
+  const session = {};
+  const expected = [true, false, true, false, true, false];
+  chunks.forEach((chunk, index) => {
+    trackSessionIdlePrompt(session, chunk);
+    assert.equal(Boolean(ready(session)), expected[index], `Bash stage ${index}: ${JSON.stringify(chunk)}`);
+  });
 });
 
 test('OSC repeats complete execution and prompt cycles without stale prompt state', async () => {

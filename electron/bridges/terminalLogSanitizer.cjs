@@ -521,6 +521,10 @@ function terminalDataToPlainText(terminalData) {
 }
 
 function terminalCursorLine(terminalData, options) {
+  return terminalCursorState(terminalData, options).line;
+}
+
+function terminalCursorState(terminalData, options) {
   // Prompt tracking keeps a rolling tail, so the alternate-screen entry may
   // already have scrolled off. Seed the mode that was active at the first
   // byte still in that tail; a fresh renderer would otherwise treat TUI paint
@@ -532,8 +536,8 @@ function terminalCursorLine(terminalData, options) {
   renderer.finish();
   // A full-screen program owns the display. The main buffer may still hold
   // the shell prompt from before the alternate screen was entered.
-  if (renderer.alternateScreenActive) return "";
-  return renderer.getCursorLine();
+  if (renderer.alternateScreenActive) return { line: "", column: 0 };
+  return { line: renderer.getCursorLine(), column: renderer.col };
 }
 
 // Alternate-screen transitions from TerminalTextRenderer, without a text
@@ -620,6 +624,7 @@ module.exports = {
   terminalDataToHtmlContent,
   terminalDataToPlainText,
   terminalCursorLine,
+  terminalCursorState,
   alternateScreenActiveAfter,
 };
 
