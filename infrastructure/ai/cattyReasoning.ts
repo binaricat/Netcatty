@@ -14,11 +14,38 @@ const GEMINI_25_THINKING_BUDGET: Record<'low' | 'medium' | 'high', number> = {
   high: 16_384,
 };
 
-const REASONING_RANK = ['off', 'minimal', 'low', 'medium', 'high'] as const;
+const REASONING_RANK = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 const LEVELS_LOW_MEDIUM_HIGH = ['low', 'medium', 'high'] as const;
 const LEVELS_LOW_HIGH = ['low', 'high'] as const;
 const LEVELS_MINIMAL_LOW_MEDIUM_HIGH = ['minimal', 'low', 'medium', 'high'] as const;
 const LEVELS_MINIMAL_HIGH = ['minimal', 'high'] as const;
+const LEVELS_LOW_MEDIUM_HIGH_MAX = ['low', 'medium', 'high', 'max'] as const;
+const LEVELS_LOW_MEDIUM_HIGH_XHIGH = ['low', 'medium', 'high', 'xhigh'] as const;
+const LEVELS_LOW_MEDIUM_HIGH_XHIGH_MAX = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+const LEVELS_OFF_LOW_MEDIUM_HIGH_MAX = ['off', 'low', 'medium', 'high', 'max'] as const;
+const LEVELS_OFF_LOW_MEDIUM_HIGH_XHIGH_MAX = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+const LEVELS_OFF_LOW_MEDIUM_HIGH_XHIGH = ['off', 'low', 'medium', 'high', 'xhigh'] as const;
+
+/**
+ * Levels the provider-level default may take. Shared with the settings form so
+ * the select and the save guard never drift apart.
+ *
+ * `xhigh` and `max` are real wire values, not UI sugar: DeepSeek V4 grades
+ * `reasoning_effort` continuously up to `max`, Anthropic maps
+ * `output_config.effort` (4.6 reaches `max`, 4.7+/5+ also `xhigh`), and OpenAI
+ * documents `xhigh` for the Codex Max line. A model whose vocabulary stops
+ * earlier clamps these down to its own ceiling instead of emitting a value the
+ * provider would reject.
+ */
+export const PROVIDER_REASONING_EFFORT_OPTIONS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+export function isProviderReasoningEffort(value: string | null | undefined): boolean {
+  return typeof value === 'string'
+    && (PROVIDER_REASONING_EFFORT_OPTIONS as readonly string[]).includes(value);
+}
+
+/** Highest level every reasoning-capable vendor understands. */
+const HIGHEST_UNIVERSAL_EFFORT = 'high';
 
 export type CattyReasoningProviderOptions = Record<string, Record<string, unknown>>;
 
@@ -121,7 +148,7 @@ export function buildCattyReasoningProviderOptions(
 
   if (style === 'openai') {
     if (modelId && openaiModelKnownUnsupportedReasoning(modelId)) return undefined;
-    const explicitDefault = ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '');
+    const explicitDefault = isProviderReasoningEffort(provider.advancedParams?.reasoningEffort);
     const unrecognizedModel = !!modelId && !openaiModelLikelySupportsReasoning(modelId);
     if (unrecognizedModel && !(provider.providerId === 'custom' && explicitDefault)) return undefined;
     if (resolved === 'off') {
@@ -130,7 +157,12 @@ export function buildCattyReasoningProviderOptions(
       }
       return undefined;
     }
-    return { openai: { reasoningEffort: resolved, ...(explicitDefault && resolveOpenAIApi(provider) === 'responses' ? { forceReasoning: true } : {}) } };
+    return {
+      openai: {
+        reasoningEffort: resolved,
+        ...(explicitDefault && resolveOpenAIApi(provider) === 'responses' ? { forceReasoning: true } : {}),
+      },
+    };
   }
 
   if (style === 'anthropic') {
@@ -141,12 +173,19 @@ export function buildCattyReasoningProviderOptions(
       }
       return undefined;
     }
-    if (resolved !== 'low' && resolved !== 'medium' && resolved !== 'high') return undefined;
-    if (modelId && anthropicUsesAdaptiveThinking(modelId)) {
+    // Claude 4.6+ maps `output_config.effort` directly and accepts up to `max`
+    // (4.7+/5+ also `xhigh`). Older models only have the fixed token budgets, so
+    // a level above `high` must clamp to `high` rather than drop the setting.
+    const adaptiveThinking = !!modelId && anthropicUsesAdaptiveThinking(modelId);
+    const anthropicEffort = adaptiveThinking
+      ? resolveAnthropicAdaptiveEffort(modelId!, resolved)
+      : clampToUniversalEffort(resolved);
+    if (!anthropicEffort) return undefined;
+    if (adaptiveThinking) {
       return {
         anthropic: {
           thinking: { type: 'adaptive' },
-          effort: resolved,
+          effort: anthropicEffort,
         },
       };
     }
@@ -154,7 +193,7 @@ export function buildCattyReasoningProviderOptions(
       anthropic: {
         thinking: {
           type: 'enabled',
-          budgetTokens: ANTHROPIC_THINKING_BUDGET[resolved],
+          budgetTokens: ANTHROPIC_THINKING_BUDGET[anthropicEffort as keyof typeof ANTHROPIC_THINKING_BUDGET],
         },
       },
     };
@@ -162,15 +201,19 @@ export function buildCattyReasoningProviderOptions(
 
   if (style === 'google') {
     if (!modelId || !googleModelLikelySupportsThinking(modelId)) return undefined;
+    // Gemini 3 `thinkingLevel` stops at `high`, and Gemini 2.5 only has numeric
+    // budgets, so anything above `high` has to clamp instead of being sent raw.
+    const googleResolved = clampToUniversalEffort(resolved);
+    if (!googleResolved) return undefined;
     if (isGemini3Model(modelId)) {
-      if (resolved !== 'minimal' && resolved !== 'low' && resolved !== 'medium' && resolved !== 'high') {
+      if (googleResolved !== 'minimal' && googleResolved !== 'low' && googleResolved !== 'medium' && googleResolved !== 'high') {
         return undefined;
       }
       return {
         google: {
           thinkingConfig: {
-            thinkingLevel: resolved,
-            includeThoughts: resolved !== 'minimal',
+            thinkingLevel: googleResolved,
+            includeThoughts: googleResolved !== 'minimal',
           },
         },
       };
@@ -186,17 +229,46 @@ export function buildCattyReasoningProviderOptions(
         },
       };
     }
-    if (resolved !== 'low' && resolved !== 'medium' && resolved !== 'high') return undefined;
+    if (googleResolved !== 'low' && googleResolved !== 'medium' && googleResolved !== 'high') return undefined;
     return {
       google: {
         thinkingConfig: {
-          thinkingBudget: GEMINI_25_THINKING_BUDGET[resolved],
+          thinkingBudget: GEMINI_25_THINKING_BUDGET[googleResolved],
           includeThoughts: true,
         },
       },
     };
   }
   return undefined;
+}
+
+/**
+ * Collapse `xhigh` / `max` onto `high` for providers whose vocabulary stops
+ * there. Dropping the setting entirely would silently ignore an explicit user
+ * choice, so the maximum supported depth is used instead.
+ */
+function clampToUniversalEffort(level: string): string | undefined {
+  if (level === 'xhigh' || level === 'max') return HIGHEST_UNIVERSAL_EFFORT;
+  return level;
+}
+
+/**
+ * Claude `output_config.effort` vocabulary per adaptive-thinking generation.
+ * 4.6 exposes `max`; 4.7 and later (including 5.x) also expose `xhigh`.
+ */
+function resolveAnthropicAdaptiveEffort(modelId: string, level: string): string | undefined {
+  if (level !== 'xhigh' && level !== 'max') {
+    return level === 'minimal' ? 'low' : level;
+  }
+  return anthropicSupportsExtraHighEffort(modelId) ? level : 'max';
+}
+
+/** Claude 4.7+ / 5+ list `xhigh`; 4.6 stops at `max`. */
+function anthropicSupportsExtraHighEffort(modelId: string): boolean {
+  const parsed = parseClaudeModel(modelId);
+  if (!parsed) return false;
+  if (parsed.major >= 5) return true;
+  return parsed.major === 4 && parsed.minor >= 7;
 }
 
 /** Extended thinking is Claude 3.7+ / 4+ / 5+; original Claude 3 Haiku/Sonnet reject it. */
@@ -231,6 +303,28 @@ export function openaiModelSupportsMinimalReasoning(modelId: string): boolean {
   return /gpt-5/.test(id);
 }
 
+/**
+ * Models whose `reasoning_effort` is a continuous dial rather than an OpenAI
+ * tier list. DeepSeek V4 documents `low | high | max` natively and maps
+ * everything in between, so the full graded scale is meaningful there.
+ */
+export function openaiModelSupportsGradedReasoningEffort(modelId: string): boolean {
+  const id = modelId.trim().toLowerCase();
+  if (!id) return false;
+  return /deepseek-(?:v?4|v4\.1)/.test(id);
+}
+
+/**
+ * Explicitly supported OpenAI `xhigh` families. GPT-5.5 accepts xhigh (not
+ * max); keep older families and unverified variants at their existing ceiling.
+ */
+export function openaiModelSupportsExtraHighReasoning(modelId: string): boolean {
+  const id = modelId.trim().toLowerCase();
+  if (!id || openaiModelIsChatSnapshot(id)) return false;
+  return /gpt-5(?:\.\d+)?-codex-max/.test(id)
+    || /(?:^|\/)gpt-5\.5(?:-\d{4}-\d{2}-\d{2})?$/.test(id);
+}
+
 /** OpenAI-compat models that accept `reasoning_effort` (o-series, GPT-5, reasoners). */
 export function openaiModelLikelySupportsReasoning(modelId: string): boolean {
   const id = modelId.trim().toLowerCase();
@@ -242,6 +336,7 @@ export function openaiModelLikelySupportsReasoning(modelId: string): boolean {
     || /gpt-oss/.test(id)
     || /reasoner|reasoning/.test(id)
     || /deepseek-r1/.test(id)
+    || openaiModelSupportsGradedReasoningEffort(id)
     || /grok-4/.test(id)
   );
 }
@@ -255,8 +350,7 @@ export function cattyReasoningLevelsForSelection(
   const style = resolveProviderStyle(provider);
   if (style === 'anthropic') {
     if (!modelId || !anthropicModelLikelySupportsThinking(modelId)) return [];
-    if (!anthropicAllowsDisabledThinking(modelId)) return LEVELS_LOW_MEDIUM_HIGH;
-    return CATTY_REASONING_LEVELS;
+    return anthropicAdvertisedLevels(modelId);
   }
   if (style === 'google') {
     if (!modelId || !googleModelLikelySupportsThinking(modelId)) return [];
@@ -267,15 +361,45 @@ export function cattyReasoningLevelsForSelection(
   if (style === 'openai') {
     if (!modelId || openaiModelKnownUnsupportedReasoning(modelId)) return [];
     if (!openaiModelLikelySupportsReasoning(modelId)) {
-      return provider.providerId === 'custom' && ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '')
-        ? LEVELS_LOW_MEDIUM_HIGH
+      // A custom provider with an explicit default is the escape hatch for
+      // relay aliases we cannot classify. Advertising only the legacy three
+      // levels would let resolveVisibleCattyThinkingLevel downgrade a
+      // configured `xhigh`/`max` to `high`, so the user's own assertion about
+      // the alias becomes the capability signal instead.
+      return provider.providerId === 'custom' && isProviderReasoningEffort(provider.advancedParams?.reasoningEffort)
+        ? LEVELS_LOW_MEDIUM_HIGH_XHIGH_MAX
         : [];
+    }
+    // DeepSeek grades `reasoning_effort` continuously and `none` is not part of
+    // that scale, so the chip starts at `low` and ends at `max`.
+    if (openaiModelSupportsGradedReasoningEffort(modelId)) return LEVELS_LOW_MEDIUM_HIGH_XHIGH_MAX;
+    if (openaiModelSupportsExtraHighReasoning(modelId)) {
+      return openaiModelSupportsNoneReasoning(modelId)
+        ? LEVELS_OFF_LOW_MEDIUM_HIGH_XHIGH
+        : LEVELS_LOW_MEDIUM_HIGH_XHIGH;
     }
     if (openaiModelSupportsNoneReasoning(modelId)) return CATTY_REASONING_LEVELS;
     if (openaiModelSupportsMinimalReasoning(modelId)) return LEVELS_MINIMAL_LOW_MEDIUM_HIGH;
     return LEVELS_LOW_MEDIUM_HIGH;
   }
   return [];
+}
+
+/**
+ * Anthropic advertises `off` plus the effort tiers the model documents.
+ * Adaptive thinking (4.6+) adds `max`; 4.7+/5+ also add `xhigh`. Always-on
+ * families (Fable/Mythos 5) cannot switch thinking off at all.
+ */
+function anthropicAdvertisedLevels(modelId: string): readonly string[] {
+  const allowsDisabled = anthropicAllowsDisabledThinking(modelId);
+  if (!anthropicUsesAdaptiveThinking(modelId)) {
+    return allowsDisabled ? CATTY_REASONING_LEVELS : LEVELS_LOW_MEDIUM_HIGH;
+  }
+  const supportsExtraHigh = anthropicSupportsExtraHighEffort(modelId);
+  if (!allowsDisabled) {
+    return supportsExtraHigh ? LEVELS_LOW_MEDIUM_HIGH_XHIGH_MAX : LEVELS_LOW_MEDIUM_HIGH_MAX;
+  }
+  return supportsExtraHigh ? LEVELS_OFF_LOW_MEDIUM_HIGH_XHIGH_MAX : LEVELS_OFF_LOW_MEDIUM_HIGH_MAX;
 }
 
 /**

@@ -90,6 +90,7 @@ export const esAiMessages: Messages = {
   'ai.providers.advancedParams.hint': 'Déjalo en blanco para usar los valores predeterminados del proveedor.',
   'ai.providers.advancedParams.maxTokens.placeholder': 'p. ej. 4096',
   'ai.providers.advancedParams.default': 'Predeterminado del proveedor',
+  'ai.providers.advancedParams.reasoningEffort.help': 'xhigh y max solo se envían cuando el modelo elegido los admite; de lo contrario se ajustan al nivel más profundo compatible.',
   'ai.providers.headers': 'Cabeceras HTTP personalizadas',
   'ai.providers.headers.help': 'Cabeceras opcionales para este proveedor. Los valores se ocultan y se cifran al guardarlos.',
   'ai.providers.headers.name': 'Nombre de la cabecera',

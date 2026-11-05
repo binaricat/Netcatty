@@ -99,6 +99,7 @@ export const zhCNAiMessages: Messages = {
   'ai.providers.advancedParams.hint': '留空则使用提供商默认值。',
   'ai.providers.advancedParams.maxTokens.placeholder': '例如 4096',
   'ai.providers.advancedParams.default': '提供商默认',
+  'ai.providers.advancedParams.reasoningEffort.help': '仅当所选模型支持时才会发送 xhigh 和 max，否则自动收敛到该模型支持的最高档位。',
 
   // AI Codex
   'ai.codex': 'Codex',
