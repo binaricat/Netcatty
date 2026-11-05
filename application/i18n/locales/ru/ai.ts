@@ -599,6 +599,10 @@ export const ruAiMessages: Messages = {
   'ai.chatShortcuts.title': 'Быстрые действия чата',
   'ai.chatShortcuts.selectionAction': 'Показывать «Добавить в чат» при выделении в терминале',
   'ai.chatShortcuts.selectionAction.description': 'Показывать небольшую кнопку AI рядом с выделенным текстом терминала.',
+  'ai.chatHistory.title': 'История чата',
+  'ai.chatHistory.messageCap': 'Сообщений, сохраняемых в чате',
+  'ai.chatHistory.messageCap.description': 'Максимальное число сообщений, хранимых для одного чата (50–2000). При уменьшении самые старые сообщения удаляются из хранилища при следующей записи. Большие значения увеличивают объём хранилища и синхронизации с облаком.',
+  'ai.chatHistory.messageCap.unit': 'сообщений',
 
   // AI Error
   'ai.codex.bridgeError': 'Обработчики главного процесса Codex ещё не загружены. Полностью перезапустите Netcatty или dev-процесс Electron и попробуйте снова.',

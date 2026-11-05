@@ -66,10 +66,12 @@ test('parseBackupSessions ignores corrupt payloads and drops malformed entries',
 });
 
 test('restore preserves all sessions when cloud sync is enabled', () => {
-  const sessions = Array.from({ length: 51 }, (_, index) => makeSession(`s${index}`, index));
+  // Issue #4123: the retention cap is a session count (raised to 1000) —
+  // there is no byte budget any more.
+  const sessions = Array.from({ length: 1001 }, (_, index) => makeSession(`s${index}`, index));
   assert.deepEqual(prepareRestoredSessions(sessions, true), sessions);
   const local = prepareRestoredSessions(sessions, false);
-  assert.equal(local.length, 50);
+  assert.equal(local.length, 1000);
   assert.equal(local.some(session => session.id === 's0'), false);
 });
 

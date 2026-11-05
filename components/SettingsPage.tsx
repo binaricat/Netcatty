@@ -247,6 +247,8 @@ const SettingsAITabContainer: React.FC = () => {
                 setResponseIdleTimeout={aiState.setResponseIdleTimeout}
                 maxIterations={aiState.maxIterations}
                 setMaxIterations={aiState.setMaxIterations}
+                aiSessionMessageCap={aiState.aiSessionMessageCap}
+                setAiSessionMessageCap={aiState.setAiSessionMessageCap}
                 webSearchConfig={aiState.webSearchConfig}
                 setWebSearchConfig={aiState.setWebSearchConfig}
                 quickMessages={aiState.quickMessages}

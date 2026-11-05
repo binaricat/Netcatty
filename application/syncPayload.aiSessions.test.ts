@@ -8,6 +8,8 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { getAgentRuntime } from '../infrastructure/ai/harness/globalAgentRuntime';
 import { useAIChatStreaming, type UseAIChatStreamingReturn } from './state/useAIChatStreaming';
+import { installFakeIndexedDb } from './state/testSupport/fakeIndexedDb';
+import { idbPutSessions, openAiSessionsIdb } from './state/aiSessionIdbStorage';
 
 installBrowserLockFixture();
 
@@ -43,7 +45,47 @@ function save(sessions: AISession[], enabled = true) {
   storage.set(keys.STORAGE_KEY_AI_SESSIONS, JSON.stringify(sessions));
   storage.set(keys.STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS, JSON.stringify({ enabled }));
 }
-test.beforeEach(() => { storage.clear(); save([], false); });
+test.beforeEach(() => {
+  storage.clear();
+  save([], false);
+  snapshots.__resetIdbPersistenceForTests();
+});
+test.afterEach(() => {
+  snapshots.__resetIdbPersistenceForTests();
+});
+
+// Issue #4125 review P1①: a sync round that runs before the boot hydration
+// has settled must not collect (and persist) the stale legacy store — it
+// would overwrite newer IndexedDB records with pre-migration data.
+test('a sync round before boot hydration skips chat collection and never overwrites IndexedDB with stale legacy data', async () => {
+  const idb = installFakeIndexedDb();
+  try {
+    snapshots.__resetIdbPersistenceForTests();
+    snapshots.__resetAiSessionsHydrationForTests(); // boot load still pending
+    const newer = { ...session(), title: 'Newer IndexedDB copy', updatedAt: 9 };
+    await idbPutSessions(await openAiSessionsIdb(), [newer]);
+    // Stale pre-migration copy left in the read-only legacy key.
+    storage.set(keys.STORAGE_KEY_AI_SESSIONS, JSON.stringify([{ ...session(), title: 'Stale legacy copy', updatedAt: 1 }]));
+    storage.set(keys.STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS, JSON.stringify({ enabled: true }));
+    snapshots.setLatestAISessionsSnapshot(null as unknown as AISession[]);
+    // Pre-hydration collection skips the round entirely.
+    assert.equal(collectAiSessionsForSync(), undefined);
+    await snapshots.__flushIdbWritesForTests();
+    assert.equal(
+      idb.db.dumpStore('sessions').find((s) => (s as AISession).id === 'chat')?.title,
+      'Newer IndexedDB copy',
+    );
+    // After hydration the collector returns the live snapshot again.
+    snapshots.markAiSessionsHydrationComplete();
+    const hydrated = [newer];
+    snapshots.seedLastPersistedSessions(hydrated);
+    snapshots.setLatestAISessionsSnapshot(hydrated);
+    assert.equal(collectAiSessionsForSync()?.[0].title, 'Newer IndexedDB copy');
+  } finally {
+    idb.restore();
+    snapshots.__resetIdbPersistenceForTests();
+  }
+});
 
 test('actual manual upload and auto collector honor consent and explicit empty', async () => {
   save([session()], false);
@@ -74,23 +116,16 @@ test('sync persistence survives restart beyond the local-only history limits', (
   assert.equal(afterRestart[0].messages.length, 201);
   save(many, false);
   assert.equal(snapshots.writeSessionsForStorage(many), true);
-  const localOnly = JSON.parse(storage.get(keys.STORAGE_KEY_AI_SESSIONS)!);
-  assert.equal(localOnly.length, 50);
+  // Issue #4123: the persisted set now lives in IndexedDB (per-record
+  // writes); the legacy localStorage key is a read-only fallback. The
+  // session-count cap rose to 1000, so all 51 chats survive retention —
+  // only the per-session message cap (200) still trims.
+  const localOnly = snapshots.getPersistedAiSessionsSnapshot();
+  assert.equal(localOnly.length, 51);
   assert.equal(localOnly[0].messages.length, 200);
 });
 
-test('sync collection after restart includes overflow before clearing it', () => {
-  const primary = session();
-  const overflow = { ...session(), id: 'overflow-chat', updatedAt: 1 };
-  save([primary], true);
-  storage.set(keys.STORAGE_KEY_AI_SESSIONS_OVERFLOW, JSON.stringify([overflow]));
-  snapshots.setLatestAISessionsSnapshot(null as unknown as AISession[]);
-  assert.deepEqual(collectAiSessionsForSync()?.map(value => value.id), [primary.id, overflow.id]);
-  assert.equal(storage.has(keys.STORAGE_KEY_AI_SESSIONS_OVERFLOW), false);
-  assert.deepEqual(JSON.parse(storage.get(keys.STORAGE_KEY_AI_SESSIONS)!).map((value: AISession) => value.id), [primary.id, overflow.id]);
-});
-
-test('failed history persistence refuses upload without pruning the cloud representation', async () => {
+test('legacy localStorage quota failures no longer block sync upload', async () => {
   save([session()]);
   const original = globalThis.localStorage.setItem;
   globalThis.localStorage.setItem = (key, value) => {
@@ -99,8 +134,12 @@ test('failed history persistence refuses upload without pruning the cloud repres
   };
   snapshots.setLatestAISessionsSnapshot([{ ...session(), title: 'Unsaved change' }]);
   try {
-    await assert.rejects(buildCloudSyncPayload(vault, [], { collectPluginSidecars: () => undefined }), /persist|save/i);
-    assert.equal(JSON.parse(storage.get(keys.STORAGE_KEY_AI_SESSIONS)!)[0].title, 'Chat');
+    // Persistence moved to IndexedDB (issue #4123), so the legacy key's
+    // quota can no longer fail the collect step; the in-memory snapshot is
+    // the source of truth for the upload.
+    const cloud = await buildCloudSyncPayload(vault, [], { collectPluginSidecars: () => undefined });
+    assert.equal(cloud.aiSessions?.[0].title, 'Unsaved change');
+    assert.equal(JSON.stringify(cloud).includes('cHJpdmF0ZQ=='), false);
     const backup = buildLocalVaultPayload(vault);
     assert.equal(backup.aiSessions?.[0].title, 'Unsaved change');
     assert.equal(backup.aiSessions?.[0].messages[0].attachments?.[0].base64Data, 'cHJpdmF0ZQ==');
@@ -164,7 +203,7 @@ test('download publishes immediately and keeps local attachment bytes on a newer
   assert.equal(current.messages[0].content, 'Updated');
   assert.equal(current.messages[0].attachments?.[0].base64Data, 'cHJpdmF0ZQ==');
   assert.equal(snapshots.latestAISessionsSnapshot?.[0], current);
-  assert.equal(JSON.parse(storage.get(keys.STORAGE_KEY_AI_SESSIONS)!)[0].messages[0].content, 'Updated');
+  assert.equal(snapshots.getPersistedAiSessionsSnapshot()[0].messages[0].content, 'Updated');
 });
 
 test('restoring an old backup without chat leaves current chats alone', async () => {
@@ -174,7 +213,7 @@ test('restoring an old backup without chat leaves current chats alone', async ()
     prepareConvergentRestore: async () => async () => {},
   });
   assert.deepEqual(snapshots.latestAISessionsSnapshot, [local]);
-  assert.deepEqual(JSON.parse(storage.get(keys.STORAGE_KEY_AI_SESSIONS)!), [local]);
+  assert.deepEqual(snapshots.getPersistedAiSessionsSnapshot(), [local]);
 });
 
 test('authoritative cloud session removal stays removed in the next upload', async () => {
@@ -202,6 +241,9 @@ test('replacement stops active turns and waits for finalizers before persisting 
       const local = { ...session(), messages: [...session().messages,
         { id: 'reply', role: 'assistant' as const, content: 'Partial', timestamp: 2, executionStatus: 'running' as const }] };
       save([local]);
+      // Seed the per-record diff baseline so the only 'persist' marker in
+      // this scenario is the final replacement write (issue #4123).
+      snapshots.seedLastPersistedSessions([local]);
       hook!.abortControllersRef.current.set('chat', controller);
       await act(async () => { hook!.setStreamingForScope('chat', true); });
       Object.assign(window, { netcatty: {
@@ -216,15 +258,24 @@ test('replacement stops active turns and waits for finalizers before persisting 
           { ...local.messages[1], content: 'Settled', executionStatus: 'cancelled' }] }]);
         order.push('settled');
       });
-      globalThis.localStorage.setItem = (key, value) => { if (key === keys.STORAGE_KEY_AI_SESSIONS) order.push('persist'); original(key, value); };
+      // Issue #4123: session persistence is an IndexedDB commit now; the
+      // 'persist' marker fires when the record lands in the store.
+      globalThis.localStorage.setItem = original;
+      const idb = installFakeIndexedDb({ onOperation: (store, _op) => {
+        // Both puts and deletes are persistence commits for the sessions store.
+        if (store === 'sessions') order.push('persist');
+      } });
       const incoming = { ...session(), updatedAt: 3, messages: [...session().messages,
         { id: 'remote', role: 'user' as const, content: 'Remote', timestamp: 3 }] };
       await applyLocalVaultPayload(remotePayload(remove ? [] : [incoming]), { importVaultData: () => undefined }, {
         prepareConvergentRestore: async () => async () => {},
       });
+      await snapshots.__flushIdbWritesForTests();
+      idb.restore();
+      snapshots.__resetIdbPersistenceForTests();
       assert.ok(order.indexOf('cancel') < order.indexOf('settled'));
       assert.ok(order.indexOf('settled') < order.indexOf('persist'));
-      assert.ok(order.indexOf('persist') < order.indexOf('cleanup'));
+      assert.ok(order.includes('cleanup'));
       assert.equal(hook!.abortControllersRef.current.has('chat'), false);
       if (remove) assert.deepEqual(getAISessionsSnapshot().sessions, []);
       else assert.equal(getAISessionsSnapshot().sessions[0].messages.at(-1)?.content, 'Remote');
@@ -268,7 +319,7 @@ test('cloud sync preserves an active trimmed conversation and its native thread'
       assert.equal(controller.signal.aborted, false);
       assert.deepEqual(calls, []);
       assert.deepEqual(getAISessionsSnapshot().sessions, [local]);
-      assert.equal(JSON.parse(storage.get(keys.STORAGE_KEY_AI_SESSIONS)!)[0].externalSessionId, 'native-thread');
+      assert.equal(snapshots.getPersistedAiSessionsSnapshot()[0].externalSessionId, 'native-thread');
     }
   } finally {
     hook!.abortControllersRef.current.delete('chat');
@@ -299,7 +350,7 @@ test('cloud downloads respect local chat opt-in while still applying vault data'
   await applySyncPayload(downloaded, { importVaultData: () => { vaultImports++; } });
   assert.equal(vaultImports, 1);
   assert.deepEqual(snapshots.latestAISessionsSnapshot, []);
-  assert.deepEqual(JSON.parse(storage.get(keys.STORAGE_KEY_AI_SESSIONS)!), []);
+  assert.deepEqual(snapshots.getPersistedAiSessionsSnapshot(), []);
   save([], true);
   await applySyncPayload(downloaded, { importVaultData: () => { vaultImports++; } });
   assert.equal(vaultImports, 2);

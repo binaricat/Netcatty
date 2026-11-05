@@ -660,6 +660,10 @@ export const zhCNAiMessages: Messages = {
   'ai.chatShortcuts.title': '聊天快捷入口',
   'ai.chatShortcuts.selectionAction': '选中终端内容时显示“添加到对话”',
   'ai.chatShortcuts.selectionAction.description': '在终端里选中文本后显示 AI 快捷按钮。',
+  'ai.chatHistory.title': '聊天历史',
+  'ai.chatHistory.messageCap': '每个会话保留的消息数',
+  'ai.chatHistory.messageCap.description': '每个会话最多存储的消息条数（50–2000）。调低后会在下一次写入时从存储中丢弃最旧的消息。数值越大，存储占用和云同步体积也越大。',
+  'ai.chatHistory.messageCap.unit': '条消息',
 
   // AI Error
   'ai.codex.bridgeError': 'Codex 主进程处理器尚未加载。请完全重启 Netcatty 或重启 Electron 开发进程，然后重试。',

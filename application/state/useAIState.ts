@@ -66,18 +66,23 @@ import {
   bumpDraftUploadGeneration,
   cleanupDeletedAIChatSessions,
   cleanupOrphanedAISessions,
-  latestAIActiveTargetIdsSnapshot,
-  getAIBridge,
   flushBackupMirror,
+  getAIBridge,
   getDraftUploadGeneration,
+  getPersistedAiSessionsSnapshot,
+  isAiSessionsHydrationComplete,
   latestAIActiveSessionMapSnapshot,
+  latestAIActiveTargetIdsSnapshot,
   latestAIDraftsByScopeSnapshot,
   latestAIPanelViewByScopeSnapshot,
   latestAISessionsSnapshot,
+  markAiSessionsHydrationComplete,
   prepareRestoredSessions,
-  readSessionsFromStorage,
-  scheduleBackupMirror,
+  readAiSessionMessageCap,
   rebindActiveSessionMap,
+  scheduleBackupMirror,
+  seedLastPersistedSessions,
+  setAiSessionsBackupRecoveryPending,
   writeSessionsForStorage,
   setLatestAIActiveSessionMapSnapshot,
   setLatestAIDraftsByScopeSnapshot,
@@ -87,10 +92,24 @@ import {
   type PanelViewByScope,
 } from './aiStateSnapshots';
 import {
+  AI_SESSIONS_IDB_VERSION,
+  AI_SESSIONS_META_LAST_WRITE_KEY,
+  AI_SESSIONS_META_SCHEMA_VERSION_KEY,
+  idbGetAllSessions,
+  idbPutMeta,
+  idbPutSessions,
+  loadOrMigrateAiSessions,
+  mirrorActiveSessionMapToIdb,
+  openAiSessionsIdb,
+  publishAiSessionsIdbChange,
+  readActiveSessionMapFromIdb,
+  subscribeAiSessionsIdbChange,
+} from './aiSessionIdbStorage';
+import {
   isMissingOrCorruptSessionsStore,
-  parseSessionsStore,
   mergeImportedSessions,
   parseBackupSessions,
+  readLiveSessionsArray,
 } from './aiSessionsBackup';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
 import {
@@ -181,53 +200,165 @@ export function useAIState() {
   );
 
   // ── Sessions ──
-  const [sessions, setSessionsRaw] = useState<AISession[]>(() =>
-    latestAISessionsSnapshot
-      ?? readSessionsFromStorage()
-  );
+  // Memory-only initial state: the primary store is IndexedDB and loads
+  // asynchronously in the boot effect below (issue #4123). The legacy
+  // localStorage key is read-only fallback and must not pre-seed stale data.
+  const [sessions, setSessionsRaw] = useState<AISession[]>(() => latestAISessionsSnapshot ?? []);
+  // Issue #4125 review P2②: flips true when the boot load settles. The
+  // active-pointer validation effect waits for it — the initially-empty
+  // in-memory session array must never null the persisted pointers.
+  const [sessionsHydrated, setSessionsHydrated] = useState(() => isAiSessionsHydrationComplete());
   // An explicit empty array is authoritative, even if the backup is stale.
-  // Disk-only overflow IDs also permit recovery, without reviving deleted chats.
+  // Only a missing or corrupt store can be restored from disk.
   useEffect(() => {
     window.addEventListener('beforeunload', flushBackupMirror);
     return () => window.removeEventListener('beforeunload', flushBackupMirror);
   }, []);
   useEffect(() => {
-    const liveRaw = localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS);
-    const liveStore = parseSessionsStore(liveRaw);
-    const liveSessions = readSessionsFromStorage();
-    const diskOnlyRecovery = (localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)?.length ?? 0) > 0;
-    if (!diskOnlyRecovery && (liveStore.valid || liveSessions.length > 0)) {
-      if (liveSessions.length > 0) scheduleBackupMirror(JSON.stringify(liveSessions));
-      return;
-    }
-    if (!diskOnlyRecovery && latestAISessionsSnapshot && latestAISessionsSnapshot.length > 0) return;
-    const bridge = getAIBridge();
-    if (!bridge?.aiSessionsBackupReadLatest) return;
     let cancelled = false;
-    const canRestore = () => diskOnlyRecovery
-      ? (localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW)?.length ?? 0) > 0
-      : isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS))
-        && readSessionsFromStorage().length === 0
-        && (latestAISessionsSnapshot?.length ?? 0) === 0
-        && sessionsRef.current.length === 0;
+    let cleanupAfterHydration = false;
     void (async () => {
       try {
-        if (!canRestore()) return;
+        // 1. IndexedDB (primary) → one-time legacy localStorage migration.
+        const diskOnlyIds = new Set(localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) ?? []);
+        setAiSessionsBackupRecoveryPending(diskOnlyIds.size > 0);
+        const boot = await loadOrMigrateAiSessions(
+          async () => {
+            // Legacy retention split history between the primary key, JSON
+            // chunks, and explicitly marked disk-only records. Resolve all
+            // slices before the one-shot migration records completion.
+            const chunks: string[] = [];
+            for (let index = 0; ; index += 1) {
+              const key = index === 0 ? STORAGE_KEY_AI_SESSIONS_OVERFLOW : `${STORAGE_KEY_AI_SESSIONS_OVERFLOW}_${index + 1}`;
+              const chunk = localStorageAdapter.readString(key);
+              if (chunk == null) break;
+              chunks.push(chunk);
+            }
+            let legacy = mergeImportedSessions(
+              readLiveSessionsArray(chunks.join('')),
+              readLiveSessionsArray(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS)),
+            );
+            if (diskOnlyIds.size > 0) {
+              try {
+                const backup = await getAIBridge()?.aiSessionsBackupReadLatest?.();
+                if (backup?.ok) {
+                  legacy = mergeImportedSessions(
+                    (parseBackupSessions(backup.json) ?? []).filter(session => diskOnlyIds.has(session.id)),
+                    legacy,
+                  );
+                }
+              } catch (error) {
+                console.warn('[AIState] Disk-only session recovery failed; migration will retry on the next boot:', error);
+              }
+            }
+            return JSON.stringify(legacy);
+          },
+          [...diskOnlyIds],
+        );
+        setAiSessionsBackupRecoveryPending(boot.migrationPending);
+        if (cancelled) return;
+        if (boot.idbFailed && boot.sessions.length > 0) {
+          // Issue #4125 review P2①: the legacy set is not in IndexedDB yet.
+          // Persist it best-effort (one re-open retry) BEFORE seeding the
+          // diff baseline; if the store is still unreachable, leave the
+          // baseline unset so the next edit performs a full write instead of
+          // a diff that would drop the un-persisted sessions after IndexedDB
+          // recovers.
+          try {
+            const db = await openAiSessionsIdb();
+            if (!cancelled) {
+              await idbPutSessions(db, boot.sessions);
+              await idbPutMeta(db, AI_SESSIONS_META_SCHEMA_VERSION_KEY, AI_SESSIONS_IDB_VERSION);
+              await idbPutMeta(db, AI_SESSIONS_META_LAST_WRITE_KEY, Date.now());
+              publishAiSessionsIdbChange();
+              seedLastPersistedSessions(boot.sessions);
+            }
+          } catch (error) {
+            console.warn(
+              '[AIState] Could not persist the legacy sessions after an IndexedDB failure;'
+              + ' the diff baseline stays unset so the next edit rewrites every record:',
+              error,
+            );
+          }
+        } else {
+          seedLastPersistedSessions(boot.sessions);
+        }
+
+        // Restore the mirrored active-pointer map when the localStorage key
+        // is missing (fresh profile restored from IndexedDB).
+        if (localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_SESSION_MAP) == null) {
+          const mirrored = await readActiveSessionMapFromIdb();
+          if (cancelled) return;
+          if (mirrored && Object.keys(mirrored).length > 0) {
+            localStorageAdapter.write(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, mirrored);
+            setLatestAIActiveSessionMapSnapshot(mirrored);
+            setActiveSessionIdMapRaw(mirrored);
+          }
+        }
+
+        const bootSessions = boot.sessions;
+        if (bootSessions.length > 0) {
+          const live = latestAISessionsSnapshot ?? sessionsRef.current;
+          if (live.length > 0) {
+            // Sessions were created before the async load finished: merge
+            // (live records win by id) instead of clobbering either side.
+            const byId = new Map(bootSessions.map(session => [session.id, session]));
+            for (const session of live) byId.set(session.id, session);
+            const merged = Array.from(byId.values())
+              .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+            setLatestAISessionsSnapshot(merged);
+            sessionsRef.current = merged;
+            setSessionsRaw(merged);
+            writeSessionsForStorage(merged);
+            return;
+          }
+          setLatestAISessionsSnapshot(bootSessions);
+          sessionsRef.current = bootSessions;
+          setSessionsRaw(bootSessions);
+          scheduleBackupMirror(JSON.stringify(bootSessions));
+          cleanupAfterHydration = true;
+          return;
+        }
+
+        // A previously initialized empty IDB is a committed deletion. An
+        // incomplete migration must retry only its marked disk-only records.
+        if (boot.authoritativeEmpty || boot.migrationPending) return;
+
+        // 2. Uninitialized store (and no legacy data to migrate): the #4018 disk
+        // backup remains the last restore step. Only when the legacy store
+        // is also missing or corrupt — a valid empty legacy array is an
+        // intentional wipe and stays authoritative.
+        if (!isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS))) {
+          return;
+        }
+        const bridge = getAIBridge();
+        if (!bridge?.aiSessionsBackupReadLatest) return;
         const backup = await bridge.aiSessionsBackupReadLatest?.();
         if (cancelled || !backup?.ok) return;
-        // Re-check after the async gap so live mutations and deletions win.
-        if (!canRestore()) return;
-        const backupSessions = parseBackupSessions(backup.json);
-        if (!backupSessions) return;
-        const diskOnlyIds = new Set(localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) ?? []);
-        const recovered = diskOnlyRecovery
-          ? mergeImportedSessions(
-            backupSessions.filter(session => diskOnlyIds.has(session.id)),
-            latestAISessionsSnapshot ?? readSessionsFromStorage(),
-          )
-          : backupSessions;
+        // Re-check after the async gap: a session may have been created
+        // while the backup was being read; never restore over live state.
+        // Cover persisted storage and in-memory snapshot/React state —
+        // createSession updates the snapshot before the debounced disk write.
+        if ((latestAISessionsSnapshot?.length ?? 0) > 0) return;
+        if (sessionsRef.current.length > 0) return;
+        // Issue #4125 review P2③: one open retry already happened inside
+        // the boot load. If the store is still unopenable, do not let the
+        // recheck rejection reach the outer catch — the disk backup below
+        // is the recovery source.
+        try {
+          if ((await idbGetAllSessions()).length > 0) return;
+        } catch (error) {
+          console.warn(
+            '[AIState] IndexedDB recheck failed during the disk-backup restore;'
+            + ' applying the newest backup generation as the recovery source:',
+            error,
+          );
+        }
+        if (!isMissingOrCorruptSessionsStore(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS))) {
+          return;
+        }
         const syncEnabled = !!localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled;
-        const restored = prepareRestoredSessions(recovered, syncEnabled);
+        const restored = prepareRestoredSessions(parseBackupSessions(backup.json) ?? [], syncEnabled);
         if (restored.length === 0) return;
         // Apply restore synchronously (not inside a setState updater). A
         // deferred updater would leave didRestore false and skip dangling
@@ -235,11 +366,7 @@ export function useAIState() {
         setLatestAISessionsSnapshot(restored);
         writeSessionsForStorage(restored);
         emitAIStateChanged(STORAGE_KEY_AI_SESSIONS);
-        // Restore does not change live terminals/workspaces, so the orphan-
-        // cleanup effect will not run. Reuse the last known live target set
-        // (empty is valid: nothing live) so chats bound to missing scopes
-        // become dangling and /chats can offer /rebind.
-        cleanupOrphanedAISessions(latestAIActiveTargetIdsSnapshot);
+        cleanupAfterHydration = true;
         const nextSessions = latestAISessionsSnapshot ?? restored;
         sessionsRef.current = nextSessions;
         setSessionsRaw(nextSessions);
@@ -249,10 +376,25 @@ export function useAIState() {
             ?? {},
         );
         console.info(
-          `[AIState] Restored ${restored.length} AI session(s) from the disk backup.`,
+          `[AIState] Restored ${nextSessions.length} AI session(s) from the disk backup.`,
         );
-      } catch {
-        // Backup restore must never break startup.
+      } catch (error) {
+        // Boot load must never break startup — but it must not vanish
+        // silently either (issue #4125 review P2③).
+        console.warn('[AIState] AI session boot load failed:', error);
+      } finally {
+        markAiSessionsHydrationComplete();
+        if (!cancelled) {
+          // Maintenance may have mounted before hydration with unchanged live
+          // targets. Replay it now against the authoritative boot history.
+          if (cleanupAfterHydration) {
+            cleanupOrphanedAISessions(latestAIActiveTargetIdsSnapshot);
+            const nextSessions = latestAISessionsSnapshot ?? sessionsRef.current;
+            sessionsRef.current = nextSessions;
+            setSessionsRaw(nextSessions);
+          }
+          setSessionsHydrated(true);
+        }
       }
     })();
     return () => {
@@ -321,6 +463,9 @@ export function useAIState() {
 
   useEffect(() => {
     setLatestAIActiveSessionMapSnapshot(activeSessionIdMap);
+    // Issue #4123: mirror the active-pointer map into the IndexedDB meta
+    // store (localStorage stays written at the mutation sites as before).
+    void mirrorActiveSessionMapToIdb(activeSessionIdMap);
   }, [activeSessionIdMap]);
 
   useEffect(() => {
@@ -332,12 +477,12 @@ export function useAIState() {
   }, [panelViewByScope]);
 
   useEffect(() => {
+    // Issue #4125 review P2②: before boot hydration settles, `sessions` is
+    // the initially-empty in-memory array; validating pointers against it
+    // would null every pointer and break workspace restore. No pointer
+    // writes before hydration completes.
+    if (!sessionsHydrated) return;
     const validSessionIds = new Set<string>(sessions.map((session) => session.id));
-    // Disk-only chats may not have arrived from the startup backup read yet.
-    // Keep their active pointers and panel views until recovery or deletion.
-    for (const id of localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) ?? []) {
-      validSessionIds.add(id);
-    }
     let changed = false;
     const nextActiveSessionIdMap: Record<string, string | null> = {};
 
@@ -365,7 +510,7 @@ export function useAIState() {
       emitAIStateChanged(AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE);
       return next;
     });
-  }, [sessions, activeSessionIdMap]);
+  }, [sessions, activeSessionIdMap, sessionsHydrated]);
 
   const setActiveSessionId = useCallback((scopeKey: string, id: string | null) => {
     let nextActiveSessionIdMap: Record<string, string | null> | null = null;
@@ -557,8 +702,7 @@ export function useAIState() {
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       try {
-        const key = e.key === STORAGE_KEY_AI_SESSIONS_OVERFLOW || e.key?.startsWith(`${STORAGE_KEY_AI_SESSIONS_OVERFLOW}_`)
-          ? STORAGE_KEY_AI_SESSIONS : e.key;
+        const key = e.key;
         switch (key) {
           case STORAGE_KEY_AI_PROVIDERS: {
             const parsed = localStorageAdapter.read<ProviderConfig[]>(STORAGE_KEY_AI_PROVIDERS);
@@ -651,7 +795,10 @@ export function useAIState() {
             break;
           }
           case STORAGE_KEY_AI_SESSIONS: {
-            const nextSessions = readSessionsFromStorage();
+            // Session writes no longer land in localStorage (issue #4123);
+            // the cross-window signal is the IndexedDB change channel and the
+            // storage event only fires as a legacy fallback.
+            const nextSessions = getPersistedAiSessionsSnapshot();
             setLatestAISessionsSnapshot(nextSessions);
             setSessionsRaw(nextSessions);
             break;
@@ -693,7 +840,7 @@ export function useAIState() {
         case STORAGE_KEY_AI_SESSIONS:
           setSessionsRaw(
             latestAISessionsSnapshot
-              ?? readSessionsFromStorage(),
+              ?? getPersistedAiSessionsSnapshot(),
           );
           return;
         case STORAGE_KEY_AI_ACTIVE_SESSION_MAP:
@@ -719,6 +866,37 @@ export function useAIState() {
       window.removeEventListener(AI_STATE_CHANGED_EVENT, handleLocalStateChanged);
     };
   }, []);
+
+  // Cross-window AI session sync: session writes land in IndexedDB now, so
+  // the localStorage `storage` event no longer fires for them. Other windows
+  // announce their writes on a BroadcastChannel; the receiver reloads the
+  // store from IndexedDB.
+  useEffect(() => subscribeAiSessionsIdbChange(() => {
+    void (async () => {
+      try {
+        const next = await idbGetAllSessions();
+        if (next.length === 0) {
+          if (!isAiSessionsHydrationComplete()) return;
+          // Issue #4125 review P2④: after hydration an empty store is an
+          // intentional cross-window deletion — adopt it instead of keeping
+          // the deleted session alive locally (its next edit would
+          // resurrect it). The pointer-validation effect clears the
+          // now-stale pointers. Only the pre-hydration window keeps the
+          // early-return: the boot load owns the store view until it
+          // settles.
+          setLatestAISessionsSnapshot([]);
+          seedLastPersistedSessions([]);
+          setSessionsRaw([]);
+          return;
+        }
+        setLatestAISessionsSnapshot(next);
+        seedLastPersistedSessions(next);
+        setSessionsRaw(next);
+      } catch {
+        // Cross-window refresh is best-effort.
+      }
+    })();
+  }), []);
 
   // ── Sync initial safety settings to MCP Server on mount ──
   useEffect(() => {
@@ -1031,8 +1209,6 @@ export function useAIState() {
     const syncEnabled = !!localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled;
     const next = prepareRestoredSessions(mergeImportedSessions(sessionsRef.current, imported), syncEnabled);
     if (!writeSessionsForStorage(next)) return 0;
-    // Local readback can omit disk-only overflow chats. Keep the complete
-    // prepared history live so cleanup and later writes retain those chats.
     const importedIds = new Set(imported.map(session => session.id));
     sessionsRef.current = next;
     setLatestAISessionsSnapshot(next);
@@ -1069,22 +1245,27 @@ export function useAIState() {
     });
   }, [debouncedPersistSessions]);
 
-  // Local-only retention. Synced history must match the full-history storage policy.
-  const MAX_MESSAGES_PER_SESSION = 500;
+  // Local-only retention. Synced history must match the full-history storage
+  // policy. The in-memory bound follows the user-configurable per-session cap
+  // (see aiStateSnapshots.readAiSessionMessageCap) but never below this floor,
+  // so the default behavior is unchanged and RAM stays bounded when the user
+  // lowers the persisted cap.
+  const MIN_IN_MEMORY_MESSAGES_PER_SESSION = 500;
 
   const addMessageToSession = useCallback((sessionId: string, message: ChatMessage) => {
     const syncEnabled = localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled === true;
+    const inMemoryCap = Math.max(readAiSessionMessageCap(), MIN_IN_MEMORY_MESSAGES_PER_SESSION);
     setSessionsRaw(prev => {
       const next = prev.map(s => {
         if (s.id !== sessionId) return s;
         let msgs = [...s.messages, message];
         // Dropping synced prefixes makes the next cloud merge add them back.
-        if (!syncEnabled && msgs.length > MAX_MESSAGES_PER_SESSION) {
+        if (!syncEnabled && msgs.length > inMemoryCap) {
           const systemMsgs = msgs.filter(m => m.role === 'system');
           const nonSystemMsgs = msgs.filter(m => m.role !== 'system');
-          const dropped = nonSystemMsgs.length - (MAX_MESSAGES_PER_SESSION - systemMsgs.length);
-          console.warn(`[useAIState] Session ${sessionId}: trimmed ${dropped} oldest non-system message(s) to stay within ${MAX_MESSAGES_PER_SESSION} limit`);
-          msgs = [...systemMsgs, ...nonSystemMsgs.slice(-MAX_MESSAGES_PER_SESSION + systemMsgs.length)];
+          const dropped = nonSystemMsgs.length - (inMemoryCap - systemMsgs.length);
+          console.warn(`[useAIState] Session ${sessionId}: trimmed ${dropped} oldest non-system message(s) to stay within ${inMemoryCap} limit`);
+          msgs = [...systemMsgs, ...nonSystemMsgs.slice(-inMemoryCap + systemMsgs.length)];
         }
         return { ...s, messages: msgs, updatedAt: Date.now() };
       });
@@ -1322,10 +1503,11 @@ export function useAIState() {
 
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
     cleanupOrphanedAISessions(activeTargetIds);
+    if (!isAiSessionsHydrationComplete()) return;
 
     const nextSessions =
       latestAISessionsSnapshot
-      ?? readSessionsFromStorage();
+      ?? getPersistedAiSessionsSnapshot();
     sessionsRef.current = nextSessions;
     setSessionsRaw(nextSessions);
     setActiveSessionIdMapRaw(
@@ -1377,7 +1559,7 @@ export function useAIState() {
       ?? {};
     const currentSessions =
       latestAISessionsSnapshot
-      ?? readSessionsFromStorage();
+      ?? getPersistedAiSessionsSnapshot();
     const currentPanelViewByScope = latestAIPanelViewByScopeSnapshot ?? {};
     const result = handoffDissolvedWorkspaceAIScope({
       activeSessionIdMap: currentMap,
@@ -1422,7 +1604,7 @@ export function useAIState() {
       ?? {};
     const currentSessions =
       latestAISessionsSnapshot
-      ?? readSessionsFromStorage();
+      ?? getPersistedAiSessionsSnapshot();
     const result = retargetWorkspaceActiveChatAfterMemberLoss({
       activeSessionIdMap: currentMap,
       sessions: currentSessions,
