@@ -1,5 +1,6 @@
 import type { ModelMessage } from 'ai';
 import type { ChatMessage, AIPermissionMode } from '../types';
+import { sliceHead } from '../textBoundaries';
 import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   DEFAULT_PROTECT_RECENT_MESSAGES,
@@ -331,7 +332,7 @@ export function extractLatestUserGoal(messages: ModelMessage[] | ChatMessage[]):
     const content = typeof message.content === 'string'
       ? message.content.trim()
       : '';
-    if (content && !content.startsWith('[Netcatty session context')) return content.slice(0, 500);
+    if (content && !content.startsWith('[Netcatty session context')) return sliceHead(content, 500);
   }
   return undefined;
 }
