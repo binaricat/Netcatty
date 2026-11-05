@@ -224,11 +224,109 @@ function looksLikeIdleAutoLogout(outputTail) {
   return false;
 }
 
+// ── OSC 133 (shell-integration) readiness ──
+//
+// A starts a prompt; B ends its rendering and starts command input; C starts
+// execution/output; D finishes execution. A alone does not prove empty input.
+// Keep lifecycle state beyond rolling-tail eviction, and accept custom prompts
+// only while the B-marked cursor line is unchanged and no continuation arrived.
+// A-only integrations retain the existing whitelist checks.
+const OSC133_MARKER_PATTERN = /\u001B\]133;([ABCD])(?:;([^\u0007\u001B]*))?(?:\u0007|\u001B\\)/g;
+
+function isOsc133PrimaryPrompt(marker) {
+  // Kitty's k=s marks PS2, which is unfinished command input, not a fresh PS1.
+  return marker[1] === "A" && !marker[2]?.split(";").includes("k=s");
+}
+
+function computeOsc133ReadyState(tail) {
+  if (typeof tail !== "string" || !tail) return null;
+  let ready = null;
+  for (const marker of tail.matchAll(OSC133_MARKER_PATTERN)) {
+    if (marker[1] !== "B") ready = isOsc133PrimaryPrompt(marker);
+  }
+  return ready;
+}
+
+function promptTrackingView(session) {
+  const tail = session?._promptTrackTail;
+  if (typeof tail !== "string" || !tail) return { tail: "", alternateScreenActive: false };
+  if (session.osc133Ready === true) {
+    const start = session._osc133PromptStart;
+    return {
+      // Never revive text from before A, or a prompt whose start was evicted.
+      tail: typeof start === "number" && start >= 0 ? tail.slice(start) : "",
+      alternateScreenActive: session._osc133PromptAltScreenAtStart === true,
+    };
+  }
+  return { tail, alternateScreenActive: session._promptTrackAltScreenAtTailStart === true };
+}
+
+function matchesOsc133EmptyPrompt(session, view) {
+  if (session._osc133PromptRedrawPending) return false;
+  if (session._osc133PromptLine == null) return true;
+  if (session._osc133PromptContinued) return false;
+  const { terminalCursorState } = require("../terminalLogSanitizer.cjs");
+  const cursor = terminalCursorState(view.tail, view);
+  // Readline deletion and vi replacement can emit identical BS-space-BS
+  // bytes. Preserve every displayed blank; output cannot certify its removal.
+  return cursor.column === session._osc133PromptColumn
+    && cursor.line === session._osc133PromptLine;
+}
+
 function trackSessionIdlePrompt(session, chunk) {
   if (!session || typeof chunk !== "string" || !chunk) return "";
 
   const previousTail = session._promptTrackTail || "";
   const combined = `${previousTail}${chunk}`;
+  session.osc133Ready ??= null;
+  for (const marker of combined.matchAll(OSC133_MARKER_PATTERN)) {
+    const end = marker.index + marker[0].length;
+    // Replaying old markers would erase pending-input state on every chunk.
+    // A marker split across chunks is consumed when its terminator arrives.
+    if (end <= previousTail.length) continue;
+    if (isOsc133PrimaryPrompt(marker)) {
+      const { alternateScreenActiveAfter } = require("../terminalLogSanitizer.cjs");
+      const beforeMarker = combined.slice(0, marker.index);
+      const priorSession = { ...session, _promptTrackTail: beforeMarker };
+      // A/B also occur during redraw, including multiline PS1 and packets
+      // ending before pending input is re-echoed. Neither A nor a newline
+      // proves cancellation. Keep uncertain input gated until C/D establishes
+      // a new command lifecycle; a redraw cannot clear this latch.
+      session._osc133PromptRedrawPending ||= session.osc133Ready === true
+        && session._osc133PromptLine != null
+        && !matchesOsc133EmptyPrompt(priorSession, promptTrackingView(priorSession));
+      session.osc133Ready = true;
+      session._osc133PromptStart = end;
+      session._osc133PromptAltScreenAtStart = alternateScreenActiveAfter(
+        combined.slice(0, end), session._promptTrackAltScreenAtTailStart === true,
+      );
+      session._osc133PromptLine = null;
+      session._osc133PromptEnd = -1;
+      session._osc133PromptContinued = false;
+    } else if (marker[1] === "B") {
+      if (session.osc133Ready === true && session._osc133PromptStart >= 0) {
+        const { terminalCursorState } = require("../terminalLogSanitizer.cjs");
+        const cursor = terminalCursorState(
+          combined.slice(session._osc133PromptStart, end),
+          { alternateScreenActive: session._osc133PromptAltScreenAtStart === true },
+        );
+        session._osc133PromptLine = cursor.line;
+        session._osc133PromptColumn = cursor.column;
+        session._osc133PromptEnd = end;
+      }
+    } else {
+      // Secondary prompts continue input; only C/D establish a new lifecycle.
+      session._osc133PromptRedrawPending = marker[1] === "A";
+      session.osc133Ready = false;
+      session._osc133PromptLine = null;
+      session._osc133PromptStart = -1;
+      session._osc133PromptEnd = -1;
+    }
+  }
+  if (session._osc133PromptLine != null) {
+    const inputStart = Math.max(previousTail.length, session._osc133PromptEnd);
+    if (combined.slice(inputStart).includes("\n")) session._osc133PromptContinued = true;
+  }
   const overflow = combined.length - MAX_PROMPT_TRACK_TAIL;
   if (overflow > 0) {
     // The kept tail no longer starts where the previous tail started. Replay
@@ -239,11 +337,14 @@ function trackSessionIdlePrompt(session, chunk) {
       combined.slice(0, overflow),
       session._promptTrackAltScreenAtTailStart === true,
     );
+    for (const key of ["_osc133PromptStart", "_osc133PromptEnd"]) {
+      if (typeof session[key] === "number") session[key] = Math.max(-1, session[key] - overflow);
+    }
   }
   const nextTail = overflow > 0 ? combined.slice(overflow) : combined;
   session._promptTrackTail = nextTail;
 
-  const prompt = extractTrailingIdlePrompt(nextTail);
+  const prompt = extractTrailingIdlePrompt(promptTrackingView(session).tail);
   if (prompt) {
     session.lastIdlePrompt = prompt;
     session.lastIdlePromptAt = Date.now();
@@ -269,11 +370,18 @@ function trackSessionIdlePrompt(session, chunk) {
 // back to `shellKind` alone.
 function getFreshIdlePrompt(session) {
   if (!session) return "";
+
+  // C/D gate text-shaped output. A never bypasses cache freshness or input
+  // checks: an earlier prompt remains marked A while a user edits a command.
+  if (session.osc133Ready === false) return "";
+
   const cached = session.lastIdlePrompt;
   if (!cached) return "";
 
-  const tail = session._promptTrackTail;
+  const view = promptTrackingView(session);
+  const tail = view.tail;
   if (typeof tail !== "string" || !tail) return "";
+  if (!matchesOsc133EmptyPrompt(session, view)) return "";
 
   const normalizedTail = stripAnsi(tail).replace(/\r/g, "\n");
   const normalizedCached = stripAnsi(cached).replace(/\r/g, "\n");
@@ -289,15 +397,23 @@ function getFreshIdlePrompt(session) {
 // screen is still an idle default prompt (#3927). Collapse those cursor and
 // erase operations, then accept only the line the cursor is actually on.
 function getVisibleIdlePrompt(session) {
-  const tail = session?._promptTrackTail;
+  const view = promptTrackingView(session);
+  const tail = view.tail;
   if (typeof tail !== "string" || !tail) return "";
 
+  // Mirror getFreshIdlePrompt: C/D gate output, B confirms an empty input line.
+  if (session.osc133Ready === false) return "";
+  if (!matchesOsc133EmptyPrompt(session, view)) return "";
+
   const { terminalCursorLine } = require("../terminalLogSanitizer.cjs");
-  const cursorLine = terminalCursorLine(tail, {
-    alternateScreenActive: session._promptTrackAltScreenAtTailStart === true,
-  });
+  const cursorLine = terminalCursorLine(tail, view);
   const rightTrimmed = cursorLine.replace(/\s+$/, "");
   if (!rightTrimmed) return "";
+  if (session.osc133Ready === true && session._osc133PromptLine != null) {
+    // A complete B gives the custom prompt boundary; its unchanged cursor line
+    // and lack of continuation are checked above before bypassing shape checks.
+    return /\s$/.test(cursorLine) ? `${rightTrimmed} ` : rightTrimmed;
+  }
   if (
     !isDefaultPowerShellPromptLine(rightTrimmed)
     && !isDefaultPosixPromptLine(rightTrimmed)
@@ -1251,6 +1367,7 @@ module.exports = {
   extractTrailingIdlePrompt,
   getFreshIdlePrompt,
   getVisibleIdlePrompt,
+  computeOsc133ReadyState,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,

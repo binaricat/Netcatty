@@ -25,6 +25,7 @@ const {
   readWindowsRegistryPath,
   createWindowsLivePathResolver,
   trackSessionIdlePrompt,
+  computeOsc133ReadyState,
 } = require("./shellUtils.cjs");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -1377,4 +1378,99 @@ test("a failed machine hive does not promote user directories ahead of inherited
   assert.equal(await resolve({
     platform: "win32", basePath: "C:\\Windows\\System32", env: {}, knownCliDirs: () => [],
   }), "C:\\Windows\\System32;C:\\user-tools");
+});
+
+// ── OSC 133 shell-integration readiness ──
+
+test("computeOsc133ReadyState derives readiness from the last marker in the raw tail", () => {
+  assert.equal(computeOsc133ReadyState(""), null);
+  assert.equal(computeOsc133ReadyState("plain output with no markers"), null);
+  // BEL terminator, A last → ready.
+  assert.equal(computeOsc133ReadyState("\x1b]133;A\x07user@host ~ % "), true);
+  // ST terminator on D; full cycle A→B→C→D ends not-at-prompt.
+  assert.equal(
+    computeOsc133ReadyState("\x1b]133;A\x07\x1b]133;B\x07ls\x07\x1b]133;C\x07files\x1b]133;D\x1b\\"),
+    false,
+  );
+  // Parameterized D form (e.g. `133;D;0`) still matches the marker prefix.
+  assert.equal(computeOsc133ReadyState("\x1b]133;A\x07\x1b]133;D;0\x07"), false);
+  // Output start (C) after the last prompt start means a command is running.
+  assert.equal(computeOsc133ReadyState("\x1b]133;A\x07\x1b]133;C\x07build output..."), false);
+  // A fresh prompt start after a finished command is ready again.
+  assert.equal(computeOsc133ReadyState("\x1b]133;D\x07\x1b]133;A\x07~ ❯ "), true);
+});
+
+test("trackSessionIdlePrompt stores OSC 133 state alongside the whitelist prompt", () => {
+  // No markers → null (non-integrated shell, whitelist fallback unchanged).
+  const plain = {};
+  trackSessionIdlePrompt(plain, "Last login...\r\nuser@host ~ % ");
+  assert.equal(plain.osc133Ready, null);
+  assert.equal(getFreshIdlePrompt(plain), "user@host ~ % ");
+});
+
+test("OSC 133 keeps whitelisted prompts and readies custom prompts after B", () => {
+  // Colored Powerlevel10k-style prompt: theme SGR codes + ❯, after an A marker.
+  const p10k = {};
+  trackSessionIdlePrompt(
+    p10k,
+    "\x1b]133;A\x07\x1b]0;title\x07\x1b[38;5;39m~/src\x1b[0m \x1b[38;5;213m❯\x1b[0m ",
+  );
+  assert.equal(p10k.osc133Ready, true);
+  assert.equal(getFreshIdlePrompt(p10k), "~/src ❯ ");
+  assert.equal(getVisibleIdlePrompt(p10k), "~/src ❯ ");
+
+  // B marks the custom prompt boundary; A alone cannot prove empty input.
+  const custom = {};
+  trackSessionIdlePrompt(custom, "\x1b]133;A\x07myprompt λ ");
+  assert.equal(custom.osc133Ready, true);
+  assert.equal(getFreshIdlePrompt(custom), "");
+  assert.equal(getVisibleIdlePrompt(custom), "");
+  trackSessionIdlePrompt(custom, "\x1b]133;B\x07");
+  assert.equal(getVisibleIdlePrompt(custom), "myprompt λ ");
+});
+
+test("OSC 133 C/D markers override whitelisted-looking prompt text (not ready)", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "\x1b]133;A\x07PS C:\\Users\\alice> ");
+  assert.equal(session.osc133Ready, true);
+  assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice> ");
+
+  // Command in flight; a running program then echoes prompt-shaped text —
+  // the exact case where the whitelist lies (#4048 false-ready).
+  trackSessionIdlePrompt(session, "\x1b]133;B\x07dir\x07\x1b]133;C\x07running...\r\nPS C:\\Users\\alice> ");
+  assert.equal(session.osc133Ready, false);
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getVisibleIdlePrompt(session), "");
+
+  // D (finished) without a new A marker stays not-ready even with
+  // prompt-shaped text after it.
+  trackSessionIdlePrompt(session, "done\x1b]133;D;0\x1b\\\r\nuser@host ~ % ");
+  assert.equal(session.osc133Ready, false);
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getVisibleIdlePrompt(session), "");
+
+  // A new prompt start restores readiness.
+  trackSessionIdlePrompt(session, "\x1b]133;A\x07user@host ~ % ");
+  assert.equal(session.osc133Ready, true);
+  assert.equal(getFreshIdlePrompt(session), "user@host ~ % ");
+});
+
+test("OSC 133 state survives markers split across PTY chunks via the rolling tail", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "welcome\r\n\x1b]133;");
+  assert.equal(session.osc133Ready, null);
+  trackSessionIdlePrompt(session, "A\x07user@host ~ % ");
+  assert.equal(session.osc133Ready, true);
+  assert.equal(getVisibleIdlePrompt(session), "user@host ~ % ");
+});
+
+test("OSC 133 lifecycle state survives rolling-tail eviction without reviving old prompts", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "\x1b]133;A\x07");
+  assert.equal(session.osc133Ready, true);
+  // Retain lifecycle state, but fail closed when the prompt itself was evicted.
+  trackSessionIdlePrompt(session, "x".repeat(4200));
+  assert.equal(session.osc133Ready, true);
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getVisibleIdlePrompt(session), "");
 });
