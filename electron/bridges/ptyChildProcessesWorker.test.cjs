@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const EventEmitter = require("node:events");
 
 const { createBridgeRegistrar } = require("../main/registerBridges.cjs");
 const ptyProcessTree = require("./ptyProcessTree.cjs");
@@ -39,6 +40,7 @@ function createMainHandler(t, { mode = "worker" } = {}) {
       ipcMain,
       safeStorage: { isEncryptionAvailable: () => false },
       dialog: {},
+      nativeTheme: new EventEmitter(),
       ...(mode === "unavailable" ? {} : {
         utilityProcess: { fork() { throw new Error("test must not start a real worker"); } },
       }),
