@@ -1,6 +1,6 @@
 import { pluginThemeRegistry } from '../../infrastructure/config/pluginThemeRegistry';
 import { usePluginThemeRevision } from './usePluginThemeRuntime';
-import { useSettingsChromeStore } from './settingsChromeStore';
+import { getSettingsChromeSnapshot, useSettingsChromeStore } from './settingsChromeStore';
 import { useLayoutEffect, useRef } from "react";
 import type { TerminalTheme } from "../../domain/models";
 import {
@@ -239,7 +239,9 @@ function applyActiveChromeTheme(theme: TerminalTheme) {
 function refreshActiveChromeThemeSurfaces(theme: TerminalTheme) {
   const targetClass = theme.type === "dark" ? "dark" : "light";
   if (typeof window !== "undefined") {
-    netcattyBridge.get()?.setTheme?.(targetClass);
+    // Preserve OS preference events instead of locking nativeTheme to the chrome type.
+    const themeSource = getSettingsChromeSnapshot().theme === "system" ? "system" : targetClass;
+    netcattyBridge.get()?.setTheme?.(themeSource);
     netcattyBridge.get()?.setBackgroundColor?.(theme.colors.background);
   }
   applyTopTabsChromeThemeVars(theme);
