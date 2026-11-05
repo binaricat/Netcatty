@@ -167,6 +167,40 @@ test("consoleBroken latch also arms from stdout error", () => {
   }
 });
 
+test("worker guards report the first sink error exactly once", () => {
+  const fakeProcess = createFakeProcess();
+  const reports = [];
+  installTerminalWorkerErrorGuards({
+    processObject: fakeProcess,
+    report: (origin, err, decision) => reports.push({ origin, err, decision }),
+    logError: () => {},
+  });
+
+  const first = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  fakeProcess.stderr.emit("error", first);
+  fakeProcess.stdout.emit("error", Object.assign(new Error("write EPIPE again"), { code: "EPIPE" }));
+
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].origin, "stdio");
+  assert.equal(reports[0].err, first);
+});
+
+test("worker guards absorb report failures caused by a sink error", () => {
+  const fakeProcess = createFakeProcess();
+  installTerminalWorkerErrorGuards({
+    processObject: fakeProcess,
+    report: () => {
+      throw new Error("report route is dead");
+    },
+    logError: () => {},
+  });
+
+  assert.doesNotThrow(() => fakeProcess.stderr.emit(
+    "error",
+    Object.assign(new Error("write EPIPE"), { code: "EPIPE" }),
+  ));
+});
+
 test("worker guards suppress unhandled rejections with non-Error reasons", () => {
   const fakeProcess = createFakeProcess();
   const reports = [];

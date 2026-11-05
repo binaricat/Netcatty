@@ -25,9 +25,30 @@ perfTrace.mark("main:entry");
 // Load crash log bridge early so process-level error handlers can use it
 const crashLogBridge = require("./bridges/crashLogBridge.cjs");
 const {
+  createDiagnosticLogger,
   createProcessErrorController,
   installProcessErrorHandlers,
 } = require("./bridges/processErrorGuards.cjs");
+// Diagnostics must stay writable-safe: logging a broken stdout/stderr delivers
+// a new process-level error straight back into these handlers (see
+// createDiagnosticLogger). Errors themselves are still captured above.
+const logProcessDiagnostic = createDiagnosticLogger(
+  (...args) => console.error(...args),
+  {
+    streams: [process.stdout, process.stderr],
+    // The logger consumes the stream `error` event, so forward the first sink
+    // failure explicitly or it would never reach the crash log. Only this
+    // logger reports: both share the same streams, so reporting in both would
+    // record every failure twice.
+    onError(err) {
+      try { crashLogBridge.captureError('stdio', err); } catch {}
+    },
+  },
+);
+const logProcessWarning = createDiagnosticLogger(
+  (...args) => console.warn(...args),
+  { streams: [process.stdout, process.stderr] },
+);
 const processErrorController = createProcessErrorController({
   captureError(source, err) {
     try { crashLogBridge.captureError(source, err); } catch {}
@@ -35,17 +56,17 @@ const processErrorController = createProcessErrorController({
   onFatalError(err, context) {
     uninstallProcessErrorHandlers();
     if (context?.origin === 'unhandledRejection') {
-      console.error('Unhandled rejection:', context.reason);
+      logProcessDiagnostic('Unhandled rejection:', context.reason);
     } else {
-      console.error('Uncaught exception:', err);
+      logProcessDiagnostic('Uncaught exception:', err);
     }
     throw err;
   },
   logError(...args) {
-    console.error(...args);
+    logProcessDiagnostic(...args);
   },
   logWarn(...args) {
-    console.warn(...args);
+    logProcessWarning(...args);
   },
 });
 let uninstallProcessErrorHandlers = installProcessErrorHandlers(process, processErrorController);
