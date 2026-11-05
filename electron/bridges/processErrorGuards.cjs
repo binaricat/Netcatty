@@ -85,17 +85,30 @@ function classifyProcessError(err, options = {}) {
  * to the process-level handlers, which log again — an unbounded feedback loop
  * that pins a core, buffers every failed write in memory, and leaves the
  * process unable to answer anything else. Once the sink reports a failure its
- * diagnostics are dropped; the error itself is still captured by the caller
- * (`captureError` in the main process, `report` in the terminal worker).
+ * diagnostics are dropped; because this listener also consumes the stream
+ * `error` event before the process guards see it, the first failure is handed
+ * to `options.onError` so the caller (`captureError` in the main process,
+ * `report` in the terminal worker) can still persist it.
  */
 function createDiagnosticLogger(log, options = {}) {
   const streams = (options.streams || []).filter(
     (stream) => typeof stream?.on === "function"
       && typeof stream?.removeListener === "function",
   );
+  const onError = typeof options.onError === "function" ? options.onError : null;
   let sinkFailed = false;
-  const onSinkError = () => {
+  let sinkErrorReported = false;
+  const onSinkError = (err) => {
+    // Latch before reporting: anything the reporter logs is already unwritable.
     sinkFailed = true;
+    if (sinkErrorReported) return;
+    sinkErrorReported = true;
+    if (!onError) return;
+    try {
+      onError(err);
+    } catch {
+      // A failing reporter must not escape the stream's error listener.
+    }
   };
   for (const stream of streams) {
     // Holding an `error` listener also keeps a failed write on the diagnostics

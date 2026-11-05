@@ -34,7 +34,16 @@ const {
 // createDiagnosticLogger). Errors themselves are still captured above.
 const logProcessDiagnostic = createDiagnosticLogger(
   (...args) => console.error(...args),
-  { streams: [process.stdout, process.stderr] },
+  {
+    streams: [process.stdout, process.stderr],
+    // The logger consumes the stream `error` event, so forward the first sink
+    // failure explicitly or it would never reach the crash log. Only this
+    // logger reports: both share the same streams, so reporting in both would
+    // record every failure twice.
+    onError(err) {
+      try { crashLogBridge.captureError('stdio', err); } catch {}
+    },
+  },
 );
 const logProcessWarning = createDiagnosticLogger(
   (...args) => console.warn(...args),

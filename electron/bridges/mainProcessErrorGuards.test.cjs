@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const {
   classifyProcessError,
@@ -266,6 +267,81 @@ test("diagnostic logger drops lines once the sink reports an error", () => {
   log("second");
 
   assert.deepEqual(written, [["first"]]);
+});
+
+test("diagnostic logger forwards only the first sink error to onError", () => {
+  const sink = new EventEmitter();
+  const reports = [];
+  createDiagnosticLogger(
+    () => {},
+    { streams: [sink], onError: (err) => reports.push(err) },
+  );
+
+  const first = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  sink.emit("error", first);
+  sink.emit("error", Object.assign(new Error("write EPIPE again"), { code: "EPIPE" }));
+
+  assert.deepEqual(reports, [first]);
+});
+
+test("diagnostic logger latches before forwarding the sink error", () => {
+  const sink = new EventEmitter();
+  let attempts = 0;
+  let log = null;
+  log = createDiagnosticLogger(
+    () => {
+      attempts += 1;
+    },
+    { streams: [sink], onError: () => log("logged from the reporter") },
+  );
+
+  sink.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+
+  assert.equal(attempts, 0, "the reporter must not write through the failed sink");
+});
+
+test("diagnostic logger keeps a throwing onError from escaping", () => {
+  const sink = new EventEmitter();
+  const written = [];
+  const log = createDiagnosticLogger(
+    (...args) => written.push(args),
+    {
+      streams: [sink],
+      onError() {
+        throw new Error("reporter is dead");
+      },
+    },
+  );
+
+  assert.doesNotThrow(() => sink.emit("error", new Error("write EPIPE")));
+  log("after failure");
+  assert.deepEqual(written, []);
+});
+
+test("a closed stdout pipe is reported once so the failure reaches the crash log", async () => {
+  const child = spawn(process.execPath, ["-e", `
+    const { createDiagnosticLogger } = require(${JSON.stringify(require.resolve("./processErrorGuards.cjs"))});
+    let reports = 0;
+    const log = createDiagnosticLogger(
+      (...args) => console.error(...args),
+      {
+        streams: [process.stdout, process.stderr],
+        onError() { reports += 1; },
+      },
+    );
+    setTimeout(() => {
+      log("diagnostic after the pipe closed");
+      log("second diagnostic after the pipe closed");
+      setTimeout(() => process.exit(reports), 200);
+    }, 200);
+    setTimeout(() => process.exit(reports), 3000);
+  `], { stdio: ["ignore", "pipe", "pipe"] });
+
+  child.stdout.destroy();
+  child.stderr.destroy();
+  const exitCode = await new Promise((resolve) => child.once("exit", resolve));
+
+  assert.equal(exitCode, 1, "exactly one report for the first sink failure");
 });
 
 test("diagnostic logger latches closed when the sink throws synchronously", () => {
