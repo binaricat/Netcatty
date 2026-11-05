@@ -237,9 +237,9 @@ function applyActiveChromeTheme(theme: TerminalTheme) {
 }
 
 function refreshActiveChromeThemeSurfaces(theme: TerminalTheme) {
-  const targetClass = theme.type === "dark" ? "dark" : "light";
   if (typeof window !== "undefined") {
     // Preserve OS preference events instead of locking nativeTheme to the chrome type.
+    const targetClass = theme.type === "dark" ? "dark" : "light";
     const themeSource = getSettingsChromeSnapshot().theme === "system" ? "system" : targetClass;
     netcattyBridge.get()?.setTheme?.(themeSource);
     netcattyBridge.get()?.setBackgroundColor?.(theme.colors.background);
@@ -250,10 +250,11 @@ function refreshActiveChromeThemeSurfaces(theme: TerminalTheme) {
 export function syncActiveChromeTheme(
   activeTheme: TerminalTheme | null,
   applyAppTheme: () => void,
+  { refreshSurfaces = false }: { refreshSurfaces?: boolean } = {},
 ): void {
   const nextFingerprint = activeTheme ? themeFingerprint(activeTheme) : null;
   const appliedFingerprint = getAppliedChromeFingerprint();
-  if (nextFingerprint === appliedFingerprint) {
+  if (nextFingerprint === appliedFingerprint && !(activeTheme && refreshSurfaces)) {
     return;
   }
 
@@ -283,8 +284,11 @@ export function useActiveChromeTheme({
   applyAppThemeRef.current = applyAppTheme;
 
   useLayoutEffect(() => {
-    syncActiveChromeTheme(effectiveTheme, applyAppTheme);
-  }, [effectiveTheme, applyAppTheme, pluginThemeRevision]);
+    // Settings may have just applied the OS theme over a fixed terminal theme.
+    // Reassert its visual surfaces even when the terminal fingerprint is stable;
+    // tab-switch callers retain the default fingerprint fast path.
+    syncActiveChromeTheme(effectiveTheme, applyAppTheme, { refreshSurfaces: true });
+  }, [effectiveTheme, applyAppTheme, pluginThemeRevision, resolvedTheme]);
 
   useLayoutEffect(() => {
     return () => {
