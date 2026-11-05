@@ -2776,6 +2776,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       };
       return true;
     }
+    // xterm leaves Shift+Insert to the browser's native paste handler. Fan out
+    // the clipboard data from onData instead of encoding an Insert key for
+    // peers or treating the paste as that key's pending legacy data (#4142).
+    if (
+      e.key === "Insert" && e.shiftKey
+      && !e.ctrlKey && !e.altKey && !e.metaKey
+    ) {
+      return true;
+    }
     if (!shouldDeferKittyKeyEvent(normalizedKittyEvent)) {
       const identity = kittyKeyIdentity(e);
       if (
