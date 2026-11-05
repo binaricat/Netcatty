@@ -15,11 +15,15 @@ import {
   cleanupSdkAgentSessions,
   latestAIActiveSessionMapSnapshot,
   latestAISessionsSnapshot,
+  markAiSessionsHydrationComplete,
   pruneSessionsForStorage,
   setLatestAIActiveSessionMapSnapshot,
   setLatestAISessionsSnapshot,
   rebindActiveSessionMap,
 } from './aiStateSnapshots';
+
+// These unit tests exercise maintenance after boot hydration.
+test.beforeEach(() => { markAiSessionsHydrationComplete(); });
 
 test('orphan cleanup keeps durable Catty output while explicit deletion removes it', async () => {
   const sdkCleanups: string[] = [];

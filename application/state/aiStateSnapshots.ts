@@ -127,6 +127,10 @@ export let latestAIActiveTargetIdsSnapshot: Set<string> = new Set();
 
 export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
   latestAIActiveTargetIdsSnapshot = activeTargetIds;
+  // Child maintenance effects run before the provider's boot effects. Keep
+  // the live targets for post-hydration cleanup without adopting stale legacy
+  // history as authoritative state while IndexedDB is still loading.
+  if (!isAiSessionsHydrationComplete()) return;
   const currentSessions = latestAISessionsSnapshot ?? getPersistedAiSessionsSnapshot();
 
   // Sessions shown by a still-live scope must be protected from cleanup

@@ -211,12 +211,13 @@ export interface AiSessionsBootLoadResult {
  *
  * Callers decide what to do when both sources are empty (the #4018 backup
  * generations remain the last restore step in useAIState).
+ * The legacy reader may await disk-only recovery before migration completes.
  */
 export async function loadOrMigrateAiSessions(
-  readLegacyRaw: () => string | null | undefined,
+  readLegacyRaw: () => string | null | undefined | Promise<string | null | undefined>,
 ): Promise<AiSessionsBootLoadResult> {
   if (!isIndexedDbAvailable()) {
-    const legacy = parseLegacySessions(readLegacyRaw());
+    const legacy = parseLegacySessions(await readLegacyRaw());
     return { sessions: legacy, source: legacy.length > 0 ? 'legacy-localstorage' : 'none', idbFailed: false };
   }
   let db: IDBDatabase;
@@ -224,7 +225,7 @@ export async function loadOrMigrateAiSessions(
     db = await openAiSessionsIdb();
   } catch (error) {
     console.warn('[AIState] IndexedDB unavailable, falling back to the legacy localStorage store:', error);
-    const legacy = parseLegacySessions(readLegacyRaw());
+    const legacy = parseLegacySessions(await readLegacyRaw());
     return { sessions: legacy, source: legacy.length > 0 ? 'legacy-localstorage' : 'none', idbFailed: true };
   }
   let sessions: AISession[];
@@ -232,7 +233,7 @@ export async function loadOrMigrateAiSessions(
     sessions = await idbGetAllSessions(db);
   } catch (error) {
     console.warn('[AIState] IndexedDB read failed, falling back to the legacy localStorage store:', error);
-    const legacy = parseLegacySessions(readLegacyRaw());
+    const legacy = parseLegacySessions(await readLegacyRaw());
     return { sessions: legacy, source: legacy.length > 0 ? 'legacy-localstorage' : 'none', idbFailed: true };
   }
   let marker: AiSessionsMigrationMarker | undefined;
@@ -259,7 +260,7 @@ export async function loadOrMigrateAiSessions(
   // Empty, un-migrated IndexedDB → one-time migration. The legacy key is
   // intentionally NOT removed: it stays as a read-only fallback for one
   // release.
-  const legacy = parseLegacySessions(readLegacyRaw());
+  const legacy = parseLegacySessions(await readLegacyRaw());
   if (legacy.length === 0) {
     // Nothing to migrate: mark the store initialized so this state is
     // distinguishable from "uninitialized" on the next boot.

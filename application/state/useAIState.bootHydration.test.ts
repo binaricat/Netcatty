@@ -1,6 +1,7 @@
 /**
  * Boot-scenario regression tests for the IndexedDB migration review fixes
- * (issue #4125 review): P2① baseline seeding after an IndexedDB failure,
+ * (issue #4125 review): P1 maintenance gating and complete legacy migration,
+ * P2① baseline seeding after an IndexedDB failure,
  * P2② pointer validation gated on hydration, P2③ disk-backup restore when
  * IndexedDB stays unopenable, and P2④ adopting an intentional cross-window
  * deletion.
@@ -14,6 +15,8 @@ import type { AISession } from '../../infrastructure/ai/types';
 import {
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_SESSIONS,
+  STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW,
+  STORAGE_KEY_AI_SESSIONS_OVERFLOW,
 } from '../../infrastructure/config/storageKeys';
 import { useAIState } from './useAIState';
 import { getAISessionsSnapshot } from './aiSessionsStore';
@@ -22,6 +25,7 @@ import {
   __resetAiSessionsHydrationForTests,
   __resetIdbPersistenceForTests,
   getPersistedAiSessionsSnapshot,
+  latestAISessionsSnapshot,
   setLatestAIActiveSessionMapSnapshot,
   setLatestAIDraftsByScopeSnapshot,
   setLatestAIPanelViewByScopeSnapshot,
@@ -29,6 +33,7 @@ import {
 } from './aiStateSnapshots';
 import {
   idbDeleteSessionIds,
+  AI_SESSIONS_META_MIGRATION_KEY,
   idbPutSessions,
   openAiSessionsIdb,
   resetAiSessionsIdbForTests,
@@ -62,11 +67,16 @@ interface Mounted {
   container: HTMLDivElement;
 }
 
-async function mountAiState(): Promise<Mounted> {
+async function mountAiState(onMaintenance?: (ai: ReturnType<typeof useAIState>) => void): Promise<Mounted> {
   const holder: { ai?: ReturnType<typeof useAIState> } = {};
+  function Maintenance({ ai }: { ai: ReturnType<typeof useAIState> }) {
+    const mountAi = React.useRef(ai);
+    React.useEffect(() => { onMaintenance?.(mountAi.current); }, []);
+    return null;
+  }
   function Harness() {
     holder.ai = useAIState();
-    return null;
+    return onMaintenance ? React.createElement(Maintenance, { ai: holder.ai }) : null;
   }
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -93,6 +103,101 @@ test.beforeEach(() => {
   setLatestAIActiveSessionMapSnapshot(null as unknown as Record<string, string | null>);
   setLatestAIDraftsByScopeSnapshot({});
   setLatestAIPanelViewByScopeSnapshot({});
+});
+
+test('P1: child mount maintenance waits for hydration and marks the IndexedDB transcript dangling', async () => {
+  const dom = installDom();
+  const idb = installFakeIndexedDb();
+  const stale: AISession = {
+    ...makeSession('closed-chat', 1),
+    scope: { type: 'terminal', targetId: 'closed-terminal' },
+    messages: [{ id: 'm-1', role: 'user', content: 'Old history', timestamp: 1 }],
+  };
+  const current: AISession = {
+    ...stale,
+    updatedAt: 2,
+    messages: [...stale.messages, { id: 'm-2', role: 'assistant', content: 'New history', timestamp: 2 }],
+  };
+  dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS, JSON.stringify([stale]));
+  await idbPutSessions(await openAiSessionsIdb(), [current]);
+  setLatestAISessionsSnapshot(null as unknown as AISession[]);
+  let snapshotAfterMaintenance: AISession[] | null | undefined;
+  let putsAfterMaintenance = 0;
+  const mounted = await mountAiState((ai) => {
+    ai.cleanupOrphanedSessions(new Set(['live-terminal']));
+    snapshotAfterMaintenance = latestAISessionsSnapshot;
+    putsAfterMaintenance = idb.db.opCounts.get('sessions')!.put;
+  });
+  try {
+    assert.equal(snapshotAfterMaintenance, null, 'pending maintenance must not adopt the legacy transcript');
+    assert.equal(putsAfterMaintenance, 1, 'pending maintenance must not persist stale history');
+    await __flushIdbWritesForTests();
+    const expected = [{ ...current, scopeDangling: true }];
+    assert.deepEqual(getAISessionsSnapshot().sessions, expected);
+    assert.deepEqual(idb.db.dumpStore('sessions'), expected);
+    assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS), JSON.stringify([stale]));
+  } finally {
+    await unmount(mounted, dom);
+    idb.restore();
+    resetAiSessionsIdbForTests();
+  }
+});
+
+test('P1: migration includes chunked overflow alongside a populated primary', async () => {
+  const dom = installDom();
+  const idb = installFakeIndexedDb();
+  const primary = makeSession('primary-chat', 3);
+  const overflow = [makeSession('overflow-a', 2), makeSession('overflow-b', 1), { ...primary, updatedAt: 0 }];
+  const overflowJson = JSON.stringify(overflow);
+  const split = Math.floor(overflowJson.length / 2);
+  dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS, JSON.stringify([primary]));
+  dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS_OVERFLOW, overflowJson.slice(0, split));
+  dom.window.localStorage.setItem(`${STORAGE_KEY_AI_SESSIONS_OVERFLOW}_2`, overflowJson.slice(split));
+  const mounted = await mountAiState();
+  try {
+    const expected = [primary, ...overflow.slice(0, 2)];
+    assert.deepEqual(getAISessionsSnapshot().sessions, expected);
+    assert.deepEqual(idb.db.dumpStore('sessions'), expected);
+    assert.ok(idb.db.dumpStore('meta').some((entry) => (entry as { key: string }).key === AI_SESSIONS_META_MIGRATION_KEY));
+    assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_OVERFLOW), overflowJson.slice(0, split));
+    assert.equal(dom.window.localStorage.getItem(`${STORAGE_KEY_AI_SESSIONS_OVERFLOW}_2`), overflowJson.slice(split));
+  } finally {
+    await unmount(mounted, dom);
+    idb.restore();
+    resetAiSessionsIdbForTests();
+  }
+});
+
+test('P1: migration awaits disk-only recovery before recording completion beside a populated primary', async () => {
+  const dom = installDom();
+  const idb = installFakeIndexedDb();
+  const primary = makeSession('primary-chat', 3);
+  const diskOnly = makeSession('disk-only-chat', 2);
+  const deleted = makeSession('deleted-chat', 1);
+  dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS, JSON.stringify([primary]));
+  dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify([diskOnly.id]));
+  let resolveBackup!: (result: { ok: boolean; json: string }) => void;
+  const backup = new Promise<{ ok: boolean; json: string }>((resolve) => { resolveBackup = resolve; });
+  let backupReads = 0;
+  Object.assign(dom.window, {
+    netcatty: { aiSessionsBackupReadLatest: () => { backupReads += 1; return backup; } },
+  });
+  const mounted = await mountAiState();
+  try {
+    assert.equal(backupReads, 1);
+    assert.equal(idb.db.dumpStore('meta').some((entry) => (entry as { key: string }).key === AI_SESSIONS_META_MIGRATION_KEY), false);
+    await act(async () => {
+      resolveBackup({ ok: true, json: JSON.stringify([primary, diskOnly, deleted]) });
+    });
+    assert.deepEqual(getAISessionsSnapshot().sessions, [primary, diskOnly]);
+    assert.deepEqual(idb.db.dumpStore('sessions'), [primary, diskOnly]);
+    assert.ok(idb.db.dumpStore('meta').some((entry) => (entry as { key: string }).key === AI_SESSIONS_META_MIGRATION_KEY));
+    assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW), JSON.stringify([diskOnly.id]));
+  } finally {
+    await unmount(mounted, dom);
+    idb.restore();
+    resetAiSessionsIdbForTests();
+  }
 });
 
 // ── P2①: idbFailed boot must persist the legacy set before seeding the baseline ──

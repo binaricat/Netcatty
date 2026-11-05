@@ -14,6 +14,8 @@ import {
   STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_SESSIONS,
+  STORAGE_KEY_AI_SESSIONS_OVERFLOW,
+  STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW,
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
@@ -106,6 +108,7 @@ import {
   isMissingOrCorruptSessionsStore,
   mergeImportedSessions,
   parseBackupSessions,
+  readLiveSessionsArray,
 } from './aiSessionsBackup';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
 import {
@@ -212,11 +215,38 @@ export function useAIState() {
   }, []);
   useEffect(() => {
     let cancelled = false;
+    let cleanupAfterHydration = false;
     void (async () => {
       try {
         // 1. IndexedDB (primary) → one-time legacy localStorage migration.
         const boot = await loadOrMigrateAiSessions(
-          () => localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS),
+          async () => {
+            // Legacy retention split history between the primary key, JSON
+            // chunks, and explicitly marked disk-only records. Resolve all
+            // slices before the one-shot migration records completion.
+            const chunks: string[] = [];
+            for (let index = 0; ; index += 1) {
+              const key = index === 0 ? STORAGE_KEY_AI_SESSIONS_OVERFLOW : `${STORAGE_KEY_AI_SESSIONS_OVERFLOW}_${index + 1}`;
+              const chunk = localStorageAdapter.readString(key);
+              if (chunk == null) break;
+              chunks.push(chunk);
+            }
+            let legacy = mergeImportedSessions(
+              readLiveSessionsArray(chunks.join('')),
+              readLiveSessionsArray(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS)),
+            );
+            const diskOnlyIds = new Set(localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) ?? []);
+            if (diskOnlyIds.size > 0) {
+              const backup = await getAIBridge()?.aiSessionsBackupReadLatest?.();
+              if (backup?.ok) {
+                legacy = mergeImportedSessions(
+                  (parseBackupSessions(backup.json) ?? []).filter(session => diskOnlyIds.has(session.id)),
+                  legacy,
+                );
+              }
+            }
+            return JSON.stringify(legacy);
+          },
         );
         if (cancelled) return;
         if (boot.idbFailed && boot.sessions.length > 0) {
@@ -278,11 +308,7 @@ export function useAIState() {
           sessionsRef.current = bootSessions;
           setSessionsRaw(bootSessions);
           scheduleBackupMirror(JSON.stringify(bootSessions));
-          // Load does not change live terminals/workspaces, so the orphan-
-          // cleanup effect will not run. Reuse the last known live target set
-          // (empty is valid: nothing live) so chats bound to missing scopes
-          // become dangling and /chats can offer /rebind.
-          cleanupOrphanedAISessions(latestAIActiveTargetIdsSnapshot);
+          cleanupAfterHydration = true;
           return;
         }
 
@@ -328,7 +354,7 @@ export function useAIState() {
         setLatestAISessionsSnapshot(restored);
         writeSessionsForStorage(restored);
         emitAIStateChanged(STORAGE_KEY_AI_SESSIONS);
-        cleanupOrphanedAISessions(latestAIActiveTargetIdsSnapshot);
+        cleanupAfterHydration = true;
         const nextSessions = latestAISessionsSnapshot ?? restored;
         sessionsRef.current = nextSessions;
         setSessionsRaw(nextSessions);
@@ -346,7 +372,17 @@ export function useAIState() {
         console.warn('[AIState] AI session boot load failed:', error);
       } finally {
         markAiSessionsHydrationComplete();
-        if (!cancelled) setSessionsHydrated(true);
+        if (!cancelled) {
+          // Maintenance may have mounted before hydration with unchanged live
+          // targets. Replay it now against the authoritative boot history.
+          if (cleanupAfterHydration) {
+            cleanupOrphanedAISessions(latestAIActiveTargetIdsSnapshot);
+            const nextSessions = latestAISessionsSnapshot ?? sessionsRef.current;
+            sessionsRef.current = nextSessions;
+            setSessionsRaw(nextSessions);
+          }
+          setSessionsHydrated(true);
+        }
       }
     })();
     return () => {
@@ -1455,6 +1491,7 @@ export function useAIState() {
 
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
     cleanupOrphanedAISessions(activeTargetIds);
+    if (!isAiSessionsHydrationComplete()) return;
 
     const nextSessions =
       latestAISessionsSnapshot
