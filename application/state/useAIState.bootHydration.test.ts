@@ -23,8 +23,10 @@ import { getAISessionsSnapshot } from './aiSessionsStore';
 import {
   __flushIdbWritesForTests,
   __resetAiSessionsHydrationForTests,
+  __resetBackupMirrorForTests,
   __resetIdbPersistenceForTests,
   getPersistedAiSessionsSnapshot,
+  flushBackupMirror,
   latestAISessionsSnapshot,
   setLatestAIActiveSessionMapSnapshot,
   setLatestAIDraftsByScopeSnapshot,
@@ -35,6 +37,7 @@ import {
   idbDeleteSessionIds,
   AI_SESSIONS_META_MIGRATION_KEY,
   idbPutSessions,
+  loadOrMigrateAiSessions,
   openAiSessionsIdb,
   resetAiSessionsIdbForTests,
 } from './aiSessionIdbStorage';
@@ -91,7 +94,7 @@ async function unmount(mounted: Mounted, dom: JSDOM) {
   dom.window.close();
 }
 
-test.beforeEach(() => {
+function resetBootState() {
   // Post-boot defaults first, then back to pending so every test starts
   // from the pre-hydration state its own hook instance controls.
   __resetIdbPersistenceForTests();
@@ -103,7 +106,141 @@ test.beforeEach(() => {
   setLatestAIActiveSessionMapSnapshot(null as unknown as Record<string, string | null>);
   setLatestAIDraftsByScopeSnapshot({});
   setLatestAIPanelViewByScopeSnapshot({});
+}
+
+test.beforeEach(() => {
+  __resetBackupMirrorForTests();
+  resetBootState();
 });
+test.afterEach(() => { __resetBackupMirrorForTests(); });
+
+test('P1: deleting the last migrated chat with no legacy key never restores a stale disk backup', async () => {
+  const dom = installDom();
+  const idb = installFakeIndexedDb();
+  const deleted = makeSession('deleted-chat', 1);
+  await loadOrMigrateAiSessions(() => JSON.stringify([deleted]));
+  await idbDeleteSessionIds(await openAiSessionsIdb(), [deleted.id]);
+  let backupReads = 0;
+  const backupWrites: string[] = [];
+  Object.assign(dom.window, {
+    netcatty: {
+      aiSessionsBackupReadLatest: async () => {
+        backupReads += 1;
+        return { ok: true, json: JSON.stringify([deleted]) };
+      },
+      aiSessionsBackupWrite: async ({ json }: { json: string }) => {
+        backupWrites.push(json);
+        return { ok: true };
+      },
+    },
+  });
+  const mounted = await mountAiState();
+  try {
+    flushBackupMirror();
+    await __flushIdbWritesForTests();
+    assert.equal(dom.window.localStorage.getItem(STORAGE_KEY_AI_SESSIONS), null);
+    assert.equal(backupReads, 0);
+    assert.deepEqual(backupWrites, []);
+    assert.deepEqual(getAISessionsSnapshot().sessions, []);
+    assert.deepEqual(idb.db.dumpStore('sessions'), []);
+  } finally {
+    await unmount(mounted, dom);
+    idb.restore();
+    resetAiSessionsIdbForTests();
+  }
+});
+
+test('P1: an uninitialized IndexedDB still restores the disk backup', async () => {
+  const dom = installDom();
+  const idb = installFakeIndexedDb();
+  const backup = [makeSession('backup-chat', 1)];
+  Object.assign(dom.window, {
+    netcatty: { aiSessionsBackupReadLatest: async () => ({ ok: true, json: JSON.stringify(backup) }) },
+  });
+  const mounted = await mountAiState();
+  try {
+    await __flushIdbWritesForTests();
+    assert.deepEqual(getAISessionsSnapshot().sessions, backup);
+    assert.deepEqual(idb.db.dumpStore('sessions'), backup);
+  } finally {
+    await unmount(mounted, dom);
+    idb.restore();
+    resetAiSessionsIdbForTests();
+  }
+});
+
+for (const failure of ['not-ok', 'rejection', 'missing-id'] as const) {
+  test(`P1: disk overflow ${failure} keeps migration pending and backups intact, then retries beside primary IDB records`, async () => {
+    const dom = installDom();
+    const idb = installFakeIndexedDb();
+    const primary = makeSession('primary-chat', 3);
+    const chunk = makeSession('chunk-chat', 2);
+    const diskOnly = makeSession('disk-only-chat', 1);
+    const unmarked = makeSession('unmarked-deleted-chat', 0);
+    dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS, JSON.stringify([primary]));
+    dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS_OVERFLOW, JSON.stringify([chunk]));
+    dom.window.localStorage.setItem(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW, JSON.stringify([diskOnly.id]));
+    let recoveryAvailable = false;
+    let backupReads = 0;
+    const backupWrites: string[] = [];
+    Object.assign(dom.window, {
+      netcatty: {
+        aiSessionsBackupReadLatest: async () => {
+          backupReads += 1;
+          if (recoveryAvailable) return { ok: true, json: JSON.stringify([primary, chunk, diskOnly, unmarked]) };
+          if (failure === 'rejection') throw new Error('disk temporarily unavailable');
+          if (failure === 'missing-id') return { ok: true, json: JSON.stringify([unmarked]) };
+          return { ok: false };
+        },
+        aiSessionsBackupWrite: async ({ json }: { json: string }) => {
+          backupWrites.push(json);
+          return { ok: true };
+        },
+      },
+    });
+    let mounted = await mountAiState();
+    const hasMarker = () => idb.db.dumpStore('meta').some(entry => (entry as { key: string }).key === AI_SESSIONS_META_MIGRATION_KEY);
+    try {
+      assert.equal(backupReads, 1);
+      assert.equal(hasMarker(), false);
+      assert.deepEqual(getAISessionsSnapshot().sessions, [primary, chunk]);
+      assert.deepEqual(idb.db.dumpStore('sessions'), [primary, chunk]);
+      flushBackupMirror();
+      assert.deepEqual(backupWrites, [], 'boot must not mirror a partial migration');
+
+      // Ordinary edits and unload must also preserve the recovery generation.
+      await act(async () => {
+        mounted.ai.addMessageToSession(primary.id, { id: 'new-message', role: 'user', content: 'New edit', timestamp: 4 });
+      });
+      await new Promise(resolve => setTimeout(resolve, 600));
+      await __flushIdbWritesForTests();
+      dom.window.dispatchEvent(new dom.window.Event('beforeunload'));
+      assert.deepEqual(backupWrites, []);
+      const updated = getAISessionsSnapshot().sessions.find(session => session.id === primary.id)!;
+      assert.equal(updated.messages.length, 1);
+      assert.equal(hasMarker(), false);
+
+      await act(async () => { mounted.root.unmount(); });
+      mounted.container.remove();
+      resetBootState();
+      recoveryAvailable = true;
+      mounted = await mountAiState();
+      await __flushIdbWritesForTests();
+      assert.equal(backupReads, 2, 'populated IDB must still retry unresolved disk IDs');
+      assert.equal(hasMarker(), true);
+      const expected = [updated, chunk, diskOnly];
+      assert.deepEqual(getAISessionsSnapshot().sessions, expected);
+      assert.deepEqual(idb.db.dumpStore('sessions'), expected);
+      flushBackupMirror();
+      assert.equal(backupWrites.length, 1, 'mirroring resumes only after all marked IDs are recovered');
+      assert.deepEqual(JSON.parse(backupWrites[0]), expected);
+    } finally {
+      await unmount(mounted, dom);
+      idb.restore();
+      resetAiSessionsIdbForTests();
+    }
+  });
+}
 
 test('P1: child mount maintenance waits for hydration and marks the IndexedDB transcript dangling', async () => {
   const dom = installDom();

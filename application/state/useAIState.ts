@@ -82,6 +82,7 @@ import {
   rebindActiveSessionMap,
   scheduleBackupMirror,
   seedLastPersistedSessions,
+  setAiSessionsBackupRecoveryPending,
   writeSessionsForStorage,
   setLatestAIActiveSessionMapSnapshot,
   setLatestAIDraftsByScopeSnapshot,
@@ -219,6 +220,8 @@ export function useAIState() {
     void (async () => {
       try {
         // 1. IndexedDB (primary) → one-time legacy localStorage migration.
+        const diskOnlyIds = new Set(localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) ?? []);
+        setAiSessionsBackupRecoveryPending(diskOnlyIds.size > 0);
         const boot = await loadOrMigrateAiSessions(
           async () => {
             // Legacy retention split history between the primary key, JSON
@@ -235,19 +238,24 @@ export function useAIState() {
               readLiveSessionsArray(chunks.join('')),
               readLiveSessionsArray(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS)),
             );
-            const diskOnlyIds = new Set(localStorageAdapter.read<string[]>(STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW) ?? []);
             if (diskOnlyIds.size > 0) {
-              const backup = await getAIBridge()?.aiSessionsBackupReadLatest?.();
-              if (backup?.ok) {
-                legacy = mergeImportedSessions(
-                  (parseBackupSessions(backup.json) ?? []).filter(session => diskOnlyIds.has(session.id)),
-                  legacy,
-                );
+              try {
+                const backup = await getAIBridge()?.aiSessionsBackupReadLatest?.();
+                if (backup?.ok) {
+                  legacy = mergeImportedSessions(
+                    (parseBackupSessions(backup.json) ?? []).filter(session => diskOnlyIds.has(session.id)),
+                    legacy,
+                  );
+                }
+              } catch (error) {
+                console.warn('[AIState] Disk-only session recovery failed; migration will retry on the next boot:', error);
               }
             }
             return JSON.stringify(legacy);
           },
+          [...diskOnlyIds],
         );
+        setAiSessionsBackupRecoveryPending(boot.migrationPending);
         if (cancelled) return;
         if (boot.idbFailed && boot.sessions.length > 0) {
           // Issue #4125 review P2①: the legacy set is not in IndexedDB yet.
@@ -312,7 +320,11 @@ export function useAIState() {
           return;
         }
 
-        // 2. Empty store (and no legacy data to migrate): the #4018 disk
+        // A previously initialized empty IDB is a committed deletion. An
+        // incomplete migration must retry only its marked disk-only records.
+        if (boot.authoritativeEmpty || boot.migrationPending) return;
+
+        // 2. Uninitialized store (and no legacy data to migrate): the #4018 disk
         // backup remains the last restore step. Only when the legacy store
         // is also missing or corrupt — a valid empty legacy array is an
         // intentional wipe and stays authoritative.

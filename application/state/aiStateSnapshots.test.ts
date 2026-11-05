@@ -535,6 +535,55 @@ test('count-cap eviction writes a pre-eviction backup generation and removes evi
   }
 });
 
+test('pending disk recovery suppresses queued, ordinary and pre-eviction backup generations', async (t) => {
+  const { writeSessionsForStorage, __flushIdbWritesForTests, __resetIdbPersistenceForTests, __resetBackupMirrorForTests,
+    flushBackupMirror, scheduleBackupMirror, setAiSessionsBackupRecoveryPending } = await import('./aiStateSnapshots');
+  __resetIdbPersistenceForTests();
+  __resetBackupMirrorForTests();
+  const idb = installFakeIndexedDb();
+  const backupWrites: string[] = [];
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      netcatty: {
+        aiSessionsBackupWrite: async ({ json }: { json: string }) => {
+          backupWrites.push(json);
+          return { ok: true };
+        },
+      },
+    },
+  });
+  t.mock.method(localStorageAdapter, 'read', () => null);
+  try {
+    scheduleBackupMirror('queued partial backup');
+    setAiSessionsBackupRecoveryPending(true);
+    flushBackupMirror();
+    assert.deepEqual(backupWrites, []);
+
+    const sessions = Array.from({ length: 1000 }, (_, index) => makeSession(`session-${index}`, index + 1, []));
+    writeSessionsForStorage(sessions);
+    await __flushIdbWritesForTests();
+    flushBackupMirror();
+    const overCap = [makeSession('newest', 10_000, []), ...sessions];
+    writeSessionsForStorage(overCap);
+    await __flushIdbWritesForTests();
+    flushBackupMirror();
+    assert.deepEqual(backupWrites, [], 'neither debounced nor immediate writes may rotate recovery generations');
+    assert.equal(idb.db.dumpStore('sessions').length, 1000, 'IndexedDB writes continue during recovery');
+
+    setAiSessionsBackupRecoveryPending(false);
+    scheduleBackupMirror(JSON.stringify(overCap));
+    flushBackupMirror();
+    assert.deepEqual(backupWrites, [JSON.stringify(overCap)]);
+  } finally {
+    idb.restore();
+    __resetIdbPersistenceForTests();
+    __resetBackupMirrorForTests();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+  }
+});
+
 test('explicitly deleted sessions do not trigger the pre-eviction generation', async (t) => {
   const { writeSessionsForStorage, __flushIdbWritesForTests, __resetIdbPersistenceForTests, __resetBackupMirrorForTests, flushBackupMirror, cleanupDeletedAIChatSessions } =
     await import('./aiStateSnapshots');

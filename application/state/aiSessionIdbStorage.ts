@@ -191,6 +191,10 @@ export interface AiSessionsBootLoadResult {
   source: 'indexeddb' | 'legacy-localstorage' | 'none';
   /** True when IndexedDB itself could not be opened (corrupt/blocked). */
   idbFailed: boolean;
+  /** The store was already initialized before this boot; empty means deleted. */
+  authoritativeEmpty: boolean;
+  /** Marked disk-only records are still missing; keep their backup generations. */
+  migrationPending: boolean;
 }
 
 /**
@@ -212,29 +216,42 @@ export interface AiSessionsBootLoadResult {
  * Callers decide what to do when both sources are empty (the #4018 backup
  * generations remain the last restore step in useAIState).
  * The legacy reader may await disk-only recovery before migration completes.
+ * Missing disk-only IDs keep migration resumable, including in a populated IDB.
  */
 export async function loadOrMigrateAiSessions(
   readLegacyRaw: () => string | null | undefined | Promise<string | null | undefined>,
+  diskOnlySessionIds: readonly string[] = [],
 ): Promise<AiSessionsBootLoadResult> {
-  if (!isIndexedDbAvailable()) {
+  const hasUnresolvedDiskSessions = (sessions: AISession[]) => {
+    const ids = new Set(sessions.map(session => session.id));
+    return diskOnlySessionIds.some(id => !ids.has(id));
+  };
+  const legacyFallback = async (idbFailed: boolean): Promise<AiSessionsBootLoadResult> => {
     const legacy = parseLegacySessions(await readLegacyRaw());
-    return { sessions: legacy, source: legacy.length > 0 ? 'legacy-localstorage' : 'none', idbFailed: false };
+    return {
+      sessions: legacy,
+      source: legacy.length > 0 ? 'legacy-localstorage' : 'none',
+      idbFailed,
+      authoritativeEmpty: false,
+      migrationPending: hasUnresolvedDiskSessions(legacy),
+    };
+  };
+  if (!isIndexedDbAvailable()) {
+    return legacyFallback(false);
   }
   let db: IDBDatabase;
   try {
     db = await openAiSessionsIdb();
   } catch (error) {
     console.warn('[AIState] IndexedDB unavailable, falling back to the legacy localStorage store:', error);
-    const legacy = parseLegacySessions(await readLegacyRaw());
-    return { sessions: legacy, source: legacy.length > 0 ? 'legacy-localstorage' : 'none', idbFailed: true };
+    return legacyFallback(true);
   }
   let sessions: AISession[];
   try {
     sessions = await idbGetAllSessions(db);
   } catch (error) {
     console.warn('[AIState] IndexedDB read failed, falling back to the legacy localStorage store:', error);
-    const legacy = parseLegacySessions(await readLegacyRaw());
-    return { sessions: legacy, source: legacy.length > 0 ? 'legacy-localstorage' : 'none', idbFailed: true };
+    return legacyFallback(true);
   }
   let marker: AiSessionsMigrationMarker | undefined;
   try {
@@ -242,44 +259,60 @@ export async function loadOrMigrateAiSessions(
   } catch {
     marker = undefined;
   }
-  if (sessions.length > 0) {
+  if (marker || (sessions.length > 0 && !hasUnresolvedDiskSessions(sessions))) {
     if (!marker) {
       // First boot on a store that already holds sessions (e.g. migrated by
       // a build without the marker): record one-shot completion so the
       // legacy key can never re-seed the store.
       await writeMigrationMarker(db).catch(() => {});
     }
-    return { sessions, source: 'indexeddb', idbFailed: false };
+    return {
+      sessions,
+      source: sessions.length > 0 ? 'indexeddb' : 'none',
+      idbFailed: false,
+      authoritativeEmpty: sessions.length === 0,
+      migrationPending: false,
+    };
   }
-  if (marker) {
-    // Migration already ran once: an empty store is authoritative (the user
-    // deleted every chat, or there was never anything to migrate). Never
-    // resurrect from the still-present legacy key.
-    return { sessions: [], source: 'none', idbFailed: false };
-  }
-  // Empty, un-migrated IndexedDB → one-time migration. The legacy key is
+  // Unfinished migration (empty or partially populated IDB). The legacy key is
   // intentionally NOT removed: it stays as a read-only fallback for one
   // release.
   const legacy = parseLegacySessions(await readLegacyRaw());
-  if (legacy.length === 0) {
+  // A partial migration may already have primary/chunk records in IDB. Only
+  // fill missing marked IDs; never replay stale primary data over live IDB.
+  const existingIds = new Set(sessions.map(session => session.id));
+  const diskOnlyIds = new Set(diskOnlySessionIds);
+  const recovered = sessions.length === 0
+    ? legacy
+    : legacy.filter(session => diskOnlyIds.has(session.id) && !existingIds.has(session.id));
+  const merged = [...sessions, ...recovered].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  const migrationPending = hasUnresolvedDiskSessions(merged);
+  const result: AiSessionsBootLoadResult = {
+    sessions: merged,
+    source: sessions.length > 0 ? 'indexeddb' : merged.length > 0 ? 'legacy-localstorage' : 'none',
+    idbFailed: false,
+    authoritativeEmpty: false,
+    migrationPending,
+  };
+  if (merged.length === 0) {
     // Nothing to migrate: mark the store initialized so this state is
     // distinguishable from "uninitialized" on the next boot.
-    await writeMigrationMarker(db).catch(() => {});
-    return { sessions: [], source: 'none', idbFailed: false };
+    if (!migrationPending) await writeMigrationMarker(db).catch(() => {});
+    return result;
   }
   try {
-    await idbPutSessions(db, legacy);
+    await idbPutSessions(db, recovered);
     await idbPutMeta(db, AI_SESSIONS_META_SCHEMA_VERSION_KEY, AI_SESSIONS_IDB_VERSION);
     await idbPutMeta(db, AI_SESSIONS_META_LAST_WRITE_KEY, Date.now());
     // Written AFTER the migration data is durable: a crash before this point
     // leaves the marker absent and the next boot safely re-migrates.
-    await writeMigrationMarker(db);
+    if (!migrationPending) await writeMigrationMarker(db);
   } catch (error) {
     console.warn('[AIState] IndexedDB migration write failed; keeping legacy store authoritative:', error);
-    return { sessions: legacy, source: 'legacy-localstorage', idbFailed: true };
+    return { ...result, idbFailed: true };
   }
-  console.info(`[AIState] Migrated ${legacy.length} AI session(s) from localStorage to IndexedDB.`);
-  return { sessions: legacy, source: 'legacy-localstorage', idbFailed: false };
+  console.info(`[AIState] Migrated ${recovered.length} AI session(s) from localStorage to IndexedDB.`);
+  return result;
 }
 
 interface AiSessionsMigrationMarker {

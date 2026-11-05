@@ -131,6 +131,8 @@ test('loadOrMigrateAiSessions returns none for an empty store without legacy dat
     assert.equal(result.source, 'none');
     assert.deepEqual(result.sessions, []);
     assert.equal(result.idbFailed, false);
+    assert.equal(result.authoritativeEmpty, false, 'a newly created store still permits disk recovery');
+    assert.equal(result.migrationPending, false);
   } finally {
     idb.restore();
     resetAiSessionsIdbForTests();
@@ -219,8 +221,48 @@ test('an empty IndexedDB store with the migration marker ignores a populated leg
       () => JSON.stringify([makeSession('resurrected', 1)]),
     );
     assert.equal(second.source, 'none');
+    assert.equal(second.authoritativeEmpty, true);
     assert.deepEqual(second.sessions, []);
     assert.equal(idb.db.dumpStore('sessions').length, 0);
+  } finally {
+    idb.restore();
+    resetAiSessionsIdbForTests();
+  }
+});
+
+test('partial disk migration retries missing IDs beside existing IDB records until all are durable', async () => {
+  const idb = installFakeIndexedDb();
+  try {
+    const primary = makeSession('primary', 3);
+    const diskA = makeSession('disk-a', 2);
+    const diskB = makeSession('disk-b', 1);
+    const diskIds = [diskA.id, diskB.id];
+    const db = await openAiSessionsIdb();
+    const first = await loadOrMigrateAiSessions(() => JSON.stringify([primary]), diskIds);
+    assert.equal(first.migrationPending, true);
+    assert.deepEqual(await idbGetAllSessions(db), [primary]);
+    assert.equal(await idbGetMeta(db, AI_SESSIONS_META_MIGRATION_KEY), undefined);
+
+    const updated = { ...primary, title: 'edited in IndexedDB', updatedAt: 4 };
+    await idbPutSession(db, updated);
+    const partial = await loadOrMigrateAiSessions(() => JSON.stringify([primary, diskA]), diskIds);
+    assert.equal(partial.migrationPending, true, 'one recovered disk ID does not complete migration');
+    assert.deepEqual(partial.sessions, [updated, diskA]);
+    assert.equal(await idbGetMeta(db, AI_SESSIONS_META_MIGRATION_KEY), undefined);
+
+    const complete = await loadOrMigrateAiSessions(() => JSON.stringify([primary, diskA, diskB]), diskIds);
+    assert.equal(complete.source, 'indexeddb');
+    assert.equal(complete.migrationPending, false);
+    assert.deepEqual(complete.sessions, [updated, diskA, diskB]);
+    assert.deepEqual(await idbGetAllSessions(db), [updated, diskA, diskB]);
+    assert.ok(await idbGetMeta(db, AI_SESSIONS_META_MIGRATION_KEY));
+
+    await idbClearSessions(db);
+    const deleted = await loadOrMigrateAiSessions(() => {
+      assert.fail('completed migration must not retry the stale overflow markers');
+    }, diskIds);
+    assert.equal(deleted.authoritativeEmpty, true);
+    assert.deepEqual(deleted.sessions, []);
   } finally {
     idb.restore();
     resetAiSessionsIdbForTests();

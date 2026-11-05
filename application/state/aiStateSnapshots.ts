@@ -410,6 +410,14 @@ const backupMirror = new DebouncedBackupMirror((json) => {
   }
 });
 
+let aiSessionsBackupRecoveryPending = false;
+
+/** Partial migration must not rotate away generations holding disk-only chats. */
+export function setAiSessionsBackupRecoveryPending(pending: boolean) {
+  aiSessionsBackupRecoveryPending = pending;
+  if (pending) backupMirror.reset();
+}
+
 export function flushBackupMirror() {
   try {
     backupMirror.flushNow();
@@ -420,9 +428,11 @@ export function flushBackupMirror() {
 
 export function __resetBackupMirrorForTests() {
   backupMirror.reset();
+  aiSessionsBackupRecoveryPending = false;
 }
 
 export function scheduleBackupMirror(json: string) {
+  if (aiSessionsBackupRecoveryPending) return;
   try {
     backupMirror.schedule(json);
   } catch {
@@ -432,6 +442,7 @@ export function scheduleBackupMirror(json: string) {
 
 /** Write one immediate backup generation (bypasses the debounce window). */
 function writeImmediateBackupGeneration(json: string) {
+  if (aiSessionsBackupRecoveryPending) return;
   try {
     backupMirror.schedule(json);
     backupMirror.flushNow();
