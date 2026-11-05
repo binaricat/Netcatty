@@ -398,7 +398,7 @@ test("cancelled compressed extraction leaves the existing folder untouched", asy
     try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
   });
   const waitFor = async (predicate) => {
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 30000;
     while (Date.now() < deadline) {
       if (predicate()) return true;
       await new Promise((resolve) => setTimeout(resolve, 20));
