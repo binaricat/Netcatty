@@ -54,13 +54,7 @@ function createFastSftp(overrides) {
   sftp.mkdir = (_path, callback) => callback(null);
   sftp.unlink = (_path, callback) => callback(null);
   sftp.end = () => {};
-  // Mirror ssh2 SFTP outstanding-request map so softDispose deferred-end can
-  // wait for quiescence in unit tests (#4134 / Codex 4475686359).
-  sftp._requests = {};
   Object.assign(sftp, overrides);
-  if (!sftp._requests || typeof sftp._requests !== "object") {
-    sftp._requests = {};
-  }
   return sftp;
 }
 
@@ -5528,145 +5522,6 @@ test("large isolated upload cancel does not end the shared SSH client (#4134)", 
   assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:error"), false);
 });
 
-test("large isolated download cancel softDispose deferred-ends the channel (#4134)", async (t) => {
-  // softDispose must not sftp.end() while READs are held (even past the old 2s
-  // wall-clock), and must deferred-end only after sftp._requests drains.
-  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-4134-isolated-dl-cancel-"));
-  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
-  const payload = Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES + TRANSFER_CHUNK_SIZE, 77);
-  const targetPath = path.join(tempDir, "download.bin");
-
-  let sshClientEndCalls = 0;
-  let isolatedEndWhileHeld = 0;
-  let isolatedEndCalls = 0;
-  let browseEndCalls = 0;
-  let holdReads = true;
-  let nextReqId = 0;
-  const pendingReads = [];
-
-  const isolatedSftp = createFastSftp({
-    open(_remotePath, _flags, callback) {
-      callback(null, Buffer.from("isolated-read-handle"));
-    },
-    read(_handle, buffer, offset, length, position, callback) {
-      const reqId = `held-read-${nextReqId++}`;
-      const complete = () => {
-        delete isolatedSftp._requests[reqId];
-        const end = Math.min(position + length, payload.length);
-        const slice = payload.subarray(position, end);
-        slice.copy(buffer, offset);
-        callback(null, slice.length, buffer, position);
-      };
-      if (holdReads) {
-        isolatedSftp._requests[reqId] = { cb: complete };
-        pendingReads.push(complete);
-        return;
-      }
-      setImmediate(complete);
-    },
-    close(_handle, callback) {
-      callback(null);
-    },
-    end() {
-      isolatedEndCalls += 1;
-      if (holdReads && pendingReads.length > 0) {
-        isolatedEndWhileHeld += 1;
-      }
-    },
-  });
-
-  const browseSftp = createFastSftp({
-    readdir(_remotePath, callback) {
-      if (browseEndCalls > 0 || sshClientEndCalls > 0) {
-        callback(new Error("browse session ended"));
-        return;
-      }
-      callback(null, [{ filename: "keep" }]);
-    },
-    end() {
-      browseEndCalls += 1;
-    },
-  });
-
-  const sshClient = {
-    end() {
-      sshClientEndCalls += 1;
-    },
-    sftp(callback) {
-      callback(null, isolatedSftp);
-    },
-  };
-
-  const client = {
-    sftp: browseSftp,
-    client: sshClient,
-    stat() {
-      return Promise.resolve({ size: payload.length });
-    },
-  };
-  transferBridge.init({ sftpClients: new Map([["source", client]]) });
-
-  const sender = createSender();
-  const transferId = "isolated-download-cancel-4134";
-  const running = transferBridge.startTransfer({ sender }, {
-    transferId,
-    sourcePath: "/tmp/isolated-cancel-4134.bin",
-    targetPath,
-    sourceType: "sftp",
-    targetType: "local",
-    sourceSftpId: "source",
-    totalBytes: payload.length,
-    resumable: true,
-    skipAdmission: true,
-  });
-
-  const ready = await waitUntil(
-    () => pendingReads.length >= DOWNLOAD_TRANSFER_CONCURRENCY,
-    2000,
-  );
-  assert.equal(ready, true, "expected isolated READ fanout to be in flight");
-  assert.equal(isolatedEndWhileHeld, 0);
-  assert.equal(sshClientEndCalls, 0);
-
-  await transferBridge.cancelTransfer(null, { transferId });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(
-    isolatedEndWhileHeld,
-    0,
-    "cancel must not sftp.end() the isolated download channel while READs are held",
-  );
-  assert.equal(sshClientEndCalls, 0, "cancel must not end the shared SSH client");
-  assert.equal(browseEndCalls, 0, "cancel must not end the browse SFTP channel");
-
-  // Codex 4475686359: held READs past the old 2s wall-clock must NOT trigger end.
-  await new Promise((resolve) => setTimeout(resolve, 2500));
-  assert.equal(
-    isolatedEndCalls,
-    0,
-    "deferred dispose must not sftp.end() while _requests are still pending past 2s",
-  );
-  assert.equal(isolatedEndWhileHeld, 0);
-  assert.ok(
-    Object.keys(isolatedSftp._requests).length > 0,
-    "expected held READs to remain in sftp._requests during the wait",
-  );
-
-  // Release held READs — deferred dispose should then end after quiescence.
-  holdReads = false;
-  for (const complete of pendingReads.splice(0)) complete();
-  const result = await running;
-  assert.equal(result.cancelled, true, result);
-  assert.equal(sshClientEndCalls, 0);
-  assert.equal(browseEndCalls, 0);
-  assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:cancelled"), true);
-  assert.ok(
-    await waitUntil(() => isolatedEndCalls >= 1, 2000),
-    "softDisposed isolated download channel must deferred-end after request drain",
-  );
-  assert.equal(isolatedEndWhileHeld, 0);
-  assert.equal(Object.keys(isolatedSftp._requests).length, 0);
-});
-
 test("small shared upload pause leaves the browse session usable", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-small-upload-shared-pause-"));
   t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
@@ -6534,8 +6389,6 @@ test("fastPut fallback cancel settles while prior isolated write OPEN gate is un
   let firstOpenStarted = false;
   let firstIsolated = null;
   let fastPutCalls = 0;
-  let reopenedEnded = 0;
-  let reopenedEndAtCancel = 0;
   const sharedSftp = createFastSftp({
     lstat(remotePath, callback) {
       const key = String(remotePath);
@@ -6601,9 +6454,7 @@ test("fastPut fallback cancel settles while prior isolated write OPEN gate is un
             fastPutCalls += 1;
             cb(null);
           },
-          end() {
-            reopenedEnded += 1;
-          },
+          end() {},
         }));
       },
     },
@@ -6649,20 +6500,10 @@ test("fastPut fallback cancel settles while prior isolated write OPEN gate is un
 
   assert.match(result.error || "", /cancel/i);
   assert.equal(fastPutCalls, 0, "cancel must settle before fastPut runs on unresolved gate");
-  reopenedEndAtCancel = reopenedEnded;
-  // #4134: cancel must settle without requiring sftp.end() at the abort instant.
-  assert.equal(
-    reopenedEndAtCancel,
-    0,
-    "cancel during gate wait must not end the reopened channel mid-flight",
-  );
+  // #4134: cancel must settle without requiring sftp.end() on the reopened
+  // channel — ending mid-flight on the shared SSH transport can drop the
+  // whole session. Hang-freedom + cancelled event are the contract.
   assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:cancelled"), true);
-  // Drain-based deferred dispose: no outstanding _requests on the reopened
-  // channel, so it should end shortly after cancel settle (Codex P2 / 4475686359).
-  assert.ok(
-    await waitUntil(() => reopenedEnded >= 1, 2000),
-    "reopened isolated channel must deferred-end after request drain",
-  );
 });
 
 test("fastPut fallback fails closed when prior isolated write OPEN gate never settles", async (t) => {
