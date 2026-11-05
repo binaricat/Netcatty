@@ -1512,6 +1512,13 @@ async function inspectLocalPromotionTarget(targetPath) {
 // ~5 Hz is smooth enough for bars; do not stack another 500ms in the store.
 const PROGRESS_THROTTLE_MS = 200;
 const ISOLATED_DOWNLOAD_IDLE_TTL_MS = 5000;
+// Soft-cancelled isolated subsystem dispose: poll sftp._requests for quiescence
+// and only then call sftp.end(). Never treat wall-clock alone as proof of quiet
+// (#4134 / Codex 4475686359). Past MAX with requests still pending: abandon
+// (skip end) — a leaked subsystem until session close is safer than dropping
+// the shared SSH transport mid-flight.
+const ISOLATED_CHANNEL_DEFERRED_DISPOSE_POLL_MS = 50;
+const ISOLATED_CHANNEL_DEFERRED_DISPOSE_MAX_MS = 60_000;
 
 // Speed calculation uses strict sliding-window average:
 // speed = bytes_delta_in_window / time_delta_in_window
@@ -1810,6 +1817,8 @@ function takePendingCancel(transferId) {
 const admittedActiveByResource = new Map();
 let admittedTransferLimit = 2;
 const isolatedDownloadChannelPools = new WeakMap();
+/** @type {WeakMap<object, NodeJS.Timeout>} deferred sftp.end() after softDispose cancel */
+const deferredIsolatedChannelDisposeTimers = new WeakMap();
 // One concurrent 64-READ fanout download per SFTP session (#1507) — covers both
 // isolated channels and shared/sudo browse READs. Extra downloads wait for the
 // session slot instead of degrading to serial createReadStream (#2719 / #2449).
@@ -2338,14 +2347,65 @@ function scheduleIdleIsolatedDownloadChannel(client, sftp) {
   sftp?.once?.("error", onIdleError);
 }
 
+function countPendingSftpRequests(sftp) {
+  const requests = sftp?._requests;
+  if (!requests || typeof requests !== "object") return 0;
+  return Object.keys(requests).length;
+}
+
+function clearDeferredIsolatedChannelDispose(sftp) {
+  const timer = deferredIsolatedChannelDisposeTimers.get(sftp);
+  if (!timer) return;
+  clearTimeout(timer);
+  deferredIsolatedChannelDisposeTimers.delete(sftp);
+}
+
+/**
+ * End an isolated SFTP subsystem once outstanding requests have drained.
+ * Used when cancel must not call sftp.end() mid-flight on a transport shared
+ * with the terminal (#4134), but the channel should still close after quiet
+ * (Codex P2). Polls sftp._requests; if still pending past MAX, abandons
+ * rather than ending mid-flight (Codex 4475686359).
+ */
+function scheduleDeferredIsolatedChannelDispose(sftp) {
+  if (!sftp) return;
+  clearDeferredIsolatedChannelDispose(sftp);
+  const startedAt = Date.now();
+  const tick = () => {
+    deferredIsolatedChannelDisposeTimers.delete(sftp);
+    if (countPendingSftpRequests(sftp) > 0) {
+      if (Date.now() - startedAt >= ISOLATED_CHANNEL_DEFERRED_DISPOSE_MAX_MS) {
+        // Abandon until session close — do not recreate #4134.
+        return;
+      }
+      const timer = setTimeout(tick, ISOLATED_CHANNEL_DEFERRED_DISPOSE_POLL_MS);
+      if (typeof timer.unref === "function") timer.unref();
+      deferredIsolatedChannelDisposeTimers.set(sftp, timer);
+      return;
+    }
+    try { sftp.end?.(); } catch { /* ignore */ }
+  };
+  // First check ASAP; if already quiet, end without a fixed settle delay.
+  const timer = setTimeout(tick, 0);
+  if (typeof timer.unref === "function") timer.unref();
+  deferredIsolatedChannelDisposeTimers.set(sftp, timer);
+}
+
 function releaseIsolatedDownloadChannel(client, sftp, options = {}) {
   const { dispose = false, softDispose = false } = options;
   const pool = isolatedDownloadChannelPools.get(client);
-  // softDispose: drop the channel without sftp.end(). Abrupt end mid-transfer
+  // softDispose: do not sftp.end() at the abort instant. Abrupt end mid-transfer
   // on a transport shared with the terminal can kill the whole SSH (#4134).
+  // Drop from the pool immediately, then schedule a deferred end after request
+  // drain so remote handles/subsystems are not leaked forever (Codex P2 /
+  // 4475686359 — quiescence, not wall-clock alone).
   if (!pool) {
-    if (dispose && !softDispose) {
-      try { sftp?.end?.(); } catch { }
+    if (dispose) {
+      if (softDispose) scheduleDeferredIsolatedChannelDispose(sftp);
+      else {
+        clearDeferredIsolatedChannelDispose(sftp);
+        try { sftp?.end?.(); } catch { }
+      }
     }
     return;
   }
@@ -2355,12 +2415,16 @@ function releaseIsolatedDownloadChannel(client, sftp, options = {}) {
   clearIdleIsolatedDownloadErrorHandler(pool, sftp);
 
   if (dispose) {
-    if (!softDispose) {
+    if (softDispose) {
+      scheduleDeferredIsolatedChannelDispose(sftp);
+    } else {
+      clearDeferredIsolatedChannelDispose(sftp);
       try { sftp?.end?.(); } catch { }
     }
     return;
   }
 
+  clearDeferredIsolatedChannelDispose(sftp);
   pool.idle.push(sftp);
   scheduleIdleIsolatedDownloadChannel(client, sftp);
 }
@@ -2651,10 +2715,18 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
         try { sftp.removeListener("error", onFastSftpError); } catch { /* ignore */ }
         onFastSftpError = null;
       }
-      // End disposable channels only after a quiet settle — never on cancel.
-      // Abrupt end mid-transfer can tear down the shared SSH transport (#4134).
-      if (disposeChannel && !transfer.cancelled) {
-        try { sftp.end(); } catch { /* ignore */ }
+      // End disposable channels after settle. On cancel, defer the end until
+      // outstanding requests drain so we never tear the shared SSH transport
+      // mid-flight (#4134 / Codex 4475686359) but still close the subsystem
+      // once quiet. Stopping ssh2 fastXfer internal scheduling needs invasive
+      // hooks — left as residual; drain-then-end is the minimal leak fix.
+      if (disposeChannel) {
+        if (transfer.cancelled) {
+          scheduleDeferredIsolatedChannelDispose(sftp);
+        } else {
+          clearDeferredIsolatedChannelDispose(sftp);
+          try { sftp.end(); } catch { /* ignore */ }
+        }
       }
 
       if (transfer.cancelled) reject(new Error("Transfer cancelled"));
@@ -2992,10 +3064,17 @@ async function uploadFileOnChannel(
       fastPutOk = true;
     } catch (err) {
       // Gate-wait / fastPut failure: end the reopened isolated channel before
-      // nulling — except on cancel. Ending mid-fastPut on the shared transport
-      // can drop the whole SSH session (#4134). Non-cancel failures still end.
-      if (!transfer.cancelled && isolated && typeof isolated.end === "function") {
-        try { isolated.end(); } catch { /* ignore */ }
+      // nulling. On cancel, defer until request drain — never mid-flight on the
+      // shared transport (#4134 / Codex 4475686359) — so the subsystem is not
+      // leaked. uploadViaFastPut may already have scheduled the same deferred
+      // dispose; rescheduling is idempotent (resets the poll).
+      if (isolated) {
+        if (transfer.cancelled) {
+          scheduleDeferredIsolatedChannelDispose(isolated);
+        } else if (typeof isolated.end === "function") {
+          clearDeferredIsolatedChannelDispose(isolated);
+          try { isolated.end(); } catch { /* ignore */ }
+        }
       }
       isolated = null;
       // Restore pause capability for subsequent pause-aware strategies.
