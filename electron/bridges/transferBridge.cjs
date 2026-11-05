@@ -1512,10 +1512,6 @@ async function inspectLocalPromotionTarget(targetPath) {
 // ~5 Hz is smooth enough for bars; do not stack another 500ms in the store.
 const PROGRESS_THROTTLE_MS = 200;
 const ISOLATED_DOWNLOAD_IDLE_TTL_MS = 5000;
-// Quiet settle before ending a soft-disposed isolated subsystem after cancel.
-// Matches forceFinish / CLOSE timeout grace so mid-flight READs/WRITEs can drain
-// before sftp.end() (#4134 / Codex P2 deferred dispose).
-const ISOLATED_CHANNEL_DEFERRED_DISPOSE_MS = 2000;
 
 // Speed calculation uses strict sliding-window average:
 // speed = bytes_delta_in_window / time_delta_in_window
@@ -1814,8 +1810,6 @@ function takePendingCancel(transferId) {
 const admittedActiveByResource = new Map();
 let admittedTransferLimit = 2;
 const isolatedDownloadChannelPools = new WeakMap();
-/** @type {WeakMap<object, NodeJS.Timeout>} deferred sftp.end() after softDispose cancel */
-const deferredIsolatedChannelDisposeTimers = new WeakMap();
 // One concurrent 64-READ fanout download per SFTP session (#1507) — covers both
 // isolated channels and shared/sudo browse READs. Extra downloads wait for the
 // session slot instead of degrading to serial createReadStream (#2719 / #2449).
@@ -2344,43 +2338,14 @@ function scheduleIdleIsolatedDownloadChannel(client, sftp) {
   sftp?.once?.("error", onIdleError);
 }
 
-function clearDeferredIsolatedChannelDispose(sftp) {
-  const timer = deferredIsolatedChannelDisposeTimers.get(sftp);
-  if (!timer) return;
-  clearTimeout(timer);
-  deferredIsolatedChannelDisposeTimers.delete(sftp);
-}
-
-/**
- * End an isolated SFTP subsystem after a quiet settle window. Used when cancel
- * must not call sftp.end() mid-flight on a transport shared with the terminal
- * (#4134), but the channel must not be abandoned forever (Codex P2).
- */
-function scheduleDeferredIsolatedChannelDispose(sftp) {
-  if (!sftp) return;
-  clearDeferredIsolatedChannelDispose(sftp);
-  const timer = setTimeout(() => {
-    deferredIsolatedChannelDisposeTimers.delete(sftp);
-    try { sftp.end?.(); } catch { /* ignore */ }
-  }, ISOLATED_CHANNEL_DEFERRED_DISPOSE_MS);
-  if (typeof timer.unref === "function") timer.unref();
-  deferredIsolatedChannelDisposeTimers.set(sftp, timer);
-}
-
 function releaseIsolatedDownloadChannel(client, sftp, options = {}) {
   const { dispose = false, softDispose = false } = options;
   const pool = isolatedDownloadChannelPools.get(client);
-  // softDispose: do not sftp.end() at the abort instant. Abrupt end mid-transfer
+  // softDispose: drop the channel without sftp.end(). Abrupt end mid-transfer
   // on a transport shared with the terminal can kill the whole SSH (#4134).
-  // Drop from the pool immediately, then schedule a deferred end after quiet
-  // settle so remote handles/subsystems are not leaked forever (Codex P2).
   if (!pool) {
-    if (dispose) {
-      if (softDispose) scheduleDeferredIsolatedChannelDispose(sftp);
-      else {
-        clearDeferredIsolatedChannelDispose(sftp);
-        try { sftp?.end?.(); } catch { }
-      }
+    if (dispose && !softDispose) {
+      try { sftp?.end?.(); } catch { }
     }
     return;
   }
@@ -2390,16 +2355,12 @@ function releaseIsolatedDownloadChannel(client, sftp, options = {}) {
   clearIdleIsolatedDownloadErrorHandler(pool, sftp);
 
   if (dispose) {
-    if (softDispose) {
-      scheduleDeferredIsolatedChannelDispose(sftp);
-    } else {
-      clearDeferredIsolatedChannelDispose(sftp);
+    if (!softDispose) {
       try { sftp?.end?.(); } catch { }
     }
     return;
   }
 
-  clearDeferredIsolatedChannelDispose(sftp);
   pool.idle.push(sftp);
   scheduleIdleIsolatedDownloadChannel(client, sftp);
 }
@@ -2690,18 +2651,10 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
         try { sftp.removeListener("error", onFastSftpError); } catch { /* ignore */ }
         onFastSftpError = null;
       }
-      // End disposable channels after settle. On cancel, defer the end so we
-      // never tear the shared SSH transport mid-flight (#4134) but still close
-      // the subsystem once quiet (Codex P2 deferred dispose). Stopping ssh2
-      // fastXfer's internal scheduling itself would need invasive hooks; ending
-      // after the force-settle window is the aligned minimal fix.
-      if (disposeChannel) {
-        if (transfer.cancelled) {
-          scheduleDeferredIsolatedChannelDispose(sftp);
-        } else {
-          clearDeferredIsolatedChannelDispose(sftp);
-          try { sftp.end(); } catch { /* ignore */ }
-        }
+      // End disposable channels only after a quiet settle — never on cancel.
+      // Abrupt end mid-transfer can tear down the shared SSH transport (#4134).
+      if (disposeChannel && !transfer.cancelled) {
+        try { sftp.end(); } catch { /* ignore */ }
       }
 
       if (transfer.cancelled) reject(new Error("Transfer cancelled"));
@@ -3039,17 +2992,10 @@ async function uploadFileOnChannel(
       fastPutOk = true;
     } catch (err) {
       // Gate-wait / fastPut failure: end the reopened isolated channel before
-      // nulling. On cancel, defer the end — never mid-flight on the shared
-      // transport (#4134) — so the subsystem is not leaked (Codex P2).
-      // uploadViaFastPut may already have scheduled the same deferred dispose;
-      // rescheduling is idempotent (resets the quiet timer).
-      if (isolated) {
-        if (transfer.cancelled) {
-          scheduleDeferredIsolatedChannelDispose(isolated);
-        } else if (typeof isolated.end === "function") {
-          clearDeferredIsolatedChannelDispose(isolated);
-          try { isolated.end(); } catch { /* ignore */ }
-        }
+      // nulling — except on cancel. Ending mid-fastPut on the shared transport
+      // can drop the whole SSH session (#4134). Non-cancel failures still end.
+      if (!transfer.cancelled && isolated && typeof isolated.end === "function") {
+        try { isolated.end(); } catch { /* ignore */ }
       }
       isolated = null;
       // Restore pause capability for subsequent pause-aware strategies.
