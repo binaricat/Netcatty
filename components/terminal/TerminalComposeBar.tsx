@@ -1,3 +1,4 @@
+import { ComposeDirectoryPicker } from './ComposeDirectoryPicker';
 /**
  * Terminal Compose Bar
  * An immersive prompt bar below the terminal with a quick-snippet strip,
@@ -29,7 +30,7 @@ import {
 const SNIPPET_STRIP_HEIGHT = 30;
 const RESIZE_HANDLE_HEIGHT = 6;
 
-type ComposeBarTheme = {
+export type ComposeBarTheme = {
   resolvedBg: string;
   resolvedFg: string;
   borderColor: string;
@@ -273,6 +274,7 @@ const ComposeBarSnippetManagePopover = memo(function ComposeBarSnippetManagePopo
 });
 
 export interface TerminalComposeBarProps {
+  contextChipsEnabled?: boolean;
   // Return false for rejected or sensitive input so it is not recalled.
   onSend: (text: string) => boolean | void | Promise<boolean | void>;
   sessionId: string;
@@ -291,6 +293,7 @@ export interface TerminalComposeBarProps {
 
 export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
   onSend,
+  contextChipsEnabled = true,
   sessionId,
   onClose,
   onSnippetClick,
@@ -610,6 +613,9 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
           pinnedCountLabel={t('terminal.composeBar.pinnedCount', { count: pinnedSnippets.length })}
         />
       </div>
+
+      {contextChipsEnabled && <ComposeDirectoryPicker key={sessionId} sessionId={sessionId} theme={theme}
+        onReturnFocus={() => textareaRef.current?.focus({ preventScroll: true })} />}
 
       <div className="flex-1 min-h-0 px-3 pt-1.5 pb-2 flex flex-col">
         <div className="flex flex-1 min-h-0 items-start gap-1.5">

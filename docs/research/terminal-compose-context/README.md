@@ -15,9 +15,11 @@ Context Chips： [目录] [分支] [变更统计] [Node] [PR]
 
 芯片显示上下文，点击就近操作。首期只显示已实现的目录芯片，其余按终端能力与上下文出现。共享终端主题、紧凑图标和文字、悬停说明及键盘焦点；不额外显示占据高度的行标题。窄分屏优先保留目录，长路径／分支名截断显示，完整值可查看。
 
+“设置 → 终端 → Context Chips”控制整行显示，默认开启；关闭时保留命令草稿，并停止芯片额外发起的目录读取与命令后刷新。
+
 | 功能 | 开发目标 | 调研与交互 |
 | --- | --- | --- |
-| Directory Picker | 显示当前位置；搜索子目录、返回父目录、选择后立即切换并关闭菜单 | [directory-picker.md](directory-picker.md) · [交互示意](directory-picker-demo.html) |
+| Directory Picker | 显示当前位置；搜索子目录、返回父目录、选择后立即切换并关闭菜单 | [功能规格](directory-picker.md) · [交互示意](directory-picker-demo.html) · [跨平台研究](directory-picker-cross-platform.md) · [后续计划](directory-picker-follow-up.md) |
 | Git Branch | 显示当前分支，搜索并切换其他分支 | [git-branch.md](git-branch.md) |
 | Git Changes | 显示改动文件数及增删行；预留变更文件面板入口 | [git-changes.md](git-changes.md) |
 | Node Version | 显示当前终端 Node 版本；支持的管理器可提供版本切换 | [node-version.md](node-version.md) |

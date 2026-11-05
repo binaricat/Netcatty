@@ -6,6 +6,10 @@
 
 本地模拟见 [directory-picker-demo.html](directory-picker-demo.html)，不访问文件系统或真实终端。
 
+Context Chips 在“设置 → 终端”中默认开启，可关闭整行。该偏好随现有终端设置保存，旧配置默认开启；关闭不会发送或清空草稿，也不会继续订阅芯片的额外 cwd 刷新。
+
+Windows 原生 shell、跨平台路径与 shell 集成的后续范围见 [跨平台研究](directory-picker-cross-platform.md) 和 [开发计划](directory-picker-follow-up.md)，不改变本 PR 的产品支持范围。
+
 ## 1. 目标与首期边界
 
 用户在撰写命令前，能看到**当前聚焦终端的真实工作目录**，并通过一个小菜单搜索当前层子目录、返回父目录、选择目录，使接下来执行的命令落在目标位置。
