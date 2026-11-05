@@ -21,6 +21,12 @@ const {
  * An IPC-retained utilityProcess that swallowed a startup failure
  * would otherwise stay alive without a message listener, leaving every
  * manager request pending forever instead of rejecting/replacing it.
+ *
+ * Benign stream teardown (EPIPE / ERR_STREAM_DESTROYED) is classified as
+ * `ignore` and must NOT call `logError`/`console.error`: writing diagnostics
+ * through an already-broken console pipe re-enters this handler and busy-
+ * loops (see #4136). A `consoleBroken` latch also no-ops the default
+ * console.error path after stdout/stderr emit `error`.
  */
 function installTerminalWorkerErrorGuards(options = {}) {
   const processObject = options.processObject || process;
@@ -28,9 +34,27 @@ function installTerminalWorkerErrorGuards(options = {}) {
     throw new Error("A process-like EventEmitter is required");
   }
   const report = typeof options.report === "function" ? options.report : () => {};
+  let consoleBroken = false;
+  const latchConsoleBroken = () => {
+    consoleBroken = true;
+  };
+  for (const stream of [processObject.stdout, processObject.stderr]) {
+    if (stream && typeof stream.on === "function") {
+      stream.on("error", latchConsoleBroken);
+    }
+  }
   const logError = typeof options.logError === "function"
     ? options.logError
-    : (...args) => console.error(...args);
+    : (...args) => {
+      if (consoleBroken) return;
+      try {
+        console.error(...args);
+      } catch {
+        // Sync write failures must not escalate; async EPIPE arrives via
+        // stream `error` and is covered by the consoleBroken latch above.
+        consoleBroken = true;
+      }
+    };
   // Default to runtime semantics only when a caller provides no startup
   // signal; process.cjs always passes one.
   const isRuntimeStarted = typeof options.isRuntimeStarted === "function"
@@ -69,6 +93,16 @@ function installTerminalWorkerErrorGuards(options = {}) {
       fatal.__terminalWorkerFatalStartupError = true;
       throw fatal;
     }
+    // Never log through a stream that just failed: ignore-classified EPIPE
+    // would otherwise call console.error → EPIPE → uncaughtException → loop.
+    if (decision.action === "ignore") {
+      try {
+        report(origin, err, decision);
+      } catch {
+        // Error reporting must never be able to escalate into a worker crash.
+      }
+      return;
+    }
     logError(
       `Suppressed terminal worker ${labelFor(origin)} (${decision.reason}):`,
       err,
@@ -89,6 +123,11 @@ function installTerminalWorkerErrorGuards(options = {}) {
   return () => {
     processObject.removeListener("uncaughtException", handleUncaughtException);
     processObject.removeListener("unhandledRejection", handleUnhandledRejection);
+    for (const stream of [processObject.stdout, processObject.stderr]) {
+      if (stream && typeof stream.removeListener === "function") {
+        stream.removeListener("error", latchConsoleBroken);
+      }
+    }
   };
 }
 
