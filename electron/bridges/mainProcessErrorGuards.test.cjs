@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const {
   classifyProcessError,
+  createDiagnosticLogger,
   createProcessErrorController,
   installProcessErrorHandlers,
   isNonFatalNetworkError,
@@ -250,4 +251,63 @@ test("controller suppresses ssh-style errors with a level property", () => {
 
   assert.equal(isNonFatalNetworkError(err), true);
   assert.equal(result.action, "suppress");
+});
+
+test("diagnostic logger drops lines once the sink reports an error", () => {
+  const sink = new EventEmitter();
+  const written = [];
+  const log = createDiagnosticLogger(
+    (...args) => written.push(args),
+    { streams: [sink] },
+  );
+
+  log("first");
+  sink.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+  log("second");
+
+  assert.deepEqual(written, [["first"]]);
+});
+
+test("diagnostic logger latches closed when the sink throws synchronously", () => {
+  let attempts = 0;
+  const log = createDiagnosticLogger(() => {
+    attempts += 1;
+    throw Object.assign(new Error("write EIO"), { code: "EIO" });
+  });
+
+  assert.doesNotThrow(() => log("boom"));
+  assert.doesNotThrow(() => log("boom again"));
+  assert.equal(attempts, 1);
+});
+
+test("diagnostic logger dispose releases the sink listeners", () => {
+  const sink = new EventEmitter();
+  const log = createDiagnosticLogger(() => {}, { streams: [sink] });
+
+  assert.equal(sink.listenerCount("error"), 1);
+  log.dispose();
+  assert.equal(sink.listenerCount("error"), 0);
+});
+
+test("a broken diagnostic sink still lets runtime errors be captured", () => {
+  const captured = [];
+  const controller = createProcessErrorController({
+    captureError(source, err) {
+      captured.push([source, err.message]);
+    },
+    onFatalError(err) {
+      throw err;
+    },
+    logError: createDiagnosticLogger(() => {
+      throw Object.assign(new Error("write EIO"), { code: "EIO" });
+    }),
+    logWarn: createDiagnosticLogger(() => {
+      throw Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+    }),
+  });
+  controller.beginMainWindowStartup();
+  controller.completeMainWindowStartup({ windowShown: true });
+
+  assert.doesNotThrow(() => controller.handleUncaughtException(new Error("runtime boom")));
+  assert.deepEqual(captured, [["uncaughtException", "runtime boom"]]);
 });
