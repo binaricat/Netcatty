@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 
@@ -7,6 +8,8 @@ const { installTerminalWorkerErrorGuards } = require("./workerProcessGuards.cjs"
 function createFakeProcess() {
   const listeners = new Map();
   return {
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
     on(name, callback) {
       listeners.set(name, callback);
     },
@@ -41,6 +44,129 @@ test("worker guards suppress uncaught exceptions and report them", () => {
   assert.equal(logs.length, 1);
 });
 
+test("worker guards ignore EPIPE without calling logError", () => {
+  const fakeProcess = createFakeProcess();
+  const reports = [];
+  const logs = [];
+  installTerminalWorkerErrorGuards({
+    processObject: fakeProcess,
+    report: (origin, err, decision) => reports.push({ origin, err, reason: decision.reason, action: decision.action }),
+    logError: (...args) => logs.push(args),
+  });
+
+  const err = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  assert.doesNotThrow(() => fakeProcess.emit("uncaughtException", err));
+
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].action, "ignore");
+  assert.equal(reports[0].reason, "benign stream teardown");
+  assert.equal(logs.length, 0, "ignore path must not call logError (avoids EPIPE feedback loop)");
+});
+
+test("worker guards ignore ERR_STREAM_DESTROYED without calling logError", () => {
+  const fakeProcess = createFakeProcess();
+  const reports = [];
+  const logs = [];
+  installTerminalWorkerErrorGuards({
+    processObject: fakeProcess,
+    report: (origin, err, decision) => reports.push({ origin, err, action: decision.action }),
+    logError: (...args) => logs.push(args),
+  });
+
+  const err = Object.assign(new Error("Cannot call write after a stream was destroyed"), {
+    code: "ERR_STREAM_DESTROYED",
+  });
+  assert.doesNotThrow(() => fakeProcess.emit("unhandledRejection", err));
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].action, "ignore");
+  assert.equal(logs.length, 0);
+});
+
+test("EPIPE ignore path cannot re-enter via a throwing logError", () => {
+  const fakeProcess = createFakeProcess();
+  let logCalls = 0;
+  installTerminalWorkerErrorGuards({
+    processObject: fakeProcess,
+    report: () => {},
+    logError: () => {
+      logCalls += 1;
+      throw Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+    },
+  });
+
+  // Pure EPIPE emit never reaches logError, so a throwing logError cannot loop.
+  for (let i = 0; i < 20; i += 1) {
+    assert.doesNotThrow(() => fakeProcess.emit(
+      "uncaughtException",
+      Object.assign(new Error("write EPIPE"), { code: "EPIPE" }),
+    ));
+  }
+  assert.equal(logCalls, 0);
+
+  // Suppress path may call logError once; feeding the thrown EPIPE back in
+  // must then short-circuit on ignore without further logError calls.
+  assert.throws(() => fakeProcess.emit(
+    "uncaughtException",
+    Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+  ));
+  assert.equal(logCalls, 1);
+  assert.doesNotThrow(() => fakeProcess.emit(
+    "uncaughtException",
+    Object.assign(new Error("write EPIPE"), { code: "EPIPE" }),
+  ));
+  assert.equal(logCalls, 1, "post-suppress EPIPE must not call logError again");
+});
+
+test("consoleBroken latch stops default console.error after stderr error", () => {
+  const fakeProcess = createFakeProcess();
+  const originalError = console.error;
+  let consoleCalls = 0;
+  console.error = (...args) => {
+    consoleCalls += 1;
+    return originalError(...args);
+  };
+  try {
+    installTerminalWorkerErrorGuards({
+      processObject: fakeProcess,
+      report: () => {},
+      // Use default logError (console.error) so the latch is exercised.
+    });
+    fakeProcess.stderr.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+
+    // Suppress-classified error would normally console.error; latch must no-op.
+    assert.doesNotThrow(() => fakeProcess.emit(
+      "uncaughtException",
+      Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+    ));
+    assert.equal(consoleCalls, 0, "latched console must not be written after stream error");
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("consoleBroken latch also arms from stdout error", () => {
+  const fakeProcess = createFakeProcess();
+  const originalError = console.error;
+  let consoleCalls = 0;
+  console.error = () => {
+    consoleCalls += 1;
+  };
+  try {
+    installTerminalWorkerErrorGuards({
+      processObject: fakeProcess,
+      report: () => {},
+    });
+    fakeProcess.stdout.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+    assert.doesNotThrow(() => fakeProcess.emit(
+      "uncaughtException",
+      Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+    ));
+    assert.equal(consoleCalls, 0);
+  } finally {
+    console.error = originalError;
+  }
+});
+
 test("worker guards suppress unhandled rejections with non-Error reasons", () => {
   const fakeProcess = createFakeProcess();
   const reports = [];
@@ -67,6 +193,24 @@ test("worker guards absorb report failures instead of rethrowing", () => {
   });
 
   assert.doesNotThrow(() => fakeProcess.emit("uncaughtException", new Error("boom")));
+});
+
+test("worker guards absorb report failures on ignore path", () => {
+  const fakeProcess = createFakeProcess();
+  installTerminalWorkerErrorGuards({
+    processObject: fakeProcess,
+    report: () => {
+      throw new Error("report route is dead");
+    },
+    logError: () => {
+      throw new Error("logError must not be called for ignore");
+    },
+  });
+
+  assert.doesNotThrow(() => fakeProcess.emit(
+    "uncaughtException",
+    Object.assign(new Error("write EPIPE"), { code: "EPIPE" }),
+  ));
 });
 
 test("uninstall removes the installed handlers", () => {
