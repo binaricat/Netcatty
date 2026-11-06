@@ -6,8 +6,11 @@ import type {
 } from '../domain/sync';
 import {
   cloudSyncPayloadsEqual,
+  convergentConflictAddressKey,
   materializeSyncPayloadFromConvergentState,
   planConvergentSyncMigration,
+  refreshConvergentSyncMigrationPlan,
+  resolveConvergentFieldConflict,
   stripConvergentSyncEnvelope,
   validateConvergentSyncPayload,
   type ConvergentMigrationPlan,
@@ -23,6 +26,25 @@ export interface PreparedConvergentMigration {
   plan: ConvergentMigrationPlan;
   providerBaselines: ConvergentProviderBaselineV2[];
   localSnapshot: SyncPayload;
+}
+
+export function resolvePreparedConvergentMigrationConflict(
+  prepared: PreparedConvergentMigration,
+  addressKey: string,
+  candidateDot: string,
+  manager: CloudSyncManager = getCloudSyncManager(),
+  now = Date.now(),
+): PreparedConvergentMigration {
+  const conflict = prepared.plan.preview.conflicts.find(
+    (entry) => convergentConflictAddressKey(entry.address) === addressKey,
+  );
+  if (!prepared.plan.state || !conflict) {
+    throw new Error('The convergent migration conflict no longer exists');
+  }
+  const state = resolveConvergentFieldConflict(
+    prepared.plan.state, conflict, candidateDot, manager.getState().deviceId, now,
+  );
+  return { ...prepared, plan: refreshConvergentSyncMigrationPlan(prepared.plan, state) };
 }
 
 interface LegacyProviderBaselineSeed {
