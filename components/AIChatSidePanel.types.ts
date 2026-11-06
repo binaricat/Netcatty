@@ -46,8 +46,8 @@ export interface AIChatSidePanelProps {
   updateSessionTitle: (sessionId: string, title: string) => void;
   /** Issue #4015 R2: rebind a dangling chat to this panel's scope (panel action, never agent content). */
   rebindSessionScope?: (sessionId: string, scope: { type: 'terminal' | 'workspace'; targetId: string; hostIds?: string[] }) => void;
-  /** Manual durability escape hatch: export the store to a JSON file (returns the path, '' when fixed-path). */
-  exportSessionsBackup?: () => Promise<string | null>;
+  /** Manual durability escape hatch: export the store to a JSON file (returns the path, '' when fixed-path). With `sessionIds`, exports only those chats. */
+  exportSessionsBackup?: (sessionIds?: readonly string[]) => Promise<string | null>;
   /** Import sessions from a JSON export; merges by id. Returns the imported count. */
   importSessionsBackup?: () => Promise<number>;
   updateSessionExternalSessionId: (sessionId: string, externalSessionId: string | undefined) => void;
@@ -113,6 +113,14 @@ export interface AIChatSidePanelProps {
   workspaces?: Array<{ id: string; title: string }>;
   /** All currently live terminal (and workspace) scope target ids. */
   liveScopeTargetIds?: Set<string>;
+  /** App-wide open terminal infos (all tabs), for the global session manager's rebind targets and dangling detection. */
+  appTerminalSessions?: Array<{
+    sessionId: string;
+    hostId: string;
+    hostname: string;
+    label: string;
+    connected: boolean;
+  }>;
 
   // Terminal session context (from parent)
   terminalSessions?: Array<{

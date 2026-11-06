@@ -1188,11 +1188,17 @@ export function useAIState() {
   // Manual durability escape hatch (issue #4015 follow-up): export the
   // current store to a user-chosen JSON file, or import one back in.
   // Import is an explicit action, so it may overwrite the live store.
-  const exportSessionsBackup = useCallback(async (): Promise<string | null> => {
+  // With `sessionIds`, export only those chats (global session manager,
+  // issue #4098 phase 4) — import merges by id, so a single-chat export
+  // restores just that chat.
+  const exportSessionsBackup = useCallback(async (sessionIds?: readonly string[]): Promise<string | null> => {
     const bridge = getAIBridge();
     if (!bridge?.aiSessionsBackupExport) return null;
+    const source = sessionIds && sessionIds.length > 0
+      ? sessionsRef.current.filter((session) => sessionIds.includes(session.id))
+      : sessionsRef.current;
     const result = await bridge.aiSessionsBackupExport({
-      json: JSON.stringify(sessionsRef.current),
+      json: JSON.stringify(source),
     });
     return result?.success ? (result.filePath ?? '') : null;
   }, []);

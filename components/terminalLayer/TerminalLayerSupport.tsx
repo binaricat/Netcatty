@@ -529,6 +529,21 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     () => (workspaces ?? []).map((workspace) => ({ id: workspace.id, title: workspace.title })),
     [workspaces],
   );
+  // Flattened open terminals across ALL tabs: the global AI session manager
+  // resolves chat scopes and rebind targets app-wide, not per-tab. Stable by
+  // reference while contexts are retained, so panel memo is unaffected.
+  const appTerminalInfos = useMemo(() => {
+    const seen = new Set<string>();
+    const infos: AITerminalSessionInfo[] = [];
+    for (const context of contextsByTabId.values()) {
+      for (const info of context.terminalSessions) {
+        if (!info.sessionId || seen.has(info.sessionId)) continue;
+        seen.add(info.sessionId);
+        infos.push(info);
+      }
+    }
+    return infos;
+  }, [contextsByTabId]);
 
   useEffect(() => {
     if (!pendingTerminalSelection) return;
@@ -638,6 +653,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     focusedSessionId={context.focusedSessionId}
                     workspaces={aiPanelWorkspaces}
                     terminalSessions={context.terminalSessions}
+                    appTerminalSessions={appTerminalInfos}
                     liveScopeTargetIds={liveScopeTargetIds}
                     resolveExecutorContext={resolveExecutorContext}
                     isVisible={isVisible}
