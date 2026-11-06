@@ -3536,6 +3536,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     options?: {
       broadcast?: boolean;
       multiLineRunMode?: Snippet["multiLineRunMode"];
+      /** Submit compose blocks through the shell's advertised paste support. */
+      preferBracketedPaste?: boolean;
       /** When false, skip term.focus() so multi-tab fan-out does not steal focus. */
       focus?: boolean;
       /** Force sensitive classification on the write (bypassed password fan-out, #3488). */
@@ -3584,7 +3586,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // Wrap in bracketed paste BEFORE appending \r so the Enter is sent
     // outside the paste markers — otherwise shells treat it as pasted text
     // instead of a submit action.
-    if (!lineDelayMs && isMultiLine && term.modes.bracketedPasteMode && !disableBracketedPasteRef.current) {
+    // Compose submits a command block, so keep it in the shell's input buffer
+    // even when clipboard bracketing is disabled. Otherwise a running command
+    // can consume the later lines as stdin (#4062). Still require shell support.
+    if (!lineDelayMs && isMultiLine && term.modes.bracketedPasteMode
+      && (options?.preferBracketedPaste || !disableBracketedPasteRef.current)) {
       data = wrapBracketedPaste(data);
     }
     if (!noAutoRun) data = `${data}\r`;

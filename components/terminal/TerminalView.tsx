@@ -1446,6 +1446,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
                 let anyRecipientSensitive = false;
                 let broadcastRecipientIds: readonly string[] = [];
                 const sent = await executeSnippetCommand(text, false, {
+                  preferBracketedPaste: true,
                   // Explicit target: active-only stays local while toolbar
                   // broadcast (keystrokes) can remain on, and send-to-all
                   // still fans out when the toolbar switch is off.
