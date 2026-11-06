@@ -316,6 +316,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   scopeHostIds,
   scopeLabel,
   focusedSessionId,
+  onSetWorkspaceAnchorChat,
   workspaces = [],
   terminalSessions = [],
   liveScopeTargetIds,
@@ -444,9 +445,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     preferredTerminalId: focusedSessionId,
     visibleSessionIds: visibleHistorySessionIds,
   });
+  // Issue #4098 phase 2: this workspace's anchored chat — used by the panel
+  // view resolver before any positional fallback could apply.
+  const workspaceAnchorChatId = scopeType === 'workspace'
+    ? workspaces.find((workspace) => workspace.id === scopeTargetId)?.anchorChatId
+    : undefined;
   const normalizedPanelView = useMemo<AIPanelView>(
-    () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId, scopeType),
-    [explicitPanelView, currentDraft, historySessions, persistedSessionId, scopeType],
+    () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId),
+    [explicitPanelView, currentDraft, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId],
   );
   const activeSession = useMemo(
     () => resolveDisplayedSession(normalizedPanelView, historySessions),
@@ -658,6 +664,13 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   useEffect(() => {
     if (!activeSession) return;
 
+    // Issue #4098 phase 2: a chat becoming active in the workspace scope pins
+    // the workspace's anchorChatId so member loss / restart resolve by id,
+    // never by position.
+    if (scopeType === 'workspace' && scopeTargetId && isVisible) {
+      onSetWorkspaceAnchorChat?.(scopeTargetId, activeSession.id);
+    }
+
     if (isVisible && activeSessionIdMap[scopeKey] !== activeSession.id) {
       setActiveSessionId(activeSession.id);
     }
@@ -665,7 +678,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     activeSession,
     activeSessionIdMap,
     scopeKey,
+    scopeType,
+    scopeTargetId,
     isVisible,
+    onSetWorkspaceAnchorChat,
     setActiveSessionId,
   ]);
 

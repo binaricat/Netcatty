@@ -300,6 +300,8 @@ interface AIChatPanelsHostProps {
   onOpenVaultHostFromChat?: (hostId: string) => void;
   onOpenVaultSectionFromChat?: (section: 'notes' | 'hosts' | 'snippets') => void;
   onOpenVaultSnippetFromChat?: (snippetId: string) => void;
+  /** Issue #4098 phase 2: pin the AI chat a workspace scope is anchored to. */
+  onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void;
   /** Live workspaces, threaded to AI chats for `/chats` scope titles. */
   workspaces?: Workspace[] | null;
 }
@@ -467,6 +469,7 @@ function aiChatPanelsHostAreEqual(
   if (prev.onOpenVaultHostFromChat !== next.onOpenVaultHostFromChat) return false;
   if (prev.onOpenVaultSectionFromChat !== next.onOpenVaultSectionFromChat) return false;
   if (prev.onOpenVaultSnippetFromChat !== next.onOpenVaultSnippetFromChat) return false;
+  if (prev.onSetWorkspaceAnchorChat !== next.onSetWorkspaceAnchorChat) return false;
   if (prev.workspaces !== next.workspaces) return false;
   if (prev.activeTabId === next.activeTabId) return true;
 
@@ -507,6 +510,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   onOpenVaultHostFromChat,
   onOpenVaultSectionFromChat,
   onOpenVaultSnippetFromChat,
+  onSetWorkspaceAnchorChat,
   workspaces,
 }) => {
   const aiConfig = useContext(AIConfigContext);
@@ -526,7 +530,11 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     updateDraft,
   } = aiConfig;
   const aiPanelWorkspaces = useMemo(
-    () => (workspaces ?? []).map((workspace) => ({ id: workspace.id, title: workspace.title })),
+    () => (workspaces ?? []).map((workspace) => ({
+      id: workspace.id,
+      title: workspace.title,
+      anchorChatId: workspace.anchorChatId,
+    })),
     [workspaces],
   );
 
@@ -637,6 +645,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     scopeLabel={context.scopeLabel}
                     focusedSessionId={context.focusedSessionId}
                     workspaces={aiPanelWorkspaces}
+                    onSetWorkspaceAnchorChat={onSetWorkspaceAnchorChat}
                     terminalSessions={context.terminalSessions}
                     liveScopeTargetIds={liveScopeTargetIds}
                     resolveExecutorContext={resolveExecutorContext}
@@ -723,6 +732,8 @@ export interface TerminalLayerProps {
   onSetDraggingSessionId: (id: string | null) => void;
   onToggleWorkspaceViewMode?: (workspaceId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
+  /** Issue #4098 phase 2: pin the AI chat a workspace scope is anchored to. */
+  onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void;
   onReorderWorkspaceSessions?: (workspaceId: string, draggedSessionId: string, targetSessionId: string, position: 'before' | 'after') => void;
   onReorderTabs?: (draggedId: string, targetId: string, position: 'before' | 'after', additionalTabIds?: readonly string[]) => void;
   onCopySession?: (sessionId: string) => void;

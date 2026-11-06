@@ -39,6 +39,7 @@ export function resolveDisplayedPanelView(
   sessions: AISession[],
   persistedSessionId?: string | null,
   scopeType: "terminal" | "workspace" = "workspace",
+  anchorChatId?: string | null,
 ): AIPanelView {
   if (panelView) {
     return normalizePanelView(panelView, sessions);
@@ -66,11 +67,37 @@ export function resolveDisplayedPanelView(
     return DEFAULT_PANEL_VIEW;
   }
 
-  if (sessions[0]) {
-    return { mode: "session", sessionId: sessions[0].id };
+  // Issue #4098 phase 2: the auto-resume fallback resolves by id (the
+  // workspace anchor first, then AI-chat recency) — never by positional
+  // "first session in the list".
+  if (anchorChatId && sessions.some((s) => s.id === anchorChatId)) {
+    return { mode: "session", sessionId: anchorChatId };
+  }
+  const mostRecent = resolveMostRecentlyUpdatedSession(sessions);
+  if (mostRecent) {
+    return { mode: "session", sessionId: mostRecent.id };
   }
 
   return DEFAULT_PANEL_VIEW;
+}
+
+/**
+ * The most recently updated session by `updatedAt`, or null when the list is
+ * empty. Ties keep the earlier entry so the result is deterministic.
+ */
+export function resolveMostRecentlyUpdatedSession(
+  sessions: AISession[],
+): AISession | null {
+  let best: AISession | null = null;
+  let bestUpdatedAt = 0;
+  for (const session of sessions) {
+    const updatedAt = session.updatedAt ?? 0;
+    if (best === null || updatedAt > bestUpdatedAt) {
+      best = session;
+      bestUpdatedAt = updatedAt;
+    }
+  }
+  return bestUpdatedAt > 0 ? best : null;
 }
 
 export function normalizePanelView(

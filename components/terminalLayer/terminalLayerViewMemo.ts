@@ -420,6 +420,7 @@ const WORKSPACE_CTX_KEYS = [
   'handleCommandExecuted',
   'handleCommandSubmitted',
   'onSetWorkspaceFocusedSession',
+  'onSetWorkspaceAnchorChat',
   'onSplitSession',
   'isBroadcastEnabled',
   'isComposeSendToAll',
@@ -531,6 +532,7 @@ export function terminalLayerFocusSidebarPropsEqual(prev: Ctx, next: Ctx): boole
     && eq(prev, next, 'onCopySessionToNewWindow')
     && eq(prev, next, 'onRemoveSessionFromWorkspace')
     && eq(prev, next, 'onSetWorkspaceFocusedSession')
+    && eq(prev, next, 'onSetWorkspaceAnchorChat')
     && eq(prev, next, 'onToggleWorkspaceViewMode')
     && eq(prev, next, 'onSubmitSessionRename');
 }

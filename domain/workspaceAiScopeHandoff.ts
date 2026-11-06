@@ -1,5 +1,6 @@
 import { buildAIScopeKey } from './aiSessionsForScope';
 import { resolveInheritedAIActiveSessionId } from './aiWorkspaceScopeInherit';
+import { resolveMostRecentlyActiveMemberTerminalId } from './aiSessionRecency';
 
 export type AIActiveSessionIdMap = Readonly<Record<string, string | null | undefined>>;
 
@@ -285,11 +286,17 @@ export function retargetWorkspaceActiveChatAfterMemberLoss<T extends AISessionSc
     };
   }
 
+  // Issue #4098 phase 2: when the focused member did not survive, the retarget
+  // lands on the most-recently-active survivor (AI chat recency) — never on
+  // the first positional member.
   const preferredTerminalId = (
     input.preferredTerminalId
     && survivorTerminalIds.has(input.preferredTerminalId)
       ? input.preferredTerminalId
-      : input.currentMemberTerminalIds.find((id) => survivorTerminalIds.has(id))
+      : resolveMostRecentlyActiveMemberTerminalId({
+          memberTerminalIds: input.currentMemberTerminalIds,
+          aiSessions: input.sessions,
+        })
   ) ?? null;
   if (!preferredTerminalId) {
     return {

@@ -226,6 +226,41 @@ test('retargetWorkspaceActiveChatAfterMemberLoss remints chat from a closed pane
   assert.equal(result.activeSessionIdMap['terminal:term-a'], null);
 });
 
+test('retarget prefers the most-recently-active survivor over the first positional member (#4098)', () => {
+  // term-b is the first surviving member, but term-c owns the most recently
+  // updated chat — the retarget must land there, not on sessions[0]'s owner.
+  const result = retargetWorkspaceActiveChatAfterMemberLoss({
+    activeSessionIdMap: {
+      'workspace:ws-1': 'chat-a',
+      'terminal:term-a': 'chat-a',
+    },
+    sessions: [
+      {
+        id: 'chat-a',
+        scope: { type: 'terminal', targetId: 'term-a', hostIds: ['host-a'] },
+        updatedAt: 1,
+      },
+      {
+        id: 'chat-b',
+        scope: { type: 'terminal', targetId: 'term-b', hostIds: ['host-b'] },
+        updatedAt: 4,
+      },
+      {
+        id: 'chat-c',
+        scope: { type: 'terminal', targetId: 'term-c', hostIds: ['host-c'] },
+        updatedAt: 9,
+      },
+    ],
+    workspaceId: 'ws-1',
+    previousMemberTerminalIds: ['term-a', 'term-b', 'term-c'],
+    currentMemberTerminalIds: ['term-b', 'term-c'],
+  });
+
+  assert.equal(result.changed, true);
+  assert.equal(result.sessions[0]?.scope.targetId, 'term-c');
+  assert.equal(result.activeSessionIdMap['terminal:term-a'], null);
+});
+
 test('retargetWorkspaceActiveChatAfterMemberLoss is a no-op when active chat pane survives', () => {
   const sessions = [
     {
