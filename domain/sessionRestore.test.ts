@@ -12,6 +12,7 @@ import {
   sanitizeSessionRestorePayload,
   shouldAttemptRestoreCwd,
 } from "./sessionRestore.ts";
+import { collectSessionIds, movePaneInWorkspace } from "./workspace.ts";
 import type { TerminalSession, Workspace } from "./models.ts";
 
 const session = (id: string, workspaceId?: string): TerminalSession => ({
@@ -978,4 +979,53 @@ test("restore retains absent local display snapshots while legacy fields remain 
   assert.equal(restored.sessions[1].localShellIcon, "bash");
   assert.equal(restored.sessions[2].localShellName, undefined);
   assert.equal(restored.sessions[2].localShellIcon, undefined);
+});
+
+test("a moved pane tree (#4037) roundtrips through the restore snapshot", () => {
+  const movedRoot = movePaneInWorkspace(
+    {
+      id: "split-1",
+      type: "split",
+      direction: "vertical",
+      children: [
+        { id: "pane-1", type: "pane", sessionId: "s1" },
+        { id: "pane-2", type: "pane", sessionId: "s2" },
+        { id: "pane-3", type: "pane", sessionId: "s3" },
+      ],
+      sizes: [1, 1, 1],
+    },
+    "s3",
+    { direction: "vertical", position: "left", targetSessionId: "s1" },
+  );
+
+  const sanitized = sanitizeSessionRestorePayload(
+    JSON.parse(JSON.stringify({
+      version: 1,
+      savedAt: 1,
+      activeTabId: "ws-1",
+      tabOrder: ["ws-1"],
+      sessions: [session("s1", "ws-1"), session("s2", "ws-1"), session("s3", "ws-1")],
+      workspaces: [{
+        id: "ws-1",
+        title: "Workspace",
+        root: movedRoot,
+        focusedSessionId: "s1",
+        focusSessionOrder: ["s1", "s2", "s3"],
+        anchorChatId: "chat-1",
+      }],
+    })),
+  );
+
+  assert.equal(sanitized.workspaces.length, 1);
+  const restored = sanitized.workspaces[0];
+  assert.equal(restored.id, "ws-1");
+  assert.equal(restored.anchorChatId, "chat-1");
+  assert.deepEqual(collectSessionIds(restored.root), ["s3", "s1", "s2"], "moved order survives the roundtrip");
+  // The inner split the move created keeps its shape (s3 sibling of s1).
+  assert.equal(restored.root.type, "split");
+  if (restored.root.type !== "split") return;
+  assert.equal(restored.root.children[0].type, "split");
+  assert.equal(restored.root.children[0].type === "split"
+    ? collectSessionIds(restored.root.children[0]).join(",")
+    : "", "s3,s1");
 });

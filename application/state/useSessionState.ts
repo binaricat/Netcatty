@@ -19,6 +19,7 @@ createWorkspaceFromSessionIds,
 FocusDirection,
 getNextFocusSessionId,
 insertPaneIntoWorkspace,
+movePaneInWorkspace,
 pruneWorkspaceNode,
 reorderWorkspaceFocusSessionOrder,
 setWorkspaceFocusedSessionId,
@@ -120,6 +121,26 @@ export function appendWorkspaceRootPaneIfMissing(
       root: appendPaneToWorkspaceRoot(ws.root, sessionId, direction),
       focusedSessionId: sessionId,
     };
+  });
+}
+
+/**
+ * Issue #4037: rearrange an existing member pane within its own workspace.
+ * Only `workspaces[].root` shape changes — session ids, tab order, focus
+ * fields and every AI binding (anchorChatId / activeSessionIdMap scopes) are
+ * untouched, because the moved session keeps its id and its workspaceId.
+ */
+export function moveWorkspacePaneInWorkspaces(
+  workspaces: Workspace[],
+  workspaceId: string,
+  sessionId: string,
+  hint: SplitHint,
+): Workspace[] {
+  return workspaces.map(ws => {
+    if (ws.id !== workspaceId) return ws;
+    if (!collectSessionIds(ws.root).includes(sessionId)) return ws;
+    const nextRoot = movePaneInWorkspace(ws.root, sessionId, hint);
+    return nextRoot === ws.root ? ws : { ...ws, root: nextRoot };
   });
 }
 
@@ -827,6 +848,20 @@ export const useSessionState = ({
       return prevSessions.map(s => s.id === sessionId ? { ...s, workspaceId } : s);
 	    });
 	  }, [setActiveTabId]);
+
+  // Issue #4037: drop an existing member pane back into its own workspace to
+  // rearrange it. Deliberately touches nothing but the pane tree: no session
+  // fields, no tab order, no focus changes (focusedSessionId keeps pointing
+  // at the same session id, so focus visually follows the moved pane), and
+  // no AI state — the anchorChatId lives on the workspace, which keeps its id.
+  const moveWorkspacePane = useCallback((
+    workspaceId: string,
+    sessionId: string,
+    hint: SplitHint
+  ) => {
+    if (!hint) return;
+    setWorkspaces(prev => moveWorkspacePaneInWorkspaces(prev, workspaceId, sessionId, hint));
+  }, []);
 
   // Merge two tabs into one workspace. When one of them already belongs to a
   // workspace, that workspace (and its id) is reused instead of dissolving
@@ -1538,6 +1573,7 @@ export const useSessionState = ({
     createWorkspaceFromTargets,
     createWorkspaceFromSessions,
     addSessionToWorkspace,
+    moveWorkspacePane,
     removeSessionFromWorkspace,
     appendHostToWorkspace,
     appendHostToWorkspaceConfirmed,

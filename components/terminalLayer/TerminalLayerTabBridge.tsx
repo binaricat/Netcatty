@@ -113,6 +113,10 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     shouldKeepHiddenWorkspaceLaidOut,
     onAddSessionToWorkspace: s.onAddSessionToWorkspace,
     onCreateWorkspaceFromSessions: s.onCreateWorkspaceFromSessions,
+    onMoveWorkspacePane: s.onMoveWorkspacePane,
+    draggingSession: s.draggingSessionId
+      ? sessions.find((session) => session.id === s.draggingSessionId) ?? null
+      : null,
     onSetDraggingSessionId: s.onSetDraggingSessionId,
     onUpdateSplitSizes: s.onUpdateSplitSizes,
     sessions,

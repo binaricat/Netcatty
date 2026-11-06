@@ -160,6 +160,36 @@ export const insertPaneIntoWorkspace = (
   return insertPane(root);
 };
 
+/**
+ * Move an existing member pane to a new position inside the same workspace
+ * tree (issue #4037). The pane is pruned from its current spot (collapsing
+ * the emptied parent split per `pruneWorkspaceNode` rules) and re-inserted
+ * as a split sibling of the target pane on the hint's side, exactly like an
+ * orphan drop would land. Pure and immutable: session ids, node identity of
+ * untouched panes, focus fields and AI bindings are never touched — only the
+ * tree shape changes. Returns the same `root` reference for no-ops:
+ * unknown session, single-pane tree, or the pane dropped onto itself.
+ */
+export const movePaneInWorkspace = (
+  root: WorkspaceNode,
+  memberSessionId: string,
+  hint: SplitHint,
+): WorkspaceNode => {
+  const paneSessionIds = collectSessionIds(root);
+  if (!paneSessionIds.includes(memberSessionId)) return root;
+  // A lone pane has nowhere to move within its own workspace.
+  if (paneSessionIds.length <= 1) return root;
+  if (hint.targetSessionId === memberSessionId) return root;
+
+  // Prune before inserting so the dragged pane is out of the tree even when
+  // the drop target sits inside its old subtree. The pruned tree keeps the
+  // target pane (target !== source), so the insert below always lands.
+  const prunedRoot = pruneWorkspaceNode(root, memberSessionId);
+  if (!prunedRoot) return root;
+
+  return insertPaneIntoWorkspace(prunedRoot, memberSessionId, hint);
+};
+
 export const createWorkspaceFromSessions = (
   baseSessionId: string,
   joiningSessionId: string,
