@@ -42,8 +42,9 @@ import {
 import {
   closeSessionsState,
   detachSessionFromWorkspaceState,
-  replaceDissolvedWorkspaceTabOrder,
 } from './sessionWorkspaceDetach';
+import { getAISessionsSnapshot } from './aiSessionsStore';
+import { getPersistedAiSessionsSnapshot } from './aiStateSnapshots';
 import {
   createCopiedTerminalSessionClone,
   createSplitTerminalSessionClone,
@@ -615,6 +616,11 @@ export const useSessionState = ({
       currentActiveTabId: activeTabStore.getActiveTabId(),
       preferredTabId: activeTabStore.getPreviousActiveTabId(),
       tabOrder: tabOrderRef.current,
+      // AI chat recency decides which surviving member receives focus/anchor
+      // after member loss (#4098 phase 2); hot store first, persisted fallback.
+      aiSessions: getAISessionsSnapshot().sessions.length > 0
+        ? getAISessionsSnapshot().sessions
+        : getPersistedAiSessionsSnapshot(),
     });
 
     setWorkspaces(result.workspaces);
@@ -1106,6 +1112,25 @@ export const useSessionState = ({
     setWorkspaces(prev => setWorkspaceFocusedSessionId(prev, workspaceId, sessionId));
   }, []);
 
+  // Issue #4098 phase 2: pin the AI chat a workspace scope is anchored to.
+  // Written by the AI side panel when a chat becomes active in the workspace
+  // scope; consumed by the non-positional fallbacks and persisted to the
+  // session restore snapshot.
+  const setWorkspaceAnchorChat = useCallback((workspaceId: string, chatId: string | null) => {
+    setWorkspaces(prev => {
+      const index = prev.findIndex(ws => ws.id === workspaceId);
+      if (index < 0) return prev;
+      if (prev[index].anchorChatId === (chatId ?? undefined)) return prev;
+      const next = prev.slice();
+      next[index] = chatId
+        ? { ...prev[index], anchorChatId: chatId }
+        : Object.fromEntries(
+            Object.entries(prev[index]).filter(([key]) => key !== 'anchorChatId'),
+          ) as Workspace;
+      return next;
+    });
+  }, []);
+
   const reorderWorkspaceSessions = useCallback((
     workspaceId: string,
     draggedSessionId: string,
@@ -1435,18 +1460,16 @@ export const useSessionState = ({
       sessions: sessionsRef.current,
       workspaces: workspacesRef.current,
       sessionId,
+      aiSessions: getAISessionsSnapshot().sessions.length > 0
+        ? getAISessionsSnapshot().sessions
+        : getPersistedAiSessionsSnapshot(),
     });
     if (!result.changed) return;
 
     setWorkspaces(result.workspaces);
     setSessions(result.sessions);
     setTabOrder((prevTabOrder) => {
-      const replacedOrder = replaceDissolvedWorkspaceTabOrder(
-        prevTabOrder,
-        result.dissolvedWorkspaceId,
-        result.replacementTabIds,
-      );
-      if (!tabInsertionTarget) return replacedOrder;
+      if (!tabInsertionTarget) return prevTabOrder;
 
       const allTabIds = [
         ...result.sessions.filter((s) => !s.workspaceId).map((s) => s.id),
@@ -1455,7 +1478,7 @@ export const useSessionState = ({
         ...(tabInsertionTarget.additionalTabIds ?? []),
       ];
       return reorderWorkTabIds(
-        replacedOrder,
+        prevTabOrder,
         allTabIds,
         sessionId,
         tabInsertionTarget.tabId,
@@ -1523,6 +1546,7 @@ export const useSessionState = ({
     splitSession,
     toggleWorkspaceViewMode,
     setWorkspaceFocusedSession,
+    setWorkspaceAnchorChat,
     reorderWorkspaceSessions,
     moveFocusInWorkspace,
     runSnippet,

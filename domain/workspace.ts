@@ -19,6 +19,20 @@ export const invertSplitPosition = (position: SplitPosition): SplitPosition => {
   }
 };
 
+/**
+ * Root placeholder for a workspace whose member sessions have all closed.
+ * Issue #4098 phase 2 keeps the workspace entity (and its id) alive at zero
+ * members so restore re-links its AI chats; this empty split renders as a
+ * workspace tab with no panes until a session joins again.
+ */
+export const createEmptyWorkspaceRoot = (): WorkspaceNode => ({
+  id: crypto.randomUUID(),
+  type: 'split',
+  direction: 'vertical',
+  children: [],
+  sizes: [],
+});
+
 
 export const pruneWorkspaceNode = (node: WorkspaceNode, targetSessionId: string): WorkspaceNode | null => {
   if (node.type === 'pane') {

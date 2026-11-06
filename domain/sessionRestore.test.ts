@@ -334,6 +334,92 @@ test("sanitizeSessionRestorePayload prunes invalid workspace panes and drops emp
   assert.equal(sanitized.activeTabId, "ws-1");
 });
 
+test("an empty workspace (all members closed) restores with the same id (#4098 phase 2)", () => {
+  const sanitized = sanitizeSessionRestorePayload({
+    version: 1,
+    savedAt: 1,
+    activeTabId: "ws-1",
+    tabOrder: ["ws-1"],
+    sessions: [],
+    workspaces: [{
+      id: "ws-1",
+      title: "Workspace",
+      root: {
+        id: "empty-root",
+        type: "split",
+        direction: "vertical",
+        children: [],
+        sizes: [],
+      },
+      anchorChatId: "chat-1",
+    }],
+  });
+
+  assert.equal(sanitized.workspaces.length, 1);
+  assert.equal(sanitized.workspaces[0].id, "ws-1");
+  assert.equal(sanitized.workspaces[0].root.type, "split");
+  assert.deepEqual(
+    sanitized.workspaces[0].root.type === "split" ? sanitized.workspaces[0].root.children : null,
+    [],
+  );
+  assert.equal(sanitized.workspaces[0].focusedSessionId, undefined);
+  assert.equal(sanitized.workspaces[0].anchorChatId, "chat-1");
+  assert.deepEqual(sanitized.tabOrder, ["ws-1"]);
+  assert.equal(sanitized.activeTabId, "ws-1");
+});
+
+test("a workspace whose member sessions are unrestorable is still dropped", () => {
+  const sanitized = sanitizeSessionRestorePayload({
+    version: 1,
+    savedAt: 1,
+    activeTabId: "vault",
+    tabOrder: ["ws-1"],
+    sessions: [],
+    workspaces: [{
+      id: "ws-1",
+      title: "Workspace",
+      root: {
+        id: "split-1",
+        type: "split",
+        direction: "vertical",
+        children: [{ id: "pane-1", type: "pane", sessionId: "s1" }],
+        sizes: [1],
+      },
+    }],
+  });
+
+  assert.equal(sanitized.workspaces.length, 0);
+  assert.deepEqual(sanitized.tabOrder, []);
+  assert.equal(sanitized.activeTabId, "vault");
+});
+
+test("anchorChatId survives the snapshot roundtrip and drops invalid values", () => {
+  const payload = buildSessionRestorePayload({
+    sessions: [session("s1", "ws-1")],
+    workspaces: [
+      {
+        id: "ws-1",
+        title: "Workspace",
+        root: { id: "pane-1", type: "pane", sessionId: "s1" },
+        focusedSessionId: "s1",
+        anchorChatId: "chat-1",
+      },
+      {
+        id: "ws-2",
+        title: "Workspace",
+        root: { id: "empty-root", type: "split", direction: "vertical", children: [], sizes: [] },
+        anchorChatId: "",
+      },
+    ],
+    tabOrder: ["ws-1", "ws-2"],
+    activeTabId: "ws-1",
+    now: 123,
+  });
+
+  assert.equal(payload.workspaces[0].anchorChatId, "chat-1");
+  assert.equal(payload.workspaces[1].anchorChatId, undefined);
+});
+
 test("sanitizeSessionRestorePayload preserves explicit workspace autoTitle across restore", () => {
   const workspace: Workspace = {
     id: "ws-1",
