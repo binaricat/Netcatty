@@ -152,7 +152,8 @@ export const useSftpViewPaneActions = ({
     (files: SftpTransferSource[], side: "left" | "right") => {
       const groups = new Map<string, SftpTransferSource[]>();
       for (const file of files) {
-        if (!file.sourcePath) continue;
+        // ".." is the tree's parent-navigation row, not a real entry.
+        if (!file.sourcePath || file.name === "..") continue;
         const key = `${file.sourceConnectionId ?? ""}::${file.sourcePath}`;
         const group = groups.get(key) ?? [];
         group.push(file);

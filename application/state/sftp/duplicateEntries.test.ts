@@ -104,6 +104,22 @@ test("duplicate transfers resolve same-name conflicts to (copy) without promptin
     await waitForSettledRoots(sources.length * 2);
     assert.equal(await fs.readFile(path.join(dir, "report (copy 2).txt"), "utf8"), "original data");
     assert.equal(await fs.readFile(path.join(dir, "photos (copy 2)", "nested.txt"), "utf8"), "nested data");
+
+    // The tree's ".." navigation row must never be duplicated: it would copy
+    // an ancestor into itself.
+    const tasksBefore = sftpTransferCenterStore.getOwnerTasks(ownerId).length;
+    let navigationResults: unknown;
+    await act(async () => {
+      navigationResults = await ops.startTransfer(
+        [{ name: "..", isDirectory: true }],
+        "left",
+        "left",
+        { sourcePath: dir, targetPath: dir, duplicate: true },
+      );
+    });
+    assert.deepEqual(navigationResults, []);
+    assert.equal(sftpTransferCenterStore.getOwnerTasks(ownerId).length, tasksBefore);
+    assert.deepEqual(ops.conflicts, []);
   } finally {
     await act(async () => { renderer?.unmount(); });
     for (const row of sftpTransferCenterStore.getOwnerTasks(ownerId)) sftpTransferCenterStore.dismiss(row.id);

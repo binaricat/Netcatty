@@ -1436,6 +1436,10 @@ export const useSftpTransfers = ({
       }
 
       for (const file of sourceFiles) {
+        // "." / ".." are navigation rows, not real entries. Duplicating one
+        // would resolve to an ancestor (e.g. "/") and could walk the copy into
+        // its own output.
+        if (options?.duplicate && (file.name === "." || file.name === "..")) continue;
         const direction: TransferDirection =
           sourcePane.connection!.isLocal && !targetPane.connection!.isLocal
             ? "upload"
@@ -1480,6 +1484,20 @@ export const useSftpTransfers = ({
               targetPane,
               targetIsLocal ? null : (sftpSessionsRef.current.get(targetPane.connection!.id) ?? null),
               targetIsLocal ? "auto" : (targetPane.filenameEncoding || "auto"),
+              // A queued or paused copy has not created its destination on disk
+              // yet, so the next duplicate would pick the same name and surface
+              // a conflict dialog. Reserve active destinations while naming.
+              (candidatePath) => Boolean(findActivePathConflict(
+                [...sftpTransferCenterStore.getSnapshot().tasks, ...transfersRef.current, ...newTasks],
+                {
+                  id: "",
+                  targetPath: candidatePath,
+                  targetConnectionId: targetIsLocal ? "local" : targetPane.connection!.id,
+                  targetHostId: targetIsLocal ? undefined : targetPane.connection!.hostId,
+                  targetHostLabel: targetIsLocal ? "Local" : targetPane.connection!.hostLabel,
+                  isDirectory: file.isDirectory,
+                },
+              )),
             )
           : null;
         const nextFileName = duplicateTarget?.fileName ?? file.name;
