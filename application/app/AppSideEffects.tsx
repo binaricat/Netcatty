@@ -58,7 +58,8 @@ import {
 } from '../../domain/terminalAppearance';
 import { selectConnectionLogForTerminalDataCapture } from '../../domain/connectionLog';
 import { collectSessionIds } from '../../domain/workspace';
-import { resolveAgentHostWorkspace } from '../../domain/agentHostWorkspace';
+import { resolveAgentHostOpenWorkspace } from '../../domain/agentHostWorkspace';
+import { getAISessionsSnapshot } from '../state/aiSessionsStore';
 import { useHostOpenSessionReuse } from '../state/useHostOpenSessionReuse';
 import type { PaneMagnificationController } from '../../domain/paneMagnification';
 import { isPluginViewEditingTarget } from '../state/pluginKeybindings';
@@ -1505,8 +1506,20 @@ export function AppSideEffects() {
     return sessionId;
   }, [handleConnectToHost, renameSessionInline]);
 
-  const openHostForVaultAgent = useCallback((host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string }) => {
-    const target = resolveAgentHostWorkspace(options?.workspaceId, activeTabStore.getActiveTabId(), workspaces.map(workspace => workspace.id));
+  const openHostForVaultAgent = useCallback((host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string; chatSessionId?: string }) => {
+    // Placement follows the invoking chat's bound workspace, not whichever
+    // workspace happens to be focused when the tool call lands (#4155's
+    // chat↔workspace binding story): a workspace-B chat must not drop its
+    // tab into the active workspace A. The chat lives in the AI sessions hot
+    // store; terminalSessions come from the ref to keep this callback stable.
+    const chat = options?.chatSessionId
+      ? getAISessionsSnapshot().sessions.find((session) => session.id === options.chatSessionId)
+      : undefined;
+    const target = resolveAgentHostOpenWorkspace(options?.workspaceId, chat, {
+      activeTabId: activeTabStore.getActiveTabId(),
+      workspaceIds: workspaces.map(workspace => workspace.id),
+      terminalSessions: sessionsRef.current,
+    });
     if (target.error) return { ok: false as const, error: target.error };
     // Silent sessions only apply to actual external MCP clients (chatSessionId
     // equals the reserved external-MCP scope). The in-app Catty AI chat's

@@ -34,11 +34,13 @@ test('MCP host_open forwards the schema input through RPC and vault service to t
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   t.after(async () => act(async () => renderer.unmount()));
   await render();
+  let lastOpenOptions: { workspaceId?: string; chatSessionId?: string } | undefined;
   const deps = {
     getHosts: () => [host],
     resolveEffectiveHost: (value: Host) => value,
     findExistingSessionForHost: (hostId: string) => finder(hostId),
-    openHost: (openedHost: Host) => {
+    openHost: (openedHost: Host, _isExternalMcpCall: boolean, options?: { workspaceId?: string; chatSessionId?: string }) => {
+      lastOpenOptions = options;
       const sessionId = `new-${tabs.length}`;
       tabs.push(createHostTerminalSession(sessionId, openedHost));
       return { ok: true as const, sessionId, host };
@@ -75,10 +77,16 @@ test('MCP host_open forwards the schema input through RPC and vault service to t
   const fresh = await run({ hostId: host.id, newTab: 'true' });
   assert.equal(fresh.sessionId, 'new-1');
   assert.equal(tabs.length, 2);
+  // The invoking chat's context must reach the placement layer so the new tab
+  // can land in the chat's bound workspace (resolveAgentHostOpenWorkspace).
+  assert.equal(lastOpenOptions?.chatSessionId, 'integration-chat');
+  assert.equal(lastOpenOptions?.workspaceId, undefined);
   // An inactive tab requires a real open instead of an endless wait.
+  // An explicit workspaceId is forwarded untouched to the placement layer.
   for (const tab of tabs) tab.status = 'disconnected';
-  const recovered = await run({ hostId: host.id, newTab: 'false' });
+  const recovered = await run({ hostId: host.id, newTab: 'false', workspaceId: 'ws-explicit' });
   assert.equal(recovered.sessionId, 'new-2');
+  assert.equal(lastOpenOptions?.workspaceId, 'ws-explicit');
   assert.equal(tabs.length, 3);
   tabs[2].status = 'connected';
   host.label = 'Renamed only';
