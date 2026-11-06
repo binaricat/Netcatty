@@ -1,0 +1,37 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.host-actions",
+  "name": "host-actions",
+  "displayName": "Host action sample",
+  "description": "Explicit host metadata sharing, reviewed SSH drafts, and confirmed saved-host connections.",
+  "version": "0.1.0",
+  "publisher": "netcatty",
+  "license": "GPL-3.0-or-later",
+  "engines": { "netcatty": ">=0.0.0", "api": ">=0.1.0-internal <0.2.0" },
+  "features": { "required": ["vault.host-actions", "commands.interactive"] },
+  "main": { "browser": "browser.js" },
+  "activationEvents": [
+    "onCommand:com.netcatty.host-actions.select",
+    "onCommand:com.netcatty.host-actions.create",
+    "onCommand:com.netcatty.host-actions.edit",
+    "onCommand:com.netcatty.host-actions.connect"
+  ],
+  "permissions": {
+    "required": ["commands", "menus"],
+    "optional": ["vault.metadata", "vault.write", "ui.interact"]
+  },
+  "contributes": {
+    "commands": [
+      { "id": "com.netcatty.host-actions.select", "title": "Host sample: share selected metadata", "interactive": true },
+      { "id": "com.netcatty.host-actions.create", "title": "Host sample: review a synthetic SSH draft", "interactive": true },
+      { "id": "com.netcatty.host-actions.edit", "title": "Host sample: review a host label change", "interactive": true },
+      { "id": "com.netcatty.host-actions.connect", "title": "Host sample: confirm a saved-host connection", "interactive": true }
+    ],
+    "menus": [
+      { "command": "com.netcatty.host-actions.select", "location": "commandPalette" },
+      { "command": "com.netcatty.host-actions.create", "location": "commandPalette" },
+      { "command": "com.netcatty.host-actions.edit", "location": "commandPalette" },
+      { "command": "com.netcatty.host-actions.connect", "location": "commandPalette" }
+    ]
+  }
+}

@@ -665,3 +665,209 @@ test('Anthropic-format signed thinking survives build and stream preparation', (
   assert.equal(plainThinking?.text, 'final thinking');
   assert.deepEqual(plainThinking?.providerOptions?.anthropic, { signature: 'sig-xyz' });
 });
+
+test('durable summary skips Anthropic signed thinking on the retained tail (#4073)', () => {
+  // Durable compaction injects a synthetic summary and keeps the recent tail.
+  // Replaying signed thinking on that tail would 400 (prefix binding). Unsigned
+  // reasoning may still be replayed.
+  const messages: ChatMessage[] = [
+    {
+      id: 'assistant-old',
+      role: 'assistant',
+      content: 'Earlier.',
+      timestamp: 1,
+      providerContinuation: {
+        source: { providerConfigId: 'anthropic-1', providerType: 'anthropic', modelId: 'claude-opus-4-5' },
+        reasoningParts: [{
+          text: 'compacted thinking',
+          providerOptions: { anthropic: { signature: 'sig-old' } },
+        }],
+      },
+    },
+    {
+      id: 'assistant-tail',
+      role: 'assistant',
+      content: 'Recent reply.',
+      timestamp: 2,
+      providerContinuation: {
+        source: { providerConfigId: 'anthropic-1', providerType: 'anthropic', modelId: 'claude-opus-4-5' },
+        reasoningParts: [
+          {
+            text: 'signed recent',
+            providerOptions: { anthropic: { signature: 'sig-tail' } },
+          },
+          { text: 'unsigned recent' },
+        ],
+      },
+      toolCalls: [{ id: 'call-1', name: 'terminal_execute', arguments: { command: 'ls' } }],
+    },
+    {
+      id: 'tool-1',
+      role: 'tool',
+      content: '',
+      timestamp: 3,
+      toolResults: [{ toolCallId: 'call-1', content: 'ok' }],
+    },
+  ];
+
+  const built = buildCattySdkMessages({
+    allMessages: messages,
+    contextCompaction: {
+      summary: 'Earlier work finished.',
+      compactedMessageCount: 1,
+    },
+    includeCurrentUserMessage: false,
+    trimmed: '',
+    continuationContext: createContinuationContext('anthropic-1', 'anthropic', 'claude-opus-4-5'),
+    chatSessionId: 'chat-1',
+    toolOutputStore: new ToolOutputStore(),
+    fieldsByMessage: new Map(),
+  });
+
+  assert.match(String(built[0].content), /Earlier work finished/);
+  const tailAssistant = built.find((m) => m.role === 'assistant' && Array.isArray(m.content)
+    && (m.content as { type?: string }[]).some((p) => p.type === 'tool-call'));
+  assert.ok(tailAssistant);
+  const parts = tailAssistant!.content as {
+    type: string;
+    text?: string;
+    providerOptions?: { anthropic?: { signature?: string } };
+  }[];
+  const reasoning = parts.filter((p) => p.type === 'reasoning');
+  assert.equal(reasoning.length, 1, 'only unsigned reasoning should remain');
+  assert.equal(reasoning[0].text, 'unsigned recent');
+  assert.equal(reasoning[0].providerOptions?.anthropic?.signature, undefined);
+  for (const part of parts) {
+    if (part.type === 'reasoning') {
+      assert.equal(part.providerOptions?.anthropic?.signature, undefined);
+    }
+  }
+});
+
+test('durable summary keeps Anthropic signed thinking for DeepSeek (#4074 P2)', () => {
+  // DeepSeek Anthropic-compat requires thinking blocks with replayed tool calls.
+  // Even with a durable summary (prefix mutate), do not strip signed thinking.
+  const messages: ChatMessage[] = [
+    {
+      id: 'assistant-old',
+      role: 'assistant',
+      content: 'Earlier.',
+      timestamp: 1,
+      providerContinuation: {
+        source: { providerConfigId: 'anthropic-1', providerType: 'anthropic', modelId: 'deepseek-v4-flash' },
+        reasoningParts: [{
+          text: 'compacted thinking',
+          providerOptions: { anthropic: { signature: 'sig-old' } },
+        }],
+      },
+    },
+    {
+      id: 'assistant-tail',
+      role: 'assistant',
+      content: 'Recent reply.',
+      timestamp: 2,
+      providerContinuation: {
+        source: { providerConfigId: 'anthropic-1', providerType: 'anthropic', modelId: 'deepseek-v4-flash' },
+        reasoningParts: [
+          {
+            text: 'signed recent',
+            providerOptions: { anthropic: { signature: 'sig-tail' } },
+          },
+          { text: 'unsigned recent' },
+        ],
+      },
+      toolCalls: [{ id: 'call-1', name: 'terminal_execute', arguments: { command: 'ls' } }],
+    },
+    {
+      id: 'tool-1',
+      role: 'tool',
+      content: '',
+      timestamp: 3,
+      toolResults: [{ toolCallId: 'call-1', content: 'ok' }],
+    },
+  ];
+
+  const built = buildCattySdkMessages({
+    allMessages: messages,
+    contextCompaction: {
+      summary: 'Earlier work finished.',
+      compactedMessageCount: 1,
+    },
+    includeCurrentUserMessage: false,
+    trimmed: '',
+    continuationContext: createContinuationContext('anthropic-1', 'anthropic', 'deepseek-v4-flash'),
+    chatSessionId: 'chat-1',
+    toolOutputStore: new ToolOutputStore(),
+    fieldsByMessage: new Map(),
+    allowStripAnthropicSignedThinking: false,
+  });
+
+  assert.match(String(built[0].content), /Earlier work finished/);
+  const tailAssistant = built.find((m) => m.role === 'assistant' && Array.isArray(m.content)
+    && (m.content as { type?: string }[]).some((p) => p.type === 'tool-call'));
+  assert.ok(tailAssistant);
+  const parts = tailAssistant!.content as {
+    type: string;
+    text?: string;
+    providerOptions?: { anthropic?: { signature?: string } };
+  }[];
+  const reasoning = parts.filter((p) => p.type === 'reasoning');
+  assert.equal(reasoning.length, 2, 'signed + unsigned reasoning must both remain for DeepSeek');
+  const signed = reasoning.find((p) => p.providerOptions?.anthropic?.signature === 'sig-tail');
+  assert.ok(signed, 'signed thinking must survive when allowStrip is false');
+  assert.equal(signed!.text, 'signed recent');
+  assert.ok(reasoning.some((p) => p.text === 'unsigned recent'));
+});
+
+
+test('prepareCattyMessagesForStream does not return [] when prune empties reasoning-only history (#4102)', () => {
+  const reasoningOnly = [
+    {
+      role: 'assistant' as const,
+      content: [{ type: 'reasoning' as const, text: 'plan the ping' }],
+    },
+    {
+      role: 'assistant' as const,
+      content: [{ type: 'reasoning' as const, text: 'then run it' }],
+    },
+  ];
+  const prepared = prepareCattyMessagesForStream(reasoningOnly);
+  assert.ok(prepared.length > 0, 'must not hand AI SDK an empty messages array');
+  assert.equal(prepared.length, reasoningOnly.length);
+  assert.equal(
+    (prepared[0].content as { type: string }[]).some((part) => part.type === 'reasoning'),
+    true,
+    'fallback keeps original reasoning when strip-all would empty the prompt',
+  );
+});
+
+test('prepareCattyMessagesForStream still strips reasoning when other content remains (#4102)', () => {
+  const mixed = [
+    { role: 'user' as const, content: 'ping www.baidu.com -c 4' },
+    {
+      role: 'assistant' as const,
+      content: [
+        { type: 'reasoning' as const, text: 'plan' },
+        { type: 'text' as const, text: 'running it' },
+        {
+          type: 'tool-call' as const,
+          toolCallId: 'call-1',
+          toolName: 'terminal_execute',
+          input: { command: 'ping www.baidu.com -c 4' },
+        },
+      ],
+    },
+  ];
+  const prepared = prepareCattyMessagesForStream(mixed);
+  assert.equal(prepared.length, 2);
+  assert.equal(prepared[0].role, 'user');
+  const assistantContent = prepared[1].content;
+  assert.ok(Array.isArray(assistantContent));
+  assert.equal(assistantContent.some((part) => part.type === 'reasoning'), false);
+  assert.equal(assistantContent.some((part) => part.type === 'text'), true);
+  assert.equal(assistantContent.some((part) => part.type === 'tool-call'), true);
+});
+
+test('prepareCattyMessagesForStream leaves a true empty input empty', () => {
+  assert.deepEqual(prepareCattyMessagesForStream([]), []);
+});

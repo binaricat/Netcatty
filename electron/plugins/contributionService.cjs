@@ -6,6 +6,7 @@ const { assertPluginContextKey, evaluateContextKeyExpression } = require("./cont
 const { assertPluginJsonValue } = require("./jsonBoundary.cjs");
 const { compileRestrictedJsonSchema } = require("./restrictedJsonSchema.cjs");
 const { PluginRpcError, RPC_ERRORS } = require("./rpcRouter.cjs");
+const { InteractiveCommandFeature, InteractiveCommandLimits } = require("./generated/plugin-contract.schema.json").$defs;
 
 const MAX_SETTING_BYTES = 128 * 1024;
 const MAX_PATTERN_LENGTH = 512;
@@ -149,6 +150,8 @@ class PluginContributionService {
   constructor(options) {
     this.database = options.database;
     this.runtimeSupervisor = options.runtimeSupervisor;
+    this.onCommandFinished = options.onCommandFinished;
+    this.activeCommandCalls = new Map();
     this.secretStore = options.secretStore;
     this.getLocale = options.getLocale ?? (() => "en");
     this.contextKeys = new Map();
@@ -336,12 +339,31 @@ class PluginContributionService {
       throw new PluginRpcError(RPC_ERRORS.failedPrecondition, `Plugin command is disabled: ${commandId}`);
     }
     assertJsonValue(args ?? null, "command arguments");
-    await this.#ensureActivated(plugin, `onCommand:${commandId}`);
-    return this.runtimeSupervisor.request(plugin.id, "plugin.command.execute", {
-      command: commandId,
-      ...(args === undefined ? {} : { args }),
-      invocation: freezeJson({ source: invocation.source ?? "host", context: invocation.context ?? {} }),
-    });
+    if (contribution.interactive && !plugin.manifest.features?.required?.includes(InteractiveCommandFeature.const)) {
+      throw new PluginRpcError(RPC_ERRORS.failedPrecondition, "Interactive command feature is required");
+    }
+    const identity = await this.#ensureActivated(plugin, `onCommand:${commandId}`);
+    const runtimeId = identity?.runtimeId;
+    if (runtimeId) this.activeCommandCalls.set(runtimeId, (this.activeCommandCalls.get(runtimeId) ?? 0) + 1);
+    let failed = true;
+    try {
+      const result = await this.runtimeSupervisor.request(plugin.id, "plugin.command.execute", {
+        command: commandId,
+        ...(args === undefined ? {} : { args }),
+        invocation: freezeJson({ source: invocation.source ?? "host", context: invocation.context ?? {} }),
+      }, { expectedIdentity: identity, ...(contribution.interactive ? { timeoutMs: InteractiveCommandLimits.const.timeoutMs } : {}) });
+      failed = false;
+      return result;
+    } finally {
+      if (runtimeId) {
+        const remaining = Math.max(0, (this.activeCommandCalls.get(runtimeId) ?? 1) - 1);
+        if (remaining) this.activeCommandCalls.set(runtimeId, remaining);
+        else this.activeCommandCalls.delete(runtimeId);
+        // A failed command must not leave a live native consent prompt. On
+        // success wait for other concurrent commands before closing orphans.
+        if (failed || remaining === 0) this.onCommandFinished?.(runtimeId);
+      }
+    }
   }
 
   async activateView(viewId, params = {}) {
@@ -545,6 +567,7 @@ class PluginContributionService {
         return {
           ...setting,
           label: localize(setting.label),
+          group: setting.group == null ? undefined : localize(setting.group),
           description: setting.description == null ? undefined : localize(setting.description),
           placeholder: setting.placeholder == null ? undefined : localize(setting.placeholder),
           options: setting.options?.map((option) => ({

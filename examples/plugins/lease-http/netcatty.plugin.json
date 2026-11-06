@@ -1,0 +1,25 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.lease-http",
+  "name": "lease-http",
+  "displayName": "Synthetic credential lease",
+  "description": "Isolated credential lease and grant revocation acceptance fixture.",
+  "version": "0.1.0",
+  "publisher": "netcatty",
+  "license": "GPL-3.0-or-later",
+  "engines": { "netcatty": ">=0.0.0", "api": ">=0.1.0-internal <0.2.0" },
+  "features": { "required": ["network.credential-lease"] },
+  "main": { "browser": "browser.js" },
+  "activationEvents": ["onCommand:com.netcatty.lease-http.request"],
+  "permissions": {
+    "required": ["commands", "menus"],
+    "optional": [
+      { "permission": "secrets", "resources": ["secret:synthetic-token"] },
+      { "permission": "network", "resources": ["https://example.invalid"] }
+    ]
+  },
+  "contributes": {
+    "commands": [{ "id": "com.netcatty.lease-http.request", "title": "Synthetic credential lease request" }],
+    "menus": [{ "command": "com.netcatty.lease-http.request", "location": "commandPalette" }]
+  }
+}

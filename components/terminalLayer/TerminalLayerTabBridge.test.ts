@@ -32,6 +32,13 @@ test('terminal layer bridge passes vault open callbacks into the side panel cont
   assert.match(source, /onOpenVaultSectionFromChat: s\.onOpenVaultSectionFromChat/);
 });
 
+test('production terminal layer context forwards extension sidebar owner and pane callbacks', () => {
+  const contextProjection = source.slice(source.indexOf('const ctx = useMemo('));
+  for (const callback of ['getActiveTerminalSessionId', 'handleSwitchSidePanelTab', 'handleWithdrawPluginSidebarPane']) {
+    assert.match(contextProjection, new RegExp(`${callback}: s\\.${callback}\\b`));
+  }
+});
+
 test('terminal layer bridge updates side panel live state after render', () => {
   assert.match(source, /const sidePanelLiveSnapshot = useMemo<SidePanelLiveSnapshot>/);
   assert.match(

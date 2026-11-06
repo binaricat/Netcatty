@@ -36,6 +36,116 @@ test('PTY sends no bytes while a slow shell is starting, then runs once ready', 
   assert.equal(pty.writes.length, 1);
 });
 
+test('macOS default zsh prompt is recognized as an idle prompt', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const prompt = 'hexiao@JosephdeMacBook-Pro-2 ~ % ';
+  trackSessionIdlePrompt(session, `Last login: Mon Oct 26\r\n${prompt}`);
+  assert.equal(session.lastIdlePrompt, prompt);
+  assert.equal(readyPrompt(session), prompt);
+
+  const job = startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  });
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
+test('zsh prompt with pending input does not become ready', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  trackSessionIdlePrompt(session, 'hexiao@JosephdeMacBook-Pro-2 ~ % echo half-typed');
+  assert.equal(readyPrompt(session), '');
+
+  const job = startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 50,
+    timeoutMs: 1000,
+  });
+  t.mock.timers.tick(50);
+  const result = await job.resultPromise;
+  assert.equal(result.code, 'SHELL_NOT_READY');
+  assert.deepEqual(pty.writes, []);
+});
+
+test('zsh default prompts allow directory spaces and the privileged marker', async () => {
+  for (const prompt of ['alice@MacBook-Pro My Project % ', 'root@MacBook-Pro ~ # ', 'root@MacBook-Pro My Project # ']) {
+    const pty = new TestPty();
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, `Last login\r\n${prompt}`);
+    assert.equal(getFreshIdlePrompt(session), prompt);
+    assert.equal(getVisibleIdlePrompt(session), prompt);
+
+    const result = await startPtyJob(pty, 'echo OK', {
+      shellKind: 'posix',
+      getReadyPrompt: () => readyPrompt(session),
+      promptWaitTimeoutMs: 200,
+      timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.ok, true, prompt);
+    assert.equal(pty.writes.length, 1, prompt);
+  }
+});
+
+test('zsh spaced-directory prompts with pending input stay unready', async () => {
+  for (const line of ['alice@MacBook-Pro My Project % echo %', 'root@MacBook-Pro My Project # echo #']) {
+    const pty = new TestPty();
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, line);
+    assert.equal(readyPrompt(session), '', line);
+    const result = await startPtyJob(pty, 'echo forbidden', {
+      getReadyPrompt: () => readyPrompt(session),
+      promptWaitTimeoutMs: 25,
+      timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.code, 'SHELL_NOT_READY', line);
+    assert.deepEqual(pty.writes, [], line);
+  }
+});
+
+test('parenthesized Deck prompts allow execution only while idle', async () => {
+  for (const prompt of ['(deck@steamdeck ~)$ ', '(root@steamdeck /home/deck)# ', '(venv) (deck@steamdeck My Project)$ ', '(deck@steamdeck My Project (1))$ ', '(root@steamdeck /cash$# (old))# ', '(venv) (deck@steamdeck $work#1)$ ']) {
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, `Last login\r\n${prompt}`);
+    assert.equal(readyPrompt(session), prompt);
+    const pty = new TestPty();
+    const result = await startPtyJob(pty, 'echo OK', {
+      shellKind: 'posix', getReadyPrompt: () => readyPrompt(session), promptWaitTimeoutMs: 25, timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.ok, true, prompt);
+    assert.equal(pty.writes.length, 1);
+
+    trackSessionIdlePrompt(session, 'echo pending');
+    assert.equal(readyPrompt(session), '');
+    const pendingPty = new TestPty();
+    const pending = await startPtyJob(pendingPty, 'echo OK', {
+      shellKind: 'posix', getReadyPrompt: () => readyPrompt(session), promptWaitTimeoutMs: 25, timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(pending.code, 'SHELL_NOT_READY');
+    assert.deepEqual(pendingPty.writes, []);
+  }
+});
+
+test('parenthesized Deck prompts with pending input do not allow execution', async () => {
+  for (const line of ['(deck@steamdeck ~)$ echo hello', '(deck@steamdeck ~)$ echo $', '(deck@steamdeck ~)$ echo (x)$', '(deck@steamdeck 100%)%']) {
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, line);
+    assert.equal(readyPrompt(session), '', line);
+    const pty = new TestPty();
+    const result = await startPtyJob(pty, 'echo OK', {
+      shellKind: 'posix', getReadyPrompt: () => readyPrompt(session), promptWaitTimeoutMs: 25, timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.code, 'SHELL_NOT_READY', line);
+    assert.deepEqual(pty.writes, [], line);
+  }
+});
+
 test('PTY readiness timeout does not send command or interrupt to a busy program', async () => {
   const pty = new TestPty();
   const job = startPtyJob(pty, 'echo OK', { getReadyPrompt:()=>'', promptWaitTimeoutMs:25, timeoutMs:1000 });
@@ -271,6 +381,49 @@ test('real pending PowerShell input is still not sent', async (t) => {
   const pty = new TestPty();
   const session = { _promptTrackTail: '', lastIdlePrompt: '' };
   trackSessionIdlePrompt(session, 'PS C:\\Users\\alice> Write-Output ok');
+  const job = startPtyJob(pty, 'echo OK', {
+    shellKind: 'powershell',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 50,
+    timeoutMs: 1000,
+  });
+  t.mock.timers.tick(50);
+  const result = await job.resultPromise;
+  assert.equal(result.code, 'SHELL_NOT_READY');
+  assert.match(result.error, /no command was sent/);
+  assert.deepEqual(pty.writes, []);
+});
+
+test('OSC 133 A marker readies exec for a colored P10k prompt the whitelist rejects', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  // Colored P10k-style prompt after a prompt-start marker; the SGR codes and
+  // ❯ shape are irrelevant — the marker proves the shell accepts input.
+  trackSessionIdlePrompt(
+    session,
+    '\x1b]133;A\x07\x1b[38;5;39m~/src\x1b[0m \x1b[38;5;213m❯\x1b[0m ',
+  );
+  assert.equal(readyPrompt(session), '~/src ❯ ');
+  const result = await startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  }).resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
+test('OSC 133 C/D markers keep exec gated even when output echoes a known prompt', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  trackSessionIdlePrompt(session, '\x1b]133;A\x07PS C:\\Users\\alice> ');
+  assert.equal(readyPrompt(session), 'PS C:\\Users\\alice> ');
+  // Command in flight; the program echoes prompt-shaped text. Text says
+  // ready, the last marker says otherwise — markers override.
+  trackSessionIdlePrompt(session, '\x1b]133;C\x07build running...\r\nPS C:\\Users\\alice> ');
+  assert.equal(readyPrompt(session), '');
   const job = startPtyJob(pty, 'echo OK', {
     shellKind: 'powershell',
     getReadyPrompt: () => readyPrompt(session),

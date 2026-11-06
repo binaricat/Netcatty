@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { DatabaseSync } = require("node:sqlite");
+const { privateOwner, LOCAL_SOURCE } = require("./sourceIdentity.cjs");
 
 const {
   MAX_SECURITY_AUDIT_DETAILS_BYTES,
@@ -488,7 +489,7 @@ test("schema upgrade backfills bindings from legacy sync-provider-map secrets", 
     INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
-    "com.example",
+    privateOwner(LOCAL_SOURCE, "com.example"),
     "sync-provider-map:com.example.sync",
     "ref-legacy-map",
     Buffer.from("sealed"),
@@ -499,7 +500,7 @@ test("schema upgrade backfills bindings from legacy sync-provider-map secrets", 
     INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
-    "com.example",
+    privateOwner(LOCAL_SOURCE, "com.example"),
     "sync-credential",
     "ref-cred",
     Buffer.from("sealed-cred"),
@@ -532,7 +533,7 @@ test("legacy map backfill does not overwrite an existing host binding", (context
     INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
-    "com.example",
+    privateOwner(LOCAL_SOURCE, "com.example"),
     "sync-provider-map:com.example.sync.foo",
     "ref-stale-parent-map",
     Buffer.from("sealed"),
@@ -566,7 +567,7 @@ test("legacy map backfill skips when no candidate holds sync credentials", (cont
     database.db.prepare(`
       INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(pluginId, key, `ref-${pluginId}`, Buffer.from("sealed"), now, now);
+    `).run(privateOwner(LOCAL_SOURCE, pluginId), key, `ref-${pluginId}`, Buffer.from("sealed"), now, now);
   }
   const promoted = database.backfillSyncProviderBindingsFromLegacySecrets();
   assert.equal(promoted, 0, "map-only candidates must not bind without credentials");
@@ -589,7 +590,7 @@ test("legacy map backfill binds sole credential-backed owner when maps conflict"
     database.db.prepare(`
       INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(pluginId, key, `ref-${pluginId}-${key}`, Buffer.from(ciphertext), now, now);
+    `).run(privateOwner(LOCAL_SOURCE, pluginId), key, `ref-${pluginId}-${key}`, Buffer.from(ciphertext), now, now);
   }
   const promoted = database.backfillSyncProviderBindingsFromLegacySecrets();
   assert.equal(promoted, 1);
@@ -618,7 +619,7 @@ test("legacy map backfill does not let longest map override credential-backed pa
     database.db.prepare(`
       INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(pluginId, key, `ref-${pluginId}-${key}`, Buffer.from(ciphertext), now, now);
+    `).run(privateOwner(LOCAL_SOURCE, pluginId), key, `ref-${pluginId}-${key}`, Buffer.from(ciphertext), now, now);
   }
   const promoted = database.backfillSyncProviderBindingsFromLegacySecrets();
   assert.equal(promoted, 1);
@@ -648,7 +649,7 @@ test("legacy map backfill skips when multiple credential-backed candidates exist
     database.db.prepare(`
       INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(pluginId, key, `ref-${pluginId}-${key}`, Buffer.from(ciphertext), now, now);
+    `).run(privateOwner(LOCAL_SOURCE, pluginId), key, `ref-${pluginId}-${key}`, Buffer.from(ciphertext), now, now);
   }
   const promoted = database.backfillSyncProviderBindingsFromLegacySecrets();
   assert.equal(promoted, 0, "ambiguous credential-backed candidates must not auto-bind");
@@ -672,7 +673,7 @@ test("legacy map backfill still consumes maps after unbind tombstone blocks prom
     INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
-    "com.example",
+    privateOwner(LOCAL_SOURCE, "com.example"),
     "sync-provider-map:com.example.sync.foo",
     "ref-tombstone-map",
     Buffer.from("sealed"),
@@ -683,7 +684,7 @@ test("legacy map backfill still consumes maps after unbind tombstone blocks prom
     INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
-    "com.example",
+    privateOwner(LOCAL_SOURCE, "com.example"),
     "sync-credential",
     "ref-cred",
     Buffer.from("secret"),
@@ -711,7 +712,7 @@ test("legacy map backfill deletes promoted map markers so unbind cannot resurrec
     INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
-    "com.example",
+    privateOwner(LOCAL_SOURCE, "com.example"),
     "sync-provider-map:com.example.custom",
     "ref-plugin-owned",
     Buffer.from("plugin-owned-payload"),
@@ -723,7 +724,7 @@ test("legacy map backfill deletes promoted map markers so unbind cannot resurrec
     INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
-    "com.example",
+    privateOwner(LOCAL_SOURCE, "com.example"),
     "sync-credential",
     "ref-cred-keep",
     Buffer.from("cred"),
@@ -750,7 +751,7 @@ test("legacy map backfill does not resurrect after explicit unbind tombstone", (
     INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
-    "com.example",
+    privateOwner(LOCAL_SOURCE, "com.example"),
     "sync-provider-map:com.example.sync",
     "ref-leftover-map",
     Buffer.from("sealed"),
@@ -823,7 +824,7 @@ test("inferPluginIdForSyncProvider never guesses from credential key prefixes", 
     database.db.prepare(`
       INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(pluginId, key, `ref-${pluginId}`, Buffer.from("x"), now, now);
+    `).run(privateOwner(LOCAL_SOURCE, pluginId), key, `ref-${pluginId}`, Buffer.from("x"), now, now);
   }
   // Parent prefix alone is not enough: a removed plugin may have owned
   // com.example.backup.sync while only com.example still has credentials.
@@ -832,4 +833,15 @@ test("inferPluginIdForSyncProvider never guesses from credential key prefixes", 
   assert.equal(database.inferPluginIdForSyncProvider("com.other.cloud"), undefined);
   assert.equal(database.inferPluginIdForSyncProvider("com.missing.sync"), undefined);
   database.close();
+});
+
+test("sync sidecar enumeration preserves NUL-separated setting coordinates", (context) => {
+  const database = createDatabase(context);
+  context.after(() => database.close());
+  const key = "com.example.test.theme\0application\0application";
+  database.setSyncSidecar("com.example.test", "settings", key, "dark", 10);
+  assert.equal(database.listSyncSidecars("com.example.test")[0].key, key);
+  assert.equal(database.listAllSyncSidecars()[0].key, key);
+  database.replaceAllSyncSidecars(database.listAllSyncSidecars());
+  assert.equal(database.getSyncSidecar("com.example.test", "settings", key).value, "dark");
 });

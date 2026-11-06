@@ -1,0 +1,46 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.forest-themes",
+  "name": "forest-themes",
+  "displayName": {
+    "en": "Forest Themes",
+    "zh-CN": "森林主题"
+  },
+  "version": "0.1.0",
+  "publisher": "netcatty",
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "features": {
+    "required": [
+      "appearance.theme-packs"
+    ]
+  },
+  "main": {
+    "data": "theme"
+  },
+  "contributes": {
+    "themes": [
+      {
+        "id": "com.netcatty.forest-themes.light",
+        "label": {
+          "en": "Forest Light",
+          "zh-CN": "森林浅色"
+        },
+        "variant": "light",
+        "entry": "light.json"
+      },
+      {
+        "id": "com.netcatty.forest-themes.dark",
+        "label": {
+          "en": "Forest Dark",
+          "zh-CN": "森林深色"
+        },
+        "variant": "dark",
+        "entry": "dark.json"
+      }
+    ]
+  }
+}

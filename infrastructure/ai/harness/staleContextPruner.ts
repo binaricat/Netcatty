@@ -1,5 +1,6 @@
 import type { ModelMessage } from 'ai';
 import { redactSecretsForModel, redactSecretsInValueForModel } from './modelSecretRedaction';
+import { sliceHead, sliceTail } from '../textBoundaries';
 
 const SUPERSEDED_READ_PREFIX = '[superseded read:';
 const EARLIER_TERMINAL_PREFIX = '[earlier terminal output omitted:';
@@ -272,7 +273,7 @@ export function pruneStaleToolContext(
           return `[older tool result omitted: tool=${toolName || 'unknown'}, chars=${text.length}]`;
         }
         if (age >= 3 && text.length > 4_000) {
-          return `${text.slice(0, 1_500)}\n\n[... tool result shortened: ${text.length - 3_000} chars omitted ...]\n\n${text.slice(-1_500)}`;
+          return `${sliceHead(text, 1_500)}\n\n[... tool result shortened: ${text.length - 3_000} chars omitted ...]\n\n${sliceTail(text, 1_500)}`;
         }
       }
       return null;

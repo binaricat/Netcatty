@@ -64,6 +64,7 @@ import {
   type DefaultTargetSessionHint,
 } from '../application/state/useAIChatStreaming';
 import { getScopedHistorySessions } from './ai/scopedHistorySessions';
+import { buildAiChatsListingEntries, canRebindChat, formatAiChatsListingNote, resolveRebindTargetFromArg, type AiChatsListingEntry } from './ai/aiChatsListing';
 import { resolveInheritedAIActiveSessionId } from '../domain/aiWorkspaceScopeInherit';
 import { resolveUndoLastTurnBoundary } from '../domain/aiUndoLastTurn';
 import { aiSessionIdSetEqual, exactScopeAISessionsEqual } from '../domain/aiSessionsForScope';
@@ -279,6 +280,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   undoLastTurnInSession,
   deleteSession,
   updateSessionTitle,
+  rebindSessionScope,
+  exportSessionsBackup,
+  importSessionsBackup,
   updateSessionExternalSessionId,
   addMessageToSession,
   updateLastMessage,
@@ -312,7 +316,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   scopeHostIds,
   scopeLabel,
   focusedSessionId,
+  workspaces = [],
   terminalSessions = [],
+  liveScopeTargetIds,
   resolveExecutorContext,
   isVisible = true,
   notes = [],
@@ -327,6 +333,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const scopeKey = `${scopeType}:${scopeTargetId ?? ''}`;
 
   const [showHistory, setShowHistory] = useState(false);
+  // Inline system-style note above the composer (e.g. `/chats` listing).
+  // Panel-command output, never agent content.
+  const [panelCommandNote, setPanelCommandNote] = useState<string | null>(null);
+  // Entries of the last `/chats` listing; `/rebind <n>` resolves against them.
+  const lastChatsListingRef = useRef<AiChatsListingEntry[]>([]);
   const [isSending, setIsSending] = useState(false);
   // Undo-last-turn is still
   // running. Unlike the send flow this is not reflected in `isSending`, so it
@@ -483,6 +494,119 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   }
   const activeSessionRef = useRef(activeSession);
   activeSessionRef.current = activeSession;
+
+  /** Rename a chat (slash command + history drawer affordance). Panel action: nothing is sent to the agent. */
+  const handleRenameSession = useCallback((sessionId: string, rawTitle: string) => {
+    const title = rawTitle.trim();
+    if (!title) {
+      toast.warning(t('ai.chat.renameUsage'));
+      return;
+    }
+    if (!sessionId) {
+      toast.warning(t('ai.chat.renameNoActive'));
+      return;
+    }
+    updateSessionTitle(sessionId, title);
+    toast.success(t('ai.chat.renameDone').replace('{title}', title));
+  }, [t, updateSessionTitle]);
+
+  const handleRenameSlashCommand = useCallback((title: string) => {
+    handleRenameSession(activeSessionRef.current?.id ?? null, title);
+  }, [handleRenameSession]);
+
+  const handleListChats = useCallback(() => {
+    // Prefer the app-wide live target set so chats bound to other still-open
+    // terminals are not mislabelled dangling / offered for /rebind.
+    const liveTerminalIds = liveScopeTargetIds
+      ?? (scopeType === 'workspace' && workspaceMemberTerminalIds
+        ? workspaceMemberTerminalIds
+        : new Set(scopeTargetId ? [scopeTargetId] : []));
+    // Dangling chats no longer match any live scope (rank 0), so they must be
+    // appended explicitly for the listing — that is where they become visible
+    // and rebindable again (issue #4015 R2).
+    const listedSessionIds = new Set(historySessions.map((session) => session.id));
+    const danglingSessions = sessions.filter((session) => session.scopeDangling && !listedSessionIds.has(session.id));
+    const entries = buildAiChatsListingEntries({
+      sessions: [...historySessions, ...danglingSessions],
+      activeSessionId,
+      externalAgents,
+      workspaces,
+      liveTerminalIds,
+      currentScopeLabel: scopeLabel,
+      scopeTargetId,
+      t,
+    });
+    lastChatsListingRef.current = entries;
+    setPanelCommandNote(formatAiChatsListingNote(entries, t));
+  }, [activeSessionId, externalAgents, historySessions, liveScopeTargetIds, scopeLabel, scopeTargetId, scopeType, sessions, t, workspaces, workspaceMemberTerminalIds]);
+
+  // `/rebind <n>`: rebind the nth dangling chat from the last /chats listing
+  // to this panel's current scope. Panel action — no agent round-trip.
+  const handleRebindChat = useCallback((arg: string) => {
+    if (!scopeTargetId) {
+      toast.warning(t('ai.chat.rebindUnavailable'));
+      return;
+    }
+    const target = resolveRebindTargetFromArg(arg, lastChatsListingRef.current);
+    if (!target) {
+      toast.warning(t('ai.chat.rebindUsage'));
+      return;
+    }
+    const session = sessions.find((item) => item.id === target.sessionId);
+    const liveTargets = new Set(liveScopeTargetIds ?? workspaceMemberTerminalIds ?? []);
+    for (const workspace of workspaces) liveTargets.add(workspace.id);
+    liveTargets.add(scopeTargetId);
+    if (canRebindChat(session, liveTargets)) {
+      rebindSessionScope?.(target.sessionId, { type: scopeType, targetId: scopeTargetId, hostIds: scopeHostIds });
+      toast.success(t('ai.chat.rebindDone').replace('{title}', target.title));
+    } else {
+      toast.warning(t('ai.chat.rebindUsage'));
+    }
+    // Do not rebuild /chats from this render's stale sessions (still dangling).
+    // Drop the resolved entry from the stored listing so a repeat /rebind <n>
+    // cannot target it; the next explicit /chats refreshes from live state.
+    const remaining = lastChatsListingRef.current.filter(
+      (entry) => entry.sessionId !== target.sessionId,
+    );
+    let danglingCounter = 0;
+    for (const entry of remaining) {
+      if (!entry.isDangling) {
+        entry.rebindNumber = undefined;
+        continue;
+      }
+      danglingCounter += 1;
+      entry.rebindNumber = danglingCounter;
+    }
+    lastChatsListingRef.current = remaining;
+    setPanelCommandNote(formatAiChatsListingNote(remaining, t));
+  }, [liveScopeTargetIds, rebindSessionScope, scopeHostIds, scopeTargetId, scopeType, sessions, t, workspaces, workspaceMemberTerminalIds]);
+
+  // Manual durability actions (history drawer header). Export writes the
+  // whole store to a user-chosen JSON file; import merges by id.
+  const handleExportSessions = useCallback(() => {
+    void exportSessionsBackup?.().then((filePath) => {
+      if (filePath == null) {
+        toast.warning(t('ai.chat.exportUnavailable'));
+        return;
+      }
+      toast.success(
+        filePath
+          ? t('ai.chat.exportDone').replace('{path}', filePath)
+          : t('ai.chat.exportDoneNoPath'),
+      );
+    });
+  }, [exportSessionsBackup, t]);
+
+  const handleImportSessions = useCallback(() => {
+    void importSessionsBackup?.().then((count) => {
+      if (count <= 0) {
+        toast.warning(t('ai.chat.importNone'));
+        return;
+      }
+      toast.success(t('ai.chat.importDone').replace('{n}', String(count)));
+    });
+  }, [importSessionsBackup, t]);
+
 
   const defaultTargetSession = useMemo<DefaultTargetSessionHint | undefined>(() => {
     const connectedSessions = terminalSessions.filter((session) => session.connected !== false);
@@ -2065,6 +2189,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         setInputValue={setInputValue}
         handleSend={handleSend}
         handleCompact={handleCompact}
+        onRenameSession={handleRenameSession}
+        onRenameActiveChat={handleRenameSlashCommand}
+        onListChats={handleListChats}
+        onRebindChat={handleRebindChat}
+        panelCommandNote={panelCommandNote}
+        onDismissPanelCommandNote={() => setPanelCommandNote(null)}
+        onExportSessions={handleExportSessions}
+        onImportSessions={handleImportSessions}
         canUndoLastTurn={canUndoLastTurn}
         handleUndoLastTurn={undoLastTurnInSession ? handleUndoLastTurn : undefined}
         handleSteer={handleSteer}
@@ -2143,6 +2275,9 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'createSession',
   'deleteSession',
   'updateSessionTitle',
+  'rebindSessionScope',
+  'exportSessionsBackup',
+  'importSessionsBackup',
   'updateSessionExternalSessionId',
   'addMessageToSession',
   'updateLastMessage',
@@ -2193,6 +2328,8 @@ export function aiChatSidePanelPropsAreEqual(
   if ((prev.isVisible ?? true) !== (next.isVisible ?? true)) return false;
   if (prev.scopeHostIds !== next.scopeHostIds) return false;
   if (prev.terminalSessions !== next.terminalSessions) return false;
+  if (prev.liveScopeTargetIds !== next.liveScopeTargetIds) return false;
+  if (prev.workspaces !== next.workspaces) return false;
   if (prev.resolveExecutorContext !== next.resolveExecutorContext) return false;
   if (prev.notes !== next.notes) return false;
   if (prev.hosts !== next.hosts) return false;

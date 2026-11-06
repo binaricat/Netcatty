@@ -13,6 +13,7 @@ async function buildInjectedMcpServers({
   mcpServerBridge,
   chatSessionId,
   toolIntegrationMode,
+  delegationTag,
 }) {
   try {
     // Start the netcatty control host for BOTH modes. getOrCreateHost binds the
@@ -30,8 +31,22 @@ async function buildInjectedMcpServers({
       scopedIds,
       chatSessionId,
     );
+    if (mcpServerBridge.isPluginAgentConversation?.(chatSessionId)) {
+      const delegated = mcpServerBridge.getPluginAgentMcpConfiguration(chatSessionId, delegationTag);
+      // Replace, never append alongside, the app-wide credential. These values
+      // stay in the managed subprocess configuration and never reach the plugin.
+      netcattyMcpConfig.env = netcattyMcpConfig.env.filter((entry) => ![
+        "NETCATTY_MCP_TOKEN", "NETCATTY_MCP_DEBUG", "NETCATTY_MCP_PERMISSION_MODE",
+      ].includes(entry.name));
+      netcattyMcpConfig.env.push(
+        { name: "NETCATTY_MCP_TOKEN", value: delegated.token },
+        { name: "NETCATTY_MCP_PERMISSION_MODE", value: "confirm" },
+        { name: "NETCATTY_MCP_DELEGATED_TOOLS", value: JSON.stringify(delegated.tools) },
+      );
+    }
     return [netcattyMcpConfig];
   } catch (err) {
+    if (mcpServerBridge.isPluginAgentConversation?.(chatSessionId)) throw Error("Delegated Agent MCP is unavailable");
     console.error("[sdk] Failed to ensure netcatty host / inject MCP server:", err?.message || err);
     return [];
   }

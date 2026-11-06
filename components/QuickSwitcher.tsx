@@ -21,6 +21,7 @@ import { buildQuickSwitcherShells, useDiscoveredShells, getShellIconPath, isMono
 import { usePluginContributions } from "../application/state/usePluginContributions";
 import { requestOpenPluginView } from "./plugins/PluginContributionHost";
 import { PluginContributionIcon } from "./plugins/PluginContributionIcon";
+import { toast } from "./ui/toast";
 
 type QuickSwitcherItemBase = {
   id: string;
@@ -149,7 +150,7 @@ export function getQuickSwitcherVisualRowHeight(row: QuickSwitcherVisualRow): nu
   return QS_ROW_HEIGHT;
 }
 
-interface QuickSwitcherProps {
+export interface QuickSwitcherProps {
   isOpen: boolean;
   query: string;
   results: Host[];
@@ -507,7 +508,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
             useAlternate && item.altCommand ? item.altCommand : item.commandId,
             undefined,
             { 'netcatty.surface': 'commandPalette' },
-          ).catch(() => {});
+          ).catch(() => toast.error(t('plugins.command.failed')));
           onClose();
         }
         break;

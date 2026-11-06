@@ -56,6 +56,7 @@ const COVERED_COMMANDS = [
   "dnf",
   "brew",
   "sudo",
+  "touch",
   "cat",
   "tail",
   "head",

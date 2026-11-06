@@ -1,0 +1,173 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.hello-react-host",
+  "name": "hello-react-host",
+  "displayName": {
+    "en": "Hello React",
+    "zh-CN": "你好，React"
+  },
+  "description": "Freely styled pages with standard, persistent Netcatty settings. No host data access.",
+  "version": "0.2.0",
+  "publisher": "netcatty",
+  "license": "MIT",
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "features": {
+    "required": [
+      "views.vault-pages",
+      "views.terminal-sidebar",
+      "views.host-drawn"
+    ]
+  },
+  "main": {
+    "browser": "dist/index.js"
+  },
+  "activationEvents": [
+    "onView:com.netcatty.hello-react-host.vault",
+    "onView:com.netcatty.hello-react-host.sidebar",
+    "onView:com.netcatty.hello-react-host.tab",
+    "onView:com.netcatty.hello-react-host.aside",
+    "onView:com.netcatty.hello-react-host.panel",
+    "onView:com.netcatty.hello-react-host.modal"
+  ],
+  "permissions": {
+    "required": [
+      "views",
+      "settings.read"
+    ]
+  },
+  "contributes": {
+    "views": [
+      {
+        "id": "com.netcatty.hello-react-host.vault",
+        "title": {
+          "en": "Hello · Vault",
+          "zh-CN": "你好 · Vault 页面"
+        },
+        "location": "vault-page"
+      },
+      {
+        "id": "com.netcatty.hello-react-host.sidebar",
+        "title": {
+          "en": "Hello · Sidebar",
+          "zh-CN": "你好 · 终端侧栏"
+        },
+        "location": "terminal-sidebar"
+      },
+      {
+        "id": "com.netcatty.hello-react-host.tab",
+        "title": {
+          "en": "Hello · Tab",
+          "zh-CN": "你好 · 独立标签页"
+        },
+        "location": "tab"
+      },
+      {
+        "id": "com.netcatty.hello-react-host.aside",
+        "title": {
+          "en": "Hello · Aside",
+          "zh-CN": "你好 · 侧边面板"
+        },
+        "location": "aside"
+      },
+      {
+        "id": "com.netcatty.hello-react-host.panel",
+        "title": {
+          "en": "Hello · Panel",
+          "zh-CN": "你好 · 底部面板"
+        },
+        "location": "panel"
+      },
+      {
+        "id": "com.netcatty.hello-react-host.modal",
+        "title": {
+          "en": "Hello · Modal",
+          "zh-CN": "你好 · 弹窗"
+        },
+        "location": "modal"
+      }
+    ],
+    "settings": [
+      {
+        "id": "com.netcatty.hello-react-host.name",
+        "label": {
+          "en": "Default name",
+          "zh-CN": "默认称呼"
+        },
+        "group": {
+          "en": "Greeting",
+          "zh-CN": "问候"
+        },
+        "description": {
+          "en": "Used when opening a new plugin page.",
+          "zh-CN": "用于新打开的插件页面。"
+        },
+        "control": "text",
+        "scope": "application",
+        "default": "",
+        "pattern": "^.{0,40}$"
+      },
+      {
+        "id": "com.netcatty.hello-react-host.enabled",
+        "label": {
+          "en": "Enable greeting",
+          "zh-CN": "启用问候"
+        },
+        "group": {
+          "en": "Greeting",
+          "zh-CN": "问候"
+        },
+        "control": "switch",
+        "scope": "application",
+        "default": true
+      },
+      {
+        "id": "com.netcatty.hello-react-host.color",
+        "label": {
+          "en": "Accent color",
+          "zh-CN": "强调颜色"
+        },
+        "group": {
+          "en": "Appearance",
+          "zh-CN": "外观"
+        },
+        "control": "select",
+        "scope": "application",
+        "default": "blue",
+        "options": [
+          {
+            "value": "blue",
+            "label": {
+              "en": "Blue",
+              "zh-CN": "蓝色"
+            }
+          },
+          {
+            "value": "green",
+            "label": {
+              "en": "Green",
+              "zh-CN": "绿色"
+            }
+          }
+        ]
+      },
+      {
+        "id": "com.netcatty.hello-react-host.note",
+        "label": {
+          "en": "Default note",
+          "zh-CN": "默认便签"
+        },
+        "group": {
+          "en": "Content",
+          "zh-CN": "内容"
+        },
+        "control": "textarea",
+        "scope": "application",
+        "default": "",
+        "pattern": "^[\\s\\S]{0,500}$"
+      }
+    ]
+  }
+}

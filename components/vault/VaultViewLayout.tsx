@@ -29,6 +29,7 @@ import { LazyLoadBoundary } from "../ui/lazy-load-boundary";
 import { toast } from "../ui/toast";
 import { AppWordmark } from "../AppWordmark";
 import { openHostBrowser } from "../../application/hostBrowser";
+import { PluginVaultNavigation, PluginVaultPage } from '../plugins/PluginVaultPages';
 
 type VaultViewLayoutContext = Record<string, any>;
 
@@ -156,6 +157,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     ContextMenuTrigger,
     Copy,
     currentSection,
+    pluginVault,
     customGroups,
     deleteGroupPaths,
     deleteGroupWithHosts,
@@ -595,12 +597,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           </div>
 
           <div
-            className={cn("space-y-1", sidebarCollapsed ? "px-1.5" : "px-2.5")}
+            className={cn("min-h-0 flex-1 overflow-y-auto space-y-1", sidebarCollapsed ? "px-1.5" : "px-2.5")}
           >
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
                   variant={currentSection === "hosts" ? "secondary" : "ghost"}
+                  data-plugin-vault-fallback
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
@@ -805,11 +808,12 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 </TooltipContent>
               )}
             </Tooltip>
+            {pluginVault && <PluginVaultNavigation model={pluginVault} collapsed={sidebarCollapsed} />}
           </div>
 
           <div
             className={cn(
-              "mt-auto pb-4 space-y-2",
+              "mt-auto shrink-0 pb-4 space-y-2",
               sidebarCollapsed ? "px-1.5" : "px-2.5",
             )}
           >
@@ -864,6 +868,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             className="flex-1 min-w-0 flex flex-col min-h-0 relative"
             data-section="vault-main"
           >
+            {pluginVault?.selected && <PluginVaultPage key={pluginVault.selected.key} model={pluginVault} />}
             <VaultPageHeader
               className={cn(!isHostsSectionActive && "hidden")}
               dataSection="vault-hosts-header"
@@ -1066,7 +1071,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   size="sm"
                   variant="secondary"
                   className={vaultHeaderSecondaryButtonClass}
-                  onClick={onCreateLocalTerminal}
+                  onClick={() => onCreateLocalTerminal()}
                   tabIndex={isHostAsideOpen ? -1 : 0}
                 >
                   <TerminalSquare size={14} className="mr-2" />{" "}

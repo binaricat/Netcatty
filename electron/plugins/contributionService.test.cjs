@@ -87,6 +87,7 @@ function setup(context, pluginManifest, options = {}) {
     runtimeSupervisor,
     secretStore,
     getLocale: () => "zh-CN",
+    onCommandFinished: options.onCommandFinished,
   });
   return { calls, database, secretStore, service, secrets };
 }
@@ -98,6 +99,48 @@ test("plugin contribution values enforce the exact JSON value boundary", () => {
   for (const value of [new Date(), new Map(), Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
     assert.throws(() => assertJsonValue(value), /bounded JSON value/u);
   }
+});
+
+test("only explicitly declared interactive commands receive the fixed budget and command completion is runtime-bound", async (t) => {
+  const pluginManifest = manifest();
+  delete pluginManifest.contributes.commands[0].enablement;
+  pluginManifest.features = { required: ["commands.interactive"] };
+  pluginManifest.contributes.commands.push({ id: `${pluginManifest.id}.interactive`, title: "Interactive", interactive: true });
+  const optionsSeen = [], finished = [];
+  const runtimeId = "runtime-budget";
+  const { service } = setup(t, pluginManifest, {
+    onCommandFinished: (id) => finished.push(id),
+    runtimeSupervisor: {
+      async start() { return { runtimeId, pluginVersion: pluginManifest.version }; },
+      async request(_id, _method, _params, options) { optionsSeen.push(options); return null; },
+    },
+  });
+  await service.executeCommand(`${pluginManifest.id}.hello`);
+  await service.executeCommand(`${pluginManifest.id}.interactive`);
+  assert.equal(Object.hasOwn(optionsSeen[0], "timeoutMs"), false, "ordinary commands retain the existing router deadline");
+  assert.equal(optionsSeen[0].expectedIdentity.runtimeId, runtimeId);
+  assert.equal(optionsSeen[1].timeoutMs, 180_000);
+  assert.equal(optionsSeen[1].expectedIdentity.runtimeId, runtimeId);
+  assert.deepEqual(finished, [runtimeId, runtimeId]);
+  assert.equal(service.activeCommandCalls.size, 0);
+});
+
+test("concurrent successful commands retain the runtime interaction until the last ends, while a failed command cancels it", async (t) => {
+  const pluginManifest = manifest(); delete pluginManifest.contributes.commands[0].enablement;
+  const pending = [], finished = [];
+  const { service } = setup(t, pluginManifest, { onCommandFinished: (id) => finished.push(id),
+    runtimeSupervisor: { async start() { return { runtimeId: "runtime-concurrent" }; },
+      request() { return new Promise((resolve, reject) => pending.push({ resolve, reject })); } },
+  });
+  const first = service.executeCommand(`${pluginManifest.id}.hello`);
+  const second = service.executeCommand(`${pluginManifest.id}.hello`);
+  await new Promise((resolve) => setImmediate(resolve));
+  pending[0].resolve(null); await first;
+  assert.deepEqual(finished, []);
+  pending[1].reject(new Error("synthetic timeout"));
+  await assert.rejects(second, /synthetic timeout/);
+  assert.deepEqual(finished, ["runtime-concurrent"]);
+  assert.equal(service.activeCommandCalls.size, 0);
 });
 
 test("only onStartupFinished plugins activate during contribution initialization", async (context) => {
@@ -680,4 +723,20 @@ test("Provider contributions expose a PR 5 lazy activation seam", async (context
   assert.equal(result.provider.id, "com.example.provider.completion");
   assert.deepEqual(result.identity, identity);
   assert.deepEqual(calls, ["start:com.example.provider"]);
+});
+
+
+test("host settings groups are localized and preferences persist without activating UI code", async (t) => {
+  const pluginManifest = manifest();
+  pluginManifest.contributes.settings[0].group = { en: "General", "zh-CN": "常规" };
+  const { service, database, calls } = setup(t, pluginManifest);
+  const settingId = `${pluginManifest.id}.greeting`;
+  const snapshot = () => service.snapshot().plugins[0].settings[0];
+  assert.equal(snapshot().group, "常规");
+  await service.updateSetting(pluginManifest.id, settingId, "persisted preference");
+  assert.equal(database.getSetting(pluginManifest.id, settingId, "application", "application"), "persisted preference");
+  assert.equal(snapshot().value, "persisted preference");
+  assert.ok(!calls.some(call => call.startsWith("start:")), "editing host settings does not start plugin UI");
+  await service.resetSetting(pluginManifest.id, settingId);
+  assert.equal(snapshot().value, "hello");
 });

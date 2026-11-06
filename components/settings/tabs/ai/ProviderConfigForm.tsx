@@ -7,6 +7,10 @@ import { PROVIDER_PRESETS, resolveOpenAIApi, resolveProviderStyle } from "../../
 import { normalizeOllamaSdkBaseURL } from "../../../../infrastructure/ai/ollamaCompatBaseUrl";
 import { sanitizeContextWindow } from "../../../../infrastructure/ai/contextCompaction";
 import {
+  isProviderReasoningEffort,
+  PROVIDER_REASONING_EFFORT_OPTIONS,
+} from "../../../../infrastructure/ai/cattyReasoning";
+import {
   probeProviderConnection,
   validateProviderProbeInputs,
   type ProviderProbeHealth,
@@ -57,8 +61,17 @@ async function compressIconFileToDataUrl(file: File): Promise<string> {
 
 const STYLE_OPTIONS: ReadonlyArray<ProviderStyle> = ["anthropic", "openai", "google"];
 const OPENAI_API_OPTIONS: ReadonlyArray<OpenAIApiFormat> = ["chat", "responses"];
-/** Selectable thinking-depth levels; empty string means "provider default" (field not sent). */
-const REASONING_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
+/**
+ * How each reasoning level is shown in the select. Raw wire values stay the
+ * option values so a saved config keeps round-tripping unchanged.
+ */
+const REASONING_EFFORT_LABELS: Record<string, string> = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh (extra high)",
+  max: "max",
+};
 
 /** Same box as the h-8 fields above. Transparent border keeps primary aligned with outline. */
 const PROVIDER_ACTION_CLASS = "box-border h-8 px-3 gap-1.5 text-sm font-medium leading-none";
@@ -363,7 +376,7 @@ export const ProviderConfigForm: React.FC<{
     if (ap.topP != null) cleanedParams.topP = Math.min(1, Math.max(0, ap.topP));
     if (ap.frequencyPenalty != null) cleanedParams.frequencyPenalty = Math.min(2, Math.max(-2, ap.frequencyPenalty));
     if (ap.presencePenalty != null) cleanedParams.presencePenalty = Math.min(2, Math.max(-2, ap.presencePenalty));
-    if (ap.reasoningEffort && (REASONING_EFFORT_OPTIONS as readonly string[]).includes(ap.reasoningEffort)) {
+    if (isProviderReasoningEffort(ap.reasoningEffort)) {
       cleanedParams.reasoningEffort = ap.reasoningEffort;
     }
 
@@ -774,10 +787,13 @@ export const ProviderConfigForm: React.FC<{
                 className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 <option value="">{t('ai.providers.advancedParams.default')}</option>
-                {REASONING_EFFORT_OPTIONS.map((level) => (
-                  <option key={level} value={level}>{level}</option>
+                {PROVIDER_REASONING_EFFORT_OPTIONS.map((level) => (
+                  <option key={level} value={level}>{REASONING_EFFORT_LABELS[level] ?? level}</option>
                 ))}
               </select>
+              <p className="text-[11px] text-muted-foreground/70">
+                {t('ai.providers.advancedParams.reasoningEffort.help')}
+              </p>
             </div>
           </div>
         )}

@@ -107,6 +107,7 @@ test("attached popups retain the active mode across snapshots and return, includ
           hibernateSnapshotRef: ref(""), hibernatePendingBufferRef: ref(""), hibernateViewportSnapshotRef: ref(""), hibernateScrollbackSnapshotRef: ref(""),
           hibernateContextSnapshotRef: ref(""), hibernateContextViewportSnapshotRef: ref(""), hibernateContextScrollbackSnapshotRef: ref(""), hibernateAlternateScreenRef: ref(false),
           kittyKeyboardProtocolEnabledForSession: false, passwordPromptActiveRef: ref(false), knownCwdRef: ref(null), terminalTitleRef: ref(null), pluginTerminalLifecycleRef: ref(null),
+          promptSecurityScreenRef: ref({ active: null, incomplete: null }),
           onTerminalCwdChange: undefined, onTerminalTitleChange: undefined, terminalCwdTracker: { setRendererCwd: noop },
           flushPendingTerminalWritesBeforeHibernate: async () => true, resetTerminalLineTimestamps: noop,
           applyAuthoritativeHibernateSnapshot: noop, logger: { warn: noop },
@@ -147,6 +148,7 @@ test("attached popups retain the active mode across snapshots and return, includ
           safeFit: noop, logger: { warn: noop, error: (...args: unknown[]) => errors.push(args) },
           onPluginRuntimeCwdChange: noop, onOpenExternalError: noop, requestSearchFocus: noop,
           requestPluginTerminalProviders: undefined, isPluginTerminalProviderAvailable: () => false,
+          isPromptSecurityAlternateScreenActive: undefined,
           useEffect: (effect: React.EffectCallback, dependencies: React.DependencyList) => {
             useEffect(() => {
               if (effect.toString().includes("bootAbort")) return effect();

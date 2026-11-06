@@ -1,6 +1,13 @@
-import React, { createContext, useContext, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
-import { MESSAGES_BY_LOCALE } from './messages';
+import {
+  getBaseFallbackLocale,
+  getLoadedLocaleMessages,
+  getLocaleMessagesVersion,
+  loadLocaleMessages,
+  subscribeLocaleMessages,
+  type Messages,
+} from './messages';
 
 type InterpolationValues = Record<string, string | number | boolean | null | undefined>;
 
@@ -29,32 +36,59 @@ const interpolate = (template: string, values?: InterpolationValues): string => 
     .replace(/\{(\w+)\}/g, replaceSingleBraceToken);
 };
 
-const resolveMessage = (resolvedLocale: string, key: string): string | undefined => {
-  const direct = MESSAGES_BY_LOCALE[resolvedLocale]?.[key];
-  if (direct) return direct;
-  const base = resolvedLocale.split('-')[0];
-  const baseKey = Object.keys(MESSAGES_BY_LOCALE).find((k) => k === base || k.startsWith(`${base}-`));
-  const baseHit = baseKey ? MESSAGES_BY_LOCALE[baseKey]?.[key] : undefined;
-  if (baseHit) return baseHit;
-  return MESSAGES_BY_LOCALE[DEFAULT_UI_LOCALE]?.[key];
+type LocaleDictionaries = {
+  direct?: Messages;
+  base?: Messages;
+  fallback?: Messages;
 };
+
+/**
+ * Dictionaries consulted for `resolvedLocale`: exact locale, same-base sibling
+ * (zh-TW -> zh-CN), then English. `_loadedVersion` is only a cache key so a
+ * dictionary that finishes loading yields a fresh snapshot.
+ */
+const snapshotLocaleDictionaries = (resolvedLocale: string, _loadedVersion: number): LocaleDictionaries => {
+  const baseKey = getBaseFallbackLocale(resolvedLocale);
+  return {
+    direct: getLoadedLocaleMessages(resolvedLocale),
+    base: baseKey ? getLoadedLocaleMessages(baseKey) : undefined,
+    fallback: getLoadedLocaleMessages(DEFAULT_UI_LOCALE),
+  };
+};
+
+const resolveMessage = (dictionaries: LocaleDictionaries, key: string): string | undefined =>
+  dictionaries.direct?.[key] || dictionaries.base?.[key] || dictionaries.fallback?.[key];
 
 export const I18nProvider: React.FC<{ locale: string; children: React.ReactNode }> = ({
   locale,
   children,
 }) => {
   const resolvedLocale = resolveSupportedLocale(locale || DEFAULT_UI_LOCALE);
+  // Non-English dictionaries load on demand (index.tsx preloads the saved one
+  // before the first render); re-render consumers once a switch finishes.
+  const messagesVersion = useSyncExternalStore(
+    subscribeLocaleMessages,
+    getLocaleMessagesVersion,
+    getLocaleMessagesVersion,
+  );
+  useEffect(() => {
+    void loadLocaleMessages(resolvedLocale).catch(() => {});
+  }, [resolvedLocale]);
+  const dictionaries = useMemo(
+    () => snapshotLocaleDictionaries(resolvedLocale, messagesVersion),
+    [resolvedLocale, messagesVersion],
+  );
 
   const value = useMemo<I18nContextValue>(() => {
     return {
       locale,
       resolvedLocale,
       t: (key, values) => {
-        const msg = resolveMessage(resolvedLocale, key) ?? key;
+        const msg = resolveMessage(dictionaries, key) ?? key;
         return interpolate(msg, values);
       },
     };
-  }, [locale, resolvedLocale]);
+  }, [dictionaries, locale, resolvedLocale]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 };

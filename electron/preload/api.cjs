@@ -99,7 +99,54 @@ function createPreloadApi(ctx) {
   with (ctx) {
     return {
   getPluginRuntimeStatus: () => ipcRenderer.invoke("netcatty:plugins:status"),
+  getPluginSourceBinding: (pluginId) => ipcRenderer.invoke("netcatty:plugins:source-binding", { pluginId }),
+  resetPluginSource: (pluginId, expectedSourceId) => ipcRenderer.invoke("netcatty:plugins:reset-source", { pluginId, expectedSourceId }),
+  listPluginSources: () => ipcRenderer.invoke("netcatty:plugins:sources"),
+  addPluginSource: (source) => ipcRenderer.invoke("netcatty:plugins:add-source", source),
+  updatePluginSource: (source) => ipcRenderer.invoke("netcatty:plugins:update-source", source),
+  removePluginSource: (id, disablePlugins) => ipcRenderer.invoke("netcatty:plugins:remove-source", { id, disablePlugins }),
+  listPluginCatalog: (sourceId) => ipcRenderer.invoke("netcatty:plugins:catalog", { sourceId }),
+  getPluginAuthorPresentation: (request) => ipcRenderer.invoke("netcatty:plugins:author", request),
+  onPluginCatalogChanged: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("netcatty:plugins:catalog-changed", listener);
+    return () => ipcRenderer.removeListener("netcatty:plugins:catalog-changed", listener);
+  },
+  getPluginCatalogReadme: (id, selectionToken, sourceId) => ipcRenderer.invoke("netcatty:plugins:catalog-readme", { id, selectionToken, sourceId }),
+  getPluginCatalogReadmeImages: (id, selectionToken, sourceId) => ipcRenderer.invoke("netcatty:plugins:catalog-readme-images", { id, selectionToken, sourceId }),
+  installCatalogPlugin: (id, selectionToken, sourceId, acceptedSourceId) => ipcRenderer.invoke("netcatty:plugins:catalog-install", { id, selectionToken, sourceId, acceptedSourceId }),
+  setPluginAIHostReady: (ready) => ipcRenderer.invoke("netcatty:plugins:ai-host-ready", ready),
+  setPluginAgentHostReady: (ready) => ipcRenderer.invoke("netcatty:plugins:agent-host-ready", ready),
+  respondPluginAgentHost: (response) => ipcRenderer.invoke("netcatty:plugins:agent-host-response", response),
+  onPluginAgentHostRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("netcatty:plugins:agent-host-request", listener);
+    return () => ipcRenderer.removeListener("netcatty:plugins:agent-host-request", listener);
+  },
+  respondPluginAIHost: (response) => ipcRenderer.invoke("netcatty:plugins:ai-host-response", response),
+  onPluginAIHostRequest: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("netcatty:plugins:ai-host-request", listener);
+    return () => ipcRenderer.removeListener("netcatty:plugins:ai-host-request", listener);
+  },
+  setPluginInteractionReady: (ready) => ipcRenderer.invoke("netcatty:plugins:interaction-ready", { ready }),
+  respondPluginInteraction: (response) => ipcRenderer.invoke("netcatty:plugins:interaction-response", response),
+  onPluginInteraction: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("netcatty:plugins:host-interaction", listener);
+    return () => ipcRenderer.removeListener("netcatty:plugins:host-interaction", listener);
+  },
   listPlugins: () => ipcRenderer.invoke("netcatty:plugins:list"),
+  setPluginPermissionMode: (pluginId, permission, mode, policyRevision) => ipcRenderer.invoke("netcatty:plugins:set-permission-mode", { pluginId, permission, mode, policyRevision }),
+  setPluginPermissionReady: (ready) => ipcRenderer.invoke("netcatty:plugins:permission-ready", { ready }),
+  respondPluginPermission: (response) => ipcRenderer.invoke("netcatty:plugins:permission-response", response),
+  onPluginPermission: (callback) => {
+    const listener = (_event, prompt) => callback(prompt);
+    ipcRenderer.on("netcatty:plugins:permission-prompt", listener);
+    return () => ipcRenderer.removeListener("netcatty:plugins:permission-prompt", listener);
+  },
+  getPluginPermissions: (pluginId) => ipcRenderer.invoke("netcatty:plugins:permissions", { pluginId }),
+  revokePluginPermissions: (pluginId) => ipcRenderer.invoke("netcatty:plugins:revoke-permissions", { pluginId }),
   installPluginPackage: (archivePath, options) => ipcRenderer.invoke("netcatty:plugins:install", {
     archivePath,
     enable: options?.enable === true,
@@ -110,7 +157,28 @@ function createPreloadApi(ctx) {
   }),
   restartPlugin: (pluginId) => ipcRenderer.invoke("netcatty:plugins:restart", { pluginId }),
   uninstallPlugin: (pluginId) => ipcRenderer.invoke("netcatty:plugins:uninstall", { pluginId }),
+  getPluginLogStatus: () => ipcRenderer.invoke("netcatty:plugins:log-status"),
+  configurePluginLogs: (settings) => ipcRenderer.invoke("netcatty:plugins:log-configure", settings),
+  openPluginLogFolder: () => ipcRenderer.invoke("netcatty:plugins:log-open"),
+  exportPluginLogs: () => ipcRenderer.invoke("netcatty:plugins:log-export"),
+  clearPluginLogs: () => ipcRenderer.invoke("netcatty:plugins:log-clear"),
+  setPluginTerminalTarget: (target) => ipcRenderer.invoke("netcatty:plugins:terminal-target", target),
+  getPluginThemes: () => ipcRenderer.invoke("netcatty:plugins:theme-catalog"),
+  applyPluginTheme: (request) => ipcRenderer.invoke("netcatty:plugins:theme-apply", request),
+  onPluginThemesChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("netcatty:plugins:themes-changed", listener);
+    return () => ipcRenderer.removeListener("netcatty:plugins:themes-changed", listener);
+  },
+  onSystemThemeChanged: (callback) => {
+    const listener = (_event, payload) => {
+      if (typeof payload?.isDark === "boolean") callback({ isDark: payload.isDark });
+    };
+    ipcRenderer.on("netcatty:system-theme-changed", listener);
+    return () => ipcRenderer.removeListener("netcatty:system-theme-changed", listener);
+  },
   getPluginContributions: (options) => ipcRenderer.invoke("netcatty:plugins:contributions", options ?? {}),
+  getPluginBrandIcon: (pluginId) => ipcRenderer.invoke("netcatty:plugins:brand-icon", { pluginId }),
   getPluginContributionIcon: (pluginId, icon) => ipcRenderer.invoke("netcatty:plugins:contribution-icon", { pluginId, icon }),
   executePluginCommand: (command, args, context) => ipcRenderer.invoke("netcatty:plugins:execute-command", {
     command,
@@ -255,22 +323,18 @@ function createPreloadApi(ctx) {
     ipcRenderer.on("netcatty:plugins:connection-closed", listener);
     return () => ipcRenderer.removeListener("netcatty:plugins:connection-closed", listener);
   },
-  openPluginView: (payload) => ipcRenderer.invoke("netcatty:plugins:open-view", payload),
-  closePluginView: (instanceId) => ipcRenderer.invoke("netcatty:plugins:close-view", { instanceId }),
-  setPluginViewBounds: (instanceId, bounds) => ipcRenderer.invoke("netcatty:plugins:set-view-bounds", { instanceId, bounds }),
-  setPluginViewVisibility: (instanceId, visible) => ipcRenderer.invoke("netcatty:plugins:set-view-visibility", {
-    instanceId,
-    visible: visible === true,
-  }),
-  postPluginViewMessage: (instanceId, message) => ipcRenderer.invoke("netcatty:plugins:view-message", { instanceId, message }),
+  getPluginViewResource: (payload) => ipcRenderer.invoke("netcatty:plugins:host-ui-resource", payload),
+  openHostDrawnPluginView: (payload) => ipcRenderer.invoke("netcatty:plugins:host-ui-open", payload),
+  closeHostDrawnPluginView: (instanceId) => ipcRenderer.invoke("netcatty:plugins:host-ui-close", { instanceId }),
+  sendHostDrawnPluginViewEvent: (instanceId, event) => ipcRenderer.invoke("netcatty:plugins:host-ui-event", { instanceId, event }),
+  onHostDrawnPluginViewUpdate: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("netcatty:plugins:host-ui-update", listener);
+    return () => ipcRenderer.removeListener("netcatty:plugins:host-ui-update", listener);
+  },
   onPluginContributionsChanged: (callback) => {
     pluginContributionsChangedListeners.add(callback);
     return () => pluginContributionsChangedListeners.delete(callback);
-  },
-  onPluginViewMessage: (callback) => {
-    const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on("netcatty:plugins:view-message-posted", listener);
-    return () => ipcRenderer.removeListener("netcatty:plugins:view-message-posted", listener);
   },
   onPluginViewClosed: (callback) => {
     const listener = (_event, payload) => callback(payload);
@@ -365,6 +429,7 @@ function createPreloadApi(ctx) {
     ipcRenderer.send("netcatty:write", {
       sessionId,
       data,
+      binary: options?.binary === true,
       automated: Boolean(options?.automated),
       pasteRequestId: typeof options?.pasteRequestId === "string" ? options.pasteRequestId : undefined,
       sensitive: options?.sensitive === true,
@@ -880,10 +945,10 @@ function createPreloadApi(ctx) {
     const result = await ipcRenderer.invoke("netcatty:sftp:openForSession", {
       ...(options || {}),
       sessionId,
-      expectedEndpoint: options,
+      expectedEndpoint: options?.reuseExactSessionOnly === true ? undefined : options,
     });
     if (
-      options?.requireExactSourceSession === true
+      (options?.requireExactSourceSession === true || options?.reuseExactSessionOnly === true)
       && result.sourceSessionId !== sessionId
     ) {
       if (result.sftpId) {
@@ -1650,6 +1715,9 @@ function createPreloadApi(ctx) {
   // Temp directory management
   getTempDirInfo: () =>
     ipcRenderer.invoke("netcatty:tempdir:getInfo"),
+  chooseTempDir: () => ipcRenderer.invoke("netcatty:tempdir:choose"),
+  setCustomTempDir: (dir) => ipcRenderer.invoke("netcatty:tempdir:setCustom", dir),
+  resetCustomTempDir: () => ipcRenderer.invoke("netcatty:tempdir:resetCustom"),
   clearTempDir: () =>
     ipcRenderer.invoke("netcatty:tempdir:clear"),
   getTempDirPath: () =>
@@ -1706,6 +1774,16 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:crashLogs:clear"),
   openCrashLogsDir: () =>
     ipcRenderer.invoke("netcatty:crashLogs:openDir"),
+
+  // AI Sessions Backup (disk mirror of the AI chat session store)
+  aiSessionsBackupWrite: (payload) =>
+    ipcRenderer.invoke("netcatty:aiSessionsBackup:write", payload),
+  aiSessionsBackupReadLatest: () =>
+    ipcRenderer.invoke("netcatty:aiSessionsBackup:readLatest"),
+  aiSessionsBackupExport: (payload) =>
+    ipcRenderer.invoke("netcatty:aiSessionsBackup:export", payload),
+  aiSessionsBackupImport: () =>
+    ipcRenderer.invoke("netcatty:aiSessionsBackup:import"),
 
   // Global Toggle Hotkey (Quake Mode)
   registerGlobalHotkey: (hotkey) =>
@@ -1937,23 +2015,23 @@ function createPreloadApi(ctx) {
   aiChatCancel: async (requestId) => {
     return ipcRenderer.invoke("netcatty:ai:chat:cancel", { requestId });
   },
-  aiFetch: async (url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify) => {
-    return ipcRenderer.invoke("netcatty:ai:fetch", { url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify });
+  aiFetch: async (url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify, requestId) => {
+    return ipcRenderer.invoke("netcatty:ai:fetch", { url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify, ...(requestId ? { requestId } : {}) });
   },
   aiAllowlistAddHost: async (baseURL) => {
     return ipcRenderer.invoke("netcatty:ai:allowlist:add-host", { baseURL });
   },
-  aiExec: async (sessionId, command, chatSessionId) => {
-    return ipcRenderer.invoke("netcatty:ai:exec", { sessionId, command, chatSessionId });
+  aiExec: async (sessionId, command, chatSessionId, delegationTag) => {
+    return ipcRenderer.invoke("netcatty:ai:exec", { sessionId, command, chatSessionId, ...(delegationTag ? { delegationTag } : {}) });
   },
-  aiCattyCancelExec: async (chatSessionId) => {
-    return ipcRenderer.invoke("netcatty:ai:catty:cancel", { chatSessionId });
+  aiCattyCancelExec: async (chatSessionId, delegationTag) => {
+    return ipcRenderer.invoke("netcatty:ai:catty:cancel", { chatSessionId, ...(delegationTag ? { delegationTag } : {}) });
   },
-  aiSetChatSessionCancelled: async (chatSessionId, cancelled = true) => {
-    return ipcRenderer.invoke("netcatty:ai:chat-session:set-cancelled", { chatSessionId, cancelled });
+  aiSetChatSessionCancelled: async (chatSessionId, cancelled = true, delegationTag) => {
+    return ipcRenderer.invoke("netcatty:ai:chat-session:set-cancelled", { chatSessionId, cancelled, ...(delegationTag ? { delegationTag } : {}) });
   },
-  aiCapability: async (rpcMethod, params, chatSessionId) => {
-    return ipcRenderer.invoke("netcatty:ai:capability", { rpcMethod, params, chatSessionId });
+  aiCapability: async (rpcMethod, params, chatSessionId, delegationTag) => {
+    return ipcRenderer.invoke("netcatty:ai:capability", { rpcMethod, params, chatSessionId, ...(delegationTag ? { delegationTag } : {}) });
   },
   aiDiscoverAgents: async (options) => {
     return ipcRenderer.invoke("netcatty:ai:agents:discover", options);
@@ -2014,8 +2092,8 @@ function createPreloadApi(ctx) {
   aiPrivacyStatus: async () => ipcRenderer.invoke("netcatty:ai:privacy:status"),
   aiPrivacyTransform: async (request) => ipcRenderer.invoke("netcatty:ai:privacy:transform", request),
   aiPrivacyClearSession: async (chatSessionId) => ipcRenderer.invoke("netcatty:ai:privacy:clear", chatSessionId),
-  aiMcpUpdateSessions: async (sessions, chatSessionId) => {
-    return ipcRenderer.invoke("netcatty:ai:mcp:update-sessions", { sessions, chatSessionId });
+  aiMcpUpdateSessions: async (sessions, chatSessionId, delegationTag) => {
+    return ipcRenderer.invoke("netcatty:ai:mcp:update-sessions", { sessions, chatSessionId, ...(delegationTag ? { delegationTag } : {}) });
   },
   aiMcpUpdateLiveSessions: async (sessions) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:update-live-sessions", { sessions });

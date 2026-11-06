@@ -516,7 +516,7 @@ class PluginTerminalDataPipelineService {
             this.#assertAttachmentCurrent(session, direction, providerId, identity, options);
           },
         });
-        if (!["existing", "session", "application", "always"].includes(grant?.scope)) {
+        if (!["policy", "existing", "session", "application", "always"].includes(grant?.scope)) {
           throw new PluginRpcError(
             RPC_ERRORS.permissionDenied,
             "Terminal interceptor streams require a session, application, or persistent permission grant",

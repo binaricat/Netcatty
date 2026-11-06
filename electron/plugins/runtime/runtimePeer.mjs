@@ -5,8 +5,9 @@ import {
   PLUGIN_ERROR_WIRE_CODES,
   pluginErrorToRpcError,
 } from "@netcatty/plugin-sdk";
-import { createMessagePortStreamEnvelope } from "@netcatty/plugin-contract";
+import { createMessagePortStreamEnvelope, PLUGIN_HOST_INTERACTION_LIMITS, PLUGIN_FILESYSTEM_DIRECTORY_ENUMERATION_FEATURE } from "@netcatty/plugin-contract";
 import { createPluginStreamEndpoint } from "./pluginStreamEndpoint.mjs";
+import { connectByteStream } from "./byteStreamClient.mjs";
 
 let terminalInterceptorTransportPromise;
 
@@ -164,6 +165,7 @@ function createHostClient(transport) {
     const request = pending.get(`${typeof message.id}:${String(message.id)}`);
     if (!request) return false;
     pending.delete(`${typeof message.id}:${String(message.id)}`);
+    request.cancellation?.dispose();
     if (message.error) {
       request.reject(new PluginError(
         pluginErrorNameFromRpcError(message.error),
@@ -174,16 +176,23 @@ function createHostClient(transport) {
     return true;
   }
   function request(method, params, options = {}) {
+    if (options.cancellationToken?.isCancellationRequested) return Promise.reject(new PluginError("cancelled", "Plugin request cancelled"));
     const id = nextId;
     nextId = nextId === Number.MAX_SAFE_INTEGER ? 0 : nextId + 1;
     return new Promise((resolve, reject) => {
-      pending.set(`${typeof id}:${String(id)}`, { resolve, reject });
+      const cancellationId = options.cancellationToken ? `browser-${id}` : undefined;
+      const pendingRequest = { resolve, reject };
+      pending.set(`${typeof id}:${String(id)}`, pendingRequest);
       transport.post({
         jsonrpc: "2.0",
         id,
         method,
         params,
+        ...(cancellationId === undefined ? {} : { cancellationId }),
         ...(options.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
+      });
+      pendingRequest.cancellation = options.cancellationToken?.onCancellationRequested(() => {
+        notify("$/cancelRequest", { cancellationId });
       });
     });
   }
@@ -192,7 +201,7 @@ function createHostClient(transport) {
   }
   function close() {
     const error = new PluginError("unavailable", "Plugin host disconnected");
-    for (const request of pending.values()) request.reject(error);
+    for (const request of pending.values()) { request.cancellation?.dispose(); request.reject(error); }
     pending.clear();
   }
   return { accept, request, notify, close };
@@ -365,11 +374,36 @@ function createPluginContext(config, client, runtimeApi) {
       ...(options?.ttlMs === undefined ? {} : { ttlMs: options.ttlMs }),
     }),
   };
+  const interact = (params) => client.request("ui.interact", params, { deadlineMs: PLUGIN_HOST_INTERACTION_LIMITS.timeoutMs })
+    .then((result) => result.cancelled ? undefined : result.value);
+  const ui = {
+    quickPick: (title, items) => interact({ kind: "quickPick", title, items }),
+    input: (title, initialValue) => interact({ kind: "input", title, ...(initialValue === undefined ? {} : { initialValue }) }),
+  };
+  const vault = Object.fromEntries(["selectHosts", "requestHostDraft", "requestConnect"].map((method) => [
+    method, (params) => client.request(`vault.${method}`, params, { deadlineMs: PLUGIN_HOST_INTERACTION_LIMITS.timeoutMs }),
+  ]));
+  const clipboard = {
+    readText: (title) => interact({ kind: "clipboard.read", title }),
+    writeText: (text, title) => interact({ kind: "clipboard.write", title, text }).then((value) => value === true),
+  };
   const network = {
+    connect: (request, cancellationToken) => connectByteStream({ client, streams: runtimeApi.streams, subscriptions,
+      enabledFeatures: config.enabledFeatures }, request, cancellationToken),
     request: (request) => client.request("network.request", request, {
       deadlineMs: forwardedDeadline(request?.timeoutMs, 300_000),
     }),
   };
+  const ai = Object.fromEntries(["openChat", "startTurn", "readTurn", "stopTurn", "closeChat"].map((operation) => [
+    operation, (params) => client.request(`ai.${operation}`, params, operation === "readTurn" ? { deadlineMs: 65_000 } : {}),
+  ]));
+  const selectedContext = {
+    list: (params) => client.request("context.selected.list", params),
+    read: (params) => client.request("context.selected.read", params),
+  };
+  const agent = Object.fromEntries(["listBackends", "selectTargets", "listChats", "openChat", "send", "read", "history", "stop", "closeChat"].map((operation) => [
+    operation, (params) => client.request(`agent.${operation}`, params, operation === "read" ? { deadlineMs: 65_000 } : {}),
+  ]));
   const filesystem = {
     readFile: (filePath, options = {}) => client.request("filesystem.readFile", {
       path: filePath,
@@ -381,8 +415,12 @@ function createPluginContext(config, client, runtimeApi) {
       ...options,
     }).then(() => undefined),
     stat: (filePath) => client.request("filesystem.stat", { path: filePath }),
-    readDirectory: (directoryPath) => client.request("filesystem.readDirectory", { path: directoryPath })
-      .then((result) => result.entries),
+    readDirectory: async (directoryPath) => {
+      if (!config.enabledFeatures?.includes(PLUGIN_FILESYSTEM_DIRECTORY_ENUMERATION_FEATURE)) {
+        throw new PluginError("unsupported", "Secure plugin directory enumeration is unavailable on this runtime");
+      }
+      return (await client.request("filesystem.readDirectory", { path: directoryPath })).entries;
+    },
   };
   const companions = {
     start: async (companionId) => {
@@ -508,6 +546,14 @@ function createPluginContext(config, client, runtimeApi) {
     },
   };
   const terminals = {
+    shareSelection: (title) => {
+      if (!config.enabledFeatures?.includes("terminal.selection-sharing")) return Promise.reject(new Error("Terminal selection sharing is unsupported"));
+      return interact({ kind: "terminal.selection.read", title }).then((value) => value === undefined ? undefined : Object.freeze(value));
+    },
+    proposeInput: (handle, text, title) => {
+      if (!config.enabledFeatures?.includes("terminal.input-drafts")) return Promise.reject(new Error("Terminal input drafts are unsupported"));
+      return interact({ kind: "terminal.input.propose", handle, text, title }).then((value) => value === true);
+    },
     onDidChange: runtimeApi.terminalEvents.event,
   };
   const environment = {
@@ -543,6 +589,12 @@ function createPluginContext(config, client, runtimeApi) {
     secrets,
     credentials,
     network,
+    ai,
+    agent,
+    selectedContext,
+    ui,
+    vault,
+    clipboard,
     filesystem,
     companions,
     streams,

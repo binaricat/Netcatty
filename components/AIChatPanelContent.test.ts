@@ -40,3 +40,35 @@ test('terminal side panel tools share one primary toolbar height', () => {
     assert.match(source, /TERMINAL_SIDE_PANEL_INNER_HEADER_CLASS/);
   }
 });
+
+test('/rename and /chats panel commands stay out of the agent message path', () => {
+  const sidePanel = preparingSource;
+  // Panel implements the commands with updateSessionTitle + a note state —
+  // never addMessageToSession, so the commands cannot leak into chat history.
+  assert.match(sidePanel, /handleRenameSession = useCallback/);
+  assert.match(sidePanel, /handleListChats = useCallback/);
+  assert.match(sidePanel, /updateSessionTitle\(sessionId, title\)/);
+  assert.match(sidePanel, /setPanelCommandNote\(formatAiChatsListingNote\(entries, t\)\)/);
+  const renameHandler = sidePanel.slice(
+    sidePanel.indexOf('handleRenameSession = useCallback'),
+    sidePanel.indexOf('const handleRenameSlashCommand'),
+  );
+  assert.doesNotMatch(renameHandler, /addMessageToSession/);
+  const chatsHandler = sidePanel.slice(
+    sidePanel.indexOf('handleListChats = useCallback'),
+    sidePanel.indexOf('const handleSend'),
+  );
+  assert.doesNotMatch(chatsHandler, /addMessageToSession/);
+  // Wiring reaches AIChatPanelContent.
+  assert.match(sidePanel, /onRenameActiveChat=\{handleRenameSlashCommand\}/);
+  assert.match(sidePanel, /onListChats=\{handleListChats\}/);
+});
+
+test('AIChatPanelContent renders the panel command note and wires rename/list props', () => {
+  assert.match(panelSource, /panelCommandNote \? \(/);
+  assert.match(panelSource, /role="status"/);
+  assert.match(panelSource, /onDismissPanelCommandNote/);
+  assert.match(panelSource, /onRenameSession=\{onRenameActiveChat\}/);
+  assert.match(panelSource, /onListChats=\{onListChats\}/);
+  assert.match(panelSource, /onRename=\{onRenameSession\}/);
+});

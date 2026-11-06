@@ -3,7 +3,7 @@ import {
 } from "@netcatty/plugin-contract";
 import { satisfies, valid, validRange } from "semver";
 
-const DEFAULT_PLUGIN_API_VERSION = "0.1.0-internal";
+const DEFAULT_PLUGIN_API_VERSION = "0.1.0-internal.1";
 
 export interface PluginCompatibilityTarget {
   readonly netcattyVersion: string;
@@ -43,7 +43,13 @@ export function checkPluginCompatibility(
   manifest: PluginManifest,
   target: PluginCompatibilityTarget,
 ): PluginCompatibilityResult {
-  const apiVersion = target.apiVersion ?? DEFAULT_PLUGIN_API_VERSION;
+  let apiVersion = target.apiVersion ?? DEFAULT_PLUGIN_API_VERSION;
+  // This host still offers the previous, unchanged wire contract to legacy packages.
+  // Never negotiate new brand metadata down to a host revision that cannot validate it.
+  if (apiVersion === DEFAULT_PLUGIN_API_VERSION && !manifest.icon
+    && !satisfies(apiVersion, manifest.engines.api) && satisfies('0.1.0-internal', manifest.engines.api)) {
+    apiVersion = '0.1.0-internal';
+  }
   const errors: string[] = [];
   checkEngineVersion("Netcatty", target.netcattyVersion, manifest.engines.netcatty, errors);
   checkEngineVersion("plugin API", apiVersion, manifest.engines.api, errors);

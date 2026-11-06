@@ -66,3 +66,9 @@ test("Vault credential catalog fails closed when secure storage is unavailable",
     /unavailable|not found/i,
   );
 });
+
+test("availability reporting does not unlock a missing OS vault", () => {
+  const catalog = new PluginCredentialCatalog({ safeStorage: { isEncryptionAvailable: () => false } });
+  assert.equal(catalog.isAvailable(), false);
+  assert.throws(() => catalog.update([]), /OS-backed Vault/);
+});

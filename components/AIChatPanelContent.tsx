@@ -57,6 +57,20 @@ interface AIChatPanelContentProps {
   setInputValue: (value: string) => void;
   handleSend: () => void;
   handleCompact: () => void;
+  /** Rename a chat by id (history drawer edit affordance). Panel action, never agent content. */
+  onRenameSession?: (sessionId: string, title: string) => void;
+  /** `/rename <title>` for the current chat. Panel action, never agent content. */
+  onRenameActiveChat?: (title: string) => void;
+  /** `/chats`: list the chats visible to this panel. Panel action, never agent content. */
+  onListChats?: () => void;
+  /** `/rebind <n>`: rebind a dangling chat to this panel's scope. Panel action, never agent content. */
+  onRebindChat?: (arg: string) => void;
+  /** `/chats` listing output, rendered as a system-style note above the composer. */
+  panelCommandNote?: string | null;
+  onDismissPanelCommandNote?: () => void;
+  /** Manual durability escape hatch: export/import the whole session store. */
+  onExportSessions?: () => void;
+  onImportSessions?: () => void;
   /** Undo last turn is offered at a safe boundary (never mid-tool / mid-compaction). */
   canUndoLastTurn?: boolean;
   handleUndoLastTurn?: () => void;
@@ -142,6 +156,14 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   setInputValue,
   handleSend,
   handleCompact,
+  onRenameSession,
+  onRenameActiveChat,
+  onListChats,
+  onRebindChat,
+  panelCommandNote,
+  onDismissPanelCommandNote,
+  onExportSessions,
+  onImportSessions,
   canUndoLastTurn = false,
   handleUndoLastTurn,
   canCompact = false,
@@ -309,6 +331,9 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
             activeSessionId={activeSessionId}
             onSelect={sending ? () => undefined : handleSelectSession}
             onDelete={handleDeleteSession}
+            onRename={onRenameSession}
+            onExportSessions={onExportSessions}
+            onImportSessions={onImportSessions}
             onClose={() => setShowHistory(false)}
           />
         </React.Profiler>
@@ -369,6 +394,21 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
           {!hideInput && (
             <React.Profiler {...getAIPanelProfilerProps('AIChatPanel.Input')}>
               <div>
+                {panelCommandNote ? (
+                  <div role="status" className="mx-3 mb-1.5 rounded-md border border-border/50 bg-muted/30 px-2.5 py-1.5 text-[11px] leading-4 text-muted-foreground">
+                    <span className="block max-h-48 overflow-y-auto whitespace-pre-wrap break-words">{panelCommandNote}</span>
+                    {onDismissPanelCommandNote && (
+                      <button
+                        type="button"
+                        aria-label={t('common.close')}
+                        onClick={onDismissPanelCommandNote}
+                        className="mt-1 text-[11px] text-muted-foreground/60 underline-offset-2 transition-colors hover:text-foreground hover:underline cursor-pointer"
+                      >
+                        {t('common.close')}
+                      </button>
+                    )}
+                  </div>
+                ) : null}
                 {steerWarning ? (
                   <div role="status" className="mx-3 mb-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-4 text-amber-600 dark:text-amber-400">
                     {steerWarning}
@@ -396,6 +436,9 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   onChange={setInputValue}
                   onSend={handleSend}
                   onCompact={handleCompact}
+                  onRenameSession={onRenameActiveChat}
+                  onListChats={onListChats}
+                  onRebindChat={onRebindChat}
                   canCompact={canCompact}
                   onSteer={handleSteer}
                   onStop={handleStop}

@@ -13,6 +13,13 @@ import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/600.css';
 import App from './App';
 import { AppLockGate } from './components/AppLockGate';
+import { loadLocaleMessages } from './application/i18n/messages';
+import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from './infrastructure/config/i18n';
+import { STORAGE_KEY_UI_LANGUAGE } from './infrastructure/config/storageKeys';
+import { localStorageAdapter } from './infrastructure/persistence/localStorageAdapter';
+
+// Startup timeline marks (see electron/perfTrace.cjs); visible in DevTools too.
+performance.mark('netcatty:renderer:entry-evaluated');
 
 const LazySettingsPage = lazy(() => import('./components/SettingsPage'));
 const LazyTrayPanel = lazy(() => import('./components/TrayPanel'));
@@ -258,8 +265,15 @@ const renderApp = () => {
   }
 };
 
-// Initial render
-renderApp();
-
-// Listen for hash changes
-window.addEventListener('hashchange', renderApp);
+// Load the saved UI language before the first render (only English ships in
+// the startup chunk), so no window flashes English first. Render regardless
+// if the dictionary fails to load; I18nProvider retries and falls back to en.
+void loadLocaleMessages(
+  resolveSupportedLocale(localStorageAdapter.readString(STORAGE_KEY_UI_LANGUAGE) || DEFAULT_UI_LOCALE),
+)
+  .catch(() => {})
+  .finally(() => {
+    renderApp();
+    // Listen for hash changes
+    window.addEventListener('hashchange', renderApp);
+  });

@@ -1,0 +1,22 @@
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const { createHash } = require('node:crypto');
+test('terminal sample is a reproducible two-file sandbox package with optional action-only permissions', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'netcatty-terminal-package-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const { prepareTerminalDraftExample } = await import('./prepare.mjs');
+  const files = [path.join(root, 'a.ncpkg'), path.join(root, 'b.ncpkg')];
+  for (const file of files) await prepareTerminalDraftExample(file);
+  const hashes = await Promise.all(files.map(async (file) => createHash('sha256').update(await fs.readFile(file)).digest('hex')));
+  assert.equal(hashes[0], hashes[1]);
+  const { validatePluginPackage } = await import('@netcatty/plugin-cli');
+  const result = await validatePluginPackage(files[0]);
+  assert.equal(result.manifest.id, 'com.netcatty.terminal-selection-draft');
+  assert.equal(result.fileCount, 2);
+  const manifest = result.manifest;
+  assert.deepEqual(manifest.permissions.optional, ['terminal.selection.read', 'terminal.input.propose']);
+  assert.equal(manifest.main.node, undefined);
+});

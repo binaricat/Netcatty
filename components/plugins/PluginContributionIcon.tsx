@@ -60,7 +60,7 @@ export function PluginContributionIcon({
   const packageIcon = usePluginContributionIcon(pluginId, icon);
 
   if (icon?.kind === 'theme') {
-    const Icon = THEME_ICONS[icon.name] ?? Puzzle;
+    const Icon = Object.hasOwn(THEME_ICONS, icon.name) ? THEME_ICONS[icon.name] : Puzzle;
     return <Icon size={size} className={className} aria-hidden="true" data-plugin-icon-kind="theme" />;
   }
   if (packageIcon) {

@@ -182,6 +182,8 @@ declare global {
     sourceSessionId?: string;
     /** Require openSftpForSession to use exactly the requested live session. */
     requireExactSourceSession?: boolean;
+    /** Use the named live terminal only; never open a dedicated/fresh login. */
+    reuseExactSessionOnly?: boolean;
     // Skip POSIX process discovery when copying a network-device session.
     skipShellPidDiscovery?: boolean;
     /**
@@ -331,13 +333,71 @@ declare global {
   interface NetcattyPluginRuntimeStatus {
     available: boolean;
     experimental: true;
+    credentialStorageAvailable?: boolean;
   }
 
+  interface NetcattyPluginCatalogSnapshot {
+    entries: NetcattyPluginCatalogEntry[];
+    source: "registry" | "cached" | "builtin";
+    error: string | null;
+  }
+
+  interface NetcattyPluginCatalogEntry {
+    selectionToken?: string;
+    id: string;
+    version: string;
+    name: string;
+    description: string;
+    author: string;
+    repository: string;
+    commit: string;
+    license: string;
+    readme: string;
+    manifest: import("@netcatty/plugin-contract").PluginManifest;
+    artifact?: { url: string; sha256: string };
+  }
+
+  type NetcattyPluginAuthorRequest =
+    | { kind: 'catalog'; pluginId: string; selectionToken: string; sourceId: string }
+    | { kind: 'installed'; pluginId: string };
+  interface NetcattyPluginAuthorPresentation {
+    author: string;
+    avatar: string | null;
+    officialMaintained: boolean;
+    sourceId: string;
+    version: string;
+    archiveSha256: string | null;
+  }
+
+  type PluginPermissionMode = 'allow' | 'ask' | 'deny';
+  type NetcattyPluginPermissionPrompt = import('@netcatty/plugin-contract').PermissionRequest & {
+    actionToken: string; resources: string[];
+  };
+  interface NetcattyPluginPermissionSnapshot {
+    policyRevision?: string;
+    policies?: Array<{ permission: string; resources: string[]; mode: PluginPermissionMode }>;
+    grants: Array<{
+      permission: string; resource: string; resourceKind: string;
+      scope: 'always' | 'application' | 'session'; sessionId: string | null; grantedAt: number;
+      matchesCurrentActivation: boolean;
+    }>;
+    audit: Array<{ event: string; createdAt: number; permission?: string; scope?: string; mode?: PluginPermissionMode; action?: string }>;
+  }
+
+  interface NetcattyPluginSource {
+    id: string;
+    kind: 'official' | 'third-party' | 'local';
+    name: string;
+    origin: string | null;
+    enabled?: boolean;
+  }
   interface NetcattyInstalledPlugin {
+    source?: NetcattyPluginSource;
     id: string;
     enabled: boolean;
     activeVersion: string | null;
-    manifest: unknown;
+    manifest: import("@netcatty/plugin-contract").PluginManifest | null;
+    archiveSha256?: string | null;
     runtime: {
       status: string;
       kind: 'browser' | 'utility' | null;
@@ -407,14 +467,61 @@ declare global {
     | NetcattyPluginAuthenticationChallengeOpenEvent
     | NetcattyPluginAuthenticationChallengeCancelEvent;
 
+  interface NetcattyPluginLogStatus {
+    saveToDisk: boolean;
+    verbose: boolean;
+    droppedRecords: number;
+    writeErrors: number;
+    pendingBytes: number;
+    maxBytes: number;
+    retentionDays: number;
+  }
+
   interface NetcattyBridge {
+    getPluginLogStatus?(): Promise<NetcattyPluginLogStatus>;
+    configurePluginLogs?(settings: { saveToDisk: boolean; verbose: boolean }): Promise<NetcattyPluginLogStatus>;
+    openPluginLogFolder?(): Promise<NetcattyPluginLogStatus>;
+    exportPluginLogs?(): Promise<NetcattyPluginLogStatus>;
+    clearPluginLogs?(): Promise<NetcattyPluginLogStatus>;
     getPluginRuntimeStatus?(): Promise<NetcattyPluginRuntimeStatus>;
+    getPluginSourceBinding?(pluginId: string): Promise<NetcattyPluginSource | null>;
+    resetPluginSource?(pluginId: string, expectedSourceId: string): Promise<void>;
+    listPluginSources?(): Promise<NetcattyPluginSource[]>;
+    addPluginSource?(source: { name: string; address: string }): Promise<NetcattyPluginSource>;
+    updatePluginSource?(source: { id: string; name: string; enabled: boolean }): Promise<NetcattyPluginSource>;
+    removePluginSource?(id: string, disablePlugins: boolean): Promise<void>;
+    listPluginCatalog?(sourceId?: string): Promise<NetcattyPluginCatalogSnapshot>;
+    getPluginAuthorPresentation?(request: NetcattyPluginAuthorRequest): Promise<NetcattyPluginAuthorPresentation | null>;
+    onPluginCatalogChanged?(callback: (event: { sourceId: string }) => void): () => void;
+    getPluginCatalogReadme?(id: string, selectionToken?: string, sourceId?: string): Promise<string>;
+    getPluginCatalogReadmeImages?(id: string, selectionToken?: string, sourceId?: string): Promise<Record<string, string>>;
+    installCatalogPlugin?(id: string, selectionToken?: string, sourceId?: string, acceptedSourceId?: string): Promise<NetcattyInstalledPlugin>;
+    setPluginAIHostReady?(ready: boolean): Promise<boolean>;
+    setPluginAgentHostReady?(ready: boolean): Promise<boolean>;
+    respondPluginAgentHost?(response: import("@netcatty/plugin-contract").PluginAgentHostResponse): Promise<boolean>;
+    onPluginAgentHostRequest?(callback: (request: import("@netcatty/plugin-contract").PluginAgentHostRequest) => void): () => void;
+    respondPluginAIHost?(response: import("@netcatty/plugin-contract").PluginAIHostResponse): Promise<boolean>;
+    onPluginAIHostRequest?(callback: (request: import("@netcatty/plugin-contract").PluginAIHostRequest) => void): () => void;
+    setPluginInteractionReady?(ready: boolean): Promise<boolean>;
+    respondPluginInteraction?(response: import("@netcatty/plugin-contract").HostInteractionResponse): Promise<import("@netcatty/plugin-contract").HostInteractionReceipt>;
+    onPluginInteraction?(callback: (event: import("@netcatty/plugin-contract").HostInteractionEvent) => void): () => void;
     listPlugins?(): Promise<NetcattyInstalledPlugin[]>;
+    setPluginPermissionMode?(pluginId: string, permission: string, mode: PluginPermissionMode, policyRevision: string): Promise<boolean>;
+    setPluginPermissionReady?(ready: boolean): Promise<boolean>;
+    respondPluginPermission?(response: { requestId: string; actionToken: string; decision: 'allow' | 'deny' | 'cancel' }): Promise<boolean>;
+    onPluginPermission?(callback: (event: NetcattyPluginPermissionPrompt | { requestId: string; closed: true }) => void): () => void;
+    getPluginPermissions?(pluginId: string): Promise<NetcattyPluginPermissionSnapshot>;
+    revokePluginPermissions?(pluginId: string): Promise<NetcattyInstalledPlugin>;
     installPluginPackage?(archivePath: string, options?: { enable?: boolean }): Promise<NetcattyInstalledPlugin>;
     setPluginEnabled?(pluginId: string, enabled: boolean): Promise<NetcattyInstalledPlugin>;
     restartPlugin?(pluginId: string): Promise<NetcattyInstalledPlugin>;
     uninstallPlugin?(pluginId: string): Promise<boolean>;
+    setPluginTerminalTarget?(target: import("@netcatty/plugin-contract").HostTerminalTarget): Promise<boolean>;
+    getPluginThemes?(): Promise<import("@netcatty/plugin-contract").ThemePackCatalog>;
+    applyPluginTheme?(request: import("@netcatty/plugin-contract").ThemePackApplyRequest): Promise<import("@netcatty/plugin-contract").ThemePackCatalog>;
+    onPluginThemesChanged?(callback: () => void): () => void;
     getPluginContributions?(options?: NetcattyPluginContributionQuery): Promise<NetcattyPluginContributionSnapshot>;
+    getPluginBrandIcon?(pluginId: string): Promise<{ light: string; dark?: string } | null>;
     getPluginContributionIcon?(pluginId: string, icon: Extract<NetcattyPluginIconReference, { kind: 'package' }>): Promise<{ light: string; dark?: string }>;
     executePluginCommand?(command: string, args?: unknown, context?: Record<string, unknown>): Promise<unknown>;
     updatePluginSetting?(pluginId: string, settingId: string, value: unknown, scopeId?: string): Promise<{ restartRequired: boolean }>;
@@ -536,13 +643,12 @@ declare global {
     onPluginAuthenticationChallenge?(callback: (event: NetcattyPluginAuthenticationChallengeEvent) => void): () => void;
     onPluginConnectionData?(callback: (event: { sessionId: string; data: Uint8Array }) => void): () => void;
     onPluginConnectionClosed?(callback: (event: { sessionId: string; reason: string }) => void): () => void;
-    openPluginView?(payload: NetcattyPluginViewOpenRequest): Promise<{ instanceId: string }>;
-    closePluginView?(instanceId: string): Promise<void>;
-    setPluginViewBounds?(instanceId: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
-    setPluginViewVisibility?(instanceId: string, visible: boolean): Promise<void>;
-    postPluginViewMessage?(instanceId: string, message: unknown): Promise<void>;
+    getPluginViewResource?(payload: import('@netcatty/plugin-contract').PluginViewResourceRequest): Promise<import('@netcatty/plugin-contract').PluginViewResourceResult>;
+    openHostDrawnPluginView?(payload: NetcattyPluginViewOpenRequest): Promise<{ instanceId: string }>;
+    closeHostDrawnPluginView?(instanceId: string): Promise<void>;
+    sendHostDrawnPluginViewEvent?(instanceId: string, event: import('@netcatty/plugin-contract').HostDrawnViewEvent): Promise<void>;
+    onHostDrawnPluginViewUpdate?(callback: (event: import('@netcatty/plugin-contract').HostDrawnViewMessage & { viewId: string }) => void): () => void;
     onPluginContributionsChanged?(callback: (event: { reason: string; pluginId: string | null; revision: number }) => void): () => void;
-    onPluginViewMessage?(callback: (event: { pluginId: string; viewId: string; message: unknown }) => void): () => void;
     onPluginViewClosed?(callback: (event: NetcattyPluginViewClosedEvent) => void): () => void;
     getPluginScopeCatalog?(): Promise<NetcattyPluginScopeCatalog>;
     setPluginScopeCatalog?(catalog: NetcattyPluginScopeCatalog): Promise<void>;
@@ -557,6 +663,7 @@ declare global {
   }
 
   interface NetcattyPluginSettingContribution {
+    group?: string;
     id: string;
     label: string;
     description?: string;
@@ -607,7 +714,7 @@ declare global {
         icon?: NetcattyPluginIconReference;
       }>;
       settings: ReadonlyArray<NetcattyPluginSettingContribution>;
-      views: ReadonlyArray<{ id: string; title: string; location: string; entry: string; icon?: NetcattyPluginIconReference; order?: number; visible: boolean; retainContextWhenHidden?: boolean }>;
+      views: ReadonlyArray<{ id: string; title: string; location: string; icon?: NetcattyPluginIconReference; order?: number; visible: boolean }>;
     }>;
   }
 
@@ -721,13 +828,7 @@ declare global {
     error: { code: number; message: string; data?: unknown };
   };
 
-  interface NetcattyPluginViewOpenRequest {
-    viewId: string;
-    instanceId?: string;
-    scopeId: string;
-    bounds?: { x: number; y: number; width: number; height: number };
-    context?: Record<string, unknown>;
-  }
+  type NetcattyPluginViewOpenRequest = import('@netcatty/plugin-contract').HostDrawnViewOpenRequest;
 
   interface NetcattyPluginViewClosedEvent {
     instanceId: string;

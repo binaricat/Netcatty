@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { Search, Trash2, X } from 'lucide-react';
+import { Download, Pencil, Search, Trash2, Upload, X } from 'lucide-react';
 import type { AISession } from '../infrastructure/ai/types';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { cn } from '../lib/utils';
@@ -19,6 +19,12 @@ interface SessionHistoryDrawerProps {
   activeSessionId: string | null;
   onSelect: (sessionId: string) => void;
   onDelete: (e: React.MouseEvent, sessionId: string) => void;
+  /** Rename a chat inline (issue #4015 R5). Empty titles are ignored. */
+  onRename?: (sessionId: string, title: string) => void;
+  /** Manual durability escape hatch: export the whole store to a JSON file. */
+  onExportSessions?: () => void;
+  /** Import sessions from a JSON export; merges by id, newer wins. */
+  onImportSessions?: () => void;
   onClose: () => void;
 }
 
@@ -30,11 +36,17 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   activeSessionId,
   onSelect,
   onDelete,
+  onRename,
+  onExportSessions,
+  onImportSessions,
   onClose,
 }) => {
   const { t } = useI18n();
   const [renderCount, setRenderCount] = useState(SESSION_RENDER_BATCH);
   const [searchQuery, setSearchQuery] = useState('');
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const searchHintId = useId();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { filteredSessions, isSearching } = useSessionHistorySearch(
@@ -52,16 +64,69 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   const displayedSessions = filteredSessions.slice(0, renderCount);
   const hiddenSessionCount = Math.max(0, filteredSessions.length - renderCount);
 
+  useEffect(() => {
+    if (renamingSessionId) renameInputRef.current?.focus();
+  }, [renamingSessionId]);
+
+  const beginRename = (sessionId: string, currentTitle: string) => {
+    setRenamingSessionId(sessionId);
+    setRenameDraft(currentTitle);
+  };
+
+  const commitRename = () => {
+    if (renamingSessionId && renameDraft.trim()) {
+      onRename?.(renamingSessionId, renameDraft.trim());
+    }
+    setRenamingSessionId(null);
+    setRenameDraft('');
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="px-4 py-2.5 flex items-center justify-between shrink-0 border-b border-border/30">
         <span className="text-[13px] font-medium text-foreground/80">{t('ai.chat.allSessions')}</span>
-        <button
-          onClick={onClose}
-          className="text-[12px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer"
-        >
-          <X size={14} />
-        </button>
+        <div className="flex items-center gap-2">
+          {onImportSessions && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onImportSessions();
+                  }}
+                  className="text-[12px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer"
+                  aria-label={t('ai.chat.importSessions')}
+                >
+                  <Upload size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('ai.chat.importSessions')}</TooltipContent>
+            </Tooltip>
+          )}
+          {onExportSessions && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onExportSessions();
+                  }}
+                  className="text-[12px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer"
+                  aria-label={t('ai.chat.exportSessions')}
+                >
+                  <Download size={14} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('ai.chat.exportSessions')}</TooltipContent>
+            </Tooltip>
+          )}
+          <button
+            onClick={onClose}
+            className="text-[12px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer"
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
       <div className="px-3 py-2 shrink-0 border-b border-border/30">
         <div className="relative">
@@ -146,12 +211,52 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
                   )}
                 >
                   <span className={SESSION_HISTORY_ROW_CLASSNAMES.title}>
-                    {session.title || t('ai.chat.untitled')}
+                    {renamingSessionId === session.id ? (
+                      <Input
+                        ref={renameInputRef}
+                        type="text"
+                        value={renameDraft}
+                        aria-label={t('ai.chat.renameChat')}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitRename();
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setRenamingSessionId(null);
+                            setRenameDraft('');
+                          }
+                        }}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onBlur={commitRename}
+                        className="h-6 text-[12px]"
+                      />
+                    ) : (
+                      session.title || t('ai.chat.untitled')
+                    )}
                   </span>
                   <div className={SESSION_HISTORY_ROW_CLASSNAMES.meta}>
                     <span className={SESSION_HISTORY_ROW_CLASSNAMES.time}>
                       {timeStr}
                     </span>
+                    {onRename && renamingSessionId !== session.id && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              beginRename(session.id, session.title || '');
+                            }}
+                            className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('ai.chat.renameChat')}</TooltipContent>
+                      </Tooltip>
+                    )}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button

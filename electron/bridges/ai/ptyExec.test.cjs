@@ -312,6 +312,21 @@ test("recognizes PowerShell on Linux/macOS prompts (`PS /home/alice>`)", () => {
   );
 });
 
+test("recognizes the macOS zsh default prompt without changing PowerShell/cmd detection", () => {
+  assert.equal(
+    resolveEffectiveShellKind(undefined, "hexiao@JosephdeMacBook-Pro-2 ~ % "),
+    "posix",
+  );
+  assert.equal(
+    resolveEffectiveShellKind(undefined, "hexiao@MacBook-Pro ~/git %", { loginShellHint: "powershell" }),
+    "posix",
+  );
+  assert.equal(
+    resolveEffectiveShellKind("posix", "hexiao@MacBook-Pro ~ % echo half-typed"),
+    "posix",
+  );
+});
+
 test("ignores ANSI-coloured PowerShell prompts when detecting the shell", () => {
   assert.equal(
     resolveEffectiveShellKind(undefined, "[32mPS C:\\Users\\alice>[0m"),
@@ -903,6 +918,13 @@ test("execViaRawPty does not prepend a line-clear before device commands", async
   abort.abort();
   const result = await resultPromise;
   assert.equal(result.ok, false);
+});
+
+test("powershell wrapper submits with CR only", () => {
+  const wrapped = buildWrappedCommand("Get-Location", "powershell", "__NCMCP_TEST__");
+  assert.ok(wrapped.endsWith("\r"));
+  assert.ok(!wrapped.endsWith("\r\n"));
+  assert.ok(buildWrappedCommand("echo test", "cmd", "__NCMCP_TEST__").endsWith("\r\n"));
 });
 
 test("cmd wrapper uses interactive cmd variable expansion", () => {

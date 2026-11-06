@@ -93,6 +93,24 @@ test("filesystem broker uses canonical authorization for bounded read, write, st
   ]);
 });
 
+test("host conversation roots are unreadable through explicit filesystem grants, including symlink aliases", async (context) => {
+  const root = createRoot(context); const privateRoot = path.join(root, "agent-chats");
+  await fsp.mkdir(privateRoot); const file = path.join(privateRoot, "synthetic.json"); await fsp.writeFile(file, "PRIVATE_OTHER_SOURCE_HISTORY");
+  const broker = new PluginFilesystemBroker({ protectedReadDirectories: [privateRoot], openDirectoryHandle: openTestDirectoryHandle });
+  const authorize = (candidate, kind = "exact") => runtimeContext(broker.describeReadAuthorization({ path: candidate }, kind));
+  await assert.rejects(broker.readFile({ path: file }, authorize(file)), (error) => error.code === RPC_ERRORS.permissionDenied);
+  await assert.rejects(broker.stat({ path: privateRoot }, authorize(privateRoot)), (error) => error.code === RPC_ERRORS.permissionDenied);
+  await assert.rejects(broker.readDirectory({ path: privateRoot }, authorize(privateRoot, "directory")), (error) => error.code === RPC_ERRORS.permissionDenied);
+  if (process.platform !== "win32") {
+    const alias = path.join(root, "alias.json"); await fsp.symlink(file, alias);
+    await assert.rejects(broker.readFile({ path: alias }, authorize(root, "directory")), (error) => error.code === RPC_ERRORS.permissionDenied);
+    const directoryAlias = path.join(root, "directory-alias"); await fsp.symlink(privateRoot, directoryAlias);
+    await assert.rejects(broker.readDirectory({ path: directoryAlias }, authorize(root, "directory")), (error) => error.code === RPC_ERRORS.permissionDenied);
+  }
+  const ordinary = path.join(root, "ordinary.txt"); await fsp.writeFile(ordinary, "Synthetic public file");
+  assert.deepEqual(await broker.readFile({ path: ordinary }, authorize(ordinary)), { data: "Synthetic public file" });
+});
+
 test("filesystem authorization removes trailing directory separators before permission", async (context) => {
   const root = createRoot(context);
   const requestedPath = `${root}${path.sep}`;
@@ -389,4 +407,62 @@ test("filesystem broker rejects oversized and non-canonical payloads", async (co
     broker.readFile({ path: target, maxBytes: 4 }, runtimeContext(authorization)),
     (error) => error.code === RPC_ERRORS.resourceExhausted,
   );
+});
+
+test("plugin writes cannot modify host audit files or preferences, including symlink aliases", async (t) => {
+  const root = createRoot(t);
+  const directory = path.join(root, "host-logs");
+  await fsp.mkdir(directory);
+  const audit = path.join(directory, "runtime.jsonl");
+  const preferences = path.join(root, "local-logging.json");
+  await fsp.writeFile(audit, "host audit");
+  await fsp.writeFile(preferences, "host preferences");
+  const alias = path.join(root, "alias");
+  await fsp.symlink(audit, alias);
+  const broker = new PluginFilesystemBroker({ protectedDirectories: [directory], protectedFiles: [preferences] });
+  for (const target of [audit, preferences, alias]) {
+    const authorization = broker.describeWriteAuthorization({ path: target, data: "overwrite", overwrite: true });
+    await assert.rejects(broker.writeFile({ path: target, data: "overwrite", overwrite: true }, runtimeContext(authorization)), { code: RPC_ERRORS.permissionDenied });
+  }
+  assert.equal(await fsp.readFile(audit, "utf8"), "host audit");
+  assert.equal(await fsp.readFile(preferences, "utf8"), "host preferences");
+});
+
+test("host audit protection resolves a symlinked userData directory", async (t) => {
+  const root = createRoot(t);
+  const actual = path.join(root, "actual-profile");
+  await fsp.mkdir(path.join(actual, "logs"), { recursive: true });
+  const profileAlias = path.join(root, "profile-alias");
+  await fsp.symlink(actual, profileAlias);
+  const target = path.join(actual, "logs", "runtime.jsonl");
+  await fsp.writeFile(target, "host audit");
+  const broker = new PluginFilesystemBroker({ protectedDirectories: [path.join(profileAlias, "logs")] });
+  const params = { path: target, data: "overwrite", overwrite: true };
+  const authorization = broker.describeWriteAuthorization(params);
+  await assert.rejects(broker.writeFile(params, runtimeContext(authorization)), { code: RPC_ERRORS.permissionDenied });
+  assert.equal(await fsp.readFile(target, "utf8"), "host audit");
+});
+
+test("revocation during the protected-storage check cannot write an unrelated granted file", async (t) => {
+  const root = createRoot(t);
+  const logs = path.join(root, "host-logs");
+  const target = path.join(root, "synthetic.txt");
+  await fsp.mkdir(logs);
+  await fsp.writeFile(target, "prior");
+  let checks = 0;
+  let active = true;
+  const broker = new PluginFilesystemBroker({ protectedDirectories: [logs], fileSystem: {
+    ...fsp, async realpath(requested) {
+      const canonical = await fsp.realpath(requested);
+      if (requested === logs && ++checks === 3) active = false;
+      return canonical;
+    },
+  } });
+  const params = { path: target, data: "overwrite", overwrite: true };
+  const authorization = broker.describeWriteAuthorization(params);
+  const context = { ...runtimeContext(authorization), async assertActive() {
+    if (!active) throw Object.assign(new Error("synthetic revocation"), { code: RPC_ERRORS.permissionDenied });
+  } };
+  await assert.rejects(broker.writeFile(params, context), { code: RPC_ERRORS.permissionDenied });
+  assert.equal(await fsp.readFile(target, "utf8"), "prior");
 });

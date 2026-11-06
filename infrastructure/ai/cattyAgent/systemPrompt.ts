@@ -110,7 +110,7 @@ function buildScopeDescription(
     case 'workspace':
       return `You are scoped to workspace${scopeLabel ? ` **${scopeLabel}**` : ''}. You can operate on any session within this workspace.`;
     case 'global':
-      return `You have global scope and can operate on any connected session across all workspaces.`;
+      return `You have global scope across workspaces, restricted to the explicitly provided sessions and authorized tools. Use only listed session IDs; never infer a target from the active tab.`;
   }
 }
 

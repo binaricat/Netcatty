@@ -47,3 +47,45 @@ test("renderer cursor acknowledges GPU publication separately from CPU sample an
     historyId: "history",
   });
 });
+
+test("idle runtime polls do not notify subscribers until something changes", async () => {
+  const React = await import("react");
+  const { act, create } = await import("react-test-renderer");
+  const { useMonitorSnapshot } = await import("./monitorRuntimeStore");
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const idle = (takenAt: number): MonitorSnapshot => ({
+    historyMode: "replace",
+    runtimeId: "idle-poll-test",
+    epoch: 7,
+    takenAt,
+    running: [],
+    count: 0,
+    hostCount: 0,
+    activeSessions: [],
+    startedAt: {},
+    hosts: {},
+  });
+  let renders = 0;
+  function Probe() {
+    useMonitorSnapshot();
+    renders += 1;
+    return null;
+  }
+  // Later than anything earlier tests published, so this baseline wins.
+  const base = 1_000_000_000;
+  publishMonitorSnapshot(idle(base));
+  let renderer!: ReturnType<typeof create>;
+  act(() => {
+    renderer = create(React.createElement(Probe));
+  });
+  const baseline = renders;
+  act(() => {
+    for (let at = base + 1000; at <= base + 5000; at += 1000) publishMonitorSnapshot(idle(at));
+  });
+  assert.equal(renders, baseline, "unchanged idle replies must not re-render subscribers");
+  act(() => {
+    publishMonitorSnapshot({ ...idle(base + 6000), running: ["panel"], count: 1 });
+  });
+  assert.equal(renders, baseline + 1, "a real change still notifies");
+  act(() => renderer.unmount());
+});

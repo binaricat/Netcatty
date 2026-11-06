@@ -1,0 +1,19 @@
+{
+  "formatVersion": 1,
+  "base": "light",
+  "colors": {
+    "background": "#f4faf6",
+    "foreground": "#16251c",
+    "card": "#ffffff",
+    "cardForeground": "#16251c",
+    "popover": "#ffffff",
+    "popoverForeground": "#16251c",
+    "secondary": "#dcebe1",
+    "secondaryForeground": "#16251c",
+    "muted": "#e7f2eb",
+    "mutedForeground": "#324b3b",
+    "accent": "#166534",
+    "border": "#527360",
+    "input": "#527360"
+  }
+}

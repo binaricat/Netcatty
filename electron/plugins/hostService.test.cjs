@@ -16,6 +16,7 @@ function createOptions(root, configureRpcRegistry) {
       getPath: () => root,
       getVersion: () => "0.0.0",
     },
+    env: { NETCATTY_PLUGIN_DEV: "1" },
     electron: {},
     configureRpcRegistry,
   };
@@ -27,6 +28,19 @@ function transportContext() {
     logger: { write: async () => {} },
   };
 }
+
+test("host-drawn views are available without a development gate", (context) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-plugin-host-preview-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const preview = createPluginHostService(createOptions(path.join(root, "preview")));
+  const normal = createPluginHostService({ ...createOptions(path.join(root, "normal")), env: {} });
+  context.after(() => { preview.database.close(); normal.database.close(); });
+  for (const service of [preview, normal]) {
+    const expected = true;
+    assert.equal(service.runtimeSupervisor.supportedFeatures.includes("views.host-drawn"), expected);
+    assert.equal(service.packageStore.supportedFeatures.includes("views.host-drawn"), expected);
+  }
+});
 
 test("host RPC registry configuration is complete before runtime initialization", (context) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-plugin-host-service-"));
@@ -113,7 +127,7 @@ test("runtime cleanup revokes leases before awaiting companion teardown", async 
   assert.equal(settled, true);
 });
 
-test("runtime trust placement precedes required and advanced permission prompts", async (context) => {
+test("runtime trust placement and default Allow require no install permission ceremony", async (context) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-plugin-host-service-"));
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const events = [];
@@ -145,11 +159,7 @@ test("runtime trust placement precedes required and advanced permission prompts"
     securityPrincipal: "verified:test-publisher-key",
     signal: new AbortController().signal,
   }), "utility");
-  assert.deepEqual(events, [
-    "placement",
-    "permission:storage",
-    "permission:runtime.advanced",
-  ]);
+  assert.deepEqual(events, ["placement"]);
 });
 
 test("first-party placement selects the utility runtime for companion manifests", async (context) => {
@@ -197,7 +207,7 @@ test("first-party placement selects the utility runtime for companion manifests"
     securityPrincipal: "unsigned-package:companion-placement",
     signal: new AbortController().signal,
   }), "utility");
-  assert.deepEqual(requested, ["companion.execute", "runtime.advanced"]);
+  assert.deepEqual(requested, []);
 });
 
 test("first-party placement selects utility for dual-entrypoint terminal interceptors", async (context) => {
@@ -237,15 +247,7 @@ test("first-party placement selects utility for dual-entrypoint terminal interce
     securityPrincipal: "unsigned-package:interceptor-placement",
     signal: new AbortController().signal,
   }), "utility");
-  assert.deepEqual(requested.map((request) => request.permission), [
-    "provider.terminal",
-    "terminal.intercept.input",
-    "runtime.advanced",
-  ]);
-  assert.match(
-    requested.find((request) => request.permission === "terminal.intercept.input")?.reason ?? "",
-    /arbitrary no-echo input may not be detectable/u,
-  );
+  assert.deepEqual(requested, []);
 });
 
 test("secure host methods fail closed without an approver while public logging remains available", async (context) => {
@@ -253,6 +255,7 @@ test("secure host methods fail closed without an approver while public logging r
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const service = createPluginHostService(createOptions(root));
   context.after(() => service.manager.shutdown());
+  service.database.getPermissionMode = () => "ask";
   const routes = service.rpcRegistry.createRoutes({
     pluginId: "com.example.service",
     pluginVersion: "1.0.0",
@@ -267,7 +270,7 @@ test("secure host methods fail closed without an approver while public logging r
   });
   await assert.rejects(
     routes.requestHandlers["storage.set"]({ key: "answer", value: 42 }, transportContext()),
-    /not granted/,
+    /decision provider failed/,
   );
   await routes.notificationHandlers["log.write"]({ level: "info", message: "hello" }, transportContext());
   assert.equal(service.database.getValue("com.example.service", "answer"), undefined);
@@ -302,6 +305,7 @@ test("approved host capabilities reuse application grants through the registry",
     archiveSha256: "a".repeat(64),
     packageRelativePath: "com.example.service/1.0.0/package",
   });
+  service.permissionEngine.setMode({ id: pluginManifest.id, manifest: pluginManifest }, "storage", "ask");
   const routes = service.rpcRegistry.createRoutes({
     pluginId: "com.example.service",
     pluginVersion: "1.0.0",
@@ -344,6 +348,8 @@ test("host service wires a handle-bound directory adapter without changing the R
     },
   });
   context.after(() => service.manager.shutdown());
+  assert.ok(service.runtimeSupervisor.supportedFeatures.includes("filesystem.directory-enumeration"));
+  assert.ok(service.packageStore.supportedFeatures.includes("filesystem.directory-enumeration"));
   const pluginManifest = {
     id: "com.example.directory",
     name: "directory",
@@ -385,4 +391,132 @@ test("custom host methods without an explicit authorization classification are d
     routes.requestHandlers["custom.unclassified"]({}, transportContext()),
     /no authorization policy/,
   );
+});
+
+test("normal release blocks a custom utility placement before permission prompts", async (context) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-plugin-normal-mode-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let prompts = 0;
+  const service = createPluginHostService({ ...createOptions(root), env: {}, resolveRuntimeKind: () => "utility", requestPermissionDecision: () => { prompts++; } });
+  context.after(() => service.database.close());
+  await assert.rejects(service.runtimeSupervisor.resolveRuntimeKind({
+    plugin: { id: "com.example.safe", manifest: { main: { browser: "index.js" } } },
+    availableKinds: ["browser", "utility"],
+    signal: new AbortController().signal,
+  }), /requires developer mode/);
+  assert.equal(prompts, 0);
+});
+
+test("host service logs revocation with injected provenance and drains through manager shutdown", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-synthetic-log-host-"));
+  let seen;
+  const service = createPluginHostService({ ...createOptions(root), resolvePluginProvenance(input) {
+    seen = input;
+    return { sourceId: "synthetic-host-source", namespace: "test", sourceKind: "local" };
+  } });
+  t.after(async () => { await service.manager.shutdown(); fs.rmSync(root, { recursive: true, force: true }); });
+  const manifest = { manifestVersion: 1, id: "com.example.synthetic-audit", version: "1.0.0", name: "Synthetic", publisher: "example", engines: { netcatty: ">=0.0.0", api: ">=0.1.0-internal <0.2.0" }, main: { browser: "index.js" } };
+  service.database.installVersion({ pluginId: manifest.id, version: manifest.version, manifest, archiveSha256: "b".repeat(64), packageRelativePath: `${manifest.id}/${manifest.version}/package` }, { enable: true });
+  await service.logService.ready;
+  assert.equal(service.logService.status().saveToDisk, false);
+  await service.logService.configure({ saveToDisk: true, verbose: false });
+  service.permissionEngine.revokeAll(manifest.id);
+  await service.logService.sink.flush();
+  const record = JSON.parse(await fsp.readFile(service.logService.sink.file(0), "utf8"));
+  assert.equal(record.operation, "permission.revoked");
+  assert.equal(record.sourceId, "synthetic-host-source");
+  assert.equal(record.archiveSha256, "b".repeat(64));
+  assert.equal(record.pluginVersion, "1.0.0");
+  assert.equal(record.runtimeId, null);
+  assert.equal(seen.pluginId, manifest.id);
+  assert.equal(seen.archiveSha256, "b".repeat(64));
+  await service.manager.shutdown();
+  assert.equal(service.logService.sink.closed, true);
+});
+
+test("logging always drains before database close when another shutdown stage rejects", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-synthetic-log-shutdown-failure-"));
+  const host = createPluginHostService(createOptions(root));
+  t.after(async () => { await host.manager.shutdown().catch(() => {}); fs.rmSync(root, { recursive: true, force: true }); });
+  await host.logService.ready;
+  await host.logService.configure({ saveToDisk: true, verbose: false });
+  let resume;
+  const gate = new Promise((resolve) => { resume = resolve; });
+  host.logService.sink.queue = host.logService.sink.queue.then(() => gate);
+  const logger = host.logService.createLogger({ pluginId: "com.example.synthetic", pluginVersion: "1.0.0", runtimeId: "host-shutdown", runtimeKind: "browser" }, {});
+  logger.audit({ operation: "synthetic.before-shutdown", result: "ok" });
+  host.companionSupervisor.shutdown = async () => { throw new Error("synthetic companion shutdown failure"); };
+  let settled = false;
+  const shutdown = host.manager.shutdown().finally(() => { settled = true; });
+  // Attach the rejection assertion before yielding so the expected failure is handled.
+  const rejected = assert.rejects(shutdown, /synthetic companion shutdown failure/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.doesNotThrow(() => host.database.db.prepare("SELECT 1").get());
+  resume();
+  await rejected;
+  assert.equal(host.logService.sink.closed, true);
+  assert.equal(host.logService.retentionTimer._destroyed, true);
+  const record = JSON.parse(await fsp.readFile(host.logService.sink.file(0), "utf8"));
+  assert.equal(record.operation, "synthetic.before-shutdown");
+});
+
+test("required browser capabilities activate without a permission ceremony", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-synthetic-activation-"));
+  let prompts = 0;
+  const host = createPluginHostService({ ...createOptions(root), requestPermissionDecision: () => { prompts++; throw new Error("Unexpected install prompt"); } });
+  t.after(async () => { await host.manager.shutdown(); fs.rmSync(root, { recursive: true, force: true }); });
+  const manifest = { id: "com.example.synthetic-activation", version: "1.0.0", publisher: "example", main: { browser: "index.js" }, permissions: { required: ["commands"] } };
+  assert.equal(await host.runtimeSupervisor.resolveRuntimeKind({ plugin: { id: manifest.id, activeVersion: manifest.version, manifest }, availableKinds: ["browser"], signal: new AbortController().signal }), "browser");
+  assert.equal(prompts, 0);
+});
+
+test("Deny for the privileged development runtime stops its activation through the manager queue", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-advanced-policy-"));
+  const service = createPluginHostService(createOptions(root));
+  t.after(async () => { await service.manager.shutdown(); fs.rmSync(root, { recursive: true, force: true }); });
+  await service.manager.initialize();
+  const manifest = { id: "com.example.advanced-policy", version: "1.0.0", publisher: "example", main: { node: "index.js" }, permissions: { required: ["runtime.advanced"] } };
+  service.database.installVersion({ pluginId: manifest.id, version: manifest.version, manifest, archiveSha256: "a".repeat(64), packageRelativePath: "synthetic/package" }, { enable: true });
+  const identity = { pluginId: manifest.id, pluginVersion: manifest.version, runtimeId: "synthetic-utility", runtimeKind: "utility" };
+  let current = identity, stops = 0;
+  service.runtimeSupervisor.getRuntimeIdentity = () => current;
+  service.runtimeSupervisor.stop = async (pluginId) => { assert.equal(pluginId, manifest.id); stops++; current = null; };
+  await service.permissionEngine.setMode(service.database.getActivePlugin(manifest.id), "runtime.advanced", "deny");
+  assert.equal(stops, 1); assert.equal(current, null);
+  assert.equal(service.database.getActivePlugin(manifest.id).enabled, false);
+  assert.equal(service.database.getPermissionMode(manifest.id, "runtime.advanced"), "deny");
+  await assert.rejects(service.permissionEngine.authorize({ ...identity, manifest }, { permission: "runtime.advanced" }), /disabled/);
+  // A queued teardown for the old source must not disable its replacement.
+  service.database.setEnabled(manifest.id, true); current = identity;
+  const privateOwner = service.database.privateOwner.bind(service.database);
+  const pending = service.permissionEngine.setMode(service.database.getActivePlugin(manifest.id), "runtime.advanced", "deny");
+  service.database.privateOwner = () => "synthetic-replacement-owner";
+  await assert.rejects(pending, /source changed/);
+  assert.equal(stops, 1); assert.equal(current, identity); assert.equal(service.database.getActivePlugin(manifest.id).enabled, true);
+  service.database.privateOwner = privateOwner;
+});
+
+test("production host composition does not advertise or prompt for unavailable directory enumeration", async (context) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-plugin-directory-availability-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let prompts = 0;
+  const feature = "filesystem.directory-enumeration";
+  // Same adapter-free composition as main/registerBridges; even an explicit extra
+  // supportedFeatures entry cannot claim an adapter that was never supplied.
+  const service = createPluginHostService({ ...createOptions(root), supportedFeatures: [feature],
+    requestPermissionDecision: async () => { prompts++; throw new Error("must not prompt"); } });
+  context.after(() => service.manager.shutdown());
+  assert.equal(service.runtimeSupervisor.supportedFeatures.includes(feature), false);
+  assert.equal(service.packageStore.supportedFeatures.includes(feature), false);
+  let authorizations = 0, probes = 0;
+  service.permissionEngine.authorize = async () => { authorizations++; throw new Error("must not authorize"); };
+  service.filesystemBroker.fileSystem = new Proxy({}, { get() { probes++; throw new Error("must not probe"); } });
+  const manifest = { id: "com.example.unavailable-directory", version: "1.0.0",
+    permissions: { optional: [{ permission: "filesystem.read", resources: [root] }] } };
+  const routes = service.rpcRegistry.createRoutes({ pluginId: manifest.id, pluginVersion: manifest.version,
+    runtimeId: "runtime-unavailable", runtimeKind: "browser", manifest });
+  await assert.rejects(routes.requestHandlers["filesystem.readDirectory"]({ path: root }, transportContext()),
+    (error) => error.code === -32012 && /unavailable/.test(error.message));
+  assert.equal(authorizations, 0); assert.equal(prompts, 0); assert.equal(probes, 0);
 });

@@ -101,6 +101,28 @@ test("plugin management bridge checks sender ownership before invoking manager",
   );
 });
 
+test("plugin bridge refuses embedded frames even at an app URL", () => {
+  const trusted = createTrustedPluginBridgeSender({ devServerUrl: "http://localhost:5173" });
+  const mainFrame = { url: "http://localhost:5173/" };
+  const sender = { mainFrame };
+  assert.equal(trusted({ sender, senderFrame: mainFrame }), true);
+  assert.equal(trusted({ sender, senderFrame: { url: mainFrame.url } }), false);
+  assert.equal(trusted({ sender, senderFrame: null }), false);
+});
+
+test("author presentation is a trusted-app-only route and forwards no invented authority", async () => {
+  const ipcMain = createIpcMain(); const calls = [];
+  registerPluginBridge(ipcMain, { manager: { initialize: async () => {} }, isTrustedSender: createTrustedPluginBridgeSender({ devServerUrl: "http://localhost:5173" }),
+    catalogService: { author: async (request) => { calls.push(request); return { author: "Netcatty", avatar: null, officialMaintained: false }; } } });
+  const payload = { kind: "catalog", pluginId: "com.netcatty.starter", selectionToken: "a".repeat(64), sourceId: "official" };
+  for (const url of ["netcatty-plugin://plugin-runtime/index.html", "https://attacker.invalid/"]) {
+    await assert.rejects(ipcMain.handlers.get(CHANNELS.author)({ senderFrame: { url } }, payload), /Untrusted/);
+  }
+  assert.deepEqual(calls, []);
+  const result = await ipcMain.handlers.get(CHANNELS.author)({ senderFrame: { url: "app://netcatty/index.html" } }, payload);
+  assert.equal(result.officialMaintained, false); assert.deepEqual(calls, [payload]);
+});
+
 test("plugin Vault credential catalog updates only through the trusted host bridge", async () => {
   const ipcMain = createIpcMain();
   const updates = [];
@@ -147,28 +169,16 @@ test("plugin management availability follows asynchronous host initialization", 
   assert.equal(listCalls, 0);
 });
 
-test("plugin view host closures are broadcast to renderer windows", async () => {
-  const ipcMain = createIpcMain();
-  const broadcasts = [];
-  let closeListener;
+test("plugin view events are routed with their owning sender and never globally broadcast", async () => {
+  const ipcMain = createIpcMain(); const calls = []; const broadcasts = []; const sender = {};
   registerPluginBridge(ipcMain, {
-    manager: { initialize: async () => {} },
-    contributionService: {},
-    viewHost: {
-      onDidClose(listener) { closeListener = listener; return { dispose() {} }; },
-    },
-    env: { NETCATTY_PLUGIN_DEV: "1" },
-    isTrustedSender: () => true,
-    broadcast: (...args) => broadcasts.push(args),
+    manager: { initialize: async () => {} }, contributionService: {},
+    hostDrawnViewHost: { event: async (...args) => calls.push(args) },
+    isTrustedSender: () => true, broadcast: (...args) => broadcasts.push(args),
   });
-  const event = {
-    instanceId: "view-1",
-    pluginId: "com.example.view",
-    viewId: "com.example.view.panel",
-    reason: "runtime-error",
-  };
-  closeListener(event);
-  assert.deepEqual(broadcasts, [[CHANNELS.viewClosed, event]]);
+  const event = { nodeId: "button", type: "click" };
+  await ipcMain.handlers.get(CHANNELS.hostDrawnEvent)({ sender }, { instanceId: "view-1", event });
+  assert.deepEqual(calls, [["view-1", event, sender]]); assert.deepEqual(broadcasts, []);
 });
 
 test("plugin contribution icon requests use the host-owned resolver", async () => {
@@ -1598,4 +1608,164 @@ test("syncDeleteSecrets uses retained provider binding when contribution is miss
   assert.deepEqual(result, { deleted: 2 });
   assert.deepEqual(deleted, [["com.example", "prefix:sync-credential"]]);
   assert.deepEqual(unbound, [["com.example", "com.example.sync"]]);
+});
+
+test("missing OS vault does not block curated browsing and status exposes the limitation", async () => {
+  const ipcMain = createIpcMain();
+  let selected;
+  registerPluginBridge(ipcMain, {
+    manager: { async initialize() {} },
+    env: { NETCATTY_PLUGIN_DEV: "1" },
+    isTrustedSender: (event) => event.trusted === true,
+    credentialResolver: { isAvailable: () => false },
+    catalogService: {
+      list: () => [{ id: "com.example.synthetic" }],
+      install: async (id) => { selected = id; return { id }; },
+    },
+  });
+  const event = { trusted: true };
+  assert.deepEqual(await ipcMain.handlers.get(CHANNELS.status)(event), {
+    available: true, experimental: true, credentialStorageAvailable: false,
+  });
+  assert.equal((await ipcMain.handlers.get(CHANNELS.catalog)(event)).length, 1);
+  await assert.rejects(ipcMain.handlers.get(CHANNELS.catalog)({ trusted: false }), /Untrusted/);
+  await ipcMain.handlers.get(CHANNELS.catalogInstall)(event, { id: "com.example.synthetic", url: "https://attacker.invalid", enable: true });
+  assert.equal(selected, "com.example.synthetic");
+});
+
+test('brand metadata bridge accepts only trusted UI and forwards only the plugin ID', async () => {
+  const ipcMain = createIpcMain(); const seen = [];
+  registerPluginBridge(ipcMain, {
+    manager: { initialize: async () => {} },
+    isTrustedSender: (event) => event.trusted === true,
+    resolveBrandIcon: async (...args) => { seen.push(args); return { light: 'data:image/png;base64,fixture' }; },
+  });
+  await assert.rejects(ipcMain.handlers.get(CHANNELS.brandIcon)({ trusted: false }, { pluginId: 'com.test.brand' }), /Untrusted/);
+  assert.equal(seen.length, 0);
+  await ipcMain.handlers.get(CHANNELS.brandIcon)({ trusted: true }, { pluginId: 'com.test.brand', path: '/secret', url: 'https://attacker.invalid/' });
+  assert.deepEqual(seen, [['com.test.brand']]);
+});
+
+test("permission management is trusted-host-only and projects bounded audit summaries", async () => {
+  const ipcMain = createIpcMain();
+  let reads = 0;
+  const revoked = [];
+  registerPluginBridge(ipcMain, {
+    manager: { async initialize() {}, async revokePermissions(id) { revoked.push(id); return { enabled: false }; } },
+    isTrustedSender: (event) => event?.trusted === true,
+    permissionEngine: { describeGrants(id, context) {
+      assert.equal(context, null);
+      reads++;
+      assert.equal(id, "com.example.synthetic");
+      return { always: [{ permission: "network", resource: "https://example.invalid", resourceKind: "exact", grantedAt: 12, matchesCurrentActivation: false, declarationHash: "private" }], application: [], session: [] };
+    } },
+    database: { getActivePlugin() { return null; }, listSecurityAudit(id, limit) {
+      assert.equal(id, "com.example.synthetic");
+      assert.equal(limit, 100);
+      return [{ event: "permission.used", createdAt: 13, details: { permission: "network", scope: "always", operationId: "hidden", secret: "synthetic-private" } }];
+    } },
+  });
+  const payload = { pluginId: "com.example.synthetic" };
+  for (const channel of [CHANNELS.permissions, CHANNELS.revokePermissions]) {
+    await assert.rejects(ipcMain.handlers.get(channel)({}, payload), /Untrusted/);
+    await assert.rejects(ipcMain.handlers.get(channel)({ trusted: true }, { pluginId: "../invalid" }), /Plugin ID/);
+  }
+  assert.equal(reads, 0);
+  assert.deepEqual(await ipcMain.handlers.get(CHANNELS.permissions)({ trusted: true }, payload), {
+    grants: [{ permission: "network", resource: "https://example.invalid", resourceKind: "exact", scope: "always", sessionId: null, grantedAt: 12, matchesCurrentActivation: false }],
+    audit: [{ event: "permission.used", createdAt: 13, permission: "network", scope: "always" }],
+  });
+  assert.deepEqual(await ipcMain.handlers.get(CHANNELS.revokePermissions)({ trusted: true }, payload), { enabled: false });
+  assert.deepEqual(revoked, [payload.pluginId]);
+});
+
+test("grant classification uses only the current host activation and stops matching after disable or upgrade", async () => {
+  const ipcMain = createIpcMain();
+  let plugin = { enabled: true, activeVersion: "1.0.0", manifest: { id: "com.example.synthetic" } };
+  let identity = { pluginId: "com.example.synthetic", pluginVersion: "1.0.0", runtimeId: "runtime-host", securityPrincipal: "host-owned-principal" };
+  const contexts = [];
+  registerPluginBridge(ipcMain, {
+    manager: { async initialize() {} }, isTrustedSender: () => true,
+    runtimeSupervisor: { getRuntimeIdentity: () => identity },
+    permissionEngine: { describeGrants(_id, context) { contexts.push(context); return { always: [], application: [], session: [] }; } },
+    database: { getActivePlugin: () => plugin, listSecurityAudit: () => [] },
+  });
+  const payload = { pluginId: "com.example.synthetic", securityPrincipal: "plugin-forgery", manifest: {} };
+  const read = ipcMain.handlers.get(CHANNELS.permissions);
+  await read({}, payload);
+  assert.deepEqual(contexts[0], { ...identity, manifest: plugin.manifest });
+  plugin = { ...plugin, enabled: false };
+  await read({}, payload);
+  assert.equal(contexts[1], null);
+  plugin = { ...plugin, enabled: true, activeVersion: "2.0.0" };
+  await read({}, payload);
+  assert.equal(contexts[2], null, "old activation cannot label upgraded package grants as current");
+  identity = null;
+  await read({}, payload);
+  assert.equal(contexts[3], null, "stopped and lazy plugins show saved grants as inactive");
+});
+
+test("host interaction ready and response channels reject untrusted senders before touching the adapter", async () => {
+  const ipcMain = createIpcMain(), calls = [];
+  const sender = { id: 7 };
+  registerPluginBridge(ipcMain, {
+    manager: { async initialize() {} }, isTrustedSender: (event) => event?.trusted === true,
+    interactionService: {
+      setReady(...args) { calls.push(args); return true; },
+      respond(...args) { calls.push(args); return true; },
+    },
+  });
+  for (const channel of [CHANNELS.interactionReady, CHANNELS.interactionResponse]) {
+    await assert.rejects(ipcMain.handlers.get(channel)({ sender }, {}), /Untrusted/);
+  }
+  assert.deepEqual(calls, []);
+  await ipcMain.handlers.get(CHANNELS.interactionReady)({ trusted: true, sender }, { ready: true });
+  const response = { requestId: "opaque", actionToken: "host-token", action: "cancel" };
+  await ipcMain.handlers.get(CHANNELS.interactionResponse)({ trusted: true, sender }, response);
+  assert.deepEqual(calls, [[sender, true], [sender, response]]);
+});
+
+test('theme catalog and selection remain trusted app management channels',async()=>{
+ const ipc=createIpcMain();let calls=0;
+ registerPluginBridge(ipc,{manager:{initialize:async()=>{}},isTrustedSender:event=>event?.trusted===true,themeService:{catalog:async()=>{calls++;return{};},apply:async()=>{calls++;return{};}}});
+ for(const channel of [CHANNELS.themeCatalog,CHANNELS.themeApply])await assert.rejects(ipc.handlers.get(channel)({trusted:false},{}),/Untrusted/);
+ assert.equal(calls,0);await ipc.handlers.get(CHANNELS.themeCatalog)({trusted:true});await ipc.handlers.get(CHANNELS.themeApply)({trusted:true},{});assert.equal(calls,2);
+});
+
+test("local log management rejects plugin/untrusted senders before touching the sink", async () => {
+  const ipcMain = createIpcMain();
+  const actions = [];
+  const logService = { ready: Promise.resolve() };
+  for (const action of ["status", "configure", "openFolder", "exportLogs", "clear"]) logService[action] = async () => { actions.push(action); return { saveToDisk: false }; };
+  registerPluginBridge(ipcMain, { manager: { async initialize() {} }, logService, isTrustedSender: (event) => event?.trusted === true });
+  for (const channel of [CHANNELS.logStatus, CHANNELS.logConfigure, CHANNELS.logOpen, CHANNELS.logExport, CHANNELS.logClear]) {
+    await assert.rejects(ipcMain.handlers.get(channel)({}, {}), /Untrusted/);
+    assert.equal(actions.length, 0);
+  }
+  for (const channel of [CHANNELS.logStatus, CHANNELS.logConfigure, CHANNELS.logOpen, CHANNELS.logExport, CHANNELS.logClear]) await ipcMain.handlers.get(channel)({ trusted: true }, {});
+  assert.deepEqual(actions, ["status", "configure", "openFolder", "exportLogs", "clear"]);
+});
+
+test("policy edits require trusted UI and the exact source/version/policy revision", async () => {
+  const { PluginPermissionEngine } = require("./permissionEngine.cjs");
+  const ipcMain = createIpcMain();
+  let sourceOwner = "source-a", mode = "deny";
+  const plugin = { id: "com.example.policy", activeVersion: "1.0.0", manifest: { permissions: { optional: ["storage"] } } };
+  const engine = new PluginPermissionEngine({ database: { privateOwner: () => sourceOwner,
+    getPermissionMode: () => mode, setPermissionMode: (_id, _permission, value) => { mode = value; },
+    deleteAllPermissionGrants() {}, recordSecurityAudit() {},
+  } });
+  registerPluginBridge(ipcMain, { manager: { async initialize() {} }, isTrustedSender: (event) => event?.trusted === true,
+    permissionEngine: engine, database: { getActivePlugin: () => plugin } });
+  const edit = ipcMain.handlers.get(CHANNELS.setPermissionMode);
+  const payload = { pluginId: plugin.id, permission: "storage", mode: "allow", policyRevision: engine.getPolicyRevision(plugin) };
+  await assert.rejects(edit({}, payload), /Untrusted/);
+  for (const change of [() => { sourceOwner = "source-b"; }, () => { plugin.activeVersion = "2.0.0"; }, () => engine.revokeAll(plugin.id)]) {
+    const stale = { ...payload, policyRevision: engine.getPolicyRevision(plugin) }; change();
+    await assert.rejects(edit({ trusted: true }, stale), /refresh/);
+    assert.equal(mode, "deny");
+  }
+  assert.equal(await edit({ trusted: true }, { ...payload, policyRevision: engine.getPolicyRevision(plugin) }), true);
+  assert.equal(mode, "allow");
+  engine.shutdown();
 });

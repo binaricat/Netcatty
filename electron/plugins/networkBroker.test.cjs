@@ -157,7 +157,10 @@ test("network response streaming stops above the byte cap", async () => {
   );
 });
 
-test("network broker reports its own timeout as a stable deadline error", async () => {
+test("network broker reports its own timeout as a stable deadline error", async (context) => {
+  // A real request owns a socket; this pending fake must also keep the loop alive.
+  const keepAlive = setInterval(() => {}, 1_000);
+  context.after(() => clearInterval(keepAlive));
   const broker = new PluginNetworkBroker({
     fetch: async (_url, options) => new Promise((_resolve, reject) => {
       options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
@@ -168,4 +171,15 @@ test("network broker reports its own timeout as a stable deadline error", async 
     broker.request({ url: "https://example.com", timeoutMs: 5 }, runtimeContext()),
     (error) => error.code === RPC_ERRORS.deadlineExceeded,
   );
+});
+
+test("credential field validation follows the canonical contract and keeps Bearer default", () => {
+  const broker = new PluginNetworkBroker({ permissionEngine: {} });
+  const lease = { kind: "secret-lease", id: "l".repeat(32), operationId: "network:https://example.invalid", expiresAt: 1000 };
+  const request = { url: "https://example.invalid", credentialLease: lease, authorization: {} };
+  assert.deepEqual(broker.validate(request).authorization, { scheme: "Bearer" });
+  for (const authorization of [{ scheme: "Digest" }, { scheme: "Basic", username: "name\n" }, { password: "synthetic" }]) {
+    assert.throws(() => broker.validate({ ...request, authorization }), /authorization is invalid/);
+  }
+  assert.throws(() => broker.validate({ ...request, credentialLease: { ...lease, id: "short" } }), /lease is invalid/);
 });

@@ -1,3 +1,5 @@
+import { safeSliceBounds, sliceHead, sliceTail } from '../textBoundaries';
+
 export interface ToolOutputHandle {
   id: string;
   chatSessionId: string;
@@ -142,26 +144,6 @@ function nextHandleId(): string {
   return `tool-output-${randomId}`;
 }
 
-function isHighSurrogate(value: number): boolean {
-  return value >= 0xd800 && value <= 0xdbff;
-}
-
-function isLowSurrogate(value: number): boolean {
-  return value >= 0xdc00 && value <= 0xdfff;
-}
-
-function safeSliceBounds(content: string, requestedStart: number, requestedEnd: number): [number, number] {
-  let start = Math.min(content.length, Math.max(0, requestedStart));
-  let end = Math.min(content.length, Math.max(start, requestedEnd));
-  if (start > 0 && start < content.length && isLowSurrogate(content.charCodeAt(start))) {
-    start -= 1;
-  }
-  if (end > start && end < content.length && isHighSurrogate(content.charCodeAt(end - 1))) {
-    end -= 1;
-  }
-  return [start, end];
-}
-
 export class ToolOutputStore {
   private readonly bySession = new Map<string, Map<string, ToolOutputHandle>>();
   private readonly maxHandleChars: number;
@@ -257,7 +239,7 @@ export class ToolOutputStore {
       totalChars: input.content.length,
       storedChars: retainedContent.length,
       sourceTruncated: retainedContent.length < input.content.length,
-      preview: retainedContent.slice(0, previewChars),
+      preview: sliceHead(retainedContent, previewChars),
       storedAt: now,
       accessedAt: now,
       fullContent: retainedContent,
@@ -750,11 +732,11 @@ function isValidPersistedRecord(
 function retainBoundedContent(content: string, maxChars: number): string {
   if (content.length <= maxChars) return content;
   const marker = `\n\n[... source output exceeded local handle limit; ${content.length - maxChars} chars omitted ...]\n\n`;
-  if (marker.length >= maxChars) return content.slice(0, maxChars);
+  if (marker.length >= maxChars) return sliceHead(content, maxChars);
   const budget = Math.max(0, maxChars - marker.length);
   const head = Math.floor(budget / 2);
   const tail = budget - head;
-  return `${content.slice(0, head)}${marker}${content.slice(-tail)}`;
+  return `${sliceHead(content, head)}${marker}${sliceTail(content, tail)}`;
 }
 
 function buildReadResult(

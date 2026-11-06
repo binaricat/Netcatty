@@ -117,3 +117,59 @@ test('group additions preserve default and custom top-level order and isolate ex
   assert.equal(state().sessions.filter(s => s.sessionGroupId === third.id).length, 1, 'explicit merging moves only the chosen member');
   assert.ok(state().sessions.filter(s => s.workspaceId).every(s => !s.sessionGroupId));
 });
+
+test('copy actions retain stable callbacks and use group tab ids after the original member closes', async (t) => {
+  const state = await mount(t);
+  for (const shellName of ['first', 'group', 'last']) {
+    await act(async () => { state().createLocalTerminal({ shellName }); });
+  }
+  const [first, group, last] = state().sessions;
+  const copySession = state().copySession;
+  const copyWorkspace = state().copyWorkspace;
+  await act(async () => { state().addSessionTab(group.id); });
+  const member = state().sessions.at(-1)!;
+  await act(async () => state().closeSession(group.id));
+  assert.equal(state().copySession, copySession);
+  assert.equal(state().copyWorkspace, copyWorkspace);
+  await act(async () => copySession(member.id));
+  const copied = state().sessions.at(-1)!;
+  assert.deepEqual(state().orderedTabs, [first.id, group.id, copied.id, last.id]);
+
+  await act(async () => state().createWorkspaceFromSessions(first.id, last.id, {
+    direction: 'vertical', position: 'right',
+  }));
+  const workspace = state().workspaces[0];
+  const beforeCopy = state().orderedTabs;
+  await act(async () => copyWorkspace(workspace.id));
+  const copiedWorkspace = state().workspaces.at(-1)!;
+  const expected = [...beforeCopy];
+  expected.splice(expected.indexOf(workspace.id) + 1, 0, copiedWorkspace.id);
+  assert.deepEqual(state().orderedTabs, expected);
+});
+
+test('merging grouped sessions into an existing workspace preserves the remaining group slot', async (t) => {
+  const state = await mount(t);
+  for (const shellName of ['first', 'group', 'last']) {
+    await act(async () => { state().createLocalTerminal({ shellName }); });
+  }
+  const [first, group, last] = state().sessions;
+  await act(async () => { state().addSessionTab(group.id); });
+  const member = state().sessions.at(-1)!;
+  await act(async () => state().createWorkspaceFromSessions(first.id, last.id, {
+    direction: 'vertical', position: 'right',
+  }));
+  const workspace = state().workspaces[0];
+  const beforeMerge = state().orderedTabs;
+  await act(async () => state().createWorkspaceFromSessions(group.id, first.id, {
+    direction: 'vertical', position: 'right',
+  }));
+  assert.deepEqual(state().orderedTabs, beforeMerge);
+  assert.equal(state().workspaces[0].id, workspace.id);
+  assert.equal(state().sessions.find(s => s.id === member.id)?.sessionGroupId, group.id);
+  await act(async () => state().createWorkspaceFromSessions(first.id, member.id, {
+    direction: 'vertical', position: 'right',
+  }));
+  assert.deepEqual(state().orderedTabs, [workspace.id]);
+  assert.equal(state().workspaces.length, 1);
+  assert.ok(state().sessions.every(s => s.workspaceId === workspace.id && !s.sessionGroupId));
+});

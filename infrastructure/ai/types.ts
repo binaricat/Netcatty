@@ -42,7 +42,7 @@ export interface ProviderAdvancedParams {
   frequencyPenalty?: number;  // -2–2
   presencePenalty?: number;   // -2–2
   /** Provider-level default thinking depth; omitted = API default (not sent). */
-  reasoningEffort?: string;   // 'low' | 'medium' | 'high'
+  reasoningEffort?: string;   // 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 
 export interface ProviderConfig {
@@ -231,6 +231,13 @@ export interface AISession {
   title: string;
   agentId: string;
   scope: AISessionScope;
+  /**
+   * The scope target (terminal/workspace) this chat is bound to no longer
+   * exists. The record and its active pointer stay intact so `/chats` can
+   * list the chat and offer a rebind; the flag clears when the chat is
+   * rebound or its target becomes live again.
+   */
+  scopeDangling?: boolean;
   messages: ChatMessage[];
   contextCompaction?: AISessionContextCompaction;
   externalSessionId?: string;

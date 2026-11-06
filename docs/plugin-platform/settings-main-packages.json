@@ -1,0 +1,217 @@
+[
+  {
+    "name": "assistant",
+    "id": "com.netcatty.assistant",
+    "version": "0.1.0",
+    "fileCount": 6,
+    "bytes": 17214,
+    "sha256": "7943d4c3800914fe0acd3d0f3a3d7f7c1910c212a5dc58a044871a6a82485274",
+    "contentSha256": "c3e31e9613422bf9a05ccaa5b6f234304208f1a8298b1c1ee19262ba88af6cd0",
+    "features": {
+      "required": [
+        "ai.model-invocation",
+        "context.selected-read"
+      ]
+    },
+    "permissions": {
+      "required": [
+        "commands",
+        "views"
+      ],
+      "optional": [
+        "ai.invoke",
+        "context.selected.list",
+        "context.selected.read"
+      ]
+    },
+    "package": "assistant.ncpkg",
+    "repeatIdentical": true,
+    "preparedOnlyInThisExecutor": true,
+    "previousFrozen677Sha256": "c7d784d5c3bd2feb463afd58eae3a9594615395b168174cb8a3d0677584ae395",
+    "changedEntriesFromFrozen677": [
+      "README.md",
+      "panel.css",
+      "panel.js"
+    ],
+    "previous7856Sha256": "7943d4c3800914fe0acd3d0f3a3d7f7c1910c212a5dc58a044871a6a82485274",
+    "changedEntriesFrom7856": [],
+    "rebuiltAgainstPolicy": "1551fa8355021b5a811d737d16f81e8070f99f5d",
+    "rebuiltAgainstAI": "d33c0193ccaedc1a10aed9da495f040250121bef",
+    "previous020Sha256": "7943d4c3800914fe0acd3d0f3a3d7f7c1910c212a5dc58a044871a6a82485274",
+    "changedEntriesFrom020": [],
+    "rebuiltAgainstMain": "a0cf2b487c9ff0b0472d622e66bc5ee20de32c71",
+    "productionMerge": "714e2397a43dc6c083dce8afeeb7a0475de11384",
+    "previous2433Sha256": "7943d4c3800914fe0acd3d0f3a3d7f7c1910c212a5dc58a044871a6a82485274",
+    "changedEntriesFrom2433": []
+  },
+  {
+    "name": "database-owned",
+    "id": "com.netcatty.database-minimal",
+    "version": "0.1.0",
+    "fileCount": 5,
+    "bytes": 11660,
+    "sha256": "f01c6a24382897d4b0bf4130941274abacb9a9a963f9b56ecaceb2c020f36874",
+    "contentSha256": "4d628c41c7a231e31cd56dacb822acaaa37f61e1e98b285b0086a4f783be199d",
+    "features": {
+      "required": [
+        "network.byte-streams"
+      ]
+    },
+    "permissions": {
+      "required": [
+        "commands",
+        "views"
+      ],
+      "optional": [
+        {
+          "permission": "network.stream",
+          "resources": [
+            "tcp://10.77.0.20:3306"
+          ],
+          "reason": "Connect only to the prepared disposable fixture."
+        }
+      ]
+    },
+    "package": "database-owned.ncpkg",
+    "repeatIdentical": true,
+    "preparedOnlyInThisExecutor": true,
+    "previousFrozen677Sha256": "f01c6a24382897d4b0bf4130941274abacb9a9a963f9b56ecaceb2c020f36874",
+    "changedEntriesFromFrozen677": [],
+    "previous7856Sha256": "f01c6a24382897d4b0bf4130941274abacb9a9a963f9b56ecaceb2c020f36874",
+    "changedEntriesFrom7856": [],
+    "rebuiltAgainstPolicy": "1551fa8355021b5a811d737d16f81e8070f99f5d",
+    "rebuiltAgainstAI": "d33c0193ccaedc1a10aed9da495f040250121bef",
+    "previous020Sha256": "f01c6a24382897d4b0bf4130941274abacb9a9a963f9b56ecaceb2c020f36874",
+    "changedEntriesFrom020": [],
+    "rebuiltAgainstMain": "a0cf2b487c9ff0b0472d622e66bc5ee20de32c71",
+    "productionMerge": "714e2397a43dc6c083dce8afeeb7a0475de11384",
+    "previous2433Sha256": "f01c6a24382897d4b0bf4130941274abacb9a9a963f9b56ecaceb2c020f36874",
+    "changedEntriesFrom2433": []
+  },
+  {
+    "name": "database-rfam-readonly",
+    "id": "com.netcatty.database-rfam-readonly",
+    "version": "0.1.0",
+    "fileCount": 5,
+    "bytes": 11003,
+    "sha256": "aaca586669db454e91d61487e576ed524d1b7190eed182bc2cd0035e59caa0d3",
+    "contentSha256": "f542ca7b8e821d684cf7f71f0930458bd3ad97bc94bf654c88b0f353111e9162",
+    "features": {
+      "required": [
+        "network.byte-streams"
+      ]
+    },
+    "permissions": {
+      "required": [
+        "commands",
+        "views"
+      ],
+      "optional": [
+        {
+          "permission": "network.stream",
+          "resources": [
+            "tcp://mysql-rfam-public.ebi.ac.uk:4497"
+          ],
+          "reason": "Run the fixed public Rfam acceptance query only after explicit authorization."
+        }
+      ]
+    },
+    "package": "database-rfam-readonly.ncpkg",
+    "repeatIdentical": true,
+    "preparedOnlyInThisExecutor": true,
+    "previousFrozen677Sha256": "aaca586669db454e91d61487e576ed524d1b7190eed182bc2cd0035e59caa0d3",
+    "changedEntriesFromFrozen677": [],
+    "previous7856Sha256": "aaca586669db454e91d61487e576ed524d1b7190eed182bc2cd0035e59caa0d3",
+    "changedEntriesFrom7856": [],
+    "rebuiltAgainstPolicy": "1551fa8355021b5a811d737d16f81e8070f99f5d",
+    "rebuiltAgainstAI": "d33c0193ccaedc1a10aed9da495f040250121bef",
+    "previous020Sha256": "aaca586669db454e91d61487e576ed524d1b7190eed182bc2cd0035e59caa0d3",
+    "changedEntriesFrom020": [],
+    "rebuiltAgainstMain": "a0cf2b487c9ff0b0472d622e66bc5ee20de32c71",
+    "productionMerge": "714e2397a43dc6c083dce8afeeb7a0475de11384",
+    "previous2433Sha256": "aaca586669db454e91d61487e576ed524d1b7190eed182bc2cd0035e59caa0d3",
+    "changedEntriesFrom2433": []
+  },
+  {
+    "name": "host-actions",
+    "id": "com.netcatty.host-actions",
+    "version": "0.1.0",
+    "fileCount": 3,
+    "bytes": 4633,
+    "sha256": "cf04f82dfe25ab5cda6f5f3dad0a8fb06c37bedf9924f556bee2b8402e542ef2",
+    "contentSha256": "d6f8bf3ae9dc417ea838f673966f2e1075fc8f9ef1d939ca85b476b1bb007e6c",
+    "features": {
+      "required": [
+        "vault.host-actions",
+        "commands.interactive"
+      ]
+    },
+    "permissions": {
+      "required": [
+        "commands",
+        "menus"
+      ],
+      "optional": [
+        "vault.metadata",
+        "vault.write",
+        "ui.interact"
+      ]
+    },
+    "package": "host-actions.ncpkg",
+    "repeatIdentical": true,
+    "preparedOnlyInThisExecutor": true,
+    "previousFrozen677Sha256": "cf04f82dfe25ab5cda6f5f3dad0a8fb06c37bedf9924f556bee2b8402e542ef2",
+    "changedEntriesFromFrozen677": [],
+    "previous7856Sha256": "cf04f82dfe25ab5cda6f5f3dad0a8fb06c37bedf9924f556bee2b8402e542ef2",
+    "changedEntriesFrom7856": [],
+    "rebuiltAgainstPolicy": "1551fa8355021b5a811d737d16f81e8070f99f5d",
+    "rebuiltAgainstAI": "d33c0193ccaedc1a10aed9da495f040250121bef",
+    "previous020Sha256": "cf04f82dfe25ab5cda6f5f3dad0a8fb06c37bedf9924f556bee2b8402e542ef2",
+    "changedEntriesFrom020": [],
+    "rebuiltAgainstMain": "a0cf2b487c9ff0b0472d622e66bc5ee20de32c71",
+    "productionMerge": "714e2397a43dc6c083dce8afeeb7a0475de11384",
+    "previous2433Sha256": "cf04f82dfe25ab5cda6f5f3dad0a8fb06c37bedf9924f556bee2b8402e542ef2",
+    "changedEntriesFrom2433": []
+  },
+  {
+    "name": "terminal-selection-draft",
+    "id": "com.netcatty.terminal-selection-draft",
+    "version": "0.1.0",
+    "fileCount": 2,
+    "bytes": 2954,
+    "sha256": "4c9c2388b7f891156192a0b5ab7b23291beba3555e7ec8cf24fbe2dfe1242d5e",
+    "contentSha256": "99797d8679f34b96580076f922cbec067e511adc0f4ccf396ed129206acb6c4c",
+    "features": {
+      "required": [
+        "terminal.selection-sharing",
+        "terminal.input-drafts",
+        "commands.interactive"
+      ]
+    },
+    "permissions": {
+      "required": [
+        "commands",
+        "menus"
+      ],
+      "optional": [
+        "terminal.selection.read",
+        "terminal.input.propose"
+      ]
+    },
+    "package": "terminal-selection-draft.ncpkg",
+    "repeatIdentical": true,
+    "preparedOnlyInThisExecutor": true,
+    "previousFrozen677Sha256": "4c9c2388b7f891156192a0b5ab7b23291beba3555e7ec8cf24fbe2dfe1242d5e",
+    "changedEntriesFromFrozen677": [],
+    "previous7856Sha256": "4c9c2388b7f891156192a0b5ab7b23291beba3555e7ec8cf24fbe2dfe1242d5e",
+    "changedEntriesFrom7856": [],
+    "rebuiltAgainstPolicy": "1551fa8355021b5a811d737d16f81e8070f99f5d",
+    "rebuiltAgainstAI": "d33c0193ccaedc1a10aed9da495f040250121bef",
+    "previous020Sha256": "4c9c2388b7f891156192a0b5ab7b23291beba3555e7ec8cf24fbe2dfe1242d5e",
+    "changedEntriesFrom020": [],
+    "rebuiltAgainstMain": "a0cf2b487c9ff0b0472d622e66bc5ee20de32c71",
+    "productionMerge": "714e2397a43dc6c083dce8afeeb7a0475de11384",
+    "previous2433Sha256": "4c9c2388b7f891156192a0b5ab7b23291beba3555e7ec8cf24fbe2dfe1242d5e",
+    "changedEntriesFrom2433": []
+  }
+]

@@ -161,3 +161,20 @@ test('sensitive prompts pause broadcasting unless the password bypass is on', ()
     true,
   );
 });
+
+test('sensitive prompts stay fail-closed on every screen unless bypassed (#4107)', () => {
+  for (const sensitivePromptSource of [undefined, 'heuristic', 'explicit'] as const) {
+    for (const alternateScreen of [false, true]) {
+      for (const sensitivePromptActive of [false, true]) {
+        for (const broadcastPasswordBypass of [false, true]) {
+          assert.equal(shouldBroadcastDuringSensitivePrompt({
+            sensitivePromptActive,
+            broadcastPasswordBypass,
+            sensitivePromptSource,
+            alternateScreen,
+          }), !sensitivePromptActive || broadcastPasswordBypass);
+        }
+      }
+    }
+  }
+});

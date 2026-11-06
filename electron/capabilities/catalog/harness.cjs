@@ -61,7 +61,7 @@ const HARNESS_CAPABILITIES = [
   },
   {
     id: "harness.terminal.read_context",
-    agentKinds: ["sidebar"],
+    agentKinds: ["sidebar", "global"],
     domain: "harness",
     status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "Read a bounded slice of the current terminal screen or scrollback from the active AI scope.",

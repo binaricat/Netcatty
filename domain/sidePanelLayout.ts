@@ -1,4 +1,4 @@
-export type SidePanelTool =
+export type BuiltinSidePanelTool =
   | 'sftp'
   | 'browser'
   | 'scripts'
@@ -7,6 +7,12 @@ export type SidePanelTool =
   | 'ai'
   | 'system'
   | 'notes';
+
+export type SidePanelTool = BuiltinSidePanelTool | `plugin-view:${string}`;
+
+export function isPluginSidePanelTool(value: unknown): value is `plugin-view:${string}` {
+  return typeof value === 'string' && value.length <= 256 && /^plugin-view:[A-Za-z0-9_.-]+$/.test(value);
+}
 
 export type SidePanelSplitDirection = 'horizontal' | 'vertical';
 

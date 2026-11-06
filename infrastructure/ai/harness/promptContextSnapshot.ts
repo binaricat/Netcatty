@@ -2,11 +2,11 @@ import type { AIPermissionMode } from '../types';
 
 export interface PromptContextSnapshot {
   version: 2;
-  audience: 'sidebar';
+  audience: import('../agentKinds').AgentKind;
   providerId?: string;
   modelId?: string;
   permissionMode: AIPermissionMode;
-  scopeType: 'terminal' | 'workspace';
+  scopeType: 'terminal' | 'workspace' | 'global';
   scopeLabel?: string;
   toolNames: string[];
   selectedSkillSlugs: string[];
@@ -28,10 +28,11 @@ export interface PromptContextSnapshot {
 }
 
 export function buildPromptContextSnapshot(input: {
+  agentKind?: import('../agentKinds').AgentKind;
   providerId?: string;
   modelId?: string;
   permissionMode: AIPermissionMode;
-  scopeType: 'terminal' | 'workspace';
+  scopeType: 'terminal' | 'workspace' | 'global';
   scopeLabel?: string;
   toolNames: string[];
   selectedSkillSlugs?: string[];
@@ -52,7 +53,7 @@ export function buildPromptContextSnapshot(input: {
   ];
   return {
     version: 2,
-    audience: 'sidebar',
+    audience: input.agentKind ?? 'sidebar',
     providerId: input.providerId,
     modelId: input.modelId,
     permissionMode: input.permissionMode,

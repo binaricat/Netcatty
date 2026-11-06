@@ -22,6 +22,7 @@ export interface NetcattyBridge {
     sessionId: string,
     command: string,
     chatSessionId?: string,
+    delegationTag?: string,
   ): Promise<{
     ok: boolean;
     stdout?: string;
@@ -36,12 +37,13 @@ export interface NetcattyBridge {
    * window if the user clicks Stop after we've already dispatched
    * `aiExec` but before the main process has registered it.
    */
-  aiCattyCancelExec?(chatSessionId: string): Promise<unknown>;
-  aiSetChatSessionCancelled?(chatSessionId: string, cancelled?: boolean): Promise<{ ok: boolean; error?: string }>;
+  aiCattyCancelExec?(chatSessionId: string, delegationTag?: string): Promise<unknown>;
+  aiSetChatSessionCancelled?(chatSessionId: string, cancelled?: boolean, delegationTag?: string): Promise<{ ok: boolean; error?: string }>;
   aiCapability?(
     rpcMethod: string,
     params: Record<string, unknown>,
     chatSessionId?: string,
+    delegationTag?: string,
   ): Promise<unknown>;
 }
 

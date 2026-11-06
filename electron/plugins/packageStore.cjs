@@ -1,5 +1,7 @@
 "use strict";
 
+const { LOCAL_SOURCE, assertSource } = require("./sourceIdentity.cjs");
+
 const { createHash, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const { constants } = fs;
@@ -20,6 +22,9 @@ const {
   isPathInside,
   resolveInstalledVersionDirectory,
 } = require("./paths.cjs");
+
+const { assertBrowserOnlyPlugin } = require("../../domain/pluginRuntimePolicy.cjs");
+const { assertCatalogManifest } = require("./catalogPolicy.cjs");
 
 const INSTALL_METADATA_FILE = "install.json";
 const ARCHIVE_SNAPSHOT_FILE = "package.ncpkg";
@@ -124,6 +129,7 @@ function validateInstallMetadata(value) {
     version,
     archiveSha256: value.archiveSha256,
     contentSha256: value.contentSha256,
+    source: assertSource(value.source ?? LOCAL_SOURCE),
   };
 }
 
@@ -136,6 +142,7 @@ function validateRemovalMetadata(value) {
 
 class PackageStore {
   constructor(options) {
+    this.allowAdvancedPlugins = options.allowAdvancedPlugins !== false;
     this.paths = options.paths;
     this.database = options.database;
     this.netcattyVersion = options.netcattyVersion;
@@ -151,6 +158,41 @@ class PackageStore {
       .filter((value) => typeof value === "string" && value !== this.paths.database)
       .map((directory) => mkdir(directory, { recursive: true, mode: 0o700 })));
     await this.recover();
+    // Reconcile every installed manifest before lazy contributions are exposed.
+    // An application/API upgrade must not leave incompatible providers enabled.
+    for (const plugin of this.database.listPlugins()) {
+      if (!plugin.enabled) continue;
+      await this.assertCompatible(plugin).catch((error) => {
+        if (!["PLUGIN_INCOMPATIBLE", "PLUGIN_UNSUPPORTED_RUNTIME"].includes(error.code)) throw error;
+      });
+    }
+  }
+
+  async assertCompatible(plugin) {
+    const pluginCli = await loadPluginCli();
+    const result = pluginCli.checkPluginCompatibility(plugin.manifest, {
+      netcattyVersion: this.netcattyVersion,
+      apiVersion: this.apiVersion,
+      features: this.supportedFeatures,
+    });
+    let error;
+    if (!this.allowAdvancedPlugins) {
+      try { assertBrowserOnlyPlugin(plugin.manifest); } catch (cause) { error = cause; }
+    }
+    if (!error && result.compatible) return result;
+    if (!error) {
+      error = new Error(`Plugin is incompatible: ${result.errors.join("; ")}`);
+      error.code = "PLUGIN_INCOMPATIBLE";
+    }
+    const current = this.database.getActivePlugin(plugin.id);
+    if (current?.activeVersion === plugin.activeVersion) {
+      this.database.setEnabled(plugin.id, false);
+      this.database.setRuntimeState(plugin.id, "error", {
+        pluginVersion: plugin.activeVersion,
+        error: error.message,
+      });
+    }
+    throw error;
   }
 
   async install(archivePath, options = {}) {
@@ -175,6 +217,7 @@ class PackageStore {
       const validation = await pluginCli.extractPluginPackage(archiveSnapshot, extractedDirectory);
       await syncDirectoryTree(extractedDirectory);
       const manifest = validation.manifest;
+      if (!this.allowAdvancedPlugins) assertBrowserOnlyPlugin(manifest);
       const compatibility = pluginCli.checkPluginCompatibility(manifest, {
         netcattyVersion: this.netcattyVersion,
         apiVersion: this.apiVersion,
@@ -186,8 +229,18 @@ class PackageStore {
       const pluginId = assertPluginStorageSegment(manifest.id, "ID");
       const version = assertPluginStorageSegment(manifest.version, "version");
       const targetDirectory = resolveInstalledVersionDirectory(this.paths, pluginId, version);
+      const source = this.database.assertInstallSource(pluginId, options.source ?? LOCAL_SOURCE);
       const previousPlugin = this.database.getActivePlugin(pluginId);
-      const enableAfterActivation = options.enable === true || previousPlugin?.enabled === true;
+      if (options.catalog) {
+        if (snapshot.sha256 !== options.catalog.artifact.sha256) throw new Error("Catalog package SHA-256 mismatch");
+        assertCatalogManifest(manifest, options.catalog);
+        // Detail-page permissions and engine ranges must describe these exact bytes.
+        const { isDeepStrictEqual } = require("node:util");
+        if (!isDeepStrictEqual(manifest, options.catalog.manifest)) throw new Error("Catalog manifest does not match package");
+      }
+      const enableAfterActivation = options.enable === false
+        ? false
+        : options.enable === true || previousPlugin?.enabled === true;
       let activationPrepared = false;
       const prepareActivation = async (reason) => {
         if (activationPrepared) return;
@@ -214,15 +267,16 @@ class PackageStore {
           await rm(targetDirectory, { recursive: true, force: true });
         }
         if (existingValidation) {
-          if (previousPlugin?.activeVersion !== version) await prepareActivation("switch-active-version");
+          if (previousPlugin?.activeVersion !== version || options.enable === false) await prepareActivation("switch-active-version");
           const existingPackage = path.join(targetDirectory, PACKAGE_DIRECTORY);
           this.database.installVersion({
+            source,
             pluginId,
             version,
             manifest: existingValidation.manifest,
             archiveSha256: existing.archiveSha256,
             packageRelativePath: path.relative(this.paths.packages, existingPackage),
-          }, { enable: enableAfterActivation });
+          }, { enable: enableAfterActivation, forceDisabled: options.enable === false });
           return this.database.getActivePlugin(pluginId);
         }
       }
@@ -233,6 +287,7 @@ class PackageStore {
         if (!(error && error.code === "ENOENT")) throw error;
       }
       const metadata = {
+        source,
         pluginId,
         version,
         archiveSha256: snapshot.sha256,
@@ -241,7 +296,7 @@ class PackageStore {
       await writeDurableMetadata(path.join(stagingDirectory, INSTALL_METADATA_FILE), metadata);
       await this.syncDirectory(stagingDirectory);
       await mkdir(path.dirname(targetDirectory), { recursive: true, mode: 0o700 });
-      if (previousPlugin?.activeVersion !== version) await prepareActivation("switch-active-version");
+      if (previousPlugin?.activeVersion !== version || options.enable === false) await prepareActivation("switch-active-version");
       await rename(stagingDirectory, targetDirectory);
       await this.syncDirectory(path.dirname(targetDirectory));
       const packageRelativePath = path.relative(
@@ -250,12 +305,13 @@ class PackageStore {
       );
       try {
         this.database.installVersion({
+          source,
           pluginId,
           version,
           manifest,
           archiveSha256: snapshot.sha256,
           packageRelativePath,
-        }, { enable: enableAfterActivation });
+        }, { enable: enableAfterActivation, forceDisabled: options.enable === false });
       } catch (error) {
         this.verifiedArchives.delete(this.#versionKey(pluginId, version));
         await rm(targetDirectory, { recursive: true, force: true });
@@ -342,6 +398,7 @@ class PackageStore {
           if (metadata.pluginId !== pluginEntry.name || metadata.version !== versionEntry.name) {
             throw new Error("Plugin install metadata does not match its directory");
           }
+          this.database.assertInstallSource(metadata.pluginId, metadata.source);
           if (committedVersion && committedVersion.archiveSha256 !== metadata.archiveSha256) {
             throw new Error("Plugin install archive hash does not match its database record");
           }
@@ -357,6 +414,7 @@ class PackageStore {
           if (!committedVersion) {
             const packageDirectory = path.join(versionDirectory, PACKAGE_DIRECTORY);
             this.database.installVersion({
+              source: metadata.source,
               pluginId: metadata.pluginId,
               version: metadata.version,
               manifest: validation.manifest,
@@ -528,6 +586,12 @@ class PackageStore {
       }
       throw error;
     }
+  }
+
+  async clearUninstalledPrivateFiles(pluginId) {
+    assertPluginStorageSegment(pluginId, "ID");
+    if (this.database.getActivePlugin(pluginId)) throw new Error("Plugin is still installed");
+    await rm(path.join(this.paths.data, pluginId), { recursive: true, force: true });
   }
 
   async uninstall(pluginId) {

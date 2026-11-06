@@ -42,6 +42,16 @@ test("virtual card rows adapt to narrow panes and do not allocate empty columns"
   assert.equal(monitorGridColumns(0, 1000), 1);
 });
 
+test("old saved layouts gain a resizable disk I/O column after disk capacity", () => {
+  const keys = MONITOR_COLUMNS.map(column => column.key);
+  assert.equal(keys[keys.indexOf("disks") + 1], "diskIo");
+  const widths = normalizeMonitorColumnWidths({ disks: 280, network: 170 });
+  assert.equal(widths.disks, 280);
+  assert.equal(widths.network, 170);
+  assert.equal(widths.diskIo, 230);
+  assert.deepEqual(normalizeMonitorHiddenColumns(["diskIo"]), ["diskIo"]);
+});
+
 test("hidden columns always preserve host and terminal and discard unknown settings", () => {
   assert.deepEqual(
     normalizeMonitorHiddenColumns([

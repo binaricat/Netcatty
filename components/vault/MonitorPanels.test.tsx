@@ -10,6 +10,7 @@ import type { Host } from "../../domain/models";
 import type { MonitorPoint } from "../../domain/monitorRuntime";
 import { MonitorPanels, MonitorTrend } from "./MonitorPanels";
 import { MonitorDiskUsage } from "./MonitorDiskUsage";
+import { MonitorDiskIo } from "./MonitorDiskIo";
 import { MonitorHostLatency } from "./MonitorHostMetadata";
 import { TooltipProvider } from "../ui/tooltip";
 
@@ -132,7 +133,7 @@ test("disk usage shows every reported partition, including healthy and empty dis
   const document = new JSDOM(renderToStaticMarkup(
     <MonitorDiskUsage stats={{ disks, diskPercent: 25 }} />,
   )).window.document;
-  assert.deepEqual([...document.querySelectorAll("[data-monitor-disk] > span")].map((e) => e.textContent), ["/", "/data", "/backup"]);
+  assert.deepEqual([...document.querySelectorAll("[data-monitor-disk-label]")].map((e) => e.textContent), ["/", "/backup", "/data"]);
   for (const value of ["25.0%", "95.0%", "0.0%"])
     assert.ok(document.body.textContent!.includes(value));
 });
@@ -158,6 +159,15 @@ test("cards show the two largest capacities without changing the source disk ord
   assert.deepEqual(disks.map((disk) => disk.mountPoint), ["/small", "/data", "/backup"]);
 });
 
+test("cards retain aggregate disk I/O while lists keep it in the separate column", () => {
+  const stats = { disks: [], diskPercent: 10, diskReadSpeed: 1000, diskWriteSpeed: 2e6 };
+  const markup = (limit?: number) => new JSDOM(renderToStaticMarkup(
+    <I18nProvider locale="en"><MonitorDiskUsage stats={stats} limit={limit} /></I18nProvider>,
+  )).window.document;
+  assert.match(markup(2).querySelector("[data-disk-io]")!.textContent!, /Read 1.0 KB\/s.*Write 2.0 MB\/s/);
+  assert.equal(markup().querySelector("[data-disk-io]"), null);
+});
+
 for (const view of ["list", "charts"] as const) {
   test(`${view} keeps saved custom icons, colors and OS logos`, (t) => {
     const storage = new Map<string, string>();
@@ -181,6 +191,9 @@ for (const view of ["list", "charts"] as const) {
     assert.equal(document.querySelector("header .lucide-gauge"), null);
     assert.equal(document.querySelector(".lucide-activity"), null);
     if (view === "list") {
+      const diskIo = document.querySelector("[data-monitor-cell=diskIo]")!;
+      assert.ok(diskIo.querySelector("[data-monitor-disk-io-total]"));
+      assert.equal(document.querySelector("[data-monitor-column=diskIo]")?.textContent, "Disk I/O");
       const network = document.querySelector("[data-monitor-cell=network]")!;
       assert.deepEqual([...network.querySelectorAll(".sr-only")].map((e) => e.textContent), ["Download: ", "Upload: "]);
     }
@@ -191,14 +204,39 @@ test("disk I/O distinguishes warming up or unsupported from idle and reports bot
   for (const [rates, expected] of [
     [{}, ["Read --", "Write --"]],
     [{ diskReadSpeed: null, diskWriteSpeed: null }, ["Read --", "Write --"]],
-    [{ diskReadSpeed: 0, diskWriteSpeed: 0 }, ["Read 0 B/s", "Write 0 B/s"]],
-    [{ diskReadSpeed: 1024, diskWriteSpeed: 2097152 }, ["Read 1.0 KiB/s", "Write 2.0 MiB/s"]],
+    [{ diskReadSpeed: 0, diskWriteSpeed: 0 }, ["Read 0.0 KB/s", "Write 0.0 KB/s"]],
+    [{ diskReadSpeed: 1000, diskWriteSpeed: 2000000 }, ["Read 1.0 KB/s", "Write 2.0 MB/s"]],
   ] as const) {
     const document = new JSDOM(renderToStaticMarkup(
-      <I18nProvider locale="en"><MonitorDiskUsage stats={{ disks: [], diskPercent: null, ...rates }} /></I18nProvider>,
+      <I18nProvider locale="en"><MonitorDiskIo stats={{ disks: [{ mountPoint: "/", used: 1, total: 10, percent: 10, ...rates }] }} /></I18nProvider>,
     )).window.document;
-    const io = document.querySelector("[data-disk-io]")!;
+    const io = document.querySelector("[data-monitor-disk-io]")!;
     for (const text of expected) assert.ok(io.textContent?.includes(text));
-    assert.match(io.getAttribute("title")!, /Linux.*not supported on macOS/);
+    assert.match(io.getAttribute("title")!, /block device.*not supported on macOS/);
   }
+});
+
+
+test("disk capacity and I/O columns share system-first order and isolate the physical aggregate", () => {
+  const stats = {
+    diskPercent: 10, diskReadSpeed: 5000000, diskWriteSpeed: 2000000000,
+    disks: [
+      { mountPoint: "/", used: 1, total: 10, percent: 10, diskReadSpeed: 1000, diskWriteSpeed: 0 },
+      { mountPoint: "/bd10", used: 2, total: 20, percent: 10, diskReadSpeed: 2000000, diskWriteSpeed: 4000 },
+      { mountPoint: "/bd02", used: 1, total: 10, percent: 10, diskReadSpeed: 1000, diskWriteSpeed: 0 },
+    ],
+  };
+  const document = new JSDOM(renderToStaticMarkup(
+    <I18nProvider locale="en"><div data-capacity><MonitorDiskUsage stats={stats} /></div><MonitorDiskIo stats={stats} /></I18nProvider>,
+  )).window.document;
+  const capacity = document.querySelector("[data-capacity]")!;
+  const rows = [...document.querySelectorAll("[data-monitor-disk-io]")];
+  assert.equal(capacity.querySelectorAll("[data-disk-io], [data-monitor-disk-io]").length, 0);
+  assert.deepEqual(rows.map(row => row.getAttribute("data-monitor-disk-io")),
+    [...capacity.querySelectorAll("[data-monitor-disk]")].map(row => row.getAttribute("data-monitor-disk")));
+  assert.match(rows[0].textContent!, /Read 1.0 KB\/s.*Write 0.0 KB\/s/);
+  assert.deepEqual(rows.map(row => row.getAttribute("data-monitor-disk-io")), ["/", "/bd02", "/bd10"]);
+  assert.match(rows[2].textContent!, /Read 2.0 MB\/s.*Write 4.0 KB\/s/);
+  const total = document.querySelector("[data-monitor-disk-io-total]")!;
+  assert.match(total.textContent!, /Total.*Read 5.0 MB\/s.*Write 2.0 GB\/s/);
 });

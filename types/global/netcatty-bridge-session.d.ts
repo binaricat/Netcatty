@@ -261,6 +261,7 @@ declare global {
     getSessionRemoteInfo?(sessionId: string): Promise<{
       success: boolean;
       remoteSshVersion?: string;
+      singleChannelSsh?: boolean;
       error?: string;
     }>;
     /**
@@ -327,6 +328,8 @@ declare global {
         diskUsed: number | null;      // Disk used in GB
         diskTotal: number | null;     // Total disk in GB
         disks: Array<{                // All mounted disks
+          diskReadSpeed?: number | null; // Mounted block-device I/O, bytes/sec
+          diskWriteSpeed?: number | null;
           capacityKey?: string;       // Filesystem or shared-pool identity
           mountPoint: string;
           used: number;               // Used in GB
@@ -357,6 +360,8 @@ declare global {
       sessionId: string,
       data: string,
       options?: {
+        /** Byte-valued xterm onBinary string; bypasses text charset encoding. */
+        binary?: boolean;
         automated?: boolean;
         pasteRequestId?: string;
         /** Host-classified secret/no-echo input; always bypasses plugin observers and interceptors. */

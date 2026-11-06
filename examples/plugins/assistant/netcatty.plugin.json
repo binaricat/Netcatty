@@ -1,0 +1,72 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.assistant",
+  "name": "assistant-example",
+  "displayName": "Selected Note Assistant",
+  "description": "Minimal sandbox assistant using a host-selected model and one explicitly selected reference. No tools or commands are executed.",
+  "version": "0.1.0",
+  "publisher": "netcatty",
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "main": {
+    "browser": "dist/host.js"
+  },
+  "activationEvents": [
+    "onView:com.netcatty.assistant.panel"
+  ],
+  "permissions": {
+    "required": [
+      "commands",
+      "views"
+    ],
+    "optional": [
+      "ai.invoke",
+      "context.selected.list",
+      "context.selected.read"
+    ]
+  },
+  "features": {
+    "required": [
+      "ai.model-invocation",
+      "context.selected-read"
+    ]
+  },
+  "contributes": {
+    "commands": [
+      {
+        "id": "com.netcatty.assistant.open",
+        "title": "Assistant: Open Chat"
+      },
+      {
+        "id": "com.netcatty.assistant.contexts",
+        "title": "Assistant: Selected References"
+      },
+      {
+        "id": "com.netcatty.assistant.send",
+        "title": "Assistant: Send"
+      },
+      {
+        "id": "com.netcatty.assistant.read",
+        "title": "Assistant: Read Stream"
+      },
+      {
+        "id": "com.netcatty.assistant.stop",
+        "title": "Assistant: Stop"
+      },
+      {
+        "id": "com.netcatty.assistant.close",
+        "title": "Assistant: Close Chat"
+      }
+    ],
+    "views": [
+      {
+        "id": "com.netcatty.assistant.panel",
+        "title": "Selected Note Assistant",
+        "location": "modal"
+      }
+    ]
+  }
+}

@@ -574,6 +574,8 @@ export interface VaultAgentApiDeps {
     ok: false;
     error: string;
   };
+  reconnectSession?: (sessionId: string) => Record<string, unknown>;
+  inspectSessionRecovery?: (sessionId: string) => Record<string, unknown>;
   getScriptSessionMeta?: (sessionId: string) => {
     connected?: boolean;
     name?: string;
@@ -657,6 +659,20 @@ export async function handleVaultAgentOp(
 ): Promise<Record<string, unknown>> {
   switch (op) {
     case 'terminal.readContext': return handleTerminalContextRead(params);
+    case 'session.inspectRecovery': {
+      const sessionId = String(params.sessionId || '').trim();
+      if (!sessionId || !deps.inspectSessionRecovery) return { ok: false, error: 'Session recovery inspection is unavailable.' };
+      return deps.inspectSessionRecovery(sessionId);
+    }
+    case 'session.reconnect': {
+      const sessionId = String(params.sessionId || '').trim();
+      if (!sessionId) return { ok: false, started: false, error: 'sessionId is required.' };
+      if (typeof params.expiresAt === 'number' && Date.now() >= params.expiresAt) {
+        return { ok: false, started: false, code: 'RECONNECT_EXPIRED', error: 'Reconnect request expired before renderer dispatch. Inspect the session before continuing.' };
+      }
+      if (!deps.reconnectSession) return { ok: false, started: false, error: 'Session reconnect is not available in this window.' };
+      return deps.reconnectSession(sessionId);
+    }
     case 'session.close': {
       const sessionId = String(params.sessionId || '').trim();
       if (!sessionId) return { ok: false, error: 'sessionId is required.' };
@@ -1576,6 +1592,9 @@ export function shouldBypassVaultAgentSerialization(
   op: string,
   params: Record<string, unknown>,
 ): boolean {
+  // Reconnect changes terminal runtime, not vault records. Never leave a
+  // recovery request queued behind an unrelated long-running vault operation.
+  if (op === 'session.reconnect' || op === 'session.inspectRecovery') return true;
   if (op !== 'scripts.run' && op !== 'snippets.run') return false;
   return parseOptionalBoolean(params.wait) ?? false;
 }

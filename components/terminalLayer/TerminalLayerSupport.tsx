@@ -44,6 +44,7 @@ import type { TerminalContextReader } from '../../domain/terminalContextRead';
 import {
   getTerminalPaneRenderSnapshot,
   parseTerminalPaneRenderSnapshot,
+  resolveTerminalPaneInputProps,
   resolveInactiveTerminalPaneStyle,
   shouldUseTerminalPaneSplitLayout,
   type TerminalPaneHiddenSize,
@@ -283,6 +284,8 @@ interface AIChatPanelsHostProps {
   mountedTabIds: string[];
   activeTabId: string | null;
   activeSidePanelTab: SidePanelTab | null;
+  /** All live terminal+workspace target ids (for /chats dangling detection). */
+  liveScopeTargetIds: Set<string>;
   contextsByTabId: Map<string, AIPanelContext>;
   resolveExecutorContext: (scope: {
     type: 'terminal' | 'workspace';
@@ -298,6 +301,8 @@ interface AIChatPanelsHostProps {
   onOpenVaultHostFromChat?: (hostId: string) => void;
   onOpenVaultSectionFromChat?: (section: 'notes' | 'hosts' | 'snippets') => void;
   onOpenVaultSnippetFromChat?: (snippetId: string) => void;
+  /** Live workspaces, threaded to AI chats for `/chats` scope titles. */
+  workspaces?: Workspace[] | null;
 }
 
 const EMPTY_WORKSPACES: Workspace[] = [];
@@ -450,6 +455,7 @@ function aiChatPanelsHostAreEqual(
   next: AIChatPanelsHostProps,
 ): boolean {
   if (prev.mountedTabIds !== next.mountedTabIds) return false;
+  if (prev.liveScopeTargetIds !== next.liveScopeTargetIds) return false;
   if (prev.contextsByTabId !== next.contextsByTabId) return false;
   if (prev.activeSidePanelTab !== next.activeSidePanelTab) return false;
   if (prev.pendingTerminalSelection !== next.pendingTerminalSelection) return false;
@@ -462,6 +468,7 @@ function aiChatPanelsHostAreEqual(
   if (prev.onOpenVaultHostFromChat !== next.onOpenVaultHostFromChat) return false;
   if (prev.onOpenVaultSectionFromChat !== next.onOpenVaultSectionFromChat) return false;
   if (prev.onOpenVaultSnippetFromChat !== next.onOpenVaultSnippetFromChat) return false;
+  if (prev.workspaces !== next.workspaces) return false;
   if (prev.activeTabId === next.activeTabId) return true;
 
   for (let i = 0; i < prev.mountedTabIds.length; i += 1) {
@@ -489,6 +496,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   mountedTabIds,
   activeTabId,
   activeSidePanelTab,
+  liveScopeTargetIds,
   contextsByTabId,
   resolveExecutorContext,
   pendingTerminalSelection,
@@ -500,6 +508,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   onOpenVaultHostFromChat,
   onOpenVaultSectionFromChat,
   onOpenVaultSnippetFromChat,
+  workspaces,
 }) => {
   const aiConfig = useContext(AIConfigContext);
 
@@ -517,6 +526,10 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     showDraftView,
     updateDraft,
   } = aiConfig;
+  const aiPanelWorkspaces = useMemo(
+    () => (workspaces ?? []).map((workspace) => ({ id: workspace.id, title: workspace.title })),
+    [workspaces],
+  );
 
   useEffect(() => {
     if (!pendingTerminalSelection) return;
@@ -588,6 +601,9 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     undoLastTurnInSession={aiConfig.undoLastTurnInSession}
                     deleteSession={aiConfig.deleteSession}
                     updateSessionTitle={aiConfig.updateSessionTitle}
+                    rebindSessionScope={aiConfig.rebindSessionScope}
+                    exportSessionsBackup={aiConfig.exportSessionsBackup}
+                    importSessionsBackup={aiConfig.importSessionsBackup}
                     updateSessionExternalSessionId={aiConfig.updateSessionExternalSessionId}
                     addMessageToSession={aiConfig.addMessageToSession}
                     updateLastMessage={aiConfig.updateLastMessage}
@@ -621,7 +637,9 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     scopeHostIds={context.scopeHostIds}
                     scopeLabel={context.scopeLabel}
                     focusedSessionId={context.focusedSessionId}
+                    workspaces={aiPanelWorkspaces}
                     terminalSessions={context.terminalSessions}
+                    liveScopeTargetIds={liveScopeTargetIds}
                     resolveExecutorContext={resolveExecutorContext}
                     isVisible={isVisible}
                     notes={notes}
@@ -1299,7 +1317,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     [isTerminalLayerVisible, session.id, session.workspaceId, session.sessionGroupId, session.sessionGroupFocused, workspaceById],
   );
   const renderSnapshot = useSyncExternalStore(activeTabStore.subscribe, getRenderSnapshot, getRenderSnapshot);
-  const { paneState, isFocusedPane } = parseTerminalPaneRenderSnapshot(renderSnapshot);
+  const parsedPane = parseTerminalPaneRenderSnapshot(renderSnapshot);
+  const { paneState, isFocusedPane } = parsedPane;
+  const terminalInputProps = resolveTerminalPaneInputProps(parsedPane);
   // Live titles/icons are store-driven; per-session snapshot so other panes do
   // not re-render when only a sibling title changes.
   const presentedSession = usePresentedSession(session);
@@ -1593,14 +1613,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         chainHosts={chainHosts}
         appearanceTheme={sessionAppearanceTheme}
         knownHosts={knownHosts}
-        isVisible={isVisible}
+        {...terminalInputProps}
         paneLayoutKey={paneLayoutKey}
         inWorkspace={keepsWorkspacePresentation}
         isResizing={isResizing}
         isFocusMode={layoutWorkspace?.viewMode === 'focus'}
         isPaneMagnified={isMagnified}
-        isFocused={isFocusedPane}
-        isFocusedPane={isSplitViewVisible ? isFocusedPane : undefined}
         fontFamilyId={terminalFontFamilyId}
         fontSize={fontSize}
         terminalTheme={terminalTheme}

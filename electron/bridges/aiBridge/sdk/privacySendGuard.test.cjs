@@ -3,6 +3,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createAiPrivacyService } = require("../../../shared/aiPrivacyService.cjs");
+// Load the query-only Claude fixture with config repair replaced. Its live
+// prompt guard tests must never read or repair the executor's actual profile.
+const configPath = require.resolve("./claudeConfig.cjs");
+const priorConfigModule = require.cache[configPath];
+require.cache[configPath] = { id: configPath, filename: configPath, loaded: true, exports: { ensureClaudeConfig() {} } };
+const claudeDriver = require("./claudeDriver.cjs");
+if (priorConfigModule) require.cache[configPath] = priorConfigModule;
+else delete require.cache[configPath];
 
 function fixture() {
   const privacy = createAiPrivacyService();
@@ -172,7 +180,7 @@ for (const pausedMethod of ["initialize", "session/new"]) {
 
 test("query and argv drivers reject invalid sessions at their outbound handoff", async (t) => {
   const cases = [
-    ["claude", (f) => require("./claudeDriver.cjs").runClaudeTurn({ ...f, options: {}, queryFn: (input) => { f.sends.push(input); } })],
+    ["claude", (f) => claudeDriver.runClaudeTurn({ ...f, options: {}, queryFn: (input) => { f.sends.push(input); } })],
     ["codebuddy", (f) => require("./codebuddyDriver.cjs").runCodebuddyTurn({ ...f, options: {}, queryFn: (input) => { f.sends.push(input); } })],
     ["cursor-cli", (f) => require("./cursorCliDriver.cjs").runCursorCliTurn({ ...f, binPath: "/bin/cursor", workspaceCwd: "/tmp", spawnImpl: (...input) => { f.sends.push(input); } })],
     ["grok-cli", (f) => require("./grokDriver.cjs").runGrokTurn({ ...f, binPath: "/bin/grok", spawnImpl: (...input) => { f.sends.push(input); } })],

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { registerAppHandlers } from './appHandlersBridge';
+import { registerAppHandlers, stabilizeAppHandlers, type StableAppHandlerCache } from './appHandlersBridge';
 import { publishAppLocalUi } from './appLocalUiStore';
 import { activeTabStore, toEditorTabId, fromEditorTabId, isEditorTabId } from '../state/activeTabStore';
 import { useAutoSync } from '../state/useAutoSync';
@@ -19,6 +19,8 @@ import {
 } from '../state/connectionLogsStore';
 import { getNotesSnapshot } from '../state/notesStore';
 import { useVaultAgentBridge } from '../state/useVaultAgentBridge';
+import { terminalReconnectRegistry } from '../state/terminalReconnectRegistry';
+import { requestAgentSessionReconnect } from '../state/agentSessionReconnect';
 import { useWindowControls } from '../state/useWindowControls';
 import { useTerminalKeyboardFocus } from '../state/useTerminalKeyboardFocus';
 import { editorTabStore, useEditorTabChromeList } from '../state/editorTabStore';
@@ -59,6 +61,7 @@ import { collectSessionIds } from '../../domain/workspace';
 import { resolveAgentHostWorkspace } from '../../domain/agentHostWorkspace';
 import { useHostOpenSessionReuse } from '../state/useHostOpenSessionReuse';
 import type { PaneMagnificationController } from '../../domain/paneMagnification';
+import { isPluginViewEditingTarget } from '../state/pluginKeybindings';
 import { resolveCloseIntent } from '../state/resolveCloseIntent';
 import { resolveSnippetsShortcutIntent } from '../state/resolveSnippetsShortcutIntent';
 import { isPrimaryModifierWBinding, resolveWindowCommandCloseIntent } from '../state/windowCommandClose';
@@ -133,7 +136,6 @@ export function AppSideEffects() {
     | { mode: 'create' }
     | null
   >(null);
-  const [quickSearch, setQuickSearch] = useState('');
   // Protocol selection dialog state for QuickSwitcher
   const [protocolSelectHost, setProtocolSelectHost] = useState<Host | null>(null);
   // Navigation state for VaultView sections
@@ -1158,6 +1160,8 @@ export function AppSideEffects() {
     const topmostOpenDialog = openDialogs[openDialogs.length - 1] ?? null;
     const topmostDialogClose = topmostOpenDialog?.querySelector<HTMLElement>('[data-dialog-close="true"]');
 
+    if (!topmostDialogClose && isPluginViewEditingTarget(document.activeElement)) return;
+
     const intent = resolveWindowCommandCloseIntent({
       activeTabId: activeTabStore.getActiveTabId(),
       editorTabIds: editorTabs.map((tab) => toEditorTabId(tab.id)),
@@ -1526,6 +1530,19 @@ export function AppSideEffects() {
     sessions, hosts, keys, identities, resolveEffectiveHost,
   });
 
+  const reconnectSessionForVaultAgent = useCallback((sessionId: string) => {
+    const session = sessions.find((entry) => entry.id === sessionId);
+    return requestAgentSessionReconnect(sessionId, session?.status, terminalReconnectRegistry);
+  }, [sessions]);
+
+  const inspectSessionRecoveryForVaultAgent = useCallback((sessionId: string) => {
+    const session = sessions.find((entry) => entry.id === sessionId);
+    if (!session) return { ok: false, error: `Session "${sessionId}" was not found.` };
+    const live = terminalReconnectRegistry.inspect(sessionId);
+    return { ok: true, sessionId, status: session.status, waitingForInput: false,
+      reconnecting: false, reconnectAllowed: false, ...live };
+  }, [sessions]);
+
   const closeSessionForVaultAgent = useCallback((sessionId: string) => {
     if (!sessions.some((session) => session.id === sessionId)) {
       return { ok: false as const, error: `Session "${sessionId}" was not found.` };
@@ -1570,6 +1587,8 @@ export function AppSideEffects() {
     openHost: openHostForVaultAgent,
     findExistingSessionForHost: findExistingSessionForHostForVaultAgent,
     closeSession: closeSessionForVaultAgent,
+    reconnectSession: reconnectSessionForVaultAgent,
+    inspectSessionRecovery: inspectSessionRecoveryForVaultAgent,
     getScriptSessionMeta: (sessionId) => sessions.find((session) => session.id === sessionId),
   });
 
@@ -1946,7 +1965,7 @@ export function AppSideEffects() {
   const hasMultipleProtocols = useCallback((host: Host) => { return hasMultipleProtocolsImpl(() => ({ host, resolveEffectiveHost }), host); }, [resolveEffectiveHost]);
 
   // Handle host connect with protocol selection (used by QuickSwitcher)
-  const handleHostConnectWithProtocolCheck = useCallback((host: Host) => { return handleHostConnectWithProtocolCheckImpl(() => ({ handleConnectToHost, hasMultipleProtocols, host, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost, setQuickSearch }), host); }, [hasMultipleProtocols, handleConnectToHost, resolveEffectiveHost]);
+  const handleHostConnectWithProtocolCheck = useCallback((host: Host) => { return handleHostConnectWithProtocolCheckImpl(() => ({ handleConnectToHost, hasMultipleProtocols, host, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost }), host); }, [hasMultipleProtocols, handleConnectToHost, resolveEffectiveHost]);
 
   // Handle protocol selection from dialog
   const handleProtocolSelect = useCallback((protocol: HostProtocol, port: number) => { return handleProtocolSelectImpl(() => ({ handleConnectToHost, port, protocol, protocolSelectHost, setProtocolSelectHost }), protocol, port); }, [protocolSelectHost, handleConnectToHost]);
@@ -2014,8 +2033,11 @@ export function AppSideEffects() {
 
   // Hosts assemble domain bags from stores + this flat glue. Do NOT register
   // catalog arrays or prepared vault/terminal/chrome/dialogs domain bags here.
+  // Handlers are registered behind stable per-key wrappers so session/host
+  // churn does not re-notify every Host (see stabilizeAppHandlers).
+  const appHandlerCacheRef = useRef<StableAppHandlerCache>(new Map());
   useLayoutEffect(() => {
-    registerAppHandlers({
+    registerAppHandlers(stabilizeAppHandlers(appHandlerCacheRef.current, {
       // Vault glue
       handleAddKnownHost,
       handleDeleteHost,
@@ -2075,15 +2097,13 @@ export function AppSideEffects() {
       setIsCreateWorkspaceOpen,
       setIsQuickSwitcherOpen,
       setProtocolSelectHost,
-      setQuickSearch,
       handleCancelDeleteHost,
       handleConfirmDeleteHost,
-    });
+    }));
     publishAppLocalUi({
       isQuickSwitcherOpen,
       isCreateWorkspaceOpen,
       addToWorkspaceDialog,
-      quickSearch,
       protocolSelectHost,
       navigateToSection,
       deepLinkHostDraft,
@@ -2149,7 +2169,6 @@ export function AppSideEffects() {
     isQuickSwitcherOpen,
     isCreateWorkspaceOpen,
     addToWorkspaceDialog,
-    quickSearch,
     protocolSelectHost,
     navigateToSection,
     deepLinkHostDraft,

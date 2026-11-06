@@ -88,6 +88,7 @@ class PluginStreamRouter {
         streamId: frame.streamId,
         nextSequence: 1,
         availableBytes: frame.windowBytes,
+        windowBytes: frame.windowBytes,
         updateSequence: -1,
         openController: new AbortController(),
         closed: false,
@@ -139,7 +140,7 @@ class PluginStreamRouter {
       if (outgoing.availableBytes > outgoing.maxCreditBytes) {
         throw new Error(`Plugin stream credit exceeds its negotiated window: ${frame.streamId}`);
       }
-      if (outgoing.terminalKind === "end") {
+      if (outgoing.terminalKind === "end" || outgoing.terminalKind === "cancel") {
         if (outgoing.availableBytes === outgoing.maxCreditBytes) {
           this.outgoing.delete(frame.streamId);
         }
@@ -158,6 +159,8 @@ class PluginStreamRouter {
       this.outgoing.delete(frame.streamId);
       for (const pending of outgoing.queue) pending.reject(new Error(`Plugin stream cancelled: ${frame.streamId}`));
       outgoing.queue.length = 0;
+      outgoing.queuedBytes = 0;
+      this.#notifyOutgoingClosed(outgoing, "cancel");
       return;
     }
     const state = this.incoming.get(frame.streamId);
@@ -214,7 +217,17 @@ class PluginStreamRouter {
       ? frame.error
       : new Error(`Plugin stream ${frame.kind}: ${frame.streamId}`);
     state.openController.abort(abortReason);
-    await state.onClose?.(closeReason);
+    try {
+      if (frame.kind === "cancel" && state.availableBytes < state.windowBytes) {
+        // The producer has stopped. Return discarded credit once so it can
+        // retire its terminal state, without releasing more queued writes.
+        state.updateSequence += 1;
+        this.send({ frame: {
+          streamId: state.streamId, sequence: state.updateSequence,
+          kind: "windowUpdate", creditBytes: state.windowBytes - state.availableBytes,
+        } });
+      }
+    } finally { await state.onClose?.(closeReason); }
   }
 
   bindIncoming(streamId, handlers) {
@@ -233,7 +246,8 @@ class PluginStreamRouter {
     state.onClose = handlers.onClose;
   }
 
-  async openOutgoing(streamId, windowBytes) {
+  async openOutgoing(streamId, windowBytes, options = {}) {
+    if (options.onClose !== undefined && typeof options.onClose !== "function") throw new TypeError("Stream onClose must be a function");
     if (
       this.closed
       || this.outgoing.has(streamId)
@@ -268,6 +282,7 @@ class PluginStreamRouter {
       queuedBytes: 0,
       closed: false,
       terminalKind: null,
+      onClose: options.onClose,
     };
     this.outgoing.set(streamId, state);
     try {
@@ -347,6 +362,13 @@ class PluginStreamRouter {
     for (const pending of state.queue) pending.reject(error);
     state.queue.length = 0;
     state.queuedBytes = 0;
+    this.#notifyOutgoingClosed(state, error);
+  }
+
+  #notifyOutgoingClosed(state, reason) {
+    if (state.closeNotified) return;
+    state.closeNotified = true;
+    try { state.onClose?.(reason); } catch {}
   }
 
   #finishOutgoing(state, kind) {
@@ -368,11 +390,11 @@ class PluginStreamRouter {
       state.queuedBytes = 0;
       if (
         !terminalSent
-        || kind !== "end"
         || state.availableBytes === state.maxCreditBytes
       ) {
         this.outgoing.delete(state.streamId);
       }
+      this.#notifyOutgoingClosed(state, kind);
     }
   }
 
@@ -413,6 +435,7 @@ class PluginStreamRouter {
     for (const state of this.outgoing.values()) {
       state.closed = true;
       for (const pending of state.queue) pending.reject(error);
+      this.#notifyOutgoingClosed(state, error);
     }
     this.outgoing.clear();
     for (const state of this.incoming.values()) {

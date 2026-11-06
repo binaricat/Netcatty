@@ -1560,3 +1560,22 @@ test("shared server stats parse Linux disk I/O across samples and leave macOS un
   assert.equal(result.stats.diskReadSpeed, null);
   assert.equal(result.stats.diskWriteSpeed, null);
 });
+
+test("shared server stats attach independent block rates to mounted partitions", async (t) => {
+  let now = 100000;
+  t.mock.method(Date, "now", () => now);
+  const base = LINUX_STATS.replace("DISKS:", "DISKS:/:1:10:10:/dev/root,/data:2:20:10:/dev/mapper/data");
+  let payload = `${base}|PARTITIONIO:10;8-1:100:200,253-0:10:20,|DISKMOUNTS:/:8-1,/data:253-0,`;
+  const session = { conn: { exec(command, cb) { cb(null, fakeStream(selectServerStatsFixtureOutput(command, payload))); } }, type: "ssh", _monitorStats: true, _monitorIntervalMs: 1000 };
+  const api = makeSessionOps(new Map([["partition-io", session]]));
+  const get = () => api.getServerStats({ sender: {} }, { sessionId: "partition-io" });
+  let result = await get();
+  assert.equal(result.success, true);
+  assert.equal(result.stats.disks[0].diskReadSpeed, undefined);
+  assert.equal(Object.hasOwn(result.stats.disks[0], "diskReadSpeed"), false);
+  now += 1000;
+  payload = `${base}|PARTITIONIO:11;8-1:102:204,253-0:20:40,|DISKMOUNTS:/:8-1,/data:253-0,`;
+  result = await get();
+  assert.equal(result.success, true);
+  assert.deepEqual(result.stats.disks.map(disk => [disk.diskReadSpeed, disk.diskWriteSpeed]), [[1024, 2048], [5120, 10240]]);
+});

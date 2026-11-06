@@ -33,7 +33,7 @@ test("sidecar table has no package cascade and survives removePlugin", (context)
   database.removePlugin("com.example.sync");
 
   assert.deepEqual(database.getSyncSidecar("com.example.sync", "account_baseline", "account"), {
-    pluginId: "com.example.sync",
+    pluginId: database.privateOwner("com.example.sync"),
     kind: "account_baseline",
     key: "account",
     value: { id: "acct" },
@@ -68,7 +68,7 @@ test("collectForSync excludes secrets and preserves missing-plugin baselines", (
   const service = new PluginSyncSidecarService({ database, contributionService });
   const bundle = service.collectForSync();
   assert.equal(bundle.version, 1);
-  assert.ok(bundle.entries.some((entry) => entry.kind === "crdt_baseline" && entry.pluginId === "com.missing.plugin"));
+  assert.ok(bundle.entries.some((entry) => entry.kind === "crdt_baseline" && entry.pluginId === database.privateOwner("com.missing.plugin")));
   assert.ok(bundle.entries.some((entry) => entry.kind === "settings" && entry.value === "dark"));
   assert.equal(bundle.entries.some((entry) => entry.value === "secret"), false);
   // Collected settings must land in the non-cascade table for post-uninstall collect.
@@ -187,7 +187,7 @@ test("collectForSync omits deleted settings for installed plugins but keeps miss
   const bundle = service.collectForSync();
   assert.equal(bundle.entries.some((e) => e.value === "stale"), false);
   assert.ok(bundle.entries.some((e) => e.value === "ok"));
-  assert.ok(bundle.entries.some((e) => e.pluginId === "com.missing.plugin" && e.value === "keep"));
+  assert.ok(bundle.entries.some((e) => e.pluginId === database.privateOwner("com.missing.plugin") && e.value === "keep"));
 });
 
 test("applyFromSync preserves remote updatedAt when writing settings", async (context) => {
@@ -210,7 +210,7 @@ test("applyFromSync preserves remote updatedAt when writing settings", async (co
   await service.applyFromSync({
     version: 1,
     entries: [{
-      pluginId: "com.example.sync",
+      pluginId: database.privateOwner("com.example.sync"),
       kind: "settings",
       key: "com.example.sync.theme\0application\0application",
       value: "dark",
@@ -234,7 +234,7 @@ test("applyFromSync does not drop local baselines for plugins absent remotely", 
   await service.applyFromSync({
     version: 1,
     entries: [{
-      pluginId: "com.remote.plugin",
+      pluginId: database.privateOwner("com.remote.plugin"),
       kind: "settings",
       key: "com.remote.plugin.theme\0application\0application",
       value: "light",
@@ -243,8 +243,8 @@ test("applyFromSync does not drop local baselines for plugins absent remotely", 
   });
 
   const all = database.listAllSyncSidecars();
-  assert.ok(all.some((entry) => entry.pluginId === "com.local.only"));
-  assert.ok(all.some((entry) => entry.pluginId === "com.remote.plugin" && entry.value === "light"));
+  assert.ok(all.some((entry) => entry.pluginId === database.privateOwner("com.local.only")));
+  assert.ok(all.some((entry) => entry.pluginId === database.privateOwner("com.remote.plugin") && entry.value === "light"));
 });
 
 test("hydrateInstalledPluginSettings applies retained sidecars through contribution service", async (context) => {
@@ -449,7 +449,7 @@ test("applyFromSync does not resurrect missing-plugin keys deleted on another de
   await service.applyFromSync({
     version: 1,
     entries: [{
-      pluginId: "com.missing.plugin",
+      pluginId: database.privateOwner("com.missing.plugin"),
       kind: "settings",
       key: "com.missing.plugin.kept\0application\0application",
       value: "remote-new",
@@ -498,7 +498,7 @@ test("applyFromSync keeps newer local baseline over older remote (LWW)", async (
   await service.applyFromSync({
     version: 1,
     entries: [{
-      pluginId: "com.example.plugin",
+      pluginId: database.privateOwner("com.example.plugin"),
       kind: "crdt_baseline",
       key: "crdt",
       value: { clock: 50 },

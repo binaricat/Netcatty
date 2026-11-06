@@ -1,0 +1,52 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.host-interactions",
+  "name": "host-interactions",
+  "displayName": "Host text interactions",
+  "description": "Synthetic host choice, input and explicit clipboard sharing workflow.",
+  "version": "0.1.1",
+  "publisher": "netcatty",
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal <0.2.0"
+  },
+  "features": {
+    "required": [
+      "host.interactions",
+      "commands.interactive"
+    ]
+  },
+  "main": {
+    "browser": "browser.js"
+  },
+  "activationEvents": [
+    "onCommand:com.netcatty.host-interactions.text"
+  ],
+  "permissions": {
+    "required": [
+      "commands",
+      "menus"
+    ],
+    "optional": [
+      "ui.interact",
+      "clipboard.read",
+      "clipboard.write"
+    ]
+  },
+  "contributes": {
+    "commands": [
+      {
+        "id": "com.netcatty.host-interactions.text",
+        "title": "Host text workflow",
+        "interactive": true
+      }
+    ],
+    "menus": [
+      {
+        "command": "com.netcatty.host-interactions.text",
+        "location": "commandPalette"
+      }
+    ]
+  }
+}

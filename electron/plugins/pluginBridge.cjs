@@ -3,7 +3,10 @@
 const fs = require("node:fs/promises");
 const { randomUUID } = require("node:crypto");
 
-const { isPluginDevelopmentEnabled } = require("./constants.cjs");
+const { createDefinitionValidator } = require("./contractValidator.cjs");
+const validateManagedPluginId = createDefinitionValidator("PluginId");
+const validatePluginViewResourceRequest = createDefinitionValidator("PluginViewResourceRequest");
+
 const { raceWithAbort } = require("./rpcRouter.cjs");
 const {
   INLINE_SYNC_OBJECT_SAFE_BYTES,
@@ -13,13 +16,42 @@ const {
 const { assertSecretKey } = require("./secretStore.cjs");
 
 const CHANNELS = Object.freeze({
+  themeCatalog: "netcatty:plugins:theme-catalog",
+  themeApply: "netcatty:plugins:theme-apply",
+  themesChanged: "netcatty:plugins:themes-changed",
   status: "netcatty:plugins:status",
+  logStatus: "netcatty:plugins:log-status",
+  logConfigure: "netcatty:plugins:log-configure",
+  logOpen: "netcatty:plugins:log-open",
+  logExport: "netcatty:plugins:log-export",
+  logClear: "netcatty:plugins:log-clear",
+  terminalTarget: "netcatty:plugins:terminal-target",
+  interactionReady: "netcatty:plugins:interaction-ready",
+  interactionResponse: "netcatty:plugins:interaction-response",
   list: "netcatty:plugins:list",
+  permissions: "netcatty:plugins:permissions",
+  setPermissionMode: "netcatty:plugins:set-permission-mode",
+  permissionReady: "netcatty:plugins:permission-ready",
+  permissionResponse: "netcatty:plugins:permission-response",
+  revokePermissions: "netcatty:plugins:revoke-permissions",
+  resetSource: "netcatty:plugins:reset-source",
+  sourceBinding: "netcatty:plugins:source-binding",
+  sources: "netcatty:plugins:sources",
+  addSource: "netcatty:plugins:add-source",
+  updateSource: "netcatty:plugins:update-source",
+  removeSource: "netcatty:plugins:remove-source",
+  catalog: "netcatty:plugins:catalog",
+  catalogChanged: "netcatty:plugins:catalog-changed",
+  catalogReadme: "netcatty:plugins:catalog-readme",
+  catalogReadmeImages: "netcatty:plugins:catalog-readme-images",
+  author: "netcatty:plugins:author",
+  catalogInstall: "netcatty:plugins:catalog-install",
   install: "netcatty:plugins:install",
   setEnabled: "netcatty:plugins:set-enabled",
   restart: "netcatty:plugins:restart",
   uninstall: "netcatty:plugins:uninstall",
   contributions: "netcatty:plugins:contributions",
+  brandIcon: "netcatty:plugins:brand-icon",
   contributionIcon: "netcatty:plugins:contribution-icon",
   contributionsChanged: "netcatty:plugins:contributions-changed",
   executeCommand: "netcatty:plugins:execute-command",
@@ -63,13 +95,9 @@ const CHANNELS = Object.freeze({
   importerReleaseFile: "netcatty:plugins:importer-release-file",
   importerParseFile: "netcatty:plugins:importer-parse-file",
   importerProgress: "netcatty:plugins:importer-progress",
-  openView: "netcatty:plugins:open-view",
-  closeView: "netcatty:plugins:close-view",
-  setViewBounds: "netcatty:plugins:set-view-bounds",
-  setViewVisibility: "netcatty:plugins:set-view-visibility",
-  viewMessage: "netcatty:plugins:view-message",
-  viewMessagePosted: "netcatty:plugins:view-message-posted",
-  viewClosed: "netcatty:plugins:view-closed",
+  hostDrawnOpen: "netcatty:plugins:host-ui-open",
+  hostDrawnClose: "netcatty:plugins:host-ui-close",
+  hostDrawnEvent: "netcatty:plugins:host-ui-event",
   getScopeCatalog: "netcatty:plugins:get-scope-catalog",
   setScopeCatalog: "netcatty:plugins:set-scope-catalog",
   scopeCatalogChanged: "netcatty:plugins:scope-catalog-changed",
@@ -181,6 +209,8 @@ function mergePluginScopeCatalogs(catalogs) {
 function createTrustedPluginBridgeSender(options = {}) {
   const devServerOrigin = options.devServerUrl ? new URL(options.devServerUrl).origin : null;
   return (event) => {
+    // The app may embed untrusted frames; a trusted URL alone is not authority.
+    if (event?.sender?.mainFrame && event.senderFrame !== event.sender.mainFrame) return false;
     const senderUrl = event?.senderFrame?.url || event?.sender?.getURL?.() || "";
     try {
       const url = new URL(senderUrl);
@@ -208,8 +238,7 @@ function registerPluginBridge(ipcMain, options) {
     : DEFAULT_CONNECTION_STATUS_POLL_MS;
   const getTerminalWorkerManager = options.getTerminalWorkerManager ?? (() => null);
   const selectImporterFile = options.selectImporterFile;
-  const viewHost = options.viewHost;
-  const env = options.env ?? process.env;
+  const hostDrawnViewHost = options.hostDrawnViewHost;
   const isTrustedSender = options.isTrustedSender;
   const defaultScopeCatalog = normalizePluginScopeCatalog({ device: [{ id: "device", label: "This device" }] });
   const scopeCatalogs = new Map();
@@ -251,15 +280,14 @@ function registerPluginBridge(ipcMain, options) {
       if (scopeCatalogs.delete(key)) publishScopeCatalog();
     });
   };
-  const configured = isPluginDevelopmentEnabled(env)
-    && Boolean(manager)
+  const configured = Boolean(manager)
     && typeof manager.initialize === "function";
   const resolveManager = async () => {
-    if (!configured) throw new Error("Plugin development runtime is disabled or unavailable");
+    if (!configured) throw new Error("Plugin runtime is disabled or unavailable");
     try {
       await manager.initialize();
     } catch (cause) {
-      throw new Error("Plugin development runtime is disabled or unavailable", { cause });
+      throw new Error("Plugin runtime is disabled or unavailable", { cause });
     }
     return manager;
   };
@@ -641,12 +669,113 @@ function registerPluginBridge(ipcMain, options) {
       await resolveManager();
       available = true;
     } catch {}
-    return { available, experimental: true };
+    return { available, experimental: true,
+      ...(typeof credentialResolver?.isAvailable === "function"
+        ? { credentialStorageAvailable: credentialResolver.isAvailable() } : {}),
+    };
+  });
+  handle(CHANNELS.sources, async () => options.catalogService?.listSources() ?? []);
+  handle(CHANNELS.addSource, async (_manager, payload) => options.catalogService.addSource(payload));
+  handle(CHANNELS.updateSource, async (_manager, payload) => options.catalogService.updateSource(payload));
+  handle(CHANNELS.removeSource, async (_manager, payload) => options.catalogService.removeSource(payload));
+  handle(CHANNELS.catalog, async (_manager, payload) => options.catalogService?.list(payload?.sourceId) ?? { entries: [], source: "builtin", error: "Plugin catalog unavailable" });
+  handle(CHANNELS.author, async (_manager, payload) => {
+    if (!options.catalogService) throw new Error("Plugin catalog unavailable");
+    return options.catalogService.author(payload);
+  });
+  handle(CHANNELS.catalogReadme, async (_manager, payload) => {
+    if (!options.catalogService) throw new Error("Plugin catalog unavailable");
+    return options.catalogService.readme(payload?.id, payload?.selectionToken, payload?.sourceId);
+  });
+  handle(CHANNELS.catalogReadmeImages, async (_manager, payload) => {
+    if (!options.catalogService) throw new Error("Plugin catalog unavailable");
+    return options.catalogService.readmeImages(payload?.id, payload?.selectionToken, payload?.sourceId);
+  });
+  handle(CHANNELS.catalogInstall, async (_manager, payload) => {
+    if (!options.catalogService) throw new Error("Plugin catalog unavailable");
+    return options.catalogService.install(payload?.id, payload?.selectionToken, payload?.sourceId, payload?.acceptedSourceId);
+  });
+  handle(CHANNELS.interactionReady, async (_manager, payload, event) => {
+    if (!options.interactionService) throw new Error("Host interactions are unavailable");
+    return options.interactionService.setReady(event.sender, payload?.ready);
+  });
+  handle(CHANNELS.interactionResponse, async (_manager, payload, event) => {
+    if (!options.interactionService) throw new Error("Host interactions are unavailable");
+    return options.interactionService.respond(event.sender, payload);
   });
   handle(CHANNELS.list, async (activeManager) => activeManager.list());
+  handle(CHANNELS.sourceBinding, async (activeManager, payload) => activeManager.database.getRetainedPluginSource(assertManagedPluginId(payload)));
+  handle(CHANNELS.resetSource, async (activeManager, payload) => activeManager.resetUninstalledSource(assertManagedPluginId(payload), payload?.expectedSourceId));
+  const assertManagedPluginId = (payload) => {
+    const id = payload?.pluginId;
+    if (!validateManagedPluginId(id)) {
+      throw new TypeError("Plugin ID is invalid");
+    }
+    return id;
+  };
+  for (const [channel, action] of [
+    [CHANNELS.logStatus, "status"], [CHANNELS.logConfigure, "configure"],
+    [CHANNELS.logOpen, "openFolder"], [CHANNELS.logExport, "exportLogs"], [CHANNELS.logClear, "clear"],
+  ]) handle(channel, async (_manager, payload) => {
+    if (!options.logService) throw new Error("Local plugin logging is unavailable");
+    await options.logService.ready;
+    return options.logService[action](payload);
+  });
+  const permissionSender = (event) => {
+    if ("senderFrame" in event && (!event.senderFrame || event.senderFrame !== event.sender?.mainFrame)) throw new Error("Untrusted permission UI frame");
+    return event.sender;
+  };
+  handle(CHANNELS.permissionReady, async (_manager, payload, event) => options.permissionDecisionHost?.setReady(permissionSender(event), payload?.ready));
+  handle(CHANNELS.permissionResponse, async (_manager, payload, event) => options.permissionDecisionHost?.respond(permissionSender(event), payload));
+  handle(CHANNELS.setPermissionMode, async (_manager, payload) => {
+    const pluginId = assertManagedPluginId(payload);
+    const plugin = options.database?.getActivePlugin(pluginId);
+    if (!plugin || !options.permissionEngine) throw new Error("Plugin permissions are unavailable");
+    if (typeof payload?.policyRevision !== "string" || payload.policyRevision !== options.permissionEngine.getPolicyRevision(plugin)) {
+      throw new Error("Plugin permissions changed; refresh before editing");
+    }
+    await options.permissionEngine.setMode(plugin, payload?.permission, payload?.mode);
+    return true;
+  });
+  handle(CHANNELS.permissions, async (_manager, payload) => {
+    const pluginId = assertManagedPluginId(payload);
+    if (!options.permissionEngine || !options.database) throw new Error("Plugin permissions are unavailable");
+    const plugin = options.database.getActivePlugin(pluginId);
+    const identity = options.runtimeSupervisor?.getRuntimeIdentity(pluginId);
+    // A stored grant is effective only for its matching host-owned activation.
+    // Disabled/lazy/stopped plugins retain saved grants without claiming they
+    // currently apply. Never infer a principal from plugin-provided metadata.
+    const context = plugin?.enabled && identity?.pluginVersion === plugin.activeVersion
+      ? { ...identity, manifest: plugin.manifest }
+      : null;
+    const groups = options.permissionEngine.describeGrants(pluginId, context);
+    // Host-only summaries: never return arbitrary audit details, reasons,
+    // operation IDs, credentials, terminal content or future database columns.
+    const grants = ["always", "application", "session"].flatMap((scope) => (
+      (groups[scope] ?? []).map((grant) => ({
+        permission: grant.permission, resource: grant.resource,
+        resourceKind: grant.resourceKind, scope,
+        sessionId: grant.sessionId ?? null, grantedAt: grant.grantedAt,
+        matchesCurrentActivation: grant.matchesCurrentActivation,
+      }))
+    ));
+    const audit = options.database.listSecurityAudit(pluginId, 100).map((entry) => ({
+      event: entry.event, createdAt: entry.createdAt,
+      ...(typeof entry.details?.permission === "string" ? { permission: entry.details.permission } : {}),
+      ...(typeof entry.details?.scope === "string" ? { scope: entry.details.scope } : {}),
+      ...(["allow", "ask", "deny"].includes(entry.details?.mode) ? { mode: entry.details.mode } : {}),
+      ...(["completed", "cancelled", "preview-confirmed", "share-confirmed", "copy-confirmed", "draft-reviewed", "action-confirmed", "action-claimed"].includes(entry.details?.action)
+        ? { action: entry.details.action } : {}),
+    }));
+    return { grants, audit, ...(options.permissionEngine.describePolicies && plugin
+      ? { policies: options.permissionEngine.describePolicies(plugin), policyRevision: options.permissionEngine.getPolicyRevision(plugin) } : {}) };
+  });
+  handle(CHANNELS.revokePermissions, async (activeManager, payload) => (
+    activeManager.revokePermissions(assertManagedPluginId(payload))
+  ));
   handle(CHANNELS.install, async (activeManager, payload) => activeManager.install(
     payload?.archivePath,
-    { enable: payload?.enable === true },
+    { enable: typeof payload?.enable === "boolean" ? payload.enable : undefined },
   ));
   handle(CHANNELS.setEnabled, async (activeManager, payload) => activeManager.setEnabled(
     payload?.pluginId,
@@ -654,9 +783,26 @@ function registerPluginBridge(ipcMain, options) {
   ));
   handle(CHANNELS.restart, async (activeManager, payload) => activeManager.restart(payload?.pluginId));
   handle(CHANNELS.uninstall, async (activeManager, payload) => activeManager.uninstall(payload?.pluginId));
+  handle(CHANNELS.terminalTarget, async (_manager, target, event) => {
+    if (!options.interactionService) throw new Error("Host interactions unavailable");
+    return options.interactionService.setTerminalTarget(event.sender, target);
+  });
+  handle(CHANNELS.themeCatalog, async () => {
+    if (!options.themeService) throw new Error("Plugin themes are unavailable");
+    return options.themeService.catalog();
+  });
+  handle(CHANNELS.themeApply, async (_manager, request) => {
+    if (!options.themeService) throw new Error("Plugin themes are unavailable");
+    return options.themeService.apply(request);
+  });
+  options.themeService?.onDidChange?.(() => options.broadcast?.(CHANNELS.themesChanged, {}));
   handle(CHANNELS.contributions, async (_activeManager, payload) => {
     if (!contributionService) throw new Error("Plugin contributions are unavailable");
     return contributionService.snapshot(payload ?? {});
+  });
+  handle(CHANNELS.brandIcon, async (_activeManager, payload) => {
+    if (!options.resolveBrandIcon) throw new Error("Plugin brand icons are unavailable");
+    return options.resolveBrandIcon(payload?.pluginId);
   });
   handle(CHANNELS.contributionIcon, async (_activeManager, payload) => {
     if (!options.resolveContributionIcon) throw new Error("Plugin contribution icons are unavailable");
@@ -686,7 +832,6 @@ function registerPluginBridge(ipcMain, options) {
   handle(CHANNELS.setEnvironment, async (_activeManager, payload) => {
     if (!contributionService) throw new Error("Plugin contributions are unavailable");
     await contributionService.setEnvironment(payload ?? {});
-    viewHost?.setEnvironment?.(payload ?? {});
     return null;
   });
   handlePassive(CHANNELS.terminalProviders, [], async (_activeManager, payload) => {
@@ -1525,29 +1670,22 @@ function registerPluginBridge(ipcMain, options) {
       await handle.close();
     }
   }));
-  handle(CHANNELS.openView, async (_activeManager, payload, event) => {
-    if (!viewHost) throw new Error("Plugin views are unavailable");
-    return viewHost.open(payload, event.sender);
+  handle(CHANNELS.hostDrawnOpen, async (_activeManager, payload, event) => {
+    if (!hostDrawnViewHost) throw new Error("Host-drawn plugin views are unavailable");
+    return hostDrawnViewHost.open(payload, event.sender);
   });
-  handle(CHANNELS.closeView, async (_activeManager, payload, event) => {
-    if (!viewHost) throw new Error("Plugin views are unavailable");
-    await viewHost.close(payload?.instanceId, event.sender);
-    return null;
+  handle(CHANNELS.hostDrawnClose, async (_activeManager, payload, event) => {
+    if (!hostDrawnViewHost) throw new Error("Host-drawn plugin views are unavailable");
+    await hostDrawnViewHost.close(payload?.instanceId, event.sender); return null;
   });
-  handle(CHANNELS.setViewBounds, async (_activeManager, payload, event) => {
-    if (!viewHost) throw new Error("Plugin views are unavailable");
-    viewHost.setBounds(payload?.instanceId, payload?.bounds, event.sender);
-    return null;
+  handle("netcatty:plugins:host-ui-resource", async (_activeManager, payload, event) => {
+    if (!hostDrawnViewHost) throw new Error("Plugin views unavailable");
+    if (!validatePluginViewResourceRequest(payload)) throw new TypeError("Invalid plugin resource request");
+    return hostDrawnViewHost.resource(payload.instanceId, payload.path, event.sender);
   });
-  handle(CHANNELS.setViewVisibility, async (_activeManager, payload, event) => {
-    if (!viewHost) throw new Error("Plugin views are unavailable");
-    viewHost.setVisible(payload?.instanceId, payload?.visible, event.sender);
-    return null;
-  });
-  handle(CHANNELS.viewMessage, async (_activeManager, payload, event) => {
-    if (!viewHost) throw new Error("Plugin views are unavailable");
-    await viewHost.postMessage(payload?.instanceId, payload?.message, event.sender);
-    return null;
+  handle(CHANNELS.hostDrawnEvent, async (_activeManager, payload, event) => {
+    if (!hostDrawnViewHost) throw new Error("Host-drawn plugin views are unavailable");
+    await hostDrawnViewHost.event(payload?.instanceId, payload?.event, event.sender); return null;
   });
   handlePassive(CHANNELS.getScopeCatalog, () => currentScopeCatalog(), async () => currentScopeCatalog());
   handlePassive(CHANNELS.setScopeCatalog, null, async (_activeManager, payload, event) => {
@@ -1559,9 +1697,9 @@ function registerPluginBridge(ipcMain, options) {
     publishScopeCatalog(event);
     return null;
   });
+  options.catalogService?.onDidChange?.((event) => options.broadcast?.(CHANNELS.catalogChanged, event));
   contributionService?.onDidChange?.((event) => options.broadcast?.(CHANNELS.contributionsChanged, event));
-  contributionService?.onDidPostViewMessage?.((event) => options.broadcast?.(CHANNELS.viewMessagePosted, event));
-  viewHost?.onDidClose?.((event) => options.broadcast?.(CHANNELS.viewClosed, event));
+
 }
 
 module.exports = {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyError, isRequestTooLargeError, sanitizeErrorMessage } from "./errorClassifier.ts";
+import { classifyError, isInvalidAnthropicThinkingSignatureError, isRequestTooLargeError, sanitizeErrorMessage } from "./errorClassifier.ts";
 
 // -------------------------------------------------------------------
 // sanitizeErrorMessage — regression guard for pre-existing behavior
@@ -72,6 +72,61 @@ test("isRequestTooLargeError detects 413 hidden in an HTML response body", () =>
 test("isRequestTooLargeError does not treat timing text as HTTP 413", () => {
   assert.equal(isRequestTooLargeError("upstream timed out in 413 ms"), false);
   assert.equal(isRequestTooLargeError("413 ms"), false);
+});
+
+
+// -------------------------------------------------------------------
+// isInvalidAnthropicThinkingSignatureError — #4073 prefix binding
+// -------------------------------------------------------------------
+
+test("isInvalidAnthropicThinkingSignatureError matches Anthropic 400 signature text", () => {
+  const err = Object.assign(
+    new Error("Invalid signature in thinking block. The block is bound to a different conversation."),
+    { statusCode: 400 },
+  );
+  assert.equal(isInvalidAnthropicThinkingSignatureError(err), true);
+});
+
+test("isInvalidAnthropicThinkingSignatureError matches responseBody-only signature errors", () => {
+  const err = Object.assign(new Error("AI_APICallError"), {
+    statusCode: 400,
+    responseBody: JSON.stringify({
+      type: "error",
+      error: {
+        type: "invalid_request_error",
+        message: "Invalid signature in thinking block. The block is bound to a different conversation.",
+      },
+    }),
+  });
+  assert.equal(isInvalidAnthropicThinkingSignatureError(err), true);
+});
+
+test("isInvalidAnthropicThinkingSignatureError matches text without statusCode", () => {
+  assert.equal(
+    isInvalidAnthropicThinkingSignatureError(
+      new Error("bound to a different conversation"),
+    ),
+    true,
+  );
+});
+
+test("isInvalidAnthropicThinkingSignatureError rejects unrelated 400s and non-400 signature-ish text", () => {
+  assert.equal(
+    isInvalidAnthropicThinkingSignatureError(
+      Object.assign(new Error("Invalid request: missing field"), { statusCode: 400 }),
+    ),
+    false,
+  );
+  assert.equal(
+    isInvalidAnthropicThinkingSignatureError(
+      Object.assign(
+        new Error("Invalid signature in thinking block. The block is bound to a different conversation."),
+        { statusCode: 500 },
+      ),
+    ),
+    false,
+  );
+  assert.equal(isInvalidAnthropicThinkingSignatureError(new Error("plain failure")), false);
 });
 
 // -------------------------------------------------------------------

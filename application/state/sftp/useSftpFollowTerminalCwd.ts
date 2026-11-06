@@ -393,12 +393,10 @@ export function useSftpFollowTerminalCwd({
       handledFollowRef.current = { connectionId: currentConnection.id, terminalCwd: targetPath };
     }
   }, [
-    activeSessionId,
     activeTerminalCwd,
     activeTerminalCwdTrusted,
     canFollowTerminalCwd,
     effectiveFollowTerminalCwd,
-    focusedSessionId,
     hasActiveWork,
     isVisible,
     onGetTerminalCwd,

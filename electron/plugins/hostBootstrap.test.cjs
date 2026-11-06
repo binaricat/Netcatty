@@ -3,24 +3,24 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { startDevelopmentPluginHost } = require("./hostBootstrap.cjs");
+const { startPluginHost } = require("./hostBootstrap.cjs");
 
-test("disabled development host does not construct plugin infrastructure", () => {
+test("normal release constructs the browser plugin host without a developer flag", async () => {
   let created = 0;
-  const service = startDevelopmentPluginHost({
+  const service = { manager: { async initialize() {}, async shutdown() {} } };
+  assert.equal(startPluginHost({
     env: {},
-    createService() { created += 1; },
+    createService() { created += 1; return service; },
     registerShutdown() {},
     logger: { error() {} },
-  });
-  assert.equal(service, null);
-  assert.equal(created, 0);
+  }), service);
+  assert.equal(created, 1);
 });
 
 test("synchronous plugin host construction failure leaves Netcatty available", () => {
   const errors = [];
   let registered = 0;
-  const service = startDevelopmentPluginHost({
+  const service = startPluginHost({
     env: { NETCATTY_PLUGIN_DEV: "1" },
     createService() { throw new Error("corrupt plugin database"); },
     registerShutdown() { registered += 1; },
@@ -41,7 +41,7 @@ test("created plugin host initializes and registers one shutdown owner", async (
       async shutdown() { shutdown += 1; },
     },
   };
-  assert.equal(startDevelopmentPluginHost({
+  assert.equal(startPluginHost({
     env: { NETCATTY_PLUGIN_DEV: "1" },
     createService: () => service,
     registerShutdown(handler) { shutdownHandler = handler; },
@@ -63,7 +63,7 @@ test("asynchronous initialization failure closes and leaves the host unavailable
       shutdown: async () => { shutdown += 1; },
     },
   };
-  assert.equal(startDevelopmentPluginHost({
+  assert.equal(startPluginHost({
     env: { NETCATTY_PLUGIN_DEV: "1" },
     createService: () => service,
     registerShutdown(handler) { shutdownHandler = handler; },
@@ -79,7 +79,7 @@ test("asynchronous initialization failure closes and leaves the host unavailable
 test("failure while registering shutdown closes the constructed host", async () => {
   let shutdown = 0;
   const errors = [];
-  const service = startDevelopmentPluginHost({
+  const service = startPluginHost({
     env: { NETCATTY_PLUGIN_DEV: "1" },
     createService: () => ({
       manager: {

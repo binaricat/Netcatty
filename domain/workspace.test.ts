@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { WorkspaceNode } from "./models.ts";
+import type { Workspace, WorkspaceNode } from "./models.ts";
 import {
   appendPaneToWorkspaceRoot,
   cloneWorkspaceTree,
   insertPaneIntoWorkspace,
   reorderWorkspaceFocusSessionOrder,
   resolveWorkspaceFocusSessionOrder,
+  setWorkspaceFocusedSessionId,
 } from "./workspace.ts";
 
 const root: WorkspaceNode = {
@@ -133,4 +134,26 @@ test("cloneWorkspaceTree keeps original sessionId when the map lacks it", () => 
     new Map(),
   );
   assert.equal(clone.type === "pane" && clone.sessionId, "s1");
+});
+
+test("setWorkspaceFocusedSessionId keeps the same array when focus is unchanged", () => {
+  const workspaces = [
+    { id: "ws-1", title: "One", root, focusedSessionId: "s2" },
+    { id: "ws-2", title: "Two", root, focusedSessionId: "s1" },
+  ] as Workspace[];
+  // Pane click + focus capture both call the setter; neither may re-render the shell.
+  assert.equal(setWorkspaceFocusedSessionId(workspaces, "ws-1", "s2"), workspaces);
+  assert.equal(setWorkspaceFocusedSessionId(workspaces, "missing", "s3"), workspaces);
+});
+
+test("setWorkspaceFocusedSessionId replaces only the focused workspace", () => {
+  const workspaces = [
+    { id: "ws-1", title: "One", root, focusedSessionId: "s2" },
+    { id: "ws-2", title: "Two", root, focusedSessionId: "s1" },
+  ] as Workspace[];
+  const next = setWorkspaceFocusedSessionId(workspaces, "ws-1", "s3");
+  assert.notEqual(next, workspaces);
+  assert.equal(next[0].focusedSessionId, "s3");
+  assert.equal(next[1], workspaces[1]);
+  assert.equal(workspaces[0].focusedSessionId, "s2", "input is not mutated");
 });

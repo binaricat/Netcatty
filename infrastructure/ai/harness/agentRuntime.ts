@@ -176,6 +176,9 @@ export class AgentRuntime {
         const meta = toolCallMeta.get(event.toolCallId);
         const toolName = event.toolName ?? meta?.toolName;
         if (toolName) {
+          // SDKs such as Claude omit names on results. Publish the same
+          // per-turn correlation used below to downstream event consumers.
+          event = { ...event, toolName };
           sessionStateStore.updateFromToolResult(
             chatSessionId,
             toolName,

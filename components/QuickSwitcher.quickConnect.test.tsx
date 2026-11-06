@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { I18nProvider } from "../application/i18n/I18nProvider";
+import { loadLocaleMessages } from "../application/i18n/messages";
 import type { Host, TerminalSession } from "../types";
 import { QuickSwitcher } from "./QuickSwitcher";
 
@@ -39,6 +40,12 @@ const renderSwitcher = (
     />
   </I18nProvider>,
 );
+
+// Non-English dictionaries load on demand; static rendering runs no effects.
+before(async () => {
+  await loadLocaleMessages("zh-TW");
+  await loadLocaleMessages("zh-CN");
+});
 
 test("quick switcher keeps a matching host ahead of an address row", () => {
   const markup = renderSwitcher("10.1.1.1", [host()]);

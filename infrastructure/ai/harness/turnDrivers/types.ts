@@ -56,7 +56,12 @@ export interface CattyTurnContext {
   activeProvider: ProviderConfig | undefined;
   activeModelId: string;
   reasoningEffort?: string;
-  scopeType: 'terminal' | 'workspace';
+  scopeType: 'terminal' | 'workspace' | 'global';
+  agentKind?: import('../../agentKinds').AgentKind;
+  /** Trusted host only: tools still pass the main source-bound dispatcher. */
+  delegated?: boolean;
+  delegationTag?: string;
+  allowedCapabilityIds?: readonly string[];
   scopeTargetId?: string;
   scopeLabel?: string;
   globalPermissionMode: AIPermissionMode;
@@ -74,6 +79,7 @@ export interface CattyTurnContext {
 }
 
 export interface ExternalTurnContext {
+  delegationTag?: string;
   existingSessionId?: string;
   updateExternalSessionId?: (sessionId: string, externalSessionId: string | undefined) => void;
   historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;

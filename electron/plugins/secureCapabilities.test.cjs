@@ -324,7 +324,7 @@ test("networkBroker.validate preserves credentialLease for registry dispatch", (
     url: "https://example.com/vault",
     credentialLease: {
       kind: "secret-lease",
-      id: "lease-1",
+      id: "l".repeat(32),
       operationId: "network:https://example.com",
       expiresAt: Date.now() + 60_000,
     },

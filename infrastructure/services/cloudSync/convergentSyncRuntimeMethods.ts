@@ -268,16 +268,22 @@ async function saveVerifiedBaseline(
   });
 }
 
-async function markProviderVerified(
-  manager: any,
+function markProviderVerified(
   runtime: ProviderRuntime,
   decoded: DecodedRemote,
-): Promise<void> {
+): void {
   runtime.verifiedState = decoded.state;
   runtime.verifiedFile = decoded.file;
   runtime.verifiedPayload = decoded.payload;
   runtime.latestRemotePayload = decoded.payload;
   runtime.error = undefined;
+}
+
+async function persistProviderVerification(
+  manager: any,
+  runtime: ProviderRuntime,
+  decoded: DecodedRemote,
+): Promise<void> {
   await saveVerifiedBaseline(manager, runtime, decoded);
 
   const connection = manager.state.providers[runtime.provider];
@@ -520,6 +526,37 @@ export async function syncConvergentProvidersUnlockedImpl(
     }
   }
 
+  let chatShrinkForced = false;
+  const blockChatShrink = (aiSessions: SyncPayload['aiSessions'], remotes: ProviderRuntime[]): boolean => {
+    if (aiSessions === undefined || strategy === 'preferCloud' || isPreserveDeletionsStrategy(strategy)) return false;
+    const outgoing = { ...inputPayload, aiSessions };
+    // Keep this gate scoped to chats; the vault has its own pre-merge guard.
+    const chatReference = (reference: SyncPayload | null | undefined) => reference
+      ? { ...outgoing, aiSessions: reference.aiSessions }
+      : null;
+    const checks = [detectSuspiciousShrink(outgoing, inputPayload, null), ...remotes.map((runtime) =>
+      detectSuspiciousShrink(outgoing, chatReference(cyclePayloadBaseByProvider.get(runtime.provider)),
+        chatReference(runtime.latestRemotePayload ?? runtime.verifiedPayload)))];
+    const finding = checks.find((check) => check.suspicious);
+    if (!finding || !finding.suspicious) return false;
+    if (options.overrideShrink) {
+      if (!chatShrinkForced) {
+        for (const provider of providers) this.emit({ type: 'SYNC_FORCED', provider, finding });
+        chatShrinkForced = true;
+      }
+      return false;
+    }
+    this.state.syncState = 'BLOCKED';
+    this.state.lastShrinkFinding = finding;
+    for (const provider of providers) {
+      this.updateProviderStatus(provider, 'error', 'Sync blocked: would delete too much');
+      this.emit({ type: 'SYNC_BLOCKED_SHRINK', provider, finding });
+      results.set(provider, { success: false, provider, action: 'none', shrinkBlocked: true, finding });
+    }
+    this.notifyStateChange();
+    return true;
+  };
+
   for (let round = 0; round < maxRounds && usable.length > 0; round += 1) {
     if (round > 0) await jitter(round);
 
@@ -560,7 +597,7 @@ export async function syncConvergentProvidersUnlockedImpl(
         // The provider already contains the complete joined state. Treat the
         // preflight read as verification instead of creating a new encrypted
         // cloud revision for a no-op runtime check.
-        await markProviderVerified(this, runtime, decoded);
+        markProviderVerified(runtime, decoded);
         preflightVerified.set(runtime.provider, decoded);
       } catch (error) {
         runtime.error = errorMessage(error);
@@ -637,6 +674,7 @@ export async function syncConvergentProvidersUnlockedImpl(
       return providerSidecarMismatch(runtime);
     });
     const aiSessions = mergeRuntimeAiSessions(inputPayload, usable.filter((runtime) => !runtime.error), cyclePayloadBaseByProvider, strategy);
+    if (blockChatShrink(aiSessions, usable)) return results;
     const providerChatMismatch = (runtime: ProviderRuntime) => {
       const decoded = preflightVerified.get(runtime.provider);
       return !decoded || !chatPayloadsEqual(decoded.payload, aiSessions);
@@ -696,7 +734,7 @@ export async function syncConvergentProvidersUnlockedImpl(
         if (!chatPayloadsEqual(decoded.payload, aiSessions)) {
           throw new Error('Remote verification did not retain the expected chat history');
         }
-        await markProviderVerified(this, runtime, decoded);
+        markProviderVerified(runtime, decoded);
         return decoded;
       } catch (error) {
         runtime.error = errorMessage(error);
@@ -722,7 +760,7 @@ export async function syncConvergentProvidersUnlockedImpl(
       && !runtime.error
       && versionVectorDominates(runtime.verifiedState.vector, canonical.vector)
   ));
-  const hasSuccess = successfulRuntimes.length > 0;
+  let hasSuccess = successfulRuntimes.length > 0;
   const {
     mergePluginSyncSidecarsThreeWay: mergeSidecarsThreeWayFinal,
   } = await import('../../../domain/pluginSyncSidecar');
@@ -755,6 +793,17 @@ export async function syncConvergentProvidersUnlockedImpl(
   };
   const finalAiSessions = mergeRuntimeAiSessions(inputPayload, successfulRuntimes, cyclePayloadBaseByProvider, strategy);
   if (finalAiSessions !== undefined) mergedPayload.aiSessions = finalAiSessions;
+  if (blockChatShrink(finalAiSessions, runtimes)) return results;
+  await Promise.all(successfulRuntimes.map(async (runtime) => {
+    try {
+      await persistProviderVerification(this, runtime, {
+        state: runtime.verifiedState!, file: runtime.verifiedFile!, payload: runtime.verifiedPayload!,
+      });
+    } catch (error) {
+      runtime.error = errorMessage(error);
+    }
+  }));
+  hasSuccess = successfulRuntimes.some((runtime) => !runtime.error);
   const localPayloadChanged = !cloudSyncPayloadsEqual(inputPayload, mergedPayload)
     || JSON.stringify(inputPayload.pluginSidecars ?? null)
       !== JSON.stringify(mergedPayload.pluginSidecars ?? null);

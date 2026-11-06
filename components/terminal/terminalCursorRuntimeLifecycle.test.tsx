@@ -212,3 +212,60 @@ test("first width-only update after actual runtime creation preserves an applica
 
   await act(async () => renderer!.unmount());
 });
+
+test('real pane props publish late-mounted selection targets only for the effective input owner', async () => {
+  const { usePluginTerminalSelection } = await import('../../application/state/usePluginTerminalSelection');
+  const { getTerminalPaneRenderSnapshot, parseTerminalPaneRenderSnapshot, resolveTerminalPaneInputProps } = await import('../terminalPaneVisibility');
+  const workspace = (id: string, viewMode: 'focus' | 'split'): import('../../types').Workspace => ({
+    id, title: id, viewMode, focusedSessionId: `${id}-a`, root: { id: `${id}-root`, type: 'split', direction: 'vertical',
+      children: ['a', 'b'].map((suffix) => ({ id: `${id}-${suffix}`, type: 'pane', sessionId: `${id}-${suffix}` })) },
+  });
+  const workspaceById = new Map([['focus', workspace('focus', 'focus')], ['split', workspace('split', 'split')]]);
+  const cases = [
+    { activeTabId: 'solo', sessionId: 'solo', eligible: true },
+    { activeTabId: 'solo', sessionId: 'other', eligible: false },
+    { activeTabId: 'focus', sessionId: 'focus-a', sessionWorkspaceId: 'focus', eligible: true },
+    { activeTabId: 'focus', sessionId: 'focus-b', sessionWorkspaceId: 'focus', eligible: false },
+    { activeTabId: 'split', sessionId: 'split-a', sessionWorkspaceId: 'split', eligible: true },
+    { activeTabId: 'split', sessionId: 'split-b', sessionWorkspaceId: 'split', eligible: false },
+    { activeTabId: 'solo', sessionId: 'split-a', sessionWorkspaceId: 'split', eligible: false },
+    { activeTabId: 'solo', sessionId: 'solo', isTerminalLayerVisible: false, eligible: false },
+  ];
+  const previous = Object.getOwnPropertyDescriptor(window, 'netcatty');
+  const targets: Array<{ sessionId: string | null }> = [];
+  Object.defineProperty(window, 'netcatty', { configurable: true, value: {
+    async setPluginTerminalTarget(target: { sessionId: string | null }) { targets.push(target); return true; },
+  } });
+  try {
+    for (const item of cases) {
+      targets.length = 0;
+      const inputProps = resolveTerminalPaneInputProps(parseTerminalPaneRenderSnapshot(getTerminalPaneRenderSnapshot({
+        ...item, workspaceById, isTerminalLayerVisible: item.isTerminalLayerVisible ?? true,
+      })));
+      const element = document.createElement('div'); document.body.append(element);
+      const term = Object.assign(createTerm(), { element });
+      const { context, termRef } = createContext(term, { cursorShape: 'block' });
+      function SelectionHarness() {
+        usePluginTerminalSelection(item.sessionId, () => ({ sessionId: item.sessionId, term: termRef.current as never,
+          bootEpoch: 1, visible: inputProps.isVisible, isFocusedPane: inputProps.isFocusedPane,
+          connected: true, sensitive: false, normalize: false, label: 'Synthetic mount' }), JSON.stringify(inputProps));
+        context.useEffect = useEffect; context.useLayoutEffect = useLayoutEffect;
+        useTerminalEffects(context);
+        return null;
+      }
+      let renderer: ReturnType<typeof create> | undefined;
+      try {
+        await act(async () => { renderer = create(<SelectionHarness />); await Promise.resolve(); await Promise.resolve(); });
+        assert.equal(termRef.current, term);
+        assert.equal(targets.some((target) => target.sessionId === item.sessionId), item.eligible,
+          `${item.activeTabId}/${item.sessionId}: publication must follow real pane ownership after late assignment`);
+      } finally {
+        await act(async () => renderer?.unmount());
+        assert.equal(targets.at(-1)?.sessionId, null);
+        element.remove();
+      }
+    }
+  } finally {
+    if (previous) Object.defineProperty(window, 'netcatty', previous); else Reflect.deleteProperty(window, 'netcatty');
+  }
+});

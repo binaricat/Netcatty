@@ -30,6 +30,7 @@ import {
 import { redactSecretsForModel, redactSecretsInValueForModel } from '../modelSecretRedaction';
 import { fitLargeUserInputForModel } from '../largeUserInput';
 import type { ToolOutputStore } from '../toolOutputStore';
+import { hasAnthropicThinkingSignature } from '../anthropicThinkingBinding';
 
 const OPENAI_CHAT_ASSISTANT_FIELDS = Symbol('netcatty.openAIChatAssistantFields');
 
@@ -201,6 +202,12 @@ export interface BuildCattySdkMessagesInput {
   chatSessionId: string;
   toolOutputStore: ToolOutputStore;
   fieldsByMessage: Map<ModelMessage, OpenAIChatAssistantFields | undefined>;
+  /**
+   * When true (default), durable-summary builds skip Anthropic signed thinking
+   * on the retained tail (#4073). DeepSeek Anthropic-compat must pass false —
+   * it requires thinking blocks with replayed tool calls.
+   */
+  allowStripAnthropicSignedThinking?: boolean;
 }
 
 export function buildCattySdkMessages(input: BuildCattySdkMessagesInput): ModelMessage[] {
@@ -214,6 +221,7 @@ export function buildCattySdkMessages(input: BuildCattySdkMessagesInput): ModelM
     chatSessionId,
     toolOutputStore,
     fieldsByMessage,
+    allowStripAnthropicSignedThinking = true,
   } = input;
 
   const { resolvedToolCallsByAssistant, toolCallByToolResult } = buildHistoricalToolReplayMaps(allMessages);
@@ -231,6 +239,14 @@ export function buildCattySdkMessages(input: BuildCattySdkMessagesInput): ModelM
   // The boundary can become zero when storage trims messages that were all
   // covered by the durable summary. Keep injecting that summary even though
   // no remaining persisted message needs to be skipped.
+  // Durable summary replaces the compacted prefix. Replaying Anthropic signed
+  // thinking on the retained tail would 400 on official Anthropic (prefix
+  // binding / #4073) — skip those signatures while leaving unsigned reasoning
+  // intact. DeepSeek Anthropic-compat forbids wholesale removal, so callers
+  // pass allowStripAnthropicSignedThinking=false for that provider.
+  const skipSignedAnthropicReasoning = Boolean(contextCompaction?.summary)
+    && allowStripAnthropicSignedThinking;
+
   if (contextCompaction?.summary) {
     sdkMessages.push({
       role: 'user',
@@ -322,6 +338,7 @@ export function buildCattySdkMessages(input: BuildCattySdkMessagesInput): ModelM
         if (replayedCalls.length > 0) {
           for (const part of collectReplayableReasoningParts(replayContinuation)) {
             if (!part.text && !part.providerOptions) continue;
+            if (skipSignedAnthropicReasoning && hasAnthropicThinkingSignature(part)) continue;
             contentParts.push({
               type: 'reasoning' as const,
               text: part.text,
@@ -357,6 +374,7 @@ export function buildCattySdkMessages(input: BuildCattySdkMessagesInput): ModelM
         const contentParts: AssistantContentPart[] = [];
         for (const part of collectReplayableReasoningParts(replayContinuation)) {
           if (!part.text && !part.providerOptions) continue;
+          if (skipSignedAnthropicReasoning && hasAnthropicThinkingSignature(part)) continue;
           contentParts.push({
             type: 'reasoning' as const,
             text: part.text,

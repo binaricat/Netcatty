@@ -7,8 +7,9 @@ import { TerminalLayerWorkspaceSection } from './TerminalLayerWorkspaceSection';
 import { terminalLayerViewCtxEqual } from './terminalLayerViewMemo';
 import { useTerminalHostTreeLayoutWidth } from '../../application/state/terminalHostTreeStore';
 import { resolveTerminalLayerSurfaceStyle } from '../terminalPaneVisibility';
+import type { PluginSidebarHostActions } from '../../application/state/usePluginTerminalSidebar';
 
-type TerminalLayerViewContext = Record<string, any>;
+type TerminalLayerViewContext = Record<string, any> & PluginSidebarHostActions;
 
 function TerminalLayerViewInner({ ctx }: { ctx: TerminalLayerViewContext }) {
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();

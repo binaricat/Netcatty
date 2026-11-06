@@ -3,6 +3,7 @@ import test from "node:test";
 import React from "react";
 
 import { I18nProvider } from "../application/i18n/I18nProvider.tsx";
+import { loadLocaleMessages } from "../application/i18n/messages.ts";
 import { APP_LOCK_AUTO_PROMPT_DELAY_MS, AppLockOverlay } from "./AppLockOverlay.tsx";
 import {
   createDomRenderer,
@@ -342,6 +343,7 @@ test("AppLockOverlay renders platform-specific system unlock button", async () =
 });
 
 test("AppLockOverlay localizes the system unlock button label", async () => {
+  await loadLocaleMessages("zh-CN");
   const dom = installDomEnvironment();
   const renderer = await createDomRenderer(dom.document);
 

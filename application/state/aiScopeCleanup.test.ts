@@ -2,14 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type {
-  AIPanelView,
   AISession,
 } from "../../infrastructure/ai/types.ts";
-import { createEmptyDraft } from "./aiDraftState.ts";
-import {
-  pruneInactiveScopedSessions,
-  pruneInactiveScopedTransientState,
-} from "./aiScopeCleanup.ts";
+import { pruneInactiveScopedSessions } from "./aiScopeCleanup.ts";
 
 function createSession(id: string, scope: AISession["scope"], externalSessionId?: string): AISession {
   return {
@@ -23,47 +18,6 @@ function createSession(id: string, scope: AISession["scope"], externalSessionId?
     updatedAt: 1,
   };
 }
-
-test("pruneInactiveScopedTransientState removes closed workspace and terminal scope state", () => {
-  const activeSessionIdMap = {
-    "terminal:open-terminal": "session-open",
-    "terminal:closed-terminal": "session-closed-terminal",
-    "workspace:open-workspace": "session-open-workspace",
-    "workspace:closed-workspace": "session-closed-workspace",
-  };
-  const draftsByScope = {
-    "terminal:open-terminal": createEmptyDraft("catty"),
-    "terminal:closed-terminal": createEmptyDraft("catty"),
-    "workspace:open-workspace": createEmptyDraft("catty"),
-    "workspace:closed-workspace": createEmptyDraft("catty"),
-  };
-  const panelViewByScope = {
-    "terminal:open-terminal": { mode: "draft" },
-    "terminal:closed-terminal": { mode: "session", sessionId: "session-closed-terminal" },
-    "workspace:open-workspace": { mode: "draft" },
-    "workspace:closed-workspace": { mode: "session", sessionId: "session-closed-workspace" },
-  } satisfies Record<string, AIPanelView>;
-
-  const next = pruneInactiveScopedTransientState(
-    activeSessionIdMap,
-    draftsByScope,
-    panelViewByScope,
-    new Set(["open-terminal", "open-workspace"]),
-  );
-
-  assert.deepEqual(next.activeSessionIdMap, {
-    "terminal:open-terminal": "session-open",
-    "workspace:open-workspace": "session-open-workspace",
-  });
-  assert.deepEqual(next.draftsByScope, {
-    "terminal:open-terminal": draftsByScope["terminal:open-terminal"],
-    "workspace:open-workspace": draftsByScope["workspace:open-workspace"],
-  });
-  assert.deepEqual(next.panelViewByScope, {
-    "terminal:open-terminal": panelViewByScope["terminal:open-terminal"],
-    "workspace:open-workspace": panelViewByScope["workspace:open-workspace"],
-  });
-});
 
 test("pruneInactiveScopedSessions reports inactive targets without deleting persisted history", () => {
   const sessions = [

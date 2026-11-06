@@ -1,4 +1,8 @@
 export const enMonitorMessages = {
+  "monitor.systemDisks": "System partitions ({count})",
+  "monitor.systemDisksAlert": "System partition usage exceeds 80%; expanded automatically.",
+  "monitor.diskIoTotal": "Total",
+  "monitor.partitionIoHint": "I/O of the block device backing this mount. Mounts sharing a device show the same rates. Unavailable until two valid samples or when no block device can be identified; not supported on macOS.",
   "monitor.diskIo": "Disk I/O",
   "monitor.diskRead": "Read",
   "monitor.diskWrite": "Write",

@@ -91,6 +91,27 @@ if (!process.versions.electron) {
         ready: true,
       });
     }
+    // Exercise browser-network bypasses against local listeners, never a remote service.
+    const http = require('node:http'); const dgram = require('node:dgram');
+    let requests = 0; let packets = 0;
+    const server = http.createServer((_request, response) => { requests++; response.end('unexpected'); });
+    const udp = dgram.createSocket('udp4'); udp.on('message', () => { packets++; });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await new Promise((resolve) => udp.bind(0, '127.0.0.1', resolve));
+    try {
+      const runtime = service.runtimeSupervisor.runtimes.get('com.netcatty.runtime-smoke-browser');
+      const isolation = await runtime.window.webContents.executeJavaScript(`(() => {
+        try { fetch('http://127.0.0.1:${server.address().port}/fetch').catch(() => {}); } catch {}
+        const image = new Image(); image.src = 'http://127.0.0.1:${server.address().port}/image';
+        try { const rtc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:${udp.address().port}' }] }); rtc.createDataChannel('probe'); rtc.createOffer().then((offer) => rtc.setLocalDescription(offer)).catch(() => {}); window.rtcProbe = rtc; } catch {}
+        return { node: typeof require, process: typeof process, bridge: typeof window.netcatty, visibleHost: !!document.querySelector('[data-section=vault-main]') };
+      })()`);
+      assert.deepEqual(isolation, { node: 'undefined', process: 'undefined', bridge: 'undefined', visibleHost: false });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      assert.equal(requests, 0, 'browser fetch/image cannot bypass host permissions');
+      assert.equal(packets, 0, 'WebRTC cannot bypass the offline runtime');
+      await runtime.window.webContents.executeJavaScript('window.rtcProbe?.close()');
+    } finally { server.close(); udp.close(); }
     await service.manager.shutdown();
     fs.rmSync(userData, { recursive: true, force: true });
     process.stdout.write("PLUGIN_RUNTIME_SMOKE_OK\n");

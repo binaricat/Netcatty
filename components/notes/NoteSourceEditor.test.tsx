@@ -4,9 +4,35 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import {
+  MAX_SOURCE_HISTORY_CHARS,
+  MAX_SOURCE_HISTORY_STEPS,
   NoteSourceEditor,
   type NoteSourceEditorHandle,
+  pushSourceHistory,
 } from "./NoteSourceEditor.tsx";
+
+const snapshot = (value: string) => ({ value, selectionStart: 0, selectionEnd: 0 });
+
+test("source undo history keeps only the most recent steps", () => {
+  const stack: Array<ReturnType<typeof snapshot>> = [];
+  for (let step = 0; step < MAX_SOURCE_HISTORY_STEPS + 50; step += 1) {
+    pushSourceHistory(stack, snapshot(`v${step}`));
+  }
+  assert.equal(stack.length, MAX_SOURCE_HISTORY_STEPS);
+  assert.equal(stack[0].value, "v50");
+  assert.equal(stack.at(-1)?.value, `v${MAX_SOURCE_HISTORY_STEPS + 49}`);
+});
+
+test("source undo history drops old full-note copies past the text budget", () => {
+  const stack: Array<ReturnType<typeof snapshot>> = [];
+  const third = Math.floor(MAX_SOURCE_HISTORY_CHARS / 3) + 1;
+  for (const label of ["a", "b", "c", "d"]) pushSourceHistory(stack, snapshot(label.repeat(third)));
+  assert.deepEqual(stack.map((entry) => entry.value[0]), ["c", "d"]);
+
+  // The newest step always survives, even when it alone is over budget.
+  pushSourceHistory(stack, snapshot("e".repeat(MAX_SOURCE_HISTORY_CHARS + 1)));
+  assert.deepEqual(stack.map((entry) => entry.value[0]), ["e"]);
+});
 
 test("NoteSourceEditor toolbar undo restores coalesced ordinary typing", async () => {
   const actEnvironment = globalThis as typeof globalThis & {

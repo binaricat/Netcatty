@@ -7,6 +7,6 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@netcatty/plugin-sdk": "0.1.0-internal"
+    "@netcatty/plugin-sdk": "0.1.0-internal.1"
   }
 }

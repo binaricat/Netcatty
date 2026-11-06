@@ -170,3 +170,6 @@ build_with_vs2022.bat
 /resources/et/*/et.exe
 /resources/et/*/et-*-dlls/
 /resources/et/*/*.dll
+
+# Local plugin example staging and bundles
+/examples/plugins/*/.package/

@@ -5,10 +5,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 
-const SCHEMA_VERSION = 3;
+const { LOCAL_SOURCE, assertSource, privateOwner } = require("./sourceIdentity.cjs");
+
+const SCHEMA_VERSION = 7;
 const MAX_SECURITY_AUDIT_DETAILS_BYTES = 16 * 1024;
 const MAX_SECURITY_AUDIT_RECORDS_PER_PLUGIN = 1_000;
 const REQUIRED_SCHEMA_COLUMNS = Object.freeze({
+  plugin_source_bindings: ["plugin_id", "source_json"],
+  plugin_host_preferences: ["key", "value_json", "updated_at"],
   plugins: ["id", "enabled", "active_version", "installed_at", "updated_at"],
   plugin_versions: ["plugin_id", "version", "manifest_json", "archive_sha256", "package_relative_path", "installed_at"],
   plugin_runtime_state: ["plugin_id", "plugin_version", "status", "runtime_kind", "last_error", "quarantined_at", "updated_at"],
@@ -212,7 +216,50 @@ class PluginDatabase {
         `);
       });
     }
+    if (version <= 3) this.transaction(() => this.db.exec(`
+      CREATE TABLE plugin_host_preferences (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      PRAGMA user_version = 4;
+    `));
+    if (version <= 4) this.transaction(() => this.db.exec(`
+      CREATE TABLE IF NOT EXISTS plugin_source_bindings (plugin_id TEXT PRIMARY KEY, source_json TEXT NOT NULL);
+    `));
     this.#assertSchemaLayout();
+    if (version <= 5) this.transaction(() => {
+      // Upgraded installs and retained local private records must keep their
+      // provenance after uninstall. Never infer official ownership from names.
+      const rows = this.db.prepare(`
+        SELECT id AS plugin_id FROM plugins
+        UNION SELECT plugin_id FROM plugin_settings
+        UNION SELECT plugin_id FROM plugin_view_state
+        UNION SELECT plugin_id FROM plugin_permission_grants
+        UNION SELECT plugin_id FROM plugin_secrets
+        UNION SELECT plugin_id FROM plugin_sync_sidecars
+      `).all();
+      const insert = this.db.prepare("INSERT OR IGNORE INTO plugin_source_bindings(plugin_id,source_json) VALUES(?,?)");
+      for (const row of rows) {
+        if (/^[a-z0-9][a-z0-9.-]{1,127}$/u.test(row.plugin_id)) insert.run(row.plugin_id, JSON.stringify(LOCAL_SOURCE));
+      }
+      this.db.exec("PRAGMA user_version = 6");
+    });
+    if (version <= 6) this.transaction(() => {
+      // One-time conversion of existing local private rows; all sources now use
+      // immutable encoded owners. Never retain a raw-ID lookup fallback.
+      for (const table of ["plugin_settings", "plugin_view_state", "plugin_permission_grants", "plugin_secrets", "plugin_sync_sidecars"]) {
+        const rows = this.db.prepare(`SELECT DISTINCT plugin_id FROM ${table}`).all();
+        for (const { plugin_id: id } of rows) {
+          if (/^[a-z0-9][a-z0-9.-]{1,127}$/u.test(id)) {
+            this.db.prepare(`UPDATE ${table} SET plugin_id = ? WHERE plugin_id = ?`).run(privateOwner(LOCAL_SOURCE, id), id);
+          }
+        }
+      }
+      for (const row of this.db.prepare("SELECT plugin_id, key FROM plugin_kv").all()) {
+        if (this.getPluginSource(row.plugin_id).id === "local") {
+          const prefix = `${privateOwner(LOCAL_SOURCE, row.plugin_id)}:`;
+          if (!row.key.startsWith(prefix)) this.db.prepare("UPDATE plugin_kv SET key = ? WHERE plugin_id = ? AND key = ?").run(prefix + row.key, row.plugin_id, row.key);
+        }
+      }
+      this.db.exec("PRAGMA user_version = 7");
+    });
     // Legacy-map backfill is deferred until PackageStore.recover() has finished
     // (hostService seeds after package initialize). Running here would promote
     // sole map candidates before recovered manifests are visible, then skip
@@ -245,15 +292,65 @@ class PluginDatabase {
     }
   }
 
+  getPluginSource(pluginId) {
+    const row = this.db.prepare("SELECT source_json FROM plugin_source_bindings WHERE plugin_id = ?").get(pluginId);
+    return row ? assertSource(parseJson(row.source_json, "source identity")) : { ...LOCAL_SOURCE };
+  }
+
+  getRetainedPluginSource(pluginId) {
+    const row = this.db.prepare("SELECT source_json FROM plugin_source_bindings WHERE plugin_id = ?").get(pluginId);
+    if (row) return assertSource(parseJson(row.source_json, "source identity"));
+    return this.db.prepare("SELECT id FROM plugins WHERE id = ?").get(pluginId) ? { ...LOCAL_SOURCE } : null;
+  }
+
+  assertInstallSource(pluginId, source = LOCAL_SOURCE) {
+    const trusted = assertSource(source);
+    const row = this.db.prepare("SELECT source_json FROM plugin_source_bindings WHERE plugin_id = ?").get(pluginId);
+    const existing = row ? assertSource(parseJson(row.source_json, "source identity"))
+      : this.getActivePlugin(pluginId) ? LOCAL_SOURCE : null;
+    if (existing && existing.id !== trusted.id) {
+      throw new Error("Plugin source differs. Uninstall and explicitly clear the old source's private data before reinstalling.");
+    }
+    return trusted;
+  }
+
+  privateOwner(pluginId) {
+    // Opaque owners enter only from host sync storage, never plugin RPC identity.
+    if (/^source:[a-f0-9]{64}:[a-z0-9][a-z0-9.-]{1,127}$/u.test(pluginId)) return pluginId;
+    const source = this.getPluginSource(pluginId);
+    return privateOwner(source, pluginId);
+  }
+
+  publicPluginId(owner) {
+    if (!/^source:[a-f0-9]{64}:[a-z0-9][a-z0-9.-]{1,127}$/u.test(owner)) return null;
+    const pluginId = owner.slice(owner.lastIndexOf(":") + 1);
+    return this.privateOwner(pluginId) === owner ? pluginId : null;
+  }
+
+  clearUninstalledSourceData(pluginId, expectedSourceId) {
+    if (this.getActivePlugin(pluginId)) throw new Error("Uninstall the plugin before changing its source");
+    if (this.getPluginSource(pluginId).id !== expectedSourceId) throw new Error("Plugin source changed; review the reset again");
+    const owner = this.privateOwner(pluginId);
+    this.transaction(() => {
+      for (const table of ["plugin_settings", "plugin_view_state", "plugin_permission_grants", "plugin_secrets", "plugin_sync_sidecars", "plugin_sync_provider_bindings"]) {
+        this.db.prepare(`DELETE FROM ${table} WHERE plugin_id = ? OR plugin_id = ?`).run(owner, pluginId);
+      }
+      this.db.prepare("DELETE FROM plugin_host_preferences WHERE key LIKE ?").run(`permission:${owner}:%`);
+      this.db.prepare("DELETE FROM plugin_source_bindings WHERE plugin_id = ?").run(pluginId);
+    });
+  }
+
   installVersion(record, options = {}) {
     if (options.enable === true && options.forceDisabled === true) {
       throw new TypeError("Plugin version cannot be enabled and force-disabled together");
     }
+    const source = this.assertInstallSource(record.pluginId, record.source);
     const now = this.clock();
     const manifestJson = JSON.stringify(record.manifest);
     const requestedEnabled = options.enable === true ? 1 : 0;
     const overwriteEnabled = options.enable === true || options.forceDisabled === true;
     this.transaction(() => {
+      this.db.prepare("INSERT INTO plugin_source_bindings(plugin_id,source_json) VALUES(?,?) ON CONFLICT(plugin_id) DO UPDATE SET source_json=excluded.source_json").run(record.pluginId, JSON.stringify(source));
       this.db.prepare(`
         INSERT INTO plugins(id, enabled, active_version, installed_at, updated_at)
         VALUES (?, ?, ?, ?, ?)
@@ -360,6 +457,7 @@ class PluginDatabase {
   #mapPlugin(row) {
     return {
       id: row.id,
+      source: this.getPluginSource(row.id),
       enabled: row.enabled === 1,
       activeVersion: row.active_version ?? null,
       installedAt: Number(row.installed_at),
@@ -493,6 +591,8 @@ class PluginDatabase {
   }
 
   getValue(pluginId, key) {
+    const owner = this.privateOwner(pluginId);
+    if (owner !== pluginId) key = `${owner}:${key}`;
     const row = this.db.prepare(
       "SELECT value_json FROM plugin_kv WHERE plugin_id = ? AND key = ?",
     ).get(pluginId, key);
@@ -500,6 +600,8 @@ class PluginDatabase {
   }
 
   setValue(pluginId, key, value) {
+    const owner = this.privateOwner(pluginId);
+    if (owner !== pluginId) key = `${owner}:${key}`;
     const serialized = JSON.stringify(value);
     if (serialized === undefined) throw new TypeError("Plugin storage value must be JSON serializable");
     this.db.prepare(`
@@ -512,16 +614,22 @@ class PluginDatabase {
   }
 
   deleteValue(pluginId, key) {
+    const owner = this.privateOwner(pluginId);
+    if (owner !== pluginId) key = `${owner}:${key}`;
     this.db.prepare("DELETE FROM plugin_kv WHERE plugin_id = ? AND key = ?").run(pluginId, key);
   }
 
   listKeys(pluginId) {
     return this.db.prepare(
       "SELECT key FROM plugin_kv WHERE plugin_id = ? ORDER BY key COLLATE BINARY",
-    ).all(pluginId).map((row) => row.key);
+    ).all(pluginId).map((row) => row.key).filter((key) => {
+      const owner = this.privateOwner(pluginId);
+      return owner === pluginId || key.startsWith(`${owner}:`);
+    }).map((key) => this.privateOwner(pluginId) === pluginId ? key : key.slice(this.privateOwner(pluginId).length + 1));
   }
 
   getSetting(pluginId, settingId, scope, scopeId) {
+    pluginId = this.privateOwner(pluginId);
     const row = this.db.prepare(`
       SELECT value_json FROM plugin_settings
       WHERE plugin_id = ? AND setting_id = ? AND scope = ? AND scope_id = ?
@@ -530,6 +638,7 @@ class PluginDatabase {
   }
 
   setSetting(pluginId, settingId, scope, scopeId, value, updatedAt = this.clock()) {
+    pluginId = this.privateOwner(pluginId);
     const serialized = JSON.stringify(value);
     if (serialized === undefined) throw new TypeError("Plugin setting value must be JSON serializable");
     const stamp = Number.isFinite(Number(updatedAt)) ? Number(updatedAt) : this.clock();
@@ -543,6 +652,7 @@ class PluginDatabase {
   }
 
   deleteSetting(pluginId, settingId, scope, scopeId) {
+    pluginId = this.privateOwner(pluginId);
     this.db.prepare(`
       DELETE FROM plugin_settings
       WHERE plugin_id = ? AND setting_id = ? AND scope = ? AND scope_id = ?
@@ -550,6 +660,7 @@ class PluginDatabase {
   }
 
   listSettings(pluginId) {
+    pluginId = this.privateOwner(pluginId);
     return this.db.prepare(`
       SELECT setting_id, scope, scope_id, value_json, updated_at
       FROM plugin_settings WHERE plugin_id = ?
@@ -579,6 +690,7 @@ class PluginDatabase {
   }
 
   getSyncSidecar(pluginId, kind, key) {
+    pluginId = this.privateOwner(pluginId);
     const row = this.db.prepare(`
       SELECT value_json, updated_at FROM plugin_sync_sidecars
       WHERE plugin_id = ? AND kind = ? AND key = ?
@@ -594,6 +706,7 @@ class PluginDatabase {
   }
 
   setSyncSidecar(pluginId, kind, key, value, updatedAt = this.clock()) {
+    pluginId = this.privateOwner(pluginId);
     const serialized = JSON.stringify(value);
     if (serialized === undefined) throw new TypeError("Plugin sync sidecar value must be JSON serializable");
     this.db.prepare(`
@@ -606,6 +719,7 @@ class PluginDatabase {
   }
 
   deleteSyncSidecar(pluginId, kind, key) {
+    pluginId = this.privateOwner(pluginId);
     this.db.prepare(`
       DELETE FROM plugin_sync_sidecars
       WHERE plugin_id = ? AND kind = ? AND key = ?
@@ -613,15 +727,17 @@ class PluginDatabase {
   }
 
   listSyncSidecars(pluginId) {
+    pluginId = this.privateOwner(pluginId);
     return this.db.prepare(`
-      SELECT plugin_id, kind, key, value_json, updated_at
+      SELECT plugin_id, kind, CAST(key AS BLOB) AS key_bytes, value_json, updated_at
       FROM plugin_sync_sidecars
       WHERE plugin_id = ?
       ORDER BY kind COLLATE BINARY, key COLLATE BINARY
     `).all(pluginId).map((row) => ({
       pluginId: row.plugin_id,
       kind: row.kind,
-      key: row.key,
+      // Node 22 truncates TEXT results at NUL; settings keys contain NUL separators.
+      key: Buffer.from(row.key_bytes).toString("utf8"),
       value: parseJson(row.value_json, "sync sidecar value"),
       updatedAt: Number(row.updated_at),
     }));
@@ -629,13 +745,14 @@ class PluginDatabase {
 
   listAllSyncSidecars() {
     return this.db.prepare(`
-      SELECT plugin_id, kind, key, value_json, updated_at
+      SELECT plugin_id, kind, CAST(key AS BLOB) AS key_bytes, value_json, updated_at
       FROM plugin_sync_sidecars
       ORDER BY plugin_id COLLATE BINARY, kind COLLATE BINARY, key COLLATE BINARY
     `).all().map((row) => ({
       pluginId: row.plugin_id,
       kind: row.kind,
-      key: row.key,
+      // Node 22 truncates TEXT results at NUL; settings keys contain NUL separators.
+      key: Buffer.from(row.key_bytes).toString("utf8"),
       value: parseJson(row.value_json, "sync sidecar value"),
       updatedAt: Number(row.updated_at),
     }));
@@ -665,6 +782,7 @@ class PluginDatabase {
   }
 
   getViewState(pluginId, viewId, scopeId) {
+    pluginId = this.privateOwner(pluginId);
     const row = this.db.prepare(`
       SELECT state_json FROM plugin_view_state
       WHERE plugin_id = ? AND view_id = ? AND scope_id = ?
@@ -673,6 +791,7 @@ class PluginDatabase {
   }
 
   setViewState(pluginId, viewId, scopeId, state) {
+    pluginId = this.privateOwner(pluginId);
     const serialized = JSON.stringify(state);
     if (serialized === undefined) throw new TypeError("Plugin view state must be JSON serializable");
     this.db.prepare(`
@@ -685,6 +804,7 @@ class PluginDatabase {
   }
 
   deleteViewState(pluginId, viewId, scopeId) {
+    pluginId = this.privateOwner(pluginId);
     this.db.prepare(`
       DELETE FROM plugin_view_state
       WHERE plugin_id = ? AND view_id = ? AND scope_id = ?
@@ -697,8 +817,8 @@ class PluginDatabase {
       FROM plugin_permission_grants
       WHERE plugin_id = ?
       ORDER BY permission COLLATE BINARY, resource COLLATE BINARY
-    `).all(pluginId).map((row) => ({
-      pluginId: row.plugin_id,
+    `).all(this.privateOwner(pluginId)).map((row) => ({
+      pluginId,
       permission: row.permission,
       resource: row.resource,
       resourceKind: row.resource_kind,
@@ -717,7 +837,7 @@ class PluginDatabase {
         declaration_hash = excluded.declaration_hash,
         granted_at = excluded.granted_at
     `).run(
-      record.pluginId,
+      this.privateOwner(record.pluginId),
       record.permission,
       record.resource,
       record.resourceKind,
@@ -727,6 +847,7 @@ class PluginDatabase {
   }
 
   deletePermissionGrant(pluginId, permission, resource) {
+    pluginId = this.privateOwner(pluginId);
     this.db.prepare(`
       DELETE FROM plugin_permission_grants
       WHERE plugin_id = ? AND permission = ? AND resource = ?
@@ -734,10 +855,12 @@ class PluginDatabase {
   }
 
   deleteAllPermissionGrants(pluginId) {
+    pluginId = this.privateOwner(pluginId);
     this.db.prepare("DELETE FROM plugin_permission_grants WHERE plugin_id = ?").run(pluginId);
   }
 
   getSecretByKey(pluginId, key) {
+    pluginId = this.privateOwner(pluginId);
     const row = this.db.prepare(`
       SELECT plugin_id, key, secret_ref, ciphertext, created_at, updated_at
       FROM plugin_secrets WHERE plugin_id = ? AND key = ?
@@ -746,6 +869,7 @@ class PluginDatabase {
   }
 
   getSecretByRef(pluginId, secretRef) {
+    pluginId = this.privateOwner(pluginId);
     const row = this.db.prepare(`
       SELECT plugin_id, key, secret_ref, ciphertext, created_at, updated_at
       FROM plugin_secrets WHERE plugin_id = ? AND secret_ref = ?
@@ -755,7 +879,7 @@ class PluginDatabase {
 
   #mapSecret(row) {
     return {
-      pluginId: row.plugin_id,
+      pluginId: this.publicPluginId(row.plugin_id),
       key: row.key,
       secretRef: row.secret_ref,
       ciphertext: Buffer.from(row.ciphertext),
@@ -775,7 +899,7 @@ class PluginDatabase {
         ciphertext = excluded.ciphertext,
         updated_at = excluded.updated_at
     `).run(
-      record.pluginId,
+      this.privateOwner(record.pluginId),
       record.key,
       record.secretRef,
       record.ciphertext,
@@ -785,12 +909,14 @@ class PluginDatabase {
   }
 
   deleteSecret(pluginId, key) {
+    pluginId = this.privateOwner(pluginId);
     this.db.prepare("DELETE FROM plugin_secrets WHERE plugin_id = ? AND key = ?")
       .run(pluginId, key);
   }
 
   /** Delete all secrets whose key equals prefix or starts with `${prefix}:`. */
   deleteSecretsByKeyPrefix(pluginId, prefix) {
+    pluginId = this.privateOwner(pluginId);
     const result = this.db.prepare(`
       DELETE FROM plugin_secrets
       WHERE plugin_id = ?
@@ -850,7 +976,7 @@ class PluginDatabase {
       SELECT DISTINCT plugin_id
       FROM plugin_secrets
       WHERE key = ? OR key LIKE ? ESCAPE '\\'
-    `).all(prefix, `${escaped}:%`).map((row) => row.plugin_id);
+    `).all(prefix, `${escaped}:%`).map((row) => this.publicPluginId(row.plugin_id)).filter((id) => id !== null);
   }
 
   /**
@@ -883,7 +1009,7 @@ class PluginDatabase {
     /** @type {Map<string, Array<{ pluginId: string, key: string }>>} */
     const byProvider = new Map();
     for (const row of legacyRows) {
-      const pluginId = row.plugin_id;
+      const pluginId = this.publicPluginId(row.plugin_id);
       const key = row.key;
       if (typeof pluginId !== "string" || typeof key !== "string") continue;
       if (!key.startsWith(legacyPrefix)) continue;
@@ -1028,18 +1154,53 @@ class PluginDatabase {
         sha256: createHash("sha256").update(detailsJson).digest("hex"),
       });
     }
+    this.transaction(() => this.#appendSecurityAudit(pluginId, event, detailsJson));
+  }
+
+  #appendSecurityAudit(pluginId, event, detailsJson) {
+    this.db.prepare(`
+      INSERT INTO plugin_security_audit(plugin_id, event, details_json, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(pluginId, event, detailsJson, this.clock());
+    this.db.prepare(`
+      DELETE FROM plugin_security_audit
+      WHERE plugin_id = ? AND id NOT IN (
+        SELECT id FROM plugin_security_audit
+        WHERE plugin_id = ? ORDER BY id DESC LIMIT ${MAX_SECURITY_AUDIT_RECORDS_PER_PLUGIN}
+      )
+    `).run(pluginId, pluginId);
+  }
+
+  // Host-owned policy preferences are deliberately separate from plugin-writable
+  // settings. Source ownership is stable across package versions; grants are not.
+  getPermissionMode(pluginId, permission) {
+    const key = `permission:${this.privateOwner(pluginId)}:${permission}`;
+    const row = this.db.prepare("SELECT value_json FROM plugin_host_preferences WHERE key = ?").get(key);
+    const mode = row ? parseJson(row.value_json, "permission mode") : "allow";
+    if (!["allow", "ask", "deny"].includes(mode)) throw new Error("Corrupt plugin permission mode");
+    return mode;
+  }
+
+  setPermissionMode(pluginId, permission, mode) {
+    const key = `permission:${this.privateOwner(pluginId)}:${permission}`;
     this.transaction(() => {
-      this.db.prepare(`
-        INSERT INTO plugin_security_audit(plugin_id, event, details_json, created_at)
-        VALUES (?, ?, ?, ?)
-      `).run(pluginId, event, detailsJson, this.clock());
-      this.db.prepare(`
-        DELETE FROM plugin_security_audit
-        WHERE plugin_id = ? AND id NOT IN (
-          SELECT id FROM plugin_security_audit
-          WHERE plugin_id = ? ORDER BY id DESC LIMIT ${MAX_SECURITY_AUDIT_RECORDS_PER_PLUGIN}
-        )
-      `).run(pluginId, pluginId);
+      this.db.prepare("INSERT INTO plugin_host_preferences(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at")
+        .run(key, JSON.stringify(mode), this.clock());
+      this.#appendSecurityAudit(pluginId, "permission.policy-edited", JSON.stringify({ permission, mode, sourceOwner: this.privateOwner(pluginId) }));
+    });
+  }
+
+  getHostThemeSelection() {
+    const row = this.db.prepare("SELECT value_json FROM plugin_host_preferences WHERE key = 'theme'").get();
+    return row ? parseJson(row.value_json, "host theme selection") : {formatVersion: 1, revision: 0, light: null, dark: null};
+  }
+
+  commitHostThemeSelection(expectedRevision, selection, pluginId) {
+    this.transaction(() => {
+      if (this.getHostThemeSelection().revision !== expectedRevision) throw new Error("Theme selection changed; refresh before applying");
+      this.db.prepare("INSERT INTO plugin_host_preferences(key,value_json,updated_at) VALUES('theme',?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at")
+        .run(JSON.stringify(selection), this.clock());
+      this.#appendSecurityAudit(pluginId ?? "$host.appearance", "theme-selection", JSON.stringify({revision:selection.revision, action:pluginId ? "apply" : "restore"}));
     });
   }
 

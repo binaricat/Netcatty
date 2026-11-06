@@ -31,7 +31,11 @@ import {
 } from '../cattyRuntime';
 import { computeTotalInputTokens, DEFAULT_MAX_OUTPUT_TOKENS } from '../contextBudget';
 import { clearChatSessionCancelled } from '../agentStop';
-import { isRequestTooLargeError } from '../../errorClassifier';
+import { isInvalidAnthropicThinkingSignatureError, isRequestTooLargeError } from '../../errorClassifier';
+import {
+  providerAllowsAnthropicSignedThinkingRemoval,
+  stripAnthropicSignedReasoningParts,
+} from '../anthropicThinkingBinding';
 import { getNetcattyBridge, generateId, resolveUserSkillsContext } from '../../aiChatStreamingSupport';
 import {
   buildCattySdkMessages,
@@ -148,7 +152,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
   if (attachments?.length && netcattyBridge.aiMcpUpdateAttachments) {
     await netcattyBridge.aiMcpUpdateAttachments(attachments, sessionId);
   }
-  const userSkillsContext = await resolveUserSkillsContext(
+  const userSkillsContext = context.delegated ? '' : await resolveUserSkillsContext(
     netcattyBridge,
     trimmed,
     context.selectedUserSkillSlugs,
@@ -168,6 +172,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     sessionId,
     ctx.toolOutputStore,
     ctx.toolResultDedup,
+    { agentKind: context.agentKind, allowedCapabilityIds: context.allowedCapabilityIds },
   );
   const { tools } = toolsBundle;
 
@@ -187,6 +192,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
 
   const activeModelId = context.activeModelId || context.activeProvider.defaultModel || '';
   const promptContext = buildPromptContextSnapshot({
+    agentKind: context.agentKind,
     providerId: context.activeProvider.providerId,
     modelId: activeModelId,
     permissionMode: context.permissionMode ?? context.globalPermissionMode,
@@ -215,6 +221,10 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
 
   try {
     const openAIChatAssistantFieldsByMessage = new Map<ModelMessage, OpenAIChatAssistantFields | undefined>();
+    const allowStripSignedThinking = providerAllowsAnthropicSignedThinkingRemoval(
+      context.activeProvider,
+      activeModelId,
+    );
 
     const buildSdkMessages = (
       allMessages: import('../../types').ChatMessage[],
@@ -230,6 +240,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       chatSessionId: sessionId,
       toolOutputStore: ctx.toolOutputStore,
       fieldsByMessage: openAIChatAssistantFieldsByMessage,
+      allowStripAnthropicSignedThinking: allowStripSignedThinking,
     });
 
     const responseIdleTimeoutSeconds = normalizeResponseIdleTimeoutSeconds(
@@ -251,6 +262,8 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
             : undefined,
           streamIdleTimeoutMs: responseIdleTimeoutMs,
           chatSessionId: sessionId,
+          requestIdPrefix: context.delegated && context.delegationTag
+            ? `agent-model_${sessionId.slice('plugin-agent:'.length)}_${context.delegationTag}_` : undefined,
         },
       ), privacy, {
         // Compaction can run before prepareMessagesForStream selects replay
@@ -261,7 +274,8 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         ],
       });
     } catch (e) {
-      console.error('[Catty] Model creation failed:', e);
+      if (context.delegated) console.error('[Plugin Agent] Model setup unavailable');
+      else console.error('[Catty] Model creation failed:', e);
       ui.reportStreamError(sessionId, signal, `Model creation failed: ${e instanceof Error ? e.message : String(e)}`);
       return;
     }
@@ -293,6 +307,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     // Keep the reasoning parts buildCattySdkMessages replayed instead of
     // pruning them like generic Chat Completions histories.
     const preserveAnthropicThinkingReplay = resolveProviderStyle(context.activeProvider) === 'anthropic';
+    // allowStripSignedThinking computed once above (DeepSeek must keep signed thinking).
     const preserveReasoningForStream = preserveStatelessResponsesReasoning || preserveAnthropicThinkingReplay;
     const reasoningReserveTokens = estimateReasoningOutputReserve(reasoningProviderOptions);
     // Fold thinking budget into compaction maxOutput only. reservedTokens is
@@ -437,6 +452,8 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     emitContextSnapshot(messagesForStream);
 
     const runtimeContext = createInitialCattyRuntimeContext({
+      agentKind: context.agentKind,
+      delegated: context.delegated,
       chatSessionId: sessionId,
       turnId: ctx.turnId,
       providerId: context.activeProvider?.providerId,
@@ -490,9 +507,26 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
             runtimeContext: stepRuntimeContext,
             onEvent: (event) => ctx.emit(event),
           });
-          emitContextSnapshot(prepared.messages);
+          // Prefix-mutating step prep (tool_result compress/prune/budget head-prune)
+          // invalidates Anthropic preserved-thinking signatures on the retained
+          // tail (#4073). Strip signed reasoning when we know the prefix changed.
+          let stepMessages = prepared.messages;
+          if (preserveAnthropicThinkingReplay && prepared.didAdjust && allowStripSignedThinking) {
+            const stripped = stripAnthropicSignedReasoningParts(stepMessages);
+            if (stripped.didStrip) {
+              console.warn('[Catty] Stripped Anthropic signed thinking after step context mutate (#4073)');
+              stepMessages = stripped.messages;
+            }
+          }
+          // Never replace the step prompt with [] (#4102). Prefer the SDK's
+          // pre-prepare messages over an emptied prepareStepContext result.
+          if (stepMessages.length === 0 && messages.length > 0) {
+            console.warn('[Catty] prepareStep produced empty messages; keeping prior step messages (#4102)');
+            stepMessages = messages;
+          }
+          emitContextSnapshot(stepMessages);
           return {
-            messages: prepared.messages,
+            messages: stepMessages,
             runtimeContext: prepared.runtimeContext,
           };
         },
@@ -506,57 +540,121 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     try {
       await runStream(messagesForStream, assistantMsgId);
     } catch (streamErr) {
-      if (signal.aborted || !isRequestTooLargeError(streamErr)) {
+      if (signal.aborted) {
         throw streamErr;
       }
 
-      console.warn('[Catty] Request hit HTTP 413; forcing context compaction and retrying once.', streamErr);
-      const hadToolProgress = hadToolProgressBeforeRequestTooLarge(streamErr);
-      let retryBaseMessages = messagesForStream;
-      let retryAssistantMsgId = assistantMsgId;
-      let preservedWriteFingerprints: string[] = [];
-      if (hadToolProgress) {
-        const latestSession = ui.getLatestSession?.(sessionId);
-        if (latestSession) {
-          preservedWriteFingerprints = collectPreservedTerminalWriteFingerprints(
-            latestSession.messages,
-            assistantMsgId,
-            sessionId,
-          );
-          retryBaseMessages = buildSdkMessages(latestSession.messages, false, latestSession.contextCompaction);
+      if (isRequestTooLargeError(streamErr)) {
+        if (context.delegated) console.warn('[Plugin Agent] Context compaction requested');
+        else console.warn('[Catty] Request hit HTTP 413; forcing context compaction and retrying once.', streamErr);
+        const hadToolProgress = hadToolProgressBeforeRequestTooLarge(streamErr);
+        let retryBaseMessages = messagesForStream;
+        let retryAssistantMsgId = assistantMsgId;
+        let preservedWriteFingerprints: string[] = [];
+        if (hadToolProgress) {
+          const latestSession = ui.getLatestSession?.(sessionId);
+          if (latestSession) {
+            preservedWriteFingerprints = collectPreservedTerminalWriteFingerprints(
+              latestSession.messages,
+              assistantMsgId,
+              sessionId,
+            );
+            retryBaseMessages = buildSdkMessages(latestSession.messages, false, latestSession.contextCompaction);
+          }
+          retryAssistantMsgId = generateId();
+          ui.addMessageToSession(sessionId, {
+            id: retryAssistantMsgId,
+            role: 'assistant',
+            content: '',
+            timestamp: Date.now(),
+            model: activeModelId || context.activeProvider?.defaultModel || '',
+            providerId: context.activeProvider?.providerId,
+          });
+        } else {
+          ui.updateMessageById(sessionId, assistantMsgId, msg => ({
+            ...msg,
+            content: '',
+            thinking: undefined,
+            thinkingDurationMs: undefined,
+            providerContinuation: undefined,
+            toolCalls: undefined,
+            errorInfo: undefined,
+            executionStatus: undefined,
+            pendingApproval: undefined,
+          }));
         }
-        retryAssistantMsgId = generateId();
-        ui.addMessageToSession(sessionId, {
-          id: retryAssistantMsgId,
-          role: 'assistant',
-          content: '',
-          timestamp: Date.now(),
-          model: activeModelId || context.activeProvider?.defaultModel || '',
-          providerId: context.activeProvider?.providerId,
-        });
+        ctx.toolResultDedup.enableWriteReplay(preservedWriteFingerprints);
+        const retryMessages = prepareMessagesForStream((await compactMessages(retryBaseMessages, {
+          force: true,
+          compressForRequestTooLargeRetry: true,
+        })).messages);
+        emitContextSnapshot(retryMessages);
+        await runStream(retryMessages, retryAssistantMsgId);
+      } else if (
+        preserveAnthropicThinkingReplay
+        && isInvalidAnthropicThinkingSignatureError(streamErr)
+      ) {
+        // Once per turn: strip signed thinking and retry. Nested failure throws
+        // to the outer catch (no loop). Mirror the 413 progress-aware path so
+        // completed tool calls/results are retained and write replay is enabled
+        // (#4074 P1) instead of clearing the initial assistant and restarting.
+        console.warn(
+          '[Catty] Anthropic thinking signature invalid after prefix mutate; stripping signed reasoning and retrying once (#4073).',
+          streamErr,
+        );
+        const hadToolProgress = hadToolProgressBeforeRequestTooLarge(streamErr);
+        let retryBaseMessages = messagesForStream;
+        let retryAssistantMsgId = assistantMsgId;
+        let preservedWriteFingerprints: string[] = [];
+        if (hadToolProgress) {
+          const latestSession = ui.getLatestSession?.(sessionId);
+          if (latestSession) {
+            preservedWriteFingerprints = collectPreservedTerminalWriteFingerprints(
+              latestSession.messages,
+              assistantMsgId,
+              sessionId,
+            );
+            retryBaseMessages = buildSdkMessages(latestSession.messages, false, latestSession.contextCompaction);
+            retryBaseMessages = prepareMessagesForStream(retryBaseMessages);
+          }
+          retryAssistantMsgId = generateId();
+          ui.addMessageToSession(sessionId, {
+            id: retryAssistantMsgId,
+            role: 'assistant',
+            content: '',
+            timestamp: Date.now(),
+            model: activeModelId || context.activeProvider?.defaultModel || '',
+            providerId: context.activeProvider?.providerId,
+          });
+        } else {
+          ui.updateMessageById(sessionId, assistantMsgId, msg => ({
+            ...msg,
+            content: '',
+            thinking: undefined,
+            thinkingDurationMs: undefined,
+            providerContinuation: undefined,
+            toolCalls: undefined,
+            errorInfo: undefined,
+            executionStatus: undefined,
+            pendingApproval: undefined,
+          }));
+        }
+        const stripped = stripAnthropicSignedReasoningParts(retryBaseMessages);
+        if (!stripped.didStrip) {
+          throw streamErr;
+        }
+        ctx.toolResultDedup.enableWriteReplay(preservedWriteFingerprints);
+        const retryMessages = stripped.messages;
+        emitContextSnapshot(retryMessages);
+        await runStream(retryMessages, retryAssistantMsgId);
       } else {
-        ui.updateMessageById(sessionId, assistantMsgId, msg => ({
-          ...msg,
-          content: '',
-          thinking: undefined,
-          thinkingDurationMs: undefined,
-          providerContinuation: undefined,
-          toolCalls: undefined,
-          errorInfo: undefined,
-          executionStatus: undefined,
-          pendingApproval: undefined,
-        }));
+        throw streamErr;
       }
-      ctx.toolResultDedup.enableWriteReplay(preservedWriteFingerprints);
-      const retryMessages = prepareMessagesForStream((await compactMessages(retryBaseMessages, {
-        force: true,
-        compressForRequestTooLargeRetry: true,
-      })).messages);
-      emitContextSnapshot(retryMessages);
-      await runStream(retryMessages, retryAssistantMsgId);
     }
   } catch (err) {
-    console.error('[Catty] streamText error:', err);
+    if (context.delegated && signal.aborted) return;
+    if (context.delegated) console.error('[Plugin Agent] Turn unavailable');
+    else console.error('[Catty] streamText error:', err);
     ui.reportStreamError(sessionId, signal, err);
   } finally {
     ui.updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);

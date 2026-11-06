@@ -1,4 +1,5 @@
 import { compressVerboseText } from '../requestPayloadCompression';
+import { sliceHead } from '../textBoundaries';
 
 const MONITOR_LINE_MAX_CHARS = 500;
 const MONITOR_BATCH_MAX_CHARS = 3_000;
@@ -194,13 +195,13 @@ function fitMonitorBatch(output: string): { content: string; sourceTruncated: bo
   const lines = normalized.split('\n').map(line => {
     if (line.length <= MONITOR_LINE_MAX_CHARS) return line;
     sourceTruncated = true;
-    return `${line.slice(0, MONITOR_LINE_MAX_CHARS - 28)}[... line shortened ...]`;
+    return `${sliceHead(line, MONITOR_LINE_MAX_CHARS - 28)}[... line shortened ...]`;
   });
   const content = lines.join('\n');
   if (content.length <= MONITOR_BATCH_MAX_CHARS) return { content, sourceTruncated };
   const marker = '\n[... monitor batch shortened ...]';
   return {
-    content: `${content.slice(0, MONITOR_BATCH_MAX_CHARS - marker.length)}${marker}`,
+    content: `${sliceHead(content, MONITOR_BATCH_MAX_CHARS - marker.length)}${marker}`,
     sourceTruncated: true,
   };
 }

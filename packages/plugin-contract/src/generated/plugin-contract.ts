@@ -73,6 +73,32 @@ export type AuthenticationResult = ({
 
 export type BoundedPermissionResource = string;
 
+export type ByteStreamAttachResult = {
+  attached: true;
+};
+
+export type ByteStreamConnectionDescriptor = {
+  handleId: string;
+  endpoint: ByteStreamEndpoint;
+  inputStreamId: StreamId;
+  outputStreamId: StreamId;
+  windowBytes: 65536;
+};
+
+export type ByteStreamConnectRequest = {
+  endpoint: ByteStreamEndpoint;
+};
+
+export type ByteStreamEndpoint = string;
+
+export type ByteStreamFeature = "network.byte-streams";
+
+export type ByteStreamHandleRequest = {
+  handleId: string;
+};
+
+export type ByteStreamLimits = {"connectionsPerRuntime":4,"connectionsTotal":64,"chunkBytes":65536,"bufferBytes":65536,"connectionBytes":8388608,"connectMs":10000,"idleMs":30000,"lifetimeMs":120000};
+
 export type CommandContribution = {
   id: ContributionId;
   title: LocalizedText;
@@ -80,6 +106,7 @@ export type CommandContribution = {
   description?: LocalizedText;
   icon?: IconReference;
   enablement?: ContextKeyExpression;
+  interactive?: boolean;
 };
 
 export type CompanionExecutable = {
@@ -166,6 +193,150 @@ export type CredentialRef = {
 };
 
 export type FeatureId = string;
+
+export type FilesystemDirectoryEnumerationFeature = "filesystem.directory-enumeration";
+
+export type HostClipboardReadRequest = {
+  kind: "clipboard.read";
+  title: string;
+};
+
+export type HostClipboardWriteRequest = {
+  kind: "clipboard.write";
+  title: string;
+  text: string;
+};
+
+export type HostDrawnViewEvent = {
+  nodeId: string;
+  type: "click" | "input" | "change" | "keydown" | "keyup" | "focusin" | "focusout" | "compositionstart" | "compositionupdate" | "compositionend" | "dismiss" | "submit" | "reset";
+  value?: string;
+  checked?: boolean;
+  eventId?: number;
+  data?: string;
+  key?: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  values?: Array<string>;
+};
+
+export type HostDrawnViewMessage = ({
+  kind: "host-ui.open";
+  instanceId: string;
+  stateScope?: string;
+}) | ({
+  kind: "host-ui.close";
+  instanceId: string;
+}) | ({
+  kind: "host-ui.update";
+  instanceId: string;
+  sequence: number;
+  acknowledgedEvent?: number;
+  mutations: Array<JsonValue>;
+  css: string;
+}) | ({
+  kind: "host-ui.event";
+  instanceId: string;
+  event: HostDrawnViewEvent;
+});
+
+export type HostDrawnViewOpenRequest = {
+  viewId: string;
+  instanceId: string;
+  scopeId: string;
+  context?: { [key: string]: string | number | boolean | null };
+};
+
+export type HostDrawnViewsFeature = "views.host-drawn";
+
+export type HostInputRequest = {
+  kind: "input";
+  title: string;
+  initialValue?: HostSingleLineInputText;
+};
+
+export type HostInteractionClosed = {
+  requestId: string;
+  closed: true;
+};
+
+export type HostInteractionEvent = (HostInteractionPrompt) | (HostInteractionClosed);
+
+export type HostInteractionFeature = "host.interactions";
+
+export type HostInteractionLimits = {"textBytes":4096,"requestBytes":65536,"items":100,"pendingPerRuntime":1,"pendingTotal":8,"requestsPerMinute":10,"timeoutMs":60000};
+
+export type HostInteractionPrompt = {
+  permissionMode?: "allow" | "ask" | "deny";
+  requestId: string;
+  actionToken: string;
+  pluginId: PluginId;
+  pluginVersion: SemanticVersion;
+  expiresAt: SafePositiveInteger;
+  phase: "request" | "preview" | "commit";
+  request: (HostInteractionRequest) | (VaultHostActionRequest);
+  previewText?: string;
+  terminalSessionId?: string;
+  terminalRendererId?: string;
+  terminalLabel?: string;
+  vaultTarget?: VaultHostLocalTarget;
+  reviewedDraft?: (VaultHostCreateFields) | (VaultHostEditFields);
+};
+
+export type HostInteractionReceipt = (boolean) | ({
+  completionToken: string;
+});
+
+export type HostInteractionRequest = (HostQuickPickRequest) | (HostInputRequest) | (HostClipboardReadRequest) | (HostClipboardWriteRequest) | (HostTerminalSelectionReadRequest) | (HostTerminalInputProposalRequest);
+
+export type HostInteractionResponse = {
+  requestId: string;
+  actionToken: string;
+  action: "cancel" | "preview" | "submit" | "commit" | "complete" | "fail";
+  value?: string;
+  resources?: VaultHostSelectedResources;
+  draft?: (VaultHostCreateFields) | (VaultHostEditFields);
+  scriptsRun?: boolean;
+};
+
+export type HostInteractionResult = ({
+  cancelled: true;
+}) | ({
+  cancelled: false;
+  value: (string) | (true) | (SharedTerminalSelection);
+}) | (VaultHostSelectedResult) | (VaultHostActionAccepted);
+
+export type HostQuickPickItem = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
+export type HostQuickPickRequest = {
+  kind: "quickPick";
+  title: string;
+  items: Array<HostQuickPickItem>;
+};
+
+export type HostSingleLineInputText = string;
+
+export type HostTerminalInputProposalRequest = {
+  kind: "terminal.input.propose";
+  title: string;
+  handle: string;
+  text: string;
+};
+
+export type HostTerminalSelectionReadRequest = {
+  kind: "terminal.selection.read";
+  title: string;
+};
+
+export type HostTerminalTarget = (unknown);
+
+export type HostVaultFeature = "vault.host-actions";
 
 export type IconReference = (ThemeIcon) | (PackageIcon);
 
@@ -319,6 +490,10 @@ export type ImporterSnippetDraft = {
   description?: string;
 };
 
+export type InteractiveCommandFeature = "commands.interactive";
+
+export type InteractiveCommandLimits = {"timeoutMs":180000};
+
 export type JsonPrimitive = (string) | (number) | (boolean) | (null);
 
 export type JsonRpcStandardErrorCode = -32700 | -32600 | -32601 | -32602 | -32603;
@@ -355,7 +530,9 @@ export type MenuContribution = {
 
 export type MenuLocation = "commandPalette" | "application" | "host/context" | "terminal/context" | "terminal/toolbar" | "statusBar";
 
-export type NonResourceScopedPermission = "storage" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "secrets" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer";
+export type NetworkCredentialLeaseFeature = "network.credential-lease";
+
+export type NonResourceScopedPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "secrets" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose";
 
 export type NullableRpcId = (RpcId) | (null);
 
@@ -375,7 +552,7 @@ export type PermissionDecision = ({
   decision: "deny" | "cancel";
 });
 
-export type PermissionDeclaration = (PluginPermission) | (PermissionResourceDeclaration);
+export type PermissionDeclaration = Exclude<PluginPermission, "network.stream"> | PermissionResourceDeclaration;
 
 export type PermissionGrantScope = "once" | "session" | "application" | "always";
 
@@ -390,6 +567,19 @@ export type PermissionRequest = {
   permission: PluginPermission;
   resources?: Array<PermissionResource>;
   resourceKinds?: Array<PermissionResourceKind>;
+  displayContext?: {
+    action?: PluginAgentActionPreview;
+    modelLabel?: string;
+    selections?: Array<{
+      title: string;
+      scope: "workspace" | "tab" | "session" | "host" | "note";
+      version: string;
+    }>;
+  };
+  relatedPermissions?: Array<{
+    permission: PluginPermission;
+    resources: Array<PermissionResource>;
+  }>;
   reason: string;
   operationId?: string;
   sessionId?: string;
@@ -411,7 +601,439 @@ export type PermissionSet = {
   optional?: Array<PermissionDeclaration>;
 };
 
+export type PluginAgentActionPreview = {
+  capabilityId: string;
+  text: string;
+};
+
+export type PluginAgentBackend = {
+  backendRef: string;
+  label: string;
+  backend: PluginAgentBackendKind;
+  status: "supported" | "unsupported" | "unavailable";
+  reason: "ready" | "not-configured" | "native-boundary-unverified" | "configuration-unavailable";
+};
+
+export type PluginAgentBackendKind = "catty" | "claude" | "codex" | "copilot" | "cursor" | "codebuddy" | "opencode" | "grok" | "mimo";
+
+export type PluginAgentBackendsResult = {
+  items: Array<PluginAgentBackend>;
+};
+
+export type PluginAgentCapabilities = ["session.environment","terminal.execute","terminal.start","terminal.poll","terminal.stop","harness.terminal.read_context"];
+
+export type PluginAgentChatRef = {
+  chatHandle: string;
+};
+
+export type PluginAgentChatResult = {
+  chatHandle: string;
+  conversationRef: string;
+  backendLabel: string;
+  expiresAt: number;
+};
+
+export type PluginAgentChatsResult = {
+  items: Array<PluginAgentChatSummary>;
+};
+
+export type PluginAgentChatSummary = {
+  conversationRef: string;
+  title: string;
+  backend: PluginAgentBackendKind;
+  updatedAt: number;
+};
+
+export type PluginAgentEvent = ({
+  kind: "text";
+  text: string;
+}) | ({
+  kind: "activity";
+  capabilityId: string;
+  state: "started" | "completed" | "denied";
+}) | ({
+  kind: "usage";
+  inputTokens: number;
+  outputTokens: number;
+}) | ({
+  kind: "end";
+  reason: "completed" | "cancelled" | "unavailable" | "budget-exceeded";
+});
+
+export type PluginAgentFeature = "ai.agent-sessions";
+
+export type PluginAgentHistoryResult = {
+  items: Array<PluginAgentMessage>;
+};
+
+export type PluginAgentHostBackend = {
+  hostHandle: string;
+  label: string;
+  backend: PluginAgentBackendKind;
+  status: "supported" | "unsupported" | "unavailable";
+  reason: "ready" | "not-configured" | "native-boundary-unverified" | "configuration-unavailable";
+};
+
+export type PluginAgentHostRequest = ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "agent.backends";
+  payload: PluginAIEmptyParams;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "agent.targets";
+  payload: PluginAIEmptyParams;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "agent.current";
+  payload: {
+    hostHandle: string;
+  };
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "agent.run";
+  payload: {
+    backendHandle: string;
+    delegationTag: string;
+    session: PluginAgentHostSession;
+    terminalSessions: Array<PluginAgentHostTerminal>;
+    text: string;
+    capabilities: Array<"session.environment" | "terminal.execute" | "terminal.start" | "terminal.poll" | "terminal.stop" | "harness.terminal.read_context">;
+    maxIterations: number;
+  };
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "agent.next";
+  payload: {
+    hostHandle: string;
+  };
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "agent.stop";
+  payload: {
+    hostHandle: string;
+  };
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "agent.release";
+  payload: {
+    hostHandle: string;
+  };
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "request.cancel";
+  payload: {
+    requestId: string;
+  };
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "runtime.release";
+  payload: PluginAIEmptyParams;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "agent.close";
+  payload: {
+    chatSessionId: string;
+  };
+});
+
+export type PluginAgentHostResponse = ({
+  requestId: string;
+  actionToken: string;
+  result: PluginAgentHostResult;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  error: true;
+});
+
+export type PluginAgentHostResult = ({
+  backends: Array<PluginAgentHostBackend>;
+}) | ({
+  targets: Array<PluginAgentHostTerminal>;
+}) | ({
+  current: boolean;
+}) | ({
+  hostHandle: string;
+}) | ({
+  ok: boolean;
+  session?: PluginAgentHostSession;
+}) | ({
+  done: false;
+  event: PluginAgentEvent;
+  session?: PluginAgentHostSession;
+}) | ({
+  done: true;
+  session: PluginAgentHostSession;
+});
+
+export type PluginAgentHostSession = {
+  conversationRef: string;
+  id: string;
+  title: string;
+  agentId: string;
+  scope: {
+    type: "global";
+  };
+  messages: Array<JsonValue>;
+  createdAt: number;
+  updatedAt: number;
+  externalSessionId?: string;
+  contextCompaction?: JsonValue;
+};
+
+export type PluginAgentHostTerminal = {
+  sessionId: string;
+  hostId?: string;
+  hostname: string;
+  label: string;
+  protocol?: string;
+  username?: string;
+  connected: boolean;
+};
+
+export type PluginAgentMessage = {
+  role: "user" | "assistant";
+  text: string;
+};
+
+export type PluginAgentOpenParams = {
+  backendRef: string;
+  selectionHandle: string;
+  conversationRef?: string;
+};
+
+export type PluginAgentSendParams = {
+  chatHandle: string;
+  text: string;
+};
+
+export type PluginAgentTargetsResult = {
+  selectionHandle: string;
+  expiresAt: number;
+  items: Array<PluginAgentTargetSummary>;
+};
+
+export type PluginAgentTargetSummary = {
+  title: string;
+  kind: "terminal";
+};
+
+export type PluginAgentTurnRef = {
+  turnHandle: string;
+};
+
+export type PluginAgentTurnResult = {
+  turnHandle: string;
+  expiresAt: number;
+};
+
+export type PluginAIBooleanResult = {
+  ok: boolean;
+};
+
+export type PluginAIChatRef = {
+  chatHandle: string;
+};
+
+export type PluginAIChatResult = {
+  chatHandle: string;
+  model: string;
+  expiresAt: number;
+};
+
+export type PluginAIContextLimits = {"contexts":4,"inputBytes":16384,"chunkBytes":4096,"outputBytes":32768,"outputTokens":2048,"turnMs":60000};
+
+export type PluginAIEmptyParams = Record<string, never>;
+
+export type PluginAIHostContextRef = {
+  hostHandle: string;
+  version: string;
+};
+
+export type PluginAIHostHandleRef = {
+  hostHandle: string;
+};
+
+export type PluginAIHostModelEvent = ({
+  kind: "text";
+  text: string;
+}) | ({
+  kind: "usage";
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+});
+
+export type PluginAIHostModelStart = {
+  hostHandle: string;
+  prompt: string;
+  contexts: Array<string>;
+  maxOutputTokens: number;
+  maxChunkBytes: number;
+};
+
+export type PluginAIHostRequest = ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "model.select";
+  payload: PluginAIEmptyParams;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "model.current";
+  payload: PluginAIHostHandleRef;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "model.start";
+  payload: PluginAIHostModelStart;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "model.next";
+  payload: PluginAIHostHandleRef;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "model.stop";
+  payload: PluginAIHostHandleRef;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "model.release";
+  payload: PluginAIHostHandleRef;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "context.select";
+  payload: PluginAIEmptyParams;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "context.current";
+  payload: PluginAIHostContextRef;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "context.read";
+  payload: PluginAIHostContextRef;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "runtime.release";
+  payload: PluginAIEmptyParams;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  runtimeId: string;
+  kind: "request.cancel";
+  payload: {
+    requestId: string;
+  };
+});
+
+export type PluginAIHostResponse = ({
+  requestId: string;
+  actionToken: string;
+  result: PluginAIHostResult;
+}) | ({
+  requestId: string;
+  actionToken: string;
+  error: true;
+});
+
+export type PluginAIHostResult = ({
+  hostHandle: string;
+  label: string;
+}) | ({
+  hostHandle: string;
+}) | ({
+  current: boolean;
+}) | ({
+  done: true;
+}) | ({
+  done: false;
+  event: PluginAIHostModelEvent;
+}) | ({
+  items: Array<PluginAIHostSelectedSummary>;
+}) | ({
+  text: string;
+}) | ({
+  ok: boolean;
+});
+
+export type PluginAIHostSelectedSummary = {
+  hostHandle: string;
+  scope: "workspace" | "tab" | "session" | "host" | "note";
+  title: string;
+  version: string;
+};
+
+export type PluginAIModelInvocationFeature = "ai.model-invocation";
+
+export type PluginAIStartTurnParams = {
+  chatHandle: string;
+  prompt: string;
+  contexts?: Array<PluginSelectedContextRef>;
+};
+
+export type PluginAIStreamEvent = ({
+  kind: "text";
+  sequence: number;
+  text: string;
+}) | ({
+  kind: "usage";
+  sequence: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}) | ({
+  kind: "end";
+  sequence: number;
+});
+
+export type PluginAITurnRef = {
+  turnHandle: string;
+};
+
+export type PluginAITurnResult = {
+  turnHandle: string;
+  maxOutputTokens: 2048;
+  reservedTokens: number;
+};
+
 export type PluginContributions = {
+  themes?: Array<ThemePackContribution>;
   settings?: Array<SettingContribution>;
   commands?: Array<CommandContribution>;
   keybindings?: Array<KeybindingContribution>;
@@ -433,6 +1055,7 @@ export type PluginEngines = {
 export type PluginEntrypoints = {
   browser?: RelativePackagePath;
   node?: RelativePackagePath;
+  data?: "theme";
 };
 
 export type PluginErrorData = {
@@ -461,6 +1084,7 @@ export type PluginManifest = {
   version: SemanticVersion;
   publisher: string;
   license?: string;
+  icon?: IconReference;
   homepage?: string;
   repository?: string;
   engines: PluginEngines;
@@ -480,7 +1104,78 @@ export type PluginManifestHeader = ({
   engines: PluginEngineHeader;
 } & Record<string, unknown>);
 
-export type PluginPermission = "storage" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "network" | "filesystem.read" | "filesystem.write" | "secrets" | "companion.execute" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer";
+export type PluginNetworkAuthorization = {
+  scheme?: "Basic" | "Bearer";
+  username?: string;
+};
+
+export type PluginNetworkRequest = {
+  url: string;
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD";
+  headers?: { [key: string]: string };
+  body?: {
+    encoding: "utf8" | "base64";
+    data: string;
+  };
+  timeoutMs?: number;
+  credentialLease?: SecretLeaseRef;
+  authorization?: PluginNetworkAuthorization;
+};
+
+export type PluginNetworkResponse = {
+  url: string;
+  status: number;
+  headers: { [key: string]: string };
+  body: {
+    encoding: "base64";
+    data: string;
+  };
+};
+
+export type PluginPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "network" | "network.stream" | "filesystem.read" | "filesystem.write" | "secrets" | "companion.execute" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose";
+
+export type PluginSelectedContextContent = {
+  handle: string;
+  scope: "workspace" | "tab" | "session" | "host" | "note";
+  title: string;
+  version: string;
+  expiresAt: number;
+  text: string;
+};
+
+export type PluginSelectedContextFeature = "context.selected-read";
+
+export type PluginSelectedContextListResult = {
+  items: Array<PluginSelectedContextSummary>;
+};
+
+export type PluginSelectedContextRef = {
+  handle: string;
+  version: string;
+};
+
+export type PluginSelectedContextSummary = {
+  handle: string;
+  scope: "workspace" | "tab" | "session" | "host" | "note";
+  title: string;
+  version: string;
+  expiresAt: number;
+};
+
+export type PluginViewFocusEvent = {
+  instanceId: string;
+};
+
+export type PluginViewFocusRequest = PluginViewFocusEvent;
+
+export type PluginViewResourceRequest = {
+  instanceId: string;
+  path: RelativePackagePath;
+};
+
+export type PluginViewResourceResult = {
+  url: string;
+};
 
 export type PluginWireErrorCode = -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016;
 
@@ -557,7 +1252,7 @@ export type RequiredPermissionResourceDeclaration = {
   reason?: string;
 };
 
-export type ResourceScopedPermission = "network" | "filesystem.read" | "filesystem.write" | "companion.execute";
+export type ResourceScopedPermission = "network" | "network.stream" | "filesystem.read" | "filesystem.write" | "companion.execute";
 
 export type RpcCancel = {
   jsonrpc: "2.0";
@@ -686,6 +1381,7 @@ export type SettingContribution = {
   sync?: boolean;
   sortable?: boolean;
   valueSchema?: JsonValue;
+  group?: LocalizedText;
 };
 
 export type SettingControl = "switch" | "radio" | "select" | "multiselect" | "text" | "textarea" | "number" | "slider" | "password" | "color" | "font" | "file" | "directory" | "keybinding" | "list" | "table";
@@ -697,6 +1393,12 @@ export type SettingOption = {
 };
 
 export type SettingScope = "application" | "workspace" | "host" | "session" | "device";
+
+export type SharedTerminalSelection = {
+  text: string;
+  handle: string;
+  expiresAt: SafePositiveInteger;
+};
 
 export type StreamChunkByteLength = number;
 
@@ -846,6 +1548,8 @@ export type SyncWriteObjectResult = {
   revision?: SyncObjectRevision;
 };
 
+export type TerminalInputDraftFeature = "terminal.input-drafts";
+
 export type TerminalInterceptorAttachmentDescriptor = {
   providerId: ContributionId;
   direction: "input" | "output";
@@ -916,6 +1620,10 @@ export type TerminalInterceptorReadyFrame = {
 
 export type TerminalInterceptorWindowBytes = number;
 
+export type TerminalSelectionSharingFeature = "terminal.selection-sharing";
+
+export type TerminalSelectionSharingLimits = {"textBytes":4096,"handleTtlMs":120000,"handlesPerRuntime":4,"handlesTotal":64};
+
 export type TerminalSessionSnapshot = {
   sessionId: string;
   hostId?: string;
@@ -930,22 +1638,213 @@ export type TerminalSessionSnapshot = {
   alternateScreen?: boolean;
 };
 
+export type TerminalSidebarFeature = "views.terminal-sidebar";
+
 export type ThemeIcon = {
   kind: "theme";
   name: string;
+};
+
+export type ThemePackApplyRequest = {
+  expectedRevision: SafeUnsignedInteger;
+  mode: "light" | "dark";
+  choice: (ThemePackChoice) | (null);
+};
+
+export type ThemePackCatalog = {
+  selection: ThemePackSelection;
+  entries: Array<ThemePackEntry>;
+  diagnostics: Array<{
+    pluginId: PluginId;
+    themeId?: string;
+    code: "invalid" | "unavailable" | "capacity";
+  }>;
+};
+
+export type ThemePackChoice = {
+  ref: ThemePackReference;
+};
+
+export type ThemePackColors = {
+  background?: string;
+  foreground?: string;
+  card?: string;
+  cardForeground?: string;
+  popover?: string;
+  popoverForeground?: string;
+  secondary?: string;
+  secondaryForeground?: string;
+  muted?: string;
+  mutedForeground?: string;
+  accent?: string;
+  destructive?: string;
+  destructiveForeground?: string;
+  border?: string;
+  input?: string;
+};
+
+export type ThemePackContribution = {
+  id: ContributionId;
+  label: LocalizedText;
+  variant: ThemePackVariant;
+  entry: RelativePackagePath;
+};
+
+export type ThemePackEntry = {
+  ref: ThemePackReference;
+  label: string;
+  pluginName: string;
+  dataOnly: boolean;
+  palette: ThemePackPalette;
+};
+
+export type ThemePackFeature = "appearance.theme-packs";
+
+export type ThemePackLimits = {"jsonBytes":65536,"catalogEntries":256,"themesPerPackage":32};
+
+export type ThemePackPalette = {
+  formatVersion: 1;
+  base: "light" | "dark";
+  colors: ThemePackColors;
+};
+
+export type ThemePackReference = {
+  pluginId: PluginId;
+  themeId: ContributionId;
+  version: SemanticVersion;
+  digest: string;
+  variant: ThemePackVariant;
+};
+
+export type ThemePackSelection = {
+  formatVersion: 1;
+  revision: SafeUnsignedInteger;
+  light: (ThemePackChoice) | (null);
+  dark: (ThemePackChoice) | (null);
+};
+
+export type ThemePackVariant = "light" | "dark";
+
+export type VaultHostActionAccepted = {
+  cancelled: false;
+  status: "saved" | "requested";
+};
+
+export type VaultHostActionRequest = ({
+  kind: "vault.selectHosts";
+  title: string;
+}) | ({
+  kind: "vault.requestHostDraft";
+  draft: VaultHostCreateFields;
+}) | ({
+  kind: "vault.requestHostDraft";
+  target: VaultHostRef;
+  expectedRevision: string;
+  draft: VaultHostEditFields;
+}) | ({
+  kind: "vault.requestConnect";
+  target: VaultHostRef;
+  expectedRevision: string;
+});
+
+export type VaultHostActionResult = ({
+  cancelled: true;
+}) | (VaultHostActionAccepted);
+
+export type VaultHostConnectParams = {
+  target: VaultHostRef;
+  expectedRevision: string;
+};
+
+export type VaultHostCreateFields = {
+  label?: string;
+  hostname: string;
+  username?: string;
+  port?: number;
+  group?: string;
+  tags?: Array<string>;
+};
+
+export type VaultHostDraftParams = ({
+  draft: VaultHostCreateFields;
+}) | ({
+  target: VaultHostRef;
+  expectedRevision: string;
+  draft: VaultHostEditFields;
+});
+
+export type VaultHostEditFields = {
+  label?: string;
+  group?: string;
+  tags?: Array<string>;
+};
+
+export type VaultHostLocalTarget = {
+  resourceId: string;
+  revision: string;
+};
+
+export type VaultHostMetadata = {
+  label: string;
+  hostname: string;
+  username: string;
+  port?: number;
+  group: string;
+  tags: Array<string>;
+  protocol: string;
+};
+
+export type VaultHostRef = {
+  kind: "host.selection";
+  scope: "metadata";
+  handle: string;
+  revision: string;
+  expiresAt: SafePositiveInteger;
+};
+
+export type VaultHostSelectedResources = Array<{
+  resourceId: string;
+  revision: string;
+  label: string;
+  hostname: string;
+  username: string;
+  port?: number;
+  group: string;
+  tags: Array<string>;
+  protocol: string;
+}>;
+
+export type VaultHostSelectedResult = {
+  cancelled: false;
+  hosts: Array<{
+    target: VaultHostRef;
+    metadata: VaultHostMetadata;
+  }>;
+  groups: Array<{
+    path: string;
+    members: Array<VaultHostRef>;
+  }>;
+};
+
+export type VaultHostSelectionResult = ({
+  cancelled: true;
+}) | (VaultHostSelectedResult);
+
+export type VaultPagesFeature = "views.vault-pages";
+
+export type VaultSelectHostsParams = {
+  title: string;
 };
 
 export type ViewContribution = {
   id: ContributionId;
   title: LocalizedText;
   location: ViewLocation;
-  entry: RelativePackagePath;
   icon?: IconReference;
   order?: number;
   when?: ContextKeyExpression;
-  retainContextWhenHidden?: boolean;
 };
 
-export type ViewLocation = "aside" | "panel" | "tab" | "modal" | "settings";
+export type ViewLocation = "aside" | "panel" | "tab" | "modal" | "vault-page" | "terminal-sidebar";
 
 export type WireIntegerLimits = {"maxSafeInteger":9007199254740991};

@@ -1,4 +1,5 @@
 import type { ToolOutputStore } from './toolOutputStore';
+import { sliceHead, sliceTail } from '../textBoundaries';
 
 const LARGE_USER_INPUT_THRESHOLD_CHARS = 25_000;
 const LARGE_USER_INPUT_HEAD_CHARS = 12_000;
@@ -43,8 +44,8 @@ export function fitLargeUserInputForModel(
   if (input.length <= LARGE_USER_INPUT_THRESHOLD_CHARS) return input;
   const handleId = getStableHandleId(input, chatSessionId, toolOutputStore);
   return [
-    input.slice(0, LARGE_USER_INPUT_HEAD_CHARS),
+    sliceHead(input, LARGE_USER_INPUT_HEAD_CHARS),
     `\n\n[... large user input moved to saved output: ${input.length} chars, handleId=${handleId}. Use tool_output_read with range or search for omitted details ...]\n\n`,
-    input.slice(-LARGE_USER_INPUT_TAIL_CHARS),
+    sliceTail(input, LARGE_USER_INPUT_TAIL_CHARS),
   ].join('');
 }

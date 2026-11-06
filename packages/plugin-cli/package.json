@@ -1,6 +1,6 @@
 {
   "name": "@netcatty/plugin-cli",
-  "version": "0.1.0-internal",
+  "version": "0.1.0-internal.1",
   "private": true,
   "type": "module",
   "license": "GPL-3.0-or-later",
@@ -18,7 +18,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@netcatty/plugin-contract": "0.1.0-internal",
+    "@netcatty/plugin-contract": "0.1.0-internal.1",
     "ajv": "8.18.0",
     "ajv-formats": "3.0.1",
     "semver": "^7.7.3",

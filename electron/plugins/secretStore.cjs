@@ -41,7 +41,12 @@ class PluginSecretStore {
   }
 
   #stashKey(pluginId, key) {
-    return `${pluginId}\0${key}`;
+    return `${this.database.privateOwner?.(pluginId) ?? pluginId}\0${key}`;
+  }
+
+  clearPluginMemory(pluginId) {
+    const prefix = `${this.database.privateOwner?.(pluginId) ?? pluginId}\0`;
+    for (const key of this.#overwriteStash.keys()) if (key.startsWith(prefix)) this.#overwriteStash.delete(key);
   }
 
   #assertAvailable() {
@@ -163,7 +168,7 @@ class PluginSecretStore {
     } else {
       deleted = this.database.deleteSecretsByKeyPrefix(pluginId, prefix);
     }
-    const pluginPrefix = `${pluginId}\0`;
+    const pluginPrefix = `${this.database.privateOwner?.(pluginId) ?? pluginId}\0`;
     for (const stashKey of [...this.#overwriteStash.keys()]) {
       if (!stashKey.startsWith(pluginPrefix)) continue;
       const secretKey = stashKey.slice(pluginPrefix.length);

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
 export interface DiskInfo {
+  diskReadSpeed?: number | null; // Mounted block-device I/O, bytes/sec
+  diskWriteSpeed?: number | null;
   capacityKey?: string;       // Filesystem or shared-pool identity for deduplication
   filesystemType?: string;    // Filesystem type reported by df (for network/FUSE filtering)
   mountPoint: string;

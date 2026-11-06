@@ -1,3 +1,6 @@
+import { PluginThemePicker } from './PluginThemePicker';
+import { applyPluginThemeSelection, usePluginThemeRevision } from '../../../application/state/usePluginThemeRuntime';
+import { pluginThemeRegistry } from '../../../infrastructure/config/pluginThemeRegistry';
 import React, { memo, useCallback, useMemo, useState } from "react";
 import { applyCustomCssToDocument } from "../../../lib/customCss";
 import { DebouncedTextarea } from "../DebouncedTextarea";
@@ -72,6 +75,8 @@ function SettingsAppearanceTab(props: {
   setAppIconVariant: (variant: AppIconVariant) => void;
 }) {
   const { t } = useI18n();
+  usePluginThemeRevision();
+  const [pluginThemeError, setPluginThemeError] = useState('');
   const availableUIFonts = useAvailableUIFonts();
   // Note code fonts come from the monospace-only store (fontStore); the note
   // body font follows the UI font setting instead.
@@ -236,8 +241,12 @@ function SettingsAppearanceTab(props: {
   );
 
   const visibleUiThemes = resolvedTheme === "dark" ? DARK_UI_THEMES : LIGHT_UI_THEMES;
-  const visibleUiThemeId = resolvedTheme === "dark" ? darkUiThemeId : lightUiThemeId;
-  const setVisibleUiThemeId = resolvedTheme === "dark" ? setDarkUiThemeId : setLightUiThemeId;
+  const visibleUiThemeId = pluginThemeRegistry.isActive(resolvedTheme) ? "" : resolvedTheme === "dark" ? darkUiThemeId : lightUiThemeId;
+  const setVisibleUiThemeId = (id: string) => {
+    void applyPluginThemeSelection(resolvedTheme, null).then(() => {
+      (resolvedTheme === "dark" ? setDarkUiThemeId : setLightUiThemeId)(id);setPluginThemeError('');
+    }).catch((error: unknown) => setPluginThemeError(error instanceof Error ? error.message : t('settings.plugins.themes.failed')));
+  };
 
   return (
     <SettingsTabContent value="appearance">
@@ -357,6 +366,8 @@ function SettingsAppearanceTab(props: {
             {renderThemeSwatches(visibleUiThemes, visibleUiThemeId, setVisibleUiThemeId)}
           </div>
         </SettingsAnchor>
+        <PluginThemePicker mode={resolvedTheme} onRestore={() => (resolvedTheme === "dark" ? setDarkUiThemeId : setLightUiThemeId)(resolvedTheme === "dark" ? "midnight" : "snow")} />
+        {pluginThemeError && <p role="alert" className="text-xs text-destructive">{pluginThemeError}</p>}
         <SettingRow
           anchorId="appearance-accent-mode"
           label={t("settings.appearance.accentColor.mode")}

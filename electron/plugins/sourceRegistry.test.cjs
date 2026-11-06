@@ -1,0 +1,33 @@
+"use strict";
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { PluginDatabase } = require("./database.cjs");
+const { PluginSourceRegistry } = require("./sourceRegistry.cjs");
+
+test("sources persist, rename without changing identity, and fail closed when disabled or removed", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-sources-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, "db.sqlite");
+  let db = new PluginDatabase(file);
+  let registry = new PluginSourceRegistry(db);
+  assert.equal(registry.list().length, 1);
+  const source = registry.add("Example", "https://example.com");
+  assert.throws(() => registry.add("Duplicate", "https://example.com/v1/snapshot.json"));
+  registry.update(source.id, "Renamed", false);
+  assert.throws(() => registry.get(source.id), /removed or disabled/);
+  db.close();
+  db = new PluginDatabase(file);
+  t.after(() => db.close());
+  registry = new PluginSourceRegistry(db);
+  assert.equal(registry.list()[1].name, "Renamed");
+  registry.update(source.id, "Again", true);
+  assert.equal(registry.get(source.id).origin, source.origin);
+  registry.remove(source.id);
+  assert.throws(() => registry.get(source.id), /removed or disabled/);
+  assert.throws(() => registry.remove("official"));
+  assert.throws(() => registry.update("official", "Impersonated", false));
+  assert.equal(registry.get("official").origin, "https://plugins.netcatty.app");
+});

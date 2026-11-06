@@ -6,7 +6,6 @@ import type {
 
 type DraftsByScope = Partial<Record<string, AIDraft>>;
 type PanelViewByScope = Partial<Record<string, AIPanelView>>;
-type ActiveSessionIdMap = Record<string, string | null>;
 
 function isInactiveScopedTarget(
   scopeKey: string,
@@ -52,41 +51,6 @@ export function pruneInactiveScopedState(
   return {
     draftsByScope: draftsChanged ? nextDraftsByScope : draftsByScope,
     panelViewByScope: panelViewsChanged ? nextPanelViewByScope : panelViewByScope,
-  };
-}
-
-export function pruneInactiveScopedTransientState(
-  activeSessionIdMap: ActiveSessionIdMap,
-  draftsByScope: DraftsByScope,
-  panelViewByScope: PanelViewByScope,
-  activeTargetIds: Set<string>,
-): {
-  activeSessionIdMap: ActiveSessionIdMap;
-  draftsByScope: DraftsByScope;
-  panelViewByScope: PanelViewByScope;
-} {
-  let activeSessionMapChanged = false;
-  const nextActiveSessionIdMap: ActiveSessionIdMap = {};
-
-  for (const [scopeKey, sessionId] of Object.entries(activeSessionIdMap)) {
-    if (isInactiveScopedTarget(scopeKey, activeTargetIds)) {
-      activeSessionMapChanged = true;
-      continue;
-    }
-
-    nextActiveSessionIdMap[scopeKey] = sessionId;
-  }
-
-  const nextScopedState = pruneInactiveScopedState(
-    draftsByScope,
-    panelViewByScope,
-    activeTargetIds,
-  );
-
-  return {
-    activeSessionIdMap: activeSessionMapChanged ? nextActiveSessionIdMap : activeSessionIdMap,
-    draftsByScope: nextScopedState.draftsByScope,
-    panelViewByScope: nextScopedState.panelViewByScope,
   };
 }
 

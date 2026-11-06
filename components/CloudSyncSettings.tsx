@@ -35,6 +35,7 @@ import {
 import {
     initializePreparedConvergentMigration,
     prepareConvergentSyncMigration,
+    resolvePreparedConvergentMigrationConflict,
     type PreparedConvergentMigration,
 } from '../application/convergentSyncMigration';
 import type { ShrinkFinding } from '../domain/syncGuards';
@@ -358,6 +359,15 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
         setConvergentBusy(true);
         setConvergentError(null);
         try {
+            if (preparedConvergentMigration && !sync.convergentSyncConfig.initialized) {
+                const prepared = resolvePreparedConvergentMigrationConflict(
+                    preparedConvergentMigration, addressKey, candidateDot,
+                );
+                setPreparedConvergentMigration(prepared);
+                setConvergentPreview(prepared.plan.preview);
+                toast.success(t('cloudSync.convergent.conflict.resolved'));
+                return;
+            }
             const { results } = await sync.resolveConvergentConflict(
                 addressKey,
                 candidateDot,
@@ -371,7 +381,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
         } finally {
             setConvergentBusy(false);
         }
-    }, [onApplyConvergentPayload, sync, t]);
+    }, [onApplyConvergentPayload, preparedConvergentMigration, sync, t]);
 
     const handleDowngradeConvergent = useCallback(async () => {
         if (!window.confirm(t('cloudSync.convergent.downgrade.confirm'))) return;

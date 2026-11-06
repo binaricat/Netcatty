@@ -3,9 +3,57 @@ const assert = require("node:assert/strict");
 const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
+const shellPath = value => "'" + value.replaceAll("\\", "/").replaceAll("'", "'\\''") + "'";
 const { execFileSync } = require("node:child_process");
-const { DISK_IO_ASSIGNMENT, parseDiskIo, diskIoRates } = require("./monitorDiskIo.cjs");
+const { DISK_IO_ASSIGNMENT, PARTITION_IO_ASSIGNMENT, parseDiskIo, diskIoRates, withPartitionIo } = require("./monitorDiskIo.cjs");
 const unknown = { diskReadSpeed: null, diskWriteSpeed: null };
+
+test("mount rates isolate partitions, support shared devices and escaped mounts, and tolerate unrelated hotplug", () => {
+  const disks = ["/", "/data space", "/bind", "/pool"].map(mountPoint => ({ mountPoint }));
+  const mounts = "/:8-1,/data\\040space:253-0,/bind:8-1,/pool:0-42,";
+  const previous = parseDiskIo("10;8-1:100:200,253-0:10:20,");
+  const current = parseDiskIo("12;8-1:104:208,253-0:30:60,8-2:0:0,");
+  const result = withPartitionIo(disks, mounts, current, previous);
+  assert.deepEqual(result.slice(0, 3).map(({ diskReadSpeed, diskWriteSpeed }) => ({ diskReadSpeed, diskWriteSpeed })), [
+    { diskReadSpeed: 1024, diskWriteSpeed: 2048 },
+    { diskReadSpeed: 5120, diskWriteSpeed: 10240 },
+    { diskReadSpeed: 1024, diskWriteSpeed: 2048 },
+  ]);
+  assert.equal(result[3], disks[3]);
+  for (const snapshot of [null, parseDiskIo("12;8-1:99:200,253-0:10:20,")]) {
+    assert.deepEqual(withPartitionIo(disks, mounts, snapshot, previous)[0], { mountPoint: "/" });
+  }
+  assert.deepEqual(withPartitionIo(disks, mounts, current, null)[0], { mountPoint: "/" });
+});
+
+test("partition collection reads hundreds of devices with two awk processes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "partition-io-"));
+  try {
+    const block = join(dir, "block");
+    mkdirSync(block);
+    writeFileSync(join(dir, "uptime"), "123.45 100.00\n");
+    writeFileSync(join(dir, "mountinfo"), "1 0 8:1 / / rw - ext4 /dev/root rw\n2 0 253:0 / /data rw - ext4 /dev/mapper/data rw\n");
+    const names = Array.from({ length: 256 }, (_, index) => `8-${index + 1}`);
+    names.push("253-0");
+    for (const name of names) {
+      // Use portable fixture names; Linux kernel names use a colon.
+      mkdirSync(join(block, name.replace(":", "-")));
+      writeFileSync(join(block, name.replace(":", "-"), "stat"), "1 2 100 4 5 6 200\n");
+    }
+    const command = PARTITION_IO_ASSIGNMENT
+      .replaceAll("/proc/uptime", shellPath(join(dir, "uptime")))
+      .replaceAll("/sys/dev/block", shellPath(block))
+      .replaceAll("/proc/self/mountinfo", shellPath(join(dir, "mountinfo")));
+    const count = shellPath(join(dir, "awk-count"));
+    const output = execFileSync("sh", ["-c", `awk() { printf x >> ${count}; command awk "$@"; }; ${command}; printf '%s|%s|' "$partitionio" "$diskmounts"; cat ${count}`], { encoding: "utf8" });
+    const [counters, mounts, processes] = output.split("|");
+    assert.deepEqual([...parseDiskIo(counters).devices.keys()].sort(), names.sort());
+    assert.equal(processes, "xx", "device count must not increase awk process count");
+    assert.equal(mounts, "/:8-1,/data:253-0,");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("disk rates use remote fractional sample time and fixed 512-byte sectors", () => {
   const before = parseDiskIo("100.25;sda:100:200,nvme0n1:50:100,");
@@ -39,7 +87,7 @@ test("Linux collection includes whole hardware devices, excludes partitions and 
     }
     mkdirSync(join(block, "sda", "sda1"));
     writeFileSync(join(block, "sda", "sda1", "stat"), "1 2 100 4 5 6 200\n");
-    const command = DISK_IO_ASSIGNMENT.replaceAll("/proc/uptime", join(dir, "uptime")).replaceAll("/sys/block", block);
+    const command = DISK_IO_ASSIGNMENT.replaceAll("/proc/uptime", shellPath(join(dir, "uptime"))).replaceAll("/sys/block", shellPath(block));
     const output = execFileSync("sh", ["-c", `${command}; printf '%s' "$diskio"`], { encoding: "utf8" });
     const parsed = parseDiskIo(output);
     assert.equal(parsed.timestamp, 123.45);

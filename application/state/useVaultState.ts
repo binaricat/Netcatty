@@ -317,6 +317,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
   const [noteGroups, setNoteGroups] = useState<string[]>([]);
   const [knownHosts, setKnownHosts] = useState<KnownHost[]>([]);
   const [shellHistory, setShellHistory] = useState<ShellHistoryEntry[]>([]);
+  const shellHistoryGenerationRef = useRef(0);
   const [connectionLogs, setConnectionLogs] = useState<ConnectionLog[]>([]);
   const [managedSources, setManagedSources] = useState<ManagedSource[]>([]);
   const [groupConfigs, setGroupConfigs] = useState<GroupConfig[]>([]);
@@ -775,6 +776,13 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
       return normalizeVaultOrder(decrypted.map((host) => sanitizeHost(host)));
     }
   }, [waitForPendingVaultWrites]);
+
+  // Host-owned action guards need the synchronous mutation snapshot, including
+  // edits that React has not published yet. This accessor never crosses RPC.
+  const readCurrentHostActionState = useCallback(() => ({
+    hosts: hostsRef.current, groupConfigs: groupConfigsRef.current, snippets: snippetsRef.current,
+    managedSources: managedSourcesRef.current,
+  }), []);
 
   const updateKeys = useCallback((data: SSHKey[]) => {
     const cleaned = normalizeVaultOrder(data);
@@ -1248,6 +1256,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
     updateGroupConfigs?: (current: GroupConfig[]) => GroupConfig[],
     expectedHosts?: Host[],
     lock?: VaultLockHandle | null,
+    assertAuthorized?: () => void | Promise<void>,
   ): Promise<
     | {
       status: "persisted";
@@ -1322,6 +1331,10 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
         encryptHosts(cleanedHosts),
         encryptGroupConfigs(nextGroupConfigs),
       ]);
+      // Optional plugin draft guard: runtime/source/revoke/lock authority must
+      // still hold after encryption, immediately before the existing atomic
+      // persistence boundary. Ordinary imports retain their existing behavior.
+      if (assertAuthorized) await assertAuthorized();
       if (
         version !== hostsWriteVersion.current
         || groupConfigsVersion !== groupConfigsWriteVersion.current
@@ -1433,19 +1446,25 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
 
   const addShellHistoryEntry = useCallback(
     (entry: Omit<ShellHistoryEntry, "id" | "timestamp">) => {
-      setShellHistory((prev) => {
-        const updated = mergeGlobalHistoryOnAppend(prev, entry);
-        if (updated === prev) return prev;
-        // Persist immediately so crash between commit and layout effect cannot drop history.
-        // Store republish is also done in useLayoutEffect for load/storage-event paths.
-        localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, updated);
-        return updated;
-      });
+      const generation = shellHistoryGenerationRef.current;
+      // Yield the input turn before history rendering and synchronous storage work.
+      // Persist in the next task to keep the crash-loss window small.
+      setTimeout(() => {
+        if (generation !== shellHistoryGenerationRef.current) return;
+        setShellHistory((prev) => {
+          if (generation !== shellHistoryGenerationRef.current) return prev;
+          const updated = mergeGlobalHistoryOnAppend(prev, entry);
+          if (updated === prev) return prev;
+          localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, updated);
+          return updated;
+        });
+      }, 0);
     },
     [],
   );
 
   const clearShellHistory = useCallback(() => {
+    shellHistoryGenerationRef.current += 1;
     setShellHistory([]);
     localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, []);
     publishShellHistorySnapshot([]);
@@ -2520,6 +2539,7 @@ export const useVaultState = (options?: UseVaultStateOptions) => {
     groupConfigs,
     updateHosts,
     readPersistedHosts,
+    readCurrentHostActionState,
     updateKeys,
     importOrReuseKey,
     updateIdentities,

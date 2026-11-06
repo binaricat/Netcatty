@@ -2,6 +2,7 @@
 
 let bridgesRegistered = false;
 let cloudSyncSessionPassword = null;
+const perfTrace = require("../perfTrace.cjs");
 const { readClipboardFiles, readClipboardImage, hasClipboardImage } = require("../bridges/clipboardFiles.cjs");
 const { registerSystemNotificationHandlers } = require("../bridges/systemNotification.cjs");
 const {
@@ -148,14 +149,12 @@ function createBridgeRegistrar(context) {
     } = require("../plugins/pluginBridge.cjs");
     let terminalWorkerManager = null;
     const { toElectronAccelerator } = require("../plugins/keybindings.cjs");
-    const { startDevelopmentPluginHost } = require("../plugins/hostBootstrap.cjs");
-    const pluginHostService = startDevelopmentPluginHost({
+    const { startPluginHost } = require("../plugins/hostBootstrap.cjs");
+    perfTrace.mark("main:plugin-host:start");
+    const pluginHostService = startPluginHost({
       env: process.env,
       createService: () => {
         const { createPluginHostService } = require("../plugins/hostService.cjs");
-        const {
-          createNativePermissionDecisionProvider,
-        } = require("../plugins/nativePermissionDecision.cjs");
         const {
           terminalInterceptorChoiceLabel,
           terminalInterceptorIdentifier,
@@ -165,10 +164,11 @@ function createBridgeRegistrar(context) {
           app,
           electron: electronModule,
           safeStorage,
-          requestPermissionDecision: createNativePermissionDecisionProvider({
-            dialog: electronModule.dialog,
-            window: win,
-          }),
+          getInteractionWindow: () => win,
+          getPermissionWindows: () => getWindowManager().getManagedAppWindows(),
+          getTerminalWorkerManager: () => terminalWorkerManager,
+          isAppLocked: () => getAppLockController?.()?.getRuntimeState?.()?.locked !== false,
+          subscribeAppLock: (listener) => getAppLockController?.()?.subscribe?.(listener),
           getLocale: () => getWindowManager().getCurrentLanguage?.() ?? "en",
           requestTerminalInterceptorSelection: async ({ direction, providers }) => {
             const messages = terminalInterceptorMessages(getWindowManager().getCurrentLanguage?.() ?? "en");
@@ -208,8 +208,15 @@ function createBridgeRegistrar(context) {
       },
       logger: console,
     });
+    perfTrace.mark("main:plugin-host:end");
     registerPluginBridge(ipcMain, {
       manager: pluginHostService?.manager,
+      interactionService: pluginHostService?.interactionService,
+      permissionEngine: pluginHostService?.permissionEngine,
+      permissionDecisionHost: pluginHostService?.permissionDecisionHost,
+      runtimeSupervisor: pluginHostService?.runtimeSupervisor,
+      database: pluginHostService?.database,
+      catalogService: pluginHostService?.catalogService,
       contributionService: pluginHostService?.contributionService,
       terminalProviderService: pluginHostService?.terminalProviderService,
       terminalDataPipelineService: pluginHostService?.terminalDataPipelineService,
@@ -227,13 +234,16 @@ function createBridgeRegistrar(context) {
         });
         return result.canceled ? null : result.filePaths[0] ?? null;
       },
+      resolveBrandIcon: (pluginId) => pluginHostService?.contributionIconService?.resolveBrand(pluginId),
       resolveContributionIcon: (payload) => pluginHostService?.contributionIconService?.resolve(payload),
-      viewHost: pluginHostService?.viewHost,
+      themeService: pluginHostService?.themeService,
+      logService: pluginHostService?.logService,
+      hostDrawnViewHost: pluginHostService?.hostDrawnViewHost,
       env: process.env,
       isTrustedSender: createTrustedPluginBridgeSender({ devServerUrl: effectiveDevServerUrl }),
       broadcast: (channel, payload) => {
         for (const window of electronModule.BrowserWindow.getAllWindows()) {
-          if (!window.isDestroyed()) window.webContents.send(channel, payload);
+          if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel, payload);
         }
       },
     });
@@ -325,6 +335,11 @@ function createBridgeRegistrar(context) {
         windowManager.setPluginApplicationMenuProvider?.(applicationMenuProvider);
       });
     }
+    const { registerSystemThemeListener } = require("../bridges/systemTheme.cjs");
+    registerSystemThemeListener({
+      nativeTheme: electronModule.nativeTheme,
+      getWindows: () => BrowserWindow.getAllWindows(),
+    });
   
     const getCloudSyncPasswordPath = () => {
       try {
@@ -457,7 +472,9 @@ function createBridgeRegistrar(context) {
     });
   
     // Initialize temp directory (synchronously)
+    tempDirBridge.configureTempDirPreference?.(electronModule);
     tempDirBridge.ensureTempDir();
+    terminalWorkerManager?.setCustomTempDir(tempDirBridge.getCustomTempDir());
   
     // Register all IPC handlers
     sshBridge.registerHandlers(ipcMain, {
@@ -526,7 +543,7 @@ function createBridgeRegistrar(context) {
     onedriveAuthBridge.registerHandlers(ipcMain, electronModule);
     cloudSyncBridge.registerHandlers(ipcMain, electronModule);
     fileWatcherBridge.registerHandlers(ipcMain, { terminalWorkerManager });
-    tempDirBridge.registerHandlers(ipcMain, shell, electronModule);
+    tempDirBridge.registerHandlers(ipcMain, shell, electronModule, terminalWorkerManager);
     sessionLogsBridge.registerHandlers(ipcMain, { terminalWorkerManager });
     compressUploadBridge.registerHandlers(ipcMain, { terminalWorkerManager });
     globalShortcutBridge.registerHandlers(ipcMain);
@@ -538,6 +555,9 @@ function createBridgeRegistrar(context) {
     aiBridge.registerHandlers(ipcMain);
     httpNetworkProxyBridge.registerHandlers(ipcMain, electronModule);
     crashLogBridge.registerHandlers(ipcMain);
+    const aiSessionsBackupBridge = require("../bridges/aiSessionsBackupBridge.cjs");
+    aiSessionsBackupBridge.init({ electronModule });
+    aiSessionsBackupBridge.registerHandlers(ipcMain);
     vaultBackupBridge.registerHandlers(ipcMain, electronModule);
     appLockController?.registerHandlers?.(ipcMain);
   
@@ -970,8 +990,19 @@ function createBridgeRegistrar(context) {
     });
   
     // PTY child process list for busy-check before close
-    ipcMain.handle("netcatty:pty:childProcesses", async (_event, sessionId) => {
+    ipcMain.handle("netcatty:pty:childProcesses", async (event, sessionId) => {
       if (typeof sessionId !== "string") return [];
+      if (terminalWorkerManager) {
+        try {
+          const result = await terminalWorkerManager.request("netcatty:pty:childProcesses", { sessionId }, {
+            webContentsId: event?.sender?.id,
+          });
+          const children = Array.isArray(result) ? result : result?.children;
+          if (Array.isArray(children)) return children;
+        } catch {
+          // Fall back to main-owned sessions when the worker is unavailable.
+        }
+      }
       return ptyProcessTree.getChildProcesses(sessionId);
     });
   

@@ -109,13 +109,13 @@ async function runExternalTurn(
     return;
   }
 
-  const userSkillsContext = await resolveUserSkillsContext(
+  const userSkillsContext = context.delegationTag ? '' : await resolveUserSkillsContext(
     netcattyBridge,
     trimmed,
     context.selectedUserSkillSlugs,
   );
 
-  const requestId = ctx.turnId;
+  const requestId = context.delegationTag ? `plugin-agent_${context.delegationTag}_${ctx.turnId}` : ctx.turnId;
   ui.setStreamingForScope(sessionId, true);
 
   if (netcattyBridge.aiMcpUpdateSessions) {

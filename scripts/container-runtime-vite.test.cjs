@@ -38,6 +38,35 @@ async function checkDevImport() {
       }
       return modules.get(url);
     }
+    const managerResponse = await fetch(new URL("/components/settings/tabs/PluginPackageManager.tsx", origin));
+    assert.equal(managerResponse.status, 200);
+    const themeResponse = await fetch(new URL("/infrastructure/config/pluginThemeRegistry.ts", origin));
+    assert.equal(themeResponse.status, 200);
+    const managerSource = await managerResponse.text() + "\n" + await themeResponse.text();
+    // The lazy settings entry also links the permission panel before it renders.
+    // Probe its actual Vite-served import: Node's CJS interop and production
+    // CommonJS conversion otherwise hide missing browser ESM exports.
+    const settingsResponse = await fetch(new URL("/components/settings/tabs/SettingsPluginsTab.tsx", origin));
+    assert.equal(settingsResponse.status, 200);
+    assert.match(await settingsResponse.text(), /\/components\/settings\/tabs\/PluginPackageManager\.tsx/);
+    assert.match(managerSource, /\/components\/settings\/tabs\/PluginPermissionPanel\.tsx/);
+    const panelResponse = await fetch(new URL("/components/settings/tabs/PluginPermissionPanel.tsx", origin));
+    assert.equal(panelResponse.status, 200);
+    const panelSource = await panelResponse.text();
+    const permissionImport = panelSource.match(/^import\s+.*from "[^"\n]*pluginPermissionDescriptions[^"\n]*";[^\n]*$/m);
+    assert.ok(permissionImport, "Missing Vite-served permission helper import");
+    const panelProbe = new SourceTextModule(`${permissionImport[0]}\nexport { describePluginPermission };`, { context, identifier: new URL("/permission-panel-probe", origin).href });
+    await panelProbe.link((specifier, importer) => load(new URL(specifier, importer.identifier).href));
+    await panelProbe.evaluate();
+    assert.equal(panelProbe.namespace.describePluginPermission("network").label, "Network requests");
+    for (const [helper, exported] of [["pluginRuntimePolicy", "describePluginRuntime"], ["pluginPermissionDescriptions", "describePluginPermission"], ["pluginThemePack", "resolveThemePalette"]]) {
+      const match = managerSource.match(new RegExp('from "([^"\\n]*' + helper + '[^"\\n]*)"'));
+      assert.ok(match, `Missing prebundled ${helper} import`);
+      const module = await load(new URL(match[1], origin).href);
+      if (module.status === "unlinked") await module.link((specifier, importer) => load(new URL(specifier, importer.identifier).href));
+      await module.evaluate();
+      assert.equal(typeof module.namespace.default[exported], "function");
+    }
     const entry = await load(new URL("/domain/systemManager/containerRuntime.ts", origin).href);
     await entry.link((specifier, importer) => load(new URL(specifier, importer.identifier).href));
     await entry.evaluate();
@@ -53,7 +82,7 @@ async function checkDevImport() {
   }
 }
 
-test("Vite serves the renderer container runtime with browser-compatible exports", { timeout: 60_000 }, () => {
+test("Vite serves the renderer shared helpers with browser-compatible exports", { timeout: 60_000 }, () => {
   const result = spawnSync(process.execPath, [
     "--experimental-vm-modules", "--input-type=module", "-e",
     `(${checkDevImport.toString()})().catch(error => { console.error(error); process.exitCode = 1; });`,

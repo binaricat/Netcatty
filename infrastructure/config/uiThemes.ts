@@ -1,3 +1,4 @@
+import { pluginThemeRegistry } from "./pluginThemeRegistry";
 export type UiThemeTokens = {
   background: string;
   foreground: string;
@@ -3156,7 +3157,9 @@ export const DARK_UI_THEMES: UiThemePreset[] = [
   ...EXTENDED_DARK_UI_THEMES,
 ];
 
-export const getUiThemeById = (theme: "light" | "dark", id: string): UiThemePreset => {
+export const getUiThemeById = (theme: "light" | "dark", id: string, includePreview = true): UiThemePreset => {
+  const pluginTheme = pluginThemeRegistry.getTheme(theme, includePreview);
+  if (pluginTheme) return pluginTheme;
   const list = theme === "dark" ? DARK_UI_THEMES : LIGHT_UI_THEMES;
   const found = list.find((preset) => preset.id === id);
   return found || list[0];

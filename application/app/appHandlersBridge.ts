@@ -51,6 +51,37 @@ class AppHandlersBridge {
 
 const bridge = new AppHandlersBridge();
 
+export type StableAppHandlerCache = Map<string, { latest: unknown; stable: unknown }>;
+
+/**
+ * Give every function-valued handler a per-key wrapper with a stable identity
+ * that always calls the latest implementation; non-functions (refs) pass
+ * through. Many glue callbacks close over sessions/workspaces/hosts, so their
+ * identities changed on every session status change and host update (connect
+ * bursts, last-connected times), and the bridge re-notified every Host island,
+ * rebuilding all shell bags and re-rendering AppView/TopTabs each time. The
+ * handlers are actions invoked from events, never read during render.
+ */
+export function stabilizeAppHandlers(cache: StableAppHandlerCache, handlers: AppHandlers): AppHandlers {
+  const stableHandlers: AppHandlers = {};
+  for (const [key, value] of Object.entries(handlers)) {
+    if (typeof value !== 'function') {
+      stableHandlers[key] = value;
+      continue;
+    }
+    let entry = cache.get(key);
+    if (!entry) {
+      const created: { latest: unknown; stable: unknown } = { latest: value, stable: null };
+      created.stable = (...args: unknown[]) => (created.latest as (...callArgs: unknown[]) => unknown)(...args);
+      cache.set(key, created);
+      entry = created;
+    }
+    entry.latest = value;
+    stableHandlers[key] = entry.stable;
+  }
+  return stableHandlers;
+}
+
 export function registerAppHandlers(handlers: AppHandlers | null): void {
   bridge.set(handlers);
 }

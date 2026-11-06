@@ -41,6 +41,16 @@ test("prompt suffix is found after a very large flood of CRLF output", () => {
   assert.equal(hasExpectedPromptSuffix(`${flood}${COLORED_PROMPT}`, "root@3160T:~# "), true);
 });
 
+test("macOS zsh default prompt suffix matches only when the prompt is idle", () => {
+  const prompt = "hexiao@JosephdeMacBook-Pro-2 ~ % ";
+  assert.equal(hasExpectedPromptSuffix(`Last login\r\n${prompt}`, prompt), true);
+  assert.equal(hasExpectedPromptSuffix(`Last login\r\n${prompt}echo hello`, prompt), false);
+  assert.equal(
+    hasExpectedPromptSuffix(`Last login\r\n${prompt}`, "hexiao@JosephdeMacBook-Pro-2 ~ %"),
+    false,
+  );
+});
+
 test("live PTY CR bytes match a cached two-line idle prompt", () => {
   // Bash writes the PS1 newline as CR and ONLCR adds another, so the bytes
   // are `\r\r\n`. The idle-prompt cache keeps those as blank lines. Suffix

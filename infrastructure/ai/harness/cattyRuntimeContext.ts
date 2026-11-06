@@ -16,7 +16,8 @@ export const cattyRuntimeContextSchema = z.object({
   modelId: z.string().optional(),
   userGoal: z.string().optional(),
   permissionMode: z.enum(['observer', 'confirm', 'auto']),
-  scopeType: z.enum(['terminal', 'workspace']),
+  scopeType: z.enum(['terminal', 'workspace', 'global']),
+  delegated: z.boolean().optional(),
   scopeLabel: z.string().optional(),
   lastCompaction: z.custom<CompactionTrace>().optional(),
   lastStepAdjusted: z.boolean().optional(),
@@ -46,7 +47,8 @@ export function createInitialCattyRuntimeContext(input: {
   modelId?: string;
   userGoal?: string;
   permissionMode: AIPermissionMode;
-  scopeType: 'terminal' | 'workspace';
+  scopeType: 'terminal' | 'workspace' | 'global';
+  delegated?: boolean;
   scopeLabel?: string;
   promptContext?: PromptContextSnapshot;
 }): CattyRuntimeContext {
@@ -54,6 +56,7 @@ export function createInitialCattyRuntimeContext(input: {
     chatSessionId: input.chatSessionId,
     turnId: input.turnId,
     agentKind: input.agentKind ?? 'sidebar',
+    delegated: input.delegated,
     providerId: input.providerId,
     modelId: input.modelId,
     userGoal: input.userGoal,

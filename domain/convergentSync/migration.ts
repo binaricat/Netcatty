@@ -115,6 +115,42 @@ export interface ConvergentMigrationPlan {
   preview: ConvergentMigrationPreview;
   state: ConvergentSyncStateV2 | null;
   payload: SyncPayload | null;
+  /** Retains sidecars and chats while field conflicts prevent payload creation. */
+  materializedPayload: SyncPayload | null;
+}
+
+const UNRESOLVED_FIELD_CONFLICTS = 'The convergent state contains unresolved field conflicts';
+
+export function refreshConvergentSyncMigrationPlan(
+  plan: ConvergentMigrationPlan,
+  state: ConvergentSyncStateV2,
+): ConvergentMigrationPlan {
+  if (!plan.state || !plan.materializedPayload) {
+    throw new Error('No resolvable convergent migration state is available');
+  }
+  const materializedPayload = materializeSyncPayloadFromConvergentState(state, plan.materializedPayload);
+  const conflicts = materializeConvergentSyncState(state).conflicts;
+  const blockedReasons = plan.preview.blockedReasons.filter((reason) => reason !== UNRESOLVED_FIELD_CONFLICTS);
+  const hasHardBlockers = blockedReasons.length > 0;
+  if (conflicts.length > 0) blockedReasons.push(UNRESOLVED_FIELD_CONFLICTS);
+  const canInitialize = blockedReasons.length === 0;
+  return {
+    preview: {
+      ...plan.preview,
+      canInitialize,
+      conflictCount: conflicts.length,
+      conflicts,
+      blockedReasons,
+      entityCounts: Object.fromEntries(
+        [...CONVERGENT_ENTITY_COLLECTIONS, ...CONVERGENT_STRING_COLLECTIONS]
+          .map((key) => [key, entityCount(materializedPayload, key)]),
+      ) as ConvergentMigrationPreview['entityCounts'],
+      settingsLeafCount: countSettingsLeaves(materializedPayload.settings),
+    },
+    state: hasHardBlockers ? null : state,
+    materializedPayload: hasHardBlockers ? null : materializedPayload,
+    payload: canInitialize ? withConvergentSyncEnvelope(state, materializedPayload) : null,
+  };
 }
 
 function runtimeSchema(meta: SyncFileMeta): 1 | 2 | 'future' | 'invalid' {
@@ -407,7 +443,8 @@ export function planConvergentSyncMigration(options: {
   }
 
   const conflicts = state ? materializeConvergentSyncState(state).conflicts : [];
-  if (conflicts.length > 0) blockedReasons.push('The convergent state contains unresolved field conflicts');
+  const hasHardBlockers = blockedReasons.length > 0;
+  if (conflicts.length > 0) blockedReasons.push(UNRESOLVED_FIELD_CONFLICTS);
   const canInitialize = blockedReasons.length === 0 && state !== null && materialized !== null;
   const payload = canInitialize && state
     ? withConvergentSyncEnvelope(state, {
@@ -437,7 +474,8 @@ export function planConvergentSyncMigration(options: {
       oldClientCompatibility: 'materialized-v1-snapshot',
       blockedReasons,
     },
-    state: canInitialize ? state : null,
+    state: hasHardBlockers ? null : state,
+    materializedPayload: hasHardBlockers ? null : materialized,
     payload,
   };
 }

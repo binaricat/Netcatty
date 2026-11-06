@@ -5,6 +5,17 @@ const test = require("node:test");
 
 const { PluginStreamRouter } = require("./streamRouter.cjs");
 
+test("outgoing close hook observes idle peer cancellation exactly once", async () => {
+  const closed = [];
+  const router = new PluginStreamRouter({ send() {} });
+  const stream = await router.openOutgoing("idle-close-hook", 1024, { onClose: (reason) => closed.push(reason) });
+  await router.accept({ frame: { streamId: "idle-close-hook", sequence: 1, kind: "cancel" } });
+  stream.cancel();
+  router.close();
+  assert.deepEqual(closed, ["cancel"]);
+  assert.equal(router.outgoing.size, 0);
+});
+
 test("incoming stream credit is returned only after the consumer releases a chunk", async () => {
   const sent = [];
   const received = [];
@@ -142,6 +153,64 @@ test("ended outgoing streams accept final receive credit before retiring", async
     },
   });
   assert.equal(router.outgoing.has("ended-output"), false);
+});
+
+test("cancelled outgoing streams accept only ordered outstanding credit and release their slot", async () => {
+  const router = new PluginStreamRouter({ send() {}, maxStreams: 1 });
+  const stream = await router.openOutgoing("cancel-in-flight", 1024);
+  await stream.write(new Uint8Array(1024));
+  const queued = stream.write(Uint8Array.of(1));
+  stream.cancel();
+  await assert.rejects(queued, /cancel/u);
+  await assert.rejects(stream.write(Uint8Array.of(1)), /closed/u);
+  const credit = (streamId, sequence, creditBytes) => ({ frame: { streamId, sequence, kind: "windowUpdate", creditBytes } });
+  await assert.rejects(router.accept(credit("unknown", 0, 1)), /Unknown outgoing/u);
+  await assert.rejects(router.accept(credit("cancel-in-flight", 1, 1)), /Out-of-order/u);
+  await assert.rejects(router.accept(credit("cancel-in-flight", 0, 0)), /contract|creditBytes/u);
+  await router.accept(credit("cancel-in-flight", 0, 512));
+  await assert.rejects(router.accept(credit("cancel-in-flight", 0, 1)), /Out-of-order/u);
+  await router.accept(credit("cancel-in-flight", 1, 512));
+  assert.equal(router.outgoing.size, 0);
+  await assert.rejects(router.accept(credit("cancel-in-flight", 2, 1)), /Unknown outgoing/u);
+  const other = await router.openOutgoing("next", 1024);
+  other.cancel();
+  assert.equal(router.outgoing.size, 0);
+});
+
+test("cancelled outgoing streams reject excess credit and clear retained state at runtime close", async () => {
+  const router = new PluginStreamRouter({ send() {} });
+  const stream = await router.openOutgoing("cancel-excess", 1024);
+  await stream.write(Uint8Array.of(1));
+  stream.cancel();
+  await assert.rejects(router.accept({ frame: {
+    streamId: "cancel-excess", sequence: 0, kind: "windowUpdate", creditBytes: 2,
+  } }), /exceeds/u);
+  router.close();
+  assert.equal(router.outgoing.size, 0);
+});
+
+test("failed cancellation credit refund still aborts and cleans up its incoming owner", async () => {
+  let ownerSignal;
+  let closeReason;
+  const router = new PluginStreamRouter({
+    send() { throw new Error("refund transport failed"); },
+    onIncomingStream({ signal, bind }) {
+      ownerSignal = signal;
+      bind({ onChunk() {}, onClose(reason) { closeReason = reason; } });
+      return true;
+    },
+  });
+  await router.accept({ frame: { streamId: "cancel-refund", sequence: 0, kind: "open", windowBytes: 1024 } });
+  await router.accept({ frame: {
+    streamId: "cancel-refund", sequence: 1, kind: "chunk",
+    data: { encoding: "base64", value: "AQ==", byteLength: 1 },
+  } });
+  await assert.rejects(router.accept({ frame: {
+    streamId: "cancel-refund", sequence: 2, kind: "cancel",
+  } }), /refund transport failed/u);
+  assert.equal(ownerSignal.aborted, true);
+  assert.equal(closeReason, "cancel");
+  assert.equal(router.incoming.size, 0);
 });
 
 test("unhandled incoming streams are cancelled immediately", async () => {

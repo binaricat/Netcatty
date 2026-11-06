@@ -22,9 +22,11 @@ getNextFocusSessionId,
 insertPaneIntoWorkspace,
 pruneWorkspaceNode,
 reorderWorkspaceFocusSessionOrder,
+setWorkspaceFocusedSessionId,
 SplitDirection,
 SplitHint,
 updateWorkspaceSplitSizes,
+  invertSplitPosition,
 } from '../../domain/workspace';
 import { clearSessionFontSizeOverride as clearSessionFontSizeOverrideFields } from '../../domain/terminalAppearance';
 import {
@@ -255,6 +257,8 @@ export const useSessionState = ({
   const [globalComposeSendToAll, setGlobalComposeSendToAll] = useState<boolean>(false);
   // Log views: stores open log replay tabs
   const [logViews, setLogViews] = useState<LogView[]>([]);
+  const logViewsRef = useRef(logViews);
+  logViewsRef.current = logViews;
   const [restorePreviousSessionRevision, setRestorePreviousSessionRevision] = useState(0);
   const sessionsRef = useRef(sessions);
   const tabOrderRef = useRef(tabOrder);
@@ -814,12 +818,73 @@ export const useSessionState = ({
     return workspace.id;
   }, [setActiveTabId]);
 
+  const addSessionToWorkspace = useCallback((
+    workspaceId: string,
+    sessionId: string,
+    hint: SplitHint
+  ) => {
+    if (!hint) return;
+
+    setSessions(prevSessions => {
+      const session = prevSessions.find(s => s.id === sessionId);
+      if (!session || session.workspaceId) return prevSessions;
+
+      setWorkspaces(prevWorkspaces => {
+        const targetWorkspace = prevWorkspaces.find(w => w.id === workspaceId);
+        if (!targetWorkspace) return prevWorkspaces;
+
+        return insertWorkspacePaneIfMissing(prevWorkspaces, workspaceId, sessionId, hint);
+      });
+
+      const groupId = getSessionTabId(session);
+      const hasRemainingGroup = getSessionGroups(
+        prevSessions.filter(s => s.id !== sessionId),
+      ).some(group => group.id === groupId);
+      if (!hasRemainingGroup) {
+        setTabOrder(prev => prev.filter(id => id !== groupId));
+      }
+      setActiveTabId(workspaceId);
+      return prevSessions.map(s => s.id === sessionId ? { ...s, workspaceId } : s);
+    });
+  }, [setActiveTabId]);
+
+  // Merge two tabs into one workspace. When one of them already belongs to a
+  // workspace, that workspace (and its id) is reused instead of dissolving
+  // and recreating: the id is what workspace-scoped AI chats bind to, so
+  // regenerating it used to strand every conversation anchored to it
+  // (issue #4015 R3). Only two genuinely standalone tabs create a new id.
   const createWorkspaceFromSessions = useCallback((
     baseSessionId: string,
     joiningSessionId: string,
     hint: SplitHint
   ) => {
     if (!hint || baseSessionId === joiningSessionId) return;
+    const baseSession = sessionsRef.current.find((s) => s.id === baseSessionId);
+    const joiningSession = sessionsRef.current.find((s) => s.id === joiningSessionId);
+    const anchorWorkspaceId = baseSession?.workspaceId ?? joiningSession?.workspaceId;
+    if (anchorWorkspaceId) {
+      const anchorSessionId = baseSession?.workspaceId ? baseSessionId : joiningSessionId;
+      const orphanSessionId = anchorSessionId === baseSessionId ? joiningSessionId : baseSessionId;
+      const orphanSession = sessionsRef.current.find((s) => s.id === orphanSessionId);
+      if (!orphanSession || orphanSession.workspaceId) return;
+      // Split next to the anchor's existing pane: the raw drop hint targets
+      // the orphan's pane, which is not part of this workspace tree yet.
+      // When the dragged (joining) pane already owns the workspace, the orphan
+      // is what gets inserted — invert the drop position so the previewed
+      // side still matches (hint describes where the dragged pane should sit).
+      const joinOwnsWorkspace = Boolean(joiningSession?.workspaceId) && !baseSession?.workspaceId;
+      const insertHint = {
+        ...hint,
+        targetSessionId: anchorSessionId,
+        position: joinOwnsWorkspace ? invertSplitPosition(hint.position) : hint.position,
+      };
+      addSessionToWorkspace(
+        anchorWorkspaceId,
+        orphanSessionId,
+        insertHint,
+      );
+      return;
+    }
     // Name the merged workspace after both tabs' connection labels (e.g.
     // "01/02") so the window title and the rename dialog show the merged
     // identity instead of the generic "Workspace". Falls back to the default
@@ -879,30 +944,7 @@ export const useSessionState = ({
         return s;
       });
     });
-  }, [setActiveTabId]);
-
-  const addSessionToWorkspace = useCallback((
-    workspaceId: string,
-    sessionId: string,
-    hint: SplitHint
-  ) => {
-    if (!hint) return;
-    
-	    setSessions(prevSessions => {
-      const session = prevSessions.find(s => s.id === sessionId);
-      if (!session || session.workspaceId) return prevSessions;
-      
-      setWorkspaces(prevWorkspaces => {
-        const targetWorkspace = prevWorkspaces.find(w => w.id === workspaceId);
-        if (!targetWorkspace) return prevWorkspaces;
-        
-        return insertWorkspacePaneIfMissing(prevWorkspaces, workspaceId, sessionId, hint);
-      });
-      
-      setActiveTabId(workspaceId);
-      return prevSessions.map(s => s.id === sessionId ? { ...s, workspaceId } : s);
-	    });
-	  }, [setActiveTabId]);
+  }, [addSessionToWorkspace, setActiveTabId]);
 
   // Add a host into an existing workspace by creating a new session for
   // that host and appending it as the last pane at the workspace root.
@@ -1123,10 +1165,10 @@ export const useSessionState = ({
 
   // Set the focused session in a workspace (for focus mode)
   const setWorkspaceFocusedSession = useCallback((workspaceId: string, sessionId: string) => {
-    setWorkspaces(prev => prev.map(ws => {
-      if (ws.id !== workspaceId) return ws;
-      return { ...ws, focusedSessionId: sessionId };
-    }));
+    // Pane click and focus both land here; an unchanged focus must keep the
+    // same array or every click re-renders the whole shell (and re-saves the
+    // session restore snapshot).
+    setWorkspaces(prev => setWorkspaceFocusedSessionId(prev, workspaceId, sessionId));
   }, []);
 
   const reorderWorkspaceSessions = useCallback((
@@ -1152,7 +1194,7 @@ export const useSessionState = ({
 
   // Move focus between panes in a workspace
   const moveFocusInWorkspace = useCallback((workspaceId: string, direction: FocusDirection): boolean => {
-    const workspace = workspaces.find(w => w.id === workspaceId);
+    const workspace = workspacesRef.current.find(w => w.id === workspaceId);
     if (!workspace) {
       return false;
     }
@@ -1173,13 +1215,10 @@ export const useSessionState = ({
     }
     
     // Update focused session
-    setWorkspaces(prev => prev.map(ws => {
-      if (ws.id !== workspaceId) return ws;
-      return { ...ws, focusedSessionId: nextSessionId };
-    }));
+    setWorkspaces(prev => setWorkspaceFocusedSessionId(prev, workspaceId, nextSessionId));
     
     return true;
-  }, [workspaces]);
+  }, []);
 
   // Run a snippet on multiple target hosts - creates a focus mode workspace
   const runSnippet = useCallback((snippet: Snippet, targetHosts: Host[], commandOverride?: string) => {
@@ -1224,6 +1263,8 @@ export const useSessionState = ({
   const orphanSessions = useMemo(() => getSessionGroups(sessions).map(group => (
     sessions.find(session => session.id === group.activeSessionId)!
   )), [sessions]);
+  const orphanSessionsRef = useRef(orphanSessions);
+  orphanSessionsRef.current = orphanSessions;
   const canUseGlobalBroadcast = sessions.filter(session => !session.workspaceId && !session.hiddenFromTabs).length >= 2;
 
   // Losing the group must disarm broadcast before another tab can join it.
@@ -1258,6 +1299,13 @@ export const useSessionState = ({
   }) => {
     // Pre-allocate the new id outside the updater so StrictMode's
     // double-invocation of the functional updater doesn't mint two ids.
+    // Same snapshot the old closure captured (values at click time), read from
+    // refs so this action keeps a stable identity across session updates.
+    const tabIdsAtCall = [
+      ...orphanSessionsRef.current.map(getSessionTabId),
+      ...workspacesRef.current.map(w => w.id),
+      ...logViewsRef.current.map(lv => lv.id),
+    ];
     const newSessionId = crypto.randomUUID();
 
     setSessions(prevSessions => {
@@ -1278,17 +1326,13 @@ export const useSessionState = ({
       // StrictMode's double-invocation is harmless.
       setActiveTabId(newSessionId);
       setTabOrder(prevTabOrder => {
-        const allTabIds = [
-          ...orphanSessions.map(getSessionTabId),
-          ...workspaces.map(w => w.id),
-          ...logViews.map(lv => lv.id),
-        ];
+        const allTabIds = tabIdsAtCall;
         return insertCopiedTabOrderIdOnce(prevTabOrder, getSessionTabId(session), newSessionId, allTabIds);
       });
 
       return [...prevSessions, newSession];
     });
-  }, [orphanSessions, workspaces, logViews, setActiveTabId]);
+  }, [setActiveTabId]);
 
   // Copy a whole workspace (split/focus tab): clone every pane's session and
   // reproduce the layout tree in a new tab.
@@ -1296,7 +1340,14 @@ export const useSessionState = ({
     localShellType?: TerminalSession['shellType'];
     perPaneCwd?: Record<string, string | undefined>;
   }) => {
-    const sourceWorkspace = workspaces.find(w => w.id === workspaceId);
+    // Same snapshot the old closure captured (values at click time), read from
+    // refs so this action keeps a stable identity across session updates.
+    const tabIdsAtCall = [
+      ...orphanSessionsRef.current.map(getSessionTabId),
+      ...workspacesRef.current.map(w => w.id),
+      ...logViewsRef.current.map(lv => lv.id),
+    ];
+    const sourceWorkspace = workspacesRef.current.find(w => w.id === workspaceId);
     if (!sourceWorkspace) return;
 
     // Pre-mint the new workspace id and the old->new session-id map OUTSIDE the
@@ -1334,17 +1385,13 @@ export const useSessionState = ({
       setWorkspaces(prev => addWorkspaceIfMissing(prev, built.newWorkspace));
       setActiveTabId(newWorkspaceId);
       setTabOrder(prevTabOrder => {
-        const allTabIds = [
-          ...orphanSessions.map(getSessionTabId),
-          ...workspaces.map(w => w.id),
-          ...logViews.map(lv => lv.id),
-        ];
+        const allTabIds = tabIdsAtCall;
         return insertCopiedTabOrderIdOnce(prevTabOrder, workspaceId, newWorkspaceId, allTabIds);
       });
 
       return [...prevSessions, ...built.newSessions];
     });
-  }, [workspaces, orphanSessions, logViews, setActiveTabId]);
+  }, [setActiveTabId]);
 
   const createSessionFromCloneSource = useCallback((sourceSession: TerminalSession, options?: {
     localShellType?: TerminalSession['shellType'];

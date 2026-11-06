@@ -151,3 +151,24 @@ test('plugin palette items keep repeated placements independently addressable', 
     commandId: 'com.example.palette.run',
   }]);
 });
+
+test('packaged Starter contributions are discoverable through the real palette builder', async (context) => {
+  const { createRequire } = await import('node:module');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const require = createRequire(import.meta.url);
+  const { PluginDatabase } = require('../electron/plugins/database.cjs');
+  const { PluginContributionService } = require('../electron/plugins/contributionService.cjs');
+  const manifest = JSON.parse(readFileSync(new URL('../examples/plugins/starter-netcatty/netcatty.plugin.json', import.meta.url), 'utf8'));
+  const root = mkdtempSync(join(tmpdir(), 'starter-palette-'));
+  const database = new PluginDatabase(join(root, 'plugins.sqlite'));
+  context.after(() => { database.close(); rmSync(root, { recursive: true, force: true }); });
+  database.installVersion({ pluginId: manifest.id, version: manifest.version, manifest, archiveSha256: 'a'.repeat(64), packageRelativePath: 'starter' }, { enable: true });
+  const service = new PluginContributionService({ database, runtimeSupervisor: {}, secretStore: {}, getLocale: () => 'en' });
+  const items = buildPluginPaletteItems(service.snapshot().plugins, 'Starter');
+  assert.ok(items.some((item) => item.type === 'plugin-command' && item.commandId === 'com.netcatty.starter.greet'));
+  assert.ok(items.some((item) => item.type === 'plugin-view' && item.id === 'com.netcatty.starter.panel'));
+  database.setEnabled(manifest.id, false);
+  assert.equal(buildPluginPaletteItems(service.snapshot().plugins, 'Starter').length, 0);
+});

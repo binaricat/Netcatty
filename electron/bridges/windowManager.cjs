@@ -7,6 +7,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 const { safeSend } = require("./ipcUtils.cjs");
+const perfTrace = require("../perfTrace.cjs");
 
 const V8_CACHE_OPTIONS = "bypassHeatCheck";
 
@@ -346,6 +347,12 @@ function getAppContentWindowList() {
   return Array.from(appContentWindows).filter((win) => isWindowUsable(win));
 }
 
+// Settings has its own reusable window lifecycle, outside app-content editors.
+// Enumerate only managed app renderers; remote/pop-up/plugin contents are absent.
+function getManagedAppWindowList() {
+  return [...new Set([...getAppContentWindowList(), getSettingsWindow()])].filter((win) => isWindowUsable(win));
+}
+
 function getDirtyEditorWindowList() {
   pruneAppContentWindows();
   return Array.from(dirtyEditorWindows).filter((win) => isWindowUsable(win));
@@ -426,6 +433,7 @@ function applyWindowOpacity(opacity) {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     applyWindowOpacityToWindow(settingsWindow);
   }
+  applyTrayPanelBackgroundBlur(getGlobalShortcutBridge().getTrayPanelWindow?.());
   return currentWindowOpacity;
 }
 
@@ -433,6 +441,15 @@ function isWindowBackgroundBlurActive() {
   return process.platform === "darwin"
     && currentWindowBackgroundBlurRequested
     && currentWindowOpacity < 1;
+}
+
+function applyTrayPanelBackgroundBlur(win) {
+  if (process.platform !== "darwin" || !win || win.isDestroyed?.()) return;
+  try {
+    win.setVibrancy?.(isWindowBackgroundBlurActive() ? "hud" : null);
+  } catch {
+    // ignore platform-specific chrome failures
+  }
 }
 
 function applyWindowBackgroundChromeToWindow(win, options = {}) {
@@ -486,6 +503,7 @@ function applyWindowBackgroundBlur(enabled) {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     applyWindowOpacityToWindow(settingsWindow);
   }
+  applyTrayPanelBackgroundBlur(getGlobalShortcutBridge().getTrayPanelWindow?.());
   return supported;
 }
 
@@ -746,7 +764,10 @@ function setupDeferredShow(win, { timeoutMs = 3000, waitForRendererReady = true,
       return;
     }
     try {
-      if (!win.isDestroyed()) win.show();
+      if (!win.isDestroyed()) {
+        win.show();
+        perfTrace.mark("main:window-shown");
+      }
     } catch {
       // ignore
     }
@@ -1381,6 +1402,9 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
   ipcMain.on("netcatty:renderer:ready", (event) => {
     const wcId = event?.sender?.id;
     if (!wcId) return;
+    if (perfTrace.isEnabled()) {
+      perfTrace.noteRendererReady({ app: require("electron").app, webContents: event.sender });
+    }
     resolveRendererReady(wcId);
   });
 }
@@ -1624,6 +1648,7 @@ module.exports = {
   getMainWindow,
   getMainWindows: getMainWindowList,
   getAppContentWindows: getAppContentWindowList,
+  getManagedAppWindows: getManagedAppWindowList,
   getDirtyEditorWindows: getDirtyEditorWindowList,
   getMainWindowCount,
   isMainWindow,
@@ -1655,4 +1680,5 @@ module.exports = {
   clampWindowOpacity,
   applyWindowOpacity,
   applyWindowOpacityToWindow,
+  applyTrayPanelBackgroundBlur,
 };

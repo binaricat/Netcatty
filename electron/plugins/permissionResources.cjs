@@ -2,6 +2,7 @@
 
 const { createHash } = require("node:crypto");
 const path = require("node:path");
+const { canonicalizeStreamEndpoint } = require("./byteStreamEndpoint.cjs");
 
 const contractSchema = require("./generated/plugin-contract.schema.json");
 
@@ -62,6 +63,7 @@ function canonicalizeFilesystemResource(value) {
 
 function canonicalizePermissionResource(permission, resource) {
   assertPluginPermission(permission);
+  if (permission === "network.stream") return canonicalizeStreamEndpoint(resource).endpoint;
   if (resource === "*") return resource;
   if (permission === "network") return canonicalizeNetworkOrigin(resource);
   if (permission === "companion.execute") return canonicalizeCompanionResource(resource);
@@ -86,6 +88,7 @@ function permissionResourceCovers(
   resourceKind = "exact",
   requestedResourceKind = "exact",
 ) {
+  if (permission === "network.stream") return grantResource !== "*" && grantResource === requestedResource;
   if (grantResource === "*") return true;
   if (permission === "filesystem.read" || permission === "filesystem.write") {
     if (requestedResourceKind === "directory" && resourceKind !== "directory") return false;
@@ -112,7 +115,7 @@ function normalizePermissionDeclarations(manifest) {
         : [...new Set((value.resources ?? []).map((resource) => (
             canonicalizePermissionResource(permission, resource)
           )))].sort();
-      if (required && RESOURCE_SCOPED_PERMISSIONS.has(permission)) {
+      if ((required && RESOURCE_SCOPED_PERMISSIONS.has(permission)) || permission === "network.stream") {
         if (resources.length === 0) {
           throw new TypeError(`Required permission ${permission} must declare resources`);
         }

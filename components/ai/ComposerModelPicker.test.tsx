@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import React from 'react';
@@ -6,6 +6,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { ComposerModelPicker } from './ComposerModelPicker';
 import { I18nProvider } from '../../application/i18n/I18nProvider';
+import { loadLocaleMessages } from '../../application/i18n/messages';
+
+// Non-English dictionaries load on demand; static rendering runs no effects.
+before(async () => {
+  for (const locale of ['zh-CN', 'zh-TW', 'es', 'ru']) await loadLocaleMessages(locale);
+});
 
 for (const [locale, cachedLabel] of [
   ['en', 'Cached'],

@@ -69,6 +69,7 @@ const CHAT_SESSION_ID = process.env.NETCATTY_MCP_CHAT_SESSION_ID || null;
 // External MCP clients may keep a long-lived stdio process; re-read discovery so
 // Settings → AI → Safety changes apply without restarting the client.
 function readPermissionMode() {
+  if (process.env.NETCATTY_MCP_DELEGATED_TOOLS !== undefined) return "confirm";
   const discoveryPath = process.env.NETCATTY_EXTERNAL_MCP_DISCOVERY_FILE;
   if (discoveryPath) {
     try {
@@ -342,12 +343,20 @@ server.resource(
 );
 
 // Start with core tools; load specialized catalog groups through load_netcatty_tools.
-registerProgressiveMcpTools(server, {
+const toolDependencies = {
   rpcCall: exposedRpcCall,
   scopeParams,
   guardWriteOperation,
   catalogDescription,
-});
+};
+if (process.env.NETCATTY_MCP_DELEGATED_TOOLS !== undefined) {
+  const { listMcpTools } = require("../capabilities/codegen/toolSurfaces.cjs");
+  const { registerMcpTools } = require("../capabilities/codegen/mcpToolRegistry.cjs");
+  const names = JSON.parse(process.env.NETCATTY_MCP_DELEGATED_TOOLS);
+  if (!Array.isArray(names) || names.length > 128 || names.some((name) => typeof name !== "string")) throw Error("Invalid delegated tool profile");
+  const allowed = new Set(names);
+  registerMcpTools(server, toolDependencies, listMcpTools().filter((tool) => allowed.has(tool.mcpTool)));
+} else registerProgressiveMcpTools(server, toolDependencies);
 
 // ── Start ──
 
