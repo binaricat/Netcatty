@@ -11,10 +11,13 @@ import {
   createConvergentSyncEnvelope,
   createConvergentSyncStateFromPayload,
   diffLegacySyncPayload,
+  dotKey,
   hydrateConvergentSyncEnvelope,
   materializeSyncPayloadFromConvergentState,
   mergeConvergentSyncStates,
   planConvergentSyncMigration,
+  refreshConvergentSyncMigrationPlan,
+  resolveConvergentFieldConflict,
   serializeConvergentSyncState,
   validateConvergentSyncPayload,
   withConvergentSyncEnvelope,
@@ -660,6 +663,86 @@ test('migration blocks unresolved v1 conflicts and future provider schemas', () 
   assert.equal(future.preview.providers[0].schemaVersion, 'future');
 });
 
+test('migration retains conflict-only state and refreshes after each local resolution', () => {
+  const baseline = payload();
+  const base = createConvergentSyncStateFromPayload(baseline, 'seed', NOW);
+  const leftPayload = payload('Left');
+  leftPayload.hosts[0].hostname = 'left.example.com';
+  const rightPayload = payload('Right');
+  rightPayload.hosts[0].hostname = 'right.example.com';
+  const state = mergeConvergentSyncStates(
+    applyLegacySyncPayload(base, baseline, leftPayload, 'left', NOW + 1),
+    applyLegacySyncPayload(base, baseline, rightPayload, 'right', NOW + 2),
+  );
+  const remote = withConvergentSyncEnvelope(state, {
+    syncedAt: NOW + 3,
+    pluginSidecars: { version: 1, entries: [] },
+    aiSessions: [{
+      id: 'chat', title: 'Chat', agentId: 'catty', scope: { type: 'global' },
+      createdAt: NOW, updatedAt: NOW, messages: [],
+    }],
+  });
+  const options = {
+    localPayload: emptyPayload(),
+    localTrustedBaseline: null,
+    providers: [{
+      provider: 'github' as const,
+      status: 'ready' as const,
+      meta: meta({ syncSchemaVersion: 2 }),
+      payload: remote,
+      trustedBaseline: null,
+    }],
+    deviceId: 'local-device',
+    now: NOW + 4,
+  };
+  let plan = planConvergentSyncMigration(options);
+  const originalPlan = plan;
+  assert.equal(plan.preview.canInitialize, false);
+  assert.equal(plan.preview.conflictCount, 2);
+  assert.deepEqual(plan.preview.blockedReasons, ['The convergent state contains unresolved field conflicts']);
+  assert.ok(plan.state);
+  assert.equal(plan.payload, null);
+
+  for (const remaining of [1, 0]) {
+    const conflict = plan.preview.conflicts[0];
+    const candidate = conflict.candidates.find((entry) => entry.dot.deviceId === 'left')!;
+    const resolved = resolveConvergentFieldConflict(
+      plan.state!, conflict, dotKey(candidate.dot), 'local-device', NOW + 5,
+    );
+    plan = refreshConvergentSyncMigrationPlan(plan, resolved);
+    assert.equal(plan.preview.conflictCount, remaining);
+    assert.equal(plan.preview.conflicts.length, remaining);
+    assert.equal(plan.preview.canInitialize, remaining === 0);
+    assert.equal(plan.preview.blockedReasons.length, remaining === 0 ? 0 : 1);
+    assert.equal(plan.payload === null, remaining > 0);
+  }
+  assert.equal(originalPlan.preview.conflictCount, 2);
+  assert.equal(plan.payload?.hosts[0].label, 'Left');
+  assert.equal(plan.payload?.hosts[0].hostname, 'left.example.com');
+  assert.equal(plan.payload?.convergentSync?.schemaVersion, 2);
+  assert.deepEqual(plan.payload?.pluginSidecars, remote.pluginSidecars);
+  assert.deepEqual(plan.payload?.aiSessions, remote.aiSessions);
+  assert.deepEqual(plan.preview.providers, originalPlan.preview.providers);
+  assert.deepEqual(plan.preview.entityCounts, originalPlan.preview.entityCounts);
+
+  // A field picker must never make a separate migration blocker resolvable.
+  const blocked = planConvergentSyncMigration({ ...options, localPayload: payload('Unbased local edit') });
+  assert.ok(blocked.preview.conflictCount > 0);
+  assert.match(blocked.preview.blockedReasons.join('; '), /no trusted legacy baseline/);
+  assert.equal(blocked.state, null);
+  assert.equal(blocked.materializedPayload, null);
+  assert.equal(blocked.payload, null);
+  assert.throws(() => refreshConvergentSyncMigrationPlan(blocked, state), /No resolvable/);
+
+  const unavailable = planConvergentSyncMigration({
+    ...options,
+    providers: [...options.providers, { provider: 'google', status: 'unavailable', message: 'offline' }],
+  });
+  assert.equal(unavailable.preview.canInitialize, false);
+  assert.equal(unavailable.state, null);
+  assert.equal(unavailable.payload, null);
+});
+
 test('joining existing v2 data blocks changed legacy writers without a trusted baseline', () => {
   const remoteState = createConvergentSyncStateFromPayload(payload('Remote'), 'remote', NOW);
   const remotePayload = withConvergentSyncEnvelope(remoteState, { syncedAt: NOW });
@@ -679,6 +762,7 @@ test('joining existing v2 data blocks changed legacy writers without a trusted b
 
   assert.equal(plan.preview.canInitialize, false);
   assert.match(plan.preview.blockedReasons.join(' '), /no trusted legacy baseline/);
+  assert.equal(plan.state, null);
 });
 
 test('joining existing v2 data blocks a shrunk legacy local source', () => {
@@ -710,6 +794,7 @@ test('joining existing v2 data blocks a shrunk legacy local source', () => {
 
   assert.equal(plan.preview.canInitialize, false);
   assert.match(plan.preview.blockedReasons.join(' '), /legacy-local:local-device.*remove too many entities/);
+  assert.equal(plan.state, null);
 });
 
 test('joining existing v2 data blocks a shrunk legacy provider source', () => {
