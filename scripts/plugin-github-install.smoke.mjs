@@ -15,6 +15,7 @@ export default async function githubInstallSmoke({ app, win, log, OUT }) {
   const bytes = await fs.readFile(archive);
   const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
   const repository = 'netcatty-smoke/starter-plugin';
+  const rejectedRepository = 'netcatty-smoke/rejected-plugin';
   const tag = 'v0.1.3';
   const requests = [];
   const server = http.createServer(async (req, res) => {
@@ -23,10 +24,12 @@ export default async function githubInstallSmoke({ app, win, log, OUT }) {
     const send = (status, value) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(value)); };
     if (req.url === '/repos/netcatty-smoke/no-release') return send(200, { full_name: 'netcatty-smoke/no-release', private: false });
     if (req.url === '/repos/netcatty-smoke/no-release/releases/latest') return send(404, { message: 'No release' });
-    if (req.url === `/repos/${repository}`) return send(200, { full_name: repository, private: false });
-    if (req.url === `/repos/${repository}/releases/latest`) return send(200, { tag_name: tag, draft: false, prerelease: false, assets: [{ id: 123, state: 'uploaded', name: 'starter.ncpkg', size: bytes.length, digest, browser_download_url: `https://github.com/${repository}/releases/download/${tag}/starter.ncpkg` }] });
-    if (req.url === `/repos/${repository}/commits/${tag}`) return send(200, { sha: 'a'.repeat(40) });
-    if (req.url === `/${repository}/releases/download/${tag}/starter.ncpkg`) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length }); res.end(bytes); return; }
+    for (const selected of [repository, rejectedRepository]) {
+      if (req.url === `/repos/${selected}`) return send(200, { full_name: selected, private: false });
+      if (req.url === `/repos/${selected}/releases/latest`) return send(200, { tag_name: tag, draft: false, prerelease: false, assets: [{ id: 123, state: 'uploaded', name: 'starter.ncpkg', size: bytes.length, digest, browser_download_url: `https://github.com/${selected}/releases/download/${tag}/starter.ncpkg` }] });
+      if (req.url === `/repos/${selected}/commits/${tag}`) return send(200, { sha: 'a'.repeat(40) });
+      if (req.url === `/${selected}/releases/download/${tag}/starter.ncpkg`) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length }); res.end(bytes); return; }
+    }
     send(404, { message: 'Unknown controlled fixture path' });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -47,6 +50,9 @@ export default async function githubInstallSmoke({ app, win, log, OUT }) {
     const windowPromise = app.waitForEvent('window');
     await win.evaluate(() => window.netcatty.openSettingsWindow());
     sw = await windowPromise;
+    const rendererErrors = [];
+    sw.on('pageerror', error => rendererErrors.push(String(error)));
+    sw.on('console', message => { if (message.type() === 'error') log(`GitHub settings console: ${message.text()}`); });
     await sw.waitForLoadState('domcontentloaded');
     await sw.getByRole('tab', { name: 'Plugins', exact: true }).click();
     await sw.getByRole('button', { name: 'Browse', exact: true }).click();
@@ -72,6 +78,27 @@ export default async function githubInstallSmoke({ app, win, log, OUT }) {
     await input.press('Enter');
     await dialog.getByRole('alert').filter({ hasText: 'no published stable release' }).waitFor();
     await shot('github-no-release');
+    const trustChecks = [];
+    for (const attempt of ['first', 'same-package-retry']) {
+      await input.fill(rejectedRepository);
+      await input.press('Enter');
+      await dialog.locator('[data-plugin-github-preview]').waitFor({ timeout: 30000 });
+      const confirm = dialog.getByRole('button', { name: 'Install disabled', exact: true });
+      const checkbox = dialog.getByRole('checkbox');
+      assert.equal(await checkbox.isChecked(), false);
+      assert.equal(await confirm.isDisabled(), true);
+      trustChecks.push({ attempt, checked: false, installDisabled: true });
+      await checkbox.check();
+      // Use the real host cleanup path to invalidate the downloaded preview,
+      // just as expiry does. Never replace install IPC or fake its response.
+      await sw.evaluate(() => window.netcatty.discardGitHubPlugin());
+      await confirm.click();
+      await dialog.getByRole('alert').filter({ hasText: 'preview expired' }).waitFor();
+      assert.equal(await dialog.locator('[data-plugin-github-preview]').count(), 0);
+      assert.deepEqual(await sw.evaluate(() => window.netcatty.listPlugins()), []);
+      await shot(`github-rejected-${attempt}`);
+      log(`GitHub real host rejection after download: ${attempt}; no installed package`);
+    }
     await input.fill('https://github.com/netcatty-smoke/starter-plugin.git/');
     await shot('github-input');
     await input.press('Enter');
@@ -84,6 +111,8 @@ export default async function githubInstallSmoke({ app, win, log, OUT }) {
     assert.match(await preview.innerText(), /SHA-256/);
     const confirm = dialog.getByRole('button', { name: 'Install disabled', exact: true });
     assert.equal(await confirm.isDisabled(), true);
+    assert.equal(await dialog.getByRole('checkbox').isChecked(), false);
+    trustChecks.push({ attempt: 'different-repository', checked: false, installDisabled: true });
     await shot('github-review-permissions');
     await confirm.scrollIntoViewIfNeeded();
     await shot('github-permission-confirmation');
@@ -114,7 +143,8 @@ export default async function githubInstallSmoke({ app, win, log, OUT }) {
     await shot('github-reopened-source');
     await sw.waitForTimeout(1000);
     log(`GitHub install smoke PASS: ${requests.length} controlled HTTP requests; validated actual starter .ncpkg; no plugin enabled`);
-    await fs.writeFile(path.join(OUT, 'github-fixture-evidence.json'), JSON.stringify({ fixture: repository, controlledLoopback: true, requests, sha256: digest.slice(7), installed, videoErrors: videoErrors.slice(-3) }, null, 2));
+    assert.deepEqual(rendererErrors, []);
+    await fs.writeFile(path.join(OUT, 'github-fixture-evidence.json'), JSON.stringify({ fixture: repository, controlledLoopback: true, requests, sha256: digest.slice(7), trustChecks, realPreviewRejections: 2, rendererErrors, installed, videoErrors: videoErrors.slice(-3) }, null, 2));
     return true;
   } catch (error) {
     if (sw) {

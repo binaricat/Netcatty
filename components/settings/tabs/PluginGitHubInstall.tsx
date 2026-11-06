@@ -44,7 +44,7 @@ export function PluginGitHubInstall({ disabled, onInstalled }: { disabled: boole
         </div>}
         <DialogFooter>
           <Button type="button" variant="outline" disabled={flow.busy} onClick={() => { if (preview) { flow.reset(); setAccepted(false); } else setOpen(false); }}>{t(preview ? 'common.back' : 'common.cancel')}</Button>
-          {preview ? <Button type="button" disabled={flow.busy || !accepted} onClick={() => void flow.install()}>{t('settings.plugins.github.confirm')}</Button>
+          {preview ? <Button type="button" disabled={flow.busy || !accepted} onClick={() => { setAccepted(false); void flow.install(); }}>{t('settings.plugins.github.confirm')}</Button>
             : <Button type="submit" disabled={flow.busy || !input.trim()}>{t('settings.plugins.github.download')}</Button>}
         </DialogFooter>
       </form>

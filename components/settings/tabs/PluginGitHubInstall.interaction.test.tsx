@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 
-test('real dialog validates input, handles download errors/busy state, reviews permissions and confirms disabled installation', async () => {
+test('real dialog reviews permissions and requires fresh trust after failed installation for same-package retries and different repositories', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true, url: 'http://localhost' });
   const previous = new Map<string, PropertyDescriptor | undefined>();
   const install = (key: string, value: unknown) => {
@@ -26,7 +26,7 @@ test('real dialog validates input, handles download errors/busy state, reviews p
   let resolveDownload: ((value: NetcattyGitHubPluginPreview) => void) | undefined;
   Object.defineProperty(window, 'netcatty', { configurable: true, value: {
     prepareGitHubPlugin: async (input: string) => { requests.push(input); if (requests.length === 1) throw new Error('GitHub API rate limit reached. Try again later'); return new Promise<NetcattyGitHubPluginPreview>(resolve => { resolveDownload = resolve; }); },
-    installGitHubPlugin: async (token: string) => { installed.push(token); return {} as NetcattyInstalledPlugin; },
+    installGitHubPlugin: async (token: string) => { installed.push(token); if (installed.length <= 2) throw new Error('GitHub package preview expired. Download and review it again'); return {} as NetcattyInstalledPlugin; },
     discardGitHubPlugin: async (token: string) => { discarded.push(token); },
   } as NetcattyBridge });
   const settle = () => new Promise(resolve => setTimeout(resolve, 20));
@@ -70,6 +70,35 @@ test('real dialog validates input, handles download errors/busy state, reviews p
     assert.equal(button('Install disabled').disabled, false);
     await click(button('Install disabled'));
     assert.deepEqual(installed, ['reviewed-token']);
+    assert.match(document.querySelector('[role=alert]')!.textContent!, /preview expired/);
+    assert.equal(document.querySelector('[data-plugin-github-preview]'), null);
+    assert.equal(refreshed, 0);
+    // A retry of the very same archive/repository is a fresh preview too.
+    await click(button('Download and review'));
+    await act(async () => { resolveDownload!({ ...preview, token: 'retry-token' }); await settle(); });
+    assert.equal(document.querySelector<HTMLInputElement>('input[type=checkbox]')!.checked, false);
+    assert.ok(button('Install disabled').disabled);
+    await click(button('Install disabled'));
+    assert.deepEqual(installed, ['reviewed-token']);
+    await click(document.querySelector('input[type=checkbox]')!);
+    assert.equal(button('Install disabled').disabled, false);
+    await click(button('Install disabled'));
+    assert.match(document.querySelector('[role=alert]')!.textContent!, /preview expired/);
+    await type('another/plugin');
+    await click(button('Download and review'));
+    await act(async () => { resolveDownload!({ ...preview, token: 'different-token', source: { ...preview.source, origin: 'https://github.com/another/plugin', name: 'another/plugin' } }); await settle(); });
+    assert.equal(requests.at(-1), 'https://github.com/another/plugin');
+    assert.match(document.querySelector('[data-plugin-github-preview]')!.textContent!, /https:\/\/github.com\/another\/plugin/);
+    assert.equal(document.querySelector<HTMLInputElement>('input[type=checkbox]')!.checked, false);
+    assert.ok(button('Install disabled').disabled);
+    await click(button('Install disabled'));
+    assert.deepEqual(installed, ['reviewed-token', 'retry-token']);
+    await click(document.querySelector('input[type=checkbox]')!);
+    await click(document.querySelector('input[type=checkbox]')!);
+    assert.ok(button('Install disabled').disabled);
+    await click(document.querySelector('input[type=checkbox]')!);
+    await click(button('Install disabled'));
+    assert.deepEqual(installed, ['reviewed-token', 'retry-token', 'different-token']);
     assert.equal(refreshed, 1);
     assert.equal(document.querySelector('[role=dialog]'), null);
     await click(trigger);

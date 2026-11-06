@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
-import { parsePluginGitHubRepository } from '../../domain/pluginGitHubRepository.cjs';
+import { parsePluginGitHubRepository } from '@/domain/pluginGitHubRepository.cjs';
 
 export function usePluginGitHubInstall(onInstalled: () => Promise<unknown>) {
   const [preview, setPreview] = useState<NetcattyGitHubPluginPreview | null>(null);
