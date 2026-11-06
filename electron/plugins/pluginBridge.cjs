@@ -47,6 +47,9 @@ const CHANNELS = Object.freeze({
   author: "netcatty:plugins:author",
   catalogInstall: "netcatty:plugins:catalog-install",
   install: "netcatty:plugins:install",
+  githubPrepare: "netcatty:plugins:github-prepare",
+  githubInstall: "netcatty:plugins:github-install",
+  githubDiscard: "netcatty:plugins:github-discard",
   setEnabled: "netcatty:plugins:set-enabled",
   restart: "netcatty:plugins:restart",
   uninstall: "netcatty:plugins:uninstall",
@@ -224,6 +227,17 @@ function createTrustedPluginBridgeSender(options = {}) {
 
 function registerPluginBridge(ipcMain, options) {
   const manager = options.manager;
+  let githubService;
+  const githubOwners = new WeakSet();
+  const githubFor = (activeManager, event) => {
+    const { GitHubInstallService } = require("./githubInstallService.cjs");
+    githubService ??= new GitHubInstallService({ manager: activeManager });
+    if (!githubOwners.has(event.sender)) {
+      githubOwners.add(event.sender);
+      event.sender.once?.("destroyed", () => { void githubService.discard(event.sender).catch(() => {}); });
+    }
+    return githubService;
+  };
   const contributionService = options.contributionService;
   const terminalProviderService = options.terminalProviderService;
   const terminalDataPipelineService = options.terminalDataPipelineService;
@@ -777,6 +791,9 @@ function registerPluginBridge(ipcMain, options) {
     payload?.archivePath,
     { enable: typeof payload?.enable === "boolean" ? payload.enable : undefined },
   ));
+  handle(CHANNELS.githubPrepare, (activeManager, payload, event) => githubFor(activeManager, event).prepare(event.sender, payload?.repository));
+  handle(CHANNELS.githubInstall, (activeManager, payload, event) => githubFor(activeManager, event).install(event.sender, payload?.token));
+  handle(CHANNELS.githubDiscard, (activeManager, payload, event) => githubFor(activeManager, event).discard(event.sender, payload?.token));
   handle(CHANNELS.setEnabled, async (activeManager, payload) => activeManager.setEnabled(
     payload?.pluginId,
     payload?.enabled === true,

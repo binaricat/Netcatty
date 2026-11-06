@@ -59,7 +59,7 @@
     "test:plugin-contract": "node --test --import tsx packages/*/src/*.test.ts",
     "test:plugin-examples": "node --test examples/plugins/database-minimal/*.test.cjs examples/plugins/database-rfam-readonly/*.test.cjs examples/plugins/terminal-selection-draft/prepare.test.cjs examples/plugins/global-agent/*.test.cjs",
     "pretest:plugin-runtime": "npm run build:plugin-runtime-deps && npm run build:plugin-view-examples",
-    "test:plugin-runtime": "node --test electron/plugins/*.test.cjs domain/pluginRuntimePolicy.test.cjs domain/pluginPermissionDescriptions.test.cjs domain/pluginThemePack.test.cjs",
+    "test:plugin-runtime": "node --test electron/plugins/*.test.cjs domain/pluginRuntimePolicy.test.cjs domain/pluginPermissionDescriptions.test.cjs domain/pluginThemePack.test.cjs domain/pluginGitHubRepository.test.cjs",
     "test:plugin-host-drawn": "node --test --import tsx domain/pluginRemoteTreePolicy.test.cjs domain/pluginViewStylePolicy.test.cjs electron/plugins/hostDrawnViewHost.test.cjs application/state/pluginRemoteTree.test.tsx components/plugins/PluginRemoteSurface.test.tsx packages/plugin-sdk/src/hostReact.test.tsx application/state/pluginViewSession.test.ts application/state/terminalSidePanelPluginTabs.test.tsx components/PluginVaultPages.test.tsx components/PluginTerminalSidebar.test.tsx electron/plugins/viewResourceService.test.cjs",
     "pretest:plugin-runtime:electron": "npm run build:plugin-runtime-deps",
     "test:plugin-runtime:electron": "electron electron/plugins/electronRuntime.live.test.cjs",

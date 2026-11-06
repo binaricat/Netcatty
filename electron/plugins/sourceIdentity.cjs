@@ -12,6 +12,18 @@ const FIRST_PARTY_PLUGINS = Object.freeze([
   Object.freeze({ id: "com.netcatty.hello", repository: "binaricat/Netcatty" }),
 ]);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
+const { parsePluginGitHubRepository } = require("../../domain/pluginGitHubRepository.cjs");
+
+function githubSource(address, pin = {}) {
+  const { origin, repository } = parsePluginGitHubRepository(address);
+  const source = { id: `github:${hash(origin)}`, kind: "github", name: repository, origin };
+  if (Object.keys(pin).length) {
+    if (typeof pin.tag !== "string" || !pin.tag || pin.tag.length > 256 || /[\u0000-\u001f\u007f]/u.test(pin.tag)
+      || !/^[a-f0-9]{40}$/u.test(pin.commit) || !Number.isSafeInteger(pin.assetId) || pin.assetId < 1) throw new Error("Invalid GitHub release identity");
+    Object.assign(source, { tag: pin.tag, commit: pin.commit, assetId: pin.assetId });
+  }
+  return Object.freeze(source);
+}
 
 // Source identity is host-owned. Neither a manifest nor a catalog supplies kind/id.
 function canonicalSourceOrigin(value) {
@@ -36,7 +48,8 @@ function thirdPartySource(name, address) {
 
 function assertSource(source) {
   if (!source || typeof source !== "object") throw new Error("Missing host source identity");
-  const trusted = source.id === "official" ? OFFICIAL_SOURCE : source.id === "local" ? LOCAL_SOURCE : thirdPartySource(source.name, source.origin);
+  const trusted = source.kind === "github" ? githubSource(source.origin, source.tag === undefined ? {} : { tag: source.tag, commit: source.commit, assetId: source.assetId })
+    : source.id === "official" ? OFFICIAL_SOURCE : source.id === "local" ? LOCAL_SOURCE : thirdPartySource(source.name, source.origin);
   if (["id", "kind", "origin"].some((key) => trusted[key] !== source[key])) throw new Error("Invalid host source identity");
   return { ...trusted };
 }
@@ -53,4 +66,4 @@ function isOfficialMaintained(entry, source) {
     && FIRST_PARTY_PLUGINS.some((pair) => pair.id === entry.id && pair.repository === entry.repository);
 }
 
-module.exports = { OFFICIAL_SOURCE, LOCAL_SOURCE, canonicalSourceOrigin, thirdPartySource, assertSource, privateOwner, isOfficialMaintained };
+module.exports = { OFFICIAL_SOURCE, LOCAL_SOURCE, canonicalSourceOrigin, thirdPartySource, githubSource, assertSource, privateOwner, isOfficialMaintained };

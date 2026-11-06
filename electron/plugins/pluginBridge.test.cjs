@@ -1769,3 +1769,17 @@ test("policy edits require trusted UI and the exact source/version/policy revisi
   assert.equal(mode, "allow");
   engine.shutdown();
 });
+
+test("GitHub management IPC rejects untrusted senders before initialization or retrieval", async () => {
+  let initialized = 0;
+  const ipcMain = createIpcMain();
+  registerPluginBridge(ipcMain, {
+    manager: { initialize: async () => { initialized++; } },
+    isTrustedSender: () => false,
+  });
+  for (const channel of [CHANNELS.githubPrepare, CHANNELS.githubInstall, CHANNELS.githubDiscard]) {
+    assert.equal(typeof ipcMain.handlers.get(channel), 'function');
+    await assert.rejects(ipcMain.handlers.get(channel)({ sender: {} }, { repository: 'owner/repo', token: 'unknown' }), /Untrusted plugin management sender/);
+  }
+  assert.equal(initialized, 0);
+});

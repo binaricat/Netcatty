@@ -69,6 +69,7 @@ module.exports = {
         // fail-closed prompt classifier at runtime.
         'domain/terminalPromptSecurity.shared.cjs',
         'domain/pluginRuntimePolicy.cjs',
+        'domain/pluginGitHubRepository.cjs',
         'domain/pluginPermissionDescriptions.cjs',
         'domain/pluginThemePack.cjs',
         'domain/pluginRemoteTreePolicy.cjs',
