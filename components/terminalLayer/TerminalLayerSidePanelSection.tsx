@@ -1479,7 +1479,7 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
                   <Btn
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                    className="h-7 w-7 shrink-0 rounded-md p-0 hover:bg-transparent"
                     style={{ color: sidePanelTheme.mutedFg }}
                     onClick={handleCloseSidePanel}
                   >
