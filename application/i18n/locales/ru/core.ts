@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const ruCoreMessages: Messages = {
+  'settings.terminal.connection.sshAutoReconnectInterval': 'Интервал переподключения SSH (секунды)',
+  'settings.terminal.connection.sshAutoReconnectInterval.desc': 'Ожидание между попытками: 5–3600 секунд (по умолчанию 5). Изменение применяется к следующему ожиданию; уже запущенный таймер не меняется.',
   // Common
   'common.save': 'Сохранить',
   'common.cancel': 'Отмена',

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   TERMINAL_AUTO_RECONNECT_DELAY_MS,
+  getTerminalAutoReconnectDelayMs,
   canAttemptTerminalAutoReconnect,
   isTerminalAutoReconnectEnabled,
   shouldAutoReconnectAfterExit,
@@ -16,6 +17,17 @@ const sshHost = {
 
 test("terminal auto reconnect uses a five second retry delay", () => {
   assert.equal(TERMINAL_AUTO_RECONNECT_DELAY_MS, 5000);
+});
+
+test("configured reconnect intervals apply to the timer in milliseconds", () => {
+  assert.equal(getTerminalAutoReconnectDelayMs(undefined), 5000);
+  assert.equal(getTerminalAutoReconnectDelayMs({}), 5000);
+  for (const seconds of [5, 30, 300, 3600]) {
+    assert.equal(getTerminalAutoReconnectDelayMs({ sshAutoReconnectInterval: seconds }), seconds * 1000);
+  }
+  assert.equal(getTerminalAutoReconnectDelayMs({ sshAutoReconnectInterval: 0 }), 5000);
+  assert.equal(getTerminalAutoReconnectDelayMs({ sshAutoReconnectInterval: Infinity }), 5000);
+  assert.equal(getTerminalAutoReconnectDelayMs({ sshAutoReconnectInterval: 7200 }), 3600000);
 });
 
 test("terminal auto reconnect is disabled unless the setting is explicitly true", () => {
