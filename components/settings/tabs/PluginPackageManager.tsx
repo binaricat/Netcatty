@@ -30,6 +30,7 @@ export function PluginPackageDetails({ plugin }: { plugin: NetcattyInstalledPlug
       <dt className="text-muted-foreground">Netcatty</dt><dd>{manifest.engines.netcatty}</dd>
       <dt className="text-muted-foreground">API</dt><dd>{manifest.engines.api}</dd>
       <dt className="text-muted-foreground">SHA-256</dt><dd className="break-all font-mono">{plugin.archiveSha256 ?? '-'}</dd>
+      {plugin.source?.kind === 'github' && <><dt>GitHub</dt><dd className="break-all">{plugin.source.origin}<br />{plugin.source.tag}<br /><span className="font-mono">{plugin.source.commit}</span></dd></>}
     </dl>
     <p className={!policy.browserOnly && !policy.dataOnly ? 'text-destructive' : 'text-muted-foreground'}>{policy.dataOnly ? t('settings.plugins.manager.dataTheme') : t(`settings.plugins.manager.${runtimeLabel}`)}</p>
     <div className="space-y-2">

@@ -1,6 +1,16 @@
 import type { Messages } from '../types';
 
 export const ruCoreMessages: Messages = {
+  "settings.plugins.github.install": "Установить из GitHub",
+  "settings.plugins.github.description": "Загрузите опубликованный выпуск .ncpkg и проверьте источник и разрешения.",
+  "settings.plugins.github.repository": "Репозиторий GitHub",
+  "settings.plugins.github.formats": "Поддерживаются https://github.com/owner/repo, github.com/owner/repo и owner/repo.",
+  "settings.plugins.github.busy": "Загрузка, проверка или установка пакета...",
+  "settings.plugins.github.review": "Источник и целостность пакета не подтверждают доверие к издателю. Скрипты сборки не запускаются. Плагин устанавливается выключенным; проверьте разрешения перед включением.",
+  "settings.plugins.github.accept": "Я доверяю этому репозиторию и проверил заявленные разрешения.",
+  "settings.plugins.github.confirm": "Установить выключенным",
+  "settings.plugins.github.download": "Загрузить и проверить",
+
   // Common
   'common.save': 'Сохранить',
   'common.cancel': 'Отмена',

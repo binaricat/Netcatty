@@ -1,6 +1,16 @@
 import type { Messages } from '../types';
 
 export const enCoreMessages: Messages = {
+  "settings.plugins.github.install": "Install from GitHub",
+  "settings.plugins.github.description": "Download a published .ncpkg release, then review its source and permissions.",
+  "settings.plugins.github.repository": "GitHub repository",
+  "settings.plugins.github.formats": "Accepts https://github.com/owner/repo, github.com/owner/repo or owner/repo.",
+  "settings.plugins.github.busy": "Downloading, validating or installing the package...",
+  "settings.plugins.github.review": "Repository ownership and package integrity do not verify publisher trust. No build scripts run. The plugin installs disabled; review permission modes before enabling.",
+  "settings.plugins.github.accept": "I trust this repository and have reviewed the declared permissions.",
+  "settings.plugins.github.confirm": "Install disabled",
+  "settings.plugins.github.download": "Download and review",
+
   "settings.plugins.landing.checkUpdates": "Check for updates",
   "settings.plugins.landing.checkingUpdates": "Checking…",
   "settings.plugins.landing.updateSummary": "Checked: {checked} · Published updates: {updates} · Not checked: {skipped}.",

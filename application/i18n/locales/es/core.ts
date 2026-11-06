@@ -1,6 +1,16 @@
 import type { Messages } from '../types';
 
 export const esCoreMessages: Messages = {
+  "settings.plugins.github.install": "Instalar desde GitHub",
+  "settings.plugins.github.description": "Descarga una versión .ncpkg publicada y revisa su origen y permisos.",
+  "settings.plugins.github.repository": "Repositorio de GitHub",
+  "settings.plugins.github.formats": "Acepta https://github.com/owner/repo, github.com/owner/repo u owner/repo.",
+  "settings.plugins.github.busy": "Descargando, validando o instalando el paquete...",
+  "settings.plugins.github.review": "El origen y la integridad no verifican la confianza en el autor. No se ejecutan scripts de compilación. Se instala desactivado; revisa los permisos antes de activarlo.",
+  "settings.plugins.github.accept": "Confío en este repositorio y he revisado los permisos declarados.",
+  "settings.plugins.github.confirm": "Instalar desactivado",
+  "settings.plugins.github.download": "Descargar y revisar",
+
   "settings.plugins.landing.checkUpdates": "Buscar actualizaciones",
   "settings.plugins.landing.checkingUpdates": "Buscando…",
   "settings.plugins.landing.updateSummary": "Comprobados: {checked} · Actualizaciones publicadas: {updates} · Sin comprobar: {skipped}.",

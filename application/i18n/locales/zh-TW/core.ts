@@ -1,6 +1,16 @@
 import type { Messages } from '../types';
 
 export const zhTWCoreMessages: Messages = {
+  "settings.plugins.github.install": "從 GitHub 安裝",
+  "settings.plugins.github.description": "下載已發布的 .ncpkg 發行套件，再查看來源及權限。",
+  "settings.plugins.github.repository": "GitHub 儲存庫",
+  "settings.plugins.github.formats": "支援 https://github.com/owner/repo、github.com/owner/repo 或 owner/repo。",
+  "settings.plugins.github.busy": "正在下載、驗證或安裝套件…",
+  "settings.plugins.github.review": "儲存庫歸屬及套件完整性不代表發布者可信。不會執行建置腳本。安裝後預設停用；啟用前請檢查權限模式。",
+  "settings.plugins.github.accept": "我信任此儲存庫，並已查看宣告的權限。",
+  "settings.plugins.github.confirm": "安裝並保持停用",
+  "settings.plugins.github.download": "下載並查看",
+
   "settings.plugins.landing.checkUpdates": "檢查更新",
   "settings.plugins.landing.checkingUpdates": "正在檢查…",
   "settings.plugins.landing.updateSummary": "已檢查：{checked} · 已發佈更新：{updates} · 未檢查：{skipped}。",

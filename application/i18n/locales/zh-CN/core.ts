@@ -1,6 +1,16 @@
 import type { Messages } from '../types';
 
 export const zhCNCoreMessages: Messages = {
+  "settings.plugins.github.install": "从 GitHub 安装",
+  "settings.plugins.github.description": "下载已发布的 .ncpkg 发行包，然后查看来源和权限。",
+  "settings.plugins.github.repository": "GitHub 仓库",
+  "settings.plugins.github.formats": "支持 https://github.com/owner/repo、github.com/owner/repo 或 owner/repo。",
+  "settings.plugins.github.busy": "正在下载、验证或安装插件包…",
+  "settings.plugins.github.review": "仓库归属和包完整性不代表发布者可信。不会运行构建脚本。插件安装后默认禁用；启用前请检查权限模式。",
+  "settings.plugins.github.accept": "我信任此仓库，并已查看声明的权限。",
+  "settings.plugins.github.confirm": "安装并保持禁用",
+  "settings.plugins.github.download": "下载并查看",
+
   "settings.plugins.landing.checkUpdates": "检查更新",
   "settings.plugins.landing.checkingUpdates": "正在检查…",
   "settings.plugins.landing.updateSummary": "已检查：{checked} · 已发布更新：{updates} · 未检查：{skipped}。",
