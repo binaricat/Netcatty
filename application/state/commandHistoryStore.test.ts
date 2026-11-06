@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type { HistoryEntry } from "./commandHistoryStore";
 
 import {
   STORAGE_KEY_COMMAND_HISTORY,
@@ -73,7 +74,9 @@ const {
   getCommandHistoryClearGeneration,
   hasCommandHistoryBeenCleared,
   markCommandHistoryCleared,
+  fuzzyQueryHistory,
   queryHistory,
+  queryRecentHistoryByCommand,
   recordCommand,
   subscribeCommandHistoryCleared,
 } = await import("./commandHistoryStore.ts");
@@ -343,3 +346,155 @@ test("saving after a command and peer writes read the clear generation without p
   parse.mock.restore();
   assert.ok(queryHistory("echo fast", { hostId: "host-fast" }).some((entry) => entry.command === "echo fast-path-2"));
 });
+
+const QUERY_NOW = 1_700_000_000_000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function historyEntry(command: string, overrides: Partial<HistoryEntry> = {}): HistoryEntry {
+  return {
+    command, hostId: "host-1", os: "linux", frequency: 1,
+    createdAt: QUERY_NOW, lastUsedAt: QUERY_NOW, ...overrides,
+  };
+}
+
+function installHistoryEntries(entries: HistoryEntry[]): void {
+  clearHistory();
+  const raw = JSON.stringify({
+    clearGeneration: getCommandHistoryClearGeneration(), version: 1, entries,
+  });
+  storage.set(COMMAND_HISTORY_STORAGE_KEY, raw);
+  dispatchStorageEvent(COMMAND_HISTORY_STORAGE_KEY, raw);
+}
+
+test("prefix history preserves relevance, stable ties, host isolation and best duplicate", (t) => {
+  t.mock.method(Date, "now", () => QUERY_NOW);
+  const entries = [
+    historyEntry("vi", { frequency: 100 }),
+    historyEntry("vim duplicate"),
+    historyEntry("vim frequent", { frequency: 8, lastUsedAt: QUERY_NOW - DAY_MS }),
+    historyEntry("Vim case"),
+    historyEntry("vim tied"),
+    historyEntry("vim duplicate", { hostId: "host-2", frequency: 5 }),
+    historyEntry("unrelated", { frequency: 100 }),
+  ];
+  installHistoryEntries(entries);
+
+  assert.deepEqual(queryHistory("vi", { limit: 4 }), [entries[5], entries[2], entries[3], entries[4]]);
+  assert.deepEqual(queryHistory("vi", { hostId: "host-1", limit: 3 }), [entries[2], entries[1], entries[3]]);
+  assert.deepEqual(queryHistory("VI", { limit: 1 }), [entries[0]]);
+  assert.deepEqual(queryHistory("missing"), []);
+  assert.deepEqual(queryHistory("vi", { limit: 0 }), []);
+});
+
+test("top-k history replaces and evicts duplicates without losing distinct results", (t) => {
+  t.mock.method(Date, "now", () => QUERY_NOW);
+  const entries = [
+    historyEntry("vim a", { frequency: 2 }),
+    historyEntry("vim b", { frequency: 3 }),
+    historyEntry("vim c", { frequency: 4 }),
+    historyEntry("vim b", { hostId: "host-2", frequency: 5 }),
+    historyEntry("vim a", { hostId: "host-2", frequency: 6 }),
+    historyEntry("vim a", { hostId: "host-3", frequency: 1 }),
+  ];
+  installHistoryEntries(entries);
+  assert.deepEqual(queryHistory("vi", { limit: 2 }), [entries[4], entries[3]]);
+  assert.deepEqual(fuzzyQueryHistory("vi", { limit: 2 }), [entries[4], entries[3]]);
+});
+
+test("fuzzy history preserves subsequence quality, recency, exclusions and stable ties", (t) => {
+  t.mock.method(Date, "now", () => QUERY_NOW);
+  const entries = [
+    historyEntry("vi", { frequency: 100 }),
+    historyEntry("vi alpha"),
+    historyEntry("vi beta"),
+    historyEntry("very indirect", { frequency: 2 }),
+    historyEntry("vi stale", { lastUsedAt: QUERY_NOW - DAY_MS }),
+    historyEntry("vi alpha", { hostId: "host-2", frequency: 3 }),
+    historyEntry("iv does not match"),
+  ];
+  installHistoryEntries(entries);
+  assert.deepEqual(fuzzyQueryHistory("vi", { limit: 4 }), [entries[5], entries[3], entries[2], entries[4]]);
+  assert.deepEqual(fuzzyQueryHistory("vi", { hostId: "host-1", limit: 4 }), [entries[3], entries[1], entries[2], entries[4]]);
+  assert.deepEqual(fuzzyQueryHistory(""), []);
+  assert.deepEqual(fuzzyQueryHistory("vi", { limit: -1 }), []);
+});
+
+test("recent history preserves timestamps, command boundaries and quoted argument prefixes", () => {
+  const entries = [
+    historyEntry("cd /work/older", { lastUsedAt: QUERY_NOW - DAY_MS }),
+    historyEntry("cd '/work/new folder'"),
+    historyEntry("CD /work/tied"),
+    historyEntry("cd /work/older", { hostId: "host-2", lastUsedAt: QUERY_NOW + 1 }),
+    historyEntry("cd /other", { lastUsedAt: QUERY_NOW + 2 }),
+    historyEntry("cdb /work/wrong", { lastUsedAt: QUERY_NOW + 3 }),
+    historyEntry("cd /work/excluded", { lastUsedAt: QUERY_NOW + 4 }),
+  ];
+  installHistoryEntries(entries);
+  const options = { commandName: " CD ", argumentPrefix: "'/work/", excludeCommand: "cd /work/excluded", limit: 3 };
+  assert.deepEqual(queryRecentHistoryByCommand(options), [entries[3], entries[1], entries[2]]);
+  assert.deepEqual(queryRecentHistoryByCommand({ ...options, hostId: "host-1" }), [entries[1], entries[2], entries[0]]);
+  assert.deepEqual(queryRecentHistoryByCommand({ commandName: "" }), []);
+  assert.deepEqual(queryRecentHistoryByCommand({ commandName: "cd", limit: 0 }), []);
+});
+
+test("fuzzy scoring preserves consecutive and word-boundary bonuses across long gaps", (t) => {
+  t.mock.method(Date, "now", () => QUERY_NOW);
+  const entries = [
+    historyEntry("av-x"),
+    historyEntry("avx"),
+    historyEntry(`v${"a".repeat(1900)}x`),
+    historyEntry("v-x"),
+    historyEntry("v/x"),
+    historyEntry("v_x"),
+    historyEntry("v x"),
+    historyEntry("vx adjacent"),
+    historyEntry("v missing second character"),
+    historyEntry("xv wrong order"),
+  ];
+  installHistoryEntries(entries);
+  assert.deepEqual(fuzzyQueryHistory("vx"), [
+    entries[7], entries[3], entries[4], entries[5], entries[6], entries[2], entries[1], entries[0],
+  ]);
+  assert.deepEqual(fuzzyQueryHistory("vv"), []);
+});
+
+for (const size of [4_000, 40_000]) {
+  test(`history queries keep five best results with linear scoring for ${size} entries`, (t) => {
+    t.mock.method(Date, "now", () => QUERY_NOW);
+    const entries = Array.from({ length: size }, (_, i) => historyEntry(`vi file-${i}`, {
+      // Unsorted scores/timestamps, with the best match at the end of the store.
+      frequency: i === size - 1 ? size + 1 : (i * 7919) % size + 1,
+      lastUsedAt: QUERY_NOW + (i === size - 1 ? size + 1 : (i * 7919) % size),
+    }));
+    installHistoryEntries(entries);
+    queryHistory("missing"); // Warm the cache before measuring query operations.
+
+    const expected = entries.slice().sort((a, b) => b.frequency - a.frequency).slice(0, 5);
+    const pow = t.mock.method(Math, "pow");
+    const lower = t.mock.method(String.prototype, "toLowerCase");
+    // node:test cannot mock methods directly on arrays (including Array.prototype).
+    const originalSort = Array.prototype.sort;
+    const sortedSizes: number[] = [];
+    Array.prototype.sort = function<T>(this: T[], compare?: (a: T, b: T) => number): T[] {
+      sortedSizes.push(this.length);
+      return originalSort.call(this, compare);
+    };
+    t.after(() => { Array.prototype.sort = originalSort; });
+    const queries = [
+      () => queryHistory("vi", { limit: 5 }),
+      () => fuzzyQueryHistory("vi", { limit: 5 }),
+      () => queryRecentHistoryByCommand({ commandName: "vi", argumentPrefix: "file-", limit: 5 }),
+    ];
+
+    for (const query of queries) {
+      const beforePow = pow.mock.callCount();
+      const beforeLower = lower.mock.callCount();
+      const result = query();
+      assert.deepEqual(result, expected);
+      assert.equal(new Set(result.map((entry) => entry.command)).size, 5);
+      assert.ok(pow.mock.callCount() - beforePow <= size, "score each entry at most once");
+      assert.ok(lower.mock.callCount() - beforeLower <= 2 * size + 2, "normalize in one linear pass");
+    }
+    assert.deepEqual(sortedSizes, [], "never sort all matches before limiting");
+  });
+}
