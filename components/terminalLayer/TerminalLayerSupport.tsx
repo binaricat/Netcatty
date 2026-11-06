@@ -112,6 +112,7 @@ export type SnippetExecutor = (
   options?: {
     broadcast?: boolean;
     multiLineRunMode?: Snippet["multiLineRunMode"];
+    preferBracketedPaste?: boolean;
     /** When false, do not steal keyboard focus (multi-tab fan-out). Default true. */
     focus?: boolean;
     /**
