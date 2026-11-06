@@ -1,3 +1,4 @@
+import { resolveSessionGroupSession } from '../../domain/sessionGroup';
 import {
   fromEditorTabId,
   isEditorTabId,
@@ -152,7 +153,7 @@ export function resolveWorkTabActiveHostId({
     return editorTabs.find((tab) => tab.id === editorId)?.hostId ?? null;
   }
 
-  const activeSession = sessions.find((session) => session.id === activeTabId);
+  const activeSession = resolveSessionGroupSession(sessions, activeTabId);
   if (activeSession) return activeSession.hostId ?? null;
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeTabId);

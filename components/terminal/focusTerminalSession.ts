@@ -18,6 +18,10 @@ export const hasOpenAppDialog = (
   return doc.querySelector('[role="dialog"][data-state="open"]') !== null;
 };
 
+export const hasInlineSessionRename = (
+  doc: QueryRoot | null = typeof document !== "undefined" ? document : null,
+): boolean => Boolean(doc?.querySelector('[data-session-inline-rename="true"]'));
+
 interface FocusTerminalSessionInputOptions {
   document?: QueryTarget | null;
   requestAnimationFrame?: (callback: () => void) => unknown;
@@ -69,6 +73,9 @@ export const focusTerminalSessionInput = (
   const paneSelector = `[data-session-id="${escapeAttributeValue(sessionId)}"]`;
 
   const focusTarget = () => {
+    // A click preceding double-click/F2 may already have queued a retry.
+    // Do not focus xterm or dispatch its restore event while a name is edited.
+    if (hasInlineSessionRename(doc)) return;
     if (hasOpenAppDialog(doc)) {
       dispatchTerminalSessionRestoreFocus(sessionId);
       return;

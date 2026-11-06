@@ -125,6 +125,8 @@ test("buildSessionRestorePayload only stores allowlisted session fields", () => 
     "id",
     "protocol",
     "restoreState",
+    "sessionGroupId",
+    "sessionGroupFocused",
     "status",
     "username",
   ].sort());

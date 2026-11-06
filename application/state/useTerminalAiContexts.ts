@@ -1,4 +1,5 @@
 import type React from 'react';
+import { resolveSessionGroupSession } from '../../domain/sessionGroup';
 import { useCallback, useMemo, useRef } from 'react';
 
 import { retainStableAiPanelContexts } from '../../domain/aiPanelContextsEqual';
@@ -72,7 +73,7 @@ export function useTerminalAiContexts({
         continue;
       }
 
-      const session = sessionById.get(tabId);
+      const session = resolveSessionGroupSession(sessions, tabId);
       if (!session) continue;
 
       contexts.set(tabId, {

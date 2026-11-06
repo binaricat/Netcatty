@@ -98,6 +98,34 @@ test("copy session clones reuse SSH sources and preserve serial config", () => {
   assert.deepEqual(copied.serialConfig, { path: "/dev/tty.usbserial", baudRate: 115200 });
 });
 
+test("split and copy serial sessions retain independent connection settings", () => {
+  const serialConfig: NonNullable<TerminalSession["serialConfig"]> = {
+    path: "/dev/tty.usbserial",
+    baudRate: 115200,
+    dataBits: 8,
+    stopBits: 1,
+    parity: "none",
+    flowControl: "rts/cts",
+    localEcho: true,
+    lineMode: true,
+    backspaceBehavior: "ctrl-h",
+    byteOrientedBackspace: true,
+  };
+  const source = session({ protocol: "serial", serialConfig });
+
+  for (const createClone of [createSplitTerminalSessionClone, createCopiedTerminalSessionClone]) {
+    const clone = createClone(source, { id: "serial-clone", workspaceId: "workspace-1" });
+
+    assert.equal(clone.protocol, "serial");
+    assert.equal(clone.status, "connecting");
+    assert.deepEqual(clone.serialConfig, serialConfig);
+    assert.equal(clone.reuseConnectionFromSessionId, undefined);
+    assert.notEqual(clone.serialConfig, serialConfig);
+    clone.serialConfig!.baudRate = 9600;
+    assert.equal(source.serialConfig!.baudRate, 115200);
+  }
+});
+
 test("copy session clones open a fresh connection when reuseConnection is false", () => {
   const fresh = createCopiedTerminalSessionClone(session(), { id: "copy-fresh", reuseConnection: false });
   assert.equal(fresh.reuseConnectionFromSessionId, undefined);

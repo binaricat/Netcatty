@@ -524,7 +524,7 @@ test("terminal body keeps a slight inset from the surrounding chrome", () => {
   assert.match(source, /const terminalBodyInset = 4/);
   assert.match(source, /left: activeLineTimestampGutterWidth \+ terminalBodyInset/);
   assert.match(source, /right: terminalRightInset/);
-  assert.match(source, /const terminalBottomInset = terminalBodyInset \+ \(showDisconnectedTerminalNotice \? 28 : 0\)/);
+  assert.match(source, /const terminalBottomInset = terminalBodyInset \+ statusBarHeight \+ \(showDisconnectedTerminalNotice \? 28 : 0\)/);
   assert.match(source, /bottom: terminalBottomInset/);
   assert.match(source, /left=\{terminalBodyInset\}/);
   assert.match(source, /bottom=\{terminalBottomInset\}/);
@@ -537,14 +537,14 @@ test("hidden host information bar gives its vertical space back to the terminal"
   );
   assert.deepEqual(
     resolveTerminalTopOffsets({ showHostInfoBar: true, isSearchOpen: false }),
-    { toolbarOffset: 30, contentTop: "34px" },
+    { toolbarOffset: 0, contentTop: "4px" },
   );
 });
 
 test("terminal search keeps enough space when host information is hidden", () => {
   assert.deepEqual(
     resolveTerminalTopOffsets({ showHostInfoBar: false, isSearchOpen: true }),
-    { toolbarOffset: 64, contentTop: "68px" },
+    { toolbarOffset: 34, contentTop: "38px" },
   );
 });
 
@@ -553,7 +553,7 @@ test("network device tip reserves extra top space below the toolbar", () => {
   // the toolbar offset itself is unchanged.
   assert.deepEqual(
     resolveTerminalTopOffsets({ showHostInfoBar: true, isSearchOpen: false, networkDeviceTipHeight: 28 }),
-    { toolbarOffset: 30, contentTop: "62px" },
+    { toolbarOffset: 0, contentTop: "32px" },
   );
   assert.deepEqual(
     resolveTerminalTopOffsets({ showHostInfoBar: false, isSearchOpen: false, networkDeviceTipHeight: 28 }),

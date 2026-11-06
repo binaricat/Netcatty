@@ -1,6 +1,9 @@
 import type { Messages } from '../types';
 
 export const esTerminalMessages: Messages = {
+  'terminal.sessions.title': 'Terminal',
+  'terminal.sessions.add': 'Nueva sesión de terminal',
+  'terminal.sessions.close': 'Cerrar sesión de terminal',
   'terminal.directory.open': 'Directorio actual: {path}. Cambiar directorio',
   'terminal.directory.unknown': 'Directorio desconocido',
   'terminal.directory.search': 'Buscar subdirectorios...',

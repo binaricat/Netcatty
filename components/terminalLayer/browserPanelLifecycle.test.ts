@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { collectSidePanelPanes, closeSidePanelPane, type SidePanelLayout } from '../../domain/sidePanelLayout';
 import { resolveSessionSidePanelAutoOpen } from '../../domain/terminalSidePanelAutoOpen';
+import { getSessionTabId } from '../../domain/sessionGroup';
 
 const source = readFileSync(new URL('../TerminalLayer.tsx', import.meta.url), 'utf8');
 const start = source.indexOf('const handleCloseSidePanelPane = useCallback(');
@@ -80,6 +81,7 @@ for (const protocol of ['local', 'ssh']) {
       localShellSidePanelAutoOpenTabRef: { current: 'browser' },
       sftpAutoOpenSidebarRef: { current: false },
       resolveSessionSidePanelAutoOpen,
+      getSessionTabId,
       applyWorkspaceLayoutPresetForSession: () => false,
       setBrowserMountedTabIds: (update: (previous: string[]) => string[]) => { mounted = update(mounted); },
       setSidePanelOpenTabs: (update: (previous: Map<string, string>) => Map<string, string>) => { opened = update(opened); },
@@ -109,6 +111,7 @@ test('host-only browser requests skip hidden and unsupported sessions', () => {
       activeTabStore: { setActiveTabId: (tabId: string) => { active = tabId; } },
       onConnectToHost: () => 'new-visible',
       addMountedSidePanelTabId: (previous: string[], tabId: string) => [...previous, tabId],
+      getSessionTabId,
       setBrowserMountedTabIds: (update: (previous: string[]) => string[]) => { mounted = update(mounted); },
       setSidePanelOpenTabs: (update: (previous: Map<string, string>) => Map<string, string>) => { opened = update(opened); },
     });

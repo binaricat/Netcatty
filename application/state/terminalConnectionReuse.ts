@@ -74,6 +74,7 @@ function createTerminalSessionClone(
     username: session.username,
     status: "connecting",
     protocol: session.protocol,
+    serialConfig: session.serialConfig ? { ...session.serialConfig } : undefined,
     pluginConnection: session.pluginConnection == null
       ? undefined
       : structuredClone(session.pluginConnection),
@@ -120,8 +121,5 @@ export function createCopiedTerminalSessionClone(
   session: TerminalSession,
   options: CloneSessionOptions,
 ): TerminalSession {
-  return {
-    ...createTerminalSessionClone(session, options),
-    serialConfig: session.serialConfig,
-  };
+  return createTerminalSessionClone(session, options);
 }

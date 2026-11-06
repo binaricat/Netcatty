@@ -101,6 +101,8 @@ interface GetTerminalPaneSnapshotOptions {
   activeTabId: string | null;
   sessionId: string;
   sessionWorkspaceId?: string;
+  sessionGroupId?: string;
+  sessionGroupFocused?: boolean;
   workspaceById: Map<string, Workspace>;
   isTerminalLayerVisible: boolean;
 }
@@ -109,6 +111,8 @@ export function getTerminalPaneSnapshot({
   activeTabId,
   sessionId,
   sessionWorkspaceId,
+  sessionGroupId,
+  sessionGroupFocused,
   workspaceById,
   isTerminalLayerVisible,
 }: GetTerminalPaneSnapshotOptions): TerminalPaneSnapshot {
@@ -132,7 +136,7 @@ export function getTerminalPaneSnapshot({
     return `workspace|split|${activeWorkspace.id}`;
   }
 
-  return activeTabId === sessionId
+  return (activeTabId === sessionGroupId ? sessionGroupFocused === true : activeTabId === sessionId)
     ? `solo|${sessionId}`
     : HIDDEN_TERMINAL_PANE_SNAPSHOT;
 }

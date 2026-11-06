@@ -1,6 +1,9 @@
 import type { Messages } from '../types';
 
 export const zhTWTerminalMessages: Messages = {
+  'terminal.sessions.title': '終端',
+  'terminal.sessions.add': '新增終端工作階段',
+  'terminal.sessions.close': '關閉終端工作階段',
   'terminal.directory.open': '目前目錄：{path}。變更目錄',
   'terminal.directory.unknown': '目錄未知',
   'terminal.directory.search': '搜尋目前目錄下的資料夾…',

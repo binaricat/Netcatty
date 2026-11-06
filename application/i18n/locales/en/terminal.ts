@@ -1,6 +1,9 @@
 import type { Messages } from '../types';
 
 export const enTerminalMessages: Messages = {
+  'terminal.sessions.title': 'Terminal',
+  'terminal.sessions.add': 'New terminal session',
+  'terminal.sessions.close': 'Close terminal session',
   'terminal.directory.open': 'Current directory: {path}. Change directory',
   'terminal.directory.unknown': 'Directory unknown',
   'terminal.directory.search': 'Search child directories...',
