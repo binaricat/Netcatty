@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 
-test('real dialog reviews permissions and requires fresh trust after failed installation for same-package retries and different repositories', async () => {
+for (const locale of ['en', 'es', 'ru', 'zh-CN', 'zh-TW']) test(`real dialog (${locale}) reviews permissions and requires fresh trust after failed installation for same-package retries and different repositories`, async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true, url: 'http://localhost' });
   const previous = new Map<string, PropertyDescriptor | undefined>();
   const install = (key: string, value: unknown) => {
@@ -17,6 +17,10 @@ test('real dialog reviews permissions and requires fresh trust after failed inst
   const { default: React, act } = await import('react');
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('../../../application/i18n/I18nProvider');
+  const { loadLocaleMessages, getLoadedLocaleMessages } = await import('../../../application/i18n/messages');
+  await loadLocaleMessages(locale);
+  const messages = getLoadedLocaleMessages(locale)!;
+  const t = (key: string) => messages[key]!;
   const { PluginGitHubInstall } = await import('./PluginGitHubInstall');
   const root = createRoot(document.getElementById('root')!);
   const requests: string[] = [];
@@ -43,21 +47,29 @@ test('real dialog reviews permissions and requires fresh trust after failed inst
   const preview = { token: 'reviewed-token', source: { id: 'github:fixture', kind: 'github', name: 'owner/repo', origin: 'https://github.com/owner/repo', tag: 'v1.0.0', commit: 'a'.repeat(40) }, assetName: 'plugin.ncpkg', size: 400,
     archiveSha256: 'b'.repeat(64), manifest: { manifestVersion: 1, id: 'com.example.fixture', name: 'fixture', publisher: 'example', version: '1.0.0', engines: { netcatty: '*', api: '*' }, main: { browser: 'index.js' }, permissions: { required: [{ permission: 'network', resources: ['https://example.com'], reason: 'Read only fixture' }] } } } as NetcattyGitHubPluginPreview;
   try {
-    await act(async () => root.render(<I18nProvider locale="en"><PluginGitHubInstall disabled={false} onInstalled={async () => { refreshed++; }} /></I18nProvider>));
-    const trigger = button('Install from GitHub');
+    await act(async () => root.render(<I18nProvider locale={locale}><PluginGitHubInstall disabled={false} onInstalled={async () => { refreshed++; }} /></I18nProvider>));
+    const trigger = button(t('settings.plugins.github.install'));
     await click(trigger);
     assert.equal(document.activeElement?.tagName, 'INPUT');
-    assert.ok(button('Download and review').disabled);
+    assert.ok(button(t('settings.plugins.github.download')).disabled);
     await type('https://evil.com/owner/repo');
-    await click(button('Download and review'));
-    assert.match(document.querySelector('[role=alert]')!.textContent!, /repository only/);
+    await click(button(t('settings.plugins.github.download')));
+    assert.equal(document.querySelector('[role=alert] p')!.textContent, t('settings.plugins.github.error.invalidRepository'));
     assert.equal(requests.length, 0);
+    if (locale !== 'en') {
+      // The existing error follows provider state without repeating the host call.
+      await act(async () => root.render(<I18nProvider locale="en"><PluginGitHubInstall disabled={false} onInstalled={async () => { refreshed++; }} /></I18nProvider>));
+      assert.match(document.querySelector('[role=alert]')!.textContent!, /repository only/);
+      await act(async () => root.render(<I18nProvider locale={locale}><PluginGitHubInstall disabled={false} onInstalled={async () => { refreshed++; }} /></I18nProvider>));
+      assert.equal(document.querySelector('[role=alert] p')!.textContent, t('settings.plugins.github.error.invalidRepository'));
+      assert.equal(requests.length, 0);
+    }
     await type('github.com/Owner/Repo.git/');
-    await click(button('Download and review'));
-    assert.match(document.querySelector('[role=alert]')!.textContent!, /rate limit/);
+    await click(button(t('settings.plugins.github.download')));
+    assert.equal(document.querySelector('[role=alert] p')!.textContent, t('settings.plugins.github.error.rateLimit'));
     assert.deepEqual(requests, ['https://github.com/owner/repo']);
-    await click(button('Download and review'));
-    assert.ok(button('Download and review').disabled);
+    await click(button(t('settings.plugins.github.download')));
+    assert.ok(button(t('settings.plugins.github.download')).disabled);
     assert.equal(document.querySelector('form')?.getAttribute('aria-busy'), 'true');
     assert.equal(document.querySelector<HTMLInputElement>('input')?.disabled, true);
     await act(async () => { resolveDownload!(preview); await settle(); });
@@ -65,39 +77,39 @@ test('real dialog reviews permissions and requires fresh trust after failed inst
     assert.match(review.textContent!, /https:\/\/github.com\/owner\/repo/);
     assert.match(review.textContent!, /v1\.0\.0.*aaaaaaaa/);
     assert.match(review.textContent!, /https:\/\/example.com/);
-    assert.ok(button('Install disabled').disabled);
+    assert.ok(button(t('settings.plugins.github.confirm')).disabled);
     await click(document.querySelector('input[type=checkbox]')!);
-    assert.equal(button('Install disabled').disabled, false);
-    await click(button('Install disabled'));
+    assert.equal(button(t('settings.plugins.github.confirm')).disabled, false);
+    await click(button(t('settings.plugins.github.confirm')));
     assert.deepEqual(installed, ['reviewed-token']);
-    assert.match(document.querySelector('[role=alert]')!.textContent!, /preview expired/);
+    assert.equal(document.querySelector('[role=alert] p')!.textContent, t('settings.plugins.github.error.expired'));
     assert.equal(document.querySelector('[data-plugin-github-preview]'), null);
     assert.equal(refreshed, 0);
     // A retry of the very same archive/repository is a fresh preview too.
-    await click(button('Download and review'));
+    await click(button(t('settings.plugins.github.download')));
     await act(async () => { resolveDownload!({ ...preview, token: 'retry-token' }); await settle(); });
     assert.equal(document.querySelector<HTMLInputElement>('input[type=checkbox]')!.checked, false);
-    assert.ok(button('Install disabled').disabled);
-    await click(button('Install disabled'));
+    assert.ok(button(t('settings.plugins.github.confirm')).disabled);
+    await click(button(t('settings.plugins.github.confirm')));
     assert.deepEqual(installed, ['reviewed-token']);
     await click(document.querySelector('input[type=checkbox]')!);
-    assert.equal(button('Install disabled').disabled, false);
-    await click(button('Install disabled'));
-    assert.match(document.querySelector('[role=alert]')!.textContent!, /preview expired/);
+    assert.equal(button(t('settings.plugins.github.confirm')).disabled, false);
+    await click(button(t('settings.plugins.github.confirm')));
+    assert.equal(document.querySelector('[role=alert] p')!.textContent, t('settings.plugins.github.error.expired'));
     await type('another/plugin');
-    await click(button('Download and review'));
+    await click(button(t('settings.plugins.github.download')));
     await act(async () => { resolveDownload!({ ...preview, token: 'different-token', source: { ...preview.source, origin: 'https://github.com/another/plugin', name: 'another/plugin' } }); await settle(); });
     assert.equal(requests.at(-1), 'https://github.com/another/plugin');
     assert.match(document.querySelector('[data-plugin-github-preview]')!.textContent!, /https:\/\/github.com\/another\/plugin/);
     assert.equal(document.querySelector<HTMLInputElement>('input[type=checkbox]')!.checked, false);
-    assert.ok(button('Install disabled').disabled);
-    await click(button('Install disabled'));
+    assert.ok(button(t('settings.plugins.github.confirm')).disabled);
+    await click(button(t('settings.plugins.github.confirm')));
     assert.deepEqual(installed, ['reviewed-token', 'retry-token']);
     await click(document.querySelector('input[type=checkbox]')!);
     await click(document.querySelector('input[type=checkbox]')!);
-    assert.ok(button('Install disabled').disabled);
+    assert.ok(button(t('settings.plugins.github.confirm')).disabled);
     await click(document.querySelector('input[type=checkbox]')!);
-    await click(button('Install disabled'));
+    await click(button(t('settings.plugins.github.confirm')));
     assert.deepEqual(installed, ['reviewed-token', 'retry-token', 'different-token']);
     assert.equal(refreshed, 1);
     assert.equal(document.querySelector('[role=dialog]'), null);
@@ -105,9 +117,9 @@ test('real dialog reviews permissions and requires fresh trust after failed inst
     assert.equal(document.querySelector('[data-plugin-github-preview]'), null);
     assert.equal(document.querySelector<HTMLInputElement>('input')?.value, '');
     await type('owner/repo');
-    await click(button('Download and review'));
+    await click(button(t('settings.plugins.github.download')));
     await act(async () => { resolveDownload!({ ...preview, token: 'cancel-token' }); await settle(); });
-    await click(button('Back'));
+    await click(button(t('common.back')));
     assert.deepEqual(discarded, ['cancel-token']);
     await act(async () => { document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle(); });
     assert.equal(document.querySelector('[role=dialog]'), null);

@@ -6,14 +6,16 @@ import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../../ui/dialog';
 import { PluginPackageDetails } from './PluginPackageManager';
+import { describePluginGitHubInstallError } from '../../../domain/pluginGitHubInstallError';
 
 export function PluginGitHubInstall({ disabled, onInstalled }: { disabled: boolean; onInstalled: () => Promise<unknown> }) {
-  const { t } = useI18n();
+  const { t, resolvedLocale } = useI18n();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [accepted, setAccepted] = useState(false);
   const flow = usePluginGitHubInstall(async () => { await onInstalled(); setOpen(false); });
   const preview = flow.preview;
+  const error = flow.error ? describePluginGitHubInstallError(flow.error) : null;
   return <Dialog open={open} onOpenChange={(next) => {
     if (flow.busy) return;
     setOpen(next); flow.reset(); setAccepted(false); setInput('');
@@ -30,12 +32,15 @@ export function PluginGitHubInstall({ disabled, onInstalled }: { disabled: boole
         </label>
         <p className="text-xs text-muted-foreground">{t('settings.plugins.github.formats')}</p>
         {flow.busy && <p role="status" className="text-sm text-muted-foreground">{t('settings.plugins.github.busy')}</p>}
-        {flow.error && <p role="alert" className="break-words text-sm text-destructive">{flow.error}</p>}
+        {error && <div role="alert" className="break-words text-sm text-destructive">
+          <p>{t(error.key, error.values)}</p>
+          {error.details && <details className="mt-2 text-xs"><summary>{t('settings.plugins.github.error.details')}</summary><p className="whitespace-pre-wrap">{error.details}</p></details>}
+        </div>}
         {preview && <div className="space-y-3" data-plugin-github-preview="">
           <p className="break-words text-sm font-medium">{preview.manifest.name} · {preview.manifest.version}</p>
           <div className="break-all rounded-md bg-muted/40 p-3 text-xs">
             <p>{preview.source.origin}</p><p>{preview.source.tag} · {preview.source.commit}</p>
-            <p>{preview.assetName} · {preview.size.toLocaleString()} B</p>
+            <p>{preview.assetName} · {preview.size.toLocaleString(resolvedLocale)} B</p>
           </div>
           <p className="text-xs text-muted-foreground">{t('settings.plugins.github.review')}</p>
           <PluginPackageDetails plugin={{ id: preview.manifest.id, enabled: false, activeVersion: preview.manifest.version, manifest: preview.manifest,
