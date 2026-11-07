@@ -65,6 +65,50 @@ export function buildRuleSummary(
   }
 }
 
+export interface PortForwardingFormRow {
+  localPort?: number;
+  remotePort?: number;
+}
+
+/**
+ * Working draft for the create/edit forms: the rule fields plus the editable
+ * mapping rows for local/remote rules. Row 0 mirrors localPort/remotePort on
+ * save; `mappings` is persisted only when more than one row remains.
+ */
+export type PortForwardingFormDraft = Partial<PortForwardingRule> & {
+  mappingRows?: PortForwardingFormRow[];
+};
+
+/**
+ * Effective mapping rows for a form draft: the working rows when present,
+ * otherwise the single pair derived from the scalar fields.
+ */
+export function getFormRows(draft: PortForwardingFormDraft): PortForwardingFormRow[] {
+  if (draft.mappingRows && draft.mappingRows.length > 0) return draft.mappingRows;
+  return [{ localPort: draft.localPort, remotePort: draft.remotePort }];
+}
+
+/**
+ * One line per mapping for multi-mapping rules (single-mapping rules return
+ * the one legacy summary line). Bind address and destination host are shared
+ * by all mappings, so only the port pair varies per line.
+ */
+export function buildRuleMappingSummaries(
+  t: (key: string, vars?: Record<string, unknown>) => string,
+  rule: PortForwardingRule
+): string[] {
+  if (!rule.mappings || rule.mappings.length <= 1) {
+    return [buildRuleSummary(t, rule)];
+  }
+  return rule.mappings.map((mapping) =>
+    t('pf.rule.summary.mapping', {
+      localPort: mapping.localPort,
+      remoteHost: rule.remoteHost,
+      remotePort: mapping.remotePort,
+    })
+  );
+}
+
 export async function stopRuntimeTunnelBeforeDelete(
   ruleId: string,
   stopTunnel: (ruleId: string) => Promise<{ success: boolean }>,
@@ -81,6 +125,8 @@ export function getStatusColor(status: string): string {
       return 'bg-emerald-500';
     case 'connecting':
       return 'bg-yellow-500 animate-pulse';
+    case 'partial':
+      return 'bg-amber-500';
     case 'error':
       return 'bg-red-500';
     case 'unknown':

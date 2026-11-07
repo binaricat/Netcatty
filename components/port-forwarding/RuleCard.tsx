@@ -11,13 +11,23 @@ import { Button } from '../ui/button';
 import { ContextMenu,ContextMenuContent,ContextMenuItem,ContextMenuSeparator,ContextMenuTrigger } from '../ui/context-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { vaultEntityIconClass } from '../vault/VaultEntityIcon';
-import { buildRuleSummary,getStatusColor,getTypeColor } from './utils';
+import { buildRuleMappingSummaries, getStatusColor, getTypeColor } from './utils';
 
 export type ViewMode = 'grid' | 'list';
+
+/** Per-mapping runtime snapshot for multi-mapping rules (props stay presentational). */
+export interface RuleMappingState {
+    mappingId: number;
+    localPort: number;
+    remotePort?: number;
+    status: string;
+    error?: string;
+}
 
 export interface RuleCardProps {
     rule: PortForwardingRule;
     host?: Host; // The relay host for this rule (for tooltip display)
+    mappingStates?: RuleMappingState[];
     viewMode: ViewMode;
     isSelected: boolean;
     isPending: boolean;
@@ -34,6 +44,7 @@ export interface RuleCardProps {
 export const RuleCard: React.FC<RuleCardProps> = ({
     rule,
     host,
+    mappingStates,
     viewMode,
     isSelected,
     isPending,
@@ -48,10 +59,13 @@ export const RuleCard: React.FC<RuleCardProps> = ({
 }) => {
     const { t } = useI18n();
     const isActive = rule.status === 'active';
-    const isStoppable = canStop || rule.status === 'active' || rule.status === 'connecting';
+    const isStoppable = canStop || rule.status === 'active' || rule.status === 'connecting' || rule.status === 'partial';
     // unknown/stale means we cannot trust inactive — do not offer Start until
     // an authoritative snapshot confirms there is no runtime.
     const isStartable = !isStoppable && (rule.status === 'inactive' || rule.status === 'error');
+    const summaryLines = buildRuleMappingSummaries(t, rule);
+    const summaryText = summaryLines.join(' · ');
+    const perMappingStates = mappingStates && mappingStates.length > 1 ? mappingStates : undefined;
 
     return (
         <ContextMenu>
@@ -106,11 +120,35 @@ export const RuleCard: React.FC<RuleCardProps> = ({
                                     <Tooltip>
                                         <TooltipTrigger asChild>
                                             <span className="truncate cursor-default">
-                                                {buildRuleSummary(t, rule)}
+                                                {summaryText}
                                             </span>
                                         </TooltipTrigger>
                                         <TooltipContent side="bottom" align="start" className="max-w-xs">
                                             <div className="space-y-1 text-xs">
+                                                {perMappingStates ? (
+                                                    <div className="space-y-1">
+                                                        {perMappingStates.map((mapping) => (
+                                                            <div key={mapping.mappingId} className="flex items-center gap-2">
+                                                                <span
+                                                                    className={cn(
+                                                                        "h-2 w-2 rounded-full flex-shrink-0",
+                                                                        getStatusColor(mapping.status)
+                                                                    )}
+                                                                />
+                                                                <span>
+                                                                    {t('pf.rule.summary.mapping', {
+                                                                        localPort: mapping.localPort,
+                                                                        remoteHost: rule.remoteHost,
+                                                                        remotePort: mapping.remotePort,
+                                                                    })}
+                                                                </span>
+                                                                {mapping.error && (
+                                                                    <span className="text-destructive">{mapping.error}</span>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : null}
                                                 {host ? (
                                                     <>
                                                         <div className="font-medium">{t('pf.tooltip.relayHost')}</div>
