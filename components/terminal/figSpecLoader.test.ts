@@ -9,6 +9,9 @@ test("preload common specs includes dnf alongside yum and apt", () => {
   for (const command of ["ln", "stat", "wc", "cut", "uniq", "tee", "xargs"]) {
     assert.ok(COMMON_FIG_SPECS.includes(command), `${command} should be preloaded`);
   }
+  for (const command of ["basename", "dirname", "readlink", "more", "seq", "dig", "htop"]) {
+    assert.ok(COMMON_FIG_SPECS.includes(command), `${command} should be preloaded`);
+  }
 });
 
 test("normalizeCommandName strips path and extension", () => {
