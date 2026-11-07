@@ -155,6 +155,9 @@ export const COMMON_FIG_SPECS = [
   "vim", "nano", "less", "head", "tail", "sort",
   "awk", "sed", "chmod", "chown", "cp", "mv", "rm", "mkdir",
   "ln", "stat", "wc", "cut", "uniq", "tee", "xargs",
+  "echo", "which", "pwd", "clear", "su", "crontab", "env",
+  "uname", "base64", "date", "id", "split", "seq", "join",
+  "dig", "dd", "htop", "basename", "dirname", "readlink", "more", "paste",
 ] as const;
 
 /**
