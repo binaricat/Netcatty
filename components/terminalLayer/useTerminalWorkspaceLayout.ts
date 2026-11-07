@@ -1,4 +1,4 @@
-import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { terminalLayoutSuppressStore } from '../../application/state/terminalLayoutSuppressStore';
 import type { TerminalSession, Workspace, WorkspaceNode } from '../../types';
@@ -367,17 +367,25 @@ export function useTerminalWorkspaceLayout({
       }
     }, [isFocusMode, computeSplitHint, setDropHint, onSetDraggingSessionId, activeWorkspace, sessions, onAddSessionToWorkspace, onMoveWorkspacePane, activeSession, onCreateWorkspaceFromSessions]);
 
-  // Commit directly from the gesture owner before it clears drag state. This
-  // also handles a release that crosses the threshold without a delivered move.
+  // All mounted panes share this callback. Keep its identity across tab/layout
+  // changes, but resolve a saved gesture against the latest committed state.
+  const paneDropStateRef = useRef({ isFocusMode, activeWorkspace, sessions, computeSplitHint, onMoveWorkspacePane });
+  useLayoutEffect(() => {
+    paneDropStateRef.current = { isFocusMode, activeWorkspace, sessions, computeSplitHint, onMoveWorkspacePane };
+  }, [isFocusMode, activeWorkspace, sessions, computeSplitHint, onMoveWorkspacePane]);
+
+  // Commit directly from the gesture owner before it clears drag state, even
+  // when the release crosses the threshold without a delivered move.
   const handleWorkspacePanePointerDrop = useCallback((sessionId: string, point: { clientX: number; clientY: number }) => {
     setDropHint(null);
-    if (isFocusMode || !activeWorkspace) return;
-    const session = sessions.find((candidate) => candidate.id === sessionId);
-    if (session?.workspaceId !== activeWorkspace.id) return;
-    const hint = computeSplitHint(point);
+    const current = paneDropStateRef.current;
+    if (current.isFocusMode || !current.activeWorkspace) return;
+    const session = current.sessions.find((candidate) => candidate.id === sessionId);
+    if (session?.workspaceId !== current.activeWorkspace.id) return;
+    const hint = current.computeSplitHint(point);
     if (!hint || hint.targetSessionId === sessionId) return;
-    onMoveWorkspacePane(activeWorkspace.id, sessionId, hint);
-  }, [isFocusMode, activeWorkspace, sessions, computeSplitHint, onMoveWorkspacePane]);
+    current.onMoveWorkspacePane(current.activeWorkspace.id, sessionId, hint);
+  }, []);
 
   // Pointer movement only updates the visual preview. The gesture owner handles
   // release/cancellation, so completion does not depend on listener ordering.
