@@ -10,7 +10,8 @@ const MAX_REPORT = 24 * 1024;
 
 function nativePath(value) {
   return typeof value === 'string' && value.length <= 8192 && !/[\x00-\x1f\x7f]/.test(value)
-    && (/^[a-z]:[\\/]/i.test(value) || /^\\\\[^\\?.]+\\[^\\]+/.test(value));
+    && !/^\\\\[?.]\\/.test(value)
+    && (/^[a-z]:[\\/]/i.test(value) || /^\\\\[^\\]+\\[^\\]+(?:\\|$)/.test(value));
 }
 
 function createDirectoryReportReader(nonce) {

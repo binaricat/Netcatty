@@ -65,6 +65,9 @@ test('long native Windows paths remain empty shell prompts for directory navigat
     String.raw`PS C:\Projects\${'long-directory-'.repeat(20)}> `,
     String.raw`C:\Projects\a directory with spaces\nested\working-copy>`,
     String.raw`PS \\server\share\a directory with spaces\working-copy> `,
+    String.raw`PS Microsoft.PowerShell.Core\FileSystem::\\files.example.com\share\working-copy> `,
+    String.raw`PS FileSystem::\\192.0.2.10\share\working-copy> `,
+    String.raw`PS ProjectDrive:\a-directory\another-directory\working-copy> `,
   ];
   for (const prompt of prompts) {
     const detected = detectPrompt(createPaddedFakeTerm(prompt, stringCellWidth(prompt), 512) as never);
@@ -85,15 +88,18 @@ test('long native Windows paths remain empty shell prompts for directory navigat
 });
 
 test('wrapped Windows directory prompts preserve the boundary and typed input', () => {
-  const prompt = String.raw`PS C:\Projects\deep\working-copy\nested-directory> `;
-  for (const input of ['', 'echo > output']) {
-    const content = prompt + input;
-    const cols = 24;
-    const rows = content.match(new RegExp(`.{1,${cols}}`, 'g'))!;
-    const result = detectPrompt(createWrappedFakeTerm(rows, rows.length - 1, rows.at(-1)!.length, cols) as never);
-    assert.equal(result.isAtPrompt, true);
-    assert.equal(result.promptText, prompt);
-    assert.equal(result.userInput, input);
+  for (const prompt of [String.raw`PS C:\Projects\deep\working-copy\nested-directory> `,
+    String.raw`PS Microsoft.PowerShell.Core\FileSystem::\\files.example.com\share\nested-directory> `,
+    String.raw`PS ProjectDrive:\working-copy\nested-directory> `]) {
+    for (const input of ['', 'echo > output']) {
+      const content = prompt + input;
+      const cols = 24;
+      const rows = content.match(new RegExp(`.{1,${cols}}`, 'g'))!;
+      const result = detectPrompt(createWrappedFakeTerm(rows, rows.length - 1, rows.at(-1)!.length, cols) as never);
+      assert.equal(result.isAtPrompt, true);
+      assert.equal(result.promptText, prompt);
+      assert.equal(result.userInput, input);
+    }
   }
 });
 

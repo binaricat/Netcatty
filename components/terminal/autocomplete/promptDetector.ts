@@ -886,7 +886,7 @@ function findPromptBoundary(lineText: string): number {
 
 /** Native path syntax identifies the first terminator even in deep cwd prompts. */
 function findWindowsPathPromptBoundary(lineText: string): number {
-  const match = /^(?:PS\s+)?(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+\\[^\\\s]+(?:\\|(?=>)))[^<>\r\n]*> ?/i.exec(lineText);
+  const match = /^(?:PS\s+(?:(?:Microsoft\.PowerShell\.Core\\)?FileSystem::)?(?:[A-Za-z][\w.-]*:[\\/]|\\\\[^\\\s]+\\[^\\\s]+(?:\\|(?=>)))|(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+\\[^\\\s]+(?:\\|(?=>))))[^<>\r\n]*> ?/i.exec(lineText);
   return match?.[0].length ?? -1;
 }
 

@@ -28,7 +28,7 @@ for (const executable of shells) {
     const { readLocalSessionCwd } = require('../../electron/bridges/localSessionCwd.cjs');
     const pty = require('node-pty') as typeof import('node-pty');
     tempDir.ensureTempDir();
-    const fixture = fs.mkdtempSync(tempDir.getTempFilePath('native-powershell-directory-'));
+    const fixture = fs.realpathSync(fs.mkdtempSync(tempDir.getTempFilePath('native-powershell-directory-')));
     const name = "space ' [$]`;&!% \u2018\u2019\u201a\u201b 中文";
     const target = path.join(fixture, name);
     fs.mkdirSync(target);
@@ -132,7 +132,7 @@ for (const executable of shells) {
     const { preparePowerShellDirectoryIntegration } = require('../../electron/bridges/powerShellDirectoryIntegration.cjs');
     const pty = require('node-pty') as typeof import('node-pty');
     tempDir.ensureTempDir();
-    const fixture = fs.mkdtempSync(tempDir.getTempFilePath('restricted-powershell-directory-'));
+    const fixture = fs.realpathSync(fs.mkdtempSync(tempDir.getTempFilePath('restricted-powershell-directory-')));
     const plan = preparePowerShellDirectoryIntegration(shell, ['-NoLogo', '-NoProfile']);
     // Apply Restricted to this test child; product startup honors user policy.
     const proc = pty.spawn(shell!, ['-ExecutionPolicy', 'Restricted', ...plan.args], {
@@ -149,9 +149,10 @@ for (const executable of shells) {
       clearTimeout(timer); plan.cleanup();
       await fs.promises.rm(fixture, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     });
-    proc.write("Write-Output '__NETCATTY_POLICY_ALIVE__'; Get-ExecutionPolicy\r");
+    proc.write("[Console]::WriteLine('__NETCATTY_POLICY_ALIVE__')\r");
     const deadline = Date.now() + 10000;
-    const policyBlocked = () => output.includes('Restricted') || output.includes('Do you want to run software from this untrusted publisher?');
+    const policyBlocked = () => output.includes('PSSecurityException')
+      || output.includes('Do you want to run software from this untrusted publisher?');
     while (!policyBlocked() && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 25));
     }
@@ -169,7 +170,7 @@ test('real Windows terminal bridge strips reports and invalidates runspace cwd o
   const tempDir = require('../../electron/bridges/tempDirBridge.cjs');
   const { readLocalSessionCwd } = require('../../electron/bridges/localSessionCwd.cjs');
   tempDir.ensureTempDir();
-  const fixture = fs.mkdtempSync(tempDir.getTempFilePath('bridge-powershell-directory-'));
+  const fixture = fs.realpathSync(fs.mkdtempSync(tempDir.getTempFilePath('bridge-powershell-directory-')));
   const sessions = new Map();
   let output = '';
   const sender = Object.assign(new EventEmitter(), { id: 112, isDestroyed: () => false,

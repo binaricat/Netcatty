@@ -12,6 +12,19 @@ const report = (changes = {}, end = '\x07') => PREFIX + Buffer.from(JSON.stringi
 })).toString('base64') + end;
 const reader = () => { const value = createDirectoryReportReader('session-secret'); value.setProcessId(123); return value; };
 
+test('native reports accept qualified UNC servers while gating device namespaces', () => {
+  for (const cwd of ['\\\\files.example.com\\share', '\\\\192.0.2.10\\share\\folder', '\\\\files.example.com\\share\\folder']) {
+    const value = reader();
+    value.consume(report({ cwd }));
+    assert.equal(value.read().cwd, cwd);
+  }
+  for (const cwd of ['\\\\?\\C:\\folder', '\\\\.\\pipe\\folder', '\\\\server', '\\\\server\\']) {
+    const value = reader();
+    value.consume(report({ cwd }));
+    assert.equal(value.read().success, false);
+  }
+});
+
 test('report parser handles every chunk boundary, BEL/ST, and UTF-8 without leaking protocol', () => {
   for (const end of ['\x07', '\x1b\\']) {
     const source = report({ cwd: 'D:\\中文' }, end);
