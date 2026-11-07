@@ -4,11 +4,63 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { ConvergentSyncPanel } from './ConvergentSyncPanel.tsx';
+import type { ConvergentMigrationPreview } from '../../domain/sync.ts';
 
 const t = (key: string, values?: Record<string, string | number>) =>
   key === 'cloudSync.convergent.conflict.secretSet'
     ? 'SECRET_SET'
     : `${key}${values?.count === undefined ? '' : `:${values.count}`}`;
+
+test('uninitialized migration preview shows conflict choices and disables confirmation', () => {
+  const preview: ConvergentMigrationPreview = {
+    schemaVersion: 2,
+    canInitialize: false,
+    entityCounts: { hosts: 1 },
+    settingsLeafCount: 0,
+    conflictCount: 1,
+    conflicts: [{
+      address: { kind: 'entity-field', collection: 'hosts', entityId: 'host-1', field: 'label' },
+      candidates: ['Left', 'Right'].map((value, index) => ({
+        dot: { deviceId: value, counter: 1 },
+        hlc: { wallTime: index + 1, logical: 0 },
+        tombstone: false,
+        value,
+        selected: index === 0,
+      })),
+    }],
+    shrinkFindings: [],
+    providers: [],
+    oldClientCompatibility: 'materialized-v1-snapshot',
+    blockedReasons: ['The convergent state contains unresolved field conflicts'],
+  };
+  const renderPreview = (value: ConvergentMigrationPreview) => renderToStaticMarkup(
+    <ConvergentSyncPanel
+      t={t}
+      resolvedLocale="en"
+      config={{ enabled: false, initialized: false }}
+      preview={value}
+      busy={false}
+      error={null}
+      conflicts={[]}
+      onToggle={() => {}}
+      onConfirmMigration={() => {}}
+      onCancelMigration={() => {}}
+      onResolveConflict={() => {}}
+      onDowngrade={() => {}}
+    />,
+  );
+  const markup = renderPreview(preview);
+  assert.match(markup, /cloudSync\.convergent\.conflicts\.title:1/);
+  assert.match(markup, /hosts\/host-1/);
+  assert.equal((markup.match(/cloudSync\.convergent\.conflict\.choose/g) ?? []).length, 2);
+  assert.match(markup, /<button[^>]*disabled=""[^>]*>cloudSync\.convergent\.preview\.confirm<\/button>/);
+
+  const resolvedMarkup = renderPreview({
+    ...preview, conflicts: [], conflictCount: 0, blockedReasons: [], canInitialize: true,
+  });
+  assert.doesNotMatch(resolvedMarkup, /cloudSync\.convergent\.conflict\.choose/);
+  assert.doesNotMatch(resolvedMarkup, /<button[^>]*disabled=""[^>]*>cloudSync\.convergent\.preview\.confirm<\/button>/);
+});
 
 test('secret conflict candidates never render their value', () => {
   const markup = renderToStaticMarkup(

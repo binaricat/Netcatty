@@ -33,6 +33,7 @@ const NAMED_KEYS = new Map<string, string>([
   ['tab', 'tab'],
 ]);
 const PLUGIN_SHORTCUT_EDITABLE_SELECTOR = [
+  '[data-plugin-editing]',
   'input',
   'textarea',
   'select',
@@ -43,6 +44,10 @@ const PLUGIN_SHORTCUT_EDITABLE_SELECTOR = [
   '.monaco-inputbox',
   '.monaco-menu-container',
 ].join(', ');
+
+export function isPluginViewEditingTarget(node: EventTarget | null): boolean {
+  return Boolean((node as Element | null)?.closest?.('[data-plugin-editing]'));
+}
 
 function hasEditableShortcutAncestor(node: unknown): boolean {
   const closest = (node as { closest?: (selector: string) => unknown } | null)?.closest;

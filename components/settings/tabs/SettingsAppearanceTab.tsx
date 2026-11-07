@@ -1,3 +1,6 @@
+import { PluginThemePicker } from './PluginThemePicker';
+import { applyPluginThemeSelection, usePluginThemeRevision } from '../../../application/state/usePluginThemeRuntime';
+import { pluginThemeRegistry } from '../../../infrastructure/config/pluginThemeRegistry';
 import React, { memo, useCallback, useMemo, useState } from "react";
 import { applyCustomCssToDocument } from "../../../lib/customCss";
 import { DebouncedTextarea } from "../DebouncedTextarea";
@@ -20,7 +23,7 @@ import {
 import { resolveAppIconVariant, type AppIconVariant } from "../../../domain/appIconVariant";
 import { resolveNoteFontSelectionFamily, resolveNoteFontSelectionId } from "../../../domain/noteFonts";
 import { DEFAULT_AUTO_IMPORT_SYSTEM_KNOWN_HOSTS } from "../../../domain/systemKnownHostsAutoImport";
-import { cn } from "../../../lib/utils";
+import { cn, isMacPlatform } from "../../../lib/utils";
 import { SectionHeader, SettingsAnchor, SettingsTabContent, SettingRow, Toggle, Select } from "../settings-ui";
 import { FontSelect } from "../FontSelect";
 import { TerminalFontSelect } from "../TerminalFontSelect";
@@ -66,10 +69,14 @@ function SettingsAppearanceTab(props: {
   setShowHostTreeSidebar: (enabled: boolean) => void;
   windowOpacity: number;
   setWindowOpacity: (opacity: number) => void;
+  windowBackgroundBlur: boolean;
+  setWindowBackgroundBlur: (enabled: boolean) => void;
   appIconVariant: AppIconVariant;
   setAppIconVariant: (variant: AppIconVariant) => void;
 }) {
   const { t } = useI18n();
+  usePluginThemeRevision();
+  const [pluginThemeError, setPluginThemeError] = useState('');
   const availableUIFonts = useAvailableUIFonts();
   // Note code fonts come from the monospace-only store (fontStore); the note
   // body font follows the UI font setting instead.
@@ -135,10 +142,13 @@ function SettingsAppearanceTab(props: {
     setShowHostTreeSidebar,
     windowOpacity,
     setWindowOpacity,
+    windowBackgroundBlur,
+    setWindowBackgroundBlur,
     appIconVariant,
     setAppIconVariant,
   } = props;
   const resolvedAppIconVariant = resolveAppIconVariant(appIconVariant);
+  const isMac = isMacPlatform();
 
   const WINDOW_OPACITY_PRESETS = [
     { label: '100%', value: 1 },
@@ -231,8 +241,12 @@ function SettingsAppearanceTab(props: {
   );
 
   const visibleUiThemes = resolvedTheme === "dark" ? DARK_UI_THEMES : LIGHT_UI_THEMES;
-  const visibleUiThemeId = resolvedTheme === "dark" ? darkUiThemeId : lightUiThemeId;
-  const setVisibleUiThemeId = resolvedTheme === "dark" ? setDarkUiThemeId : setLightUiThemeId;
+  const visibleUiThemeId = pluginThemeRegistry.isActive(resolvedTheme) ? "" : resolvedTheme === "dark" ? darkUiThemeId : lightUiThemeId;
+  const setVisibleUiThemeId = (id: string) => {
+    void applyPluginThemeSelection(resolvedTheme, null).then(() => {
+      (resolvedTheme === "dark" ? setDarkUiThemeId : setLightUiThemeId)(id);setPluginThemeError('');
+    }).catch((error: unknown) => setPluginThemeError(error instanceof Error ? error.message : t('settings.plugins.themes.failed')));
+  };
 
   return (
     <SettingsTabContent value="appearance">
@@ -306,6 +320,19 @@ function SettingsAppearanceTab(props: {
             </div>
           </div>
         </SettingRow>
+        {isMac && (
+          <SettingRow
+            anchorId="appearance-window-background-blur"
+            label={t("settings.appearance.windowBackgroundBlur")}
+            description={t("settings.appearance.windowBackgroundBlur.desc")}
+          >
+            <Toggle
+              checked={windowBackgroundBlur}
+              onChange={setWindowBackgroundBlur}
+              ariaLabel={t("settings.appearance.windowBackgroundBlur")}
+            />
+          </SettingRow>
+        )}
       </div>
 
       <SectionHeader title={t("settings.appearance.uiTheme")} />
@@ -339,6 +366,8 @@ function SettingsAppearanceTab(props: {
             {renderThemeSwatches(visibleUiThemes, visibleUiThemeId, setVisibleUiThemeId)}
           </div>
         </SettingsAnchor>
+        <PluginThemePicker mode={resolvedTheme} onRestore={() => (resolvedTheme === "dark" ? setDarkUiThemeId : setLightUiThemeId)(resolvedTheme === "dark" ? "midnight" : "snow")} />
+        {pluginThemeError && <p role="alert" className="text-xs text-destructive">{pluginThemeError}</p>}
         <SettingRow
           anchorId="appearance-accent-mode"
           label={t("settings.appearance.accentColor.mode")}

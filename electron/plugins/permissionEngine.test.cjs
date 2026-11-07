@@ -19,7 +19,11 @@ const { RPC_ERRORS } = require("./rpcRouter.cjs");
 function createDatabase(context) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-plugin-permissions-"));
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  return new PluginDatabase(path.join(root, "plugins.sqlite"));
+  const database = new PluginDatabase(path.join(root, "plugins.sqlite"));
+  // These tests exercise explicit Ask decisions and grant semantics. Default
+  // Allow and persisted policy behavior are covered in permissionModes.test.cjs.
+  database.getPermissionMode = () => "ask";
+  return database;
 }
 
 function manifest(permissions) {
@@ -47,7 +51,7 @@ function runtimeContext(pluginManifest, overrides = {}) {
   };
 }
 
-test("permission declarations are not grants and no renderer fails closed", async (context) => {
+test("Ask mode without a renderer fails closed", async (context) => {
   const database = createDatabase(context);
   const engine = new PluginPermissionEngine({ database });
   const pluginManifest = manifest({ required: ["storage"] });
@@ -551,7 +555,7 @@ test("required preflight rejects missing or wildcard resource-scoped activation 
   database.close();
 });
 
-test("required preflight prompts for non-resource permissions and bounded resources", async (context) => {
+test("required preflight validates declarations without permission ceremonies", async (context) => {
   const database = createDatabase(context);
   const requested = [];
   const engine = new PluginPermissionEngine({
@@ -573,10 +577,7 @@ test("required preflight prompts for non-resource permissions and bounded resour
     activeVersion: pluginManifest.version,
     manifest: pluginManifest,
   });
-  assert.deepEqual(requested, [
-    { permission: "runtime.advanced", resources: ["*"] },
-    { permission: "network", resources: ["https://example.com"] },
-  ]);
+  assert.deepEqual(requested, []);
   database.close();
 });
 
@@ -604,7 +605,7 @@ test("required filesystem preflight preserves declared directory scope", async (
     activeVersion: pluginManifest.version,
     manifest: pluginManifest,
   });
-  assert.deepEqual(requests[0].resourceKinds, ["directory"]);
+  assert.deepEqual(requests, []);
   await engine.authorize(runtimeContext(pluginManifest), {
     permission: "filesystem.read",
     resources: [child],
@@ -629,5 +630,27 @@ test("permission middleware rejects unclassified methods and permits explicit pu
     method: "log.write",
     metadata: { public: true },
   }, async () => "ok"), "ok");
+  database.close();
+});
+
+test("grant descriptions distinguish current activation from old package and changed declarations", async (context) => {
+  const database = createDatabase(context);
+  const engine = new PluginPermissionEngine({ database, requestDecision: async (request) => ({
+    requestId: request.requestId, decision: "allow", scope: "always",
+  }) });
+  const pluginManifest = manifest({ optional: [{ permission: "network", resources: ["https://example.invalid"] }] });
+  const first = runtimeContext(pluginManifest, { securityPrincipal: defaultSecurityPrincipal(pluginManifest, "a".repeat(64)) });
+  const descriptor = { permission: "network", resources: ["https://example.invalid"], reason: "Synthetic request" };
+  await engine.authorize(first, descriptor);
+  assert.equal(engine.describeGrants(first.pluginId, first).always[0].matchesCurrentActivation, true);
+  assert.equal(engine.describeGrants(first.pluginId, null).always[0].matchesCurrentActivation, false);
+  const upgraded = { ...first, securityPrincipal: defaultSecurityPrincipal(pluginManifest, "b".repeat(64)) };
+  assert.equal(engine.describeGrants(first.pluginId, upgraded).always[0].matchesCurrentActivation, false);
+  await assert.rejects(engine.authorize(upgraded, { ...descriptor, interactive: false }), /permission/i);
+  const changed = { ...first, manifest: { ...pluginManifest, permissions: { optional: [{ permission: "network", resources: ["https://example.invalid", "https://other.invalid"] }] } } };
+  assert.equal(engine.describeGrants(first.pluginId, changed).always[0].matchesCurrentActivation, false);
+  await assert.rejects(engine.authorize(changed, { ...descriptor, interactive: false }), /permission/i);
+  assert.equal(engine.describeGrants(first.pluginId, { ...first, manifest: { ...pluginManifest, permissions: {} } }).always[0].matchesCurrentActivation, false);
+  engine.shutdown();
   database.close();
 });

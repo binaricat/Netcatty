@@ -5381,6 +5381,147 @@ test("small shared upload cancel leaves the browse session usable", async (t) =>
   assert.deepEqual(await browse("readdir", "/tmp"), [{ filename: "keep" }]);
 });
 
+test("large isolated upload cancel does not end the shared SSH client (#4134)", async (t) => {
+  // Large uploads open an isolated SFTP subsystem on the same SSH client as
+  // the browse/terminal transport. Cancel used to call sftp.end() mid-WRITE,
+  // which can make Windows OpenSSH drop the whole connection. Abort must drain
+  // without ending the subsystem while WRITEs are in flight, and must not call
+  // client.end() on the shared SSH client.
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-4134-isolated-cancel-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const payload = Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES + TRANSFER_CHUNK_SIZE, 41);
+  const localPath = path.join(tempDir, "upload.bin");
+  await fs.promises.writeFile(localPath, payload);
+  const targetPath = "/tmp/isolated-cancel-4134.bin";
+
+  let sshClientEndCalls = 0;
+  let isolatedEndWhileHeld = 0;
+  let isolatedEndCalls = 0;
+  let browseEndCalls = 0;
+  let holdWrites = true;
+  const pendingWrites = [];
+
+  const isolatedSftp = createFastSftp({
+    open(_remotePath, flags, callback) {
+      callback(null, Buffer.from("isolated-handle"));
+    },
+    write(_handle, _buffer, _offset, _length, _position, callback) {
+      if (holdWrites) {
+        pendingWrites.push(callback);
+        return;
+      }
+      setImmediate(() => callback(null));
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    end() {
+      isolatedEndCalls += 1;
+      if (holdWrites && pendingWrites.length > 0) {
+        isolatedEndWhileHeld += 1;
+      }
+    },
+  });
+
+  const browseSftp = createFastSftp({
+    open(_remotePath, _flags, callback) {
+      callback(null, Buffer.from("browse-handle"));
+    },
+    write(_handle, _buffer, _offset, _length, _position, callback) {
+      setImmediate(() => callback(null));
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    readdir(_remotePath, callback) {
+      if (browseEndCalls > 0 || sshClientEndCalls > 0) {
+        callback(new Error("browse session ended"));
+        return;
+      }
+      callback(null, [{ filename: "keep" }]);
+    },
+    end() {
+      browseEndCalls += 1;
+    },
+  });
+
+  const sshClient = {
+    end() {
+      sshClientEndCalls += 1;
+    },
+    sftp(callback) {
+      callback(null, isolatedSftp);
+    },
+  };
+
+  const client = {
+    sftp: browseSftp,
+    client: sshClient,
+    stat() {
+      return Promise.resolve({ size: 0 });
+    },
+    rename() {
+      return Promise.resolve();
+    },
+    delete() {
+      return Promise.resolve();
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const sender = createSender();
+  const transferId = "isolated-upload-cancel-4134";
+  const running = transferBridge.startTransfer({ sender }, {
+    transferId,
+    sourcePath: localPath,
+    targetPath,
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "target",
+    totalBytes: payload.length,
+    resumable: true,
+    skipAdmission: true,
+  });
+
+  const ready = await waitUntil(
+    () => pendingWrites.length >= UPLOAD_TRANSFER_CONCURRENCY,
+    2000,
+  );
+  assert.equal(ready, true, "expected isolated WRITE fanout to be in flight");
+  assert.equal(isolatedEndWhileHeld, 0);
+  assert.equal(sshClientEndCalls, 0);
+
+  await transferBridge.cancelTransfer(null, { transferId });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    isolatedEndWhileHeld,
+    0,
+    "cancel must not sftp.end() the isolated channel while WRITEs are held",
+  );
+  assert.equal(sshClientEndCalls, 0, "cancel must not end the shared SSH client");
+  assert.equal(browseEndCalls, 0, "cancel must not end the browse SFTP channel");
+
+  // Browse on the shared transport must still work while WRITEs are draining.
+  await new Promise((resolve, reject) => {
+    browseSftp.readdir("/tmp", (error, value) => {
+      if (error) reject(error);
+      else resolve(value);
+    });
+  }).then((entries) => {
+    assert.deepEqual(entries, [{ filename: "keep" }]);
+  });
+
+  holdWrites = false;
+  for (const callback of pendingWrites.splice(0)) callback(null);
+  const result = await running;
+  assert.equal(result.cancelled, true, result);
+  assert.equal(result.error, "Transfer cancelled");
+  assert.equal(sshClientEndCalls, 0, "SSH client must stay alive after cancel settle");
+  assert.equal(browseEndCalls, 0);
+  assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:cancelled"), true);
+  assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:error"), false);
+});
+
 test("small shared upload pause leaves the browse session usable", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-small-upload-shared-pause-"));
   t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
@@ -6248,7 +6389,6 @@ test("fastPut fallback cancel settles while prior isolated write OPEN gate is un
   let firstOpenStarted = false;
   let firstIsolated = null;
   let fastPutCalls = 0;
-  let reopenedEnded = 0;
   const sharedSftp = createFastSftp({
     lstat(remotePath, callback) {
       const key = String(remotePath);
@@ -6314,9 +6454,7 @@ test("fastPut fallback cancel settles while prior isolated write OPEN gate is un
             fastPutCalls += 1;
             cb(null);
           },
-          end() {
-            reopenedEnded += 1;
-          },
+          end() {},
         }));
       },
     },
@@ -6362,7 +6500,9 @@ test("fastPut fallback cancel settles while prior isolated write OPEN gate is un
 
   assert.match(result.error || "", /cancel/i);
   assert.equal(fastPutCalls, 0, "cancel must settle before fastPut runs on unresolved gate");
-  assert.equal(reopenedEnded, 1, "cancel during gate wait must end the reopened isolated channel");
+  // #4134: cancel must settle without requiring sftp.end() on the reopened
+  // channel — ending mid-flight on the shared SSH transport can drop the
+  // whole session. Hang-freedom + cancelled event are the contract.
   assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:cancelled"), true);
 });
 

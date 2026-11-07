@@ -581,11 +581,11 @@ test("example README commands use repository-root CLI paths", async () => {
   assert.match(readme, /npm run build:plugin-packages/);
   assert.match(
     readme,
-    /npm exec -- netcatty-plugin validate examples\/plugins\/hello-netcatty/,
+    /node packages\/plugin-cli\/dist\/cli\.js validate examples\/plugins\/hello-netcatty/,
   );
   assert.match(
     readme,
-    /npm exec -- netcatty-plugin compatibility examples\/plugins\/hello-netcatty --netcatty 0\.0\.0/,
+    /node packages\/plugin-cli\/dist\/cli\.js compatibility examples\/plugins\/hello-netcatty --netcatty 0\.0\.0/,
   );
   assert.doesNotMatch(readme, /npm exec --workspace @netcatty\/plugin-cli/);
 });

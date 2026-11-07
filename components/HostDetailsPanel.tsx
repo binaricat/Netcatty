@@ -182,6 +182,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         os: "linux",
         authMethod: undefined,
         authPolicyVersion: 1,
+        sshInputCompatibility: false,
         charset: groupDefaults?.charset ? undefined : "UTF-8",
         distroMode: "auto",
         createdAt: Date.now(),

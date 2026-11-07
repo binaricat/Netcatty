@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "id": "com.netcatty.starter",
+      "current": "0.1.2",
+      "versions": [
+        {
+          "entry": {
+            "id": "com.netcatty.starter",
+            "version": "0.1.2",
+            "name": "Plugin Starter",
+            "description": "First-party greeting panel, local settings and commands, without terminal or secret access.",
+            "author": "Netcatty",
+            "repository": "binaricat/Netcatty",
+            "commit": "f4a6b205adca486d4e9cda0270e13a9ff0afd7be",
+            "license": "GPL-3.0-or-later",
+            "readme": "examples/plugins/starter-netcatty/README.md",
+            "manifest": {
+              "manifestVersion": 1,
+              "id": "com.netcatty.starter",
+              "name": "starter-netcatty",
+              "displayName": {
+                "en": "Plugin Starter",
+                "zh-CN": "插件入门"
+              },
+              "description": "First-party settings and command example. No terminal, network, filesystem or secret access.",
+              "version": "0.1.2",
+              "publisher": "netcatty",
+              "license": "GPL-3.0-or-later",
+              "engines": {
+                "netcatty": ">=0.0.0",
+                "api": ">=0.1.0-internal.1 <0.2.0"
+              },
+              "main": {
+                "browser": "dist/index.js"
+              },
+              "activationEvents": [
+                "onCommand:com.netcatty.starter.greet",
+                "onView:com.netcatty.starter.panel"
+              ],
+              "permissions": {
+                "required": [
+                  "commands",
+                  "settings.read",
+                  "menus",
+                  "views"
+                ],
+                "optional": []
+              },
+              "contributes": {
+                "settings": [
+                  {
+                    "id": "com.netcatty.starter.greeting",
+                    "label": {
+                      "en": "Greeting",
+                      "zh-CN": "问候语"
+                    },
+                    "description": "A local preference for the example command.",
+                    "control": "text",
+                    "scope": "application",
+                    "default": "Hello, synthetic world!"
+                  }
+                ],
+                "commands": [
+                  {
+                    "id": "com.netcatty.starter.greet",
+                    "title": {
+                      "en": "Starter: Read Greeting",
+                      "zh-CN": "入门：读取问候语"
+                    }
+                  }
+                ],
+                "menus": [
+                  {
+                    "command": "com.netcatty.starter.greet",
+                    "location": "commandPalette",
+                    "group": "examples"
+                  }
+                ],
+                "views": [
+                  {
+                    "id": "com.netcatty.starter.panel",
+                    "title": {
+                      "en": "Starter: Greeting Panel",
+                      "zh-CN": "入门：问候面板"
+                    },
+                    "location": "modal"
+                  }
+                ]
+              },
+              "features": {
+                "required": [
+                  "metadata.brand-icon"
+                ]
+              },
+              "icon": {
+                "kind": "package",
+                "light": "assets/logo-light.png",
+                "dark": "assets/logo-dark.png"
+              }
+            }
+          },
+          "distribution": "source-only",
+          "withdrawal": null
+        }
+      ]
+    },
+    {
+      "id": "com.netcatty.hello",
+      "current": "0.1.0",
+      "versions": [
+        {
+          "entry": {
+            "id": "com.netcatty.hello",
+            "version": "0.1.0",
+            "name": "Hello Netcatty",
+            "description": "First-party example: greeting settings, commands and terminal providers. Build locally and import.",
+            "author": "Netcatty",
+            "repository": "binaricat/Netcatty",
+            "commit": "4336f8fd53a05a48d6bbc9ad3ce0ca88b121862f",
+            "license": "GPL-3.0-or-later",
+            "readme": "examples/plugins/hello-netcatty/README.md",
+            "manifest": {
+              "$schema": "../../../packages/plugin-contract/schema/plugin-contract.schema.json",
+              "manifestVersion": 1,
+              "id": "com.netcatty.hello",
+              "name": "hello-netcatty",
+              "displayName": {
+                "en": "Hello Netcatty",
+                "zh-CN": "你好，Netcatty"
+              },
+              "description": "Minimal plugin contract and SDK example.",
+              "version": "0.1.0",
+              "publisher": "netcatty",
+              "license": "GPL-3.0-or-later",
+              "engines": {
+                "netcatty": ">=0.0.0",
+                "api": ">=0.1.0-internal <0.2.0"
+              },
+              "main": {
+                "browser": "dist/index.js"
+              },
+              "activationEvents": [
+                "onCommand:com.netcatty.hello.sayHello",
+                "onProvider:com.netcatty.hello.completion",
+                "onProvider:com.netcatty.hello.decoration",
+                "onProvider:com.netcatty.hello.theme"
+              ],
+              "permissions": {
+                "required": [
+                  "commands",
+                  "settings.read",
+                  "menus",
+                  "provider.terminal",
+                  "terminal.complete",
+                  "terminal.output",
+                  "terminal.decorate"
+                ],
+                "optional": []
+              },
+              "contributes": {
+                "settings": [
+                  {
+                    "id": "com.netcatty.hello.greeting",
+                    "label": "Greeting",
+                    "description": "Text used by the example command.",
+                    "control": "text",
+                    "scope": "application",
+                    "default": "Hello from Netcatty"
+                  }
+                ],
+                "commands": [
+                  {
+                    "id": "com.netcatty.hello.sayHello",
+                    "title": "Say Hello",
+                    "category": "Examples"
+                  }
+                ],
+                "menus": [
+                  {
+                    "command": "com.netcatty.hello.sayHello",
+                    "location": "commandPalette",
+                    "group": "examples",
+                    "order": 10
+                  }
+                ],
+                "providers": [
+                  {
+                    "id": "com.netcatty.hello.completion",
+                    "label": "Hello completion",
+                    "description": "Suggests the example hello command.",
+                    "kind": "terminal.completion"
+                  },
+                  {
+                    "id": "com.netcatty.hello.decoration",
+                    "label": "Hello decoration",
+                    "description": "Highlights the example greeting in terminal output.",
+                    "kind": "terminal.decoration"
+                  },
+                  {
+                    "id": "com.netcatty.hello.theme",
+                    "label": "Hello theme",
+                    "description": "Adds a subtle cursor color to the example terminal theme.",
+                    "kind": "terminal.theme"
+                  }
+                ]
+              }
+            }
+          },
+          "distribution": "source-only",
+          "withdrawal": null
+        }
+      ]
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import type { ChatMessage, ChatMessageAttachment, ToolCall, ToolResult } from ".
 import { isTerminalSelectionAttachment } from "../../application/state/terminalSelectionAttachment";
 import { formatVaultNoteReferences, isVaultNoteAttachment } from "../../application/state/vaultNoteAttachment";
 import { redactSecretsForModel } from "../../infrastructure/ai/harness/modelSecretRedaction";
+import { sliceHead, sliceTail } from "../../infrastructure/ai/textBoundaries";
 
 const MAX_ATTACHMENT_PLACEHOLDER_DETAIL_CHARS = 120;
 const MAX_TOOL_COMMAND_CHARS = 220;
@@ -11,7 +12,7 @@ const HISTORICAL_TERMINAL_OUTPUT_HEAD_CHARS = 2_800;
 function truncateInline(value: string, maxChars: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxChars) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+  return `${sliceHead(normalized, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
 function describeAttachmentSize(attachment: ChatMessageAttachment): string {
@@ -84,7 +85,7 @@ function fitHistoricalTerminalOutput(content: string): string {
     0,
     MAX_HISTORICAL_TERMINAL_OUTPUT_CHARS - HISTORICAL_TERMINAL_OUTPUT_HEAD_CHARS - marker.length,
   );
-  return `${safeContent.slice(0, HISTORICAL_TERMINAL_OUTPUT_HEAD_CHARS)}${marker}${safeContent.slice(-tailChars)}`;
+  return `${sliceHead(safeContent, HISTORICAL_TERMINAL_OUTPUT_HEAD_CHARS)}${marker}${sliceTail(safeContent, tailChars)}`;
 }
 
 function findOutputHandleId(content: string): string | undefined {

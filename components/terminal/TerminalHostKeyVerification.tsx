@@ -30,7 +30,7 @@ export const TerminalHostKeyVerification: React.FC<TerminalHostKeyVerificationPr
     const Icon = isChanged ? AlertTriangle : Fingerprint;
 
     return (
-        <div className="space-y-3 animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
+        <div data-host-security-surface="" className="space-y-3 animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
             <div
                 className={cn(
                     "rounded-xl border px-3 py-2.5",

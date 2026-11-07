@@ -400,7 +400,7 @@ function registerProviderHandlers(ctx) {
   });
 
   // Non-streaming request (for model listing, validation, etc.)
-  ipcMain.handle("netcatty:ai:fetch", async (event, { url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify }) => {
+  ipcMain.handle("netcatty:ai:fetch", async (event, { url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify, requestId }) => {
     // Validate IPC sender — settings window needs this for model listing
     if (!validateSenderOrSettings(event)) {
       return { ok: false, status: 0, data: "", error: "Unauthorized IPC sender" };
@@ -428,7 +428,25 @@ function registerProviderHandlers(ctx) {
       return { ok: false, status: 0, data: "", error: "URL host is not in the allowed list" };
     }
 
-    const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB safety limit
+    const delegated = typeof requestId === "string" && /^agent-model_([0-9a-f-]{36})_([0-9a-f-]{36})_fetch_/.exec(requestId);
+    if (requestId !== undefined && !delegated) return { ok: false, status: 0, data: "", error: "Delegated request identity invalid" };
+    const controller = delegated ? new AbortController() : null;
+    const delegatedBridge = delegated ? require("./mcpServerBridge.cjs") : null;
+    const assertDelegation = () => {
+      controller?.signal.throwIfAborted();
+      if (delegated) delegatedBridge.assertPluginAgentCaller(`plugin-agent:${delegated[1]}`, event.sender.id, delegated[2]);
+    };
+    let detach; let totalTimer;
+    if (delegated) {
+      try {
+        assertDelegation();
+        delegatedBridge.beginPluginAgentModelRequest(`plugin-agent:${delegated[1]}`, event.sender.id, delegated[2]);
+        detach = delegatedBridge.onPluginAgentRelease(`plugin-agent:${delegated[1]}`, delegated[2], () => controller.abort());
+        activeStreams.set(requestId, controller);
+        totalTimer = setTimeout(() => controller.abort(), 60_000);
+      } catch { return { ok: false, status: 0, data: "", error: "Delegated Agent unavailable" }; }
+    }
+    const MAX_RESPONSE_SIZE = delegated ? 131_072 : 10 * 1024 * 1024;
     const MAX_REDIRECTS = followRedirects ? 5 : 0;
 
     async function doFetch(fetchUrl, redirectsLeft) {
@@ -437,13 +455,17 @@ function registerProviderHandlers(ctx) {
       const skipTLS = Boolean(skipTLSVerify || shouldSkipTLSVerify(providerId));
       let proxyAgent;
       try {
+        assertDelegation();
         proxyAgent = await resolveOutboundHttpAgent(fetchUrl, {
           session: electronModule?.session?.defaultSession,
           rejectUnauthorized: skipTLS ? false : undefined,
         });
-      } catch {
+      } catch (error) {
+        if (delegated) throw error;
         proxyAgent = undefined;
       }
+
+      assertDelegation();
 
       return new Promise((resolve) => {
         const parsedUrl = new URL(fetchUrl);
@@ -457,6 +479,8 @@ function registerProviderHandlers(ctx) {
         };
         if (skipTLS && isHttps) fetchOpts.rejectUnauthorized = false;
         if (proxyAgent) fetchOpts.agent = proxyAgent;
+        if (controller) fetchOpts.signal = controller.signal;
+        assertDelegation();
         const req = lib.request(parsedUrl, fetchOpts,
           (res) => {
             // Handle redirects
@@ -505,7 +529,9 @@ function registerProviderHandlers(ctx) {
       });
     }
 
-    return doFetch(resolvedUrl, MAX_REDIRECTS);
+    try { return await doFetch(resolvedUrl, MAX_REDIRECTS); }
+    catch (error) { if (!delegated) throw error; return { ok: false, status: 0, data: "", error: "Delegated Agent unavailable" }; }
+    finally { if (delegated) { clearTimeout(totalTimer); detach?.(); activeStreams.delete(requestId); } }
   });
 
   }

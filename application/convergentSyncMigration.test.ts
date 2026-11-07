@@ -21,13 +21,20 @@ Object.defineProperty(globalThis, 'localStorage', {
 });
 
 const {
+  applyLegacySyncPayload,
+  convergentConflictAddressKey,
+  createConvergentSyncStateFromPayload,
+  dotKey,
+  mergeConvergentSyncStates,
   planConvergentSyncMigration,
+  refreshConvergentSyncMigrationPlan,
   stripConvergentSyncEnvelope,
 } = await import('../domain/convergentSync/index.ts');
 const { getConvergentSyncLocalConfig } = await import('../infrastructure/services/convergentSyncConfig.ts');
 const {
   initializePreparedConvergentMigration,
   prepareConvergentSyncMigration,
+  resolvePreparedConvergentMigrationConflict,
 } = await import('./convergentSyncMigration.ts');
 
 function payload(): SyncPayload {
@@ -42,6 +49,42 @@ function payload(): SyncPayload {
 
 test.beforeEach(() => {
   localStorageValues.clear();
+});
+
+test('preview resolution uses the manager device identity and only updates the prepared plan', () => {
+  const baseline: SyncPayload = { ...payload(), settings: { theme: 'system' } };
+  const base = createConvergentSyncStateFromPayload(baseline, 'seed', NOW);
+  const state = mergeConvergentSyncStates(
+    applyLegacySyncPayload(base, baseline, { ...baseline, settings: { theme: 'light' } }, 'left', NOW + 1),
+    applyLegacySyncPayload(base, baseline, { ...baseline, settings: { theme: 'dark' } }, 'right', NOW + 2),
+  );
+  const plan = refreshConvergentSyncMigrationPlan(planConvergentSyncMigration({
+    localPayload: baseline, localTrustedBaseline: null, providers: [], deviceId: 'local', now: NOW,
+  }), state);
+  const prepared = { plan, localSnapshot: baseline, providerBaselines: [] };
+  const conflict = plan.preview.conflicts[0];
+  const addressKey = convergentConflictAddressKey(conflict.address);
+  const selected = conflict.candidates.find((candidate) => candidate.value === 'light')!;
+  const manager = { getState: () => ({ deviceId: 'resolver' }) } as unknown as CloudSyncManager;
+  const resolved = resolvePreparedConvergentMigrationConflict(
+    prepared, addressKey, dotKey(selected.dot), manager, NOW + 3,
+  );
+
+  assert.equal(resolved.plan.preview.canInitialize, true);
+  assert.equal(resolved.plan.preview.conflictCount, 0);
+  assert.deepEqual(resolved.plan.preview.blockedReasons, []);
+  assert.equal(resolved.plan.payload?.settings?.theme, 'light');
+  assert.ok(resolved.plan.state?.vector.resolver);
+  assert.equal(resolved.localSnapshot, prepared.localSnapshot);
+  assert.equal(resolved.providerBaselines, prepared.providerBaselines);
+  assert.equal(prepared.plan.preview.conflictCount, 1);
+  assert.equal(prepared.plan.payload, null);
+  assert.throws(() => resolvePreparedConvergentMigrationConflict(
+    prepared, 'missing', dotKey(selected.dot), manager,
+  ), /conflict no longer exists/);
+  assert.throws(() => resolvePreparedConvergentMigrationConflict(
+    prepared, addressKey, 'missing', manager,
+  ), /candidate no longer exists/);
 });
 
 test('preparation seeds a trusted baseline for an unchanged v1 provider', async () => {

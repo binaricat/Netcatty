@@ -199,6 +199,7 @@ export const STORAGE_KEY_HTTP_NETWORK_PROXY = 'netcatty_http_network_proxy_v1';
 export const STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE = 'netcatty_global_default_proxy_profile_v1';
 export const STORAGE_KEY_GLOBAL_HOTKEY_ENABLED = 'netcatty_global_hotkey_enabled_v1';
 export const STORAGE_KEY_WINDOW_OPACITY = 'netcatty_window_opacity_v1';
+export const STORAGE_KEY_WINDOW_BACKGROUND_BLUR = 'netcatty_window_background_blur_v1';
 export const STORAGE_KEY_APP_ICON_VARIANT = 'netcatty_app_icon_variant_v1';
 // Custom Terminal Themes
 export const STORAGE_KEY_CUSTOM_THEMES = 'netcatty_custom_themes_v1';
@@ -216,7 +217,12 @@ export const STORAGE_KEY_AI_COMMAND_BLOCKLIST = 'netcatty_ai_command_blocklist_v
 export const STORAGE_KEY_AI_COMMAND_TIMEOUT = 'netcatty_ai_command_timeout_v1';
 export const STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT = 'netcatty_ai_response_idle_timeout_v1';
 export const STORAGE_KEY_AI_MAX_ITERATIONS = 'netcatty_ai_max_iterations_v1';
+export const STORAGE_KEY_AI_SESSION_MESSAGE_CAP = 'netcatty_ai_session_message_cap_v1';
 export const STORAGE_KEY_AI_SESSIONS = 'netcatty_ai_sessions_v1';
+/** Byte-budget overflow JSON; further chunks use suffixes _2, _3, etc. */
+export const STORAGE_KEY_AI_SESSIONS_OVERFLOW = 'netcatty_ai_sessions_overflow_v1';
+/** IDs intentionally retained only in the disk backup after aggregate quota exhaustion. */
+export const STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW = 'netcatty_ai_sessions_disk_overflow_v1';
 /** Opt-in flag: include AI chat sessions in cloud sync payloads. */
 export const STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS = 'netcatty_cloud_sync_ai_sessions_v1';
 export const STORAGE_KEY_AI_ACTIVE_SESSION_MAP = 'netcatty_ai_active_session_map_v1';

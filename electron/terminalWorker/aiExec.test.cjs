@@ -29,6 +29,24 @@ test("worker SSH exec waits for a slow interactive shell prompt before any PTY w
   assert.equal((await pending).stdout, 'ready');
 });
 
+test("worker shell readiness route reports prompt state read-only", () => {
+  const session = { protocol: 'ssh', stream: new FakePty(), shellKind: 'posix', _promptTrackTail: '', lastIdlePrompt: '' };
+  trackSessionIdlePrompt(session, 'root@host:~# ');
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([['ssh-1', session]]) });
+  const handler = ipcMain.handlers.get('netcatty:ai:shellReadiness');
+  const ready = handler(createFakeEvent(), { sessionId: 'ssh-1' });
+  assert.deepEqual(ready, {
+    ok: true,
+    found: true,
+    trackedShell: true,
+    freshIdlePrompt: 'root@host:~# ',
+    visibleIdlePrompt: 'root@host:~# ',
+  });
+  assert.deepEqual(session.stream.writes, [], "readiness probe must never write to the PTY");
+  assert.deepEqual(handler(createFakeEvent(), { sessionId: 'gone' }), { ok: true, found: false });
+});
+
 class FakePty extends EventEmitter {
   constructor() {
     super();

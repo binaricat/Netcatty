@@ -30,7 +30,7 @@ export async function initPlugin(
   const activationMessage = JSON.stringify(`${displayName} activated`);
   const packageName = options.id.replaceAll(".", "-");
   const manifest: PluginManifest = {
-    $schema: "https://netcatty.com/schemas/plugins/0.1.0-internal/plugin-contract.schema.json",
+    $schema: "https://netcatty.com/schemas/plugins/0.1.0-internal.1/plugin-contract.schema.json",
     manifestVersion: 1,
     id: options.id,
     name: displayName,
@@ -61,7 +61,7 @@ export async function initPlugin(
         private: true,
         type: "module",
         scripts: { build: "tsc -p tsconfig.json" },
-        dependencies: { "@netcatty/plugin-sdk": "0.1.0-internal" },
+        dependencies: { "@netcatty/plugin-sdk": "0.1.0-internal.1" },
         devDependencies: { typescript: "^5.9.0" },
       }, null, 2)}\n`,
       "utf8",

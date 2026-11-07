@@ -860,10 +860,10 @@ index 9f33c02..9751164 100644
        if (names !== undefined) {
          sftp._debug && sftp._debug(
 diff --git a/node_modules/ssh2/lib/protocol/constants.js b/node_modules/ssh2/lib/protocol/constants.js
-index ad77592..a249e00 100644
+index ad77592..03ab33b 100644
 --- a/node_modules/ssh2/lib/protocol/constants.js
 +++ b/node_modules/ssh2/lib/protocol/constants.js
-@@ -71,9 +71,30 @@ const DEFAULT_SERVER_HOST_KEY = [
+@@ -71,14 +71,37 @@ const DEFAULT_SERVER_HOST_KEY = [
  ];
  if (eddsaSupported)
    DEFAULT_SERVER_HOST_KEY.unshift('ssh-ed25519');
@@ -894,7 +894,15 @@ index ad77592..a249e00 100644
  
  
  const canUseCipher = (() => {
-@@ -160,6 +181,7 @@ const COMPAT = {
+   const ciphers = crypto.getCiphers();
+-  return (name) => ciphers.includes(CIPHER_INFO[name].sslName);
++  // crypto.js supplies the original ChaCha20 primitive on BoringSSL too.
++  return (name) => (name === 'chacha20-poly1305@openssh.com'
++                    || ciphers.includes(CIPHER_INFO[name].sslName));
+ })();
+ let DEFAULT_CIPHER = [
+   // http://tools.ietf.org/html/rfc5647
+@@ -160,6 +183,7 @@ const COMPAT = {
    DYN_RPORT_BUG: 1 << 2,
    BUG_DHGEX_LARGE: 1 << 3,
    IMPLY_RSA_SHA2_SIGALGS: 1 << 4,
@@ -902,7 +910,7 @@ index ad77592..a249e00 100644
  };
  
  module.exports = {
-@@ -330,6 +352,7 @@ module.exports = {
+@@ -330,6 +354,7 @@ module.exports = {
    COMPAT_CHECKS: [
      [ 'Cisco-1.25', COMPAT.BAD_DHGEX ],
      [ /^Cisco-1[.]/, COMPAT.BUG_DHGEX_LARGE ],
@@ -910,6 +918,113 @@ index ad77592..a249e00 100644
      [ /^[0-9.]+$/, COMPAT.OLD_EXIT ], // old SSH.com implementations
      [ /^OpenSSH_5[.][0-9]+/, COMPAT.DYN_RPORT_BUG ],
      [ /^OpenSSH_7[.]4/, COMPAT.IMPLY_RSA_SHA2_SIGALGS ],
+diff --git a/node_modules/ssh2/lib/protocol/crypto.js b/node_modules/ssh2/lib/protocol/crypto.js
+index 851cc73..088de2a 100644
+--- a/node_modules/ssh2/lib/protocol/crypto.js
++++ b/node_modules/ssh2/lib/protocol/crypto.js
+@@ -11,6 +11,7 @@ const {
+ } = require('crypto');
+ 
+ const { readUInt32BE, writeUInt32BE } = require('./utils.js');
++const { chacha20, nativeChacha20 } = require('./crypto/chacha20.js');
+ 
+ const FastBuffer = Buffer[Symbol.species];
+ const MAX_SEQNO = 2 ** 32 - 1;
+@@ -198,20 +199,17 @@ class ChaChaPolyCipherNative {
+     POLY1305_OUT_COMPUTE[0] = 0; // Set counter to 0 (little endian)
+     writeUInt32BE(POLY1305_OUT_COMPUTE, this.outSeqno, 12);
+     const polyKey =
+-      createCipheriv('chacha20', this._encKeyMain, POLY1305_OUT_COMPUTE)
+-      .update(POLY1305_ZEROS);
++      chacha20(this._encKeyMain, POLY1305_OUT_COMPUTE, POLY1305_ZEROS);
+ 
+     // Encrypt packet length
+     const pktLenEnc =
+-      createCipheriv('chacha20', this._encKeyPktLen, POLY1305_OUT_COMPUTE)
+-      .update(packet.slice(0, 4));
++      chacha20(this._encKeyPktLen, POLY1305_OUT_COMPUTE, packet.slice(0, 4));
+     this._onWrite(pktLenEnc);
+ 
+     // Encrypt rest of packet
+     POLY1305_OUT_COMPUTE[0] = 1; // Set counter to 1 (little endian)
+     const payloadEnc =
+-      createCipheriv('chacha20', this._encKeyMain, POLY1305_OUT_COMPUTE)
+-      .update(packet.slice(4));
++      chacha20(this._encKeyMain, POLY1305_OUT_COMPUTE, packet.slice(4));
+     this._onWrite(payloadEnc);
+ 
+     // Calculate Poly1305 MAC
+@@ -650,8 +648,7 @@ class ChaChaPolyDecipherNative {
+         writeUInt32BE(POLY1305_OUT_COMPUTE, this.inSeqno, 12);
+ 
+         const decLenBytes =
+-          createDecipheriv('chacha20', this._decKeyPktLen, POLY1305_OUT_COMPUTE)
+-          .update(this._lenBuf);
++          chacha20(this._decKeyPktLen, POLY1305_OUT_COMPUTE, this._lenBuf);
+         this._len = readUInt32BE(decLenBytes, 0);
+ 
+         if (this._len > MAX_PACKET_SIZE
+@@ -706,8 +703,7 @@ class ChaChaPolyDecipherNative {
+       POLY1305_OUT_COMPUTE[0] = 0; // Set counter to 0 (little endian)
+       writeUInt32BE(POLY1305_OUT_COMPUTE, this.inSeqno, 12);
+       const polyKey =
+-        createCipheriv('chacha20', this._decKeyMain, POLY1305_OUT_COMPUTE)
+-        .update(POLY1305_ZEROS);
++        chacha20(this._decKeyMain, POLY1305_OUT_COMPUTE, POLY1305_ZEROS);
+ 
+       // Calculate and compare Poly1305 MACs
+       poly1305_auth(POLY1305_RESULT_MALLOC,
+@@ -729,8 +725,7 @@ class ChaChaPolyDecipherNative {
+       // Decrypt packet
+       POLY1305_OUT_COMPUTE[0] = 1; // Set counter to 1 (little endian)
+       const packet =
+-        createDecipheriv('chacha20', this._decKeyMain, POLY1305_OUT_COMPUTE)
+-        .update(this._packet);
++        chacha20(this._decKeyMain, POLY1305_OUT_COMPUTE, this._packet);
+ 
+       const payload = new FastBuffer(packet.buffer,
+                                      packet.byteOffset + 1,
+@@ -1496,7 +1491,7 @@ function createCipher(config) {
+               ? new AESGCMCipherBinding(config)
+               : new AESGCMCipherNative(config));
+     case 'chacha20':
+-      return (ChaChaPolyCipher && !forceNative
++      return (ChaChaPolyCipher && nativeChacha20 && !forceNative
+               ? new ChaChaPolyCipherBinding(config)
+               : new ChaChaPolyCipherNative(config));
+     default: {
+@@ -1556,7 +1551,7 @@ function createDecipher(config) {
+               ? new AESGCMDecipherBinding(config)
+               : new AESGCMDecipherNative(config));
+     case 'chacha20':
+-      return (ChaChaPolyDecipher && !forceNative
++      return (ChaChaPolyDecipher && nativeChacha20 && !forceNative
+               ? new ChaChaPolyDecipherBinding(config)
+               : new ChaChaPolyDecipherNative(config));
+     default: {
+diff --git a/node_modules/ssh2/lib/protocol/crypto/chacha20.js b/node_modules/ssh2/lib/protocol/crypto/chacha20.js
+new file mode 100644
+index 0000000..86dd731
+--- /dev/null
++++ b/node_modules/ssh2/lib/protocol/crypto/chacha20.js
+@@ -0,0 +1,17 @@
++// OpenSSH uses original ChaCha20 (64-bit nonce), not the IETF/TLS AEAD.
++// Electron's BoringSSL lacks the standalone cipher, including in sshcrypto.
++'use strict';
++const { createCipheriv, getCiphers } = require('crypto');
++const nativeChacha20 = getCiphers().includes('chacha20');
++const { chacha20orig } = nativeChacha20 ? {} : require('@noble/ciphers/chacha.js');
++
++function chacha20(key, iv, data) {
++  if (nativeChacha20)
++    return createCipheriv('chacha20', key, iv).update(data);
++  // ssh2 only uses block counters 0 (length/Poly1305 key) and 1 (payload).
++  // The last eight IV bytes are its big-endian SSH packet sequence nonce.
++  return Buffer.from(chacha20orig(key, iv.subarray(8), data, undefined,
++                                  iv.readUInt32LE(0)));
++}
++
++module.exports = { chacha20, nativeChacha20 };
 diff --git a/node_modules/ssh2/lib/protocol/kex.js b/node_modules/ssh2/lib/protocol/kex.js
 index 811e631..422a198 100644
 --- a/node_modules/ssh2/lib/protocol/kex.js
@@ -1127,7 +1242,7 @@ index 811e631..422a198 100644
    onKEXPayload,
    DEFAULT_KEXINIT_CLIENT: new KexInit({
 diff --git a/node_modules/ssh2/lib/protocol/keyParser.js b/node_modules/ssh2/lib/protocol/keyParser.js
-index a276c1a..c8ff9d1 100644
+index a276c1a..57a05d6 100644
 --- a/node_modules/ssh2/lib/protocol/keyParser.js
 +++ b/node_modules/ssh2/lib/protocol/keyParser.js
 @@ -35,6 +35,9 @@ const SYM_PRIV_PEM = Symbol('Private key PEM');

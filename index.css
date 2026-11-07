@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./components/settings/tabs/plugin-marketplace.css";
 @import "@mdxeditor/editor/style.css";
 
 /* Bundled icon-only fallback so terminals show Nerd Font glyphs (powerline,
@@ -2197,4 +2198,59 @@ html[data-theme-transition] *::after {
 /* Monitoring's single-row header follows the available pane width. */
 @container monitor-main (max-width: 760px) {
   .monitor-header-action-label { display: none; }
+}
+
+/* Host-owned security surfaces never inherit third-party theme colors. */
+:root[data-plugin-theme-active] :is([role="dialog"], [role="alertdialog"], [data-app-lock-overlay], [data-host-security-surface], [data-section="host-details-panel"], [data-section="keychain-security-panel"], [data-testid="password-credential-picker"], [data-port-forward-host-key-tray-prompt]) {
+  --background: var(--host-security-background) !important;
+  --foreground: var(--host-security-foreground) !important;
+  --card: var(--host-security-card) !important;
+  --card-foreground: var(--host-security-card-foreground) !important;
+  --popover: var(--host-security-popover) !important;
+  --popover-foreground: var(--host-security-popover-foreground) !important;
+  --primary: var(--host-security-primary) !important;
+  --primary-foreground: var(--host-security-primary-foreground) !important;
+  --secondary: var(--host-security-secondary) !important;
+  --secondary-foreground: var(--host-security-secondary-foreground) !important;
+  --muted: var(--host-security-muted) !important;
+  --muted-foreground: var(--host-security-muted-foreground) !important;
+  --accent: var(--host-security-accent) !important;
+  --accent-foreground: var(--host-security-accent-foreground) !important;
+  --destructive: var(--host-security-destructive) !important;
+  --destructive-foreground: var(--host-security-destructive-foreground) !important;
+  --border: var(--host-security-border) !important;
+  --input: var(--host-security-input) !important;
+  --ring: var(--host-security-ring) !important;
+  /* Tailwind theme aliases resolve where declared; pin them in this scope too. */
+  --color-background: hsl(var(--host-security-background)) !important;
+  --color-foreground: hsl(var(--host-security-foreground)) !important;
+  --color-card: hsl(var(--host-security-card)) !important;
+  --color-card-foreground: hsl(var(--host-security-card-foreground)) !important;
+  --color-popover: hsl(var(--host-security-popover)) !important;
+  --color-popover-foreground: hsl(var(--host-security-popover-foreground)) !important;
+  --color-primary: hsl(var(--host-security-primary)) !important;
+  --color-primary-foreground: hsl(var(--host-security-primary-foreground)) !important;
+  --color-secondary: hsl(var(--host-security-secondary)) !important;
+  --color-secondary-foreground: hsl(var(--host-security-secondary-foreground)) !important;
+  --color-muted: hsl(var(--host-security-muted)) !important;
+  --color-muted-foreground: hsl(var(--host-security-muted-foreground)) !important;
+  --color-accent: hsl(var(--host-security-accent)) !important;
+  --color-accent-foreground: hsl(var(--host-security-accent-foreground)) !important;
+  --color-destructive: hsl(var(--host-security-destructive)) !important;
+  --color-destructive-foreground: hsl(var(--host-security-destructive-foreground)) !important;
+  --color-border: hsl(var(--host-security-border)) !important;
+  --color-input: hsl(var(--host-security-input)) !important;
+  --color-ring: hsl(var(--host-security-ring)) !important;
+  color: hsl(var(--foreground)) !important;
+  background-color: hsl(var(--background)) !important;
+  border-color: hsl(var(--border)) !important;
+}
+
+html.window-background-blur,
+html.window-background-blur body {
+  background: transparent !important;
+}
+
+html.window-background-blur #root {
+  opacity: var(--window-content-opacity, 1);
 }

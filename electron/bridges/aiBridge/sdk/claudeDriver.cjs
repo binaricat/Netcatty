@@ -5,7 +5,7 @@
  *
  * - Spawns the user's system `claude` binary via an ABSOLUTE pathToClaudeCodeExecutable
  *   (SDK existsSync-checks it; PATH is not resolved — issue #205).
- * - Repairs ~/.claude.json before spawn (ensureClaudeConfig).
+ * - Repairs ~/.claude.json before builtin turns only (ensureClaudeConfig).
  * - Bypasses the SDK's built-in permission system and BLOCKS built-in
  *   side-effect tools so the agent can only act through the injected netcatty
  *   MCP server (approval/scope/blocklist enforced there).
@@ -101,7 +101,9 @@ function mergeClaudeEffortSettings(settings, effort) {
 function buildClaudeQueryOptions({
   cwd, model, env, pathToClaudeCodeExecutable, abortController, injectedMcpServers, settings, resume,
   toolIntegrationMode,
+  delegatedAgent = false,
 }) {
+  if (delegatedAgent && toolIntegrationMode !== "mcp") throw Error("Delegated Claude requires MCP mode");
   const { model: resolvedModel, effort } = splitClaudeModelSelection(model);
   const options = {
     cwd,
@@ -130,8 +132,17 @@ function buildClaudeQueryOptions({
     options.pathToClaudeCodeExecutable = pathToClaudeCodeExecutable;
   }
   // Optional settings.json path / inline object — additive to CLAUDE_CONFIG_DIR.
-  const parsedSettings = mergeClaudeEffortSettings(parseClaudeSettings(settings), effort);
+  const parsedSettings = mergeClaudeEffortSettings(delegatedAgent ? undefined : parseClaudeSettings(settings), effort);
   if (parsedSettings !== undefined) options.settings = parsedSettings;
+  if (delegatedAgent) {
+    options.strictMcpConfig = true;
+    options.settingSources = [];
+    options.maxTurns = 12;
+    // Global plugin history belongs to core's source namespace. Rehydrate from
+    // that history each turn instead of creating a second native history store.
+    options.persistSession = false;
+    delete options.resume;
+  }
   return options;
 }
 
@@ -233,8 +244,10 @@ function buildClaudePromptInput(prompt, attachments) {
  * @param {object} args.emitter  createStreamEmitter(...)
  * @param {Function} [args.queryFn] inject @anthropic-ai/claude-agent-sdk query (for tests)
  */
-async function runClaudeTurn({ prompt, attachments, options, emitter, queryFn, assertSessionValid }) {
-  ensureClaudeConfig();
+async function runClaudeTurn({ prompt, attachments, options, emitter, queryFn, assertSessionValid, delegatedAgent = false }) {
+  // A delegated turn may use the selected host profile for authentication, but
+  // must not repair or delete unrelated files in the main process's home.
+  if (!delegatedAgent) ensureClaudeConfig();
   let query = queryFn;
   if (!query) {
     let sdk;

@@ -300,3 +300,8 @@ installs plugins but fails to start them outside the repository checkout.
 separate `npm run test:plugin-runtime:electron` smoke launches both a real
 sandboxed BrowserWindow plugin and a real utilityProcess plugin, verifies
 bidirectional storage RPC, and checks the recorded runtime ownership.
+
+Static `appearance.theme-packs` packages are an explicit non-executable admission
+form: `main.data = "theme"`, theme-only contributions and no permissions,
+activation events or companions. The runtime supervisor never starts them. This
+exception does not admit Node code or arbitrary host access in normal Settings.

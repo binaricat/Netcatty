@@ -1,3 +1,5 @@
+import { sliceHead } from '../textBoundaries';
+
 export interface ToolResultDedupEntry {
   fingerprint: string;
   toolName: string;
@@ -88,7 +90,7 @@ export class ToolResultDedup {
       fingerprint,
       toolName,
       turnNumber: this.turnNumber,
-      preview: preview.slice(0, 160),
+      preview: sliceHead(preview, 160),
     });
   }
 
@@ -112,11 +114,11 @@ export function buildTerminalWriteFingerprint(
 }
 
 export function previewToolResult(result: unknown): string {
-  if (typeof result === 'string') return result.slice(0, 160);
+  if (typeof result === 'string') return sliceHead(result, 160);
   try {
-    return JSON.stringify(result).slice(0, 160);
+    return sliceHead(JSON.stringify(result), 160);
   } catch {
-    return String(result).slice(0, 160);
+    return sliceHead(String(result), 160);
   }
 }
 

@@ -1,14 +1,14 @@
 {
-  version = "1.1.89";
+  version = "1.1.90";
 
   sources = {
     x86_64-linux = {
       appImageArch = "x86_64";
-      hash = "sha256-Ne5TalZ3G9cHPl0xnQpPq/0GNRe1ErUg1DzE+/nnseM=";
+      hash = "sha256-oa/T3Zey0FHsH+SOt4C1H4CT6aZRJta+x4x/11EAOJE=";
     };
     aarch64-linux = {
       appImageArch = "arm64";
-      hash = "sha256-L1aiJ/CroFwLSLH5aDnakogxjP8k5gLt8NJC+IGfXIw=";
+      hash = "sha256-r5hr3+gpIGrv9XJ7PQkHCdhOd2COkhELMHlnr3xIG7A=";
     };
   };
 }

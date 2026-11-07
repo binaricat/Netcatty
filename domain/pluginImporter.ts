@@ -204,6 +204,7 @@ const normalizeHost = (value: JsonValue): Host | null => {
   };
   if (Object.values(optionalStrings).some((item) => item === INVALID_FIELD)) return null;
   const optionalBooleans = {
+    sshInputCompatibility: optionalBooleanValue(object, 'sshInputCompatibility'),
     moshEnabled: optionalBooleanValue(object, 'moshEnabled'),
     etEnabled: optionalBooleanValue(object, 'etEnabled'),
     telnetEnabled: optionalBooleanValue(object, 'telnetEnabled'),
@@ -242,6 +243,7 @@ const normalizeHost = (value: JsonValue): Host | null => {
     createdAt: Date.now(),
     ephemeral: false,
     managedSourceId: undefined,
+    sshInputCompatibility: false,
     ...(protocol ? { protocol } : {}),
     ...(pluginConnection ? { pluginConnection: structuredClone(pluginConnection) } : {}),
     ...(deviceType ? { deviceType } : {}),

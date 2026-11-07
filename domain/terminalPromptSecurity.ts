@@ -1,6 +1,7 @@
 const ESCAPE_SEQUENCE = "\\x" + "1b";
 const BELL_SEQUENCE = "\\x" + "07";
 const ANSI_CONTROL_PATTERN = new RegExp(`${ESCAPE_SEQUENCE}\\[[0-?]*[ -/]*[@-~]`, 'gu');
+const CURSOR_POSITION_PATTERN = new RegExp(`${ESCAPE_SEQUENCE}\\[\\d*(?:;(\\d*))?[Hf]`, 'gu');
 const OSC_CONTROL_PATTERN = new RegExp(
   `${ESCAPE_SEQUENCE}\\][^${BELL_SEQUENCE}]*(?:${BELL_SEQUENCE}|${ESCAPE_SEQUENCE}\\\\)`,
   'gu',
@@ -80,7 +81,9 @@ function nextHeredocPromptOrigin(origin: string, completedLine: string): string 
 }
 
 /**
- * Current logical line, plus the heredoc opener when the line is a bare ">".
+ * Current logical line with controls stripped for classification, plus the
+ * heredoc opener when the line is a bare ">". `current` stays raw so partial
+ * control sequences can be completed by the next transport chunk.
  * `appendTerminalPromptSecurityTail` keeps only the current line, which is all
  * `observeTerminalInputPrompt` used to pass in. The opener is the last
  * completed non-PS2 line, so a long heredoc body does not have to be retained.
@@ -97,15 +100,25 @@ export function foldTerminalPromptSecurityOutput(
     input = input.slice(1);
     pendingCr = false;
   }
-  const combined = `${state.current}${input}`;
+  // Vim redraws lines with CUP/HVP + EL instead of CR/LF (#4107). A move
+  // to column one (also the default for an omitted/zero column) starts a
+  // new security line, so editor chrome cannot become part of its ":" prompt.
+  // Match after joining the raw tail to handle CSI split across PTY chunks.
+  const combined = `${state.current}${input}`.replace(
+    CURSOR_POSITION_PATTERN,
+    (sequence, column: string | undefined) => Number(column || 1) <= 1 ? '\r' : sequence,
+  );
   let origin = state.origin;
   for (const line of splitTerminalLogicalLines(combined).slice(0, -1)) {
     origin = nextHeredocPromptOrigin(origin, line);
   }
-  const current = appendTerminalPromptSecurityTail(state.current, input);
-  const promptText = lastLogicalLine(current).trim() === '>' && origin
-    ? `${origin}\n${current}`
-    : current;
+  const current = appendTerminalPromptSecurityTail('', combined);
+  // EL and cursor-visibility controls can precede/follow a colon in separate
+  // chunks. They must not hide vim ex from the observer's stale-latch reset.
+  const plain = stripTerminalControlSequences(current);
+  const promptText = plain.trim() === '>' && origin
+    ? `${origin}\n${plain}`
+    : plain;
   if (input.endsWith('\r')) pendingCr = true;
   else if (input.length > 0) pendingCr = false;
   return { origin, current, promptText, pendingCr };

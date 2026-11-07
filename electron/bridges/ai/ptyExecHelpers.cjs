@@ -68,7 +68,8 @@ const PROMPT_SUFFIX_WINDOW_PER_PROMPT_CHAR = 8;
 
 function hasExpectedPromptSuffix(text, expectedPrompt) {
   if (!expectedPrompt) return false;
-  const normalizedPrompt = stripAnsi(String(expectedPrompt || "")).replace(/\r/g, "");
+  const ansiFreePrompt = stripAnsi(String(expectedPrompt || ""));
+  const normalizedPrompt = ansiFreePrompt.replace(/\r/g, "");
   if (!normalizedPrompt) return false;
   const fullText = String(text || "");
   const windowChars = Math.max(
@@ -76,7 +77,17 @@ function hasExpectedPromptSuffix(text, expectedPrompt) {
     String(expectedPrompt).length * PROMPT_SUFFIX_WINDOW_PER_PROMPT_CHAR,
   );
   const tail = fullText.length > windowChars ? fullText.slice(-windowChars) : fullText;
-  return stripAnsi(tail).replace(/\r/g, "").endsWith(normalizedPrompt);
+  const strippedTail = stripAnsi(tail);
+  // Drop CR so a redraw inside one line (`root@host:~\r# `) still matches
+  // the cached prompt. That collapses a two-line PS1's `\r\r\n` to a single
+  // LF, which no longer ends with the cache (`user@host: /root\n\n\n$ `).
+  if (strippedTail.replace(/\r/g, "").endsWith(normalizedPrompt)) return true;
+  // The idle-prompt cache turns those CRs into LFs and keeps the blank
+  // lines. Compare that form too, only when the cache itself spans lines,
+  // so a bare `$`/`#` is unchanged.
+  if (!ansiFreePrompt.includes("\n")) return false;
+  const crAsLfPrompt = ansiFreePrompt.replace(/\r/g, "\n");
+  return strippedTail.replace(/\r/g, "\n").endsWith(crAsLfPrompt);
 }
 
 function escapePosixSingleQuoted(text) {
@@ -297,7 +308,7 @@ function buildWrappedCommand(command, shellKind, marker, separateStartMarker = f
       const psPager = "$env:PAGER='cat'; $env:SYSTEMD_PAGER=''; $env:GIT_PAGER='cat'; $env:LESS=''; ";
       const psEscaped = escapePowerShellSingleQuoted(command);
       return (
-        `$${marker}=0; $${marker}_cmd='${psEscaped}'; & { Write-Output '${marker}_S'; ${psPager}$LASTEXITCODE=$null; try { Invoke-Expression $${marker}_cmd; $${marker}_rc = if ($LASTEXITCODE -ne $null) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 } } catch { $${marker}_rc = 1 }; Write-Output "${marker}_E:$${marker}_rc" }\r\n`
+        `$${marker}=0; $${marker}_cmd='${psEscaped}'; & { Write-Output '${marker}_S'; ${psPager}$LASTEXITCODE=$null; try { Invoke-Expression $${marker}_cmd; $${marker}_rc = if ($LASTEXITCODE -ne $null) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 } } catch { $${marker}_rc = 1 }; Write-Output "${marker}_E:$${marker}_rc" }\r`
       );
     }
 

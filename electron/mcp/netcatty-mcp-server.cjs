@@ -69,6 +69,7 @@ const CHAT_SESSION_ID = process.env.NETCATTY_MCP_CHAT_SESSION_ID || null;
 // External MCP clients may keep a long-lived stdio process; re-read discovery so
 // Settings → AI → Safety changes apply without restarting the client.
 function readPermissionMode() {
+  if (process.env.NETCATTY_MCP_DELEGATED_TOOLS !== undefined) return "confirm";
   const discoveryPath = process.env.NETCATTY_EXTERNAL_MCP_DISCOVERY_FILE;
   if (discoveryPath) {
     try {
@@ -122,19 +123,33 @@ function guardWriteOperation(command, { skipBlocklist = false } = {}) {
 }
 
 let tcpSocket = null;
-let pendingRequests = new Map(); // id -> { resolve, reject }
+let pendingRequests = new Map(); // id -> { resolve, reject, sock }
 let nextRpcId = 1;
 let tcpBuffer = "";
 
+// `destroyed` stays false after the peer FIN has already moved readyState to
+// "closed". Writing in that window hits writeAfterFIN and rejects the call
+// with "TCP connection lost" instead of reconnecting.
+function isLiveSocket(sock) {
+  return Boolean(
+    sock
+    && !sock.destroyed
+    && sock.readyState === "open"
+    && sock.writable
+    && !sock.readableEnded
+    && !sock.writableEnded
+  );
+}
+
 function rejectPendingOnSocket(sock, externalMessage) {
-  if (tcpSocket && tcpSocket !== sock) return;
   const managed = !externalDiscoveryPath;
   if (managed && tcpSocket === sock) tcpSocket = null;
   const message = managed ? "Not connected to Netcatty" : externalMessage;
-  for (const { reject: rej } of pendingRequests.values()) {
-    rej(new Error(message));
+  for (const [id, pending] of pendingRequests) {
+    if (pending.sock !== sock) continue;
+    pendingRequests.delete(id);
+    pending.reject(new Error(message));
   }
-  pendingRequests.clear();
 }
 
 function connectTcp() {
@@ -198,15 +213,16 @@ function connectTcp() {
 
 function sendRpc(method, params) {
   return new Promise((resolve, reject) => {
-    if (!tcpSocket || tcpSocket.destroyed) {
+    if (!isLiveSocket(tcpSocket)) {
       reject(new Error("Not connected to Netcatty"));
       return;
     }
+    const sock = tcpSocket;
     const id = nextRpcId++;
-    pendingRequests.set(id, { resolve, reject });
+    pendingRequests.set(id, { resolve, reject, sock });
     const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
     debugLog("rpcCall", { id, method });
-    tcpSocket.write(msg);
+    sock.write(msg);
   });
 }
 
@@ -246,7 +262,12 @@ function dropActiveSocket() {
 let connecting = null;
 
 async function connectAndAuth() {
-  if (tcpSocket?.destroyed) tcpSocket = null;
+  // Drop the reference only. In-flight requests stay bound to the old socket
+  // and are rejected when that socket closes; they are not replayed.
+  if (!isLiveSocket(tcpSocket)) {
+    tcpSocket = null;
+    tcpBuffer = "";
+  }
   refreshExternalEndpoint();
   tcpBuffer = "";
   try {
@@ -263,8 +284,11 @@ async function connectAndAuth() {
 }
 
 function ensureConnected() {
-  if (tcpSocket && !tcpSocket.destroyed) return Promise.resolve();
+  // Join an in-flight reconnect before trusting tcpSocket. connectTcp assigns
+  // the socket before auth/verify returns; a second caller must wait for that
+  // re-auth instead of sending on an unauthenticated socket.
   if (connecting) return connecting;
+  if (isLiveSocket(tcpSocket)) return Promise.resolve();
   connecting = connectAndAuth().finally(() => {
     connecting = null;
   });
@@ -319,12 +343,20 @@ server.resource(
 );
 
 // Start with core tools; load specialized catalog groups through load_netcatty_tools.
-registerProgressiveMcpTools(server, {
+const toolDependencies = {
   rpcCall: exposedRpcCall,
   scopeParams,
   guardWriteOperation,
   catalogDescription,
-});
+};
+if (process.env.NETCATTY_MCP_DELEGATED_TOOLS !== undefined) {
+  const { listMcpTools } = require("../capabilities/codegen/toolSurfaces.cjs");
+  const { registerMcpTools } = require("../capabilities/codegen/mcpToolRegistry.cjs");
+  const names = JSON.parse(process.env.NETCATTY_MCP_DELEGATED_TOOLS);
+  if (!Array.isArray(names) || names.length > 128 || names.some((name) => typeof name !== "string")) throw Error("Invalid delegated tool profile");
+  const allowed = new Set(names);
+  registerMcpTools(server, toolDependencies, listMcpTools().filter((tool) => allowed.has(tool.mcpTool)));
+} else registerProgressiveMcpTools(server, toolDependencies);
 
 // ── Start ──
 

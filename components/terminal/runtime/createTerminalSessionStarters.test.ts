@@ -357,6 +357,34 @@ test("startPluginConnection displays status diagnostics when a Provider exits wi
   ]);
 });
 
+test("startSSH forwards a saved ChaCha20-only host setting to the transport", async () => {
+  const host = JSON.parse(JSON.stringify({
+    id: "host-chacha",
+    label: "Synthetic ChaCha20 server",
+    hostname: "127.0.0.1",
+    username: "synthetic",
+    algorithms: { cipher: ["chacha20-poly1305@openssh.com"] },
+  }));
+  let captured: Record<string, unknown> | undefined;
+  const ctx = createStarterContext({
+    host,
+    terminalBackend: {
+      backendAvailable: () => true,
+      startSSHSession: async (options: Record<string, unknown>) => {
+        captured = options;
+        return "ssh-session";
+      },
+      onSessionData: () => noop,
+      onSessionExit: () => noop,
+      onChainProgress: () => noop,
+      writeToSession: noop,
+      resizeSession: noop,
+    },
+  });
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+  assert.deepEqual(captured?.algorithmOverrides, host.algorithms);
+});
+
 test("startSSH forwards imported system agent authentication settings", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
   const terminalBackend = {

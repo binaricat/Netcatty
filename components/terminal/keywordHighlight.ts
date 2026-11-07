@@ -67,6 +67,7 @@ const CELL_INDICES = 3;
 const CELL_CONTENT = 0;
 const CELL_FG = 1;
 const STYLE_MASK = 0xfc000000;
+const CM_MASK = 0x3000000;
 const CM_RGB = 0x3000000;
 const MAX_PLUGIN_HIGHLIGHT_SCAN_CHARS = 4_096;
 const MAX_PLUGIN_HIGHLIGHT_MATCHES_PER_WRITE = 256;
@@ -1061,7 +1062,13 @@ export class KeywordHighlighter implements IDisposable {
       const dataIndex = x * CELL_INDICES;
       const content = internal._data[dataIndex + CELL_CONTENT];
       const currentFg = internal._data[dataIndex + CELL_FG];
-      if (!originals.mask[x] || originals.content[x] !== content) {
+      // A cell already carrying a PTY palette/truecolor foreground (starship
+      // directory segments, ANSI logs) must keep that color. Keyword RGB is
+      // only for the default foreground.
+      const maskedForContent = originals.mask[x] === 1 && originals.content[x] === content;
+      const ptyFg = maskedForContent ? originals.fg[x] : currentFg;
+      if ((ptyFg & CM_MASK) !== 0) continue;
+      if (!maskedForContent) {
         originals.fg[x] = currentFg;
         originals.content[x] = content;
         originals.mask[x] = 1;

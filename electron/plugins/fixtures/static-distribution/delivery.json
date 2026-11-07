@@ -1,0 +1,48 @@
+{
+  "builderSha256": "57199cc6a5d30f5f356adb072d51de9e2283dac6e26c647a4404e4c2261c4a70",
+  "catalogSha256": "85a6b5efbe4fca52d2bce0ae7074b9d33ac876e29a41ae9a6a28be5c7387c8a9",
+  "indexSha256": "f8f81e2f86fd459e061b38e05b8fff3b21b4e660ad06bbd65129f542764c2062",
+  "plugins": [
+    {
+      "artifact": null,
+      "avatar": null,
+      "commit": "f4a6b205adca486d4e9cda0270e13a9ff0afd7be",
+      "iconDark": {
+        "path": "/assets/7a897a67ae6b652339c77a113d1c759919776fead82d2eefd0238d3c05ba87fe.png",
+        "sha256": "7a897a67ae6b652339c77a113d1c759919776fead82d2eefd0238d3c05ba87fe",
+        "size": 873
+      },
+      "iconLight": {
+        "path": "/assets/ec7bcd5e470ee3d3d9f7f77d120a4de7496a9c0ba984094f84e560d240bea947.png",
+        "sha256": "ec7bcd5e470ee3d3d9f7f77d120a4de7496a9c0ba984094f84e560d240bea947",
+        "size": 873
+      },
+      "id": "com.netcatty.starter",
+      "readme": {
+        "path": "/assets/d685ec68558c81705f03195ca35a0a62ea6ec75d8837d5ddb5b5a970890aae6e.md",
+        "sha256": "d685ec68558c81705f03195ca35a0a62ea6ec75d8837d5ddb5b5a970890aae6e",
+        "size": 2050
+      },
+      "repository": "binaricat/Netcatty",
+      "version": "0.1.2"
+    },
+    {
+      "artifact": null,
+      "avatar": null,
+      "commit": "4336f8fd53a05a48d6bbc9ad3ce0ca88b121862f",
+      "iconDark": null,
+      "iconLight": null,
+      "id": "com.netcatty.hello",
+      "readme": {
+        "path": "/assets/1692573445e3688b4fe3612282becc086b191a034c0609deeaaebf615627c209.md",
+        "sha256": "1692573445e3688b4fe3612282becc086b191a034c0609deeaaebf615627c209",
+        "size": 2951
+      },
+      "repository": "binaricat/Netcatty",
+      "version": "0.1.0"
+    }
+  ],
+  "registryCommit": "32578ae27ff86f0151511478d698a1cdc12fb2e0",
+  "schemaVersion": 1,
+  "sourceLockSha256": "753711c1860ff0fcc10a558182f8c868d9d06b40e5c8de5522249d0d27b139d6"
+}

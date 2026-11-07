@@ -6,6 +6,10 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
 export default [
+  {
+    files: ["examples/plugins/starter-netcatty/panel.js"],
+    languageOptions: { globals: globals.browser },
+  },
   // The recommended preset has no file scope of its own, so scope it off all of
   // electron/ — that main-process tree is historically unlinted. The bridges
   // get a focused rule set in the dedicated block at the end of this config;

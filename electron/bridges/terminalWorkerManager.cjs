@@ -390,6 +390,7 @@ function createTerminalWorkerManager(options = {}) {
     onRendererEvent = null,
   } = options;
   let child = null;
+  let pluginSessionAuthorityEpoch = 0;
   const pending = new Map();
   const pendingOutput = new Map();
   const pendingOutputBytes = new Map();
@@ -439,6 +440,7 @@ function createTerminalWorkerManager(options = {}) {
     ? Math.max(1, Math.floor(Number(options.maxClosedSessionTombstones)))
     : DEFAULT_MAX_CLOSED_SESSION_TOMBSTONES;
   let transportIdleTtlMs = resolveInitialTransportIdleTtlMs(options);
+  let customTempDir = null;
 
   function rejectAllPending(error) {
     for (const { reject } of pending.values()) {
@@ -1854,9 +1856,11 @@ function createTerminalWorkerManager(options = {}) {
       env: {
         ...process.env,
         [SSH_TRANSPORT_IDLE_TTL_ENV]: String(transportIdleTtlMs),
+        NETCATTY_CUSTOM_TEMP_DIR: customTempDir || "",
       },
     });
     child = worker;
+    pluginSessionAuthorityEpoch++;
     worker.on?.("message", (message) => {
       if (child === worker) handleMessage(message);
     });
@@ -1864,6 +1868,16 @@ function createTerminalWorkerManager(options = {}) {
       if (child === worker) handleExit(code);
     });
     return worker;
+  }
+
+  function setCustomTempDir(value) {
+    customTempDir = value || null;
+    if (!child) return;
+    try {
+      child.postMessage({ kind: "set-custom-temp-dir", value: customTempDir });
+    } catch (error) {
+      retireWorkerAfterIpcFailure(child, error);
+    }
   }
 
   function setDefaultTransportIdleTtlMs(value) {
@@ -2213,6 +2227,7 @@ function createTerminalWorkerManager(options = {}) {
 
   return {
     ensureStarted,
+    setCustomTempDir,
     /** True when the utilityProcess child is currently alive. */
     isRunning() {
       return Boolean(child);
@@ -2245,6 +2260,14 @@ function createTerminalWorkerManager(options = {}) {
     getSessionWebContentsId(sessionId) {
       if (!sessionId) return null;
       return sessionWebContentsIds.get(sessionId) ?? null;
+    },
+    // Main-process resource authority only; never expose worker objects or endpoints.
+    getPluginSessionBinding(sessionId, webContentsId) {
+      const generation = sessionGenerations.get(sessionId);
+      if (!child || !Number.isSafeInteger(generation) || closedSessions.has(sessionId)
+        || pendingSessionStartSequences.has(sessionId) || outputRoutePending.has(sessionId)
+        || sessionWebContentsIds.get(sessionId) !== webContentsId || !isLiveWebContentsId(webContentsId)) return null;
+      return Object.freeze({ epoch: pluginSessionAuthorityEpoch, generation });
     },
     getSessionHostId(sessionId) {
       if (!sessionId) return null;

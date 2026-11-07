@@ -20,6 +20,10 @@ test("single-channel banners match only the supported software tokens", () => {
     "CloudLinker",
     "SSH-2.0-CloudLinker",
     "cloudlinker-1.0",
+    "russh",
+    "SSH-2.0-russh",
+    "SSH-2.0-russh_0.45.0",
+    "RuSSH",
   ]) {
     assert.equal(remoteSoftwareRequiresSingleChannel(version), true, version);
   }
@@ -49,6 +53,12 @@ test("single-channel banner match ignores OpenSSH, JumpServer, and lookalike tok
     "SSH-2.0-Go",
     "notcloudlinker",
     "CloudLinkerProxy",
+    "russhd",
+    "myrussh",
+    "prerussh",
+    "russhserver",
+    "SSH-2.0-russhd",
+    "notRussh",
   ]) {
     assert.equal(remoteSoftwareRequiresSingleChannel(version), false, String(version));
   }
@@ -59,6 +69,8 @@ test("chunked-write limit stays on BHostSSH and TERM-SSHD", () => {
   assert.equal(remoteDisallowsChunkedChannelWrite("SSH-2.0-TERM-SSHD"), true);
   assert.equal(remoteDisallowsChunkedChannelWrite("CLOUDBILITY-4.14"), false);
   assert.equal(remoteDisallowsChunkedChannelWrite("SSH-2.0-CloudLinker"), false);
+  assert.equal(remoteDisallowsChunkedChannelWrite("SSH-2.0-russh"), false);
+  assert.equal(remoteDisallowsChunkedChannelWrite("SSH-2.0-russh_0.45.0"), false);
   assert.equal(remoteDisallowsChunkedChannelWrite("OpenSSH_9.6"), false);
   assert.equal(remoteDisallowsChunkedChannelWrite("superterm-sshd"), false);
 });
@@ -82,7 +94,7 @@ test("CommonJS and renderer modules agree on SSH banner behavior", async () => {
   const browserModule = await import("./singleChannelSshBanner.shared.mjs");
   const nodeModule = require("./singleChannelSshBanner.shared.cjs");
   for (const version of [
-    "BHostSSH_7.0", "TERM-SSHD", "CLOUDBILITY-4.14", "CloudLinker", "SSH-2.0-Go", "OpenSSH_9.6", "JumpServer", "",
+    "BHostSSH_7.0", "TERM-SSHD", "CLOUDBILITY-4.14", "CloudLinker", "SSH-2.0-russh_0.45.0", "SSH-2.0-Go", "OpenSSH_9.6", "JumpServer", "",
   ]) {
     assert.equal(browserModule.remoteSoftwareRequiresSingleChannel(version), nodeModule.remoteSoftwareRequiresSingleChannel(version));
     assert.equal(browserModule.remoteDisallowsChunkedChannelWrite(version), nodeModule.remoteDisallowsChunkedChannelWrite(version));

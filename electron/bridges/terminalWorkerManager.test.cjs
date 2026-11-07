@@ -5283,3 +5283,26 @@ test("backend-assigned session ID is closed if its renderer disappeared before t
   await assert.rejects(start, /closed before its output route opened/);
   assert.deepEqual(f.closes().map(m => m.payload), [{ sessionId: "assigned" }]);
 });
+
+
+test("custom temp directory is seeded and delivered to the worker", () => {
+  const child = new FakeChild();
+  let env;
+  const manager = createTerminalWorkerManager({
+    utilityProcess: { fork(_script, _args, options) { env = options.env; return child; } },
+    workerScriptPath: "/worker.cjs",
+  });
+  manager.setCustomTempDir("/custom/Netcatty");
+  manager.ensureStarted();
+  assert.equal(env.NETCATTY_CUSTOM_TEMP_DIR, "/custom/Netcatty");
+  manager.setCustomTempDir(null);
+  assert.deepEqual(child.messages.at(-1), { kind: "set-custom-temp-dir", value: null });
+  const parentPort = new EventEmitter();
+  parentPort.postMessage = () => {};
+  const values = [];
+  const runtime = createTerminalWorkerRuntime({ parentPort, registerBridges() {}, applyCustomTempDir: value => values.push(value) });
+  runtime.start();
+  parentPort.emit("message", { kind: "set-custom-temp-dir", value: "/custom/Netcatty" });
+  parentPort.emit("message", { kind: "set-custom-temp-dir", value: null });
+  assert.deepEqual(values, ["/custom/Netcatty", null]);
+});

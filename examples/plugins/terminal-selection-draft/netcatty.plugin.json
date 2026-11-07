@@ -1,0 +1,62 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.terminal-selection-draft",
+  "name": "terminal-selection-draft",
+  "displayName": "Selected terminal draft",
+  "description": "Share a bounded selection and review a synthetic input draft without sending input.",
+  "version": "0.1.0",
+  "publisher": "netcatty",
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal <0.2.0"
+  },
+  "features": {
+    "required": [
+      "terminal.selection-sharing",
+      "terminal.input-drafts",
+      "commands.interactive"
+    ]
+  },
+  "main": {
+    "browser": "browser.js"
+  },
+  "activationEvents": [
+    "onCommand:com.netcatty.terminal-selection-draft.share",
+    "onCommand:com.netcatty.terminal-selection-draft.review"
+  ],
+  "permissions": {
+    "required": [
+      "commands",
+      "menus"
+    ],
+    "optional": [
+      "terminal.selection.read",
+      "terminal.input.propose"
+    ]
+  },
+  "contributes": {
+    "commands": [
+      {
+        "id": "com.netcatty.terminal-selection-draft.share",
+        "title": "Share selected terminal text",
+        "interactive": true
+      },
+      {
+        "id": "com.netcatty.terminal-selection-draft.review",
+        "title": "Review selected terminal draft",
+        "interactive": true
+      }
+    ],
+    "menus": [
+      {
+        "command": "com.netcatty.terminal-selection-draft.share",
+        "location": "commandPalette"
+      },
+      {
+        "command": "com.netcatty.terminal-selection-draft.review",
+        "location": "commandPalette"
+      }
+    ]
+  }
+}

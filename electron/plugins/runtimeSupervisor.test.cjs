@@ -12,6 +12,7 @@ const { createPluginPaths } = require("./paths.cjs");
 const { RPC_ERRORS } = require("./rpcRouter.cjs");
 const { RuntimeSupervisor } = require("./runtimeSupervisor.cjs");
 const { createContainmentError } = require("./utilityPluginRuntime.cjs");
+const { PluginContributionService } = require("./contributionService.cjs");
 
 function pluginManifest(overrides = {}) {
   return {
@@ -65,6 +66,31 @@ function createFixture(context, runtimeFactory, supervisorOptions = {}) {
   });
   return { database, manifest, runtimeOptions, supervisor };
 }
+
+test("ordinary command activation A cannot dispatch on replacement runtime B", async (t) => {
+  let executed = 0, activation;
+  const fixture = createFixture(t, () => ({ async start(config) { return { pluginId: config.pluginId, pluginVersion: config.pluginVersion,
+    apiVersion: config.apiVersion, enabledFeatures: config.enabledFeatures }; }, async stop() {}, async request() { executed++; return null; } }));
+  t.after(() => fixture.supervisor.shutdown());
+  const manifest = { ...fixture.manifest, contributes: { commands: [{ id: `${fixture.manifest.id}.ordinary`, title: "Ordinary" }] } };
+  const finished = [];
+  const service = new PluginContributionService({
+    database: { listPlugins: () => [{ id: manifest.id, manifest, activeVersion: manifest.version, enabled: true, runtime: {} }] },
+    onCommandFinished: (runtimeId) => finished.push(runtimeId),
+    runtimeSupervisor: {
+      async start(pluginId) {
+        activation = await fixture.supervisor.start(pluginId);
+        await fixture.supervisor.restart(pluginId);
+        return activation;
+      },
+      request: (...args) => fixture.supervisor.request(...args),
+    },
+  });
+  await assert.rejects(service.executeCommand(`${manifest.id}.ordinary`), /no longer matches the authorized activation/);
+  assert.notEqual(fixture.supervisor.getRuntimeIdentity(manifest.id).runtimeId, activation.runtimeId);
+  assert.equal(executed, 0, "replacement B receives no stale command");
+  assert.deepEqual(finished, [activation.runtimeId]);
+});
 
 test("supervisor prefers the ordinary browser runtime and enforces negotiated identity", async (context) => {
   const calls = [];
@@ -950,4 +976,56 @@ test("a stale runtime crash cannot quarantine or overwrite a replacement version
   const priorVersion = fixture.database.getActivePlugin(fixture.manifest.id);
   assert.equal(priorVersion.runtime.status, "error");
   assert.match(priorVersion.runtime.lastError, /stale process crashed/);
+});
+
+test('new host initializes an exact legacy API plugin with its negotiated legacy revision', async (context) => {
+  const observed = [];
+  const fixture = createFixture(context, () => ({
+    async start(config) { observed.push(config.apiVersion); return { pluginId: config.pluginId, pluginVersion: config.pluginVersion, apiVersion: config.apiVersion, enabledFeatures: config.enabledFeatures }; },
+    async stop() {},
+  }), { apiVersion: '0.1.0-internal.1', supportedFeatures: ['metadata.brand-icon'] });
+  fixture.database.installVersion({
+    pluginId: fixture.manifest.id, version: fixture.manifest.version,
+    manifest: { ...fixture.manifest, engines: { netcatty: '>=0.0.0', api: '0.1.0-internal' } },
+    archiveSha256: 'a'.repeat(64), packageRelativePath: `${fixture.manifest.id}/${fixture.manifest.version}/package`,
+  }, { enable: true });
+  await fixture.supervisor.start(fixture.manifest.id);
+  assert.deepEqual(observed, ['0.1.0-internal']);
+  await fixture.supervisor.stop(fixture.manifest.id);
+});
+
+test('data-only themes never create a runtime on startup or explicit start',async(t)=>{
+ const fixture=createFixture(t,()=>{throw new Error('data pack must not execute');});
+ const manifest={...fixture.manifest,main:{data:'theme'},activationEvents:[],features:{required:['appearance.theme-packs']},contributes:{themes:[{id:fixture.manifest.id+'.light',label:'Light',variant:'light',entry:'light.json'}]}};
+ fixture.database.installVersion({pluginId:manifest.id,version:manifest.version,manifest,archiveSha256:'a'.repeat(64),packageRelativePath:'theme'}, {enable:true});
+ await fixture.supervisor.startEnabled();assert.equal(fixture.runtimeOptions.length,0);
+ await assert.rejects(fixture.supervisor.start(manifest.id),/no executable runtime/);assert.equal(fixture.runtimeOptions.length,0);
+ await fixture.supervisor.shutdown();
+});
+
+test("runtime cleanup closes diagnostic loggers before stale runtime callbacks can write", async (t) => {
+  const { PluginLogger } = require("./pluginLogger.cjs");
+  const loggers = [];
+  const events = [];
+  const fixture = createFixture(t, () => ({
+    async start(config) { return { pluginId: config.pluginId, pluginVersion: config.pluginVersion, apiVersion: config.apiVersion, enabledFeatures: config.enabledFeatures }; },
+    async stop() {},
+  }), { logService: {
+    createLogger(identity) {
+      const logger = new PluginLogger({ identity });
+      loggers.push(logger);
+      return logger;
+    },
+    audit(_identity, event) { events.push(event.operation); },
+  } });
+  t.after(() => fixture.supervisor.shutdown());
+  await fixture.supervisor.start(fixture.manifest.id);
+  assert.equal(loggers[0].closed, false);
+  await fixture.supervisor.stop(fixture.manifest.id);
+  assert.equal(loggers[0].closed, true);
+  assert.deepEqual(events.slice(0, 3), ["runtime.starting", "runtime.running", "runtime.stopped"]);
+  await fixture.runtimeOptions[0].logger.write("info", "synthetic stale callback");
+  await fixture.supervisor.start(fixture.manifest.id);
+  await fixture.supervisor.shutdown();
+  assert.equal(loggers[1].closed, true);
 });

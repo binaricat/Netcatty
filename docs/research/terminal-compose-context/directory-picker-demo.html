@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Netcatty Context Chips · Directory Chip 交互示意</title>
+  <style>
+    :root{color-scheme:dark;--bg:#111315;--surface:#1c1f22;--line:#34383c;--fg:#e0e3e6;--muted:#a0a6ac;--accent:#52b7d6}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    button,input,textarea{font:inherit}button{cursor:pointer;color:inherit}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+    .page{max-width:1160px;margin:auto;padding:42px 32px}h1{font-size:27px;line-height:1.3;margin:12px 0}p{margin:10px 0;color:var(--muted)}
+    .layout{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:24px;margin-top:26px}.terminal{min-width:0;border:1px solid var(--line);border-radius:8px;background:#15181b;overflow:hidden}
+    .tabbar{padding:10px 16px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}.tabbar span{color:var(--fg);margin-right:18px}
+    .output{height:380px;padding:22px 18px;font:12px/1.9 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow:auto;color:#aab2b9}.output .prompt{color:#c1d7a2}.output .note{color:#6f7a83}
+    .compose{border-top:1px solid var(--line);padding:0 14px 14px;position:relative}.handle{height:6px;width:30px;border-bottom:2px solid #41464b;margin:0 auto 6px}.snippets{display:flex;gap:6px;height:30px;align-items:center;font:11px ui-monospace,monospace;color:var(--muted)}.snippet{padding:1px 7px;border-radius:3px;background:#25292d}
+    .context{position:relative;display:flex;gap:8px;align-items:center;height:30px;min-width:0}.chip{display:flex;align-items:center;gap:6px;max-width:100%;height:24px;padding:0 7px;border:1px solid #363b40;border-radius:4px;background:#101214;font:12px ui-monospace,monospace}.chip:hover,.chip[aria-expanded=true]{background:#272c31;border-color:#5b6872}.chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chip:disabled{cursor:wait;opacity:.7}.icon{width:14px;height:14px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.7}
+    .progress{font-size:11px;color:var(--muted)}textarea{display:block;width:100%;height:66px;resize:vertical;min-height:48px;border:0;background:transparent;color:var(--fg);font:12px/1.8 ui-monospace,monospace;margin-top:8px;padding:2px}
+    .popover{display:flex;flex-direction:column;position:absolute;z-index:2;left:0;bottom:calc(100% + 6px);width:min(360px,100%);max-height:310px;border:1px solid #383e44;border-radius:8px;overflow:hidden;background:var(--surface);box-shadow:0 10px 30px #0007}.popover[hidden]{display:none}.search{flex-shrink:0;padding:9px 12px;background:#121416;border-bottom:1px solid #2a2f34}.search input{width:100%;border:0;padding:0;background:transparent;color:var(--fg);font-size:13px;outline:none}.search input::placeholder{color:#858d94}
+    #directories{display:flex;flex-direction:column;min-height:0;overflow:hidden}#parent{flex-shrink:0}
+    .row{display:flex;align-items:center;gap:9px;padding:5px 12px;min-height:31px;cursor:pointer;color:#d7dcdf;font-size:13px}.row.active{background:var(--accent);color:#092631}.row:hover{background:#303940}.row.active:hover{background:var(--accent)}.row.parent{color:var(--muted);border-bottom:1px solid #343a40}.row.parent.active{color:#092631}.row .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.scroll{min-height:0;max-height:217px;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.empty{padding:20px 12px;color:var(--muted);font-size:12px}.foot{flex-shrink:0;padding:7px 12px;border-top:1px solid #343a40;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted)}.foot label{display:flex;align-items:center;gap:4px}.foot input{accent-color:var(--accent)}
+    aside{padding-top:2px}aside h2{font-size:14px;margin:0 0 12px}aside p{font-size:12px}.badge{font-size:11px;color:#b5c79b;border:1px solid #46503b;padding:2px 6px;display:inline-block;border-radius:3px}.checks{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:18px}.checks label{display:flex;align-items:center;gap:6px}.checks input{accent-color:var(--accent)}.status{min-height:44px;border-top:1px solid var(--line);padding-top:12px;margin-top:16px;font-size:12px;color:var(--muted)}.reset{border:1px solid #424a51;border-radius:4px;background:transparent;padding:4px 9px;font-size:12px;margin-top:12px}.warning{color:#ddbc85}kbd{font:11px ui-monospace,monospace;border:1px solid #3c4248;border-radius:3px;padding:0 4px}
+    @media(max-width:760px){.page{padding:24px 16px}.layout{grid-template-columns:minmax(0,1fr)}aside{border-top:1px solid var(--line);padding-top:18px}.output{height:355px}h1{font-size:23px}}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1>目录即入口，选中即切换</h1>
+    <p>Context Chips 建议交互稿，位于快捷命令下方。首期仅演示目录芯片；使用虚构数据，不访问文件系统或执行命令。</p>
+    <div class="layout">
+      <section aria-label="终端交互示意" class="terminal">
+        <div class="tabbar"><span>本地终端</span>zsh · 模拟会话 A</div>
+        <div class="output" id="output"><span class="prompt">~/git/Netcatty</span>
+$ pwd
+/home/demo/git/Netcatty
+
+<span class="note">从目录菜单选择一个文件夹。
+每次选择都会关闭菜单；再次打开可继续导航。</span>
+</div>
+        <div class="compose" id="compose">
+          <div class="handle" aria-hidden="true"></div>
+          <div class="snippets" aria-label="现有快捷片段区域"><span class="snippet">git status</span><span class="snippet">npm run dev</span></div>
+          <div class="context" role="group" aria-label="Context Chips">
+            <button id="trigger" class="chip" aria-haspopup="dialog" aria-expanded="true" aria-controls="picker"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 6V4h6l2 2h8v10H2zM2 8h16"/></svg><span id="path">~/git/Netcatty</span></button>
+            <span class="progress" id="progress"></span>
+            <div id="picker" class="popover" role="dialog" aria-label="更改工作目录">
+              <div class="search"><input id="query" type="search" placeholder="搜索当前目录下的文件夹…" aria-label="搜索子目录" aria-controls="directories" autocomplete="off" spellcheck="false"></div>
+              <div id="directories" role="listbox" aria-label="目录"><div id="parent"></div><div class="scroll" id="children"></div></div>
+              <div class="foot"><label><input id="hidden" type="checkbox">显示隐藏目录</label><span><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Enter</kbd></span></div>
+            </div>
+          </div>
+          <textarea id="draft" aria-label="命令草稿" spellcheck="false">npm run test -- --watch</textarea>
+        </div>
+      </section>
+      <aside>
+        <span class="badge">首期建议范围</span>
+        <h2 style="margin-top:16px">可以直接操作</h2>
+        <p>搜索当前层子目录；按上下键后 Enter，或单击目录；父目录同样会切换并关闭。</p>
+        <p>命令草稿始终保留。约 650ms 后模拟 cwd 确认，chip 才更新。</p>
+        <h2 style="margin-top:22px">观察失败状态</h2>
+        <p>勾选下方“模拟忙碌”或“模拟失败”，核对无法注入时的反馈和目录真值保持。</p>
+        <p>目录在模拟 cwd 确认后更新；切换失败时保持原路径。</p>
+        <button class="reset" id="reset">重置演示</button>
+      </aside>
+    </div>
+    <div class="checks"><label><input type="checkbox" id="busy">模拟终端忙碌</label><label><input type="checkbox" id="fail">模拟 cd 失败</label></div>
+    <div id="status" class="status" role="status" aria-live="polite">示意：菜单已展开，可搜索或选择。所有路径均为虚构。</div>
+  </main>
+  <script>
+    const $=id=>document.getElementById(id);
+    const home='/home/demo';
+    const tree={
+      '/':['home','srv','tmp','var'], '/home':['demo'], '/home/demo':['.config','Downloads','git'],
+      '/home/demo/git':['Netcatty','sample-app','tools'],
+      '/home/demo/git/Netcatty':['.github','.vscode','application','build','components','dist','docs','domain','electron','examples','infrastructure','lib','node_modules','packages','public','scripts'],
+      '/home/demo/git/Netcatty/application':['i18n','state'], '/home/demo/git/Netcatty/components':['ai','sftp','terminal','terminalLayer','ui'],
+      '/home/demo/git/Netcatty/docs':['assets','features','plans','research'], '/home/demo/git/Netcatty/domain':[],
+      '/home/demo/git/sample-app':['src','tests'], '/home/demo/.config':['demo'], '/tmp':[], '/srv':['app'], '/var':['log']
+    };
+    let cwd=home+'/git/Netcatty', open=true, pending=false, active=0, rows=[], epoch=0, composing=false;
+    const folder='<svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 6V4h6l2 2h8v10H2zM2 8h16"/></svg>';
+    const up='<svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 16V4M5 9l5-5 5 5"/></svg>';
+    function display(p){return p===home?'~':p.startsWith(home+'/')?'~'+p.slice(home.length):p}
+    function parent(p){return p==='/'?null:p.slice(0,p.lastIndexOf('/'))||'/'}
+    function join(p,n){return (p==='/'?'':p)+'/'+n}
+    function status(s,error=false){$('status').textContent=s;$('status').classList.toggle('warning',error)}
+    function updateChip(){ $('path').textContent=display(cwd);$('trigger').title=cwd;$('trigger').setAttribute('aria-label','当前目录 '+display(cwd)+'，更改工作目录');$('trigger').disabled=pending;$('progress').textContent=pending?'切换中…':'' }
+    function setOpen(v,focus=true){open=v;$('picker').hidden=!v;$('trigger').setAttribute('aria-expanded',String(v));if(v){$('query').value='';render();if(focus)$('query').focus()}else if(focus)$('trigger').focus()}
+    function paint(){rows.forEach((r,i)=>{r.node.classList.toggle('active',i===active);r.node.setAttribute('aria-selected',String(i===active))});if(rows[active])$('query').setAttribute('aria-activedescendant',rows[active].node.id);else $('query').removeAttribute('aria-activedescendant')}
+    function render(){
+      $('parent').replaceChildren();$('children').replaceChildren();rows=[];
+      const query=$('query').value.toLocaleLowerCase();const par=parent(cwd);
+      const names=(tree[cwd]||[]).filter(n=>($('hidden').checked||!n.startsWith('.'))&&n.toLocaleLowerCase().includes(query)).sort((a,b)=>a.localeCompare(b,'en',{numeric:true}));
+      function add(label,path,isParent){const node=document.createElement('div');node.className='row'+(isParent?' parent':'');node.role='option';node.id='dir-'+rows.length;node.title=path;node.innerHTML=isParent?up:folder;const text=document.createElement('span');text.className='label';text.textContent=label;node.append(text);const index=rows.length;rows.push({path,node});node.addEventListener('click',()=>select(index));node.addEventListener('pointermove',()=>{active=index;paint()});$(isParent?'parent':'children').append(node)}
+      if(par)add('..（父目录）',par,true);names.forEach(n=>add(n,join(cwd,n),false));
+      active=names.length?(par?1:0):-1;paint();
+      if(!names.length){const el=document.createElement('div');el.className='empty';el.textContent=query?'没有匹配的子目录':'没有子目录';$('children').append(el)}
+    }
+    function select(index){
+      if(!rows[index]||pending)return;
+      if($('busy').checked){status('请等待终端回到空命令提示符。未提交 cd，草稿保持。',true);return}
+      const target=rows[index].path, token=++epoch, fail=$('fail').checked;
+      setOpen(false,false);pending=true;updateChip();$('draft').focus();status('模拟已提交导航；等待目标会话 cwd 确认，暂不更改 chip。');
+      setTimeout(()=>{if(token!==epoch)return;pending=false;if(fail){status('模拟切换失败：无法进入目标目录。保留原实际目录，可重新打开菜单。',true)}else{cwd=target;const line=document.createElement('div');line.textContent='$ cd -- '+"'"+target+"'"+'\n'+display(cwd);$('output').append(line);$('output').scrollTop=$('output').scrollHeight;status('模拟 cwd 已确认：'+display(cwd)+'。菜单已关闭，命令草稿保留。')}updateChip()},650);
+    }
+    $('trigger').addEventListener('click',()=>setOpen(!open));$('query').addEventListener('input',render);$('hidden').addEventListener('change',render);
+    $('query').addEventListener('compositionstart',()=>composing=true);$('query').addEventListener('compositionend',()=>composing=false);
+    $('picker').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();setOpen(false)}else if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();e.stopPropagation();if(!rows.length)return;active=active<0?(e.key==='ArrowUp'?rows.length-1:0):Math.max(0,Math.min(rows.length-1,active+(e.key==='ArrowDown'?1:-1)));paint();rows[active].node.scrollIntoView({block:'nearest'})}else if(e.key==='Enter'&&e.target===$('query')){e.preventDefault();e.stopPropagation();if(!e.isComposing&&!composing)select(active)}});
+    document.addEventListener('pointerdown',e=>{if(open&&!$('picker').contains(e.target)&&!$('trigger').contains(e.target))setOpen(false,false)});
+    $('reset').addEventListener('click',()=>{epoch++;pending=false;cwd=home+'/git/Netcatty';$('busy').checked=false;$('fail').checked=false;$('hidden').checked=false;$('draft').value='npm run test -- --watch';updateChip();setOpen(true);status('演示已重置。虚构目录数据，不执行命令。')});
+    updateChip();render();$('query').focus();
+  </script>
+</body>
+</html>

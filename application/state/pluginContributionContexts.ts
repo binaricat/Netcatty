@@ -1,4 +1,6 @@
 import { collectSessionIds } from '../../domain/workspace';
+import { resolveMostRecentlyActiveMemberTerminalId } from '../../domain/aiSessionRecency';
+import type { AIChatRecencyEntry } from '../../domain/aiSessionRecency';
 import type { TerminalSession, Workspace } from '../../types';
 
 export type PluginContributionContextValue = string | boolean | number | null;
@@ -44,14 +46,17 @@ export function resolveActivePluginKeybindingContext({
   activeTabId,
   sessions,
   workspaces,
+  aiSessions,
 }: {
   activeTabId: string;
   sessions: readonly TerminalSession[];
   workspaces: readonly Workspace[];
+  /** AI chat snapshot: resolves the workspace anchor and recency fallback (#4098 phase 2). */
+  aiSessions?: readonly AIChatRecencyEntry[];
 }): PluginContributionContext {
   const workspace = workspaces.find((candidate) => candidate.id === activeTabId);
   const activeSessionId = workspace
-    ? (workspace.focusedSessionId ?? collectSessionIds(workspace.root)[0])
+    ? resolveWorkspaceActiveTerminalId(workspace, aiSessions)
     : sessions.some((candidate) => candidate.id === activeTabId)
       ? activeTabId
       : undefined;
@@ -71,4 +76,33 @@ export function resolveActivePluginKeybindingContext({
     }),
     'netcatty.activeTabId': activeTabId,
   };
+}
+
+/**
+ * Issue #4098 phase 2: the keybinding context's workspace session resolves by
+ * id, never positionally — focused member first, then the terminal member that
+ * owns the anchored chat, then the most-recently-active member by chat recency.
+ */
+function resolveWorkspaceActiveTerminalId(
+  workspace: Workspace,
+  aiSessions: readonly AIChatRecencyEntry[] | undefined,
+): string | undefined {
+  if (workspace.focusedSessionId && collectSessionIds(workspace.root).includes(workspace.focusedSessionId)) {
+    return workspace.focusedSessionId;
+  }
+
+  const memberTerminalIds = collectSessionIds(workspace.root);
+  if (memberTerminalIds.length === 1) {
+    // A single-member workspace has exactly one candidate — not a positional
+    // pick among many.
+    return memberTerminalIds[0];
+  }
+  const anchorChat = workspace.anchorChatId
+    ? aiSessions?.find((session) => session.id === workspace.anchorChatId && session.scope?.type === 'terminal')
+    : undefined;
+
+  const anchorOwner = anchorChat?.scope.targetId;
+  return (anchorOwner && memberTerminalIds.includes(anchorOwner) ? anchorOwner : undefined)
+    ?? resolveMostRecentlyActiveMemberTerminalId({ memberTerminalIds, aiSessions })
+    ?? undefined;
 }

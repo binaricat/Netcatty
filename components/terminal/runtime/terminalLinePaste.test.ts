@@ -26,7 +26,7 @@ const code = ts.transpileModule(
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 const helpers = await Promise.all([
-  "../../../domain/serialCharMetrics.ts", "./terminalReportSequence.ts", "./terminalInputSanitize.ts",
+  "../../../domain/terminalBroadcast.ts", "../../../domain/serialCharMetrics.ts", "./terminalReportSequence.ts", "./terminalInputSanitize.ts",
   "./terminalBackspaceInput.ts", "./terminalPerCharacterInput.ts",
   "./terminalSudoAutofill.ts", "./terminalCommandExecution.ts",
   "./terminalPacedBroadcast.ts", "./terminalInterruptInputState.ts", "./serialLocalEcho.ts", "../autocomplete/terminalStringCellWidth.ts",
@@ -127,6 +127,7 @@ for (const [protocol, lineMode, sensitive] of [
         ? { isWrapped: false, translateToString: () => liveLine } : undefined } },
     };
     const env = {
+    usePerCharacterInput: true,
       ...Object.assign({}, ...helpers), ...userPaste, ctx, term, crypto, isPluginHostProtocol: () => false, logger: { warn() {} },
       netcattyBridge: { get: () => ({ onTerminalPasteWrite: (listener: typeof receiptListener) => { receiptListener = listener; return () => { receiptListener = undefined; }; } }) },
       suppressNextTerminalDataBroadcast: false, handlingKittyBroadcast: false,
@@ -341,6 +342,7 @@ test("bypassed sensitive line paste keeps the paced fan-out with sourceSensitive
     buffer: { active: { cursorX: 0, cursorY: 0, baseY: 0, getLine: () => undefined } },
   };
   const env = {
+    usePerCharacterInput: true,
     ...Object.assign({}, ...helpers), ...userPaste, ctx, term, crypto, isPluginHostProtocol: () => false, logger: { warn() {} },
     netcattyBridge: { get: () => ({ onTerminalPasteWrite: (listener: typeof receiptListener) => { receiptListener = listener; return () => { receiptListener = undefined; }; } }) },
     suppressNextTerminalDataBroadcast: false, handlingKittyBroadcast: false,

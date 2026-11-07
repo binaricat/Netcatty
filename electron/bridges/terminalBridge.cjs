@@ -257,6 +257,9 @@ function handleTerminalSessionSnapshotResponse(event, payload) {
   pending.resolve({
     success: true,
     snapshot: typeof payload?.snapshot === "string" ? payload.snapshot : "",
+    perCharacterInput: typeof payload?.perCharacterInput === "boolean"
+      ? payload.perCharacterInput
+      : undefined,
     kittyKeyboardModeState: normalizeKittyKeyboardModeState(payload?.kittyKeyboardModeState),
     kittyKeyboardProtocolEnabled: typeof payload?.kittyKeyboardProtocolEnabled === "boolean"
       ? payload.kittyKeyboardProtocolEnabled
@@ -316,6 +319,9 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
   const contextScrollbackSnapshot = hasContextScrollbackSnapshot ? payload.contextScrollbackSnapshot : "";
   const hasAlternateScreen = typeof payload?.alternateScreen === "boolean";
   const alternateScreen = payload?.alternateScreen === true;
+  const perCharacterInput = typeof payload?.perCharacterInput === "boolean"
+    ? payload.perCharacterInput
+    : undefined;
   const kittyKeyboardModeState = normalizeKittyKeyboardModeState(payload?.kittyKeyboardModeState);
   const kittyKeyboardProtocolEnabled = typeof payload?.kittyKeyboardProtocolEnabled === "boolean"
     ? payload.kittyKeyboardProtocolEnabled
@@ -368,6 +374,7 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
           contextViewportSnapshot,
           contextScrollbackSnapshot,
           alternateScreen,
+          perCharacterInput,
           kittyKeyboardModeState,
           kittyKeyboardProtocolEnabled,
           passwordPromptActive,
@@ -1727,9 +1734,14 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
     // the transport's native string serialization keeps handling that case.
     sessionLogStreamManager.registerSudoAutofillInput(payload.sessionId, data);
     sessionLogStreamManager.registerProgrammaticCommandLogRewrite(payload.sessionId, logRewrite);
-    const inputData = session.type === 'telnet-native'
-      ? telnetProtocol.normalizeNvtNewlines(data)
+    // xterm onBinary strings contain wire bytes, including values above 127.
+    // Convert before text charset encoding or Telnet newline normalization.
+    const wireInput = payload.binary === true && typeof data === 'string'
+      ? Buffer.from(data, 'latin1')
       : data;
+    const inputData = session.type === 'telnet-native'
+      ? telnetProtocol.normalizeNvtNewlines(wireInput)
+      : wireInput;
     const outgoing = encodeTerminalInput(inputData, session.encoding);
 
     if (session.stream) {

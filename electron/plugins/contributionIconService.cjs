@@ -1,6 +1,7 @@
 "use strict";
 
 const path = require("node:path");
+const { createHash } = require("node:crypto");
 
 const { readContainedFile } = require("./pluginProtocol.cjs");
 const { createIsolatedContributionIconRasterizer } = require("./contributionIconRasterizer.cjs");
@@ -214,6 +215,35 @@ class PluginContributionIconService {
     return pending;
   }
 
+  // Called only with a host-selected, hash-bound registry reference. It shares
+  // the existing decoder, queue, cache and pending work with package icons.
+  async resolveCatalogAvatar({ sourceId, reference, read }) {
+    const key = JSON.stringify(["catalog-avatar", sourceId, reference.path, reference.sha256, reference.size]);
+    if (this.cache.has(key)) return this.cache.get(key);
+    if (this.pending.has(key)) return this.pending.get(key);
+    if (this.pending.size >= MAX_QUEUED_ICON_RASTERIZATIONS + MAX_CONCURRENT_ICON_RASTERIZATIONS) {
+      throw new Error("Plugin image queue is full");
+    }
+    const pending = (async () => {
+      const body = await read();
+      if (!Buffer.isBuffer(body) || body.length !== reference.size || body.length > 256 * 1024
+        || createHash("sha256").update(body).digest("hex") !== reference.sha256) throw new Error("Invalid plugin avatar bytes");
+      const extension = path.extname(reference.path);
+      if (![".png", ".webp"].includes(extension)) throw new Error("Invalid plugin avatar format");
+      const inspected = inspectContributionIconSource(body, extension);
+      if (inspected.mimeType !== (extension === ".png" ? "image/png" : "image/webp")) throw new Error("Plugin avatar format mismatch");
+      const png = await this.rasterizeIcon({ body, ...inspected, maxEdge: MAX_ICON_EDGE });
+      if (!png.length || png.length > MAX_ICON_PNG_BYTES) throw new Error("Plugin avatar output is too large");
+      inspectContributionIconSource(png, ".png", MAX_ICON_EDGE);
+      const value = `data:image/png;base64,${png.toString("base64")}`;
+      if (this.cache.size >= 256) this.cache.clear();
+      this.cache.set(key, value);
+      return value;
+    })().finally(() => this.pending.delete(key));
+    this.pending.set(key, pending);
+    return pending;
+  }
+
   async #resolveUncached({ pluginId, plugin, icon, cacheKey }) {
     const packageRoot = await this.packageStore.preparePackageRoot(plugin);
     const result = Object.freeze({
@@ -231,12 +261,42 @@ class PluginContributionIconService {
     return result;
   }
 
-  async #readIcon(packageRoot, packagePath) {
+  // Branding is inert installed metadata. It does not share the enabled-only
+  // contribution admission path, and accepts no renderer-provided resource path.
+  async resolveBrand(pluginId) {
+    if (typeof pluginId !== "string" || pluginId.length > 256) throw new TypeError("Invalid plugin ID");
+    const plugin = this.database.getActivePlugin(pluginId);
+    if (!plugin?.activeVersion || plugin.runtime?.quarantinedAt != null) return null;
+    const icon = plugin.manifest?.icon;
+    if (icon?.kind !== "package") return null;
+    const identity = JSON.stringify([plugin.activeVersion, plugin.archiveSha256, icon]);
+    const key = JSON.stringify(["brand", pluginId, identity]);
+    if (this.cache.has(key)) return this.cache.get(key);
+    if (this.pending.has(key)) return this.pending.get(key);
+    const pending = (async () => {
+      const root = await this.packageStore.preparePackageRoot(plugin);
+      const result = { light: await this.#readIcon(root, icon.light, true),
+        ...(icon.dark ? { dark: await this.#readIcon(root, icon.dark, true) } : {}) };
+      const current = this.database.getActivePlugin(pluginId);
+      if (!current || current.runtime?.quarantinedAt != null || identity !== JSON.stringify([current.activeVersion, current.archiveSha256, current.manifest?.icon])) {
+        throw new Error("Plugin brand icon ownership changed while loading");
+      }
+      if (this.cache.size >= 256) this.cache.clear();
+      this.cache.set(key, result);
+      return result;
+    })().finally(() => this.pending.delete(key));
+    this.pending.set(key, pending);
+    return pending;
+  }
+
+  async #readIcon(packageRoot, packagePath, brand = false) {
     const segments = packagePath.split("/");
     const file = await readContainedFile(packageRoot, segments);
     if (file.body.byteLength > MAX_ICON_SOURCE_BYTES) throw new Error("Plugin contribution icon is too large");
     const extension = path.extname(file.filePath).toLowerCase();
-    const inspected = inspectContributionIconSource(file.body, extension);
+    const inspected = brand
+      ? (await import("@netcatty/plugin-contract")).inspectPluginBrandIcon(file.body, packagePath)
+      : inspectContributionIconSource(file.body, extension);
     const png = await this.rasterizeIcon({
       body: file.body,
       ...inspected,

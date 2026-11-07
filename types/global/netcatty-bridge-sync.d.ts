@@ -47,6 +47,7 @@ declare global {
     setTheme?(theme: 'light' | 'dark' | 'system'): Promise<boolean>;
     setBackgroundColor?(color: string): Promise<boolean>;
     setWindowOpacity?(opacity: number): Promise<boolean>;
+    setWindowBackgroundBlur?(enabled: boolean): Promise<boolean>;
     setAppIconVariant?(variant: import('../../domain/appIconVariant').AppIconVariant): Promise<boolean>;
     setLanguage?(language: string): Promise<boolean>;
     // Window controls for custom title bar (Windows/Linux)
@@ -131,6 +132,7 @@ declare global {
     // Cross-window settings sync
     notifySettingsChanged?(payload: { key: string; value: unknown }): void;
     onSettingsChanged?(cb: (payload: { key: string; value: unknown }) => void): () => void;
+    onSystemThemeChanged?(cb: (payload: { isDark: boolean }) => void): () => void;
     getAppLockRuntimeState?(): Promise<AppLockRuntimeState>;
     getAppLockSettings?(): Promise<AppLockSettings>;
     setAppLockTimeoutMinutes?(timeoutMinutes: number): Promise<AppLockSettings>;

@@ -2192,3 +2192,111 @@ test("SDK adapter passes a live privacy guard through asynchronous driver startu
   assert.equal(sent, false);
   assert.equal(h.ctx.sdkActiveStreams.size, 0);
 });
+
+test("delegated Agent entry rejects unverified runtimes and Skills before native/environment work", async () => {
+  let validated = 0;
+  const { handlers } = registerWithStubbedCtx({
+    mcpServerBridge: {
+      isPluginAgentConversation: () => true,
+      assertPluginAgentCaller: () => {},
+      getPluginAgentMcpConfiguration: () => { validated++; throw Error("No current delegation"); },
+    },
+  });
+  const handler = handlers.get("netcatty:ai:sdk-agent:stream");
+  for (const sdkBackend of ["codex", "copilot", "cursor", "codebuddy", "opencode", "grok", "mimo", "arbitrary-cli"]) {
+    await assert.rejects(handler({ sender: { id: 7 } }, {
+      requestId: "synthetic", chatSessionId: "plugin-agent:synthetic", sdkBackend, toolIntegrationMode: "mcp",
+    }), /not eligible/);
+  }
+  await assert.rejects(handler({ sender: { id: 7 } }, {
+    requestId: "synthetic", chatSessionId: "plugin-agent:synthetic", sdkBackend: "claude", toolIntegrationMode: "skills",
+  }), /not eligible/);
+  assert.equal(validated, 0);
+  await assert.rejects(handler({ sender: { id: 7 } }, {
+    requestId: "synthetic", chatSessionId: "plugin-agent:synthetic", sdkBackend: "claude", toolIntegrationMode: "mcp",
+  }), /No current delegation/);
+  assert.equal(validated, 1);
+});
+
+test("actual SDK entry derives delegated mode from main authority, ignoring caller flag spoofing", async (t) => {
+  const { PluginAgentMcpDelegations } = require("../../../plugins/agent/mcpDelegation.cjs");
+  const registry = new PluginAgentMcpDelegations(); t.after(() => registry.shutdown());
+  const chat = "plugin-agent:11111111-1111-4111-8111-111111111111";
+  const tag = "22222222-2222-4222-8222-222222222222";
+  registry.register(chat, { turnTag: tag, senderId: 7, tools: [], assertCurrent() {}, dispatch() {} });
+  const h = createPrivacyStreamHarness(createTestPrivacy(false));
+  const directory = fs.mkdtempSync(nodePath.join(os.tmpdir(), "netcatty-claude-flag-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  h.ctx.tempDirBridge = { getTempDir: () => directory };
+  Object.assign(h.ctx.mcpServerBridge, {
+    isPluginAgentConversation: (id) => registry.isReserved(id),
+    assertPluginAgentCaller: (...args) => registry.assertCaller(...args),
+    getPluginAgentMcpConfiguration: (...args) => registry.configuration(...args),
+    onPluginAgentRelease: (...args) => registry.onRelease(...args),
+  });
+  const handler = h.handlers.get("netcatty:ai:sdk-agent:stream");
+  const payload = { requestId: `plugin-agent_${tag}_fixture`, chatSessionId: chat, sdkBackend: "claude", toolIntegrationMode: "mcp", prompt: "Synthetic", delegatedAgent: false };
+  assert.equal((await handler({ sender: { id: 7 } }, payload)).ok, true);
+  assert.equal(h.turns[0].delegatedAgent, true, "caller cannot turn off delegated protection");
+  assert.equal((await h.stream({ delegatedAgent: true })).ok, true);
+  assert.equal(h.turns[1].delegatedAgent, false, "builtin caller cannot opt into the delegated branch");
+  await assert.rejects(handler({ sender: { id: 99 } }, { ...payload, requestId: `plugin-agent_${tag}_foreign`, delegatedAgent: true }));
+  assert.equal(h.turns.length, 2, "a spoofed flag cannot replace current sender/turn authority");
+});
+
+test("delegated native cancellation is exact-request and cannot mark replacement chat work cancelled", async () => {
+  const broad = [];
+  const { handlers, ctx } = registerWithStubbedCtx({ mcpServerBridge: {
+    isPluginAgentConversation: () => true,
+    assertPluginAgentCaller: () => {},
+    setChatSessionCancelled: () => broad.push('chat'), cancelPtyExecsForSession: () => broad.push('pty'),
+    clearPendingApprovals: () => broad.push('approval'), cancelWorkerBackgroundJobsForSession: () => broad.push('worker'),
+  } });
+  const first = new AbortController(); const second = new AbortController();
+  const chat = 'plugin-agent:synthetic';
+  ctx.sdkActiveStreams.set('native-a', first); ctx.sdkRequestSessions.set('native-a', chat);
+  ctx.sdkRequestRuntimes.set('native-a', { delegationTag: 'tag-a', senderId: 7 });
+  ctx.sdkActiveStreams.set('native-b', second); ctx.sdkRequestSessions.set('native-b', chat);
+  ctx.sdkRequestRuntimes.set('native-b', { delegationTag: 'tag-b', senderId: 7 });
+  const cancel = handlers.get('netcatty:ai:sdk-agent:cancel');
+  assert.equal((await cancel({ sender: { id: 7 } }, { requestId: 'native-a', chatSessionId: chat })).ok, true);
+  assert.equal(first.signal.aborted, true); assert.equal(second.signal.aborted, false);
+  assert.equal((await cancel({ sender: { id: 7 } }, { requestId: '', chatSessionId: chat })).ok, false);
+  assert.equal((await cancel({ sender: { id: 99 } }, { requestId: 'native-b', chatSessionId: chat })).ok, false);
+  assert.equal(second.signal.aborted, false); assert.deepEqual(broad, []);
+});
+
+test("legacy chat-wide cleanup cannot abort replacement delegated turn B or remove its metadata", async () => {
+  const effects = [];
+  const { handlers, ctx } = registerWithStubbedCtx({ mcpServerBridge: {
+    isPluginAgentConversation: (id) => id?.startsWith('plugin-agent:'),
+    setChatSessionCancelled: () => effects.push('cancelled'), cancelPtyExecsForSession: () => effects.push('pty'),
+    cancelWorkerBackgroundJobsForSession: () => effects.push('worker'), cleanupScopedMetadata: async () => effects.push('metadata'),
+  } });
+  const chat = 'plugin-agent:11111111-1111-4111-8111-111111111111';
+  const replacement = new AbortController();
+  ctx.sdkActiveStreams.set('native-b', replacement); ctx.sdkRequestSessions.set('native-b', chat);
+  ctx.sdkRequestRuntimes.set('native-b', { backendKey: 'claude', delegationTag: 'turn-b', senderId: 7 });
+  const result = await handlers.get('netcatty:ai:sdk-agent:cleanup')({ sender: { id: 7 } }, { chatSessionId: chat, delegationTag: 'turn-a' });
+  assert.equal(replacement.signal.aborted, false); assert.equal(ctx.sdkActiveStreams.has('native-b'), true);
+  assert.equal(ctx.sdkRequestSessions.get('native-b'), chat); assert.equal(ctx.sdkRequestRuntimes.get('native-b').delegationTag, 'turn-b');
+  assert.deepEqual(effects, []); assert.equal(result.ok, false);
+});
+
+test("caller-supplied builtin chat cannot downgrade cancellation of a main-owned delegated request", async () => {
+  const effects = []; const chat = 'plugin-agent:11111111-1111-4111-8111-111111111111';
+  const { handlers, ctx } = registerWithStubbedCtx({ mcpServerBridge: {
+    isPluginAgentConversation: (id) => id?.startsWith('plugin-agent:'),
+    assertPluginAgentCaller: (id, sender, tag) => { if (id !== chat || sender !== 7 || tag !== 'turn-b') throw Error('Unavailable'); },
+    setChatSessionCancelled: () => effects.push('cancelled'), cancelPtyExecsForSession: () => effects.push('pty'),
+    clearPendingApprovals: () => effects.push('approval'), cancelWorkerBackgroundJobsForSession: () => effects.push('worker'),
+  } });
+  const replacement = new AbortController();
+  ctx.sdkActiveStreams.set('native-b', replacement); ctx.sdkRequestSessions.set('native-b', chat);
+  ctx.sdkRequestRuntimes.set('native-b', { backendKey: 'claude', delegationTag: 'turn-b', senderId: 7 });
+  const cancel = handlers.get('netcatty:ai:sdk-agent:cancel');
+  const result = await cancel({ sender: { id: 99 } }, { requestId: 'native-b', chatSessionId: 'builtin-chat' });
+  assert.equal(replacement.signal.aborted, false); assert.equal(result.ok, false); assert.deepEqual(effects, []);
+  assert.equal((await cancel({ sender: { id: 7 } }, { requestId: 'native-b', chatSessionId: chat })).ok, true);
+  assert.equal(replacement.signal.aborted, true);
+});

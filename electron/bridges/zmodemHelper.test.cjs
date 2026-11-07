@@ -1814,6 +1814,93 @@ function assertNoZmodemHeaderBytes(terminal, context) {
   );
 }
 
+test("ordinary star echoes wait at most one frame for a possible ZMODEM prefix", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const text of ["*", "**", "ls *", "**/*.txt*"]) {
+    const { sentry, terminal } = createProbeSentry({ hexHeaderFragmentTtlMs: undefined });
+    sentry.consume(Buffer.from(text));
+    t.mock.timers.tick(16);
+    assert.equal(joinedText(terminal), text, `echo delayed: ${text}`);
+    t.mock.timers.tick(1000);
+    assert.equal(joinedText(terminal), text, "the fragment must not be emitted twice");
+  }
+});
+
+test("a following parenthesis and repeated stars preserve echo order", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { sentry, terminal } = createProbeSentry({ hexHeaderFragmentTtlMs: undefined });
+  for (const text of ["*", "(", "*", "*", "*", "!"]) {
+    sentry.consume(Buffer.from(text));
+    t.mock.timers.tick(16);
+  }
+  assert.equal(joinedText(terminal), "*(***!");
+  t.mock.timers.tick(1000);
+  assert.equal(joinedText(terminal), "*(***!");
+});
+
+test("expired printable prefixes preserve ordinary bytes across chunk boundaries", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const input = Buffer.from("a***(b)**/*.txt *\x18X **\x18Bxy more *\uFF0A");
+  for (const gap of [0, 16, 200]) {
+    for (let chunkSize = 1; chunkSize <= input.length; chunkSize += 1) {
+      const { sentry, terminal } = createProbeSentry({ hexHeaderFragmentTtlMs: undefined });
+      for (let i = 0; i < input.length; i += chunkSize) {
+        sentry.consume(input.subarray(i, i + chunkSize));
+        t.mock.timers.tick(gap);
+      }
+      t.mock.timers.tick(1000);
+      assert.deepEqual(Buffer.concat(terminal), input, `chunkSize=${chunkSize}, gap=${gap}`);
+    }
+  }
+});
+
+test("a prefix containing ZDLE keeps the full fragmented-header timeout", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { sentry, terminal } = createProbeSentry({ hexHeaderFragmentTtlMs: undefined });
+  const header = buildHexHeaderBytes("ZRQINIT");
+  sentry.consume(header.subarray(0, 3));
+  t.mock.timers.tick(200);
+  assert.equal(joinedText(terminal), "");
+  sentry.consume(header.subarray(3));
+  t.mock.timers.tick(1000);
+  assert.equal(joinedText(terminal), "");
+  assertNoZmodemHeaderBytes(terminal, "delayed ZDLE prefix");
+});
+
+test("a slow split header after printable-prefix expiry still detects and hides control bytes", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const prefixLength of [1, 2]) {
+    let detected = false;
+    const { sentry, terminal } = createProbeSentry({
+      hexHeaderFragmentTtlMs: undefined,
+      selectDownloadDirectory: async () => { detected = true; return { canceled: true }; },
+    });
+    const header = buildHexHeaderBytes("ZRQINIT");
+    sentry.consume(header.subarray(0, prefixLength));
+    t.mock.timers.tick(200);
+    assert.equal(joinedText(terminal), "*".repeat(prefixLength));
+    sentry.consume(header.subarray(prefixLength, 3));
+    t.mock.timers.tick(200);
+    sentry.consume(header.subarray(3));
+    await Promise.resolve();
+    assert.equal(detected, true, "the printable echo timeout must not reset protocol detection");
+    assert.equal(joinedText(terminal), "*".repeat(prefixLength));
+    assertNoZmodemHeaderBytes(terminal, "slow split after printable prefix");
+  }
+});
+
+test("stripping a slow header does not skip ordinary output after it", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { sentry, terminal } = createProbeSentry({ hexHeaderFragmentTtlMs: undefined });
+  const header = buildHexHeaderBytes("ZRQINIT");
+  sentry.consume(header.subarray(0, 2));
+  t.mock.timers.tick(200);
+  sentry.consume(Buffer.concat([header.subarray(2), Buffer.from("* next prompt")]));
+  t.mock.timers.tick(1000);
+  assert.equal(joinedText(terminal), "*** next prompt");
+  assertNoZmodemHeaderBytes(terminal, "ordinary output after slow header");
+});
+
 test("fragmented sz ZRQINIT preamble never reaches the terminal", () => {
   const { sentry, terminal } = createProbeSentry();
   const stream = Buffer.concat([

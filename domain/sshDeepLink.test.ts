@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { Host } from "./models";
 import { resolveHostAutofillPassword } from "./sshAuth";
+import { sanitizeHost } from "./host";
 import {
   buildSshDeepLinkConnectionHost,
   buildSshDeepLinkEphemeralHost,
@@ -242,8 +243,10 @@ test("buildSshDeepLinkHostDraft prepares an editable new ssh host", () => {
     tags: [],
     os: "linux",
     protocol: "ssh",
+    sshInputCompatibility: false,
     createdAt: 123,
   });
+  assert.equal(sanitizeHost(draft).sshInputCompatibility, false);
 });
 
 test("buildSshDeepLinkOpenHost falls back to a draft host when no saved host matches", () => {
@@ -330,4 +333,14 @@ test("buildSshNoteLinkOpenHost ignores unrelated external links", () => {
   );
 
   assert.equal(openHost, null);
+});
+
+
+test("deep links derived from saved hosts preserve explicit input choices", () => {
+  const target = parseSshDeepLink("ssh://alice:secret@example.com")!;
+  for (const sshInputCompatibility of [false, true]) {
+    const saved = host({ sshInputCompatibility });
+    assert.equal(buildSshDeepLinkConnectionHost(saved).sshInputCompatibility, sshInputCompatibility);
+    assert.equal(buildSshDeepLinkEphemeralHostFromSaved(saved, target, { id: "copy", now: 1 }).sshInputCompatibility, sshInputCompatibility);
+  }
 });

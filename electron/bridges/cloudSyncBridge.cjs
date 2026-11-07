@@ -1,16 +1,17 @@
-const { createClient, AuthType } = require("webdav");
 const https = require("https");
-const { NodeHttpHandler } = require("@smithy/node-http-handler");
-const {
-  S3Client,
-  HeadObjectCommand,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-} = require("@aws-sdk/client-s3");
 const {
   resolveOutboundHttpAgent,
 } = require("./httpNetworkProxyAgent.cjs");
+
+// webdav and the AWS SDK pull in ~140 modules (~110 ms) that are only needed
+// once a WebDAV/S3 sync actually runs, so load them on first use instead of at
+// startup (this bridge is registered before the main window loads).
+let webdavModule = null;
+const loadWebdav = () => (webdavModule ??= require("webdav"));
+let s3Module = null;
+const loadS3 = () => (s3Module ??= require("@aws-sdk/client-s3"));
+let nodeHttpHandlerModule = null;
+const loadNodeHttpHandler = () => (nodeHttpHandlerModule ??= require("@smithy/node-http-handler"));
 
 const SYNC_FILE_NAME = "netcatty-vault.json";
 
@@ -244,6 +245,7 @@ const buildBasicAuthHeader = (username, password) =>
 
 const buildWebdavClient = async (config) => {
   if (!config) throw new Error("Missing WebDAV config");
+  const { createClient, AuthType } = loadWebdav();
   const endpoint = normalizeEndpoint(config.endpoint);
   const extraOpts = {};
   const agent = await resolveCloudSyncTransportAgent(endpoint, Boolean(config.allowInsecure));
@@ -297,9 +299,11 @@ const buildS3Client = async (config) => {
     const handlerOpts = isHttpsEndpoint(endpoint)
       ? { httpsAgent: agent }
       : { httpAgent: agent };
+    const { NodeHttpHandler } = loadNodeHttpHandler();
     clientOptions.requestHandler = new NodeHttpHandler(handlerOpts);
   }
 
+  const { S3Client } = loadS3();
   return new S3Client(clientOptions);
 };
 
@@ -393,6 +397,7 @@ const handleWebdavDelete = async (config) => {
 };
 
 const handleS3Initialize = async (config) => {
+  const { HeadObjectCommand } = loadS3();
   if (!config) throw new Error("Missing S3 config");
   const client = await buildS3Client(config);
   const key = getS3ObjectKey(config);
@@ -419,6 +424,7 @@ const handleS3Initialize = async (config) => {
 };
 
 const handleS3Upload = async (config, syncedFile) => {
+  const { PutObjectCommand } = loadS3();
   if (!config) throw new Error("Missing S3 config");
   const client = await buildS3Client(config);
   const key = getS3ObjectKey(config);
@@ -438,6 +444,7 @@ const handleS3Upload = async (config, syncedFile) => {
 };
 
 const handleS3Download = async (config) => {
+  const { GetObjectCommand } = loadS3();
   if (!config) throw new Error("Missing S3 config");
   const client = await buildS3Client(config);
   const key = getS3ObjectKey(config);
@@ -455,6 +462,7 @@ const handleS3Download = async (config) => {
 };
 
 const handleS3Delete = async (config) => {
+  const { DeleteObjectCommand } = loadS3();
   if (!config) throw new Error("Missing S3 config");
   const client = await buildS3Client(config);
   const key = getS3ObjectKey(config);

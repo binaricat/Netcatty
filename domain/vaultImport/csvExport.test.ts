@@ -842,3 +842,16 @@ test("CSV import warns and ignores a malformed LocalShell value", () => {
   assert.equal(imported.hosts[0]?.localShell, undefined);
   assert.ok(imported.issues.some((issue) => issue.message.includes("row 2") && issue.message.includes("LocalShell")));
 });
+
+
+test("CSV export/import preserves independent SSH input compatibility choices", () => {
+  const hosts: Host[] = [false, true].map((choice, index) => ({
+    ...hostDefaults, id: `mode-${index}`, label: `Mode ${index}`,
+    hostname: `mode-${index}.example.test`, protocol: "ssh", sshInputCompatibility: choice,
+  }));
+  const { csv } = exportHostsToCsvWithStats(hosts);
+  const imported = importVaultHostsFromText("csv", csv);
+  assert.deepEqual(imported.hosts.map(host => host.sshInputCompatibility), [false, true]);
+  const second = importVaultHostsFromText("csv", exportHostsToCsvWithStats(imported.hosts).csv);
+  assert.deepEqual(second.hosts.map(host => host.sshInputCompatibility), [false, true]);
+});

@@ -67,3 +67,19 @@ test("wire chunking honors the per-character request only for plain text", () =>
     "\x1b[200~ab\x1b[201~",
   ]);
 });
+
+test("compatibility preserves exact Unicode byte order and keeps terminal controls intact", () => {
+  for (const text of ["中文", "👩🏽‍💻", "e\u0301", "क्‍ष"]) {
+    assert.deepEqual(Buffer.from(getTextInputWireChunks(text, true).join("")), Buffer.from(text));
+  }
+  for (const data of ["\x03", "\x1b[A", "\x1b[200~中文\x1b[201~", "\x1b[0;;200u", "\x03\x04", "a\r\nb"]) {
+    assert.deepEqual(getTextInputWireChunks(data, true, true), [data]);
+  }
+});
+
+
+test("non-SSH callers retain legacy control-containing text chunking", () => {
+  assert.equal(shouldSplitRawPasteInputForWire("a\rb"), true);
+  assert.deepEqual(getTextInputWireChunks("a\rb", true), ["a", "\r", "b"]);
+  assert.deepEqual(getTextInputWireChunks("a\rb", true, true), ["a\rb"]);
+});

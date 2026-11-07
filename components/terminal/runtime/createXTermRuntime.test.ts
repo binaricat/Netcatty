@@ -985,13 +985,12 @@ test("multi-character plain text goes out as per-character writes (#3077)", asyn
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
 
-  // Strict bastion prompts (QAX) treat one channel write as one keystroke and
-  // drop multi-character chunks, so IME commits and short raw pastes must be
-  // sent one character per write instead of one write per commit.
+  // The legacy workaround selected IME commits and short raw pastes (#3077).
+  // Host settings now gate that selection at the shared send boundary.
   assert.match(source, /perCharacterWrites\?: boolean/);
   assert.match(
     source,
-    /getTextInputWireChunks\(outData, options\?\.perCharacterWrites === true\)/,
+    /getTextInputWireChunks\(outData, usePerCharacterInput && options\?\.perCharacterWrites === true, \(ctx\.host\.protocol === undefined \|\| ctx\.host\.protocol === "ssh"\) && !ctx\.host\.moshEnabled && !ctx\.host\.etEnabled\)/,
   );
   // Every chunk carries the same write options as the original single write.
   const writeLoopIdx = source.indexOf("for (const chunk of getTextInputWireChunks(outData");

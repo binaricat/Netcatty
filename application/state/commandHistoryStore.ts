@@ -68,33 +68,75 @@ function loadStore(): HistoryStore {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let saveIdleHandle: number | null = null;
+
+const CLEAR_GENERATION_PREFIX = /^\{"clearGeneration":(\d+)[,}]/;
+
+/**
+ * The store's clear generation, read from its raw JSON without parsing the
+ * whole history (up to 10k entries, ~1.5 MB). Stores are serialized with
+ * clearGeneration first (serializeStore); other layouts fall back to a parse.
+ */
+function readRawClearGeneration(raw: string | null): number | null {
+  if (!raw) return null;
+  const match = CLEAR_GENERATION_PREFIX.exec(raw.slice(0, 48));
+  if (match) return Number(match[1]);
+  try {
+    return readClearGeneration(JSON.parse(raw) as HistoryStore);
+  } catch {
+    return null;
+  }
+}
+
+function serializeStore(store: HistoryStore): HistoryStore {
+  // Keep clearGeneration first so readRawClearGeneration can find it.
+  return { clearGeneration: readClearGeneration(store), version: store.version, entries: store.entries };
+}
 
 function persistStoreNow(store: HistoryStore): boolean {
   // A peer clear is visible in storage before its queued event is handled.
   // Never flush a cached pre-clear snapshot over that newer empty store.
-  const persisted = localStorageAdapter.read<HistoryStore>(STORAGE_KEY);
-  if (persisted && readClearGeneration(persisted) > readClearGeneration(store)) {
-    cachedStore = persisted;
-    knownClearGeneration = readClearGeneration(persisted);
-    notifyCommandHistoryCleared();
-    return true;
+  // Only the generation is needed on this per-command path; parse the stored
+  // history just in the rare case where it must be adopted.
+  const persistedGeneration = readRawClearGeneration(localStorageAdapter.readString(STORAGE_KEY));
+  if (persistedGeneration !== null && persistedGeneration > readClearGeneration(store)) {
+    const persisted = localStorageAdapter.read<HistoryStore>(STORAGE_KEY);
+    if (persisted && readClearGeneration(persisted) > readClearGeneration(store)) {
+      cachedStore = persisted;
+      knownClearGeneration = readClearGeneration(persisted);
+      notifyCommandHistoryCleared();
+      return true;
+    }
   }
-  const ok = localStorageAdapter.write(STORAGE_KEY, store);
+  const ok = localStorageAdapter.write(STORAGE_KEY, serializeStore(store));
   if (ok) return true;
   // Storage full — evict lowest scored entries (not just oldest by insertion)
   const now = Date.now();
   store.entries.sort((a, b) => scoreEntryAt(b, now) - scoreEntryAt(a, now));
   store.entries = store.entries.slice(0, Math.floor(MAX_ENTRIES / 2));
-  return localStorageAdapter.write(STORAGE_KEY, store);
+  return localStorageAdapter.write(STORAGE_KEY, serializeStore(store));
+}
+
+function hasPendingSave(): boolean {
+  return saveTimer !== null || saveIdleHandle !== null;
 }
 
 function saveStore(store: HistoryStore): void {
   cachedStore = store;
-  // Debounce saves to avoid excessive writes
-  if (saveTimer) clearTimeout(saveTimer);
+  // Debounce saves, then write when the renderer is idle: serializing the
+  // history right after Enter used to land in the middle of command output.
+  cancelPendingSave();
   saveTimer = setTimeout(() => {
-    persistStoreNow(store);
     saveTimer = null;
+    const persist = () => {
+      saveIdleHandle = null;
+      persistStoreNow(store);
+    };
+    if (typeof requestIdleCallback === "function") {
+      saveIdleHandle = requestIdleCallback(persist, { timeout: 2000 });
+    } else {
+      persist();
+    }
   }, 500);
 }
 
@@ -102,6 +144,10 @@ function cancelPendingSave(): void {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
+  }
+  if (saveIdleHandle !== null) {
+    if (typeof cancelIdleCallback === "function") cancelIdleCallback(saveIdleHandle);
+    saveIdleHandle = null;
   }
 }
 
@@ -129,26 +175,14 @@ function applyExternalCommandHistoryWrite(
   rawNewValue: string | null,
   rawOldValue: string | null,
 ): void {
-  let incomingGeneration: number | null = null;
-  if (rawNewValue) {
-    try {
-      incomingGeneration = readClearGeneration(JSON.parse(rawNewValue) as HistoryStore);
-    } catch {
-      incomingGeneration = null;
-    }
-  }
+  // Fires in every other window for each save; read just the generation.
+  const incomingGeneration = readRawClearGeneration(rawNewValue);
 
   let previousGeneration = knownClearGeneration;
   if (previousGeneration === null) {
     // A fresh popup can have compose recall before its first autocomplete query.
     // The event's old value is its baseline, even after an earlier global clear.
-    try {
-      previousGeneration = rawOldValue
-        ? readClearGeneration(JSON.parse(rawOldValue) as HistoryStore)
-        : 0;
-    } catch {
-      previousGeneration = 0;
-    }
+    previousGeneration = readRawClearGeneration(rawOldValue) ?? 0;
   }
   if (incomingGeneration !== null && incomingGeneration > previousGeneration) {
     cancelPendingSave();
@@ -156,7 +190,7 @@ function applyExternalCommandHistoryWrite(
     knownClearGeneration = incomingGeneration;
     notifyCommandHistoryCleared();
   } else {
-    if (!saveTimer) cachedStore = null;
+    if (!hasPendingSave()) cachedStore = null;
     if (incomingGeneration !== null && knownClearGeneration === null) {
       knownClearGeneration = incomingGeneration;
     }
@@ -318,6 +352,36 @@ export interface RecentHistoryQueryOptions extends HistoryQueryOptions {
   argumentPrefix?: string;
 }
 
+interface RankedHistoryEntry {
+  entry: HistoryEntry;
+  score: number;
+}
+
+/**
+ * Keep only the best k distinct commands. Queries score each match once and
+ * retain O(k) candidates instead of sorting/allocating all matches (k is 5
+ * for autocomplete). Entries arrive in store order for stable score ties.
+ */
+function retainHistoryMatch(
+  best: RankedHistoryEntry[],
+  entry: HistoryEntry,
+  score: number,
+  limit: number,
+): void {
+  if (best.length >= limit && score <= best[best.length - 1].score) return;
+
+  const duplicate = best.findIndex((candidate) => candidate.entry.command === entry.command);
+  if (duplicate >= 0) {
+    if (score <= best[duplicate].score) return;
+    best.splice(duplicate, 1);
+  }
+
+  // Insert after equal scores to preserve the original store order on ties.
+  const index = best.findIndex((candidate) => score > candidate.score);
+  if (best.length >= limit) best.pop();
+  best.splice(index < 0 ? best.length : index, 0, { entry, score });
+}
+
 /**
  * Query history entries matching a prefix.
  * Returns entries sorted by relevance (frequency * recency).
@@ -332,33 +396,17 @@ export function queryHistory(
   const lowerPrefix = prefix.toLowerCase();
   const now = Date.now(); // Cache once per query
 
-  const filtered = store.entries.filter((entry) => {
+  const best: RankedHistoryEntry[] = [];
+  for (const entry of store.entries) {
+    if (hostId && entry.hostId !== hostId) continue;
     // Must match prefix
-    if (!entry.command.toLowerCase().startsWith(lowerPrefix)) return false;
+    if (!entry.command.toLowerCase().startsWith(lowerPrefix)) continue;
     // Must not be identical to prefix
-    if (entry.command === prefix) return false;
-
-    // Host filtering: strict per-host isolation
-    if (hostId) {
-      return entry.hostId === hostId;
-    }
-    return true;
-  });
-
-  // Sort by score (frequency * recency)
-  filtered.sort((a, b) => scoreEntryAt(b, now) - scoreEntryAt(a, now));
-
-  // Deduplicate by command text (keep highest scored)
-  const seen = new Set<string>();
-  const results: HistoryEntry[] = [];
-  for (const entry of filtered) {
-    if (seen.has(entry.command)) continue;
-    seen.add(entry.command);
-    results.push(entry);
-    if (results.length >= limit) break;
+    if (entry.command === prefix) continue;
+    retainHistoryMatch(best, entry, scoreEntryAt(entry, now), limit);
   }
 
-  return results;
+  return best.map(({ entry }) => entry);
 }
 
 /**
@@ -376,7 +424,7 @@ export function fuzzyQueryHistory(
   const lowerQuery = query.toLowerCase();
   const now = Date.now(); // Cache once per query
 
-  const scored: { entry: HistoryEntry; matchScore: number }[] = [];
+  const best: RankedHistoryEntry[] = [];
 
   for (const entry of store.entries) {
     // Host filtering
@@ -386,24 +434,11 @@ export function fuzzyQueryHistory(
 
     const matchScore = fuzzyScore(lowerQuery, entry.command.toLowerCase());
     if (matchScore > 0 && entry.command !== query) {
-      scored.push({ entry, matchScore });
+      retainHistoryMatch(best, entry, matchScore * scoreEntryAt(entry, now), limit);
     }
   }
 
-  scored.sort((a, b) =>
-    b.matchScore * scoreEntryAt(b.entry, now) - a.matchScore * scoreEntryAt(a.entry, now),
-  );
-
-  const seen = new Set<string>();
-  const results: HistoryEntry[] = [];
-  for (const { entry } of scored) {
-    if (seen.has(entry.command)) continue;
-    seen.add(entry.command);
-    results.push(entry);
-    if (results.length >= limit) break;
-  }
-
-  return results;
+  return best.map(({ entry }) => entry);
 }
 
 /**
@@ -428,38 +463,26 @@ export function queryRecentHistoryByCommand(
   const commandPrefix = `${trimmedCommandName} `;
   const normalizedArgumentPrefix = normalizeArgumentToken(argumentPrefix ?? "");
 
-  const filtered = store.entries.filter((entry) => {
+  const best: RankedHistoryEntry[] = [];
+  for (const entry of store.entries) {
+    if (hostId && entry.hostId !== hostId) continue;
     const lowerCommand = entry.command.toLowerCase();
     if (lowerCommand !== trimmedCommandName && !lowerCommand.startsWith(commandPrefix)) {
-      return false;
+      continue;
     }
-    if (excludeCommand && entry.command === excludeCommand) return false;
+    if (excludeCommand && entry.command === excludeCommand) continue;
 
     if (normalizedArgumentPrefix) {
       const currentToken = normalizeArgumentToken(getCurrentCommandToken(entry.command));
       if (!currentToken.startsWith(normalizedArgumentPrefix)) {
-        return false;
+        continue;
       }
     }
 
-    if (hostId) {
-      return entry.hostId === hostId;
-    }
-    return true;
-  });
-
-  filtered.sort((a, b) => b.lastUsedAt - a.lastUsedAt);
-
-  const seen = new Set<string>();
-  const results: HistoryEntry[] = [];
-  for (const entry of filtered) {
-    if (seen.has(entry.command)) continue;
-    seen.add(entry.command);
-    results.push(entry);
-    if (results.length >= limit) break;
+    retainHistoryMatch(best, entry, entry.lastUsedAt, limit);
   }
 
-  return results;
+  return best.map(({ entry }) => entry);
 }
 
 function getCurrentCommandToken(command: string): string {
@@ -535,28 +558,28 @@ function fuzzyScore(query: string, target: string): number {
   if (query.length > target.length) return 0;
 
   let score = 0;
-  let queryIdx = 0;
+  let searchFrom = 0;
   let prevMatchIdx = -2;
 
-  for (let i = 0; i < target.length && queryIdx < query.length; i++) {
-    if (target[i] === query[queryIdx]) {
-      queryIdx++;
-      // First character bonus
-      if (i === 0) score += 10;
-      // Consecutive match bonus
-      if (i === prevMatchIdx + 1) score += 5;
-      // Word boundary bonus
-      if (i === 0 || target[i - 1] === " " || target[i - 1] === "/" ||
-          target[i - 1] === "-" || target[i - 1] === "_") {
-        score += 3;
-      }
-      score += 1;
-      prevMatchIdx = i;
+  for (let queryIdx = 0; queryIdx < query.length; queryIdx++) {
+    // Skip unmatched runs in native string search, especially for long commands.
+    const i = target.indexOf(query[queryIdx], searchFrom);
+    if (i < 0) return 0;
+    // First character bonus
+    if (i === 0) score += 10;
+    // Consecutive match bonus
+    if (i === prevMatchIdx + 1) score += 5;
+    // Word boundary bonus
+    if (i === 0 || target[i - 1] === " " || target[i - 1] === "/" ||
+        target[i - 1] === "-" || target[i - 1] === "_") {
+      score += 3;
     }
+    score += 1;
+    prevMatchIdx = i;
+    searchFrom = i + 1;
   }
 
-  // All query characters must be matched
-  return queryIdx === query.length ? score : 0;
+  return score;
 }
 
 /**

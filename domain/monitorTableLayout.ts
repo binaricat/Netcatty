@@ -6,6 +6,7 @@ export const MONITOR_COLUMNS = [
   { key: "cpu", width: 120, min: 120 },
   { key: "memory", width: 120, min: 120 },
   { key: "disks", width: 240, min: 220 },
+  { key: "diskIo", width: 230, min: 220 },
   { key: "network", width: 150, min: 140 },
   { key: "updated", width: 110, min: 95 },
   { key: "status", width: 100, min: 90 },

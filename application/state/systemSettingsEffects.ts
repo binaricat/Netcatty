@@ -7,6 +7,7 @@ import {
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_TOGGLE_WINDOW_HOTKEY,
   STORAGE_KEY_WINDOW_OPACITY,
+  STORAGE_KEY_WINDOW_BACKGROUND_BLUR,
   STORAGE_KEY_APP_ICON_VARIANT,
   STORAGE_KEY_HTTP_NETWORK_PROXY,
 } from '../../infrastructure/config/storageKeys';
@@ -17,6 +18,8 @@ import {
 } from '../../domain/httpNetworkProxy';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
+import { isMacPlatform } from '../../lib/utils';
+import { isWindowBackgroundBlurActive } from '../../domain/windowBackgroundBlur';
 import {
   parseWindowOpacityRecord,
   serializeWindowOpacityRecord,
@@ -47,6 +50,7 @@ interface UseSystemSettingsEffectsParams {
   autoLaunchEnabled: boolean;
   windowOpacityRecord: WindowOpacityRecord;
   windowOpacityMutationSourceRef: MutableRefObject<WindowOpacityMutationSource>;
+  windowBackgroundBlur: boolean;
   appIconVariant: AppIconVariant;
   autoUpdateEnabled: boolean;
   httpNetworkProxy: HttpNetworkProxySettings;
@@ -68,6 +72,7 @@ export function useSystemSettingsEffects({
   autoLaunchEnabled,
   windowOpacityRecord,
   windowOpacityMutationSourceRef,
+  windowBackgroundBlur,
   appIconVariant,
   autoUpdateEnabled,
   httpNetworkProxy,
@@ -299,6 +304,49 @@ export function useSystemSettingsEffects({
     notifySettingsChanged,
     persistMountedRef,
   ]);
+
+  // Window chrome also applies in detached sessions, independently of the
+  // OS-level effects disabled there (tray, global shortcuts, autolaunch, ...).
+  // Only the windows that own settings persistence drive the shared native
+  // state; detached/editor windows consume it (see applySharedWindowSetting).
+  useEffect(() => {
+    if (!enabled) return;
+    localStorageAdapter.writeBoolean(STORAGE_KEY_WINDOW_BACKGROUND_BLUR, windowBackgroundBlur);
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_WINDOW_BACKGROUND_BLUR, windowBackgroundBlur);
+  }, [
+    enabled,
+    windowBackgroundBlur,
+    notifySettingsChanged,
+    persistMountedRef,
+  ]);
+
+  const windowBackgroundBlurActive = isMacPlatform() && isWindowBackgroundBlurActive(
+    windowBackgroundBlur,
+    windowOpacityRecord.opacity,
+  );
+
+  // Applies in every app-content window, including detached sessions: the
+  // transparent backing only looks right when the renderer class matches the
+  // native vibrancy the main process put on that window.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.classList.toggle('window-background-blur', windowBackgroundBlurActive);
+    document.documentElement.style.setProperty('--window-content-opacity', String(windowOpacityRecord.opacity));
+    return () => {
+      document.documentElement.classList.remove('window-background-blur');
+      document.documentElement.style.removeProperty('--window-content-opacity');
+    };
+  }, [windowBackgroundBlurActive, windowOpacityRecord.opacity]);
+
+  // setWindowBackgroundBlur is a main-process handler that retargets every
+  // app-content window, so a single owner must drive it.
+  useEffect(() => {
+    if (!enabled) return;
+    netcattyBridge.get()?.setWindowBackgroundBlur?.(windowBackgroundBlur).catch((err) => {
+      console.warn('[WindowBackgroundBlur] Failed to apply macOS vibrancy:', err);
+    });
+  }, [enabled, windowBackgroundBlur]);
 
   // Persist and sync app icon variant
   useEffect(() => {

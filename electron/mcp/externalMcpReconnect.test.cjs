@@ -37,7 +37,12 @@ function startBridge({ token, authDelayMs = 0, onGetContext = null }) {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     let buffer = "";
+    let authenticated = false;
     socket.setEncoding("utf8");
+    const writeLine = (payload) => {
+      if (socket.destroyed) return;
+      socket.write(`${JSON.stringify(payload)}\n`);
+    };
     socket.on("data", (chunk) => {
       buffer += chunk;
       let newlineIdx;
@@ -52,17 +57,29 @@ function startBridge({ token, authDelayMs = 0, onGetContext = null }) {
           token: msg.params?.token,
         });
         const respond = () => {
+          if (socket.destroyed) return;
           if (msg.method === "auth/verify") {
             if (msg.params?.token !== token) {
-              socket.write(`${JSON.stringify({
+              writeLine({
                 jsonrpc: "2.0",
                 id: msg.id,
                 error: { code: -32001, message: "Authentication required. Send auth/verify with valid token first." },
-              })}\n`);
+              });
               socket.destroy();
               return;
             }
-            socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { ok: true } })}\n`);
+            authenticated = true;
+            writeLine({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
+            return;
+          }
+          // Match the app bridge: a call before auth/verify closes the socket.
+          if (!authenticated) {
+            writeLine({
+              jsonrpc: "2.0",
+              id: msg.id,
+              error: { code: -32001, message: "Authentication required. Send auth/verify with valid token first." },
+            });
+            socket.destroy();
             return;
           }
           if (msg.method === "netcatty/getContext" && onGetContext) {
@@ -72,11 +89,11 @@ function startBridge({ token, authDelayMs = 0, onGetContext = null }) {
               return;
             }
           }
-          socket.write(`${JSON.stringify({
+          writeLine({
             jsonrpc: "2.0",
             id: msg.id,
             result: { ok: true, marker: token },
-          })}\n`);
+          });
         };
         if (msg.method === "auth/verify" && authDelayMs > 0) {
           setTimeout(respond, authDelayMs);

@@ -1,9 +1,6 @@
 "use strict";
 
-const { isPluginDevelopmentEnabled } = require("./constants.cjs");
-
-function startDevelopmentPluginHost(options) {
-  if (!isPluginDevelopmentEnabled(options.env)) return null;
+function startPluginHost(options) {
   const reportFailure = (message, error) => {
     try { options.logger?.error?.(message, error); } catch {}
   };
@@ -30,4 +27,4 @@ function startDevelopmentPluginHost(options) {
   }
 }
 
-module.exports = { startDevelopmentPluginHost };
+module.exports = { startPluginHost };

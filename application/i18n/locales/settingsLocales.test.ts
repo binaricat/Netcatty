@@ -29,6 +29,16 @@ const ALL_SETTINGS_LOCALES = [
   ...LOCALIZED_SETTINGS_LOCALES,
 ];
 
+test("Host selection disclosure describes later permission-controlled actions without promising another confirmation", () => {
+  const permissionWords: Record<string, RegExp> = { en: /permission settings/i, es: /permisos/i, ru: /разрешени/u, 'zh-CN': /权限设置/u, 'zh-TW': /權限設定/u };
+  const oldPromise = /requires a separate confirmation|requiere otra confirmación|требует отдельного подтверждения|需要单独确认|需要另外確認/iu;
+  for (const locale of ALL_SETTINGS_LOCALES) {
+    const note = locale.messages['plugins.hostActions.selectionNote'];
+    assert.match(note, permissionWords[locale.name], locale.name);
+    assert.doesNotMatch(note, oldPromise, locale.name);
+  }
+});
+
 test("localized settings include names for every default shortcut", () => {
   for (const locale of ALL_SETTINGS_LOCALES) {
     const missing = DEFAULT_KEY_BINDINGS

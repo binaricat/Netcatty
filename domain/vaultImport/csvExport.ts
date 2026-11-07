@@ -37,7 +37,7 @@ export const getVaultCsvTemplate = (
   opts: VaultCsvTemplateOptions = {},
 ): string => {
   const includeExampleRows = opts.includeExampleRows !== false;
-  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy", "ProxyJump", "LocalShell"];
+  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy", "ProxyJump", "LocalShell", "SshInputCompatibility"];
   const rows: string[][] = [header];
   if (includeExampleRows) {
     rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "Dev web tier", "192.168.1.10", "ssh", "22", "root", "", "~/.ssh/id_ed25519", "", "socks5://127.0.0.1:1080"]);
@@ -115,7 +115,7 @@ const formatCsvProxyJump = (host: Host, allHosts: readonly Host[]): string => {
 };
 
 const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions) => {
-  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy", "ProxyJump", "LocalShell"];
+  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy", "ProxyJump", "LocalShell", "SshInputCompatibility"];
   const rows: string[][] = [header];
   let unreadableProxyCredentialCount = 0;
 
@@ -217,6 +217,7 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions) => {
       encodeCsvProxy(proxyValue),
       encodeCsvProxyJump(proxyJumpValue),
       localShellSpec ? encodeCsvLocalShell(localShellSpec) : "",
+      host.protocol === undefined || host.protocol === "ssh" ? String(host.sshInputCompatibility ?? true) : "",
     ]);
   }
 

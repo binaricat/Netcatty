@@ -280,6 +280,17 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
     record.tabs.set(tab.id, tab);
     const contents = view.webContents;
     contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
+    // Device admin pages commonly use self-signed or private-CA certificates.
+    // Accept them only in host-browser page tabs, never in the app/chrome UI.
+    contents.on("certificate-error", (event, _url, error, _certificate, callback) => {
+      event.preventDefault();
+      const navigation = record.navigations.get(contents.id);
+      if (navigation) {
+        navigation.acceptedCertificateErrors ||= new Set();
+        navigation.acceptedCertificateErrors.add(error.replace(/^net::/, ""));
+      }
+      callback(true);
+    });
     contents.on("before-input-event", (event, input) => {
       const modifier = process.platform === "darwin" ? input.meta : input.control;
       if (input.type !== "keyDown" || !modifier) return;
@@ -910,9 +921,11 @@ function createHostBrowserManager({ electron, app, portForwardingBridge }) {
           if (record.visible && record.activeTabId === tab.id && !record.overlayOpen) contents.focus();
           try { await contents.loadURL(url); }
           catch (error) {
+            // Only suppress TLS errors this navigation explicitly accepted.
+            const acceptedCertificateError = navigation.acceptedCertificateErrors?.has(error.code);
             // Chromium rejects loadURL when a navigation becomes a download.
             // Response headers identify this request before will-download fires.
-            if (!navigation.downloading || !["ERR_FAILED", "ERR_ABORTED"].includes(error.code)) throw error;
+            if (!acceptedCertificateError && (!navigation.downloading || !["ERR_FAILED", "ERR_ABORTED"].includes(error.code))) throw error;
           } finally {
             if (record.navigations.get(contentsId) === navigation) record.navigations.delete(contentsId);
           }

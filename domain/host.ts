@@ -466,6 +466,11 @@ export const sanitizeHost = (host: Host, snippets: Snippet[] = []): Host => {
       ? undefined
       : migrated.authMethod ?? inferredLegacyAuthMethod,
     authPolicyVersion: 1,
+    // Legacy SSH records used per-character IME/short-paste writes globally.
+    // Persist the choice on normalization; explicit false survives every reload.
+    sshInputCompatibility: host.protocol === undefined || host.protocol === 'ssh'
+      ? host.sshInputCompatibility ?? true
+      : host.sshInputCompatibility,
     hostname: cleanHostname,
     osOverride: osSelection,
     os: osSelection === 'linux' || osSelection === 'windows' || osSelection === 'macos' ? osSelection : host.os,

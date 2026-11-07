@@ -1,3 +1,4 @@
+import { pluginThemeRegistry } from '../../infrastructure/config/pluginThemeRegistry';
 import {
   DEFAULT_SHIFT_ENTER_NEWLINE_TEXT,
   isLegacyDefaultShiftEnterNewlineText,
@@ -252,6 +253,9 @@ export const applyThemeTokens = (
   accentOverride: string,
 ) => {
   const root = window.document.documentElement;
+  root.toggleAttribute('data-plugin-theme-active', pluginThemeRegistry.isActive(resolvedTheme));
+  const securityVars = buildAppThemeCssVars(pluginThemeRegistry.securityTokens(resolvedTheme), 'theme', '');
+  for (const [key, value] of Object.entries(securityVars)) root.style.setProperty('--host-security' + key.slice(1), value);
   root.classList.remove('light', 'dark');
   root.classList.add(resolvedTheme);
   const cssVars = buildAppThemeCssVars(tokens, accentMode, accentOverride);

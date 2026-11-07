@@ -30,6 +30,7 @@ import { useClipboardBackend } from '../../application/state/useClipboardBackend
 import { isPrimaryModifierWBinding } from '../../application/state/windowCommandClose';
 import { HotkeyScheme, KeyBinding, matchesKeyBinding } from '../../domain/models';
 import { pasteForMonacoEditorCommand } from '../../infrastructure/monaco/monacoClipboardPaste';
+import { registerNginxLanguage } from '../../infrastructure/monaco/nginxLanguage';
 import { useNetcattyMonacoTheme } from '../../infrastructure/monaco/useNetcattyMonacoTheme';
 import { getLanguageName, getSupportedLanguages } from '../../lib/sftpFileUtils';
 import { Button } from '../ui/button';
@@ -37,7 +38,7 @@ import { Combobox } from '../ui/combobox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 // Map our language IDs to Monaco language IDs
-const languageIdToMonaco = (langId: string): string => {
+export const languageIdToMonaco = (langId: string): string => {
   const mapping: Record<string, string> = {
     'javascript': 'javascript',
     'typescript': 'typescript',
@@ -73,6 +74,7 @@ const languageIdToMonaco = (langId: string): string => {
     'yaml': 'yaml',
     'toml': 'ini',
     'ini': 'ini',
+    'nginx': 'nginx',
     'sql': 'sql',
     'graphql': 'graphql',
     'markdown': 'markdown',
@@ -512,6 +514,7 @@ const TextEditorPaneInner: React.FC<TextEditorPaneProps> = ({
           language={monacoLanguage}
           value={content}
           onChange={handleEditorChange}
+          beforeMount={registerNginxLanguage}
           onMount={handleEditorMount}
           theme={customThemeName}
           loading={

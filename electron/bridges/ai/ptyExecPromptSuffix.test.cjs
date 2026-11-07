@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { hasExpectedPromptSuffix } = require("./ptyExecHelpers.cjs");
-const { stripAnsi } = require("./shellUtils.cjs");
+const { extractTrailingIdlePrompt, stripAnsi } = require("./shellUtils.cjs");
 
 // The behaviour before the tail window was introduced: normalise the whole
 // text, then compare its end.
@@ -39,6 +39,48 @@ test("prompt suffix is found after a very large flood of CRLF output", () => {
   assert.equal(hasExpectedPromptSuffix(`${flood}root@3160T:~# `, "root@3160T:~# "), true);
   assert.equal(hasExpectedPromptSuffix(`${flood}root@3160T:~# x`, "root@3160T:~# "), false);
   assert.equal(hasExpectedPromptSuffix(`${flood}${COLORED_PROMPT}`, "root@3160T:~# "), true);
+});
+
+test("macOS zsh default prompt suffix matches only when the prompt is idle", () => {
+  const prompt = "hexiao@JosephdeMacBook-Pro-2 ~ % ";
+  assert.equal(hasExpectedPromptSuffix(`Last login\r\n${prompt}`, prompt), true);
+  assert.equal(hasExpectedPromptSuffix(`Last login\r\n${prompt}echo hello`, prompt), false);
+  assert.equal(
+    hasExpectedPromptSuffix(`Last login\r\n${prompt}`, "hexiao@JosephdeMacBook-Pro-2 ~ %"),
+    false,
+  );
+});
+
+test("live PTY CR bytes match a cached two-line idle prompt", () => {
+  // Bash writes the PS1 newline as CR and ONLCR adds another, so the bytes
+  // are `\r\r\n`. The idle-prompt cache keeps those as blank lines. Suffix
+  // matching has to accept that form; stripping CR down to one LF does not.
+  const live = "user@host: /workspace\r\r\n$ ";
+  const cached = extractTrailingIdlePrompt(`welcome\r\n${live}`);
+  assert.equal(cached, "user@host: /workspace\n\n\n$ ");
+  const matchLive = hasExpectedPromptSuffix(live, cached);
+  assert.equal(matchLive, true);
+  assert.equal(hasExpectedPromptSuffix(`hostname\r\nbox\r\n${live}`, cached), true);
+  assert.equal(
+    hasExpectedPromptSuffix("\x1b[?2004huser@host: /workspace\r\r\n$ ", cached),
+    true,
+  );
+
+  const rootLive = "user@host: /root\r\r\n# ";
+  const rootCached = extractTrailingIdlePrompt(rootLive);
+  assert.equal(rootCached, "user@host: /root\n\n\n# ");
+  assert.equal(hasExpectedPromptSuffix(rootLive, rootCached), true);
+
+  // Readiness for a real LF two-line prompt still matches, and a bare
+  // `$`/`#` is neither this prompt nor a POSIX prompt on its own.
+  const lfCached = extractTrailingIdlePrompt("welcome\r\nuser@host: /workspace\n$ ");
+  assert.equal(lfCached, "user@host: /workspace\n$ ");
+  assert.equal(hasExpectedPromptSuffix("user@host: /workspace\n$ ", lfCached), true);
+  assert.equal(hasExpectedPromptSuffix("output\r\n$ ", cached), false);
+  assert.equal(hasExpectedPromptSuffix("$ ", cached), false);
+  assert.equal(hasExpectedPromptSuffix("# ", rootCached), false);
+  assert.equal(extractTrailingIdlePrompt("$ "), "");
+  assert.equal(extractTrailingIdlePrompt("# "), "");
 });
 
 test("prompt suffix check does not scan the whole buffer on every call", () => {

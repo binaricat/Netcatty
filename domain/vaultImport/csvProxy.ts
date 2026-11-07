@@ -13,7 +13,7 @@ export const isCsvDirectProxyValue = (raw: string): boolean =>
   decodeCsvProxy(raw.trim()) === CSV_DIRECT_PROXY_VALUE;
 
 const PROXY_SCHEME_PATTERN = /^(http|socks5|command):\/\/(.*)$/is;
-const PROXY_AUTHORITY_PATTERN = /^(?:([^@:/?#\s]+)(?::([^@/?#]*))?@)?(\[[^\[\]@/?#\s]+\]|[^\[\]@:/?#\s]+):(\d+)$/u;
+const PROXY_AUTHORITY_PATTERN = /^(?:([^@:/?#\s]+)(?::([^@/?#]*))?@)?(\[[^[\]@/?#\s]+\]|[^[\]@:/?#\s]+):(\d+)$/u;
 
 const decodeAuthorityPart = (value: string | undefined): string | undefined => {
   if (value === undefined) return undefined;

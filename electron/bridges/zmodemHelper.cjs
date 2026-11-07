@@ -138,6 +138,7 @@ function createZmodemSentry(opts) {
   let pendingTerminalSuppressionAt = 0;
   let pendingHexHeaderFragment = null;
   let pendingHexHeaderFragmentTimer = null;
+  let emittedHexHeaderPrefixBytes = 0;
   // Set when a stripped hex header's trailing XON (0x11) may arrive in the
   // next terminal-output chunk; at most one byte is then dropped.
   let suppressNextTerminalXon = false;
@@ -172,6 +173,11 @@ function createZmodemSentry(opts) {
   const HEX_HEADER_FRAGMENT_TTL_MS = Number.isFinite(opts.hexHeaderFragmentTtlMs)
     ? Math.max(1, opts.hexHeaderFragmentTtlMs)
     : 1000;
+  // A bare "*" or "**" is also ordinary shell echo (#3959). Give this
+  // ambiguous printable prefix at most one frame to complete, rather than
+  // holding every typed/pasted star for the full protocol timeout. Once
+  // ZDLE arrives, retain the longer timeout for fragmented protocol bytes.
+  const PRINTABLE_HEX_PREFIX_TTL_MS = Math.min(16, HEX_HEADER_FRAGMENT_TTL_MS);
   /**
    * Upper bound on how long a drag-drop echo suppression may stay armed.
    * The suppression hides the terminal echo of the upload command, whose echo
@@ -308,6 +314,10 @@ function createZmodemSentry(opts) {
         buf.subarray(0, prefixAt),
         buf.subarray(prefixAt + headerLength),
       ]);
+      // Printable prefix bytes may already have been shown after the short
+      // echo timeout. If they belonged to this header, do not skip bytes
+      // from the ordinary output that follows the stripped header.
+      emittedHexHeaderPrefixBytes = Math.min(emittedHexHeaderPrefixBytes, prefixAt);
       searchFrom = prefixAt;
     }
 
@@ -317,8 +327,17 @@ function createZmodemSentry(opts) {
   function flushPendingHexHeaderFragment() {
     pendingHexHeaderFragmentTimer = null;
     const buf = pendingHexHeaderFragment;
-    pendingHexHeaderFragment = null;
-    if (buf?.length) onData(buf);
+    if (!buf?.length) return;
+    const output = buf.subarray(emittedHexHeaderPrefixBytes);
+    if (buf.every((byte) => byte === 0x2a)) {
+      // Keep at most two printable bytes as parsing context: a later ZDLE
+      // must still be recognized and stripped, without replaying the stars.
+      emittedHexHeaderPrefixBytes = buf.length;
+    } else {
+      pendingHexHeaderFragment = null;
+      emittedHexHeaderPrefixBytes = 0;
+    }
+    if (output.length) onData(output);
   }
 
   /**
@@ -412,19 +431,27 @@ function createZmodemSentry(opts) {
     const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
 
     const fragmentAt = findTrailingHexHeaderFragment(buf);
-    if (fragmentAt === -1) return buf;
+    const alreadyEmitted = emittedHexHeaderPrefixBytes;
+    emittedHexHeaderPrefixBytes = fragmentAt === -1
+      ? 0
+      : Math.max(0, alreadyEmitted - fragmentAt);
+    if (fragmentAt === -1) return buf.subarray(alreadyEmitted);
 
     if (fragmentAt < buf.length) {
       pendingHexHeaderFragment = Buffer.from(buf.subarray(fragmentAt));
-      if (!pendingHexHeaderFragmentTimer) {
+      if (!pendingHexHeaderFragmentTimer
+        && pendingHexHeaderFragment.length > emittedHexHeaderPrefixBytes) {
+        const ttl = pendingHexHeaderFragment.every((byte) => byte === 0x2a)
+          ? PRINTABLE_HEX_PREFIX_TTL_MS
+          : HEX_HEADER_FRAGMENT_TTL_MS;
         pendingHexHeaderFragmentTimer = setTimeout(
           flushPendingHexHeaderFragment,
-          HEX_HEADER_FRAGMENT_TTL_MS,
+          ttl,
         );
       }
     }
 
-    return fragmentAt ? buf.subarray(0, fragmentAt) : Buffer.alloc(0);
+    return buf.subarray(Math.min(alreadyEmitted, fragmentAt), fragmentAt);
   }
 
   function looksLikeResidualZmodemData(data) {

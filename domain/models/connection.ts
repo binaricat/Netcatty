@@ -189,6 +189,9 @@ export interface Host {
   identityFileId?: string; // Reference to SSHKey
   protocol?: HostProtocol; // Default/primary protocol, including namespaced plugin protocols
   pluginConnection?: PluginConnectionConfig;
+  // SSH interactive IME/short-paste compatibility; applied on reconnect.
+  // Missing on legacy records; sanitizeHost preserves their previous behavior.
+  sshInputCompatibility?: boolean;
   // Runtime marker for in-memory-only hosts (e.g. password deep links).
   // Ephemeral hosts are never persisted to the vault or session restore.
   ephemeral?: boolean;

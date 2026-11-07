@@ -1,0 +1,177 @@
+[
+  {
+    "name": "assistant",
+    "id": "com.netcatty.assistant",
+    "version": "0.1.0",
+    "sha256": "7943d4c3800914fe0acd3d0f3a3d7f7c1910c212a5dc58a044871a6a82485274",
+    "bytes": 17214,
+    "fileCount": 6,
+    "permissions": {
+      "required": [
+        "commands",
+        "views"
+      ],
+      "optional": [
+        "ai.invoke",
+        "context.selected.list",
+        "context.selected.read"
+      ]
+    },
+    "features": {
+      "required": [
+        "ai.model-invocation",
+        "context.selected-read"
+      ]
+    },
+    "repeatIdentical": true,
+    "previousD40Sha256": "7943d4c3800914fe0acd3d0f3a3d7f7c1910c212a5dc58a044871a6a82485274",
+    "preparedOnly": true,
+    "noConnectionOrActivation": true,
+    "changedEntriesFromD40": [],
+    "delta": "Archive byte-identical."
+  },
+  {
+    "name": "database-owned",
+    "id": "com.netcatty.database-minimal",
+    "version": "0.1.0",
+    "sha256": "3c67f529cd5d2843dbf74a62d237b7b7d50d24a466ade85cce76b3adfff919a2",
+    "bytes": 11660,
+    "fileCount": 5,
+    "permissions": {
+      "required": [
+        "commands",
+        "views"
+      ],
+      "optional": [
+        {
+          "permission": "network.stream",
+          "resources": [
+            "tcp://10.77.0.20:3306"
+          ],
+          "reason": "Connect only to the prepared disposable fixture."
+        }
+      ]
+    },
+    "features": {
+      "required": [
+        "network.byte-streams"
+      ]
+    },
+    "repeatIdentical": true,
+    "previousD40Sha256": "f01c6a24382897d4b0bf4130941274abacb9a9a963f9b56ecaceb2c020f36874",
+    "preparedOnly": true,
+    "noConnectionOrActivation": true,
+    "changedEntriesFromD40": [
+      "browser.js"
+    ],
+    "delta": "Generated SDK export changes alter only minified bound identifier spelling; scope-aware normalized AST is identical.",
+    "oldGeneratedRebuildSha256": "f01c6a24382897d4b0bf4130941274abacb9a9a963f9b56ecaceb2c020f36874",
+    "boundIdentifierAlphaEquivalent": true
+  },
+  {
+    "name": "database-rfam-readonly",
+    "id": "com.netcatty.database-rfam-readonly",
+    "version": "0.1.0",
+    "sha256": "554407c067ced0a6634599b7eccc7c6dbb4f2ff7c523d0bacbbbd4fb78c04612",
+    "bytes": 11003,
+    "fileCount": 5,
+    "permissions": {
+      "required": [
+        "commands",
+        "views"
+      ],
+      "optional": [
+        {
+          "permission": "network.stream",
+          "resources": [
+            "tcp://mysql-rfam-public.ebi.ac.uk:4497"
+          ],
+          "reason": "Run the fixed public Rfam acceptance query only after explicit authorization."
+        }
+      ]
+    },
+    "features": {
+      "required": [
+        "network.byte-streams"
+      ]
+    },
+    "repeatIdentical": true,
+    "previousD40Sha256": "aaca586669db454e91d61487e576ed524d1b7190eed182bc2cd0035e59caa0d3",
+    "preparedOnly": true,
+    "noConnectionOrActivation": true,
+    "changedEntriesFromD40": [
+      "browser.js"
+    ],
+    "delta": "Generated SDK export changes alter only minified bound identifier spelling; scope-aware normalized AST is identical.",
+    "oldGeneratedRebuildSha256": "aaca586669db454e91d61487e576ed524d1b7190eed182bc2cd0035e59caa0d3",
+    "boundIdentifierAlphaEquivalent": true
+  },
+  {
+    "name": "host-actions",
+    "id": "com.netcatty.host-actions",
+    "version": "0.1.0",
+    "sha256": "9713f001449b0c749f518d42f013fa72ead6dd43f8e7ddd7843cc6ecc03027f9",
+    "bytes": 4789,
+    "fileCount": 3,
+    "permissions": {
+      "required": [
+        "commands",
+        "menus"
+      ],
+      "optional": [
+        "vault.metadata",
+        "vault.write",
+        "ui.interact"
+      ]
+    },
+    "features": {
+      "required": [
+        "vault.host-actions",
+        "commands.interactive"
+      ]
+    },
+    "repeatIdentical": true,
+    "previousD40Sha256": "cf04f82dfe25ab5cda6f5f3dad0a8fb06c37bedf9924f556bee2b8402e542ef2",
+    "preparedOnly": true,
+    "noConnectionOrActivation": true,
+    "changedEntriesFromD40": [
+      "README.md"
+    ],
+    "delta": "README wording follows permission policy. Manifest and browser entrypoint are byte-identical."
+  },
+  {
+    "name": "terminal-selection-draft",
+    "id": "com.netcatty.terminal-selection-draft",
+    "version": "0.1.0",
+    "sha256": "aaadd8687b1af1d6e1f9a56c52760ac0d19e7ed4e8212fb7c8775ed052ed74f1",
+    "bytes": 2954,
+    "fileCount": 2,
+    "permissions": {
+      "required": [
+        "commands",
+        "menus"
+      ],
+      "optional": [
+        "terminal.selection.read",
+        "terminal.input.propose"
+      ]
+    },
+    "features": {
+      "required": [
+        "terminal.selection-sharing",
+        "terminal.input-drafts",
+        "commands.interactive"
+      ]
+    },
+    "repeatIdentical": true,
+    "previousD40Sha256": "4c9c2388b7f891156192a0b5ab7b23291beba3555e7ec8cf24fbe2dfe1242d5e",
+    "preparedOnly": true,
+    "noConnectionOrActivation": true,
+    "changedEntriesFromD40": [
+      "browser.js"
+    ],
+    "delta": "Generated SDK export changes alter only minified bound identifier spelling; scope-aware normalized AST is identical.",
+    "oldGeneratedRebuildSha256": "4c9c2388b7f891156192a0b5ab7b23291beba3555e7ec8cf24fbe2dfe1242d5e",
+    "boundIdentifierAlphaEquivalent": true
+  }
+]

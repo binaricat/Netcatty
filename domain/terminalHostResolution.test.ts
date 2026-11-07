@@ -675,3 +675,16 @@ test("resolveTerminalChainHosts skips non-SSH jump candidates", () => {
 
   assert.deepEqual(resolved.map((host) => host.id), ["jump-ssh", "jump-mosh"]);
 });
+
+
+test("input compatibility belongs to the terminal endpoint, independently of SSH jump hops", () => {
+  const target: Host = { id: "target", label: "Target", hostname: "target.example.test", username: "alice",
+    protocol: "ssh", tags: [], os: "linux", sshInputCompatibility: false, hostChain: { hostIds: ["bastion"] } };
+  const bastion: Host = { ...target, id: "bastion", hostChain: undefined, sshInputCompatibility: true };
+  const resolve = (hostId: string) => resolveTerminalSessionHost({
+    session: { ...baseSession, hostId }, hosts: [target, bastion], groupConfigs: [], proxyProfiles: [], localOs: "linux",
+  });
+  assert.equal(resolve("target").sshInputCompatibility, false);
+  assert.equal(resolve("bastion").sshInputCompatibility, true);
+  assert.equal(resolveTerminalChainHosts({ host: target, hosts: [target, bastion], groupConfigs: [], proxyProfiles: [] })[0].sshInputCompatibility, true);
+});

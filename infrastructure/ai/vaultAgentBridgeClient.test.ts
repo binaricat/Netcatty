@@ -3,7 +3,32 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fitLargeToolResultForModel } from './harness/toolResultFitting';
 import type { GroupConfig, Host, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, VaultNote } from '../../domain/models';
-import { handleVaultAgentOp, runSerializedVaultAgentRequest, sanitizeHostForAgent, type VaultAgentApiDeps } from './vaultAgentBridgeClient';
+import { handleVaultAgentOp, runSerializedVaultAgentRequest, sanitizeHostForAgent, shouldBypassVaultAgentSerialization, type VaultAgentApiDeps } from './vaultAgentBridgeClient';
+
+it('terminal reconnect is immediate and leaves vault mutations serialized', () => {
+  assert.equal(shouldBypassVaultAgentSerialization('session.reconnect', {}), true);
+  assert.equal(shouldBypassVaultAgentSerialization('host.update', {}), false);
+  assert.equal(shouldBypassVaultAgentSerialization('session.inspectRecovery', {}), true);
+});
+
+it('expired reconnect requests cannot execute after a delayed renderer delivery', async () => {
+  let called = false;
+  const result = await handleVaultAgentOp('session.reconnect', { sessionId: 's', expiresAt: Date.now() - 1000 }, {
+    reconnectSession: () => { called = true; return { ok: true }; },
+  } as VaultAgentApiDeps);
+  assert.equal(result.code, 'RECONNECT_EXPIRED');
+  assert.equal(result.started, false);
+  assert.equal(called, false);
+});
+
+it('session reconnect forwards runtime acknowledgement without claiming a connection', async () => {
+  const result = await handleVaultAgentOp('session.reconnect', { sessionId: 's' }, {
+    reconnectSession: (id) => ({ ok: true, sessionId: id, started: true, status: 'reconnecting' }),
+  } as VaultAgentApiDeps);
+  assert.equal(result.status, 'reconnecting');
+  assert.equal(result.sessionId, 's');
+  assert.equal((await handleVaultAgentOp('session.reconnect', { sessionId: 's' }, {} as VaultAgentApiDeps)).started, false);
+});
 
 type DepsSeed = {
   hosts?: Host[];

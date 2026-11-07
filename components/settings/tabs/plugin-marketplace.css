@@ -1,0 +1,9 @@
+.plugin-marketplace-browser { min-width: 0; }
+.plugin-marketplace-catalog { min-width: 0; }
+.plugin-marketplace-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+/* Details use only the manager's main scrolling surface at every width. */
+.plugin-marketplace-detail { overflow-wrap: anywhere; }
+.plugin-card { box-shadow: 0 1px 4px hsl(var(--foreground) / 0.06); }
+.plugin-card:hover { box-shadow: 0 2px 8px hsl(var(--foreground) / 0.09); }
+.dark .plugin-card { background: hsl(var(--muted) / 0.2); box-shadow: none; }
+.dark .plugin-card:hover { background: hsl(var(--muted) / 0.3); box-shadow: none; }

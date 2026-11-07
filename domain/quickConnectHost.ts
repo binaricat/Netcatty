@@ -68,6 +68,7 @@ export const buildQuickConnectHost = ({
     os: "linux",
     protocol: protocol === "mosh" || protocol === "et" ? "ssh" : protocol,
     authMethod,
+    sshInputCompatibility: false,
     identityId: applicableIdentityId,
     password: !applicableIdentityId && authMethod === "password" ? password : undefined,
     identityFileId:

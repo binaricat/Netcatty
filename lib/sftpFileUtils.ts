@@ -138,7 +138,15 @@ export function isKnownBinaryFile(fileName: string): boolean {
  * Get language ID for syntax highlighting
  */
 export function getLanguageId(fileName: string): string {
-  const ext = getFileExtension(fileName);
+  const path = fileName.replace(/\\/g, '/');
+  const baseName = path.slice(path.lastIndexOf('/') + 1);
+  const ext = getFileExtension(baseName);
+  // Keep generic .conf files as INI. Only infer Nginx with filename/path context.
+  if (baseName.toLowerCase() === 'nginx.conf'
+    || /(?:^|\/)nginx\/(?:conf\/)?(?:conf\.d|snippets)\/.+\.conf$/i.test(path)
+    || /(?:^|\/)nginx\/(?:conf\/)?sites-(?:available|enabled)\/[^/]+$/i.test(path)) {
+    return 'nginx';
+  }
   return EXTENSION_TO_LANGUAGE[ext] || 'plaintext';
 }
 
@@ -181,6 +189,7 @@ export function getLanguageName(languageId: string): string {
     yaml: 'YAML',
     toml: 'TOML',
     ini: 'INI',
+    nginx: 'Nginx',
     sql: 'SQL',
     graphql: 'GraphQL',
     markdown: 'Markdown',
@@ -224,6 +233,7 @@ export interface FileAssociation {
 export function getSupportedLanguages(): { id: string; name: string }[] {
   const languageIds = new Set(Object.values(EXTENSION_TO_LANGUAGE));
   languageIds.add('plaintext');
+  languageIds.add('nginx');
 
   return Array.from(languageIds)
     .map(id => ({ id, name: getLanguageName(id) }))

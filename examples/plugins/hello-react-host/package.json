@@ -1,0 +1,8 @@
+{
+  "name": "@netcatty/example-hello-react-host",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": { "@netcatty/plugin-sdk": "0.1.0-internal.1", "react": "^19.2.1", "react-dom": "^19.2.1" }
+}

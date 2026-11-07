@@ -106,10 +106,13 @@ Placement rules (`resolveAgentKinds` in `toolSurfaces.cjs`):
 
 **Harness domain (`catalog/harness.cjs`):** Catty executes these locally in `capabilityTools.executeLocalCattyCapability`. The read-only `harness.terminal.read_context` also exposes `netcatty/readContext` to MCP, with scope validation before and after the existing renderer bridge call. It reuses the sidebar reader through the screen snapshot registry (80 rows by default, maximum 300); no script or command runs. Other harness tools remain Catty-only. `harness.web.search` is omitted when web search is not configured.
 
-## Plugin host runtime (internal preview)
+## Plugin host runtime
 
-The phase-2 plugin host lives under `electron/plugins/` and is disabled unless
-`NETCATTY_PLUGIN_DEV=1` is present at application launch. Public wire and package
+The plugin host under `electron/plugins/` exposes browser-only packages in normal
+Settings. `NETCATTY_PLUGIN_DEV=1` admits advanced development packages, without
+granting their permissions. Admission and default placement share
+`domain/pluginRuntimePolicy.cjs`; permission explanations shared with native
+prompts live in `domain/pluginPermissionDescriptions.cjs`. Public wire and package
 types still come only from `packages/plugin-contract/schema/`; do not add a
 second private RPC shape when extending the host.
 
@@ -124,6 +127,11 @@ second private RPC shape when extending the host.
 - `PluginRpcRouter` owns correlation, cancellation, deadlines, stream credit and
   protocol-failure containment. Runtime identity is assigned by the host and is
   never accepted from request parameters.
+- Custom views use only host-rendered DOM: plugin scripts stay in the isolated
+  runtime; the host validates incoming trees, styles, resources and events before
+  rendering. Never reintroduce native child views, iframe UI, or plugin code in
+  the host renderer. See `docs/plugin-platform/host-rendered-ui.md` for authoring,
+  lifecycle, limits and verification.
 - App quit goes through `runPluginShutdown()` after the dirty-editor guard; do
   not add another independent quit interception path.
 

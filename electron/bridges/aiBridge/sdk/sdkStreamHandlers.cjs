@@ -744,6 +744,22 @@ function registerSdkStreamHandlers(ctx) {
         } = payload;
 
         const backendKey = resolveBackendKey(sdkBackend);
+        const delegatedAgent = mcpServerBridge.isPluginAgentConversation?.(chatSessionId) === true;
+        const delegationTag = delegatedAgent ? /^plugin-agent_([0-9a-f-]{36})_/.exec(requestId)?.[1] : undefined;
+        if (delegatedAgent && (backendKey !== "claude" || toolIntegrationMode !== "mcp")) {
+          throw Error("This backend is not eligible for delegated Agent sessions");
+        }
+        if (delegatedAgent) {
+          mcpServerBridge.assertPluginAgentCaller(chatSessionId, event.sender.id, delegationTag);
+          mcpServerBridge.getPluginAgentMcpConfiguration(chatSessionId, delegationTag);
+        }
+        let delegatedCwd;
+        if (delegatedAgent) {
+          const nativePath = require("node:path");
+          const name = require("node:crypto").createHash("sha256").update(chatSessionId).digest("hex");
+          delegatedCwd = nativePath.join(tempDirBridge.getTempDir(), "plugin-agent", name);
+          require("node:fs").mkdirSync(delegatedCwd, { recursive: true, mode: 0o700 });
+        }
         if (!backendKey) {
           safeSend(event.sender, "netcatty:ai:sdk-agent:error", {
             requestId, error: `Unknown SDK backend: ${sdkBackend}`,
@@ -752,8 +768,11 @@ function registerSdkStreamHandlers(ctx) {
         }
 
         const abortController = new AbortController();
+        const detachDelegatedCancellation = delegatedAgent
+          ? mcpServerBridge.onPluginAgentRelease(chatSessionId, delegationTag, () => abortController.abort()) : null;
         sdkActiveStreams.set(requestId, abortController);
         sdkRequestSessions.set(requestId, chatSessionId);
+        if (delegatedAgent) sdkRequestRuntimes.set(requestId, { backendKey, delegationTag, senderId: event.sender.id });
         mcpServerBridge.setChatSessionCancelled?.(chatSessionId, false);
 
         let privacyEnabled = false;
@@ -776,6 +795,7 @@ function registerSdkStreamHandlers(ctx) {
             mcpServerBridge,
             chatSessionId,
             toolIntegrationMode: effectiveMode,
+            delegationTag,
           });
 
           // NETCATTY_CLAUDE_SETTINGS is a netcatty marker carrying the claude SDK
@@ -850,6 +870,7 @@ function registerSdkStreamHandlers(ctx) {
           const sessionRuntime = backendKey === "grok" ? grokRuntime : codexRuntime;
           sdkRequestRuntimes.set(requestId, {
             backendKey,
+            ...(delegatedAgent ? { delegationTag, senderId: event.sender.id } : {}),
             codexRuntime,
             grokRuntime,
             sessionRuntime,
@@ -1026,9 +1047,14 @@ function registerSdkStreamHandlers(ctx) {
             chatSessionId,
             // Drivers recheck after their own asynchronous startup, at the
             // final Netcatty-owned prompt handoff (including disabled turns).
-            assertSessionValid: () => privacyService.checkSession(chatSessionId),
+            assertSessionValid: () => {
+              if (delegatedAgent) mcpServerBridge.assertPluginAgentCaller(chatSessionId, event.sender.id, delegationTag);
+              abortController.signal.throwIfAborted();
+              return privacyService.checkSession(chatSessionId);
+            },
+            delegatedAgent,
             ...promptPlacement,
-            cwd: cwd || process.cwd(),
+            cwd: delegatedCwd || cwd || process.cwd(),
             model: model || undefined,
             permissionMode: permissionMode || "confirm",
             env,
@@ -1086,6 +1112,7 @@ function registerSdkStreamHandlers(ctx) {
           emitter.emitError(err?.message || String(err));
           return { ok: false, error: err?.message || String(err) };
         } finally {
+          detachDelegatedCancellation?.();
           sdkActiveStreams.delete(requestId);
           sdkRequestSessions.delete(requestId);
           sdkRequestRuntimes.delete(requestId);
@@ -1388,7 +1415,19 @@ function registerSdkStreamHandlers(ctx) {
 
     ipcMain.handle("netcatty:ai:sdk-agent:cancel", async (event, { requestId, chatSessionId }) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
-      const effectiveChatSessionId = chatSessionId || sdkRequestSessions.get(requestId);
+      const ownedChatSessionId = sdkRequestSessions.get(requestId);
+      // Caller text cannot select the legacy route for a delegated request.
+      if (ownedChatSessionId && chatSessionId && ownedChatSessionId !== chatSessionId) return { ok: false, error: "Agent request ownership mismatch" };
+      const effectiveChatSessionId = ownedChatSessionId || chatSessionId;
+      if (mcpServerBridge.isPluginAgentConversation?.(effectiveChatSessionId)) {
+        const native = sdkRequestRuntimes.get(requestId);
+        if (!native?.delegationTag || native.senderId !== event.sender.id
+          || sdkRequestSessions.get(requestId) !== effectiveChatSessionId) return { ok: false, error: "Agent turn unavailable" };
+        try { mcpServerBridge.assertPluginAgentCaller(effectiveChatSessionId, event.sender.id, native.delegationTag); }
+        catch { return { ok: false, error: "Agent turn unavailable" }; }
+        sdkActiveStreams.get(requestId)?.abort();
+        return { ok: true };
+      }
       mcpServerBridge.setChatSessionCancelled?.(effectiveChatSessionId, true);
       mcpServerBridge.cancelPtyExecsForSession(effectiveChatSessionId);
       mcpServerBridge.cancelWorkerBackgroundJobsForSession?.(effectiveChatSessionId);
@@ -1405,6 +1444,9 @@ function registerSdkStreamHandlers(ctx) {
 
     ipcMain.handle("netcatty:ai:sdk-agent:cleanup", async (event, { chatSessionId }) => {
       if (!validateSender(event)) return { ok: false, error: "Unauthorized IPC sender" };
+      // This legacy route has no per-request identity. Delegated lifecycle is
+      // owned by main's exact-turn lease, never a delayed chat-wide UI cleanup.
+      if (mcpServerBridge.isPluginAgentConversation?.(chatSessionId)) return { ok: false, error: "Delegated Agent cleanup is main-owned" };
       mcpServerBridge.setChatSessionCancelled?.(chatSessionId, true);
       mcpServerBridge.cancelPtyExecsForSession(chatSessionId);
       mcpServerBridge.cancelWorkerBackgroundJobsForSession?.(chatSessionId);

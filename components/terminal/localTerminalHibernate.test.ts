@@ -34,7 +34,7 @@ test("local terminals stay out of hibernate and hidden-renderer paths", () => {
 test("reconnect clears keyboard pairing before resetting protocol state", () => {
   assert.match(
     terminalSource,
-    /startNewSession = \(\) => \{[\s\S]*resetKittyConnectionInputState\(\);[\s\S]*resetKittyKeyboardModeStateForSession/,
+    /startNewSession = \(\) => \{[\s\S]*resetConnectionInputState\(host\);[\s\S]*resetKittyKeyboardModeStateForSession/,
   );
   assert.match(
     runtimeSource,
@@ -42,7 +42,7 @@ test("reconnect clears keyboard pairing before resetting protocol state", () => 
   );
   assert.match(
     runtimeSource,
-    /resetKittyConnectionInputState: clearKittyConnectionInputState/,
+    /resetConnectionInputState: \(host\) => \{[\s\S]*clearKittyConnectionInputState\(\)/,
   );
   assert.match(
     runtimeSource,

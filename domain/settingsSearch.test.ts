@@ -5,6 +5,7 @@ import en from "../application/i18n/locales/en.ts";
 import zhCN from "../application/i18n/locales/zh-CN.ts";
 import zhTW from "../application/i18n/locales/zh-TW.ts";
 import { filterSettingsSearchCatalog } from "./settingsSearch.ts";
+import { resolveSettingsPlatform } from "./settingsSearchCatalog.ts";
 import { SETTINGS_SEARCH_CATALOG } from "./settingsSearchCatalog.ts";
 
 const EN: Record<string, string> = {
@@ -151,4 +152,38 @@ test("Sync status entries retain syncSubTab for navigation", () => {
   const backups = hits.find((hit) => hit.entry.id === "sync-local-backups");
   assert.ok(backups);
   assert.equal(backups?.entry.syncSubTab, "status");
+});
+
+test("macOS-only settings stay out of search on other platforms", () => {
+  const blurId = "appearance-window-background-blur";
+
+  // Both a targeted query and the default (empty query) list must skip it,
+  // otherwise selecting the hit jumps to a tab with no anchor to focus.
+  const macHits = filterSettingsSearchCatalog("", tEn, { platform: "mac", limit: 500 });
+  assert.ok(macHits.some((hit) => hit.entry.id === blurId));
+
+  for (const platform of ["win", "linux"] as const) {
+    const searched = filterSettingsSearchCatalog("frosted glass", tEn, { platform });
+    assert.equal(searched.some((hit) => hit.entry.id === blurId), false);
+
+    const defaults = filterSettingsSearchCatalog("", tEn, { platform, limit: 500 });
+    assert.equal(defaults.some((hit) => hit.entry.id === blurId), false);
+  }
+});
+
+test("platform-gated entries never hide cross-platform settings", () => {
+  for (const platform of ["mac", "win", "linux"] as const) {
+    const hits = filterSettingsSearchCatalog("opacity", tEn, { platform });
+    assert.ok(
+      hits.some((hit) => hit.entry.id === "appearance-window-opacity"),
+      `window opacity must stay searchable on ${platform}`,
+    );
+  }
+});
+
+test("resolveSettingsPlatform maps Electron-style platform strings", () => {
+  assert.equal(resolveSettingsPlatform("MacIntel"), "mac");
+  assert.equal(resolveSettingsPlatform("Win32"), "win");
+  assert.equal(resolveSettingsPlatform("Linux x86_64"), "linux");
+  assert.equal(resolveSettingsPlatform(""), "linux");
 });

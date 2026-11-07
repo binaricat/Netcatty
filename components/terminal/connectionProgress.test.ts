@@ -5,7 +5,9 @@ import test from "node:test";
 import {
   CONNECTION_PROGRESS_CAP,
   CONNECTION_PROGRESS_START,
+  MAX_CONNECTION_PROGRESS_LOGS,
   advanceIndeterminateConnectionProgress,
+  capConnectionProgressLogs,
   advanceMonotonicConnectionProgress,
   resolveHopConnectionProgress,
 } from "./connectionProgress";
@@ -39,7 +41,12 @@ test("connecting seeds progress once and hop/phase changes do not snap it back",
     effectsSource,
     /if \(status === "connecting"\) \{\s*setIsDisconnectedDialogDismissed\(false\);\s*setProgressValue\(CONNECTION_PROGRESS_START\);/,
   );
-  assert.match(effectsSource, /setProgressValue\(advanceIndeterminateConnectionProgress\)/);
+  // The indeterminate animation and countdown tick inside the connection
+  // dialog (connectionTicker.ts); Terminal only publishes the deadline.
+  assert.doesNotMatch(effectsSource, /setProgressValue\(advanceIndeterminateConnectionProgress\)/);
+  assert.match(effectsSource, /setConnectionDeadlineAt\(Date\.now\(\) \+ connectionTimeout\)/);
+  const tickerSource = readFileSync(new URL("./connectionTicker.ts", import.meta.url), "utf8");
+  assert.match(tickerSource, /setValue\(advanceIndeterminateConnectionProgress\)/);
   assert.doesNotMatch(effectsSource, /setProgressValue\(5\)/);
 
   const starterSource = readFileSync(
@@ -48,4 +55,14 @@ test("connecting seeds progress once and hop/phase changes do not snap it back",
   );
   assert.match(starterSource, /advanceMonotonicConnectionProgress/);
   assert.match(starterSource, /resolveHopConnectionProgress/);
+});
+
+test("connection progress logs keep only the newest lines", () => {
+  const short = ["a", "b"];
+  assert.equal(capConnectionProgressLogs(short), short);
+  const long = Array.from({ length: MAX_CONNECTION_PROGRESS_LOGS + 5 }, (_, i) => `line ${i}`);
+  const capped = capConnectionProgressLogs(long);
+  assert.equal(capped.length, MAX_CONNECTION_PROGRESS_LOGS);
+  assert.equal(capped[0], "line 5");
+  assert.equal(capped.at(-1), `line ${MAX_CONNECTION_PROGRESS_LOGS + 4}`);
 });

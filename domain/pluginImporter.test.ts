@@ -820,3 +820,29 @@ test('plugin importer preview is bounded and never exposes secret or command pay
   assert.equal(JSON.stringify(preview).includes('private-key-material'), false);
   assert.equal(JSON.stringify(preview).includes('contains-sensitive-command'), false);
 });
+
+
+test('new imported SSH drafts default to standard input and preserve explicit boolean choices', () => {
+  for (const protocol of [undefined, 'ssh'] as const) {
+    for (const choice of [undefined, false, true]) {
+      const result = normalizePluginImporterRecords([{ type: 'draft', draft: {
+        kind: 'host', value: {
+          hostname: 'new.test', ...(protocol ? { protocol } : {}),
+          ...(choice === undefined ? {} : { sshInputCompatibility: choice }),
+        },
+      } }]);
+      assert.deepEqual(result.errors, []);
+      assert.equal(result.hosts[0].sshInputCompatibility, choice ?? false);
+    }
+  }
+});
+
+test('imported host drafts reject non-boolean input compatibility choices', () => {
+  for (const choice of ['false', 'true', 0, null]) {
+    const result = normalizePluginImporterRecords([{ type: 'draft', draft: {
+      kind: 'host', value: { hostname: 'new.test', protocol: 'ssh', sshInputCompatibility: choice },
+    } }]);
+    assert.deepEqual(result.hosts, []);
+    assert.deepEqual(result.errors, ['Importer returned an invalid host draft.']);
+  }
+});

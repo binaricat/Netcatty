@@ -144,17 +144,17 @@ for (const [label, buildAlgorithms] of [
     });
   });
 
-  test(`${label} drops chacha20-poly1305 when the runtime lacks chacha20`, () => {
+  test(`${label} retains chacha20-poly1305 through ssh2's fallback when the runtime lacks chacha20`, () => {
     const ciphersWithoutChacha20 = crypto.getCiphers().filter((cipher) => cipher !== "chacha20");
 
     withAlgorithmRuntime({ ciphers: ciphersWithoutChacha20 }, () => {
       const algorithms = buildAlgorithms(false);
 
-      assert.equal(algorithms.cipher.includes("chacha20-poly1305@openssh.com"), false);
+      assert.equal(algorithms.cipher.includes("chacha20-poly1305@openssh.com"), true);
     });
   });
 
-  test(`${label} cipher override is filtered against runtime support`, () => {
+  test(`${label} preserves explicit ChaCha20 and mixed cipher overrides without native crypto`, () => {
     const ciphersWithoutChacha20 = crypto.getCiphers().filter((cipher) => cipher !== "chacha20");
 
     withAlgorithmRuntime({ ciphers: ciphersWithoutChacha20 }, () => {
@@ -164,7 +164,10 @@ for (const [label, buildAlgorithms] of [
         },
       });
 
-      assert.deepEqual(algorithms.cipher, ["aes256-ctr"]);
+      assert.deepEqual(algorithms.cipher, ["chacha20-poly1305@openssh.com", "aes256-ctr"]);
+      assert.deepEqual(buildAlgorithms(false, {
+        algorithmOverrides: { cipher: ["chacha20-poly1305@openssh.com"] },
+      }).cipher, ["chacha20-poly1305@openssh.com"]);
     });
   });
 

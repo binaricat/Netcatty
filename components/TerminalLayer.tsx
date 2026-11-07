@@ -123,6 +123,7 @@ import {
 import { classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from '../domain/host';
 import {
   collectSidePanelPanes,
+  isPluginSidePanelTool,
   sidePanelLayoutHasTool,
   type SidePanelLayout,
   type SidePanelSplitDirection,
@@ -244,12 +245,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onTerminalDataCapture,
   onCreateWorkspaceFromSessions,
   onAddSessionToWorkspace,
+  onMoveWorkspacePane,
   onRequestAddToWorkspace,
   onAppendHostToWorkspace,
   onUpdateSplitSizes,
   onSetDraggingSessionId,
   onToggleWorkspaceViewMode,
   onSetWorkspaceFocusedSession,
+  onSetWorkspaceAnchorChat,
   onReorderWorkspaceSessions,
   onReorderTabs,
   onCopySession,
@@ -1933,6 +1936,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     resizeSidePanelSplitForTab(tabId, splitId, sizes);
   }, [resizeSidePanelSplitForTab]);
 
+  const handleWithdrawPluginSidebarPane = useCallback((tabId: string, paneId: string, expectedTool: SidePanelTab) => {
+    if (!isPluginSidePanelTool(expectedTool)) return;
+    const layout = sidePanelLayoutsRef.current.get(tabId);
+    const pane = layout && collectSidePanelPanes(layout.root).find((item) => item.id === paneId);
+    if (pane?.tool !== expectedTool) return;
+    setMagnifiedPane((current) => current?.tabId === tabId && current.target.kind === 'side-panel'
+      && current.target.paneId === paneId ? null : current);
+    closeSidePanelPaneForTab(tabId, paneId);
+  }, [closeSidePanelPaneForTab, sidePanelLayoutsRef]);
+
   // Toggle SFTP from activity bar header
   const handleToggleSftpFromBar = useCallback(() => {
     handleSwitchSidePanelTab('sftp');
@@ -2488,6 +2501,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         if (executor) {
           pendingSends.push(Promise.resolve(executor(text, false, {
             broadcast: false,
+            preferBracketedPaste: true,
             // Preserve both prompt snapshots across an asynchronous wake: the
             // peer may clear its prompt classification before the actual write.
             ...(focusedSensitive || recipientSensitive ? { sensitive: true } : {}),
@@ -2527,7 +2541,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           const sensitive = isTerminalSensitiveInputActive(targetId);
           // Explicitly local: an omitted broadcast option falls back to the
           // toolbar switch, which can still be on while compose is active-only.
-          pendingSends.push(Promise.resolve(executor(text, false, { broadcast: false })).then(
+          pendingSends.push(Promise.resolve(executor(text, false, {
+            broadcast: false,
+            preferBracketedPaste: true,
+          })).then(
             (sent) => sent && !sensitive && !isTerminalSensitiveInputActive(targetId),
           ));
         } else {
@@ -2617,6 +2634,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleOpenAI,
     handleOpenSystem,
     handleOpenNotes,
+    getActiveTerminalSessionId,
+    handleSwitchSidePanelTab,
+    handleWithdrawPluginSidebarPane,
     handleOpenBrowser,
     handleFocusSidePanelPane,
     handleMagnifySidePanelPane,
@@ -2694,6 +2714,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     systemMountedTabIds,
     themeMountedTabIds,
     onAddSessionToWorkspace,
+    onMoveWorkspacePane,
     onConnectToHost,
     onCreateLocalTerminal,
     onCreateWorkspaceFromSessions,
@@ -2708,6 +2729,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onSessionData,
     onSetDraggingSessionId,
     onSetWorkspaceFocusedSession,
+    onSetWorkspaceAnchorChat,
     onStartSessionRename,
     onSubmitSessionRename,
     onRemoveSessionFromWorkspace,

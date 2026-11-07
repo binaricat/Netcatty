@@ -90,6 +90,21 @@ test('sanitize accepts a valid saved preset and rejects malformed data', () => {
   );
 });
 
+test('plugin panes keep split uniqueness and limits; saved routes grant no availability and can be pruned', () => {
+  const tool = 'plugin-view:com.example.plugin.page' as const;
+  let layout = createSidePanelLayout('notes', 'notes');
+  layout = splitSidePanelPane(layout, 'notes', tool, 'vertical', { paneId: 'plugin', splitId: 'root' }, 600);
+  const unique = splitSidePanelPane(layout, 'notes', tool, 'vertical', { paneId: 'duplicate', splitId: 'unused' }, 600);
+  assert.equal(collectSidePanelPanes(unique.root).length, 2);
+  assert.equal(getFocusedSidePanelPane(unique).tool, tool);
+  assert.ok(createWorkspaceLayoutPreset(layout));
+  assert.equal(withoutUnavailableSidePanelTools(layout, (item) => item === 'notes')?.root.type, 'pane');
+  for (let i = 0; i < 10; i++) layout = splitSidePanelPane(layout, getFocusedSidePanelPane(layout).id,
+    `plugin-view:com.example.plugin.page${i}`, 'horizontal', { paneId: `p${i}`, splitId: `s${i}` }, 600);
+  assert.equal(collectSidePanelPanes(layout.root).length, 8);
+  assert.equal(sanitizeWorkspaceLayoutPreset({ version: 1, layout: { root: { id: 'invalid', type: 'pane', tool: 'plugin-view:../outside' }, focusedPaneId: 'invalid' } }), null);
+});
+
 test('sanitize rejects duplicate node ids', () => {
   assert.equal(
     sanitizeWorkspaceLayoutPreset({

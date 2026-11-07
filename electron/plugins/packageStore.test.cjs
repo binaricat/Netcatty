@@ -370,3 +370,89 @@ test("failed package validation removes every extracted staging file", async (co
   assert.deepEqual(await fs.promises.readdir(fixture.paths.staging), []);
   assert.deepEqual(fixture.database.listPlugins(), []);
 });
+
+test("host upgrade disables incompatible lazy plugins before contributions and retains data", async (context) => {
+  const fixture = createStore(context);
+  await fixture.store.initialize();
+  const archive = await createPackage(fixture.root, {
+    manifest: { engines: { netcatty: "<1.0.0", api: ">=0.1.0-internal <0.2.0" } },
+  });
+  const installed = await fixture.store.install(archive.archive, { enable: true });
+  fixture.database.setValue(installed.id, "synthetic", { retained: true });
+  fixture.store.netcattyVersion = "1.0.0";
+  await fixture.store.initialize();
+  const disabled = fixture.database.getActivePlugin(installed.id);
+  assert.equal(disabled.enabled, false);
+  assert.match(disabled.runtime.lastError, /incompatible.*Netcatty/);
+  assert.equal(disabled.activeVersion, installed.activeVersion);
+  assert.deepEqual(fixture.database.getValue(installed.id, "synthetic"), { retained: true });
+  assert.equal(fs.existsSync(fixture.store.resolvePackageRoot(disabled)), true);
+  await assert.rejects(fixture.store.assertCompatible(disabled), { code: "PLUGIN_INCOMPATIBLE" });
+  fixture.store.netcattyVersion = "0.0.0";
+  await fixture.store.initialize();
+  assert.equal(fixture.database.getActivePlugin(installed.id).enabled, false,
+    "returning to a compatible host must not silently re-enable code");
+});
+
+for (const target of [
+  { apiVersion: "0.2.0" },
+  { supportedFeatures: [] },
+]) {
+  test(`startup checks API and required feature compatibility: ${JSON.stringify(target)}`, async (context) => {
+    const fixture = createStore(context, { supportedFeatures: ["example.feature"] });
+    await fixture.store.initialize();
+    const archive = await createPackage(fixture.root, {
+      manifest: { features: { required: ["example.feature"] } },
+    });
+    const installed = await fixture.store.install(archive.archive, { enable: true });
+    Object.assign(fixture.store, target);
+    await fixture.store.initialize();
+    assert.equal(fixture.database.getActivePlugin(installed.id).enabled, false);
+  });
+}
+
+test("explicit disabled import never auto-enables an update of an enabled plugin", async (context) => {
+  const fixture = createStore(context);
+  await fixture.store.initialize();
+  const first = await createPackage(fixture.root);
+  await fixture.store.install(first.archive, { enable: true });
+  const update = await createPackage(fixture.root, { manifest: { version: "1.1.0" } });
+  const installed = await fixture.store.install(update.archive, { enable: false });
+  assert.equal(installed.activeVersion, "1.1.0");
+  assert.equal(installed.enabled, false);
+});
+
+test("catalog installation verifies actual package manifest and rejects Node before activation", async (context) => {
+  const fixture = createStore(context);
+  await fixture.store.initialize();
+  const archive = await createPackage(fixture.root, { manifest: { license: "MIT" } });
+  const sha256 = createHash("sha256").update(await fs.promises.readFile(archive.archive)).digest("hex");
+  const entry = { id: archive.manifest.id, version: archive.manifest.version, license: "MIT", manifest: archive.manifest, artifact: { sha256 } };
+  await assert.rejects(fixture.store.install(archive.archive, { catalog: { ...entry, version: "9.0.0" } }), /identity\/version/);
+  await assert.rejects(fixture.store.install(archive.archive, { catalog: { ...entry, artifact: { sha256: "0".repeat(64) } } }), /SHA-256/);
+  await assert.rejects(fixture.store.install(archive.archive, { catalog: { ...entry, manifest: { ...archive.manifest, description: "different" } } }), /manifest does not match/);
+  assert.equal(fixture.database.listPlugins().length, 0);
+  assert.equal((await fixture.store.install(archive.archive, { enable: false, catalog: entry })).enabled, false);
+  const advanced = await createPackage(fixture.root, { manifest: { version: "2.0.0", license: "MIT", main: { node: "dist/index.js" }, permissions: { required: ["runtime.advanced"] } } });
+  const advancedEntry = { ...entry, version: "2.0.0", manifest: advanced.manifest, artifact: { sha256: createHash("sha256").update(await fs.promises.readFile(advanced.archive)).digest("hex") } };
+  await assert.rejects(fixture.store.install(advanced.archive, { catalog: advancedEntry }), /browser-only packages/);
+  assert.equal(fixture.database.getActivePlugin(entry.id).activeVersion, "1.0.0");
+});
+
+test("normal release refuses advanced local imports and disables previously installed lazy packages", async (context) => {
+  const fixture = createStore(context);
+  await fixture.store.initialize();
+  const archive = await createPackage(fixture.root, { manifest: {
+    main: { browser: "dist/index.js", node: "dist/index.js" },
+    permissions: { optional: ["runtime.advanced"] },
+  } });
+  const installed = await fixture.store.install(archive.archive, { enable: true });
+  fixture.database.setValue(installed.id, "synthetic", 42);
+  fixture.store.allowAdvancedPlugins = false;
+  await fixture.store.initialize();
+  assert.equal(fixture.database.getActivePlugin(installed.id).enabled, false);
+  assert.match(fixture.database.getActivePlugin(installed.id).runtime.lastError, /developer mode/);
+  assert.equal(fixture.database.getValue(installed.id, "synthetic"), 42);
+  await assert.rejects(fixture.store.install(archive.archive), /browser-only packages/);
+  await assert.rejects(fixture.store.assertCompatible(installed), /browser-only packages/);
+});

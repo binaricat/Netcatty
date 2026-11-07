@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { registerAppHandlers } from './appHandlersBridge';
+import { registerAppHandlers, stabilizeAppHandlers, type StableAppHandlerCache } from './appHandlersBridge';
 import { publishAppLocalUi } from './appLocalUiStore';
 import { activeTabStore, toEditorTabId, fromEditorTabId, isEditorTabId } from '../state/activeTabStore';
 import { useAutoSync } from '../state/useAutoSync';
@@ -19,6 +19,8 @@ import {
 } from '../state/connectionLogsStore';
 import { getNotesSnapshot } from '../state/notesStore';
 import { useVaultAgentBridge } from '../state/useVaultAgentBridge';
+import { terminalReconnectRegistry } from '../state/terminalReconnectRegistry';
+import { requestAgentSessionReconnect } from '../state/agentSessionReconnect';
 import { useWindowControls } from '../state/useWindowControls';
 import { useTerminalKeyboardFocus } from '../state/useTerminalKeyboardFocus';
 import { editorTabStore, useEditorTabChromeList } from '../state/editorTabStore';
@@ -56,9 +58,12 @@ import {
 } from '../../domain/terminalAppearance';
 import { selectConnectionLogForTerminalDataCapture } from '../../domain/connectionLog';
 import { collectSessionIds } from '../../domain/workspace';
-import { resolveAgentHostWorkspace } from '../../domain/agentHostWorkspace';
+import { resolveAgentHostOpenWorkspace } from '../../domain/agentHostWorkspace';
+import { getAISessionsSnapshot } from '../state/aiSessionsStore';
+import { peekAgentRuntimeCleanup } from '../../infrastructure/ai/harness/agentRuntimeHandle';
 import { useHostOpenSessionReuse } from '../state/useHostOpenSessionReuse';
 import type { PaneMagnificationController } from '../../domain/paneMagnification';
+import { isPluginViewEditingTarget } from '../state/pluginKeybindings';
 import { resolveCloseIntent } from '../state/resolveCloseIntent';
 import { resolveSnippetsShortcutIntent } from '../state/resolveSnippetsShortcutIntent';
 import { isPrimaryModifierWBinding, resolveWindowCommandCloseIntent } from '../state/windowCommandClose';
@@ -133,7 +138,6 @@ export function AppSideEffects() {
     | { mode: 'create' }
     | null
   >(null);
-  const [quickSearch, setQuickSearch] = useState('');
   // Protocol selection dialog state for QuickSwitcher
   const [protocolSelectHost, setProtocolSelectHost] = useState<Host | null>(null);
   // Navigation state for VaultView sections
@@ -611,7 +615,7 @@ export function AppSideEffects() {
   const _handleTrayPanelConnect = useEffectEvent((hostId: string) => { return handleTrayPanelConnectImpl(() => ({ addConnectionLog, connectToHost, hostId, hosts, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef, t, toast }), hostId); });
   const _handleTrayPanelConnectRequest = useEffectEvent((hostId: string) => { return handleTrayPanelConnectRequestImpl(() => ({ connectNow: _handleTrayPanelConnect, hostId, isVaultInitialized, queueConnect: (queuedHostId: string) => setPendingTrayPanelConnectHostIds((prev) => [...prev, queuedHostId]) }), hostId); });
   const _handleGlobalHotkeyKeyDown = useEffectEvent((e: KeyboardEvent) => { return handleGlobalHotkeyKeyDownImpl(() => ({ HOTKEY_DEBUG, closeTabKeyStr, e, executeHotkeyAction, hotkeyScheme, keyBindings, matchesKeyBinding }), e); });
-  const _handleEscapeKeyDown = useEffectEvent((e: KeyboardEvent) => { return handleEscapeKeyDownImpl(() => ({ e, isQuickSwitcherOpen, setIsQuickSwitcherOpen, sftpPaneMagnificationRef, terminalPaneMagnificationRef }), e); });
+  const _handleEscapeKeyDown = useEffectEvent((e: KeyboardEvent) => { return handleEscapeKeyDownImpl(() => ({ e, isQuickSwitcherOpen, setIsQuickSwitcherOpen }), e); });
 
   // Vault hosts for tray / auto-start; terminalHosts (vault + ephemeral) only for
   // dedicated transfer resume so quick-connect rows do not break tray connect.
@@ -716,7 +720,7 @@ export function AppSideEffects() {
   }, [isVaultInitialized, pendingTrayPanelConnectHostIds]);
 
   // Handle keyboard-interactive submit
-  const handleKeyboardInteractiveSubmit = useCallback((requestId: string, responses: string[], savePassword?: string) => { return handleKeyboardInteractiveSubmitImpl(() => ({ hosts, hostsRef, keyboardInteractiveQueue, netcattyBridge, requestId, responses, savePassword, sessions, setKeyboardInteractiveQueue, t, toast, updateHosts }), requestId, responses, savePassword); }, [keyboardInteractiveQueue, sessions, hosts, t, updateHosts]);
+  const handleKeyboardInteractiveSubmit = useCallback((requestId: string, responses: string[], savePassword?: string) => { return handleKeyboardInteractiveSubmitImpl(() => ({ hosts, hostsRef, identities, keyboardInteractiveQueue, netcattyBridge, requestId, responses, savePassword, sessions, setKeyboardInteractiveQueue, t, toast, updateHosts }), requestId, responses, savePassword); }, [identities, keyboardInteractiveQueue, sessions, hosts, t, updateHosts]);
 
   // Handle keyboard-interactive cancel
   const handleKeyboardInteractiveCancel = useCallback((requestId: string) => { return handleKeyboardInteractiveCancelImpl(() => ({ netcattyBridge, requestId, setKeyboardInteractiveQueue, t, toast }), requestId); }, [t]);
@@ -1156,6 +1160,8 @@ export function AppSideEffects() {
     const topmostOpenDialog = openDialogs[openDialogs.length - 1] ?? null;
     const topmostDialogClose = topmostOpenDialog?.querySelector<HTMLElement>('[data-dialog-close="true"]');
 
+    if (!topmostDialogClose && isPluginViewEditingTarget(document.activeElement)) return;
+
     const intent = resolveWindowCommandCloseIntent({
       activeTabId: activeTabStore.getActiveTabId(),
       editorTabIds: editorTabs.map((tab) => toEditorTabId(tab.id)),
@@ -1229,19 +1235,11 @@ export function AppSideEffects() {
 
   useEffect(() => {
     if (appLockLocked) return;
-    const onCaptureKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      const target = e.target;
-      if (!(target instanceof HTMLElement) || !target.closest('.xterm')) return;
-      _handleEscapeKeyDown(e);
-    };
     const onKeyDown = (e: KeyboardEvent) => {
       _handleEscapeKeyDown(e);
     };
-    window.addEventListener('keydown', onCaptureKeyDown, true);
     window.addEventListener('keydown', onKeyDown);
     return () => {
-      window.removeEventListener('keydown', onCaptureKeyDown, true);
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [appLockLocked]);
@@ -1501,8 +1499,21 @@ export function AppSideEffects() {
     return sessionId;
   }, [handleConnectToHost, renameSessionInline]);
 
-  const openHostForVaultAgent = useCallback((host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string }) => {
-    const target = resolveAgentHostWorkspace(options?.workspaceId, activeTabStore.getActiveTabId(), workspaces.map(workspace => workspace.id));
+  const openHostForVaultAgent = useCallback((host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string; chatSessionId?: string }) => {
+    // A resumed history chat can run in a panel other than its saved binding.
+    // Prefer that turn's captured scope, never the window's current focus.
+    // Outside a running turn, retain the saved chat binding as the fallback.
+    const chat = options?.chatSessionId
+      ? getAISessionsSnapshot().sessions.find((session) => session.id === options.chatSessionId)
+      : undefined;
+    const turnScope = options?.chatSessionId
+      ? peekAgentRuntimeCleanup()?.getActiveScope?.(options.chatSessionId)
+      : undefined;
+    const target = resolveAgentHostOpenWorkspace(options?.workspaceId, turnScope ? { scope: turnScope } : chat, {
+      activeTabId: activeTabStore.getActiveTabId(),
+      workspaceIds: workspaces.map(workspace => workspace.id),
+      terminalSessions: sessionsRef.current,
+    });
     if (target.error) return { ok: false as const, error: target.error };
     // Silent sessions only apply to actual external MCP clients (chatSessionId
     // equals the reserved external-MCP scope). The in-app Catty AI chat's
@@ -1523,6 +1534,19 @@ export function AppSideEffects() {
   const findExistingSessionForHostForVaultAgent = useHostOpenSessionReuse({
     sessions, hosts, keys, identities, resolveEffectiveHost,
   });
+
+  const reconnectSessionForVaultAgent = useCallback((sessionId: string) => {
+    const session = sessions.find((entry) => entry.id === sessionId);
+    return requestAgentSessionReconnect(sessionId, session?.status, terminalReconnectRegistry);
+  }, [sessions]);
+
+  const inspectSessionRecoveryForVaultAgent = useCallback((sessionId: string) => {
+    const session = sessions.find((entry) => entry.id === sessionId);
+    if (!session) return { ok: false, error: `Session "${sessionId}" was not found.` };
+    const live = terminalReconnectRegistry.inspect(sessionId);
+    return { ok: true, sessionId, status: session.status, waitingForInput: false,
+      reconnecting: false, reconnectAllowed: false, ...live };
+  }, [sessions]);
 
   const closeSessionForVaultAgent = useCallback((sessionId: string) => {
     if (!sessions.some((session) => session.id === sessionId)) {
@@ -1568,6 +1592,8 @@ export function AppSideEffects() {
     openHost: openHostForVaultAgent,
     findExistingSessionForHost: findExistingSessionForHostForVaultAgent,
     closeSession: closeSessionForVaultAgent,
+    reconnectSession: reconnectSessionForVaultAgent,
+    inspectSessionRecovery: inspectSessionRecoveryForVaultAgent,
     getScriptSessionMeta: (sessionId) => sessions.find((session) => session.id === sessionId),
   });
 
@@ -1944,7 +1970,7 @@ export function AppSideEffects() {
   const hasMultipleProtocols = useCallback((host: Host) => { return hasMultipleProtocolsImpl(() => ({ host, resolveEffectiveHost }), host); }, [resolveEffectiveHost]);
 
   // Handle host connect with protocol selection (used by QuickSwitcher)
-  const handleHostConnectWithProtocolCheck = useCallback((host: Host) => { return handleHostConnectWithProtocolCheckImpl(() => ({ handleConnectToHost, hasMultipleProtocols, host, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost, setQuickSearch }), host); }, [hasMultipleProtocols, handleConnectToHost, resolveEffectiveHost]);
+  const handleHostConnectWithProtocolCheck = useCallback((host: Host) => { return handleHostConnectWithProtocolCheckImpl(() => ({ handleConnectToHost, hasMultipleProtocols, host, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost }), host); }, [hasMultipleProtocols, handleConnectToHost, resolveEffectiveHost]);
 
   // Handle protocol selection from dialog
   const handleProtocolSelect = useCallback((protocol: HostProtocol, port: number) => { return handleProtocolSelectImpl(() => ({ handleConnectToHost, port, protocol, protocolSelectHost, setProtocolSelectHost }), protocol, port); }, [protocolSelectHost, handleConnectToHost]);
@@ -2012,8 +2038,11 @@ export function AppSideEffects() {
 
   // Hosts assemble domain bags from stores + this flat glue. Do NOT register
   // catalog arrays or prepared vault/terminal/chrome/dialogs domain bags here.
+  // Handlers are registered behind stable per-key wrappers so session/host
+  // churn does not re-notify every Host (see stabilizeAppHandlers).
+  const appHandlerCacheRef = useRef<StableAppHandlerCache>(new Map());
   useLayoutEffect(() => {
-    registerAppHandlers({
+    registerAppHandlers(stabilizeAppHandlers(appHandlerCacheRef.current, {
       // Vault glue
       handleAddKnownHost,
       handleDeleteHost,
@@ -2073,15 +2102,13 @@ export function AppSideEffects() {
       setIsCreateWorkspaceOpen,
       setIsQuickSwitcherOpen,
       setProtocolSelectHost,
-      setQuickSearch,
       handleCancelDeleteHost,
       handleConfirmDeleteHost,
-    });
+    }));
     publishAppLocalUi({
       isQuickSwitcherOpen,
       isCreateWorkspaceOpen,
       addToWorkspaceDialog,
-      quickSearch,
       protocolSelectHost,
       navigateToSection,
       deepLinkHostDraft,
@@ -2147,7 +2174,6 @@ export function AppSideEffects() {
     isQuickSwitcherOpen,
     isCreateWorkspaceOpen,
     addToWorkspaceDialog,
-    quickSearch,
     protocolSelectHost,
     navigateToSection,
     deepLinkHostDraft,

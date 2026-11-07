@@ -1,6 +1,9 @@
 import { matchesSearchQuery } from "../lib/searchMatcher";
 import {
   SETTINGS_SEARCH_CATALOG,
+  isSettingsEntryAvailableOn,
+  resolveSettingsPlatform,
+  type SettingsPlatform,
   type SettingsSearchEntry,
   type SettingsTabId,
 } from "./settingsSearchCatalog";
@@ -61,16 +64,22 @@ export function filterSettingsSearchCatalog(
     catalog?: readonly SettingsSearchEntry[];
     includePlugins?: boolean;
     limit?: number;
+    /** Platform whose settings UI will receive the jump; defaults to the host. */
+    platform?: SettingsPlatform;
   },
 ): SettingsSearchHit[] {
   const catalog = options?.catalog ?? SETTINGS_SEARCH_CATALOG;
   const includePlugins = options?.includePlugins ?? true;
   const limit = options?.limit ?? 40;
+  const platform = options?.platform ?? resolveSettingsPlatform();
   const trimmed = query.trim();
 
   const hits: SettingsSearchHit[] = [];
   for (const entry of catalog) {
     if (!includePlugins && entry.tab === "plugins") continue;
+    // Platform-gated settings are hidden from search where their anchor is not
+    // rendered, so a hit always has a real control to focus.
+    if (!isSettingsEntryAvailableOn(entry, platform)) continue;
     const hit = buildSettingsSearchHit(entry, t);
     if (!trimmed) {
       hits.push(hit);

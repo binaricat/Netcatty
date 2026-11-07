@@ -10,9 +10,11 @@ import {
   formatTerminalTitleConnectionAddress,
   focusTerminalFromDisconnectedNotice,
   getLineTimestampToggleHostUpdate,
+  resolveLineTimestampGutterLayout,
   resolveNetworkDeviceTipRightInset,
   resolveTerminalRightInset,
   resolveTerminalTopOffsets,
+  subscribeTerminalAlternateScreenChanges,
   shouldBlockTerminalReconnectForTarget,
   shouldEnableStatusBarDisconnect,
   shouldEnableStatusBarReconnect,
@@ -180,6 +182,127 @@ test("line timestamp toolbar toggle is hidden when timestamps are unavailable", 
   assert.equal(shouldShowLineTimestampToolbarToggle(true, () => {}), true);
   assert.equal(shouldShowLineTimestampToolbarToggle(undefined, () => {}), true);
   assert.equal(shouldShowLineTimestampToolbarToggle(true, undefined), false);
+});
+
+test("line timestamp gutter reserves no space while the alternate screen is active", () => {
+  assert.deepEqual(resolveLineTimestampGutterLayout({
+    showLineTimestampGutter: true,
+    alternateScreenActive: true,
+    gutterWidth: 72,
+  }), { enabled: false, width: 0 });
+  assert.deepEqual(resolveLineTimestampGutterLayout({
+    showLineTimestampGutter: true,
+    alternateScreenActive: false,
+    gutterWidth: 72,
+  }), { enabled: true, width: 72 });
+  assert.deepEqual(resolveLineTimestampGutterLayout({
+    showLineTimestampGutter: false,
+    alternateScreenActive: false,
+    gutterWidth: 72,
+  }), { enabled: false, width: 0 });
+
+  const source = readFileSync(new URL("./TerminalView.tsx", import.meta.url), "utf8");
+  assert.match(source, /const activeLineTimestampGutterWidth = lineTimestampGutterLayout\.width/);
+  assert.match(source, /enabled=\{lineTimestampGutterLayout\.enabled\}/);
+  assert.doesNotMatch(source, /enabled=\{showLineTimestampGutter\}/);
+  assert.match(source, /aria-pressed=\{showLineTimestampGutter\}/);
+  assert.doesNotMatch(source, /aria-pressed=\{[^}]*alternateScreenActive/);
+});
+
+type AlternateScreenWatchTerm = {
+  buffer: { active: { type: string } };
+  onRender: (callback: () => void) => { dispose: () => void };
+};
+
+function createAlternateScreenWatchTerm(type: "normal" | "alternate") {
+  const renders: Array<() => void> = [];
+  let disposed = 0;
+  const term: AlternateScreenWatchTerm = {
+    buffer: { active: { type } },
+    onRender(callback) {
+      renders.push(callback);
+      return { dispose: () => { disposed += 1; } };
+    },
+  };
+  return {
+    term,
+    renders,
+    disposeCount: () => disposed,
+  };
+}
+
+test("alternate screen enter and leave drive the timestamp gutter", (t) => {
+  const watched = createAlternateScreenWatchTerm("normal");
+  const seen: boolean[] = [];
+  const stop = subscribeTerminalAlternateScreenChanges(
+    () => watched.term,
+    (active) => { seen.push(active); },
+  );
+  t.after(stop);
+
+  assert.deepEqual(seen, [false]);
+  watched.term.buffer.active.type = "alternate";
+  watched.renders[0]();
+  watched.renders[0]();
+  watched.term.buffer.active.type = "normal";
+  watched.renders[0]();
+  assert.deepEqual(seen, [false, true, false]);
+
+  stop();
+  assert.equal(watched.disposeCount(), 1);
+  watched.term.buffer.active.type = "alternate";
+  watched.renders[0]();
+  assert.deepEqual(seen, [false, true, false]);
+});
+
+test("alternate screen watch attaches after the terminal runtime exists", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const watched = createAlternateScreenWatchTerm("alternate");
+  let current: AlternateScreenWatchTerm | null = null;
+  const seen: boolean[] = [];
+  const stop = subscribeTerminalAlternateScreenChanges(
+    () => current,
+    (active) => { seen.push(active); },
+  );
+  t.after(() => {
+    stop();
+    t.mock.timers.reset();
+  });
+
+  assert.deepEqual(seen, [false]);
+  current = watched.term;
+  t.mock.timers.tick(50);
+  assert.deepEqual(seen, [false, true]);
+  assert.equal(watched.renders.length, 1);
+  t.mock.timers.tick(500);
+  assert.equal(watched.renders.length, 1);
+  assert.deepEqual(seen, [false, true]);
+});
+
+test("alternate screen watch follows a replacement terminal runtime", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const first = createAlternateScreenWatchTerm("alternate");
+  const second = createAlternateScreenWatchTerm("normal");
+  let current: AlternateScreenWatchTerm = first.term;
+  const seen: boolean[] = [];
+  const stop = subscribeTerminalAlternateScreenChanges(
+    () => current,
+    (active) => { seen.push(active); },
+  );
+  t.after(() => {
+    stop();
+    t.mock.timers.reset();
+  });
+
+  assert.deepEqual(seen, [true]);
+  current = second.term;
+  t.mock.timers.tick(250);
+  assert.deepEqual(seen, [true, false]);
+  assert.equal(first.disposeCount(), 1);
+  assert.equal(second.renders.length, 1);
+  second.term.buffer.active.type = "alternate";
+  second.renders[0]();
+  assert.deepEqual(seen, [true, false, true]);
 });
 
 test("selection AI overlay honors the visibility preference", () => {

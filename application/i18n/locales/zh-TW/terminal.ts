@@ -1,6 +1,24 @@
 import type { Messages } from '../types';
 
 export const zhTWTerminalMessages: Messages = {
+  'terminal.directory.open': '目前目錄：{path}。變更目錄',
+  'terminal.directory.unknown': '目錄未知',
+  'terminal.directory.search': '搜尋目前目錄下的資料夾…',
+  'terminal.directory.directories': '目錄',
+  'terminal.directory.parent': '..（父目錄）',
+  'terminal.directory.loading': '正在讀取目錄…',
+  'terminal.directory.empty': '沒有子目錄',
+  'terminal.directory.noMatches': '沒有符合的子目錄',
+  'terminal.directory.hidden': '顯示隱藏目錄',
+  'terminal.directory.refresh': '重新整理',
+  'terminal.directory.unavailable': '此工作階段暫不支援目錄導覽。',
+  'terminal.directory.busy': '請等待終端回到空白命令提示字元。',
+  'terminal.directory.readFailed': '無法讀取此目錄，請重新整理後重試。',
+  'terminal.directory.changeFailed': '未能確認目錄切換，請重新整理後重試。',
+  'terminal.directory.unsupportedPath': '此目錄名稱暫不支援快速切換。',
+  'settings.terminal.behavior.contextChips': 'Context Chips 上下文工具列',
+  'settings.terminal.behavior.contextChips.desc': '在撰寫列的快捷命令下方顯示上下文工具列。',
+
   'terminal.toolbar.openSessionLog': '開啟工作階段日誌',
   'terminal.toolbar.sessionLogActions': '工作階段日誌操作',
   'terminal.toolbar.sessionLog.menu': '工作階段日誌',

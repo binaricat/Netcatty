@@ -288,9 +288,9 @@ class BrowserPluginRuntime {
     this.router.notify(method, params);
   }
 
-  openStream(streamId, windowBytes) {
+  openStream(streamId, windowBytes, options) {
     if (!this.router) return Promise.reject(new Error("Plugin browser runtime is not connected"));
-    return this.router.streams.openOutgoing(streamId, windowBytes);
+    return this.router.streams.openOutgoing(streamId, windowBytes, options);
   }
 
   getProcessId() {

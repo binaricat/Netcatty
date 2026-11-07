@@ -33,6 +33,7 @@ import {
   type ToolResultDedup,
 } from './toolResultDedup';
 import cattyToolSpecs from './generated/cattyToolSpecs.json';
+import globalAgentToolSpecs from './generated/globalAgentToolSpecs.json';
 import {
   cattyToolContextSchema,
   toolDepsFromContext,
@@ -739,6 +740,7 @@ export function createCattyToolsFromCatalog(
   chatSessionId?: string,
   toolOutputStore?: ToolOutputStore,
   toolResultDedup?: ToolResultDedup,
+  selection?: { agentKind?: import('../agentKinds').AgentKind; allowedCapabilityIds?: readonly string[] },
 ): CattyToolsBundle {
   const sharedContext = buildCattyToolContext({
     bridge,
@@ -754,7 +756,10 @@ export function createCattyToolsFromCatalog(
   const catalogTools: Record<string, ReturnType<typeof tool>> = {};
   const toolsContext: Record<string, CattyToolContext> = {};
 
-  for (const rawSpec of cattyToolSpecs as CattyToolSpec[]) {
+  const selectedSpecs = selection?.agentKind === 'global' ? globalAgentToolSpecs : cattyToolSpecs;
+  const allowed = selection?.allowedCapabilityIds ? new Set(selection.allowedCapabilityIds) : null;
+  for (const rawSpec of selectedSpecs as CattyToolSpec[]) {
+    if (allowed && !allowed.has(rawSpec.capabilityId)) continue;
     if (rawSpec.capabilityId === 'harness.web.search' && !isWebSearchReady(webSearchConfig)) {
       continue;
     }

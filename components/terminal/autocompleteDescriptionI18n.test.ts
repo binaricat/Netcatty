@@ -34,6 +34,33 @@ const dockerSpec: FigSpec = {
   ],
 };
 
+const TOUCH = {
+  command: "Change file access and modification times",
+  adjust: "Adjust the access and modification time stamps for the file by the specified value",
+  access: "Change the access time of the file",
+  noCreate: "Do not create the file if it does not exist",
+  force: "Attempt to force the update, even if the file permissions do not currently permit it",
+  link: "If the file is a symbolic link, change the times of the link itself rather than the file that the link points to",
+  modify: "Change the modification time of the file",
+  reference: "Use the access and modifications times from the specified file instead of the current time of day",
+  timestamp: "Change the access and modification times to the specified time instead of the current time of day",
+} as const;
+
+const touchSpec: FigSpec = {
+  name: "touch",
+  description: TOUCH.command,
+  options: [
+    { name: "-A", description: TOUCH.adjust },
+    { name: "-a", description: TOUCH.access },
+    { name: "-c", description: TOUCH.noCreate },
+    { name: "-f", description: TOUCH.force },
+    { name: "-h", description: TOUCH.link },
+    { name: "-m", description: TOUCH.modify },
+    { name: "-r", description: TOUCH.reference },
+    { name: "-t", description: TOUCH.timestamp },
+  ],
+};
+
 Object.defineProperty(globalThis, "localStorage", {
   value: {
     getItem: () => null,
@@ -47,8 +74,11 @@ Object.defineProperty(globalThis, "localStorage", {
 Object.defineProperty(globalThis, "window", {
   value: {
     netcatty: {
-      listFigSpecs: async () => ["docker"],
-      loadFigSpec: async (commandName: string) => commandName === "docker" ? dockerSpec : null,
+      listFigSpecs: async () => ["docker", "touch"],
+      loadFigSpec: async (commandName: string) => ({
+        docker: dockerSpec,
+        touch: touchSpec,
+      } as Record<string, FigSpec>)[commandName] ?? null,
     },
   },
   configurable: true,
@@ -122,6 +152,24 @@ test("locales other than zh-CN and zh-TW keep English descriptions", async () =>
     assert.equal(suggestionNamed(suggestions, "--process-sample")?.description, PROCESS_TREE);
   }
   assert.equal(dockerSpec.subcommands?.[0].options?.[0].description, SINCE);
+});
+
+test("zh-CN translates touch options without changing the command", async () => {
+  const suggestions = await getCompletions("touch -", {
+    locale: "zh-CN",
+    skipPathCompletion: true,
+    maxResults: 20,
+  });
+
+  assert.equal(suggestionNamed(suggestions, "-A")?.description, "按指定值调整文件的访问时间和修改时间");
+  assert.equal(suggestionNamed(suggestions, "-a")?.description, "仅修改文件的访问时间");
+  assert.equal(suggestionNamed(suggestions, "-c")?.description, "文件不存在时不创建文件");
+  assert.equal(suggestionNamed(suggestions, "-f")?.description, "即使当前文件权限不允许，也尝试强制更新时间");
+  assert.equal(suggestionNamed(suggestions, "-h")?.description, "如果文件是符号链接，则修改链接本身的时间，而不是链接所指向文件的时间");
+  assert.equal(suggestionNamed(suggestions, "-m")?.description, "仅修改文件的修改时间");
+  assert.equal(suggestionNamed(suggestions, "-r")?.description, "使用指定文件的访问时间和修改时间，而不是当前时间");
+  assert.equal(suggestionNamed(suggestions, "-t")?.description, "将访问时间和修改时间设为指定时间，而不是当前时间");
+  assert.equal(touchSpec.options?.[0].description, TOUCH.adjust);
 });
 
 test("zh-CN and zh-TW overlays do not leak across later lookups", async () => {

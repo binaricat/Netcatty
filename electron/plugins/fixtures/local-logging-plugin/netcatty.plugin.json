@@ -1,0 +1,29 @@
+{
+  "manifestVersion": 1,
+  "id": "com.example.local-logging-fixture",
+  "name": "local-logging-fixture",
+  "displayName": "Synthetic local logging fixture",
+  "description": "Synthetic diagnostics and denied-operation checks. No real data or credentials.",
+  "version": "0.1.0",
+  "publisher": "example",
+  "engines": { "netcatty": ">=0.0.0", "api": ">=0.1.0-internal <0.2.0" },
+  "main": { "browser": "index.js" },
+  "activationEvents": [
+    "onCommand:com.example.local-logging-fixture.emit",
+    "onCommand:com.example.local-logging-fixture.noise",
+    "onCommand:com.example.local-logging-fixture.denied"
+  ],
+  "permissions": { "required": ["commands", "menus"], "optional": [] },
+  "contributes": {
+    "commands": [
+      { "id": "com.example.local-logging-fixture.emit", "title": "Emit synthetic diagnostic", "category": "Logging QA" },
+      { "id": "com.example.local-logging-fixture.noise", "title": "Emit synthetic diagnostic burst", "category": "Logging QA" },
+      { "id": "com.example.local-logging-fixture.denied", "title": "Test undeclared network denial", "category": "Logging QA" }
+    ],
+    "menus": [
+      { "command": "com.example.local-logging-fixture.emit", "location": "commandPalette" },
+      { "command": "com.example.local-logging-fixture.noise", "location": "commandPalette" },
+      { "command": "com.example.local-logging-fixture.denied", "location": "commandPalette" }
+    ]
+  }
+}

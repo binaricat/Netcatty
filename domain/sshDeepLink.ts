@@ -165,6 +165,7 @@ export const buildSshDeepLinkHostDraft = (
   tags: [],
   os: "linux",
   protocol: "ssh",
+  sshInputCompatibility: false,
   createdAt: options.now,
 });
 

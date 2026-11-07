@@ -70,6 +70,9 @@ import SelectHostPanel from "../SelectHostPanel";
 import { DistroAvatar } from "../DistroAvatar";
 import { ResourceBar } from "../systemManager/ResourceBar";
 import { MonitorDiskUsage } from "./MonitorDiskUsage";
+import { MonitorDiskIo } from "./MonitorDiskIo";
+import { useMonitorDiskGroups } from "../../application/state/useMonitorDiskGroups";
+import { formatMonitorRate as rate } from "../../domain/monitorFormatting";
 import { VaultHeaderSearch, VaultPageHeader, vaultHeaderIconButtonClass, vaultHeaderSecondaryButtonClass } from "./VaultPageHeader";
 import { toast } from "../ui/toast";
 import { TooltipProvider } from "../ui/tooltip";
@@ -85,12 +88,6 @@ const capacity = (n: number | null | undefined) =>
     : n >= 1024
       ? `${(n / 1024).toFixed(1)} GiB`
       : `${n.toFixed(0)} MiB`;
-const rate = (n: number | null | undefined) =>
-  n == null
-    ? "--"
-    : n >= 1048576
-      ? `${(n / 1048576).toFixed(1)} MiB/s`
-      : `${(n / 1024).toFixed(1)} KiB/s`;
 
 const monitorAsideHeaderClass =
   "relative h-14 py-0 border-b-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px after:origin-bottom after:[transform:scaleY(.5)] after:bg-border/40 after:content-['']";
@@ -209,6 +206,7 @@ export function MonitorPanels({
   const { t } = useI18n();
   const panels = useMonitorPanels();
   const runtime = useMonitorSnapshot();
+  const diskGroups = useMonitorDiskGroups();
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [dragging, setDragging] = useState<{ panelId: string; hostId: string } | null>(null);
@@ -835,7 +833,9 @@ export function MonitorPanels({
                         </Button>
                       </article>
                     )}
-                    renderCells={({ id, host, state }) => ({
+                    renderCells={({ id, host, state }, visibleColumns) => {
+                      const diskLayout = diskGroups.layoutFor(id, state?.stats);
+                      return ({
                       host: (<td>
                           <button
                             type="button"
@@ -900,10 +900,15 @@ export function MonitorPanels({
                             }
                           />
                         </td>),
-                      disks: (<td>
+                      disks: (<td className={diskLayout.rows.length === 1 && diskLayout.rows[0].kind === "disk" && diskLayout.rows[0].disk.mountPoint === "/" ? undefined : "!items-start"}>
                           <div className="w-full min-w-0">
-                            <MonitorDiskUsage stats={state?.stats} />
+                            <MonitorDiskUsage stats={state?.stats} listLayout={diskLayout} onToggleSystem={() => diskGroups.toggle(id)} />
                           </div>
+                        </td>),
+                      diskIo: (<td data-monitor-cell="diskIo" className="!items-start">
+                          <MonitorDiskIo stats={state?.stats} listLayout={diskLayout}
+                            showSystemToggle={!visibleColumns.includes("disks")}
+                            onToggleSystem={() => diskGroups.toggle(id)} />
                         </td>),
                       network: (<td
                           data-monitor-cell="network"
@@ -964,7 +969,8 @@ export function MonitorPanels({
                             <Terminal size={14} />
                           </Button>
                         </td>)
-                    })}
+                    });
+                    }}
                   />
                 </TooltipProvider>
               )}

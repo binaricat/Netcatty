@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import type { Terminal as XTerm } from '@xterm/xterm';
 import { ChevronsLeft, GripVertical, Minimize2, Network, PanelLeft, X as XIcon } from 'lucide-react';
 import { isTerminalSensitiveInputActive } from './runtime/terminalSensitiveInputRegistry';
 import { isSessionReconnectDisabled } from '../top-tabs/SessionTabContextMenuContent';
@@ -18,6 +19,7 @@ import {
   resolveTerminalTimestampGutterColor,
   resolveTerminalTimestampGutterWidth,
 } from './TerminalTimestampGutter';
+import { isTerminalAlternateScreenActive } from './terminalHibernateRuntime';
 import {
   Dialog,
   DialogContent,
@@ -120,6 +122,108 @@ export function shouldShowLineTimestampToolbarToggle(
   onUpdateHost: unknown,
 ): boolean {
   return lineTimestampsAvailable !== false && Boolean(onUpdateHost);
+}
+
+export function resolveLineTimestampGutterLayout({
+  showLineTimestampGutter,
+  alternateScreenActive,
+  gutterWidth,
+}: {
+  showLineTimestampGutter: boolean;
+  alternateScreenActive: boolean;
+  gutterWidth: number;
+}): { enabled: boolean; width: number } {
+  const enabled = showLineTimestampGutter && !alternateScreenActive;
+  return { enabled, width: enabled ? gutterWidth : 0 };
+}
+
+const ALTERNATE_SCREEN_ATTACH_RETRY_MS = 50;
+const ALTERNATE_SCREEN_RUNTIME_WATCH_MS = 250;
+
+type TerminalAlternateScreenDisposable = { dispose: () => void };
+
+type TerminalAlternateScreenWatchTarget = {
+  buffer?: { active?: { type?: string } };
+  onRender?: (callback: () => void) => TerminalAlternateScreenDisposable;
+};
+
+const readAlternateScreenActive = (
+  term: TerminalAlternateScreenWatchTarget | null | undefined,
+): boolean => {
+  try {
+    if (!term?.buffer?.active) return false;
+    return isTerminalAlternateScreenActive(term as XTerm);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Alternate-screen programs intentionally skip timestamp recording. onRender
+ * collapses and restores the gutter immediately. The timer attaches once xterm
+ * exists and follows a replacement runtime after hibernate or reconnect.
+ */
+export function subscribeTerminalAlternateScreenChanges(
+  getTerm: () => TerminalAlternateScreenWatchTarget | null | undefined,
+  onChange: (alternateScreenActive: boolean) => void,
+): () => void {
+  let disposed = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let renderDisposable: TerminalAlternateScreenDisposable | null = null;
+  let attachedTerm: TerminalAlternateScreenWatchTarget | null = null;
+  let lastActive: boolean | null = null;
+
+  const publish = (active: boolean) => {
+    if (disposed || lastActive === active) return;
+    lastActive = active;
+    onChange(active);
+  };
+
+  const detachRender = () => {
+    renderDisposable?.dispose();
+    renderDisposable = null;
+  };
+
+  const watch = () => {
+    if (disposed) return;
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+
+    const term = getTerm() ?? null;
+    if (term !== attachedTerm) {
+      detachRender();
+      attachedTerm = term;
+      if (term?.onRender) {
+        renderDisposable = term.onRender(() => {
+          if (disposed) return;
+          const current = getTerm() ?? null;
+          if (current !== term) {
+            watch();
+            return;
+          }
+          publish(readAlternateScreenActive(current));
+        });
+      }
+    }
+
+    publish(readAlternateScreenActive(term));
+    if (disposed) return;
+    const delay = term?.onRender
+      ? ALTERNATE_SCREEN_RUNTIME_WATCH_MS
+      : ALTERNATE_SCREEN_ATTACH_RETRY_MS;
+    timer = setTimeout(watch, delay);
+  };
+
+  watch();
+
+  return () => {
+    disposed = true;
+    if (timer !== null) clearTimeout(timer);
+    detachRender();
+    attachedTerm = null;
+  };
 }
 
 /** Keep the tab/pane; only tear down the live transport. */
@@ -390,7 +494,7 @@ function terminalViewCtxEqual(
 }
 
 function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalViewContext; isPaneMagnified?: boolean }) {
-  const { Activity, Button, Clock3, Copy, Maximize2, Radio, RefreshCcw, SquareArrowOutUpRight, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, Unplug, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, canUpdateHost, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTerminalProtocol, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDisconnect, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, composeSendToAll, onToggleComposeSendTarget, isCancelling, isComposeBarOpen, isConnectionAwaitingUserInput, isDraggingOver, isFocusMode, isFocusedPane, isLocalConnection, remoteDragDropUsesZmodem, isPluginTerminalProviderAvailable, isReconnectActive, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, identities, knownCwdRef, needsHostKeyVerification, onCloseSession, onDetach, onDetachPointerDown, onExpandToFocus, onTogglePaneMagnification, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onToggleBroadcast, onUpdateHost, osc52ReadPromptVisible, osc7SetupOpen, osc7SetupRunning, passwordPromptActiveRef, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, scriptExecutionOverlay, searchMatchCount, searchFocusToken, sessionDisplayName, sessionId, workspaceId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showDisconnectedTerminalNotice, showConnectionControls, showLogs, showSelectionAIAction, isRestoringSelectionRef, snippets, status, sudoHintRef, sudoHintText, passwordPickerState, onPasswordPickerSelect, passwordPickerTitle, passwordPickerEmptyText, t, termRef, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, terminalReconnectAvailable, reconnectNoticeMessage, timeLeft, toast, zmodem } = ctx;
+  const { Activity, Button, Clock3, Copy, Maximize2, Radio, RefreshCcw, SquareArrowOutUpRight, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, Unplug, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, canUpdateHost, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTerminalProtocol, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDisconnect, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, composeSendToAll, onToggleComposeSendTarget, isCancelling, isComposeBarOpen, isConnectionAwaitingUserInput, isDraggingOver, isFocusMode, isFocusedPane, isLocalConnection, remoteDragDropUsesZmodem, isPluginTerminalProviderAvailable, isReconnectActive, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, identities, knownCwdRef, needsHostKeyVerification, onCloseSession, onDetach, onDetachPointerDown, onExpandToFocus, onTogglePaneMagnification, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onToggleBroadcast, onUpdateHost, osc52ReadPromptVisible, osc7SetupOpen, osc7SetupRunning, passwordPromptActiveRef, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, scriptExecutionOverlay, searchMatchCount, searchFocusToken, sessionDisplayName, sessionId, workspaceId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showDisconnectedTerminalNotice, showConnectionControls, showLogs, showSelectionAIAction, isRestoringSelectionRef, snippets, status, sudoHintRef, sudoHintText, passwordPickerState, onPasswordPickerSelect, passwordPickerTitle, passwordPickerEmptyText, t, termRef, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, terminalReconnectAvailable, reconnectNoticeMessage, connectionDeadlineAt, connectionTimeoutSeconds, toast, zmodem } = ctx;
   // Context menu only needs a snapshot at open; avoid selection state lifting into Terminal.
   const [contextMenuHasSelection, setContextMenuHasSelection] = useState(false);
   const isNetworkDevice = host.deviceType === 'network'
@@ -486,6 +590,11 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
   }, [hostTimestampsEnabled, timestampOverride]);
   const showLineTimestampGutter = lineTimestampsAvailable !== false
     && (timestampOverride ?? hostTimestampsEnabled);
+  const [alternateScreenActive, setAlternateScreenActive] = useState(false);
+  useEffect(() => subscribeTerminalAlternateScreenChanges(
+    () => termRef.current,
+    setAlternateScreenActive,
+  ), [sessionId, status, termRef]);
   const lineTimestampColor = resolveTerminalTimestampGutterColor(effectiveTheme.colors);
   const [lineTimestampGutterWidth, setLineTimestampGutterWidth] = useState(() => (
     resolveTerminalTimestampGutterWidth({ fontSize: effectiveFontSize })
@@ -497,7 +606,12 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
   const handleLineTimestampGutterWidthChange = useCallback((width: number) => {
     setLineTimestampGutterWidth((current) => (current === width ? current : width));
   }, []);
-  const activeLineTimestampGutterWidth = showLineTimestampGutter ? lineTimestampGutterWidth : 0;
+  const lineTimestampGutterLayout = resolveLineTimestampGutterLayout({
+    showLineTimestampGutter,
+    alternateScreenActive,
+    gutterWidth: lineTimestampGutterWidth,
+  });
+  const activeLineTimestampGutterWidth = lineTimestampGutterLayout.width;
   const lineTimestampToggleLabel = showLineTimestampGutter
     ? t("terminal.toolbar.timestampsDisable")
     : t("terminal.toolbar.timestampsEnable");
@@ -1086,7 +1200,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
           <TerminalTimestampGutter
             termRef={termRef}
             containerRef={containerRef}
-            enabled={showLineTimestampGutter}
+            enabled={lineTimestampGutterLayout.enabled}
             top={terminalContentTop}
             left={terminalBodyInset}
             bottom={terminalBottomInset}
@@ -1238,6 +1352,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
                 restoreState={restoreState}
                 error={error}
                 progressValue={progressValue}
+                progressAnimating={connectionDeadlineAt != null}
                 chainProgress={chainProgress}
                 needsAuth={auth.needsAuth}
                 showLogs={showLogs}
@@ -1277,7 +1392,8 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
                   isValid: auth.isValid,
                 }}
                 progressProps={{
-                  timeLeft,
+                  timeLeft: connectionTimeoutSeconds,
+                  deadlineAt: connectionDeadlineAt,
                   isAwaitingUserInput: Boolean(isConnectionAwaitingUserInput),
                   isCancelling,
                   progressLogs,
@@ -1316,6 +1432,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
         {/* Compose Bar (solo sessions only; workspace uses TerminalLayer's global bar) */}
         {isComposeBarOpen && !inWorkspace && (
           <TerminalComposeBar
+            contextChipsEnabled={terminalSettings?.contextChipsEnabled !== false}
             key={sessionId}
             sessionId={sessionId}
             onSend={async (text) => {
@@ -1329,6 +1446,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
                 let anyRecipientSensitive = false;
                 let broadcastRecipientIds: readonly string[] = [];
                 const sent = await executeSnippetCommand(text, false, {
+                  preferBracketedPaste: true,
                   // Explicit target: active-only stays local while toolbar
                   // broadcast (keystrokes) can remain on, and send-to-all
                   // still fans out when the toolbar switch is off.

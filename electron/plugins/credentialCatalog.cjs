@@ -47,6 +47,10 @@ class PluginCredentialCatalog {
     }
   }
 
+  isAvailable() {
+    try { this.#assertAvailable(); return true; } catch { return false; }
+  }
+
   update(entries) {
     if (!Array.isArray(entries) || entries.length > MAX_CREDENTIAL_CATALOG_ENTRIES) {
       throw new PluginRpcError(RPC_ERRORS.invalidArgument, "Vault credential catalog is invalid or too large");

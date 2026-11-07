@@ -31,6 +31,8 @@ export const SYNC_SETTINGS_SUB_TAB_IDS = ["providers", "status"] as const;
 
 export type SyncSettingsSubTabId = (typeof SYNC_SETTINGS_SUB_TAB_IDS)[number];
 
+export type SettingsPlatform = "mac" | "win" | "linux";
+
 export type SettingsSearchEntry = {
   /** Stable id; also used as `data-settings-anchor` on the target element. */
   id: string;
@@ -47,7 +49,32 @@ export type SettingsSearchEntry = {
   sectionKey?: string;
   /** Extra English/Chinese aliases that are not full i18n strings. */
   keywords?: readonly string[];
+  /**
+   * Platforms where the destination actually renders. Omit for cross-platform
+   * entries. Entries must not be offered on a platform whose settings UI hides
+   * the anchor, otherwise search jumps to a tab with nothing to highlight.
+   */
+  platforms?: readonly SettingsPlatform[];
 };
+
+/** Resolve the host platform in the same terms the settings UI branches on. */
+export function resolveSettingsPlatform(
+  platform?: string,
+): SettingsPlatform {
+  const value = platform
+    ?? (typeof navigator !== "undefined" ? navigator.platform : "");
+  if (/mac|iphone|ipad/i.test(value)) return "mac";
+  if (/win/i.test(value)) return "win";
+  return "linux";
+}
+
+export function isSettingsEntryAvailableOn(
+  entry: SettingsSearchEntry,
+  platform: SettingsPlatform,
+): boolean {
+  if (!entry.platforms?.length) return true;
+  return entry.platforms.includes(platform);
+}
 
 export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   // Application
@@ -107,6 +134,14 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     labelKey: "settings.appearance.windowOpacity",
     descriptionKey: "settings.appearance.windowOpacity.desc",
     keywords: ["transparency", "透明"],
+  },
+  {
+    id: "appearance-window-background-blur",
+    tab: "appearance",
+    labelKey: "settings.appearance.windowBackgroundBlur",
+    descriptionKey: "settings.appearance.windowBackgroundBlur.desc",
+    keywords: ["blur", "frosted glass", "vibrancy", "模糊", "毛玻璃"],
+    platforms: ["mac"],
   },
   {
     id: "appearance-theme",
@@ -392,6 +427,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     tab: "terminal",
     labelKey: "settings.terminal.behavior.shiftEnterForceText",
     descriptionKey: "settings.terminal.behavior.shiftEnterForceText.desc",
+    sectionKey: "settings.terminal.section.behavior",
+  },
+  {
+    id: "terminal-context-chips",
+    tab: "terminal",
+    labelKey: "settings.terminal.behavior.contextChips",
+    descriptionKey: "settings.terminal.behavior.contextChips.desc",
     sectionKey: "settings.terminal.section.behavior",
   },
   {

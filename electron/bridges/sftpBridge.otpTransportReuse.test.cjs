@@ -836,6 +836,105 @@ test("sudo SFTP-page transfer reuses the elevated channel instead of dialing aga
   assert.equal(sftpClients.has("browse-sudo"), true);
 });
 
+for (const [ident, sequential] of [
+  ["OpenSSH_9.6", false],
+  ["CLOUDBILITY-4.14", true],
+  ["TERM-SSHD", true],
+]) {
+  test(`sudo transfer aliases preserve ${ident} upload concurrency`, { timeout: 15000 }, async (t) => {
+    const server = await startOtpOnlyServer({ ident });
+    pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+    const sftpClients = new Map();
+    sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+    transferBridge.init({ sftpClients });
+    t.after(async () => {
+      for (const sftpId of [...sftpClients.keys()].reverse()) {
+        await sftpBridge.closeSftp(null, { sftpId }).catch(() => {});
+      }
+      pool.discardAllTransports("test-end");
+      pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+      await server.close();
+    });
+
+    const options = { ...BASE_OPTIONS(server.port), reuseTransport: false };
+    const sender = createSender();
+    const opening = sftpBridge.openSftp({ sender }, { ...options, sessionId: "sudo-owner" });
+    opening.catch(() => {});
+    await waitFor(() => answerOtpPrompts(sender));
+    const opened = await opening;
+    const owner = sftpClients.get(opened.sftpId);
+    // Model an already-elevated channel. The real SSH/SFTP peer remains the
+    // ordinary server or bastion above; no second sudo/authentication is needed.
+    const sudoOptions = { ...BASE_OPTIONS(server.port), sudo: true };
+    const endpoint = pool.buildConnectionReuseEndpoint(sudoOptions, { sftpSudo: true });
+    owner.__netcattySudoMode = true;
+    owner.__netcattyEndpointKey = pool.buildEndpointKey(endpoint);
+    owner.__netcattyChannelAdoptionKey = pool.buildChannelAdoptionKey(endpoint);
+    const firstAlias = await sftpBridge.openSftp({ sender: createSender() }, sudoOptions);
+    const secondAlias = await sftpBridge.openSftp({ sender: createSender() }, sudoOptions);
+    for (const alias of [firstAlias, secondAlias]) {
+      const client = sftpClients.get(alias.sftpId);
+      assert.equal(client.__netcattySharedChannelAlias, true);
+      assert.equal(client.__netcattySudoMode, true);
+      assert.equal(client.sftp, owner.sftp, "both uploads must retain the elevated channel");
+    }
+
+    const root = fs.mkdtempSync(`${tempDirBridge.getTempFilePath("sudo-concurrency")}-`);
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const source = path.join(root, "source.bin");
+    const payload = Buffer.alloc(3 * 32768 + 17, 0x5a);
+    fs.writeFileSync(source, payload);
+    const firstPath = "/home/otpuser/first.bin";
+    const secondPath = "/home/otpuser/second.bin";
+    server.files.set(firstPath, Buffer.from("original file"));
+    const channel = owner.sftp;
+    const originalLstat = channel.lstat.bind(channel);
+    let firstTargetChecks = 0;
+    let promotionStarted;
+    const promotionStartedPromise = new Promise((resolve) => { promotionStarted = resolve; });
+    let releasePromotion;
+    const promotionGate = new Promise((resolve) => { releasePromotion = resolve; });
+    channel.lstat = (remotePath, ...args) => {
+      if (String(remotePath) === firstPath && ++firstTargetChecks === 2) {
+        promotionStarted();
+        void promotionGate.then(() => originalLstat(remotePath, ...args));
+        return;
+      }
+      originalLstat(remotePath, ...args);
+    };
+    const upload = (alias, targetPath) => transferBridge.startTransfer({ sender: createSender() }, {
+      transferId: `sudo-concurrency-${ident}-${path.basename(targetPath)}`,
+      sourcePath: source, targetPath,
+      sourceType: "local", targetType: "sftp", targetSftpId: alias.sftpId,
+      totalBytes: payload.length, resumable: true,
+    });
+    let firstFinished = false;
+    let secondFinished = false;
+    const first = upload(firstAlias, firstPath).then((result) => { firstFinished = true; return result; });
+    let second;
+    let results;
+    try {
+      await promotionStartedPromise;
+      second = upload(secondAlias, secondPath).then((result) => { secondFinished = true; return result; });
+      await waitFor(() => secondFinished
+        || transferBridge._getSessionFastDownloadWaiterCountForTests(channel) > 0);
+      assert.equal(firstFinished, false, "the first upload must still be held before publication");
+      assert.equal(secondFinished, !sequential,
+        sequential ? "a bastion must wait for the first promotion" : "ordinary sudo uploads must remain concurrent");
+      assert.equal(transferBridge._getSessionFastDownloadWaiterCountForTests(channel), sequential ? 1 : 0);
+    } finally {
+      releasePromotion();
+      results = await Promise.all(second ? [first, second] : [first]);
+      channel.lstat = originalLstat;
+    }
+    for (const result of results) assert.equal(result.error, undefined, result.error);
+    assert.deepEqual(server.files.get(firstPath), payload);
+    assert.deepEqual(server.files.get(secondPath), payload);
+    assert.equal(server.getConnectionCount(), 1, "sudo uploads must not open an unelevated connection");
+    assert.equal(server.getKeyboardInteractiveRounds(), 1, "uploads must not ask for another OTP");
+  });
+}
+
 test("reconnecting the soft-closed owner id does not replace it with a self-alias (#3310)", async (t) => {
   const { sftpTransferSessionLeaseStore, channelAliasLeaseId } = require("./sftpTransferSessionLease.cjs");
   pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });

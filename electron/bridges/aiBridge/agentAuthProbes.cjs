@@ -10,7 +10,7 @@
 const { existsSync, readFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
+const { execFile } = require("node:child_process");
 const { resolveCursorCliSpawnSpec } = require("./cursorCliSpawn.cjs");
 
 function defaultFileExists(p) {
@@ -21,22 +21,49 @@ function defaultReadFile(p) {
   try { return readFileSync(p, "utf-8"); } catch { return null; }
 }
 
-// ── Claude ──
-function defaultRunSecurity() {
-  // macOS keychain lookup for the Claude Code OAuth credentials entry.
-  try {
-    const stdout = execFileSync(
-      "security",
-      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
-      { encoding: "utf8", timeout: 4000, stdio: ["pipe", "pipe", "pipe"] },
-    );
-    return { exitCode: 0, stdout };
-  } catch (err) {
-    return { exitCode: err?.status ?? 1, stdout: "" };
-  }
+/**
+ * Run a probe command without blocking the main process. These probes used
+ * execFileSync, which froze every window (and keystroke relay) for as long as
+ * `security`, `gh auth status` or `cursor-agent status` took — up to their
+ * multi-second timeouts. Never rejects; mirrors execFileSync's failure shape
+ * (exit code plus whatever output was captured).
+ */
+function runFile(command, args, options = {}) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = execFile(command, args, { encoding: "utf8", ...options }, (error, stdout, stderr) => {
+        if (!error) {
+          resolve({ exitCode: 0, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+          return;
+        }
+        resolve({
+          exitCode: typeof error.code === "number" ? error.code : 1,
+          stdout: String(stdout ?? ""),
+          stderr: String(stderr || error.message || ""),
+        });
+      });
+    } catch (error) {
+      resolve({ exitCode: 1, stdout: "", stderr: String(error?.message || error) });
+      return;
+    }
+    // Probes never read stdin; close it so a CLI that waits for input exits.
+    child?.stdin?.end();
+  });
 }
 
-function probeClaudeAuth({ env, platform, runSecurity, fileExists, homeDir } = {}) {
+// ── Claude ──
+async function defaultRunSecurity() {
+  // macOS keychain lookup for the Claude Code OAuth credentials entry.
+  const res = await runFile(
+    "security",
+    ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+    { timeout: 4000 },
+  );
+  return { exitCode: res.exitCode, stdout: res.exitCode === 0 ? res.stdout : "" };
+}
+
+async function probeClaudeAuth({ env, platform, runSecurity, fileExists, homeDir } = {}) {
   const e = env || process.env;
   const plat = platform || process.platform;
   const fx = fileExists || defaultFileExists;
@@ -48,7 +75,7 @@ function probeClaudeAuth({ env, platform, runSecurity, fileExists, homeDir } = {
   if (apiKey || oauthToken || authToken) return { authenticated: true, authSource: "env" };
 
   if (plat === "darwin") {
-    const sec = (runSecurity || defaultRunSecurity)();
+    const sec = await (runSecurity || defaultRunSecurity)();
     if (sec && sec.exitCode === 0 && String(sec.stdout || "").trim()) {
       return { authenticated: true, authSource: "keychain" };
     }
@@ -64,19 +91,14 @@ function probeClaudeAuth({ env, platform, runSecurity, fileExists, homeDir } = {
 }
 
 // ── Copilot ──
-function defaultRunGhAuthStatus() {
-  try {
-    const out = execFileSync("gh", ["auth", "status"], {
-      encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"],
-    });
-    return { exitCode: 0, stdout: out, stderr: "" };
-  } catch (err) {
-    return { exitCode: err?.status ?? 1, stdout: "", stderr: String(err?.stderr || err?.message || "") };
-  }
+async function defaultRunGhAuthStatus() {
+  const res = await runFile("gh", ["auth", "status"], { timeout: 5000 });
+  if (res.exitCode === 0) return { exitCode: 0, stdout: res.stdout, stderr: "" };
+  return { exitCode: res.exitCode, stdout: "", stderr: res.stderr };
 }
 
-function probeCopilotAuth({ runGhAuthStatus } = {}) {
-  const res = (runGhAuthStatus || defaultRunGhAuthStatus)();
+async function probeCopilotAuth({ runGhAuthStatus } = {}) {
+  const res = await (runGhAuthStatus || defaultRunGhAuthStatus)();
   if (res && res.exitCode === 0) return { authenticated: true, authSource: "gh" };
   return { authenticated: false, authSource: null };
 }
@@ -140,41 +162,22 @@ function stripCursorApiKeyFromProbeEnv(env) {
   return out;
 }
 
-function defaultResolveCursorCliBinary(name, env) {
-  try {
-    const whichCmd = process.platform === "win32" ? "where" : "which";
-    const out = execFileSync(whichCmd, [name], {
-      encoding: "utf8",
-      timeout: 4000,
-      env: env || process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const first = String(out || "").split(/\r?\n/).map((l) => l.trim()).find(Boolean);
-    return first || null;
-  } catch {
-    return null;
-  }
+async function defaultResolveCursorCliBinary(name, env) {
+  const whichCmd = process.platform === "win32" ? "where" : "which";
+  const res = await runFile(whichCmd, [name], { timeout: 4000, env: env || process.env, windowsHide: true });
+  if (res.exitCode !== 0) return null;
+  const first = res.stdout.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+  return first || null;
 }
 
 function defaultRunCursorStatus(binPath, env) {
   const spec = resolveCursorCliSpawnSpec(binPath, ["status", "--format", "json"]);
-  try {
-    const stdout = execFileSync(spec.command, spec.args, {
-      encoding: "utf8",
-      timeout: 8000,
-      env: env || process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: spec.shell,
-      windowsHide: true,
-    });
-    return { exitCode: 0, stdout: String(stdout || ""), stderr: "" };
-  } catch (err) {
-    return {
-      exitCode: err?.status ?? 1,
-      stdout: String(err?.stdout || ""),
-      stderr: String(err?.stderr || err?.message || ""),
-    };
-  }
+  return runFile(spec.command, spec.args, {
+    timeout: 8000,
+    env: env || process.env,
+    shell: spec.shell,
+    windowsHide: true,
+  });
 }
 
 function extractFirstJsonObject(text) {
@@ -214,7 +217,7 @@ function parseCursorStatusJson(stdout) {
  *
  * @returns {{ authenticated: boolean, authSource: string|null, email: string|null, binPath: string|null }}
  */
-function probeCursorCliAuth({ env, resolveBinary, runStatus } = {}) {
+async function probeCursorCliAuth({ env, resolveBinary, runStatus } = {}) {
   const e = stripCursorApiKeyFromProbeEnv(env || process.env);
   const resolve = resolveBinary || ((name) => defaultResolveCursorCliBinary(name, e));
   const run = runStatus || ((bin) => defaultRunCursorStatus(bin, e));
@@ -225,7 +228,7 @@ function probeCursorCliAuth({ env, resolveBinary, runStatus } = {}) {
   for (const name of CURSOR_CLI_BINARY_CANDIDATES) {
     let binPath = null;
     try {
-      binPath = resolve(name);
+      binPath = await resolve(name);
     } catch {
       continue;
     }
@@ -234,7 +237,7 @@ function probeCursorCliAuth({ env, resolveBinary, runStatus } = {}) {
 
     let res = null;
     try {
-      res = run(binPath);
+      res = await run(binPath);
     } catch {
       continue;
     }

@@ -87,10 +87,19 @@ async function proxyCattyExecToWorker({
 function registerCattyExecHandlers(ctx) {
   const privacyService = ctx.aiPrivacyService || defaultAiPrivacyService;
   with (ctx) {
-  ipcMain.handle("netcatty:ai:exec", async (event, { sessionId, command, chatSessionId }) => {
+  ipcMain.handle("netcatty:ai:exec", async (event, { sessionId, command, chatSessionId, delegationTag }) => {
     // Validate IPC sender (Issue #17)
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (mcpServerBridge.isPluginAgentConversation?.(chatSessionId)) {
+      try {
+        return await mcpServerBridge.dispatchBuiltinRpc("netcatty/exec", { sessionId, command, chatSessionId }, {
+          trustedAgentSenderId: event.sender.id,
+          trustedAgentTurnTag: delegationTag,
+          beforeExecute: () => assertCattyPrivacySession(privacyService, chatSessionId),
+        });
+      } catch { return { ok: false, error: "Delegated Agent execution unavailable" }; }
     }
     // Block execution in observer mode (Issue #11)
     if (mcpServerBridge.getPermissionMode() === "observer") {
@@ -293,9 +302,13 @@ function registerCattyExecHandlers(ctx) {
   });
 
   // Cancel in-flight Catty Agent command executions for a chat session
-  ipcMain.handle("netcatty:ai:catty:cancel", async (event, { chatSessionId }) => {
+  ipcMain.handle("netcatty:ai:catty:cancel", async (event, { chatSessionId, delegationTag }) => {
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
+    }
+    if (mcpServerBridge.isPluginAgentConversation?.(chatSessionId)) {
+      try { mcpServerBridge.assertPluginAgentCaller(chatSessionId, event.sender.id, delegationTag); }
+      catch { return { ok: false, error: "Agent cancellation unavailable" }; }
     }
     mcpServerBridge.cancelPtyExecsForSession(chatSessionId);
     void mcpServerBridge.cancelSftpOpsForSession?.(chatSessionId);
@@ -313,7 +326,7 @@ function registerCattyExecHandlers(ctx) {
     return { ok: true };
   });
 
-  ipcMain.handle("netcatty:ai:chat-session:set-cancelled", async (event, { chatSessionId, cancelled }) => {
+  ipcMain.handle("netcatty:ai:chat-session:set-cancelled", async (event, { chatSessionId, cancelled, delegationTag }) => {
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
     }
@@ -321,13 +334,14 @@ function registerCattyExecHandlers(ctx) {
       return { ok: false, error: "chatSessionId is required" };
     }
     try {
+      if (mcpServerBridge.isPluginAgentConversation?.(chatSessionId)) mcpServerBridge.assertPluginAgentCaller(chatSessionId, event.sender.id, delegationTag);
       return await mcpServerBridge.applyChatSessionCancelled(chatSessionId, cancelled !== false);
     } catch (err) {
       return { ok: false, error: err?.message || String(err) };
     }
   });
 
-  ipcMain.handle("netcatty:ai:capability", async (event, { rpcMethod, params, chatSessionId }) => {
+  ipcMain.handle("netcatty:ai:capability", async (event, { rpcMethod, params, chatSessionId, delegationTag }) => {
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
     }
@@ -340,7 +354,7 @@ function registerCattyExecHandlers(ctx) {
       return await mcpServerBridge.dispatchBuiltinRpc(rpcMethod, {
         ...(params || {}),
         chatSessionId,
-      }, { beforeExecute });
+      }, { beforeExecute, trustedAgentSenderId: event.sender.id, trustedAgentTurnTag: delegationTag });
     } catch (err) {
       return { ok: false, error: err?.message || "AI privacy protection is unavailable." };
     }

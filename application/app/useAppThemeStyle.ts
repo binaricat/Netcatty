@@ -1,3 +1,4 @@
+import { usePluginThemeRevision } from '../state/usePluginThemeRuntime';
 import type React from 'react';
 import { useMemo } from 'react';
 
@@ -12,17 +13,20 @@ import { getUiThemeById } from '../../infrastructure/config/uiThemes';
  * settingsChromeStore so accent drags only re-render the leaf that applies the
  * vars, never the App shell.
  */
-export function useAppThemeStyle(): React.CSSProperties {
+export function useAppThemeStyle(includePreview = true): React.CSSProperties {
+  const pluginThemeRevision = usePluginThemeRevision();
   const { accentMode, customAccent } = useAppearanceChromeStore();
   const { resolvedTheme, darkUiThemeId, lightUiThemeId } = useSettingsChromeStore();
   return useMemo(() => {
+    void pluginThemeRevision; // getUiThemeById reads this external registry revision.
     const tokens = getUiThemeById(
       resolvedTheme,
       resolvedTheme === 'dark' ? darkUiThemeId : lightUiThemeId,
+      includePreview,
     ).tokens;
     return {
       ...buildAppThemeCssVars(tokens, accentMode, customAccent),
       colorScheme: resolvedTheme,
     } as React.CSSProperties;
-  }, [accentMode, customAccent, darkUiThemeId, lightUiThemeId, resolvedTheme]);
+  }, [accentMode, customAccent, darkUiThemeId, lightUiThemeId, resolvedTheme, pluginThemeRevision, includePreview]);
 }

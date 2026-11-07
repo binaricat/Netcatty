@@ -1,6 +1,24 @@
 import type { Messages } from '../types';
 
 export const zhCNTerminalMessages: Messages = {
+  'terminal.directory.open': '当前目录：{path}。更改目录',
+  'terminal.directory.unknown': '目录未知',
+  'terminal.directory.search': '搜索当前目录下的文件夹…',
+  'terminal.directory.directories': '目录',
+  'terminal.directory.parent': '..（父目录）',
+  'terminal.directory.loading': '正在读取目录…',
+  'terminal.directory.empty': '没有子目录',
+  'terminal.directory.noMatches': '没有匹配的子目录',
+  'terminal.directory.hidden': '显示隐藏目录',
+  'terminal.directory.refresh': '刷新',
+  'terminal.directory.unavailable': '此会话暂不支持目录导航。',
+  'terminal.directory.busy': '请等待终端回到空命令提示符。',
+  'terminal.directory.readFailed': '无法读取此目录，请刷新重试。',
+  'terminal.directory.changeFailed': '未能确认目录切换，请刷新后重试。',
+  'terminal.directory.unsupportedPath': '此目录名称暂不支持快捷切换。',
+  'settings.terminal.behavior.contextChips': 'Context Chips 上下文工具栏',
+  'settings.terminal.behavior.contextChips.desc': '在撰写栏的快捷命令下方显示上下文工具栏。',
+
   'terminal.toolbar.openSessionLog': '打开会话日志',
   'terminal.toolbar.sessionLogActions': '会话日志操作',
   'terminal.toolbar.sessionLog.menu': '会话日志',

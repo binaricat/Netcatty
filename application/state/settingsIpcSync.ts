@@ -49,6 +49,7 @@ import {
   STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN,
   STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB,
   STORAGE_KEY_WINDOW_OPACITY,
+  STORAGE_KEY_WINDOW_BACKGROUND_BLUR,
   STORAGE_KEY_APP_ICON_VARIANT,
   STORAGE_KEY_HTTP_NETWORK_PROXY,
   STORAGE_KEY_GLOBAL_DEFAULT_PROXY_PROFILE,
@@ -99,6 +100,7 @@ interface UseSettingsIpcSyncParams {
   setIsHotkeyRecordingState: Dispatch<SetStateAction<boolean>>;
   setGlobalHotkeyEnabled: Dispatch<SetStateAction<boolean>>;
   setWindowOpacity: (raw: unknown) => void;
+  setWindowBackgroundBlur: Dispatch<SetStateAction<boolean>>;
   setAppIconVariant: Dispatch<SetStateAction<AppIconVariant>>;
   setAutoUpdateEnabled: Dispatch<SetStateAction<boolean>>;
   setAutoLaunchEnabled: Dispatch<SetStateAction<boolean>>;
@@ -148,6 +150,7 @@ export function useSettingsIpcSync({
   setIsHotkeyRecordingState,
   setGlobalHotkeyEnabled,
   setWindowOpacity,
+  setWindowBackgroundBlur,
   setAppIconVariant,
   setAutoUpdateEnabled,
   setAutoLaunchEnabled,
@@ -279,6 +282,9 @@ export function useSettingsIpcSync({
       if (key === STORAGE_KEY_WINDOW_OPACITY) {
         setWindowOpacity(value);
       }
+      if (key === STORAGE_KEY_WINDOW_BACKGROUND_BLUR && typeof value === 'boolean') {
+        setWindowBackgroundBlur((prev) => (prev === value ? prev : value));
+      }
       if (key === STORAGE_KEY_APP_ICON_VARIANT) {
         const nextVariant = resolveAppIconVariant(value);
         setAppIconVariant((prev) => (prev === nextVariant ? prev : nextVariant));
@@ -371,6 +377,7 @@ export function useSettingsIpcSync({
     setFollowAppTerminalThemeState,
     setGlobalHotkeyEnabled,
     setWindowOpacity,
+    setWindowBackgroundBlur,
     setAppIconVariant,
     setHotkeyScheme,
     setIsHotkeyRecordingState,

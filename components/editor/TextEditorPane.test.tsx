@@ -8,6 +8,7 @@ import {
   getTextEditorContentStats,
   isTextEditorCommandWEnabled,
   isTextEditorReadOnly,
+  languageIdToMonaco,
   TextEditorPromoteButton,
 } from "./TextEditorPane.tsx";
 import { TooltipProvider } from "../ui/tooltip.tsx";
@@ -15,6 +16,11 @@ import { DEFAULT_KEY_BINDINGS } from "../../domain/models/keyBindings.ts";
 
 const wrap = (child: React.ReactElement) =>
   React.createElement(TooltipProvider, null, child);
+
+test("maps manual Nginx selection to the registered language", () => {
+  assert.equal(languageIdToMonaco('nginx'), 'nginx');
+  assert.equal(languageIdToMonaco('ini'), 'ini');
+});
 
 test("disables promoting a modal editor to a tab while a save is running", () => {
   assert.equal(canPromoteTextEditor({ saving: true }), false);

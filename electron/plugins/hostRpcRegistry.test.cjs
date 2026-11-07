@@ -76,7 +76,8 @@ test("host RPC middleware receives immutable host identity, method metadata, and
   assert.equal(Object.isFrozen(seen[0].metadata.permission.resources), true);
   assert.deepEqual(seen[0].params, { hostId: "host-1" });
   assert.equal(seen[0].requestId, 7);
-  assert.equal(seen[0].signal, signal);
+  assert.equal(seen[0].signal.aborted, signal.aborted);
+  assert.equal(typeof seen[0].addAuthorizationGuard, "function");
   assert.equal(typeof seen[0].assertActive, "function");
 });
 

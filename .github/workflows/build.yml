@@ -330,6 +330,9 @@ jobs:
           APPLE_TEAM_ID: ${{ matrix.name == 'macos' && secrets.APPLE_TEAM_ID || '' }}
         run: npm run ${{ matrix.pack_script }}
 
+      - name: Test packaged SSH cipher negotiation
+        run: node scripts/test-packaged-ssh-ciphers.cjs
+
       - name: Test tray panel layout
         run: npm run test:tray-panel-layout
 
@@ -631,6 +634,9 @@ jobs:
           done
           npm run pack:linux-x64
 
+      - name: Test packaged SSH cipher negotiation
+        run: node scripts/test-packaged-ssh-ciphers.cjs
+
       - name: Verify packaged node-pty Linux runtime
         run: bash scripts/ensure-node-pty-linux.sh verify x64
 
@@ -764,6 +770,9 @@ jobs:
           npm_config_arch: arm64
           ELECTRON_BUILDER_PUBLISH: "never"
         run: npm run pack:linux-arm64
+
+      - name: Test packaged SSH cipher negotiation
+        run: node scripts/test-packaged-ssh-ciphers.cjs
 
       - name: Verify packaged node-pty Linux runtime
         run: bash scripts/ensure-node-pty-linux.sh verify arm64

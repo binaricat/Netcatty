@@ -793,3 +793,15 @@ test("sanitizeHost preserves named-pipe spaces and restores the authoritative se
   assert.equal(sanitizeHost(host).serialConfig?.path, path);
   assert.equal(sanitizeHost(makeHost({ hostname: 'example.com extra' })).hostname, 'example.com');
 });
+
+
+test("SSH input compatibility migrates legacy hosts once and preserves later choices", () => {
+  const legacy = { id: "legacy", label: "Legacy", hostname: "localhost", username: "user", tags: [], os: "linux" } as Host;
+  for (const protocol of [undefined, "ssh"] as const) {
+    const migrated = sanitizeHost({ ...legacy, protocol });
+    assert.equal(migrated.sshInputCompatibility, true);
+    assert.equal(sanitizeHost(migrated).sshInputCompatibility, true);
+    assert.equal(sanitizeHost({ ...migrated, sshInputCompatibility: false }).sshInputCompatibility, false);
+  }
+  assert.equal(sanitizeHost({ ...legacy, protocol: "telnet" }).sshInputCompatibility, undefined);
+});

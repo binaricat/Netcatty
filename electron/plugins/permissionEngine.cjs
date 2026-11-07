@@ -156,6 +156,9 @@ function immutableRequest(request) {
     ...request,
     resources: Object.freeze([...request.resources]),
     resourceKinds: Object.freeze([...request.resourceKinds]),
+    ...(request.relatedPermissions ? { relatedPermissions: Object.freeze(request.relatedPermissions.map((item) => Object.freeze({
+      ...item, resources: Object.freeze([...item.resources]),
+    }))) } : {}),
   });
 }
 
@@ -163,6 +166,7 @@ class PluginPermissionEngine {
   constructor(options) {
     this.database = options.database;
     this.requestDecision = options.requestDecision ?? null;
+    this.onPolicyChanged = options.onPolicyChanged ?? null;
     if (this.requestDecision != null && typeof this.requestDecision !== "function") {
       throw new TypeError("Plugin permission decision provider must be a function");
     }
@@ -174,6 +178,9 @@ class PluginPermissionEngine {
     this.sessionPromptControllers = new Map();
     this.promptControllers = new Set();
     this.revocationListeners = new Set();
+    this.policyRevisions = new Map();
+    this.policyInstanceId = randomUUID();
+    this.operationDecisions = new WeakMap();
     this.closed = false;
     this.shutdownController = new AbortController();
   }
@@ -185,6 +192,7 @@ class PluginPermissionEngine {
   }
 
   #emitRevocation(event) {
+    this.policyRevisions.set(event.pluginId, (this.policyRevisions.get(event.pluginId) ?? 0) + 1);
     const frozen = Object.freeze({ ...event });
     for (const listener of this.revocationListeners) {
       try { listener(frozen); } catch {}
@@ -201,7 +209,7 @@ class PluginPermissionEngine {
   }
 
   #grantKey(pluginId, permission, declarationHash, resource) {
-    return `${pluginId}\0${permission}\0${declarationHash}\0${resource}`;
+    return `${this.database.privateOwner?.(pluginId) ?? pluginId}\0${permission}\0${declarationHash}\0${resource}`;
   }
 
   #sessionGrantKey(sessionId, grantKey) {
@@ -219,6 +227,7 @@ class PluginPermissionEngine {
   ) {
     return Object.freeze({
       pluginId: context.pluginId,
+      sourceOwner: this.database.privateOwner?.(context.pluginId) ?? context.pluginId,
       permission,
       declarationHash,
       resource,
@@ -239,6 +248,7 @@ class PluginPermissionEngine {
     sessionId,
   ) {
     return grant.pluginId === context.pluginId
+      && grant.sourceOwner === (this.database.privateOwner?.(context.pluginId) ?? context.pluginId)
       && grant.permission === permission
       && grant.declarationHash === declarationHash
       && (grant.scope !== "session" || grant.sessionId === sessionId)
@@ -320,6 +330,40 @@ class PluginPermissionEngine {
     ));
   }
 
+  getMode(context, permission) {
+    assertPluginPermission(permission);
+    if (context.sourceOwner && this.database.privateOwner(context.pluginId) !== context.sourceOwner) {
+      throw permissionDenied("Plugin permission source changed");
+    }
+    return this.database.getPermissionMode?.(context.pluginId, permission) ?? "allow";
+  }
+
+  getPolicyRevision(plugin) {
+    return createHash("sha256").update(JSON.stringify([
+      this.policyInstanceId, this.database.privateOwner?.(plugin.id) ?? plugin.id,
+      plugin.activeVersion ?? null, this.policyRevisions.get(plugin.id) ?? 0,
+    ])).digest("hex");
+  }
+
+  describePolicies(plugin) {
+    return [...normalizePermissionDeclarations(plugin.manifest).values()].map((declaration) => ({
+      permission: declaration.permission,
+      resources: declaration.resources.length ? [...declaration.resources] : ["*"],
+      mode: this.getMode({ pluginId: plugin.id }, declaration.permission),
+    }));
+  }
+
+  setMode(plugin, permission, mode) {
+    assertPluginPermission(permission);
+    if (!["allow", "ask", "deny"].includes(mode)) throw new TypeError("Plugin permission mode is invalid");
+    if (!normalizePermissionDeclarations(plugin.manifest).has(permission)) throw permissionDenied("Permission is undeclared");
+    this.database.setPermissionMode(plugin.id, permission, mode);
+    // Clear every old grant and invalidate pending/in-flight work before the
+    // next operation. A later Allow is a new operation, never a revived prompt.
+    this.revokeAll(plugin.id);
+    return this.onPolicyChanged?.(plugin, permission, mode);
+  }
+
   async authorize(context, descriptor) {
     if (this.closed) throw permissionDenied("Plugin permission engine is unavailable");
     context.signal?.throwIfAborted();
@@ -354,8 +398,43 @@ class PluginPermissionEngine {
     );
     const resources = resourceDescriptors.map(({ resource }) => resource);
     const resourceKinds = resourceDescriptors.map(({ resourceKind }) => resourceKind);
-    const { declaration, declarationHash } = this.#assertDeclared(context, permission, resources);
-    if (this.#hasAllGrants(
+    const { declaration, declarationHash, securityPrincipal } = this.#assertDeclared(context, permission, resources);
+    const revision = this.policyRevisions.get(context.pluginId) ?? 0;
+    const mode = this.getMode(context, permission);
+    if (mode === "deny") {
+      this.database.recordSecurityAudit(context.pluginId, "permission.denied", { permission, resources, mode });
+      throw permissionDenied(`Plugin permission is disabled: ${permission}`);
+    }
+    if (descriptor.relatedPermissions !== undefined && (!Array.isArray(descriptor.relatedPermissions) || descriptor.relatedPermissions.length > 5)) {
+      throw permissionDenied("Related permission scope is invalid");
+    }
+    const related = (descriptor.relatedPermissions ?? []).map((item) => {
+      const relatedResources = normalizePermissionResources(item.permission, item.resources);
+      this.#assertDeclared(context, item.permission, relatedResources);
+      const relatedMode = this.getMode(context, item.permission);
+      if (relatedMode === "deny") {
+        this.database.recordSecurityAudit(context.pluginId, "permission.denied", { permission: item.permission, mode: relatedMode });
+        throw permissionDenied(`Plugin permission is disabled: ${item.permission}`);
+      }
+      return { permission: item.permission, resources: relatedResources, mode: relatedMode };
+    });
+    const relatedAsk = related.some((item) => item.mode === "ask");
+    const operation = context.permissionOperation ?? context;
+    const receipt = this.operationDecisions.get(operation);
+    const sourceOwner = context.sourceOwner ?? this.database.privateOwner?.(context.pluginId) ?? null;
+    const operationApproved = receipt?.revision === revision
+      && receipt.pluginId === context.pluginId && receipt.runtimeId === (context.runtimeId ?? null)
+      && receipt.securityPrincipal === securityPrincipal && receipt.sourceOwner === sourceOwner
+      && receipt.permissions.some((item) => (
+      item.permission === permission && resources.every((resource) => item.resources.includes(resource))
+    ));
+    if ((mode === "allow" && !relatedAsk) || descriptor.deferDecision === true || operationApproved) {
+      this.database.recordSecurityAudit(context.pluginId, "permission.used", { permission, resources, mode,
+        runtimeId: context.runtimeId ?? null });
+      descriptor.validateBeforeGrant?.();
+      return Object.freeze({ declaration, resources, scope: "policy", mode });
+    }
+    if (!relatedAsk && this.#hasAllGrants(
       context,
       permission,
       declarationHash,
@@ -395,6 +474,7 @@ class PluginPermissionEngine {
       descriptor.operationId ?? null,
       descriptor.sessionId ?? null,
       descriptor.allowedScopes ?? null,
+      related,
     ]);
     let pending = this.pending.get(pendingKey);
     let ownsPrompt = false;
@@ -402,7 +482,7 @@ class PluginPermissionEngine {
       ownsPrompt = true;
       pending = this.#requestGrant(
         context,
-        descriptor,
+        { ...descriptor, relatedPermissions: related },
         resources,
         resourceKinds,
         declaration,
@@ -413,9 +493,16 @@ class PluginPermissionEngine {
     }
     const grant = await pending;
     context.signal?.throwIfAborted();
+    if ((this.policyRevisions.get(context.pluginId) ?? 0) !== revision || this.getMode(context, permission) !== mode) {
+      throw permissionDenied("Plugin permission policy changed");
+    }
     if (!ownsPrompt && grant.scope === "once") {
       return this.authorize(context, descriptor);
     }
+    if (related.length || context.permissionOperation) this.operationDecisions.set(operation, {
+      revision, pluginId: context.pluginId, runtimeId: context.runtimeId ?? null, securityPrincipal, sourceOwner,
+      permissions: [{ permission, resources }, ...related],
+    });
     return Object.freeze({ declaration, resources, scope: grant.scope });
   }
 
@@ -439,6 +526,8 @@ class PluginPermissionEngine {
       permission: descriptor.permission,
       resources,
       resourceKinds,
+      ...(descriptor.displayContext ? { displayContext: descriptor.displayContext } : {}),
+      ...(descriptor.relatedPermissions?.length ? { relatedPermissions: descriptor.relatedPermissions.map(({ permission, resources }) => ({ permission, resources })) } : {}),
       reason: descriptor.reason,
       ...(descriptor.operationId === undefined ? {} : { operationId: descriptor.operationId }),
       ...(descriptor.sessionId === undefined ? {} : { sessionId: descriptor.sessionId }),
@@ -609,41 +698,48 @@ class PluginPermissionEngine {
   }
 
   async authorizeRequired(plugin, options = {}) {
-    const declarations = normalizePermissionDeclarations(plugin.manifest);
-    const skipPermissions = new Set(options.skipPermissions ?? []);
-    const context = {
-      pluginId: plugin.id,
-      pluginVersion: plugin.activeVersion,
-      runtimeId: options.runtimeId ?? null,
-      manifest: plugin.manifest,
-      securityPrincipal: options.securityPrincipal,
-      signal: options.signal,
-    };
-    for (const declaration of declarations.values()) {
-      if (!declaration.required || skipPermissions.has(declaration.permission)) continue;
-      await this.authorize(context, {
-        permission: declaration.permission,
-        resources: declaration.resources.length ? declaration.resources : ["*"],
-        ...(declaration.resources.length
-          && (declaration.permission === "filesystem.read"
-            || declaration.permission === "filesystem.write")
-          ? { resourceKinds: declaration.resources.map(() => "directory") }
-          : {}),
-        reason: declaration.reason || `Required by ${plugin.id}`,
-        operationId: `activation:${plugin.activeVersion}`,
-      });
-    }
+    options.signal?.throwIfAborted();
+    normalizePermissionDeclarations(plugin.manifest);
   }
 
   createMiddleware() {
-    return async (context, next) => {
-      if (context.metadata.public === true) return next();
+    const middleware = async (context, next) => {
+      if (context.metadata.public === true) {
+        context.recordAuthorization?.("not-required");
+        return next();
+      }
       if (!context.authorization) {
+        context.recordAuthorization?.("denied");
         throw permissionDenied(`Plugin host method has no authorization policy: ${context.method}`);
       }
-      await this.authorize(context, context.authorization);
-      return next();
+      try {
+        await this.authorize(context, context.authorization);
+        await context.assertActive();
+        context.recordAuthorization?.("allowed");
+        const result = await next();
+        await context.assertActive();
+        return result;
+      } catch (error) {
+        if (error?.code === RPC_ERRORS.permissionDenied) context.recordAuthorization?.("denied");
+        throw error;
+      }
     };
+    middleware.prepareAuthorization = (context) => {
+      if (context.metadata.public === true) return undefined;
+      const revision = this.policyRevisions.get(context.pluginId) ?? 0;
+      const owner = this.database.privateOwner?.(context.pluginId);
+      const subscription = this.onDidRevoke((event) => {
+        if (event.pluginId === context.pluginId) context.cancelAuthorization?.(permissionDenied("Plugin access changed"));
+      });
+      context.addAuthorizationGuard?.(() => {
+        if ((this.policyRevisions.get(context.pluginId) ?? 0) !== revision
+          || (owner !== undefined && this.database.privateOwner(context.pluginId) !== owner)) {
+          throw permissionDenied("Plugin permission policy or source changed");
+        }
+      });
+      return () => subscription.dispose();
+    };
+    return middleware;
   }
 
   listGrants(pluginId) {
@@ -658,6 +754,22 @@ class PluginPermissionEngine {
         grant.pluginId === pluginId
       ))),
     });
+  }
+
+  describeGrants(pluginId, context) {
+    const groups = this.listGrants(pluginId);
+    const declarations = context ? normalizePermissionDeclarations(context.manifest) : new Map();
+    return Object.fromEntries(Object.entries(groups).map(([scope, grants]) => [scope, grants.map((grant) => {
+      const declaration = declarations.get(grant.permission);
+      const matchesCurrentActivation = Boolean(
+        context?.pluginId === pluginId
+        && context.securityPrincipal
+        && declaration
+        && declarationAllowsResource(declaration, grant.resource)
+        && grant.declarationHash === permissionDeclarationHash(declaration, context.securityPrincipal),
+      );
+      return Object.freeze({ ...grant, matchesCurrentActivation });
+    })]));
   }
 
   revokeAlways(pluginId, permission, resource) {

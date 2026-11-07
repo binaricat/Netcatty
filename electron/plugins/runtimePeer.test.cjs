@@ -78,7 +78,7 @@ test("runtime peer exposes secure host capabilities over the canonical RPC trans
       pluginVersion: "1.0.0",
       netcattyVersion: "1.0.0",
       apiVersion: "0.1.0-internal",
-      enabledFeatures: [],
+      enabledFeatures: ["filesystem.directory-enumeration"],
     },
     async loadPlugin() {
       return {
@@ -128,7 +128,7 @@ test("runtime peer exposes secure host capabilities over the canonical RPC trans
   const initialized = await host.request("plugin.initialize", {
     netcattyVersion: "1.0.0",
     apiVersion: "0.1.0-internal",
-    supportedFeatures: [],
+    supportedFeatures: ["filesystem.directory-enumeration"],
   });
   assert.equal(initialized.pluginId, "com.example.peer");
   const unhandledStream = await host.streams.openOutgoing("unhandled", 1024);
@@ -615,4 +615,24 @@ test("runtime peer routes connection and importer Provider operation maps", asyn
 
   await peer.dispose();
   host.close();
+});
+
+test("actual SDK directory call rejects an unnegotiated feature without sending host RPC", async (context) => {
+  const { startPluginRuntime } = await import("./runtime/runtimePeer.mjs");
+  const { port1, port2 } = new MessageChannel();
+  let requests = 0;
+  const host = new PluginRpcRouter({ pluginId: "com.example.no-directory", send: (message) => port1.postMessage(message),
+    handlers: { "filesystem.readDirectory": async () => { requests++; return { entries: [] }; }, "log.write": async () => null } });
+  port1.on("message", (message) => host.accept(message));
+  const peer = await startPluginRuntime({ port: port2,
+    config: { pluginId: "com.example.no-directory", pluginVersion: "1.0.0", netcattyVersion: "1.0.0", apiVersion: "0.1.0-internal", enabledFeatures: [] },
+    async loadPlugin() { return { default: { async activate(pluginContext) {
+      assert.equal(pluginContext.enabledFeatures.has("filesystem.directory-enumeration"), false);
+      await assert.rejects(pluginContext.filesystem.readDirectory("/not-probed"),
+        (error) => error.code === "unsupported" && /unavailable/.test(error.message));
+    } } }; } });
+  context.after(async () => { await peer.dispose(); host.close(); port1.close(); port2.close(); });
+  await host.request("plugin.initialize", { netcattyVersion: "1.0.0", apiVersion: "0.1.0-internal", supportedFeatures: [] });
+  await host.request("plugin.activate", {});
+  assert.equal(requests, 0);
 });

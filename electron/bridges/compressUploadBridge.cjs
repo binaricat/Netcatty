@@ -52,13 +52,16 @@ function buildAtomicRemoteExtractionCommand({
     `staged_final=${escapeShellArg(stagedFinalDir)}`,
     "rollback_compressed_upload() {",
     "  status=$1",
-    "  trap - EXIT HUP INT TERM",
+    // Ignore cancellation during rollback, including in cleanup children.
+    // Resetting these signals to defaults would let another TERM abort cleanup.
+    "  trap - EXIT",
+    "  trap '' HUP INT TERM",
+    "  rm -f -- \"$archive\" || true",
     "  if [ ! -e \"$final\" ] && [ ! -L \"$final\" ] && { [ -e \"$backup\" ] || [ -L \"$backup\" ]; }; then",
     "    mv -- \"$backup\" \"$final\" 2>/dev/null || true",
     "  fi",
-    "  make_tree_writable \"$stage\"",
-    "  rm -rf -- \"$stage\"",
-    "  rm -f -- \"$archive\"",
+    "  make_tree_writable \"$stage\" || true",
+    "  rm -rf -- \"$stage\" || true",
     "  exit \"$status\"",
     "}",
     "make_tree_writable() {",
@@ -396,11 +399,20 @@ function init(deps) {
 }
 
 /**
+ * Resolve Windows tar before switching to an upload-controlled directory.
+ */
+function resolveLocalTarCommand() {
+  return process.platform === 'win32'
+    ? path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar';
+}
+
+/**
  * Check if tar command is available on the system
  */
 async function checkTarAvailable(signal) {
   return new Promise((resolve) => {
-    const tar = spawn('tar', ['--version'], { stdio: 'ignore' });
+    const tar = spawn(resolveLocalTarCommand(), ['--version'], { stdio: 'ignore' });
     let settled = false;
     let childClosed = false;
     let forceKillTimer = null;
@@ -484,24 +496,41 @@ async function compressFolder(folderPath, outputPath, compressionId, sendProgres
     }
 
     // Use tar with gzip compression, excluding macOS resource fork files
-    // -czf: create, gzip, file
-    // -C: change to directory (so we don't include the full path in archive)
+    // -czf -: create, gzip, write to stdout (the opened output file)
+    // cwd: run in the parent directory (so we don't include the full path in archive)
     // --exclude='._*': exclude macOS resource fork files
     // --exclude='.DS_Store': exclude macOS folder metadata files
+    // Windows tar.exe converts argv to the ANSI code page, so local paths are
+    // passed via cwd and a file descriptor instead of -C and -f. Explicitly
+    // exclude the archive when it lies inside the source tree.
     const folderName = path.basename(folderPath);
     const parentDir = path.dirname(folderPath);
-    
-    const tar = spawn('tar', [
-      '-czf', outputPath, 
-      '-C', parentDir, 
+
+    let outputFd;
+    try {
+      outputFd = fs.openSync(outputPath, 'w');
+    } catch (err) {
+      reject(new Error(`Failed to create tar archive: ${err.message}`));
+      return;
+    }
+    const tarArgs = [
+      '-czf', '-',
       '--exclude=._*',
       '--exclude=.DS_Store',
       '--exclude=.Spotlight-V100',
-      '--exclude=.Trashes',
-      folderName
-    ], {
-      stdio: ['ignore', 'pipe', 'pipe']
+      '--exclude=.Trashes'
+    ];
+    const relativeOutputPath = path.relative(folderPath, outputPath);
+    if (relativeOutputPath !== '..' && !relativeOutputPath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativeOutputPath)) {
+      tarArgs.push(`--exclude=${path.relative(parentDir, outputPath).split(path.sep).join('/')}`);
+    }
+    tarArgs.push(folderName);
+    const tar = spawn(resolveLocalTarCommand(), tarArgs, {
+      cwd: parentDir,
+      stdio: ['ignore', outputFd, 'pipe']
     });
+    // tar holds its own handle; close ours so the archive can be removed later.
+    fs.closeSync(outputFd);
 
     compression.process = tar;
     const stderr = createBoundedUtf8Collector(MAX_LOCAL_TAR_STDERR_BYTES);

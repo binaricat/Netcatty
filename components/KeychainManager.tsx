@@ -882,6 +882,7 @@ echo $3 >> "$FILE"`);
       {/* Slide-out Panel */}
       {panel.type !== "closed" && (
         <AsidePanel
+          dataSection="keychain-security-panel"
           open={true}
           onClose={closePanel}
           title={panelTitle}

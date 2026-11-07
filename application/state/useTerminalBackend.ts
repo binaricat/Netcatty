@@ -335,6 +335,7 @@ export const useTerminalBackend = () => {
       contextViewportSnapshot: string;
       contextScrollbackSnapshot: string;
       alternateScreen: boolean;
+      perCharacterInput?: boolean;
       kittyKeyboardModeState?: NetcattyKittyKeyboardModeState;
       kittyKeyboardProtocolEnabled?: boolean;
     },

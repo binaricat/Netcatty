@@ -1,6 +1,6 @@
 # Plugin UI contributions
 
-Status: internal preview (`0.1.0-internal`), development gate only
+Status: unpublished plugin platform; host-rendered browser views enabled in normal Settings
 
 Phase 4 of [#2269](https://github.com/binaricat/Netcatty/issues/2269)
 connects the manifest contribution contract to Netcatty's native UI and to a
@@ -30,6 +30,10 @@ lives in the runtime, not in a view, so closing one view does not stop an
 otherwise active plugin.
 
 ## Native settings
+
+Settings are always host-rendered forms. Plugins cannot contribute custom HTML,
+CSS or executable renderers here. Optional localized `group` labels organize
+fields in declaration order. See [plugin-settings.md](plugin-settings.md).
 
 Netcatty renders setting declarations with host-owned controls. The supported
 controls are switches, radio/select/multiselect, text and password fields,
@@ -110,58 +114,17 @@ contexts rather than sharing one renderer snapshot context. This gives the PR 5
 Terminal Provider layer a stable session identity without exposing xterm or
 allowing renderer-supplied plugin keys to override runtime-owned Context Keys.
 
-## Sandboxed custom views
+## Host-rendered custom views
 
-Each open custom view is a lazily created `WebContentsView` with:
+All custom views use the [host-rendered UI contract](./host-rendered-ui.md).
+Plugins author ordinary React or DOM and CSS in the isolated runtime. Netcatty
+validates and draws their content in the same DOM as its own UI. There is no
+visible browser surface, HTML entry document, or legacy renderer selection.
 
-- `sandbox: true`, context isolation, web security, and no Node integration;
-- a private ephemeral session and a fixed black-hole proxy;
-- browser permissions, downloads, popups, webviews, drag navigation, and
-  navigation away from the registered entry document denied;
-- a protocol token scoped to one plugin package;
-- a CSP with `connect-src 'none'`, no frames, workers, objects, media, forms, or
-  base-URL changes; and
-- a Permissions Policy denying camera, microphone, location, display capture,
-  USB, serial, HID, payment, fullscreen, and clipboard capabilities.
-
-The protocol serves package files only. A view cannot load host runtime modules
-or another plugin's package. The view instance is bound to the Netcatty window
-that created it; another renderer window cannot resize, message, or close it.
-Owner closure, plugin disable, setup failure, and host shutdown all dispose the
-view and its protocol/session registrations.
-
-Opening is generation-bound: the host revalidates the exact plugin version and
-runtime identity after package preparation and again after document loading,
-before attaching the `WebContentsView`. Runtime stop, crash, quarantine,
-disable, uninstall, or replacement therefore cancels an in-flight open. Every
-host-side close is also broadcast to the owning renderer so retained and active
-view state, including native tabs, is withdrawn immediately.
-
-Views declaring `retainContextWhenHidden` are hidden without destroying their
-owner-bound `WebContentsView` and are restored with fresh bounds when reopened.
-Retained views are still disposed on owner shutdown, plugin disable, runtime
-quarantine, or host shutdown; the flag never extends ownership or permissions.
-
-Views declaring `location: "tab"` participate in Netcatty's draggable native
-top-tab model, including neighbor activation, middle-click and Cmd/Ctrl+W close,
-and close-others/right/all actions. They do not fall through to the overlay
-surface used by non-tab locations.
-
-The application-state lifecycle module combines a directly tested controller
-for active and retained instances, in-flight open tokens, early-close tombstones,
-and explicit-close handling with a hook that owns tab-catalog reconciliation,
-bounds, keyboard dispatch, and environment publication. The React component is
-rendering glue only. Contribution query changes expose a fail-closed empty
-snapshot while loading, but cannot mutate the native tab catalog until the
-matching query completes; opening or switching a tab therefore cannot withdraw
-an unconditional plugin tab during its own context refresh.
-
-The preload exposes only `postMessage`, same-plugin `executeCommand`, state
-get/set, runtime messages, and environment changes. It caches environment
-updates before view code subscribes and uses an owner-checked getter as a
-fallback, so late subscribers still receive their initial environment. Messages,
-state, command arguments, and Context Key values use the exact bounded JSON
-value boundary rather than relying on `JSON.stringify` coercion.
+The host owns placement, registration, retention, overlays and window identity.
+Commands, settings and privileged capabilities keep their existing permission
+boundaries. The linked contract documents authoring, supported controls,
+resources, quotas, cleanup and current limitations.
 
 ## Themes, localization, and accessibility
 
@@ -177,7 +140,7 @@ preference, and subsequent environment changes. Theme-token mutations and
 accessibility media-query changes are observed while the host is open, rather
 than only at initial view creation. Netcatty retains the accessible
 name and close control around every custom view; modal placements use dialog
-semantics, while aside, panel, tab, and settings placements use named regions.
+semantics, while aside, panel, and tab placements use named regions.
 
 ## SDK surface
 

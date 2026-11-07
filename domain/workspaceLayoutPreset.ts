@@ -3,6 +3,7 @@ import {
   closeSidePanelPane,
   collectSidePanelPanes,
   getFocusedSidePanelPane,
+  isPluginSidePanelTool,
   type SidePanelLayout,
   type SidePanelLayoutNode,
   type SidePanelTool,
@@ -32,7 +33,7 @@ const SIDE_PANEL_TOOLS: ReadonlySet<SidePanelTool> = new Set([
 ]);
 
 function isSidePanelTool(value: unknown): value is SidePanelTool {
-  return typeof value === 'string' && SIDE_PANEL_TOOLS.has(value as SidePanelTool);
+  return typeof value === 'string' && (SIDE_PANEL_TOOLS.has(value as SidePanelTool) || isPluginSidePanelTool(value));
 }
 
 function sanitizeSidePanelLayoutNode(

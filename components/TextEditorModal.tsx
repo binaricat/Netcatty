@@ -64,6 +64,8 @@ interface TextEditorModalProps {
   onClose: () => void;
   fileName: string;
   initialContent: string;
+  /** Full path for language detection; the title still uses fileName. */
+  filePath?: string;
   onSave: (content: string) => Promise<void>;
   editorWordWrap: boolean;
   onToggleWordWrap: () => void;
@@ -79,6 +81,7 @@ const TextEditorModal: React.FC<TextEditorModalProps> = ({
   open,
   onClose,
   fileName,
+  filePath,
   initialContent,
   onSave,
   editorWordWrap,
@@ -94,7 +97,7 @@ const TextEditorModal: React.FC<TextEditorModalProps> = ({
   const [baselineContent, setBaselineContent] = useState(initialContent);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [languageId, setLanguageId] = useState(() => getLanguageId(fileName));
+  const [languageId, setLanguageId] = useState(() => getLanguageId(filePath ?? fileName));
   const contentRef = useRef(initialContent);
   const baselineContentRef = useRef(initialContent);
   const savingRef = useRef(false);
@@ -149,13 +152,13 @@ const TextEditorModal: React.FC<TextEditorModalProps> = ({
     setBaselineContent(initialContent);
     setSaveError(null);
     setSaving(false);
-    setLanguageId(getLanguageId(fileName));
+    setLanguageId(getLanguageId(filePath ?? fileName));
     contentRef.current = initialContent;
     baselineContentRef.current = initialContent;
     savingRef.current = false;
     closePromptRef.current = null;
     viewStateRef.current = null;
-  }, [initialContent, fileName]);
+  }, [initialContent, fileName, filePath]);
 
   const saveContent = useCallback(async (contentToSave = contentRef.current): Promise<boolean> => {
     return saveCoordinatorRef.current?.save(contentToSave) ?? false;

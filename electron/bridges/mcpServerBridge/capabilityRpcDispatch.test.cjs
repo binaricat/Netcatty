@@ -33,6 +33,31 @@ function createTestDispatcher(overrides = {}) {
   });
 }
 
+test('reconnect respects observer mode and denial before touching transport', async () => {
+  let calls = 0;
+  for (const mode of [PERMISSION_MODES.OBSERVER, PERMISSION_MODES.CONFIRM]) {
+    const dispatch = createTestDispatcher({ permissionMode: mode, evaluatePermissionWithGrants,
+      validateSessionReconnect: () => ({ ok: true }),
+      requestApprovalFromRenderer: async () => false,
+      invokeVaultAgent: async () => { calls++; return { ok: true }; } });
+    assert.equal((await dispatch('session/reconnect', { sessionId: 's', chatSessionId: 'chat' })).ok, false);
+    assert.equal((await dispatch('session/recover', { sessionId: 's', chatSessionId: 'chat' })).ok, false);
+  }
+  assert.equal(calls, 0);
+});
+
+test('reconnect revalidates scope after approval and supports public RPC', async () => {
+  let allowed = true;
+  let calls = 0;
+  const dispatch = createTestDispatcher({ evaluatePermissionWithGrants,
+    validateSessionReconnect: () => allowed ? { ok: true } : { ok: false, error: 'scope revoked' },
+    requestApprovalFromRenderer: async () => { allowed = false; return true; },
+    invokeVaultAgent: async () => { calls++; return { ok: true }; } });
+  const result = await dispatch('public/session/reconnect', { sessionId: 's', chatSessionId: 'chat' });
+  assert.equal(result.error, 'scope revoked');
+  assert.equal(calls, 0);
+});
+
 test("host open does not report success after its scope binding was revoked", async () => {
   const dispatch = createTestDispatcher({
     invokeVaultAgent: async () => ({ ok: true, sessionId: "opened-1" }),

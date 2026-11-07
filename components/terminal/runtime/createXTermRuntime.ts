@@ -1,3 +1,5 @@
+import { shouldBroadcastDuringSensitivePrompt } from "../../../domain/terminalBroadcast";
+import type { SensitiveInputActiveRef } from "../autocomplete/terminalAutocompletePrompt";
 import { clearTerminalBroadcastUserInput, captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent, markTerminalBroadcastUserInput, type TerminalPacedBroadcast } from "./terminalPacedBroadcast";
 import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
@@ -109,6 +111,7 @@ import {
   terminalFontLigaturesEnabled,
 } from "./terminalFontLigatures";
 import { createWebglRendererController } from "./webglRendererController";
+import { getSharedWebglContextBudget } from "./webglContextBudget";
 import {
   captureMiddleClickTerminalMouseEvent,
   markMiddleClickContextMenuEvent,
@@ -252,6 +255,17 @@ type TerminalBackendApi = {
 // renderer hibernation. Weak ownership keeps negotiated keyboard state alive
 // for that session without introducing a process-wide session registry.
 const kittyKeyboardStates = createKittyKeyboardSessionStateStore();
+// The same session-owned ref also keeps the connection's input choice alive
+// when hibernation destroys xterm. Only a real reconnect refreshes this choice.
+const inputCompatibilityStates = new WeakMap<object, boolean>();
+
+// The stable session owner survives xterm disposal while its home renderer sleeps.
+export const getTerminalPerCharacterInput = (owner: object): boolean | undefined =>
+  inputCompatibilityStates.get(owner);
+
+export const restoreTerminalPerCharacterInput = (owner: object, enabled: boolean): void => {
+  inputCompatibilityStates.set(owner, enabled);
+};
 
 const resolveKittyKeyboardModeState = (
   ctx: Pick<
@@ -295,6 +309,12 @@ export type XTermRuntime = {
   /** Drop the WebGL addon while keeping the terminal alive (soft-hide). */
   suspendWebglRenderer: () => void;
   /**
+   * Re-read isPaneVisibleRef after the pane is shown or hidden. Hidden panes
+   * wait for the reveal path to rebuild a lost WebGL renderer, and past the
+   * shared context budget they give theirs up (see webglContextBudget).
+   */
+  syncPaneVisibility: () => void;
+  /**
    * Turn programming ligatures on or off. An active WebGL renderer is rebuilt
    * because its glyph atlas captures font-feature-settings only at creation.
    */
@@ -307,8 +327,10 @@ export type XTermRuntime = {
    * terminal reset or FIFO eviction.
    */
   hasInlineImages: () => boolean;
-  /** Clear local/per-target keyboard state before reusing this runtime. */
-  resetKittyConnectionInputState: () => void;
+  /** Reset keyboard state and snapshot endpoint settings for a fresh connection. */
+  resetConnectionInputState: (host: Host) => void;
+  getPerCharacterInput: () => boolean;
+  restorePerCharacterInput: (enabled: boolean) => void;
   /** Emit any owed releases before detaching or closing this renderer. */
   flushKittyKeyboardReleases: () => void;
   /** Transfer negotiated keyboard state across renderer attach handoffs. */
@@ -395,7 +417,9 @@ export type CreateXTermRuntimeContext = {
     recordEnter: (options?: { sensitive?: boolean }) => Promise<void>;
     captureSubmittedLineRecorder?: () => ((line: string, options?: { sensitive?: boolean; includePendingInput?: boolean; consumePendingInput?: boolean }) => Promise<void>) | undefined;
   } | undefined>;
-  passwordPromptActiveRef?: RefObject<boolean>;
+  passwordPromptActiveRef?: SensitiveInputActiveRef;
+  /** Includes raw PTY screen transitions not yet parsed by xterm. */
+  isPromptSecurityAlternateScreenActive?: () => boolean;
   /**
    * Opt-in "broadcast without password protection" (#3488). When true, an
    * active password prompt no longer pauses raw-string broadcast fan-out.
@@ -459,9 +483,18 @@ export type CreateXTermRuntimeContext = {
   // background tabs) to avoid spinning up many WebGL contexts at once. Defaults
   // to visible (immediate WebGL) when omitted.
   initiallyVisible?: boolean;
+  /**
+   * Whether the pane is on screen right now. Unlike initiallyVisible, which
+   * stays true for hidden panes unless hibernation is on, this feeds the WebGL
+   * context budget. Treated as always visible when omitted.
+   */
+  isPaneVisibleRef?: RefObject<boolean>;
   /** When true, keep the DOM renderer until replay completes (hibernate wake). */
   deferWebglUntilReplayComplete?: boolean;
 };
+
+/** Private xterm fields used to release a disposed renderer's WebGL context. */
+type WebglAddonInternals = { _renderer?: { _gl?: WebGL2RenderingContext } };
 
 const detectPlatform = (): XTermPlatform => {
   if (
@@ -515,6 +548,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const rendererType = settings?.rendererType ?? "auto";
   const bridge = netcattyBridge.get();
   const isLocalTerminalHost = ctx.host.protocol === "local";
+  // Capture the terminal endpoint's choice for this connection, never a chain hop.
+  const usesPerCharacterInput = (host: Host) =>
+    (host.protocol !== undefined && host.protocol !== "ssh") || host.moshEnabled === true
+    || host.etEnabled === true || host.sshInputCompatibility === true;
+  let usePerCharacterInput = inputCompatibilityStates.get(ctx.terminalSettingsRef)
+    ?? usesPerCharacterInput(ctx.host);
+  inputCompatibilityStates.set(ctx.terminalSettingsRef, usePerCharacterInput);
   const windowsPty =
     platform === "win32" && isLocalTerminalHost
       ? bridge?.getWindowsPtyInfo?.() ?? { backend: "conpty" as const }
@@ -879,10 +919,27 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
   };
 
+  // Disposing the addon leaves its WebGL context alive until the canvas is
+  // garbage collected, still holding GPU memory and one of Chromium's 16
+  // context slots. Lose it explicitly so both come back right away.
+  const disposeWebglAddon = (addon: WebglAddon) => {
+    const gl = (addon as unknown as WebglAddonInternals)._renderer?._gl;
+    addon.dispose();
+    try {
+      if (gl && !gl.isContextLost()) gl.getExtension("WEBGL_lose_context")?.loseContext();
+    } catch (err) {
+      logger.warn("[XTerm] Failed to release WebGL context", err);
+    }
+  };
+
+  const isPaneVisibleRef = ctx.isPaneVisibleRef;
   const webglController = createWebglRendererController({
     enabled: performanceConfig.useWebGLAddon,
+    budget: getSharedWebglContextBudget(),
+    isVisible: isPaneVisibleRef ? () => isPaneVisibleRef.current !== false : undefined,
     createAddon: () => new WebglAddon(),
     loadAddon: (addon) => term.loadAddon(addon),
+    disposeAddon: disposeWebglAddon,
     repaint: repaintTerminal,
     setLoaded: (loaded) => {
       webglLoaded = loaded;
@@ -1034,8 +1091,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // classification carried in the paste options must still tag the fan-out.
     const sourceSensitive = dispatchingFromPasswordPrompt || options?.sensitive === true;
     if (
-      (!dispatchingFromPasswordPrompt
-        || ctx.broadcastPasswordBypassRef?.current === true)
+      shouldBroadcastDuringSensitivePrompt({
+        sensitivePromptActive: dispatchingFromPasswordPrompt,
+        broadcastPasswordBypass: ctx.broadcastPasswordBypassRef?.current === true,
+        sensitivePromptSource: ctx.passwordPromptActiveRef?.source,
+        alternateScreen: ctx.isPromptSecurityAlternateScreenActive?.() || term.buffer?.active.type === "alternate",
+      })
       && ctx.isBroadcastEnabledRef.current
       && ctx.onBroadcastInputRef.current
     ) {
@@ -1325,10 +1386,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       lineDelayMs?: number;
       pasteRequestId?: string;
       /**
-       * Send plain text as one write per character. Strict bastion prompts
-       * (QAX) treat one channel write as a keystroke and drop multi-character
-       * chunks, so IME commits and short raw pastes must go out per
-       * character (#3077). Bookkeeping still sees the whole payload once.
+       * Request the legacy IME/short-paste workaround reported in #3077.
+       * The SSH host's compatibility choice gates the final writes below.
+       * Bookkeeping still sees the whole payload once.
        */
       perCharacterWrites?: boolean;
     },
@@ -1361,9 +1421,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // reconnect may have cleared passwordPromptActiveRef while the dialog was
     // open, so the live ref alone would downgrade the secret to nonsensitive.
     // The override is consumed only for the flagged paste data.
-    const sensitive = ctx.passwordPromptActiveRef?.current === true
-      || options?.sensitive === true
+    const carriedSensitive = options?.sensitive === true
       || shouldOverrideTerminalUserPasteSensitivity(term, logicalData ?? data);
+    const sensitive = ctx.passwordPromptActiveRef?.current === true || carriedSensitive;
     if (!options?.lineDelayMs && logicalData !== null
       && !isPrintableInput(logicalData) && !isTerminalReportSequence(logicalData)) {
       commandBufferRevision += 1;
@@ -1392,8 +1452,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // The password bypass (#3488) only lifts the live password-prompt pause.
     // Explicitly classified sensitive payloads (confirmed pastes, preloaded
     // sudo credentials) stay non-broadcastable regardless of the opt-in.
-    const canBroadcastInput = (!sensitive
-      || (ctx.broadcastPasswordBypassRef?.current === true && options?.sensitive !== true)) &&
+    const canBroadcastInput = shouldBroadcastDuringSensitivePrompt({
+      sensitivePromptActive: sensitive,
+      broadcastPasswordBypass: ctx.broadcastPasswordBypassRef?.current === true && options?.sensitive !== true,
+      sensitivePromptSource: carriedSensitive ? "explicit" : ctx.passwordPromptActiveRef?.source,
+      alternateScreen: ctx.isPromptSecurityAlternateScreenActive?.() || term.buffer?.active.type === "alternate",
+    }) &&
       inputSource !== "kitty" &&
       !handlingKittyBroadcast &&
       !suppressTerminalBroadcast &&
@@ -1550,7 +1614,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         }
 
         ctx.onOutputTriggerUserInputRef?.current?.(outData);
-        for (const chunk of getTextInputWireChunks(outData, options?.perCharacterWrites === true)) {
+        for (const chunk of getTextInputWireChunks(outData, usePerCharacterInput && options?.perCharacterWrites === true, (ctx.host.protocol === undefined || ctx.host.protocol === "ssh") && !ctx.host.moshEnabled && !ctx.host.etEnabled)) {
           ctx.terminalBackend.writeToSession(id, chunk, {
             sensitive,
             serialEraseChar,
@@ -1727,8 +1791,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     isHandlingBroadcast: () => handlingKittyBroadcast,
     isBroadcastEnabled: () => ctx.isBroadcastEnabledRef.current,
     // The #3488 bypass lifts the password-prompt pause for Kitty key fan-out too.
-    isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true
-      && ctx.broadcastPasswordBypassRef?.current !== true,
+    isSensitiveInput: () => !shouldBroadcastDuringSensitivePrompt({
+      sensitivePromptActive: ctx.passwordPromptActiveRef?.current === true,
+      broadcastPasswordBypass: ctx.broadcastPasswordBypassRef?.current === true,
+      sensitivePromptSource: ctx.passwordPromptActiveRef?.source,
+      alternateScreen: ctx.isPromptSecurityAlternateScreenActive?.() || term.buffer?.active.type === "alternate",
+    }),
     // Dispatching from an active prompt under the bypass must tag the payload
     // so peer writes keep input interceptors skipped.
     isSensitivePromptSource: () => ctx.passwordPromptActiveRef?.current === true,
@@ -2708,6 +2776,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       };
       return true;
     }
+    // xterm leaves Shift+Insert to the browser's native paste handler. Fan out
+    // the clipboard data from onData instead of encoding an Insert key for
+    // peers or treating the paste as that key's pending legacy data (#4142).
+    if (
+      e.key === "Insert" && e.shiftKey
+      && !e.ctrlKey && !e.altKey && !e.metaKey
+    ) {
+      return true;
+    }
     if (!shouldDeferKittyKeyEvent(normalizedKittyEvent)) {
       const identity = kittyKeyIdentity(e);
       if (
@@ -3140,13 +3217,19 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       broadcastLegacyDataPending = null;
     }
     // Raw multi-character onData is an unbracketed paste (or a committed
-    // composition): short plain text must reach strict bastions per character.
+    // composition): selected short plain text can use compatibility writes.
     // Decide on the sanitized payload so removed zero-width characters cannot
     // keep a qualifying paste above the split cap (#3138).
     const sanitizedRawData = sanitizeTerminalInput(data);
     handleTerminalInputData(sanitizedRawData, {
       perCharacterWrites: shouldSplitRawPasteInputForWire(sanitizedRawData),
     });
+  });
+
+  term.onBinary((data) => {
+    // Legacy mouse reports are wire bytes, not text input or broadcast keys.
+    const id = ctx.sessionRef.current;
+    if (id) ctx.terminalBackend.writeToSession(id, data, { binary: true });
   });
 
   const handleKittyKeyboardBroadcast = createKittyKeyboardBroadcastHandler({
@@ -3475,12 +3558,22 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     clearTextureAtlas: clearWebglTextureAtlas,
     ensureWebglRenderer: loadWebglRenderer,
     suspendWebglRenderer,
+    syncPaneVisibility: webglController.syncVisibility,
     syncFontLigatures: (enabled: boolean) => {
       ligatures.apply(enabled);
     },
     hasInlineImages,
-    resetKittyConnectionInputState: clearKittyConnectionInputState,
+    resetConnectionInputState: (host) => {
+      usePerCharacterInput = usesPerCharacterInput(host);
+      inputCompatibilityStates.set(ctx.terminalSettingsRef, usePerCharacterInput);
+      clearKittyConnectionInputState();
+    },
     flushKittyKeyboardReleases: clearKittyTransientInputState,
+    getPerCharacterInput: () => usePerCharacterInput,
+    restorePerCharacterInput: (enabled) => {
+      usePerCharacterInput = enabled;
+      restoreTerminalPerCharacterInput(ctx.terminalSettingsRef, enabled);
+    },
     getKittyKeyboardModeState: () => snapshotKittyKeyboardModeState(kittyKeyboardMode),
     restoreKittyKeyboardModeState: (state) => restoreKittyKeyboardModeState(
       kittyKeyboardMode,

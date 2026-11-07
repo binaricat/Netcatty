@@ -35,9 +35,14 @@ class PluginSyncSidecarService {
         sync: setting.sync === true,
         scope: setting.scope,
       }));
-      map.set(plugin.id, fields);
+      map.set(this.database.privateOwner(plugin.id), fields);
     }
     return map;
+  }
+
+  #isCurrentOwner(owner, publicId) {
+    return publicId !== null && this.database.publicPluginId(owner) === publicId
+      && this.#declaredSettingsByPlugin().has(owner);
   }
 
   /**
@@ -170,12 +175,14 @@ class PluginSyncSidecarService {
       }
     }
     for (const entry of resetCandidates) {
+      const publicId = this.database.publicPluginId(entry.pluginId);
+      if (!this.#isCurrentOwner(entry.pluginId, publicId)) continue;
       const parsed = parseSettingsSidecarKey(entry.key);
       if (!parsed) continue;
       if (typeof this.contributionService?.resetSetting === "function") {
         try {
           await this.contributionService.resetSetting(
-            entry.pluginId,
+            publicId,
             parsed.settingId,
             parsed.scopeId,
           );
@@ -183,6 +190,7 @@ class PluginSyncSidecarService {
           // Validation rejected the reset (e.g. required setting) — still try
           // the stored-coordinate delete below for stale-scope rows.
         }
+        if (!this.#isCurrentOwner(entry.pluginId, publicId)) continue;
         // resetSetting normalizes against the *current* declared scope. After a
         // scope migration (application → device), that may miss the stale row
         // still stored under the old coordinates; always delete those too.
@@ -201,6 +209,8 @@ class PluginSyncSidecarService {
       this.database.deleteSetting(entry.pluginId, parsed.settingId, parsed.scope, parsed.scopeId);
     }
     for (const entry of safe) {
+      const publicId = this.database.publicPluginId(entry.pluginId);
+      if (!this.#isCurrentOwner(entry.pluginId, publicId)) continue;
       if (entry.kind !== "settings") continue;
       const fields = declared.get(entry.pluginId);
       if (!fields) continue;
@@ -218,12 +228,13 @@ class PluginSyncSidecarService {
       if (typeof this.contributionService?.updateSetting === "function") {
         try {
           await this.contributionService.updateSetting(
-            entry.pluginId,
+            publicId,
             parsed.settingId,
             entry.value,
             targetScopeId,
             { source: "host" },
           );
+          if (!this.#isCurrentOwner(entry.pluginId, publicId)) continue;
           // Preserve remote LWW timestamp after validated write (updateSetting uses clock).
           this.database.setSetting(
             entry.pluginId,
@@ -312,12 +323,14 @@ class PluginSyncSidecarService {
    */
   async hydrateInstalledPluginSettings(pluginId) {
     if (typeof pluginId !== "string" || pluginId.length < 1) return;
-    const declared = this.#declaredSettingsByPlugin().get(pluginId);
+    const owner = this.database.privateOwner(pluginId);
+    const declared = this.#declaredSettingsByPlugin().get(owner);
     if (!declared) return;
     const rows = typeof this.database.listSyncSidecars === "function"
       ? this.database.listSyncSidecars(pluginId)
       : [];
     for (const entry of rows) {
+      if (!this.#isCurrentOwner(owner, pluginId)) return;
       if (entry.kind !== "settings") continue;
       const parsed = parseSettingsSidecarKey(entry.key);
       if (!parsed) continue;
@@ -347,8 +360,9 @@ class PluginSyncSidecarService {
             targetScopeId,
             { source: "host" },
           );
+          if (!this.#isCurrentOwner(owner, pluginId)) return;
           this.database.setSetting(
-            pluginId,
+            owner,
             parsed.settingId,
             targetScope,
             targetScopeId,
@@ -358,7 +372,7 @@ class PluginSyncSidecarService {
           if (targetScope !== parsed.scope || targetScopeId !== parsed.scopeId) {
             try {
               this.database.deleteSetting(
-                pluginId,
+                owner,
                 parsed.settingId,
                 parsed.scope,
                 parsed.scopeId,
@@ -369,14 +383,14 @@ class PluginSyncSidecarService {
             if (typeof this.database.setSyncSidecar === "function") {
               try {
                 this.database.setSyncSidecar(
-                  pluginId,
+                  owner,
                   "settings",
                   nextKey,
                   entry.value,
                   entry.updatedAt,
                 );
                 if (nextKey !== entry.key && typeof this.database.deleteSyncSidecar === "function") {
-                  this.database.deleteSyncSidecar(pluginId, "settings", entry.key);
+                  this.database.deleteSyncSidecar(owner, "settings", entry.key);
                 }
               } catch {
                 // Sidecar re-key is best-effort after settings write.

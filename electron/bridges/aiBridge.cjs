@@ -241,6 +241,7 @@ let registeredVaultAgentBridge = null;
 
 // Active streaming requests (for cancellation)
 const activeStreams = new Map();
+const pluginModelStreamOwners = new Map();
 
 // ── Provider registry (synced from renderer, keys stay encrypted) ──
 const ENC_PREFIX = "enc:v1:";
@@ -610,10 +611,25 @@ function withContentLength(headers, body) {
 }
 
 async function streamRequest(url, options, event, requestId, skipTLS) {
+  if (requestId.startsWith("agent-model_") && !/^agent-model_[0-9a-f-]{36}_[0-9a-f-]{36}_sdk_/.test(requestId)) {
+    throw new Error("Delegated model request identity invalid");
+  }
   const parsedUrl = new URL(url);
   // Register cancellation before any await so Stop during PAC/proxy lookup works.
   const controller = new AbortController();
-  const { idleTimeoutMs, totalTimeoutMs } = resolveAIStreamTimeouts(options);
+  const pluginRuntimeId = /^plugin-model_([A-Za-z0-9-]{1,128})_/.exec(requestId)?.[1];
+  const delegatedMatch = /^agent-model_([0-9a-f-]{36})_([0-9a-f-]{36})_sdk_/.exec(requestId);
+  const delegatedId = delegatedMatch?.[1];
+  const delegationTag = delegatedMatch?.[2];
+  const delegatedBridge = delegatedId ? require("./mcpServerBridge.cjs") : null;
+  const assertDelegation = () => delegatedBridge?.assertPluginAgentCaller(`plugin-agent:${delegatedId}`, event.sender.id, delegationTag);
+  assertDelegation();
+  if (delegatedId) delegatedBridge.beginPluginAgentModelRequest(`plugin-agent:${delegatedId}`, event.sender.id, delegationTag);
+  const detachDelegation = delegatedBridge?.onPluginAgentRelease(`plugin-agent:${delegatedId}`, delegationTag, () => controller.abort(createAbortError()));
+  const { idleTimeoutMs, totalTimeoutMs } = pluginRuntimeId || delegatedId
+    ? { idleTimeoutMs: Math.min(15_000, Math.max(1, Number(options.idleTimeoutMs) || 15_000)),
+        totalTimeoutMs: Math.min(60_000, Math.max(1, Number(options.totalTimeoutMs) || 60_000)) }
+    : resolveAIStreamTimeouts(options);
   const maxErrorBodyBytes = Math.max(1, Number(options.maxErrorBodyBytes) || 64 * 1024);
   let lifecycleFinished = false;
   let idleTimer;
@@ -623,6 +639,8 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
     clearTimeout(totalTimer);
     clearTimeout(idleTimer);
     activeStreams.delete(requestId);
+    pluginModelStreamOwners.delete(requestId);
+    detachDelegation?.();
   };
   const noteStreamActivity = () => {
     if (lifecycleFinished) return;
@@ -636,10 +654,14 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
   }, totalTimeoutMs);
   noteStreamActivity();
   activeStreams.set(requestId, controller);
+  if (pluginRuntimeId) pluginModelStreamOwners.set(requestId, { sender: event.sender, runtimeId: pluginRuntimeId });
   if (controller.signal.aborted) {
     finishLifecycle();
     throw controller.signal.reason instanceof Error ? controller.signal.reason : createAbortError();
   }
+
+  try { assertDelegation(); }
+  catch (error) { finishLifecycle(); throw error; }
 
   const { resolveOutboundHttpAgent } = require("./httpNetworkProxyAgent.cjs");
   let proxyAgent;
@@ -724,6 +746,7 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
     if (proxyAgent) reqOpts.agent = proxyAgent;
 
     try {
+      assertDelegation();
       req = lib.request(parsedUrl, reqOpts,
         (res) => {
         if (streamFinished) {
@@ -782,10 +805,19 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
         settleResolve({ statusCode, statusText });
 
         let buffer = "";
+        let pluginResponseBytes = 0;
         const MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB safety limit
 
         res.on("data", (chunk) => {
+          if (streamFinished) return;
           noteStreamActivity();
+          if (pluginRuntimeId || delegatedId) {
+            pluginResponseBytes += Buffer.byteLength(chunk);
+            if (pluginResponseBytes > 131_072) {
+              failStream(new Error("Plugin model stream byte budget exceeded"));
+              return;
+            }
+          }
           const previousBufferLength = buffer.length;
           buffer += chunk.toString();
           // Guard against unbounded buffer growth
@@ -1005,12 +1037,25 @@ function registerHandlers(ipcMain) {
   }
 }
 
+// This entry point is main-process only. Plugin views cannot choose a sender or
+// access it through IPC. Internal Agent streams have no plugin request tag.
+function cancelPluginAIStreamsForSender(sender, runtimeId) {
+  let cancelled = 0;
+  for (const [requestId, owner] of [...pluginModelStreamOwners]) {
+    if (owner.sender !== sender || (runtimeId !== undefined && owner.runtimeId !== runtimeId)) continue;
+    activeStreams.get(requestId)?.abort(createAbortError());
+    cancelled++;
+  }
+  return cancelled;
+}
+
 // Abort active streams and child processes on shutdown
 function cleanup() {
   for (const [id, controller] of activeStreams) {
     try { controller.abort(); } catch {}
   }
   activeStreams.clear();
+  pluginModelStreamOwners.clear();
 
   // Abort active SDK agent streams (set by registerSdkStreamHandlers on ctx).
   if (registeredContext && registeredContext.sdkActiveStreams) {
@@ -1056,6 +1101,7 @@ module.exports = {
   buildExternalAgentSystemContext,
   buildExternalAgentContextualPrompt,
   _streamRequestForTests: streamRequest,
+  cancelPluginAIStreamsForSender,
   _resolveAIStreamTimeoutsForTests: resolveAIStreamTimeouts,
   _getActiveStreamCountForTests: () => activeStreams.size,
   DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS,

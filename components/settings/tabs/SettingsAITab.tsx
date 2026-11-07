@@ -55,6 +55,10 @@ import { AIPrivacySection } from "./ai/AIPrivacySection";
 import { ToolAccessGuidance } from "./ai/ToolAccessGuidance";
 import { PermissionGrantsSettings } from "./ai/PermissionGrantsSettings";
 import { useAIPermissionGrantsState } from "../../../application/state/useAIPermissionGrantsState";
+import {
+  MAX_AI_SESSION_MESSAGE_CAP,
+  MIN_AI_SESSION_MESSAGE_CAP,
+} from "../../../domain/aiSessionMessageCap";
 import { WebSearchSettings } from "./ai/WebSearchSettings";
 import { QuickMessagesSettings } from "./ai/QuickMessagesSettings";
 import type { AIQuickMessage } from "../../../infrastructure/ai/quickMessages";
@@ -159,6 +163,8 @@ interface SettingsAITabProps {
   setResponseIdleTimeout: (value: number) => void;
   maxIterations: number;
   setMaxIterations: (value: number) => void;
+  aiSessionMessageCap: number;
+  setAiSessionMessageCap: (value: number) => void;
   webSearchConfig: WebSearchConfig | null;
   setWebSearchConfig: (config: WebSearchConfig | null) => void;
   quickMessages: AIQuickMessage[];
@@ -196,6 +202,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   setResponseIdleTimeout,
   maxIterations,
   setMaxIterations,
+  aiSessionMessageCap,
+  setAiSessionMessageCap,
   webSearchConfig,
   setWebSearchConfig,
   quickMessages,
@@ -1260,6 +1268,34 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         </TabsContent>
 
         <TabsContent value="tools" className="m-0 space-y-6">
+
+
+          <SettingsSection
+            anchorId="ai-tool-access-mode"
+            title={t('ai.toolAccess.title')}
+          >
+            <SettingCard>
+              <SettingRow className="flex-col items-start md:flex-row md:items-center" description={t('ai.toolAccess.description')}>
+                <div className="flex flex-wrap justify-end gap-2">
+                <Select
+                  value={toolIntegrationMode}
+                  options={[
+                    { value: 'mcp', label: t('ai.toolAccess.mode.mcp') },
+                    { value: 'skills', label: t('ai.toolAccess.mode.skills') },
+                  ]}
+                  onChange={(value) => setToolIntegrationMode(value as AIToolIntegrationMode)}
+                  className="w-48"
+                />
+                <ToolAccessGuidance mode={toolIntegrationMode} />
+                </div>
+              </SettingRow>
+            </SettingCard>
+          </SettingsSection>
+
+          <ExternalMcpCard />
+
+          <AIPrivacySection />
+
           <SettingsSection title={t('ai.chatShortcuts.title')}>
             <SettingCard divided>
               <SettingRow
@@ -1277,31 +1313,32 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           </SettingsSection>
 
           <SettingsSection
-            anchorId="ai-tool-access-mode"
-            title={t('ai.toolAccess.title')}
+            anchorId="ai-chat-history"
+            title={t('ai.chatHistory.title')}
           >
             <SettingCard>
-              <SettingRow description={t('ai.toolAccess.description')}>
-                <Select
-                  value={toolIntegrationMode}
-                  options={[
-                    { value: 'mcp', label: t('ai.toolAccess.mode.mcp') },
-                    { value: 'skills', label: t('ai.toolAccess.mode.skills') },
-                  ]}
-                  onChange={(value) => setToolIntegrationMode(value as AIToolIntegrationMode)}
-                  className="w-48"
-                />
+              <SettingRow
+                anchorId="ai-chat-history-message-cap"
+                label={t('ai.chatHistory.messageCap')}
+                description={t('ai.chatHistory.messageCap.description')}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    aria-label={t('ai.chatHistory.messageCap')}
+                    value={aiSessionMessageCap}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val)) setAiSessionMessageCap(val);
+                    }}
+                    min={MIN_AI_SESSION_MESSAGE_CAP}
+                    max={MAX_AI_SESSION_MESSAGE_CAP}
+                    className="w-20 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                  <span className="text-xs text-muted-foreground">{t('ai.chatHistory.messageCap.unit')}</span>
+                </div>
               </SettingRow>
-              <div className="pb-4">
-                <ToolAccessGuidance mode={toolIntegrationMode} />
-              </div>
             </SettingCard>
-          </SettingsSection>
-
-          <AIPrivacySection />
-
-          <SettingsSection anchorId="ai-external-mcp" title={t('ai.externalMcp.title')}>
-            <ExternalMcpCard />
           </SettingsSection>
 
           <SettingsSection

@@ -127,7 +127,7 @@ function registerSecurePluginCapabilities(registry, options) {
     options.filesystemBroker.readDirectory(params, context)
   ), {
     metadata: { capability: "filesystem", mutating: false, permission: "filesystem.read" },
-    validateParams: (params) => options.filesystemBroker.validatePath(params),
+    validateParams: (params) => options.filesystemBroker.validateDirectory(params),
     authorization: (params) => options.filesystemBroker.describeReadAuthorization(params, "directory"),
   });
   registry.registerRequest("filesystem.writeFile", (params, context) => (

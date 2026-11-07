@@ -665,6 +665,7 @@ const importFromCsv = (
   const proxyIdx = findExactHeaderIndex(header, ["proxy", "proxyserver", "proxy server"]);
   const proxyJumpIdx = findExactHeaderIndex(header, ["proxyjump"]);
   const localShellIdx = findExactHeaderIndex(header, ["localshell"]);
+  const inputCompatibilityIdx = findExactHeaderIndex(header, ["sshinputcompatibility"]);
   const passphraseIdx = keyPathIdx >= 0 ? explicitPassphraseIdx : -1;
   const exactPasswordIdx = findExactHeaderIndex(header, ["password", "pass", "passwd"]);
   const fuzzyNamedPasswordIdx = findHeaderIndex(header, ["password", "passwd"]);
@@ -795,6 +796,10 @@ const importFromCsv = (
       tags,
       notes,
     });
+    if (inputCompatibilityIdx >= 0 && (protocol === undefined || protocol === "ssh")) {
+      const choice = row[inputCompatibilityIdx]?.trim().toLowerCase();
+      if (choice === "true" || choice === "false") host.sshInputCompatibility = choice === "true";
+    }
     if (proxyConfig) host.proxyConfig = proxyConfig;
     if (directProxy) host.directProxy = true;
     if (localShellSpec && protocol === "local") {

@@ -238,3 +238,12 @@ export function parseTerminalPaneRenderSnapshot(snapshot: string): {
     isFocusedPane: focusToken === "focused",
   };
 }
+
+/** Preserve the existing Terminal input props: solo/Focus mode have no split focus contention. */
+export function resolveTerminalPaneInputProps({ paneState, isFocusedPane }: ReturnType<typeof parseTerminalPaneRenderSnapshot>) {
+  return {
+    isVisible: paneState.isVisible,
+    isFocused: isFocusedPane,
+    isFocusedPane: paneState.mode === "split" ? isFocusedPane : undefined,
+  };
+}

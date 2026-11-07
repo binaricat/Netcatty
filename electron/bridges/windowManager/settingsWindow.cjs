@@ -139,6 +139,7 @@ function createSettingsWindowApi(ctx) {
         minWidth: 820,
         minHeight: 600,
         backgroundColor,
+        transparent: isMac,
         icon: appIcon,
         fullscreenable: !isMac,
         // NOTE: Do NOT set parent - on macOS this causes rendering issues when dragging
@@ -150,6 +151,7 @@ function createSettingsWindowApi(ctx) {
         frame: isMac,
         titleBarStyle: isMac ? "hiddenInset" : undefined,
         trafficLightPosition: isMac ? { x: 12, y: 12 } : undefined,
+        ...(isMac ? { visualEffectState: "active" } : {}),
         ...windowsChrome,
         webPreferences: {
           preload,

@@ -264,6 +264,7 @@ export const SftpOverlays: React.FC<SftpOverlaysProps> = React.memo(({
               open={showTextEditor}
               onClose={closeTextEditor}
               fileName={textEditorFileName}
+              filePath={textEditorTarget?.fullPath}
               initialContent={textEditorContent}
               onSave={handleSaveTextFile}
               editorWordWrap={editorWordWrap}

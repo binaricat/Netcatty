@@ -1,0 +1,46 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.hello-vault",
+  "name": "hello-vault",
+  "displayName": {
+    "en": "Hello World",
+    "zh-CN": "你好，世界"
+  },
+  "description": "A static Hello World page in Vault. No external data access.",
+  "version": "0.1.0",
+  "publisher": "netcatty",
+  "license": "MIT",
+  "engines": {
+    "netcatty": "=0.0.0",
+    "api": "=0.1.0-internal.1"
+  },
+  "features": {
+    "required": [
+      "views.vault-pages"
+    ]
+  },
+  "main": {
+    "browser": "dist/host.js"
+  },
+  "activationEvents": [
+    "onView:com.netcatty.hello-vault.page"
+  ],
+  "permissions": {
+    "required": [
+      "views"
+    ],
+    "optional": []
+  },
+  "contributes": {
+    "views": [
+      {
+        "id": "com.netcatty.hello-vault.page",
+        "title": {
+          "en": "Hello World",
+          "zh-CN": "你好，世界"
+        },
+        "location": "vault-page"
+      }
+    ]
+  }
+}

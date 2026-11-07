@@ -488,3 +488,98 @@ test("shutdown cancels an in-flight runtime mutation before waiting for its queu
     "database:close",
   ]);
 });
+
+test("explicit enable checks compatibility before clearing quarantine or exposing lazy contributions", async () => {
+  const calls = [];
+  const plugin = { id: "com.example.incompatible", enabled: false, runtime: { quarantinedAt: 1 } };
+  const manager = new PluginManager({
+    database: {
+      getActivePlugin: () => plugin,
+      clearQuarantine: () => calls.push("clear"),
+      setEnabled: () => calls.push("enable"),
+    },
+    packageStore: {
+      async initialize() {},
+      async assertCompatible() { throw new Error("Plugin is incompatible"); },
+    },
+    runtimeSupervisor: {},
+    contributionService: {
+      async initialize() {},
+      onPluginEnabled: () => calls.push("contribute"),
+    },
+  });
+  await assert.rejects(manager.setEnabled(plugin.id, true), /incompatible/);
+  assert.deepEqual(calls, []);
+});
+
+test("permission revocation disables before clearing grants and waits for runtime cleanup", async () => {
+  const calls = [];
+  let releaseStop;
+  const stopped = new Promise((resolve) => { releaseStop = resolve; });
+  let enabled = true;
+  const manager = new PluginManager({
+    database: {
+      getActivePlugin: (id) => ({ id, enabled }),
+      setEnabled(_id, value) { enabled = value; calls.push("disable"); },
+    },
+    packageStore: { async initialize() {} },
+    contributionService: {
+      async initialize() {},
+      onPluginDisabled() { calls.push("contributions"); },
+    },
+    permissionEngine: { revokeAll() { assert.equal(enabled, false); calls.push("revoke"); } },
+    runtimeSupervisor: { async stop() { calls.push("stop"); await stopped; calls.push("clean"); } },
+  });
+  let complete = false;
+  const revoke = manager.revokePermissions("com.example.revoke").then((value) => { complete = true; return value; });
+  const enable = manager.setEnabled("com.example.revoke", false);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["disable", "revoke", "contributions", "stop"]);
+  assert.equal(complete, false);
+  releaseStop();
+  assert.equal((await revoke).enabled, false);
+  await enable;
+  assert.deepEqual(calls.slice(4), ["clean", "disable", "contributions", "stop", "clean"]);
+});
+
+test("failed runtime containment leaves the revoked plugin disabled and reports failure", async () => {
+  let enabled = true;
+  let revoked = false;
+  const manager = new PluginManager({
+    database: { getActivePlugin: () => ({ enabled }), setEnabled(_id, value) { enabled = value; } },
+    packageStore: { async initialize() {} },
+    contributionService: { async initialize() {}, onPluginDisabled() {} },
+    permissionEngine: { revokeAll() { revoked = true; } },
+    runtimeSupervisor: { async stop() { throw new Error("containment failed"); } },
+  });
+  await assert.rejects(manager.revokePermissions("com.example.revoke"), /containment failed/);
+  assert.equal(enabled, false);
+  assert.equal(revoked, true);
+});
+
+test("revocation attempts every cleanup stage and aggregates independent failures", async () => {
+  for (const failedStages of [["revoke"], ["contributions"], ["disable"], ["stop"], ["disable", "revoke", "contributions", "stop"]]) {
+    const calls = [];
+    const fail = (stage) => {
+      calls.push(stage);
+      if (failedStages.includes(stage)) throw new Error(`${stage} failed`);
+    };
+    const manager = new PluginManager({
+      database: {
+        getActivePlugin: () => ({ id: "com.example.revoke", enabled: false }),
+        setEnabled() { fail("disable"); },
+      },
+      packageStore: { async initialize() {} },
+      contributionService: { async initialize() {}, onPluginDisabled() { fail("contributions"); } },
+      permissionEngine: { revokeAll() { fail("revoke"); } },
+      runtimeSupervisor: { async stop() { fail("stop"); } },
+    });
+    await assert.rejects(manager.revokePermissions("com.example.revoke"), (error) => {
+      if (failedStages.length === 1) return error.message === `${failedStages[0]} failed`;
+      assert.ok(error instanceof AggregateError);
+      assert.deepEqual(error.errors.map((entry) => entry.message), failedStages.map((stage) => `${stage} failed`));
+      return true;
+    });
+    assert.deepEqual(calls, ["disable", "revoke", "contributions", "stop"]);
+  }
+});

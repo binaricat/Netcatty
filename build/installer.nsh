@@ -1,3 +1,14 @@
+!macro customInit
+  ; #3946: external MCP hosts launch Netcatty.exe with ELECTRON_RUN_AS_NODE=1
+  ; via netcatty-external-mcp.cmd. Those processes can outlive the host UI as
+  ; orphans and keep $INSTDIR locked, so the in-app updater hangs (AppHangB1).
+  ; Force-kill leftover Netcatty.exe before files are replaced. Do not pass /T:
+  ; electron-updater spawns this installer as a child of the UI Netcatty.exe,
+  ; and /T would terminate the installer itself. Ignore a missing process.
+  nsExec::ExecToLog "taskkill /F /IM Netcatty.exe"
+  Pop $0
+!macroend
+
 !macro customInstall
   ; Open a selected folder in a new Netcatty local terminal.
   ; Args go after `--` so Electron/Chromium does not swallow them. Use

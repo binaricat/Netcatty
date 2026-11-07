@@ -16,6 +16,7 @@ import { isPortForwardingAutoReconnectEnabled } from '../../domain/portForwardin
 import { buildNumberShortcutTabTargets } from './tabShortcutTargets';
 import { captureInheritedCwd } from '../state/inheritedCwd';
 import { fromEditorTabId, isEditorTabId } from '../state/activeTabStore';
+import { isPluginViewEditingTarget } from '../state/pluginKeybindings';
 import { resolveBatchTabCloseFocus } from '../state/pluginViewTabStore';
 
 type AppContextGetter = () => Record<string, any>;
@@ -264,7 +265,7 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
       }
     }
 
-    const isFormElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+    const isFormElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || isPluginViewEditingTarget(target);
     const isMonacoElement =
       target instanceof HTMLElement &&
       !!target.closest?.('.monaco-editor, .monaco-diff-editor, .monaco-inputbox');
@@ -364,21 +365,12 @@ export function handleEscapeKeyDownImpl(getCtx: AppContextGetter, e: KeyboardEve
   const {
     isQuickSwitcherOpen,
     setIsQuickSwitcherOpen,
-    sftpPaneMagnificationRef,
-    terminalPaneMagnificationRef,
   } = getCtx();
 {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
     if (isQuickSwitcherOpen) {
       setIsQuickSwitcherOpen(false);
       return;
-    }
-    if (getAvailablePaneMagnificationController([
-      sftpPaneMagnificationRef?.current,
-      terminalPaneMagnificationRef?.current,
-    ])?.restore()) {
-      e.preventDefault();
-      e.stopPropagation();
     }
   }
 }
@@ -393,6 +385,7 @@ export async function handleKeyboardInteractiveSubmitImpl(
   const {
     hosts,
     hostsRef,
+    identities,
     keyboardInteractiveQueue,
     sessions,
     setKeyboardInteractiveQueue,
@@ -424,12 +417,27 @@ export async function handleKeyboardInteractiveSubmitImpl(
     // Save password to host if requested - never for second-factor / EDR prompts
     // (allowSavePassword === false) so a secondary secret cannot overwrite the
     // host login password (#2150 / Codex review on #2151).
+    // Detach a Keychain identity when one is attached. resolveHostAuth prefers
+    // identity.password and identity.username, so snapshot the identity username
+    // onto the host before clearing identityId (#3982). Same as
+    // applyVaultHostUpdate's password detach. Do not mutate the identity.
     if (savePassword && host && request?.allowSavePassword !== false) {
-      updateHosts(latestHosts.map((h: Host) => h.id === host.id ? {
-        ...h,
-        password: savePassword,
-        savePassword: true,
-      } : h));
+      updateHosts(latestHosts.map((h: Host) => {
+        if (h.id !== host.id) return h;
+        const identity = h.identityId
+          ? identities?.find((item: { id?: string; username?: string }) => item.id === h.identityId)
+          : undefined;
+        const detachedUsername = identity?.username?.trim();
+        return {
+          ...h,
+          password: savePassword,
+          savePassword: true,
+          ...(h.identityId ? {
+            identityId: '',
+            ...(detachedUsername ? { username: detachedUsername } : {}),
+          } : {}),
+        };
+      }));
     }
     // Remove from queue by requestId
     setKeyboardInteractiveQueue(prev => prev.filter(r => r.requestId !== requestId));
@@ -1121,11 +1129,18 @@ export function handleCreateLocalTerminalImpl(
   const { addConnectionLog, classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, systemInfoRef, terminalSettings } = getCtx();
 {
     const { username, hostname } = systemInfoRef.current;
-    const resolved = shell ?? resolveShellSetting(terminalSettings.localShell, discoveredShells, terminalSettings.localShellArgs);
+    // Vault/header buttons historically wired `onClick={handleCreateLocalTerminal}`.
+    // React then passes the MouseEvent as the first arg; treat only real shell
+    // objects (string command) as explicit so Settings localShell still applies (#4085).
+    const explicitShell = shell && typeof shell.command === 'string' ? shell : undefined;
+    const resolved = explicitShell
+      ?? resolveShellSetting(terminalSettings.localShell, discoveredShells, terminalSettings.localShellArgs);
     // Match by ID (not command) to avoid WSL distros all sharing wsl.exe
-    const matchedShell = !shell ? discoveredShells.find(s => s.id === terminalSettings.localShell) : undefined;
-    const shellName = shell?.name ?? matchedShell?.name;
-    const shellIcon = shell?.icon ?? matchedShell?.icon;
+    const matchedShell = !explicitShell
+      ? discoveredShells.find(s => s.id === terminalSettings.localShell)
+      : undefined;
+    const shellName = explicitShell?.name ?? matchedShell?.name;
+    const shellIcon = explicitShell?.icon ?? matchedShell?.icon;
     const sessionId = createLocalTerminal({
       shellType: classifyLocalShellType(resolved?.command || terminalSettings.localShell, navigator.userAgent),
       shell: resolved?.command,
@@ -1255,16 +1270,14 @@ export function hasMultipleProtocolsImpl(getCtx: AppContextGetter, host: Host) {
 }
 
 export function handleHostConnectWithProtocolCheckImpl(getCtx: AppContextGetter, host: Host) {
-  const { handleConnectToHost, hasMultipleProtocols, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost, setQuickSearch } = getCtx();
+  const { handleConnectToHost, hasMultipleProtocols, resolveEffectiveHost, setIsQuickSwitcherOpen, setProtocolSelectHost } = getCtx();
 {
     if (hasMultipleProtocols(host)) {
       setProtocolSelectHost(resolveEffectiveHost(host));
       setIsQuickSwitcherOpen(false);
-      setQuickSearch('');
     } else {
       handleConnectToHost(host);
       setIsQuickSwitcherOpen(false);
-      setQuickSearch('');
     }
   }
 }

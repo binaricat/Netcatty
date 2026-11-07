@@ -86,16 +86,28 @@ export function createPluginStreamEndpoint(transport, options = {}) {
     }
   }
 
-  function closeIncoming(state, error, notify = false) {
+  function closeIncoming(state, error, notify = false, refundCancelledCredit = false) {
     if (state.closed) return;
     state.closed = true;
     state.error = error ?? null;
     incoming.delete(state.streamId);
+    if (error) {
+      // Discard unread bytes on cancellation/failure and settle their credit
+      // now. A later read must surface the error without sending more credit.
+      state.currentCreditBytes += state.queue.reduce((sum, chunk) => sum + chunk.creditBytes, 0);
+      state.queue.length = 0;
+      // A consumer-initiated cancel rejects the producer's queued writes.
+      // Returning credit first could let that producer send another chunk.
+      if (refundCancelledCredit) {
+        try { releaseCurrent(state); } catch {}
+      }
+      state.currentCreditBytes = 0;
+    }
     if (notify) {
       try {
         sendEnvelope({
           streamId: state.streamId,
-          sequence: state.nextSequence,
+          sequence: Math.max(1, state.updateSequence + 1),
           kind: "cancel",
         });
       } catch {}
@@ -221,16 +233,21 @@ export function createPluginStreamEndpoint(transport, options = {}) {
       cancel() {
         if (state.closed) return;
         state.closed = true;
-        outgoing.delete(state.streamId);
+        state.terminal = "cancel";
         const error = new PluginError("cancelled", "Plugin stream was cancelled");
         for (const pending of state.queue.splice(0)) pending.reject(error);
         state.queuedBytes = 0;
         state.endReject?.(error);
-        sendEnvelope({
-          streamId: state.streamId,
-          sequence: state.nextSequence + 1,
-          kind: "cancel",
-        });
+        try {
+          sendEnvelope({
+            streamId: state.streamId,
+            sequence: state.nextSequence + 1,
+            kind: "cancel",
+          });
+          state.terminalSent = true;
+        } finally {
+          if (!state.terminalSent || state.availableBytes === state.windowBytes) outgoing.delete(state.streamId);
+        }
       },
       dispose() { this.cancel(); },
     });
@@ -314,6 +331,8 @@ export function createPluginStreamEndpoint(transport, options = {}) {
         : frame.kind === "cancel"
           ? new PluginError("cancelled", `Plugin stream peer cancelled: ${frame.streamId}`)
           : null,
+      false,
+      frame.kind === "cancel",
     );
     return true;
   }

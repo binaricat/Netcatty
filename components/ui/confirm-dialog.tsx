@@ -17,6 +17,7 @@ interface ConfirmDialogProps {
   confirmLabel: string;
   busy?: boolean;
   destructive?: boolean;
+  hostSecuritySurface?: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }
@@ -28,6 +29,7 @@ export const ConfirmDialog = memo(function ConfirmDialog({
   confirmLabel,
   busy = false,
   destructive = false,
+  hostSecuritySurface = false,
   onOpenChange,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -35,7 +37,7 @@ export const ConfirmDialog = memo(function ConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[calc(100vw-2rem)] overflow-hidden sm:max-w-[380px]">
+      <DialogContent data-host-security-surface={hostSecuritySurface ? "" : undefined} className="max-w-[calc(100vw-2rem)] overflow-hidden sm:max-w-[380px]">
         <DialogHeader className="min-w-0 pr-6">
           <DialogTitle className="truncate">{title}</DialogTitle>
         </DialogHeader>

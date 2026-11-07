@@ -685,6 +685,21 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
   ipcMain.handle("netcatty:ai:jobPoll", createWorkerAiJobPollHandler({
     backgroundJobs,
   }));
+  ipcMain.handle("netcatty:ai:shellReadiness", (_event, payload = {}) => {
+    // Read-only probe used by session recovery readiness inspection. Sessions
+    // live here in the default worker path, so the main process cannot see
+    // prompt tracking state without this route. Never mutates the session and
+    // never writes to the PTY.
+    const session = sessions.get(payload?.sessionId);
+    if (!session) return { ok: true, found: false };
+    return {
+      ok: true,
+      found: true,
+      trackedShell: typeof session._promptTrackTail === "string",
+      freshIdlePrompt: getFreshIdlePrompt(session) || "",
+      visibleIdlePrompt: getVisibleIdlePrompt(session) || "",
+    };
+  });
   ipcMain.handle("netcatty:ai:jobStop", createWorkerAiJobStopHandler({
     backgroundJobs,
   }));

@@ -24,6 +24,33 @@ const testSecretRef: SecretRef = {
   key: "token",
 };
 
+test("byte streams and AI/context clients expose only canonical requests", () => {
+  assertSdkTypeChecks(`
+    import type { PluginContext } from "./index.ts";
+    declare const context: PluginContext;
+    async function useCapabilities() {
+      const connection = await context.network.connect({ endpoint: "tls://example.test:443" });
+      await connection.writable.write(new Uint8Array([1]));
+      await connection.readable.read();
+      await connection.close();
+      const chat = await context.ai.openChat({});
+      const turn = await context.ai.startTurn({ chatHandle: chat.chatHandle, prompt: "synthetic" });
+      await context.ai.readTurn({ turnHandle: turn.turnHandle });
+      const selected = await context.selectedContext.list({});
+      await context.selectedContext.read({ handle: selected.items[0].handle, version: selected.items[0].version });
+      // @ts-expect-error source identity is host-owned
+      await context.network.connect({ endpoint: "tcp://example.test:22", sourceOwner: "spoofed" });
+      // @ts-expect-error TLS validation cannot be disabled
+      await context.network.connect({ endpoint: "tls://example.test:443", rejectUnauthorized: false });
+      // @ts-expect-error model selection belongs to the host
+      await context.ai.openChat({ model: "plugin-chosen" });
+      // @ts-expect-error selected context requires a version
+      await context.selectedContext.read({ handle: "opaque" });
+    }
+    void useCapabilities;
+  `);
+});
+
 const testSecretStore: PluginSecretStore = {
   async get() {
     return testSecretRef;
@@ -394,4 +421,38 @@ test("CancellationTokenSource finishes disposal when a cancellation listener fai
 
   assert.throws(() => source.dispose(true), AggregateError);
   assert.doesNotThrow(() => source.dispose(true));
+});
+
+test("network requests expose canonical host-consumed credential leases without plaintext fields", () => {
+  assertSdkTypeChecks(`
+    import type { PluginNetworkRequest, PluginNetworkClient, SecretLeaseRef } from './index.ts';
+    declare const network: PluginNetworkClient;
+    declare const lease: SecretLeaseRef;
+    const request: PluginNetworkRequest = {
+      url: 'https://example.invalid', credentialLease: lease,
+      authorization: { scheme: 'Basic', username: 'synthetic' },
+    };
+    void network.request(request);
+    void network.request({ url: 'https://example.invalid' });
+    // @ts-expect-error Plaintext credential handoff is not supported.
+    void network.request({ url: 'https://example.invalid', authorization: { scheme: 'Bearer', password: 'secret' } });
+    // @ts-expect-error Unsupported authentication schemes fail at compile time.
+    void network.request({ url: 'https://example.invalid', authorization: { scheme: 'Digest' } });
+  `);
+});
+
+test("host interaction SDK exposes bounded choice/input and explicit clipboard methods", () => {
+  assertSdkTypeChecks(`
+    import type { PluginContext } from './index.ts';
+    declare const context: PluginContext;
+    const choice: Promise<string | undefined> = context.ui.quickPick('Pick', [{ id: 'one', label: 'One' }]);
+    const input: Promise<string | undefined> = context.ui.input('Input', 'synthetic');
+    const text: Promise<string | undefined> = context.clipboard.readText('Share');
+    const copied: Promise<boolean> = context.clipboard.writeText('synthetic', 'Copy');
+    void [choice, input, text, copied];
+    // @ts-expect-error A plugin boolean cannot grant clipboard authority.
+    context.clipboard.readText('Share', { userGesture: true });
+    // @ts-expect-error No ambient clipboard watcher exists.
+    context.clipboard.watch(() => {});
+  `);
 });

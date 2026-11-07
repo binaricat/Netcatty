@@ -249,6 +249,51 @@ function chatSession(messageIds: string[], updatedAt = NOW): NonNullable<SyncPay
   };
 }
 
+for (const overrideShrink of [false, true]) {
+  test(`post-merge chat shrink is ${overrideShrink ? 'allowed with override' : 'blocked'}`, async () => {
+    const encryption = installEncryptionDouble();
+    try {
+      const chats = Array.from({ length: 46 }, (_, index) => ({ ...chatSession(['message']), id: `chat-${index}` }));
+      const local = { ...payload('base'), aiSessions: chats };
+      const state = createConvergentSyncStateFromPayload(local, 'seed', NOW);
+      const github = adapter(encryption.register(withConvergentSyncEnvelope(state, { syncedAt: NOW, aiSessions: chats.slice(0, 7) })));
+      const baseline: ConvergentProviderBaselineV2 = {
+        schemaVersion: 2, provider: 'github', remoteVersion: 1, remoteUpdatedAt: NOW,
+        remoteDeviceId: 'remote', materializedPayload: local, state,
+      };
+      const baselines = { github: baseline };
+      const subject = manager(state, { github }, baselines);
+      const savedBaselines: ConvergentProviderBaselineV2[] = [];
+      const saveBaseline = subject.saveConvergentProviderBaseline;
+      subject.saveConvergentProviderBaseline = async (saved) => {
+        savedBaselines.push(saved);
+        await saveBaseline(saved);
+      };
+      let applied = false;
+      const results = await syncConvergentProvidersUnlockedImpl.call(subject, local, {
+        overrideShrink, now: () => NOW + 10, jitter: async () => {},
+        applyPayload: async (_incoming, commit) => { applied = true; await commit(); },
+      });
+      const result = results.get('github');
+      if (overrideShrink) {
+        assert.equal(result?.success, true);
+        assert.equal(applied, true);
+        assert.ok(subject.events.some((event) => (event as { type: string }).type === 'SYNC_FORCED'));
+      } else {
+        assert.equal(result?.success, false);
+        assert.equal(result?.shrinkBlocked, true);
+        assert.equal(result?.finding?.entityType, 'aiSessions');
+        assert.equal(result?.finding?.reason, 'large-shrink');
+        assert.equal(subject.state.syncState, 'BLOCKED');
+        assert.equal(github.uploads, 0);
+        assert.equal(applied, false);
+        assert.deepEqual(savedBaselines, []);
+        assert.equal(baselines.github, baseline);
+      }
+    } finally { encryption.restore(); }
+  });
+}
+
 test('chat-only convergent changes merge both transcripts, apply them, and remain idle afterwards', async () => {
   const encryption = installEncryptionDouble();
   try {

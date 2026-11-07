@@ -1956,3 +1956,10 @@ test('applyVaultHostDelete keeps jump hosts referenced by empty group defaults',
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.error, /still used as a group jump host/i);
 });
+
+
+test('new SSH hosts explicitly use standard interactive input', () => {
+  const created = buildVaultHostFromDraft({ hostname: 'localhost', username: 'user' });
+  assert.equal(created.ok, true);
+  if (created.ok) assert.equal(created.host.sshInputCompatibility, false);
+});

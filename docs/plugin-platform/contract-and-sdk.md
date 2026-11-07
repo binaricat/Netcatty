@@ -1,6 +1,6 @@
 # Netcatty plugin contract and SDK
 
-Status: internal preview (`0.1.0-internal`)
+Status: internal preview (`0.1.0-internal.1`; legacy `0.1.0-internal` remains offered)
 Tracking issue: [#2269](https://github.com/binaricat/Netcatty/issues/2269)
 
 Phases 2 and 3 consume this contract in the isolated host runtime and secure
@@ -450,6 +450,13 @@ new child to an opened parent directory without a path race.
 `readDirectory()` likewise keeps its stable SDK/RPC method but fails closed
 unless the main process supplies a native adapter whose inode checks and entry
 enumeration are bound to the same directory handle.
+The host advertises `filesystem.directory-enumeration` only when it supplies that
+adapter. Declare the feature as required, or optional and check
+`context.enabledFeatures.has(PLUGIN_FILESYSTEM_DIRECTORY_ENUMERATION_FEATURE)`.
+The default host supplies no adapter and does not enable this feature. Both the
+SDK and direct RPC return `unsupported` before a permission request or path probe.
+An enabled feature still requires the declared `filesystem.read` directory
+resource and the normal permission, root, symlink and same-handle checks.
 
 Permission names already use the phase-3 enforcement boundaries: clipboard
 read/write, terminal metadata/output/input and input/output interception, Vault
@@ -615,3 +622,28 @@ npm run build:plugin-packages
 
 The complete application checks remain mandatory because workspace and root
 dependency changes affect installation and release builds.
+
+
+## Plugin brand icons (internal revision 0.1.0-internal.1)
+
+Optional top-level `icon` reuses `IconReference` from contributions. A package
+using it must require `metadata.brand-icon` and an API range accepting
+`0.1.0-internal.1` but excluding `0.1.0-internal`. See
+[the author guide](plugin-icons.md) for bounds and packaging commands.
+
+The host still offers the previous wire revision to plugins with no top-level
+icon whose range matches only that revision. Compatibility selection returns the
+negotiated API version and runtime initialization uses and verifies that exact
+version. Host version bounds remain independently enforced; unknown required
+features still fail closed. No old manifest is rewritten and no permission grant
+is migrated by this revision.
+
+## Declarative host color contributions
+
+`appearance.theme-packs` adds `contributes.themes` and generated palette/reference
+schemas. A pure package uses `main: { "data": "theme" }`, contributes only themes
+and omits permissions/activation/companions. It has no executable runtime. Normal
+admission accepts this data-only form alongside browser-only code packages; Node
+and arbitrary IPC remain advanced/unsupported public boundaries. Selection is a
+trusted host Appearance action, not an SDK setter or `appearance.write` grant.
+See [Theme packs](./theme-packs.md) for limits, preview, persistence and fallback.

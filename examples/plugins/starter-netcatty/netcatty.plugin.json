@@ -1,0 +1,84 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.starter",
+  "name": "starter-netcatty",
+  "displayName": {
+    "en": "Plugin Starter",
+    "zh-CN": "插件入门"
+  },
+  "description": "First-party settings and command example. No terminal, network, filesystem or secret access.",
+  "version": "0.1.3",
+  "publisher": "netcatty",
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "main": {
+    "browser": "dist/host.js"
+  },
+  "activationEvents": [
+    "onCommand:com.netcatty.starter.greet",
+    "onView:com.netcatty.starter.panel"
+  ],
+  "permissions": {
+    "required": [
+      "commands",
+      "settings.read",
+      "menus",
+      "views"
+    ],
+    "optional": []
+  },
+  "contributes": {
+    "settings": [
+      {
+        "id": "com.netcatty.starter.greeting",
+        "label": {
+          "en": "Greeting",
+          "zh-CN": "问候语"
+        },
+        "description": "A local preference for the example command.",
+        "control": "text",
+        "scope": "application",
+        "default": "Hello, synthetic world!"
+      }
+    ],
+    "commands": [
+      {
+        "id": "com.netcatty.starter.greet",
+        "title": {
+          "en": "Starter: Read Greeting",
+          "zh-CN": "入门：读取问候语"
+        }
+      }
+    ],
+    "menus": [
+      {
+        "command": "com.netcatty.starter.greet",
+        "location": "commandPalette",
+        "group": "examples"
+      }
+    ],
+    "views": [
+      {
+        "id": "com.netcatty.starter.panel",
+        "title": {
+          "en": "Starter: Greeting Panel",
+          "zh-CN": "入门：问候面板"
+        },
+        "location": "modal"
+      }
+    ]
+  },
+  "features": {
+    "required": [
+      "metadata.brand-icon"
+    ]
+  },
+  "icon": {
+    "kind": "package",
+    "light": "assets/logo-light.png",
+    "dark": "assets/logo-dark.png"
+  }
+}

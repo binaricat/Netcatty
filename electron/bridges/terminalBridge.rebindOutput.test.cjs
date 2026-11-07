@@ -667,3 +667,65 @@ test("attach snapshots preserve cwd and title updates including explicit clears"
     /payload\.cwd !== undefined[\s\S]*?setRendererCwd\(payload\.cwd,\s*"snapshot"\)[\s\S]*?payload\.title !== undefined/,
   );
 });
+
+test("active input policy roundtrips through preload and authorized snapshot IPC", async () => {
+  const { EventEmitter } = require("node:events");
+  const { createPreloadApi } = require("../preload/api.cjs");
+  const { bridge, fakeChannel } = loadTerminalBridgeWithMocks();
+  const handles = new Map();
+  const listeners = new Map();
+  const homeIpc = new EventEmitter();
+  const home = { id: 71, isDestroyed: () => false, send: (channel, payload) => homeIpc.emit(channel, {}, payload) };
+  const popup = { id: 72, isDestroyed: () => false };
+  const sessionId = "input-policy-snapshot";
+  const authorization = "input-policy-popup";
+  bridge.init({
+    sessions: new Map([[sessionId, { webContentsId: home.id }]]),
+    electronModule: { webContents: { fromId: (id) => id === home.id ? home : popup } },
+    terminalOutputChannel: fakeChannel,
+  });
+  bridge.registerHandlers({
+    handle: (channel, handler) => handles.set(channel, handler),
+    on: (channel, handler) => listeners.set(channel, handler),
+  }, { terminalWorkerManager: { getAttachHomeWebContentsId: () => home.id } });
+  const registry = require("./terminalAttachRestore.cjs");
+  registry.registerAttachPopupAuthorization(authorization, sessionId, popup.id);
+  homeIpc.send = (channel, payload) => listeners.get(channel)({ sender: home }, payload);
+  const homeApi = createPreloadApi({ ipcRenderer: homeIpc, webUtils: {} });
+  const invoke = (channel, payload) => {
+    const originalRequire = Module.prototype.require;
+    Module.prototype.require = function(request) {
+      if (request === "./windowManager.cjs") return { getMainWindows: () => [{ webContents: home }] };
+      return originalRequire.apply(this, arguments);
+    };
+    try { return handles.get(channel)({ sender: popup }, payload); }
+    finally { Module.prototype.require = originalRequire; }
+  };
+  const popupApi = createPreloadApi({ ipcRenderer: { invoke }, webUtils: {} });
+  let mode;
+  let received;
+  const unsubscribeRequest = homeApi.onTerminalSessionSnapshotRequest(({ requestId }) => {
+    homeApi.respondTerminalSessionSnapshot(requestId, "screen", undefined, false, false, null, null, mode);
+  });
+  const unsubscribeApply = homeApi.onTerminalSessionApplySnapshot((payload) => { received = payload; return true; });
+  try {
+    for (mode of [false, true, undefined, "false"]) {
+      const expected = typeof mode === "boolean" ? mode : undefined;
+      const snapshot = await popupApi.requestTerminalSessionSnapshot(sessionId, authorization);
+      assert.equal(snapshot.success, true);
+      assert.equal(snapshot.perCharacterInput, expected, "snapshot keeps explicit false and drops invalid metadata");
+      const applied = await popupApi.applyTerminalSessionSnapshot(sessionId, "screen", {
+        contextSnapshot: "", contextViewportSnapshot: "", contextScrollbackSnapshot: "", alternateScreen: false,
+        perCharacterInput: mode,
+      }, authorization);
+      assert.equal(applied.success, true);
+      assert.equal(received.perCharacterInput, expected, "return snapshot carries the same active choice");
+    }
+    assert.equal((await popupApi.requestTerminalSessionSnapshot(sessionId, "wrong-grant")).success, false);
+    assert.equal((await popupApi.applyTerminalSessionSnapshot(sessionId, "", { perCharacterInput: false }, "wrong-grant")).success, false);
+  } finally {
+    unsubscribeRequest();
+    unsubscribeApply();
+    registry.releaseAttachPopupAuthorization(authorization);
+  }
+});

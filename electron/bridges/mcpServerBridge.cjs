@@ -10,9 +10,11 @@ const net = require("node:net");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { PluginAgentMcpDelegations } = require("../plugins/agent/mcpDelegation.cjs");
+const pluginAgentDelegations = new PluginAgentMcpDelegations();
 const { existsSync } = require("node:fs");
 
-const { toUnpackedAsarPath, getFreshIdlePrompt, formatSyntheticEcho } = require("./ai/shellUtils.cjs");
+const { toUnpackedAsarPath, getFreshIdlePrompt, getVisibleIdlePrompt, formatSyntheticEcho } = require("./ai/shellUtils.cjs");
 const { appendVaultAgentGuidance } = require("../shared/vaultAgentGuidance.cjs");
 const {
   checkBlocklistForShell,
@@ -802,6 +804,7 @@ function updateLiveSessionMetadata(sessionList) {
   const next = new Map();
   for (const entry of incoming) {
     if (!entry || typeof entry !== "object" || !entry.sessionId) continue;
+    if (entry.connected === true) sessionService?.forgetReconnect(entry.sessionId);
     next.set(entry.sessionId, {
       hostname: entry.hostname || "",
       label: entry.label || "",
@@ -1269,6 +1272,8 @@ function ensureOpenedSessionMetadata(chatSessionId, sessionId, result) {
  */
 function forgetClosedTerminalSession(sessionId) {
   if (!sessionId) return;
+  sessionService?.forgetReconnect(sessionId);
+  sessionService?.forgetRecovery(sessionId);
   terminalSessionCloseRevision += 1;
   closedTerminalSessionRevisions.delete(sessionId);
   closedTerminalSessionRevisions.set(sessionId, terminalSessionCloseRevision);
@@ -1423,7 +1428,7 @@ function handleConnection(socket) {
       consumedUntil = newlineIdx + 1;
       searchFrom = consumedUntil;
       if (!line.trim()) continue;
-      debugLog("Incoming line", line);
+      debugLog("Incoming message", { bytes: Buffer.byteLength(line) });
       handleMessage(socket, line);
     }
     if (consumedUntil > 0) buffer = buffer.slice(consumedUntil);
@@ -1455,7 +1460,8 @@ async function handleMessage(socket, line) {
     const isExternalToken = Boolean(
       presentedToken && externalAuthToken && presentedToken === externalAuthToken,
     );
-    if (method === "auth/verify" && (isCattyToken || isExternalToken)) {
+    const isDelegatedToken = method === "auth/verify" && pluginAgentDelegations.authenticate(presentedToken, socket);
+    if (method === "auth/verify" && (isCattyToken || isExternalToken || isDelegatedToken)) {
       if (isExternalToken && !externalMcpActivityHook?.isEnabled?.()) {
         const response = JSON.stringify({
           jsonrpc: "2.0",
@@ -1496,6 +1502,13 @@ async function handleMessage(socket, line) {
 
   try {
     const callParams = { ...(params || {}) };
+    const delegatedChat = pluginAgentDelegations.boundChat(socket);
+    if (delegatedChat) {
+      if (callParams.chatSessionId && callParams.chatSessionId !== delegatedChat) throw Error("Agent connection cannot change its session");
+      callParams.chatSessionId = delegatedChat;
+    } else if (pluginAgentDelegations.isReserved(callParams.chatSessionId)) {
+      throw Error("Delegated Agent credentials required");
+    }
     // External-token sockets always operate under the reserved app-wide scope so
     // callers cannot omit chatSessionId and widen access via scopedSessionIds.
     if (externalMcpSockets.has(socket)) {
@@ -1531,7 +1544,7 @@ async function handleMessage(socket, line) {
         managedPrivacyScopes.set(socket, callParams.chatSessionId);
       }
       result = await createManagedPrivacyBoundary(
-        (rpcMethod, rpcParams, context) => dispatch(rpcMethod, rpcParams, context),
+        (rpcMethod, rpcParams, context) => dispatch(rpcMethod, rpcParams, { ...context, externalSocket: socket }),
         aiPrivacyService,
       )(method, callParams);
     }
@@ -1604,7 +1617,74 @@ function reportOpenedSessionActivity(event = {}) {
   return sessionIdleManager.touch(null, sessionId);
 }
 
+// In the default terminal worker path the SSH runtime (and its prompt
+// tracking state) lives in the worker, so the main-process `sessions` map is
+// empty for it. Ask the owning worker for read-only prompt readiness. A miss
+// or a worker failure yields null: an unknown state must never report ready.
+// The probe is bounded well below the 20s recovery budget so a live-but-
+// unresponsive worker cannot hang inspectRecovery past the recovery loop's
+// deadline/cancel machinery.
+const WORKER_SHELL_READINESS_TIMEOUT_MS = 2000;
+
+async function queryWorkerShellReadiness(sessionId, status) {
+  if (status !== "connected" || !terminalWorkerManager?.request) return null;
+  // terminalWorkerManager.request has no cancellation support, so the probe
+  // cannot be aborted once posted. Race it against a timeout instead: a late
+  // worker response settles into an abandoned promise (fire-and-forget) and
+  // never mutates state after the timeout decision.
+  let timeoutId;
+  try {
+    const result = await Promise.race([
+      terminalWorkerManager.request("netcatty:ai:shellReadiness", { sessionId }, {}),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(
+          () => resolve(null),
+          WORKER_SHELL_READINESS_TIMEOUT_MS,
+        );
+      }),
+    ]);
+    if (result?.ok !== true || result.found !== true) return null;
+    return {
+      trackedShell: result.trackedShell === true,
+      ready: Boolean(result.freshIdlePrompt || result.visibleIdlePrompt),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 sessionService = createSessionService({
+  validateReconnect: (params = {}) => {
+    const scopeErr = validateSessionScope(params.sessionId, params.chatSessionId, params.scopedSessionIds);
+    if (scopeErr) return { ok: false, error: scopeErr };
+    if (isChatSessionCancelled(params.chatSessionId)) return { ok: false, error: "Chat session is cancelled." };
+    if (permissionMode === "observer") return { ok: false, error: "Recovery is unavailable in observer mode." };
+    if (sessionIdleManager.isClosing(params.sessionId)) return { ok: false, error: "Session is closing." };
+    return { ok: true };
+  },
+  inspectRecovery: async (params, timeoutMs) => {
+    if (typeof invokeVaultAgentFn !== "function") return { ok: false, error: "Session recovery bridge is unavailable." };
+    sessionIdleManager.touch(null, params.sessionId);
+    const state = await invokeVaultAgentFn("session.inspectRecovery", { sessionId: params.sessionId }, { timeoutMs });
+    if (state?.ok !== true) return state;
+    const runtime = sessions?.get(params.sessionId);
+    const meta = getSessionMeta(params.sessionId, params.chatSessionId);
+    const probe = runtime ? {
+      trackedShell: typeof runtime._promptTrackTail === "string",
+      ready: Boolean(getFreshIdlePrompt(runtime) || getVisibleIdlePrompt(runtime)),
+    } : await queryWorkerShellReadiness(params.sessionId, state.status);
+    const trackedShell = Boolean(probe?.trackedShell) && !isNetworkDeviceLikeMeta(meta);
+    // shellReady semantics: transport not connected → false; connected but
+    // the shell is untracked or the probe missed/timed out → null (unknown);
+    // a tracked shell reports its observed readiness. It is advisory for
+    // callers: recovery never writes to the PTY, so an unknown or false
+    // readiness only asks for an inspect_shell step, never blocks.
+    const shellReady = state.status !== "connected" ? false : !probe ? null : trackedShell
+      ? Boolean(probe.ready) : null;
+    return { ...state, shellReady, busy: Boolean(getSessionBusyError(params.sessionId)) };
+  },
   invokeSessionAgent: (...args) => {
     if (typeof invokeVaultAgentFn !== "function") {
       return Promise.resolve({ ok: false, error: "Vault agent bridge is unavailable." });
@@ -1653,6 +1733,7 @@ const dispatchCapabilityRpc = createCapabilityRpcDispatcher({
     return invokeVaultAgentFn(...args);
   },
   evaluatePermissionWithGrants,
+  isDelegatedApproval: (context) => pluginAgentDelegations.isApproved(context),
   get permissionMode() {
     return permissionMode;
   },
@@ -1967,7 +2048,7 @@ function getWorkerJob(jobId, chatSessionId) {
 
 const WORKER_JOB_NOT_FOUND_ERROR = "Background job not found";
 
-async function handleWorkerJobPoll(params = {}) {
+async function handleWorkerJobPoll(params = {}, beforeExecute) {
   const { jobId, chatSessionId, scopedSessionIds } = params || {};
   if (!jobId) throw new Error("jobId is required");
   const job = getWorkerJob(jobId, chatSessionId || null);
@@ -1979,7 +2060,7 @@ async function handleWorkerJobPoll(params = {}) {
     const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
     if (scopeErr) return { ok: false, error: scopeErr };
   }
-  const result = await terminalWorkerManager.request("netcatty:ai:jobPoll", params, {});
+  const result = await terminalWorkerManager.request("netcatty:ai:jobPoll", params, typeof beforeExecute === "function" ? { beforeExecute } : {});
   if (result?.ok === false && result.error === WORKER_JOB_NOT_FOUND_ERROR) {
     // The route is still here but the worker no longer knows the job (pruned or restarted).
     emitJobDiag("job-stop-miss", { jobId, chatSessionId: chatSessionId || null, op: "poll", reason: "worker-job-missing" });
@@ -1990,7 +2071,7 @@ async function handleWorkerJobPoll(params = {}) {
   return result;
 }
 
-async function handleWorkerJobStop(params = {}) {
+async function handleWorkerJobStop(params = {}, beforeExecute) {
   const { jobId, chatSessionId, scopedSessionIds } = params || {};
   if (!jobId) throw new Error("jobId is required");
   const job = getWorkerJob(jobId, chatSessionId || null);
@@ -2001,7 +2082,7 @@ async function handleWorkerJobStop(params = {}) {
   if (Array.isArray(scopedSessionIds) && job.sessionId && !scopedSessionIds.includes(job.sessionId)) {
     return { ok: false, error: `Session "${job.sessionId}" is not in the current scope.` };
   }
-  const result = await terminalWorkerManager.request("netcatty:ai:jobStop", params, {});
+  const result = await terminalWorkerManager.request("netcatty:ai:jobStop", params, typeof beforeExecute === "function" ? { beforeExecute } : {});
   if (result?.ok === false && result.error === WORKER_JOB_NOT_FOUND_ERROR) {
     // The route is still here but the worker no longer knows the job (pruned or restarted).
     emitJobDiag("job-stop-miss", { jobId, chatSessionId: chatSessionId || null, op: "stop", reason: "worker-job-missing" });
@@ -2148,7 +2229,17 @@ function getBuiltinRpcHandlerRegistry() {
 }
 
 async function dispatch(method, params, approvalContext = {}) {
-  debugLog("dispatch", { method, params, permissionMode });
+  if (pluginAgentDelegations.isReserved(params?.chatSessionId)) {
+    return pluginAgentDelegations.dispatch(method, params, approvalContext,
+      (approved) => dispatchCore(method, params, approved));
+  }
+  return dispatchCore(method, params, approvalContext);
+}
+
+async function dispatchCore(method, params, approvalContext = {}) {
+  const delegated = pluginAgentDelegations.isApproved(approvalContext);
+  if (delegated) debugLog("Delegated dispatch", { method });
+  else debugLog("dispatch", { method, params, permissionMode });
 
   if (!method.startsWith("netcatty/")) {
     const capabilityResult = await dispatchCapabilityRpc(method, params || {}, approvalContext);
@@ -2164,7 +2255,8 @@ async function dispatch(method, params, approvalContext = {}) {
   pruneCompletedBackgroundJobs();
 
   const approvalTarget = getApprovalTarget(params);
-  const permission = evaluatePermissionWithGrants({
+  const permission = delegated ? { allowed: !isChatSessionCancelled(params?.chatSessionId), requiresApproval: false }
+    : evaluatePermissionWithGrants({
     rpcMethod: method,
     surface: CAPABILITY_SURFACES.BUILTIN,
     permissionMode,
@@ -2266,10 +2358,10 @@ async function dispatch(method, params, approvalContext = {}) {
       return await handleWorkerJobStart(params, approvalContext.beforeExecute);
     }
     if (capability?.id === "terminal.poll" && workerBackgroundJobs.has(params?.jobId)) {
-      return await handleWorkerJobPoll(params);
+      return await handleWorkerJobPoll(params, approvalContext.beforeExecute);
     }
     if (capability?.id === "terminal.stop" && workerBackgroundJobs.has(params?.jobId)) {
-      return await handleWorkerJobStop(params);
+      return await handleWorkerJobStop(params, approvalContext.beforeExecute);
     }
     return await handler(params, approvalContext);
   } finally {
@@ -2284,10 +2376,12 @@ async function dispatch(method, params, approvalContext = {}) {
 
 // ── Handler: getContext ──
 
-async function handleGetContext(params) {
-  debugLog("handleGetContext:start", { params, sessionCount: sessions?.size || 0 });
-  const toolHints = buildMcpToolHints();
+async function handleGetContext(params, approvalContext) {
+  const delegated = pluginAgentDelegations.isApproved(approvalContext);
+  debugLog("handleGetContext:start", delegated ? { delegated: true } : { params, sessionCount: sessions?.size || 0 });
+  const toolHints = delegated ? null : buildMcpToolHints();
   if (!sessions) {
+    if (delegated) return { environment: "netcatty-terminal", description: "No host-selected terminal sessions are available.", hosts: [], hostCount: 0 };
     return {
       hosts: [],
       instructions: "No sessions available.",
@@ -2333,7 +2427,7 @@ async function handleGetContext(params) {
       description: "No hosts are available in the current scope.",
       hosts: [],
       hostCount: 0,
-      tools: toolHints,
+      ...(delegated ? {} : { tools: toolHints }),
     };
   }
   for (const [sessionId, session] of sessions.entries()) {
@@ -2383,6 +2477,12 @@ async function handleGetContext(params) {
     }
   }
 
+  if (pluginAgentDelegations.isApproved(approvalContext)) {
+    // Do not query or serialize app-wide tunnel/tool inventory for a delegated
+    // conversation. Its core-owned scope already selected the session metadata.
+    return { environment: "netcatty-terminal", description: "Use only these host-selected session IDs.",
+      hosts, hostCount: hosts.length };
+  }
   let activePortForwardTunnels = [];
   try {
     activePortForwardTunnels = await listActivePortForwards();
@@ -2532,12 +2632,35 @@ const configAndCleanupApi = createConfigAndCleanupApi({
 const { resolveMcpServerRuntimeCommand, buildMcpServerConfig, cleanupScopedMetadata } = configAndCleanupApi;
 
 function cleanup() {
+  pluginAgentDelegations.shutdown();
   try { disposeWorkerSessionClosed?.dispose?.(); } catch { /* ignore */ }
   disposeWorkerSessionClosed = null;
   shutdownHost();
 }
 
+// Keep identifier exports so Node 22's CJS namespace analysis also preserves the
+// existing named exports consumed by renderer-side harness tests.
+const registerPluginAgentDelegation = (...args) => pluginAgentDelegations.register(...args);
+const getPluginAgentMcpConfiguration = (id, tag) => pluginAgentDelegations.configuration(id, tag);
+const isPluginAgentConversation = (id) => pluginAgentDelegations.isReserved(id);
+const assertPluginAgentCaller = (id, senderId, tag) => pluginAgentDelegations.assertCaller(id, senderId, tag);
+const onPluginAgentRelease = (id, tag, cancel) => pluginAgentDelegations.onRelease(id, tag, cancel);
+
+const beginPluginAgentModelRequest = (id, senderId, tag) => pluginAgentDelegations.beginModelRequest(id, senderId, tag);
+function getPluginAgentJobTarget(jobId, chatSessionId) {
+  if (!pluginAgentDelegations.isReserved(chatSessionId)) return null;
+  const job = workerBackgroundJobs.get(jobId) ?? backgroundJobs.get(jobId);
+  return job?.chatSessionId === chatSessionId && typeof job.sessionId === "string" ? job.sessionId : null;
+}
+
 module.exports = {
+  getPluginAgentJobTarget,
+  beginPluginAgentModelRequest,
+  registerPluginAgentDelegation,
+  getPluginAgentMcpConfiguration,
+  isPluginAgentConversation,
+  assertPluginAgentCaller,
+  onPluginAgentRelease,
   init,
   setCommandBlocklist,
   getCommandBlocklist,

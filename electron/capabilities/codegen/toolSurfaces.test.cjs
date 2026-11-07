@@ -117,6 +117,20 @@ test("session_close is exposed to agents and external MCP clients", () => {
   assert.equal(cattyTool.rpcMethod, "session/close");
 });
 
+test('session reconnect is exposed to both agents without cleanup permission bypasses', () => {
+  const spec = listCattyToolSpecs().find(tool => tool.toolName === 'session_reconnect');
+  assert.equal(spec?.rpcMethod, 'session/reconnect');
+  const mcp = listMcpTools().find(tool => tool.mcpTool === 'session_reconnect');
+  assert.equal(mcp?.publicRpcMethod, 'public/session/reconnect');
+  assert.equal(mcp?.policy.bypassesApproval, false);
+  assert.equal(mcp?.policy.bypassesObserverBlock, false);
+  assert.equal(mcp?.policy.bypassesChatCancel, false);
+  const recover = listCattyToolSpecs().find(tool => tool.toolName === 'session_recover');
+  assert.equal(recover?.rpcMethod, 'session/recover');
+  const recoverMcp = listMcpTools().find(tool => tool.mcpTool === 'session_recover');
+  assert.equal(recoverMcp?.policy.bypassesApproval, false);
+});
+
 test("host_open tells agents to close sessions after use", () => {
   const hostOpen = listMcpTools().find((tool) => tool.mcpTool === "host_open");
   assert.match(hostOpen?.description || "", /session_close/i);

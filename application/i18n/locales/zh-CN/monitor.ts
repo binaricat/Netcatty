@@ -1,4 +1,8 @@
 export const zhCNMonitorMessages = {
+  "monitor.systemDisks": "系统分区（{count}）",
+  "monitor.systemDisksAlert": "系统分区使用率超过 80%，已自动展开。",
+  "monitor.diskIoTotal": "汇总",
+  "monitor.partitionIoHint": "此挂载点对应块设备的读写速率；共用设备的挂载点显示相同速率。取得两次有效采样前或无法识别块设备时显示 --；暂不支持 macOS。",
   "monitor.diskIo": "磁盘 I/O",
   "monitor.diskRead": "读取",
   "monitor.diskWrite": "写入",

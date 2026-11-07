@@ -4,8 +4,12 @@ function registerAgentProcessHandlers(ctx) {
   const maxCommandTimeoutSeconds = 24 * 60 * 60;
   // ── MCP Server session metadata ──
 
-  ipcMain.handle("netcatty:ai:mcp:update-sessions", async (event, { sessions: sessionList, chatSessionId }) => {
+  ipcMain.handle("netcatty:ai:mcp:update-sessions", async (event, { sessions: sessionList, chatSessionId, delegationTag }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    if (mcpServerBridge.isPluginAgentConversation?.(chatSessionId)) {
+      try { mcpServerBridge.assertPluginAgentCaller(chatSessionId, event.sender.id, delegationTag); }
+      catch { return { ok: false, error: "Agent scope update unavailable" }; }
+    }
     const list = Array.isArray(sessionList) ? sessionList : [];
     const externalId = mcpServerBridge.EXTERNAL_MCP_CHAT_SESSION_ID;
     if (chatSessionId === externalId) {

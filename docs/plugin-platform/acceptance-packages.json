@@ -1,0 +1,153 @@
+[
+  {
+    "name": "assistant",
+    "id": "com.netcatty.assistant",
+    "version": "0.1.0",
+    "fileCount": 6,
+    "bytes": 14638,
+    "sha256": "c7d784d5c3bd2feb463afd58eae3a9594615395b168174cb8a3d0677584ae395",
+    "features": {
+      "required": [
+        "ai.model-invocation",
+        "context.selected-read"
+      ]
+    },
+    "permissions": {
+      "required": [
+        "commands",
+        "views"
+      ],
+      "optional": [
+        "ai.invoke",
+        "context.selected.list",
+        "context.selected.read"
+      ]
+    },
+    "package": "assistant.ncpkg",
+    "repeatIdentical": true,
+    "preparedOnly": true,
+    "contentSha256": "9a4efe442cd1c35ec8f61e3e2e4ccbb4fa97addf168b0b8b6ac85bac79c39ca9"
+  },
+  {
+    "name": "database-owned",
+    "id": "com.netcatty.database-minimal",
+    "version": "0.1.0",
+    "fileCount": 5,
+    "bytes": 11660,
+    "sha256": "f01c6a24382897d4b0bf4130941274abacb9a9a963f9b56ecaceb2c020f36874",
+    "features": {
+      "required": [
+        "network.byte-streams"
+      ]
+    },
+    "permissions": {
+      "required": [
+        "commands",
+        "views"
+      ],
+      "optional": [
+        {
+          "permission": "network.stream",
+          "resources": [
+            "tcp://10.77.0.20:3306"
+          ],
+          "reason": "Connect only to the prepared disposable fixture."
+        }
+      ]
+    },
+    "package": "database-owned.ncpkg",
+    "repeatIdentical": true,
+    "preparedOnly": true,
+    "contentSha256": "4d628c41c7a231e31cd56dacb822acaaa37f61e1e98b285b0086a4f783be199d"
+  },
+  {
+    "name": "database-rfam-readonly",
+    "id": "com.netcatty.database-rfam-readonly",
+    "version": "0.1.0",
+    "fileCount": 5,
+    "bytes": 11003,
+    "sha256": "aaca586669db454e91d61487e576ed524d1b7190eed182bc2cd0035e59caa0d3",
+    "features": {
+      "required": [
+        "network.byte-streams"
+      ]
+    },
+    "permissions": {
+      "required": [
+        "commands",
+        "views"
+      ],
+      "optional": [
+        {
+          "permission": "network.stream",
+          "resources": [
+            "tcp://mysql-rfam-public.ebi.ac.uk:4497"
+          ],
+          "reason": "Run the fixed public Rfam acceptance query only after explicit authorization."
+        }
+      ]
+    },
+    "package": "database-rfam-readonly.ncpkg",
+    "repeatIdentical": true,
+    "preparedOnly": true,
+    "contentSha256": "f542ca7b8e821d684cf7f71f0930458bd3ad97bc94bf654c88b0f353111e9162"
+  },
+  {
+    "name": "host-actions",
+    "id": "com.netcatty.host-actions",
+    "version": "0.1.0",
+    "fileCount": 3,
+    "bytes": 4633,
+    "sha256": "cf04f82dfe25ab5cda6f5f3dad0a8fb06c37bedf9924f556bee2b8402e542ef2",
+    "features": {
+      "required": [
+        "vault.host-actions",
+        "commands.interactive"
+      ]
+    },
+    "permissions": {
+      "required": [
+        "commands",
+        "menus"
+      ],
+      "optional": [
+        "vault.metadata",
+        "vault.write",
+        "ui.interact"
+      ]
+    },
+    "package": "host-actions.ncpkg",
+    "repeatIdentical": true,
+    "preparedOnly": true,
+    "contentSha256": "d6f8bf3ae9dc417ea838f673966f2e1075fc8f9ef1d939ca85b476b1bb007e6c"
+  },
+  {
+    "name": "terminal-selection-draft",
+    "id": "com.netcatty.terminal-selection-draft",
+    "version": "0.1.0",
+    "fileCount": 2,
+    "bytes": 2954,
+    "sha256": "4c9c2388b7f891156192a0b5ab7b23291beba3555e7ec8cf24fbe2dfe1242d5e",
+    "features": {
+      "required": [
+        "terminal.selection-sharing",
+        "terminal.input-drafts",
+        "commands.interactive"
+      ]
+    },
+    "permissions": {
+      "required": [
+        "commands",
+        "menus"
+      ],
+      "optional": [
+        "terminal.selection.read",
+        "terminal.input.propose"
+      ]
+    },
+    "package": "terminal-selection-draft.ncpkg",
+    "repeatIdentical": true,
+    "preparedOnly": true,
+    "contentSha256": "99797d8679f34b96580076f922cbec067e511adc0f4ccf396ed129206acb6c4c"
+  }
+]

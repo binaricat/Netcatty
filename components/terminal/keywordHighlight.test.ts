@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import type { SerializeAddon as SerializeAddonType } from "@xterm/addon-serialize";
 import type { Terminal as XTermType } from "@xterm/xterm";
 
+import { DEFAULT_KEYWORD_HIGHLIGHT_RULES } from "../../domain/models/terminal.ts";
 import { writeTerminalDataWithLineTimestamps } from "./runtime/terminalLineTimestamps.ts";
 import {
   noteTerminalOutputPressureData,
@@ -76,6 +77,76 @@ test("new output is colored on the written cells without decorations", async () 
 
   assert.equal(cellRgb(term, 0, "ERROR"), RED);
   assert.equal(term.buffer.active.getLine(0)?.getCell(0)?.getFgColor(), -1);
+
+  highlighter.dispose();
+  term.dispose();
+});
+
+test("keyword highlight skips cells whose PTY foreground is already colored", async () => {
+  // Starship directory segments set a truecolor foreground (#3940). Those
+  // cells must keep the PTY color; only default-foreground matches are recolored.
+  const unixPath = DEFAULT_KEYWORD_HIGHLIGHT_RULES.find((entry) => entry.id === "unix-path");
+  assert.ok(unixPath);
+  const keywordRgb = Number.parseInt(unixPath.color.slice(1), 16);
+  const cream = 0xfbf1c7;
+  const yellow = 0xfabd2f;
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 5, scrollback: 20 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules([unixPath], true);
+  await write(
+    term,
+    "\x1b[38;2;251;241;199m\x1b[48;2;250;189;47m/opt\x1b[0m"
+    + " \x1b[38;5;220m/mnt\x1b[0m"
+    + " \x1b[31m/bin\x1b[0m"
+    + " /var",
+  );
+
+  const tokenCells = (text: string) => {
+    const line = term.buffer.active.getLine(0);
+    const index = (line?.translateToString(true) ?? "").indexOf(text);
+    assert.ok(index >= 0, text);
+    return Array.from({ length: text.length }, (_, offset) => {
+      const cell = line?.getCell(index + offset);
+      assert.ok(cell, `${text}[${offset}]`);
+      return cell;
+    });
+  };
+
+  for (const cell of tokenCells("/opt")) {
+    assert.equal(cell.isFgRGB(), true);
+    assert.equal(cell.getFgColorMode(), 0x3000000);
+    assert.equal(cell.getFgColor(), cream);
+    assert.equal(cell.isBgRGB(), true);
+    assert.equal(cell.getBgColor(), yellow);
+  }
+  for (const cell of tokenCells("/mnt")) {
+    assert.equal(cell.isFgPalette(), true);
+    assert.equal(cell.getFgColorMode(), 0x2000000);
+    assert.equal(cell.getFgColor(), 220);
+  }
+  for (const cell of tokenCells("/bin")) {
+    assert.equal(cell.isFgPalette(), true);
+    assert.equal(cell.getFgColorMode(), 0x1000000);
+    assert.equal(cell.getFgColor(), 1);
+  }
+  for (const cell of tokenCells("/var")) {
+    assert.equal(cell.isFgRGB(), true);
+    assert.equal(cell.getFgColor(), keywordRgb);
+  }
+
+  highlighter.setRules([{ ...unixPath, color: "#60A5FA" }], true);
+  await highlighter.whenSettled();
+  assert.equal(tokenCells("/opt")[0]?.getFgColor(), cream);
+  assert.equal(tokenCells("/mnt")[0]?.getFgColor(), 220);
+  assert.equal(tokenCells("/bin")[0]?.getFgColor(), 1);
+  assert.equal(tokenCells("/var")[0]?.getFgColor(), BLUE);
+
+  highlighter.setRules([{ ...unixPath, color: "#60A5FA" }], false);
+  await highlighter.whenSettled();
+  assert.equal(tokenCells("/opt")[0]?.getFgColor(), cream);
+  assert.equal(tokenCells("/mnt")[0]?.getFgColor(), 220);
+  assert.equal(tokenCells("/bin")[0]?.getFgColor(), 1);
+  assert.equal(tokenCells("/var")[0]?.getFgColor(), -1);
 
   highlighter.dispose();
   term.dispose();

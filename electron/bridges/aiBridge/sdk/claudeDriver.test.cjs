@@ -1,6 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+// SDK queries in this file are synthetic. Never repair real user config.
+const configPath = require.resolve("./claudeConfig.cjs");
+const priorConfigModule = require.cache[configPath];
+require.cache[configPath] = { id: configPath, filename: configPath, loaded: true, exports: { ensureClaudeConfig() {} } };
 const { translateClaudeMessage, buildClaudeQueryOptions, buildClaudePromptInput, classifyClaudeSpawnError, listClaudeModels, mapClaudeModels, parseClaudeSettings, splitClaudeModelSelection } = require("./claudeDriver.cjs");
+if (priorConfigModule) require.cache[configPath] = priorConfigModule;
+else delete require.cache[configPath];
 
 function collector() {
   const events = [];
@@ -332,4 +338,20 @@ test("listClaudeModels aborts a hung SDK query and returns it for cleanup", asyn
   assert.deepEqual(await modelsPromise, []);
   assert.equal(queryAbortSignal.aborted, true);
   assert.equal(returnCount, 1);
+});
+
+test("delegated Claude uses only explicit MCP configuration and cannot inherit local settings/tool mode", () => {
+  const options = buildClaudeQueryOptions({
+    delegatedAgent: true, toolIntegrationMode: "mcp", settings: { mcpServers: { unwanted: {} } },
+    injectedMcpServers: [{ name: "scoped-netcatty", command: "host-managed", args: [], env: [] }],
+  });
+  assert.equal(options.strictMcpConfig, true);
+  assert.equal(options.maxTurns, 12);
+  assert.equal(options.persistSession, false);
+  assert.equal(options.resume, undefined);
+  assert.deepEqual(options.settingSources, []);
+  assert.deepEqual(options.tools, []);
+  assert.equal(options.settings, undefined);
+  assert.deepEqual(Object.keys(options.mcpServers), ["scoped-netcatty"]);
+  assert.throws(() => buildClaudeQueryOptions({ delegatedAgent: true, toolIntegrationMode: "skills" }), /requires MCP/);
 });

@@ -7,6 +7,7 @@ interface ResourceBarProps {
   className?: string;
   /** Slightly taller track for GPU cards. */
   size?: 'sm' | 'md';
+  danger?: boolean;
 }
 
 function barTone(clamped: number): string {
@@ -20,6 +21,7 @@ export const ResourceBar = memo(function ResourceBar({
   value,
   className,
   size = 'sm',
+  danger = false,
 }: ResourceBarProps) {
   const finite = typeof value === 'number' && Number.isFinite(value);
   const clamped = finite ? Math.max(0, Math.min(100, value)) : 0;
@@ -37,12 +39,12 @@ export const ResourceBar = memo(function ResourceBar({
         <div
           className={cn(
             'h-full rounded-full transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none',
-            finite ? barTone(clamped) : 'opacity-0',
+            finite ? (danger ? 'bg-destructive/80' : barTone(clamped)) : 'opacity-0',
           )}
           style={{ width: `${clamped}%` }}
         />
       </div>
-      <span className="text-[10px] tabular-nums text-muted-foreground w-10 text-right shrink-0">
+      <span className={cn('text-[10px] tabular-nums w-10 text-right shrink-0', danger ? 'text-destructive font-medium' : 'text-muted-foreground')}>
         {finite ? `${value.toFixed(1)}%` : '--'}
       </span>
     </div>

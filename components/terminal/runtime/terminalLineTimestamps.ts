@@ -323,17 +323,6 @@ const isBulkMeasurableEscapeSequence = (sequence: string): boolean =>
   getAlternateScreenAction(sequence) === null
   && (getWraparoundAction(sequence) !== null || isSgrSequence(sequence));
 
-const isPotentialAlternateScreenSequence = (sequence: string): boolean => {
-  if (!sequence.startsWith("\x1b[?")) return false;
-
-  const params = sequence.slice(3).split(";");
-  const alternateScreenModes = ["47", "1047", "1049"];
-  return params.some((part) => (
-    part === ""
-    || alternateScreenModes.some((mode) => mode.startsWith(part) || part.startsWith(mode))
-  ));
-};
-
 const isPrintableOutput = (char: string): boolean => {
   if (char === "\t") return true;
   const code = char.codePointAt(0);
@@ -1711,7 +1700,7 @@ const writeTerminalDataWithSecondLedger = (
   const segments = store.segmenter.append(dataForTimestamps, stampDate);
 
   const pendingEscapeSequence = store.segmenter.flushPendingEscapeSequence();
-  if (isPotentialAlternateScreenSequence(pendingEscapeSequence)) {
+  if (canRetainIncompleteTerminalControlSequence(pendingEscapeSequence)) {
     store.timestampOnlyPrefix = pendingEscapeSequence;
   }
 
@@ -1779,6 +1768,40 @@ const writeTerminalDataWithSecondLedger = (
   });
 };
 
+/**
+ * Normal-screen erasure needs real parser coordinates. Keep erase writes
+ * separate from text so anchors are attached before an erase,
+ * and subsequent stamps are seeded after xterm has moved/trimmed the buffer.
+ * Standalone cursor moves stay on the bulk path: a backwards sparse stamp
+ * would overwrite the fill-forward time of untouched rows below it.
+ * Skip alternate-screen programs and string controls (OSC/DCS payloads).
+ */
+const findTimestampCursorBoundary = (term: XTerm, data: string): {
+  start: number;
+  end: number;
+} | null => {
+  const prefix = getTimestampStore(term).timestampOnlyPrefix;
+  const input = prefix + data;
+  let altActive = term.buffer?.active?.type === "alternate";
+  for (let index = input.indexOf("\x1b"); index !== -1;) {
+    const parsed = readEscapeSequence(input, index);
+    if (!parsed?.complete) break;
+    const sequence = parsed.sequence;
+    const action = getAlternateScreenAction(sequence);
+    if (action) altActive = action === "enter";
+    const final = getCsiFinal(sequence);
+    const params = sequence.slice(2, -1);
+    if (!altActive && final === "J" && /^[\d;]*$/.test(params)) {
+      return {
+        start: Math.max(0, index - prefix.length),
+        end: parsed.endIndex + 1 - prefix.length,
+      };
+    }
+    index = input.indexOf("\x1b", parsed.endIndex + 1);
+  }
+  return null;
+};
+
 export const writeTerminalDataWithLineTimestamps = (
   term: XTerm,
   data: string,
@@ -1814,13 +1837,41 @@ export const writeTerminalDataWithLineTimestamps = (
     return;
   }
 
-  // Record/render separation: per-second ledger + sparse reflow anchors.
-  writeTerminalDataWithSecondLedger(
-    term,
-    data,
-    done,
-    options,
-    diagnostics,
-    shouldMeasureDiagnostics,
-  );
+  // Preserve arrival time across parser checkpoints, including a second rollover.
+  const writeOptions = { ...options, timestampDate: options?.timestampDate ?? new Date() };
+  const writeStamped = (part: string, onComplete: () => void) => {
+    writeTerminalDataWithSecondLedger(
+      term, part, onComplete, writeOptions, diagnostics, shouldMeasureDiagnostics,
+    );
+  };
+  const writeNext = (remaining: string): void => {
+    const boundary = findTimestampCursorBoundary(term, remaining);
+    if (!boundary) {
+      writeStamped(remaining, done);
+      return;
+    }
+    const writeControl = () => {
+      writeFallbackOnly(remaining.slice(boundary.start, boundary.end), () => {
+        const store = getTimestampStore(term);
+        store.segmenter.reset();
+        store.timestampOnlyPrefix = "";
+        // Erasure can dispose the current second's anchor. A redraw must be
+        // allowed to stamp again even when its arrival time is the same second.
+        store.lastStampSecondKey = null;
+        rebaseLedgerForScrollback(term, store);
+        notifyTimestampStore(store);
+        if (boundary.end < remaining.length) {
+          writeNext(remaining.slice(boundary.end));
+        } else {
+          done();
+        }
+      });
+    };
+    if (boundary.start > 0) {
+      writeStamped(remaining.slice(0, boundary.start), writeControl);
+    } else {
+      writeControl();
+    }
+  };
+  writeNext(data);
 };

@@ -16,6 +16,9 @@
 // CloudLinker — issue #3592: the vendor identifies a single-channel gateway
 // and proposes this distinctive banner. Older "Go" banners cannot identify it
 // safely; this compatibility entry requires the vendor banner change.
+// russh — issue #3973: russh returns CHANNEL_FAILURE for wantReply=false env
+// requests, desynchronizing ssh2's callback FIFO so pty-req/shell appear to
+// fail. Skip env via the single-channel path. No chunked-write evidence.
 // JumpServer KoKo advertises Version "JumpServer" and multiplexes. Omit it.
 
 const SINGLE_CHANNEL_SOFTWARE_TOKENS = Object.freeze([
@@ -23,6 +26,7 @@ const SINGLE_CHANNEL_SOFTWARE_TOKENS = Object.freeze([
   "TERM-SSHD",
   "CLOUDBILITY",
   "CLOUDLINKER",
+  "russh",
 ]);
 
 // #3146 also drops multi-character writes. That evidence is only for these

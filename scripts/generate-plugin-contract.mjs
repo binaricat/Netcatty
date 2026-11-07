@@ -22,6 +22,7 @@ const electronBundlePath = path.join(
 );
 const checkOnly = process.argv.includes("--check");
 const typescriptTypeOverrides = new Map([
+  ["PermissionDeclaration", 'Exclude<PluginPermission, "network.stream"> | PermissionResourceDeclaration'],
   [
     "ActivationEvent",
     '"onStartupFinished" | `onCommand:${ContributionId}` | `onView:${ContributionId}` | `onProvider:${ContributionId}`',
@@ -106,7 +107,7 @@ const schema = JSON.parse(schemaText);
 if (schema.$schema !== "https://json-schema.org/draft/2020-12/schema") {
   throw new Error("Plugin contract must use JSON Schema 2020-12");
 }
-if (!schema.$id?.includes("/0.1.0-internal/")) {
+if (!schema.$id?.includes("/0.1.0-internal.1/")) {
   throw new Error("Plugin contract $id must include the internal API version");
 }
 if (!schema.$defs || typeof schema.$defs !== "object") {
@@ -305,6 +306,15 @@ function schemaTypeToTs(node, level = 0) {
   return "unknown";
 }
 
+const hostInteractionLimits = schema.$defs.HostInteractionLimits?.const;
+const byteStreamLimits = schema.$defs.ByteStreamLimits?.const;
+if (!byteStreamLimits || Object.values(byteStreamLimits).some((value) => !Number.isSafeInteger(value) || value < 1)) {
+  throw new Error("ByteStreamLimits must contain positive bounded integers");
+}
+if (!hostInteractionLimits || Object.values(hostInteractionLimits).some((value) => !Number.isSafeInteger(value) || value < 1)) {
+  throw new Error("HostInteractionLimits must contain positive bounded integers");
+}
+
 const definitionNames = Object.keys(schema.$defs).sort((left, right) =>
   left.localeCompare(right, "en"),
 );
@@ -327,6 +337,8 @@ const generatedLimits = [
   `export const PLUGIN_JSON_MAX_NODES = ${jsonValueLimits.maxNodes} as const;`,
   `export const PLUGIN_WIRE_MAX_SAFE_INTEGER = ${wireIntegerLimits.maxSafeInteger} as const;`,
   `export const PLUGIN_RPC_MAX_JSON_BYTES = ${rpcLimits.maxJsonBytes} as const;`,
+  `export const PLUGIN_HOST_INTERACTION_LIMITS = ${JSON.stringify(hostInteractionLimits)} as const;`,
+  `export const PLUGIN_BYTE_STREAM_LIMITS = ${JSON.stringify(byteStreamLimits)} as const;`,
   `export const PLUGIN_RPC_ERROR_CODES = ${JSON.stringify(rpcErrorCodes)} as const;`,
   `export const PLUGIN_STREAM_MAX_ID_LENGTH = ${streamLimits.maxStreamIdLength} as const;`,
   `export const PLUGIN_STREAM_MAX_CHUNK_BYTES = ${streamLimits.maxChunkBytes} as const;`,

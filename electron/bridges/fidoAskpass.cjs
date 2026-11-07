@@ -370,7 +370,9 @@ function ensureFidoAskpass(options = {}) {
     };
   }
 
-  const base = path.join(getTempBase(), `netcatty-fido-askpass-${randomUUID().slice(0, 8)}`);
+  // Keep the suffix short: Unix domain sockets reject paths beyond sun_path
+  // (104 bytes on macOS), and the managed temp base is already long there.
+  const base = path.join(getTempBase(), `fa-askpass-${randomUUID().slice(0, 8)}`);
   fs.mkdirSync(base, { recursive: true, mode: 0o700 });
   askpassSocketPath = resolveFidoAskpassSocketPath(base);
   askpassScriptPath = path.join(base, "netcatty-fido-askpass.cjs");

@@ -26,6 +26,8 @@ import { openQuickConnectFromInput } from '../quickConnectBridge';
 import { AppHostTreeLayer } from './AppHostTreeLayer';
 import { AppHostEditorLayer } from './AppHostEditorLayer';
 import { AppPluginKeybindingHost } from './AppPluginKeybindingHost';
+import { PluginAIContextHost } from '../../components/plugins/PluginAIContextHost';
+import { PluginAgentHost } from '../../components/plugins/PluginAgentHost';
 import { shouldOpenHostEditOnWorkSurface } from './workTabSurface';
 import { useConnectionLogsStore } from '../state/connectionLogsStore';
 import {
@@ -44,6 +46,7 @@ import { getAvailablePaneMagnificationController } from '../../domain/paneMagnif
 import { pluginViewTabStore, usePluginViewTabs } from '../state/pluginViewTabStore';
 import { buildPluginSettingScopeCatalog } from '../state/usePluginSettingScopeCatalog';
 import { useWorkSurfaceHostEditor } from '../state/useWorkSurfaceHostEditor';
+import { QuickSwitcherOverlay } from './QuickSwitcherOverlay';
 import {
   appViewDomainsEqual,
   mergeAppViewDomains,
@@ -51,15 +54,15 @@ import {
 } from './appViewDomains';
 
 const LazyProtocolSelectDialog = lazy(() => import('../../components/ProtocolSelectDialog'));
-const LazyQuickSwitcher = lazy(() =>
-  import('../../components/QuickSwitcher').then((m) => ({ default: m.QuickSwitcher })),
-);
 const LazyCreateWorkspaceDialog = lazy(() =>
   import('../../components/CreateWorkspaceDialog').then((m) => ({ default: m.CreateWorkspaceDialog })),
 );
 const LazyTextEditorTabView = lazy(() =>
   import('../../components/editor/TextEditorTabView').then((m) => ({ default: m.TextEditorTabView })),
 );
+
+// Module-level so TopTabs' memo comparator sees a stable callback.
+const focusEditorWindowTab = (id: string) => { void focusEditorInWindow(id); };
 
 const TextEditorTabFallback = ({ tabId }: { tabId: string }) => {
   const isVisible = useIsEditorTabActive(tabId);
@@ -167,7 +170,8 @@ function AppPluginKeybindingThemeHost({
   sessions: any[];
   workspaces: any[];
 }) {
-  const appThemeStyle = useAppThemeStyle();
+  // View environment is global in the current host: publish committed colors only.
+  const appThemeStyle = useAppThemeStyle(false);
   const { resolvedTheme, uiLanguage } = useSettingsChromeStore();
   const pluginThemeTokens = useMemo(
     () => selectPluginThemeTokens(appThemeStyle as Record<string, unknown>),
@@ -239,12 +243,10 @@ function AppViewInner({ domains }: AppViewProps) {
     setIsCreateWorkspaceOpen,
     setIsQuickSwitcherOpen,
     setProtocolSelectHost,
-    setQuickSearch,
   } = ctx;
 
   const dismissTransientOverlays = useCallback(() => {
     setIsQuickSwitcherOpen(false);
-    setQuickSearch('');
     setIsCreateWorkspaceOpen(false);
     setProtocolSelectHost(null);
     setAddToWorkspaceDialog(null);
@@ -257,13 +259,12 @@ function AppViewInner({ domains }: AppViewProps) {
     setIsCreateWorkspaceOpen,
     setIsQuickSwitcherOpen,
     setProtocolSelectHost,
-    setQuickSearch,
   ]);
 
   useMainWindowInputFocusRecovery({ onPageHidden: dismissTransientOverlays });
 
   const {
-    addShellHistoryEntry, clearAllCommandHistory, removeShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace,
+    addShellHistoryEntry, clearAllCommandHistory, removeShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace, moveWorkspacePane,
     clearAndRemoveSource, clearAndRemoveSources, closeLogView, closeSession, closeTabsBatch, closeWorkspace, commitPluginImporterData, commitVaultImportTransaction, commitVaultGroupMutation, copySessionToNewWindowWithCurrentShell, copySessionWithCurrentShell, duplicateSessionWithCurrentShell, copyWorkspaceWithCurrentShell,
     convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts,
     customGroups, currentTerminalTheme, deepLinkHostDraft, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict,
@@ -274,11 +275,11 @@ function AppViewInner({ domains }: AppViewProps) {
     handleRequestCloseEditorTabRef, handleSessionStatusChange, handleSyncNowManual, handleTerminalDataCapture, handleUpdateHostFromTerminal,
     hostById, hosts, terminalHosts, updateTerminalHosts, hotkeyScheme, identities, importOrReuseKey, isBroadcastEnabled, isComposeSendToAll, onToggleComposeSendTarget, isGlobalBroadcastEnabled, isGlobalComposeSendToAll, onToggleGlobalBroadcast, onToggleGlobalComposeSendTarget, canUseGlobalBroadcast, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen,
     keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, openLogView, openNoteRequest, orderedTabsWithEditors, orphanSessions,
-    passphraseQueue, fidoPromptQueue, protocolSelectHost, proxyProfiles, portForwardingRules, quickResults, quickSearch, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions,
+    passphraseQueue, fidoPromptQueue, protocolSelectHost, proxyProfiles, portForwardingRules, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions,
     resolveEmptyVaultConflict, resolveSessionAppearance, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
     sessions, setActiveTabId, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap,
     setNavigateToSection, setTerminalFontFamilyId, setTerminalFontSize, setVaultFocusRequest, updateSessionFontSize, updateSessionRestoreCwd, updateSessionDynamicTitle, updateSessionCodingCliProvider, clearSessionFontSizeOverride,
-    setWorkspaceFocusedSession, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior,
+    setWorkspaceFocusedSession, setWorkspaceAnchorChat, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior,
     sftpShowHiddenFiles, sftpUseCompressedUpload, snippetPackages, snippets, splitSessionWithCurrentShell, startSessionRename,
     startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById,
     toggleBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, terminalPaneMagnificationRef, sftpPaneMagnificationRef, toggleWorkspaceViewMode, unmanageSource,
@@ -503,6 +504,16 @@ function AppViewInner({ domains }: AppViewProps) {
     await popOutEditorTab(id, host?.label);
   }, [hostById]);
 
+  // Stable editor-tab callbacks so memoized TextEditorTabView/TextEditorPane
+  // skip re-rendering when unrelated AppView state changes.
+  const requestCloseEditorTabFromView = useCallback(
+    (id: string) => handleRequestCloseEditorTabRef.current(id),
+    [handleRequestCloseEditorTabRef],
+  );
+  const popOutEditorTabFromView = useCallback((id: string) => {
+    void handlePopOutEditorTab(id);
+  }, [handlePopOutEditorTab]);
+
   const handleSaveSessionRename = useCallback((name: string) => {
     if (!sessionRenameTarget) return;
     if (!name.trim()) return;
@@ -580,7 +591,7 @@ function AppViewInner({ domains }: AppViewProps) {
         onClosePluginViewTab={closePluginViewTab}
         onRequestCloseEditorTab={handleRequestCloseEditorTab}
         onPopOutEditorTab={handlePopOutEditorTab}
-        onFocusEditorWindowTab={(id) => { void focusEditorInWindow(id); }}
+        onFocusEditorWindowTab={focusEditorWindowTab}
         hostById={hostById}
       />
 
@@ -763,12 +774,14 @@ function AppViewInner({ domains }: AppViewProps) {
           onTerminalDataCapture={handleTerminalDataCapture}
           onCreateWorkspaceFromSessions={createWorkspaceFromSessions}
           onAddSessionToWorkspace={addSessionToWorkspace}
+          onMoveWorkspacePane={moveWorkspacePane}
           onRequestAddToWorkspace={handleRequestAddToWorkspace}
           onAppendHostToWorkspace={handleAppendHostToWorkspace}
           onUpdateSplitSizes={updateSplitSizes}
           onSetDraggingSessionId={setDraggingSessionId}
           onToggleWorkspaceViewMode={toggleWorkspaceViewMode}
           onSetWorkspaceFocusedSession={setWorkspaceFocusedSession}
+          onSetWorkspaceAnchorChat={setWorkspaceAnchorChat}
           onReorderWorkspaceSessions={reorderWorkspaceSessions}
           onReorderTabs={reorderWorkTabs}
           onCopySession={copySessionWithCurrentShell}
@@ -844,8 +857,8 @@ function AppViewInner({ domains }: AppViewProps) {
                 hotkeyScheme={hotkeyScheme}
                 keyBindings={keyBindings}
                 hostById={hostById}
-                onRequestClose={(id) => handleRequestCloseEditorTabRef.current(id)}
-                onPopOut={(id) => { void handlePopOutEditorTab(id); }}
+                onRequestClose={requestCloseEditorTabFromView}
+                onPopOut={popOutEditorTabFromView}
               />
             </Suspense>
           </LazyLoadBoundary>
@@ -855,6 +868,8 @@ function AppViewInner({ domains }: AppViewProps) {
           sessions={sessions}
           workspaces={workspaces}
         />
+        <PluginAIContextHost sessions={sessions} workspaces={workspaces} />
+        <PluginAgentHost sessions={sessions} />
       </div>
 
       {/* Global "quick add / edit snippet" modal, triggered by the
@@ -932,50 +947,39 @@ function AppViewInner({ domains }: AppViewProps) {
       )}
 
       {isQuickSwitcherOpen && (
-        <LazyLoadBoundary name="Quick switcher" resetKey={quickSearch}>
-          <Suspense fallback={null}>
-            <LazyQuickSwitcher
-              isOpen={isQuickSwitcherOpen}
-              query={quickSearch}
-              results={quickResults}
-              sessions={sessions}
-              workspaces={workspaces}
-              showSftpTab={showSftpTab}
-              onQueryChange={setQuickSearch}
-              onSelect={handleHostConnectWithProtocolCheck}
-              onQuickConnect={openQuickConnectFromInput}
-              onEditHost={(host) => {
-                setIsQuickSwitcherOpen(false);
-                setQuickSearch('');
-                handleEditHostFromOverlay(host);
-              }}
-              onSelectTab={(tabId) => {
-                setActiveTabId(tabId);
-                setIsQuickSwitcherOpen(false);
-                setQuickSearch('');
-              }}
-              onCreateLocalTerminal={(shell) => {
-                handleCreateLocalTerminal(shell);
-                setIsQuickSwitcherOpen(false);
-                setQuickSearch('');
-              }}
-              onCreateWorkspace={() => {
-                setIsQuickSwitcherOpen(false);
-                setQuickSearch('');
-                setAddToWorkspaceDialog({ mode: 'create' });
-              }}
-              onClose={() => {
-                setIsQuickSwitcherOpen(false);
-                setQuickSearch('');
-              }}
-              keyBindings={keyBindings}
-              terminalSettings={terminalSettings}
-              paneMagnificationState={paneMagnificationState}
-              onMagnifyCurrentPane={handleMagnifyCurrentPane}
-              onRestoreMagnifiedPane={handleRestoreMagnifiedPane}
-            />
-          </Suspense>
-        </LazyLoadBoundary>
+        <QuickSwitcherOverlay
+          hosts={hosts}
+          isOpen={isQuickSwitcherOpen}
+          sessions={sessions}
+          workspaces={workspaces}
+          showSftpTab={showSftpTab}
+          onSelect={handleHostConnectWithProtocolCheck}
+          onQuickConnect={openQuickConnectFromInput}
+          onEditHost={(host) => {
+            setIsQuickSwitcherOpen(false);
+            handleEditHostFromOverlay(host);
+          }}
+          onSelectTab={(tabId) => {
+            setActiveTabId(tabId);
+            setIsQuickSwitcherOpen(false);
+          }}
+          onCreateLocalTerminal={(shell) => {
+            handleCreateLocalTerminal(shell);
+            setIsQuickSwitcherOpen(false);
+          }}
+          onCreateWorkspace={() => {
+            setIsQuickSwitcherOpen(false);
+            setAddToWorkspaceDialog({ mode: 'create' });
+          }}
+          onClose={() => {
+            setIsQuickSwitcherOpen(false);
+          }}
+          keyBindings={keyBindings}
+          terminalSettings={terminalSettings}
+          paneMagnificationState={paneMagnificationState}
+          onMagnifyCurrentPane={handleMagnifyCurrentPane}
+          onRestoreMagnifiedPane={handleRestoreMagnifiedPane}
+        />
       )}
 
       <RenameDraftDialog

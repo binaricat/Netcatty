@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import xterm from "@xterm/xterm";
 
 import {
   MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
@@ -18,6 +19,159 @@ import {
   type StampCursorEstimate,
 } from "./terminalLineTimestamps.ts";
 import { MAX_INCOMPLETE_TERMINAL_CONTROL_SEQUENCE_CHARS } from "./terminalControlSequenceLimits.ts";
+import { installEraseInDisplayHandlers } from "../clearTerminalViewport.ts";
+
+const createRealTimestampTerm = (wipeScrollback = true) => {
+  const term = new xterm.Terminal({
+    cols: 40, rows: 6, scrollback: 20, allowProposedApi: true,
+  });
+  const handler = installEraseInDisplayHandlers(term, {
+    getClearWipesScrollback: () => wipeScrollback,
+  });
+  const writes: string[] = [];
+  const originalWrite = term.write.bind(term);
+  term.write = (data, callback) => {
+    assert.equal(typeof data, "string");
+    writes.push(data as string);
+    originalWrite(data, callback);
+  };
+  return {
+    term,
+    writes,
+    write: (data: string, second = 0) => new Promise<void>((resolve) => {
+      writeTerminalDataWithLineTimestamps(term, data, resolve, {
+        timestampDate: new Date(2026, 9, 29, 12, 0, second),
+      });
+    }),
+    dispose: () => { handler.dispose(); term.dispose(); },
+  };
+};
+
+test("real xterm keeps cleared prompts timestamped across chunk and second boundaries", async () => {
+  for (const wipe of [true, false]) {
+    for (const second of [0, 1]) {
+      for (const clear of ["\x1b[H\x1b[2J\x1b[3J", "\x1b[H\x1b[J", "\x1b[1;1f\x1b[2J"]) {
+        for (const chunking of ["merged", "separate", "bytewise"]) {
+          const fixture = createRealTimestampTerm(wipe);
+          const { term, write } = fixture;
+          try {
+            const initial = "history\r\n$ clear\r\n";
+            await write(initial);
+            const redraw = clear + "$ ";
+            const chunks = chunking === "merged" ? [redraw]
+              : chunking === "separate" ? [clear, "$ "] : [...redraw];
+            for (const chunk of chunks) await write(chunk, second);
+            assert.equal(term.buffer.active.cursorY, 0, "prompt is at the top");
+            assert.equal(term.buffer.active.getLine(term.buffer.active.baseY)?.translateToString(true), "$ ");
+            assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
+              { row: 0, label: `12:00:0${second}` },
+            ], JSON.stringify({ wipe, second, clear, chunking }));
+            assert.equal(fixture.writes.join(""), initial + redraw, "PTY bytes are unchanged");
+          } finally {
+            fixture.dispose();
+          }
+        }
+      }
+    }
+  }
+});
+
+test("real xterm timestamps repeated same-second clears and redraws without a newline", async () => {
+  const fixture = createRealTimestampTerm();
+  try {
+    await fixture.write("$ ");
+    for (let index = 0; index < 5; index += 1) {
+      // Ctrl+L-style redraw: no CR/LF to reset the timestamp segmenter.
+      await fixture.write("\x1b[H\x1b[2J$ ");
+      assert.deepEqual(getVisibleTerminalLineTimestampRows(fixture.term), [
+        { row: 0, label: "12:00:00" },
+      ]);
+      assert.equal(getTerminalLineTimestampLedgerCount(fixture.term), 1);
+    }
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("real xterm preserves timestamped history when output and clear share a batch", async () => {
+  const fixture = createRealTimestampTerm(false);
+  try {
+    await fixture.write("old\r\n", 0);
+    await fixture.write("new\r\n\x1b[H\x1b[2J\x1b[3J$ ", 1);
+    fixture.term.scrollToTop();
+    assert.deepEqual(getVisibleTerminalLineTimestampRows(fixture.term), [
+      { row: 0, label: "12:00:00" },
+      { row: 1, label: "12:00:01" },
+      { row: 2, label: "12:00:01" },
+    ]);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("real xterm retains clear anchors after scrollback trim and terminal reflow", async () => {
+  const fixture = createRealTimestampTerm();
+  try {
+    await fixture.write("line\r\n".repeat(40));
+    await fixture.write("\x1b[H\x1b[2J\x1b[3J$ ", 1);
+    fixture.term.resize(20, 6);
+    await fixture.write("command\r\nnext", 2);
+    assert.deepEqual(getVisibleTerminalLineTimestampRows(fixture.term), [
+      { row: 0, label: "12:00:01" },
+      { row: 1, label: "12:00:02" },
+    ]);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("real xterm does not treat OSC payloads or alternate-screen redraws as clear boundaries", async () => {
+  const fixture = createRealTimestampTerm();
+  try {
+    const data = "\x1b]0;title\x1b[H\x1b[2J\x07$ ";
+    await fixture.write(data);
+    assert.equal(fixture.writes.length, 1, "string controls retain the bulk path");
+    await fixture.write("\x1b[?1049h\x1b[H\x1b[2JTUI", 1);
+    assert.equal(fixture.writes.length, 2, "alternate-screen output retains the bulk path");
+    await fixture.write("\x1b[?1049l\r\n$ ", 2);
+    assert.deepEqual(getVisibleTerminalLineTimestampRows(fixture.term), [
+      { row: 0, label: "12:00:00" },
+      { row: 1, label: "12:00:02" },
+    ]);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("standalone cursor moves keep untouched suffix timestamps", async () => {
+  for (const position of ["\x1b[H", "\x1b[1;1f"]) {
+    const fixture = createRealTimestampTerm();
+    try {
+      await fixture.write("first\r\nsecond\r\n", 0);
+      await fixture.write(position + "new", 1);
+      assert.equal(fixture.term.buffer.active.getLine(1)?.translateToString(true), "second");
+      assert.equal(getVisibleTerminalLineTimestampRows(fixture.term).find(({ row }) => row === 1)?.label, "12:00:00");
+      assert.equal(fixture.writes.length, 2, "a standalone move does not split the write");
+    } finally {
+      fixture.dispose();
+    }
+  }
+});
+
+test("normal-screen cursor-heavy frames remain a single write", async () => {
+  const fixture = createRealTimestampTerm();
+  let notifications = 0;
+  const unsubscribe = onTerminalLineTimestampsChange(fixture.term, () => { notifications += 1; });
+  try {
+    const frame = Array.from({ length: 1000 }, (_, row) => `\x1b[${row % 6 + 1};1Hrow`).join("");
+    await fixture.write(frame);
+    assert.deepEqual(fixture.writes, [frame]);
+    assert.equal(notifications, 1, "one ledger notification per frame");
+  } finally {
+    unsubscribe();
+    fixture.dispose();
+  }
+});
 
 const createFakeTerm = (options: {
   cols?: number;

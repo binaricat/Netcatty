@@ -39,6 +39,8 @@ export function resolveDisplayedPanelView(
   sessions: AISession[],
   persistedSessionId?: string | null,
   scopeType: "terminal" | "workspace" = "workspace",
+  anchorChatId?: string | null,
+  preferredHistorySessionId?: string | null,
 ): AIPanelView {
   if (panelView) {
     return normalizePanelView(panelView, sessions);
@@ -66,11 +68,42 @@ export function resolveDisplayedPanelView(
     return DEFAULT_PANEL_VIEW;
   }
 
-  if (sessions[0]) {
-    return { mode: "session", sessionId: sessions[0].id };
+  // Prefer the workspace anchor, then the candidate selected by scoped
+  // history's match-rank/recency ordering. Callers without a ranked candidate
+  // retain the recency fallback below.
+  if (anchorChatId && sessions.some((s) => s.id === anchorChatId)) {
+    return { mode: "session", sessionId: anchorChatId };
+  }
+  // Scoped history already ranks exact/member matches before other scopes,
+  // then sorts each rank by recency. Preserve its selected candidate instead
+  // of letting a newer chat from another workspace overtake that match.
+  const mostRecent = preferredHistorySessionId === undefined
+    ? resolveMostRecentlyUpdatedSession(sessions)
+    : sessions.find((session) => session.id === preferredHistorySessionId);
+  if (mostRecent) {
+    return { mode: "session", sessionId: mostRecent.id };
   }
 
   return DEFAULT_PANEL_VIEW;
+}
+
+/**
+ * The most recently updated session by `updatedAt`, or null when the list is
+ * empty. Ties keep the earlier entry so the result is deterministic.
+ */
+export function resolveMostRecentlyUpdatedSession(
+  sessions: AISession[],
+): AISession | null {
+  let best: AISession | null = null;
+  let bestUpdatedAt = 0;
+  for (const session of sessions) {
+    const updatedAt = session.updatedAt ?? 0;
+    if (best === null || updatedAt > bestUpdatedAt) {
+      best = session;
+      bestUpdatedAt = updatedAt;
+    }
+  }
+  return bestUpdatedAt > 0 ? best : null;
 }
 
 export function normalizePanelView(

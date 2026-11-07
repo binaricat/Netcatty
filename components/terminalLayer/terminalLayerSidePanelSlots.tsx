@@ -604,6 +604,7 @@ function SidePanelAiSlotInner({
     onOpenVaultHostFromChat,
     onOpenVaultSectionFromChat,
     onOpenVaultSnippetFromChat,
+    onSetWorkspaceAnchorChat,
     validAIScopeTargetIds,
   } = ctx;
   const workspaces = ctx.workspaces as Workspace[];
@@ -654,6 +655,7 @@ function SidePanelAiSlotInner({
         mountedTabIds={mountedAiTabIds}
         activeTabId={activeTabId}
         activeSidePanelTab={isVisible ? 'ai' : null}
+        liveScopeTargetIds={validAIScopeTargetIds}
         contextsByTabId={aiContextsByTabId}
         resolveExecutorContext={resolveAIExecutorContext}
         pendingTerminalSelection={pendingTerminalSelectionForAI}
@@ -665,6 +667,8 @@ function SidePanelAiSlotInner({
         onOpenVaultHostFromChat={onOpenVaultHostFromChat}
         onOpenVaultSectionFromChat={onOpenVaultSectionFromChat}
         onOpenVaultSnippetFromChat={onOpenVaultSnippetFromChat}
+        onSetWorkspaceAnchorChat={onSetWorkspaceAnchorChat as ((workspaceId: string, chatId: string | null) => void) | undefined}
+        workspaces={workspaces}
       />
     </AISidePanelStateRoot>
   );
@@ -693,7 +697,7 @@ export function movePersistentPortalNode(
   }
 }
 
-function PersistentSidePanelPortal({
+export function PersistentSidePanelPortal({
   portalKey,
   target,
   children,

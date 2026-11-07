@@ -85,7 +85,7 @@ test("tree archive menu passes full paths for nested multiselection and hides lo
     tRef: { current: (key: string) => key },
     onOpenFileWithSystemDefaultRef: emptyRef, onOpenFileWithRef: emptyRef,
     onEditFileRef: emptyRef, onDownloadFileRef: emptyRef,
-    onExtractArchiveRef: emptyRef, onEditPermissionsRef: emptyRef,
+    onExtractArchiveRef: emptyRef, onEditPermissionsRef: emptyRef, onDuplicateEntriesRef: emptyRef,
     onCreateArchiveRef: { current: (paths: string[]) => { captured.push(paths); } },
     getActionPaths: (path: string) => selected.has(path) ? [...selected] : [path],
   };

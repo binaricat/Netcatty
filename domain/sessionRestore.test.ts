@@ -12,6 +12,7 @@ import {
   sanitizeSessionRestorePayload,
   shouldAttemptRestoreCwd,
 } from "./sessionRestore.ts";
+import { collectSessionIds, movePaneInWorkspace } from "./workspace.ts";
 import type { TerminalSession, Workspace } from "./models.ts";
 
 const session = (id: string, workspaceId?: string): TerminalSession => ({
@@ -332,6 +333,92 @@ test("sanitizeSessionRestorePayload prunes invalid workspace panes and drops emp
   assert.deepEqual(sanitized.workspaces[0].focusSessionOrder, ["s1"]);
   assert.deepEqual(sanitized.tabOrder, ["ws-1"]);
   assert.equal(sanitized.activeTabId, "ws-1");
+});
+
+test("an empty workspace (all members closed) restores with the same id (#4098 phase 2)", () => {
+  const sanitized = sanitizeSessionRestorePayload({
+    version: 1,
+    savedAt: 1,
+    activeTabId: "ws-1",
+    tabOrder: ["ws-1"],
+    sessions: [],
+    workspaces: [{
+      id: "ws-1",
+      title: "Workspace",
+      root: {
+        id: "empty-root",
+        type: "split",
+        direction: "vertical",
+        children: [],
+        sizes: [],
+      },
+      anchorChatId: "chat-1",
+    }],
+  });
+
+  assert.equal(sanitized.workspaces.length, 1);
+  assert.equal(sanitized.workspaces[0].id, "ws-1");
+  assert.equal(sanitized.workspaces[0].root.type, "split");
+  assert.deepEqual(
+    sanitized.workspaces[0].root.type === "split" ? sanitized.workspaces[0].root.children : null,
+    [],
+  );
+  assert.equal(sanitized.workspaces[0].focusedSessionId, undefined);
+  assert.equal(sanitized.workspaces[0].anchorChatId, "chat-1");
+  assert.deepEqual(sanitized.tabOrder, ["ws-1"]);
+  assert.equal(sanitized.activeTabId, "ws-1");
+});
+
+test("a workspace whose member sessions are unrestorable is still dropped", () => {
+  const sanitized = sanitizeSessionRestorePayload({
+    version: 1,
+    savedAt: 1,
+    activeTabId: "vault",
+    tabOrder: ["ws-1"],
+    sessions: [],
+    workspaces: [{
+      id: "ws-1",
+      title: "Workspace",
+      root: {
+        id: "split-1",
+        type: "split",
+        direction: "vertical",
+        children: [{ id: "pane-1", type: "pane", sessionId: "s1" }],
+        sizes: [1],
+      },
+    }],
+  });
+
+  assert.equal(sanitized.workspaces.length, 0);
+  assert.deepEqual(sanitized.tabOrder, []);
+  assert.equal(sanitized.activeTabId, "vault");
+});
+
+test("anchorChatId survives the snapshot roundtrip and drops invalid values", () => {
+  const payload = buildSessionRestorePayload({
+    sessions: [session("s1", "ws-1")],
+    workspaces: [
+      {
+        id: "ws-1",
+        title: "Workspace",
+        root: { id: "pane-1", type: "pane", sessionId: "s1" },
+        focusedSessionId: "s1",
+        anchorChatId: "chat-1",
+      },
+      {
+        id: "ws-2",
+        title: "Workspace",
+        root: { id: "empty-root", type: "split", direction: "vertical", children: [], sizes: [] },
+        anchorChatId: "",
+      },
+    ],
+    tabOrder: ["ws-1", "ws-2"],
+    activeTabId: "ws-1",
+    now: 123,
+  });
+
+  assert.equal(payload.workspaces[0].anchorChatId, "chat-1");
+  assert.equal(payload.workspaces[1].anchorChatId, undefined);
 });
 
 test("sanitizeSessionRestorePayload preserves explicit workspace autoTitle across restore", () => {
@@ -892,4 +979,53 @@ test("restore retains absent local display snapshots while legacy fields remain 
   assert.equal(restored.sessions[1].localShellIcon, "bash");
   assert.equal(restored.sessions[2].localShellName, undefined);
   assert.equal(restored.sessions[2].localShellIcon, undefined);
+});
+
+test("a moved pane tree (#4037) roundtrips through the restore snapshot", () => {
+  const movedRoot = movePaneInWorkspace(
+    {
+      id: "split-1",
+      type: "split",
+      direction: "vertical",
+      children: [
+        { id: "pane-1", type: "pane", sessionId: "s1" },
+        { id: "pane-2", type: "pane", sessionId: "s2" },
+        { id: "pane-3", type: "pane", sessionId: "s3" },
+      ],
+      sizes: [1, 1, 1],
+    },
+    "s3",
+    { direction: "vertical", position: "left", targetSessionId: "s1" },
+  );
+
+  const sanitized = sanitizeSessionRestorePayload(
+    JSON.parse(JSON.stringify({
+      version: 1,
+      savedAt: 1,
+      activeTabId: "ws-1",
+      tabOrder: ["ws-1"],
+      sessions: [session("s1", "ws-1"), session("s2", "ws-1"), session("s3", "ws-1")],
+      workspaces: [{
+        id: "ws-1",
+        title: "Workspace",
+        root: movedRoot,
+        focusedSessionId: "s1",
+        focusSessionOrder: ["s1", "s2", "s3"],
+        anchorChatId: "chat-1",
+      }],
+    })),
+  );
+
+  assert.equal(sanitized.workspaces.length, 1);
+  const restored = sanitized.workspaces[0];
+  assert.equal(restored.id, "ws-1");
+  assert.equal(restored.anchorChatId, "chat-1");
+  assert.deepEqual(collectSessionIds(restored.root), ["s3", "s1", "s2"], "moved order survives the roundtrip");
+  // The inner split the move created keeps its shape (s3 sibling of s1).
+  assert.equal(restored.root.type, "split");
+  if (restored.root.type !== "split") return;
+  assert.equal(restored.root.children[0].type, "split");
+  assert.equal(restored.root.children[0].type === "split"
+    ? collectSessionIds(restored.root.children[0]).join(",")
+    : "", "s3,s1");
 });

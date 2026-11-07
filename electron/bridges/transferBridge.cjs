@@ -2339,10 +2339,12 @@ function scheduleIdleIsolatedDownloadChannel(client, sftp) {
 }
 
 function releaseIsolatedDownloadChannel(client, sftp, options = {}) {
-  const { dispose = false } = options;
+  const { dispose = false, softDispose = false } = options;
   const pool = isolatedDownloadChannelPools.get(client);
+  // softDispose: drop the channel without sftp.end(). Abrupt end mid-transfer
+  // on a transport shared with the terminal can kill the whole SSH (#4134).
   if (!pool) {
-    if (dispose) {
+    if (dispose && !softDispose) {
       try { sftp?.end?.(); } catch { }
     }
     return;
@@ -2353,7 +2355,9 @@ function releaseIsolatedDownloadChannel(client, sftp, options = {}) {
   clearIdleIsolatedDownloadErrorHandler(pool, sftp);
 
   if (dispose) {
-    try { sftp?.end?.(); } catch { }
+    if (!softDispose) {
+      try { sftp?.end?.(); } catch { }
+    }
     return;
   }
 
@@ -2474,16 +2478,68 @@ async function acquireSessionFastDownloadSlot(client, transfer) {
   }
 }
 
-// TERM-SSHD compatibility requires one file handle per channel. Per-file request
-// concurrency is not enough: pooled SFTP aliases share that physical channel,
-// and a second body or verification OPEN would fail even for tiny files.
-// Reuse the cancelable one-slot queue, keyed by the stream rather than its
-// wrapper client, across both directions and the complete verification phase.
+function isSingleChannelSftpClient(client) {
+  return Boolean(
+    client?.__netcattySingleChannelSsh
+    || client?.client?.__netcattySingleChannelSsh,
+  );
+}
+
+function requiresExclusiveSftpTransferChannel(client, channel) {
+  // Aliases stay on one authenticated/elevated channel, even on ordinary SSH
+  // servers. Only the owning peer's restriction requires serial transfers.
+  const peer = client?.__netcattySharedChannelAlias
+    ? sftpClients?.get(client.__netcattySharedChannelOwnerId) || client
+    : client;
+  return isSingleChannelSftpClient(peer)
+    || getSftpTransferConcurrency(channel, DOWNLOAD_TRANSFER_CONCURRENCY) === 1;
+}
+
+/**
+ * Some single-channel gateways cannot safely interleave SFTP metadata and
+ * write requests from different files. Serialize the complete upload
+ * transaction per raw SFTP stream while leaving independent connections free.
+ */
+async function acquireExclusiveSftpTransferTransaction(client, transfer) {
+  if (isScpModeClient(client)) return null;
+  // Preserve the normal lazy SFTP-open path. Only known single-channel peers
+  // acquire the transaction slot before the upload itself opens a handle.
+  const knownChannel = client?.sftp || { _client: client?.client };
+  if (!requiresExclusiveSftpTransferChannel(client, knownChannel)) return null;
+  await requireSftpChannel(client);
+  const channel = client.sftp;
+  if (transfer?._exclusiveSftpTransactionChannel === channel) return null;
+
+  await acquireSessionFastDownloadSlot(channel, transfer);
+  transfer._exclusiveSftpTransactionChannel = channel;
+  let released = false;
+  return {
+    client,
+    channel,
+    release() {
+      if (released) return;
+      released = true;
+      if (transfer._exclusiveSftpTransactionChannel === channel) {
+        transfer._exclusiveSftpTransactionChannel = null;
+      }
+      releaseSessionFastDownloadSlot(channel);
+    },
+  };
+}
+
+// Single-channel compatibility permits only one transfer operation per raw
+// SFTP stream. A per-file request limit is insufficient because pooled aliases
+// share the physical channel, and even a tiny file's second OPEN or verification
+// read can fail. Reuse the cancelable one-slot queue keyed by stream rather
+// than wrapper client across both directions and complete verification.
 async function withSequentialSftpTransferSlot(client, transfer, operation) {
   if (isScpModeClient(client)) return operation();
   await requireSftpChannel(client);
   const channel = client.sftp;
-  if (getSftpTransferConcurrency(channel, DOWNLOAD_TRANSFER_CONCURRENCY) !== 1) {
+  if (transfer?._exclusiveSftpTransactionChannel === channel) {
+    return operation();
+  }
+  if (!requiresExclusiveSftpTransferChannel(client, channel)) {
     return operation();
   }
   await acquireSessionFastDownloadSlot(channel, transfer);
@@ -2595,7 +2651,9 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
         try { sftp.removeListener("error", onFastSftpError); } catch { /* ignore */ }
         onFastSftpError = null;
       }
-      if (disposeChannel) {
+      // End disposable channels only after a quiet settle — never on cancel.
+      // Abrupt end mid-transfer can tear down the shared SSH transport (#4134).
+      if (disposeChannel && !transfer.cancelled) {
         try { sftp.end(); } catch { /* ignore */ }
       }
 
@@ -2610,21 +2668,15 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
     const abortFastTransfer = () => {
       if (settled) return;
       transfer.cancelled = true;
-      if (disposeChannel) {
-        try { sftp.end(); } catch { /* ignore */ }
-        // Wait for fastPut callback when possible; force after grace period.
-        scheduleForceFinish(new Error("Transfer cancelled"));
-        return;
-      }
-      // Shared channel: wait for callback.
+      // Do NOT sftp.end() here. Ending an isolated subsystem mid-fastPut on a
+      // transport shared with the terminal shell can make Windows OpenSSH drop
+      // the whole SSH connection (#4134). Force-settle like the shared path.
+      scheduleForceFinish(new Error("Transfer cancelled"));
     };
     transfer.abort = abortFastTransfer;
     onFastSftpError = (err) => {
       pendingError = err || new Error("SFTP channel error");
-      if (disposeChannel) {
-        try { sftp.end(); } catch { /* ignore */ }
-        scheduleForceFinish(pendingError);
-      }
+      scheduleForceFinish(pendingError);
     };
     sftp.on?.("error", onFastSftpError);
 
@@ -2841,9 +2893,9 @@ async function uploadFileOnChannel(
       );
       concurrentIsolatedOk = true;
     } catch (err) {
-      // uploadFileConcurrent ends the isolated channel itself.
+      // uploadFileConcurrent ends the isolated channel itself (except cancel).
       isolated = null;
-      if (transfer.cancelled) throw err;
+      if (transfer.cancelled) throw new Error("Transfer cancelled");
       // Whole connection lost (reset/VPN drop/sshd killed): the browse channel
       // is dead too, and every fallback request on it would hang. Fail now so
       // the task shows an error and can be resumed/retried after reconnect.
@@ -2940,10 +2992,9 @@ async function uploadFileOnChannel(
       fastPutOk = true;
     } catch (err) {
       // Gate-wait / fastPut failure: end the reopened isolated channel before
-      // nulling. Rethrow paths skip the post-block else-if end, and fallthrough
-      // also clears isolated; either way we must not leak the SSH subsystem
-      // opened for this attempt (#2755 Bugbot).
-      if (isolated && typeof isolated.end === "function") {
+      // nulling — except on cancel. Ending mid-fastPut on the shared transport
+      // can drop the whole SSH session (#4134). Non-cancel failures still end.
+      if (!transfer.cancelled && isolated && typeof isolated.end === "function") {
         try { isolated.end(); } catch { /* ignore */ }
       }
       isolated = null;
@@ -2952,7 +3003,7 @@ async function uploadFileOnChannel(
       transfer.pauseUnavailableReason = transfer.resumable
         ? undefined
         : transfer.pauseUnavailableReason;
-      if (transfer.cancelled) throw err;
+      if (transfer.cancelled) throw new Error("Transfer cancelled");
       // Source-change / hard safety errors must not be retried on another path.
       if (err?.noTransferFallback || err?.sourceChanged) throw err;
       rememberPipelineError(err);
@@ -3041,8 +3092,8 @@ async function uploadFileOnChannel(
 
 /**
  * Open a remote SFTP handle while transfer.abort can reject the wait without
- * depending on sftp.end(). Isolated channels still pass abortChannel that ends
- * the subsystem; shared/sudo channels pass a no-op end path and only reject.
+ * depending on sftp.end(). Isolated and shared/sudo channels both use a no-op
+ * abortChannel for end (cancel must not sftp.end mid-flight, #4134); reject only.
  * A late OPEN handle after cancel / channel error is closed best-effort when
  * disposeChannel is false so the shared session does not leak handles.
  * Channel `error` while OPEN is pending must reject here: callers only check
@@ -5112,8 +5163,9 @@ async function runPausableConcurrentRanges({
  * Pipelined SFTP WRITE upload (same fanout as ssh2 fastPut).
  *
  * @param {{ disposeChannel?: boolean, onBytesCommitted?: (() => void) | null, generatedStagePath?: boolean }} [options]
- *   disposeChannel — when true (isolated channel), end the SFTP subsystem on
- *   cancel/finish. When false (shared browse session), never call sftp.end().
+ *   disposeChannel — when true (isolated channel), end the SFTP subsystem after
+ *   OPEN/ranges settle (including post-cancel drain). Abort itself must not call
+ *   sftp.end() mid-flight (#4134). When false (shared browse), never end.
  *   generatedStagePath — when true, cancel may best-effort unlink this path
  *   after a truncating OPEN; in-place finals must leave this false.
  */
@@ -5153,11 +5205,10 @@ async function uploadFileConcurrent(
   // Install cancel before OPEN so a stalled remote open can still settle:
   // isolated channels end the subsystem; shared/sudo reject OPEN without end().
   // (runPausableConcurrentRanges would install abort later, after OPEN.)
-  const abortChannel = () => {
-    if (disposeChannel) {
-      try { sftp.end?.(); } catch { /* ignore */ }
-    }
-  };
+  // Never sftp.end() from abort. Isolated channels share the terminal SSH
+  // transport; ending the subsystem mid-WRITE makes some servers (notably
+  // Windows OpenSSH) close the whole connection (#4134). Drain like shared.
+  const abortChannel = () => {};
   const abortEarly = () => {
     transfer.cancelled = true;
     abortChannel();
@@ -5278,7 +5329,10 @@ async function uploadFileConcurrent(
         sendProgress,
         abortChannel,
         sftp,
-        forceSettleOnError: disposeChannel,
+        // Isolated cancel must drain WRITEs like shared (#4134). Channel-loss
+        // still force-settles via the sftp "error" listener + terminalError path
+        // after a quiet abortChannel (no mid-flight sftp.end).
+        forceSettleOnError: false,
       });
       if (channelError) throw channelError;
       // Every remote WRITE has completed. In-place destinations are already
@@ -5361,6 +5415,8 @@ async function uploadFileConcurrent(
     if (!failed && !transfer.cancelled && !remoteCloseError && channelError) {
       remoteCloseError = channelError;
     }
+    // Safe to end here: abort no longer calls sftp.end() mid-flight (#4134),
+    // and this finally runs only after OPEN/ranges have settled or drained.
     if (disposeChannel) {
       try { sftp.end?.(); } catch { /* ignore */ }
     }
@@ -5383,9 +5439,9 @@ async function uploadFileConcurrent(
  * in-flight range before acknowledging it.
  *
  * @param {{ disposeChannel?: boolean }} [options]
- *   disposeChannel — when true (isolated channel), cancel/abort may call
- *   sftp.end(); the caller still returns healthy channels to the download pool.
- *   When false (shared browse / sudo session), never call sftp.end().
+ *   disposeChannel — when true (isolated channel), successful settle may end
+ *   the subsystem; cancel must not call sftp.end() mid-flight (#4134). Shared
+ *   browse / sudo never call sftp.end().
  */
 async function downloadFileResumableFast(
   remotePath,
@@ -5408,11 +5464,8 @@ async function downloadFileResumableFast(
   // Install cancel before OPEN so a stalled remote open can still settle:
   // isolated channels end the subsystem; shared/sudo reject OPEN without end().
   // (runPausableConcurrentRanges would install abort later, after OPEN.)
-  const abortChannel = () => {
-    if (disposeChannel) {
-      try { sftp.end?.(); } catch { /* ignore */ }
-    }
-  };
+  // Never sftp.end() from abort — same #4134 constraint as uploadFileConcurrent.
+  const abortChannel = () => {};
   const abortEarly = () => {
     transfer.cancelled = true;
     abortChannel();
@@ -5772,6 +5825,8 @@ async function downloadFileOnChannel(
             fastSftp.removeListener("close", onFastSftpClose);
             releaseIsolatedDownloadChannel(client, fastSftp, {
               dispose: !!err || transfer.cancelled,
+              // Cancel must not sftp.end() mid-flight on the shared transport (#4134).
+              softDispose: transfer.cancelled,
             });
 
             if (transfer.cancelled) reject(new Error("Transfer cancelled"));
@@ -5807,8 +5862,12 @@ async function downloadFileOnChannel(
       } catch (err) {
         // Always release before rethrowing cancel — otherwise the channel stays
         // in pool.busy and the per-session fast-download budget is exhausted.
-        releaseIsolatedDownloadChannel(client, fastSftp, { dispose: true });
-        if (transfer.cancelled) throw err;
+        // Soft-dispose on cancel so we do not sftp.end() mid-flight (#4134).
+        releaseIsolatedDownloadChannel(client, fastSftp, {
+          dispose: true,
+          softDispose: transfer.cancelled,
+        });
+        if (transfer.cancelled) throw new Error("Transfer cancelled");
         if (err?.noTransferFallback) throw err;
         if (err?.completedWithUnhealthyChannel) {
           await finishSuccessfulDownload();
@@ -6625,6 +6684,7 @@ async function startTransferNow(event, payload, onProgress) {
     });
   };
 
+  let exclusiveSftpUploadTransaction = null;
   try {
     // Explicit 0 is a valid empty-snapshot plan (e.g. download of an empty log
     // that may grow later). Do not treat it as "size unknown" and re-stat into
@@ -6750,6 +6810,16 @@ async function startTransferNow(event, payload, onProgress) {
       // soft-resume paths can already own the channel.
       if (sourceClient) await withSequentialSftpTransferSlot(sourceClient, transfer, verify);
       else await verify();
+    }
+
+    // A single-channel upload holds the raw SFTP stream from directory setup
+    // through stage verification, destination safety checks, promotion, and
+    // timestamp restoration so directory children cannot interleave requests.
+    if (sourceType === "local" && targetType === "sftp" && targetClient) {
+      exclusiveSftpUploadTransaction = await acquireExclusiveSftpTransferTransaction(
+        targetClient,
+        transfer,
+      );
     }
 
     sendProgress(transfer.checkpointBytes, fileSize, { force: true });
@@ -7380,6 +7450,13 @@ async function startTransferNow(event, payload, onProgress) {
 
     return { transferId, totalBytes: fileSize, ...(transfer.warning ? { warning: transfer.warning } : {}) };
   } catch (err) {
+    if (
+      exclusiveSftpUploadTransaction
+      && err?.uncleanSftpChannel
+      && exclusiveSftpUploadTransaction.client.sftp === exclusiveSftpUploadTransaction.channel
+    ) {
+      abandonWedgedVerificationSftpChannel(exclusiveSftpUploadTransaction.client);
+    }
     const failureMessage = err?.message || String(err);
     if (
       sourceType === "local"
@@ -7457,6 +7534,7 @@ async function startTransferNow(event, payload, onProgress) {
       forgetLocalUploadAcknowledgedPrefix(transferId);
       sender.send("netcatty:transfer:cancelled", { transferId });
       broadcastGlobalTransferEvent({ type: "cancelled", transferId, endedAt: Date.now() });
+      return { transferId, error: "Transfer cancelled", cancelled: true };
     } else {
       if (transfer.stagedLocalPath && !transfer.resumable) {
         try { await fs.promises.rm(transfer.stagedLocalPath, { force: true }); } catch { }
@@ -7465,6 +7543,8 @@ async function startTransferNow(event, payload, onProgress) {
       sendError(err);
     }
     return { transferId, error: err.message };
+  } finally {
+    exclusiveSftpUploadTransaction?.release();
   }
 }
 

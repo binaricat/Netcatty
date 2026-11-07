@@ -11,7 +11,22 @@
  * logs keep shell history instead of tilde rows and status lines.
  */
 
+const { fullwidthRanges, wideRanges } = require("./terminalWidthData.cjs");
+const ZERO_WIDTH_MARK_RE = /[\p{Mn}\p{Me}]/u;
+const ZERO_WIDTH_FORMAT_RE = /(?=\p{Cf})\p{Default_Ignorable_Code_Point}/u;
 const CSI_FINAL_RE = /[@-~]/;
+
+function inWidthRanges(codePoint, ranges) {
+  if (codePoint < ranges[0] || codePoint > ranges.at(-1)) return false;
+  let low = 0, high = ranges.length / 2 - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2), index = middle * 2;
+    if (codePoint < ranges[index]) high = middle - 1;
+    else if (codePoint > ranges[index + 1]) low = middle + 1;
+    else return true;
+  }
+  return false;
+}
 // ANSI palette colors are emitted as CSS variables (with hex fallbacks) so the
 // wrapping HTML page can provide light and dark palettes. Indexes 0-7 are the
 // basic colors, 8-15 the bright colors.
@@ -64,9 +79,7 @@ class TerminalTextRenderer {
     if (!input) return;
     this.timestamp = timestamp;
 
-    for (const ch of input) {
-      this.#consume(ch);
-    }
+    for (const ch of input) this.#consume(ch);
   }
 
   finish() {
@@ -77,14 +90,13 @@ class TerminalTextRenderer {
   }
 
   getCursorLine() {
-    const line = this.lines[this.row] || [];
-    return line.map((cell) => cell?.ch || " ").join("");
+    return (this.lines[this.row] || []).map(cellText).join("");
   }
 
   toString({ includePendingClearedScreen = false, formatLine = (line) => line } = {}) {
     const lines = includePendingClearedScreen ? this.#linesWithPendingClearedScreen() : this.lines;
     return lines
-      .map((line) => formatLine(line.map((cell) => cell?.ch || " ").join("").replace(/[ \t]+$/g, ""), line.timestamp))
+      .map((line) => formatLine(line.map(cellText).join("").replace(/[ \t]+$/g, ""), line.timestamp))
       .join("\n")
       .replace(/\n+$/g, "");
   }
@@ -359,11 +371,44 @@ class TerminalTextRenderer {
     if (this.timestamp !== undefined) line.timestamp = this.timestamp;
     while (line.length < this.col) line.push(createCell(" ", createDefaultStyle()));
     for (const ch of text) {
-      line[this.col] = createCell(ch, this.style);
-      this.col += 1;
+      const codePoint = ch.codePointAt(0);
+      // Readline counts code points, including spacing marks and emoji
+      // modifiers, rather than collapsing an entire grapheme into one cell.
+      const zeroWidth = ZERO_WIDTH_MARK_RE.test(ch)
+        || (codePoint !== 0x00ad && ZERO_WIDTH_FORMAT_RE.test(ch))
+        || (codePoint >= 0x1160 && codePoint <= 0x11ff)
+        || (codePoint >= 0xd7b0 && codePoint <= 0xd7ff);
+      const width = zeroWidth ? 0
+        : inWidthRanges(codePoint, fullwidthRanges) || inWidthRanges(codePoint, wideRanges) ? 2 : 1;
+      if (width === 0) {
+        let previous = this.col - 1;
+        if (line[previous]?.continuation) previous -= 1;
+        if (previous >= 0 && line[previous]) {
+          line[previous] = { ...line[previous], ch: line[previous].ch + ch };
+        } else {
+          line[this.col] = createCell((line[this.col]?.width === 0 ? line[this.col].ch : "") + ch,
+            this.style, { width: 0 });
+        }
+        continue;
+      }
+      const prefix = line[this.col]?.width === 0 ? line[this.col].ch : "";
+      for (let offset = 0; offset < width; offset += 1) this.#clearWideCellAt(line, this.col + offset);
+      line[this.col] = createCell(prefix + ch, this.style, { width });
+      if (width === 2) line[this.col + 1] = createCell("", this.style, { continuation: true });
+      this.col += width;
     }
     this.cursorMovedHomeByCsi = false;
     this.justStartedLogScreen = false;
+  }
+
+  #clearWideCellAt(line, column) {
+    const start = line[column]?.continuation ? column - 1 : column;
+    if (line[start]?.width !== 2) return;
+    // Overwriting either half removes the glyph. Preserve evidence that both
+    // blank cells came from text, so a following readline erase can certify it.
+    for (let i = start; i <= start + 1; i += 1) {
+      line[i] = createCell(" ", createDefaultStyle());
+    }
   }
 
   #eraseLine(mode) {
@@ -377,6 +422,7 @@ class TerminalTextRenderer {
     if (changesContent && this.timestamp !== undefined) line.timestamp = this.timestamp;
     if (mode === 1) {
       for (let i = 0; i <= this.col && i < line.length; i += 1) {
+        this.#clearWideCellAt(line, i);
         line[i] = createCell(" ", createDefaultStyle());
       }
       return;
@@ -385,6 +431,7 @@ class TerminalTextRenderer {
       this.lines[this.row] = [];
       return;
     }
+    if (line[this.col]?.continuation) this.#clearWideCellAt(line, this.col);
     line.length = Math.min(line.length, this.col);
   }
 
@@ -521,6 +568,10 @@ function terminalDataToPlainText(terminalData) {
 }
 
 function terminalCursorLine(terminalData, options) {
+  return terminalCursorState(terminalData, options).line;
+}
+
+function terminalCursorState(terminalData, options) {
   // Prompt tracking keeps a rolling tail, so the alternate-screen entry may
   // already have scrolled off. Seed the mode that was active at the first
   // byte still in that tail; a fresh renderer would otherwise treat TUI paint
@@ -532,8 +583,11 @@ function terminalCursorLine(terminalData, options) {
   renderer.finish();
   // A full-screen program owns the display. The main buffer may still hold
   // the shell prompt from before the alternate screen was entered.
-  if (renderer.alternateScreenActive) return "";
-  return renderer.getCursorLine();
+  if (renderer.alternateScreenActive) return { line: "", column: 0 };
+  return {
+    line: renderer.getCursorLine(),
+    column: renderer.col,
+  };
 }
 
 // Alternate-screen transitions from TerminalTextRenderer, without a text
@@ -620,6 +674,7 @@ module.exports = {
   terminalDataToHtmlContent,
   terminalDataToPlainText,
   terminalCursorLine,
+  terminalCursorState,
   alternateScreenActiveAfter,
 };
 
@@ -634,16 +689,21 @@ function createDefaultStyle() {
   };
 }
 
-function createCell(ch, style) {
+function createCell(ch, style, options = {}) {
   return {
     ch,
     style,
+    ...options,
   };
+}
+
+function cellText(cell) {
+  return cell?.continuation ? "" : cell?.ch || " ";
 }
 
 function cloneLines(lines) {
   return lines.map((line) => {
-    const clone = line.map((cell) => (cell ? createCell(cell.ch, cell.style) : cell));
+    const clone = line.map((cell) => (cell ? { ...cell } : cell));
     if (line.timestamp !== undefined) clone.timestamp = line.timestamp;
     return clone;
   });
@@ -673,6 +733,7 @@ function renderLineHtml(line) {
   const trimmedLength = getTrimmedLineLength(line);
   for (let i = 0; i < trimmedLength; i += 1) {
     const cell = line[i] || createCell(" ", createDefaultStyle());
+    if (cell.continuation) continue;
     if (!runStyle || !stylesEqual(runStyle, cell.style)) {
       flush();
       runStyle = cell.style;
@@ -687,6 +748,7 @@ function getTrimmedLineLength(line) {
   let length = line.length;
   while (length > 0) {
     const cell = line[length - 1];
+    if (cell?.continuation) break;
     const ch = cell?.ch || " ";
     if (ch !== " " && ch !== "\t") break;
     if (styleToCss(cell?.style)) break;

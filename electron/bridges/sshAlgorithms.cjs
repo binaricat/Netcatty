@@ -9,7 +9,8 @@ const FIXED_DH_GROUP_BY_KEX = Object.freeze({
 });
 
 const CIPHER_SSL_NAME_BY_ALGORITHM = Object.freeze({
-  "chacha20-poly1305@openssh.com": "chacha20",
+  // Patched ssh2 supplies original ChaCha20 when Electron/BoringSSL lacks it.
+  // Do not filter this SSH cipher against the OpenSSL-only inventory.
   "aes128-gcm@openssh.com": "aes-128-gcm",
   "aes256-gcm@openssh.com": "aes-256-gcm",
   "aes128-gcm": "aes-128-gcm",

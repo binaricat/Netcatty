@@ -1,0 +1,45 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.session-scratchpad",
+  "name": "session-scratchpad",
+  "displayName": {
+    "en": "Session Scratchpad",
+    "zh-CN": "会话草稿板"
+  },
+  "version": "0.1.1",
+  "publisher": "netcatty",
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "features": {
+    "required": [
+      "views.terminal-sidebar"
+    ]
+  },
+  "main": {
+    "browser": "dist/host.js"
+  },
+  "activationEvents": [
+    "onView:com.netcatty.session-scratchpad.page"
+  ],
+  "permissions": {
+    "required": [
+      "views"
+    ]
+  },
+  "contributes": {
+    "views": [
+      {
+        "id": "com.netcatty.session-scratchpad.page",
+        "title": {
+          "en": "Session scratchpad",
+          "zh-CN": "会话草稿板"
+        },
+        "location": "terminal-sidebar",
+        "order": 10
+      }
+    ]
+  }
+}

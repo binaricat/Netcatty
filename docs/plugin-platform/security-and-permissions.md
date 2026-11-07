@@ -1,12 +1,67 @@
 # Plugin security and permission boundary
 
-Status: phase 3 internal preview (`0.1.0-internal`)
+Status: unreleased plugin platform; browser plugins remain sandboxed. Advanced
+utility packages remain restricted to developer mode.
 
-This phase is available only with `NETCATTY_PLUGIN_DEV=1`. It is deliberately
-usable by later contribution and Provider phases, but it is not a public plugin
-release. There is no renderer permission UI yet. The first-party development
-bootstrap injects a native Electron confirmation dialog; embedders that do not
-inject a decision provider still fail closed.
+Declared capabilities that the platform exposes default to **Allow**. Installing
+or enabling a plugin does not open a permission checklist. In Settings, each
+plugin has host-owned **Allow / Ask / Deny** controls with its declared resource
+scope. Allow skips permission dialogs; Ask requests one scoped decision; Deny
+rejects before side effects or content release. Target selection, model selection,
+and editing/saving drafts remain normal host workflows. SSH authentication and
+host-key checks are unchanged.
+
+## Policy storage, updates and source changes
+
+Policies live in `plugin_host_preferences`, separate from plugin-writable
+settings, under `permission:<host source owner>:<capability>`. Missing entries mean
+Allow. No historical plugin-policy migration or unrelated user-data reset runs.
+Policies survive restart, disable/re-enable, uninstall/reinstall from the same
+source, and package/version/publisher/declaration changes within that source.
+An explicit Deny therefore survives an update, including removal and later
+reintroduction of that capability. New declared capabilities default to Allow;
+existing Ask/Deny modes apply to the current declared scope. Undeclared
+permissions, unsupported methods and out-of-scope resources still fail closed.
+
+Changing a source requires the existing explicit uninstall/private-data reset.
+That reset removes only the old source's plugin policies and private records.
+A different source receives independent defaults. Policies never come from a
+manifest, plugin setting, RPC payload or imported grant. Existing grant hashes
+still include the immutable package principal and declaration boundaries; this
+change does not turn an old package grant into a cross-version grant.
+
+Every policy edit clears saved grants, cancels pending decisions and active RPCs,
+and invalidates host resource handles and model/stream state. Guards bind the
+source and policy revision before asynchronous authorization resolution, recheck
+before commits and content delivery, and remain invalid after a Deny-to-Allow
+flip. A late prompt reply cannot revive old work. The user must start a fresh
+operation after changing policy.
+
+Ask uses Netcatty's existing in-app Dialog, typography and theme. Its recipient
+must be a ready, focused, visible, unlocked top-level app renderer in the managed
+window registry, including the standalone Settings window. Arbitrary windows,
+plugin view contents and subframes cannot register or respond. Each single-use
+token and cancellation lifecycle remains bound to the receiving window; another
+renderer's readiness changes cannot cancel or inherit that request. No main-window
+focus handoff is needed. Close, cancel, timeout, lock, hide/blur, reload, crash
+and stale runtime/source fail closed. The dialog uses the existing host security
+surface marker so attached native plugin views yield while it is visible and
+restore through their existing lifecycle on dismissal.
+Ordinary landing rows do not suspend native views. The logging dialog and its
+verbose confirmation are marked security surfaces; the confirmation opts into
+the existing marker because it temporarily accessibility-hides its parent dialog.
+A plugin DOM click never becomes a host gesture. Choosers, drafts, terminal and
+clipboard sharing use their existing host-owned action tokens. Ask integrates
+with that workflow instead of opening a second capability dialog. Allow skips
+sharing and connection permission confirmations while retaining validation and
+operation/resource binding. AI start combines model access and exact selected
+context handles into one Ask decision; its receipt is limited to that operation.
+Stream reads, stop and close validate broker handles without prompting per chunk. The receipt uses a host-created RPC operation identity retained by derived
+model contexts, with source/runtime/principal/revision binding. It is never a
+plugin-provided field. The selected-summary chooser owns its Ask interaction;
+there is no preceding generic capability prompt. Ask displays checked host
+model/selection labels rather than opaque selected handles.
+Selected-context reads remain selected-only and never enumerate the whole Vault.
 
 ## Authority model
 
@@ -40,9 +95,9 @@ Permission prompts use the canonical contract directly: absent operation and
 session IDs are omitted, long host-generated operation IDs become stable
 SHA-256 identifiers, reasons are bounded, and no request can carry more than
 128 canonical resources.
-Runtime trust/placement resolves before permission prompts. The special
-`runtime.advanced` permission is excluded from generic required-permission
-preflight and requested exactly once only when the host actually selects the
+Runtime trust/placement resolves before advanced-runtime authorization. Required
+preflight validates declarations without asking for capability grants. The
+`runtime.advanced` policy is checked only if the host selects the developer-only
 utility runtime.
 
 ## Grant lifetimes
@@ -62,19 +117,25 @@ identical prompts coalesce. Prompt timeout, runtime abort,
 cancel, denial, absence of a decision provider, and stale activation all fail
 closed. Grant/use/deny/revoke events enter the bounded security audit.
 
-`PermissionRequest` is part of the canonical Schema and carries plugin display
-identity, version, runtime placement, permission, canonical resources and their
-aligned resource kinds, reason, operation and optional host session. This is
-the complete PR-4 UI handoff; the renderer must return the same request ID and
-one canonical lifetime decision. The native fallback visibly escapes control,
-line-separator, and bidirectional-control characters in every plugin-controlled
-display field so untrusted text cannot forge labels or resource lines.
+`PermissionRequest` remains part of the canonical schema. It carries host-bound
+identity, capability, canonical resource scope and optional related capabilities
+for one combined operation. The trusted host UI renders text, never plugin HTML
+or body payloads. A response must match its request and action token. Ordinary
+Ask decisions apply once; long-lived stream attachment may use a host session.
+The older grant lifetimes remain supported by the engine, not exposed as a
+mandatory install flow.
+
+Changing `runtime.advanced` to Ask or Deny disables and stops the privileged
+development activation through the existing manager queue. Policy IPC awaits
+that teardown. Queued lifecycle updates check the original source owner, so a
+replacement source cannot be stopped by a stale edit. Ordinary browser sandboxes
+are unchanged.
 
 ## Host-mediated capabilities
 
 These brokers are the only authority path for ordinary browser plugins. An
 advanced utility entrypoint is intentionally different: `runtime.advanced`
-means explicit consent to ambient Node, filesystem and network APIs in its
+exposes ambient Node, filesystem and network APIs in its
 contained process. Fine-grained broker grants do not sandbox that ambient Node
 authority. Phase 9 must also require a verified publisher principal before the
 advanced path can be publicly enabled.
@@ -83,8 +144,7 @@ Required resource-scoped permissions (`network`, filesystem read/write, and
 companion execution) must declare non-empty activation-time resource bounds;
 the all-resources `*` wildcard is not a valid bound.
 The string shorthand remains available only for optional declarations, whose
-concrete resource is approved on first use. A package update therefore cannot
-activate first and defer a newly required resource decision until later.
+concrete resource is checked against its policy and scope on use.
 
 Native companions are an advanced-runtime capability. Their manifests require
 a Node utility entrypoint plus `runtime.advanced`, and `companion.start` rejects
@@ -226,3 +286,33 @@ after durable user data can exist.
 - PR 9 supplies signed publisher principals and trust policy through placement;
   signed identity changes force a fresh grant instead of widening an unsigned
   grant silently.
+
+## Inspect and revoke actual grants
+
+The installed package detail shows declared capabilities, resources and effective
+Allow / Ask / Deny modes alongside any saved grants. The host-only panel lists resource, scope, session (when applicable),
+and grant time. Each row indicates whether its declaration hash and security
+principal match the host-owned current activation. Saved grants from an older
+package or a stopped/disabled activation remain visible as inactive. One-use decisions do not appear as retained grants. Refresh
+reads the engine again. Recent security events include at most 100 entries and
+project only event, time, permission, and scope. Arbitrary database details,
+operation IDs, terminal content, and credential material never cross this UI
+boundary.
+
+**Disable and revoke all grants** runs through the manager mutation queue. It
+persists disabled state before revoking grants, invalidates contributions, and
+waits for runtime shutdown. Existing runtime teardown cancels RPC, streams,
+leases, providers, and companions. Every cleanup stage is attempted if grant deletion, audit persistence, or
+contribution invalidation fails. Multiple errors are aggregated and reported;
+the UI never claims successful revocation when persistence or cleanup failed. Explicit enable retains the saved policy; Deny remains in force.
+This management bridge is available only to the trusted app renderer. It is
+not a plugin RPC method and grants no plugin authority over another package.
+
+`PluginNetworkRequest` and `PluginNetworkResponse` now derive from the canonical
+schema. `credentialLease` and `authorization` describe the existing host lease
+injection path. Hosts advertise `network.credential-lease` for discovery without
+changing existing API versions or disabling legacy requests. Plugins may
+require that feature or handle its absence. Optional authorization defaults to
+Bearer. Basic authorization accepts a bounded username. Plaintext is redeemed
+only inside the host after origin permission and operation binding checks.
+See the [synthetic fixture](../../examples/plugins/lease-http/README.md).

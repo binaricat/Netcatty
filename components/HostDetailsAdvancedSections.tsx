@@ -503,6 +503,19 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             enabled={!!form.showLineTimestamps}
             onToggle={() => update("showLineTimestamps", !form.showLineTimestamps)}
           />
+          {(form.protocol === undefined || form.protocol === "ssh") && !form.moshEnabled && !form.etEnabled && (
+            <>
+              <ToggleRow
+                label={t("hostDetails.sshInputCompatibility")}
+                hint={t("hostDetails.sshInputCompatibility.desc")}
+                enabled={form.sshInputCompatibility ?? true}
+                onToggle={() => update("sshInputCompatibility", !(form.sshInputCompatibility ?? true))}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t("hostDetails.sshInputCompatibility.reconnect")}
+              </p>
+            </>
+          )}
           <HostDetailsSettingRow label={t("hostDetails.backspaceBehavior")}>
             <Select
               value={form.backspaceBehavior ?? "default"}

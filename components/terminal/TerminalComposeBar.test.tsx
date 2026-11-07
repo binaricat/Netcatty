@@ -8,6 +8,51 @@ import { TerminalComposeBar } from './TerminalComposeBar';
 import { TooltipProvider } from '../ui/tooltip';
 import { getComposeBarHistory, pruneComposeBarHistory, recordComposeBarHistory } from '../../application/state/composeBarHistoryStore';
 import { terminalReconnectRegistry } from '../../application/state/terminalReconnectRegistry';
+import { createTerminalDirectoryController } from '../../application/state/terminalDirectoryController';
+import { registerTerminalDirectory, refreshObservedTerminalDirectory } from '../../application/state/terminalDirectoryRegistry';
+import { terminalCwdStore } from '../../application/state/terminalCwdStore';
+
+test('disabling Context Chips preserves the compose draft and stops extra cwd refreshes', async (t) => {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const name of ['window', 'document', 'localStorage']) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value: dom.window[name as keyof Window] });
+  }
+  t.after(() => {
+    dom.window.close();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  });
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  let probes = 0;
+  const cleanup = registerTerminalDirectory('toggle-test', createTerminalDirectoryController({
+    sessionId: 'toggle-test', isCurrent: () => true, isReady: () => true,
+    io: { cwd: async () => { probes++; return '/project'; }, list: async () => ({ entries: [], home: null }),
+      realpath: async path => path, write() {} },
+    publish: cwd => { terminalCwdStore.setCwd('toggle-test', cwd, 'backend-strict'); },
+  }));
+  const textarea = { value: '', selectionStart: 0, selectionEnd: 0, focus() {},
+    setSelectionRange(start: number, end: number) { this.selectionStart = start; this.selectionEnd = end; } };
+  const render = (enabled: boolean) => <TooltipProvider><TerminalComposeBar sessionId="toggle-test"
+    contextChipsEnabled={enabled} onSend={() => true} onClose={() => {}} /></TooltipProvider>;
+  let root!: ReactTestRenderer;
+  await act(async () => { root = create(render(true), { createNodeMock: el => el.type === 'textarea' ? textarea : null }); });
+  assert.equal(probes, 1);
+  textarea.value = 'keep this draft'; textarea.selectionStart = 2; textarea.selectionEnd = 8;
+  await act(async () => { root.update(render(false)); });
+  assert.equal(root.root.findAllByProps({ 'aria-label': 'Context Chips' }).length, 0);
+  const before = probes;
+  refreshObservedTerminalDirectory('toggle-test');
+  await Promise.resolve();
+  assert.equal(probes, before);
+  assert.equal(textarea.value, 'keep this draft');
+  assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [2, 8]);
+  await act(async () => { root.unmount(); });
+  cleanup();
+});
 
 test('compose bar preserves a draft on pane focus and records only successful async sends', async (t) => {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
