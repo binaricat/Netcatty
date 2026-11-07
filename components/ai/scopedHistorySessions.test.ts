@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { AISession } from "../../infrastructure/ai/types.ts";
+import { resolveDisplayedPanelView } from "./aiPanelViewState.ts";
 import {
   _getScopedHistoryCacheSizeForTests,
   getScopedHistorySessions,
@@ -22,6 +23,49 @@ function createSession(
     updatedAt,
   };
 }
+
+test("workspace auto-resume keeps scope rank ahead of recency", () => {
+  const sessions = [
+    createSession("exact-older", { type: "workspace", targetId: "workspace-current" }, 1),
+    createSession("member-newer", { type: "terminal", targetId: "member" }, 2),
+    createSession("other-newest", { type: "workspace", targetId: "workspace-other" }, 20),
+  ];
+  const history = getScopedHistorySessions(
+    sessions, "workspace", "workspace-current", [], new Set(), new Set(["member"]),
+  );
+  assert.deepEqual(history.map((session) => session.id), ["member-newer", "exact-older", "other-newest"]);
+  const preferredId = history[0]?.id ?? null;
+  assert.deepEqual(resolveDisplayedPanelView(undefined, false, history, undefined, "workspace", undefined, preferredId),
+    { mode: "session", sessionId: "member-newer" });
+
+  // The ranking only controls implicit fallback, never an explicit selection,
+  // saved selection, anchor, or deliberate new-chat draft.
+  for (const [view, persisted, anchor] of [
+    [{ mode: "session", sessionId: "other-newest" }, undefined, undefined],
+    [undefined, "other-newest", undefined],
+    [undefined, undefined, "other-newest"],
+  ] as const) {
+    assert.deepEqual(resolveDisplayedPanelView(view, false, history, persisted, "workspace", anchor, preferredId),
+      { mode: "session", sessionId: "other-newest" });
+  }
+  assert.deepEqual(resolveDisplayedPanelView({ mode: "draft" }, true, history, undefined, "workspace", undefined, preferredId),
+    { mode: "draft" });
+  assert.deepEqual(resolveDisplayedPanelView(undefined, false, history, undefined, "terminal", undefined, preferredId),
+    { mode: "draft" });
+});
+
+test("workspace auto-resume prefers an exact match and retains history fallback when none exists", () => {
+  const exact = createSession("exact", { type: "workspace", targetId: "workspace-current" }, 1);
+  const others = [
+    createSession("other-old", { type: "workspace", targetId: "workspace-other" }, 5),
+    createSession("other-new", { type: "workspace", targetId: "workspace-other" }, 10),
+  ];
+  for (const [sessions, expected] of [[others, "other-new"], [[...others, exact], "exact"], [[], undefined]] as const) {
+    const history = getScopedHistorySessions([...sessions], "workspace", "workspace-current", [], new Set());
+    assert.deepEqual(resolveDisplayedPanelView(undefined, false, history, undefined, "workspace", undefined, history[0]?.id ?? null),
+      expected ? { mode: "session", sessionId: expected } : { mode: "draft" });
+  }
+});
 
 test("workspace history remains visible after the original workspace target is gone", () => {
   const staleWorkspaceSession = createSession(

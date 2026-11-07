@@ -9,6 +9,7 @@ import {
   createEmptyWorkspaceRoot,
   insertPaneIntoWorkspace,
   movePaneInWorkspace,
+  pruneWorkspaceNode,
   reorderWorkspaceFocusSessionOrder,
   resolveWorkspaceFocusSessionOrder,
   setWorkspaceFocusedSessionId,
@@ -304,4 +305,23 @@ test("movePaneInWorkspace is a no-op for an unknown session", () => {
     movePaneInWorkspace(root, "ghost", { direction: "vertical", position: "left", targetSessionId: "s1" }),
     root,
   );
+});
+
+test("movePaneInWorkspace keeps the source when its drop target closed during dragging", () => {
+  const hint = { direction: "vertical", position: "right", targetSessionId: "s2" } as const;
+  const afterTargetClosed = pruneWorkspaceNode(root, "s2");
+  assert.ok(afterTargetClosed);
+  assert.deepEqual(collectSessionIds(afterTargetClosed), ["s1", "s3"]);
+
+  const moved = movePaneInWorkspace(afterTargetClosed, "s1", hint);
+  assert.equal(moved, afterTargetClosed, "a stale drop must preserve the current tree");
+  assert.deepEqual(collectSessionIds(moved), ["s1", "s3"], "the dragged terminal remains present");
+});
+
+test("movePaneInWorkspace preserves the original root for a missing explicit target", () => {
+  const moved = movePaneInWorkspace(root, "s2", {
+    direction: "horizontal", position: "bottom", targetSessionId: "missing",
+  });
+  assert.equal(moved, root);
+  assert.deepEqual(collectSessionIds(moved), ["s1", "s2", "s3"]);
 });

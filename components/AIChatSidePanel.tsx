@@ -450,9 +450,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const workspaceAnchorChatId = scopeType === 'workspace'
     ? workspaces.find((workspace) => workspace.id === scopeTargetId)?.anchorChatId
     : undefined;
+  // getScopedHistorySessions orders by scope match first, recency second.
+  const preferredHistorySessionId = historySessions[0]?.id ?? null;
   const normalizedPanelView = useMemo<AIPanelView>(
-    () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId),
-    [explicitPanelView, currentDraft, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId],
+    () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId, preferredHistorySessionId),
+    [explicitPanelView, currentDraft, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId, preferredHistorySessionId],
   );
   const activeSession = useMemo(
     () => resolveDisplayedSession(normalizedPanelView, historySessions),

@@ -40,6 +40,7 @@ export function resolveDisplayedPanelView(
   persistedSessionId?: string | null,
   scopeType: "terminal" | "workspace" = "workspace",
   anchorChatId?: string | null,
+  preferredHistorySessionId?: string | null,
 ): AIPanelView {
   if (panelView) {
     return normalizePanelView(panelView, sessions);
@@ -67,13 +68,18 @@ export function resolveDisplayedPanelView(
     return DEFAULT_PANEL_VIEW;
   }
 
-  // Issue #4098 phase 2: the auto-resume fallback resolves by id (the
-  // workspace anchor first, then AI-chat recency) — never by positional
-  // "first session in the list".
+  // Prefer the workspace anchor, then the candidate selected by scoped
+  // history's match-rank/recency ordering. Callers without a ranked candidate
+  // retain the recency fallback below.
   if (anchorChatId && sessions.some((s) => s.id === anchorChatId)) {
     return { mode: "session", sessionId: anchorChatId };
   }
-  const mostRecent = resolveMostRecentlyUpdatedSession(sessions);
+  // Scoped history already ranks exact/member matches before other scopes,
+  // then sorts each rank by recency. Preserve its selected candidate instead
+  // of letting a newer chat from another workspace overtake that match.
+  const mostRecent = preferredHistorySessionId === undefined
+    ? resolveMostRecentlyUpdatedSession(sessions)
+    : sessions.find((session) => session.id === preferredHistorySessionId);
   if (mostRecent) {
     return { mode: "session", sessionId: mostRecent.id };
   }

@@ -170,7 +170,7 @@ export const insertPaneIntoWorkspace = (
  * orphan drop would land. Pure and immutable: session ids, node identity of
  * untouched panes, focus fields and AI bindings are never touched — only the
  * tree shape changes. Returns the same `root` reference for no-ops:
- * unknown session, single-pane tree, or the pane dropped onto itself.
+ * unknown session/target, single-pane tree, or the pane dropped onto itself.
  */
 export const movePaneInWorkspace = (
   root: WorkspaceNode,
@@ -182,6 +182,9 @@ export const movePaneInWorkspace = (
   // A lone pane has nowhere to move within its own workspace.
   if (paneSessionIds.length <= 1) return root;
   if (hint.targetSessionId === memberSessionId) return root;
+  // The target may have closed since the drag began. Validate it before
+  // pruning the source so a stale drop cannot remove the dragged terminal.
+  if (hint.targetSessionId && !paneSessionIds.includes(hint.targetSessionId)) return root;
 
   // Prune before inserting so the dragged pane is out of the tree even when
   // the drop target sits inside its old subtree. The pruned tree keeps the
