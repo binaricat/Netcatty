@@ -152,6 +152,42 @@ test("isDefaultPosixPromptLine matches classic user@host prompts", () => {
   assert.equal(isDefaultPosixPromptLine(""), false);
 });
 
+test("recognizes space-separated Bash idle prompts and preserves trailing whitespace", () => {
+  for (const prompt of [
+    "root@VM-Q7L4M8P2 ~ $",
+    "user@host ~ $",
+    "alice@box ~/proj $",
+  ]) {
+    for (const suffix of ["", " ", "  "]) {
+      const line = prompt + suffix;
+      assert.equal(isDefaultPosixPromptLine(line), true, line);
+      assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), line, line);
+    }
+  }
+});
+
+test("space-separated Bash prompt recognition rejects pending input and non-shell screens", () => {
+  for (const line of [
+    "user@host ~ $ echo hi",
+    "user@host ~ $ whoami",
+    "user@host ~ $ echo $",
+    "user@host ~ $ echo #",
+    "user@host ~ $ echo %",
+    "root@host ~#",
+    "user@host ~/cash$dir $",
+    "user@host ~/issue#1 $",
+    "user@host ~/100% $",
+    "user@host   $",
+    "progress 50 $",
+    "$",
+    "Password:",
+    "(END)",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
 test("isDefaultPosixPromptLine matches the macOS zsh default prompt", () => {
   for (const prompt of [
     "hexiao@JosephdeMacBook-Pro-2 ~ %",
