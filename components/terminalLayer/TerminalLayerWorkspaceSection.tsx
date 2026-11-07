@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { memo, useEffect, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, TerminalSquare } from 'lucide-react';
+import { LayoutGrid, Plus } from 'lucide-react';
 import { Button } from '../ui/button';
 import { collectSessionIds } from '../../domain/workspace';
 
@@ -161,7 +161,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
         {activeWorkspace && collectSessionIds(activeWorkspace.root).length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center p-6" data-section="empty-workspace">
             <div className="flex max-w-sm flex-col items-center gap-3 text-center">
-              <TerminalSquare size={32} className="text-muted-foreground/60" aria-hidden="true" />
+              <LayoutGrid size={32} className="text-muted-foreground/60" aria-hidden="true" />
               <h2 className="text-sm font-medium">{t('terminal.layer.emptyWorkspace')}</h2>
               <p className="text-sm text-muted-foreground">{t('terminal.layer.emptyWorkspaceHint')}</p>
               {onRequestAddToWorkspace && (
