@@ -68,6 +68,9 @@ test('long native Windows paths remain empty shell prompts for directory navigat
     String.raw`PS Microsoft.PowerShell.Core\FileSystem::\\files.example.com\share\working-copy> `,
     String.raw`PS FileSystem::\\192.0.2.10\share\working-copy> `,
     String.raw`PS ProjectDrive:\a-directory\another-directory\working-copy> `,
+    String.raw`PS Microsoft.PowerShell.Core\FileSystem::\\files.example.com\Shared Documents\working-copy> `,
+    String.raw`PS FileSystem::\\192.0.2.10\Shared Documents> `,
+    String.raw`\\server\Shared Documents\deep-directory\working-copy>`,
   ];
   for (const prompt of prompts) {
     const detected = detectPrompt(createPaddedFakeTerm(prompt, stringCellWidth(prompt), 512) as never);
@@ -90,6 +93,7 @@ test('long native Windows paths remain empty shell prompts for directory navigat
 test('wrapped Windows directory prompts preserve the boundary and typed input', () => {
   for (const prompt of [String.raw`PS C:\Projects\deep\working-copy\nested-directory> `,
     String.raw`PS Microsoft.PowerShell.Core\FileSystem::\\files.example.com\share\nested-directory> `,
+    String.raw`PS Microsoft.PowerShell.Core\FileSystem::\\files.example.com\Shared Documents\nested-directory> `,
     String.raw`PS ProjectDrive:\working-copy\nested-directory> `]) {
     for (const input of ['', 'echo > output']) {
       const content = prompt + input;

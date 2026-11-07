@@ -10,6 +10,63 @@ import { DirectoryPickerError, directoryChangeCommand } from '../../domain/direc
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
+for (const outcome of ['complete', 'close', 'switch', 'repeated-reports'] as const) {
+  test(`unchanged OSC 7 during directory loading retries within the active menu (${outcome})`, async t => {
+    const id = 'hook-list-revision-' + outcome;
+    const cwd = '/base';
+    terminalCwdStore.setCwd(id, cwd, 'osc7');
+    const pending: Array<(value: { entries: { name: string; path: string; hidden: boolean }[]; home: null }) => void> = [];
+    let reads = 0;
+    const controller = createTerminalDirectoryController({
+      sessionId: id, isCurrent: () => true, isReady: () => true, publish() {},
+      io: { cwd: async () => cwd, realpath: async value => value, write() {},
+        list: () => { reads++; return new Promise(resolve => pending.push(resolve)); } },
+    });
+    const unregister = registerTerminalDirectory(id, controller);
+    let model!: ReturnType<typeof useComposeDirectoryPicker>;
+    function Harness({ session }: { session: string }) { model = useComposeDirectoryPicker(session); return null; }
+    let root!: ReactTestRenderer;
+    await act(async () => { root = create(React.createElement(Harness, { session: id })); });
+    t.after(async () => { await act(async () => { root.unmount(); }); unregister(); });
+    await act(async () => { model.setOpen(true); });
+    const version = terminalCwdStore.getVersion();
+    await act(async () => {
+      terminalCwdStore.setCwd(id, cwd, 'osc7');
+      pending.shift()!({ entries: [{ name: 'old', path: '/base/old', hidden: false }], home: null });
+    });
+    assert.equal(terminalCwdStore.getVersion(), version, 'unchanged reports keep the render version stable');
+    assert.equal(reads, 2, 'an invalidated result triggers a fresh read');
+    assert.equal(model.loading, true);
+    assert.deepEqual(model.entries, []);
+    if (outcome === 'close') await act(async () => { model.setOpen(false); });
+    if (outcome === 'switch') await act(async () => { root.update(React.createElement(Harness, { session: id + '-other' })); });
+    if (outcome === 'repeated-reports') {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await act(async () => {
+          terminalCwdStore.setCwd(id, cwd, 'osc7');
+          pending.shift()!({ entries: [], home: null });
+        });
+      }
+      assert.equal(reads, 3, 'retries are bounded during continuous reports');
+      assert.equal(model.error, 'readFailed');
+      assert.equal(model.loading, false);
+      return;
+    }
+    await act(async () => {
+      pending.shift()!({ entries: [{ name: 'fresh', path: '/base/fresh', hidden: false }], home: null });
+    });
+    assert.equal(reads, 2);
+    if (outcome === 'complete') {
+      assert.deepEqual(model.entries.map(entry => entry.name), ['fresh']);
+      assert.equal(model.error, null);
+      assert.equal(model.loading, false);
+    } else {
+      assert.deepEqual(model.entries, [], 'cancelled results preserve menu/session isolation');
+      assert.equal(model.open, false);
+    }
+  });
+}
+
 test('PowerShell non-filesystem reports clear an open menu and recover after returning to FileSystem', async t => {
   const id = 'hook-powershell-provider';
   let filesystem = true;

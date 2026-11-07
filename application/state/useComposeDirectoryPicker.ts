@@ -60,13 +60,19 @@ export function useComposeDirectoryPicker(sessionId: string) {
     read.current?.abort();
     const task = new AbortController(); read.current = task;
     const id = generation.current;
-    const revision = terminalCwdStore.getSessionRevision(sessionId);
     setLoading(true); setEntries([]); setError(null);
     try {
-      const result = await controller.list(cwd, task.signal);
-      if (!task.signal.aborted && id === generation.current && terminalCwdStore.getSessionRevision(sessionId) === revision) {
+      // Unchanged OSC 7 reports advance the revision while keeping the store's
+      // render version stable. Retry within this request's cancellation scope.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const revision = terminalCwdStore.getSessionRevision(sessionId);
+        const result = await controller.list(cwd, task.signal);
+        if (task.signal.aborted || id !== generation.current || terminalCwdStore.getCwd(sessionId) !== cwd) return;
+        if (terminalCwdStore.getSessionRevision(sessionId) !== revision) continue;
         listingBase.current = cwd; listingRevision.current = revision; setEntries(result.entries); setHome(result.home);
+        return;
       }
+      throw new DirectoryPickerError('readFailed');
     } catch (failure) {
       if (!task.signal.aborted && id === generation.current) report(failure, 'readFailed');
     } finally { if (!task.signal.aborted && id === generation.current) setLoading(false); }
