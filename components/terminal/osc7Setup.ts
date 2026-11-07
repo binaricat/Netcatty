@@ -716,7 +716,9 @@ export const buildOsc7PtySetupCommands = (shell: Osc7PtyShell): string[] => {
       `if test -n ${file} && printf '%s' '${payload.slice(offset, offset + chunkSize)}' >> ${file}; then ${ptyMarkerCommand(OSC7_PTY_ACK_MARKER, ack)}; else rm -f -- ${file}; unset __netcatty_osc7_pty_file; ${failed}; fi`,
     ));
   }
-  const runner = 'c=$(base64 -d "$1") && printf "%s\\n" "$c" | sh';
+  // Read through stdin: GNU base64 accepts a file operand, but BSD/macOS
+  // base64 only accepts -i or stdin, which broke zsh setup on macOS.
+  const runner = 'c=$(base64 -d < "$1") && printf "%s\\n" "$c" | sh';
   const shellEnv = shell === "zsh" ? ' NETCATTY_ZDOTDIR="${ZDOTDIR:-}"' : "";
   const run = `env NETCATTY_OSC7_FORCE_SHELL=${shell}${shellEnv} sh -c ${quoteForSingleQuotedShellString(runner)} sh ${file}`;
   const rc = shell === "bash" ? '$HOME/.bashrc' : '${ZDOTDIR:-$HOME}/.zshrc';

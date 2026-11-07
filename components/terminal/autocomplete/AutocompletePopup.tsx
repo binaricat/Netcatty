@@ -370,6 +370,18 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
     color: textColor,
   };
 
+  // Keep every inline description starting at the same x. The option column is
+  // sized from the longest suggestion in this popup, capped so descriptions
+  // still get useful width in a narrow terminal pane.
+  const longestCommandLength = suggestions.reduce(
+    (max, suggestion) => Math.max(max, suggestion.displayText.length),
+    0,
+  );
+  const commandColumnWidth = Math.max(
+    52,
+    Math.min(150, longestCommandLength * 7 + 12, availableWidth * 0.42),
+  );
+
   return (
     <div
       ref={wrapperRef}
@@ -417,6 +429,8 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
           const isSelected = index === selectedIndex;
           const isHovered = index === hoveredIndex;
           const sourceInfo = SOURCE_LABELS[suggestion.source];
+          const hasInlineDescription = suggestion.source !== "snippet"
+            && Boolean(suggestion.description);
 
           return (
             <div
@@ -468,10 +482,15 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
                 </span>
               )}
 
-              {/* Command text */}
+              {/* Command text. A shared fixed column keeps every description
+                  aligned on the same left edge instead of following each
+                  variable-width option label. */}
               <span
+                title={hasInlineDescription ? suggestion.displayText : undefined}
                 style={{
-                  flex: 1,
+                  flex: hasInlineDescription ? "0 0 auto" : "1 1 auto",
+                  width: hasInlineDescription ? `${commandColumnWidth}px` : undefined,
+                  minWidth: 0,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -484,16 +503,16 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
 
               {/* Inline description (truncated). Snippets show only their label
                   in the row — the full command lives in the detail preview. */}
-              {suggestion.source !== "snippet" && suggestion.description && (
+              {hasInlineDescription && (
                 <span
                   style={{
+                    flex: "1 1 auto",
+                    minWidth: 0,
                     fontSize: "11px",
                     color: dimTextColor,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
-                    maxWidth: "160px",
-                    flexShrink: 0,
                   }}
                 >
                   {suggestion.description}
