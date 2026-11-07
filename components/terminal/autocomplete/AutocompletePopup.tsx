@@ -368,6 +368,26 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
     fontFamily: "inherit",
     fontSize: "13px",
     color: textColor,
+    overscrollBehavior: "contain" as const,
+  };
+
+  // Keep terminal focus when clicking a panel's padding, but leave the native
+  // scrollbar alone so its thumb can still be dragged. `preventDefault()` on
+  // the scrollbar mousedown made the right-side detail panel impossible to
+  // scroll by dragging.
+  const handlePanelMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    const element = event.currentTarget;
+    const rect = element.getBoundingClientRect();
+    const scrollbarWidth = Math.max(16, element.offsetWidth - element.clientWidth);
+    const overVerticalScrollbar = event.clientX >= rect.right - scrollbarWidth;
+    if (!overVerticalScrollbar) event.preventDefault();
+  };
+
+  const handlePanelWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    // Keep wheel scrolling inside the popup instead of letting it reach the
+    // terminal's history/font-size handlers.
+    event.stopPropagation();
   };
 
   // Keep every inline description starting at the same x. The option column is
@@ -419,11 +439,9 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
           pointerEvents: "auto",
         }}
         // Keep the terminal focused when clicking the list's padding or
-        // scrollbar (row clicks handle this themselves).
-        onMouseDown={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
+        // scrollbar; scrollbar dragging is left to the browser.
+        onMouseDown={handlePanelMouseDown}
+        onWheel={handlePanelWheel}
       >
         {suggestions.map((suggestion, index) => {
           const isSelected = index === selectedIndex;
@@ -568,11 +586,9 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
             pointerEvents: "auto",
           }}
           // Keep the terminal focused when clicking the panel's padding or
-          // scrollbar (row clicks handle this themselves).
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
+          // scrollbar; scrollbar dragging is left to the browser.
+          onMouseDown={handlePanelMouseDown}
+          onWheel={handlePanelWheel}
         >
           {panel.entries.map((entry, idx) => {
             const isFocused = level === subDirFocusLevel;
@@ -639,10 +655,8 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
             // panel can never swallow clicks meant for the terminal.
             pointerEvents: detailVisible ? "auto" : "none",
           }}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
+          onMouseDown={handlePanelMouseDown}
+          onWheel={handlePanelWheel}
         >
           {detailVisible && detailItem && (
             <>
