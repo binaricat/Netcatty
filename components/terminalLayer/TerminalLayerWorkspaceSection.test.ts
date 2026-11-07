@@ -6,6 +6,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { TerminalLayerWorkspaceSection } from "./TerminalLayerWorkspaceSection.tsx";
 
+test("magnified terminal panes use the resolved terminal accent for border chrome", () => {
+  const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
+  const paneSource = source.slice(source.indexOf('data-section="terminal-split-pane"'), source.indexOf("<Terminal\n"));
+
+  assert.match(paneSource, /isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl /);
+  assert.match(paneSource, /borderColor: isMagnified && magnifiedSurfaceBounds \? sessionAppearanceTheme\.colors\.cursor : undefined/);
+});
+
 test("terminal keyboard focus updates the pane selected for magnification", () => {
   const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
 
