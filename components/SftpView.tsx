@@ -759,7 +759,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
               data-section="pane-magnification-hint"
             >
               {t('terminal.paneMagnification.hint')}: {t('terminal.layer.sftp')}
-              {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel} / Esc` : ' · Esc'}
+              {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel}` : ''}
             </div>
           )}
         </div>

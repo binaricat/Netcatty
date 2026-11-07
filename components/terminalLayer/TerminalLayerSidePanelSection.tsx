@@ -1577,7 +1577,7 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
             data-section="pane-magnification-hint"
           >
             {t('terminal.paneMagnification.hint')}: {sidePanelToolLabels.get(magnifiedSidePane.tool) ?? magnifiedSidePane.tool}
-            {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel} / Esc` : ' · Esc'}
+            {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel}` : ''}
           </div>
         )}
       </div>,
