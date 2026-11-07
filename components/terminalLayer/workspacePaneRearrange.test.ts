@@ -22,9 +22,9 @@ test('drop handler rearranges same-workspace panes and still rejects cross-works
 test('member pane drags drive the split-hint preview over the pointer stream', () => {
   assert.match(layoutSource, /isMemberPaneDrag/);
   assert.match(layoutSource, /window\.addEventListener\('pointermove', onPointerMove\)/);
-  assert.match(layoutSource, /window\.addEventListener\('pointerup', onPointerUp\)/);
-  // A pane dropped onto itself previews and drops as a no-op.
-  assert.match(layoutSource, /hint\.targetSessionId === draggingSession\.id/);
+  // Release is owned by the pane gesture, not a competing window listener.
+  assert.match(bridgeSource, /onDropWorkspacePane: handleWorkspacePanePointerDrop/);
+  assert.doesNotMatch(layoutSource, /window\.addEventListener\('pointerup'/);
 });
 
 test('the bridge threads the move action and the dragged member session', () => {

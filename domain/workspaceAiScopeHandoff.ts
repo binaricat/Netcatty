@@ -246,6 +246,8 @@ export function retargetWorkspaceActiveChatAfterMemberLoss<T extends AISessionSc
   previousMemberTerminalIds: readonly string[];
   currentMemberTerminalIds: readonly string[];
   preferredTerminalId?: string | null;
+  /** Current live targets distinguish a closed terminal from a detached one. */
+  activeTargetIds?: ReadonlySet<string>;
 }): {
   activeSessionIdMap: Record<string, string | null>;
   sessions: T[];
@@ -259,6 +261,33 @@ export function retargetWorkspaceActiveChatAfterMemberLoss<T extends AISessionSc
     (sessionId) => sessionId && !survivorTerminalIds.has(sessionId),
   );
 
+  if (survivorTerminalIds.size === 0) {
+    const activeSession = input.sessions.find((session) => session.id === workspaceActive);
+    const ownerId = activeSession?.scope.targetId;
+    // Preserve only the current inherited chat whose last owning terminal
+    // actually closed. A detached terminal keeps its own chat and selection.
+    if (!activeSession || activeSession.scope.type !== 'terminal' || !ownerId
+      || !departedTerminalIds.includes(ownerId)
+      || !input.activeTargetIds || input.activeTargetIds.has(ownerId)) {
+      return { activeSessionIdMap: previousMap, sessions: input.sessions as T[], changed: false };
+    }
+    const nextMap = { ...previousMap };
+    for (const departedTerminalId of departedTerminalIds) {
+      const departedKey = buildAIScopeKey('terminal', departedTerminalId);
+      if (!input.activeTargetIds.has(departedTerminalId) && nextMap[departedKey] === workspaceActive) {
+        nextMap[departedKey] = null;
+      }
+    }
+    return {
+      activeSessionIdMap: nextMap,
+      sessions: input.sessions.map((session) => session !== activeSession ? session : {
+        ...session,
+        scope: { ...session.scope, type: 'workspace', targetId: input.workspaceId },
+      }),
+      changed: true,
+    };
+  }
+
   let nextMap: Record<string, string | null> = { ...previousMap };
   let mapChanged = false;
   if (typeof workspaceActive === 'string' && workspaceActive.length > 0) {
@@ -271,14 +300,6 @@ export function retargetWorkspaceActiveChatAfterMemberLoss<T extends AISessionSc
   }
 
   if (typeof workspaceActive !== 'string' || workspaceActive.length === 0) {
-    return {
-      activeSessionIdMap: mapChanged ? nextMap : previousMap,
-      sessions: input.sessions as T[],
-      changed: mapChanged,
-    };
-  }
-
-  if (survivorTerminalIds.size === 0) {
     return {
       activeSessionIdMap: mapChanged ? nextMap : previousMap,
       sessions: input.sessions as T[],

@@ -101,7 +101,8 @@ function resolveWorkspaceActiveTerminalId(
     ? aiSessions?.find((session) => session.id === workspace.anchorChatId && session.scope?.type === 'terminal')
     : undefined;
 
-  return anchorChat?.scope.targetId
+  const anchorOwner = anchorChat?.scope.targetId;
+  return (anchorOwner && memberTerminalIds.includes(anchorOwner) ? anchorOwner : undefined)
     ?? resolveMostRecentlyActiveMemberTerminalId({ memberTerminalIds, aiSessions })
     ?? undefined;
 }

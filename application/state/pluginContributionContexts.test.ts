@@ -178,3 +178,18 @@ test('resolves standalone sessions and fails closed for non-terminal tabs', () =
     'netcatty.activeTabId': 'vault',
   });
 });
+
+
+test('empty workspace does not target the detached owner of its anchored chat', () => {
+  const context = resolveActivePluginKeybindingContext({
+    activeTabId: 'workspace-1',
+    sessions: sessions.map((session) => ({ ...session, workspaceId: undefined })),
+    workspaces: [{ ...workspaces[0], focusedSessionId: undefined, anchorChatId: 'chat-1', root: {
+      id: 'empty', type: 'split', direction: 'vertical', children: [], sizes: [],
+    } }],
+    aiSessions: [{ id: 'chat-1', scope: { type: 'terminal', targetId: 'session-1' }, updatedAt: 1 }],
+  });
+  assert.equal(context['terminal.sessionId'], undefined);
+  assert.equal(context['host.id'], undefined);
+  assert.equal(context['workspace.id'], 'workspace-1');
+});

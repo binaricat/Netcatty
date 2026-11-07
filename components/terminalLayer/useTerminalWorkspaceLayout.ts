@@ -364,43 +364,36 @@ export function useTerminalWorkspaceLayout({
       }
     }, [isFocusMode, computeSplitHint, setDropHint, onSetDraggingSessionId, activeWorkspace, sessions, onAddSessionToWorkspace, onMoveWorkspacePane, activeSession, onCreateWorkspaceFromSessions]);
 
-  // Issue #4037: member panes are dragged with pointer events (the detach
-  // grip), not HTML5 DnD, so the overlay's dragover/drop never fire for them.
-  // While a pane of the active workspace is being dragged, mirror the orphan
-  // drop UX on the pointer stream: live split-hint preview + drop-to-rearrange.
-  // Release over the top tabs keeps the existing detach behaviour (the hint is
-  // null there because the pointer is outside the workspace surface).
+  // Commit directly from the gesture owner before it clears drag state. This
+  // also handles a release that crosses the threshold without a delivered move.
+  const handleWorkspacePanePointerDrop = useCallback((sessionId: string, point: { clientX: number; clientY: number }) => {
+    setDropHint(null);
+    if (isFocusMode || !activeWorkspace) return;
+    const session = sessions.find((candidate) => candidate.id === sessionId);
+    if (session?.workspaceId !== activeWorkspace.id) return;
+    const hint = computeSplitHint(point);
+    if (!hint || hint.targetSessionId === sessionId) return;
+    onMoveWorkspacePane(activeWorkspace.id, sessionId, hint);
+  }, [isFocusMode, activeWorkspace, sessions, computeSplitHint, onMoveWorkspacePane]);
+
+  // Pointer movement only updates the visual preview. The gesture owner handles
+  // release/cancellation, so completion does not depend on listener ordering.
   const isMemberPaneDrag = !!draggingSession?.workspaceId
     && draggingSession.workspaceId === activeWorkspace?.id
     && !isFocusMode;
   useEffect(() => {
-    if (!isMemberPaneDrag || !activeWorkspace || !draggingSession) return;
-    const resolveHint = (e: PointerEvent): SplitHint => {
-      const hint = computeSplitHint(e);
-      // Dropping a pane onto itself is a no-op — show no preview so the
-      // gesture never implies a move that will not happen.
-      if (hint && hint.targetSessionId === draggingSession.id) return null;
-      return hint;
-    };
-    const onPointerMove = (e: PointerEvent) => {
-      const hint = resolveHint(e);
+    if (!isMemberPaneDrag || !draggingSession) {
+      setDropHint(null);
+      return;
+    }
+    const onPointerMove = (event: PointerEvent) => {
+      const candidate = computeSplitHint(event);
+      const hint = candidate?.targetSessionId === draggingSession.id ? null : candidate;
       setDropHint((prev) => (isSameSplitHint(prev, hint) ? prev : hint));
     };
-    const onPointerUp = (e: PointerEvent) => {
-      const hint = resolveHint(e);
-      setDropHint(null);
-      if (hint) onMoveWorkspacePane(activeWorkspace.id, draggingSession.id, hint);
-    };
-    const onPointerCancel = () => setDropHint(null);
     window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerCancel);
-    return () => {
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerCancel);
-    };
-  }, [isMemberPaneDrag, activeWorkspace, draggingSession, computeSplitHint, onMoveWorkspacePane, setDropHint]);
+    return () => window.removeEventListener('pointermove', onPointerMove);
+  }, [isMemberPaneDrag, draggingSession, computeSplitHint]);
 
   return {
     activeResizers,
@@ -408,6 +401,7 @@ export function useTerminalWorkspaceLayout({
     dropHint,
     findSplitNode,
     handleWorkspaceDrop,
+    handleWorkspacePanePointerDrop,
     resizing,
     setDropHint,
     setResizing,

@@ -1597,6 +1597,7 @@ export function useAIState() {
     previousMemberTerminalIds: readonly string[];
     currentMemberTerminalIds: readonly string[];
     preferredTerminalId?: string | null;
+    activeTargetIds?: ReadonlySet<string>;
   }) => {
     const currentMap =
       latestAIActiveSessionMapSnapshot
@@ -1612,6 +1613,7 @@ export function useAIState() {
       previousMemberTerminalIds: input.previousMemberTerminalIds,
       currentMemberTerminalIds: input.currentMemberTerminalIds,
       preferredTerminalId: input.preferredTerminalId,
+      activeTargetIds: input.activeTargetIds,
     });
     if (!result.changed) return;
 

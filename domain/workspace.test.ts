@@ -6,6 +6,7 @@ import {
   appendPaneToWorkspaceRoot,
   cloneWorkspaceTree,
   collectSessionIds,
+  createEmptyWorkspaceRoot,
   insertPaneIntoWorkspace,
   movePaneInWorkspace,
   reorderWorkspaceFocusSessionOrder,
@@ -51,6 +52,33 @@ test("reorderWorkspaceFocusSessionOrder moves a session after a target", () => {
 
 test("appendPaneToWorkspaceRoot ignores an existing session pane", () => {
   assert.equal(appendPaneToWorkspaceRoot(root, "s2"), root);
+});
+
+test("the first appended terminal fills an empty workspace without an empty sibling", () => {
+  for (const direction of ["vertical", "horizontal"] as const) {
+    const emptyRoot = createEmptyWorkspaceRoot();
+    const result = appendPaneToWorkspaceRoot(emptyRoot, "first-terminal", direction);
+    assert.equal(result.type, "pane", direction);
+    if (result.type !== "pane") continue;
+    assert.equal(result.sessionId, "first-terminal");
+    assert.deepEqual(collectSessionIds(result), ["first-terminal"]);
+    assert.deepEqual(collectSessionIds(emptyRoot), []);
+  }
+});
+
+test("the first inserted terminal fills an empty workspace for every drop edge", () => {
+  for (const hint of [
+    { direction: "vertical", position: "left" },
+    { direction: "vertical", position: "right" },
+    { direction: "horizontal", position: "top" },
+    { direction: "horizontal", position: "bottom" },
+  ] as const) {
+    const result = insertPaneIntoWorkspace(createEmptyWorkspaceRoot(), "first-terminal", hint);
+    assert.equal(result.type, "pane", hint.position);
+    if (result.type !== "pane") continue;
+    assert.equal(result.sessionId, "first-terminal");
+    assert.deepEqual(collectSessionIds(result), ["first-terminal"]);
+  }
 });
 
 test("insertPaneIntoWorkspace ignores an existing session pane", () => {

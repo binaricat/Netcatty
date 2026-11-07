@@ -27,9 +27,7 @@ type DetachSessionFromWorkspaceStateOptions = {
   sessionId: string;
   /**
    * AI chat store snapshot used to rank surviving members by chat recency.
-   * Issue #4098 phase 2: focus/anchor decisions must never fall back to
-   * "first member"; when no survivor owns a chat there is no recency signal
-   * and focus is cleared (renderers fall back to their display default).
+   * Without a recency signal, terminal display still needs a live member.
    */
   aiSessions?: readonly AIChatRecencyEntry[];
 };
@@ -38,7 +36,7 @@ type DetachSessionFromWorkspaceStateOptions = {
  * Resolve the member that should receive focus (or an anchor retarget) after a
  * member loss. Prefers the AI-chat recency winner; falls back to the still-
  * valid preferred (focused) member because that is explicit user intent, and
- * returns null when neither yields a survivor.
+ * falls back to a surviving pane so focus mode never hides all terminals.
  */
 const resolveSurvivingFocusMemberId = (
   remainingSessionIds: readonly string[],
@@ -51,7 +49,7 @@ const resolveSurvivingFocusMemberId = (
   return resolveMostRecentlyActiveMemberTerminalId({
     memberTerminalIds: remainingSessionIds,
     aiSessions,
-  }) ?? undefined;
+  }) ?? remainingSessionIds[0];
 };
 
 export function closeSessionWorkspaceLayoutState(
@@ -80,8 +78,7 @@ export function closeSessionWorkspaceLayoutState(
 
       const remainingSessionIds = collectSessionIds(prunedRoot);
       // Closing the focused session hands focus to the most-recently-active
-      // surviving member (AI chat recency) — never to a positional "first
-      // remaining" pick (#4098 phase 2).
+      // surviving member when AI chat recency is available.
       const nextFocusedSessionId = resolveSurvivingFocusMemberId(
         remainingSessionIds,
         workspace.focusedSessionId,

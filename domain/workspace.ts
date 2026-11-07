@@ -92,6 +92,7 @@ export const appendPaneToWorkspaceRoot = (
   if (collectSessionIds(root).includes(sessionId)) return root;
 
   const newPane: WorkspaceNode = { id: crypto.randomUUID(), type: 'pane', sessionId };
+  if (collectSessionIds(root).length === 0) return newPane;
 
   if (root.type === 'split' && root.direction === direction) {
     const nextChildren = [...root.children, newPane];
@@ -135,6 +136,7 @@ export const insertPaneIntoWorkspace = (
   if (collectSessionIds(root).includes(sessionId)) return root;
 
   const pane: WorkspaceNode = { id: crypto.randomUUID(), type: 'pane', sessionId };
+  if (collectSessionIds(root).length === 0) return pane;
 
   if (!hint.targetSessionId) {
     const children = (hint.position === 'left' || hint.position === 'top') ? [pane, root] : [root, pane];

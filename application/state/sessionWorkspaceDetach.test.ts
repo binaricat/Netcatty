@@ -143,7 +143,7 @@ test("closing a non-focused member keeps the focused member", () => {
   assert.deepEqual(result.workspaces[0].focusSessionOrder, ["s1", "s2"]);
 });
 
-test("with no AI recency signal the focus fallback clears instead of picking positionally", () => {
+test("with no AI recency signal focus stays on a surviving terminal", () => {
   const result = closeSessionWorkspaceLayoutState(
     [workspace(["s1", "s2"])],
     "ws-1",
@@ -151,7 +151,7 @@ test("with no AI recency signal the focus fallback clears instead of picking pos
   );
 
   assert.equal(result.workspaces.length, 1);
-  assert.equal(result.workspaces[0].focusedSessionId, undefined);
+  assert.equal(result.workspaces[0].focusedSessionId, "s2");
 });
 
 test("closing ALL members keeps the workspace alive with an empty root (#4098 phase 2)", () => {

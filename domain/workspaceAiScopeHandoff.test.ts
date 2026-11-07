@@ -1,11 +1,97 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { getScopedHistorySessions } from '../components/ai/scopedHistorySessions';
+import { resolveDisplayedPanelView } from '../components/ai/aiPanelViewState';
+import type { AISession } from '../infrastructure/ai/types';
 
 import {
   handoffDissolvedWorkspaceAIScope,
   retargetWorkspaceActiveChatAfterMemberLoss,
   seedWorkspaceAIActiveSessionFromMembers,
 } from './workspaceAiScopeHandoff.ts';
+
+test('closing the last member keeps its inherited chat visible in the empty workspace', () => {
+  const inherited: AISession = {
+    id: 'chat-a', title: 'Keep this conversation', agentId: 'catty',
+    scope: { type: 'terminal', targetId: 'term-a', hostIds: ['host-a'] },
+    messages: [{ id: 'message-1', role: 'user', content: 'Continue this work', timestamp: 1 }],
+    createdAt: 1, updatedAt: 2,
+  };
+  const unrelated: AISession = { ...inherited, id: 'other-chat', scope: { type: 'terminal', targetId: 'other-terminal' } };
+  const result = retargetWorkspaceActiveChatAfterMemberLoss({
+    activeSessionIdMap: {
+      'workspace:ws-1': inherited.id, 'terminal:term-a': inherited.id,
+      'terminal:other-terminal': unrelated.id,
+    },
+    sessions: [inherited, unrelated], workspaceId: 'ws-1',
+    previousMemberTerminalIds: ['term-a'], currentMemberTerminalIds: [],
+    activeTargetIds: new Set(['ws-1', 'other-terminal']),
+  });
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.sessions[0].scope, { type: 'workspace', targetId: 'ws-1', hostIds: ['host-a'] });
+  assert.equal(result.sessions[0].id, inherited.id);
+  assert.equal(result.sessions[0].messages, inherited.messages);
+  assert.equal(result.sessions[0].updatedAt, inherited.updatedAt);
+  assert.equal(result.sessions[1], unrelated);
+  assert.equal(result.activeSessionIdMap['terminal:term-a'], null);
+  assert.equal(result.activeSessionIdMap['workspace:ws-1'], inherited.id);
+  assert.equal(result.activeSessionIdMap['terminal:other-terminal'], unrelated.id);
+
+  // Exercise the actual panel filtering/resolution, including restored data.
+  for (const sessions of [result.sessions, JSON.parse(JSON.stringify(result.sessions)) as AISession[]]) {
+    const history = getScopedHistorySessions(sessions, 'workspace', 'ws-1', [], new Set(), new Set(), result.activeSessionIdMap);
+    assert.ok(history.some((session) => session.id === inherited.id));
+    assert.deepEqual(resolveDisplayedPanelView(
+      { mode: 'session', sessionId: inherited.id }, false, history, inherited.id, 'workspace', inherited.id,
+    ), { mode: 'session', sessionId: inherited.id });
+    assert.deepEqual(resolveDisplayedPanelView(
+      { mode: 'draft' }, true, history, inherited.id, 'workspace', inherited.id,
+    ), { mode: 'draft' });
+  }
+});
+
+test('detaching the last still-live terminal keeps its own chat and selection', () => {
+  const sessions = [{ id: 'chat-a', scope: { type: 'terminal', targetId: 'term-a' }, updatedAt: 1 }];
+  const activeSessionIdMap = { 'workspace:ws-1': 'chat-a', 'terminal:term-a': 'chat-a' };
+  const result = retargetWorkspaceActiveChatAfterMemberLoss({
+    sessions, activeSessionIdMap, workspaceId: 'ws-1',
+    previousMemberTerminalIds: ['term-a'], currentMemberTerminalIds: [],
+    activeTargetIds: new Set(['ws-1', 'term-a']),
+  });
+  assert.equal(result.changed, false);
+  assert.equal(result.sessions, sessions);
+  assert.equal(result.activeSessionIdMap, activeSessionIdMap);
+});
+
+test('an empty workspace does not adopt unrelated or already workspace-scoped chats', () => {
+  for (const scope of [
+    { type: 'terminal', targetId: 'unrelated-terminal' },
+    { type: 'workspace', targetId: 'ws-1' },
+  ]) {
+    const sessions = [{ id: 'chat-a', scope, updatedAt: 1 }];
+    const activeSessionIdMap = { 'workspace:ws-1': 'chat-a', 'terminal:term-a': 'other-chat' };
+    const result = retargetWorkspaceActiveChatAfterMemberLoss({
+      sessions, activeSessionIdMap, workspaceId: 'ws-1',
+      previousMemberTerminalIds: ['term-a'], currentMemberTerminalIds: [],
+      activeTargetIds: new Set(['ws-1']),
+    });
+    assert.equal(result.changed, false);
+    assert.equal(result.sessions, sessions);
+    assert.equal(result.activeSessionIdMap, activeSessionIdMap);
+  }
+});
+
+test('an empty workspace does not infer terminal closure without live-target evidence', () => {
+  const sessions = [{ id: 'chat-a', scope: { type: 'terminal', targetId: 'term-a' }, updatedAt: 1 }];
+  const activeSessionIdMap = { 'workspace:ws-1': 'chat-a', 'terminal:term-a': 'chat-a' };
+  const result = retargetWorkspaceActiveChatAfterMemberLoss({
+    sessions, activeSessionIdMap, workspaceId: 'ws-1',
+    previousMemberTerminalIds: ['term-a'], currentMemberTerminalIds: [],
+  });
+  assert.equal(result.changed, false);
+  assert.equal(result.sessions, sessions);
+  assert.equal(result.activeSessionIdMap, activeSessionIdMap);
+});
 
 test('seedWorkspaceAIActiveSessionFromMembers writes focused terminal chat onto a new workspace', () => {
   const next = seedWorkspaceAIActiveSessionFromMembers({
