@@ -97,8 +97,11 @@ for (const code of ["ERR_HOST_KEY_UNVERIFIED", "ERR_SFTP_SOURCE_SESSION_CLOSED",
 test("ordinary reusable-channel failures retain fresh-login fallback", async (t) => {
   let freshDials = 0;
   let borrowedChannels = 0;
-  t.mock.method(require("node:net").Socket.prototype, "connect", () => {
-    freshDials++;
+  t.mock.method(require("node:net").Socket.prototype, "connect", (...args) => {
+    // The agent availability probe also opens a Unix socket ({ path }); only
+    // count the target SSH dial, which passes a host/port options object.
+    const target = args[0] && typeof args[0] === "object" && "host" in args[0];
+    if (target) freshDials++;
     throw new Error("fresh-login fallback reached");
   });
   const options = { hostname: "ordinary.example", username: "root", password: "test-only", authMethod: "password", fileProtocol: "sftp", useSshAgent: false };
