@@ -21,6 +21,7 @@ filenames)` is shared by `basename` and `dirname`).
 | `@withfig/autocomplete` | `2.692.3`; compiled `build/{echo,which,paste,pwd,clear,su,crontab,env,uname,base64,date,id,split,seq,join,dig,dd,htop,basename,dirname,readlink,more}.js` | English keys, option names, and arguments |
 | GNU Coreutils | documented `echo`, `env`, `base64`, `date`, `id`, `split`, `seq`, `join`, `dd`, `pwd`, `basename`, `dirname`, `readlink` behavior | Option semantics shared with GNU |
 | BSD/macOS manuals | local macOS `man su`, `date`, `crontab`, `clear`, `more`, `id`, `paste` | Flags the Fig specs actually expose (several are BSD-only) |
+| `jaywcjlove/linux-command` | MIT, `master` fetched 2026-11-07 (sparse clone of `command/`) | GNU option wording for the Linux-first review, and the option set of the local GNU `date` spec |
 
 Checked on 2026-11-07 against `@withfig/autocomplete@2.692.3` by scanning all 714
 bundled specs for each adopted key. Eleven keys are shared outside this batch
@@ -47,7 +48,7 @@ and were reviewed for wording that stays correct in every owner:
 | `env` | 8 | NUL-terminated output, `-i`, `-v`, `-u`, `-P`, `-S` |
 | `uname` | 8 | `-a`, `-m`, `-n`, `-p`, `-r`, `-s`, `-v` |
 | `base64` | 5 | encode/decode, line breaks, input/output files |
-| `date` | 15 | BSD `-d`, `-f`, `-j`, `-n`, `-R`, `-r`, `-t`, `-u`, `-v` |
+| `date` | 13 | local GNU spec: `-d`, `--debug`, `-f`, `-I`, `-R`, `--rfc-3339`, `-r`, `-s`, `-u` |
 | `id` | 10 | audit, full name, groups, MAC label, `-n`, `-p` |
 | `split` | 9 | suffix length, `-b`, `-d`, `-l`, `-p`, file, prefix |
 | `seq` | 11 | start/step/last, `-w`, `-s`, `-f`, `-t` |
@@ -77,10 +78,13 @@ on-demand spec load for the most common shell sessions.
   ^L (form feed)” and `-f` to “Count logical lines, rather than screen lines”.
   This matches GNU `more`; the translations follow the option each description
   belongs to, not the numeric order of the list.
-- **date**: the spec exposes BSD/macOS flags (`-d` for DST, `-f` input format,
-  `-j` dry run, `-n`, `-R`, `-r epoch seconds`, `-t` minutes west of GMT, `-v`
-  adjust). The translations keep the BSD meanings instead of borrowing GNU
-  `--date`/`--set` wording.
+- **date**: replaced by a local GNU spec (`electron/specs/date.js`). The bundled
+  Fig spec exposed BSD/macOS flags (`-d` DST, `-f` input format, `-j` dry run,
+  `-n`, `-R`, `-r` epoch seconds, `-t` minutes west of GMT, `-v` adjust) that
+  Linux hosts do not have. The local spec describes `-d/--date`, `--debug`,
+  `-f/--file`, `-I/--iso-8601`, `-R/--rfc-email`, `--rfc-3339`, `-r/--reference`,
+  `-s/--set` and `-u/--utc` instead, and the 13 BSD-only entries were removed
+  after a repository-wide scan showed no other spec used them.
 - **su**: `-f` is the csh-specific `.cshrc` guard, `-l` performs a full login,
   `-` alone equals `-l`, and `-m` keeps the environment. All four descriptions
   follow the BSD assertions in the spec, including the `getusershell(3)`
@@ -105,7 +109,8 @@ on-demand spec load for the most common shell sessions.
 Netcatty sessions usually target Linux hosts, so GNU semantics were checked
 against `jaywcjlove/linux-command` (MIT, commit `master` at 2026-11-07) for every
 command in this batch that the reference covers (21 of 22; `readlink` is absent).
-That review changed four entries and confirmed the rest:
+That review changed four entries, confirmed the rest, and produced the GNU
+`date` spec below:
 
 - `uname -s/-r/-v`: the Fig text says “operating system name/release/version”,
   but GNU `uname` prints the kernel name/release/version. The zh-CN text now says
@@ -116,14 +121,15 @@ That review changed four entries and confirmed the rest:
 - No other wording diverged from the reference beyond synonyms (`制表符` vs
   `跳格字符`, `块` vs `区块`); the existing glossary terms stay in place.
 
-Some specs in this batch expose options that do not exist in GNU tools. Those
+`date` is no longer in this list: it now ships a GNU spec of its own (see the
+semantic notes). The remaining specs in this batch expose options that do not
+exist in GNU tools. Those
 descriptions describe the option each spec actually inserts, so they are **not**
 rewritten into GNU wording — doing so would label an item with behavior it does
 not have on the host being connected to:
 
 | Command | Spec-only (BSD/macOS) options |
 | --- | --- |
-| `date` | `-d`, `-f`, `-j`, `-n`, `-R`, `-t` |
 | `su` | `-f`, `-l`, `-m`, `-` |
 | `id` | `-A`, `-F`, `-M`, `-P` |
 | `base64` | `-b`, `-i`, `-o` |

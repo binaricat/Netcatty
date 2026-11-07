@@ -8,7 +8,15 @@ import type { FigSpec } from "./autocomplete/figSpecLoader.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "../..");
-const SPEC_DIR = path.join(ROOT, "node_modules/@withfig/autocomplete/build");
+const FIG_SPEC_DIR = path.join(ROOT, "node_modules/@withfig/autocomplete/build");
+// Runtime prefers local specs (electron/specs) over the bundled package, so the
+// tests must resolve the same file the popup will load.
+const LOCAL_SPEC_DIR = path.join(ROOT, "electron/specs");
+
+function resolveSpecPath(name: string): string {
+  const local = path.join(LOCAL_SPEC_DIR, `${name}.js`);
+  return fs.existsSync(local) ? local : path.join(FIG_SPEC_DIR, `${name}.js`);
+}
 const DICT_DIR = path.join(HERE, "autocomplete");
 const COMMANDS = [
   "echo",
@@ -38,7 +46,7 @@ const COMMANDS = [
 const specs = Object.fromEntries(
   await Promise.all(
     COMMANDS.map(async (name) => {
-      const mod = await import(pathToFileURL(path.join(SPEC_DIR, `${name}.js`)).href);
+      const mod = await import(pathToFileURL(resolveSpecPath(name)).href);
       return [name, mod.default?.default ?? mod.default] as const;
     }),
   ),
@@ -156,8 +164,20 @@ test("batch 4 spot checks preserve verified semantics, placeholders and upstream
     simplified["Query MX Record"],
     "查询 NS 记录（上游英文描述误写为 MX）",
   );
+  // The local GNU date spec replaces the bundled BSD option set.
+  assert.equal(
+    simplified["Display the last modification time of the given file"],
+    "显示给定文件的最后修改时间",
+  );
+  assert.equal(
+    traditional["Display the last modification time of the given file"],
+    "顯示給定檔案的最後修改時間",
+  );
+  assert.equal(
+    simplified["Set the system time from the given string"],
+    "按给定字符串设置系统时间",
+  );
   // Placeholder-bearing keys stay literal.
-  assert.equal(simplified["[+|-]val[ymwdHMS]"], "[+|-]val[ymwdHMS]");
   assert.equal(simplified["N[K|k|M|m|G|g]"], "N[K|k|M|m|G|g]");
 });
 
