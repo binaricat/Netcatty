@@ -1,6 +1,6 @@
 "use strict";
 
 const NETCATTY_MCP_SERVER_INSTRUCTIONS =
-  "Use Netcatty tools for terminals, hosts, SFTP, vault, snippets/scripts, and port forwards. For terminal work, call get_environment first; select by label or hostname and pass sessionId to terminal_execute/terminal_start. Never use the local shell for Netcatty session commands. If none matches, use vault_hosts_list and host_open. 15 core tools start loaded. For attachments, advanced SFTP, vault/notes, snippets, scripts, or port forwards, call load_netcatty_tools with a toolset; use all for every tool.";
+  "Call get_environment first; select by label or hostname and pass sessionId to terminal tools. Never use the local shell for Netcatty session commands. If none matches, use vault_hosts_list and host_open. 15 core tools start loaded. Use load_netcatty_tools: sessions, attachments, sftp_advanced, vault_hosts, vault_notes, snippets, scripts, portforward, or all. For disconnected in-scope sessions, load sessions; use session_reconnect/session_recover instead of host_open (creates a new tab).";
 
 module.exports = { NETCATTY_MCP_SERVER_INSTRUCTIONS };
