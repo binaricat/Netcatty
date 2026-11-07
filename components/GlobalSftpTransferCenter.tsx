@@ -501,6 +501,9 @@ function TransferRow({
     ) {
       return t("sftp.transferCenter.phase.scanning");
     }
+    if (task.controlKind === "packed-download" && task.status === "transferring") {
+      return t(task.phase === "extracting" ? "sftp.packedDownload.extracting" : "sftp.packedDownload.receiving");
+    }
     if (task.phase && task.status === "transferring") {
       return t(`sftp.transferCenter.phase.${task.phase}`);
     }

@@ -1053,6 +1053,12 @@ Vaults 标签保持扁平，不使用这块背景。
   'sftp.extract.extracting': '正在解压 {fileName}...',
   'sftp.extract.success': '已解压 {fileName}',
   'sftp.extract.error': '解压 {fileName} 失败：{error}',
+  'sftp.packedDownload.receiving': '正在接收打包数据…',
+  'sftp.packedDownload.extracting': '正在还原文件…',
+  'sftp.packedDownload.fallback': '当前无法打包下载，已改为逐文件下载。',
+  'sftp.packedDownload.selection': '已选 {count} 项',
+  'sftp.packedDownload.conflict': '目标位置已有同名项目，要选择其他保存文件夹吗？',
+
   'sftp.archive.action': '压缩…',
   'sftp.archive.title': '压缩文件',
   'sftp.archive.description': '将 {count} 个选中项目打包到服务器上的压缩包。',

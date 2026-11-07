@@ -6,6 +6,8 @@ import React, { useCallback, useMemo, useState } from "react";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { useSftpFileAssociations } from "../../../application/state/useSftpFileAssociations";
 import { useSettingsState } from "../../../application/state/useSettingsState";
+import { useStoredString } from "../../../application/state/useStoredString";
+import { STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD } from "../../../infrastructure/config/storageKeys";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { Button } from "../../ui/button";
@@ -35,6 +37,7 @@ const getOpenerLabel = (
 
 export default function SettingsFileAssociationsTab() {
   const { t } = useI18n();
+  const [packedDownload, setPackedDownload] = useStoredString<string>(STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD, "true");
   const { getAllAssociations, removeAssociation, setOpenerForExtension, getDefaultOpener, setDefaultOpener, removeDefaultOpener } = useSftpFileAssociations();
   const {
     sftpDoubleClickBehavior, setSftpDoubleClickBehavior,
@@ -184,6 +187,17 @@ export default function SettingsFileAssociationsTab() {
           description={t('settings.sftp.compressedUpload.enableDesc')}
         >
           <Toggle checked={sftpUseCompressedUpload} onChange={setSftpUseCompressedUpload} />
+        </SettingRow>
+      </SettingCard>
+
+      <SectionHeader title={t('settings.sftp.packedDownload')} />
+      <SettingCard>
+        <SettingRow
+          anchorId="sftp-packed-download"
+          label={t('settings.sftp.packedDownload.enable')}
+          description={t('settings.sftp.packedDownload.enableDesc')}
+        >
+          <Toggle checked={packedDownload !== 'false'} onChange={(enabled) => setPackedDownload(String(enabled))} />
         </SettingRow>
       </SettingCard>
 

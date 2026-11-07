@@ -79,6 +79,16 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
       manifestHash: checkpoint.manifestHash,
     };
   }
+  // Packed streams have no resumable SFTP walk. In particular a multi-select
+  // stores its common parent for display, never as a source to recursively replay.
+  if (task.controlKind === "packed-download" && !TERMINAL_STATUSES.has(task.status)) {
+    task.status = "cancelled";
+    task.speed = 0;
+    task.retryable = false;
+    task.resumable = false;
+    task.reconnectRequired = false;
+    task.phase = undefined;
+  }
   // After force-quit / restart no backend stream remains. Every unfinished row
   // (including a previously interrupted row that was already persisted) needs a
   // dedicated reconnect — do not leave reconnectRequired false.

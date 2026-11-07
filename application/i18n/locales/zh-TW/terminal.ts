@@ -247,6 +247,10 @@ export const zhTWTerminalMessages: Messages = {
   'settings.sftp.compressedUpload.enable': '啟用資料夾壓縮',
   'settings.sftp.compressedUpload.enableDesc': '自動使用 tar 壓縮資料夾後再傳輸。需要伺服器支援 tar 指令，不支援時自動改用一般傳輸。',
 
+  'settings.sftp.packedDownload': '打包下載',
+  'settings.sftp.packedDownload.enable': '下載資料夾或多個項目時打包',
+  'settings.sftp.packedDownload.enableDesc': '一次傳回所選內容，並在本機自動還原原本的資料夾結構。若伺服器不支援打包，會自動逐檔下載。',
+
   'settings.sftp.skipUnchanged.enable': '跳過未改檔案',
   'settings.sftp.skipUnchanged.enableDesc': '當目標檔案的大小與修改時間已與來源一致時跳過傳輸（類似 rsync）。替換到暫存路徑時自動停用。',
 

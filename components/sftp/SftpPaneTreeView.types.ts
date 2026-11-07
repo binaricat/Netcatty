@@ -24,6 +24,7 @@ export interface SftpPaneTreeViewProps {
   onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;
   onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;
+  onDownloadFiles?: (entries: SftpFileEntry[], fullPaths?: string[]) => void;
   onExtractArchive?: (entry: SftpFileEntry, fullPath?: string) => void | Promise<void>;
   onCreateArchive?: (sourcePaths: string[]) => void;
   onEditPermissions?: (entry: SftpFileEntry, fullPath?: string) => void;
