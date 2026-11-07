@@ -340,7 +340,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
               aria-label={t('terminal.paneMagnification.restore')}
             >
               {t('terminal.paneMagnification.hint')}: {t('terminal.layer.terminal')}
-              {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel} / Esc` : ' · Esc'}
+              {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel}` : ''}
             </button>
           )}
         </>,
