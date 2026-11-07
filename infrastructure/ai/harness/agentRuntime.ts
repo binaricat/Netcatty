@@ -15,6 +15,7 @@ import { globalTwoPassCompactionCache } from './twoPassCompaction';
 import { redactSecretsForModel, redactSecretsInValueForModel, setReversibleModelPrivacy } from './modelSecretRedaction';
 import { globalTerminalMonitorGuard } from './terminalMonitorGuard';
 import { netcattyBridge } from '../../services/netcattyBridge';
+import type { AISessionScope } from '../types';
 
 let turnCounter = 0;
 
@@ -36,6 +37,7 @@ interface ActiveTurn {
   turnId: string;
   backend: AgentBackend;
   driver: TurnDriver;
+  scope?: AISessionScope;
 }
 
 export interface AgentRuntimeOptions {
@@ -68,6 +70,11 @@ export class AgentRuntime {
 
   getSessionStateStore(): SessionStateStore {
     return this.sessionStateStore;
+  }
+
+  getActiveScope(chatSessionId: string): AISessionScope | undefined {
+    const scope = this.activeTurns.get(chatSessionId)?.scope;
+    return scope ? { ...scope } : undefined;
   }
 
   clearChatSession(chatSessionId: string): void {
@@ -135,6 +142,12 @@ export class AgentRuntime {
       turnId,
       backend: input.backend,
       driver,
+      // History may be resumed in a different panel without changing its
+      // saved binding. Keep the invoking scope stable for this entire turn.
+      scope: input.context.scopeType ? {
+        type: input.context.scopeType,
+        targetId: input.context.scopeTargetId,
+      } : undefined,
     });
 
     const toolCallMeta = new Map<string, { toolName: string; args: Record<string, unknown> }>();

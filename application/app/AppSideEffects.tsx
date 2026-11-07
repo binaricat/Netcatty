@@ -60,6 +60,7 @@ import { selectConnectionLogForTerminalDataCapture } from '../../domain/connecti
 import { collectSessionIds } from '../../domain/workspace';
 import { resolveAgentHostOpenWorkspace } from '../../domain/agentHostWorkspace';
 import { getAISessionsSnapshot } from '../state/aiSessionsStore';
+import { peekAgentRuntimeCleanup } from '../../infrastructure/ai/harness/agentRuntimeHandle';
 import { useHostOpenSessionReuse } from '../state/useHostOpenSessionReuse';
 import type { PaneMagnificationController } from '../../domain/paneMagnification';
 import { isPluginViewEditingTarget } from '../state/pluginKeybindings';
@@ -1507,15 +1508,16 @@ export function AppSideEffects() {
   }, [handleConnectToHost, renameSessionInline]);
 
   const openHostForVaultAgent = useCallback((host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string; chatSessionId?: string }) => {
-    // Placement follows the invoking chat's bound workspace, not whichever
-    // workspace happens to be focused when the tool call lands (#4155's
-    // chat↔workspace binding story): a workspace-B chat must not drop its
-    // tab into the active workspace A. The chat lives in the AI sessions hot
-    // store; terminalSessions come from the ref to keep this callback stable.
+    // A resumed history chat can run in a panel other than its saved binding.
+    // Prefer that turn's captured scope, never the window's current focus.
+    // Outside a running turn, retain the saved chat binding as the fallback.
     const chat = options?.chatSessionId
       ? getAISessionsSnapshot().sessions.find((session) => session.id === options.chatSessionId)
       : undefined;
-    const target = resolveAgentHostOpenWorkspace(options?.workspaceId, chat, {
+    const turnScope = options?.chatSessionId
+      ? peekAgentRuntimeCleanup()?.getActiveScope?.(options.chatSessionId)
+      : undefined;
+    const target = resolveAgentHostOpenWorkspace(options?.workspaceId, turnScope ? { scope: turnScope } : chat, {
       activeTabId: activeTabStore.getActiveTabId(),
       workspaceIds: workspaces.map(workspace => workspace.id),
       terminalSessions: sessionsRef.current,
