@@ -393,7 +393,10 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
             !task.parentTaskId && !["completed", "failed", "cancelled"].includes(task.status)
           ));
           if (unfinishedTasks.length > 0) {
-            const resumable = unfinishedTasks.filter((task) => (
+            // Packed streams cannot pause or resume. Keep them in the quit
+            // confirmation, but let them run until the owner actually closes.
+            const pausableTasks = unfinishedTasks.filter((task) => task.controlKind !== "packed-download");
+            const resumable = pausableTasks.filter((task) => (
               task.status === "transferring" || task.status === "queued"
               || previousAttempt?.resumeTaskIds.has(task.id)
             ));
@@ -410,7 +413,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
             };
             transferQuitPendingRef.current = attempt;
             bridge.reportDirtyEditorsResult?.(true, reason, { ...response, pending: true });
-            const paused = await Promise.allSettled(unfinishedTasks.map((task) => sftpTransferCenterStore.pause(task.id)));
+            const paused = await Promise.allSettled(pausableTasks.map((task) => sftpTransferCenterStore.pause(task.id)));
             if (transferQuitPendingRef.current !== attempt) return;
             const expired = () => request && Date.now() >= request.deadline;
             if (!expired() && paused.every((result) => result.status === "fulfilled")) {

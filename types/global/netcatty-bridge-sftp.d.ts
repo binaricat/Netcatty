@@ -48,6 +48,20 @@ declare global {
     clearPendingTransferCancel?(transferId: string): Promise<{ success: boolean } | void>;
     sameHostCopyDirectory?(sftpId: string, sourcePath: string, targetPath: string, encoding?: SftpFilenameEncoding, transferId?: string): Promise<{ success: boolean }>;
 
+    registerPackedDownload?(metadata: {
+      transferId: string;
+      fileName: string;
+      sourcePath: string;
+      targetPath: string;
+      sourceConnectionId?: string;
+      sourceHostId?: string;
+      sourceHostLabel?: string;
+      packedTargetPaths?: string[];
+    }): Promise<{ success: boolean; reason?: string }>;
+    finishPackedDownload?(transferId: string, outcome: {
+      status: "cancelled" | "failed" | "dismissed";
+      error?: string;
+    }): Promise<void>;
     downloadPackedSftp?(
       options: { sftpId: string; transferId: string; remoteDirectory: string; names: string[]; localDirectory: string; encoding?: SftpFilenameEncoding },
       onProgress?: (progress: { phase: "receiving" | "extracting"; bytes: number }) => void,
@@ -132,7 +146,7 @@ declare global {
       stagedTargetPath?: string;
     }): Promise<{ success: boolean }>;
     onGlobalSftpTransferEvent?(callback: (event: {
-      type: 'queued' | 'started' | 'progress' | 'pausing' | 'paused' | 'resumed' | 'cancelled' | 'completed' | 'failed';
+      type: 'queued' | 'started' | 'progress' | 'pausing' | 'paused' | 'resumed' | 'cancelled' | 'completed' | 'failed' | 'dismissed';
       transferId: string;
       direction?: TransferDirection;
       fileName?: string;
@@ -151,7 +165,12 @@ declare global {
       uploadCheckpointBytes?: number;
       sourceFingerprint?: string;
       isDirectory?: boolean;
-      controlKind?: 'stream' | 'compressed-upload';
+      controlKind?: 'stream' | 'compressed-upload' | 'packed-download';
+      packedTargetPaths?: string[];
+      sourceConnectionId?: string;
+      sourceHostLabel?: string;
+      origin?: 'manual' | 'drag-drop' | 'editor-sync' | 'agent' | 'internal';
+      retryable?: boolean;
       phase?: 'scanning' | 'compressing' | 'uploading' | 'transferring' | 'extracting' | 'verifying';
       sessionId?: string;
       sourceHostId?: string;

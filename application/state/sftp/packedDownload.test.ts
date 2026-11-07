@@ -6,6 +6,7 @@ import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 import { runPackedDownload } from "./packedDownload";
 import { serializeSftpTransferCenter, deserializeSftpTransferCenter } from "../../../domain/sftpTransferCenter";
 import { findActivePathConflict } from "../../../domain/sftpTransferConflicts";
+import { globalSftpTransferScheduler } from "./globalTransferScheduler";
 
 const request = {
   fileName: "2 selected", remoteDirectory: "/srv", names: ["compose", "README.md"],
@@ -120,3 +121,140 @@ test("I/O and archive validation failures keep a failed row instead of falling b
     if (id) sftpTransferCenterStore.dismiss(id);
   }
 });
+
+test("register the selected roots globally before retaining or starting a packed download", async (t) => {
+  t.mock.method(localStorageAdapter, "readBoolean", () => true);
+  t.mock.method(localStorageAdapter, "readNumber", () => 1);
+  const order: string[] = [];
+  let id = "";
+  t.mock.method(netcattyBridge, "get", () => ({
+    registerPackedDownload: async (metadata: Record<string, unknown>) => {
+      id = String(metadata.transferId);
+      assert.equal(sftpTransferCenterStore.getTask(id)?.controlKind, "packed-download");
+      assert.equal(metadata.sourceConnectionId, request.connectionId);
+      assert.equal(metadata.sourcePath, "/srv");
+      assert.deepEqual(metadata.packedTargetPaths, ["/downloads/compose", "/downloads/README.md"]);
+      order.push("register");
+      return { success: true };
+    },
+    retainSftpTransferSession: async () => { order.push("retain"); return { success: true }; },
+    downloadPackedSftp: async () => { order.push("download"); return { status: "completed" }; },
+    finishPackedDownload: async (transferId: string) => { assert.equal(transferId, id); order.push("finish"); },
+    releaseSftpTransferSession: async () => { order.push("release"); },
+  }));
+  try {
+    assert.equal(await runPackedDownload("global-order", request), "completed");
+    assert.deepEqual(order, ["register", "retain", "download", "finish", "release"]);
+  } finally { if (id) sftpTransferCenterStore.dismiss(id); }
+});
+
+test("cancellation from another window during registration never starts or retains the queued download", async (t) => {
+  t.mock.method(localStorageAdapter, "readBoolean", () => true);
+  t.mock.method(localStorageAdapter, "readNumber", () => 1);
+  let id = "", finished = false;
+  t.mock.method(netcattyBridge, "get", () => ({
+    registerPackedDownload: async (metadata: { transferId: string }) => {
+      id = metadata.transferId;
+      sftpTransferCenterStore.ingestBackgroundEvent({
+        type: "cancelled", transferId: id, controlKind: "packed-download", endedAt: Date.now(),
+      });
+      // Registration may already have returned success in main when a second
+      // window cancels it; the broadcast can arrive before this IPC resolves.
+      return { success: true };
+    },
+    retainSftpTransferSession: async () => { assert.fail("cancelled work must not acquire a connection lease"); },
+    downloadPackedSftp: async () => { assert.fail("cancelled work must not start"); },
+    finishPackedDownload: async (transferId: string, result: { status: string }) => {
+      assert.equal(transferId, id);
+      assert.equal(result.status, "cancelled");
+      finished = true;
+    },
+  }));
+  try {
+    assert.equal(await runPackedDownload("global-cancel", request), "cancelled");
+    assert.equal(sftpTransferCenterStore.getTask(id)?.status, "cancelled");
+    assert.equal(finished, true);
+  } finally { if (id) sftpTransferCenterStore.dismiss(id); }
+});
+
+test("failed startup and ordinary-download fallback settle the global row", async (t) => {
+  t.mock.method(localStorageAdapter, "readBoolean", () => true);
+  t.mock.method(localStorageAdapter, "readNumber", () => 1);
+  let id = "", failLease = true;
+  const outcomes: { status: string; error?: string }[] = [];
+  t.mock.method(netcattyBridge, "get", () => ({
+    registerPackedDownload: async (metadata: { transferId: string }) => {
+      id = metadata.transferId;
+      return { success: true };
+    },
+    retainSftpTransferSession: async () => ({ success: !failLease, reason: "Connection closed" }),
+    releaseSftpTransferSession: async () => {},
+    downloadPackedSftp: async () => ({ status: "fallback", reason: "unsupported" }),
+    finishPackedDownload: async (_id: string, result: { status: string; error?: string }) => { outcomes.push(result); },
+  }));
+  try {
+    await assert.rejects(runPackedDownload("global-startup", request), /Connection closed/);
+    assert.equal(outcomes[0].status, "failed");
+    assert.equal(outcomes[0].error, "Connection closed");
+    assert.equal(sftpTransferCenterStore.getTask(id)?.status, "failed");
+    sftpTransferCenterStore.dismiss(id);
+    failLease = false;
+    assert.equal(await runPackedDownload("global-startup", request), "unsupported");
+    assert.equal(outcomes[1].status, "dismissed");
+    assert.equal(sftpTransferCenterStore.getTask(id), undefined);
+  } finally { if (id) sftpTransferCenterStore.dismiss(id); }
+});
+
+test("worker failure while registering a queued job remains a failure and never starts it", async (t) => {
+  t.mock.method(localStorageAdapter, "readBoolean", () => true);
+  let id = "", finished = false;
+  t.mock.method(netcattyBridge, "get", () => ({
+    registerPackedDownload: async (metadata: { transferId: string }) => {
+      id = metadata.transferId;
+      sftpTransferCenterStore.ingestBackgroundEvent({
+        type: "failed", transferId: id, controlKind: "packed-download", error: "Transfer worker stopped",
+      });
+      return { success: true };
+    },
+    retainSftpTransferSession: async () => assert.fail("must not retain after worker failure"),
+    downloadPackedSftp: async () => assert.fail("must not start after worker failure"),
+    finishPackedDownload: async (_id: string, result: { status: string; error: string }) => {
+      assert.equal(result.status, "failed");
+      assert.equal(result.error, "Transfer worker stopped");
+      finished = true;
+    },
+  }));
+  try {
+    await assert.rejects(runPackedDownload("global-worker-failure", request), /Transfer worker stopped/);
+    assert.equal(sftpTransferCenterStore.getTask(id)?.status, "failed");
+    assert.equal(finished, true);
+  } finally { if (id) sftpTransferCenterStore.dismiss(id); }
+});
+
+for (const terminal of ["cancelled", "failed"] as const) {
+  test(`${terminal} during connection retention releases the lease without joining the admission queue`, async (t) => {
+    t.mock.method(localStorageAdapter, "readBoolean", () => true);
+    t.mock.method(globalSftpTransferScheduler, "run", async () => assert.fail("settled work must not queue behind another download"));
+    let id = "", released = false;
+    t.mock.method(netcattyBridge, "get", () => ({
+      registerPackedDownload: async (metadata: { transferId: string }) => { id = metadata.transferId; return { success: true }; },
+      retainSftpTransferSession: async () => {
+        sftpTransferCenterStore.ingestBackgroundEvent({
+          type: terminal, transferId: id, controlKind: "packed-download",
+          ...(terminal === "failed" ? { error: "Worker exited while retaining" } : {}),
+        });
+        return { success: true };
+      },
+      releaseSftpTransferSession: async () => { released = true; },
+      downloadPackedSftp: async () => assert.fail("settled work must not start"),
+      finishPackedDownload: async () => {},
+    }));
+    try {
+      const running = runPackedDownload("global-lease-terminal", request);
+      if (terminal === "failed") await assert.rejects(running, /Worker exited while retaining/);
+      else assert.equal(await running, "cancelled");
+      assert.equal(sftpTransferCenterStore.getTask(id)?.status, terminal);
+      assert.equal(released, true);
+    } finally { if (id) sftpTransferCenterStore.dismiss(id); }
+  });
+}

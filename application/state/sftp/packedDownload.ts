@@ -40,15 +40,46 @@ export async function runPackedDownload(ownerId: string, request: PackedDownload
   const packed = bridge.downloadPackedSftp;
   let outcome: PackedDownloadStatus = "cancelled";
   let received = 0;
+  const sharedFailure = () => {
+    const current = sftpTransferCenterStore.getTask(id);
+    return current?.status === "failed" ? current.error || "Packed download failed" : undefined;
+  };
   await transferRuntime.runWalk(id, async () => {
     let retained = false;
+    let registrationStarted = false;
+    let finalStatus: "cancelled" | "failed" | "dismissed" = "cancelled";
+    let finalError: string | undefined;
     try {
+      // Register before waiting for admission so every window can see and
+      // cancel queued work. Main owns the shared lifecycle and routes controls
+      // back to this renderer's captured connection.
+      if (bridge.registerPackedDownload) {
+        registrationStarted = true;
+        const registered = await bridge.registerPackedDownload({
+          transferId: id, fileName: task.fileName,
+          sourcePath: task.sourcePath, targetPath: task.targetPath,
+          sourceConnectionId: request.connectionId, sourceHostId: request.sourceHostId,
+          sourceHostLabel: request.sourceHostLabel, packedTargetPaths: targetPaths,
+        });
+        const registrationError = sharedFailure();
+        if (registrationError) throw new Error(registrationError);
+        if (!registered.success || isTransferCancelledFlag(id)) {
+          transferRuntime.patchTask(id, { status: "cancelled", endTime: Date.now() });
+          return;
+        }
+      }
       // Use a separate exec channel on the exact browse connection (including terminal
       // host/user overrides). A transfer lease keeps it alive if the pane is closed.
       if (bridge.retainSftpTransferSession) {
         const lease = await bridge.retainSftpTransferSession(request.sftpId, id, { cancelOnOwnerGone: true });
         if (!lease.success) throw new Error(lease.reason || "SFTP session is no longer available");
         retained = true;
+      }
+      const leaseError = sharedFailure();
+      if (leaseError) throw new Error(leaseError);
+      if (isTransferCancelledFlag(id)) {
+        transferRuntime.patchTask(id, { status: "cancelled", endTime: Date.now() });
+        return;
       }
       const result = await globalSftpTransferScheduler.run(ownerId, id,
         getSftpTransferResourceKeys({ sourceHostId: request.sourceHostId, sourceSftpId: request.sftpId }),
@@ -68,6 +99,8 @@ export async function runPackedDownload(ownerId: string, request: PackedDownload
             });
           });
         });
+      const streamError = sharedFailure();
+      if (streamError) throw new Error(streamError);
       if (result.status === "completed") {
         outcome = "completed";
         transferRuntime.patchTask(id, { status: "completed", totalBytes: received, transferredBytes: received, endTime: Date.now() });
@@ -75,17 +108,29 @@ export async function runPackedDownload(ownerId: string, request: PackedDownload
         transferRuntime.patchTask(id, { status: "cancelled", endTime: Date.now() });
       } else {
         outcome = result.reason === "conflict" ? "conflict" : "unsupported";
+        finalStatus = "dismissed";
         sftpTransferCenterStore.dismiss(id);
       }
     } catch (error) {
-      if (isTransferCancelledFlag(id)) {
+      // Worker failure also stops the renderer's admission queue. Preserve the
+      // shared failure instead of labelling that queue interruption Cancelled.
+      const sharedError = sharedFailure();
+      if (!sharedError && isTransferCancelledFlag(id)) {
         transferRuntime.patchTask(id, { status: "cancelled", endTime: Date.now() });
       } else {
-        const message = unwrapSftpIpcError(error);
+        const message = sharedError ?? unwrapSftpIpcError(error);
+        finalStatus = "failed";
+        finalError = message;
         transferRuntime.patchTask(id, { status: "failed", error: message, endTime: Date.now() });
         throw new Error(message);
       }
     } finally {
+      // Main already publishes the result of a started stream. This also
+      // settles failures/cancellation before a stream could start, and removes
+      // a fallback row from all windows without changing a completed result.
+      if (registrationStarted) {
+        await bridge.finishPackedDownload?.(id, { status: finalStatus, error: finalError }).catch(() => {});
+      }
       if (retained) await bridge.releaseSftpTransferSession?.(request.sftpId, id).catch(() => {});
     }
   });

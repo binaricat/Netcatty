@@ -7714,6 +7714,8 @@ async function startInternalTransfer(event, payload, onProgress) {
  */
 async function cancelTransfer(event, payload) {
   const { transferId } = payload;
+  const packedLifecycle = require("./sftpBridge/packedDownloadLifecycle.cjs").getPackedDownloadLifecycle();
+  if (packedLifecycle?.has(transferId)) return packedLifecycle.cancel(transferId);
   if (require("./sftpBridge/packedDownload.cjs").cancelActive(transferId, event?.sender?.id)) return { success: true };
   rememberPendingCancel(transferId);
   if (cancelQueuedTransfer(transferId)) {
@@ -8368,12 +8370,17 @@ function registerHandlers(ipcMain, options = {}) {
         throw error;
       }
     });
-    ipcMain.handle("netcatty:transfer:cancel", (event, payload) => (
-      cancelQueuedTransfer(payload?.transferId)
+    ipcMain.handle("netcatty:transfer:cancel", (event, payload) => {
+      const packedLifecycle = require("./sftpBridge/packedDownloadLifecycle.cjs").getPackedDownloadLifecycle();
+      if (packedLifecycle?.has(payload?.transferId)) return packedLifecycle.cancel(payload.transferId);
+      return cancelQueuedTransfer(payload?.transferId)
         ? { success: true }
-        : withWorkerControl(payload?.transferId, "cancel", () => workerRequest(event, "netcatty:transfer:cancel", payload))
-    ));
+        : withWorkerControl(payload?.transferId, "cancel", () => workerRequest(event, "netcatty:transfer:cancel", payload));
+    });
     ipcMain.handle("netcatty:transfer:pause", async (event, payload) => {
+      if (require("./sftpBridge/packedDownloadLifecycle.cjs").getPackedDownloadLifecycle()?.has(payload?.transferId)) {
+        return { success: false, reason: "Packed downloads cannot be paused" };
+      }
       const queued = pauseQueuedTransfer(payload?.transferId);
       if (queued) return queued;
       return withWorkerControl(payload?.transferId, "pause", async (isCurrent, superseded) => {
@@ -8423,6 +8430,9 @@ function registerHandlers(ipcMain, options = {}) {
       });
     });
     ipcMain.handle("netcatty:transfer:resume", async (event, payload) => {
+      if (require("./sftpBridge/packedDownloadLifecycle.cjs").getPackedDownloadLifecycle()?.has(payload?.transferId)) {
+        return { success: false, reason: "Packed downloads cannot be resumed" };
+      }
       const queuedResume = resumeQueuedTransfer(payload?.transferId);
       if (queuedResume) return queuedResume;
       return withWorkerControl(payload?.transferId, "resume", async (isCurrent, superseded) => {

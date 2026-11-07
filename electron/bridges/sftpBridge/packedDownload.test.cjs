@@ -9,9 +9,13 @@ const path = require("node:path");
 const { pipeline } = require("node:stream/promises");
 const { pack } = require("tar-stream");
 const { downloadPacked, extractArchive, publish } = require("./packedDownload.cjs");
+const tempDirBridge = require("../tempDirBridge.cjs");
 
 async function fixture(t) {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "netcatty-pack-qa-"));
+  const dir = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), "netcatty-pack-qa-")));
+  const previousTempDir = tempDirBridge.getCustomTempDir();
+  tempDirBridge.applyCustomTempDir(path.join(dir, "managed"));
+  t.after(() => tempDirBridge.applyCustomTempDir(previousTempDir));
   t.after(() => fsp.rm(dir, { recursive: true, force: true }));
   const stage = path.join(dir, "stage"), local = path.join(dir, "local"), file = path.join(dir, "archive");
   await fsp.mkdir(stage);
@@ -101,7 +105,7 @@ test("SFTP-only and unrepresentable shell selections fall back before touching l
   assert.deepEqual(await fsp.readdir(f.local), []);
 });
 
-test("valid parent-relative links fall back only after complete archive validation and cleanup", async t => {
+test("valid parent-relative links fall back only after complete archive validation and cleanup", { skip: process.platform === "win32" }, async t => {
   const { PassThrough } = require("node:stream");
   for (const variant of ["supported-fallback", "truncated", "traversal"]) {
     await t.test(variant, async tt => {
@@ -130,6 +134,7 @@ test("valid parent-relative links fall back only after complete archive validati
       if (variant === "supported-fallback") assert.deepEqual(await download, { status: "fallback", reason: "unsupported" });
       else await assert.rejects(download, /incomplete|unexpected end|archive path/i);
       assert.deepEqual(await fsp.readdir(f.local), [], "no staged files or partially published directory");
+      assert.deepEqual(await fsp.readdir(tempDirBridge.getTempDir()), [".netcatty-managed-temp"], "fallback and errors clean managed scratch data");
     });
   }
 });
@@ -243,4 +248,241 @@ test("packed backend releases its session lease without waiting for a renderer f
   fail = true;
   await assert.rejects(run(), /archive rejected/);
   assert.equal(leases.length, 0);
+});
+
+
+test("unsupported connections fall back before packed destination conflicts", async t => {
+  const f = await fixture(t);
+  await fsp.mkdir(path.join(f.local, "compose"));
+  await fsp.writeFile(path.join(f.local, "compose", "keep"), "original");
+  for (const kind of ["encoding", "single-channel", "sudo", "no-exec", "sftp-only", "no-tar"]) {
+    let probes = 0;
+    const ssh = { exec() { assert.fail("archive exec must not run"); } };
+    const client = { client: kind === "no-exec" ? {} : ssh,
+      __netcattySingleChannelSsh: kind === "single-channel", __netcattySudoMode: kind === "sudo" };
+    const result = await downloadPacked({ client,
+      payload: { sftpId: "s", names: ["compose"], remoteDirectory: "/srv", localDirectory: f.local, transferId: kind },
+      encoding: kind === "encoding" ? "gbk" : "utf-8",
+      execProbe: async () => { probes++; if (kind === "sftp-only") throw new Error("Unable to exec"); return { stdout: "" }; },
+    });
+    assert.deepEqual(result, { status: "fallback", reason: "unsupported" }, kind);
+    assert.equal(probes, ["sftp-only", "no-tar"].includes(kind) ? 1 : 0);
+  }
+  assert.equal(await fsp.readFile(path.join(f.local, "compose", "keep"), "utf8"), "original");
+  assert.deepEqual((await fsp.readdir(tempDirBridge.getTempDir())).filter(n => !n.startsWith(".netcatty")), []);
+});
+
+function simulateDifferentDisk(t, destination) {
+  const stat = fsp.stat.bind(fsp);
+  t.mock.method(fsp, "stat", async (file, ...args) => {
+    const result = await stat(file, ...args);
+    if (file === destination) result.dev += 1;
+    return result;
+  });
+}
+
+test("managed staging publishes validated content across filesystems without remote retransmission", async t => {
+  const f = await fixture(t);
+  await f.archive([
+    [{ name: "compose", type: "directory" }],
+    [{ name: "compose/empty", type: "directory" }],
+    [{ name: "compose/.env", mode: 0o640 }, "hidden"],
+    [{ name: "compose/config" }, Buffer.from([0, 255, 13, 10])],
+    [{ name: "compose/alias", type: "symlink", linkname: "config" }],
+    [{ name: "single" }, "sibling"],
+  ]);
+  const manifest = await f.extract(["compose", "single"]);
+  simulateDifferentDisk(t, f.local);
+  assert.deepEqual(await publish(f.stage, f.local, ["compose", "single"], new AbortController().signal, manifest), { status: "completed" });
+  assert.deepEqual(await fsp.readdir(f.local), ["compose", "single"]);
+  assert.deepEqual(await fsp.readdir(path.join(f.local, "compose", "empty")), []);
+  assert.equal(await fsp.readFile(path.join(f.local, "compose", ".env"), "utf8"), "hidden");
+  assert.deepEqual(await fsp.readFile(path.join(f.local, "compose", "config")), Buffer.from([0, 255, 13, 10]));
+  assert.equal(await fsp.readlink(path.join(f.local, "compose", "alias")), "config");
+  assert.equal(await fsp.readFile(path.join(f.local, "single"), "utf8"), "sibling");
+});
+
+test("cross-filesystem cancellation rolls back owned entries and preserves a concurrently added file", async t => {
+  const f = await fixture(t);
+  await f.archive([[{ name: "compose", type: "directory" }], [{ name: "compose/data" }, "payload"]]);
+  const manifest = await f.extract(["compose"]);
+  simulateDifferentDisk(t, f.local);
+  const controller = new AbortController();
+  const createReadStream = fs.createReadStream.bind(fs);
+  t.mock.method(fs, "createReadStream", (file, options) => {
+    if (file === path.join(f.stage, "compose", "data")) {
+      fs.writeFileSync(path.join(f.local, "compose", "foreign"), "untouched");
+      controller.abort();
+    }
+    return createReadStream(file, options);
+  });
+  await assert.rejects(publish(f.stage, f.local, ["compose"], controller.signal, manifest), /abort/i);
+  assert.deepEqual(await fsp.readdir(path.join(f.local, "compose")), ["foreign"]);
+  assert.equal(await fsp.readFile(path.join(f.local, "compose", "foreign"), "utf8"), "untouched");
+});
+
+test("cross-filesystem destination conflict never overwrites existing files", async t => {
+  const f = await fixture(t);
+  await f.archive([[{ name: "first" }, "download"], [{ name: "second", type: "directory" }]]);
+  const manifest = await f.extract(["first", "second"]);
+  await fsp.mkdir(path.join(f.local, "second"));
+  await fsp.writeFile(path.join(f.local, "second", "keep"), "untouched");
+  simulateDifferentDisk(t, f.local);
+  assert.deepEqual(await publish(f.stage, f.local, ["first", "second"], new AbortController().signal, manifest), { status: "fallback", reason: "conflict" });
+  assert.deepEqual(await fsp.readdir(f.local), ["second"]);
+  assert.equal(await fsp.readFile(path.join(f.local, "second", "keep"), "utf8"), "untouched");
+});
+
+
+test("packed download uses managed staging and cleans it after completion or cancellation", { skip: process.platform === "win32" }, async t => {
+  const { PassThrough } = require("node:stream");
+  const { cancelActive } = require("./packedDownload.cjs");
+  for (const cancel of [false, true]) {
+    await t.test(cancel ? "cancel" : "complete", async tt => {
+      const f = await fixture(tt);
+      await f.archive([[{ name: "compose", type: "directory" }], [{ name: "compose/.env" }, "settings"]]);
+      const data = await fsp.readFile(f.file);
+      let channel, start;
+      const started = new Promise(resolve => { start = resolve; });
+      const client = { client: { exec(_command, callback) {
+        channel = new PassThrough();
+        channel.stderr = new PassThrough();
+        channel.close = () => channel.destroy();
+        callback(null, channel);
+        start();
+      } } };
+      const transferId = cancel ? "managed-cancel" : "managed-complete";
+      const download = downloadPacked({ client,
+        payload: { transferId, names: ["compose"], remoteDirectory: "/srv", localDirectory: f.local },
+        encoding: "utf-8", execProbe: async () => ({ stdout: "NC_PACK_TAR" }),
+      });
+      await started;
+      const workspaces = (await fsp.readdir(tempDirBridge.getTempDir())).filter(name => name.includes("active-workspace"));
+      assert.equal(workspaces.length, 1);
+      assert.deepEqual(await fsp.readdir(f.local), [], "staging never appears alongside destination files");
+      assert.deepEqual(await tempDirBridge.clearTempDir(), { deletedCount: 0, failedCount: 0 });
+      if (cancel) cancelActive(transferId);
+      else { channel.emit("exit", 0); channel.end(data); }
+      assert.deepEqual(await download, { status: cancel ? "cancelled" : "completed" });
+      assert.deepEqual(await fsp.readdir(tempDirBridge.getTempDir()), [".netcatty-managed-temp"]);
+      if (!cancel) assert.equal(await fsp.readFile(path.join(f.local, "compose", ".env"), "utf8"), "settings");
+    });
+  }
+});
+
+
+test("cross-filesystem rollback distinguishes copied bytes from concurrent edits to the same inode", async t => {
+  for (const variant of ["edit-before-write", "same-size-edit", "owned-partial-copy"]) {
+    await t.test(variant, async tt => {
+      const f = await fixture(tt);
+      await f.archive([[{ name: "compose", type: "directory" }], [{ name: "compose/data" }, Buffer.alloc(128 * 1024, "d")]]);
+      const manifest = await f.extract(["compose"]);
+      simulateDifferentDisk(tt, f.local);
+      const controller = new AbortController();
+      const from = path.join(f.stage, "compose", "data"), to = path.join(f.local, "compose", "data");
+      let edited;
+      if (variant === "edit-before-write") {
+        const createReadStream = fs.createReadStream.bind(fs);
+        tt.mock.method(fs, "createReadStream", (file, options) => {
+          if (file === from) { edited = "USER EDIT"; fs.writeFileSync(to, edited); controller.abort(); }
+          return createReadStream(file, options);
+        });
+      } else {
+        const open = fsp.open.bind(fsp);
+        tt.mock.method(fsp, "open", async (file, flags, ...args) => {
+          const handle = await open(file, flags, ...args);
+          if (file === to && flags === "wx") {
+            const write = handle.write.bind(handle);
+            handle.write = async (...writeArgs) => {
+              const result = await write(...writeArgs);
+              if (variant === "same-size-edit") { edited = "U".repeat(result.bytesWritten); await fsp.writeFile(to, edited); }
+              controller.abort();
+              return result;
+            };
+          }
+          return handle;
+        });
+      }
+      await assert.rejects(publish(f.stage, f.local, ["compose"], controller.signal, manifest), /abort/i);
+      if (edited) assert.equal(await fsp.readFile(to, "utf8"), edited, "never delete external edits to our reserved inode");
+      else assert.deepEqual(await fsp.readdir(f.local), [], "an unchanged partial copy is still cleaned");
+    });
+  }
+});
+
+test("silent real SSH archive channels cancel promptly without closing the shared SSH connection", {
+  skip: process.platform === "win32", timeout: 10_000,
+}, async t => {
+  const { Client, Server, utils } = require("ssh2");
+  const { generateKeyPairSync, createHash, randomBytes } = require("node:crypto");
+  const { cancelActive } = require("./packedDownload.cjs");
+  const f = await fixture(t);
+  await f.archive([[{ name: "compose", type: "directory" }], [{ name: "compose/.env" }, "settings"]]);
+  const data = await fsp.readFile(f.file);
+  const hostKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs1", format: "pem" });
+  const fingerprint = createHash("sha256").update(utils.parseKey(hostKey).getPublicSSH()).digest("hex");
+  const password = randomBytes(16).toString("hex"), connections = new Set();
+  let firstExec = true;
+  const server = new Server({ hostKeys: [hostKey] }, connection => {
+    connections.add(connection);
+    connection.on("close", () => connections.delete(connection));
+    connection.on("error", () => {});
+    connection.on("authentication", context => {
+      if (context.method === "password" && context.username === "packed-test" && context.password === password) context.accept();
+      else context.reject();
+    });
+    connection.on("ready", () => connection.on("session", accept => {
+      accept().on("exec", (acceptExec, _reject, info) => {
+        const channel = acceptExec();
+        channel.on("error", () => {});
+        if (firstExec) { firstExec = false; return; } // No output, exit status or application-initiated close.
+        channel.exit(0);
+        channel.end(info.command === "still-connected" ? Buffer.from("ok") : data);
+      });
+    }));
+  });
+  const ssh = new Client();
+  t.after(async () => {
+    ssh.destroy();
+    for (const connection of connections) connection.end();
+    await new Promise(resolve => server.close(resolve));
+  });
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  await new Promise((resolve, reject) => {
+    ssh.once("ready", resolve);
+    ssh.once("error", reject);
+    ssh.connect({ host: "127.0.0.1", port: server.address().port, username: "packed-test", password,
+      hostHash: "sha256", hostVerifier: hash => hash === fingerprint, readyTimeout: 3000 });
+  });
+  let opened;
+  const channelOpened = new Promise(resolve => { opened = resolve; });
+  const client = { client: { exec(command, callback) {
+    ssh.exec(command, (error, channel) => { callback(error, channel); opened(); });
+  } } };
+  const request = transferId => downloadPacked({ client,
+    payload: { transferId, names: ["compose"], remoteDirectory: "/srv", localDirectory: f.local },
+    encoding: "utf-8", execProbe: async () => ({ stdout: "NC_PACK_TAR" }),
+  });
+  const pending = request("silent-channel");
+  await channelOpened;
+  assert.equal(cancelActive("silent-channel"), true);
+  let timer;
+  const result = await Promise.race([
+    pending,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Cancellation waited for the silent SSH peer")), 1500); }),
+  ]).finally(() => clearTimeout(timer));
+  assert.deepEqual(result, { status: "cancelled" });
+  assert.deepEqual(await fsp.readdir(f.local), []);
+  assert.deepEqual(await fsp.readdir(tempDirBridge.getTempDir()), [".netcatty-managed-temp"]);
+  const output = await new Promise((resolve, reject) => ssh.exec("still-connected", (error, channel) => {
+    if (error) { reject(error); return; }
+    let stdout = "";
+    channel.on("data", chunk => { stdout += chunk; });
+    channel.on("error", reject);
+    channel.on("close", code => code === 0 ? resolve(stdout) : reject(new Error("Shared SSH connection failed")));
+  }));
+  assert.equal(output, "ok");
+  assert.deepEqual(await request("next-download"), { status: "completed" });
+  assert.equal(await fsp.readFile(path.join(f.local, "compose", ".env"), "utf8"), "settings");
+  assert.deepEqual(await fsp.readdir(tempDirBridge.getTempDir()), [".netcatty-managed-temp"]);
 });

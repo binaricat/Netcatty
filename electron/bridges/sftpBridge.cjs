@@ -2718,6 +2718,26 @@ function registerWorkerHandle(ipcMain, terminalWorkerManager, channel, ownership
  */
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
+  const lifecycleApi = require("./sftpBridge/packedDownloadLifecycle.cjs");
+  // The worker's Electron shim deliberately has no BrowserWindow. Queue and
+  // owner state live only in main, where all windows can see/control them.
+  const packedLifecycle = terminalWorkerManager || electronModule?.BrowserWindow
+    ? lifecycleApi.createPackedDownloadLifecycle({
+        broadcast: (update) => require("./transferBridge.cjs").broadcastGlobalTransferEvent(update),
+        cancel: (event, transferId) => terminalWorkerManager
+          ? terminalWorkerManager.request("netcatty:sftp:cancelPacked", { transferId }, { webContentsId: event.sender.id })
+          : cancelPackedSftp(event, { transferId }),
+      })
+    : null;
+  if (packedLifecycle) {
+    lifecycleApi.setPackedDownloadLifecycle(packedLifecycle);
+    ipcMain.handle("netcatty:sftp:registerPacked", packedLifecycle.register);
+    ipcMain.handle("netcatty:sftp:finishPacked", packedLifecycle.finish);
+    terminalWorkerManager?.onWorkerRendererEvent?.((message) => {
+      if (message.channel === "netcatty:sftp:packedProgress") packedLifecycle.progress(message.payload);
+    });
+    terminalWorkerManager?.onWorkerExit?.((error) => packedLifecycle.workerExited(error));
+  }
   const ownership = createRendererSftpOwnership((sftpId, webContentsId) => {
     rendererSftpSourceSessions.delete(sftpId);
     return terminalWorkerManager
@@ -2749,10 +2769,14 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:sftp:chmod",
       "netcatty:sftp:extract",
       "netcatty:sftp:createArchive",
-      "netcatty:sftp:downloadPacked",
-      "netcatty:sftp:cancelPacked",
       "netcatty:sftp:homeDir",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel, ownership));
+    registerActivityHandle(ipcMain, "netcatty:sftp:downloadPacked", (event, payload) => (
+      packedLifecycle.run(event, payload, (ownerEvent, request) => terminalWorkerManager.request(
+        "netcatty:sftp:downloadPacked", request, { webContentsId: ownerEvent.sender.id },
+      ))
+    ), ownership);
+    ipcMain.handle("netcatty:sftp:cancelPacked", (_event, payload) => packedLifecycle.cancel(payload?.transferId));
     return;
   }
   [
@@ -2775,8 +2799,12 @@ function registerHandlers(ipcMain, options = {}) {
     ["netcatty:sftp:chmod", chmodSftp],
     ["netcatty:sftp:extract", extractSftpArchive],
     ["netcatty:sftp:createArchive", createSftpArchive],
-    ["netcatty:sftp:downloadPacked", downloadPackedSftp],
-    ["netcatty:sftp:cancelPacked", cancelPackedSftp],
+    ["netcatty:sftp:downloadPacked", packedLifecycle
+      ? (event, payload) => packedLifecycle.run(event, payload, downloadPackedSftp)
+      : downloadPackedSftp],
+    ["netcatty:sftp:cancelPacked", packedLifecycle
+      ? (_event, payload) => packedLifecycle.cancel(payload?.transferId)
+      : cancelPackedSftp],
     ["netcatty:sftp:homeDir", getSftpHomeDir],
   ].forEach(([channel, handler]) => registerActivityHandle(ipcMain, channel, handler, ownership));
 }

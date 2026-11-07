@@ -17,9 +17,11 @@ inside the local destination. The server never creates an archive file.
    destination, without an extra enclosing folder.
 
 The transfer center shows one task for the selection, with receiving and
-restoring phases. Cancel stops the transfer and removes its temporary local
-data. Packed transfers cannot pause or resume; after a failure or cancellation,
-start a new download from the selection.
+restoring phases, across all open app windows. Cancel from any window stops the
+transfer and removes its temporary local data. Packed transfers cannot pause or
+resume; after a failure or cancellation, start a new download from the selection.
+They continue running during the close/quit confirmation; cancelling that prompt
+does not restart or expand the selected download.
 
 If any selected name already exists in the destination, Netcatty offers to
 choose another destination folder or cancel. Packed downloads do not silently
@@ -54,16 +56,22 @@ that could escape the selected content are rejected.
 
 ## Local staging and cleanup
 
-Netcatty uses a private `.netcatty-download-*` staging directory inside the
-chosen destination. Keeping staging on the destination filesystem allows
-completed folders to be published with a rename after validation. The local
-disk needs room for both the received archive and its extracted contents during
-the operation.
+Netcatty keeps the received archive and extracted contents in a private workspace
+inside its managed temporary directory, including a custom location selected in
+**Settings > System**. Temporary-directory usage includes these files. Cleanup
+skips workspaces owned by a running transfer process.
 
-The staging archive and directory are removed after completion, failure or
-cancellation while the app is running. Closing the SFTP pane does not interrupt
-its queued or active download. Closing, reloading or crashing the owning app
-window cancels its packed downloads and releases their connection leases.
-No archive is created on the remote server, so there is no remote archive to delete. An abrupt process termination
-or power loss can leave local staging data; these hidden directories are not
-completed downloads and can be removed after Netcatty has stopped.
+The temporary disk needs room for both the received archive and its extracted
+contents. If the destination is on the same filesystem, validated folders are
+published with a rename. On another filesystem, Netcatty copies the validated
+contents into exclusively reserved final paths; those paths can be visible while
+copying. A failed or cancelled copy removes only the unchanged entries created by
+that operation and preserves any concurrently added files.
+
+The workspace is removed after completion, failure or cancellation while the app
+is running. Closing the SFTP pane does not interrupt its queued or active
+download. Closing, reloading or crashing the owning app window cancels its packed
+downloads and releases their connection leases. No archive is created on the
+remote server, so there is no remote archive to delete. An abrupt process
+termination or power loss can leave local temporary data; after the owning
+process exits, **Settings > System** can show and clear that data.
