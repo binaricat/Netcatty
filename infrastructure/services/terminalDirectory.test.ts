@@ -2,6 +2,49 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createTerminalDirectoryIO } from './terminalDirectory';
 
+test('native Windows IO requires same-runspace FileSystem reports and fresh confirmation after input', async () => {
+  let revision = 1;
+  let provider = 'FileSystem';
+  let cwd = 'C:\\base';
+  const writes: string[] = [];
+  const reads: string[] = [];
+  const io = createTerminalDirectoryIO({
+    getSessionPwd: async () => ({ success: provider === 'FileSystem', cwd, directoryState: {
+      revision, provider, shellKind: 'powershell', pathFlavor: 'win32', cwd, home: 'C:\\Users\\me',
+    } }),
+    listLocalDir: async path => { reads.push(path); return [{ name: 'child', type: 'directory', size: '', lastModified: '' }]; },
+    realpathLocal: async path => path,
+    writeToSession: (_id, data) => { writes.push(data); },
+  } as unknown as NetcattyBridge, 'native-session', { local: true, hostname: '', username: '', pathFlavor: 'win32' });
+  assert.equal(await io.cwd(), 'C:\\base');
+  assert.deepEqual((await io.list('C:\\base')).entries.map(entry => entry.path), ['C:\\base\\child']);
+  await assert.rejects(io.list('/home'), { code: 'unsupportedPath' });
+  await assert.rejects(io.validateChange!('D:\\stale'), { code: 'unavailable' });
+  await io.validateChange!('C:\\base');
+  io.write('a command\r');
+  await assert.rejects(io.cwd(), { code: 'unknown' });
+  revision++; cwd = 'D:\\actual';
+  assert.equal(await io.cwd(), cwd);
+  provider = 'Registry'; revision++;
+  await assert.rejects(io.cwd(), { code: 'nonFilesystem' });
+  await assert.rejects(io.list('C:\\base'), { code: 'nonFilesystem' });
+  assert.deepEqual(reads, ['C:\\base']);
+  assert.deepEqual(writes, ['a command\r']);
+});
+
+test('Windows local IO never substitutes process cwd or home for absent integration', async () => {
+  let reads = 0;
+  const io = createTerminalDirectoryIO({
+    getSessionPwd: async () => ({ success: true, cwd: 'C:\\guessed-process-cwd' }),
+    listLocalDir: async () => { reads++; return []; },
+    getHomeDir: async () => 'C:\\guessed-home',
+  } as unknown as NetcattyBridge, 'native-session', { local: true, hostname: '', username: '', pathFlavor: 'win32' });
+  await assert.rejects(io.cwd(), { code: 'integrationUnavailable' });
+  await assert.rejects(io.home!(), { code: 'integrationUnavailable' });
+  await assert.rejects(io.list('C:\\base'), { code: 'integrationUnavailable' });
+  assert.equal(reads, 0);
+});
+
 test('remote reads use only the exact terminal connection and always close their channel', async () => {
   const calls: unknown[] = [];
   const bridge = {

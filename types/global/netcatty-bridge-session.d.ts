@@ -243,7 +243,7 @@ declare global {
       skipEcdsaHostKey?: boolean;
       algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
     }): Promise<{ stdout: string; stderr: string; code: number | null }>;
-    /** Get current working directory from an active SSH session */
+    /** Get cwd from the exact SSH transport or local interactive shell. */
     getSessionPwd?(
       sessionId: string,
       options?: {
@@ -251,7 +251,14 @@ declare global {
         allowLoginShellFallback?: boolean;
         timeoutMs?: number;
       },
-    ): Promise<{ success: boolean; cwd?: string; error?: string }>;
+    ): Promise<{ success: boolean; cwd?: string; error?: string; directoryState?: {
+      revision: number;
+      shellKind: 'powershell';
+      pathFlavor: 'win32';
+      provider: string;
+      cwd: string | null;
+      home: string | null;
+    } }>;
     /**
      * Get metadata about an already-connected SSH session — currently the
      * SSH server identification string (the `software` part of the

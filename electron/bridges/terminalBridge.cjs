@@ -63,6 +63,7 @@ const { discoverShells } = require("./shellDiscovery.cjs");
 const { isWindowsAppExecutionAliasPath } = require("../../lib/localShell.cjs");
 const moshHandshake = require("./moshHandshake.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
+const { preparePowerShellDirectoryIntegration } = require('./powerShellDirectoryIntegration.cjs');
 const { createTelnetAutoLogin, isAutoLoginWakeInput } = require("./telnetAutoLogin.cjs");
 const telnetProtocol = require("./telnetProtocol.cjs");
 const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
@@ -1054,16 +1055,33 @@ async function startLocalSession(event, payload) {
     }
   }
   
-  const proc = pty.spawn(shell, shellArgs, {
-    name: env.TERM || "xterm-256color",
-    cols: payload?.cols || 80,
-    rows: payload?.rows || 24,
-    env,
-    cwd,
-    encoding: null, // Return Buffer for ZMODEM binary support
-    // node-pty can only clear ConPTY through its bundled conpty.dll.
-    useConptyDll: process.platform === "win32",
-  });
+  const directoryIntegration = preparePowerShellDirectoryIntegration(shell, shellArgs);
+  let proc;
+  try {
+    proc = pty.spawn(shell, directoryIntegration?.args ?? shellArgs, {
+      name: env.TERM || "xterm-256color",
+      cols: payload?.cols || 80,
+      rows: payload?.rows || 24,
+      env: { ...env, ...directoryIntegration?.env },
+      cwd,
+      encoding: null, // Return Buffer for ZMODEM binary support
+      // node-pty can only clear ConPTY through its bundled conpty.dll.
+      useConptyDll: process.platform === "win32",
+    });
+  } catch (error) {
+    directoryIntegration?.cleanup();
+    throw error;
+  }
+  directoryIntegration?.reader.setProcessId(proc.pid);
+  if (directoryIntegration) {
+    // All writers (interactive input, snippets and AI exec) share this PTY.
+    // Invalidate at the transport boundary, including direct proc/pty writes.
+    const write = proc.write.bind(proc);
+    proc.write = (data) => {
+      if (!isTerminalReportSequence(data) && /[\r\n\x03]/.test(String(data))) directoryIntegration.reader.invalidate();
+      return write(data);
+    };
+  }
   
   const session = {
     proc,
@@ -1082,6 +1100,7 @@ async function startLocalSession(event, payload) {
     label: "Local Terminal",
     shellExecutable: shell,
     shellKind,
+    directoryIntegration: directoryIntegration?.reader,
     flushPendingData: null,
     lastIdlePrompt: "",
     lastIdlePromptAt: 0,
@@ -1090,6 +1109,7 @@ async function startLocalSession(event, payload) {
   const { claimSessionSlot } = require("./sessionBootEpoch.cjs");
   const claim = claimSessionSlot(sessions, sessionId, session, payload?.bootEpoch);
   if (!claim.ok) {
+    directoryIntegration?.cleanup();
     try { proc.kill(); } catch { /* ignore */ }
     const supersededError = new Error("Local session superseded by a newer reconnect");
     supersededError.code = "NETCATTY_BOOT_SUPERSEDED";
@@ -1176,9 +1196,11 @@ async function startLocalSession(event, payload) {
     proc.onData((data) => {
       if (sessions.get(sessionId) !== session) return;
       if (!shouldProcessSessionOutput(session)) return;
-      trackSessionIdlePrompt(session, data);
-      bufferLocalData(data);
-      sessionLogStreamManager.appendData(sessionId, data);
+      const visibleData = session.directoryIntegration?.consume(data) ?? data;
+      if (!visibleData) return;
+      trackSessionIdlePrompt(session, visibleData);
+      bufferLocalData(visibleData);
+      sessionLogStreamManager.appendData(sessionId, visibleData);
     });
   }
 
@@ -1187,6 +1209,7 @@ async function startLocalSession(event, payload) {
     const finalizeExit = () => {
       if (localExitFinalized) return;
       localExitFinalized = true;
+      directoryIntegration?.cleanup();
       sessionLogStreamManager.stopStream(sessionId, logStreamToken);
       if (sessions.get(sessionId) !== session) return;
       ptyProcessTree.unregisterPid(sessionId);
