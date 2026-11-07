@@ -264,11 +264,17 @@ export function retargetWorkspaceActiveChatAfterMemberLoss<T extends AISessionSc
   if (survivorTerminalIds.size === 0) {
     const activeSession = input.sessions.find((session) => session.id === workspaceActive);
     const ownerId = activeSession?.scope.targetId;
-    // Preserve only the current inherited chat whose last owning terminal
-    // actually closed. A detached terminal keeps its own chat and selection.
+    // A member may have resumed history from an older terminal. Match its
+    // current selection as well as the original scope owner when preserving
+    // that inherited chat. Still-live detached members keep their selection.
+    const carryingTerminalIds = departedTerminalIds.filter((terminalId) => (
+      terminalId === ownerId
+      || previousMap[buildAIScopeKey('terminal', terminalId)] === workspaceActive
+    ));
     if (!activeSession || activeSession.scope.type !== 'terminal' || !ownerId
-      || !departedTerminalIds.includes(ownerId)
-      || !input.activeTargetIds || input.activeTargetIds.has(ownerId)) {
+      || carryingTerminalIds.length === 0
+      || !input.activeTargetIds || input.activeTargetIds.has(ownerId)
+      || carryingTerminalIds.some((terminalId) => input.activeTargetIds!.has(terminalId))) {
       return { activeSessionIdMap: previousMap, sessions: input.sessions as T[], changed: false };
     }
     const nextMap = { ...previousMap };

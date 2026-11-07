@@ -62,14 +62,14 @@ test('mounted workspace chat survives last-member close without defeating detach
   const { readPanel } = await import(contentUrl);
   const scopeKey = 'workspace:workspace';
 
-  for (const scenario of ['close', 'close-inherited', 'detach', 'out-of-scope'] as const) {
+  for (const scenario of ['close', 'close-inherited', 'close-resumed', 'detach', 'detach-resumed', 'out-of-scope'] as const) {
     await t.test(scenario, async () => {
       dom.window.localStorage.clear();
       const idb = installFakeIndexedDb();
       __resetIdbPersistenceForTests();
       const chat: AISession = {
         id: `chat-${scenario}`, title: 'Inherited conversation', agentId: 'catty',
-        scope: { type: 'terminal', targetId: 'terminal', hostIds: ['host'] },
+        scope: { type: 'terminal', targetId: scenario.endsWith('resumed') ? 'old-terminal' : 'terminal', hostIds: ['host'] },
         messages: [{ id: 'message', role: 'user', content: 'Keep this question', timestamp: 1 }],
         createdAt: 1, updatedAt: 2,
       };
@@ -123,7 +123,7 @@ test('mounted workspace chat survives last-member close without defeating detach
         const snapshot = getAISessionsSnapshot();
         if (scenario.startsWith('close')) {
           assert.equal(snapshot.sessions.find(session => session.id === chat.id)?.scope.type, 'workspace');
-          if (scenario === 'close') assert.equal(snapshot.panelViewByScope[scopeKey]?.mode, 'session', 'passive normalization must not overwrite the handoff');
+          if (scenario !== 'close-inherited') assert.equal(snapshot.panelViewByScope[scopeKey]?.mode, 'session', 'passive normalization must not overwrite the handoff');
           else assert.notEqual(snapshot.panelViewByScope[scopeKey]?.mode, 'draft');
           assert.equal(snapshot.activeSessionIdMap[scopeKey], chat.id);
           assert.equal(readPanel().activeSessionId, chat.id);
@@ -142,7 +142,7 @@ test('mounted workspace chat survives last-member close without defeating detach
           assert.equal(snapshot.panelViewByScope[scopeKey]?.mode, 'draft');
           assert.equal(snapshot.activeSessionIdMap[scopeKey], null);
           assert.equal(snapshot.sessions.find(session => session.id === chat.id)?.scope.type, 'terminal');
-          if (scenario === 'detach') assert.equal(snapshot.activeSessionIdMap['terminal:terminal'], chat.id);
+          if (scenario.startsWith('detach')) assert.equal(snapshot.activeSessionIdMap['terminal:terminal'], chat.id);
         }
       } finally {
         await act(async () => root.unmount());

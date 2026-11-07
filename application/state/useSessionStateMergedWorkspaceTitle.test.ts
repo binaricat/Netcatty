@@ -4,6 +4,10 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import { useSessionState } from "./useSessionState.ts";
+import { installTestLocalStorage } from "./testSupport/localStorage.ts";
+import { collectSessionIds } from "../../domain/workspace.ts";
+
+test.beforeEach((t) => { t.after(installTestLocalStorage()); });
 
 type SessionState = ReturnType<typeof useSessionState>;
 
@@ -120,6 +124,15 @@ test("merged tab titles follow the workspace lifecycle until the user renames it
   });
   assert.equal(workspace(workspaceId).title, "Pinned");
   assert.equal(workspace(workspaceId).generatedTitle, false);
+
+  await act(async () => { current().closeSession(firstSessionId); });
+  assert.equal(workspace(workspaceId).title, "Pinned");
+  assert.deepEqual(collectSessionIds(workspace(workspaceId).root), [secondSessionId]);
+  assert.equal(current().sessions.find(session => session.id === secondSessionId)?.workspaceId, workspaceId);
+  await act(async () => { current().closeSession(secondSessionId); });
+  assert.equal(workspace(workspaceId).title, "Pinned");
+  assert.equal(workspace(workspaceId).generatedTitle, false);
+  assert.deepEqual(collectSessionIds(workspace(workspaceId).root), []);
 
   let leftBaseSessionId = "";
   let leftJoiningSessionId = "";
