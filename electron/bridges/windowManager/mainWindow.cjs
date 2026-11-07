@@ -7,7 +7,7 @@ const perfTrace = require("../../perfTrace.cjs");
 
 const TERMINAL_KEYBOARD_FOCUS = Symbol("netcattyTerminalKeyboardFocus");
 
-// #3647: the 1100×640 layout minimum is larger than the usable workspace on
+// #3647: the layout minimum can be larger than the usable workspace on
 // small laptops (e.g. 1366×768 at 125% Windows scaling leaves only ~1093×574
 // logical px), which made those windows impossible to fit — let alone shrink.
 // Keep the layout minimum on capable screens, but shrink it to the work area
@@ -33,14 +33,19 @@ function pickTargetDisplay(screenModule, bounds) {
 }
 
 function resolveWindowMinimumSize(screenModule, minWidth, minHeight, bounds) {
+  let display;
+  try {
+    display = bounds ? pickTargetDisplay(screenModule, bounds) : screenModule?.getPrimaryDisplay?.();
+  } catch {
+    // screen unavailable (e.g. before app ready): keep the static minimums
+  }
+  return minimumSizeForDisplay(display, minWidth, minHeight);
+}
+
+function minimumSizeForDisplay(display, minWidth, minHeight) {
   let effectiveWidth = minWidth;
   let effectiveHeight = minHeight;
   try {
-    // Size for the display the window actually lives on (saved position or
-    // current placement), falling back to the primary display.
-    const display = bounds
-      ? pickTargetDisplay(screenModule, bounds)
-      : screenModule?.getPrimaryDisplay?.();
     const workArea = display?.workArea;
     if (Number.isFinite(workArea?.width) && workArea.width > 0) {
       effectiveWidth = Math.min(effectiveWidth, Math.floor(workArea.width * MIN_SIZE_FIT_FACTOR));
@@ -55,6 +60,52 @@ function resolveWindowMinimumSize(screenModule, minWidth, minHeight, bounds) {
     width: Math.max(MIN_WINDOW_FLOOR_WIDTH, effectiveWidth),
     height: Math.max(MIN_WINDOW_FLOOR_HEIGHT, effectiveHeight),
   };
+}
+
+function intersectsBounds(a, b) {
+  return b && a.x < b.x + b.width && a.x + a.width > b.x
+    && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+// Initial normal bounds only: live display recovery and manual placement keep
+// their existing lifecycle. Electron screen coordinates are already DIPs.
+function resolveStartupBounds(screenModule, savedState, defaults, minWidth, minHeight) {
+  const savedPosition = savedState && Number.isFinite(savedState.x) && Number.isFinite(savedState.y)
+    ? savedState : null;
+  let display;
+  try {
+    display = screenModule?.getPrimaryDisplay?.();
+    if (savedPosition) {
+      const matched = pickTargetDisplay(screenModule, savedPosition);
+      // getDisplayMatching returns the nearest screen even for removed displays.
+      // Only select it when the saved rectangle actually intersects that screen.
+      if (intersectsBounds(savedPosition, matched?.bounds)) display = matched;
+    }
+  } catch {
+    // Keep static sizes when Electron cannot supply a display.
+  }
+  const minimum = minimumSizeForDisplay(display, minWidth, minHeight);
+  const workArea = display?.workArea;
+  const bounds = {};
+  for (const axis of ["width", "height"]) {
+    const intended = savedState?.[axis] ?? defaults[axis];
+    const available = workArea?.[axis];
+    bounds[axis] = Math.max(minimum[axis], Number.isFinite(available) && available > 0 && intended > available
+      ? Math.floor(available * MIN_SIZE_FIT_FACTOR)
+      : intended);
+  }
+  if (savedPosition && workArea) {
+    bounds.x = savedPosition.x;
+    bounds.y = savedPosition.y;
+    // Preserve all usable placements, including negative monitor origins and
+    // partial overlap. Resizing can make a previously visible position unusable.
+    if (!intersectsBounds(bounds, workArea)) {
+      for (const [axis, size] of [["x", "width"], ["y", "height"]]) {
+        bounds[axis] = Math.max(workArea[axis], Math.min(bounds[axis], workArea[axis] + workArea[size] - bounds[size]));
+      }
+    }
+  }
+  return { bounds, minimum };
 }
 
 // Keep the BrowserWindow minimum in sync with the display it currently lives
@@ -207,56 +258,14 @@ function createMainWindowApi(ctx) {
     
       // Load saved window state
       const savedState = persistWindowState ? loadWindowState() : null;
-      let windowBounds = {
-        width: DEFAULT_WINDOW_WIDTH,
-        height: DEFAULT_WINDOW_HEIGHT,
-      };
-    
-      // Size the minimum to the display the restored window will live on
-      // (a saved position may target a smaller secondary display), falling
-      // back to the primary display when there is no usable saved position.
-      const savedTargetBounds = savedState && Number.isFinite(savedState.x) && Number.isFinite(savedState.y)
-        ? { x: savedState.x, y: savedState.y, width: savedState.width, height: savedState.height }
-        : null;
-      const windowMinimumSize = resolveWindowMinimumSize(
+      const { bounds: windowBounds, minimum: windowMinimumSize } = resolveStartupBounds(
         screen,
+        savedState,
+        { width: DEFAULT_WINDOW_WIDTH, height: DEFAULT_WINDOW_HEIGHT },
         MIN_WINDOW_WIDTH,
         MIN_WINDOW_HEIGHT,
-        savedTargetBounds,
       );
 
-      if (savedState) {
-        // Use saved dimensions, but clamp to the minimum so a previously
-        // shrunk window from an older build cannot start below the minimum.
-        windowBounds.width = Math.max(savedState.width, windowMinimumSize.width);
-        windowBounds.height = Math.max(savedState.height, windowMinimumSize.height);
-    
-        // Only use saved position if the screen is available at that location
-        if (typeof savedState.x === "number" && typeof savedState.y === "number") {
-          try {
-            // Check if the saved position is within any available display
-            const displays = screen?.getAllDisplays?.() || [];
-            const isPositionVisible = displays.some((display) => {
-              const { x, y, width, height } = display.bounds;
-              // Check if at least part of the window would be visible on this display
-              return (
-                savedState.x < x + width &&
-                savedState.x + savedState.width > x &&
-                savedState.y < y + height &&
-                savedState.y + savedState.height > y
-              );
-            });
-    
-            if (isPositionVisible) {
-              windowBounds.x = savedState.x;
-              windowBounds.y = savedState.y;
-            }
-          } catch {
-            // Ignore screen check errors, just don't set position
-          }
-        }
-      }
-    
       const windowsChrome = !isMac ? windowsFramelessContentChromeOptions() : {};
 
       perfTrace.mark("main:create-window");

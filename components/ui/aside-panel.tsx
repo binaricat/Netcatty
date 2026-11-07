@@ -370,14 +370,21 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
         resizable ? readPersistedAsideWidth(persistWidthStorageKey, fallbackWidthPx) : fallbackWidthPx,
     );
     const [isResizing, setIsResizing] = useState(false);
+    const resizeCleanupRef = React.useRef<(() => void) | null>(null);
+    React.useEffect(() => () => resizeCleanupRef.current?.(), [open]);
     const effectivePanelWidthPx = resizable ? panelWidthPx : fallbackWidthPx;
+    // Only containers opting into this constraint limit the rendered width.
+    // Keep the animation's final minimum on the same cap as its width.
+    const renderedWidth = resizable && layout === 'inline'
+        ? `min(${effectivePanelWidthPx}px, var(--aside-inline-max-width, ${effectivePanelWidthPx}px))`
+        : `${effectivePanelWidthPx}px`;
     // Resizable panels always use pixel width so overlay and inline share the same drag path.
     const usesPixelWidth = resizable || layout === 'inline';
 
     const panelStyle = usesPixelWidth
         ? ({
-            width: `${effectivePanelWidthPx}px`,
-            ['--aside-inline-width' as string]: `${effectivePanelWidthPx}px`,
+            width: renderedWidth,
+            ['--aside-inline-width' as string]: renderedWidth,
         } as React.CSSProperties)
         : undefined;
 
@@ -386,9 +393,12 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
 
         event.preventDefault();
         event.stopPropagation();
+        resizeCleanupRef.current?.();
 
         const startX = event.clientX;
-        const startWidth = panelWidthPx;
+        const startWidth = layout === 'inline'
+            ? event.currentTarget.parentElement?.getBoundingClientRect().width || panelWidthPx
+            : panelWidthPx;
         const previousCursor = document.body.style.cursor;
         const previousUserSelect = document.body.style.userSelect;
 
@@ -397,26 +407,35 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
         document.body.style.userSelect = 'none';
 
         const handlePointerMove = (moveEvent: PointerEvent) => {
-            setPanelWidthPx(clampAsideInlineWidth(startWidth + startX - moveEvent.clientX));
+            setPanelWidthPx(moveEvent.clientX === startX ? panelWidthPx
+                : clampAsideInlineWidth(startWidth + startX - moveEvent.clientX));
         };
         const handlePointerUp = (upEvent: PointerEvent) => {
+            cleanup();
+            // A handle click is not a request to forget a larger preference.
+            if (upEvent.clientX === startX) return;
             const nextWidth = clampAsideInlineWidth(startWidth + startX - upEvent.clientX);
             setPanelWidthPx(nextWidth);
             if (persistWidthStorageKey) {
                 localStorageAdapter.writeNumber(persistWidthStorageKey, nextWidth);
             }
+        };
+        const cleanup = () => {
+            resizeCleanupRef.current = null;
+            setPanelWidthPx(panelWidthPx);
             setIsResizing(false);
             document.body.style.cursor = previousCursor;
             document.body.style.userSelect = previousUserSelect;
             window.removeEventListener('pointermove', handlePointerMove);
             window.removeEventListener('pointerup', handlePointerUp);
-            window.removeEventListener('pointercancel', handlePointerUp);
+            window.removeEventListener('pointercancel', cleanup);
         };
 
+        resizeCleanupRef.current = cleanup;
         window.addEventListener('pointermove', handlePointerMove);
         window.addEventListener('pointerup', handlePointerUp);
-        window.addEventListener('pointercancel', handlePointerUp);
-    }, [panelWidthPx, persistWidthStorageKey, resizable]);
+        window.addEventListener('pointercancel', cleanup);
+    }, [layout, panelWidthPx, persistWidthStorageKey, resizable]);
 
     if (!open) return null;
 
