@@ -142,6 +142,31 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   const selectedRef = useRef<HTMLDivElement>(null);
   const [hoveredIndex, setHoveredIndex] = useState(-1);
   const [measuredSize, setMeasuredSize] = useState<{ width: number; height: number } | null>(null);
+  const hoverClearTimerRef = useRef<number | null>(null);
+
+  const cancelHoverClear = () => {
+    if (hoverClearTimerRef.current === null) return;
+    window.clearTimeout(hoverClearTimerRef.current);
+    hoverClearTimerRef.current = null;
+  };
+
+  // Rows and the detail panel are separate boxes with a small gap. Keep the
+  // hovered row alive briefly so moving the pointer into the detail panel does
+  // not unmount the panel before it can be read, selected, or scrolled.
+  const scheduleHoverClear = () => {
+    cancelHoverClear();
+    hoverClearTimerRef.current = window.setTimeout(() => {
+      hoverClearTimerRef.current = null;
+      setHoveredIndex(-1);
+    }, 400);
+  };
+
+  useEffect(() => () => {
+    if (hoverClearTimerRef.current !== null) {
+      window.clearTimeout(hoverClearTimerRef.current);
+      hoverClearTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (selectedRef.current && listRef.current) {
@@ -154,6 +179,10 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
 
   // Reset hover when suggestions change
   useEffect(() => {
+    if (hoverClearTimerRef.current !== null) {
+      window.clearTimeout(hoverClearTimerRef.current);
+      hoverClearTimerRef.current = null;
+    }
     setHoveredIndex(-1);
   }, [suggestions]);
 
@@ -466,8 +495,11 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
                 gap: "8px",
                 lineHeight: "1.4",
               }}
-              onMouseEnter={() => setHoveredIndex(index)}
-              onMouseLeave={() => setHoveredIndex(-1)}
+              onMouseEnter={() => {
+                cancelHoverClear();
+                setHoveredIndex(index);
+              }}
+              onMouseLeave={scheduleHoverClear}
               onMouseDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -650,12 +682,22 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
             overflowY: "auto",
             alignSelf: renderUpward ? "flex-end" : "flex-start",
             visibility: detailVisible ? "visible" : "hidden",
+            // The detail text can be selected and copied; use text cursor and
+            // native selection instead of forcing terminal focus.
+            userSelect: "text",
+            cursor: "text",
             // visibility:hidden already skips hit testing, but keep the
             // hidden reserve explicitly non-interactive so the mounted
             // panel can never swallow clicks meant for the terminal.
             pointerEvents: detailVisible ? "auto" : "none",
           }}
-          onMouseDown={handlePanelMouseDown}
+          onMouseDown={(event) => {
+            // Do not preventDefault: that would block selecting the long
+            // description or dragging the panel's scrollbar.
+            event.stopPropagation();
+          }}
+          onMouseEnter={cancelHoverClear}
+          onMouseLeave={scheduleHoverClear}
           onWheel={handlePanelWheel}
         >
           {detailVisible && detailItem && (
