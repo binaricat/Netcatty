@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createTerminalDirectoryController } from './terminalDirectoryController';
 import { terminalCwdStore } from './terminalCwdStore';
 import type { TerminalDirectoryIO } from '../../infrastructure/services/terminalDirectory';
+import { directoryChangeCommand, COMPLETE_DIRECTORY_CAPABILITIES } from '../../domain/directoryPicker';
 
 function setup(overrides: Partial<TerminalDirectoryIO> = {}) {
   let cwd = '/old'; let ready = true; let current = true;
@@ -17,6 +18,45 @@ function setup(overrides: Partial<TerminalDirectoryIO> = {}) {
   });
   return { controller, writes, published, busy: () => { ready = false; }, stale: () => { current = false; } };
 }
+
+test('capabilities prohibit writes even when a cwd can be displayed', async () => {
+  let writes = 0;
+  const controller = createTerminalDirectoryController({
+    sessionId: 'read-only', isCurrent: () => true, isReady: () => true, publish() {},
+    capabilities: { ...COMPLETE_DIRECTORY_CAPABILITIES, changeDirectory: false },
+    io: { cwd: async () => '/base', list: async () => ({ entries: [], home: null }),
+      realpath: async value => value, write() { writes++; } },
+  });
+  assert.equal(await controller.refresh(), '/base');
+  await assert.rejects(controller.change('/next', new AbortController().signal, () => {}), { code: 'unavailable' });
+  assert.equal(writes, 0);
+  controller.dispose();
+});
+
+test('Win32 adapters confirm actual native cwd and reject stale revisions or foreign namespace reports', async t => {
+  const id = 'win32-controller';
+  const writes: string[] = [];
+  let cwd = 'C:\\base';
+  terminalCwdStore.setCwd(id, cwd, 'backend-strict');
+  const controller = createTerminalDirectoryController({
+    sessionId: id, target: { authority: 'local:windows-generation', pathFlavor: 'win32' },
+    buildChangeCommand: path => directoryChangeCommand(path, 'powershell', 'win32'),
+    isCurrent: () => true, isReady: () => true,
+    io: { cwd: async () => cwd, list: async () => ({ entries: [], home: null }),
+      realpath: async value => value, write(data) { writes.push(data); cwd = "D:\\O'Brien"; } },
+    publish: value => terminalCwdStore.setCwd(id, value, 'backend-strict'),
+  });
+  t.after(() => controller.dispose());
+  const revision = terminalCwdStore.getSessionRevision(id);
+  terminalCwdStore.setCwd(id, 'C:\\other', 'backend-strict');
+  terminalCwdStore.setCwd(id, 'C:\\base', 'backend-strict');
+  await assert.rejects(controller.change("D:\\O'Brien", new AbortController().signal, () => {}, 'C:\\base', revision), { code: 'unavailable' });
+  await assert.rejects(controller.change('/foreign-posix', new AbortController().signal, () => {}), { code: 'unsupportedPath' });
+  assert.deepEqual(writes, []);
+  await controller.change("D:\\O'Brien", new AbortController().signal, () => {}, 'C:\\base');
+  assert.deepEqual(writes, ["Microsoft.PowerShell.Management\\Set-Location -LiteralPath 'D:\\O''Brien'\r"]);
+  assert.equal(terminalCwdStore.getCwd(id), "D:\\O'Brien");
+});
 
 test('navigation writes one quoted cd and waits for actual cwd before confirming', async () => {
   const ctx = setup(); const accepted: string[] = [];

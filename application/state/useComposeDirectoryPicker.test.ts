@@ -6,9 +6,42 @@ import { useComposeDirectoryPicker } from './useComposeDirectoryPicker';
 import { createTerminalDirectoryController } from './terminalDirectoryController';
 import { refreshObservedTerminalDirectory, registerTerminalDirectory } from './terminalDirectoryRegistry';
 import { terminalCwdStore } from './terminalCwdStore';
-import { DirectoryPickerError } from '../../domain/directoryPicker';
+import { DirectoryPickerError, directoryChangeCommand } from '../../domain/directoryPicker';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+
+test('PowerShell non-filesystem reports clear an open menu and recover after returning to FileSystem', async t => {
+  const id = 'hook-powershell-provider';
+  let filesystem = true;
+  const controller = createTerminalDirectoryController({
+    sessionId: id, target: { authority: 'local:ps', pathFlavor: 'win32' },
+    buildChangeCommand: path => directoryChangeCommand(path, 'powershell', 'win32'),
+    isCurrent: () => true, isReady: () => true,
+    io: { cwd: async () => { if (!filesystem) throw new DirectoryPickerError('nonFilesystem'); return 'C:\\base'; },
+      home: async () => 'C:\\base', realpath: async value => value, write() {},
+      list: async () => ({ home: 'C:\\base', entries: [{ name: 'child', path: 'C:\\base\\child', hidden: false }] }) },
+    publish: cwd => terminalCwdStore.setCwd(id, cwd, 'backend-strict'),
+  });
+  const unregister = registerTerminalDirectory(id, controller);
+  let model!: ReturnType<typeof useComposeDirectoryPicker>;
+  function Harness() { model = useComposeDirectoryPicker(id); return null; }
+  let root!: ReactTestRenderer;
+  await act(async () => { root = create(React.createElement(Harness)); });
+  t.after(async () => { await act(async () => { root.unmount(); }); unregister(); });
+  await act(async () => { model.setOpen(true); });
+  assert.equal(model.pathFlavor, 'win32');
+  assert.equal(model.parent, 'C:\\');
+  assert.equal(model.entries.length, 1);
+  await act(async () => { filesystem = false; await controller.refresh().catch(() => {}); });
+  assert.equal(model.cwd, null);
+  assert.equal(model.home, null);
+  assert.equal(model.error, 'nonFilesystem');
+  assert.deepEqual(model.entries, []);
+  await act(async () => { filesystem = true; await controller.refresh(); });
+  assert.equal(model.cwd, 'C:\\base');
+  assert.equal(model.error, null);
+  assert.equal(model.entries.length, 1);
+});
 
 test('opening loads children once; search is local; unmount stops chip refresh demand', async () => {
   let reads = 0; let probes = 0;

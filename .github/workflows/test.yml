@@ -155,5 +155,12 @@ jobs:
           NETCATTY_SSH_TEST_RUNTIME: electron
         run: node --test electron/bridges/sshChaChaTransport.test.cjs
 
+      - name: Exercise native PowerShell directory navigation in ConPTY
+        env:
+          NETCATTY_DIRECTORY_WINDOWS_LIVE: "1"
+        run: |
+          $env:NETCATTY_TEST_PWSH = (Get-Command pwsh -ErrorAction Stop).Source
+          node --test --test-force-exit --import tsx infrastructure/services/terminalDirectory.windows.test.ts
+
       - name: Exercise two SSH password prompts in the desktop app
         run: node scripts/terminal-broadcast-ssh.live.cjs

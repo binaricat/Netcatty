@@ -6,6 +6,7 @@ import { resolveAutocompleteQueryInput } from "./autocomplete/terminalAutocomple
 import { getSnippetSuggestions } from "./autocomplete/snippetCompleter.ts";
 import { stringCellWidth } from "./autocomplete/terminalStringCellWidth.ts";
 import { getCommandToRecordOnEnter } from "./autocomplete/useTerminalAutocomplete.ts";
+import { isIdleShellReadyForCommandInjection } from '../../domain/terminalCommandInjectionReady';
 
 function createFakeTerm(lineText: string, cursorX: number) {
   return {
@@ -57,6 +58,44 @@ function createWrappedFakeTerm(rows: string[], cursorY: number, cursorX: number,
     },
   };
 }
+
+test('long native Windows paths remain empty shell prompts for directory navigation', () => {
+  const prompts = [
+    String.raw`PS C:\Users\tester\git\Netcatty-directory-picker> `,
+    String.raw`PS C:\Projects\${'long-directory-'.repeat(20)}> `,
+    String.raw`C:\Projects\a directory with spaces\nested\working-copy>`,
+    String.raw`PS \\server\share\a directory with spaces\working-copy> `,
+  ];
+  for (const prompt of prompts) {
+    const detected = detectPrompt(createPaddedFakeTerm(prompt, stringCellWidth(prompt), 512) as never);
+    assert.equal(detected.isAtPrompt, true, prompt);
+    assert.equal(detected.promptText, prompt, prompt);
+    assert.equal(detected.userInput, '', prompt);
+    const ready = { hasLiveTerminal: true, alternateScreenActive: false,
+      isAtPrompt: detected.isAtPrompt, userInputLength: detected.userInput.length, pendingTypedInputLength: 0 };
+    assert.equal(isIdleShellReadyForCommandInjection(ready), true, prompt);
+    assert.equal(isIdleShellReadyForCommandInjection({ ...ready, sensitiveInputActive: true }), false);
+    assert.equal(isIdleShellReadyForCommandInjection({ ...ready, alternateScreenActive: true }), false);
+    assert.equal(isIdleShellReadyForCommandInjection({ ...ready, pendingTypedInputLength: 1 }), false);
+    const command = prompt + 'echo > output';
+    const typed = detectPrompt(createPaddedFakeTerm(command, stringCellWidth(command), 512) as never);
+    assert.equal(typed.promptText, prompt);
+    assert.equal(typed.userInput, 'echo > output');
+  }
+});
+
+test('wrapped Windows directory prompts preserve the boundary and typed input', () => {
+  const prompt = String.raw`PS C:\Projects\deep\working-copy\nested-directory> `;
+  for (const input of ['', 'echo > output']) {
+    const content = prompt + input;
+    const cols = 24;
+    const rows = content.match(new RegExp(`.{1,${cols}}`, 'g'))!;
+    const result = detectPrompt(createWrappedFakeTerm(rows, rows.length - 1, rows.at(-1)!.length, cols) as never);
+    assert.equal(result.isAtPrompt, true);
+    assert.equal(result.promptText, prompt);
+    assert.equal(result.userInput, input);
+  }
+});
 
 test("keeps raw input when a standard shell prompt echo is still behind", () => {
   const term = createFakeTerm("$ do", 4);

@@ -1,33 +1,49 @@
 import type { RemoteFile } from './models';
 import { resolveInteractiveTerminalCdIntent } from './sessionRestore';
+import { isAbsoluteDirectoryPath, joinDirectoryPath, labelDirectoryPath, parentDirectoryPath, type DirectoryPathFlavor } from './directoryPath';
 
 export type DirectoryEntry = { name: string; path: string; hidden: boolean };
-export type DirectoryPickerErrorCode = 'unavailable' | 'unknown' | 'busy' | 'readFailed' | 'changeFailed' | 'unsupportedPath';
+export type DirectoryPickerErrorCode = 'unavailable' | 'unknown' | 'busy' | 'readFailed' | 'changeFailed' | 'unsupportedPath' | 'integrationUnavailable' | 'nonFilesystem';
 
 export class DirectoryPickerError extends Error {
   constructor(public readonly code: DirectoryPickerErrorCode) { super(code); }
 }
 
-export function isDirectoryPath(path: string | null | undefined): path is string {
-  return typeof path === 'string' && path.startsWith('/') && !!resolveInteractiveTerminalCdIntent(path);
+export function isDirectoryPath(path: string | null | undefined, flavor: DirectoryPathFlavor = 'posix'): path is string {
+  return isAbsoluteDirectoryPath(path, flavor);
 }
 
-export function directoryParent(path: string): string | null {
-  const trimmed = path.replace(/\/+$/, '') || '/';
-  return trimmed === '/' ? null : trimmed.slice(0, trimmed.lastIndexOf('/')) || '/';
+export function directoryParent(path: string, flavor: DirectoryPathFlavor = 'posix'): string | null {
+  return parentDirectoryPath(path, flavor);
 }
 
-export function directoryLabel(path: string, home?: string | null): string {
-  const prefix = home?.replace(/\/+$/, '');
-  if (prefix && (path === prefix || path.startsWith(prefix + '/'))) return '~' + path.slice(prefix.length);
-  return path;
+export function directoryLabel(path: string, home?: string | null, flavor: DirectoryPathFlavor = 'posix'): string {
+  return labelDirectoryPath(path, home, flavor);
 }
 
-export function directoryEntries(path: string, files: readonly RemoteFile[]): DirectoryEntry[] {
+export function directoryEntries(path: string, files: readonly RemoteFile[], flavor: DirectoryPathFlavor = 'posix'): DirectoryEntry[] {
   return files.filter(file => file.type === 'directory' || (file.type === 'symlink' && file.linkTarget === 'directory'))
-    .filter(file => file.name !== '.' && file.name !== '..' && !file.name.includes('/') && file.name.length > 0)
-    .map(file => ({ name: file.name, path: (path === '/' ? '' : path.replace(/\/+$/, '')) + '/' + file.name,
-      hidden: file.hidden === true || file.name.startsWith('.') }));
+    .flatMap(file => {
+      const child = joinDirectoryPath(path, file.name, flavor);
+      return child ? [{ name: file.name, path: child, hidden: file.hidden === true || file.name.startsWith('.') }] : [];
+    });
+}
+
+export type DirectoryCapabilities = Readonly<{
+  readCwd: boolean; listDirectories: boolean; changeDirectory: boolean; confirmChange: boolean;
+}>;
+
+export const COMPLETE_DIRECTORY_CAPABILITIES: DirectoryCapabilities = Object.freeze({
+  readCwd: true, listDirectories: true, changeDirectory: true, confirmChange: true,
+});
+
+/** A shell adapter constructs input for the original interactive shell. */
+export function directoryChangeCommand(path: string, shell: 'posix' | 'powershell', flavor: DirectoryPathFlavor): string | null {
+  if (!isDirectoryPath(path, flavor)) return null;
+  // PowerShell recognizes smart single quotes as delimiters too. Doubling
+  // only ASCII apostrophes would let a filename terminate the literal.
+  if (shell === 'powershell') return `Microsoft.PowerShell.Management\\Set-Location -LiteralPath '${path.replace(/['\u2018\u2019\u201a\u201b]/g, quote => quote + quote)}'`;
+  return flavor === 'posix' ? resolveInteractiveTerminalCdIntent(path)?.command ?? null : null;
 }
 
 const names = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });

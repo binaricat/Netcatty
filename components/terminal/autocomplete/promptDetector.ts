@@ -604,6 +604,11 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
     if (wrappedPrefix && (isSensitiveTerminalChallenge(wrappedPrefix) || isNonPromptLine(wrappedPrefix))) {
       return NO_PROMPT;
     }
+    const windowsBoundary = wrappedPrefix ? findWindowsPathPromptBoundary(wrappedPrefix) : -1;
+    if (windowsBoundary >= 0 && wrappedPrefix) {
+      const userInput = wrappedPrefix.slice(windowsBoundary);
+      return { isAtPrompt: true, promptText: wrappedPrefix.slice(0, windowsBoundary), userInput, cursorOffset: userInput.length };
+    }
   }
 
   // Empty line
@@ -751,6 +756,8 @@ function isSpacedPromptSegment(lineText: string, boundary: number): boolean {
  * Returns the character index where user input begins, or -1 if no prompt detected.
  */
 function findPromptBoundary(lineText: string): number {
+  const windowsBoundary = findWindowsPathPromptBoundary(lineText);
+  if (windowsBoundary >= 0) return windowsBoundary;
   // Scan for prompt boundary. Take the LAST candidate.
   // For ambiguous chars like >, limit scan to first 60% to avoid matching redirections.
   // For unambiguous prompt chars ($, #), scan the full line since they're rarely
@@ -875,6 +882,12 @@ function findPromptBoundary(lineText: string): number {
   if (lastStandardBoundary >= 0) return lastStandardBoundary;
   if (lastPuaBoundary >= 0) return lastPuaBoundary;
   return findProgramInputPromptBoundary(lineText);
+}
+
+/** Native path syntax identifies the first terminator even in deep cwd prompts. */
+function findWindowsPathPromptBoundary(lineText: string): number {
+  const match = /^(?:PS\s+)?(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+\\[^\\\s]+(?:\\|(?=>)))[^<>\r\n]*> ?/i.exec(lineText);
+  return match?.[0].length ?? -1;
 }
 
 function findProgramInputPromptBoundary(lineText: string): number {

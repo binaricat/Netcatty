@@ -12,6 +12,8 @@ export const enTerminalMessages: Messages = {
   'terminal.directory.hidden': 'Show hidden directories',
   'terminal.directory.refresh': 'Refresh',
   'terminal.directory.unavailable': 'Directory navigation is unavailable for this session.',
+  'terminal.directory.integrationUnavailable': 'PowerShell directory integration is not ready. Startup arguments or execution policy may prevent it.',
+  'terminal.directory.nonFilesystem': 'The current PowerShell location is not a filesystem directory.',
   'terminal.directory.busy': 'Wait for an empty shell prompt.',
   'terminal.directory.readFailed': 'Could not read this directory. Try refreshing.',
   'terminal.directory.changeFailed': 'Could not confirm the directory change. Refresh before retrying.',
