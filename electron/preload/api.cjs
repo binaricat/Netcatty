@@ -147,6 +147,9 @@ function createPreloadApi(ctx) {
   },
   getPluginPermissions: (pluginId) => ipcRenderer.invoke("netcatty:plugins:permissions", { pluginId }),
   revokePluginPermissions: (pluginId) => ipcRenderer.invoke("netcatty:plugins:revoke-permissions", { pluginId }),
+  prepareGitHubPlugin: (repository) => ipcRenderer.invoke("netcatty:plugins:github-prepare", { repository }),
+  installGitHubPlugin: (token) => ipcRenderer.invoke("netcatty:plugins:github-install", { token }),
+  discardGitHubPlugin: (token) => ipcRenderer.invoke("netcatty:plugins:github-discard", { token }),
   installPluginPackage: (archivePath, options) => ipcRenderer.invoke("netcatty:plugins:install", {
     archivePath,
     enable: options?.enable === true,

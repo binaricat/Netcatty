@@ -53,6 +53,8 @@ export interface SftpPaneCallbacks {
     onRenameFileAtPath: (oldPath: string, newName: string) => Promise<void>;
     onMoveEntriesToPath: (sourcePaths: string[], targetPath: string) => Promise<void>;
     onCopyToOtherPane: (files: SftpTransferSource[]) => void;
+    /** Create copies next to the selected entries (same pane, same folder). */
+    onDuplicateEntries: (files: SftpTransferSource[]) => void;
     onReceiveFromOtherPane: (files: SftpTransferSource[]) => void;
     onEditPermissions?: (file: SftpFileEntry, fullPath?: string) => void;
     // File operations

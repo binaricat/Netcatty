@@ -1326,6 +1326,13 @@ export const useSftpTransfers = ({
         sourcePath?: string;
         sourceConnectionId?: string;
         targetPath?: string;
+        /**
+         * Create copies next to the originals instead of prompting for the
+         * same-name conflict. Each source name is resolved to the next free
+         * `name (copy)`, `name (copy 2)`, ... before the transfer starts.
+         * Used by the SFTP context menu's Duplicate action.
+         */
+        duplicate?: boolean;
         onTransferComplete?: (result: TransferResult) => void | Promise<void>;
       },
     ) => {
@@ -1429,6 +1436,10 @@ export const useSftpTransfers = ({
       }
 
       for (const file of sourceFiles) {
+        // "." / ".." are navigation rows, not real entries. Duplicating one
+        // would resolve to an ancestor (e.g. "/") and could walk the copy into
+        // its own output.
+        if (options?.duplicate && (file.name === "." || file.name === "..")) continue;
         const direction: TransferDirection =
           sourcePane.connection!.isLocal && !targetPane.connection!.isLocal
             ? "upload"
@@ -1461,8 +1472,36 @@ export const useSftpTransfers = ({
           : (freshMetadata?.lastModified ?? fileEntry?.lastModified ?? 0);
 
         const nextSourcePath = joinPath(sourcePath, file.name);
-        const nextTargetPath = joinPath(targetPath, file.name);
         const targetIsLocal = targetPane.connection!.isLocal;
+        // A duplicate targets the folder the item already lives in, so the
+        // same-name conflict is guaranteed. Resolve the "(copy)" name up front
+        // instead of routing through the conflict dialog: the one-click action
+        // must not prompt, and resolving it inside processTransfer would
+        // re-enter the same task while it is still marked in flight.
+        const duplicateTarget = options?.duplicate
+          ? await getDuplicateTarget(
+              { fileName: file.name, isDirectory: file.isDirectory, targetPath: joinPath(targetPath, file.name) },
+              targetPane,
+              targetIsLocal ? null : (sftpSessionsRef.current.get(targetPane.connection!.id) ?? null),
+              targetIsLocal ? "auto" : (targetPane.filenameEncoding || "auto"),
+              // A queued or paused copy has not created its destination on disk
+              // yet, so the next duplicate would pick the same name and surface
+              // a conflict dialog. Reserve active destinations while naming.
+              (candidatePath) => Boolean(findActivePathConflict(
+                [...sftpTransferCenterStore.getSnapshot().tasks, ...transfersRef.current, ...newTasks],
+                {
+                  id: "",
+                  targetPath: candidatePath,
+                  targetConnectionId: targetIsLocal ? "local" : targetPane.connection!.id,
+                  targetHostId: targetIsLocal ? undefined : targetPane.connection!.hostId,
+                  targetHostLabel: targetIsLocal ? "Local" : targetPane.connection!.hostLabel,
+                  isDirectory: file.isDirectory,
+                },
+              )),
+            )
+          : null;
+        const nextFileName = duplicateTarget?.fileName ?? file.name;
+        const nextTargetPath = duplicateTarget?.targetPath ?? joinPath(targetPath, file.name);
         const pathTaken = findActivePathConflict(
           [...sftpTransferCenterStore.getSnapshot().tasks, ...transfersRef.current, ...newTasks],
           {
@@ -1481,7 +1520,7 @@ export const useSftpTransfers = ({
           const attentionTask: TransferTask = {
             id: crypto.randomUUID(),
             batchId,
-            fileName: file.name,
+            fileName: nextFileName,
             originalFileName: file.name,
             sourcePath: nextSourcePath,
             targetPath: nextTargetPath,
@@ -1522,7 +1561,7 @@ export const useSftpTransfers = ({
         newTasks.push({
           id: taskId,
           batchId,
-          fileName: file.name,
+          fileName: nextFileName,
           originalFileName: file.name,
           sourcePath: nextSourcePath,
           targetPath: nextTargetPath,

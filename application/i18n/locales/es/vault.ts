@@ -317,6 +317,7 @@ export const esVaultMessages: Messages = {
   'sftp.extract.success': 'Se extrajo {fileName}',
   'sftp.extract.error': 'No se pudo extraer {fileName}: {error}',
   'sftp.context.copyToOtherPane': 'Copiar al otro panel',
+  'sftp.context.duplicate': 'Duplicar',
   'sftp.copyToOtherPane.unavailable': 'Abre la vista SFTP de dos paneles y conecta el panel de destino antes de copiar archivos.',
   'sftp.copyCurrentPath': 'Copiar ruta actual',
   'sftp.copyCurrentPath.success': 'Ruta actual copiada',

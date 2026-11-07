@@ -217,6 +217,12 @@ class PackageStore {
       const validation = await pluginCli.extractPluginPackage(archiveSnapshot, extractedDirectory);
       await syncDirectoryTree(extractedDirectory);
       const manifest = validation.manifest;
+      if (options.expectedPackage) {
+        const { isDeepStrictEqual } = require("node:util");
+        if (snapshot.sha256 !== options.expectedPackage.sha256 || !isDeepStrictEqual(manifest, options.expectedPackage.manifest)) {
+          throw new Error("Plugin package changed after preview; download and review it again");
+        }
+      }
       if (!this.allowAdvancedPlugins) assertBrowserOnlyPlugin(manifest);
       const compatibility = pluginCli.checkPluginCompatibility(manifest, {
         netcattyVersion: this.netcattyVersion,

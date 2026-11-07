@@ -1,4 +1,5 @@
 import { PluginThirdPartyMarket } from './PluginThirdPartyMarket';
+import { PluginGitHubInstall } from './PluginGitHubInstall';
 import { usePluginUpdateCheck } from '../../../application/state/usePluginUpdateCheck';
 import { usePluginManager } from '../../../application/state/usePluginManager';
 import { PluginManagementDialog } from './PluginManagementDialog';
@@ -35,6 +36,7 @@ function PluginManagementContent({ manager }: {
           <div className="flex items-center gap-2">
           {pluginView === 'installed' && <PluginStatus noVault={manager.credentialStorageAvailable === false} />}
           <div ref={setCatalogToolbar} className="flex items-center gap-2" />
+          <PluginGitHubInstall disabled={!manager.available || manager.busy} onInstalled={async () => { setPluginView('installed'); await manager.refresh(); }} />
           <Button variant="outline" size="sm" disabled={!manager.available || manager.busy} onClick={() => { setPluginView('installed'); void manager.importPackage(); }}><FolderOpen size={14} className="mr-2" />{t('settings.plugins.manager.import')}</Button>
           </div>
         </div>

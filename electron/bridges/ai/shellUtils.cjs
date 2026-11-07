@@ -69,12 +69,13 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 //     the final `]` before `$`/`#` is the delimiter.
 const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\n\r]+)?\])[#$]$/;
 
+// Space-separated bash PS1 `\u@\h \w $ ` renders as `user@host ~ $`.
 // macOS ships zsh with `%n@%m %1~ %#`, which renders as
 // `user@host ~ %` / `user@host My Project %`; privileged shells end in `#`.
 // Allow spaces in the path, but keep prompt delimiters excluded so a prompt
 // followed by input (`user@host ~ % echo %`) cannot count as idle. Requiring
 // whitespace before the marker also rejects output such as `user@host 100%`.
-const ZSH_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+ [^\s%#$][^%#$\r\n]* [%#]$/;
+const ZSH_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+ [^\s%#$][^%#$\r\n]* [#$%]$/;
 
 // SteamOS/Deck-style prompt: `(user@host path)$`. Allow markers and balanced
 // single-level parentheses in the path, but not an early closing delimiter:

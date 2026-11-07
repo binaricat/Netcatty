@@ -260,6 +260,7 @@ export interface TerminalProps {
       options?: {
         broadcast?: boolean;
         multiLineRunMode?: Snippet["multiLineRunMode"];
+        preferBracketedPaste?: boolean;
         focus?: boolean;
       },
     ) => boolean | Promise<boolean>) | null,

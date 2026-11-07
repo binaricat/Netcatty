@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AppWindow, Archive, ArrowRight, ArrowUp, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Trash2, Upload } from 'lucide-react';
+import { AppWindow, Archive, ArrowRight, ArrowUp, ClipboardCopy, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Trash2, Upload } from 'lucide-react';
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '../ui/context-menu';
 import { getParentPath } from '../../application/state/sftp/utils';
 import { isKnownBinaryFile } from '../../lib/sftpFileUtils';
@@ -10,12 +10,15 @@ import { getSftpTreeUploadFilesTargetPath, getSftpUploadFilesLabelKey, getSftpUp
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SftpPaneTreeContextMenuProps = Record<string, any>;
 
+/** ".." is the tree's synthetic parent-navigation row, never a real entry. */
+export const isSftpTreeParentEntry = (entry: { name: string }): boolean => entry.name === '..';
+
 export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) {
   const {
     contextTarget, pane, toggleExpand, stableOnOpenEntry, stableOnRefresh, getActionPaths, toTransferSources,
     executeMoveAction, triggerUploadPicker, onUploadExternalFolder, uploadEnabled, folderUploadEnabled,
     setMoveTargetPaths, setMoveToPath, setMoveToError, setMoveToSuggestions, setMoveToSuggestionIndex,
-    setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef,
+    setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onDuplicateEntriesRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef,
     onEditFileRef, onDownloadFileRef, onExtractArchiveRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
     openNewFolderDialogRef, openNewFileDialogRef,
   } = props;
@@ -27,6 +30,10 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     const { entry, entryPath } = target;
     const isDir = isNavigableDirectory(entry);
     const isLocal = pane.connection?.isLocal;
+    // The synthetic ".." row navigates to the parent directory; it is not a
+    // real entry, so duplicating it would target an ancestor (e.g. "/") and
+    // could recurse into its own output.
+    const isParentEntry = isSftpTreeParentEntry(entry);
 
     const handleOpen = () => {
       if (isDir) void toggleExpand(entry, entryPath);
@@ -45,6 +52,21 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
         });
       }
       onCopyToOtherPaneRef.current(files);
+    };
+
+    const handleDuplicate = () => {
+      if (!onDuplicateEntriesRef.current || isParentEntry) return;
+      const paths = getActionPaths(entryPath);
+      const files = toTransferSources(paths);
+      if (files.length === 0) {
+        files.push({
+          name: entry.name,
+          isDirectory: isDir,
+          sourceConnectionId: pane.connection?.id,
+          sourcePath: getParentPath(entryPath),
+        });
+      }
+      onDuplicateEntriesRef.current(files);
     };
 
     const handleDelete = () => {
@@ -92,6 +114,11 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
         <ContextMenuItem onClick={handleCopyToOtherPane}>
           <Copy size={14} className="mr-2" />{tRef.current('sftp.context.copyToOtherPane')}
         </ContextMenuItem>
+        {onDuplicateEntriesRef.current && !isParentEntry && (
+          <ContextMenuItem onClick={handleDuplicate}>
+            <CopyPlus size={14} className="mr-2" />{tRef.current('sftp.context.duplicate')}
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onClick={() => navigator.clipboard.writeText(entryPath)}>
           <ClipboardCopy size={14} className="mr-2" />{tRef.current('sftp.context.copyPath')}
         </ContextMenuItem>
@@ -180,6 +207,7 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     folderUploadEnabled,
     onUploadExternalFolder,
     onCopyToOtherPaneRef,
+    onDuplicateEntriesRef,
     onDownloadFileRef,
     onExtractArchiveRef,
     onEditFileRef,

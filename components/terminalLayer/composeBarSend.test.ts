@@ -15,7 +15,7 @@ const code = ts.transpileModule(source.slice(start, end) + '\nglobalThis.send = 
 }).outputText;
 
 type Status = 'connected' | 'connecting' | 'disconnected';
-type Executor = (text: string, executeImmediately: boolean, options?: { broadcast?: boolean; sensitive?: boolean }) => boolean | Promise<boolean>;
+type Executor = (text: string, executeImmediately: boolean, options?: { broadcast?: boolean; sensitive?: boolean; preferBracketedPaste?: boolean }) => boolean | Promise<boolean>;
 function setup(
   statuses: Status[],
   broadcast = false,
@@ -95,6 +95,24 @@ test('compose send-to-all fans out while toolbar broadcast stays off', async () 
   assert.equal(await send('command'), true);
   assert.deepEqual(writes, ['0', '1']);
 });
+
+for (const sendToAll of [false, true]) {
+  test(`workspace compose requests supported bracketed paste on each target (all=${sendToAll})`, async () => {
+    const calls: string[] = [];
+    const text = 'echo one\necho two\necho three';
+    const executors = new Map<string, Executor>(['0', '1'].map(id => [id, async (command, noAutoRun, options) => {
+      assert.equal(command, text);
+      assert.equal(noAutoRun, false);
+      assert.equal(options?.preferBracketedPaste, true);
+      assert.equal(options?.broadcast, false);
+      calls.push(id);
+      return true;
+    }]));
+    const { send } = setup(['connected', 'connected'], false, executors, new Set(), false, new Set(), sendToAll);
+    assert.equal(await send(text), true);
+    assert.deepEqual(calls, sendToAll ? ['0', '1'] : ['0']);
+  });
+}
 
 test('compose send-to-all keeps a bypassed sensitive peer out of history', async () => {
   const executors = new Map<string, Executor>([
@@ -231,7 +249,8 @@ test('solo compose send uses the compose-bar target while toolbar broadcast stay
   const context = {
     send: undefined as unknown as (text: string) => Promise<boolean>,
     sessionId: 'a', sessionRef: { current: 'a' },
-    executeSnippetCommand: (_text: string, _noAutoRun?: boolean, options?: { broadcast?: boolean }) => {
+    executeSnippetCommand: (_text: string, _noAutoRun?: boolean, options?: { broadcast?: boolean; preferBracketedPaste?: boolean }) => {
+      assert.equal(options?.preferBracketedPaste, true);
       calls.push(options?.broadcast);
       return true;
     },

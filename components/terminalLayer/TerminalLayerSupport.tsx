@@ -112,6 +112,7 @@ export type SnippetExecutor = (
   options?: {
     broadcast?: boolean;
     multiLineRunMode?: Snippet["multiLineRunMode"];
+    preferBracketedPaste?: boolean;
     /** When false, do not steal keyboard focus (multi-tab fan-out). Default true. */
     focus?: boolean;
     /**
@@ -1599,9 +1600,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",
         isVisible && "z-10",
-        isMagnified && magnifiedSurfaceBounds && "animate-in fade-in zoom-in-95 duration-150",
+        isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl animate-in fade-in zoom-in-95 duration-150",
       )}
-      style={style}
+      style={{
+        ...style,
+        borderColor: isMagnified && magnifiedSurfaceBounds ? sessionAppearanceTheme.colors.cursor : undefined,
+      }}
       tabIndex={-1}
       onClick={handlePaneClick}
       onFocusCapture={handlePaneClick}

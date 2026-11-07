@@ -49,6 +49,14 @@ async function checkDevImport() {
     const settingsResponse = await fetch(new URL("/components/settings/tabs/SettingsPluginsTab.tsx", origin));
     assert.equal(settingsResponse.status, 200);
     assert.match(await settingsResponse.text(), /\/components\/settings\/tabs\/PluginPackageManager\.tsx/);
+    const hookResponse = await fetch(new URL("/application/state/usePluginGitHubInstall.ts", origin));
+    assert.equal(hookResponse.status, 200);
+    const parserImport = (await hookResponse.text()).match(/^import\s+.*from "[^"\n]*pluginGitHubRepository[^"\n]*";[^\n]*$/m);
+    assert.ok(parserImport, "Missing Vite-served GitHub repository parser import");
+    const parserProbe = new SourceTextModule(`${parserImport[0]}\nexport { parsePluginGitHubRepository };`, { context, identifier: new URL("/github-parser-probe", origin).href });
+    await parserProbe.link((specifier, importer) => load(new URL(specifier, importer.identifier).href));
+    await parserProbe.evaluate();
+    assert.equal(parserProbe.namespace.parsePluginGitHubRepository("github.com/Owner/Repo.git/").origin, "https://github.com/owner/repo");
     assert.match(managerSource, /\/components\/settings\/tabs\/PluginPermissionPanel\.tsx/);
     const panelResponse = await fetch(new URL("/components/settings/tabs/PluginPermissionPanel.tsx", origin));
     assert.equal(panelResponse.status, 200);

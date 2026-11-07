@@ -361,6 +361,7 @@ export const ruVaultMessages: Messages = {
   'sftp.extract.success': 'Распакован {fileName}',
   'sftp.extract.error': 'Не удалось распаковать {fileName}: {error}',
   'sftp.context.copyToOtherPane': 'Копировать в другую панель',
+  'sftp.context.duplicate': 'Дублировать',
   'sftp.copyToOtherPane.unavailable': 'Откройте двухпанельный режим SFTP и подключите панель назначения перед копированием файлов.',
   'sftp.copyCurrentPath': 'Копировать текущий путь',
   'sftp.copyCurrentPath.success': 'Текущий путь скопирован',
