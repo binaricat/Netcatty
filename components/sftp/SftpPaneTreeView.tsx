@@ -50,6 +50,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   openRenameDialog,
   openDeleteConfirm,
   onCopyToOtherPane,
+  onDuplicateEntries,
   onReceiveFromOtherPane,
   onOpenFileWithSystemDefault,
   onOpenFileWith,
@@ -203,6 +204,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onDragEndRef.current = onDragEnd;
   const onCopyToOtherPaneRef = useRef(onCopyToOtherPane);
   onCopyToOtherPaneRef.current = onCopyToOtherPane;
+  const onDuplicateEntriesRef = useRef(onDuplicateEntries);
+  onDuplicateEntriesRef.current = onDuplicateEntries;
   const onReceiveFromOtherPaneRef = useRef(onReceiveFromOtherPane);
   onReceiveFromOtherPaneRef.current = onReceiveFromOtherPane;
   const onOpenFileWithSystemDefaultRef = useRef(onOpenFileWithSystemDefault);
@@ -938,6 +941,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     setShowMoveToDialog,
     tRef,
     onCopyToOtherPaneRef,
+    onDuplicateEntriesRef,
     onNavigateToRef,
     onOpenFileWithSystemDefaultRef,
     onOpenFileWithRef,

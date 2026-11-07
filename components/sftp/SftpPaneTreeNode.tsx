@@ -69,9 +69,14 @@ export const TreeNode = React.memo<TreeNodeProps>(({
       onClick={e => onNodeClick(entry, entryPath, e)}
       onDoubleClick={() => onOpenEntry(entry, entryPath)}
       onContextMenu={e => {
-        if (!isParentEntry) {
-          onContextMenu(entry, entryPath, e);
+        if (isParentEntry) {
+          // The shared menu still holds the previous real entry. Do not let
+          // parent navigation reopen actions for that stale target.
+          e.preventDefault();
+          e.stopPropagation();
+          return;
         }
+        onContextMenu(entry, entryPath, e);
       }}
       draggable={!isParentEntry}
       onDragStart={e => { if (!isParentEntry) onDragStart(entry, entryPath, isDir, e); }}

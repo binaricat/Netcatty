@@ -61,10 +61,11 @@ export function useSftpTransferConflictOps() {
 
   const getDuplicateTarget = useCallback(
     async (
-      task: TransferTask,
+      task: Pick<TransferTask, "fileName" | "isDirectory" | "targetPath">,
       targetPane: SftpPane,
       targetSftpId: string | null,
       targetEncoding: SftpFilenameEncoding,
+      isTargetTaken?: (targetPath: string) => boolean,
     ) => {
       const parentPath = getParentPath(task.targetPath);
       const { baseName, ext } = splitNameForDuplicate(task.fileName, task.isDirectory);
@@ -73,6 +74,9 @@ export function useSftpTransferConflictOps() {
         const suffix = index === 1 ? " (copy)" : ` (copy ${index})`;
         const fileName = `${baseName}${suffix}${ext}`;
         const targetPath = joinPath(parentPath, fileName);
+        // A queued/paused duplicate may not have created its destination yet,
+        // so the filesystem alone would hand out the same name twice.
+        if (isTargetTaken?.(targetPath)) continue;
         // Unsupported LSTAT must propagate — do not treat as a free name.
         const existing = await statTargetPath(targetPane, targetSftpId, targetPath, targetEncoding);
         if (!existing) return { fileName, targetPath };

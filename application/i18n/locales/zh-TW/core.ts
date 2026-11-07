@@ -1056,6 +1056,7 @@ Vaults 分頁維持扁平，不使用這塊背景。
   'sftp.extract.success': '已解壓 {fileName}',
   'sftp.extract.error': '解壓 {fileName} 失敗：{error}',
   'sftp.context.copyToOtherPane': '複製到另一側',
+  'sftp.context.duplicate': '建立副本',
   'sftp.copyToOtherPane.unavailable': '請開啟雙欄 SFTP 檔案管理，並連線目標側後再複製檔案。',
   'sftp.copyCurrentPath': '複製目前路徑',
   'sftp.copyCurrentPath.success': '已複製目前路徑',
