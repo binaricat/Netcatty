@@ -550,7 +550,7 @@ export interface VaultAgentApiDeps {
    * external MCP client rather than the in-app Catty AI chat — and gates the "silent
    * sessions" setting so the in-app chat's host_open still opens a visible tab.
    */
-  openHost?: (host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string }) => {
+  openHost?: (host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string; chatSessionId?: string }) => {
     ok: true;
     sessionId: string;
     host: Host;
@@ -757,6 +757,9 @@ export async function handleVaultAgentOp(
 
       const opened = deps.openHost(effectiveHost, isExternalMcpCall, {
         workspaceId: typeof params.workspaceId === 'string' ? params.workspaceId : undefined,
+        // The openHost implementation resolves placement from the invoking
+        // chat's bound workspace (see resolveAgentHostOpenWorkspace).
+        ...(chatSessionId ? { chatSessionId } : {}),
       });
       if (opened.ok === false) {
         return { ok: false, error: opened.error };
