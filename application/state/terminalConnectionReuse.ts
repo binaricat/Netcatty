@@ -39,6 +39,16 @@ type CloneSessionOptions = {
    * Defaults to true (reuse when possible).
    */
   reuseConnection?: boolean;
+  /** Command sent once the shell is ready (e.g. `tmux attach …`). */
+  startupCommand?: string;
+  /** Tab title override; wins over host label and dynamic title. */
+  customName?: string;
+  /**
+   * Downgrade mosh/et sources to a plain ssh shell so `startupCommand` runs on
+   * a standard exec channel (mirrors the terminal-popup source conversion).
+   * Ignored for protocols without a shell channel (local/telnet/serial).
+   */
+  forcePlainSshShell?: boolean;
 };
 
 function getClonedShellType(
@@ -58,6 +68,15 @@ function createTerminalSessionClone(
   options: CloneSessionOptions,
 ): TerminalSession {
   const isLocal = session.protocol === "local";
+  const runtimeProtocol = session.protocol as TerminalSession["protocol"] | "mosh" | "et" | undefined;
+  const forcePlainSshShell = options.forcePlainSshShell === true && (
+    runtimeProtocol === undefined
+    || runtimeProtocol === "ssh"
+    || runtimeProtocol === "mosh"
+    || runtimeProtocol === "et"
+    || session.moshEnabled === true
+    || session.etEnabled === true
+  );
   // Only ssh/undefined (non-mosh/et) sessions inject an inherited `cd`; setting
   // pendingInitialCwd for telnet/serial/mosh/et would be dead, never-cleared
   // state (those protocols don't track cwd, so it's never consumed or cleared).
@@ -73,13 +92,13 @@ function createTerminalSessionClone(
     hostname: session.hostname,
     username: session.username,
     status: "connecting",
-    protocol: session.protocol,
+    protocol: forcePlainSshShell ? "ssh" : session.protocol,
     pluginConnection: session.pluginConnection == null
       ? undefined
       : structuredClone(session.pluginConnection),
     port: session.port,
-    moshEnabled: session.moshEnabled,
-    etEnabled: session.etEnabled,
+    moshEnabled: forcePlainSshShell ? false : session.moshEnabled,
+    etEnabled: forcePlainSshShell ? false : session.etEnabled,
     shellType: getClonedShellType(session, options.localShellType),
     charset: session.charset,
     localShell: session.localShell,
@@ -90,6 +109,8 @@ function createTerminalSessionClone(
     fontSize: session.fontSize,
     fontSizeOverride: session.fontSizeOverride,
     ...(session.ephemeralHost ? { ephemeralHost: true } : {}),
+    ...(options.startupCommand ? { startupCommand: options.startupCommand } : {}),
+    ...(options.customName ? { customName: options.customName } : {}),
     ...(injectsInheritedCwd && options.inheritedCwd ? { pendingInitialCwd: options.inheritedCwd } : {}),
     // Clearing `reuseConnectionFromSessionId` only disables source-specific
     // reuse; without an explicit fresh-connection flag the bridge would still

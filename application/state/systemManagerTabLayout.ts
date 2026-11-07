@@ -8,6 +8,7 @@ export const SYSTEM_MANAGER_TAB_DEFAULT_ORDER: readonly SystemManagerSubTab[] = 
   'ports',
   'services',
   'tmux',
+  'zellij',
   'docker',
   'gpu',
 ] as const;

@@ -17,9 +17,11 @@ import {
   Highlighter,
   History,
   Languages,
+  LayoutGrid,
   MoreVertical,
   Palette,
   Search,
+  TerminalSquare,
   TextCursorInput,
   Upload,
   X,
@@ -50,6 +52,8 @@ export const TERMINAL_TOOLBAR_ITEM_IDS = [
   'highlight',
   'sftp',
   'browser',
+  'tmux',
+  'zellij',
   'ymodemSend',
   'ymodemReceive',
   'compose',
@@ -73,6 +77,8 @@ export const TERMINAL_TOOLBAR_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
     highlight: 'show',
     sftp: 'show',
     browser: 'show',
+    tmux: 'show',
+    zellij: 'show',
     ymodemSend: 'show',
     ymodemReceive: 'show',
     compose: 'show',
@@ -104,6 +110,9 @@ export interface TerminalToolbarProps {
   onDeleteSnippets?: (ids: ReadonlySet<string>) => void;
   onOpenSFTP: () => void;
   onOpenBrowser?: () => void;
+  /** Opens the system panel and jumps to the tmux/zellij sub-tab. */
+  onOpenTmux?: () => void;
+  onOpenZellij?: () => void;
   onSendYmodem?: () => void;
   onReceiveYmodem?: () => void;
   onOpenScripts: () => void;
@@ -147,6 +156,8 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   onDeleteSnippets,
   onOpenSFTP,
   onOpenBrowser,
+  onOpenTmux,
+  onOpenZellij,
   onSendYmodem,
   onReceiveYmodem,
   onOpenScripts,
@@ -256,6 +267,8 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     ];
     if (!hidesSftp) ids.push('sftp');
     if (onOpenBrowser && (!host?.protocol || ['ssh', 'mosh', 'local'].includes(host.protocol))) ids.push('browser');
+    if (onOpenTmux) ids.push('tmux');
+    if (onOpenZellij) ids.push('zellij');
     if (isSerialTerminal) {
       ids.push('ymodemSend', 'ymodemReceive');
     }
@@ -273,6 +286,8 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     isSerialTerminal,
     onConfigureOsc7,
     onOpenBrowser,
+    onOpenTmux,
+    onOpenZellij,
     host?.protocol,
     onSetTerminalEncoding,
     onStartRecording,
@@ -286,6 +301,8 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
       highlight: t('terminal.toolbar.hostHighlight.title'),
       sftp: t('terminal.toolbar.openSftp'),
       browser: t('terminal.browser.open'),
+      tmux: t('terminal.toolbar.tmux'),
+      zellij: t('terminal.toolbar.zellij'),
       ymodemSend: t('terminal.toolbar.sendYmodem'),
       ymodemReceive: t('terminal.toolbar.receiveYmodem'),
       compose: t('terminal.toolbar.composeBar'),
@@ -309,6 +326,8 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
       highlight: <Highlighter size={14} />,
       sftp: <FolderInput size={14} />,
       browser: <Globe2 size={14} />,
+      tmux: <TerminalSquare size={14} />,
+      zellij: <LayoutGrid size={14} />,
       ymodemSend: <Upload size={14} />,
       ymodemReceive: <Download size={14} />,
       compose: <TextCursorInput size={14} />,
@@ -602,6 +621,30 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">{t('terminal.browser.open')}</TooltipContent>
+          </Tooltip>
+        );
+      case 'tmux':
+        return (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <Button variant="secondary" size="icon" className={buttonBase}
+                aria-label={t('terminal.toolbar.tmux')} onClick={onOpenTmux}>
+                <TerminalSquare size={12} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('terminal.toolbar.tmux')}</TooltipContent>
+          </Tooltip>
+        );
+      case 'zellij':
+        return (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <Button variant="secondary" size="icon" className={buttonBase}
+                aria-label={t('terminal.toolbar.zellij')} onClick={onOpenZellij}>
+                <LayoutGrid size={12} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('terminal.toolbar.zellij')}</TooltipContent>
           </Tooltip>
         );
       case 'ymodemSend':
@@ -941,6 +984,24 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
             <button type="button" className={menuItemClass} onClick={onOpenBrowser}>
               <Globe2 size={12} className="shrink-0" />
               <span className="flex-1 text-left truncate">{t('terminal.browser.open')}</span>
+            </button>
+          </PopoverClose>
+        );
+      case 'tmux':
+        return (
+          <PopoverClose asChild key={id}>
+            <button type="button" className={menuItemClass} onClick={onOpenTmux}>
+              <TerminalSquare size={12} className="shrink-0" />
+              <span className="flex-1 text-left truncate">{t('terminal.toolbar.tmux')}</span>
+            </button>
+          </PopoverClose>
+        );
+      case 'zellij':
+        return (
+          <PopoverClose asChild key={id}>
+            <button type="button" className={menuItemClass} onClick={onOpenZellij}>
+              <LayoutGrid size={12} className="shrink-0" />
+              <span className="flex-1 text-left truncate">{t('terminal.toolbar.zellij')}</span>
             </button>
           </PopoverClose>
         );

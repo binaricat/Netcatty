@@ -1025,6 +1025,18 @@ export function AppSideEffects() {
 
   const copySessionToNewWindowWithCurrentShell = useCallback((sessionId: string) => { return copySessionToNewWindowWithCurrentShellImpl(() => ({ classifyLocalShellType, discoveredShells, netcattyBridge, resolveShellSetting, sessions, terminalSettings, t, toast }), sessionId); }, [sessions, terminalSettings, discoveredShells, t]);
 
+  // System-manager tmux/zellij "attach in a new main-window tab": clone the
+  // panel's session over the same SSH channel and run the attach command once
+  // the shell is ready.
+  const openMuxAttachTab = useCallback((sessionId: string, payload: { title: string; startupCommand: string }) => {
+    copySession(sessionId, {
+      reuseConnection: true,
+      startupCommand: payload.startupCommand,
+      customName: payload.title,
+      forcePlainSshShell: true,
+    });
+  }, [copySession]);
+
   const closeTabKeyStr = useMemo(() => {
     if (hotkeyScheme === 'disabled') return null;
     const closeTabBinding = keyBindings.find((binding) => binding.action === 'closeTab');
@@ -2046,6 +2058,7 @@ export function AppSideEffects() {
       duplicateSessionWithCurrentShell,
       copyWorkspaceWithCurrentShell,
       copySessionToNewWindowWithCurrentShell,
+      openMuxAttachTab,
       createWorkspaceFromTargets: createWorkspaceFromEffectiveTargets,
       createWorkspaceWithHosts: createWorkspaceWithEffectiveHosts,
       handleConnectSerial,
@@ -2124,6 +2137,7 @@ export function AppSideEffects() {
     duplicateSessionWithCurrentShell,
     copyWorkspaceWithCurrentShell,
     copySessionToNewWindowWithCurrentShell,
+    openMuxAttachTab,
     createWorkspaceFromEffectiveTargets,
     createWorkspaceWithEffectiveHosts,
     handleConnectSerial,

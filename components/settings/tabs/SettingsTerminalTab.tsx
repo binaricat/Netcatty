@@ -1187,6 +1187,32 @@ function SettingsTerminalTab(props: {
           </div>
         </SettingRow>
         <SettingRow
+          label={t("settings.terminal.systemManager.tmuxAutoSync")}
+          description={t("settings.terminal.systemManager.tmuxAutoSync.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.systemManagerTmuxAutoSync}
+            onChange={(v) => updateTerminalSetting("systemManagerTmuxAutoSync", v)}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t("settings.terminal.systemManager.muxAttachTarget")}
+          description={t("settings.terminal.systemManager.muxAttachTarget.desc")}
+        >
+          <ShadcnSelect
+            value={terminalSettings.systemManagerMuxAttachTarget}
+            onValueChange={(v) => updateTerminalSetting("systemManagerMuxAttachTarget", v as "tab" | "window")}
+          >
+            <SelectTrigger className="h-9 w-48 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="tab">{t("settings.terminal.systemManager.muxAttachTarget.tab")}</SelectItem>
+              <SelectItem value="window">{t("settings.terminal.systemManager.muxAttachTarget.window")}</SelectItem>
+            </SelectContent>
+          </ShadcnSelect>
+        </SettingRow>
+        <SettingRow
           label={t("settings.terminal.systemManager.dockerListRefreshInterval")}
           description={t("settings.terminal.systemManager.dockerListRefreshInterval.desc")}
         >
@@ -1559,6 +1585,7 @@ function SettingsTerminalTab(props: {
               { value: "off", label: t("settings.terminal.passwordPromptAssist.off") },
               { value: "hint", label: t("settings.terminal.passwordPromptAssist.hint") },
               { value: "picker", label: t("settings.terminal.passwordPromptAssist.picker") },
+              { value: "auto", label: t("settings.terminal.passwordPromptAssist.auto") },
             ]}
             className="w-48"
           />

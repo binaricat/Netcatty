@@ -56,12 +56,23 @@ function buildCommandPopupSourceSession(
   };
 }
 
+export interface OpenInteractiveTerminalOptions {
+  icon?: TerminalPopupIcon;
+  /**
+   * 'popup' (default) opens a separate window; 'tab' delegates to `onOpenTab`
+   * so the attach command runs in a new main-window tab. Falls back to the
+   * popup when no `onOpenTab` handler is wired.
+   */
+  target?: 'popup' | 'tab';
+  onOpenTab?: (payload: { title: string; startupCommand: string }) => void;
+}
+
 export async function openInteractiveTerminal(
   backend: Backend,
   parentSession: TerminalSession,
   title: string,
   startupCommand: string,
-  options?: { icon?: TerminalPopupIcon },
+  options?: OpenInteractiveTerminalOptions,
 ): Promise<{ success: boolean; error?: string }> {
   const canReuseConnection = canReuseTerminalConnection(parentSession);
   const popupTitle = buildPopupTitle(parentSession, title);
@@ -73,7 +84,17 @@ export async function openInteractiveTerminal(
     startupCommand,
     canReuseConnection,
     hasIcon: !!options?.icon,
+    target: options?.target ?? 'popup',
   });
+  if (options?.target === 'tab' && options.onOpenTab) {
+    options.onOpenTab({ title: popupTitle, startupCommand });
+    await writeSystemManagerDiagnostic('openInteractiveTerminal result', {
+      title: popupTitle,
+      success: true,
+      target: 'tab',
+    });
+    return { success: true };
+  }
   const avoidClientRect = readSystemPanelClientRect();
   const result = await backend.openTerminalPopup({
     title: popupTitle,

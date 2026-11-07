@@ -14,10 +14,12 @@ const OSC_PATTERN = new RegExp(
 // user into revealing the password.
 const CONCEAL_PATTERN = new RegExp(`${ESCAPE_SEQUENCE}\\[(?:[0-9]+;)*8(?:;[0-9]+)*m`);
 // A line that mentions password/密码/口令 and optionally ends in a colon.
-// Intentionally broad: filling requires the user to confirm (press Enter), so
-// over-matching only shows a dismissable hint and never leaks a password to a
-// child program.  The colon is optional because Kylin's sudo prompt doesn't
-// use one (#1293).
+// Intentionally broad: in hint/picker modes filling requires the user to
+// confirm (press Enter), so over-matching only shows a dismissable hint and
+// never leaks a password to a child program. Auto mode is the exception, so it
+// fills only ARMED sudo prompts (the user just ran sudo here) — never an
+// unarmed line a remote could print.  The colon is optional because Kylin's
+// sudo prompt doesn't use one (#1293).
 const SUDO_PROMPT_PATTERN =
   /(?:^|[\r\n])[^\r\n]*?(?:\bpassword\b|密\s*码|口\s*令)[^\r\n:：]*(?:[:：]\s*)?$/i;
 // An explicit sudo prompt carries the sudo-specific "[sudo]" tag. No other tool
@@ -287,10 +289,10 @@ export const createSudoPasswordAutofill = (_options: {
 
   const hasFillMaterial = (): boolean => {
     if (mode === "off") return false;
-    // Hint mode only uses the session host password — never an arbitrary
-    // keychain identity (that would silently send the wrong secret on Enter).
+    // Hint and auto modes only use the session host password — never an
+    // arbitrary keychain identity (that would silently send the wrong secret).
     // Picker mode uses the full candidate list.
-    if (mode === "hint") return Boolean(password);
+    if (mode === "hint" || mode === "auto") return Boolean(password);
     return candidates.length > 0 || Boolean(password);
   };
 
@@ -331,12 +333,43 @@ export const createSudoPasswordAutofill = (_options: {
     }
   };
 
+  /**
+   * Send a secret to the prompt and clear the assist UI. Keeps a short arm +
+   * postFillRetry flag so a real sudo/su rejection re-prompt can reopen assist,
+   * but a later child Password: (e.g. after `sudo mysql -p`) will not
+   * (#2156 review).
+   */
+  const fillWith = (secret: string) => {
+    options.write(`${secret}\n`);
+    pending = false;
+    hideUi();
+    dismissedWhileArmed = false;
+    postFillRetry = true;
+    if (hasFillMaterial()) {
+      armedUntil = options.now() + armWindowMs;
+      tail = "";
+    }
+  };
+
   const tryShowForCurrentTail = (): boolean => {
     const armActive = isArmActiveNow();
     const lastLine = lastPromptLine();
     // Explicit [sudo] may show host-password hint without an arm; full picker
     // still requires armed su (allowFullPickerForLine).
     if (!isArmedPromptLine(lastLine, armActive)) return false;
+    // Auto mode fills without confirmation, so it is deliberately narrow:
+    // only an armed sudo prompt (the user just ran sudo in this terminal),
+    // only the session host password, and only once per arm — a rejected
+    // password falls back to the hint instead of looping credentials into a
+    // child program.
+    if (mode === "auto" && armActive && armedKind === "sudo" && !postFillRetry) {
+      const secret = defaultPassword();
+      if (secret) {
+        pending = true;
+        fillWith(secret);
+        return true;
+      }
+    }
     const allowFullPicker = allowFullPickerForLine(lastLine, armActive);
     if (!showAssist(allowFullPicker)) return false;
     pending = true;
@@ -502,18 +535,7 @@ export const createSudoPasswordAutofill = (_options: {
         disarm();
         return;
       }
-      options.write(`${secret}\n`);
-      // Clear pending UI. Keep a short arm + postFillRetry flag so a real
-      // sudo/su rejection re-prompt can reopen assist, but a later child
-      // Password: (e.g. after `sudo mysql -p`) will not (#2156 review).
-      pending = false;
-      hideUi();
-      dismissedWhileArmed = false;
-      postFillRetry = true;
-      if (hasFillMaterial()) {
-        armedUntil = options.now() + armWindowMs;
-        tail = "";
-      }
+      fillWith(secret);
     },
     cancelHint: () => {
       softDismissPendingUi();

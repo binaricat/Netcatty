@@ -35,7 +35,7 @@ export type HostInfoBarTitleMode = 'address' | 'label';
  * - hint: ghost "press Enter" fill of the host session password
  * - picker: WindTerm-like list of host + keychain password identities
  */
-export type PasswordPromptAssistMode = 'off' | 'hint' | 'picker';
+export type PasswordPromptAssistMode = 'off' | 'hint' | 'picker' | 'auto';
 /**
  * Which command-history pool autocomplete suggestions draw from (#2595).
  * - host: only the current host's recorded commands (default; avoids cross-device noise)
@@ -177,6 +177,10 @@ export interface TerminalSettings {
   // System Manager side panel polling (seconds)
   systemManagerProcessRefreshInterval: number;
   systemManagerTmuxRefreshInterval: number;
+  /** Auto-poll the current user's tmux/zellij sessions; off = manual refresh only. */
+  systemManagerTmuxAutoSync: boolean;
+  /** Where mux attach runs: a new main-window tab or a separate popup window. */
+  systemManagerMuxAttachTarget: 'tab' | 'window';
   systemManagerDockerListRefreshInterval: number;
   systemManagerDockerStatsRefreshInterval: number;
 
@@ -401,10 +405,16 @@ const isHostInfoBarTitleMode = (value: unknown): value is HostInfoBarTitleMode =
   value === 'label'
 );
 
+const isSystemManagerMuxAttachTarget = (value: unknown): value is TerminalSettings['systemManagerMuxAttachTarget'] => (
+  value === 'tab' ||
+  value === 'window'
+);
+
 const isPasswordPromptAssistMode = (value: unknown): value is PasswordPromptAssistMode => (
   value === 'off' ||
   value === 'hint' ||
-  value === 'picker'
+  value === 'picker' ||
+  value === 'auto'
 );
 
 const isAutocompleteHistoryScope = (value: unknown): value is AutocompleteHistoryScope => (
@@ -456,6 +466,9 @@ export const normalizeTerminalSettings = (
     hostInfoBarTitleMode: isHostInfoBarTitleMode(settings?.hostInfoBarTitleMode)
       ? settings.hostInfoBarTitleMode
       : DEFAULT_TERMINAL_SETTINGS.hostInfoBarTitleMode,
+    systemManagerMuxAttachTarget: isSystemManagerMuxAttachTarget(settings?.systemManagerMuxAttachTarget)
+      ? settings.systemManagerMuxAttachTarget
+      : DEFAULT_TERMINAL_SETTINGS.systemManagerMuxAttachTarget,
     passwordPromptAssist: isPasswordPromptAssistMode(settings?.passwordPromptAssist)
       ? settings.passwordPromptAssist
       : DEFAULT_TERMINAL_SETTINGS.passwordPromptAssist,
@@ -605,6 +618,8 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   serverStatsRefreshInterval: 5, // Refresh every 5 seconds
   systemManagerProcessRefreshInterval: 3,
   systemManagerTmuxRefreshInterval: 3,
+  systemManagerTmuxAutoSync: true,
+  systemManagerMuxAttachTarget: 'tab',
   systemManagerDockerListRefreshInterval: 5,
   systemManagerDockerStatsRefreshInterval: 3,
   disableBracketedPaste: false, // Bracketed paste enabled by default

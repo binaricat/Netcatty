@@ -94,6 +94,45 @@ test('openInteractiveTerminal keeps SSH connection reuse for ordinary connected 
   assert.equal(payload.sourceSession.reuseConnectionFromSessionId, 'session-1');
 });
 
+test('openInteractiveTerminal delegates to onOpenTab when target is tab', async () => {
+  let popupCalls = 0;
+  const opened: Array<{ title: string; startupCommand: string }> = [];
+  const result = await openInteractiveTerminal(
+    {
+      openTerminalPopup: async () => {
+        popupCalls += 1;
+        return { success: true };
+      },
+    } as never,
+    parentSession(),
+    'tmux: api',
+    'tmux attach-session -t api',
+    { target: 'tab', onOpenTab: (payload) => { opened.push(payload); } },
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(popupCalls, 0);
+  assert.deepEqual(opened, [{ title: 'Prod · tmux: api', startupCommand: 'tmux attach-session -t api' }]);
+});
+
+test('openInteractiveTerminal falls back to the popup when target is tab without onOpenTab', async () => {
+  const payloads: unknown[] = [];
+  await openInteractiveTerminal(
+    {
+      openTerminalPopup: async (payload: unknown) => {
+        payloads.push(payload);
+        return { success: true };
+      },
+    } as never,
+    parentSession(),
+    'tmux: api',
+    'tmux attach-session -t api',
+    { target: 'tab' },
+  );
+
+  assert.equal(payloads.length, 1);
+});
+
 async function withSystemPanels(
   panels: Array<{ getBoundingClientRect: () => { x: number; y: number; width: number; height: number } }>,
   run: () => Promise<void>,

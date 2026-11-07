@@ -142,6 +142,56 @@ test("copy session clones default to connection reuse when reuseConnection is un
   );
 });
 
+test("copy clones carry startupCommand and customName for mux attach tabs", () => {
+  const clone = createCopiedTerminalSessionClone(session(), {
+    id: "copy-mux",
+    startupCommand: "tmux attach-session -t api",
+    customName: "Prod · tmux: api",
+  });
+  assert.equal(clone.startupCommand, "tmux attach-session -t api");
+  assert.equal(clone.customName, "Prod · tmux: api");
+  assert.equal(clone.reuseConnectionFromSessionId, "session-1");
+
+  const plain = createCopiedTerminalSessionClone(session(), { id: "copy-plain" });
+  assert.equal(plain.startupCommand, undefined);
+  assert.equal(plain.customName, undefined);
+});
+
+test("forcePlainSshShell downgrades mosh/et sources so startupCommand runs over plain ssh", () => {
+  const moshClone = createCopiedTerminalSessionClone(session({ moshEnabled: true }), {
+    id: "copy-mosh",
+    forcePlainSshShell: true,
+    startupCommand: "tmux attach-session -t api",
+  });
+  assert.equal(moshClone.protocol, "ssh");
+  assert.equal(moshClone.moshEnabled, false);
+  assert.equal(moshClone.etEnabled, false);
+  // A mosh transport cannot back an ssh exec channel, so the clone dials fresh.
+  assert.equal(moshClone.reuseConnectionFromSessionId, undefined);
+
+  const etClone = createCopiedTerminalSessionClone(
+    session({ protocol: "et" as TerminalSession["protocol"], etEnabled: true }),
+    { id: "copy-et", forcePlainSshShell: true },
+  );
+  assert.equal(etClone.protocol, "ssh");
+  assert.equal(etClone.etEnabled, false);
+
+  // Protocols without a shell channel keep their transport untouched.
+  const localClone = createCopiedTerminalSessionClone(session({ protocol: "local" }), {
+    id: "copy-local",
+    forcePlainSshShell: true,
+  });
+  assert.equal(localClone.protocol, "local");
+
+  // Plain ssh sources keep connection reuse.
+  const sshClone = createCopiedTerminalSessionClone(session(), {
+    id: "copy-ssh",
+    forcePlainSshShell: true,
+  });
+  assert.equal(sshClone.protocol, "ssh");
+  assert.equal(sshClone.reuseConnectionFromSessionId, "session-1");
+});
+
 test("split and copy session clones preserve local start directory", () => {
   const source = session({
     protocol: "local",

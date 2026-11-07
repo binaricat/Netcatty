@@ -54,7 +54,7 @@ test("gpu tab appears only after nvidia-smi or npu-smi is detected", () => {
       hasSs: true,
       hasSystemctl: true,
     }), null),
-    ["overview", "processes", "ports", "services", "tmux", "docker", "gpu"],
+    ["overview", "processes", "ports", "services", "tmux", "zellij", "docker", "gpu"],
   );
 });
 

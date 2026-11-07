@@ -5,6 +5,7 @@ import type {
   SystemdUnitInfo,
   SystemProcessInfo,
   TmuxSessionInfo,
+  ZellijSessionInfo,
 } from './types';
 
 export function systemProcessInfoEqual(a: SystemProcessInfo, b: SystemProcessInfo): boolean {
@@ -27,6 +28,14 @@ export function tmuxSessionInfoEqual(a: TmuxSessionInfo, b: TmuxSessionInfo): bo
     && a.created === b.created
     && a.activity === b.activity
     && a.group === b.group;
+}
+
+export function zellijSessionInfoEqual(a: ZellijSessionInfo, b: ZellijSessionInfo): boolean {
+  return a.name === b.name
+    && a.createdText === b.createdText
+    && a.attached === b.attached
+    && a.exited === b.exited
+    && a.isCurrent === b.isCurrent;
 }
 
 export function dockerContainerInfoEqual(a: DockerContainerInfo, b: DockerContainerInfo): boolean {

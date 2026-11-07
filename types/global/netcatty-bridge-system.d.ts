@@ -27,20 +27,72 @@ declare global {
       code?: number | null;
       error?: string;
     }>;
-    listTmuxSessions?(sessionId: string): Promise<{
+    listTmuxSessions?(
+      sessionId: string,
+      scope?: import("../../domain/systemManager/types").MultiplexerScope,
+    ): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       tmuxVersion?: string;
       sessions?: import("../../domain/systemManager/types").TmuxSessionInfo[];
     }>;
-    createTmuxSession?(options: { sessionId: string; name: string; command?: string }): Promise<{
+    listTmuxSnapshot?(
+      sessionId: string,
+      scope?: import("../../domain/systemManager/types").MultiplexerScope,
+    ): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
+      tmuxVersion?: string;
+      sessions?: import("../../domain/systemManager/types").TmuxSessionInfo[];
+      windowsBySession?: Record<string, import("../../domain/systemManager/types").TmuxWindowInfo[]>;
+      clients?: import("../../domain/systemManager/types").TmuxClientInfo[];
+    }>;
+    listMultiplexerUsers?(sessionId: string): Promise<{
+      success: boolean;
+      pending?: boolean;
+      error?: string;
+      currentUser?: string;
+      currentUid?: number;
+      users?: import("../../domain/systemManager/types").MultiplexerUser[];
+    }>;
+    listZellijSessions?(
+      sessionId: string,
+      scope?: import("../../domain/systemManager/types").MultiplexerScope,
+    ): Promise<{
+      success: boolean;
+      error?: string;
+      errorCode?: string;
+      sessions?: import("../../domain/systemManager/types").ZellijSessionInfo[];
+    }>;
+    zellijAction?(options: {
+      sessionId: string;
+      scope?: import("../../domain/systemManager/types").MultiplexerScope;
+    } & import("../../domain/systemManager/types").ZellijManageAction): Promise<{
+      success: boolean;
+      error?: string;
+      errorCode?: string;
+    }>;
+    createTmuxSession?(options: {
+      sessionId: string;
+      name: string;
+      command?: string;
+      scope?: import("../../domain/systemManager/types").MultiplexerScope;
+    }): Promise<{
+      success: boolean;
+      error?: string;
+      errorCode?: string;
       name?: string;
     }>;
-    listTmuxWindows?(options: { sessionId: string; sessionName: string }): Promise<{
+    listTmuxWindows?(options: {
+      sessionId: string;
+      sessionName: string;
+      scope?: import("../../domain/systemManager/types").MultiplexerScope;
+    }): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       debug?: {
         lastOutput?: string;
         tried?: string[];
@@ -52,9 +104,11 @@ declare global {
       sessionId: string;
       sessionName: string;
       windowIndex: number;
+      scope?: import("../../domain/systemManager/types").MultiplexerScope;
     }): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       debug?: {
         lastOutput?: string;
         tried?: string[];
@@ -62,14 +116,24 @@ declare global {
       };
       panes?: import("../../domain/systemManager/types").TmuxPaneInfo[];
     }>;
-    listTmuxClients?(options: { sessionId: string; sessionName?: string }): Promise<{
+    listTmuxClients?(options: {
+      sessionId: string;
+      sessionName?: string;
+      scope?: import("../../domain/systemManager/types").MultiplexerScope;
+    }): Promise<{
       success: boolean;
       error?: string;
+      errorCode?: string;
       clients?: import("../../domain/systemManager/types").TmuxClientInfo[];
     }>;
     tmuxAction?(options: {
       sessionId: string;
-    } & import("../../domain/systemManager/types").TmuxManageAction): Promise<{ success: boolean; error?: string }>;
+      scope?: import("../../domain/systemManager/types").MultiplexerScope;
+    } & import("../../domain/systemManager/types").TmuxManageAction): Promise<{
+      success: boolean;
+      error?: string;
+      errorCode?: string;
+    }>;
     listDockerContainers?(
       sessionId: string,
       runtime?: import("../../domain/systemManager/containerRuntime").ContainerRuntimeId,

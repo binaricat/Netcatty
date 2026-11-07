@@ -3,6 +3,7 @@ import type { TmuxManageAction } from '../../domain/systemManager/types';
 type TmuxActionResult = {
   success: boolean;
   error?: string;
+  errorCode?: string;
 };
 
 type TmuxActionPayload = { sessionId: string } & TmuxManageAction;

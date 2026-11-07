@@ -32,6 +32,7 @@ import { SystemManagerSidePanel } from '../systemManager/SystemManagerSidePanel'
 import { resolveSftpFollowTerminalCwdTargetHost } from '../../domain/sftpFollowTerminalCwd';
 import { AI_PANEL_FORCE_HIDE_SHELL } from '../ai/aiPanelDiagnostics';
 import type { SidePanelTab } from './TerminalLayerSupport';
+import type { SystemManagerSubTab } from '../../domain/systemManager/types';
 import {
   collectSidePanelPanes,
   sidePanelLayoutHasTool,
@@ -337,7 +338,14 @@ function SidePanelSystemSlotInner({
     refocusActiveTerminalSession,
     snippets,
     terminalSettings,
+    keys,
+    identities,
+    handleUpdateHost,
+    systemSubTabByTab,
+    onOpenMuxAttachTab,
   } = ctx;
+  const requestedSubTab = (systemSubTabByTab as Map<string, { tab: SystemManagerSubTab; requestId: number }> | undefined)
+    ?.get(tabId);
 
   return (
     <div className={sidePanelHiddenPanelClassName(!isVisible)}>
@@ -349,7 +357,12 @@ function SidePanelSystemSlotInner({
         isVisible={keepSystemWorkActive}
         terminalSettings={terminalSettings}
         snippets={snippets}
+        keys={keys}
+        identities={identities}
+        onUpdateHost={handleUpdateHost}
+        requestedSubTab={requestedSubTab}
         onRequestTerminalFocus={refocusActiveTerminalSession}
+        onOpenMuxAttachTab={onOpenMuxAttachTab}
       />
     </div>
   );
