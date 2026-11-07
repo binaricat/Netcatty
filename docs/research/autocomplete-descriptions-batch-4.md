@@ -100,6 +100,46 @@ on-demand spec load for the most common shell sessions.
   translation preserves that distinction and the “assumed identical when a user
   is named” clause.
 
+## Platform coverage (GNU/Linux vs BSD/macOS)
+
+Netcatty sessions usually target Linux hosts, so GNU semantics were checked
+against `jaywcjlove/linux-command` (MIT, commit `master` at 2026-11-07) for every
+command in this batch that the reference covers (21 of 22; `readlink` is absent).
+That review changed four entries and confirmed the rest:
+
+- `uname -s/-r/-v`: the Fig text says “operating system name/release/version”,
+  but GNU `uname` prints the kernel name/release/version. The zh-CN text now says
+  内核名称 / 内核发行版本 / 内核版本, which matches what a Linux host prints and
+  is still accurate on macOS (`Darwin`).
+- `dd cbs`: “Set the conversion record size” is now 设置转换记录大小（cbs，每次转换的字节数）
+  so the unit is explicit, matching GNU `dd` and the reference wording.
+- No other wording diverged from the reference beyond synonyms (`制表符` vs
+  `跳格字符`, `块` vs `区块`); the existing glossary terms stay in place.
+
+Some specs in this batch expose options that do not exist in GNU tools. Those
+descriptions describe the option each spec actually inserts, so they are **not**
+rewritten into GNU wording — doing so would label an item with behavior it does
+not have on the host being connected to:
+
+| Command | Spec-only (BSD/macOS) options |
+| --- | --- |
+| `date` | `-d`, `-f`, `-j`, `-n`, `-R`, `-t` |
+| `su` | `-f`, `-l`, `-m`, `-` |
+| `id` | `-A`, `-F`, `-M`, `-P` |
+| `base64` | `-b`, `-i`, `-o` |
+| `split` | `-p` |
+| `seq` | `-t` |
+| `env` | `-P` |
+| `more` | `-u` (GNU uses it for underlining; the spec follows BSD “ignored”) |
+| `which` | `-s` |
+
+Making those commands platform-correct needs per-OS spec selection (the loader
+currently resolves one spec per command name and ignores `hostOs`), which is a
+code change rather than a translation change. `dd` also carries an upstream
+artifact: an operand named `files` with “Copy this many files before
+terminating”, which real `dd` does not have; the literal translation is kept and
+flagged here instead of inventing behavior.
+
 ## Adopted entries (excerpt)
 
 | Command | English | zh-CN |
