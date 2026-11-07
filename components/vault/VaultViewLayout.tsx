@@ -15,6 +15,7 @@ import {
 } from "../../domain/vaultGroupSelection";
 import { STORAGE_KEY_VAULT_HOST_PANEL_WIDTH } from "@/infrastructure/config/storageKeys.ts";
 import { VaultHostListSection } from "./VaultHostListSection";
+import { VAULT_HOST_GRID_MIN_CARD_WIDTH } from "./vaultHostGridLayout";
 import { LocalShellHostDetailsPanel } from "../LocalShellHostDetailsPanel";
 import { VaultImportProgressPanel } from "./ImportVaultDialog";
 import {
@@ -860,7 +861,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
         data-section="vault-stage"
       >
         <div
-          className="relative flex min-h-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm"
+          className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm"
+          // Keep one host card and its existing px-4 padding beside an editor.
+          // CSS resolves this against the current surface, including when the
+          // retained vault is shown again; remembered widths remain untouched.
+          style={{
+            ["--aside-inline-max-width" as string]: `max(0px, calc(100% - ${VAULT_HOST_GRID_MIN_CARD_WIDTH + 32}px))`,
+          }}
           data-section="vault-surface"
         >
           {/* Main Area */}
