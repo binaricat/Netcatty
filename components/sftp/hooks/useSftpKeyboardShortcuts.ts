@@ -24,6 +24,8 @@ import { filterHiddenFiles, isNavigableDirectory } from "../utils";
 import { resolveSameConnectionPasteAction } from "../../../application/state/sftp/samePanePaste";
 import type { SftpFileEntry } from "../../../types";
 import { extractDropEntries, type DropEntry } from "../../../lib/sftpFileUtils";
+import { resolveSftpUploadErrorText } from "../reportSftpUploadResults";
+import { useI18n } from "../../../application/i18n/I18nProvider";
 import { toast } from "../../ui/toast";
 import { isAppLockOverlayActive } from '../../../infrastructure/appLockOverlayDom';
 import {
@@ -183,6 +185,7 @@ export const useSftpKeyboardShortcuts = ({
   dialogActionScopeId,
   isActive,
 }: UseSftpKeyboardShortcutsParams) => {
+  const { t } = useI18n();
   const typeaheadRef = useRef<{ paneId: string; state: SftpTypeaheadState } | null>(null);
 
   const getFocusedPane = useCallback(() => {
@@ -222,10 +225,13 @@ export const useSftpKeyboardShortcuts = ({
       toast.success(`Uploaded ${successCount} item${successCount === 1 ? "" : "s"}.`, "SFTP");
     }
     failedFiles.forEach((failed) => {
-      const errorMsg = failed.error ? ` - ${failed.error}` : "";
+      // Virtual archive-folder drags store a sentinel; map it to the
+      // localized, actionable message instead of showing the raw marker.
+      const mappedError = resolveSftpUploadErrorText(failed.error, t);
+      const errorMsg = mappedError ? ` - ${mappedError}` : "";
       toast.error(`Upload failed: ${failed.fileName}${errorMsg}`, "SFTP");
     });
-  }, []);
+  }, [t]);
 
   const triggerPathBackedClipboardUpload = useCallback((
     files: ClipboardLocalFile[],
