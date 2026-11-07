@@ -19,6 +19,8 @@ import { toEditorTabId, activeTabStore } from "../../../application/state/active
 import type { TextEditorModalSnapshot } from "../../TextEditorModal";
 import type { UseSftpViewFileOpsParams, UseSftpViewFileOpsResult } from "./useSftpViewFileOps.types";
 import { assertSftpFileFitsBuiltinEditor } from "../sftpEditorFileLimits";
+import { createSftpArchiveForPane } from "../../../application/state/sftp/createSftpArchive";
+import type { SftpArchiveCreationOptions, SftpArchiveCreationTarget } from "../../../domain/sftpArchiveCreation";
 
 /** Local multi-select blob downloads read whole files into ArrayBuffers. */
 const LOCAL_BLOB_DOWNLOAD_CONCURRENCY = 1;
@@ -659,6 +661,33 @@ export const useSftpViewFileOps = ({
     [handleExtractArchiveForSide],
   );
 
+  const handleCreateArchiveForSide = useCallback(
+    async (side: "left" | "right", options: SftpArchiveCreationOptions, target: SftpArchiveCreationTarget) => {
+      const result = await createSftpArchiveForPane({
+        getPane: () => side === "left" ? sftpRef.current.leftPane : sftpRef.current.rightPane,
+        target,
+        options,
+        bridge: netcattyBridge.get(),
+        getSftpIdForConnection,
+        refresh: (tabId) => sftpRef.current.refresh(side, { tabId }),
+        t,
+      });
+      if (result.success) {
+        toast.success(t("sftp.archive.success", { fileName: options.archiveName }), "SFTP");
+      }
+      return result;
+    },
+    [getSftpIdForConnection, sftpRef, t],
+  );
+  const onCreateArchiveLeft = useCallback(
+    (options: SftpArchiveCreationOptions, target: SftpArchiveCreationTarget) => handleCreateArchiveForSide("left", options, target),
+    [handleCreateArchiveForSide],
+  );
+  const onCreateArchiveRight = useCallback(
+    (options: SftpArchiveCreationOptions, target: SftpArchiveCreationTarget) => handleCreateArchiveForSide("right", options, target),
+    [handleCreateArchiveForSide],
+  );
+
   // Multi-file download. For local panes, each file auto-downloads as a blob
   // (no prompt). For remote panes, prompts for a target directory once and
   // streams all selected entries into it — avoids the per-file save dialog
@@ -875,6 +904,8 @@ export const useSftpViewFileOps = ({
     onDownloadFileRight,
     onExtractArchiveLeft,
     onExtractArchiveRight,
+    onCreateArchiveLeft,
+    onCreateArchiveRight,
     onDownloadFilesLeft,
     onDownloadFilesRight,
     onUploadExternalFilesLeft,

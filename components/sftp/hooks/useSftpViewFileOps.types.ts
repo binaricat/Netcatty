@@ -4,6 +4,7 @@ import type { RemoteFile, SftpFileEntry, SftpFilenameEncoding } from "../../../t
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import type { TextEditorModalSnapshot } from "../../TextEditorModal";
+import type { SftpArchiveCreationOptions, SftpArchiveCreationResult, SftpArchiveCreationTarget } from "../../../domain/sftpArchiveCreation";
 
 export interface UseSftpViewFileOpsParams {
   sftpRef: MutableRefObject<SftpStateApi>;
@@ -87,6 +88,8 @@ export interface UseSftpViewFileOpsResult {
   onDownloadFileRight: (file: SftpFileEntry, fullPath?: string) => void;
   onExtractArchiveLeft: (file: SftpFileEntry, fullPath?: string) => void | Promise<void>;
   onExtractArchiveRight: (file: SftpFileEntry, fullPath?: string) => void | Promise<void>;
+  onCreateArchiveLeft: (options: SftpArchiveCreationOptions, target: SftpArchiveCreationTarget) => Promise<SftpArchiveCreationResult>;
+  onCreateArchiveRight: (options: SftpArchiveCreationOptions, target: SftpArchiveCreationTarget) => Promise<SftpArchiveCreationResult>;
   onDownloadFilesLeft: (files: SftpFileEntry[]) => void;
   onDownloadFilesRight: (files: SftpFileEntry[]) => void;
   onUploadExternalFilesLeft: (dataTransfer: DataTransfer, targetPath?: string) => void;
