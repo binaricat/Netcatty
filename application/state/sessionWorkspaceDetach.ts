@@ -1,20 +1,17 @@
 import type { TerminalSession, Workspace } from "../../domain/models";
-import { collectSessionIds, pruneWorkspaceNode } from "../../domain/workspace";
+import type { AIChatRecencyEntry } from "../../domain/aiSessionRecency";
+import { resolveMostRecentlyActiveMemberTerminalId } from "../../domain/aiSessionRecency";
+import { collectSessionIds, createEmptyWorkspaceRoot, pruneWorkspaceNode } from "../../domain/workspace";
 
 export type DetachSessionFromWorkspaceStateResult = {
   changed: boolean;
   sessions: TerminalSession[];
   workspaces: Workspace[];
   activeTabId?: string;
-  dissolvedWorkspaceId?: string;
-  replacementTabIds?: string[];
 };
 
 export type CloseSessionWorkspaceLayoutResult = {
   workspaces: Workspace[];
-  removedWorkspaceId?: string;
-  dissolvedWorkspaceId?: string;
-  lastRemainingSessionId?: string;
 };
 
 export type CloseSessionsStateResult = {
@@ -28,82 +25,65 @@ type DetachSessionFromWorkspaceStateOptions = {
   sessions: TerminalSession[];
   workspaces: Workspace[];
   sessionId: string;
+  /**
+   * AI chat store snapshot used to rank surviving members by chat recency.
+   * Without a recency signal, terminal display still needs a live member.
+   */
+  aiSessions?: readonly AIChatRecencyEntry[];
 };
 
-export function replaceDissolvedWorkspaceTabOrder(
-  tabOrder: readonly string[],
-  workspaceId: string | undefined,
-  replacementTabIds: readonly string[] | undefined,
-): string[] {
-  if (!workspaceId || !replacementTabIds?.length) return [...tabOrder];
-
-  const uniqueReplacementIds = replacementTabIds.filter((tabId, index, list) => (
-    tabId && list.indexOf(tabId) === index
-  ));
-  if (uniqueReplacementIds.length === 0) return [...tabOrder];
-
-  if (!tabOrder.includes(workspaceId)) {
-    const hasAllReplacementIds = uniqueReplacementIds.every((tabId) => tabOrder.includes(tabId));
-    return hasAllReplacementIds ? [...tabOrder] : [
-      ...tabOrder,
-      ...uniqueReplacementIds.filter((tabId) => !tabOrder.includes(tabId)),
-    ];
+/**
+ * Resolve the member that should receive focus (or an anchor retarget) after a
+ * member loss. Prefers the AI-chat recency winner; falls back to the still-
+ * valid preferred (focused) member because that is explicit user intent, and
+ * falls back to a surviving pane so focus mode never hides all terminals.
+ */
+const resolveSurvivingFocusMemberId = (
+  remainingSessionIds: readonly string[],
+  previousFocusedSessionId: string | undefined,
+  aiSessions: readonly AIChatRecencyEntry[] | undefined,
+): string | undefined => {
+  if (previousFocusedSessionId && remainingSessionIds.includes(previousFocusedSessionId)) {
+    return previousFocusedSessionId;
   }
-
-  const replacementIdSet = new Set(uniqueReplacementIds);
-  let inserted = false;
-  const nextOrder: string[] = [];
-
-  for (const tabId of tabOrder) {
-    if (tabId === workspaceId) {
-      if (!inserted) {
-        nextOrder.push(...uniqueReplacementIds);
-        inserted = true;
-      }
-      continue;
-    }
-    if (!replacementIdSet.has(tabId)) {
-      nextOrder.push(tabId);
-    }
-  }
-
-  return nextOrder;
-}
+  return resolveMostRecentlyActiveMemberTerminalId({
+    memberTerminalIds: remainingSessionIds,
+    aiSessions,
+  }) ?? remainingSessionIds[0];
+};
 
 export function closeSessionWorkspaceLayoutState(
   workspaces: readonly Workspace[],
   workspaceId: string | undefined,
   sessionId: string,
+  aiSessions?: readonly AIChatRecencyEntry[],
 ): CloseSessionWorkspaceLayoutResult {
   if (!workspaceId) return { workspaces: [...workspaces] };
 
-  let removedWorkspaceId: string | undefined;
-  let dissolvedWorkspaceId: string | undefined;
-  let lastRemainingSessionId: string | undefined;
   const nextWorkspaces = workspaces
     .map((workspace) => {
       if (workspace.id !== workspaceId) return workspace;
       const prunedRoot = pruneWorkspaceNode(workspace.root, sessionId);
       if (!prunedRoot) {
-        removedWorkspaceId = workspace.id;
-        return null;
+        // Issue #4098 phase 2: the last member closed, but the workspace is a
+        // first-class entity — it survives with an empty root so its id (and
+        // the AI chats anchored to it) survive restart and member churn.
+        return {
+          ...workspace,
+          root: createEmptyWorkspaceRoot(),
+          focusedSessionId: undefined,
+          focusSessionOrder: [],
+        };
       }
 
       const remainingSessionIds = collectSessionIds(prunedRoot);
-      if (remainingSessionIds.length === 1) {
-        dissolvedWorkspaceId = workspace.id;
-        lastRemainingSessionId = remainingSessionIds[0];
-        return null;
-      }
-
-      // Closing the focused session must hand focus to a remaining one, or a
-      // focus-mode workspace is left with a dangling focusedSessionId: no pane
-      // qualifies as visible and the continuously rendered hidden panes all
-      // paint on top of each other (#3046).
-      const nextFocusedSessionId =
-        workspace.focusedSessionId && !remainingSessionIds.includes(workspace.focusedSessionId)
-          ? remainingSessionIds[0]
-          : workspace.focusedSessionId;
+      // Closing the focused session hands focus to the most-recently-active
+      // surviving member when AI chat recency is available.
+      const nextFocusedSessionId = resolveSurvivingFocusMemberId(
+        remainingSessionIds,
+        workspace.focusedSessionId,
+        aiSessions,
+      );
       const nextFocusSessionOrder = workspace.focusSessionOrder?.filter(
         (candidateId) => remainingSessionIds.includes(candidateId),
       );
@@ -114,36 +94,23 @@ export function closeSessionWorkspaceLayoutState(
         focusedSessionId: nextFocusedSessionId,
         focusSessionOrder: nextFocusSessionOrder,
       };
-    })
-    .filter((workspace): workspace is Workspace => Boolean(workspace));
+    });
 
   return {
     workspaces: nextWorkspaces,
-    removedWorkspaceId,
-    dissolvedWorkspaceId,
-    lastRemainingSessionId,
   };
 }
 
 /**
  * Apply a close-session action to the session list using the layout result.
- * When a 2-pane workspace dissolves to one terminal, that remaining session
- * must become an orphan tab — not stay bound to a deleted workspaceId.
+ * Since issue #4098 phase 2 workspaces survive member loss (no dissolve), the
+ * remaining members keep their workspace binding.
  */
 export function applyCloseSessionToSessions(
   sessions: readonly TerminalSession[],
   sessionId: string,
-  layoutResult: Pick<CloseSessionWorkspaceLayoutResult, "lastRemainingSessionId">,
 ): TerminalSession[] {
-  const remaining = sessions.filter((session) => session.id !== sessionId);
-  const lastRemainingSessionId = layoutResult.lastRemainingSessionId;
-  if (!lastRemainingSessionId) return remaining;
-
-  return remaining.map((session) => (
-    session.id === lastRemainingSessionId
-      ? { ...session, workspaceId: undefined }
-      : session
-  ));
+  return sessions.filter((session) => session.id !== sessionId);
 }
 
 export function isPreferredTabAvailableAfterClose(
@@ -161,12 +128,6 @@ export function isPreferredTabAvailableAfterClose(
 } {
   const { preferredTabId, closedSessionId, layoutResult, remainingSessions } = input;
   if (!preferredTabId || preferredTabId === closedSessionId) return false;
-  if (
-    preferredTabId === layoutResult.dissolvedWorkspaceId
-    || preferredTabId === layoutResult.removedWorkspaceId
-  ) {
-    return false;
-  }
   if (preferredTabId === "vault" || preferredTabId === "sftp") return true;
   if (layoutResult.workspaces.some((workspace) => workspace.id === preferredTabId)) return true;
   return remainingSessions.some((session) => (
@@ -179,7 +140,6 @@ export function isPreferredTabAvailableAfterClose(
 export function resolveActiveTabAfterCloseSession({
   currentActiveTabId,
   closedSessionId,
-  workspaceId,
   layoutResult,
   remainingSessions,
   preferredTabId,
@@ -202,18 +162,14 @@ export function resolveActiveTabAfterCloseSession({
   const preferredFallback = isPreferredTabAvailableAfterClose(preferredInput)
     ? preferredInput.preferredTabId
     : undefined;
-  const fallback = layoutResult.lastRemainingSessionId
-    ?? preferredFallback
+  const fallback = preferredFallback
     ?? fallbackWorkspace?.id
     ?? fallbackSolo?.id
     ?? "vault";
 
-  if (
-    currentActiveTabId === closedSessionId
-    || (layoutResult.dissolvedWorkspaceId && currentActiveTabId === layoutResult.dissolvedWorkspaceId)
-    || (layoutResult.removedWorkspaceId && currentActiveTabId === layoutResult.removedWorkspaceId)
-    || (workspaceId && currentActiveTabId === workspaceId && !layoutResult.workspaces.some((ws) => ws.id === workspaceId))
-  ) {
+  // Workspaces survive member loss (#4098 phase 2), so only a closed session
+  // tab that was active needs a replacement.
+  if (currentActiveTabId === closedSessionId) {
     return fallback;
   }
 
@@ -227,6 +183,7 @@ export function closeSessionsState({
   currentActiveTabId,
   preferredTabId,
   tabOrder,
+  aiSessions,
 }: {
   sessions: readonly TerminalSession[];
   workspaces: readonly Workspace[];
@@ -234,6 +191,7 @@ export function closeSessionsState({
   currentActiveTabId: string | null;
   preferredTabId?: string | null;
   tabOrder: readonly string[];
+  aiSessions?: readonly AIChatRecencyEntry[];
 }): CloseSessionsStateResult {
   let nextSessions = [...sessions];
   let nextWorkspaces = [...workspaces];
@@ -250,17 +208,10 @@ export function closeSessionsState({
       nextWorkspaces,
       workspaceId,
       sessionId,
+      aiSessions,
     );
     nextWorkspaces = layoutResult.workspaces;
-    nextSessions = applyCloseSessionToSessions(nextSessions, sessionId, layoutResult);
-
-    if (layoutResult.dissolvedWorkspaceId && layoutResult.lastRemainingSessionId) {
-      nextTabOrder = replaceDissolvedWorkspaceTabOrder(
-        nextTabOrder,
-        layoutResult.dissolvedWorkspaceId,
-        [layoutResult.lastRemainingSessionId],
-      );
-    }
+    nextSessions = applyCloseSessionToSessions(nextSessions, sessionId);
 
     const activeTabAfterClose = resolveActiveTabAfterCloseSession({
       currentActiveTabId: nextActiveTabId,
@@ -288,6 +239,7 @@ export function detachSessionFromWorkspaceState({
   sessions,
   workspaces,
   sessionId,
+  aiSessions,
 }: DetachSessionFromWorkspaceStateOptions): DetachSessionFromWorkspaceStateResult {
   const session = sessions.find((candidate) => candidate.id === sessionId);
   if (!session?.workspaceId) {
@@ -301,40 +253,36 @@ export function detachSessionFromWorkspaceState({
   }
 
   const prunedRoot = pruneWorkspaceNode(targetWorkspace.root, sessionId);
-  let nextSessions = sessions.map((candidate) => (
+  const nextSessions = sessions.map((candidate) => (
     candidate.id === sessionId ? { ...candidate, workspaceId: undefined } : candidate
   ));
 
   if (!prunedRoot) {
+    // Last member dragged out: the workspace entity survives with an empty
+    // root (#4098 phase 2) so its id and anchored AI chats stay stable.
     return {
       changed: true,
       sessions: nextSessions,
-      workspaces: workspaces.filter((workspace) => workspace.id !== workspaceId),
+      workspaces: workspaces.map((workspace) => (
+        workspace.id === workspaceId
+          ? {
+              ...workspace,
+              root: createEmptyWorkspaceRoot(),
+              focusedSessionId: undefined,
+              focusSessionOrder: [],
+            }
+          : workspace
+      )),
       activeTabId: sessionId,
-      dissolvedWorkspaceId: workspaceId,
-      replacementTabIds: [sessionId],
     };
   }
 
   const remainingSessionIds = collectSessionIds(prunedRoot);
-  if (remainingSessionIds.length === 1) {
-    nextSessions = nextSessions.map((candidate) => (
-      candidate.id === remainingSessionIds[0] ? { ...candidate, workspaceId: undefined } : candidate
-    ));
-
-    return {
-      changed: true,
-      sessions: nextSessions,
-      workspaces: workspaces.filter((workspace) => workspace.id !== workspaceId),
-      activeTabId: sessionId,
-      dissolvedWorkspaceId: workspaceId,
-      replacementTabIds: [sessionId, ...remainingSessionIds],
-    };
-  }
-
-  const nextFocusedSessionId = remainingSessionIds.includes(targetWorkspace.focusedSessionId)
-    ? targetWorkspace.focusedSessionId
-    : remainingSessionIds[0];
+  const nextFocusedSessionId = resolveSurvivingFocusMemberId(
+    remainingSessionIds,
+    targetWorkspace.focusedSessionId,
+    aiSessions,
+  );
   const nextFocusSessionOrder = (targetWorkspace.focusSessionOrder ?? [])
     .filter((candidateId, index, list) => (
       candidateId !== sessionId &&

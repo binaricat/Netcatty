@@ -659,6 +659,8 @@ export const ruAiMessages: Messages = {
 
   // Unified tooltips for terminal workspace and top tabs (issue #954)
   'terminal.layer.addTerminal': 'Добавить терминал',
+  'terminal.layer.emptyWorkspace': 'В этом рабочем пространстве пока нет терминалов',
+  'terminal.layer.emptyWorkspaceHint': 'Добавьте локальный терминал или подключитесь к хосту, чтобы начать.',
   'terminal.layer.switchToSplitView': 'Переключить в режим разделения',
   'terminal.layer.sftp': 'SFTP',
   'terminal.layer.scripts': 'Скрипты',

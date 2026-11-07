@@ -301,6 +301,8 @@ interface AIChatPanelsHostProps {
   onOpenVaultHostFromChat?: (hostId: string) => void;
   onOpenVaultSectionFromChat?: (section: 'notes' | 'hosts' | 'snippets') => void;
   onOpenVaultSnippetFromChat?: (snippetId: string) => void;
+  /** Issue #4098 phase 2: pin the AI chat a workspace scope is anchored to. */
+  onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void;
   /** Live workspaces, threaded to AI chats for `/chats` scope titles. */
   workspaces?: Workspace[] | null;
 }
@@ -394,6 +396,7 @@ const AIStateMaintenanceHostInner: React.FC<AIStateMaintenanceHostProps> = ({
         previousMemberTerminalIds: previousMemberIds,
         currentMemberTerminalIds: currentMemberIds,
         preferredTerminalId: workspace.focusedSessionId,
+        activeTargetIds: validAIScopeTargetIds,
       });
     }
 
@@ -468,6 +471,7 @@ function aiChatPanelsHostAreEqual(
   if (prev.onOpenVaultHostFromChat !== next.onOpenVaultHostFromChat) return false;
   if (prev.onOpenVaultSectionFromChat !== next.onOpenVaultSectionFromChat) return false;
   if (prev.onOpenVaultSnippetFromChat !== next.onOpenVaultSnippetFromChat) return false;
+  if (prev.onSetWorkspaceAnchorChat !== next.onSetWorkspaceAnchorChat) return false;
   if (prev.workspaces !== next.workspaces) return false;
   if (prev.activeTabId === next.activeTabId) return true;
 
@@ -508,6 +512,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   onOpenVaultHostFromChat,
   onOpenVaultSectionFromChat,
   onOpenVaultSnippetFromChat,
+  onSetWorkspaceAnchorChat,
   workspaces,
 }) => {
   const aiConfig = useContext(AIConfigContext);
@@ -527,7 +532,11 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     updateDraft,
   } = aiConfig;
   const aiPanelWorkspaces = useMemo(
-    () => (workspaces ?? []).map((workspace) => ({ id: workspace.id, title: workspace.title })),
+    () => (workspaces ?? []).map((workspace) => ({
+      id: workspace.id,
+      title: workspace.title,
+      anchorChatId: workspace.anchorChatId,
+    })),
     [workspaces],
   );
 
@@ -638,6 +647,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     scopeLabel={context.scopeLabel}
                     focusedSessionId={context.focusedSessionId}
                     workspaces={aiPanelWorkspaces}
+                    onSetWorkspaceAnchorChat={onSetWorkspaceAnchorChat}
                     terminalSessions={context.terminalSessions}
                     liveScopeTargetIds={liveScopeTargetIds}
                     resolveExecutorContext={resolveExecutorContext}
@@ -718,12 +728,15 @@ export interface TerminalLayerProps {
   onTerminalDataCapture?: (sessionId: string, data: string) => void | Promise<void>;
   onCreateWorkspaceFromSessions: (baseSessionId: string, joiningSessionId: string, hint: Exclude<SplitHint, null>) => void;
   onAddSessionToWorkspace: (workspaceId: string, sessionId: string, hint: Exclude<SplitHint, null>) => void;
+  onMoveWorkspacePane: (workspaceId: string, sessionId: string, hint: Exclude<SplitHint, null>) => void;
   onRequestAddToWorkspace?: (workspaceId: string) => void;
   onAppendHostToWorkspace?: (workspaceId: string, hostId: string) => void;
   onUpdateSplitSizes: (workspaceId: string, splitId: string, sizes: number[]) => void;
   onSetDraggingSessionId: (id: string | null) => void;
   onToggleWorkspaceViewMode?: (workspaceId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
+  /** Issue #4098 phase 2: pin the AI chat a workspace scope is anchored to. */
+  onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void;
   onReorderWorkspaceSessions?: (workspaceId: string, draggedSessionId: string, targetSessionId: string, position: 'before' | 'after') => void;
   onReorderTabs?: (draggedId: string, targetId: string, position: 'before' | 'after', additionalTabIds?: readonly string[]) => void;
   onCopySession?: (sessionId: string) => void;
@@ -881,6 +894,7 @@ interface TerminalPaneProps {
   onReorderTabs?: (draggedId: string, targetId: string, position: 'before' | 'after', additionalTabIds?: readonly string[]) => void;
   onStartSessionDrag?: (sessionId: string) => void;
   onEndSessionDrag?: () => void;
+  onDropWorkspacePane?: (sessionId: string, point: { clientX: number; clientY: number }) => void;
 }
 
 const getPaneAppearanceThemeId = (props: TerminalPaneProps): string => {
@@ -994,6 +1008,7 @@ const terminalPanePropsAreEqual = (
   prev.onRemoveSessionFromWorkspace === next.onRemoveSessionFromWorkspace &&
   prev.onReorderTabs === next.onReorderTabs &&
   prev.onStartSessionDrag === next.onStartSessionDrag &&
+  prev.onDropWorkspacePane === next.onDropWorkspacePane &&
   prev.onEndSessionDrag === next.onEndSessionDrag
 );
 
@@ -1001,9 +1016,9 @@ type WorkspaceDetachPointerDragOptions = {
   inActiveWorkspace: boolean;
   session: TerminalSession;
   terminalSettings?: TerminalSettings;
-  workspaceById: Map<string, Workspace>;
   onStartSessionDrag?: (sessionId: string) => void;
   onEndSessionDrag?: () => void;
+  onDropWorkspacePane?: (sessionId: string, point: { clientX: number; clientY: number }) => void;
   onRemoveSessionFromWorkspace?: TerminalPaneProps['onRemoveSessionFromWorkspace'];
   onReorderTabs?: TerminalPaneProps['onReorderTabs'];
 };
@@ -1012,9 +1027,9 @@ export function useWorkspaceDetachPointerDrag({
   inActiveWorkspace,
   session,
   terminalSettings,
-  workspaceById,
   onStartSessionDrag,
   onEndSessionDrag,
+  onDropWorkspacePane,
   onRemoveSessionFromWorkspace,
   onReorderTabs,
 }: WorkspaceDetachPointerDragOptions): (event: React.PointerEvent<HTMLElement>) => void {
@@ -1120,19 +1135,6 @@ export function useWorkspaceDetachPointerDrag({
       return insertionTarget;
     };
 
-    const resolveStableInsertionTarget = (insertionTarget: ReturnType<typeof getTopTabInsertionTarget>) => {
-      if (!insertionTarget || insertionTarget.tabId !== session.workspaceId) return insertionTarget;
-      const sourceWorkspace = session.workspaceId ? workspaceById.get(session.workspaceId) : undefined;
-      if (!sourceWorkspace) return insertionTarget;
-      const remainingSessionIds = collectSessionIds(sourceWorkspace.root)
-        .filter((candidateId) => candidateId !== session.id);
-      if (remainingSessionIds.length !== 1) return insertionTarget;
-      return {
-        tabId: remainingSessionIds[0],
-        position: insertionTarget.position,
-      };
-    };
-
     const startDragIfNeeded = (pointerEvent: PointerEvent) => {
       if (cleanupFinished || dragStarted) return;
       const dx = pointerEvent.clientX - startPoint.clientX;
@@ -1179,9 +1181,10 @@ export function useWorkspaceDetachPointerDrag({
       const shouldDetach = dragStarted
         && !!topTabsRoot
         && isPointInsideRect(pointerEvent, topTabsRoot.getBoundingClientRect());
+      if (dragStarted && !shouldDetach) onDropWorkspacePane?.(session.id, pointerEvent);
       cleanup();
       if (shouldDetach) {
-        const stableInsertionTarget = resolveStableInsertionTarget(insertionTarget);
+        const stableInsertionTarget = insertionTarget;
         if (onRemoveSessionFromWorkspace) {
           onRemoveSessionFromWorkspace(
             session.id,
@@ -1211,13 +1214,13 @@ export function useWorkspaceDetachPointerDrag({
     cleanupActiveDrag,
     inActiveWorkspace,
     onEndSessionDrag,
+    onDropWorkspacePane,
     onRemoveSessionFromWorkspace,
     onReorderTabs,
     onStartSessionDrag,
     session,
     terminalSettings?.dynamicTabTitleMode,
-    workspaceById,
-  ]);
+    ]);
 }
 
 const TerminalPane: React.FC<TerminalPaneProps> = memo(({
@@ -1300,6 +1303,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   onReorderTabs,
   onStartSessionDrag,
   onEndSessionDrag,
+  onDropWorkspacePane,
 }) => {
   const layoutSuppressActive = useTerminalLayoutSuppressActive();
   const deferPaneLayoutUpdate = isResizing || layoutSuppressActive;
@@ -1575,9 +1579,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     inActiveWorkspace,
     session,
     terminalSettings,
-    workspaceById,
     onStartSessionDrag,
     onEndSessionDrag,
+    onDropWorkspacePane,
     onRemoveSessionFromWorkspace,
     onReorderTabs,
   });
@@ -1796,6 +1800,7 @@ interface TerminalPanesHostProps {
   onReorderTabs?: (draggedId: string, targetId: string, position: 'before' | 'after', additionalTabIds?: readonly string[]) => void;
   onStartSessionDrag?: (sessionId: string) => void;
   onEndSessionDrag?: () => void;
+  onDropWorkspacePane?: (sessionId: string, point: { clientX: number; clientY: number }) => void;
 }
 
 const terminalPanesHostPropsAreEqual = (
@@ -1879,6 +1884,7 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.onReorderTabs !== next.onReorderTabs) return false;
   if (prev.onStartSessionDrag !== next.onStartSessionDrag) return false;
   if (prev.onEndSessionDrag !== next.onEndSessionDrag) return false;
+  if (prev.onDropWorkspacePane !== next.onDropWorkspacePane) return false;
 
   if (prev.workspaceRectsById === next.workspaceRectsById) return true;
 

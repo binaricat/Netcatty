@@ -1,6 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { memo, useEffect, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import { LayoutGrid, Plus } from 'lucide-react';
+import { Button } from '../ui/button';
+import { collectSessionIds } from '../../domain/workspace';
 
 import {
   getSidePanelLiveSnapshot,
@@ -100,6 +103,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     handleCommandExecuted,
     handleCommandSubmitted,
     onSetWorkspaceFocusedSession,
+    onRequestAddToWorkspace,
     onSplitSession,
     isBroadcastEnabled,
     isComposeSendToAll,
@@ -126,6 +130,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     onReorderTabs,
     onStartSessionDrag,
     onEndSessionDrag,
+    onDropWorkspacePane,
     isGlobalBroadcastEnabled,
     isGlobalComposeSendToAll,
     canUseGlobalBroadcast,
@@ -153,6 +158,21 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
   return (
     <div data-section="terminal-workspace-column" className="flex-1 min-h-0 flex flex-col">
     <div ref={workspaceInnerRef} className="flex-1 min-h-0 overflow-hidden relative">
+        {activeWorkspace && collectSessionIds(activeWorkspace.root).length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center p-6" data-section="empty-workspace">
+            <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+              <LayoutGrid size={32} className="text-muted-foreground/60" aria-hidden="true" />
+              <h2 className="text-sm font-medium">{t('terminal.layer.emptyWorkspace')}</h2>
+              <p className="text-sm text-muted-foreground">{t('terminal.layer.emptyWorkspaceHint')}</p>
+              {onRequestAddToWorkspace && (
+                <Button className="mt-1 gap-2" onClick={() => onRequestAddToWorkspace(activeWorkspace.id)}>
+                  <Plus size={16} aria-hidden="true" />
+                  {t('terminal.layer.addTerminal')}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
         {draggingSessionId && !isFocusMode && (
           <div
             ref={workspaceOverlayRef}
@@ -267,6 +287,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           onReorderTabs={onReorderTabs}
           onStartSessionDrag={onStartSessionDrag}
           onEndSessionDrag={onEndSessionDrag}
+          onDropWorkspacePane={onDropWorkspacePane}
           isGlobalBroadcastEnabled={isGlobalBroadcastEnabled}
           canUseGlobalBroadcast={canUseGlobalBroadcast}
           onToggleGlobalBroadcast={onToggleGlobalBroadcast}

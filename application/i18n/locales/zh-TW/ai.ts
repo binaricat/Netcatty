@@ -710,6 +710,8 @@ export const zhTWAiMessages: Messages = {
 
   // 統一終端工作區和頂部標籤的 tooltip 文案 (issue #954)
   'terminal.layer.addTerminal': '新增終端',
+  'terminal.layer.emptyWorkspace': '工作區中還沒有終端',
+  'terminal.layer.emptyWorkspaceHint': '新增本機終端或連線至主機，開始使用這個工作區。',
   'terminal.layer.switchToSplitView': '切換到分割檢視',
   'terminal.layer.sftp': '檔案傳輸',
   'terminal.layer.scripts': '指令碼',

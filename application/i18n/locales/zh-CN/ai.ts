@@ -720,6 +720,8 @@ export const zhCNAiMessages: Messages = {
 
   // 统一终端工作区和顶部标签的 tooltip 文案 (issue #954)
   'terminal.layer.addTerminal': '添加终端',
+  'terminal.layer.emptyWorkspace': '工作区中还没有终端',
+  'terminal.layer.emptyWorkspaceHint': '添加本地终端或连接主机，开始使用这个工作区。',
   'terminal.layer.switchToSplitView': '切换到分屏视图',
   'terminal.layer.sftp': '文件传输',
   'terminal.layer.scripts': '脚本',

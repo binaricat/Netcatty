@@ -15,13 +15,13 @@ import {
   shouldForceDraftViewSync,
 } from "./aiPanelViewState.ts";
 
-function createSession(id: string): AISession {
+function createSession(id: string, updatedAt = 1): AISession {
   return {
     id,
     title: `Session ${id}`,
     messages: [],
     createdAt: 1,
-    updatedAt: 1,
+    updatedAt,
     agentId: "catty",
     scope: {
       type: "terminal",
@@ -130,6 +130,33 @@ test("missing explicit panel view resumes the most recent matching history when 
   assert.deepEqual(
     resolveDisplayedPanelView(undefined, false, sessions, undefined, "workspace"),
     { mode: "session", sessionId: "session-2" },
+  );
+});
+
+test("auto-resume prefers the anchored chat over recency and position (#4098 phase 2)", () => {
+  const sessions = [createSession("session-2", 9), createSession("session-1", 4)];
+
+  assert.deepEqual(
+    resolveDisplayedPanelView(undefined, false, sessions, undefined, "workspace", "session-1"),
+    { mode: "session", sessionId: "session-1" },
+  );
+});
+
+test("auto-resume without an anchor picks the most recently updated chat, not sessions[0]", () => {
+  const sessions = [createSession("session-2", 4), createSession("session-1", 9)];
+
+  assert.deepEqual(
+    resolveDisplayedPanelView(undefined, false, sessions, undefined, "workspace"),
+    { mode: "session", sessionId: "session-1" },
+  );
+});
+
+test("a stale anchor that left the scope falls through to recency", () => {
+  const sessions = [createSession("session-2", 4), createSession("session-1", 9)];
+
+  assert.deepEqual(
+    resolveDisplayedPanelView(undefined, false, sessions, undefined, "workspace", "deleted-chat"),
+    { mode: "session", sessionId: "session-1" },
   );
 });
 

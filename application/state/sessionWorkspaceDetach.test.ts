@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { TerminalSession, Workspace } from "../../domain/models";
+import type { AIChatRecencyEntry } from "../../domain/aiSessionRecency";
 import {
   applyCloseSessionToSessions,
   closeSessionsState,
   closeSessionWorkspaceLayoutState,
   detachSessionFromWorkspaceState,
-  replaceDissolvedWorkspaceTabOrder,
   resolveActiveTabAfterCloseSession,
 } from "./sessionWorkspaceDetach";
 
@@ -14,11 +14,19 @@ const session = (id: string, workspaceId = "ws-1"): TerminalSession => ({
   id,
   hostId: id,
   hostLabel: id,
+  username: "user",
+  hostname: id,
   status: "connected",
   workspaceId,
 });
 
-const workspace = (sessionIds: string[]): Workspace => ({
+const chat = (id: string, targetId: string, updatedAt: number): AIChatRecencyEntry => ({
+  id,
+  scope: { type: "terminal", targetId },
+  updatedAt,
+});
+
+const workspace = (sessionIds: string[], overrides: Partial<Workspace> = {}): Workspace => ({
   id: "ws-1",
   title: "Workspace",
   focusedSessionId: sessionIds[0],
@@ -36,9 +44,17 @@ const workspace = (sessionIds: string[]): Workspace => ({
         })),
         sizes: sessionIds.map(() => 1),
       },
+  ...overrides,
 });
 
-test("detach dissolves the original workspace when one session remains", () => {
+const rootPaneSessionIds = (workspace: Workspace): string[] => (
+  workspace.root.type === "pane"
+    ? [workspace.root.sessionId]
+    : workspace.root.children.map((child) => child.type === "pane" ? child.sessionId : "")
+      .filter((id): id is string => Boolean(id))
+);
+
+test("detaching to one member keeps the workspace alive (#4098 phase 2)", () => {
   const result = detachSessionFromWorkspaceState({
     sessions: [session("s1"), session("s2")],
     workspaces: [workspace(["s1", "s2"])],
@@ -49,149 +65,126 @@ test("detach dissolves the original workspace when one session remains", () => {
   assert.equal(result.activeTabId, "s1");
   assert.deepEqual(result.sessions.map((s) => [s.id, s.workspaceId]), [
     ["s1", undefined],
-    ["s2", undefined],
+    // The survivor keeps its workspace binding — no orphan promotion.
+    ["s2", "ws-1"],
   ]);
-  assert.equal(result.workspaces.length, 0);
-  assert.equal(result.dissolvedWorkspaceId, "ws-1");
-  assert.deepEqual(result.replacementTabIds, ["s1", "s2"]);
+  assert.equal(result.workspaces.length, 1);
+  assert.equal(result.workspaces[0].id, "ws-1");
+  assert.deepEqual(rootPaneSessionIds(result.workspaces[0]), ["s2"]);
 });
 
-test("detach preserves the other sessions in a multi-pane workspace", () => {
+test("detaching the last member keeps the workspace with an empty root (#4098 phase 2)", () => {
   const result = detachSessionFromWorkspaceState({
-    sessions: [session("s1"), session("s2"), session("s3")],
-    workspaces: [workspace(["s1", "s2", "s3"])],
-    sessionId: "s2",
+    sessions: [session("s1")],
+    workspaces: [workspace(["s1"])],
+    sessionId: "s1",
   });
 
   assert.equal(result.changed, true);
-  assert.deepEqual(result.sessions.map((s) => [s.id, s.workspaceId]), [
-    ["s1", "ws-1"],
-    ["s2", undefined],
-    ["s3", "ws-1"],
-  ]);
-  assert.deepEqual(result.workspaces[0].focusSessionOrder, ["s1", "s3"]);
-  assert.equal(result.workspaces[0].focusedSessionId, "s1");
+  assert.equal(result.workspaces.length, 1);
+  assert.equal(result.workspaces[0].id, "ws-1");
+  assert.equal(result.workspaces[0].root.type, "split");
   assert.deepEqual(
-    result.workspaces[0].root.type === "split"
-      ? result.workspaces[0].root.children.map((child) => child.type === "pane" ? child.sessionId : null)
-      : [],
-    ["s1", "s3"],
+    result.workspaces[0].root.type === "split" ? result.workspaces[0].root.children : null,
+    [],
   );
+  assert.equal(result.workspaces[0].focusedSessionId, undefined);
 });
 
-test("dissolved workspace replacement preserves its tab position", () => {
-  assert.deepEqual(
-    replaceDissolvedWorkspaceTabOrder(["log-1", "ws-1", "session-3"], "ws-1", ["s1", "s2"]),
-    ["log-1", "s1", "s2", "session-3"],
-  );
+test("closing one member keeps the workspace and its surviving member bound (#4098 phase 2)", () => {
+  const result = closeSessionsState({
+    sessions: [session("s1"), session("s2")],
+    workspaces: [workspace(["s1", "s2"])],
+    sessionIds: ["s1"],
+    currentActiveTabId: "ws-1",
+    tabOrder: ["ws-1"],
+  });
+
+  assert.equal(result.workspaces.length, 1);
+  assert.equal(result.workspaces[0].id, "ws-1");
+  assert.deepEqual(result.sessions.map((s) => [s.id, s.workspaceId]), [["s2", "ws-1"]]);
+  // The workspace tab is still live, so the active tab does not move.
+  assert.equal(result.activeTabId, undefined);
 });
 
-test("dissolved workspace replacement removes duplicate replacement ids", () => {
-  assert.deepEqual(
-    replaceDissolvedWorkspaceTabOrder(["s1", "ws-1", "session-3"], "ws-1", ["s1", "s2"]),
-    ["s1", "s2", "session-3"],
-  );
-});
-
-test("dissolved workspace replacement is idempotent", () => {
-  const once = replaceDissolvedWorkspaceTabOrder(["log-1", "ws-1", "session-3"], "ws-1", ["s1", "s2"]);
-
-  assert.deepEqual(
-    replaceDissolvedWorkspaceTabOrder(once, "ws-1", ["s1", "s2"]),
-    once,
-  );
-});
-
-test("single remaining session preserves dissolved workspace tab position", () => {
-  assert.deepEqual(
-    replaceDissolvedWorkspaceTabOrder(["log-1", "ws-1", "session-3"], "ws-1", ["s2"]),
-    ["log-1", "s2", "session-3"],
-  );
-});
-
-test("closing a workspace session dissolves the workspace when one terminal remains", () => {
-  const result = closeSessionWorkspaceLayoutState([workspace(["s1", "s2"])], "ws-1", "s1");
-
-  assert.equal(result.dissolvedWorkspaceId, "ws-1");
-  assert.equal(result.lastRemainingSessionId, "s2");
-  assert.deepEqual(result.workspaces, []);
-  assert.deepEqual(
-    replaceDissolvedWorkspaceTabOrder(
-      ["log-1", result.dissolvedWorkspaceId!, "session-3"],
-      result.dissolvedWorkspaceId,
-      result.lastRemainingSessionId ? [result.lastRemainingSessionId] : undefined,
-    ),
-    ["log-1", "s2", "session-3"],
-  );
-});
-
-test("closing the focused session hands focus to a remaining session (#3046)", () => {
+test("member loss hands focus to the most-recently-active survivor, not sessions[0]", () => {
   const result = closeSessionWorkspaceLayoutState(
-    [workspace(["s1", "s2", "s3", "s4"])],
+    [workspace(["s1", "s2", "s3"])],
     "ws-1",
     "s1",
+    [chat("chat-s2", "s2", 4), chat("chat-s3", "s3", 9)],
   );
 
   assert.equal(result.workspaces.length, 1);
-  assert.equal(result.workspaces[0].focusedSessionId, "s2");
-  assert.deepEqual(result.workspaces[0].focusSessionOrder, ["s2", "s3", "s4"]);
+  // remainingSessionIds[0] is s2, but s3's chat is the most recent.
+  assert.equal(result.workspaces[0].focusedSessionId, "s3");
 });
 
-test("closing a non-focused session keeps the focused session", () => {
+test("reordering focus order does not change the survivor retarget", () => {
   const result = closeSessionWorkspaceLayoutState(
-    [workspace(["s1", "s2", "s3", "s4"])],
+    [workspace(["s1", "s2", "s3"], { focusSessionOrder: ["s3", "s2", "s1"] })],
+    "ws-1",
+    "s1",
+    [chat("chat-s2", "s2", 4), chat("chat-s3", "s3", 9)],
+  );
+
+  assert.equal(result.workspaces[0].focusedSessionId, "s3");
+});
+
+test("closing a non-focused member keeps the focused member", () => {
+  const result = closeSessionWorkspaceLayoutState(
+    [workspace(["s1", "s2", "s3"])],
     "ws-1",
     "s3",
   );
 
   assert.equal(result.workspaces.length, 1);
   assert.equal(result.workspaces[0].focusedSessionId, "s1");
-  assert.deepEqual(result.workspaces[0].focusSessionOrder, ["s1", "s2", "s4"]);
+  assert.deepEqual(result.workspaces[0].focusSessionOrder, ["s1", "s2"]);
 });
 
-test("closing one split pane keeps the other terminal as an orphan tab", () => {
-  const layoutResult = closeSessionWorkspaceLayoutState(
+test("with no AI recency signal focus stays on a surviving terminal", () => {
+  const result = closeSessionWorkspaceLayoutState(
     [workspace(["s1", "s2"])],
     "ws-1",
     "s1",
   );
-  const nextSessions = applyCloseSessionToSessions(
-    [session("s1"), session("s2")],
-    "s1",
-    layoutResult,
-  );
 
-  assert.deepEqual(nextSessions.map((s) => [s.id, s.workspaceId]), [
-    ["s2", undefined],
-  ]);
-  assert.equal(
-    resolveActiveTabAfterCloseSession({
-      currentActiveTabId: "ws-1",
-      closedSessionId: "s1",
-      workspaceId: "ws-1",
-      layoutResult,
-      remainingSessions: nextSessions,
-      preferredTabId: "s-outside",
-    }),
-    "s2",
-  );
+  assert.equal(result.workspaces.length, 1);
+  assert.equal(result.workspaces[0].focusedSessionId, "s2");
 });
 
-test("closing the last workspace session does not invent a surviving terminal", () => {
+test("closing ALL members keeps the workspace alive with an empty root (#4098 phase 2)", () => {
+  const result = closeSessionsState({
+    sessions: [session("s1"), session("s2")],
+    workspaces: [workspace(["s1", "s2"])],
+    sessionIds: ["s1", "s2"],
+    currentActiveTabId: "ws-1",
+    tabOrder: ["ws-1"],
+  });
+
+  assert.deepEqual(result.sessions, []);
+  assert.equal(result.workspaces.length, 1);
+  assert.equal(result.workspaces[0].id, "ws-1");
+  assert.equal(result.workspaces[0].root.type, "split");
+  assert.deepEqual(
+    result.workspaces[0].root.type === "split" ? result.workspaces[0].root.children : null,
+    [],
+  );
+  // The workspace tab survives, so the active tab is left alone.
+  assert.equal(result.activeTabId, undefined);
+});
+
+test("closing a solo workspace member still replaces the closed tab's activity via fallbacks", () => {
   const layoutResult = closeSessionWorkspaceLayoutState(
     [workspace(["s1"])],
     "ws-1",
     "s1",
   );
-  const nextSessions = applyCloseSessionToSessions(
-    [session("s1")],
-    "s1",
-    layoutResult,
-  );
+  const nextSessions = applyCloseSessionToSessions([session("s1")], "s1");
 
   assert.deepEqual(nextSessions, []);
-  assert.equal(layoutResult.removedWorkspaceId, "ws-1");
-  assert.equal(layoutResult.lastRemainingSessionId, undefined);
+  // The workspace tab survives, so an active workspace tab needs no fallback.
   assert.equal(
     resolveActiveTabAfterCloseSession({
       currentActiveTabId: "ws-1",
@@ -200,25 +193,7 @@ test("closing the last workspace session does not invent a surviving terminal", 
       layoutResult,
       remainingSessions: nextSessions,
     }),
-    "vault",
-  );
-});
-
-test("closing the last visible solo tab does not fall back to a hidden MCP session", () => {
-  const visibleSession: TerminalSession = { ...session("s1", undefined) };
-  const hiddenSession: TerminalSession = { ...session("s2", undefined), hiddenFromTabs: true };
-  const layoutResult = closeSessionWorkspaceLayoutState([], undefined, "s1");
-  const remainingSessions = [hiddenSession];
-
-  assert.equal(
-    resolveActiveTabAfterCloseSession({
-      currentActiveTabId: visibleSession.id,
-      closedSessionId: "s1",
-      workspaceId: undefined,
-      layoutResult,
-      remainingSessions,
-    }),
-    "vault",
+    null,
   );
 });
 

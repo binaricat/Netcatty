@@ -1,5 +1,6 @@
 import { buildAIScopeKey } from './aiSessionsForScope';
 import { resolveInheritedAIActiveSessionId } from './aiWorkspaceScopeInherit';
+import { resolveMostRecentlyActiveMemberTerminalId } from './aiSessionRecency';
 
 export type AIActiveSessionIdMap = Readonly<Record<string, string | null | undefined>>;
 
@@ -245,6 +246,8 @@ export function retargetWorkspaceActiveChatAfterMemberLoss<T extends AISessionSc
   previousMemberTerminalIds: readonly string[];
   currentMemberTerminalIds: readonly string[];
   preferredTerminalId?: string | null;
+  /** Current live targets distinguish a closed terminal from a detached one. */
+  activeTargetIds?: ReadonlySet<string>;
 }): {
   activeSessionIdMap: Record<string, string | null>;
   sessions: T[];
@@ -257,6 +260,39 @@ export function retargetWorkspaceActiveChatAfterMemberLoss<T extends AISessionSc
   const departedTerminalIds = input.previousMemberTerminalIds.filter(
     (sessionId) => sessionId && !survivorTerminalIds.has(sessionId),
   );
+
+  if (survivorTerminalIds.size === 0) {
+    const activeSession = input.sessions.find((session) => session.id === workspaceActive);
+    const ownerId = activeSession?.scope.targetId;
+    // A member may have resumed history from an older terminal. Match its
+    // current selection as well as the original scope owner when preserving
+    // that inherited chat. Still-live detached members keep their selection.
+    const carryingTerminalIds = departedTerminalIds.filter((terminalId) => (
+      terminalId === ownerId
+      || previousMap[buildAIScopeKey('terminal', terminalId)] === workspaceActive
+    ));
+    if (!activeSession || activeSession.scope.type !== 'terminal' || !ownerId
+      || carryingTerminalIds.length === 0
+      || !input.activeTargetIds || input.activeTargetIds.has(ownerId)
+      || carryingTerminalIds.some((terminalId) => input.activeTargetIds!.has(terminalId))) {
+      return { activeSessionIdMap: previousMap, sessions: input.sessions as T[], changed: false };
+    }
+    const nextMap = { ...previousMap };
+    for (const departedTerminalId of departedTerminalIds) {
+      const departedKey = buildAIScopeKey('terminal', departedTerminalId);
+      if (!input.activeTargetIds.has(departedTerminalId) && nextMap[departedKey] === workspaceActive) {
+        nextMap[departedKey] = null;
+      }
+    }
+    return {
+      activeSessionIdMap: nextMap,
+      sessions: input.sessions.map((session) => session !== activeSession ? session : {
+        ...session,
+        scope: { ...session.scope, type: 'workspace', targetId: input.workspaceId },
+      }),
+      changed: true,
+    };
+  }
 
   let nextMap: Record<string, string | null> = { ...previousMap };
   let mapChanged = false;
@@ -277,19 +313,17 @@ export function retargetWorkspaceActiveChatAfterMemberLoss<T extends AISessionSc
     };
   }
 
-  if (survivorTerminalIds.size === 0) {
-    return {
-      activeSessionIdMap: mapChanged ? nextMap : previousMap,
-      sessions: input.sessions as T[],
-      changed: mapChanged,
-    };
-  }
-
+  // Issue #4098 phase 2: when the focused member did not survive, the retarget
+  // lands on the most-recently-active survivor (AI chat recency) — never on
+  // the first positional member.
   const preferredTerminalId = (
     input.preferredTerminalId
     && survivorTerminalIds.has(input.preferredTerminalId)
       ? input.preferredTerminalId
-      : input.currentMemberTerminalIds.find((id) => survivorTerminalIds.has(id))
+      : resolveMostRecentlyActiveMemberTerminalId({
+          memberTerminalIds: input.currentMemberTerminalIds,
+          aiSessions: input.sessions,
+        })
   ) ?? null;
   if (!preferredTerminalId) {
     return {
