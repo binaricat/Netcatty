@@ -50,6 +50,7 @@ import {
   tryBeginSendForKey,
 } from './ai/draftSendGate';
 import { draftsByScopeEqualIgnoringComposerText, selectDraftForAgentSwitch } from '../application/state/aiDraftState';
+import { latestAIActiveSessionMapSnapshot, latestAISessionsSnapshot } from '../application/state/aiStateSnapshots';
 import { sanitizeContextWindow } from '../infrastructure/ai/contextCompaction';
 import {
   buildPromptWithTerminalSelectionAttachments,
@@ -649,6 +650,21 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }, { initialDelayMs: 250 });
   }, [isVisible, terminalSessions, activeSessionId]);
 
+  // Workspace maintenance can retarget an inherited chat earlier in this same
+  // passive-effect flush. Before clearing a selection, recheck its membership
+  // against the synchronous snapshot instead of this render's old history.
+  const isSessionVisibleInCurrentScope = useCallback((sessionId: string) => (
+    getScopedHistorySessions(
+      latestAISessionsSnapshot ?? sessions,
+      scopeType,
+      scopeTargetId,
+      scopeHostIds,
+      activeTerminalSessionIds,
+      workspaceMemberTerminalIds,
+      latestAIActiveSessionMapSnapshot ?? activeSessionIdMap,
+    ).some((session) => session.id === sessionId)
+  ), [sessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalSessionIds, workspaceMemberTerminalIds, activeSessionIdMap]);
+
   useEffect(() => {
     if (!isVisible) return;
     // Predicate must match normalizePanelView's list (scoped history), not the
@@ -656,12 +672,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     if (!shouldForceDraftViewSync(
       explicitPanelView,
       normalizedPanelView,
-      (sessionId) => historySessions.some((session) => session.id === sessionId),
+      isSessionVisibleInCurrentScope,
     )) {
       return;
     }
     showDraftView(scopeKey);
-  }, [isVisible, normalizedPanelView, explicitPanelView, scopeKey, historySessions, showDraftView]);
+  }, [isVisible, normalizedPanelView, explicitPanelView, scopeKey, isSessionVisibleInCurrentScope, showDraftView]);
 
   useEffect(() => {
     if (!activeSession) return;
@@ -690,11 +706,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   useEffect(() => {
     if (!isVisible) return;
     if (normalizedPanelView.mode !== 'draft') return;
-    // Keep ownership while an explicit session is still displayable in this
-    // scope (normalize has not demoted it). Out-of-scope / missing ids clear.
+    // Keep a selection that maintenance just made displayable, but always
+    // honor an explicit New Chat draft. Out-of-scope / missing ids still clear.
+    const selectedSessionId = explicitPanelView?.mode === 'session'
+      ? explicitPanelView.sessionId : persistedSessionId;
     if (
-      explicitPanelView?.mode === 'session'
-      && historySessions.some((session) => session.id === explicitPanelView.sessionId)
+      explicitPanelView?.mode !== 'draft'
+      && selectedSessionId
+      && isSessionVisibleInCurrentScope(selectedSessionId)
     ) {
       return;
     }
@@ -704,7 +723,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     isVisible,
     normalizedPanelView.mode,
     explicitPanelView,
-    historySessions,
+    isSessionVisibleInCurrentScope,
     persistedSessionId,
     setActiveSessionId,
   ]);
