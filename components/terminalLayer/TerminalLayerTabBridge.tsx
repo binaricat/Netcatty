@@ -111,6 +111,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     activeSession,
     activeWorkspace,
     isFocusMode,
+    hasMagnifiedPane: !!activeWorkspace && activeWorkspace.id === s.magnifiedPane?.tabId,
     shouldKeepHiddenWorkspaceLaidOut,
     onAddSessionToWorkspace: s.onAddSessionToWorkspace,
     onCreateWorkspaceFromSessions: s.onCreateWorkspaceFromSessions,

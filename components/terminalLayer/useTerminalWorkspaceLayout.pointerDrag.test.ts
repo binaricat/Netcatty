@@ -46,7 +46,7 @@ function eventSurface() {
   };
 }
 
-for (const scenario of ['move', 'release-only', 'self', 'cancel', 'blur'] as const) {
+for (const scenario of ['move', 'release-only', 'self', 'cancel', 'blur', 'magnified', 'magnified-detach'] as const) {
 test(`member pane gesture: ${scenario}`, async (t) => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const previousActEnvironment = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
@@ -61,7 +61,10 @@ test(`member pane gesture: ${scenario}`, async (t) => {
       const element = { style: {}, remove: () => dragElements.delete(element) };
       return element;
     },
-    querySelector: () => null,
+    querySelector: () => scenario === 'magnified-detach' ? {
+      getBoundingClientRect: () => ({ left: 0, right: 1000, top: -50, bottom: 0 }),
+      querySelectorAll: () => [],
+    } : null,
   } as unknown as Document;
   Object.defineProperty(globalThis, 'window', { configurable: true, value: windowSurface });
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
@@ -88,12 +91,15 @@ test(`member pane gesture: ${scenario}`, async (t) => {
   const noop = () => {};
   const events: string[] = [];
   const moves: unknown[][] = [];
+  const detachedIds: string[] = [];
+  let hasMagnifiedPane = scenario === 'magnified' || scenario === 'magnified-detach';
   let pointerDown!: ReturnType<typeof useWorkspaceDetachPointerDrag>;
   let layout!: ReturnType<typeof useTerminalWorkspaceLayout>;
   function Harness() {
     const [draggingId, setDraggingId] = useState<string | null>(null);
     layout = useTerminalWorkspaceLayout({
       activeSession: undefined, activeWorkspace: workspace, isFocusMode: false,
+      hasMagnifiedPane,
       shouldKeepHiddenWorkspaceLaidOut: () => false,
       onAddSessionToWorkspace: noop, onCreateWorkspaceFromSessions: noop,
       onMoveWorkspacePane: (...args) => { events.push('drop'); moves.push(args); },
@@ -106,6 +112,7 @@ test(`member pane gesture: ${scenario}`, async (t) => {
       onStartSessionDrag: id => { events.push('start'); setDraggingId(id); },
       onEndSessionDrag: () => { events.push('end'); setDraggingId(null); },
       onDropWorkspacePane: layout.handleWorkspacePanePointerDrop,
+      onRemoveSessionFromWorkspace: id => { events.push('detach'); detachedIds.push(id); },
     });
     return null;
   }
@@ -115,7 +122,10 @@ test(`member pane gesture: ${scenario}`, async (t) => {
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 500 }),
   } as HTMLDivElement;
   await act(async () => layout.setWorkspaceArea({ width: 1000, height: 500 }));
-  const destination = { clientX: scenario === 'self' ? 100 : 800, clientY: 100 } as PointerEvent;
+  const destination = {
+    clientX: scenario === 'self' ? 100 : 800,
+    clientY: scenario === 'magnified-detach' ? -20 : 100,
+  } as PointerEvent;
   await act(async () => {
     pointerDown({
       button: 0, clientX: 10, clientY: 10, currentTarget: { ownerDocument },
@@ -129,7 +139,7 @@ test(`member pane gesture: ${scenario}`, async (t) => {
       documentSurface.dispatch('pointermove', true, destination);
       windowSurface.dispatch('pointermove', false, destination);
     });
-    assert.equal(layout.dropHint?.targetSessionId, scenario === 'self' ? undefined : 'pane-b');
+    assert.equal(layout.dropHint?.targetSessionId, scenario === 'self' || hasMagnifiedPane ? undefined : 'pane-b');
   }
 
   // Include a commit between native listener phases. Release must complete in
@@ -146,16 +156,36 @@ test(`member pane gesture: ${scenario}`, async (t) => {
   }
 
   const shouldDrop = scenario === 'move' || scenario === 'release-only';
-  assert.deepEqual(events, shouldDrop ? ['start', 'drop', 'end'] : ['start', 'end']);
+  assert.deepEqual(events, shouldDrop ? ['start', 'drop', 'end']
+    : scenario === 'magnified-detach' ? ['start', 'end', 'detach'] : ['start', 'end']);
   assert.deepEqual(moves, shouldDrop ? [['workspace', 'pane-a', {
     direction: 'horizontal', position: 'top', targetSessionId: 'pane-b',
     rect: { x: 500, y: 0, w: 500, h: 250 },
   }]] : []);
+  assert.deepEqual(detachedIds, scenario === 'magnified-detach' ? ['pane-a'] : []);
   assert.equal(layout.dropHint, null);
   assert.equal(dragElements.size, 0);
   for (const type of ['pointermove', 'pointerup', 'pointercancel']) {
     assert.equal(documentSurface.count(type), 0);
     assert.equal(windowSurface.count(type), 0);
+  }
+
+  if (scenario === 'magnified') {
+    hasMagnifiedPane = false;
+    await act(async () => renderer!.update(React.createElement(Harness)));
+    await act(async () => {
+      pointerDown({
+        button: 0, clientX: 10, clientY: 10, currentTarget: { ownerDocument },
+        preventDefault: noop, stopPropagation: noop,
+      } as unknown as React.PointerEvent<HTMLElement>);
+      documentSurface.dispatch('pointermove', true, destination);
+    });
+    await act(async () => windowSurface.dispatch('pointermove', false, destination));
+    assert.equal(layout.dropHint?.targetSessionId, 'pane-b', 'restoring the tiled view restores preview');
+    await act(async () => documentSurface.dispatch('pointerup', true, destination));
+    assert.equal(moves.length, 1, 'restoring the tiled view permits exactly one move');
+    assert.deepEqual(events, ['start', 'end', 'start', 'drop', 'end']);
+    assert.equal(layout.dropHint, null);
   }
 });
 }

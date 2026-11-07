@@ -27,6 +27,7 @@ interface UseTerminalWorkspaceLayoutOptions {
   activeSession: TerminalSession | undefined;
   activeWorkspace: Workspace | undefined;
   isFocusMode: boolean;
+  hasMagnifiedPane?: boolean;
   shouldKeepHiddenWorkspaceLaidOut: (workspace: Workspace) => boolean;
   onAddSessionToWorkspace: (workspaceId: string, sessionId: string, hint: Exclude<SplitHint, null>) => void;
   onCreateWorkspaceFromSessions: (baseSessionId: string, joiningSessionId: string, hint: Exclude<SplitHint, null>) => void;
@@ -45,6 +46,7 @@ export function useTerminalWorkspaceLayout({
   activeSession,
   activeWorkspace,
   isFocusMode,
+  hasMagnifiedPane = false,
   shouldKeepHiddenWorkspaceLaidOut,
   onAddSessionToWorkspace,
   onCreateWorkspaceFromSessions,
@@ -282,7 +284,8 @@ export function useTerminalWorkspaceLayout({
   // coordinates, so member-pane pointer drags (#4037) reuse the same hint
   // machinery as HTML5 orphan drags.
   const computeSplitHint = useCallback((e: { clientX: number; clientY: number }): SplitHint => {
-      if (isFocusMode) return null;
+      // The tiled rectangles do not describe the visible magnified surface.
+      if (isFocusMode || hasMagnifiedPane) return null;
       const surface = workspaceOverlayRef.current || workspaceInnerRef.current || workspaceOuterRef.current;
       if (!surface || !workspaceArea.width || !workspaceArea.height) return null;
       const rect = surface.getBoundingClientRect();
@@ -331,7 +334,7 @@ export function useTerminalWorkspaceLayout({
         targetSessionId,
         rect: previewRect,
       };
-    }, [isFocusMode, workspaceArea, activeWorkspaceRects, workspaceOverlayRef, workspaceInnerRef, workspaceOuterRef]);
+    }, [isFocusMode, hasMagnifiedPane, workspaceArea, activeWorkspaceRects, workspaceOverlayRef, workspaceInnerRef, workspaceOuterRef]);
 
   const handleWorkspaceDrop = useCallback((e: DragEvent) => {
       if (isFocusMode) return;
@@ -380,7 +383,8 @@ export function useTerminalWorkspaceLayout({
   // release/cancellation, so completion does not depend on listener ordering.
   const isMemberPaneDrag = !!draggingSession?.workspaceId
     && draggingSession.workspaceId === activeWorkspace?.id
-    && !isFocusMode;
+    && !isFocusMode
+    && !hasMagnifiedPane;
   useEffect(() => {
     if (!isMemberPaneDrag || !draggingSession) {
       setDropHint(null);
