@@ -55,6 +55,10 @@ import {
   resolvePrimaryProtocolSwitchPort,
   prepareTelnetCredentialsForSave,
   prepareProxyConfigForSave,
+  nextFormAfterSelectProxyProfile,
+  nextFormAfterRemoveHostFromChain,
+  resolveFormHostChainIds,
+  resolveDisplayProxyProfileId,
 } from "./HostDetailsPanel.helpers";
 export { parseOptionalPortInput } from "./HostDetailsPanel.helpers";
 import { TerminalEncodingSelect } from "./TerminalEncodingSelect";
@@ -427,9 +431,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   const hasHostProxyOverride = form.directProxy === true
     || form.proxyProfileId !== undefined
     || form.proxyConfig !== undefined;
-  const displayProxyProfileId = form.directProxy
-    ? undefined
-    : (form.proxyProfileId ?? effectiveAuthHost.proxyProfileId);
+  const displayProxyProfileId = resolveDisplayProxyProfileId(form, effectiveAuthHost.proxyProfileId);
   const displayProxyConfig = form.directProxy
     ? undefined
     : (form.proxyConfig ?? effectiveAuthHost.proxyConfig);
@@ -493,12 +495,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   }, []);
 
   const selectProxyProfile = useCallback((profileId: string | undefined) => {
-    setForm((prev) => {
-      const { proxyConfig: _proxyConfig, proxyProfileId: _proxyProfileId, directProxy: _directProxy, ...rest } = prev;
-      if (!profileId) return rest as Host;
-      return { ...rest, proxyProfileId: profileId } as Host;
-    });
-  }, []);
+    setForm((prev) => nextFormAfterSelectProxyProfile(prev, profileId, effectiveGroupDefaults));
+  }, [effectiveGroupDefaults]);
 
   const selectDirectProxy = useCallback(() => {
     setForm((prev) => {
@@ -507,30 +505,17 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     });
   }, []);
 
-  const resolveFormHostChainIds = (host: Host): string[] => {
-    if (host.hostChain !== undefined) return host.hostChain.hostIds || [];
-    if (!effectiveGroupDefaults) return [];
-    return applyGroupDefaults(host, effectiveGroupDefaults).hostChain?.hostIds || [];
-  };
-
   const addHostToChain = (hostId: string) => {
     setForm((prev) => ({
       ...prev,
       hostChain: {
-        hostIds: [...resolveFormHostChainIds(prev), hostId],
+        hostIds: [...resolveFormHostChainIds(prev, effectiveGroupDefaults), hostId],
       },
     }));
   };
 
   const removeHostFromChain = (index: number) => {
-    setForm((prev) => {
-      const startedInherited = prev.hostChain === undefined;
-      const ids = resolveFormHostChainIds(prev).filter((_, i) => i !== index);
-      if (ids.length > 0) return { ...prev, hostChain: { hostIds: ids } };
-      if (startedInherited) return { ...prev, hostChain: { hostIds: [] } };
-      const { hostChain: _hostChain, ...rest } = prev;
-      return rest as Host;
-    });
+    setForm((prev) => nextFormAfterRemoveHostFromChain(prev, index, effectiveGroupDefaults));
   };
 
   const clearHostChain = useCallback(() => {
@@ -940,10 +925,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   if (activeSubPanel === "proxy") {
     return (
       <ProxyPanel
-        proxyConfig={form.directProxy ? form.proxyConfig : (form.proxyConfig ?? effectiveAuthHost.proxyConfig)}
+        proxyConfig={displayProxyConfig}
         proxyProfiles={proxyProfiles}
         identities={identities}
-        selectedProxyProfileId={form.directProxy ? form.proxyProfileId : (form.proxyProfileId ?? effectiveAuthHost.proxyProfileId)}
+        selectedProxyProfileId={displayProxyProfileId}
         directProxy={form.directProxy}
         allowClear={hasHostProxyOverride}
         onUpdateProxy={updateProxyConfig}
