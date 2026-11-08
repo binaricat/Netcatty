@@ -12,7 +12,7 @@ import zhTW from "./zh-TW.ts";
 // so the remaining debt stays visible instead of silently rendering in English
 // through the `DEFAULT_UI_LOCALE` fallback in `I18nProvider.resolveMessage`.
 // Move a locale out of this list once it covers every `en` key.
-const LOCALES_PENDING_PARITY = ["ru", "zh-CN", "zh-TW"] as const;
+const LOCALES_PENDING_PARITY = ["ru"] as const;
 
 const hasKey = (messages: Record<string, string>, key: string) =>
   Object.hasOwn(messages, key);
@@ -42,22 +42,31 @@ test("es defines no message keys that en does not define", () => {
   );
 });
 
-test("es keeps the same interpolation placeholders as en", () => {
-  const mismatched: string[] = [];
+test("every translated locale keeps the same interpolation placeholders as en", () => {
+  const locales = [
+    { name: "es", messages: es },
+    { name: "ru", messages: ru },
+    { name: "zh-CN", messages: zhCN },
+    { name: "zh-TW", messages: zhTW },
+  ];
 
-  for (const key of Object.keys(es)) {
-    if (!hasKey(en, key)) continue;
+  for (const locale of locales) {
+    const mismatched: string[] = [];
 
-    const expected = interpolationTokens(en[key] ?? "").join(",");
-    const actual = interpolationTokens(es[key] ?? "").join(",");
-    if (expected !== actual) mismatched.push(key);
+    for (const key of Object.keys(locale.messages)) {
+      if (!hasKey(en, key)) continue;
+
+      const expected = interpolationTokens(en[key] ?? "").join(",");
+      const actual = interpolationTokens(locale.messages[key] ?? "").join(",");
+      if (expected !== actual) mismatched.push(key);
+    }
+
+    assert.deepEqual(
+      mismatched,
+      [],
+      `${locale.name} changes interpolation placeholders for ${mismatched.length} keys`,
+    );
   }
-
-  assert.deepEqual(
-    mismatched,
-    [],
-    `es changes interpolation placeholders for ${mismatched.length} keys`,
-  );
 });
 
 test("every default shortcut has a label in en and es", () => {

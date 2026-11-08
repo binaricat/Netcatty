@@ -580,7 +580,7 @@ export const zhTWVaultMessages: Messages = {
   'terminal.serverStats.swapUsed': '已用交換',
   'terminal.serverStats.swapFree': '空閒交換',
   'terminal.serverStats.swapTotal': '總計',
-  'terminal.serverStats.topProcesses': '記憶體佔用前十程序',
+  'terminal.serverStats.topProcesses': '記憶體佔用前十行程',
   'terminal.serverStats.disk': '磁碟使用',
   'terminal.serverStats.diskDetails': '已掛載磁碟',
   'terminal.serverStats.network': '網路速度',
