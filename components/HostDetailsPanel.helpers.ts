@@ -1,4 +1,5 @@
 import type { GroupConfig } from "../domain/models";
+import { applyGroupDefaults } from "../domain/groupConfig";
 import {
   findProxyProfile,
   hasIncompleteProxyIdentity,
@@ -156,4 +157,70 @@ export const prepareProxyConfigForSave = (params: {
   return {
     normalizedProxyConfig: normalizeManualProxyConfig(params.proxyConfig),
   };
+};
+
+
+export const EMPTY_CUSTOM_PROXY_DRAFT: ProxyConfig = { type: "http", host: "", port: 8080 };
+
+export const resolveDisplayProxyProfileId = (
+  form: Pick<Host, "directProxy" | "proxyProfileId" | "proxyConfig">,
+  inheritedProfileId?: string,
+): string | undefined => {
+  if (form.directProxy || form.proxyConfig !== undefined) return form.proxyProfileId;
+  return form.proxyProfileId ?? inheritedProfileId;
+};
+
+export const nextFormAfterSelectProxyProfile = (
+  prev: Host,
+  profileId: string | undefined,
+  groupDefaults?: Partial<GroupConfig>,
+): Host => {
+  const { proxyConfig: _proxyConfig, proxyProfileId: _proxyProfileId, directProxy: _directProxy, ...rest } = prev;
+  if (!profileId) {
+    const inheritedConfig = !prev.directProxy
+      && prev.proxyProfileId === undefined
+      && prev.proxyConfig === undefined
+      && groupDefaults
+      ? applyGroupDefaults(prev, groupDefaults).proxyConfig
+      : undefined;
+    return {
+      ...rest,
+      proxyConfig: prev.proxyConfig ?? inheritedConfig ?? EMPTY_CUSTOM_PROXY_DRAFT,
+    } as Host;
+  }
+  return { ...rest, proxyProfileId: profileId } as Host;
+};
+
+export const resolveFormHostChainIds = (
+  host: Host,
+  groupDefaults?: Partial<GroupConfig>,
+): string[] => {
+  if (host.hostChain !== undefined) return host.hostChain.hostIds || [];
+  if (!groupDefaults) return [];
+  return applyGroupDefaults(host, groupDefaults).hostChain?.hostIds || [];
+};
+
+export const nextFormAfterClearHostChain = (
+  prev: Host,
+  groupDefaults?: Partial<GroupConfig>,
+): Host => {
+  const groupWouldRestore = Boolean(
+    groupDefaults
+    && applyGroupDefaults({ ...prev, hostChain: undefined }, groupDefaults).hostChain?.hostIds?.length,
+  );
+  if (prev.hostChain === undefined || groupWouldRestore) {
+    return { ...prev, hostChain: { hostIds: [] } };
+  }
+  const { hostChain: _hostChain, ...rest } = prev;
+  return rest as Host;
+};
+
+export const nextFormAfterRemoveHostFromChain = (
+  prev: Host,
+  index: number,
+  groupDefaults?: Partial<GroupConfig>,
+): Host => {
+  const ids = resolveFormHostChainIds(prev, groupDefaults).filter((_, i) => i !== index);
+  if (ids.length > 0) return { ...prev, hostChain: { hostIds: ids } };
+  return nextFormAfterClearHostChain(prev, groupDefaults);
 };
