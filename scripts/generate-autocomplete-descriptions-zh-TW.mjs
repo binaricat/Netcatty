@@ -61,6 +61,10 @@ const TAIWAN_PHRASE_FIXES = [
   ["ALPN TLS 擴充", "ALPN TLS 擴充功能"],
   ["NPN TLS 擴充", "NPN TLS 擴充功能"],
   ["數據", "資料"],
+  // “extension” as a noun keeps 功能; the generic rule above only covers the
+  // adjective “extended” (擴充屬性, 擴充正規表示式, 擴充標頭).
+  ["Apple 的擴充", "Apple 的擴充功能"],
+  ["（Apple 擴充）", "（Apple 擴充功能）"],
 ];
 
 function toTraditionalTaiwan(text, convert) {

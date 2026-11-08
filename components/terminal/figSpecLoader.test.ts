@@ -9,7 +9,12 @@ test("preload common specs includes dnf alongside yum and apt", () => {
   for (const command of ["ln", "stat", "wc", "cut", "uniq", "tee", "xargs"]) {
     assert.ok(COMMON_FIG_SPECS.includes(command), `${command} should be preloaded`);
   }
-  for (const command of ["basename", "dirname", "readlink", "more", "seq", "dig", "htop"]) {
+  const batch4Commands = [
+    "echo", "which", "paste", "pwd", "clear", "su", "crontab", "env", "uname",
+    "base64", "date", "id", "split", "seq", "join", "dig", "dd", "htop",
+    "basename", "dirname", "readlink", "more",
+  ];
+  for (const command of batch4Commands) {
     assert.ok(COMMON_FIG_SPECS.includes(command), `${command} should be preloaded`);
   }
 });

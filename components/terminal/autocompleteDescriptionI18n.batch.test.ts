@@ -110,7 +110,7 @@ test("batch zh-TW spot checks cover corrected semantics", () => {
   );
   assert.equal(
     traditional["Turn on value of next option"],
-    "啟用指定的 NeXT 相容選項（Apple 擴充）",
+    "啟用指定的 NeXT 相容選項（Apple 擴充功能）",
   );
 });
 
