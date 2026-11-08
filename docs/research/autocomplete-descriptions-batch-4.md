@@ -36,7 +36,7 @@ and were reviewed for wording that stays correct in every owner:
 
 ## Coverage
 
-| Command | Adopted | Notes |
+| Command | Descriptions | Notes |
 | --- | ---: | --- |
 | `echo` | 4 | newline suppression and escape handling |
 | `which` | 3 | PATH lookup, `-a`, `-s` |
@@ -45,23 +45,23 @@ and were reviewed for wording that stays correct in every owner:
 | `clear` | 4 | terminal type, ncurses version, E3 scrollback |
 | `su` | 4 | BSD `-f`/`-l`/`-`/`-m` |
 | `crontab` | 5 | maintain, edit, list, remove, `-u` |
-| `env` | 8 | NUL-terminated output, `-i`, `-v`, `-u`, `-P`, `-S` |
+| `env` | 9 | NUL-terminated output, `-i`, `-v`, `-u`, `-P`, `-S` |
 | `uname` | 8 | `-a`, `-m`, `-n`, `-p`, `-r`, `-s`, `-v` |
-| `base64` | 5 | encode/decode, line breaks, input/output files |
-| `date` | 13 | local GNU spec: `-d`, `--debug`, `-f`, `-I`, `-R`, `--rfc-3339`, `-r`, `-s`, `-u` |
+| `base64` | 8 | local GNU spec: `-d`, `-i`, `-w` and file operands |
+| `date` | 17 | local GNU spec: `-d`, `--debug`, `-f`, `-I`, `-R`, `--rfc-3339`, `-r`, `-s`, `-u` |
 | `id` | 10 | audit, full name, groups, MAC label, `-n`, `-p` |
 | `split` | 9 | suffix length, `-b`, `-d`, `-l`, `-p`, file, prefix |
 | `seq` | 11 | start/step/last, `-w`, `-s`, `-f`, `-t` |
 | `join` | 11 | equality join, `-a`, `-e`, `-o`, `-t`, `-v`, file/field |
-| `dig` | 11 | record types and output trimming |
+| `dig` | 17 | local spec: record types and output filters |
 | `dd` | 14 | block sizes, seek/skip, conversions |
 | `htop` | 14 | delay, filter, highlight, sort, tree, user |
 | `basename` | 4 | `-a`, `-s`, operand |
 | `dirname` | 2 | operand |
-| `readlink` | 1 | file operand |
+| `readlink` | 11 | local GNU spec: canonicalize, strip, verbose, zero |
 | `more` | 11 | `-d`, `-l`, `-f`, `-p`, `-c`, `-s`, `-u`, `-n` |
 
-Total adopted: 159 unique English keys across 22 commands.
+The 22 specs currently expose 182 descriptions; the four local GNU specs replaced the bundled option sets, so `date`, `dig`, `readlink` and `base64` counts reflect the new keys.
 
 All 22 commands are added to `COVERED_COMMANDS` and `COMMON_FIG_SPECS`. They are
 small, general-purpose utilities, so preloading them costs little and removes the
@@ -69,11 +69,10 @@ on-demand spec load for the most common shell sessions.
 
 ## Semantic notes
 
-- **dig**: the upstream spec labels the `NS` type as “Query MX Record”, and the
-  `TTL` entry as “Query TTL Record” (TTL is not a DNS record type). The `NS`
-  translation states the correct meaning and marks the upstream wording error;
-  `TTL` is translated literally because the option name itself is what the spec
-  inserts.
+- **dig**: the bundled spec labels the `NS` type as “Query MX Record” and offers
+  `TTL` as a record type. Both are spec defects rather than wording problems, so
+  `electron/specs/dig.js` replaces them: NS is described as authoritative name
+  servers, the bogus TTL shortcut is gone, and ANY carries the RFC 8482 caveat.
 - **more**: the Fig spec maps `-l` to “Do not pause after any line containing a
   ^L (form feed)” and `-f` to “Count logical lines, rather than screen lines”.
   This matches GNU `more`; the translations follow the option each description
@@ -85,17 +84,17 @@ on-demand spec load for the most common shell sessions.
   `-f/--file`, `-I/--iso-8601`, `-R/--rfc-email`, `--rfc-3339`, `-r/--reference`,
   `-s/--set` and `-u/--utc` instead, and the 13 BSD-only entries were removed
   after a repository-wide scan showed no other spec used them.
-- **su**: `-f` is the csh-specific `.cshrc` guard, `-l` performs a full login,
-  `-` alone equals `-l`, and `-m` keeps the environment. All four descriptions
-  follow the BSD assertions in the spec, including the `getusershell(3)`
-  security note.
+- **su**: the four descriptions no longer hardcode BSD-only environment claims.
+  `-l` says it switches to the target home and rebuilds the login environment as
+  the implementation and PAM decide, `-m` keeps the current environment without
+  a directory change, and `-f` prevents a csh/tcsh login shell from reading
+  `.cshrc`.
 - **env**: `-P` searches an alternate directory list instead of `PATH`, `-S`
   splits a string into arguments, and the trailing “Utility to run” describes
   the command operand. These are three separate keys and are not conflated.
-- **readlink**: the Fig spec reuses `stat` wording for the command root and for
-  `-f`. Those shared keys already had translations from the `stat` batch, so the
-  batch only adds the `file` operand; the inherited `stat` wording is unchanged
-  upstream and is not re-translated here.
+- **readlink**: the bundled spec reuses `stat` wording for the command root and
+  `-f` (“printf”, “struct stat”). `electron/specs/readlink.js` replaces it with
+  the GNU options (`-f/-e/-m/-n/-s/-v/-z`) and a plain path operand.
 - **paste**: `-d` replaces newlines with characters drawn circularly from the
   list; the translation keeps the “wrap around the list” behavior explicit.
 - **split**: `-p` starts a new output file on each matching extended regular
@@ -107,44 +106,84 @@ on-demand spec load for the most common shell sessions.
 ## Platform coverage (GNU/Linux vs BSD/macOS)
 
 Netcatty sessions usually target Linux hosts, so GNU semantics were checked
-against `jaywcjlove/linux-command` (MIT, commit `master` at 2026-11-07) for every
+against `jaywcjlove/linux-command` (MIT, `master` fetched 2026-11-07) for every
 command in this batch that the reference covers (21 of 22; `readlink` is absent).
 That review changed four entries, confirmed the rest, and produced the GNU
-`date` spec below:
+`date` spec described in the semantic notes.
 
-- `uname -s/-r/-v`: the Fig text says “operating system name/release/version”,
-  but GNU `uname` prints the kernel name/release/version. The zh-CN text now says
-  内核名称 / 内核发行版本 / 内核版本, which matches what a Linux host prints and
-  is still accurate on macOS (`Darwin`).
-- `dd cbs`: “Set the conversion record size” is now 设置转换记录大小（cbs，每次转换的字节数）
-  so the unit is explicit, matching GNU `dd` and the reference wording.
-- No other wording diverged from the reference beyond synonyms (`制表符` vs
-  `跳格字符`, `块` vs `区块`); the existing glossary terms stay in place.
+Local specs now cover five commands whose bundled Fig data was wrong or macOS-only. Local specs win over `@withfig/autocomplete` at runtime, so Linux hosts
+see options that actually exist there:
 
-`date` is no longer in this list: it now ships a GNU spec of its own (see the
-semantic notes). The remaining specs in this batch expose options that do not
-exist in GNU tools. Those
-descriptions describe the option each spec actually inserts, so they are **not**
-rewritten into GNU wording — doing so would label an item with behavior it does
-not have on the host being connected to:
+| Command | Local spec | Bundled spec problem |
+| --- | --- | --- |
+| `date` | `electron/specs/date.js` | `-j`, `-n`, `-t`, `-v`; `-d` meant DST, `-r` meant epoch seconds |
+| `dig` | `electron/specs/dig.js` | `NS` labelled as an MX query, `TTL` offered as a record type |
+| `readlink` | `electron/specs/readlink.js` | root and `-f` reused `stat` wording (`printf`, `struct stat`) |
+| `base64` | `electron/specs/base64.js` | BSD `-b`/`-i`/`-o`; GNU uses `-w`, and `-i` means ignore garbage while decoding |
+| `htop` | `electron/specs/htop.js` | `-H` delay described as tenths of a second; htop stores seconds |
+
+macOS sessions therefore see the GNU option set for these four commands. That is
+a deliberate Linux-first trade-off, not an oversight.
+
+The remaining specs in this batch still expose options that do not exist in GNU
+tools. Those descriptions describe the option each spec actually inserts, so
+they are **not** rewritten into GNU wording — doing so would label an item with
+behavior it does not have on the host being connected to:
 
 | Command | Spec-only (BSD/macOS) options |
 | --- | --- |
 | `su` | `-f`, `-l`, `-m`, `-` |
 | `id` | `-A`, `-F`, `-M`, `-P` |
-| `base64` | `-b`, `-i`, `-o` |
 | `split` | `-p` |
 | `seq` | `-t` |
 | `env` | `-P` |
 | `more` | `-u` (GNU uses it for underlining; the spec follows BSD “ignored”) |
 | `which` | `-s` |
 
-Making those commands platform-correct needs per-OS spec selection (the loader
-currently resolves one spec per command name and ignores `hostOs`), which is a
-code change rather than a translation change. `dd` also carries an upstream
-artifact: an operand named `files` with “Copy this many files before
-terminating”, which real `dd` does not have; the literal translation is kept and
-flagged here instead of inventing behavior.
+`su` is a special case: its spec is close to util-linux, but the wording no
+longer hardcodes `PATH=/bin:/usr/bin` or a fixed variable list, because Linux
+`su -l` setup depends on the implementation and PAM configuration. The `-l`,
+`-m` and `-f` descriptions now state the behavior without platform-specific
+environment claims.
+
+`dd` also carries an upstream artifact: an operand named `files` with “Copy this
+many files before terminating”, which real `dd` does not have; the literal
+translation is kept and flagged here instead of inventing behavior.
+
+Making the remaining commands platform-correct needs per-OS spec selection (the
+loader currently resolves one spec per command name and ignores `hostOs`), which
+is a code change rather than a translation change.
+
+## Review fixes (2026-11-08)
+
+A second review pass over the 159 new entries found wording that would be
+visible in the completion menu. Every item below was applied:
+
+| Item | Resolution |
+| --- | --- |
+| `htop -H` “new and old processes” | 高亮新启动和已退出的进程 (old entries are processes that just exited and linger for highlighting) |
+| `htop` highlight delay | The Fig text says “in tenths of sec”, but htop 3.2.2 compares `1000 * highlightDelaySecs`; `electron/specs/htop.js` corrects the English for every locale and the zh-CN text says seconds |
+| `split -a` “letters” | 字符, because `-d` produces numeric suffixes |
+| `split -b` units | KiB / MiB / GiB, matching GNU's 1024-based suffixes instead of KB |
+| `dd cbs` | 转换记录长度（字节），供 block/unblock 等记录转换使用 |
+| `join -a` / `-v` | 第 file_number 个文件中的行, because `file_number` is a file index |
+| `join -o` | No longer limited to matched lines; `-o` also formats unpaired output from `-a`/`-v` |
+| `basename -a` | 支持多个路径名，将每个参数作为路径名处理 |
+| `env -0` | 每条环境变量记录以 NUL 而非换行符结束 |
+| `dig` answer filter | Describes hiding comments, question, authority, additional and statistics instead of “query only the answer section” |
+| `dig ANY` | 发起 ANY 查询；响应可能不完整（RFC 8482） |
+| `dig TTL` | Removed with the local spec; TTL is a record field, not a record type |
+| `readlink -f` | Fixed by the local spec; no longer shows `printf`/`struct stat` wording |
+| `base64 -i` | Fixed by the GNU local spec (`--ignore-garbage`), documented above |
+| `su -l` / `-m` / `-f` | Removed hardcoded environment claims; see the platform note |
+| `seq` root | 默认按 1 递增；BSD/macOS 在起始值大于结束值时按 -1 递减 |
+| `uname` root | 显示系统信息（无选项时输出内核名称） |
+
+Taiwan wording that OpenCC s2twp could not resolve is handled by a documented
+post-conversion table in the generator (not by hand-editing `zh-TW`):
+`擴充套件正規表示式`→`擴充正規表示式`, `擴充套件 E3`→`擴充 E3`,
+`欄位連線`→`欄位聯結`, `二進位制資料`→`二進位資料`, `后綴`→`字尾`,
+`執行檔例項`→`執行檔`, `屏幕`→`螢幕`, `文本`→`文字`.
 
 ## Adopted entries (excerpt)
 
@@ -156,13 +195,13 @@ flagged here instead of inventing behavior.
 | `seq -w` | Equalize the widths of all numbers by padding with zeros as necessary | 必要时用零填充，使所有数字宽度一致 |
 | `basename` | Return filename portion of pathname | 返回路径名的文件名部分 |
 | `dirname` | Return directory portion of pathname | 返回路径名的目录部分 |
-| `readlink` | File(s) to readlink | 要读取的符号链接文件 |
+| `readlink` | Symbolic link or path to resolve | 要解析的符号链接或路径 |
 | `date -u` | Display or set the date in UTC (Coordinated Universal) time | 以 UTC（协调世界时）显示或设置日期 |
 | `more -f` | Count logical lines, rather than screen lines | 按逻辑行计数，而不是按屏幕行 |
-| `dig` (NS) | Query MX Record | 查询 NS 记录（上游英文描述误写为 MX） |
+| `dig` (NS) | Query NS records (authoritative name servers) | 查询 NS 记录（权威名称服务器） |
 | `split -p` | The file is split whenever an input line matches pattern, which is interpreted as an extended regular expression. The matching line will be the first line of the next output file. This option is incompatible with the -b and -l options | 每当输入行匹配 pattern（按扩展正则表达式解释）时就拆分成新文件。匹配行会成为下一个输出文件的第一行。该选项与 -b 和 -l 不兼容 |
 | `dd bs` | Set input and output block size | 同时设置输入和输出块大小 |
-| `htop -d` | Delay between updates, in tenths of sec | 更新间隔，单位为 0.1 秒 |
+| `htop -H` delay | Highlight duration in seconds | 高亮持续时间，单位为秒 |
 
 `zh-TW` is generated from these values with
 `node scripts/generate-autocomplete-descriptions-zh-TW.mjs` (OpenCC s2twp), not

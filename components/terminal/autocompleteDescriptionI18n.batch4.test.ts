@@ -151,18 +151,64 @@ test("batch 4 spot checks preserve verified semantics, placeholders and upstream
     "返回路径名的文件名部分",
   );
   assert.equal(
-    simplified["File(s) to readlink"],
-    "要读取的符号链接文件",
+    simplified["Symbolic link or path to resolve"],
+    "要解析的符号链接或路径",
+  );
+  assert.equal(
+    simplified["Resolve every symbolic link in the given path and print the canonical path (all but the last component must exist)"],
+    "解析路径中的每个符号链接并打印规范路径（除最后一段外都必须存在）",
+  );
+  // Review fixes: platform, units and scope wording.
+  assert.equal(simplified["Highlight new and old processes"], "高亮新启动和已退出的进程");
+  assert.equal(simplified["Highlight duration in seconds"], "高亮持续时间，单位为秒");
+  assert.equal(
+    simplified["Use suffix_length letters to form the suffix of the file name"],
+    "使用 suffix_length 个字符构成文件名后缀",
+  );
+  assert.ok(
+    simplified["Create split files byte_count bytes in length. If k or K is appended to the number, the file is split into byte_count kilobyte pieces. If m or M is appended to the number, the file is split into byte_count megabyte pieces.  If g or G is appended to the number, the file is split into byte_count gigabyte pieces"].includes("KiB"),
+  );
+  assert.equal(
+    simplified["Set the conversion record size"],
+    "设置转换记录长度（字节），供 block/unblock 等记录转换使用",
+  );
+  assert.equal(
+    simplified["In addition to the default output, produce a line for each unpairable line in file file_number"],
+    "除默认输出外，还为第 file_number 个文件中无法配对的行各输出一行",
+  );
+  assert.equal(
+    simplified["Treat every argument as a string"],
+    "支持多个路径名，将每个参数作为路径名处理",
+  );
+  assert.equal(
+    simplified["End each output line with NUL, not newline"],
+    "每条环境变量记录以 NUL 而非换行符结束",
+  );
+  assert.equal(simplified["Decode input instead of encoding it"], "解码输入而不是编码");
+  assert.equal(
+    simplified["When decoding, ignore non-alphabet characters"],
+    "解码时忽略不属于字母表的字符",
+  );
+  assert.ok(
+    simplified["Leave the environment unmodified.  The invoked shell is your login shell, and no directory changes are made.  As a security precaution, if the target user's shell is a non-standard shell (as defined by getusershell(3)) and the caller's real uid is non-zero, su will fail"].includes("getusershell(3)"),
+  );
+  assert.equal(simplified["Show the answer section"], "显示答案区段");
+  assert.equal(
+    simplified["Send an ANY query; the response may be incomplete (RFC 8482)"],
+    "发起 ANY 查询；响应可能不完整（RFC 8482）",
   );
   assert.equal(
     simplified["Count logical lines, rather than screen lines"],
     "按逻辑行计数，而不是按屏幕行",
   );
-  // Upstream dig spec labels the NS type as "Query MX Record"; the translation
-  // keeps the correct meaning and records the upstream wording error.
+  // The local dig spec fixes the upstream NS label and drops the bogus TTL type.
   assert.equal(
-    simplified["Query MX Record"],
-    "查询 NS 记录（上游英文描述误写为 MX）",
+    simplified["Query NS records (authoritative name servers)"],
+    "查询 NS 记录（权威名称服务器）",
+  );
+  assert.equal(
+    simplified["Query the SOA record (start of authority)"],
+    "查询 SOA 记录（起始授权机构）",
   );
   // The local GNU date spec replaces the bundled BSD option set.
   assert.equal(
@@ -187,7 +233,7 @@ test("batch 4 descriptions localize without changing insertion text", async () =
     { command: "which", option: "-a", key: "List all instances of executables found, instead of just the first", zhCn: "列出找到的所有可执行文件实例，而不只是第一个" },
     { command: "pwd", option: "-P", key: "Display the physical current working directory", zhCn: "显示物理当前工作目录" },
     { command: "seq", option: "-w", key: "Equalize the widths of all numbers by padding with zeros as necessary", zhCn: "必要时用零填充，使所有数字宽度一致" },
-    { command: "basename", option: "-a", key: "Treat every argument as a string", zhCn: "把每个参数都当作字符串" },
+    { command: "basename", option: "-a", key: "Treat every argument as a string", zhCn: "支持多个路径名，将每个参数作为路径名处理" },
     { command: "more", option: "-s", key: "Squeeze multiple blank lines into one", zhCn: "把多个空行压缩为一行" },
     { command: "clear", option: "-T", key: "Indicates the type of terminal", zhCn: "指定终端类型" },
     { command: "date", option: "-u", key: "Display or set the date in UTC (Coordinated Universal) time", zhCn: "以 UTC（协调世界时）显示或设置日期" },
@@ -224,10 +270,35 @@ test("batch 4 zh-TW uses Taiwan terminology and mirrors zh-CN keys", () => {
     traditional["Return filename portion of pathname"],
     "返回路徑名的檔名部分",
   );
-  assert.equal(traditional["File(s) to readlink"], "要讀取的符號連結檔案");
+  assert.equal(traditional["Symbolic link or path to resolve"], "要解析的符號連結或路徑");
+  assert.equal(traditional["Join on the field'th field of file1"], "按 file1 的第 field 個欄位聯結");
+  assert.equal(traditional["Use a numeric suffix instead of a alphabetic suffix"], "使用數字字尾而不是字母字尾");
   assert.equal(
-    traditional["Query MX Record"],
-    "查詢 NS 記錄（上游英文描述誤寫為 MX）",
+    traditional["List all instances of executables found, instead of just the first"],
+    "列出找到的所有執行檔，而不只是第一個",
+  );
+  assert.equal(
+    traditional["Instead, clear the whole screen and then display the text"],
+    "改為清空整個螢幕後再顯示文字",
+  );
+  assert.ok(
+    traditional["The file is split whenever an input line matches pattern, which is interpreted as an extended regular expression. The matching line will be the first line of the next output file. This option is incompatible with the -b and -l options"].includes("擴充正規表示式"),
+  );
+  assert.ok(
+    traditional["Do not attempt to clear terminal's scrollback buffer using the extended E3 capability"].includes("擴充 E3"),
+  );
+  assert.equal(traditional["Decode input instead of encoding it"], "解碼輸入而不是編碼");
+  // s2twp merges 打印 + 机器 into 印表機 when the boundary is not guarded, so
+  // the zh-CN wording avoids that sequence instead of holding it out.
+  assert.equal(traditional["Print the machine hardware name"], "顯示機器硬體名稱");
+  assert.equal(
+    traditional["Print the machine processor architecture name"],
+    "顯示機器處理器架構名稱",
+  );
+  assert.equal(simplified["Print the machine hardware name"], "显示机器硬件名称");
+  assert.equal(
+    traditional["Query NS records (authoritative name servers)"],
+    "查詢 NS 記錄（權威名稱伺服器）",
   );
   assert.deepEqual(Object.keys(traditional).sort(), Object.keys(simplified).sort());
 });
