@@ -1,30 +1,36 @@
-// dig spec — corrects two upstream problems: the NS shortcut is labelled as an
-// MX query, and "TTL" is offered as a record type even though TTL is a field.
+// dig spec. The bundled spec labels the NS shortcut as "Query MX Record" and
+// offers "TTL" as a record type, but TTL is a record field. The English keys
+// for A/MX/CNAME/TXT/SOA, ANY and the section filter stay byte-identical to
+// the bundled spec because dog shares them; the ANY and filter caveats live in
+// the zh-CN values instead of new English keys.
+const shortOption = {
+  name: ["+short", ""],
+  insertValue: "+short {cursor}",
+  description: "Only print meaningful results",
+  args: {},
+};
+
+const record = (name, description) => ({
+  name,
+  description,
+  options: [shortOption],
+});
+
 const completionSpec = {
   name: "dig",
-  description: "DNS lookup utility (Domain Information Groper)",
+  description: "Domain Information Groper",
   subcommands: [
-    { name: "A", description: "Query A records (IPv4 address)" },
-    { name: "AAAA", description: "Query AAAA records (IPv6 address)" },
-    { name: "MX", description: "Query MX records (mail exchangers)" },
-    { name: "CNAME", description: "Query CNAME records (canonical name)" },
-    { name: "TXT", description: "Query TXT records" },
-    { name: "NS", description: "Query NS records (authoritative name servers)" },
-    { name: "SOA", description: "Query the SOA record (start of authority)" },
+    record("A", "Query Domain A Record"),
+    record("MX", "Query Domain MX Record"),
+    record("CNAME", "Query Domain CNAME Record"),
+    record("TXT", "Query Domain TXT Record"),
+    record("NS", "Query NS records (authoritative name servers)"),
+    record("SOA", "Query SOA Record"),
+    { name: "ANY +noall +answer", description: "Query ALL DNS Records" },
     {
-      name: "ANY",
-      description: "Send an ANY query; the response may be incomplete (RFC 8482)",
+      name: "+nocomments +noquestion +noauthority +noadditional +nostats",
+      description: "Query only answer section",
     },
-  ],
-  options: [
-    { name: "+short", description: "Only print meaningful results" },
-    { name: "+noall", description: "Hide all sections except the ones requested explicitly" },
-    { name: "+answer", description: "Show the answer section" },
-    { name: "+nocomments", description: "Hide the comment lines" },
-    { name: "+noquestion", description: "Hide the question section" },
-    { name: "+noauthority", description: "Hide the authority section" },
-    { name: "+noadditional", description: "Hide the additional section" },
-    { name: "+nostats", description: "Hide the statistics block" },
   ],
 };
 

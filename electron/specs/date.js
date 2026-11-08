@@ -1,4 +1,4 @@
-// date spec — GNU coreutils date (Linux hosts). The bundled Fig spec follows
+// date spec - GNU coreutils date (Linux hosts). The bundled Fig spec follows
 // BSD/macOS flags (-j, -n, -t, -v) that GNU date does not have, so this local
 // spec describes the GNU option set instead. Local specs win over the bundled
 // package at runtime and in the translation audit.
@@ -18,10 +18,11 @@ const completionSpec = {
     {
       name: ["-f", "--file"],
       description: "Parse each line of the given file like --date",
-      args: { name: "datefile", description: "File with one date string per line" },
+      args: { name: "datefile", description: "File with one date string per line", template: "filepaths" },
     },
     {
       name: ["-I", "--iso-8601"],
+      netcattyOptionalArgAttached: true,
       description: "Output an ISO 8601 date/time string; the optional format is date, hours, minutes, seconds or ns",
       args: { name: "format", isOptional: true, suggestions: ["date", "hours", "minutes", "seconds", "ns"] },
     },
@@ -37,7 +38,7 @@ const completionSpec = {
     {
       name: ["-r", "--reference"],
       description: "Display the last modification time of the given file",
-      args: { name: "file", description: "File whose modification time is displayed" },
+      args: { name: "file", description: "File whose modification time is displayed", template: "filepaths" },
     },
     {
       name: ["-s", "--set"],

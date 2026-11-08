@@ -1,6 +1,7 @@
-// htop spec — the bundled Fig spec says the -H delay is in tenths of a second,
-// but htop stores it in seconds (Settings.c clamps highlightDelaySecs and
-// ProcessList.c compares 1000 * highlightDelaySecs). Only that wording differs.
+// htop spec. The bundled Fig spec gives the -H delay the wrong unit ("tenths
+// of sec"). htop 3.2.2 parses it as highlightDelaySecs and compares it as
+// 1000 * highlightDelaySecs, so the value is seconds. Every other description
+// and argument matches the bundled spec.
 const completionSpec = {
   name: "htop",
   description: "Improved top (interactive process viewer)",
@@ -19,15 +20,15 @@ const completionSpec = {
       args: {
         name: "delay",
         description: "Highlight duration in seconds",
+        suggestions: ["10", "1", "60"],
         isOptional: true,
-        suggestions: ["1", "10", "60"],
       },
     },
     { name: ["--no-mouse", "-M"], description: "Disable the mouse" },
     { name: ["--pid", "-p"], description: "Show only the given PIDs", args: { name: "PID", isVariadic: true } },
-    { name: ["--sort-key", "-s"], description: "Sort by the given column", args: { name: "column" } },
+    { name: ["--sort-key", "-s"], description: "Sort by COLUMN in list view", args: { name: "column" } },
     { name: ["--tree", "-t"], description: "Show the tree view" },
-    { name: ["--user", "-u"], description: "Show only processes of the given user", args: { name: "user", isOptional: true, suggestions: ["$USER"] } },
+    { name: ["--user", "-u"], description: "Show only processes for a given user (or $USER)", args: { name: "user", isOptional: true, suggestions: ["$USER"] } },
     { name: ["--no-unicode", "-U"], description: "Do not use unicode but plain ASCII" },
     { name: ["--version", "-V"], description: "Print version info" },
   ],

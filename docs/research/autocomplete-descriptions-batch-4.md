@@ -4,9 +4,9 @@ This batch closes the 22 general-purpose commands that the translation audit
 listed with 15 or fewer missing descriptions. The same numeric tier also
 contains 184 vendor-specific or niche specs (for example `sapphire`, `yomo`,
 `tangram`, `mailsy`, `streamlit`); those are intentionally left to a later pass
-because their semantics need per-tool verification. The Fig spec names,
-arguments and structure stay untouched; only suggestion descriptions are
-localized for `zh-CN` and generated into `zh-TW`.
+because their semantics need per-tool verification. Descriptions are localized
+for `zh-CN` and generated into `zh-TW`; local Fig specs also correct option
+semantics where the bundled specs do not match the target operating system.
 
 Scope: `echo`, `which`, `paste`, `pwd`, `clear`, `su`, `crontab`, `env`,
 `uname`, `base64`, `date`, `id`, `split`, `seq`, `join`, `dig`, `dd`, `htop`,
@@ -53,15 +53,20 @@ and were reviewed for wording that stays correct in every owner:
 | `split` | 9 | suffix length, `-b`, `-d`, `-l`, `-p`, file, prefix |
 | `seq` | 11 | start/step/last, `-w`, `-s`, `-f`, `-t` |
 | `join` | 11 | equality join, `-a`, `-e`, `-o`, `-t`, `-v`, file/field |
-| `dig` | 17 | local spec: record types and output filters |
+| `dig` | 10 | local spec: record types and output filters |
 | `dd` | 14 | block sizes, seek/skip, conversions |
 | `htop` | 14 | delay, filter, highlight, sort, tree, user |
 | `basename` | 4 | `-a`, `-s`, operand |
 | `dirname` | 2 | operand |
-| `readlink` | 11 | local GNU spec: canonicalize, strip, verbose, zero |
+| `readlink` | 11 | local GNU spec: canonicalize, quiet, verbose, zero; separate macOS spec |
 | `more` | 11 | `-d`, `-l`, `-f`, `-p`, `-c`, `-s`, `-u`, `-n` |
 
-The 22 specs currently expose 182 descriptions; the four local GNU specs replaced the bundled option sets, so `date`, `dig`, `readlink` and `base64` counts reflect the new keys.
+The table counts the descriptions each command reaches with the specs in this
+change, so later corrections are already reflected there (`dig` no longer
+carries the removed `TTL` shortcut, for example). Totals: 175 reachable
+descriptions on Linux; platform variants add descriptions beyond these numbers.
+The local `date`, `dig`, `readlink` and `base64` specs replace bundled option
+sets on Linux, while `htop` corrects the `-H` delay unit.
 
 All 22 commands are added to `COVERED_COMMANDS` and `COMMON_FIG_SPECS`. They are
 small, general-purpose utilities, so preloading them costs little and removes the
@@ -77,24 +82,29 @@ on-demand spec load for the most common shell sessions.
   ^L (form feed)” and `-f` to “Count logical lines, rather than screen lines”.
   This matches GNU `more`; the translations follow the option each description
   belongs to, not the numeric order of the list.
-- **date**: replaced by a local GNU spec (`electron/specs/date.js`). The bundled
-  Fig spec exposed BSD/macOS flags (`-d` DST, `-f` input format, `-j` dry run,
-  `-n`, `-R`, `-r` epoch seconds, `-t` minutes west of GMT, `-v` adjust) that
-  Linux hosts do not have. The local spec describes `-d/--date`, `--debug`,
-  `-f/--file`, `-I/--iso-8601`, `-R/--rfc-email`, `--rfc-3339`, `-r/--reference`,
-  `-s/--set` and `-u/--utc` instead, and the 13 BSD-only entries were removed
-  after a repository-wide scan showed no other spec used them.
+- **date**: Linux uses the local GNU spec (`electron/specs/date.js`), with
+  `-d/--date`, `--debug`, `-f/--file`, `-I/--iso-8601`, `-R/--rfc-email`,
+  `--rfc-3339`, `-r/--reference`, `-s/--set` and `-u/--utc`. macOS uses
+  `electron/specs/macos/date.js` for its BSD arguments, including `-f` input
+  format, `-j`, `-r` file or epoch seconds, `-v` adjustment and `-z` output
+  timezone. File suggestions for `-r` also appear for numeric prefixes so that
+  filenames beginning with digits remain discoverable. The bundled macOS
+  spec's obsolete `-d` and `-t` switches are omitted from the local one. If the
+  native spec is ever missing, the loader falls back to the bundled spec and its
+  descriptions keep the older BSD meanings they quote.
 - **su**: the four descriptions no longer hardcode BSD-only environment claims.
   `-l` says it switches to the target home and rebuilds the login environment as
-  the implementation and PAM decide, `-m` keeps the current environment without
-  a directory change, and `-f` prevents a csh/tcsh login shell from reading
-  `.cshrc`.
+  the implementation and PAM decide. With `-m`, BSD selects the caller's
+  login shell, while util-linux normally consults `SHELL`; explicit shell and
+  restricted-shell rules affect the latter. `-f` prevents a csh/tcsh login
+  shell from reading `.cshrc`.
 - **env**: `-P` searches an alternate directory list instead of `PATH`, `-S`
   splits a string into arguments, and the trailing “Utility to run” describes
   the command operand. These are three separate keys and are not conflated.
 - **readlink**: the bundled spec reuses `stat` wording for the command root and
-  `-f` (“printf”, “struct stat”). `electron/specs/readlink.js` replaces it with
-  the GNU options (`-f/-e/-m/-n/-s/-v/-z`) and a plain path operand.
+  `-f` (“printf”, “struct stat”). `electron/specs/readlink.js` supplies the GNU
+  options (`-f/-e/-m/-n/-q/-s/-v/-z`), while the macOS variant supplies its
+  native `-f` and `-n`. `-s/--silent` suppresses errors; there is no `--strip`.
 - **paste**: `-d` replaces newlines with characters drawn circularly from the
   list; the translation keeps the “wrap around the list” behavior explicit.
 - **split**: `-p` starts a new output file on each matching extended regular
@@ -111,8 +121,8 @@ command in this batch that the reference covers (21 of 22; `readlink` is absent)
 That review changed four entries, confirmed the rest, and produced the GNU
 `date` spec described in the semantic notes.
 
-Local specs now cover five commands whose bundled Fig data was wrong or macOS-only. Local specs win over `@withfig/autocomplete` at runtime, so Linux hosts
-see options that actually exist there:
+Local specs cover five commands whose bundled Fig data was wrong or macOS-only.
+Linux hosts load the following local versions:
 
 | Command | Local spec | Bundled spec problem |
 | --- | --- | --- |
@@ -122,15 +132,21 @@ see options that actually exist there:
 | `base64` | `electron/specs/base64.js` | BSD `-b`/`-i`/`-o`; GNU uses `-w`, and `-i` means ignore garbage while decoding |
 | `htop` | `electron/specs/htop.js` | `-H` delay described as tenths of a second; htop stores seconds |
 
-macOS sessions therefore see the GNU option set for these four commands. That is
-a deliberate Linux-first trade-off, not an oversight.
+For macOS sessions, the loader uses separate native `date` and `readlink`
+specs and the bundled BSD `base64` spec. If the native `date` spec is missing,
+the loader falls back to the bundled BSD `date` spec, whose descriptions retain
+translations matching their English keys. `dig` and `htop` use their common
+local specs. The renderer passes the target session's OS over the Fig bridge,
+and loaded/in-flight spec caches, the available-spec list and the loaded-name
+index are all scoped by command and OS. For macOS the bridge's spec list merges
+`specs/` with `specs/macos/`; other sessions see only `specs/`, so a
+macOS-only command is never suggested where it cannot load.
 
-The remaining specs in this batch still expose options that do not exist in GNU
-tools. Those descriptions describe the option each spec actually inserts, so
-they are **not** rewritten into GNU wording — doing so would label an item with
-behavior it does not have on the host being connected to:
+The remaining specs include options or meanings that depend on the platform.
+The table records examples from the bundled BSD-oriented specs; some flags also
+exist in GNU or util-linux tools but have different semantics:
 
-| Command | Spec-only (BSD/macOS) options |
+| Command | Platform-dependent options |
 | --- | --- |
 | `su` | `-f`, `-l`, `-m`, `-` |
 | `id` | `-A`, `-F`, `-M`, `-P` |
@@ -142,17 +158,17 @@ behavior it does not have on the host being connected to:
 
 `su` is a special case: its spec is close to util-linux, but the wording no
 longer hardcodes `PATH=/bin:/usr/bin` or a fixed variable list, because Linux
-`su -l` setup depends on the implementation and PAM configuration. The `-l`,
-`-m` and `-f` descriptions now state the behavior without platform-specific
-environment claims.
+`su -l` setup depends on the implementation and PAM configuration. The `-m`
+description calls out the BSD and util-linux shell-selection difference; the
+`-l` and `-f` descriptions avoid fixed environment claims.
 
 `dd` also carries an upstream artifact: an operand named `files` with “Copy this
 many files before terminating”, which real `dd` does not have; the literal
 translation is kept and flagged here instead of inventing behavior.
 
-Making the remaining commands platform-correct needs per-OS spec selection (the
-loader currently resolves one spec per command name and ignores `hostOs`), which
-is a code change rather than a translation change.
+The loader now supports per-OS spec selection. The remaining commands listed
+above still use their existing shared specs and need separate review before
+adding platform-specific overrides.
 
 ## Review fixes (2026-11-08)
 
@@ -170,11 +186,11 @@ visible in the completion menu. Every item below was applied:
 | `join -o` | No longer limited to matched lines; `-o` also formats unpaired output from `-a`/`-v` |
 | `basename -a` | 支持多个路径名，将每个参数作为路径名处理 |
 | `env -0` | 每条环境变量记录以 NUL 而非换行符结束 |
-| `dig` answer filter | Describes hiding comments, question, authority, additional and statistics instead of “query only the answer section” |
-| `dig ANY` | 发起 ANY 查询；响应可能不完整（RFC 8482） |
-| `dig TTL` | Removed with the local spec; TTL is a record field, not a record type |
+| `dig` answer filter | The zh-CN value describes hiding comments, question, authority, additional and statistics; the English key stays unchanged because `dog` shares it |
+| `dig ANY` | The shared `Query ALL DNS Records` key stays; the zh-CN value carries the RFC 8482 caveat |
+| `dig TTL` | Removed from the `dig` spec; the dictionary key stays because `dog` still offers TTL |
 | `readlink -f` | Fixed by the local spec; no longer shows `printf`/`struct stat` wording |
-| `base64 -i` | Fixed by the GNU local spec (`--ignore-garbage`), documented above |
+| `base64 -i` | GNU uses `--ignore-garbage`; macOS takes an input file and uses the bundled BSD spec |
 | `su -l` / `-m` / `-f` | Removed hardcoded environment claims; see the platform note |
 | `seq` root | 默认按 1 递增；BSD/macOS 在起始值大于结束值时按 -1 递减 |
 | `uname` root | 显示系统信息（无选项时输出内核名称） |
@@ -184,6 +200,12 @@ post-conversion table in the generator (not by hand-editing `zh-TW`):
 `擴充套件正規表示式`→`擴充正規表示式`, `擴充套件 E3`→`擴充 E3`,
 `欄位連線`→`欄位聯結`, `二進位制資料`→`二進位資料`, `后綴`→`字尾`,
 `執行檔例項`→`執行檔`, `屏幕`→`螢幕`, `文本`→`文字`.
+
+Shared keys: `dig` keeps `A`, `MX`, `CNAME`, `TXT`, `SOA`, `ANY +noall +answer`
+and the section-filter descriptions byte-identical to the bundled spec because
+`dog` reuses them, so their corrections live in the zh-CN values. `NS` is the
+one dig-specific key (`Query NS records (authoritative name servers)`), and
+`Query TTL Record` remains in the dictionary for `dog` only.
 
 ## Adopted entries (excerpt)
 

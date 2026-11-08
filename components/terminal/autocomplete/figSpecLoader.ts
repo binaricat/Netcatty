@@ -12,6 +12,8 @@ export interface FigOption {
   isRequired?: boolean;
   isPersistent?: boolean;
   exclusiveOn?: string[];
+  /** Local extension: optional short values attach directly; long values use '='. */
+  netcattyOptionalArgAttached?: boolean;
 }
 
 export interface FigArg {
@@ -44,10 +46,12 @@ export interface FigSpec extends FigSubcommand {
   // Top-level spec may include additional metadata
 }
 
+export type FigHostOs = "linux" | "windows" | "macos";
+
 // Bridge type augmentation
 interface FigSpecBridge {
-  listFigSpecs?: () => Promise<string[]>;
-  loadFigSpec?: (commandName: string) => Promise<FigSpec | null>;
+  listFigSpecs?: (hostOs?: FigHostOs) => Promise<string[]>;
+  loadFigSpec?: (commandName: string, hostOs?: FigHostOs) => Promise<FigSpec | null>;
 }
 
 function getBridge(): FigSpecBridge | undefined {
@@ -55,30 +59,48 @@ function getBridge(): FigSpecBridge | undefined {
   return (window as Window & { netcatty?: FigSpecBridge }).netcatty;
 }
 
-// Cache loaded specs
-const specCache = new Map<string, FigSpec | null>();
+// Cache by command and target OS: one renderer can contain both Linux and
+// macOS sessions, whose option names and meanings can differ.
+const specCache = new Map<string, FigSpec>();
 
-// In-flight loading promises to avoid duplicate loads
+// In-flight loading promises to avoid duplicate loads for the same target OS.
 const inFlightLoads = new Map<string, Promise<FigSpec | null>>();
 
-// All available spec names
-let availableSpecs: string[] | null = null;
-let availableSpecsSet: Set<string> | null = null;
+function specCacheKey(commandName: string, hostOs?: FigHostOs): string {
+  return JSON.stringify([commandName, hostOs ?? null]);
+}
+
+// Spec names and successfully loaded commands, both scoped by target OS so a
+// macOS-only command never reports as available to a Linux session.
+const availableSpecs = new Map<string, { names: string[]; set: Set<string> }>();
+const loadedSpecNames = new Map<string, Set<string>>();
+
+function hostKey(hostOs?: FigHostOs): string {
+  return hostOs ?? "";
+}
+
+function rememberLoadedSpecName(commandName: string, hostOs?: FigHostOs): void {
+  const key = hostKey(hostOs);
+  const loaded = loadedSpecNames.get(key);
+  if (loaded) loaded.add(commandName);
+  else loadedSpecNames.set(key, new Set([commandName]));
+}
 
 /**
- * Get the list of all available command specs via IPC.
+ * Get the list of all command specs available for one target OS via IPC.
  */
-export async function getAvailableSpecs(): Promise<string[]> {
+export async function getAvailableSpecs(hostOs?: FigHostOs): Promise<string[]> {
+  const key = hostKey(hostOs);
   // Only return cache if it has actual specs (not an empty failure)
-  if (availableSpecs && availableSpecs.length > 0) return availableSpecs;
+  const cached = availableSpecs.get(key);
+  if (cached && cached.names.length > 0) return cached.names;
 
   try {
     const bridge = getBridge();
     if (bridge?.listFigSpecs) {
-      const specs = await bridge.listFigSpecs();
+      const specs = await bridge.listFigSpecs(hostOs);
       if (Array.isArray(specs) && specs.length > 0) {
-        availableSpecs = specs;
-        availableSpecsSet = new Set(specs);
+        availableSpecs.set(key, { names: specs, set: new Set(specs) });
         return specs;
       }
     }
@@ -94,15 +116,17 @@ export async function getAvailableSpecs(): Promise<string[]> {
  * Load a command specification by name via IPC.
  * Uses in-flight deduplication to avoid loading the same spec twice concurrently.
  */
-export async function loadSpec(commandName: string): Promise<FigSpec | null> {
-  if (specCache.has(commandName)) {
-    return specCache.get(commandName) ?? null;
-  }
+export async function loadSpec(commandName: string, hostOs?: FigHostOs): Promise<FigSpec | null> {
+  const cacheKey = specCacheKey(commandName, hostOs);
+  const cached = specCache.get(cacheKey);
+  if (cached) return cached;
 
-  const existing = inFlightLoads.get(commandName);
+  const existing = inFlightLoads.get(cacheKey);
   if (existing) return existing;
 
-  const loadPromise = (async (): Promise<FigSpec | null> => {
+  // Defer the bridge lookup so even a missing bridge or synchronous throw
+  // clears the in-flight entry after it has been registered.
+  const loadPromise = Promise.resolve().then(async (): Promise<FigSpec | null> => {
     try {
       const bridge = getBridge();
       if (!bridge?.loadFigSpec) {
@@ -110,36 +134,33 @@ export async function loadSpec(commandName: string): Promise<FigSpec | null> {
         return null;
       }
 
-      const spec = await bridge.loadFigSpec(commandName);
+      const spec = await bridge.loadFigSpec(commandName, hostOs);
       if (spec) {
-        specCache.set(commandName, spec);
+        specCache.set(cacheKey, spec);
+        rememberLoadedSpecName(commandName, hostOs);
       }
       // Don't cache null — the load may have failed transiently (bridge not ready, etc.)
-      // Only cache null when we're confident the spec doesn't exist (hasSpec returned false)
       return spec;
     } catch {
       // Don't cache failures — allow retry on next request
       return null;
     } finally {
-      inFlightLoads.delete(commandName);
+      inFlightLoads.delete(cacheKey);
     }
-  })();
+  });
 
-  inFlightLoads.set(commandName, loadPromise);
+  inFlightLoads.set(cacheKey, loadPromise);
   return loadPromise;
 }
 
 /**
- * Check if a spec exists for a given command name (without loading it).
+ * Check if a spec exists for a given command name and target OS.
  */
-export async function hasSpec(commandName: string): Promise<boolean> {
-  // Only trust positive cache hits (spec loaded successfully).
-  // Null entries may be stale failures from preload — ignore them.
-  const cached = specCache.get(commandName);
-  if (cached) return true;
+export async function hasSpec(commandName: string, hostOs?: FigHostOs): Promise<boolean> {
+  if (loadedSpecNames.get(hostKey(hostOs))?.has(commandName)) return true;
 
-  await getAvailableSpecs();
-  return availableSpecsSet?.has(commandName) ?? false;
+  await getAvailableSpecs(hostOs);
+  return availableSpecs.get(hostKey(hostOs))?.set.has(commandName) ?? false;
 }
 
 /**
@@ -164,7 +185,7 @@ export const COMMON_FIG_SPECS = [
  * Preload commonly used specs in batches to avoid overwhelming IPC.
  * Only call this when autocomplete is enabled.
  */
-export function preloadCommonSpecs(): void {
+export function preloadCommonSpecs(hostOs?: FigHostOs): void {
   const BATCH_SIZE = 8;
   let offset = 0;
 
@@ -173,7 +194,7 @@ export function preloadCommonSpecs(): void {
     if (batch.length === 0) return;
 
     for (const name of batch) {
-      loadSpec(name).catch(() => {});
+      loadSpec(name, hostOs).catch(() => {});
     }
 
     offset += BATCH_SIZE;

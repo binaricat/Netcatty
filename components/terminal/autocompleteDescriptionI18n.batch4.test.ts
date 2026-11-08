@@ -192,10 +192,15 @@ test("batch 4 spot checks preserve verified semantics, placeholders and upstream
   assert.ok(
     simplified["Leave the environment unmodified.  The invoked shell is your login shell, and no directory changes are made.  As a security precaution, if the target user's shell is a non-standard shell (as defined by getusershell(3)) and the caller's real uid is non-zero, su will fail"].includes("getusershell(3)"),
   );
-  assert.equal(simplified["Show the answer section"], "显示答案区段");
+  // dig shares A/MX/CNAME/TXT/SOA/ANY/filter keys with dog, so the caveats
+  // live in the zh-CN values while the English keys stay untouched.
   assert.equal(
-    simplified["Send an ANY query; the response may be incomplete (RFC 8482)"],
-    "发起 ANY 查询；响应可能不完整（RFC 8482）",
+    simplified["Query ALL DNS Records"],
+    "查询所有 DNS 记录（ANY 结果可能不完整，见 RFC 8482）",
+  );
+  assert.equal(
+    simplified["Query only answer section"],
+    "隐藏注释、问题、权威和附加区段及统计信息",
   );
   assert.equal(
     simplified["Count logical lines, rather than screen lines"],
@@ -206,10 +211,7 @@ test("batch 4 spot checks preserve verified semantics, placeholders and upstream
     simplified["Query NS records (authoritative name servers)"],
     "查询 NS 记录（权威名称服务器）",
   );
-  assert.equal(
-    simplified["Query the SOA record (start of authority)"],
-    "查询 SOA 记录（起始授权机构）",
-  );
+  assert.equal(simplified["Query SOA Record"], "查询 SOA 记录");
   // The local GNU date spec replaces the bundled BSD option set.
   assert.equal(
     simplified["Display the last modification time of the given file"],

@@ -1,4 +1,4 @@
-// base64 spec — GNU coreutils. The bundled Fig spec follows BSD flags
+// base64 spec - GNU coreutils. The bundled Fig spec follows BSD flags
 // (-b line length, -i input file, -o output file); GNU uses -w, -i for
 // ignoring invalid bytes while decoding, and positional files.
 const completionSpec = {
@@ -18,7 +18,7 @@ const completionSpec = {
     { name: "--help", description: "Display help text" },
     { name: "--version", description: "Display version information" },
   ],
-  args: { name: "file", description: "File to read; standard input when omitted or '-'", isOptional: true, isVariadic: true },
+  args: { name: "file", description: "File to read; standard input when omitted or '-'", isOptional: true, isVariadic: true, template: "filepaths" },
 };
 
 export default completionSpec;

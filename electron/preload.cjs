@@ -945,8 +945,8 @@ const api = createPreloadApi({
 
 // Fig autocomplete spec loading via main process
 const figSpecApi = {
-  listFigSpecs: () => ipcRenderer.invoke("netcatty:figspec:list"),
-  loadFigSpec: (commandName) => ipcRenderer.invoke("netcatty:figspec:load", commandName),
+  listFigSpecs: (hostOs) => ipcRenderer.invoke("netcatty:figspec:list", hostOs),
+  loadFigSpec: (commandName, hostOs) => ipcRenderer.invoke("netcatty:figspec:load", commandName, hostOs),
   listAutocompleteRemoteDir: (sessionId, dirPath, foldersOnly, filterPrefix, limit) => ipcRenderer.invoke("netcatty:ssh:listdir", {
     sessionId,
     path: dirPath,
