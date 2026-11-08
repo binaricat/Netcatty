@@ -41,10 +41,10 @@ let
         cache="''${XDG_CACHE_HOME:-$HOME/.cache}/netcatty"
         snap="$cache/ssh_config"
         mkdir -p "$cache"
-        if [ ! -e "$snap" ] || [ "$config" -nt "$snap" ]; then
-          cp -L "$config" "$snap"
-          chmod 600 "$snap"
-        fi
+        # Always refresh: nix store files have frozen old mtimes, so -nt
+        # never sees a newer home-manager generation after the first copy.
+        cp -L "$config" "$snap"
+        chmod 600 "$snap"
         exec "$real_ssh" -F "$snap" "$@"
       fi
     fi
