@@ -56,6 +56,7 @@ import {
   prepareTelnetCredentialsForSave,
   prepareProxyConfigForSave,
   nextFormAfterSelectProxyProfile,
+  nextFormAfterClearHostChain,
   nextFormAfterRemoveHostFromChain,
   resolveFormHostChainIds,
   resolveDisplayProxyProfileId,
@@ -519,11 +520,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   };
 
   const clearHostChain = useCallback(() => {
-    setForm((prev) => {
-      const { hostChain: _hostChain, ...rest } = prev;
-      return rest as Host;
-    });
-  }, []);
+    setForm((prev) => nextFormAfterClearHostChain(prev, effectiveGroupDefaults));
+  }, [effectiveGroupDefaults]);
 
   const [newEnvName, setNewEnvName] = useState("");
   const [newEnvValue, setNewEnvValue] = useState("");

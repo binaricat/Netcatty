@@ -200,13 +200,10 @@ export const resolveFormHostChainIds = (
   return applyGroupDefaults(host, groupDefaults).hostChain?.hostIds || [];
 };
 
-export const nextFormAfterRemoveHostFromChain = (
+export const nextFormAfterClearHostChain = (
   prev: Host,
-  index: number,
   groupDefaults?: Partial<GroupConfig>,
 ): Host => {
-  const ids = resolveFormHostChainIds(prev, groupDefaults).filter((_, i) => i !== index);
-  if (ids.length > 0) return { ...prev, hostChain: { hostIds: ids } };
   const groupWouldRestore = Boolean(
     groupDefaults
     && applyGroupDefaults({ ...prev, hostChain: undefined }, groupDefaults).hostChain?.hostIds?.length,
@@ -216,4 +213,14 @@ export const nextFormAfterRemoveHostFromChain = (
   }
   const { hostChain: _hostChain, ...rest } = prev;
   return rest as Host;
+};
+
+export const nextFormAfterRemoveHostFromChain = (
+  prev: Host,
+  index: number,
+  groupDefaults?: Partial<GroupConfig>,
+): Host => {
+  const ids = resolveFormHostChainIds(prev, groupDefaults).filter((_, i) => i !== index);
+  if (ids.length > 0) return { ...prev, hostChain: { hostIds: ids } };
+  return nextFormAfterClearHostChain(prev, groupDefaults);
 };

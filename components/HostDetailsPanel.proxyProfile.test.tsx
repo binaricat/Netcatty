@@ -14,6 +14,7 @@ import {
   resolvePrimaryProtocolSwitchPort,
   validateProxyConfigForSave,
   nextFormAfterSelectProxyProfile,
+  nextFormAfterClearHostChain,
   nextFormAfterRemoveHostFromChain,
   resolveDisplayProxyProfileId,
 } from "./HostDetailsPanel.helpers.ts";
@@ -687,6 +688,13 @@ test("removing the last hop of a multi-hop inherited chain keeps an empty overri
   const afterLast = nextFormAfterRemoveHostFromChain(afterFirst, 0, group);
   assert.deepEqual(afterLast.hostChain, { hostIds: [] });
   assert.deepEqual(applyGroupDefaults(afterLast, group).hostChain, { hostIds: [] });
+});
+
+test("clearing an inherited-only chain keeps an empty override instead of restoring group hops", () => {
+  const group = { hostChain: { hostIds: ["jump-1", "jump-host"] } };
+  const cleared = nextFormAfterClearHostChain(networkSshHost, group);
+  assert.deepEqual(cleared.hostChain, { hostIds: [] });
+  assert.deepEqual(applyGroupDefaults(cleared, group).hostChain, { hostIds: [] });
 });
 
 test("HostDetailsPanel custom proxy draft hides the inherited saved proxy", () => {
