@@ -18,9 +18,16 @@ const hasKey = (messages: Record<string, string>, key: string) =>
   Object.hasOwn(messages, key);
 
 const interpolationTokens = (value: string) =>
-  [...value.matchAll(/\{\{\s*\w+\s*\}\}|\{\s*\w+\s*\}/g)]
+  [...value.matchAll(/\{\{\s*[^}]+\s*\}\}|\{\s*\w+\s*\}/g)]
     .map((match) => match[0].replace(/[{}]/g, "").trim())
     .sort();
+
+test("interpolationTokens reads the :default placeholder form", () => {
+  assert.deepEqual(interpolationTokens("{{name}} or {{name:default}}"), [
+    "name",
+    "name:default",
+  ]);
+});
 
 test("es defines every message key that en defines", () => {
   const missing = Object.keys(en).filter((key) => !hasKey(es, key));
