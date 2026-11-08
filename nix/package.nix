@@ -43,8 +43,12 @@ let
         mkdir -p "$cache"
         # Always refresh: nix store files have frozen old mtimes, so -nt
         # never sees a newer home-manager generation after the first copy.
-        cp -L "$config" "$snap"
-        chmod 600 "$snap"
+        # Publish via a unique staging file + mv so a concurrent ssh -F
+        # reader never sees a truncated snapshot (cp truncates first).
+        snap_tmp="$snap.tmp.$$"
+        cp -L "$config" "$snap_tmp"
+        chmod 600 "$snap_tmp"
+        mv -f "$snap_tmp" "$snap"
         exec "$real_ssh" -F "$snap" "$@"
       fi
     fi
