@@ -255,6 +255,12 @@ if (process.env.NETCATTY_COMPAT_GPU !== "1") {
   app.commandLine.appendSwitch("enable-zero-copy");
 }
 
+// Linux: Chromium only auto-selects gnome-libsecret / kwallet from
+// GNOME/KDE desktop names. Other compositors (niri/sway/Hyprland) fall
+// through to BASIC_TEXT even when Secret Service is running (#4189).
+const { applyLinuxPasswordStore } = require("./linuxPasswordStore.cjs");
+applyLinuxPasswordStore(app);
+
 // Silence noisy DevTools Autofill CDP errors (Electron's backend doesn't expose this domain)
 app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "devtools") return;
