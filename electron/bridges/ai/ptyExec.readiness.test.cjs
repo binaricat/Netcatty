@@ -436,3 +436,41 @@ test('OSC 133 C/D markers keep exec gated even when output echoes a known prompt
   assert.match(result.error, /no command was sent/);
   assert.deepEqual(pty.writes, []);
 });
+
+
+// ── macOS `sudo -i` root prompt (issue #4195): end-to-end startPtyJob seam ──
+
+test('macOS sudo -i root prompt is recognized as idle and allows exec', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const prompt = 'ChrisdeMacBook-Air:~ root# ';
+  trackSessionIdlePrompt(session, `Password:\r\nSorry, try again.\r\n${prompt}`);
+  assert.equal(session.lastIdlePrompt, prompt);
+  assert.equal(readyPrompt(session), prompt);
+
+  const result = await startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  }).resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
+test('sudo Password: / Sorry, try again. still gate exec as SHELL_NOT_READY', async () => {
+  for (const line of ['Password:', 'Sorry, try again.']) {
+    const pty = new TestPty();
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, `zhangdanting@ChrisdeMacBook-Air ~ %\r\n${line}`);
+    assert.equal(readyPrompt(session), '', line);
+    const result = await startPtyJob(pty, 'echo forbidden', {
+      shellKind: 'posix',
+      getReadyPrompt: () => readyPrompt(session),
+      promptWaitTimeoutMs: 25,
+      timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.code, 'SHELL_NOT_READY', line);
+    assert.deepEqual(pty.writes, [], line);
+  }
+});

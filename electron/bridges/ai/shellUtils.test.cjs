@@ -1510,3 +1510,108 @@ test("OSC 133 lifecycle state survives rolling-tail eviction without reviving ol
   assert.equal(getFreshIdlePrompt(session), "");
   assert.equal(getVisibleIdlePrompt(session), "");
 });
+
+
+// ── macOS `sudo -i` root prompt (`host:dir user#`) — issue #4195 ──
+
+test("isDefaultPosixPromptLine matches macOS sudo -i root prompts (host:dir user#)", () => {
+  for (const prompt of [
+    "ChrisdeMacBook-Air:~ root#",
+    "host:/var/root root#",
+    "MacBook-Pro:/var/root root#",
+    "ChrisdeMacBook-Air:~ admin$",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+  }
+});
+
+test("extractTrailingIdlePrompt recognizes a macOS root prompt (incl. ANSI) and preserves trailing whitespace", () => {
+  assert.equal(
+    extractTrailingIdlePrompt("Password:\r\nSorry, try again.\r\nChrisdeMacBook-Air:~ root#"),
+    "ChrisdeMacBook-Air:~ root#",
+  );
+  assert.equal(
+    extractTrailingIdlePrompt("Last login...\r\nChrisdeMacBook-Air:~ root# "),
+    "ChrisdeMacBook-Air:~ root# ",
+  );
+  // ANSI colour wrappers are removed by stripAnsi before shape matching.
+  assert.equal(
+    extractTrailingIdlePrompt(
+      "Password:\r\n\x1b[01;32mChrisdeMacBook-Air\x1b[00m:\x1b[01;34m~\x1b[00m root#",
+    ),
+    "ChrisdeMacBook-Air:~ root#",
+  );
+  // A prompt followed by input, or followed by a newline, is not idle.
+  assert.equal(extractTrailingIdlePrompt("ChrisdeMacBook-Air:~ root# echo hi"), "");
+  assert.equal(extractTrailingIdlePrompt("ChrisdeMacBook-Air:~ root#\r\n"), "");
+});
+
+test("trackSessionIdlePrompt and getFreshIdlePrompt accept a macOS root prompt, then expire on new output", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "Password:\r\nSorry, try again.\r\nChrisdeMacBook-Air:~ root# ");
+  assert.equal(session.lastIdlePrompt, "ChrisdeMacBook-Air:~ root# ");
+  assert.equal(getFreshIdlePrompt(session), "ChrisdeMacBook-Air:~ root# ");
+  assert.equal(getVisibleIdlePrompt(session), "ChrisdeMacBook-Air:~ root# ");
+
+  // A command being echoed breaks the endsWith chain -> no longer fresh.
+  trackSessionIdlePrompt(session, "uname -a");
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getVisibleIdlePrompt(session), "");
+
+  trackSessionIdlePrompt(session, "\r\nDarwin ... arm64\r\nChrisdeMacBook-Air:~ root# ");
+  assert.equal(getFreshIdlePrompt(session), "ChrisdeMacBook-Air:~ root# ");
+  assert.equal(getVisibleIdlePrompt(session), "ChrisdeMacBook-Air:~ root# ");
+});
+
+test("macOS root prompt recognition preserves prior classifications and rejects look-alikes", () => {
+  // No regression: the user's zsh prompt is still idle-ready.
+  assert.equal(isDefaultPosixPromptLine("zhangdanting@ChrisdeMacBook-Air ~ %"), true);
+  assert.equal(
+    extractTrailingIdlePrompt("welcome\r\nzhangdanting@ChrisdeMacBook-Air ~ %"),
+    "zhangdanting@ChrisdeMacBook-Air ~ %",
+  );
+  // `Password:` / `Sorry, try again.` must stay NOT ready: the shell is blocked
+  // on secret input, so the bridge must never type into it.
+  for (const line of ["Password:", "Sorry, try again."]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+  // Shapes owned by existing patterns are unchanged.
+  assert.equal(isDefaultPosixPromptLine("host:~#"), true);        // ALPINE (no user segment)
+  assert.equal(isDefaultPosixPromptLine("user@host:~#"), true);   // POSIX
+  assert.equal(isDefaultPowerShellPromptLine("PS C:\\>"), true);  // PowerShell
+  assert.equal(isDefaultPosixPromptLine("PS C:\\>"), false);      // untouched
+  // Program-output look-alikes: trailing `%` / extra text / pending input.
+  for (const line of [
+    "ChrisdeMacBook-Air:~ root# 47%",
+    "ChrisdeMacBook-Air:~ root# building 47%",
+    "ChrisdeMacBook-Air:~ root# echo hi",
+    "deploy: release 100% root#",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
+test("the macOS root pattern is pure-shape and disjoint from existing whitelist shapes (no double-count)", () => {
+  // Same shape as MACOS_ROOT_PROMPT_PATTERN; kept local to assert that the new
+  // pattern does not also claim shapes already owned by ALPINE / POSIX / ZSH /
+  // CMD / PowerShell / P10K / OMZ (the whitelist is a boolean OR, so overlap
+  // would be a latent double-count even though readiness is unchanged).
+  const root = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~|\/|[^\s:#$]+)\s+[A-Za-z0-9_.-]+[#$]$/;
+  for (const line of [
+    "host:~#",                                  // ALPINE, no ` user` segment
+    "host:/tmp#",                               // ALPINE
+    "user@host:~#",                             // POSIX
+    "zhangdanting@ChrisdeMacBook-Air ~ %",      // ZSH
+    "PS C:\\>",                                 // PowerShell
+    "C:\\>",                                    // CMD
+    "~ ❯",                                      // P10K
+    "➜  ~",                                     // OMZ
+  ]) {
+    assert.equal(root.test(line), false, line);
+  }
+  for (const line of ["ChrisdeMacBook-Air:~ root#", "host:/var/root root#"]) {
+    assert.equal(root.test(line), true, line);
+  }
+});
