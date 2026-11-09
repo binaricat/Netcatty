@@ -32,6 +32,12 @@ interface GlobalAIChatSessionManagerProps {
   activeSessionIdMap: Readonly<Record<string, string | null>>;
   currentScopeType: 'terminal' | 'workspace';
   currentScopeTargetId?: string;
+  /**
+   * Host ids of the viewing panel's own scope; carried onto chats rebound
+   * with "This panel" so the destination's host association survives the
+   * scope rewrite instead of being orphaned.
+   */
+  currentScopeHostIds?: ReadonlyArray<string>;
   workspaces: ReadonlyArray<{ id: string; title: string }>;
   terminalInfos: ReadonlyArray<GlobalManagerTerminalInfo>;
   externalAgents: ExternalAgentConfig[];
@@ -53,6 +59,7 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
   activeSessionIdMap,
   currentScopeType,
   currentScopeTargetId,
+  currentScopeHostIds,
   workspaces,
   terminalInfos,
   externalAgents,
@@ -92,6 +99,16 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
     setRenderCount(MANAGER_RENDER_BATCH);
   }, [searchQuery, agentFilter]);
 
+  // Deleting the last chat of the filtered agent must not leave the manager
+  // pointing at an agent with no rows (the select would show a blank value
+  // and the list a permanent "no matches"). Reset to "all"; the select's
+  // built-in "all" option stays the manual clear affordance.
+  useEffect(() => {
+    if (agentFilter !== 'all' && !agentIds.includes(agentFilter)) {
+      setAgentFilter('all');
+    }
+  }, [agentFilter, agentIds]);
+
   const displayedRows = filteredRows.slice(0, renderCount);
   const hiddenRowCount = Math.max(0, filteredRows.length - renderCount);
 
@@ -105,7 +122,17 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
     if (!rebindSession || !value) return;
     if (value === 'here') {
       if (!currentScopeTargetId) return;
-      onRebind(rebindSession.id, { type: currentScopeType, targetId: currentScopeTargetId, label: '' });
+      // Preserve the destination's host association: rewriting the scope
+      // without hostIds would orphan the host linkage the panel maintains
+      // for terminal-scope reconnection.
+      onRebind(rebindSession.id, {
+        type: currentScopeType,
+        targetId: currentScopeTargetId,
+        label: '',
+        hostIds: currentScopeHostIds && currentScopeHostIds.length > 0
+          ? [...currentScopeHostIds]
+          : undefined,
+      });
     } else {
       const target = rebindTargets.find((candidate) => `${candidate.type}:${candidate.targetId}` === value);
       if (target) onRebind(rebindSession.id, target);

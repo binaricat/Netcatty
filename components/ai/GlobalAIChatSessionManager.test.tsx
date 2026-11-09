@@ -32,6 +32,7 @@ function baseProps() {
     activeSessionIdMap: {} as Record<string, string | null>,
     currentScopeType: "terminal" as const,
     currentScopeTargetId: "t-1",
+    currentScopeHostIds: undefined as string[] | undefined,
     workspaces: [{ id: "w-1", title: "Prod" }],
     terminalInfos: [
       { sessionId: "t-1", hostId: "h-1", label: "edge", hostname: "edge.example", connected: true },
@@ -40,10 +41,10 @@ function baseProps() {
     externalAgents,
     rebindTargets: [
       { type: "workspace" as const, targetId: "w-1", label: "Prod" },
-      { type: "terminal" as const, targetId: "t-2", label: "core" },
+      { type: "terminal" as const, targetId: "t-2", label: "core", hostIds: undefined as string[] | undefined },
     ],
     onSelect: (_sessionId: string) => {},
-    onRebind: (_sessionId: string, _target: { type: string; targetId: string }) => {},
+    onRebind: (_sessionId: string, _target: { type: string; targetId: string; hostIds?: string[] }) => {},
     onDelete: (_sessionId: string) => {},
     onExport: (_sessionId: string) => {},
   };
@@ -216,6 +217,137 @@ test("rebind: cross-workspace target picker rewrites scope to the picked target"
     await dispatchDomEvent(picker, new dom.window.Event("change", { bubbles: true }));
 
     assert.deepEqual(rebinds, [{ sessionId: "term", type: "workspace", targetId: "w-1" }]);
+  } finally {
+    dom.cleanup();
+  }
+});
+
+test("rebind: 'This panel' preserves the panel scope host ids", async () => {
+  const dom = installDomEnvironment();
+  try {
+    const props = baseProps();
+    props.currentScopeHostIds = ["h-1"];
+    props.sessions = [
+      makeSession({ id: "gone", title: "Dangling chat", scope: { type: "terminal", targetId: "t-gone" } }),
+    ];
+    const rebinds: Array<{ sessionId: string; hostIds?: string[] }> = [];
+    props.onRebind = (sessionId, target) => rebinds.push({ sessionId, hostIds: target.hostIds });
+    const renderer = await renderManager(dom, props);
+
+    await clickButtonInRow(dom, renderer, "gone", t("ai.chat.managerRebind"));
+    const picker = renderer.container.querySelector<HTMLSelectElement>(
+      '[data-section="ai-manager-rebind-picker"] select',
+    );
+    assert.ok(picker);
+    const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value")!.set!;
+    setValue.call(picker, "here");
+    await dispatchDomEvent(picker, new dom.window.Event("change", { bubbles: true }));
+
+    assert.deepEqual(rebinds, [{ sessionId: "gone", hostIds: ["h-1"] }], "destination host association survives the scope rewrite");
+  } finally {
+    dom.cleanup();
+  }
+});
+
+test("rebind: explicit target host ids pass through to onRebind", async () => {
+  const dom = installDomEnvironment();
+  try {
+    const props = baseProps();
+    props.rebindTargets = [
+      { type: "terminal" as const, targetId: "t-2", label: "core", hostIds: ["h-2"] },
+    ];
+    props.sessions = [
+      makeSession({ id: "term", title: "Terminal chat", scope: { type: "terminal", targetId: "t-1" } }),
+    ];
+    const rebinds: Array<{ sessionId: string; hostIds?: string[] }> = [];
+    props.onRebind = (sessionId, target) => rebinds.push({ sessionId, hostIds: target.hostIds });
+    const renderer = await renderManager(dom, props);
+
+    await clickButtonInRow(dom, renderer, "term", t("ai.chat.managerRebind"));
+    const picker = renderer.container.querySelector<HTMLSelectElement>(
+      '[data-section="ai-manager-rebind-picker"] select',
+    );
+    assert.ok(picker);
+    const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value")!.set!;
+    setValue.call(picker, "terminal:t-2");
+    await dispatchDomEvent(picker, new dom.window.Event("change", { bubbles: true }));
+
+    assert.deepEqual(rebinds, [{ sessionId: "term", hostIds: ["h-2"] }]);
+  } finally {
+    dom.cleanup();
+  }
+});
+
+test("agent filter resets when its agent loses the last chat; 'all' option clears manually", async () => {
+  const dom = installDomEnvironment();
+  try {
+    const { GlobalAIChatSessionManager } = await import("./GlobalAIChatSessionManager.tsx");
+    const { I18nProvider } = await import("../../application/i18n/I18nProvider.tsx");
+    const { TooltipProvider } = await import("../ui/tooltip.tsx");
+    const renderer = await createDomRenderer(dom.document);
+    const props = baseProps();
+    props.sessions = [
+      makeSession({ id: "catty-1", agentId: "catty", title: "Catty chat" }),
+      makeSession({ id: "codex-1", agentId: "codex", title: "Codex chat" }),
+    ];
+    await renderer.render(
+      <I18nProvider locale="en">
+        <TooltipProvider>
+          <GlobalAIChatSessionManager {...props} />
+        </TooltipProvider>
+      </I18nProvider>,
+    );
+
+    const filterSelect = () => renderer.container.querySelector<HTMLSelectElement>(
+      `select[aria-label="${t("ai.chat.managerFilterAllAgents")}"]`,
+    );
+    assert.ok(filterSelect(), "agent filter renders with more than one agent");
+    const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value")!.set!;
+    setValue.call(filterSelect(), "codex");
+    await dispatchDomEvent(filterSelect(), new dom.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(rows(renderer).map((row) => row.dataset.sessionId), ["codex-1"]);
+    assert.ok(
+      Array.from(filterSelect()!.options).some((option) => option.value === "all"),
+      "manual clear affordance: the 'all' option is selectable",
+    );
+
+    // Deleting the last chat of the filtered agent: the parent drops it and
+    // re-renders with the updated store (a second agent keeps the filter UI
+    // mounted, so the reset is observable).
+    props.sessions = [
+      makeSession({ id: "catty-1", agentId: "catty", title: "Catty chat" }),
+      makeSession({ id: "gemini-1", agentId: "gemini", title: "Gemini chat" }),
+    ];
+    await renderer.render(
+      <I18nProvider locale="en">
+        <TooltipProvider>
+          <GlobalAIChatSessionManager {...props} />
+        </TooltipProvider>
+      </I18nProvider>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(filterSelect()!.value, "all", "stale agent filter resets to 'all'");
+    assert.deepEqual(
+      rows(renderer).map((row) => row.dataset.sessionId),
+      ["catty-1", "gemini-1"],
+      "rows are visible again after the reset",
+    );
+
+    // Manual clear: pick a present agent, then choose 'all' to clear.
+    setValue.call(filterSelect(), "catty");
+    await dispatchDomEvent(filterSelect(), new dom.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(rows(renderer).map((row) => row.dataset.sessionId), ["catty-1"]);
+    setValue.call(filterSelect(), "all");
+    await dispatchDomEvent(filterSelect(), new dom.window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(
+      rows(renderer).map((row) => row.dataset.sessionId),
+      ["catty-1", "gemini-1"],
+      "'all' clears the filter",
+    );
   } finally {
     dom.cleanup();
   }
