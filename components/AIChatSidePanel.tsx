@@ -96,6 +96,7 @@ import {
   appendRetainedStoredModelPreset,
   shouldLoadSdkRuntimeModels,
   shouldUseStoredAgentModel,
+  stopActiveTurnBeforeScopeRebind,
   type SdkRuntimeModelCatalog,
   type SdkRuntimeModelCatalogSource,
 } from './AIChatSidePanelHelpers';
@@ -517,6 +518,28 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     handleRenameSession(activeSessionRef.current?.id ?? null, title);
   }, [handleRenameSession]);
 
+  // Defined before the /rebind command handler, which must await turn
+  // termination before rewriting a chat's scope.
+  const stopStreamingForSession = useCallback(async (sessionId: string) => {
+    const controller = abortControllersRef.current.get(sessionId);
+    setStreamingForScope(sessionId, false);
+    updateLastMessage(sessionId, (msg) => ({
+      ...msg,
+      statusText: '',
+      executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
+    }));
+    await stopAgentTurn({
+      chatSessionId: sessionId,
+      abortController: controller,
+      bridge: getNetcattyBridge(),
+      reason: 'user',
+    });
+    await getAgentRuntime().waitForActiveTurn(sessionId);
+    if (controller && abortControllersRef.current.get(sessionId) === controller) {
+      abortControllersRef.current.delete(sessionId);
+    }
+  }, [setStreamingForScope, updateLastMessage, abortControllersRef]);
+
   const handleListChats = useCallback(() => {
     // Prefer the app-wide live target set so chats bound to other still-open
     // terminals are not mislabelled dangling / offered for /rebind.
@@ -545,7 +568,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   // `/rebind <n>`: rebind the nth dangling chat from the last /chats listing
   // to this panel's current scope. Panel action — no agent round-trip.
-  const handleRebindChat = useCallback((arg: string) => {
+  const handleRebindChat = useCallback(async (arg: string) => {
     if (!scopeTargetId) {
       toast.warning(t('ai.chat.rebindUnavailable'));
       return;
@@ -560,6 +583,13 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     for (const workspace of workspaces) liveTargets.add(workspace.id);
     liveTargets.add(scopeTargetId);
     if (canRebindChat(session, liveTargets)) {
+      // Same race as the manager rebind: stop any in-flight turn first so the
+      // scope rewrite never happens under a live stream.
+      await stopActiveTurnBeforeScopeRebind(target.sessionId, {
+        abortControllersRef,
+        streamingSessionIds,
+        stopStreamingForSession,
+      });
       rebindSessionScope?.(target.sessionId, { type: scopeType, targetId: scopeTargetId, hostIds: scopeHostIds });
       toast.success(t('ai.chat.rebindDone').replace('{title}', target.title));
     } else {
@@ -582,7 +612,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }
     lastChatsListingRef.current = remaining;
     setPanelCommandNote(formatAiChatsListingNote(remaining, t));
-  }, [liveScopeTargetIds, rebindSessionScope, scopeHostIds, scopeTargetId, scopeType, sessions, t, workspaces, workspaceMemberTerminalIds]);
+  }, [abortControllersRef, liveScopeTargetIds, rebindSessionScope, scopeHostIds, scopeTargetId, scopeType, sessions, stopStreamingForSession, streamingSessionIds, t, workspaces, workspaceMemberTerminalIds]);
 
   // Manual durability actions (history drawer header). Export writes the
   // whole store to a user-chosen JSON file; import merges by id.
@@ -1989,26 +2019,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   }, [
     validateNoteMentions, canSteerCurrentTurn, clearScopeDraft, steerExternalAgent, steeringSessionId]);
 
-  const stopStreamingForSession = useCallback(async (sessionId: string) => {
-    const controller = abortControllersRef.current.get(sessionId);
-    setStreamingForScope(sessionId, false);
-    updateLastMessage(sessionId, (msg) => ({
-      ...msg,
-      statusText: '',
-      executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
-    }));
-    await stopAgentTurn({
-      chatSessionId: sessionId,
-      abortController: controller,
-      bridge: getNetcattyBridge(),
-      reason: 'user',
-    });
-    await getAgentRuntime().waitForActiveTurn(sessionId);
-    if (controller && abortControllersRef.current.get(sessionId) === controller) {
-      abortControllersRef.current.delete(sessionId);
-    }
-  }, [setStreamingForScope, updateLastMessage, abortControllersRef]);
-
   const { addGrant } = useAIPermissionGrantsState();
 
   useEffect(() => {
@@ -2174,8 +2184,17 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     handleSelectSession(sessionId);
   }, [handleSelectSession]);
 
-  const handleManagerRebind = useCallback((sessionId: string, target: GlobalManagerScopeTarget) => {
+  const handleManagerRebind = useCallback(async (sessionId: string, target: GlobalManagerScopeTarget) => {
     if (!rebindSessionScope) return;
+    // A rebinding while a turn streams into the chat corrupts streaming state
+    // (the stream targets the old scope while the active map/pointer move).
+    // Await the stop instead of rejecting: stopStreamingForSession cleanly
+    // awaits termination, so the user's rebind intent is preserved.
+    await stopActiveTurnBeforeScopeRebind(sessionId, {
+      abortControllersRef,
+      streamingSessionIds,
+      stopStreamingForSession,
+    });
     rebindSessionScope(sessionId, {
       type: target.type,
       targetId: target.targetId,
@@ -2190,7 +2209,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
             ? t('ai.chat.chatsScopeWorkspace')
             : t('ai.chat.chatsScopeTerminal'))),
     );
-  }, [rebindSessionScope, sessions, t]);
+  }, [abortControllersRef, rebindSessionScope, sessions, stopStreamingForSession, streamingSessionIds, t]);
 
   const handleManagerDelete = useCallback(async (sessionId: string) => {
     if (abortControllersRef.current.has(sessionId) || streamingSessionIds.has(sessionId)) {
@@ -2227,6 +2246,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       activeSessionIdMap={activeSessionIdMap}
       currentScopeType={scopeType}
       currentScopeTargetId={scopeTargetId}
+      currentScopeHostIds={scopeHostIds}
       workspaces={workspaces}
       terminalInfos={managerTerminalInfos}
       externalAgents={externalAgents}
@@ -2241,6 +2261,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     activeSessionIdMap,
     scopeType,
     scopeTargetId,
+    scopeHostIds,
     workspaces,
     managerTerminalInfos,
     externalAgents,
