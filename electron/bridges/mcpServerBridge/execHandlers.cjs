@@ -3,6 +3,7 @@
 // where bare `require` resolves to ctx.require (based in electron/bridges/).
 const { clearSessionFlowState } = require("../terminalFlowAck.cjs");
 const { getVisibleIdlePrompt } = require("../ai/shellUtils.cjs");
+const { classifyShellReadiness } = require("../ai/shellReadinessState.cjs");
 const { emitJobDiag } = require("../ai/jobStartupDiagnostics.cjs");
 const {
   ensureSessionShellKind,
@@ -161,6 +162,7 @@ function createExecHandlerApi(ctx) {
             expectedPrompt: getFreshIdlePrompt(session),
             getReadyPrompt: typeof session._promptTrackTail === "string"
               ? () => getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) : undefined,
+            classifyReadiness: () => classifyShellReadiness(session),
             typedInput: true,
             echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
             chatSessionId,
@@ -343,6 +345,7 @@ function createExecHandlerApi(ctx) {
             expectedPrompt: getFreshIdlePrompt(session),
             getReadyPrompt: typeof session._promptTrackTail === "string"
               ? () => getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) : undefined,
+            classifyReadiness: () => classifyShellReadiness(session),
             typedInput: true,
             echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
             maxBufferedChars: MAX_BACKGROUND_JOB_OUTPUT_CHARS,

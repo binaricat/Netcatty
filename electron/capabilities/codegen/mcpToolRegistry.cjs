@@ -81,6 +81,11 @@ function formatTerminalExecuteResult(result) {
 // Align with Catty executor wording when a command ran but produced no text.
 const TERMINAL_EXECUTE_NO_OUTPUT_TEXT = "Command completed (no output)";
 
+// Matches READINESS_UNKNOWN in electron/bridges/ai/shellReadinessState.cjs.
+// Kept as a literal to avoid a capabilities -> bridges dependency; a test
+// asserts the two stay in sync.
+const SHELL_READINESS_UNKNOWN_CODE = "SHELL_READINESS_UNKNOWN";
+
 /**
  * Format terminal_execute for MCP clients.
  * Match Catty semantics: when the command actually ran, always surface
@@ -95,6 +100,18 @@ const TERMINAL_EXECUTE_NO_OUTPUT_TEXT = "Command completed (no output)";
 function formatTerminalExecuteMcpResponse(result) {
   if (!result || typeof result !== "object") {
     return { content: [{ type: "text", text: formatRpcError(result) }], isError: true };
+  }
+
+  // #4195: an unrecognized prompt on a live shell is an actionable,
+  // non-terminal state, not a fatal tool error. The exec gate already refused
+  // to send the command; surface the honest + viable-path hint as a NORMAL
+  // tool result (no isError) so the agent inspects / re-checks / confirms
+  // instead of treating the session as permanently bricked (cf. #3935, where
+  // shellReady became advisory). Never claim the command ran.
+  if (result.code === SHELL_READINESS_UNKNOWN_CODE) {
+    return {
+      content: [{ type: "text", text: result.error || "Shell readiness unknown; no command was sent." }],
+    };
   }
 
   // Operational failure with no command evidence (session not found, busy, blocked…).
