@@ -298,6 +298,57 @@ test("extracts an Alpine idle prompt while preserving its trailing whitespace", 
   assert.equal(extractTrailingIdlePrompt("localhost:~# \r\n"), "");
 });
 
+test("isDefaultPosixPromptLine matches macOS bash host:dir user prompts", () => {
+  for (const prompt of [
+    "ChrisdeMacBook-Air:~ root#",
+    "ChrisdeMacBook-Air:~ root# ",
+    "host:/tmp root#",
+    "host:tmp root#",
+    "host:/ root#",
+    "SomeHost:~ alice$",
+    "(venv) ChrisdeMacBook-Air:~ root# ",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+  }
+});
+
+test("macOS bash prompt recognition rejects authentication output and pending input", () => {
+  for (const line of [
+    "Password:",
+    "Sorry, try again.",
+    "ChrisdeMacBook-Air:~ root# ls",
+    "ChrisdeMacBook-Air:~ root# echo #",
+    "ChrisdeMacBook-Air:~root#",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+  for (const line of ["PS C:\\Users\\alice>", "C:\\Users\\alice>"]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+  }
+});
+
+test("extracts a macOS bash idle prompt while preserving its trailing whitespace", () => {
+  assert.equal(
+    extractTrailingIdlePrompt("Welcome\r\n\x1b[32mChrisdeMacBook-Air:~ root# \x1b[0m"),
+    "ChrisdeMacBook-Air:~ root# ",
+  );
+  assert.equal(
+    extractTrailingIdlePrompt("(venv) ChrisdeMacBook-Air:~ root# "),
+    "(venv) ChrisdeMacBook-Air:~ root# ",
+  );
+});
+
+test("extracts the macOS root idle prompt after sudo -i finishes authentication", () => {
+  const transcript = "user@MacBook-Pro ~ % sudo -i\r\nPassword:";
+  assert.equal(extractTrailingIdlePrompt(transcript), "");
+  assert.equal(extractTrailingIdlePrompt(`${transcript}\r\nSorry, try again.`), "");
+  assert.equal(
+    extractTrailingIdlePrompt(`${transcript}\r\nChrisdeMacBook-Air:~ root# `),
+    "ChrisdeMacBook-Air:~ root# ",
+  );
+});
+
 test("isDefaultPosixPromptLine matches Powerlevel10k ❯ idle prompts", () => {
   for (const prompt of [
     "~ ❯",
