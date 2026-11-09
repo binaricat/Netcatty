@@ -5,6 +5,7 @@ import { retainStableAiPanelContexts } from '../../domain/aiPanelContextsEqual';
 import {
   buildAITerminalSessionInfo,
   type AIPanelContext,
+  type AITerminalSessionInfo,
 } from '../../domain/buildAITerminalSessionInfo';
 import { collectSessionIds } from '../../domain/workspace';
 import type { TerminalContextReader } from '../../domain/terminalContextRead';
@@ -23,6 +24,35 @@ interface UseTerminalAiContextsOptions {
   terminalContextReadersRef: React.MutableRefObject<Map<string, TerminalContextReader>>;
   workspaces: Workspace[];
   workspacesRef: React.MutableRefObject<Workspace[]>;
+}
+
+/**
+ * Per-session AI info for EVERY live terminal in the session store, not only
+ * those reachable through `aiContextsByTabId` (which covers just the tabs
+ * whose AI panel context was mounted — a terminal there is missing as a
+ * global session manager rebind target until its tab opens the AI panel).
+ * Rebinding to a context-less terminal is still valid: the association is
+ * created on demand. Uses the same `buildAITerminalSessionInfo` as the
+ * per-tab contexts, so infos merge seamlessly where a context exists.
+ */
+export function buildAllTerminalAiInfos(
+  sessions: TerminalSession[],
+  sessionHostsMap: Map<string, Host>,
+  hosts: Host[],
+  portForwardingRules: PortForwardingRule[],
+  localOs: 'linux' | 'macos' | 'windows',
+): AITerminalSessionInfo[] {
+  const infos: AITerminalSessionInfo[] = [];
+  const seen = new Set<string>();
+  for (const session of sessions) {
+    if (!session.id || seen.has(session.id)) continue;
+    seen.add(session.id);
+    infos.push(buildAITerminalSessionInfo(session, sessionHostsMap.get(session.id), localOs, {
+      allHosts: hosts,
+      portForwardingRules,
+    }));
+  }
+  return infos;
 }
 
 export function useTerminalAiContexts({
@@ -96,6 +126,11 @@ export function useTerminalAiContexts({
     return retained;
   }, [sessions, workspaces, mountedAiTabIds, sessionHostsMap, hosts, portForwardingRules]);
 
+  const appTerminalInfos = useMemo(() => {
+    const localOs = detectLocalOs(navigator.userAgent || navigator.platform);
+    return buildAllTerminalAiInfos(sessions, sessionHostsMap, hosts, portForwardingRules, localOs);
+  }, [sessions, sessionHostsMap, hosts, portForwardingRules]);
+
   const resolveAIExecutorContext = useCallback((scope: {
     type: 'terminal' | 'workspace';
     targetId?: string;
@@ -142,6 +177,7 @@ export function useTerminalAiContexts({
 
   return {
     aiContextsByTabId,
+    appTerminalInfos,
     resolveAIExecutorContext,
   };
 }
