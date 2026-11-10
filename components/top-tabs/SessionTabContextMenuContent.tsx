@@ -57,7 +57,10 @@ export function SessionTabContextMenuContent({
         </ContextMenuItem>
       )}
       {onMoveSessionToNewWindow && (
-        <ContextMenuItem onClick={() => onMoveSessionToNewWindow(sessionId)}>
+        <ContextMenuItem
+          disabled={sessionStatus !== 'connected'}
+          onClick={() => onMoveSessionToNewWindow(sessionId)}
+        >
           {t('tabs.moveTabToNewWindow')}
         </ContextMenuItem>
       )}

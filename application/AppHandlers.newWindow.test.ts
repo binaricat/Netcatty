@@ -188,7 +188,7 @@ test("copySessionToNewWindowWithCurrentShellImpl shows an error when the bridge 
   assert.deepEqual(errors, ["Could not open"]);
 });
 
-const moveCtx = (openTerminalPopup: ((payload: any) => Promise<unknown>) | undefined) => {
+const moveCtx = (openTerminalPopup: ((payload: Record<string, unknown>) => Promise<unknown>) | undefined) => {
   const calls: unknown[][] = [];
   const errors: string[] = [];
   const getCtx = () => ({
@@ -203,7 +203,7 @@ const moveCtx = (openTerminalPopup: ((payload: any) => Promise<unknown>) | undef
 };
 
 test("moveSessionToNewWindowImpl hides the tab and attaches a popup to the same live session", async () => {
-  const payloads: any[] = [];
+  const payloads: Record<string, unknown>[] = [];
   const { calls, errors, getCtx } = moveCtx(async (payload) => {
     payloads.push(payload);
     return { success: true };
@@ -212,6 +212,7 @@ test("moveSessionToNewWindowImpl hides the tab and attaches a popup to the same 
   assert.equal(await moveSessionToNewWindowImpl(getCtx, "session-1"), true);
   assert.deepEqual(calls, [["poppedOut", "session-1", true], ["active", "other"]]);
   assert.equal(payloads[0].attachSessionId, "session-1");
+  assert.equal(payloads[0].moveSession, true);
   assert.deepEqual(errors, []);
 });
 
@@ -221,6 +222,17 @@ test("moveSessionToNewWindowImpl restores the tab when the popup fails to open",
   assert.equal(await moveSessionToNewWindowImpl(getCtx, "session-1"), false);
   assert.deepEqual(calls.slice(-2), [["poppedOut", "session-1", false], ["active", "session-1"]]);
   assert.deepEqual(errors, ["boom"]);
+});
+
+test("moveSessionToNewWindowImpl ignores tabs without a live backend", async () => {
+  const { calls, getCtx } = moveCtx(async () => ({ success: true }));
+  const ctx = getCtx();
+  const result = await moveSessionToNewWindowImpl(
+    () => ({ ...ctx, sessions: [sourceSession({ status: "disconnected" })] }),
+    "session-1",
+  );
+  assert.equal(result, false);
+  assert.deepEqual(calls, []);
 });
 
 test("moveSessionToNewWindowImpl ignores workspace panes", async () => {

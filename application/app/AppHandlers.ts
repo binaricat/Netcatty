@@ -704,7 +704,8 @@ export async function copySessionToNewWindowWithCurrentShellImpl(getCtx: AppCont
 export async function moveSessionToNewWindowImpl(getCtx: AppContextGetter, sessionId: string) {
   const { netcattyBridge, sessions, setActiveTabId, setSessionPoppedOut, t, toast } = getCtx();
   const session = sessions.find((item: TerminalSession) => item.id === sessionId);
-  if (!session || session.workspaceId || session.hiddenFromTabs) return false;
+  // Attach mode only takes over a live backend; it cannot connect or reconnect.
+  if (!session || session.workspaceId || session.hiddenFromTabs || session.status !== 'connected') return false;
 
   const fail = (error?: string) => {
     setSessionPoppedOut(sessionId, false);
@@ -721,7 +722,7 @@ export async function moveSessionToNewWindowImpl(getCtx: AppContextGetter, sessi
   setSessionPoppedOut(sessionId, true);
   setActiveTabId(fallbackTab);
   try {
-    const result = await bridge.openTerminalPopup(buildAiSilentSessionPopupPayload(session));
+    const result = await bridge.openTerminalPopup({ ...buildAiSilentSessionPopupPayload(session), moveSession: true });
     return result?.success ? true : fail(result?.error);
   } catch (err) {
     return fail(err instanceof Error ? err.message : undefined);

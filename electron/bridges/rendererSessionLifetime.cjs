@@ -6,6 +6,17 @@
 const owners = new WeakMap();
 const trackedRegistries = new WeakMap();
 
+function resolveLifetimeHeir(sessionId, contents) {
+  const heirId = require("./terminalAttachRestore.cjs").getLifetimeHeirWebContentsId(sessionId);
+  if (typeof heirId !== "number" || heirId === contents?.id) return null;
+  try {
+    const heir = require("electron").webContents?.fromId?.(heirId);
+    return heir && !heir.isDestroyed?.() ? heir : null;
+  } catch {
+    return null;
+  }
+}
+
 function trackRendererSessionLifetime(sessions, sessionId, contents, closeSession, transferOwnership = false) {
   const session = sessions?.get(sessionId);
   // Worker/agent senders are synthetic and have no renderer destruction event.
@@ -17,6 +28,12 @@ function trackRendererSessionLifetime(sessions, sessionId, contents, closeSessio
   const closeOwnedSessions = () => {
     for (const [id, current] of [...sessions]) {
       if (owners.get(current) !== contents || sessions.get(id) !== current) continue;
+      // A tab moved into its own window outlives the window it came from.
+      const heir = resolveLifetimeHeir(id, contents);
+      if (heir) {
+        trackRendererSessionLifetime(sessions, id, heir, closeSession, true);
+        continue;
+      }
       closeSession({ sender: contents }, { sessionId: id, bootEpoch: current.bootEpoch });
     }
   };
