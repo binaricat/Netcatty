@@ -107,16 +107,28 @@ const ALPINE_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~(?:\/[^#$\n\r]*)
 // `host:` + path + whitespace + username + trailing `[#$]`, no `@`; the path
 // segment excludes whitespace (incl. CR/LF), `:`, `#`, `$` so partially typed
 // commands cannot match. See issue #4195.
+// The path segment ALSO excludes `\` and `>` (Windows path / cmd prompt
+// markers). Without this, a cmd.exe line with pending input such as
+// `C:\Users\alice>echo hello#` or `C:\> dir#` is misread as host `C` + `:` +
+// path `\Users\alice>echo` / `\>`, then ` hello` / ` dir` as the username and
+// the trailing `#` as the prompt marker — opening the readiness gate on a
+// prompt that still has unfinished input. That is exactly the #4048 objection
+// (treating prompt-with-input as idle-ready risks typing into unfinished
+// input), so drive-letter / `>` forms are rejected outright. The username
+// whitelist `[A-Za-z0-9_.-]+` already cannot contain `\`, `>` or `:`.
+// `PS C:\>` stays owned by POWERSHELL_PROMPT_PATTERN (checked before this
+// whitelist) and `C:\>` by CMD_PROMPT_PATTERN; no collision.
 // Deliberately NO shellKind gate: `sudo -i` does not refresh shellKind tracking
 // (`detectShellKind` runs at connect time in terminalBridge.cjs; `_loginShellKind`
 // comes from sessionShellKind.cjs), so the live root sh/bash is still tracked as
 // `zsh`. A `shellKind ∈ {posix, bash}` gate would reject exactly this session;
-// every whitelist entry here is pure-shape for the same reason.
+// every whitelist entry here is pure-shape for the same reason, and a shellKind
+// gate cannot be the sole fix for this bug for the same staleness reason.
 // Residual false-ready risk: any program printing `host:dir user#` as its last
 // line could be mistaken for an idle prompt. That is the same risk class shared
 // by every whitelist pattern (POSIX / ZSH / ALPINE / ...); this adds no new
 // mitigation and does not change existing recognition semantics.
-const MACOS_ROOT_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~|\/|[^\s:#$]+)\s+[A-Za-z0-9_.-]+[#$]$/;
+const MACOS_ROOT_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~|\/|[^\s:#$>\\]+)\s+[A-Za-z0-9_.-]+[#$]$/;
 
 // Powerlevel10k / similar Unicode prompt-ending ❯ (U+276F). Common idle forms:
 // `~ ❯`, `~/path ❯`, `/tmp ❯`, short-dir `proj ❯`, optional `user@host `

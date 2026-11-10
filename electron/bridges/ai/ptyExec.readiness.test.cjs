@@ -474,3 +474,54 @@ test('sudo Password: / Sorry, try again. still gate exec as SHELL_NOT_READY', as
     assert.deepEqual(pty.writes, [], line);
   }
 });
+
+// #4195 follow-up: the macOS root pattern must not read a `C:` drive prefix as
+// a hostname. These cmd.exe lines still have PENDING INPUT (an unfinished
+// command), so the readiness gate must stay closed and NO bytes may be typed.
+test('cmd.exe prompt-with-input lines are NOT idle-ready: zero PTY bytes written (#4048)', async () => {
+  for (const line of ['C:\\Users\\alice>echo hello#', 'C:\\> dir#']) {
+    const pty = new TestPty();
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, line);
+    assert.equal(readyPrompt(session), '', line);
+    const result = await startPtyJob(pty, 'echo forbidden', {
+      shellKind: 'cmd',
+      getReadyPrompt: () => readyPrompt(session),
+      promptWaitTimeoutMs: 25,
+      timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.code, 'SHELL_NOT_READY', line);
+    assert.match(result.error, /no command was sent/, line);
+    assert.deepEqual(pty.writes, [], line);
+  }
+});
+
+// Valid macOS root prompts still open the gate (no false-negative from the
+// tightened pattern), and `Password:` stays blocked.
+test('valid macOS root prompt still ready; Password: still blocked end-to-end', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  trackSessionIdlePrompt(session, 'Password:\r\nSorry, try again.\r\nhost:~ root$ ');
+  assert.equal(readyPrompt(session), 'host:~ root$ ');
+  const result = await startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  }).resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+
+  const blockedPty = new TestPty();
+  const blockedSession = { _promptTrackTail: '', lastIdlePrompt: '' };
+  trackSessionIdlePrompt(blockedSession, 'Password:');
+  assert.equal(readyPrompt(blockedSession), '');
+  const blocked = await startPtyJob(blockedPty, 'echo forbidden', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(blockedSession),
+    promptWaitTimeoutMs: 25,
+    timeoutMs: 1000,
+  }).resultPromise;
+  assert.equal(blocked.code, 'SHELL_NOT_READY');
+  assert.deepEqual(blockedPty.writes, []);
+});

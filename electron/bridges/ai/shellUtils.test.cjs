@@ -1598,7 +1598,7 @@ test("the macOS root pattern is pure-shape and disjoint from existing whitelist 
   // pattern does not also claim shapes already owned by ALPINE / POSIX / ZSH /
   // CMD / PowerShell / P10K / OMZ (the whitelist is a boolean OR, so overlap
   // would be a latent double-count even though readiness is unchanged).
-  const root = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~|\/|[^\s:#$]+)\s+[A-Za-z0-9_.-]+[#$]$/;
+  const root = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~|\/|[^\s:#$>\\]+)\s+[A-Za-z0-9_.-]+[#$]$/;
   for (const line of [
     "host:~#",                                  // ALPINE, no ` user` segment
     "host:/tmp#",                               // ALPINE
@@ -1608,10 +1608,45 @@ test("the macOS root pattern is pure-shape and disjoint from existing whitelist 
     "C:\\>",                                    // CMD
     "~ ❯",                                      // P10K
     "➜  ~",                                     // OMZ
+    "C:\\Users\\alice>echo hello#",             // #4048: cmd prompt-with-input
+    "C:\\> dir#",                               // #4048: cmd prompt-with-input
   ]) {
     assert.equal(root.test(line), false, line);
   }
-  for (const line of ["ChrisdeMacBook-Air:~ root#", "host:/var/root root#"]) {
+  for (const line of ["ChrisdeMacBook-Air:~ root#", "host:/var/root root#", "host:~ root$"]) {
     assert.equal(root.test(line), true, line);
   }
+});
+
+test("macOS root pattern rejects cmd drive-letter prompts with pending input (#4048)", () => {
+  // A `C:` drive prefix is NOT a hostname. These lines carry `\` / `>` and a
+  // trailing command, i.e. a prompt with unfinished input. They must NEVER be
+  // judged idle-ready: typing into them would corrupt the pending input.
+  for (const line of [
+    "C:\\Users\\alice>echo hello#",
+    "C:\\> dir#",
+    "D:\\data>type notes.txt#",
+    "host:foo>bar root#",       // `>` in the path segment
+    "host:foo\\bar root#",      // `\` in the path segment
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+  // Valid macOS root prompts remain ready (no false-negative regression).
+  for (const prompt of [
+    "ChrisdeMacBook-Air:~ root#",
+    "host:/var/root root#",
+    "host:~ root$",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+  }
+  // Plain Windows prompts keep their own owners: POWERSHELL for `PS C:\>`,
+  // CMD for `C:\>`. Neither is claimed by the POSIX whitelist (no collision).
+  assert.equal(isDefaultPowerShellPromptLine("PS C:\\>"), true);
+  assert.equal(isDefaultPosixPromptLine("PS C:\\>"), false);
+  assert.equal(isDefaultCmdPromptLine("C:\\>"), true);
+  assert.equal(isDefaultPosixPromptLine("C:\\>"), false);
+  // Credential prompts stay not-ready.
+  assert.equal(isDefaultPosixPromptLine("Password:"), false);
+  assert.equal(extractTrailingIdlePrompt("welcome\r\nPassword:"), "");
 });
