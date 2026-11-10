@@ -13,6 +13,8 @@ interface SessionTabContextMenuContentProps {
   /** Duplicate the session with a brand-new connection (fresh auth, e.g. a new bastion login). */
   onDuplicateSession?: (sessionId: string) => void;
   onCopySessionToNewWindow?: (sessionId: string) => void;
+  /** Move this live session into its own window (no reconnect). */
+  onMoveSessionToNewWindow?: (sessionId: string) => void;
   onDetachSession?: (sessionId: string) => void;
   onReconnectSession: (sessionId: string) => void;
   sessionStatus: TerminalSession['status'];
@@ -31,6 +33,7 @@ export function SessionTabContextMenuContent({
   onCopySession,
   onDuplicateSession,
   onCopySessionToNewWindow,
+  onMoveSessionToNewWindow,
   onDetachSession,
   onReconnectSession,
   sessionStatus,
@@ -51,6 +54,11 @@ export function SessionTabContextMenuContent({
       {onCopySessionToNewWindow && (
         <ContextMenuItem onClick={() => onCopySessionToNewWindow(sessionId)}>
           {t('tabs.copyTabToNewWindow')}
+        </ContextMenuItem>
+      )}
+      {onMoveSessionToNewWindow && (
+        <ContextMenuItem onClick={() => onMoveSessionToNewWindow(sessionId)}>
+          {t('tabs.moveTabToNewWindow')}
         </ContextMenuItem>
       )}
       {onDuplicateSession && (

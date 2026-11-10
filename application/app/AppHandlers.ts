@@ -695,6 +695,39 @@ export async function copySessionToNewWindowWithCurrentShellImpl(getCtx: AppCont
   }
 }
 
+/**
+ * Move a solo tab into its own window without reconnecting: the tab is hidden
+ * from this window's tab bar and an attach popup takes over the same live PTY
+ * (no second login, e.g. on a bastion with seat limits). Closing the popup
+ * brings the tab back via onTerminalPopupAttachClosed.
+ */
+export async function moveSessionToNewWindowImpl(getCtx: AppContextGetter, sessionId: string) {
+  const { netcattyBridge, sessions, setActiveTabId, setSessionPoppedOut, t, toast } = getCtx();
+  const session = sessions.find((item: TerminalSession) => item.id === sessionId);
+  if (!session || session.workspaceId || session.hiddenFromTabs) return false;
+
+  const fail = (error?: string) => {
+    setSessionPoppedOut(sessionId, false);
+    setActiveTabId(sessionId);
+    toast?.error?.(error || (t?.('tabs.moveTabToNewWindowFailed') ?? 'Failed to move tab to a new window'));
+    return false;
+  };
+  const bridge = netcattyBridge?.get?.();
+  if (!bridge?.openTerminalPopup) return fail();
+
+  const fallbackTab = sessions
+    .filter((item: TerminalSession) => item.id !== sessionId && !item.workspaceId && !item.hiddenFromTabs)
+    .slice(-1)[0]?.id ?? 'vault';
+  setSessionPoppedOut(sessionId, true);
+  setActiveTabId(fallbackTab);
+  try {
+    const result = await bridge.openTerminalPopup(buildAiSilentSessionPopupPayload(session));
+    return result?.success ? true : fail(result?.error);
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : undefined);
+  }
+}
+
 export async function confirmIfBusyLocalTerminalImpl(getCtx: AppContextGetter, sessionIds: string[]) {
   const { netcattyBridge, sessions, t } = getCtx();
 {

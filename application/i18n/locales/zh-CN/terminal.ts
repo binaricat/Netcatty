@@ -832,6 +832,8 @@ export const zhCNTerminalMessages: Messages = {
   'tabs.duplicateSession': '复制会话',
   'tabs.copyTabToNewWindow': '复制标签页到新窗口',
   'tabs.copyTabToNewWindowFailed': '无法在新窗口打开标签页',
+  'tabs.moveTabToNewWindow': '移动标签页到新窗口',
+  'tabs.moveTabToNewWindowFailed': '无法将标签页移动到新窗口',
   'tabs.closeOthers': '关闭其他标签',
   'tabs.closeToLeft': '关闭左侧标签',
   'tabs.closeToRight': '关闭右侧标签',

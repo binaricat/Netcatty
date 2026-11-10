@@ -185,6 +185,17 @@ function createTerminalPopupWindowApi(ctx) {
           }
         }
         releaseAttachPopupAuthorization(attachAuthorization);
+        if (attachSessionId) {
+          // Lets a tab moved into this popup reappear in the window it came from.
+          const home = sourceWindow || mainWindow;
+          try {
+            if (isLiveWindow(home)) {
+              home.webContents.send("netcatty:terminal-popup:attach-closed", { sessionId: attachSessionId });
+            }
+          } catch {
+            // ignore destroyed home window
+          }
+        }
         unregisterAppContentWindow(win);
         notifyAppContentWindowClosed(win);
       };

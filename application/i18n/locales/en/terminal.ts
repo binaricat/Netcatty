@@ -744,6 +744,8 @@ export const enTerminalMessages: Messages = {
   'tabs.duplicateSession': 'Duplicate Session',
   'tabs.copyTabToNewWindow': 'Copy Tab to New Window',
   'tabs.copyTabToNewWindowFailed': 'Failed to open tab in a new window',
+  'tabs.moveTabToNewWindow': 'Move Tab to New Window',
+  'tabs.moveTabToNewWindowFailed': 'Failed to move tab to a new window',
   'tabs.closeOthers': 'Close Others',
   'tabs.closeToLeft': 'Close Tabs to the Left',
   'tabs.closeToRight': 'Close Tabs to the Right',
