@@ -22,9 +22,39 @@
   WriteRegStr SHCTX "Software\Classes\Directory\Background\shell\Netcatty" "MUIVerb" "Open in Netcatty"
   WriteRegStr SHCTX "Software\Classes\Directory\Background\shell\Netcatty" "Icon" "$INSTDIR\${APP_EXECUTABLE_FILENAME},0"
   WriteRegStr SHCTX "Software\Classes\Directory\Background\shell\Netcatty\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" -- --open-terminal-path="%V."'
+
+  ; #4204: Windows Default Apps requires Capabilities/RegisteredApplications
+  ; to list URL handlers; Electron's bare scheme keys are not sufficient.
+  WriteRegStr SHCTX "Software\Classes\Netcatty.SSH" "" "URL:ssh Protocol"
+  WriteRegStr SHCTX "Software\Classes\Netcatty.SSH" "URL Protocol" ""
+  WriteRegStr SHCTX "Software\Classes\Netcatty.SSH\DefaultIcon" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0'
+  WriteRegStr SHCTX "Software\Classes\Netcatty.SSH\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+
+  WriteRegStr SHCTX "Software\Classes\Netcatty.Telnet" "" "URL:telnet Protocol"
+  WriteRegStr SHCTX "Software\Classes\Netcatty.Telnet" "URL Protocol" ""
+  WriteRegStr SHCTX "Software\Classes\Netcatty.Telnet\DefaultIcon" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0'
+  WriteRegStr SHCTX "Software\Classes\Netcatty.Telnet\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+
+  WriteRegStr SHCTX "Software\Classes\Netcatty.JMS" "" "URL:jms Protocol"
+  WriteRegStr SHCTX "Software\Classes\Netcatty.JMS" "URL Protocol" ""
+  WriteRegStr SHCTX "Software\Classes\Netcatty.JMS\DefaultIcon" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0'
+  WriteRegStr SHCTX "Software\Classes\Netcatty.JMS\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+
+  WriteRegStr SHCTX "Software\Netcatty\Capabilities" "ApplicationName" "Netcatty"
+  WriteRegStr SHCTX "Software\Netcatty\Capabilities" "ApplicationDescription" "Open SSH, Telnet and JMS links in Netcatty."
+  WriteRegStr SHCTX "Software\Netcatty\Capabilities" "ApplicationIcon" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0'
+  WriteRegStr SHCTX "Software\Netcatty\Capabilities\URLAssociations" "ssh" "Netcatty.SSH"
+  WriteRegStr SHCTX "Software\Netcatty\Capabilities\URLAssociations" "telnet" "Netcatty.Telnet"
+  WriteRegStr SHCTX "Software\Netcatty\Capabilities\URLAssociations" "jms" "Netcatty.JMS"
+  WriteRegStr SHCTX "Software\RegisteredApplications" "Netcatty" "Software\Netcatty\Capabilities"
 !macroend
 
 !macro customUnInstall
   DeleteRegKey SHCTX "Software\Classes\Directory\shell\Netcatty"
   DeleteRegKey SHCTX "Software\Classes\Directory\Background\shell\Netcatty"
+  DeleteRegKey SHCTX "Software\Classes\Netcatty.SSH"
+  DeleteRegKey SHCTX "Software\Classes\Netcatty.Telnet"
+  DeleteRegKey SHCTX "Software\Classes\Netcatty.JMS"
+  DeleteRegKey SHCTX "Software\Netcatty\Capabilities"
+  DeleteRegValue SHCTX "Software\RegisteredApplications" "Netcatty"
 !macroend
