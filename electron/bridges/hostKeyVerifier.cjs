@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const { randomUUID } = require("node:crypto");
 const { utils: sshUtils } = require("ssh2");
+const { extractCertificatePublicKey } = require("../../domain/sshPublicKey.shared.cjs");
 
 const REQUEST_TTL_MS = 2 * 60 * 1000;
 const hostKeyRequests = new Map();
@@ -65,8 +66,9 @@ const fingerprintFromPublicKey = (publicKey) => {
   const parts = trimmed.split(/\s+/);
   if (parts.length >= 2 && /^ssh-|^ecdsa-|^sk-/.test(parts[0])) {
     try {
+      const blob = Buffer.from(parts[1], "base64");
       return crypto.createHash("sha256")
-        .update(Buffer.from(parts[1], "base64"))
+        .update(extractCertificatePublicKey(blob) || blob)
         .digest("base64")
         .replace(/=+$/g, "");
     } catch {
@@ -77,7 +79,16 @@ const fingerprintFromPublicKey = (publicKey) => {
 };
 
 const getKnownHostFingerprint = (knownHost) => {
-  return normalizeFingerprint(knownHost?.fingerprint)
+  const stored = normalizeFingerprint(knownHost?.fingerprint);
+  const parts = knownHost?.publicKey?.trim().split(/\s+/) || [];
+  if (parts.length >= 2 && /-cert-v0[01]@openssh\.com$/.test(parts[0])) {
+    const blob = Buffer.from(parts[1], "base64");
+    // Only replace an explicit fingerprint if it is the legacy full-cert hash.
+    // Fingerprint-only records cannot be migrated without the certificate body.
+    const legacy = crypto.createHash("sha256").update(blob).digest("base64").replace(/=+$/g, "");
+    if (!stored || stored === legacy) return fingerprintFromPublicKey(knownHost.publicKey);
+  }
+  return stored
     || fingerprintFromPublicKey(knownHost?.publicKey);
 };
 
@@ -134,7 +145,7 @@ const classifyHostKey = ({ knownHosts = [], hostname, port = 22, keyType, finger
 const describeHostKey = (rawKey) => {
   const key = Buffer.isBuffer(rawKey) ? rawKey : Buffer.from(rawKey || "");
   const fingerprint = crypto.createHash("sha256")
-    .update(key)
+    .update(extractCertificatePublicKey(key) || key)
     .digest("base64")
     .replace(/=+$/g, "");
   let keyType = "unknown";
@@ -149,7 +160,9 @@ const describeHostKey = (rawKey) => {
   try {
     const parsed = sshUtils.parseKey(key);
     const parsedKey = Array.isArray(parsed) ? parsed[0] : parsed;
-    if (parsedKey && !(parsedKey instanceof Error)) {
+    // Keep the presented certificate identity, even if a parser returns its
+    // base algorithm or underlying public key as metadata.
+    if (parsedKey && !(parsedKey instanceof Error) && !/-cert-v0[01]@openssh\.com$/.test(keyType)) {
       keyType = parsedKey.type || keyType;
       const publicSsh = parsedKey.getPublicSSH?.();
       if (publicSsh) publicKey = publicSsh.toString("utf8");

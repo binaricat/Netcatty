@@ -111,7 +111,7 @@ export default defineConfig(() => {
       build: {
         // The shared runtime is also required by Electron; convert it for browser builds.
         commonjsOptions: {
-          include: [/node_modules/, /domain\/systemManager\/containerRuntime\.shared\.cjs$/, /domain\/plugin(?:RuntimePolicy|PermissionDescriptions|ThemePack|RemoteTreePolicy|ViewStylePolicy|GitHubRepository)\.cjs$/],
+          include: [/node_modules/, /domain\/sshPublicKey\.shared\.cjs$/, /domain\/systemManager\/containerRuntime\.shared\.cjs$/, /domain\/plugin(?:RuntimePolicy|PermissionDescriptions|ThemePack|RemoteTreePolicy|ViewStylePolicy|GitHubRepository)\.cjs$/],
         },
         chunkSizeWarningLimit: 3000,
         target: 'esnext', // Required for top-level await in WASM modules
@@ -134,6 +134,7 @@ export default defineConfig(() => {
         include: [
           // Keep the renderer alias pre-bundled so dev serves ESM instead of raw CommonJS.
           '@/domain/systemManager/containerRuntime.shared.cjs',
+          '@/domain/sshPublicKey.shared.cjs',
           '@/domain/pluginRuntimePolicy.cjs',
           '@/domain/pluginGitHubRepository.cjs',
           '@/domain/pluginPermissionDescriptions.cjs',
