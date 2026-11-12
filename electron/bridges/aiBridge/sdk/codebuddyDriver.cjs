@@ -24,6 +24,21 @@ const UI_DISALLOWED_TOOLS = ["AskUserQuestion"];
 const MCP_MODE_TOOLS = [];
 const SKILLS_MODE_TOOLS = ["Bash"];
 
+// Deduped built-in catalog from @tencent-ai/agent-sdk 0.3.258 cli/product.json.
+const CODEBUDDY_BUILTIN_TOOLS = [
+  "Agent", "Bash", "PowerShell", "Glob", "Grep", "Read", "Edit", "Write",
+  "NotebookEdit", "WebFetch", "ListMcpResources", "ReadMcpResource", "WaitForMcpServers",
+  "TaskCreate", "TaskGet", "TaskUpdate", "TaskList", "WebSearch", "EnterPlanMode",
+  "ExitPlanMode", "KillShell", "TaskStop", "TaskOutput", "SlashCommand", "Skill",
+  "SkillManage", "AskUserQuestion", "AskUserForStructuredInput", "LSP", "StructuredOutput",
+  "ToolSearch", "DeferExecuteTool", "ImageGen", "ImageEdit", "VideoGen", "Artifact",
+  "ArtifactControl", "ComputerUse", "TeamCreate", "TeamDelete", "SendMessage",
+  "SendUserMessage", "EnterWorktree", "LeaveWorktree", "CronCreate", "CronDelete",
+  "CronList", "DelegateTool", "WeChatReply", "WeComReply", "PushNotification",
+  "ReportFindings", "Workflow", "Monitor", "REPL", "A2AGetAgentCard", "A2ASendMessage",
+  "A2AGetTask", "A2ACancelTask",
+];
+
 const CODEBUDDY_IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 function isCodebuddyImageAttachment(attachment) {
@@ -261,18 +276,19 @@ function buildCodebuddyQueryOptions({
     allowDangerouslySkipPermissions: true,
     extraArgs: { "dangerously-skip-permissions": null },
     mcpServers: toSdkMcpServers(injectedMcpServers),
-    tools: builtinTools,
-    // `tools` is the built-in tool whitelist. In mcp mode it is [], so CodeBuddy
-    // built-ins stay disabled while injected Netcatty MCP tools remain visible.
-    // Do not mirror that empty list into allowedTools: the SDK treats
-    // allowedTools as an auto-approval list, and allowedTools: [] prevents MCP
-    // tool calls from running under bypassPermissions.
-    disallowedTools: [...UI_DISALLOWED_TOOLS],
+    // Block built-ins explicitly in mcp mode: tools: [] becomes --tools "",
+    // which also hides injected MCP tools in CodeBuddy CLI v2.183.0.
+    // Leave allowedTools unset: an empty auto-approval list prevents MCP tool
+    // calls from running under bypassPermissions.
+    disallowedTools: builtinTools.length > 0
+      ? [...UI_DISALLOWED_TOOLS]
+      : [...new Set([...UI_DISALLOWED_TOOLS, ...CODEBUDDY_BUILTIN_TOOLS])],
     // Keep the SDK isolated from user/project settings so local hooks, plugins,
     // or extra MCP servers cannot expand Netcatty's controlled tool boundary.
     settingSources: [],
     env,
   };
+  if (builtinTools.length > 0) options.tools = builtinTools;
   const selection = splitCodebuddyModelSelection(model);
   if (selection.model) options.model = selection.model;
   if (abortController) options.abortController = abortController;
