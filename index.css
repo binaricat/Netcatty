@@ -820,6 +820,14 @@ html[data-theme-transition] *::after {
   -webkit-user-select: auto;
 }
 
+/* Scrolled boxes export native regions beyond their scroll clip. Only the
+   stationary viewport contributes an exclusion via its inline no-drag style. */
+.top-tab-scroll-viewport,
+.top-tab-scroll-viewport * {
+  -webkit-app-region: none;
+  app-region: none;
+}
+
 /* Selected top-tab hooks. Fill and text stay on the tab's inline style so the
    unset custom properties fall through to the existing chrome colors. The
    border is a 1px inset outline and stays invisible until

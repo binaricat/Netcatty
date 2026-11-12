@@ -1157,8 +1157,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             {/* Scrollable container */}
             <div
               ref={tabsContainerRef}
-              className="flex items-end gap-0 overflow-x-auto scrollbar-none app-drag max-w-full"
-              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+              className="top-tab-scroll-viewport min-w-0 flex-1 flex items-end gap-0 overflow-x-auto scrollbar-none app-no-drag max-w-full"
+              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', ...noDragRegionStyle }}
               onClick={handleScrollableTabClick}
               onDragOver={(e) => {
                 if (hasWorkspaceSessionDrag(e.dataTransfer)) {
@@ -1187,9 +1187,9 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                   <TooltipContent>{t('topTabs.openQuickSwitcher')}</TooltipContent>
                 </Tooltip>
               )}
-              {/* Draggable spacer - fixed width handle at the end */}
-              <div className="min-w-[20px] h-7 app-drag flex-shrink-0" style={dragRegionStyle} />
             </div>
+            {/* Keep the drag handle outside the scroll viewport's exclusion. */}
+            <div className="min-w-[20px] h-7 app-drag flex-shrink-0 self-end" style={dragRegionStyle} />
 
             {/* Right fade mask */}
             {canScrollRight && (
