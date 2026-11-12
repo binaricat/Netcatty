@@ -14,6 +14,7 @@ import {
   resolveDisplayedSession,
   shouldForceDraftViewSync,
 } from "./aiPanelViewState.ts";
+import { getSessionScopeMatchRank } from "./sessionScopeMatch.ts";
 
 function createSession(id: string): AISession {
   return {
@@ -267,4 +268,33 @@ test("draft entry can preserve the current session view while ensuring draft sta
   assert.deepEqual(calls, [
     "ensure-draft",
   ]);
+});
+
+test("cleared source view resolves to draft even while the rebound chat stays rank-1 visible", () => {
+  // PR #4159 round 3: rebinding chat-x from workspace A to B demotes A's
+  // explicit view to draft (clearSessionViewsForSession). The moved chat stays
+  // visible in A's scoped history at rank 1 (same scope type, different
+  // targetId), so a surviving explicit session view would keep it as
+  // activeSession and the active-session effect would recreate A's pointer.
+  const moved: AISession = {
+    ...createSession("chat-x"),
+    scope: { type: "workspace", targetId: "workspace-B" },
+  };
+  const other: AISession = {
+    ...createSession("chat-keep"),
+    scope: { type: "workspace", targetId: "workspace-A" },
+  };
+
+  // Precondition: the cross-workspace chat is still rank-1 visible in A.
+  assert.equal(getSessionScopeMatchRank(moved, "workspace", "workspace-A"), 1);
+
+  const clearedView: AIPanelView = { mode: "draft" };
+  const historySessions = [other, moved];
+  const view = resolveDisplayedPanelView(clearedView, false, historySessions, null, "workspace");
+  assert.deepEqual(view, { mode: "draft" });
+  assert.equal(
+    resolveDisplayedSession(view, historySessions),
+    null,
+    "A's activeSession is null, so the active-session effect cannot recreate the moved chat pointer",
+  );
 });

@@ -193,6 +193,36 @@ export function pruneStaleSessionPanelViews(
   return next;
 }
 
+/**
+ * PR #4159 review fix (round 3): when a chat is rebound to `keepScopeKey`,
+ * drop every *other* scope's explicit session view that still points at it.
+ * `getSessionScopeMatchRank` keeps other-workspace chats visible at rank 1, so
+ * a surviving view would keep the moved chat as that panel's activeSession;
+ * the active-session effect in AIChatSidePanel then recreates the pointer that
+ * rebindActiveSessionMap just removed, and follow-up turns in the source
+ * workspace keep executing against the moved chat. Demote to an explicit draft
+ * (not delete) so resolveDisplayedPanelView cannot fall through to sessions[0]
+ * and re-select it. The destination scope is left intact for setSessionView.
+ */
+export function clearSessionViewsForSession(
+  panelViewByScope: PanelViewByScope,
+  sessionId: string,
+  keepScopeKey: string,
+): PanelViewByScope {
+  let next = panelViewByScope;
+
+  for (const [scopeKey, panelView] of Object.entries(panelViewByScope)) {
+    if (scopeKey === keepScopeKey) continue;
+    if (panelView?.mode !== 'session' || panelView.sessionId !== sessionId) continue;
+    const updated = setDraftView(next, scopeKey);
+    if (updated !== next) {
+      next = updated;
+    }
+  }
+
+  return next;
+}
+
 export function updateDraftForScope(
   draftsByScope: DraftsByScope,
   scopeKey: string,

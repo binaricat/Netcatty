@@ -889,3 +889,27 @@ test('both panel rebind paths stop active turns before rewriting scope', () => {
     '/rebind awaits the stop before rebindSessionScope',
   );
 });
+
+test('rebindSessionScope clears source workspace views, covering both panel rebind paths', () => {
+  const aiStateSource = readFileSync(new URL('../application/state/useAIState.ts', import.meta.url), 'utf8');
+  const rebindStart = aiStateSource.indexOf('const rebindSessionScope');
+  const rebindEnd = aiStateSource.indexOf('const exportSessionsBackup');
+  assert.ok(rebindStart !== -1 && rebindEnd !== -1 && rebindEnd > rebindStart, 'rebindSessionScope found');
+  const rebindBody = aiStateSource.slice(rebindStart, rebindEnd);
+  // The single shared rebind purges every source-scope view pointing at the
+  // rebound chat before (re)setting the destination view to that chat.
+  assert.match(rebindBody, /clearSessionViewsForSession\(prev, sessionId, scopeKey\)/);
+  assert.match(rebindBody, /setSessionView\(/);
+
+  // Both the global manager and the /rebind <n> command delegate to that shared
+  // rebindSessionScope, so the source-view clear applies identically to both.
+  const panelSource = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
+  const managerStart = panelSource.indexOf('const handleManagerRebind');
+  const managerEnd = panelSource.indexOf('const handleManagerDelete');
+  const managerBody = panelSource.slice(managerStart, managerEnd);
+  assert.match(managerBody, /rebindSessionScope\(sessionId/);
+  const commandStart = panelSource.indexOf('const handleRebindChat');
+  const commandEnd = panelSource.indexOf('// Manual durability actions');
+  const commandBody = panelSource.slice(commandStart, commandEnd);
+  assert.match(commandBody, /rebindSessionScope\?\.\(target\.sessionId/);
+});

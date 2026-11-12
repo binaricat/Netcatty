@@ -48,6 +48,7 @@ import {
 import {
   activateDraftView,
   clearScopeDraftState,
+  clearSessionViewsForSession,
   draftsByScopeEqualIgnoringAllComposerText,
   ensureDraftForScopeState,
   pruneStaleSessionPanelViews,
@@ -1181,8 +1182,18 @@ export function useAIState() {
       return next;
     });
     // Open the rebound chat in this panel; active-map alone loses to an
-    // explicit draft/session panelView that still points elsewhere.
-    setPanelViewByScope((prev) => setSessionView(prev, scopeKey, sessionId));
+    // explicit draft/session panelView that still points elsewhere. Clear any
+    // SOURCE scope's view that still points at this chat first: the moved chat
+    // stays rank-1 visible in the source workspace, so a surviving view would
+    // let its active-session effect recreate the pointer rebindActiveSessionMap
+    // just removed (follow-up turns would still use the source executor).
+    setPanelViewByScope((prev) =>
+      setSessionView(
+        clearSessionViewsForSession(prev, sessionId, scopeKey),
+        scopeKey,
+        sessionId,
+      ),
+    );
   }, [persistSessions, setPanelViewByScope]);
 
   // Manual durability escape hatch (issue #4015 follow-up): export the
