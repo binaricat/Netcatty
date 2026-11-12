@@ -69,7 +69,7 @@ test("top tab native exclusions stay bounded to the stationary scroll viewport",
   assert.ok(viewport, "expected the tab scroll viewport");
   assert.match(viewport[0], /className="[^"]*\btop-tab-scroll-viewport\b[^"]*"/);
   assert.match(viewport[0], /className="[^"]*\bmin-w-0\b[^"]*"/);
-  assert.match(viewport[0], /className="[^"]*\bflex-1\b[^"]*"/);
+  assert.doesNotMatch(viewport[0], /className="[^"]*\bflex-1\b[^"]*"/);
   assert.match(viewport[0], /className="[^"]*\boverflow-x-auto\b[^"]*\bapp-no-drag\b[^"]*"/);
   assert.doesNotMatch(viewport[0], /\bapp-drag\b/);
   // Inline no-drag keeps the viewport excluded despite the scoped CSS reset.
@@ -80,7 +80,7 @@ test("top tab native exclusions stay bounded to the stationary scroll viewport",
   const viewportEnd = scrollContent.indexOf("</div>");
   assert.match(scrollContent.slice(0, viewportEnd), /\{renderOrderedTabs\(\)\}/);
   assert.doesNotMatch(scrollContent.slice(0, viewportEnd), /min-w-\[20px\]/);
-  assert.match(scrollContent.slice(viewportEnd), /^<\/div>\s*\{\/\*[^}]*\*\/\}\s*<div className="min-w-\[20px\] h-7 app-drag flex-shrink-0 self-end" style=\{dragRegionStyle\} \/>/);
+  assert.match(scrollContent.slice(viewportEnd), /^<\/div>\s*\{\/\*[^}]*\*\/\}\s*<div className="flex-1 app-drag" style=\{dragRegionStyle\} \/>\s*<div className="min-w-\[20px\] h-7 app-drag flex-shrink-0 self-end" style=\{dragRegionStyle\} \/>/);
 
   const regionReset = indexCss.match(/\.top-tab-scroll-viewport,\s*\.top-tab-scroll-viewport \*\s*\{([^}]+)\}/);
   assert.ok(regionReset, "expected a native region reset for the viewport and every descendant");

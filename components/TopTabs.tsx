@@ -1157,7 +1157,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             {/* Scrollable container */}
             <div
               ref={tabsContainerRef}
-              className="top-tab-scroll-viewport min-w-0 flex-1 flex items-end gap-0 overflow-x-auto scrollbar-none app-no-drag max-w-full"
+              className="top-tab-scroll-viewport min-w-0 flex items-end gap-0 overflow-x-auto scrollbar-none app-no-drag max-w-full"
               style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', ...noDragRegionStyle }}
               onClick={handleScrollableTabClick}
               onDragOver={(e) => {
@@ -1188,7 +1188,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 </Tooltip>
               )}
             </div>
-            {/* Keep the drag handle outside the scroll viewport's exclusion. */}
+            {/* Keep unused space and the drag handle outside the scroll viewport's exclusion. */}
+            <div className="flex-1 app-drag" style={dragRegionStyle} />
             <div className="min-w-[20px] h-7 app-drag flex-shrink-0 self-end" style={dragRegionStyle} />
 
             {/* Right fade mask */}
