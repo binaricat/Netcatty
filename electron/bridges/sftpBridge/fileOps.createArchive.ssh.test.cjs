@@ -85,7 +85,7 @@ async function connectFixture(t) {
     throwIfAborted(signal) { if (signal?.aborted) throw new Error("Aborted"); },
     execRemoteShellCommand,
   });
-  return { ...fixture, setEnv: (env) => { fixture.env = env; }, getCommandCount: () => fixture.commands, api };
+  return { ...fixture, client, setEnv: (env) => { fixture.env = env; }, getCommandCount: () => fixture.commands, api };
 }
 
 test("archive creation traverses real SSH, preserves payloads, and handles conflict/replace/failure", {
@@ -131,4 +131,56 @@ test("archive creation traverses real SSH, preserves payloads, and handles confl
     assert.deepEqual(fs.readdirSync(directory).filter((entry) => entry.startsWith(".netcatty-archive.")), []);
   }
   assert.equal(getCommandCount(), 10);
+});
+
+test("packed SSH download restores selected roots with gzip or plain tar, without creating a remote archive", {
+  skip: process.platform === "win32", timeout: 30_000,
+}, async (t) => {
+  const { downloadPacked, cancelActive } = require("./packedDownload.cjs");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-download-ssh-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const remote = path.join(tmp, "remote"), tools = path.join(tmp, "tools");
+  const dir = "compose '$(touch injected)", single = "notes.txt";
+  fs.mkdirSync(path.join(remote, dir, "空目录"), { recursive: true });
+  fs.writeFileSync(path.join(remote, dir, ".env"), "hidden");
+  fs.writeFileSync(path.join(remote, single), randomBytes(12_345));
+  fs.mkdirSync(tools);
+  const { client, setEnv } = await connectFixture(t);
+  const shell = { client };
+  for (const mode of ["gzip", "tar", "unsupported", "cancelled", "conflict"]) {
+    const localDirectory = path.join(tmp, mode);
+    fs.mkdirSync(localDirectory);
+    if (mode === "tar" || mode === "unsupported") {
+      fs.writeFileSync(path.join(tools, "tar"), mode === "tar"
+        ? '#!/bin/sh\ncase "$1" in *z*) exit 1 ;; esac\nexec /usr/bin/tar "$@"\n'
+        : "#!/bin/sh\nexit 127\n", { mode: 0o700 });
+      setEnv({ ...process.env, PATH: tools });
+    } else setEnv(process.env);
+    if (mode === "conflict") fs.writeFileSync(path.join(localDirectory, single), "original");
+    const names = mode === "gzip" ? [dir] : [dir, single], phases = [];
+    const result = await downloadPacked({
+      client: shell, payload: { names, remoteDirectory: remote, localDirectory, sftpId: "s", transferId: mode },
+      encoding: "utf-8", execProbe: execRemoteShellCommand,
+      event: { sender: { isDestroyed: () => false, send(_channel, {phase}) {
+        phases.push(phase);
+        if (mode === "cancelled" && phase === "extracting") cancelActive(mode);
+      } } },
+    });
+    if (mode === "gzip" || mode === "tar") {
+      assert.deepEqual(result, { status: "completed" });
+      assert.equal(fs.readFileSync(path.join(localDirectory, dir, ".env"), "utf8"), "hidden");
+      assert.deepEqual(fs.readdirSync(path.join(localDirectory, dir, "空目录")), []);
+      if (names.includes(single)) assert.equal(sha256(path.join(localDirectory, single)), sha256(path.join(remote, single)));
+      assert.deepEqual(fs.readdirSync(localDirectory).sort(), [...names].sort());
+      assert.ok(phases.includes("receiving") && phases.includes("extracting"));
+    } else if (mode === "conflict") {
+      assert.deepEqual(result, { status: "fallback", reason: "conflict" });
+      assert.equal(fs.readFileSync(path.join(localDirectory, single), "utf8"), "original");
+      assert.deepEqual(fs.readdirSync(localDirectory), [single]);
+    } else {
+      assert.deepEqual(result, mode === "cancelled" ? { status: "cancelled" } : { status: "fallback", reason: "unsupported" });
+      assert.deepEqual(fs.readdirSync(localDirectory), []);
+    }
+    assert.deepEqual(fs.readdirSync(remote).sort(), [dir, single].sort());
+  }
 });

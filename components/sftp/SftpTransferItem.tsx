@@ -192,6 +192,8 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
         && (task.status === 'pending' || task.status === 'queued' || task.status === 'transferring');
     const progressOverlayText = isResuming
         ? resumingLabel
+        : task.controlKind === 'packed-download' && task.status === 'transferring'
+        ? t(task.phase === 'extracting' ? 'sftp.packedDownload.extracting' : 'sftp.packedDownload.receiving')
         : isLiveScanning
         ? (fileCountDisplay
             ? `${t('sftp.transferCenter.phase.scanning')} · ${fileCountDisplay}`
@@ -285,7 +287,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
         || (isDirParent && !!fileCountDisplay)
         ? [speedFormatted, progressOverlayText].filter(Boolean).join(' • ')
         : '';
-    const showTransferSizeCalculation = task.status === 'transferring' && !hasKnownTotal && !isDirParent;
+    const showTransferSizeCalculation = task.controlKind !== 'packed-download' && task.status === 'transferring' && !hasKnownTotal && !isDirParent;
     const showFailedError = task.status === 'failed' && !!task.error;
     // Surface hard pause misses (e.g. "cannot be paused yet") so the panel
     // pause button never looks dead when the backend refuses.

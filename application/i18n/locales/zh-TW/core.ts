@@ -1055,6 +1055,12 @@ Vaults 分頁維持扁平，不使用這塊背景。
   'sftp.extract.extracting': '正在解壓 {fileName}...',
   'sftp.extract.success': '已解壓 {fileName}',
   'sftp.extract.error': '解壓 {fileName} 失敗：{error}',
+  'sftp.packedDownload.receiving': '正在接收封裝資料…',
+  'sftp.packedDownload.extracting': '正在還原檔案…',
+  'sftp.packedDownload.fallback': '目前無法打包下載，已改為逐檔下載。',
+  'sftp.packedDownload.selection': '已選取 {count} 個項目',
+  'sftp.packedDownload.conflict': '目的地已有同名項目，要選擇其他儲存位置嗎？',
+
   'sftp.archive.action': '壓縮…',
   'sftp.archive.title': '壓縮檔案',
   'sftp.archive.description': '將 {count} 個選取項目打包成伺服器上的壓縮檔。',

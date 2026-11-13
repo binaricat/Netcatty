@@ -3,6 +3,20 @@ import type { FileConflict, FileConflictAction, SftpFileEntry, SftpFilenameEncod
 import type { SftpPane } from "./types";
 import type { AcquireTransferSessionFn } from "./transferDirectoryOps";
 
+export interface PackedDownloadRequest {
+  fileName: string;
+  remoteDirectory: string;
+  names: string[];
+  localDirectory: string;
+  sftpId: string;
+  connectionId: string;
+  sourceHostId: string;
+  sourceHostLabel: string;
+  sourceEncoding?: SftpFilenameEncoding;
+}
+
+export type PackedDownloadStatus = "completed" | "regular" | "unsupported" | "conflict" | "cancelled";
+
 export interface UseSftpTransfersParams {
   ownerId: string;
   canPrepareAdoption?: boolean;
@@ -45,6 +59,7 @@ export interface UseSftpTransfersResult {
       onTransferComplete?: (result: TransferResult) => void | Promise<void>;
     },
   ) => Promise<TransferResult[]>;
+  tryPackedDownload: (request: PackedDownloadRequest) => Promise<PackedDownloadStatus>;
   downloadToLocal: (params: {
     fileName: string;
     sourcePath: string;

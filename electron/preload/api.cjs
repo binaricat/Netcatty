@@ -986,8 +986,10 @@ function createPreloadApi(ctx) {
   closeSftp: async (sftpId) => {
     return ipcRenderer.invoke("netcatty:sftp:close", { sftpId });
   },
-  retainSftpTransferSession: async (sftpId, leaseId) => {
-    return ipcRenderer.invoke("netcatty:transfer:retain-sftp-session", { sftpId, leaseId });
+  retainSftpTransferSession: async (sftpId, leaseId, options) => {
+    return ipcRenderer.invoke("netcatty:transfer:retain-sftp-session", {
+      sftpId, leaseId, ...(options?.cancelOnOwnerGone === true ? { cancelOnOwnerGone: true } : {}),
+    });
   },
   releaseSftpTransferSession: async (sftpId, leaseId) => {
     return ipcRenderer.invoke("netcatty:transfer:release-sftp-session", { sftpId, leaseId });
@@ -1016,6 +1018,18 @@ function createPreloadApi(ctx) {
   createSftpArchive: async (sftpId, options, encoding) => {
     return ipcRenderer.invoke("netcatty:sftp:createArchive", { sftpId, options, encoding });
   },
+  registerPackedDownload: (metadata) => ipcRenderer.invoke("netcatty:sftp:registerPacked", metadata),
+  finishPackedDownload: (transferId, outcome) => ipcRenderer.invoke("netcatty:sftp:finishPacked", { transferId, ...outcome }),
+  downloadPackedSftp: async (options, onProgress) => {
+    const channel = "netcatty:sftp:packedProgress";
+    const listener = (_event, update) => {
+      if (update?.transferId === options.transferId) onProgress({ phase: update.phase, bytes: update.bytes });
+    };
+    if (onProgress) ipcRenderer.on(channel, listener);
+    try { return await ipcRenderer.invoke("netcatty:sftp:downloadPacked", options); }
+    finally { if (onProgress) ipcRenderer.removeListener(channel, listener); }
+  },
+  cancelPackedSftp: (transferId) => ipcRenderer.invoke("netcatty:sftp:cancelPacked", { transferId }),
   getSftpHomeDir: async (sftpId, encoding) => {
     return ipcRenderer.invoke("netcatty:sftp:homeDir", { sftpId, encoding });
   },

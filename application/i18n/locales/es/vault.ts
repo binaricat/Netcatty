@@ -316,6 +316,12 @@ export const esVaultMessages: Messages = {
   'sftp.extract.extracting': 'Extrayendo {fileName}...',
   'sftp.extract.success': 'Se extrajo {fileName}',
   'sftp.extract.error': 'No se pudo extraer {fileName}: {error}',
+  'sftp.packedDownload.receiving': 'Recibiendo la descarga empaquetada…',
+  'sftp.packedDownload.extracting': 'Restaurando archivos…',
+  'sftp.packedDownload.fallback': 'La descarga empaquetada no está disponible. Se descargarán los archivos por separado.',
+  'sftp.packedDownload.selection': '{count} elementos seleccionados',
+  'sftp.packedDownload.conflict': 'Ya existe un elemento con el mismo nombre. ¿Quieres elegir otra carpeta de destino?',
+
   'sftp.archive.action': 'Comprimir...',
   'sftp.archive.title': 'Comprimir archivos',
   'sftp.archive.description': 'Crea un archivo comprimido en el servidor con los {count} elementos seleccionados.',
@@ -682,6 +688,10 @@ export const esVaultMessages: Messages = {
   'settings.sftp.compressedUpload.desc': 'Comprime las carpetas antes de subirlas para reducir significativamente el tiempo de transferencia.',
   'settings.sftp.compressedUpload.enable': 'Habilitar la compresión de carpetas',
   'settings.sftp.compressedUpload.enableDesc': 'Comprime automáticamente las carpetas con tar antes de la transferencia. Requiere soporte de tar en el servidor. Si no está disponible, se recurre a una transferencia normal.',
+
+  'settings.sftp.packedDownload': 'Descargas empaquetadas',
+  'settings.sftp.packedDownload.enable': 'Empaquetar carpetas y selecciones múltiples para descargar',
+  'settings.sftp.packedDownload.enableDesc': 'Descarga la selección en una sola transferencia y restaura su estructura original en este dispositivo. Si el servidor no puede empaquetarla, los archivos se descargan por separado.',
 
   'settings.sftp.skipUnchanged.enable': 'Omitir archivos sin cambios',
   'settings.sftp.skipUnchanged.enableDesc': 'Omite los archivos cuyo tamaño y hora de modificación ya coinciden con el destino (estilo rsync). Deshabilitado al reemplazar una carpeta en una ruta de staging.',

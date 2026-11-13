@@ -7714,6 +7714,9 @@ async function startInternalTransfer(event, payload, onProgress) {
  */
 async function cancelTransfer(event, payload) {
   const { transferId } = payload;
+  const packedLifecycle = require("./sftpBridge/packedDownloadLifecycle.cjs").getPackedDownloadLifecycle();
+  if (packedLifecycle?.has(transferId)) return packedLifecycle.cancel(transferId);
+  if (require("./sftpBridge/packedDownload.cjs").cancelActive(transferId, event?.sender?.id)) return { success: true };
   rememberPendingCancel(transferId);
   if (cancelQueuedTransfer(transferId)) {
     // Queued cancel already settled the job; clear pending so a later retry
@@ -8367,12 +8370,17 @@ function registerHandlers(ipcMain, options = {}) {
         throw error;
       }
     });
-    ipcMain.handle("netcatty:transfer:cancel", (event, payload) => (
-      cancelQueuedTransfer(payload?.transferId)
+    ipcMain.handle("netcatty:transfer:cancel", (event, payload) => {
+      const packedLifecycle = require("./sftpBridge/packedDownloadLifecycle.cjs").getPackedDownloadLifecycle();
+      if (packedLifecycle?.has(payload?.transferId)) return packedLifecycle.cancel(payload.transferId);
+      return cancelQueuedTransfer(payload?.transferId)
         ? { success: true }
-        : withWorkerControl(payload?.transferId, "cancel", () => workerRequest(event, "netcatty:transfer:cancel", payload))
-    ));
+        : withWorkerControl(payload?.transferId, "cancel", () => workerRequest(event, "netcatty:transfer:cancel", payload));
+    });
     ipcMain.handle("netcatty:transfer:pause", async (event, payload) => {
+      if (require("./sftpBridge/packedDownloadLifecycle.cjs").getPackedDownloadLifecycle()?.has(payload?.transferId)) {
+        return { success: false, reason: "Packed downloads cannot be paused" };
+      }
       const queued = pauseQueuedTransfer(payload?.transferId);
       if (queued) return queued;
       return withWorkerControl(payload?.transferId, "pause", async (isCurrent, superseded) => {
@@ -8422,6 +8430,9 @@ function registerHandlers(ipcMain, options = {}) {
       });
     });
     ipcMain.handle("netcatty:transfer:resume", async (event, payload) => {
+      if (require("./sftpBridge/packedDownloadLifecycle.cjs").getPackedDownloadLifecycle()?.has(payload?.transferId)) {
+        return { success: false, reason: "Packed downloads cannot be resumed" };
+      }
       const queuedResume = resumeQueuedTransfer(payload?.transferId);
       if (queuedResume) return queuedResume;
       return withWorkerControl(payload?.transferId, "resume", async (isCurrent, superseded) => {
@@ -8465,12 +8476,13 @@ function registerHandlers(ipcMain, options = {}) {
           return { success: true };
         })
     ));
-    ipcMain.handle("netcatty:transfer:retain-sftp-session", (event, payload) => (
-      workerRequest(event, "netcatty:transfer:retain-sftp-session", payload)
-    ));
-    ipcMain.handle("netcatty:transfer:release-sftp-session", (event, payload) => (
-      workerRequest(event, "netcatty:transfer:release-sftp-session", payload)
-    ));
+    const packedLeaseOwners = require("./sftpBridge/packedDownload.cjs").createRendererLeaseHandlers({
+      retain: (event, payload) => workerRequest(event, "netcatty:transfer:retain-sftp-session", payload),
+      release: (event, payload) => workerRequest(event, "netcatty:transfer:release-sftp-session", payload),
+      cancel: (event, payload) => workerRequest(event, "netcatty:sftp:cancelPacked", { transferId: payload.leaseId }),
+    });
+    ipcMain.handle("netcatty:transfer:retain-sftp-session", packedLeaseOwners.retain);
+    ipcMain.handle("netcatty:transfer:release-sftp-session", packedLeaseOwners.release);
     return;
   }
   ipcMain.handle("netcatty:transfer:start", startTransfer);
@@ -8488,8 +8500,13 @@ function registerHandlers(ipcMain, options = {}) {
     clearPendingCancel(payload?.transferId);
     return { success: true };
   });
-  ipcMain.handle("netcatty:transfer:retain-sftp-session", retainSftpTransferSession);
-  ipcMain.handle("netcatty:transfer:release-sftp-session", releaseSftpTransferSession);
+  const packedLeaseOwners = require("./sftpBridge/packedDownload.cjs").createRendererLeaseHandlers({
+    retain: retainSftpTransferSession,
+    release: releaseSftpTransferSession,
+    cancel: (event, payload) => require("./sftpBridge/packedDownload.cjs").cancelActive(payload.leaseId, event?.sender?.id),
+  });
+  ipcMain.handle("netcatty:transfer:retain-sftp-session", packedLeaseOwners.retain);
+  ipcMain.handle("netcatty:transfer:release-sftp-session", packedLeaseOwners.release);
 }
 
 module.exports = {
