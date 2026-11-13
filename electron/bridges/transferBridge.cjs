@@ -7174,6 +7174,13 @@ async function startTransferNow(event, payload, onProgress) {
         const singleChannelCopy = srcClient.__netcattySingleChannelSsh || sshClient?.__netcattySingleChannelSsh;
         if (sshClient && typeof sshClient.exec === 'function' && !singleChannelCopy) {
           try {
+            // cp -a preserves link nodes; the SFTP fallback follows target bytes.
+            // A failed lstat also falls through to that existing route.
+            const sourceAttrs = await runCancelablePreflight(() => srcClient.lstat(
+              encodePathForSession(sourceSftpId, sourcePath, resolvedSourceEnc),
+            ));
+            if (sourceAttrs.isSymbolicLink) throw new Error("Source is a symbolic link");
+
             const dir = path.dirname(targetPath).replace(/\\/g, '/');
             try {
               await runTransferAbortableOperation(transfer, (signal) => ensureRemoteDirForSession(
@@ -8233,6 +8240,18 @@ async function sameHostCopyDirectory(event, payload) {
       return { success: false };
     }
 
+    // Merges must use recursive SFTP transfers to preserve destination child modes.
+    // Only a clearly missing target is safe for the remote cp optimization.
+    try {
+      await runTransferCancelablePreflight(transfer, () => client.lstat(
+        encodePathForSession(sftpId, targetPath, resolvedEncoding),
+      ));
+      return { success: false };
+    } catch (error) {
+      if (transfer.cancelled) throw new Error("Transfer cancelled");
+      if (!isMissingRemoteStageError(error)) return { success: false };
+    }
+
     if (transfer.cancelled) throw new Error("Transfer cancelled");
     const lifecyclePayload = {
       ...payload,
@@ -8257,8 +8276,7 @@ async function sameHostCopyDirectory(event, payload) {
       if (transfer.cancelled) throw new Error("Transfer cancelled");
     }
 
-    // Use "source/." to copy directory *contents* into target, preserving merge
-    // semantics consistent with the recursive per-file transfer path.
+    // Use "source/." to copy directory *contents* into the newly created target.
     // Without "/.", `cp -ra source target` would create target/source/ when target exists.
     const escapedSource = sourcePath.replace(/'/g, "'\\''");
     const escapedTarget = targetPath.replace(/'/g, "'\\''");

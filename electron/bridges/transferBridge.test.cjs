@@ -13290,6 +13290,75 @@ test("same-host directory copy skips cp when auto encoding resolves to non-UTF-8
   assert.equal(sftpTransferSessionLeaseStore.getLeaseCount(sftpId), 0);
 });
 
+for (const targetState of ["existing", "missing", "stat-error"]) {
+  test(`same-host directory copy ${targetState} target uses cp only for a fresh destination`, async (t) => {
+    const { sftpTransferSessionLeaseStore } = require("./sftpTransferSessionLease.cjs");
+    sftpTransferSessionLeaseStore.resetForTests();
+    t.after(() => sftpTransferSessionLeaseStore.resetForTests());
+    const sftpId = `same-host-directory-${targetState}`;
+    const commands = [];
+    const mkdirs = [];
+    let targetExists = targetState === "existing";
+    const client = {
+      async lstat(remotePath) {
+        assert.equal(String(remotePath), "/target");
+        assert.deepEqual(mkdirs, [], "check the destination before ensuring it");
+        if (targetState === "stat-error") {
+          throw Object.assign(new Error("Permission denied"), { code: 3 });
+        }
+        if (!targetExists) throw Object.assign(new Error("ENOENT"), { code: 2 });
+        return { isDirectory: true };
+      },
+      sftp: createFastSftp({
+        stat(_remotePath, callback) {
+          if (!targetExists) {
+            callback(Object.assign(new Error("ENOENT"), { code: 2 }));
+            return;
+          }
+          callback(null, { isDirectory: () => true });
+        },
+        mkdir(remotePath, callback) {
+          mkdirs.push(String(remotePath));
+          targetExists = true;
+          callback(null);
+        },
+      }),
+      client: {
+        exec(command, callback) {
+          commands.push(command);
+          assert.equal(targetExists, true, "create the fresh destination before cp");
+          const stream = new PassThrough();
+          stream.stderr = new PassThrough();
+          callback(null, stream);
+          setImmediate(() => stream.emit("close", 0));
+        },
+      },
+    };
+    const sftpClients = new Map([[sftpId, client]]);
+    transferBridge.init({ sftpClients });
+    sftpBridge.init({ sftpClients });
+    const sender = createSender();
+    const result = await transferBridge.sameHostCopyDirectory({ sender }, {
+      transferId: `${sftpId}-copy`, sftpId,
+      sourcePath: "/source", targetPath: "/target", encoding: "utf-8",
+    });
+
+    if (targetState === "missing") {
+      assert.deepEqual(result, { success: true });
+      assert.deepEqual(commands, ["cp -ra '/source/.' '/target/'"]);
+      assert.deepEqual(mkdirs, ["/target"]);
+      assert.equal(sender.sent.some(entry => entry.channel === "netcatty:transfer:complete"), true);
+    } else {
+      assert.deepEqual(result, { success: false });
+      assert.deepEqual(commands, []);
+      assert.deepEqual(mkdirs, []);
+      assert.deepEqual(sender.sent, []);
+    }
+    assert.equal(transferBridge._getActiveTransferCountForTests(), 0);
+    assert.equal(sftpTransferSessionLeaseStore.getLeaseCount(sftpId), 0);
+  });
+}
+
 test("same-host directory copy cancellation aborts cp and releases its lease", async (t) => {
   const {
     sftpTransferSessionLeaseStore,
@@ -13306,6 +13375,7 @@ test("same-host directory copy cancellation aborts cp and releases its lease", a
   stream.end = () => {};
   stream.destroy = () => {};
   const client = {
+    async lstat() { throw Object.assign(new Error("ENOENT"), { code: 2 }); },
     client: {
       exec(_command, callback) {
         callback(null, stream);
@@ -13389,6 +13459,7 @@ test("same-host file cp cancellation releases the shared session lease", async (
   stream.end = () => {};
   stream.destroy = () => {};
   const client = {
+    lstat: async () => ({ isSymbolicLink: false }),
     client: {
       exec(_command, callback) {
         callback(null, stream);
@@ -15198,6 +15269,7 @@ test("same-host file cp restores existing destination mode", async () => {
   });
   const sourceClient = {
     sftp: sourceSftp,
+    lstat: async () => ({ isSymbolicLink: false }),
     stat: async () => ({ size: 64, mode: 0o100644 }),
     client: {
       sftp: (callback) => callback(null, sourceSftp),
@@ -15239,6 +15311,77 @@ test("same-host file cp restores existing destination mode", async () => {
   assert.equal(uploads, 0);
 });
 
+for (const sourceState of ["symlink", "lstat-error"]) {
+  test(`same-host file cp skips a source ${sourceState} and downloads/uploads target bytes`, async (t) => {
+    const transferId = `same-host-cp-fallback-${crypto.randomUUID()}`;
+    const sourcePath = "/opt/app/config";
+    const targetPath = "/tmp/app/config";
+    const payload = Buffer.from("contents of ../shared/config");
+    const commands = [];
+    let reads = 0;
+    let remote = Buffer.alloc(0);
+    let promoted = false;
+    const { sftp: sourceSftp } = createPipelinedDownloadSftp(payload);
+    const originalRead = sourceSftp.read;
+    sourceSftp.read = (...args) => { reads++; originalRead(...args); };
+    const sourceClient = {
+      sftp: sourceSftp,
+      async lstat(remotePath) {
+        assert.equal(String(remotePath), sourcePath);
+        if (sourceState === "lstat-error") throw new Error("lstat unsupported");
+        return { isSymbolicLink: true, size: "../shared/config".length };
+      },
+      stat: async () => ({ size: payload.length }),
+      client: {
+        sftp: (callback) => callback(null, sourceSftp),
+        exec(command, callback) {
+          commands.push(command);
+          callback(new Error("unexpected exec"));
+        },
+      },
+    };
+    const targetSftp = createFastSftp({
+      open(_path, _flags, callback) { callback(null, Buffer.from("target-handle")); },
+      write(_handle, buffer, offset, length, position, callback) {
+        if (remote.length < position + length) {
+          remote = Buffer.concat([remote, Buffer.alloc(position + length - remote.length)]);
+        }
+        buffer.copy(remote, position, offset, offset + length);
+        callback(null);
+      },
+      close(_handle, callback) { callback(null); },
+    });
+    const targetClient = {
+      sftp: targetSftp,
+      client: { sftp: (callback) => callback(null, targetSftp) },
+      async stat(remotePath) {
+        if (String(remotePath) === targetPath && remote.length === 0) {
+          throw Object.assign(new Error("ENOENT"), { code: 2 });
+        }
+        return { size: remote.length };
+      },
+      rename: async () => { promoted = true; },
+      delete: async () => {},
+    };
+    transferBridge.init({ sftpClients: new Map([["source", sourceClient], ["target", targetClient]]) });
+    const localStage = tempDirBridge.getTransferTempFilePath(transferId, "config");
+    t.after(async () => fs.promises.rm(localStage, { force: true }));
+    const result = await transferBridge.startTransfer({ sender: createSender() }, {
+      transferId, sourcePath, targetPath,
+      sourceType: "sftp", targetType: "sftp",
+      sourceSftpId: "source", targetSftpId: "target",
+      sourceEncoding: "utf-8", targetEncoding: "utf-8",
+      totalBytes: payload.length, sameHost: true, resumable: false,
+    });
+
+    assert.equal(result.error, undefined, result.error);
+    assert.deepEqual(commands, [], "source symlinks and lstat failures must bypass cp -a");
+    assert.ok(reads > 0, "fallback must download the followed source contents");
+    assert.deepEqual(remote, payload, "fallback must upload target bytes rather than the link node");
+    assert.equal(promoted, true);
+  });
+}
+
 for (const cpResult of [0, 127, 1, "exec-error"]) {
   test(`fresh same-host file cp result ${cpResult} preserves copy/fallback behavior (#4207)`, async (t) => {
     const transferId = `same-host-cp-${crypto.randomUUID()}`;
@@ -15253,6 +15396,7 @@ for (const cpResult of [0, 127, 1, "exec-error"]) {
     sourceSftp.read = (...args) => { reads++; originalRead(...args); };
     const sourceClient = {
       sftp: sourceSftp,
+      lstat: async () => ({ isSymbolicLink: false }),
       stat: async () => ({ size: payload.length }),
       client: {
         sftp: (callback) => callback(null, sourceSftp),
