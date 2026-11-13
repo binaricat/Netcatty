@@ -36,6 +36,11 @@ export type SettingsPlatform = "mac" | "win" | "linux";
 export type SettingsSearchEntry = {
   /** Stable id; also used as `data-settings-anchor` on the target element. */
   id: string;
+  /**
+   * Already-mounted parent to highlight when a prerequisite setting is off and
+   * this entry's own anchor is not in the DOM.
+   */
+  fallbackAnchorId?: string;
   tab: SettingsTabId;
   /** Nested AI settings tab when `tab === "ai"`. */
   aiSubTab?: AISettingsSubTabId;
@@ -723,6 +728,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-host-info-bar-title-mode",
+    fallbackAnchorId: "terminal-host-info-bar-show",
     tab: "terminal",
     labelKey: "settings.terminal.hostInfoBar.titleMode",
     descriptionKey: "settings.terminal.hostInfoBar.titleMode.desc",
@@ -737,6 +743,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-server-stats-refresh-interval",
+    fallbackAnchorId: "terminal-server-stats-show",
     tab: "terminal",
     labelKey: "settings.terminal.serverStats.refreshInterval",
     descriptionKey: "settings.terminal.serverStats.refreshInterval.desc",
@@ -787,6 +794,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-hibernate-hidden-tabs-delay",
+    fallbackAnchorId: "terminal-hibernate-hidden-tabs",
     tab: "terminal",
     labelKey: "settings.terminal.rendering.hibernateHiddenTabsDelay",
     descriptionKey: "settings.terminal.rendering.hibernateHiddenTabsDelay.desc",
@@ -794,6 +802,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-hibernate-skip-alt-screen",
+    fallbackAnchorId: "terminal-hibernate-hidden-tabs",
     tab: "terminal",
     labelKey: "settings.terminal.rendering.hibernateSkipAltScreen",
     descriptionKey: "settings.terminal.rendering.hibernateSkipAltScreen.desc",
@@ -801,6 +810,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-hibernate-keep-renderer-count",
+    fallbackAnchorId: "terminal-hibernate-hidden-tabs",
     tab: "terminal",
     labelKey: "settings.terminal.rendering.hibernateKeepRendererCount",
     descriptionKey: "settings.terminal.rendering.hibernateKeepRendererCount.desc",
@@ -808,6 +818,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-hibernate-replay-chunk-bytes",
+    fallbackAnchorId: "terminal-hibernate-hidden-tabs",
     tab: "terminal",
     labelKey: "settings.terminal.rendering.hibernateReplayChunkBytes",
     descriptionKey: "settings.terminal.rendering.hibernateReplayChunkBytes.desc",
@@ -815,6 +826,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-hibernate-prefer-wasm-serialize",
+    fallbackAnchorId: "terminal-hibernate-hidden-tabs",
     tab: "terminal",
     labelKey: "settings.terminal.rendering.hibernatePreferWasmSerialize",
     descriptionKey: "settings.terminal.rendering.hibernatePreferWasmSerialize.desc",
@@ -830,6 +842,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-inline-images-kitty",
+    fallbackAnchorId: "terminal-inline-images-enabled",
     tab: "terminal",
     labelKey: "settings.terminal.inlineImages.kitty",
     descriptionKey: "settings.terminal.inlineImages.kitty.desc",
@@ -837,6 +850,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-inline-images-sixel",
+    fallbackAnchorId: "terminal-inline-images-enabled",
     tab: "terminal",
     labelKey: "settings.terminal.inlineImages.sixel",
     descriptionKey: "settings.terminal.inlineImages.sixel.desc",
@@ -844,6 +858,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-inline-images-iip",
+    fallbackAnchorId: "terminal-inline-images-enabled",
     tab: "terminal",
     labelKey: "settings.terminal.inlineImages.iip",
     descriptionKey: "settings.terminal.inlineImages.iip.desc",
@@ -851,6 +866,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-inline-images-storage-limit",
+    fallbackAnchorId: "terminal-inline-images-enabled",
     tab: "terminal",
     labelKey: "settings.terminal.inlineImages.storageLimit",
     descriptionKey: "settings.terminal.inlineImages.storageLimit.desc",
@@ -858,6 +874,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-inline-images-max-megapixels",
+    fallbackAnchorId: "terminal-inline-images-enabled",
     tab: "terminal",
     labelKey: "settings.terminal.inlineImages.maxMegapixels",
     descriptionKey: "settings.terminal.inlineImages.maxMegapixels.desc",
@@ -865,6 +882,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "terminal-inline-images-sequence-limit",
+    fallbackAnchorId: "terminal-inline-images-enabled",
     tab: "terminal",
     labelKey: "settings.terminal.inlineImages.sequenceLimit",
     descriptionKey: "settings.terminal.inlineImages.sequenceLimit.desc",
@@ -1190,6 +1208,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "ai-web-search-api-key",
+    fallbackAnchorId: "ai-web-search-provider",
     tab: "ai",
     aiSubTab: "search",
     labelKey: "ai.webSearch.apiKey",
@@ -1341,6 +1360,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "system-network-proxy-url",
+    fallbackAnchorId: "system-network-proxy-mode",
     tab: "system",
     labelKey: "settings.system.networkProxy.url",
     descriptionKey: "settings.system.networkProxy.url.desc",
@@ -1348,6 +1368,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "system-network-proxy-bypass",
+    fallbackAnchorId: "system-network-proxy-mode",
     tab: "system",
     labelKey: "settings.system.networkProxy.bypass",
     descriptionKey: "settings.system.networkProxy.bypass.desc",
@@ -1362,6 +1383,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
   {
     id: "system-app-lock-timeout",
+    fallbackAnchorId: "system-app-lock",
     tab: "system",
     labelKey: "settings.appLock.timeout",
     descriptionKey: "settings.appLock.timeoutDesc",

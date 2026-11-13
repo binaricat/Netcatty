@@ -64,6 +64,41 @@ test("settings search catalog has unique ids", () => {
   assert.equal(new Set(ids).size, ids.length);
 });
 
+test("newly indexed gated settings retain visible parent destinations in search", () => {
+  const fallbacks = {
+    "terminal-hibernate-hidden-tabs-delay": "terminal-hibernate-hidden-tabs",
+    "terminal-hibernate-skip-alt-screen": "terminal-hibernate-hidden-tabs",
+    "terminal-hibernate-keep-renderer-count": "terminal-hibernate-hidden-tabs",
+    "terminal-hibernate-replay-chunk-bytes": "terminal-hibernate-hidden-tabs",
+    "terminal-hibernate-prefer-wasm-serialize": "terminal-hibernate-hidden-tabs",
+    "terminal-inline-images-kitty": "terminal-inline-images-enabled",
+    "terminal-inline-images-sixel": "terminal-inline-images-enabled",
+    "terminal-inline-images-iip": "terminal-inline-images-enabled",
+    "terminal-inline-images-storage-limit": "terminal-inline-images-enabled",
+    "terminal-inline-images-max-megapixels": "terminal-inline-images-enabled",
+    "terminal-inline-images-sequence-limit": "terminal-inline-images-enabled",
+    "terminal-host-info-bar-title-mode": "terminal-host-info-bar-show",
+    "terminal-server-stats-refresh-interval": "terminal-server-stats-show",
+    "ai-web-search-api-key": "ai-web-search-provider",
+    "system-network-proxy-url": "system-network-proxy-mode",
+    "system-network-proxy-bypass": "system-network-proxy-mode",
+    "system-app-lock-timeout": "system-app-lock",
+  };
+  const hits = filterSettingsSearchCatalog("", (key) => en[key] ?? key, { limit: 500 });
+  for (const [id, fallbackId] of Object.entries(fallbacks)) {
+    const entry = hits.find((hit) => hit.entry.id === id)?.entry;
+    assert.ok(entry, id);
+    assert.equal(entry.fallbackAnchorId, fallbackId, id);
+    const parent = SETTINGS_SEARCH_CATALOG.find((candidate) => candidate.id === fallbackId);
+    assert.ok(parent, fallbackId);
+    assert.equal(parent.tab, entry.tab, id);
+    assert.equal(parent.aiSubTab, entry.aiSubTab, id);
+    assert.equal(parent.fallbackAnchorId, undefined, fallbackId);
+  }
+  // The local start-directory row is always mounted in this UI.
+  assert.equal(hits.find((hit) => hit.entry.id === "terminal-local-shell-start-dir")?.entry.fallbackAnchorId, undefined);
+});
+
 test("filterSettingsSearchCatalog matches English labels", () => {
   const hits = filterSettingsSearchCatalog("copy on select", tEn);
   assert.ok(hits.some((hit) => hit.entry.id === "terminal-copy-on-select"));
