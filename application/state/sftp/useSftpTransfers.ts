@@ -1348,6 +1348,17 @@ export const useSftpTransfers = ({
       const sourceConnectionId = options?.sourceConnectionId ?? sourcePane.connection.id;
       const batchId = crypto.randomUUID();
       const usesLegacyScp = sourcePane.connection.fileProtocol === "scp" || targetPane.connection.fileProtocol === "scp";
+      const sourceCacheKey = connectionCacheKeyMapRef.current.get(sourcePane.connection.id);
+      const targetCacheKey = connectionCacheKeyMapRef.current.get(targetPane.connection.id);
+      const encodingSafeForExec = [sourcePane.filenameEncoding, targetPane.filenameEncoding]
+        .every((encoding) => !encoding || encoding === "utf-8" || encoding === "auto");
+      // Select the existing non-resumable cp route only for newly created copies.
+      // Resume/recovery keeps its saved strategy and checkpoints. If cp fails,
+      // recursive/download+upload fallback also remains non-resumable.
+      const useSameHostCopy = !usesLegacyScp
+        && !sourcePane.connection.isLocal && !targetPane.connection.isLocal
+        && !!sourceCacheKey && sourceCacheKey === targetCacheKey
+        && encodingSafeForExec;
 
       const newTasks: TransferTask[] = [];
       const skippedResults: TransferResult[] = [];
@@ -1582,8 +1593,10 @@ export const useSftpTransfers = ({
           sourceLastModified,
           preflightStatSkipped: preflightSkippedNames.has(file.name),
           origin: "manual",
-          resumable: !usesLegacyScp,
-          pauseUnavailableReason: usesLegacyScp ? "This server uses legacy SCP; cancel and retry from the beginning instead" : undefined,
+          resumable: !usesLegacyScp && !useSameHostCopy,
+          pauseUnavailableReason: usesLegacyScp
+            ? "This server uses legacy SCP; cancel and retry from the beginning instead"
+            : useSameHostCopy ? "Same-host copies cannot be paused; cancel and retry from the beginning instead" : undefined,
           phase: file.isDirectory ? "scanning" : "transferring",
         });
       }
