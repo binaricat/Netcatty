@@ -1294,7 +1294,9 @@ test("server-to-server resume cancellation settles while source identity verific
   t.after(async () => fs.promises.rm(tempPath, { force: true }));
   let markPrefixStarted;
   const prefixStarted = new Promise((resolve) => { markPrefixStarted = resolve; });
+  let execCalls = 0;
   const sourceClient = {
+    client: { exec() { execCalls += 1; throw new Error("checkpointed copies must not exec cp"); } },
     sftp: createFastSftp({
       createReadStream() {
         markPrefixStarted();
@@ -1317,7 +1319,7 @@ test("server-to-server resume cancellation settles while source identity verific
     targetSftpId: "target",
     totalBytes: 8,
     resumable: true,
-    sameHost: false,
+    sameHost: true,
     resumeStage: "download",
     checkpointBytes: 4,
     downloadCheckpointBytes: 4,
@@ -1332,6 +1334,7 @@ test("server-to-server resume cancellation settles while source identity verific
   ]);
 
   assert.match(result.error || "", /cancel/i);
+  assert.equal(execCalls, 0, "same-host resume must verify its saved prefix instead of running cp");
   assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:cancelled"), true);
   assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:complete"), false);
 });
@@ -15139,3 +15142,76 @@ test("pending channel-open skips the fastPut reopen and uses the shared channel"
   assert.ok(sharedWrites >= 1);
   assert.deepEqual(remoteFiles.get(targetPath), payload);
 });
+
+for (const cpResult of [0, 127, 1, "exec-error"]) {
+  test(`fresh same-host file cp result ${cpResult} preserves copy/fallback behavior (#4207)`, async (t) => {
+    const transferId = `same-host-cp-${crypto.randomUUID()}`;
+    const payload = Buffer.from("same-host ordinary SFTP copy");
+    const commands = [];
+    let reads = 0;
+    let remote = Buffer.alloc(0);
+    let promoted = false;
+    const { sftp: sourceSftp } = createPipelinedDownloadSftp(payload);
+    const originalRead = sourceSftp.read;
+    sourceSftp.read = (...args) => { reads++; originalRead(...args); };
+    const sourceClient = {
+      sftp: sourceSftp,
+      stat: async () => ({ size: payload.length }),
+      client: {
+        sftp: (callback) => callback(null, sourceSftp),
+        exec(command, callback) {
+          commands.push(command);
+          if (cpResult === "exec-error") { callback(new Error("exec denied")); return; }
+          const stream = new PassThrough();
+          stream.stderr = new PassThrough();
+          callback(null, stream);
+          setImmediate(() => stream.emit("close", cpResult));
+        },
+      },
+    };
+    const targetSftp = createFastSftp({
+      open(_path, _flags, callback) { callback(null, Buffer.from("target-handle")); },
+      write(_handle, buffer, offset, length, position, callback) {
+        if (remote.length < position + length) {
+          remote = Buffer.concat([remote, Buffer.alloc(position + length - remote.length)]);
+        }
+        buffer.copy(remote, position, offset, offset + length);
+        callback(null);
+      },
+      close(_handle, callback) { callback(null); },
+    });
+    const targetClient = {
+      sftp: targetSftp,
+      client: { sftp: (callback) => callback(null, targetSftp) },
+      stat: async () => ({ size: remote.length }),
+      rename: async () => { promoted = true; },
+      delete: async () => {},
+    };
+    transferBridge.init({ sftpClients: new Map([["source", sourceClient], ["target", targetClient]]) });
+    const localStage = tempDirBridge.getTransferTempFilePath(transferId, "payload.bin");
+    t.after(async () => fs.promises.rm(localStage, { force: true }));
+    const sender = createSender();
+    const result = await transferBridge.startTransfer({ sender }, {
+      transferId,
+      sourcePath: "/source/payload.bin",
+      targetPath: "/target/payload.bin",
+      sourceType: "sftp", targetType: "sftp",
+      sourceSftpId: "source", targetSftpId: "target",
+      sourceEncoding: "utf-8", targetEncoding: "utf-8",
+      totalBytes: payload.length,
+      sameHost: true, resumable: false,
+    });
+    assert.equal(result.error, undefined, result.error);
+    assert.deepEqual(commands, ["cp -a '/source/payload.bin' '/target/payload.bin'"]);
+    assert.equal(sender.sent.some(entry => entry.channel === "netcatty:transfer:complete"), true);
+    if (cpResult === 0) {
+      assert.equal(reads, 0, "successful cp must not download the source");
+      assert.equal(remote.length, 0, "successful cp must not upload through SFTP");
+      assert.equal(fs.existsSync(localStage), false);
+    } else {
+      assert.ok(reads > 0, "cp failure must fall back to SFTP download");
+      assert.deepEqual(remote, payload, "fallback must upload the downloaded contents");
+      assert.equal(promoted, true);
+    }
+  });
+}

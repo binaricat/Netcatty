@@ -6,6 +6,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { PREFLIGHT_STAT_CONCURRENCY, PREFLIGHT_STAT_MAX_FILES, useSftpTransfers } from "./useSftpTransfers";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 import type { SftpPane } from "./types";
+import { buildCacheKey } from "./sharedRemoteHostCache";
 
 for (const direction of ["download", "upload"] as const) {
 test(`failed ${direction} connection replaces Waiting with the actual error (#3698)`, async () => {
@@ -999,3 +1000,86 @@ test("no-conflict local copy awaits discovery so a late stat cannot overwrite th
     restore();
   }
 });
+
+for (const scenario of ["folder-cp", "folder-fallback", "file-cp", "different-key", "missing-key", "non-utf8"] as const) {
+  test(`fresh remote copy selects a consistent strategy: ${scenario} (#4207)`, async () => {
+    const isDirectory = scenario.startsWith("folder");
+    const source = makePane("left");
+    const target = makePane("left");
+    target.connection = { ...target.connection!, id: "target-conn", currentPath: "/usr/tmp" };
+    if (scenario === "non-utf8") target.filenameEncoding = "gb18030";
+    const key = buildCacheKey("host-1", "debian", 22, "ssh", false, "user", "sftp");
+    const keys = new Map([["remote-conn", key], ["target-conn", key]]);
+    if (scenario === "different-key") keys.set("target-conn", buildCacheKey("host-2", "debian", 22, "ssh", false, "user", "sftp"));
+    if (scenario === "missing-key") keys.delete("target-conn");
+    const ownerId = `same-host-${scenario}-4207`;
+    const streams: Array<{ resumable: boolean; sameHost?: boolean; parentTaskId?: string }> = [];
+    const copies: unknown[][] = [];
+    let listings = 0;
+    let ops: ReturnType<typeof useSftpTransfers> | undefined;
+    let renderer: ReactTestRenderer | undefined;
+    const restore = installGlobals({
+      statSftp: async (id: string) => id === "sftp-source"
+        ? { type: "file", size: 3626, lastModified: 1758000001000 }
+        : null,
+      mkdirSftp: async () => undefined,
+      sameHostCopyDirectory: async (...args: unknown[]) => {
+        copies.push(args);
+        assert.equal(sftpTransferCenterStore.getTask(args[4] as string)?.resumable, false);
+        return { success: scenario !== "folder-fallback" };
+      },
+      startStreamTransfer: async (options: { transferId: string; resumable: boolean; sameHost?: boolean; parentTaskId?: string }) => {
+        streams.push(options);
+        assert.equal(sftpTransferCenterStore.getTask(options.transferId)?.resumable, options.resumable);
+        sftpTransferCenterStore.ingestBackgroundEvent({
+          type: "completed", transferId: options.transferId,
+          transferred: 3626, totalBytes: 3626, lifecycleEpoch: 0,
+        });
+        return {};
+      },
+    });
+    function Probe() {
+      ops = useSftpTransfers({
+        ownerId,
+        getActivePane: (side) => side === "left" ? source : target,
+        getPaneByConnectionId: () => null,
+        getTabByConnectionId: () => null,
+        updateTab: () => undefined,
+        refresh: async () => undefined,
+        clearCacheForConnection: () => undefined,
+        handleSessionError: () => undefined,
+        sftpSessionsRef: { current: new Map([["remote-conn", "sftp-source"], ["target-conn", "sftp-target"]]) },
+        connectionCacheKeyMapRef: { current: keys },
+        listLocalFiles: async () => [],
+        listRemoteFiles: async () => { listings++; return source.files; },
+      });
+      return null;
+    }
+    try {
+      await act(async () => { renderer = create(React.createElement(Probe)); });
+      await act(async () => {
+        const results = await ops!.startTransfer(
+          [{ name: isDirectory ? "bt_mine" : "aops_dns_view_demo.sh", isDirectory }], "left", "right",
+        );
+        assert.equal(results[0]?.status, "completed");
+      });
+      const eligible = ["folder-cp", "folder-fallback", "file-cp"].includes(scenario);
+      const rows = sftpTransferCenterStore.getOwnerTasks(ownerId);
+      assert.ok(rows.length > 0);
+      assert.ok(rows.every(row => row.resumable === !eligible));
+      assert.equal(copies.length, isDirectory ? 1 : 0);
+      if (isDirectory) assert.deepEqual(copies[0]?.slice(0, 4), ["sftp-source", "/opt/bt_mine", "/usr/tmp/bt_mine", "auto"]);
+      assert.equal(listings, scenario === "folder-fallback" ? 1 : 0);
+      assert.equal(streams.length, scenario === "folder-cp" ? 0 : 1);
+      if (streams.length) {
+        assert.equal(streams[0].resumable, !eligible);
+        assert.equal(streams[0].sameHost, !["different-key", "missing-key"].includes(scenario) || undefined);
+        if (isDirectory) assert.ok(streams[0].parentTaskId);
+      }
+    } finally {
+      await act(async () => { renderer?.unmount(); });
+      for (const row of sftpTransferCenterStore.getOwnerTasks(ownerId)) sftpTransferCenterStore.dismiss(row.id);
+      restore();
+    }
+  });
+}
