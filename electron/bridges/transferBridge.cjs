@@ -8204,6 +8204,11 @@ async function sameHostCopyDirectory(event, payload) {
     }
     if (cpUnavailableSet.has(client)) return { success: false };
 
+    const resolvedEncoding = resolveEncodingForRequest(sftpId, encoding);
+    if (resolvedEncoding && resolvedEncoding !== 'utf-8') {
+      return { success: false };
+    }
+
     const sshClient = client.client;
     if (!sshClient || typeof sshClient.exec !== 'function') {
       return { success: false };

@@ -13246,6 +13246,50 @@ test("same-host directory copy rejected by a committed close leaves no lease or 
   assert.equal(sftpTransferSessionLeaseStore.getLeaseCount(sftpId), 0);
 });
 
+test("same-host directory copy skips cp when auto encoding resolves to non-UTF-8", async (t) => {
+  const {
+    sftpTransferSessionLeaseStore,
+  } = require("./sftpTransferSessionLease.cjs");
+  sftpTransferSessionLeaseStore.resetForTests();
+  t.after(() => sftpTransferSessionLeaseStore.resetForTests());
+
+  const sftpId = "same-host-directory-auto-gb18030";
+  // Seed the session's resolved encoding before the copy requests auto.
+  sftpBridge.resolveEncodingForRequest(sftpId, "gb18030");
+  let execCalls = 0;
+  transferBridge.init({
+    sftpClients: new Map([[sftpId, {
+      client: {
+        exec(_command, callback) {
+          execCalls += 1;
+          const stream = new EventEmitter();
+          stream.stderr = new EventEmitter();
+          callback(null, stream);
+          setImmediate(() => stream.emit("close", 0));
+        },
+      },
+    }]]),
+  });
+  const sender = createSender();
+
+  const result = await transferBridge.sameHostCopyDirectory(
+    { sender },
+    {
+      transferId: "same-host-directory-auto-gb18030-copy",
+      sftpId,
+      sourcePath: "/source",
+      targetPath: "/\u76ee\u6807",
+      encoding: "auto",
+    },
+  );
+
+  assert.equal(execCalls, 0);
+  assert.equal(result.success, false);
+  assert.deepEqual(sender.sent, []);
+  assert.equal(transferBridge._getActiveTransferCountForTests(), 0);
+  assert.equal(sftpTransferSessionLeaseStore.getLeaseCount(sftpId), 0);
+});
+
 test("same-host directory copy cancellation aborts cp and releases its lease", async (t) => {
   const {
     sftpTransferSessionLeaseStore,
