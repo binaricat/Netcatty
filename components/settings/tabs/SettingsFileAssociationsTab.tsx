@@ -180,6 +180,7 @@ export default function SettingsFileAssociationsTab() {
       <SectionHeader title={t('settings.sftp.compressedUpload')} />
       <SettingCard>
         <SettingRow
+          anchorId="sftp-compressed-upload"
           label={t('settings.sftp.compressedUpload.enable')}
           description={t('settings.sftp.compressedUpload.enableDesc')}
         >
@@ -231,12 +232,14 @@ export default function SettingsFileAssociationsTab() {
           </div>
         </SettingRow>
         <SettingRow
+          anchorId="sftp-skip-unchanged"
           label={t('settings.sftp.skipUnchanged.enable')}
           description={t('settings.sftp.skipUnchanged.enableDesc')}
         >
           <Toggle checked={sftpSkipUnchanged} onChange={setSftpSkipUnchanged} />
         </SettingRow>
         <SettingRow
+          anchorId="sftp-transport-idle-ttl"
           label={t('settings.ssh.transportIdleTtl')}
           description={t('settings.ssh.transportIdleTtl.desc')}
         >
