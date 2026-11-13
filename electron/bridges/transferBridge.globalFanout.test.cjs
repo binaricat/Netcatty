@@ -106,6 +106,7 @@ test("same-host cp capability cache follows the live SFTP client, not a recycled
   bridge.init({ sftpClients });
 
   const makeClient = (exitCode, calls) => ({
+    async lstat() { throw Object.assign(new Error("ENOENT"), { code: 2 }); },
     client: {
       exec(_command, callback) {
         calls.count += 1;
