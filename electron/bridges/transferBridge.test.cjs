@@ -15187,11 +15187,64 @@ test("pending channel-open skips the fastPut reopen and uses the shared channel"
   assert.deepEqual(remoteFiles.get(targetPath), payload);
 });
 
+test("same-host file cp restores existing destination mode", async () => {
+  const commands = [];
+  const chmods = [];
+  let targetMode = 0o100600;
+  let downloads = 0;
+  let uploads = 0;
+  const sourceSftp = createFastSftp({
+    open() { downloads++; throw new Error("unexpected download"); },
+  });
+  const sourceClient = {
+    sftp: sourceSftp,
+    stat: async () => ({ size: 64, mode: 0o100644 }),
+    client: {
+      sftp: (callback) => callback(null, sourceSftp),
+      exec(command, callback) {
+        commands.push(command);
+        targetMode = 0o100644;
+        const stream = new PassThrough();
+        stream.stderr = new PassThrough();
+        callback(null, stream);
+        setImmediate(() => stream.emit("close", 0));
+      },
+    },
+  };
+  const targetClient = {
+    sftp: createFastSftp({
+      open() { uploads++; throw new Error("unexpected upload"); },
+    }),
+    stat: async () => ({ size: 64, mode: targetMode }),
+    chmod: async (remotePath, mode) => {
+      chmods.push([String(remotePath), mode]);
+      targetMode = mode;
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["source", sourceClient], ["target", targetClient]]) });
+  const result = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId: `same-host-cp-mode-${crypto.randomUUID()}`,
+    sourcePath: "/source/payload.bin", targetPath: "/target/payload.bin",
+    sourceType: "sftp", targetType: "sftp",
+    sourceSftpId: "source", targetSftpId: "target",
+    sourceEncoding: "utf-8", targetEncoding: "utf-8",
+    totalBytes: 64,
+    sameHost: true, resumable: false,
+  });
+  assert.equal(result.error, undefined, result.error);
+  assert.deepEqual(commands, ["cp -a '/source/payload.bin' '/target/payload.bin'"]);
+  assert.deepEqual(chmods, [["/target/payload.bin", 0o600]]);
+  assert.equal(targetMode, 0o600);
+  assert.equal(downloads, 0);
+  assert.equal(uploads, 0);
+});
+
 for (const cpResult of [0, 127, 1, "exec-error"]) {
   test(`fresh same-host file cp result ${cpResult} preserves copy/fallback behavior (#4207)`, async (t) => {
     const transferId = `same-host-cp-${crypto.randomUUID()}`;
     const payload = Buffer.from("same-host ordinary SFTP copy");
     const commands = [];
+    const chmods = [];
     let reads = 0;
     let remote = Buffer.alloc(0);
     let promoted = false;
@@ -15227,7 +15280,13 @@ for (const cpResult of [0, 127, 1, "exec-error"]) {
     const targetClient = {
       sftp: targetSftp,
       client: { sftp: (callback) => callback(null, targetSftp) },
-      stat: async () => ({ size: remote.length }),
+      stat: async (remotePath) => {
+        if (String(remotePath) === "/target/payload.bin" && remote.length === 0) {
+          throw Object.assign(new Error("ENOENT"), { code: 2 });
+        }
+        return { size: remote.length };
+      },
+      chmod: async (...args) => { chmods.push(args); },
       rename: async () => { promoted = true; },
       delete: async () => {},
     };
@@ -15249,6 +15308,7 @@ for (const cpResult of [0, 127, 1, "exec-error"]) {
     assert.deepEqual(commands, ["cp -a '/source/payload.bin' '/target/payload.bin'"]);
     assert.equal(sender.sent.some(entry => entry.channel === "netcatty:transfer:complete"), true);
     if (cpResult === 0) {
+      assert.deepEqual(chmods, [], "fresh cp must not restore destination permissions");
       assert.equal(reads, 0, "successful cp must not download the source");
       assert.equal(remote.length, 0, "successful cp must not upload through SFTP");
       assert.equal(fs.existsSync(localStage), false);

@@ -7186,6 +7186,18 @@ async function startTransferNow(event, payload, onProgress) {
               if (transfer.cancelled || transfer.signal?.aborted) throw new Error("Transfer cancelled");
             }
 
+            const targetClient = sftpClients.get(targetSftpId);
+            let existingRemoteMode = null;
+            try {
+              const attrs = await runCancelablePreflight(() => targetClient.stat(
+                encodePathForSession(targetSftpId, targetPath, resolvedTargetEnc),
+              ));
+              if (Number.isFinite(attrs?.mode)) existingRemoteMode = attrs.mode & 0o7777;
+            } catch {
+              // Missing destinations or failed stats need no permission restore.
+              if (transfer.cancelled || transfer.signal?.aborted) throw new Error("Transfer cancelled");
+            }
+
             const escapedSource = sourcePath.replace(/'/g, "'\\''");
             const escapedTarget = targetPath.replace(/'/g, "'\\''");
             const command = `cp -a '${escapedSource}' '${escapedTarget}'`;
@@ -7194,6 +7206,13 @@ async function startTransferNow(event, payload, onProgress) {
             if (result.code === 0) {
               sendProgress(fileSize, fileSize);
               sameHostDone = true;
+              await restoreRemoteUploadModeBestEffort(
+                targetClient,
+                targetSftpId,
+                targetPath,
+                resolvedTargetEnc,
+                existingRemoteMode,
+              );
             } else if (result.code === 127) {
               // Exit 127 = command not found — cache to skip future attempts
               cpUnavailableSet.add(srcClient);
