@@ -9,6 +9,13 @@ test("SFTP settings imports the shared Toggle used by its option rows", () => {
   assert.match(source, /Toggle,\s*\n\s*Select,/);
 });
 
+test("folder compression row exposes its settings search anchor", () => {
+  assert.match(
+    source,
+    /<SettingRow\s+anchorId="sftp-compressed-upload"\s+label=\{t\('settings\.sftp\.compressedUpload\.enable'\)\}/,
+  );
+});
+
 function functionBody(functionName: string): string {
   const start = source.indexOf(`const ${functionName} = useCallback`);
   assert.notEqual(start, -1, `${functionName} should exist`);
