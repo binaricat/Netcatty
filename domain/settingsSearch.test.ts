@@ -167,6 +167,65 @@ test("settings search finds SSH connection keep-alive from the real locales", ()
   }
 });
 
+test("settings search finds note typography from the real locales", () => {
+  const tZhReal = (key: string) => zhCN[key] ?? key;
+  const tEnReal = (key: string) => en[key] ?? key;
+  for (const [id, zhQuery, enQuery] of [
+    ["appearance-vault-notes-font", "代码字体", "code font"],
+    ["appearance-vault-notes-font-size", "笔记字号", "note font size"],
+    ["appearance-vault-notes-code-font-size", "代码字号", "code font size"],
+  ] as const) {
+    for (const [t, query] of [[tZhReal, zhQuery], [tEnReal, enQuery]] as const) {
+      const hit = filterSettingsSearchCatalog(query, t).find((hit) => hit.entry.id === id);
+      assert.ok(hit, `${query} should find ${id}`);
+      assert.equal(hit.entry.tab, "appearance");
+    }
+  }
+});
+
+test("settings search finds session log options from the real locales", () => {
+  const tZhReal = (key: string) => zhCN[key] ?? key;
+  const tEnReal = (key: string) => en[key] ?? key;
+  for (const [id, t, queries] of [
+    ["system-session-logs-directory", tZhReal, ["保存目录"]],
+    ["system-session-logs-directory", tEnReal, ["save directory"]],
+    ["system-session-logs-format", tZhReal, ["日志格式"]],
+    ["system-session-logs-format", tEnReal, ["log format"]],
+    ["system-session-logs-timestamps", tZhReal, ["时间戳"]],
+    ["system-session-logs-timestamps", tEnReal, ["timestamp", "Add timestamps"]],
+  ] as const) {
+    for (const query of queries) {
+      const hit = filterSettingsSearchCatalog(query, t).find((hit) => hit.entry.id === id);
+      assert.ok(hit, `${query} should find ${id}`);
+      assert.equal(hit.entry.tab, "system");
+      assert.equal(hit.entry.sectionKey, "settings.sessionLogs.title");
+    }
+  }
+});
+
+test("later-added settings retain their tab and sub-tab destinations", () => {
+  const tZhReal = (key: string) => zhCN[key] ?? key;
+  const tEnReal = (key: string) => en[key] ?? key;
+  for (const [id, tab, subTab, labelKey] of [
+    ["terminal-font-ligatures", "terminal", undefined, "settings.terminal.font.ligatures"],
+    ["terminal-local-shell-side-panel-auto-open", "terminal", undefined, "settings.terminal.localShellSidePanel.autoOpen"],
+    ["terminal-system-manager-process-refresh-interval", "terminal", undefined, "settings.terminal.systemManager.processRefreshInterval"],
+    ["ai-chat-history-message-cap", "ai", "tools", "ai.chatHistory.messageCap"],
+    ["ai-web-search-max-results", "ai", "search", "ai.webSearch.maxResults"],
+    ["ai-safety-max-iterations", "ai", "safety", "ai.safety.maxIterations"],
+    ["sync-ai-sessions", "sync", "status", "cloudSync.aiSessions.title"],
+    ["system-network-proxy-url", "system", undefined, "settings.system.networkProxy.url"],
+  ] as const) {
+    for (const t of [tZhReal, tEnReal]) {
+      assert.notEqual(t(labelKey), labelKey);
+      const hit = filterSettingsSearchCatalog(t(labelKey), t).find((hit) => hit.entry.id === id);
+      assert.ok(hit, `${t(labelKey)} should find ${id}`);
+      assert.equal(hit.entry.tab, tab);
+      assert.equal(hit.entry.aiSubTab ?? hit.entry.syncSubTab, subTab);
+    }
+  }
+});
+
 test("settings search finds temporary network device mode", () => {
   const tEnReal = (key: string) => en[key] ?? key;
   const tZhTW = (key: string) => zhTW[key] ?? key;

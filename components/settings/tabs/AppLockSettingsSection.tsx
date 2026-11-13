@@ -258,6 +258,7 @@ export const AppLockSettingsSection: React.FC<AppLockSettingsSectionProps> = ({
             </SettingRow>
 
             <SettingRow
+              anchorId="system-app-lock-timeout"
               label={t('settings.appLock.timeout')}
               description={t('settings.appLock.timeoutDesc')}
             >
