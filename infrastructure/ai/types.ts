@@ -171,6 +171,8 @@ export interface ChatMessage {
   timestamp: number;
   model?: string;
   providerId?: AIProviderId;
+  /** Catty stopped at its tool-loop cap; rendered as a non-error notice. */
+  iterationLimit?: number;
   errorInfo?: {
     type: 'network' | 'auth' | 'timeout' | 'provider' | 'agent' | 'unknown';
     message: string;

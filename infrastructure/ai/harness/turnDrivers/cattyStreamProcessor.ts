@@ -141,6 +141,8 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     : undefined;
   const promptCache = createCattyPromptCache(systemPrompt, model.provider, endpoint);
 
+  let reachedIterationLimit = false;
+  const stopAtIterationLimit = isStepCount(maxIterations);
   const result = streamText({
     model,
     messages: promptCache.prepareMessages(sdkMessages),
@@ -152,7 +154,12 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
       permissionMode: runtimeContext.permissionMode,
       chatSessionId: runtimeContext.chatSessionId,
     }),
-    stopWhen: isStepCount(maxIterations),
+    // The SDK evaluates stopWhen only when tool work would allow another
+    // step. A natural final reply (even on the last allowed step) bypasses it.
+    stopWhen: async (options) => {
+      reachedIterationLimit = await stopAtIterationLimit(options);
+      return reachedIterationLimit;
+    },
     abortSignal: signal,
     include: { rawChunks: true },
     timeout: buildCattyStreamTimeouts({
@@ -580,6 +587,16 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
   const usage = await result.usage;
   const finalStep = await result.finalStep;
   const performance = finalStep?.performance;
+  if (reachedIterationLimit && !signal.aborted) {
+    clearCompactionStatusFromAssistant(activeMsgId);
+    ui.addMessageToSession(streamSessionId, {
+      id: generateId(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      iterationLimit: maxIterations,
+    });
+  }
   // onEnd can run before this consumer flushes its final text and creates the
   // post-tool assistant message. Attach turn totals only after that flush.
   if (usage) {

@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const zhCNAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': '已达到工具循环上限（{limit} 次迭代）。你可以在此对话中继续，正在运行的终端任务不会停止。',
+  'ai.chat.continue': '继续',
   'ai.chat.attachmentContentUnavailable': '附件内容未保留在此设备',
   // AI Settings
   'ai.agentSettings': 'Agent 设置',

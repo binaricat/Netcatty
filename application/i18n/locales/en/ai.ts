@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const enAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': 'Tool-loop limit ({limit} iterations) reached. You can continue in this chat. Running terminal jobs are not stopped.',
+  'ai.chat.continue': 'Continue',
   'ai.chat.attachmentContentUnavailable': 'Content not available on this device',
   // AI Settings
   'ai.agentSettings': 'Agent Settings',

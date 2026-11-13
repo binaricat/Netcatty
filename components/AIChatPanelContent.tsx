@@ -55,7 +55,7 @@ interface AIChatPanelContentProps {
   contextUsage?: import('../application/state/useAgentCompactionUi').AgentContextUsage | null;
   inputValue: string;
   setInputValue: (value: string) => void;
-  handleSend: () => void;
+  handleSend: (textOverride?: string) => void;
   handleCompact: () => void;
   /** Rename a chat by id (history drawer edit affordance). Panel action, never agent content. */
   onRenameSession?: (sessionId: string, title: string) => void;
@@ -211,6 +211,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   parked = false,
   sending = false,
 }) => {
+  const handleContinue = React.useCallback(() => handleSend(t('ai.chat.continue')), [handleSend, t]);
   const mentionHosts = React.useMemo(
     () => terminalSessions.map((session) => ({
       sessionId: session.sessionId,
@@ -345,6 +346,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
               <ChatMessageList
                 messages={messages}
                 isStreaming={isStreaming}
+                onContinue={handleContinue}
                 activeSessionId={activeSessionId}
                 activeCompaction={activeCompaction}
                 contextCompaction={activeSession?.contextCompaction}

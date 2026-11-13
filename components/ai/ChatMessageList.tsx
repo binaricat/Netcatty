@@ -90,6 +90,7 @@ import ChatJumpNav from './ChatJumpNav';
 interface ChatMessageListProps {
   messages: ChatMessage[];
   isStreaming?: boolean;
+  onContinue?: () => void;
   /** Active chat session ID — used to filter standalone MCP approval blocks */
   activeSessionId?: string | null;
   activeCompaction?: ActiveCompactionUi | null;
@@ -185,6 +186,7 @@ export function pruneResolvedApprovals(
 const ChatMessageList: React.FC<ChatMessageListProps> = ({
   messages,
   isStreaming,
+  onContinue,
   activeSessionId,
   activeCompaction = null,
   contextCompaction,
@@ -813,6 +815,18 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                   </div>
                 )}
 
+                {message.iterationLimit != null && (
+                  <div role="status" className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm">
+                    <p>{t('ai.chat.iterationLimitReached', { limit: message.iterationLimit })}</p>
+                    <button
+                      type="button"
+                      onClick={onContinue}
+                      disabled={!!isStreaming || !onContinue}
+                      className="mt-2 rounded-md border border-border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                    >{t('ai.chat.continue')}</button>
+                  </div>
+                )}
+
                 {/* Error info */}
                 {message.errorInfo && (
                   <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-destructive/10 border border-destructive/20 text-sm">
@@ -1079,6 +1093,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
 
 function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps): boolean {
   if (prev.isStreaming !== next.isStreaming) return false;
+  if (prev.onContinue !== next.onContinue) return false;
   if (prev.activeSessionId !== next.activeSessionId) return false;
   if (prev.notes !== next.notes) return false;
   if (prev.hosts !== next.hosts) return false;
@@ -1107,6 +1122,7 @@ function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps
         p.statusText !== n.statusText ||
         p.executionStatus !== n.executionStatus ||
         p.errorInfo !== n.errorInfo ||
+        p.iterationLimit !== n.iterationLimit ||
         p.toolCalls !== n.toolCalls ||
         p.toolResults !== n.toolResults ||
         p.agentActivities !== n.agentActivities ||
