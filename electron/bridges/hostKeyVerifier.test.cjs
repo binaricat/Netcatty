@@ -1,11 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const { mintHostCertificates, legacyCertificate, sshString, sshKeygenSkip } = require("./fixtures/hostCertificates.test.fixture.cjs");
 
 const {
   classifyHostKey,
   createHostVerifier,
   describeHostKey,
+  getKnownHostFingerprint,
   handleResponse,
   normalizeFingerprint,
 } = require("./hostKeyVerifier.cjs");
@@ -16,6 +18,84 @@ const makeRawPublicKey = (keyType, body = "trusted imported host key") => {
   length.writeUInt32BE(type.length, 0);
   return Buffer.concat([length, type, Buffer.from(body)]);
 };
+
+const hashKey = (blob) => crypto.createHash("sha256").update(blob).digest("base64").replace(/=+$/g, "");
+
+test("host certificate renewals trust the inner key, including legacy saved fingerprints", { skip: sshKeygenSkip }, (t) => {
+  const { first, renewed, different } = mintHostCertificates(t);
+  const original = describeHostKey(first.blob);
+  const live = describeHostKey(renewed.blob);
+  const changed = describeHostKey(different.blob);
+  assert.notDeepEqual(first.blob, renewed.blob);
+  assert.equal(original.fingerprint, first.publicKeyFingerprint);
+  assert.equal(live.fingerprint, original.fingerprint);
+  assert.notEqual(changed.fingerprint, live.fingerprint);
+  assert.equal(original.keyType, "ssh-ed25519-cert-v01@openssh.com");
+  assert.equal(original.publicKey, `${first.keyType} ${first.blob.toString("base64")}`);
+  assert.equal(describeHostKey(first.plain.blob).fingerprint, hashKey(first.plain.blob));
+
+  const stored = { id: "kh-cert", hostname: "cert.local", port: 2222, ...original };
+  const classify = (key, record = stored) => classifyHostKey({
+    knownHosts: [record], hostname: "cert.local", port: 2222, ...key,
+  });
+  assert.equal(classify(live).status, "trusted");
+  assert.equal(classify(changed).status, "changed");
+  assert.equal(classify(changed, { ...stored, keyType: "ssh-rsa" }).status, "unknown");
+
+  const legacy = { ...stored, fingerprint: hashKey(first.blob) };
+  assert.notEqual(legacy.fingerprint, live.fingerprint);
+  assert.equal(getKnownHostFingerprint(legacy), live.fingerprint);
+  assert.equal(classify(live, legacy).status, "trusted");
+  assert.equal(classify(changed, legacy).status, "changed");
+  assert.equal(classify(live, { ...legacy, publicKey: undefined }).status, "changed");
+  assert.equal(classify(live, { ...legacy, publicKey: `SHA256:${legacy.fingerprint}` }).status, "changed");
+  assert.equal(classify(live, { ...legacy, fingerprint: "unrelated-explicit-fingerprint" }).status, "changed");
+  assert.equal(classify(live, { ...legacy, fingerprint: undefined }).status, "trusted");
+
+  // Renewal is trusted on reconnect, but changing the raw certificate during
+  // an established connection must still be rejected synchronously on rekey.
+  const verifier = createHostVerifier({ hostname: stored.hostname, port: stored.port, knownHosts: [legacy] });
+  const results = [];
+  verifier(first.blob, (accepted) => results.push(accepted));
+  verifier(Buffer.from(first.blob), (accepted) => results.push(accepted));
+  verifier(renewed.blob, (accepted) => results.push(accepted));
+  assert.deepEqual(results, [true, true, false]);
+});
+
+for (const options of [
+  { type: "rsa", bits: 2048 },
+  ...[256, 384, 521].map((bits) => ({ type: "ecdsa", bits })),
+  { type: "ed25519", sk: true },
+  { type: "ecdsa", bits: 256, sk: true },
+  { type: "ed25519", user: true },
+]) {
+  test(`certificate fingerprint matches ssh-keygen for ${JSON.stringify(options)}`, { skip: sshKeygenSkip }, (t) => {
+    const { first, renewed, different } = mintHostCertificates(t, options);
+    assert.equal(describeHostKey(first.blob).fingerprint, first.publicKeyFingerprint);
+    assert.equal(describeHostKey(first.blob).fingerprint, hashKey(first.plain.blob));
+    assert.equal(describeHostKey(renewed.blob).fingerprint, first.publicKeyFingerprint);
+    assert.notEqual(describeHostKey(different.blob).fingerprint, first.publicKeyFingerprint);
+  });
+}
+
+test("v00 certificates extract the key before the nonce", () => {
+  for (const [type, fields] of [["ssh-rsa", ["exponent", "modulus"]], ["ssh-dss", ["p", "q", "g", "y"]]]) {
+    const cert = legacyCertificate(type, fields);
+    assert.equal(describeHostKey(cert.blob).fingerprint, hashKey(cert.plain));
+    assert.equal(describeHostKey(cert.blob).keyType, `${type}-cert-v00@openssh.com`);
+  }
+});
+
+test("malformed and unsupported certificates keep their full-blob fingerprint", () => {
+  const truncated = Buffer.concat([
+    sshString("ssh-ed25519-cert-v01@openssh.com"), sshString("nonce"), sshString(Buffer.alloc(32)),
+  ]);
+  const badLength = Buffer.concat([sshString("ssh-ed25519-cert-v01@openssh.com"), Buffer.from([255, 255, 255, 255])]);
+  const unsupported = Buffer.concat([sshString("unknown-cert-v01@openssh.com"), sshString("nonce")]);
+  for (const blob of [truncated, badLength, unsupported]) {
+    assert.equal(describeHostKey(blob).fingerprint, hashKey(blob));
+  }
+});
 
 test("classifyHostKey prompts for unknown hosts", () => {
   const result = classifyHostKey({

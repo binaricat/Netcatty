@@ -1,6 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const { mintHostCertificates, sshKeygenSkip } = require("../fixtures/hostCertificates.test.fixture.cjs");
+const { describeHostKey } = require("../hostKeyVerifier.cjs");
 const path = require("node:path");
 const os = require("node:os");
 
@@ -58,6 +60,22 @@ function hashedHostField(token, salt = crypto.randomBytes(20)) {
 }
 
 const HOME_KH = path.join(os.homedir(), ".ssh", "known_hosts");
+
+test("system certificate entries pin the inner key across renewals without CA trust", { skip: sshKeygenSkip }, (t) => {
+  const { first, renewed, different } = mintHostCertificates(t);
+  const { api } = makeApi({ [HOME_KH]: `example.com ${first.line}\n` });
+  const liveFingerprint = describeHostKey(renewed.blob).fingerprint;
+  assert.equal(api.parseKnownHostsLine(`example.com ${first.line}`).fingerprint, liveFingerprint);
+  assert.equal(api.isHostKeyTrustedBySystem({ hostname: "example.com", fingerprint: liveFingerprint }), true);
+  assert.equal(api.isHostKeyTrustedBySystem({
+    hostname: "example.com", fingerprint: describeHostKey(different.blob).fingerprint,
+  }), false);
+
+  const revoked = makeApi({ [HOME_KH]: `example.com ${first.line}\n@revoked example.com ${renewed.line}\n` });
+  assert.equal(revoked.api.isHostKeyTrustedBySystem({ hostname: "example.com", fingerprint: liveFingerprint }), false);
+  const ca = makeApi({ [HOME_KH]: `@cert-authority example.com ${first.line}\n` });
+  assert.equal(ca.api.isHostKeyTrustedBySystem({ hostname: "example.com", fingerprint: liveFingerprint }), false);
+});
 
 test("system known_hosts paths include the OpenSSH defaults for the platform", () => {
   const { api } = makeApi();
