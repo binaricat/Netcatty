@@ -1913,6 +1913,16 @@ function createSessionBackedSftpClient(sessionId, sshClient, options = {}) {
       const attrs = await statAsync(sftp, remotePath);
       return statResultFromAttrs(attrs);
     },
+    async lstat(remotePath) {
+      const sftp = await requireSftpChannel(client);
+      // Copy preflights must inspect link nodes, never their followed targets.
+      // lstatAsync falls back to STAT when LSTAT is absent, so reject first.
+      if (typeof sftp.lstat !== "function") {
+        throw Object.assign(new Error("Remote server does not support LSTAT"), { code: "ENOTSUP" });
+      }
+      const attrs = await lstatAsync(sftp, remotePath);
+      return statResultFromAttrs(attrs);
+    },
     async realPath(remotePath) {
       const sftp = await requireSftpChannel(client);
       return await realpathAsync(sftp, remotePath);
