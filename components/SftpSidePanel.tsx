@@ -71,6 +71,7 @@ import {
   mergeLatestFollowTerminalCwdHostSetting,
   resolveHostFollowTerminalCwd,
 } from "../domain/sftpFollowTerminalCwd";
+import { isWslLocalShell, resolveWslLocalSftpInitialPath } from "../domain/sftpWslLocalPath";
 import {
   canLocateSftpPathInTerminal,
   resolveLocateSftpPathInTerminalAction,
@@ -651,12 +652,17 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       }
       connectedKeyRef.current = "local";
       const needsNewTab = !!(leftConn && leftConn.status === "connected");
+      const initialPath = resolveWslLocalSftpInitialPath(
+        activeHost,
+        activeTerminalCwd,
+        navigator.platform.toLowerCase().includes("win"),
+      );
       if (needsNewTab) {
-        s.connect("left", "local", { forceNewTab: true });
+        s.connect("left", "local", { forceNewTab: true, initialPath });
       } else if (leftConn) {
-        void s.disconnect("left").then(() => s.connect("left", "local"));
+        void s.disconnect("left").then(() => s.connect("left", "local", { initialPath }));
       } else {
-        s.connect("left", "local");
+        s.connect("left", "local", { initialPath });
       }
       return;
     }
@@ -979,6 +985,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   }, [
     activeHost,
     activeSessionId,
+    activeTerminalCwd,
     bindPendingUploadRebindTarget,
     focusedSessionId,
     initialLocation,
@@ -1691,10 +1698,14 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     setPendingFollowOverride(null);
   }, [sftp.leftPane.connection?.id]);
 
+  const wslLocalHost = sftp.leftPane.connection?.isLocal
+    && navigator.platform.toLowerCase().includes("win")
+    && isWslLocalShell(displayHost) ? displayHost : null;
+
   const followTerminalCwdHost = useMemo(() => {
-    if (sftp.leftPane.connection?.isLocal) return null;
+    if (sftp.leftPane.connection?.isLocal && !wslLocalHost) return null;
     return displayHost;
-  }, [displayHost, sftp.leftPane.connection?.isLocal]);
+  }, [displayHost, sftp.leftPane.connection?.isLocal, wslLocalHost]);
 
   const effectiveFollowTerminalCwd = resolveHostFollowTerminalCwd(
     followTerminalCwdHost?.sftpFollowTerminalCwd,
@@ -1704,11 +1715,12 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   const canFollowTerminalCwd = useMemo(() => {
     if (!onGetTerminalCwd || !followTerminalCwdHost) return false;
     if (bannerRequiresSingleChannel) return false;
+    if (wslLocalHost) return true;
     const proto = followTerminalCwdHost.protocol;
     if (proto === "local" || proto === "serial") return false;
     if (followTerminalCwdHost.id?.startsWith("local-") || followTerminalCwdHost.id?.startsWith("serial-")) return false;
     return true;
-  }, [bannerRequiresSingleChannel, followTerminalCwdHost, onGetTerminalCwd]);
+  }, [bannerRequiresSingleChannel, followTerminalCwdHost, onGetTerminalCwd, wslLocalHost]);
 
   const hasActiveWork = showTextEditor || !!permissionsState || showFileOpenerDialog
     || (sftp.activeFileWatchCountRef?.current ?? 0) > 0
@@ -1720,6 +1732,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     handleGoToTerminalCwd,
     handleToggleFollowTerminalCwd,
   } = useSftpFollowTerminalCwd({
+    wslLocalHost,
     activeSessionId,
     focusedSessionId,
     activeTerminalCwd,

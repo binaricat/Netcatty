@@ -21,6 +21,11 @@ import {
   fallbackFollowPathForUntrackedSession,
 } from "../../../domain/sftpFollowTerminalCwd";
 import type { Host } from "../../../types";
+import {
+  getWslDistributionName,
+  resolveWslLinuxCwdForLocalWindowsSftp,
+  type WslLocalShell,
+} from "../../../domain/sftpWslLocalPath";
 import type { SftpNavigateOptions, SftpNavigateResult } from "./useSftpPaneActions";
 
 type FollowConnection = {
@@ -49,6 +54,29 @@ type GetTerminalCwd = (options?: {
   requireActiveShellCwd?: boolean;
 }) => Promise<string | null>;
 
+const isFollowConnectionReady = (
+  connection: FollowConnection | null | undefined,
+  wslLocalHost?: WslLocalShell | null,
+): boolean => Boolean(connection && (!connection.isLocal || wslLocalHost) && connection.status === "connected");
+
+const resolveFollowTargetPath = (
+  cwd: string,
+  connection: FollowConnection,
+  wslLocalHost?: WslLocalShell | null,
+): string => {
+  if (!connection.isLocal || !wslLocalHost) {
+    return resolveTerminalCwdForSftp(cwd, connection.homeDir, connection.currentPath);
+  }
+  const distroName = getWslDistributionName(wslLocalHost);
+  const root = resolveWslLinuxCwdForLocalWindowsSftp("/", distroName);
+  // Recover the Linux path hint for the existing prompt-tilde expansion.
+  const linuxPath = root && connection.currentPath?.startsWith(`${root}\\`)
+    ? connection.currentPath.slice(root.length).replace(/\\/g, "/")
+    : null;
+  const expanded = resolveTerminalCwdForSftp(cwd, null, linuxPath);
+  return resolveWslLinuxCwdForLocalWindowsSftp(expanded, distroName) ?? "";
+};
+
 type InitialFollowConnection = {
   id: string;
   currentPath?: string | null;
@@ -58,6 +86,7 @@ type InitialFollowConnection = {
 };
 
 type InitialFollowSyncOptions = {
+  wslLocalHost?: WslLocalShell | null;
   expectedConnectionId: string;
   staleTerminalCwd?: string | null;
   getFreshTerminalCwd: () => Promise<string | null | undefined>;
@@ -73,6 +102,7 @@ type InitialFollowSyncOptions = {
 
 /** Run one guarded first-open sync. False means the caller may retry. */
 const runInitialFollowTerminalCwdSync = async ({
+  wslLocalHost,
   expectedConnectionId,
   staleTerminalCwd,
   getFreshTerminalCwd,
@@ -86,11 +116,11 @@ const runInitialFollowTerminalCwdSync = async ({
   if (!cwd || !isEligible()) return false;
 
   const live = getConnection();
-  if (!live || live.id !== expectedConnectionId || live.status !== "connected" || live.isLocal) {
+  if (!live || live.id !== expectedConnectionId || !isFollowConnectionReady(live, wslLocalHost)) {
     return false;
   }
 
-  const targetPath = resolveTerminalCwdForSftp(cwd, live.homeDir, live.currentPath);
+  const targetPath = resolveFollowTargetPath(cwd, live, wslLocalHost);
   if (!isSftpFollowTargetPath(targetPath)) {
     // Prompt-only shortcuts such as `~` are not a real SFTP path yet. Stay on
     // the connection's landing directory instead of listing `/~`.
@@ -98,10 +128,9 @@ const runInitialFollowTerminalCwdSync = async ({
     return true;
   }
 
-  setHandled({
-    connectionId: expectedConnectionId,
-    terminalCwd: staleTerminalCwd && staleTerminalCwd !== targetPath ? staleTerminalCwd : targetPath,
-  });
+  const handledCwd = staleTerminalCwd && live.isLocal && wslLocalHost
+    ? resolveFollowTargetPath(staleTerminalCwd, live, wslLocalHost) : staleTerminalCwd;
+  setHandled({ connectionId: expectedConnectionId, terminalCwd: handledCwd || targetPath });
   if (live.currentPath === targetPath) return true;
 
   const navigateResult = await navigate(targetPath, isEligible);
@@ -111,7 +140,10 @@ const runInitialFollowTerminalCwdSync = async ({
     return false;
   }
   if (navigateResult === "failed") {
-    setBlocked({ connectionId: expectedConnectionId, terminalCwd: cwd });
+    setBlocked({
+      connectionId: expectedConnectionId,
+      terminalCwd: live.isLocal && wslLocalHost ? targetPath : cwd,
+    });
     return true;
   }
   if (navigateResult === "reached") {
@@ -122,6 +154,8 @@ const runInitialFollowTerminalCwdSync = async ({
 };
 
 type UseSftpFollowTerminalCwdOptions = {
+  /** Set only for a Windows local pane linked to a WSL terminal. */
+  wslLocalHost?: WslLocalShell | null;
   activeSessionId?: string | null;
   /** Focused terminal including Mosh/ET, used when SSH reuse id is absent. */
   focusedSessionId?: string | null;
@@ -154,6 +188,7 @@ const INITIAL_FOLLOW_RETRY_DELAY_MS = 250;
 
 /** Owns terminal-cwd follow state so the SFTP view remains presentation-only. */
 export function useSftpFollowTerminalCwd({
+  wslLocalHost,
   activeSessionId,
   focusedSessionId = null,
   activeTerminalCwd,
@@ -272,19 +307,19 @@ export function useSftpFollowTerminalCwd({
     if (!cwd) return;
     if (!shouldApply()) return;
     const connection = sftpRef.current.leftPane.connection;
-    const targetPath = resolveTerminalCwdForSftp(
-      cwd,
-      connection?.homeDir,
-      connection?.currentPath,
-    );
+    if (!connection) return;
+    const targetPath = resolveFollowTargetPath(cwd, connection, wslLocalHost);
     if (!isSftpFollowTargetPath(targetPath)) return;
     const navigateResult = await sftpRef.current.navigateTo("left", targetPath, { shouldApply });
     if (navigateResult !== "reached" || !shouldApply()) return;
     blockedFollowRef.current = null;
     if (connection?.id) {
-      handledFollowRef.current = { connectionId: connection.id, terminalCwd: cwd };
+      handledFollowRef.current = {
+        connectionId: connection.id,
+        terminalCwd: connection.isLocal && wslLocalHost ? targetPath : cwd,
+      };
     }
-  }, [onGetTerminalCwd, sftpRef]);
+  }, [onGetTerminalCwd, sftpRef, wslLocalHost]);
 
   const syncFollowToTerminalCwd = useCallback(async () => {
     if (!onGetTerminalCwd || !effectiveFollowTerminalCwd || !canFollowTerminalCwd) return;
@@ -332,24 +367,27 @@ export function useSftpFollowTerminalCwd({
     })) return;
 
     const connection = sftpRef.current.leftPane.connection;
+    if (!connection) return;
+    const targetPath = resolveFollowTargetPath(terminalCwd, connection, wslLocalHost);
+    if (!isSftpFollowTargetPath(targetPath)) return;
+    const followCwd = connection.isLocal && wslLocalHost ? targetPath : terminalCwd;
     if (!shouldFollowTerminalCwdNavigate({
       followEnabled: effectiveFollowTerminalCwdRef.current,
       isVisible,
-      terminalCwd,
+      terminalCwd: followCwd,
       currentPath: connection?.currentPath,
       connectionId: connection?.id,
       hasActiveWork,
-      isConnected: Boolean(connection && !connection.isLocal && connection.status === "connected"),
+      isConnected: isFollowConnectionReady(connection, wslLocalHost),
       blockedFollow: blockedFollowRef.current,
       handledFollow: handledFollowRef.current,
     })) {
       if (
         connection?.id
-        && !connection.isLocal
-        && connection.status === "connected"
-        && connection.currentPath === terminalCwd
+        && isFollowConnectionReady(connection, wslLocalHost)
+        && connection.currentPath === followCwd
       ) {
-        handledFollowRef.current = { connectionId: connection.id, terminalCwd };
+        handledFollowRef.current = { connectionId: connection.id, terminalCwd: followCwd };
       }
       return;
     }
@@ -369,13 +407,6 @@ export function useSftpFollowTerminalCwd({
       liveTerminalCwd: activeTerminalCwdRef.current,
       requireLiveTerminalCwd: usesLiveTerminalCwd,
     });
-    if (!connection) return;
-    const targetPath = resolveTerminalCwdForSftp(
-      terminalCwd,
-      connection.homeDir,
-      connection.currentPath,
-    );
-    if (!isSftpFollowTargetPath(targetPath)) return;
     const navigateResult = await sftpRef.current.navigateTo("left", targetPath, {
       shouldApply: shouldApplyCurrentFollowSync,
       quiet: true,
@@ -401,6 +432,7 @@ export function useSftpFollowTerminalCwd({
     isVisible,
     onGetTerminalCwd,
     sftpRef,
+    wslLocalHost,
   ]);
 
   const handleToggleFollowTerminalCwd = useCallback(() => {
@@ -492,7 +524,7 @@ export function useSftpFollowTerminalCwd({
   useEffect(() => {
     if (!effectiveFollowTerminalCwd || !canFollowTerminalCwd || !isVisible || hasActiveWork) return;
     const connection = sftpRef.current.leftPane.connection;
-    if (!connection || connection.isLocal || connection.status !== "connected" || !connection.id) return;
+    if (!connection || !isFollowConnectionReady(connection, wslLocalHost) || !connection.id) return;
     if (initialFollowSyncedConnRef.current === connection.id) return;
     if (initialFollowRetryRef.current.connectionId !== connection.id) {
       initialFollowRetryRef.current = { connectionId: connection.id, attempts: 0 };
@@ -522,8 +554,7 @@ export function useSftpFollowTerminalCwd({
         navigationStarted
         || (sftpRef.current.leftPane.connection?.currentPath ?? null) === expectedPanePath
       )
-      && !sftpRef.current.leftPane.connection?.isLocal
-      && sftpRef.current.leftPane.connection?.status === "connected"
+      && isFollowConnectionReady(sftpRef.current.leftPane.connection, wslLocalHost)
     );
     const followStillEligible = () => (
       syncGeneration === followSyncGenerationRef.current
@@ -567,6 +598,7 @@ export function useSftpFollowTerminalCwd({
     const probeAttempt = initialFollowProbeSeqRef.current;
     initialFollowProbeAttemptRef.current = probeAttempt;
     void runInitialFollowTerminalCwdSync({
+      wslLocalHost,
       expectedConnectionId,
       staleTerminalCwd,
       getFreshTerminalCwd: () => onGetTerminalCwd?.({
@@ -604,6 +636,7 @@ export function useSftpFollowTerminalCwd({
     isVisible,
     onGetTerminalCwd,
     sftpRef,
+    wslLocalHost,
   ]);
 
   return { handleGoToTerminalCwd, handleToggleFollowTerminalCwd };
