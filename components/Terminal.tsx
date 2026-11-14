@@ -1676,6 +1676,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return captureHandler(capturedSessionId, capturedData);
   }, [finalizeTerminalLogData]);
 
+  useEffect(() => {
+    // Attached popups do not own the ConnectionLog; the home terminal captures it.
+    if (attachExistingSession) return;
+    return netcattyBridge.get()?.onFinalizeSessionLogs?.(async () => {
+      if (terminalDataCapturedRef.current || (restoreState === "restored-disconnected" && statusRef.current === "disconnected")) return;
+      const term = termRef.current;
+      if (term && !await flushPendingTerminalWritesBeforeHibernate(term)) {
+        throw new Error("Terminal output did not drain before quit capture");
+      }
+      await handleTerminalDataCaptureOnce(sessionId, finalizeTerminalLogData(), { finalized: true });
+    });
+  }, [attachExistingSession, restoreState, sessionId, finalizeTerminalLogData, handleTerminalDataCaptureOnce]);
+
   const attachHomeWebContentsIdRef = useRef<number | null | undefined>(undefined);
 
   useEffect(() => {

@@ -4,6 +4,7 @@ const {
 } = require("./windowsWindowChrome.cjs");
 const { attachDisplayRecovery } = require("./displayRecovery.cjs");
 const perfTrace = require("../../perfTrace.cjs");
+const { finalizeSessionLogs } = require("../sessionLogShutdown.cjs");
 
 const TERMINAL_KEYBOARD_FOCUS = Symbol("netcattyTerminalKeyboardFocus");
 
@@ -534,11 +535,12 @@ function createMainWindowApi(ctx) {
             : false;
         })();
         Promise.resolve(dirtyEditorQuery)
-          .then((hasDirty) => {
+          .then(async (hasDirty) => {
             if (hasDirty) {
               thisWindowCloseRequested = false;
               return;
             }
+            await finalizeSessionLogs(win.webContents, { ipcMain: electronModule.ipcMain });
             dirtyEditorCloseConfirmed = true;
             try {
               win.close();
