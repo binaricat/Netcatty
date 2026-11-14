@@ -65,10 +65,13 @@ test('local logging controls default off, disclose verbose risk, and call host-o
     assert.equal(switches()[1].getAttribute('aria-checked'), 'false');
     assert.match(document.querySelector('[role=alert]')!.textContent!, /synthetic preferences write failed/);
     await act(async () => button('Close').click());
+    // Radix restores the opener in its unmount autofocus timer.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
     assert.equal(document.querySelector('[role=dialog]'), null);
-    assert.equal(document.activeElement, configure);
+    assert.equal(document.activeElement === configure, true, 'Configure button regains focus');
   } finally {
     await act(async () => root.unmount());
+    await new Promise(resolve => setTimeout(resolve, 0));
     dom.window.close();
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

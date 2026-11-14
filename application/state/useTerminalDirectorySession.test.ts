@@ -67,6 +67,21 @@ for (const platform of ['linux', 'darwin']) {
   });
 }
 
+test('Windows native PowerShell registers a Win32 controller without enabling CMD or POSIX wrappers', async t => {
+  installBridge(t, async () => ({ name: 'Netcatty', version: 'test', platform: 'win32' }));
+  function Harness() {
+    useTerminalDirectorySession(options('native-powershell', 'local', 'powershell'));
+    useTerminalDirectorySession(options('native-cmd', 'local', 'cmd'));
+    return null;
+  }
+  let root!: ReactTestRenderer;
+  await act(async () => { root = create(React.createElement(Harness)); });
+  t.after(async () => { await act(async () => { root.unmount(); }); });
+  assert.equal(getTerminalDirectory('native-powershell')?.target.pathFlavor, 'win32');
+  assert.equal(getTerminalDirectory('native-powershell')?.target.authority, 'local:native-powershell');
+  assert.equal(getTerminalDirectory('native-cmd'), null);
+});
+
 test('Windows SSH sessions do not inherit the local cwd platform limitation', async t => {
   let platformQueries = 0;
   installBridge(t, async () => { platformQueries++; return { name: 'Netcatty', version: 'test', platform: 'win32' }; });

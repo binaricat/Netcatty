@@ -12,6 +12,8 @@ export const esTerminalMessages: Messages = {
   'terminal.directory.hidden': 'Mostrar directorios ocultos',
   'terminal.directory.refresh': 'Actualizar',
   'terminal.directory.unavailable': 'La navegación de directorios no está disponible para esta sesión.',
+  'terminal.directory.integrationUnavailable': 'La integración de directorios de PowerShell no está lista. Los argumentos de inicio o la política de ejecución pueden impedirla.',
+  'terminal.directory.nonFilesystem': 'La ubicación actual de PowerShell no es un directorio del sistema de archivos.',
   'terminal.directory.busy': 'Espera a que el prompt esté vacío.',
   'terminal.directory.readFailed': 'No se pudo leer el directorio. Actualiza e inténtalo de nuevo.',
   'terminal.directory.changeFailed': 'No se pudo confirmar el cambio. Actualiza antes de reintentar.',

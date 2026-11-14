@@ -27,3 +27,10 @@ test('directory results include only directories and directory symlinks; filteri
   assert.equal(filterDirectories(entries, '', true).length, 3);
   assert.deepEqual(filterDirectories(entries, 'missing', true), []);
 });
+
+test('POSIX control-byte names remain visible as escaped data but cannot become command input', () => {
+  const entries = directoryEntries('/base', [{ name: 'line\nbreak', type: 'directory', size: '', lastModified: '' }]);
+  assert.equal(entries[0].path, '/base/line\nbreak');
+  assert.equal(directoryDisplayName(entries[0].name), 'line\\x0abreak');
+  assert.equal(isDirectoryPath(entries[0].path), false);
+});

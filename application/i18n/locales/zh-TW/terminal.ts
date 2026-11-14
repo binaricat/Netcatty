@@ -12,6 +12,8 @@ export const zhTWTerminalMessages: Messages = {
   'terminal.directory.hidden': '顯示隱藏目錄',
   'terminal.directory.refresh': '重新整理',
   'terminal.directory.unavailable': '此工作階段暫不支援目錄導覽。',
+  'terminal.directory.integrationUnavailable': 'PowerShell 目錄整合尚未就緒，啟動參數或執行原則可能阻止載入。',
+  'terminal.directory.nonFilesystem': '目前 PowerShell 位置不是檔案系統目錄。',
   'terminal.directory.busy': '請等待終端回到空白命令提示字元。',
   'terminal.directory.readFailed': '無法讀取此目錄，請重新整理後重試。',
   'terminal.directory.changeFailed': '未能確認目錄切換，請重新整理後重試。',
