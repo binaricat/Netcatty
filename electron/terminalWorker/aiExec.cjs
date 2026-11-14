@@ -9,6 +9,7 @@ const {
   execViaRawPty,
 } = require("../bridges/ai/ptyExec.cjs");
 const { getFreshIdlePrompt, getVisibleIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
+const { classifyShellReadiness } = require("../bridges/ai/shellReadinessState.cjs");
 const {
   ensureSessionShellKind,
   remoteDisallowsExecChannelProbe, sessionDisallowsExtraSshChannel, ensureSessionShellKindForExec,
@@ -339,6 +340,7 @@ function createWorkerAiExecHandler({
         expectedPrompt: getFreshIdlePrompt(session),
         getReadyPrompt: typeof session._promptTrackTail === "string"
           ? () => getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) : undefined,
+        classifyReadiness: () => classifyShellReadiness(session),
         typedInput: true,
         echoCommand: (rawCommand) => {
           event?.sender?.send?.("netcatty:data", {
@@ -568,6 +570,7 @@ function createWorkerAiJobStartHandler({
         expectedPrompt: getFreshIdlePrompt(session),
         getReadyPrompt: typeof session._promptTrackTail === "string"
           ? () => getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) : undefined,
+        classifyReadiness: () => classifyShellReadiness(session),
         typedInput: true,
         echoCommand: (rawCommand) => {
           event?.sender?.send?.("netcatty:data", {

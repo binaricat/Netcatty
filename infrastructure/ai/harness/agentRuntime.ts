@@ -16,6 +16,7 @@ import { redactSecretsForModel, redactSecretsInValueForModel, setReversibleModel
 import { globalTerminalMonitorGuard } from './terminalMonitorGuard';
 import { netcattyBridge } from '../../services/netcattyBridge';
 import type { AISessionScope } from '../types';
+import { SHELL_READINESS_UNKNOWN_CODE } from '../aiChatStreamingSupport';
 
 let turnCounter = 0;
 
@@ -27,6 +28,11 @@ function nextTurnId(): string {
 function isFailedToolResult(result: string): boolean {
   try {
     const parsed = JSON.parse(result) as Record<string, unknown>;
+    // #4198 (round 2): an unrecognized prompt on a live shell is an actionable,
+    // non-terminal state. Honour the preserved `code` so it is never stored as
+    // an open-session blocker, even if an `error` field is present. All other
+    // error codes keep the exact existing classification.
+    if (parsed?.code === SHELL_READINESS_UNKNOWN_CODE) return false;
     return parsed?.ok === false || typeof parsed?.error === 'string';
   } catch {
     return false;
