@@ -447,6 +447,8 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.startupCommandDelay.label': '启动命令延迟（毫秒）',
   'settings.terminal.startupCommandDelay.desc': '连接建立后等待多久再发送启动命令；启动命令为多行时，行与行之间也使用该间隔。慢连接可调大。',
   'settings.terminal.keywordHighlight.title': '关键字高亮',
+  'settings.terminal.keywordHighlight.deviceConsole': '网络设备高亮',
+  'settings.terminal.keywordHighlight.deviceConsole.desc': '为串口、eNSP Pro、Telnet 与网络设备 SSH 控制台着色：链路状态、CLI 报错、提示符和你输入的命令。',
   'settings.terminal.keywordHighlight.resetColors': '重置为默认颜色',
   'settings.terminal.keywordHighlight.resetDefaults': '把内置规则恢复为默认',
   'settings.terminal.keywordHighlight.resetBuiltIn': '恢复内置标签与正则',

@@ -137,6 +137,12 @@ export interface TerminalSettings {
   // Keyword Highlighting
   keywordHighlightEnabled: boolean;
   keywordHighlightRules: KeywordHighlightRule[];
+  /**
+   * Extra highlights for switch/router consoles: link state, CLI rejections,
+   * the paging prompt, the device prompt and the echoed command line. Applies
+   * to serial, eNSPro, Telnet and network-device SSH sessions only.
+   */
+  deviceConsoleHighlightEnabled: boolean;
 
   // Local Shell Configuration
   localShell: string; // Path to shell executable (empty = system default)
@@ -441,6 +447,7 @@ export const normalizeTerminalSettings = (
     ...DEFAULT_TERMINAL_SETTINGS,
     ...(settings ?? {}),
     contextChipsEnabled: settings?.contextChipsEnabled !== false,
+    deviceConsoleHighlightEnabled: settings?.deviceConsoleHighlightEnabled !== false,
     middleClickBehavior,
     middleClickPaste: middleClickBehavior === 'paste',
     wordSeparators,
@@ -579,6 +586,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   disconnectedNoticeMode: 'terminal',
   keywordHighlightEnabled: true,
   keywordHighlightRules: DEFAULT_KEYWORD_HIGHLIGHT_RULES,
+  deviceConsoleHighlightEnabled: true,
   localShell: '', // Empty = use system default
   localShellArgs: [], // Launch args for a custom local shell (empty = bridge default args)
   localStartDir: '', // Empty = use home directory

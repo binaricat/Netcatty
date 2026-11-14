@@ -871,6 +871,8 @@ Resalta el panel dividido enfocado:
   'settings.terminal.startupCommandDelay.label': 'Retraso del comando de inicio (ms)',
   'settings.terminal.startupCommandDelay.desc': 'Cuánto esperar después de conectarse antes de enviar el comando de inicio. También se usa entre líneas cuando el comando de inicio tiene varias líneas. Auméntalo para conexiones lentas.',
   'settings.terminal.keywordHighlight.title': 'Resaltado de palabras clave',
+  'settings.terminal.keywordHighlight.deviceConsole': 'Resaltado de dispositivos de red',
+  'settings.terminal.keywordHighlight.deviceConsole.desc': 'Colorea el estado del enlace, los errores de la CLI, el prompt y el comando que escribes en consolas serie, eNSP Pro, Telnet y SSH de dispositivos de red.',
   'settings.terminal.keywordHighlight.resetColors': 'Restablecer colores predeterminados',
   'settings.terminal.keywordHighlight.resetDefaults': 'Restablecer los integrados a los valores predeterminados',
   'settings.terminal.keywordHighlight.resetBuiltIn': 'Restaurar etiqueta y patrones predeterminados',

@@ -870,6 +870,20 @@ function SettingsTerminalTab(props: {
             onChange={(v) => updateTerminalSetting("keywordHighlightEnabled", v)}
           />
         </div>
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <span className="text-sm font-medium">
+              {t("settings.terminal.keywordHighlight.deviceConsole")}
+            </span>
+            <p className="text-xs text-muted-foreground">
+              {t("settings.terminal.keywordHighlight.deviceConsole.desc")}
+            </p>
+          </div>
+          <Toggle
+            checked={terminalSettings.deviceConsoleHighlightEnabled !== false}
+            onChange={(v) => updateTerminalSetting("deviceConsoleHighlightEnabled", v)}
+          />
+        </div>
         {terminalSettings.keywordHighlightEnabled && (
           <KeywordHighlightRulesEditor
             rules={terminalSettings.keywordHighlightRules}

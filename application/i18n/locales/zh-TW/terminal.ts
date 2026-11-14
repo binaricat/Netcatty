@@ -447,6 +447,8 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.startupCommandDelay.label': '啟動指令延遲（毫秒）',
   'settings.terminal.startupCommandDelay.desc': '連線建立後等待多久再發送啟動指令；啟動指令為多行時，行與行之間也使用該間隔。慢連線可調大。',
   'settings.terminal.keywordHighlight.title': '關鍵字標示',
+  'settings.terminal.keywordHighlight.deviceConsole': '網路設備高亮',
+  'settings.terminal.keywordHighlight.deviceConsole.desc': '為序列埠、eNSP Pro、Telnet 與網路設備 SSH 主控台著色：連線狀態、CLI 錯誤、提示符與你輸入的指令。',
   'settings.terminal.keywordHighlight.resetColors': '重設為預設顏色',
   'settings.terminal.keywordHighlight.resetDefaults': '把內建規則恢復為預設',
   'settings.terminal.keywordHighlight.resetBuiltIn': '恢復內建標籤與正規表示式',
