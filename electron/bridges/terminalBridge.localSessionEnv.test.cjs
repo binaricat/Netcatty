@@ -37,6 +37,15 @@ const STALE_PATH =
 const LIVE_PATH =
   "C:\\Users\\me\\.herdr\\packages\\standalone\\releases\\0.9.1-x86_64-pc-windows-msvc;C:\\Windows\\System32";
 
+test("buildLocalSessionEnv strips AppImage ARGV0 without changing the base env", async () => {
+  const baseEnv = { PATH: "/usr/bin:/bin", ARGV0: "/opt/Netcatty.AppImage" };
+  const env = await bridge.buildLocalSessionEnv({}, { baseEnv, platform: "linux" });
+
+  assert.equal(Object.hasOwn(env, "ARGV0"), false);
+  assert.equal(env.PATH, baseEnv.PATH);
+  assert.equal(baseEnv.ARGV0, "/opt/Netcatty.AppImage");
+});
+
 test("buildLocalSessionEnv keeps the captured PATH untouched off Windows", async () => {
   const env = await bridge.buildLocalSessionEnv(
     { env: { NETCATTY_MARKER: "1" } },
