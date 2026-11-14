@@ -65,7 +65,7 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
 
   // isVisible() is the source of truth; hiddenSince only remembers when the
   // pane was last seen. Re-reading it at every decision keeps a pane that is
-  // on screen from being refused or released even if a sync was missed.
+  // on screen from being released even if a sync was missed.
   const readVisibility = () => {
     if (!options.isVisible) return;
     if (options.isVisible()) hiddenSince = null;
@@ -94,7 +94,7 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
 
   const ensure = () => {
     if (loaded || circuitBroken || disposed || !options.enabled) return;
-    // A hidden pane past the budget keeps the DOM renderer until it is shown.
+    // Panes past the budget keep the DOM renderer until a slot is available.
     if (budget && !budget.tryAcquire(budgetMember)) return;
     let nextAddon: TAddon | null = null;
     try {

@@ -89,6 +89,15 @@ test("a visible pane past the cap releases the least recently seen hidden pane",
   assert.equal(budget.getActiveCount(), 3);
 });
 
+test("new visible panes are refused when visible holders fill the cap", () => {
+  const { budget } = setup(2);
+  const members = ["a", "b", "c", "d"].map((name) => new FakeMember(name));
+  assert.deepEqual(members.map((member) => budget.tryAcquire(member)), [true, true, false, false]);
+  assert.equal(budget.tryAcquire(members[0]), true, "an existing holder keeps its slot");
+  assert.equal(budget.getActiveCount(), 2);
+  assert.deepEqual(members.map((member) => member.releases), [0, 0, 0, 0]);
+});
+
 test("recently hidden panes are released only once they stay hidden long enough", () => {
   const { clock, budget } = setup(2);
   const [a, b] = ["a", "b"].map((name) => new FakeMember(name));
@@ -101,6 +110,8 @@ test("recently hidden panes are released only once they stay hidden long enough"
   budget.tryAcquire(new FakeMember("shown"));
   assert.equal(a.releases, 0, "a quick tab flip must not lose the renderer");
   assert.equal(budget.getActiveCount(), 3);
+  assert.equal(budget.tryAcquire(new FakeMember("overflow")), false);
+  assert.equal(budget.getActiveCount(), 3, "one hidden holder allows only one extra context");
 
   clock.advance(2_999);
   assert.equal(a.releases, 0);
@@ -110,26 +121,33 @@ test("recently hidden panes are released only once they stay hidden long enough"
   assert.equal(clock.pendingTimers, 0);
 });
 
-test("a pane hidden after the budget went over is released once eligible", () => {
+test("a pane hidden after a grace overshoot is released once eligible", () => {
   const { clock, budget } = setup(2);
   const [a, b, c] = ["a", "b", "c"].map((name) => new FakeMember(name));
   budget.tryAcquire(a);
   budget.tryAcquire(b);
-  budget.tryAcquire(c);
-  assert.equal(budget.getActiveCount(), 3, "three visible panes all keep WebGL");
+  assert.equal(budget.tryAcquire(c), false);
+  assert.equal(budget.getActiveCount(), 2);
   assert.equal(clock.pendingTimers, 0);
 
+  a.hiddenSince = clock.now();
+  budget.noteHidden(a);
+  assert.equal(budget.tryAcquire(c), true);
+  assert.equal(budget.getActiveCount(), 3, "recently hidden holders allow a grace overshoot");
+  a.hiddenSince = null;
   b.hiddenSince = clock.now();
   budget.noteHidden(b);
   clock.advance(3_000);
 
   assert.equal(b.releases, 1);
+  assert.equal(a.releases, 0, "a holder shown again keeps its renderer");
   assert.equal(budget.getActiveCount(), 2);
 });
 
 test("a hidden pane cannot take a context once the budget is full", () => {
-  const { budget } = setup(2);
-  budget.tryAcquire(new FakeMember("a"));
+  const { clock, budget } = setup(2);
+  const a = new FakeMember("a");
+  budget.tryAcquire(a);
   budget.tryAcquire(new FakeMember("b"));
 
   const hidden = new FakeMember("hidden");
@@ -138,7 +156,13 @@ test("a hidden pane cannot take a context once the budget is full", () => {
   assert.equal(budget.getActiveCount(), 2);
 
   hidden.hiddenSince = null;
-  assert.equal(budget.tryAcquire(hidden), true, "it gets one as soon as it is shown");
+  assert.equal(budget.tryAcquire(hidden), false, "visible holders still fill the cap");
+  a.hiddenSince = clock.now();
+  budget.noteHidden(a);
+  clock.advance(3_000);
+  assert.equal(budget.tryAcquire(hidden), true, "a shown pane can replace an eligible hidden holder");
+  assert.equal(a.releases, 1);
+  assert.equal(budget.getActiveCount(), 2);
 });
 
 test("released and forgotten panes free their slot", () => {
