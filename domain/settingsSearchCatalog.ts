@@ -672,6 +672,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.sftp.autoSync",
   },
   {
+    id: "sftp-compressed-upload",
+    tab: "file-associations",
+    labelKey: "settings.sftp.compressedUpload.enable",
+    descriptionKey: "settings.sftp.compressedUpload.enableDesc",
+    sectionKey: "settings.sftp.compressedUpload",
+  },
+  {
     id: "sftp-follow-terminal-cwd",
     tab: "file-associations",
     labelKey: "settings.sftp.followTerminalCwd.enable",
@@ -690,6 +697,20 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     tab: "file-associations",
     labelKey: "settings.sftp.transferConcurrency",
     descriptionKey: "settings.sftp.transferConcurrency.desc",
+  },
+  {
+    id: "sftp-skip-unchanged",
+    tab: "file-associations",
+    labelKey: "settings.sftp.skipUnchanged.enable",
+    descriptionKey: "settings.sftp.skipUnchanged.enableDesc",
+    sectionKey: "settings.sftp.transferConcurrency",
+  },
+  {
+    id: "sftp-transport-idle-ttl",
+    tab: "file-associations",
+    labelKey: "settings.ssh.transportIdleTtl",
+    descriptionKey: "settings.ssh.transportIdleTtl.desc",
+    sectionKey: "settings.sftp.transferConcurrency",
   },
   {
     id: "sftp-default-opener",

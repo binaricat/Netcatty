@@ -186,20 +186,93 @@ test("panes past the budget give up WebGL after staying hidden, and get it back 
   assert.equal(budget.getActiveCount(), 2);
 });
 
+test("simultaneous visible ensures stay within the context budget", () => {
+  const { budget, createPane } = setup();
+  const panes = Array.from({ length: 13 }, () => createPane());
+  for (const pane of panes) pane.controller.ensure();
+
+  assert.deepEqual(panes.map((pane) => pane.loaded), [...Array(12).fill(true), false]);
+  assert.equal(panes[12].addons.length, 0);
+  assert.equal(budget.getActiveCount(), 12);
+});
+
+test("visible context loss recovers at the cap, including with a refused visible pane", () => {
+  for (const withOverflow of [false, true]) {
+    const { clock, budget, createPane } = setup(2);
+    const panes = [createPane(), createPane()];
+    for (const pane of panes) pane.controller.ensure();
+    const overflow = withOverflow ? createPane() : null;
+    overflow?.controller.ensure();
+    assert.equal(overflow?.addons.length ?? 0, 0);
+    assert.equal(budget.getActiveCount(), 2);
+
+    panes[0].addons[0].loseContext();
+    assert.equal(budget.getActiveCount(), 1);
+    clock.advance(49);
+    assert.equal(panes[0].loaded, false);
+    clock.advance(1);
+    assert.equal(panes[0].loaded, true);
+    assert.equal(panes[0].addons.length, 2);
+    assert.equal(panes[1].addons.length, 1);
+    overflow?.controller.ensure();
+    assert.equal(overflow?.addons.length ?? 0, 0);
+    assert.equal(budget.getActiveCount(), 2);
+    assert.equal(clock.pendingTimers, 0);
+    assert.ok(panes.every((pane) => !pane.warnings.some((warning) => warning.includes("staying on DOM renderer"))));
+  }
+});
+
+test("visible loss stays on DOM if another visible pane takes the freed slot before recovery", () => {
+  const { clock, budget, createPane } = setup(2);
+  const panes = [createPane(), createPane(), createPane()];
+  for (const pane of panes) pane.controller.ensure();
+  assert.equal(panes[2].loaded, false);
+
+  panes[0].addons[0].loseContext();
+  panes[2].controller.ensure();
+  assert.equal(panes[2].loaded, true);
+  clock.advance(50);
+
+  assert.equal(panes[0].loaded, false);
+  assert.deepEqual(panes.map((pane) => pane.addons.length), [1, 1, 1]);
+  assert.equal(budget.getActiveCount(), 2);
+  assert.equal(clock.pendingTimers, 0);
+  assert.ok(panes.every((pane) => !pane.warnings.some((warning) => warning.includes("staying on DOM renderer"))));
+});
+
 test("a hidden pane mounted past the budget keeps the DOM renderer until shown", () => {
-  const { budget, createPane } = setup(1);
-  createPane().controller.ensure();
+  const { clock, budget, createPane } = setup(1);
+  const occupant = createPane();
+  occupant.controller.ensure();
 
   const hidden = createPane(false);
   hidden.controller.ensure();
   assert.equal(hidden.addons.length, 0);
   assert.equal(budget.getActiveCount(), 1);
 
+  occupant.setVisible(false);
+  clock.advance(3_000);
   hidden.reveal();
   assert.equal(hidden.loaded, true);
+  assert.equal(occupant.loaded, false);
+  assert.equal(budget.getActiveCount(), 1);
 });
 
-test("a pane on screen is never refused or released, even if a sync was missed", () => {
+test("revealing a hidden pane is refused while visible holders fill the budget", () => {
+  const { budget, createPane } = setup(1);
+  const occupant = createPane();
+  occupant.controller.ensure();
+  const hidden = createPane(false);
+  hidden.controller.ensure();
+  hidden.reveal();
+
+  assert.equal(hidden.loaded, false);
+  assert.equal(hidden.addons.length, 0);
+  assert.equal(occupant.loaded, true);
+  assert.equal(budget.getActiveCount(), 1);
+});
+
+test("a holder on screen is never released, even if a sync was missed", () => {
   const { clock, budget, createPane } = setup(1);
   const visible = createPane();
   visible.controller.ensure();
@@ -210,12 +283,37 @@ test("a pane on screen is never refused or released, even if a sync was missed",
   createPane().controller.ensure();
   clock.advance(10_000);
   assert.equal(visible.loaded, true);
-  assert.equal(budget.getActiveCount(), 2);
+  assert.equal(budget.getActiveCount(), 1);
 
   const late = createPane(false);
   late.setVisibleWithoutSync(true);
   late.controller.ensure();
-  assert.equal(late.loaded, true);
+  assert.equal(late.loaded, false);
+  assert.equal(late.addons.length, 0);
+  assert.equal(budget.getActiveCount(), 1);
+});
+
+test("grace overflow never releases a holder shown again without a visibility sync", () => {
+  const { clock, budget, createPane } = setup(1);
+  const holder = createPane();
+  holder.controller.ensure();
+  holder.setVisible(false);
+  const front = createPane();
+  front.controller.ensure();
+  assert.equal(budget.getActiveCount(), 2);
+
+  holder.setVisibleWithoutSync(true);
+  clock.advance(3_000);
+  assert.equal(holder.loaded, true);
+  assert.equal(front.loaded, true);
+  assert.equal(holder.addons[0].disposeCalls, 0);
+
+  front.addons[0].loseContext();
+  clock.advance(50);
+  assert.equal(front.loaded, false, "recovery cannot exceed a cap already filled by visible holders");
+  assert.equal(front.addons.length, 1);
+  assert.equal(budget.getActiveCount(), 1);
+  assert.equal(clock.pendingTimers, 0);
 });
 
 test("suspend, dispose and failed loads return the budget slot", () => {

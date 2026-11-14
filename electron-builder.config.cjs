@@ -84,6 +84,7 @@ module.exports = {
         // is excluded below, so the shared TOTP runtime must be listed.
         'domain/totp.shared.cjs',
         'domain/totpPrompt.shared.cjs',
+        'domain/sshPublicKey.shared.cjs',
         'lib/**/*.cjs',
         'lib/**/*.json',
         'skills/**/*',
