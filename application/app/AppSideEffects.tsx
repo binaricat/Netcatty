@@ -97,7 +97,7 @@ import { PassphraseRequest } from '../../components/PassphraseModal';
 import type { FidoPromptRequest } from '../../components/FidoPromptModal';
 import { classifyLocalShellType } from '../../lib/localShell';
 import { useDiscoveredShells, resolveShellSetting, ensureDiscoveredShells } from '../../lib/useDiscoveredShells';
-import { Host, HostProtocol, KnownHost, SerialConfig, Snippet, SSHKey, TerminalSession } from '../../types';
+import { EnspConfig, Host, HostProtocol, KnownHost, SerialConfig, Snippet, SSHKey, TerminalSession } from '../../types';
 import { resolveSnippetCommand } from '../../components/SnippetExecutionProvider';
 import { isScriptSnippet } from '../../domain/snippetScript.ts';
 import { collectSnippetDeleteIds } from '../../domain/snippetSelection.ts';
@@ -259,6 +259,7 @@ export function AppSideEffects() {
     setDraggingSessionId,
     createLocalTerminal,
     createSerialSession,
+    createEnspSession,
     connectToHost,
     appendHostToWorkspaceConfirmed,
     closeSession,
@@ -1962,6 +1963,25 @@ export function AppSideEffects() {
     });
   }, [addConnectionLog, createSerialSession]);
 
+  // Wrapper to create an eNSP Pro console session with logging
+  const handleConnectEnsp = useCallback((config: EnspConfig) => {
+    const { username, hostname } = systemInfoRef.current;
+    const label = `eNSP ${config.sandboxName || config.sandboxId} / ${config.deviceName || config.nodeId}`;
+    const sessionId = createEnspSession(config);
+    addConnectionLog({
+      sessionId,
+      hostId: '',
+      hostLabel: label,
+      hostname: config.host,
+      username,
+      protocol: 'ensp',
+      startTime: Date.now(),
+      localUsername: username,
+      localHostname: hostname,
+      saved: false,
+    });
+  }, [addConnectionLog, createEnspSession]);
+
   // Handle terminal data capture when session exits. Read sessions/logs via refs
   // so connection-log appends do not rebuild appTerminalDomain.
   const handleTerminalDataCapture = useCallback((sessionId: string, data: string) => {
@@ -2074,6 +2094,7 @@ export function AppSideEffects() {
       createWorkspaceFromTargets: createWorkspaceFromEffectiveTargets,
       createWorkspaceWithHosts: createWorkspaceWithEffectiveHosts,
       handleConnectSerial,
+      handleConnectEnsp,
       handleConnectToHost,
       handleCreateLocalTerminal,
       handleHotkeyAction,
@@ -2152,6 +2173,7 @@ export function AppSideEffects() {
     createWorkspaceFromEffectiveTargets,
     createWorkspaceWithEffectiveHosts,
     handleConnectSerial,
+    handleConnectEnsp,
     handleConnectToHost,
     handleCreateLocalTerminal,
     handleHotkeyAction,

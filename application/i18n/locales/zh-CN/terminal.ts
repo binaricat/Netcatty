@@ -975,6 +975,23 @@ export const zhCNTerminalMessages: Messages = {
 
   // Serial Port
   'serial.button': '串口',
+  // eNSP Pro 控制台
+  'ensp.button': 'eNSP Pro',
+  'ensp.modal.title': '连接 eNSP Pro 设备',
+  'ensp.modal.desc': '平台负责转发设备控制台；选择沙箱与设备即可。',
+  'ensp.field.platform': '平台地址',
+  'ensp.field.port': 'HTTPS 端口',
+  'ensp.field.sandbox': '沙箱',
+  'ensp.field.device': '设备',
+  'ensp.field.password': '控制台密码',
+  'ensp.field.passwordHint': '留空则连接后由你手动输入设备密码。',
+  'ensp.fetch': '拉取设备',
+  'ensp.fetching': '读取中…',
+  'ensp.connect': '连接',
+  'ensp.selectSandbox': '选择沙箱…',
+  'ensp.selectDevice': '选择设备…',
+  'ensp.loadFailed': '无法读取 eNSP Pro 设备列表',
+  'ensp.deviceStatus': '设备状态',
   'serial.modal.title': '连接串口',
   'serial.modal.desc': '配置串口连接参数',
   'serial.field.port': '串口',

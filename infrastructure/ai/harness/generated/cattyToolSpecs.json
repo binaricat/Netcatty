@@ -2435,5 +2435,126 @@
       "bypassesApproval": true,
       "bypassesChatCancel": true
     }
+  },
+  {
+    "capabilityId": "harness.vendor_assistant.ask",
+    "toolName": "vendor_assistant_ask",
+    "rpcMethod": "netcatty/vendorAsk",
+    "localExecution": false,
+    "description": "Ask a network vendor's official AI assistant (Huawei WeiKnow, Ruijie AZAI, H3C Zhiliao, Juniper, Aruba, Cisco) in a signed-in browser and return its answer text.",
+    "inputShape": {
+      "vendor": {
+        "type": "string",
+        "optional": false,
+        "description": "Vendor key: huawei, ruijie, h3c, juniper, aruba, or cisco."
+      },
+      "question": {
+        "type": "string",
+        "optional": false,
+        "description": "The question to ask the vendor's official AI assistant."
+      },
+      "timeoutMs": {
+        "type": "number",
+        "optional": true,
+        "description": "How long to wait for an answer (default 120000, capped at 300000)."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "harness.vendor_assistant.list",
+    "toolName": "vendor_assistant_list",
+    "rpcMethod": "netcatty/vendorList",
+    "localExecution": false,
+    "description": "List the supported vendor AI assistants with their sign-in state before asking one.",
+    "inputShape": {},
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "harness.ensp.list",
+    "toolName": "ensp_list",
+    "rpcMethod": "netcatty/enspList",
+    "localExecution": false,
+    "description": "List eNSP Pro sandboxes and their devices (names and node ids) so one can be opened and driven with terminal tools.",
+    "inputShape": {
+      "host": {
+        "type": "string",
+        "optional": false,
+        "description": "eNSP Pro platform address, e.g. https://192.168.31.211."
+      },
+      "port": {
+        "type": "number",
+        "optional": true,
+        "description": "Platform HTTPS port (default 8443)."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "harness.ensp.open",
+    "toolName": "ensp_open",
+    "rpcMethod": "netcatty/enspOpen",
+    "localExecution": false,
+    "description": "Open an eNSP Pro device console by sandbox name/id and device name/node id, returning a sessionId that terminal_execute can drive.",
+    "inputShape": {
+      "host": {
+        "type": "string",
+        "optional": false,
+        "description": "eNSP Pro platform address, e.g. https://192.168.31.211."
+      },
+      "sandbox": {
+        "type": "string",
+        "optional": false,
+        "description": "Sandbox name or numeric id, e.g. \"11\"."
+      },
+      "device": {
+        "type": "string",
+        "optional": false,
+        "description": "Device name or numeric node id, e.g. CE-1 or 2."
+      },
+      "port": {
+        "type": "number",
+        "optional": true,
+        "description": "Platform HTTPS port (default 8443)."
+      },
+      "password": {
+        "type": "string",
+        "optional": true,
+        "description": "Device console login password; also used to configure a fresh device."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": true,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
   }
 ]

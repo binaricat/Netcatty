@@ -1,4 +1,4 @@
-import type { HostProtocol, PluginConnectionConfig, SerialConfig, Snippet } from './connection';
+import type { EnspConfig, HostProtocol, PluginConnectionConfig, SerialConfig, Snippet } from './connection';
 import type { CodingCliProviderId } from '../codingCliProviders';
 import {
   normalizeHibernateHiddenTabsDelaySec,
@@ -708,6 +708,8 @@ export interface TerminalSession {
   charset?: string; // Connection-time charset override (e.g. for quick-connect serial)
   // Serial-specific connection settings
   serialConfig?: SerialConfig;
+  // eNSP Pro-specific connection settings
+  enspConfig?: EnspConfig;
   localShell?: string;       // Shell command for local terminals (from discovery)
   localShellArgs?: string[]; // Shell args for local terminals (from discovery)
   localShellName?: string;   // Display name for local shell (e.g., "Zsh", "Ubuntu (WSL)")

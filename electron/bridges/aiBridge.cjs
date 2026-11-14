@@ -18,6 +18,7 @@ const { appendVaultAgentGuidance, VAULT_NOTES_CLI_GUIDANCE } = require("../share
 const mcpServerBridge = require("./mcpServerBridge.cjs");
 const { createExternalMcpController } = require("./externalMcpController.cjs");
 const { registerPrivacyHandlers } = require("./aiBridge/privacyHandlers.cjs");
+const { registerVendorAssistantHandlers } = require("./aiBridge/vendorAssistantHandlers.cjs");
 const { getCliLauncherPath, TOOL_CLI_DISCOVERY_ENV_VAR } = require("../cli/discoveryPath.cjs");
 const { injectCliTransportEnv } = require("../cli/cliChatSession.cjs");
 const { getExternalMcpDiscoveryFilePath } = require("../cli/externalMcpDiscoveryPath.cjs");
@@ -1031,6 +1032,7 @@ function registerHandlers(ipcMain) {
   registerAgentProcessHandlers(context);
   registerSdkStreamHandlers(context);
   registerPrivacyHandlers(context);
+  registerVendorAssistantHandlers(context);
 
   if (externalMcpController) {
     externalMcpController.registerHandlers(ipcMain, validateSenderOrSettings);

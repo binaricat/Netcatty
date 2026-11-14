@@ -212,6 +212,132 @@ interface BridgeFetchResponse {
   error?: string;
 }
 
+export interface VendorAssistantAnswer {
+  ok: boolean;
+  vendor: string;
+  name: string;
+  status: string;
+  text: string;
+  url: string;
+  elapsedMs: number;
+  error: string | null;
+  /** Set when the vendor declined to answer and web results were substituted. */
+  fallback?: 'web_search';
+  sources?: Array<{ title: string; url: string }>;
+}
+
+// Vendor assistants sometimes hand the question off to a human and return no
+// answer at all. Those statuses are safe to backfill with an ordinary web
+// search so the agent still has something grounded to work from.
+const VENDOR_FALLBACK_STATUSES = new Set(['no_answer']);
+
+function formatWebFallback(
+  vendorName: string,
+  question: string,
+  results: Array<{ title: string; url: string; content: string }>,
+): { text: string; sources: Array<{ title: string; url: string }> } {
+  const body = results
+    .map((result, index) => {
+      const snippet = result.content.replace(/\s+/g, ' ').trim().slice(0, 400);
+      return `${index + 1}. ${result.title}\n   ${result.url}\n   ${snippet}`;
+    })
+    .join('\n\n');
+  return {
+    text: `${vendorName} handed this question to a human agent and returned no answer, so these web search results are provided instead:\n\n${body}`,
+    sources: results.map(result => ({ title: result.title, url: result.url })),
+  };
+}
+
+function vendorBridgeCall<T>(bridge: ToolDeps['bridge'], method: string, args: unknown[]): Promise<T> | null {
+  const fn = (bridge as unknown as Record<string, (...a: unknown[]) => Promise<unknown>> | undefined)?.[method];
+  if (typeof fn !== 'function') return null;
+  return fn.apply(bridge, args) as Promise<T>;
+}
+
+export async function executeVendorAssistantAsk(
+  deps: ToolDeps,
+  args: { vendor: string; question: string; timeoutMs?: number },
+): Promise<ToolExecResult<VendorAssistantAnswer>> {
+  const bridge = deps.bridge as unknown as Record<string, unknown>;
+  const call = vendorBridgeCall<VendorAssistantAnswer>(bridge as never, 'aiVendorAssistantAsk', [
+    args.vendor,
+    args.question,
+    args.timeoutMs,
+  ]);
+  if (!call) {
+    return { ok: false, error: 'Vendor assistant is not available in this build' };
+  }
+  if (!args.vendor?.trim()) return { ok: false, error: 'Missing vendor key' };
+  if (!args.question?.trim()) return { ok: false, error: 'Missing question' };
+
+  try {
+    const answer = await call;
+    if (!answer || typeof answer !== 'object') {
+      return { ok: false, error: 'Vendor assistant returned no response' };
+    }
+    if (answer.ok && answer.text?.trim()) {
+      return { ok: true, data: answer };
+    }
+
+    // A vendor-side hand-off leaves the agent with nothing, so transparently
+    // replace it with web results instead of failing the whole call.
+    if (VENDOR_FALLBACK_STATUSES.has(String(answer.status))) {
+      const search = await executeWebSearch(deps, { query: args.question });
+      // The result is a discriminated union, but the boolean-literal narrowing
+      // is not reliable across the async boundary, so read the message once.
+      const searchError = (search as { error?: string }).error;
+      let why = 'no web results';
+      if (!search.ok) why = searchError || 'search failed';
+      if (!search.ok || search.data.results.length === 0) {
+        return {
+          ok: false,
+          error: `${answer.name || args.vendor} did not answer (${answer.status || 'error'}): ${answer.error || answer.status}. Web search fallback also failed: ${why}`,
+        };
+      }
+      const fallback = formatWebFallback(answer.name || args.vendor, args.question, search.data.results);
+      return {
+        ok: true,
+        data: {
+          ...answer,
+          text: fallback.text,
+          fallback: 'web_search',
+          sources: fallback.sources,
+        },
+      };
+    }
+
+    const reason = answer.error || answer.status || 'unknown error';
+    return {
+      ok: false,
+      error: `${answer.name || args.vendor} did not answer (${answer.status || 'error'}): ${reason}`,
+    };
+  } catch (err) {
+    return { ok: false, error: `Vendor assistant failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+export async function executeVendorAssistantList(
+  deps: ToolDeps,
+): Promise<ToolExecResult<{ vendors: Array<{ key: string; name: string; login: string }> }>> {
+  const call = vendorBridgeCall<{ ok: boolean; vendors?: Array<{ key: string; name: string; login: string }>; error?: string }>(
+    deps.bridge as never,
+    'aiVendorAssistantStatus',
+    [],
+  );
+  if (!call) {
+    return { ok: false, error: 'Vendor assistant is not available in this build' };
+  }
+  try {
+    const status = await call;
+    if (!status?.ok) {
+      return { ok: false, error: status?.error || 'Vendor assistant status is unavailable' };
+    }
+    return { ok: true, data: { vendors: status.vendors ?? [] } };
+  } catch (err) {
+    return { ok: false, error: `Vendor assistant status failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
 export async function executeUrlFetch(
   deps: ToolDeps,
   args: { url: string; maxLength?: number },

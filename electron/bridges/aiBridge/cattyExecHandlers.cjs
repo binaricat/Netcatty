@@ -246,6 +246,37 @@ function registerCattyExecHandlers(ctx) {
         });
       }
 
+      // Serial ports expose their own transport instead of a PTY stream, so this
+      // branch has to run before the network-device PTY guard below.
+      // Serial port: raw command execution (no shell wrapping)
+      if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
+        if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
+          releaseLock();
+          return { ok: false, error: "Serial file transfer is already in progress" };
+        }
+        const { execViaRawPty } = require("./ai/ptyExec.cjs");
+        const serialTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
+        return withLockRelease(() => execViaRawPty(session.serialPort, command, {
+          timeoutMs: serialTimeoutMs,
+          trackForCancellation: mcpServerBridge.activePtyExecs,
+          chatSessionId,
+          encoding: session.serialEncoding || "utf8",
+        }));
+      }
+
+      // eNSP Pro consoles speak STOMP over a WebSocket rather than a PTY, so
+      // they follow the same raw-command path as serial sessions.
+      if (session.protocol === "ensp" && session.enspConsole && typeof session.enspConsole.write === "function") {
+        const { execViaRawPty } = require("./ai/ptyExec.cjs");
+        const enspTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
+        return withLockRelease(() => execViaRawPty(session.enspConsole, command, {
+          timeoutMs: enspTimeoutMs,
+          trackForCancellation: mcpServerBridge.activePtyExecs,
+          chatSessionId,
+          encoding: "utf8",
+        }));
+      }
+
       // Network devices require an interactive PTY for raw command execution.
       if (isNetworkDevice) {
         releaseLock();
@@ -277,22 +308,6 @@ function registerCattyExecHandlers(ctx) {
             chatSessionId,
           });
         });
-      }
-
-      // Serial port: raw command execution (no shell wrapping)
-      if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
-        if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
-          releaseLock();
-          return { ok: false, error: "Serial file transfer is already in progress" };
-        }
-        const { execViaRawPty } = require("./ai/ptyExec.cjs");
-        const serialTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return withLockRelease(() => execViaRawPty(session.serialPort, command, {
-          timeoutMs: serialTimeoutMs,
-          trackForCancellation: mcpServerBridge.activePtyExecs,
-          chatSessionId,
-          encoding: session.serialEncoding || "utf8",
-        }));
       }
 
       releaseLock();

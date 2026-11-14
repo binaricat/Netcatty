@@ -99,6 +99,14 @@ const DEFERRED_MCP_TOOLSETS = Object.freeze({
     "portforward_start",
     "portforward_stop",
   ]),
+  vendor_assistant: Object.freeze([
+    "vendor_assistant_ask",
+    "vendor_assistant_list",
+  ]),
+  ensp: Object.freeze([
+    "ensp_list",
+    "ensp_open",
+  ]),
 });
 
 const DEFERRED_MCP_TOOLSET_NAMES = Object.freeze(Object.keys(DEFERRED_MCP_TOOLSETS));

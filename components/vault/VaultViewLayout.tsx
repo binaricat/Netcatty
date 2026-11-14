@@ -1,4 +1,5 @@
 import { MonitorPanels } from './MonitorPanels';
+import { EnspConnectDialog } from '../EnspConnectDialog';
 import { MonitorNavButton } from './MonitorNavButton';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Combobox } from "../ui/combobox";
@@ -234,6 +235,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     isRenameGroupOpen,
     isSearchQuickConnect,
     isSerialModalOpen,
+    isEnspModalOpen,
     Key,
     keyBindings,
     KeychainManager,
@@ -255,6 +257,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     newHostGroupPath,
     onConnect,
     onConnectSerial,
+    onConnectEnsp,
     onCreateLocalTerminal,
     onDeleteHost,
     onImportOrReuseKey,
@@ -316,6 +319,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     setIsQuickConnectOpen,
     setIsRenameGroupOpen,
     setIsSerialModalOpen,
+    setIsEnspModalOpen,
     setLastPinnedId,
     setNewFolderName,
     setNewHostGroupPath,
@@ -1085,6 +1089,15 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   tabIndex={isHostAsideOpen ? -1 : 0}
                 >
                   <Usb size={14} className="mr-2" /> {t("serial.button")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className={vaultHeaderSecondaryButtonClass}
+                  onClick={() => setIsEnspModalOpen(true)}
+                  tabIndex={isHostAsideOpen ? -1 : 0}
+                >
+                  <Network size={14} className="mr-2" /> {t("ensp.button")}
                 </Button>
               </div>
             </VaultPageHeader>
@@ -1918,6 +1931,15 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           </Suspense>
         </LazyLoadBoundary>
       )}
+
+      {/* eNSP Pro Console Modal */}
+      <EnspConnectDialog
+        open={isEnspModalOpen}
+        onClose={() => setIsEnspModalOpen(false)}
+        onConnect={(config) => {
+          onConnectEnsp?.(config);
+        }}
+      />
 
       {/* Serial Connect Modal */}
       <SerialConnectModal

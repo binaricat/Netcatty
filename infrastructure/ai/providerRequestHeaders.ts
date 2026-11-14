@@ -8,7 +8,11 @@ import type { ProviderConfig } from "./types";
  */
 export const OPENCODE_SESSION_HEADER = "x-opencode-session";
 
-/** Match the opencode.ai API hosts (Zen `.../zen/v1`, Go `.../zen/go/v1`). */
+/**
+ * Match the opencode.ai API hosts. Zen (pay-as-you-go) uses `.../zen/v1`;
+ * the Go subscription gateway uses `.../inference/go/v1` (and some SDKs
+ * `.../inference/go/openai/v1`). Every one of them requires the session header.
+ */
 export function isOpencodeEndpoint(baseURL: string | undefined): boolean {
   if (!baseURL) return false;
   try {

@@ -20,6 +20,7 @@ const BUILT_IN_HOST_PROTOCOLS = new Set<BuiltInHostProtocol>([
   'et',
   'local',
   'serial',
+  'ensp',
 ]);
 
 export const pluginProtocolForProvider = (providerId: string): HostProtocol => `plugin:${providerId}`;

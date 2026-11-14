@@ -1,6 +1,35 @@
 import type { CodebuddyAdvancedOptions } from '../../infrastructure/ai/types';
 
 declare global {
+  interface VendorAssistantVendorStatus {
+    key: string;
+    name: string;
+    url: string;
+    login: 'logged' | 'unknown' | 'missing';
+    dir: string;
+  }
+
+  interface VendorAssistantStatusResult {
+    ok: boolean;
+    error?: string;
+    profileRoot?: string;
+    browser?: { path: string | null; found: boolean };
+    vendors?: VendorAssistantVendorStatus[];
+  }
+
+  interface VendorAssistantAnswer {
+    ok: boolean;
+    vendor: string;
+    name: string;
+    status: string;
+    text: string;
+    url: string;
+    elapsedMs: number;
+    /** Login requests only: a sign-in page was seen and the composer is now usable. */
+    logged?: boolean;
+    error: string | null;
+  }
+
   interface NetcattyBridge {
     // AI / external agents
     aiPrivacyStatus?(): Promise<{ ok: boolean; enabled?: boolean; error?: string }>;
@@ -13,6 +42,9 @@ declare global {
     aiAllowlistAddHost?(baseURL: string): Promise<{ ok: boolean; error?: string }>;
     aiExec?(sessionId: string, command: string, chatSessionId?: string): Promise<{ ok: boolean; stdout?: string; stderr?: string; exitCode?: number | null; error?: string }>;
     aiCattyCancelExec?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
+    aiVendorAssistantStatus?(): Promise<VendorAssistantStatusResult>;
+    aiVendorAssistantAsk?(vendor: string, question: string, timeoutMs?: number): Promise<VendorAssistantAnswer>;
+    aiVendorAssistantLogin?(vendor: string, timeoutMs?: number): Promise<VendorAssistantAnswer>;
     aiDiscoverAgents?(options?: { refreshShellEnv?: boolean; apiKeyPresent?: boolean }): Promise<Array<{
       command: string;
       name: string;

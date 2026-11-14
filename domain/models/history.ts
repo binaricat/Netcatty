@@ -45,7 +45,7 @@ export interface ConnectionLog {
   hostLabel: string; // Display label (e.g., 'Local Terminal' or host label)
   hostname: string; // Target hostname or 'localhost'
   username: string; // SSH username or system username
-  protocol: 'ssh' | 'telnet' | 'local' | 'mosh' | 'et' | 'serial';
+  protocol: 'ssh' | 'telnet' | 'local' | 'mosh' | 'et' | 'serial' | 'ensp';
   hostOs?: 'linux' | 'windows' | 'macos'; // Snapshot of the connected host OS for log icons
   hostDistro?: string; // Snapshot of the connected host distro/vendor icon id
   hostIconMode?: HostIconMode; // Snapshot of the host icon mode for log icons

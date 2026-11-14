@@ -2215,6 +2215,79 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     }
   };
 
+  /**
+   * eNSP Pro device console. The platform relays the console over a
+   * WebSocket, so this behaves like the serial path: raw bytes both ways,
+   * with the bridge handling the VRP "Password:" exchange before data flows.
+   */
+  const startEnsp = async (term: XTerm, options?: TerminalSessionStartOptions) => {
+    if (options?.signal?.aborted) return;
+    const { isCurrentAttempt, ignoreStaleAttemptUi, bootEpoch } = createAttemptGuards(options);
+    const enspConfig = ctx.enspConfig ?? ctx.host.enspConfig;
+    if (!enspConfig) {
+      const message = "No eNSP Pro configuration provided";
+      ctx.setError(message);
+      writeTerminalLine(ctx, term, `\r\n[Error: ${message}]`);
+      ctx.updateStatus("disconnected");
+      return;
+    }
+    const startEnspSession = ctx.terminalBackend.startEnspSession;
+    if (!startEnspSession) {
+      const message = "eNSP Pro support is unavailable in this build";
+      ctx.setError(message);
+      writeTerminalLine(ctx, term, `\r\n[Error: ${message}]`);
+      ctx.updateStatus("disconnected");
+      return;
+    }
+    const label = `eNSP ${enspConfig.sandboxName || enspConfig.sandboxId} / ${enspConfig.deviceName || enspConfig.nodeId}`;
+    const isConnectionCurrent = () => options?.signal?.aborted !== true
+      && (ctx.bootEpochRef?.current ?? 0) === bootEpoch;
+
+    try {
+      logger.info("[eNSP] Starting console session", {
+        host: enspConfig.host,
+        sandboxId: enspConfig.sandboxId,
+        nodeId: enspConfig.nodeId,
+      });
+
+      const id = await startEnspSession({
+        sessionId: ctx.sessionId,
+        host: enspConfig.host,
+        port: enspConfig.port,
+        sandboxId: enspConfig.sandboxId,
+        nodeId: enspConfig.nodeId,
+        sandboxName: enspConfig.sandboxName,
+        deviceName: enspConfig.deviceName,
+        password: enspConfig.password,
+        charset: ctx.host.charset,
+        sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
+        bootEpoch,
+      });
+
+      if (!tryAttachSessionToTerminal(ctx, term, id, {
+        isCurrentAttempt,
+        bootEpoch,
+        onExitMessage: (evt) =>
+          `\r\n[eNSP console closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
+        convertLfToCrlf: true,
+      })) {
+        if (isCurrentAttempt()) abortSessionStartAfterUnmount();
+        return;
+      }
+
+      ctx.updateStatus("connected");
+      ctx.setProgressValue(100);
+      writeTerminalLine(ctx, term, `[Connected to ${label}]`);
+      scheduleStartupCommand(ctx, term, id, undefined, isConnectionCurrent);
+    } catch (err) {
+      if (ignoreStaleAttemptUi()) return;
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.setError(message);
+      writeTerminalLine(ctx, term, `\r\n[Failed to connect to ${label}: ${message}]`);
+      ctx.updateStatus("disconnected");
+    }
+  };
+
   const reattachSession = (term: XTerm) => {
     const id = ctx.sessionRef.current;
     if (!id) return false;
@@ -2233,5 +2306,5 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     return true;
   };
 
-  return { startSSH, startTelnet, startMosh, startEt, startPluginConnection, startLocal, startSerial, reattachSession };
+  return { startSSH, startTelnet, startMosh, startEt, startPluginConnection, startLocal, startSerial, startEnsp, reattachSession };
 };

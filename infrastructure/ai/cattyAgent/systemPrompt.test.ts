@@ -88,6 +88,33 @@ test('static prefix stays stable when dynamic context changes', () => {
   assert.notStrictEqual(base, changed);
 });
 
+test('system prompt asks the vendor assistant before answering from memory', () => {
+  const prompt = buildSystemPrompt({
+    scopeType: 'terminal',
+    hosts: [],
+    permissionMode: 'confirm',
+    vendorAssistantEnabled: true,
+  });
+
+  assert.match(prompt, /## Vendor AI Assistants/);
+  assert.match(prompt, /vendor_assistant_ask/);
+  assert.match(prompt, /vendor_assistant_list/);
+  assert.match(prompt, /before answering from memory/i);
+  // The section must stay out of the static prefix so the prompt cache holds.
+  assert.ok(prompt.indexOf('## Vendor AI Assistants') > prompt.indexOf('## Current Scope'));
+});
+
+test('vendor guidance is omitted when the tool is not offered', () => {
+  const prompt = buildSystemPrompt({
+    scopeType: 'terminal',
+    hosts: [],
+    permissionMode: 'confirm',
+  });
+
+  assert.doesNotMatch(prompt, /vendor_assistant_ask/);
+  assert.doesNotMatch(prompt, /## Vendor AI Assistants/);
+});
+
 test('untrusted session metadata cannot become the last instruction in the prompt', () => {
   const prompt = buildSystemPrompt({
     scopeType: 'terminal',

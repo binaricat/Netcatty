@@ -22,7 +22,7 @@ const isSafeSshJumpHostname = (value: string): boolean =>
 const isSafeSshJumpUsername = (value: string): boolean =>
   !value.startsWith('-') && !UNSAFE_SSH_JUMP_USERNAME.test(value);
 
-export type VaultHostDraftProtocol = Exclude<HostProtocol, 'mosh' | 'et' | 'serial'>;
+export type VaultHostDraftProtocol = Exclude<HostProtocol, 'mosh' | 'et' | 'serial' | 'ensp'>;
 
 export interface VaultHostDraft {
   label?: unknown;

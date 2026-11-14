@@ -17,7 +17,7 @@ test("resolveProviderStyle falls back to providerId for google", () => {
 });
 
 test("resolveProviderStyle treats every other providerId as the OpenAI-compatible family", () => {
-  for (const providerId of ["openai", "ollama", "openrouter", "qwen", "deepseek", "kimi", "zhipu", "doubao", "mimo", "custom"] as const) {
+  for (const providerId of ["openai", "ollama", "openrouter", "qwen", "deepseek", "kimi", "zhipu", "doubao", "mimo", "opencode", "custom"] as const) {
     assert.equal(resolveProviderStyle({ providerId }), "openai", `expected openai for ${providerId}`);
   }
 });
@@ -54,4 +54,11 @@ test("domestic provider presets expose provider-specific model suggestions", () 
   assert.ok(!PROVIDER_PRESETS.doubao.defaultModels?.some((model) => model.startsWith("ep-")));
   assert.ok(PROVIDER_PRESETS.mimo.defaultModels?.includes("mimo-v2.5-pro"));
   assert.equal(PROVIDER_PRESETS.custom.defaultModels, undefined);
+});
+
+
+test("opencode preset targets the OpenCode Go gateway", () => {
+  assert.equal(PROVIDER_PRESETS.opencode.defaultBaseURL, "https://opencode.ai/inference/go/v1");
+  assert.equal(PROVIDER_PRESETS.opencode.modelsEndpoint, "/models");
+  assert.deepEqual(PROVIDER_PRESETS.opencode.defaultModels, ["deepseek-v4.1-flash"]);
 });

@@ -173,8 +173,34 @@ function createExecHandlerApi(ctx) {
         });
       }
     
+      // Serial ports expose their own transport instead of a PTY stream, so this
+      // branch has to run before the network-device PTY guard below.
+      // Serial port: raw command execution (no shell wrapping)
+      if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
+        if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
+          releaseSessionExecution(sessionId, sessionToken);
+          executionLock.release();
+          return { ok: false, error: "Serial file transfer is already in progress" };
+        }
+        return runExecution(() => execViaRawPty(session.serialPort, command, {
+          timeoutMs: commandTimeoutMs,
+          trackForCancellation: activePtyExecs,
+          chatSessionId: params?.chatSessionId,
+          encoding: session.serialEncoding || "utf8",
+        }));
+      }
+
       // Network devices require an interactive PTY for raw command execution.
       // If we got here, ptyStream wasn't writable — there's no usable channel.
+      if (session.protocol === "ensp" && session.enspConsole && typeof session.enspConsole.write === "function") {
+        return runExecution(() => execViaRawPty(session.enspConsole, command, {
+          timeoutMs: commandTimeoutMs,
+          trackForCancellation: activePtyExecs,
+          chatSessionId: params?.chatSessionId,
+          encoding: "utf8",
+        }));
+      }
+
       if (isNetworkDevice) {
         releaseSessionExecution(sessionId, sessionToken);
         executionLock.release();
@@ -206,20 +232,6 @@ function createExecHandlerApi(ctx) {
         });
       }
     
-      // Serial port: raw command execution (no shell wrapping)
-      if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
-        if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
-          releaseSessionExecution(sessionId, sessionToken);
-          executionLock.release();
-          return { ok: false, error: "Serial file transfer is already in progress" };
-        }
-        return runExecution(() => execViaRawPty(session.serialPort, command, {
-          timeoutMs: commandTimeoutMs,
-          trackForCancellation: activePtyExecs,
-          chatSessionId: params?.chatSessionId,
-          encoding: session.serialEncoding || "utf8",
-        }));
-      }
     
       releaseSessionExecution(sessionId, sessionToken);
       executionLock.release();

@@ -864,6 +864,11 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           setProgressLogs(["Initializing serial connection..."]);
           await sessionStarters.startSerial(term, bootStartOptions);
           if (!bootStillActive()) return;
+        } else if (effectiveTerminalProtocol === "ensp") {
+          setBackendConnectingStatus();
+          setProgressLogs(["Initializing eNSP Pro console..."]);
+          await sessionStarters.startEnsp(term, bootStartOptions);
+          if (!bootStillActive()) return;
         } else if (effectiveTerminalProtocol === "local") {
           setBackendConnectingStatus();
           setProgressLogs(["Initializing local shell..."]);

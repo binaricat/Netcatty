@@ -975,6 +975,23 @@ export const zhTWTerminalMessages: Messages = {
 
   // Serial Port
   'serial.button': '序列埠',
+  // eNSP Pro 主控台
+  'ensp.button': 'eNSP Pro',
+  'ensp.modal.title': '連線 eNSP Pro 裝置',
+  'ensp.modal.desc': '平台負責轉送裝置主控台；選擇沙箱與裝置即可。',
+  'ensp.field.platform': '平台位址',
+  'ensp.field.port': 'HTTPS 連接埠',
+  'ensp.field.sandbox': '沙箱',
+  'ensp.field.device': '裝置',
+  'ensp.field.password': '主控台密碼',
+  'ensp.field.passwordHint': '留空則連線後由你手動輸入裝置密碼。',
+  'ensp.fetch': '取得裝置',
+  'ensp.fetching': '讀取中…',
+  'ensp.connect': '連線',
+  'ensp.selectSandbox': '選擇沙箱…',
+  'ensp.selectDevice': '選擇裝置…',
+  'ensp.loadFailed': '無法取得 eNSP Pro 裝置清單',
+  'ensp.deviceStatus': '裝置狀態',
   'serial.modal.title': '連線序列埠',
   'serial.modal.desc': '設定序列埠連線引數',
   'serial.field.port': '序列埠',
