@@ -64,6 +64,32 @@ test("host tree tab gutter never goes negative", () => {
   assert.equal(computeHostTreeTabGutter(120, 280), 0);
 });
 
+test("top tab native exclusions stay bounded to the stationary scroll viewport", () => {
+  const viewport = topTabsSource.match(/<div\s+ref=\{tabsContainerRef\}[\s\S]*?onClick=/);
+  assert.ok(viewport, "expected the tab scroll viewport");
+  assert.match(viewport[0], /className="[^"]*\btop-tab-scroll-viewport\b[^"]*"/);
+  assert.match(viewport[0], /className="[^"]*\bmin-w-0\b[^"]*"/);
+  assert.doesNotMatch(viewport[0], /className="[^"]*\bflex-1\b[^"]*"/);
+  assert.match(viewport[0], /className="[^"]*\boverflow-x-auto\b[^"]*\bapp-no-drag\b[^"]*"/);
+  assert.doesNotMatch(viewport[0], /\bapp-drag\b/);
+  // Inline no-drag keeps the viewport excluded despite the scoped CSS reset.
+  assert.match(viewport[0], /style=\{\{[^}]*\.\.\.noDragRegionStyle\s*\}\}/);
+  assert.match(topTabsSource, /const noDragRegionStyle = \{ WebkitAppRegion: 'no-drag' \}/);
+
+  const scrollContent = topTabsSource.slice(topTabsSource.indexOf(viewport[0]));
+  const viewportEnd = scrollContent.indexOf("</div>");
+  assert.match(scrollContent.slice(0, viewportEnd), /\{renderOrderedTabs\(\)\}/);
+  assert.doesNotMatch(scrollContent.slice(0, viewportEnd), /min-w-\[20px\]/);
+  assert.match(scrollContent.slice(viewportEnd), /^<\/div>\s*\{\/\*[^}]*\*\/\}\s*<div className="flex-1 app-drag" style=\{dragRegionStyle\} \/>\s*<div className="min-w-\[20px\] h-7 app-drag flex-shrink-0 self-end" style=\{dragRegionStyle\} \/>/);
+
+  const regionReset = indexCss.match(/\.top-tab-scroll-viewport,\s*\.top-tab-scroll-viewport \*\s*\{([^}]+)\}/);
+  assert.ok(regionReset, "expected a native region reset for the viewport and every descendant");
+  assert.match(regionReset[1], /-webkit-app-region:\s*none;/);
+  assert.match(regionReset[1], /(?:^|[;\s])app-region:\s*none;/);
+  assert.ok(indexCss.indexOf(regionReset[0]) > indexCss.indexOf(".app-no-drag * {"));
+  assert.match(topTabItemsSource, /netcatty-tab[^\n]*\bapp-no-drag\b/);
+});
+
 test("host tree tab surface stays mounted when root pages are active", () => {
   assert.equal(shouldKeepHostTreeToggleSurface({
     enabled: true,
