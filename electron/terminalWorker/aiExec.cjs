@@ -382,6 +382,19 @@ function createWorkerAiExecHandler({
       });
     }
 
+    // Telnet consoles expose a socket rather than a PTY stream, so they follow
+    // the same raw-command path as serial and eNSP consoles.
+    if ((session.protocol === "telnet" || session.type === "telnet-native") && session.socket && typeof session.socket.write === "function") {
+      const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
+      if (blocked) return blocked;
+      return execViaRawPty(session.socket, command, {
+        timeoutMs,
+        trackForCancellation: activePtyExecs,
+        chatSessionId,
+        encoding: "utf8",
+      });
+    }
+
     if (isNetworkDevice) {
       return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
     }

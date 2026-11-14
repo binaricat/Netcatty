@@ -201,6 +201,17 @@ function createExecHandlerApi(ctx) {
         }));
       }
 
+      // Telnet consoles (for example H3C Cloud Lab devices) expose a socket
+      // instead of a PTY stream, so they use the raw command path too.
+      if ((session.protocol === "telnet" || session.type === "telnet-native") && session.socket && typeof session.socket.write === "function") {
+        return runExecution(() => execViaRawPty(session.socket, command, {
+          timeoutMs: commandTimeoutMs,
+          trackForCancellation: activePtyExecs,
+          chatSessionId: params?.chatSessionId,
+          encoding: "utf8",
+        }));
+      }
+
       if (isNetworkDevice) {
         releaseSessionExecution(sessionId, sessionToken);
         executionLock.release();

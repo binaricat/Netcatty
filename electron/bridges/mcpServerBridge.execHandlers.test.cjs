@@ -14,6 +14,31 @@ const {
   resolveSessionBlocklistShellKind,
 } = require("./ai/commandSafety.cjs");
 
+test("MCP terminal_execute routes telnet-native sessions through the console socket", async () => {
+  const socket = new FakePty();
+  const session = { type: "telnet-native", socket };
+  const ctx = createExecHandlerTestContext({
+    sessions: new Map([["tel-1", session]]),
+    backgroundJobs: new Map(),
+  });
+  const calls = [];
+  ctx.execViaRawPty = async (stream, command, options) => {
+    calls.push({ stream, command, options });
+    return { ok: true, stdout: "<H3C>", stderr: "", exitCode: null };
+  };
+  const api = createExecHandlerApi(ctx);
+  const result = await api.handleExec({
+    sessionId: "tel-1",
+    command: "display version",
+    chatSessionId: "chat-tel",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].stream, socket);
+  assert.equal(calls[0].command, "display version");
+  assert.equal(calls[0].options.encoding, "utf8");
+});
+
 class FakePty extends EventEmitter {
   constructor() {
     super();

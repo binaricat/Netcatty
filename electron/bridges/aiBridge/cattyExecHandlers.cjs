@@ -277,6 +277,16 @@ function registerCattyExecHandlers(ctx) {
         }));
       }
 
+      // Telnet consoles expose a socket rather than a PTY stream.
+      if ((session.protocol === "telnet" || session.type === "telnet-native") && session.socket && typeof session.socket.write === "function") {
+        return withLockRelease(() => execViaRawPty(session.socket, command, {
+          timeoutMs: mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000,
+          trackForCancellation: mcpServerBridge.activePtyExecs,
+          chatSessionId,
+          encoding: "utf8",
+        }));
+      }
+
       // Network devices require an interactive PTY for raw command execution.
       if (isNetworkDevice) {
         releaseLock();
