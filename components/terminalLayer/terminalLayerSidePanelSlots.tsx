@@ -595,6 +595,7 @@ function SidePanelAiSlotInner({
     AISidePanelStateRoot,
     mountedAiTabIds,
     aiContextsByTabId,
+    appTerminalInfos,
     resolveAIExecutorContext,
     pendingTerminalSelectionForAI,
     handlePendingTerminalSelectionConsumed,
@@ -657,6 +658,7 @@ function SidePanelAiSlotInner({
         activeSidePanelTab={isVisible ? 'ai' : null}
         liveScopeTargetIds={validAIScopeTargetIds}
         contextsByTabId={aiContextsByTabId}
+        appTerminalSessions={appTerminalInfos}
         resolveExecutorContext={resolveAIExecutorContext}
         pendingTerminalSelection={pendingTerminalSelectionForAI}
         onPendingTerminalSelectionConsumed={handlePendingTerminalSelectionConsumed}

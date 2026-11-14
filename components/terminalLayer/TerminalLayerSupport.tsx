@@ -287,6 +287,12 @@ interface AIChatPanelsHostProps {
   /** All live terminal+workspace target ids (for /chats dangling detection). */
   liveScopeTargetIds: Set<string>;
   contextsByTabId: Map<string, AIPanelContext>;
+  /**
+   * Per-session AI info for EVERY live terminal (full terminal session store,
+   * all tabs) — the global session manager's rebind targets and dangling
+   * detection must include terminals whose tab has no mounted AI context.
+   */
+  appTerminalSessions: AITerminalSessionInfo[];
   resolveExecutorContext: (scope: {
     type: 'terminal' | 'workspace';
     targetId?: string;
@@ -460,6 +466,7 @@ function aiChatPanelsHostAreEqual(
   if (prev.mountedTabIds !== next.mountedTabIds) return false;
   if (prev.liveScopeTargetIds !== next.liveScopeTargetIds) return false;
   if (prev.contextsByTabId !== next.contextsByTabId) return false;
+  if (prev.appTerminalSessions !== next.appTerminalSessions) return false;
   if (prev.activeSidePanelTab !== next.activeSidePanelTab) return false;
   if (prev.pendingTerminalSelection !== next.pendingTerminalSelection) return false;
   if (prev.onPendingTerminalSelectionConsumed !== next.onPendingTerminalSelectionConsumed) return false;
@@ -502,6 +509,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   activeSidePanelTab,
   liveScopeTargetIds,
   contextsByTabId,
+  appTerminalSessions,
   resolveExecutorContext,
   pendingTerminalSelection,
   onPendingTerminalSelectionConsumed,
@@ -539,6 +547,12 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     })),
     [workspaces],
   );
+  // Flattened open terminals across ALL tabs, built from the full terminal
+  // session store upstream (see buildAllTerminalAiInfos): the global AI
+  // session manager resolves chat scopes and rebind targets app-wide, and
+  // must also see terminals whose tab has no mounted AI panel context.
+  // Stable by reference while terminal sessions are unchanged, so panel memo
+  // is unaffected.
 
   useEffect(() => {
     if (!pendingTerminalSelection) return;
@@ -649,6 +663,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     workspaces={aiPanelWorkspaces}
                     onSetWorkspaceAnchorChat={onSetWorkspaceAnchorChat}
                     terminalSessions={context.terminalSessions}
+                    appTerminalSessions={appTerminalSessions}
                     liveScopeTargetIds={liveScopeTargetIds}
                     resolveExecutorContext={resolveExecutorContext}
                     isVisible={isVisible}

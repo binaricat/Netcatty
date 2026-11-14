@@ -71,6 +71,8 @@ interface AIChatPanelContentProps {
   /** Manual durability escape hatch: export/import the whole session store. */
   onExportSessions?: () => void;
   onImportSessions?: () => void;
+  /** Global session manager slot rendered by the drawer's "all chats" tab (#4098). */
+  globalManagerNode?: React.ReactNode;
   /** Undo last turn is offered at a safe boundary (never mid-tool / mid-compaction). */
   canUndoLastTurn?: boolean;
   handleUndoLastTurn?: () => void;
@@ -164,6 +166,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   onDismissPanelCommandNote,
   onExportSessions,
   onImportSessions,
+  globalManagerNode,
   canUndoLastTurn = false,
   handleUndoLastTurn,
   canCompact = false,
@@ -334,6 +337,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
             onRename={onRenameSession}
             onExportSessions={onExportSessions}
             onImportSessions={onImportSessions}
+            globalManager={globalManagerNode}
             onClose={() => setShowHistory(false)}
           />
         </React.Profiler>

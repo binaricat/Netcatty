@@ -6,6 +6,7 @@ import {
   bumpDraftMutationVersionState,
   bumpDraftUploadGenerationState,
   clearScopeDraftState,
+  clearSessionViewsForSession,
   createEmptyDraft,
   ensureDraftForScopeState,
   getDraftMutationVersionState,
@@ -214,6 +215,47 @@ test("pruneStaleSessionPanelViews returns the original ref when nothing is stale
     panelViewByScope,
     new Set(["session-keep"]),
   );
+
+  assert.equal(next, panelViewByScope);
+});
+
+test("clearSessionViewsForSession clears the rebound chat's source views and keeps the destination + unrelated scopes", () => {
+  // Mirrors rebindSessionScope: source A shows chat-1, destination B is set to
+  // chat-1, and unrelated scopes keep their own chats/drafts.
+  const panelViewByScope = {
+    "workspace:A": { mode: "session", sessionId: "chat-1" },
+    "workspace:A-alias": { mode: "session", sessionId: "chat-1" },
+    "workspace:B": { mode: "session", sessionId: "prev-b" },
+    "workspace:C": { mode: "session", sessionId: "chat-2" },
+    "workspace:D": { mode: "draft" },
+  } satisfies Record<string, { mode: "draft" } | { mode: "session"; sessionId: string }>;
+
+  const next = setSessionView(
+    clearSessionViewsForSession(panelViewByScope, "chat-1", "workspace:B"),
+    "workspace:B",
+    "chat-1",
+  );
+
+  assert.deepEqual(next, {
+    "workspace:A": { mode: "draft" },
+    "workspace:A-alias": { mode: "draft" },
+    "workspace:B": { mode: "session", sessionId: "chat-1" },
+    "workspace:C": { mode: "session", sessionId: "chat-2" },
+    "workspace:D": { mode: "draft" },
+  });
+  // The destination's prior view must not be cleared by the purge (setSessionView
+  // overwrites it), and unrelated scopes must keep their exact view objects.
+  assert.equal(next["workspace:C"], panelViewByScope["workspace:C"]);
+  assert.equal(next["workspace:D"], panelViewByScope["workspace:D"]);
+});
+
+test("clearSessionViewsForSession returns the original ref when no other scope points at the chat", () => {
+  const panelViewByScope = {
+    "workspace:B": { mode: "session", sessionId: "chat-2" },
+    "workspace:C": { mode: "draft" },
+  } satisfies Record<string, { mode: "draft" } | { mode: "session"; sessionId: string }>;
+
+  const next = clearSessionViewsForSession(panelViewByScope, "chat-1", "workspace:B");
 
   assert.equal(next, panelViewByScope);
 });
