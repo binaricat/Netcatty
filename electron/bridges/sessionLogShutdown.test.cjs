@@ -83,6 +83,51 @@ test("unresponsive and destroyed renderers do not strand quit or leak listeners"
   assert.equal(ipcMain.listenerCount("app:session-logs-finalized"), 0);
 });
 
+test("unavailable finalize IPC returns immediately without scheduling timers or sending", async (t) => {
+  const timer = t.mock.method(globalThis, "setTimeout");
+  const ipcMain = new EventEmitter();
+  const send = t.mock.fn();
+  const on = t.mock.method(ipcMain, "on");
+  for (const unavailableIpc of [undefined, null, {}, { on() {} }, { removeListener() {} }, { on: true, removeListener() {} }, { on() {}, removeListener: true }]) {
+    assert.equal(await finalizeSessionLogs({ send }, { ipcMain: unavailableIpc }), false);
+  }
+  for (const webContents of [undefined, null, {}, { send: true }]) {
+    assert.equal(await finalizeSessionLogs(webContents, { ipcMain }), false);
+  }
+  assert.equal(timer.mock.callCount(), 0);
+  assert.equal(on.mock.callCount(), 0);
+  assert.equal(send.mock.callCount(), 0);
+});
+
+for (const failure of ["registration", "send", "cleanup"]) {
+  test(`finalize IPC ${failure} errors do not reject or leave a pending timeout`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const warn = t.mock.method(console, "warn", () => {});
+    const ipcMain = new EventEmitter();
+    const webContents = { send() { throw new Error("send failed"); } };
+    if (failure === "registration") {
+      ipcMain.on = (channel, listener) => {
+        EventEmitter.prototype.on.call(ipcMain, channel, listener);
+        throw new Error("registration failed");
+      };
+    } else if (failure === "cleanup") {
+      ipcMain.removeListener = (channel, listener) => {
+        EventEmitter.prototype.removeListener.call(ipcMain, channel, listener);
+        throw new Error("cleanup failed");
+      };
+    }
+    let result;
+    const pending = finalizeSessionLogs(webContents, { ipcMain }).then((success) => { result = success; });
+    await tick();
+    assert.equal(result, false, "failed setup must finish before the timeout");
+    await pending;
+    assert.equal(ipcMain.listenerCount("app:session-logs-finalized"), 0);
+    assert.equal(warn.mock.callCount(), 1);
+    t.mock.timers.tick(5000);
+    assert.equal(warn.mock.callCount(), 1, "the cleared timeout must not run after finalization");
+  });
+}
+
 test("tray quit finalizes only after the dirty guard accepts and waits before quitting", async () => {
   const h = renderer();
   let finishCapture;
