@@ -12,14 +12,26 @@ let fanoutExitImpl = null;
 const attachPopupAuthorizations = new Map();
 const pendingAttachRestores = new Set();
 
-function registerAttachPopupAuthorization(token, sessionId, webContentsId) {
+function registerAttachPopupAuthorization(token, sessionId, webContentsId, options = {}) {
   if (!token || !sessionId || typeof webContentsId !== "number") return false;
   attachPopupAuthorizations.set(token, {
     sessionId,
     webContentsId,
     closePrepared: false,
+    // A user tab moved into the popup: the popup, not the hidden home tab,
+    // keeps the backend alive while it is open.
+    ownsLifetime: options?.ownsLifetime === true,
   });
   return true;
+}
+
+/** webContentsId of a moved-tab popup that should inherit sessionId if its home dies. */
+function getLifetimeHeirWebContentsId(sessionId) {
+  if (!sessionId) return null;
+  for (const grant of attachPopupAuthorizations.values()) {
+    if (grant.ownsLifetime && grant.sessionId === sessionId) return grant.webContentsId;
+  }
+  return null;
 }
 
 function validateAttachPopupAuthorization(token, sessionId, webContentsId) {
@@ -130,6 +142,7 @@ module.exports = {
   validateAttachPopupAuthorization,
   markAttachPopupClosePrepared,
   isAttachPopupClosePrepared,
+  getLifetimeHeirWebContentsId,
   releaseAttachPopupAuthorization,
   releaseAttachedSessionState,
   setRestoreAttachedSessionOutput,

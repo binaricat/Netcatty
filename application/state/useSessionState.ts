@@ -583,6 +583,16 @@ export const useSessionState = ({
     return newSession.id;
   }, [setActiveTabId]);
 
+  const setSessionPoppedOut = useCallback((sessionId: string, poppedOut: boolean) => {
+    setSessions(prev => prev.map((s) => {
+      if (s.id !== sessionId) return s;
+      if (poppedOut) return { ...s, hiddenFromTabs: true, poppedOut: true };
+      if (!s.poppedOut) return s;
+      const { hiddenFromTabs: _hidden, poppedOut: _poppedOut, ...rest } = s;
+      return rest;
+    }));
+  }, []);
+
   const updateSessionStatus = useCallback((sessionId: string, status: TerminalSession['status']) => {
     setSessions(prev => updateRestoredSessionStatusState(prev, sessionId, status));
   }, []);
@@ -1568,6 +1578,7 @@ export const useSessionState = ({
     closeWorkspace,
     updateSessionStatus,
     updateSessionFontSize,
+    setSessionPoppedOut,
     clearSessionFontSizeOverride,
     createWorkspaceWithHosts,
     createWorkspaceFromTargets,

@@ -1,6 +1,6 @@
 "use strict";
 
-const { releaseAttachedSessionState } = require("./terminalAttachRestore.cjs");
+const { getLifetimeHeirWebContentsId, releaseAttachedSessionState } = require("./terminalAttachRestore.cjs");
 
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
@@ -678,6 +678,12 @@ function createTerminalWorkerManager(options = {}) {
     const closeOwnedSessions = () => {
       for (const [ownedId, owner] of [...rendererSessionOwners]) {
         if (owner !== contents || rendererSessionOwners.get(ownedId) !== contents) continue;
+        // A tab moved into its own window outlives the window it came from.
+        const heirId = getLifetimeHeirWebContentsId(ownedId);
+        if (heirId !== contents.id && isLiveWebContentsId(heirId)) {
+          trackRendererSessionOwner(ownedId, { rendererOwned: true, webContentsId: heirId });
+          continue;
+        }
         // Use the normal close path for pending boots, output/mirror cleanup,
         // and reference-counted SSH/SFTP transport release in the worker.
         // Lifetime teardown closes both an active boot and a queued replacement.

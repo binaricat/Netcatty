@@ -90,6 +90,8 @@ function createTerminalPopupWindowApi(ctx) {
         ? payload.attachSessionId
         : null;
       const attachAuthorization = attachSessionId ? randomUUID() : null;
+      // "Move Tab to New Window": the popup owns the session until it hands it back.
+      const ownsSessionLifetime = Boolean(attachSessionId && payload?.moveSession === true);
       if (attachSessionId) {
         const existingPopupId = attachSessionPopups.get(attachSessionId);
         const existing = existingPopupId ? terminalPopupWindows.get(existingPopupId) : null;
@@ -170,7 +172,11 @@ function createTerminalPopupWindowApi(ctx) {
         lifecycleReleased = true;
         if (closePreparationTimer) clearTimeout(closePreparationTimer);
         terminalPopupWindows.delete(popupId);
-        if (attachSessionId && attachSessionPopups.get(attachSessionId) === popupId) {
+        const home = sourceWindow || mainWindow;
+        // A moved tab whose source window is gone has nowhere to return to; skip
+        // the restore so the popup's lifetime ownership closes the session.
+        const homeGone = ownsSessionLifetime && !isLiveWindow(home);
+        if (attachSessionId && attachSessionPopups.get(attachSessionId) === popupId && !homeGone) {
           attachSessionPopups.delete(attachSessionId);
           // Window may be destroyed before React cleanup runs; always restore
           // the display route from the main-process lifecycle.
@@ -185,6 +191,17 @@ function createTerminalPopupWindowApi(ctx) {
           }
         }
         releaseAttachPopupAuthorization(attachAuthorization);
+        if (attachSessionPopups.get(attachSessionId) === popupId) attachSessionPopups.delete(attachSessionId);
+        if (attachSessionId) {
+          // Lets a tab moved into this popup reappear in the window it came from.
+          try {
+            if (isLiveWindow(home)) {
+              home.webContents.send("netcatty:terminal-popup:attach-closed", { sessionId: attachSessionId });
+            }
+          } catch {
+            // ignore destroyed home window
+          }
+        }
         unregisterAppContentWindow(win);
         notifyAppContentWindowClosed(win);
       };
@@ -195,6 +212,7 @@ function createTerminalPopupWindowApi(ctx) {
           attachAuthorization,
           attachSessionId,
           win.webContents.id,
+          { ownsLifetime: ownsSessionLifetime },
         );
       }
       registerAppContentWindow(win);

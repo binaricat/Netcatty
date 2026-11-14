@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { TerminalSession } from "../domain/models";
-import { copySessionToNewWindowWithCurrentShellImpl } from "./app/AppHandlers";
+import { copySessionToNewWindowWithCurrentShellImpl, moveSessionToNewWindowImpl } from "./app/AppHandlers";
 
 const sourceSession = (overrides: Partial<TerminalSession> = {}): TerminalSession => ({
   id: "session-1",
@@ -186,4 +186,62 @@ test("copySessionToNewWindowWithCurrentShellImpl shows an error when the bridge 
 
   assert.equal(result, false);
   assert.deepEqual(errors, ["Could not open"]);
+});
+
+const moveCtx = (openTerminalPopup: ((payload: Record<string, unknown>) => Promise<unknown>) | undefined) => {
+  const calls: unknown[][] = [];
+  const errors: string[] = [];
+  const getCtx = () => ({
+    netcattyBridge: { get: () => (openTerminalPopup ? { openTerminalPopup } : {}) },
+    sessions: [sourceSession({ id: "other" }), sourceSession()],
+    setActiveTabId: (id: string) => calls.push(["active", id]),
+    setSessionPoppedOut: (id: string, poppedOut: boolean) => calls.push(["poppedOut", id, poppedOut]),
+    t: (key: string) => key,
+    toast: { error: (message: string) => errors.push(message) },
+  });
+  return { calls, errors, getCtx };
+};
+
+test("moveSessionToNewWindowImpl hides the tab and attaches a popup to the same live session", async () => {
+  const payloads: Record<string, unknown>[] = [];
+  const { calls, errors, getCtx } = moveCtx(async (payload) => {
+    payloads.push(payload);
+    return { success: true };
+  });
+
+  assert.equal(await moveSessionToNewWindowImpl(getCtx, "session-1"), true);
+  assert.deepEqual(calls, [["poppedOut", "session-1", true], ["active", "other"]]);
+  assert.equal(payloads[0].attachSessionId, "session-1");
+  assert.equal(payloads[0].moveSession, true);
+  assert.deepEqual(errors, []);
+});
+
+test("moveSessionToNewWindowImpl restores the tab when the popup fails to open", async () => {
+  const { calls, errors, getCtx } = moveCtx(async () => ({ success: false, error: "boom" }));
+
+  assert.equal(await moveSessionToNewWindowImpl(getCtx, "session-1"), false);
+  assert.deepEqual(calls.slice(-2), [["poppedOut", "session-1", false], ["active", "session-1"]]);
+  assert.deepEqual(errors, ["boom"]);
+});
+
+test("moveSessionToNewWindowImpl ignores tabs without a live backend", async () => {
+  const { calls, getCtx } = moveCtx(async () => ({ success: true }));
+  const ctx = getCtx();
+  const result = await moveSessionToNewWindowImpl(
+    () => ({ ...ctx, sessions: [sourceSession({ status: "disconnected" })] }),
+    "session-1",
+  );
+  assert.equal(result, false);
+  assert.deepEqual(calls, []);
+});
+
+test("moveSessionToNewWindowImpl ignores workspace panes", async () => {
+  const { calls, getCtx } = moveCtx(async () => ({ success: true }));
+  const ctx = getCtx();
+  const result = await moveSessionToNewWindowImpl(
+    () => ({ ...ctx, sessions: [sourceSession({ workspaceId: "ws-1" })] }),
+    "session-1",
+  );
+  assert.equal(result, false);
+  assert.deepEqual(calls, []);
 });

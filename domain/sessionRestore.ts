@@ -521,7 +521,10 @@ export function buildSessionRestorePayload(input: BuildSessionRestorePayloadInpu
     // would leak the supposedly ephemeral host metadata into restore storage.
     // Silent MCP sessions are likewise excluded — they exist for the duration
     // of an AI task, not as a user-intended workspace to bring back on launch.
-    sessions: input.sessions.filter((session) => !session.ephemeralHost && !session.hiddenFromTabs).map(restoreSession),
+    // Tabs moved to their own window are still user tabs and restore normally.
+    sessions: input.sessions
+      .filter((session) => !session.ephemeralHost && (!session.hiddenFromTabs || session.poppedOut))
+      .map(restoreSession),
     workspaces: input.workspaces,
   });
 }

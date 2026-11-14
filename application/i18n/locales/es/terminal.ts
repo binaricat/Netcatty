@@ -746,6 +746,8 @@ export const esTerminalMessages: Messages = {
   'tabs.duplicateSession': 'Duplicar sesión',
   'tabs.copyTabToNewWindow': 'Copiar pestaña a una nueva ventana',
   'tabs.copyTabToNewWindowFailed': 'No se pudo abrir la pestaña en una nueva ventana',
+  'tabs.moveTabToNewWindow': 'Mover pestaña a una nueva ventana',
+  'tabs.moveTabToNewWindowFailed': 'No se pudo mover la pestaña a una nueva ventana',
   'tabs.closeOthers': 'Cerrar las demás',
   'tabs.closeToLeft': 'Cerrar pestañas a la izquierda',
   'tabs.closeToRight': 'Cerrar pestañas a la derecha',

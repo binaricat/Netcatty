@@ -729,6 +729,11 @@ function createPreloadApi(ctx) {
     ipcRenderer.on("netcatty:terminal-popup:prepare-close", handler);
     return () => ipcRenderer.removeListener("netcatty:terminal-popup:prepare-close", handler);
   },
+  onTerminalPopupAttachClosed: (cb) => {
+    const handler = (_event, payload) => cb?.(payload);
+    ipcRenderer.on("netcatty:terminal-popup:attach-closed", handler);
+    return () => ipcRenderer.removeListener("netcatty:terminal-popup:attach-closed", handler);
+  },
   onTerminalSessionApplySnapshot: (cb) => {
     const handler = (_event, payload) => {
       Promise.resolve().then(() => cb?.(payload)).then(

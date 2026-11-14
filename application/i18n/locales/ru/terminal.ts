@@ -759,6 +759,8 @@ export const ruTerminalMessages: Messages = {
   'tabs.duplicateSession': 'Дублировать сессию',
   'tabs.copyTabToNewWindow': 'Копировать вкладку в новое окно',
   'tabs.copyTabToNewWindowFailed': 'Не удалось открыть вкладку в новом окне',
+  'tabs.moveTabToNewWindow': 'Переместить вкладку в новое окно',
+  'tabs.moveTabToNewWindowFailed': 'Не удалось переместить вкладку в новое окно',
   'tabs.closeOthers': 'Закрыть остальные',
   'tabs.closeToLeft': 'Закрыть вкладки слева',
   'tabs.closeToRight': 'Закрыть вкладки справа',
