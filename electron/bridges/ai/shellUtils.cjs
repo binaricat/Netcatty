@@ -101,6 +101,12 @@ const OH_MY_ZSH_YS_HOST_LINE_PATTERN = /^#\s+[^\s@]+\s+@\s+[^\s]+(?:\s+[^\n\r]+)
 // within the path so partially entered commands do not count as idle prompts.
 const ALPINE_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~(?:\/[^#$\n\r]*)?|\/[^#$\n\r]*)[#$]$/;
 
+// Default macOS bash PS1 `\h:\W \u\$` (also seen after `sudo -i`),
+// e.g. `ChrisdeMacBook-Air:~ root#`. Pure shape only; no shellKind gate.
+// Require a username after the path so Alpine `host:~#` / `host:/path#`
+// stay separate; the hostname excludes `@` so POSIX `user@host:...` stays separate.
+const MACOS_SUDO_ROOT_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~|\/|[^\s:#$]+)\s+[A-Za-z0-9_.-]+[#$]$/;
+
 // Powerlevel10k / similar Unicode prompt-ending ❯ (U+276F). Common idle forms:
 // `~ ❯`, `~/path ❯`, `/tmp ❯`, short-dir `proj ❯`, optional `user@host `
 // prefix (`alice@host ~ ❯`). Require a non-empty prefix and whitespace before
@@ -139,6 +145,7 @@ function isDefaultPosixPromptLine(line) {
     POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     PAREN_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ALPINE_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    MACOS_SUDO_ROOT_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ZSH_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     POWERLEVEL10K_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN.test(withoutEnvPrefix)
