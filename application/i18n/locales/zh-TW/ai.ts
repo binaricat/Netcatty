@@ -39,6 +39,15 @@ export const zhTWAiMessages: Messages = {
   'ai.providers.noApiKey': '未設定 API Key',
   'ai.providers.configure': '設定',
   'ai.providers.remove': '移除',
+  'ai.providers.headers': '自訂 HTTP 請求標頭',
+  'ai.providers.headers.help': '為此服務新增選用請求標頭。內容會隱藏顯示，並在儲存時加密。',
+  'ai.providers.headers.name': '請求標頭名稱',
+  'ai.providers.headers.value': '請求標頭內容',
+  'ai.providers.headers.add': '新增請求標頭',
+  'ai.providers.headers.remove': '刪除請求標頭',
+  'ai.providers.headers.invalid': '請填寫有效且不重複的請求標頭。Content-Length 和 Transfer-Encoding 由應用程式自動設定。',
+  'ai.providers.headers.loadError': '無法解鎖已儲存的請求標頭。請取消編輯，解鎖系統鑰匙圈後重試。',
+  'ai.providers.headers.saveError': '無法安全儲存。請確認系統鑰匙圈可用後重試。',
   'ai.providers.name': '顯示名稱',
   'ai.providers.name.placeholder': '例如 我的供應商',
   'ai.providers.style': '協定風格',
@@ -385,8 +394,8 @@ export const zhTWAiMessages: Messages = {
   "ai.privacy.cidrs.description": "每行一個 IPv4 或 IPv6 CIDR。留空則僅使用內建規則。",
   "ai.privacy.patterns": "自訂正規表示式",
   "ai.privacy.patterns.description": "每行一個相容 RE2 的模式，不含 / 分隔符號或旗標。不支援或不安全的模式會遭拒絕。",
-  "ai.privacy.connectionScope": "預留位置在同一個受管對話或外部 MCP 連線內保持穩定。只有同一範圍內的 Netcatty 受管工具呼叫才能還原原始值。",
-  "ai.privacy.reconnect": "套用變更後，請建立新的受管對話並重新連接外部 MCP 用戶端。現有對話和連線不得重複使用預留位置。",
+  "ai.privacy.connectionScope": "佔位符在同一個受管對話或外部 MCP 連線內保持穩定。只有同一範圍內的 Netcatty 受管工具呼叫才能還原原始值。",
+  "ai.privacy.reconnect": "套用變更後，請建立新的受管對話並重新連接外部 MCP 用戶端。現有對話和連線不得重複使用佔位符。",
   "ai.privacy.apply": "套用",
   "ai.privacy.applying": "正在套用...",
   "ai.privacy.applied": "AI 隱私設定已套用。請建立新的受管對話並重新連接外部 MCP 用戶端。",
@@ -657,7 +666,7 @@ export const zhTWAiMessages: Messages = {
   'ai.chatHistory.messageCap.unit': '則訊息',
 
   // AI Error
-  'ai.codex.bridgeError': 'Codex 主程序處理器尚未載入。請完全重新啟動 Netcatty 或重新啟動 Electron 開發程序，然後重試。',
+  'ai.codex.bridgeError': 'Codex 主行程處理器尚未載入。請完全重新啟動 Netcatty 或重新啟動 Electron 開發行程，然後重試。',
 
   // AI Web Search
   'ai.webSearch.title': '網路搜尋',
