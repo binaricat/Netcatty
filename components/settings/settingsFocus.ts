@@ -4,12 +4,15 @@ const HIGHLIGHT_CLASS = "settings-search-highlight";
 const HIGHLIGHT_MS = 1600;
 /** Keep focused anchors slightly below the top of the settings content pane. */
 const SCROLL_TOP_PADDING_PX = 24;
+/** Allow 200ms at the default retry delay for lazy tab / sub-tab mounts. */
+const FALLBACK_AFTER_ATTEMPTS = 5;
 
 export type SettingsFocusTarget = {
   tab: string;
   aiSubTab?: string;
   syncSubTab?: string;
   anchorId: string;
+  fallbackAnchorId?: string;
 };
 
 let focusGeneration = 0;
@@ -28,6 +31,18 @@ function isAnchorVisible(el: HTMLElement): boolean {
   const style = window.getComputedStyle(el);
   if (style.display === "none" || style.visibility === "hidden") return false;
   return el.getClientRects().length > 0;
+}
+
+function findVisibleAnchor(anchorId: string): HTMLElement | undefined {
+  const candidates = [
+    document.getElementById(settingsAnchorDomId(anchorId)),
+    ...Array.from(
+      document.querySelectorAll<HTMLElement>(
+        `[data-settings-anchor="${CSS.escape(anchorId)}"]`,
+      ),
+    ),
+  ].filter((node): node is HTMLElement => Boolean(node));
+  return candidates.find((node) => isAnchorVisible(node));
 }
 
 function focusAnchorElement(el: HTMLElement): void {
@@ -103,15 +118,16 @@ export function scrollSettingsAnchorIntoView(
 /**
  * Scroll the settings content pane to a catalog anchor and briefly highlight it.
  * Retries to cover lazy tab mounts / nested sub-tab switches.
+ * After a short mount window, use a visible parent fallback for gated rows.
  */
 export function focusSettingsAnchor(
   anchorId: string,
-  options?: { attempts?: number; delayMs?: number },
+  options?: { attempts?: number; delayMs?: number; fallbackAnchorId?: string },
 ): Promise<boolean> {
   const attempts = options?.attempts ?? 40;
   const delayMs = options?.delayMs ?? 50;
   const generation = ++focusGeneration;
-  let remaining = attempts;
+  let attempt = 0;
 
   return new Promise((resolve) => {
     const finish = (ok: boolean) => {
@@ -125,20 +141,13 @@ export function focusSettingsAnchor(
         return;
       }
 
-      const domId = settingsAnchorDomId(anchorId);
-      const candidates = [
-        document.getElementById(domId),
-        ...Array.from(
-          document.querySelectorAll<HTMLElement>(
-            `[data-settings-anchor="${CSS.escape(anchorId)}"]`,
-          ),
-        ),
-      ].filter((node): node is HTMLElement => Boolean(node));
-
-      const el = candidates.find((node) => isAnchorVisible(node));
+      attempt += 1;
+      let el = findVisibleAnchor(anchorId);
+      if (!el && options?.fallbackAnchorId && attempt >= Math.min(FALLBACK_AFTER_ATTEMPTS, attempts)) {
+        el = findVisibleAnchor(options.fallbackAnchorId);
+      }
       if (!el) {
-        remaining -= 1;
-        if (remaining > 0) {
+        if (attempt < attempts) {
           window.setTimeout(tryFocus, delayMs);
           return;
         }

@@ -93,6 +93,7 @@ export function SettingsSearchControl({
       aiSubTab: hit.entry.aiSubTab,
       syncSubTab: hit.entry.syncSubTab,
       anchorId: hit.entry.id,
+      fallbackAnchorId: hit.entry.fallbackAnchorId,
     });
     collapseSearch(false);
   };
