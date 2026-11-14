@@ -938,9 +938,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         return;
       }
 
-      // A boot that never reached "connected" has nothing worth capturing, and
-      // the teardown below awaits terminal drain plus serialization before it
-      // closes anything. Cancel the pending backend boot after giving an immediate
+      // Never-connected logs are captured at explicit session close, including
+      // empty buffers. Runtime cleanup alone must not end an open log.
+      // Cancel the pending backend boot after giving an immediate
       // remount a chance to replace this generation, instead of letting it
       // finish against a pane that is already gone. Attached popups never own
       // the backend session (skip closeSession) but still sync-dispose xterm.
