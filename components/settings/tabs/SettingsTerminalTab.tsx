@@ -814,6 +814,7 @@ function SettingsTerminalTab(props: {
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-side-panel-auto-open-pane"
           label={t("settings.terminal.sidePanel.autoOpenPane")}
           description={t("settings.terminal.sidePanel.autoOpenPane.desc")}
         >
@@ -841,6 +842,7 @@ function SettingsTerminalTab(props: {
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-local-shell-side-panel-auto-open-pane"
           label={t("settings.terminal.localShellSidePanel.autoOpenPane")}
           description={t("settings.terminal.localShellSidePanel.autoOpenPane.desc")}
         >
@@ -945,6 +947,7 @@ function SettingsTerminalTab(props: {
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-local-shell-start-dir"
           label={t("settings.terminal.localShell.startDir")}
           description={t("settings.terminal.localShell.startDir.desc")}
         >
@@ -1048,6 +1051,7 @@ function SettingsTerminalTab(props: {
           />
         </SettingRow>
         <SettingRow
+          anchorId="terminal-keepalive-count-max"
           label={t("settings.terminal.connection.keepaliveCountMax")}
           description={t("settings.terminal.connection.keepaliveCountMax.desc")}
         >
@@ -1082,6 +1086,7 @@ function SettingsTerminalTab(props: {
       <SectionHeader title={t("settings.terminal.section.serverStats")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
+          anchorId="terminal-host-info-bar-show"
           label={t("settings.terminal.hostInfoBar.show")}
           description={t("settings.terminal.hostInfoBar.show.desc")}
         >
@@ -1092,6 +1097,7 @@ function SettingsTerminalTab(props: {
         </SettingRow>
         {terminalSettings.showHostInfoBar && (
           <SettingRow
+            anchorId="terminal-host-info-bar-title-mode"
             label={t("settings.terminal.hostInfoBar.titleMode")}
             description={t("settings.terminal.hostInfoBar.titleMode.desc")}
           >
@@ -1119,6 +1125,7 @@ function SettingsTerminalTab(props: {
 
         {terminalSettings.showServerStats && (
           <SettingRow
+            anchorId="terminal-server-stats-refresh-interval"
             label={t("settings.terminal.serverStats.refreshInterval")}
             description={t("settings.terminal.serverStats.refreshInterval.desc")}
           >
@@ -1145,6 +1152,7 @@ function SettingsTerminalTab(props: {
       <SectionHeader title={t("settings.terminal.section.systemManager")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
+          anchorId="terminal-system-manager-process-refresh-interval"
           label={t("settings.terminal.systemManager.processRefreshInterval")}
           description={t("settings.terminal.systemManager.processRefreshInterval.desc")}
         >
@@ -1166,6 +1174,7 @@ function SettingsTerminalTab(props: {
           </div>
         </SettingRow>
         <SettingRow
+          anchorId="terminal-system-manager-tmux-refresh-interval"
           label={t("settings.terminal.systemManager.tmuxRefreshInterval")}
           description={t("settings.terminal.systemManager.tmuxRefreshInterval.desc")}
         >
@@ -1187,6 +1196,7 @@ function SettingsTerminalTab(props: {
           </div>
         </SettingRow>
         <SettingRow
+          anchorId="terminal-system-manager-docker-list-refresh-interval"
           label={t("settings.terminal.systemManager.dockerListRefreshInterval")}
           description={t("settings.terminal.systemManager.dockerListRefreshInterval.desc")}
         >
@@ -1208,6 +1218,7 @@ function SettingsTerminalTab(props: {
           </div>
         </SettingRow>
         <SettingRow
+          anchorId="terminal-system-manager-docker-stats-refresh-interval"
           label={t("settings.terminal.systemManager.dockerStatsRefreshInterval")}
           description={t("settings.terminal.systemManager.dockerStatsRefreshInterval.desc")}
         >
@@ -1249,6 +1260,7 @@ function SettingsTerminalTab(props: {
           />
         </SettingRow>
         <SettingRow
+          anchorId="terminal-hibernate-hidden-tabs"
           label={t("settings.terminal.rendering.hibernateHiddenTabs")}
           description={t("settings.terminal.rendering.hibernateHiddenTabs.desc")}
         >
@@ -1260,6 +1272,7 @@ function SettingsTerminalTab(props: {
         {terminalSettings.hibernateHiddenTabs && (
           <>
           <SettingRow
+            anchorId="terminal-hibernate-hidden-tabs-delay"
             label={t("settings.terminal.rendering.hibernateHiddenTabsDelay")}
             description={t("settings.terminal.rendering.hibernateHiddenTabsDelay.desc")}
           >
@@ -1281,6 +1294,7 @@ function SettingsTerminalTab(props: {
             </div>
           </SettingRow>
           <SettingRow
+            anchorId="terminal-hibernate-skip-alt-screen"
             label={t("settings.terminal.rendering.hibernateSkipAltScreen")}
             description={t("settings.terminal.rendering.hibernateSkipAltScreen.desc")}
           >
@@ -1290,6 +1304,7 @@ function SettingsTerminalTab(props: {
             />
           </SettingRow>
           <SettingRow
+            anchorId="terminal-hibernate-keep-renderer-count"
             label={t("settings.terminal.rendering.hibernateKeepRendererCount")}
             description={t("settings.terminal.rendering.hibernateKeepRendererCount.desc")}
           >
@@ -1308,6 +1323,7 @@ function SettingsTerminalTab(props: {
             />
           </SettingRow>
           <SettingRow
+            anchorId="terminal-hibernate-replay-chunk-bytes"
             label={t("settings.terminal.rendering.hibernateReplayChunkBytes")}
             description={t("settings.terminal.rendering.hibernateReplayChunkBytes.desc")}
           >
@@ -1327,6 +1343,7 @@ function SettingsTerminalTab(props: {
             />
           </SettingRow>
           <SettingRow
+            anchorId="terminal-hibernate-prefer-wasm-serialize"
             label={t("settings.terminal.rendering.hibernatePreferWasmSerialize")}
             description={t("settings.terminal.rendering.hibernatePreferWasmSerialize.desc")}
           >
@@ -1354,6 +1371,7 @@ function SettingsTerminalTab(props: {
         {terminalSettings.inlineImagesEnabled && (
           <>
           <SettingRow
+            anchorId="terminal-inline-images-kitty"
             label={t("settings.terminal.inlineImages.kitty")}
             description={t("settings.terminal.inlineImages.kitty.desc")}
           >
@@ -1363,6 +1381,7 @@ function SettingsTerminalTab(props: {
             />
           </SettingRow>
           <SettingRow
+            anchorId="terminal-inline-images-sixel"
             label={t("settings.terminal.inlineImages.sixel")}
             description={t("settings.terminal.inlineImages.sixel.desc")}
           >
@@ -1372,6 +1391,7 @@ function SettingsTerminalTab(props: {
             />
           </SettingRow>
           <SettingRow
+            anchorId="terminal-inline-images-iip"
             label={t("settings.terminal.inlineImages.iip")}
             description={t("settings.terminal.inlineImages.iip.desc")}
           >
@@ -1381,6 +1401,7 @@ function SettingsTerminalTab(props: {
             />
           </SettingRow>
           <SettingRow
+            anchorId="terminal-inline-images-storage-limit"
             label={t("settings.terminal.inlineImages.storageLimit")}
             description={t("settings.terminal.inlineImages.storageLimit.desc")}
           >
@@ -1406,6 +1427,7 @@ function SettingsTerminalTab(props: {
             </div>
           </SettingRow>
           <SettingRow
+            anchorId="terminal-inline-images-max-megapixels"
             label={t("settings.terminal.inlineImages.maxMegapixels")}
             description={t("settings.terminal.inlineImages.maxMegapixels.desc")}
           >
@@ -1431,6 +1453,7 @@ function SettingsTerminalTab(props: {
             </div>
           </SettingRow>
           <SettingRow
+            anchorId="terminal-inline-images-sequence-limit"
             label={t("settings.terminal.inlineImages.sequenceLimit")}
             description={t("settings.terminal.inlineImages.sequenceLimit.desc")}
           >
@@ -1496,6 +1519,7 @@ function SettingsTerminalTab(props: {
           />
         </SettingRow>
         <SettingRow
+          anchorId="terminal-autocomplete-ghost-text"
           label={t("settings.terminal.autocomplete.ghostText")}
           description={t("settings.terminal.autocomplete.ghostText.desc")}
         >
@@ -1506,6 +1530,7 @@ function SettingsTerminalTab(props: {
           />
         </SettingRow>
         <SettingRow
+          anchorId="terminal-autocomplete-popup-menu"
           label={t("settings.terminal.autocomplete.popupMenu")}
           description={t("settings.terminal.autocomplete.popupMenu.desc")}
         >
@@ -1516,6 +1541,7 @@ function SettingsTerminalTab(props: {
           />
         </SettingRow>
         <SettingRow
+          anchorId="terminal-autocomplete-history-scope"
           label={t("settings.terminal.autocomplete.historyScope")}
           description={t("settings.terminal.autocomplete.historyScope.desc")}
         >

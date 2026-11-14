@@ -50,11 +50,12 @@ function formatSyntheticEcho(command) {
 }
 
 // Default PowerShell prompt (e.g. `PS C:\Users\alice>`, `PS>`,
-// `PS /home/alice>`). Anchored so command output that merely starts with
-// `PS` (e.g. `PSO>`) doesn't match. The `\S` after `\s+` rejects literal
+// `PS /home/alice>`), with optional Enter-PSSession / remoting `[host]: `
+// and debug `[DBG]: ` prefixes. Anchored so command output that merely
+// starts with `PS` (e.g. `PSO>`) doesn't match. The `\S` after `\s+` rejects literal
 // `"PS >"` (which the default prompt never emits) so a script that prints
 // such a line can't trick prompt-driven shell-kind selection.
-const POWERSHELL_PROMPT_PATTERN = /^PS(?:\s+\S.*)?>$/;
+const POWERSHELL_PROMPT_PATTERN = /^(?:\[[^\]\r\n]+\]: )*PS(?:\s+\S.*)?>$/;
 
 // Default cmd.exe prompt (e.g. `C:\>`, `C:\Users\alice>`, `D:\data>`).
 // Drive letter + optional path + `>`. Rejects `C: >` (space before `>`) and

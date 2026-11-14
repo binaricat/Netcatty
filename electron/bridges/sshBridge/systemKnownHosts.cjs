@@ -41,6 +41,8 @@
  * leaves the Mosh stats bar empty (graceful degradation), never weakens
  * security.
  */
+const { extractCertificatePublicKey } = require("../../../domain/sshPublicKey.shared.cjs");
+
 function createSystemKnownHostsApi(ctx) {
   const { fs, path, os, crypto, log } = ctx;
 
@@ -64,7 +66,7 @@ function createSystemKnownHostsApi(ctx) {
     }
     if (blob.length === 0) return "";
     return stripFingerprintPadding(
-      crypto.createHash("sha256").update(blob).digest("base64"),
+      crypto.createHash("sha256").update(extractCertificatePublicKey(blob) || blob).digest("base64"),
     );
   };
 
@@ -176,7 +178,7 @@ function createSystemKnownHostsApi(ctx) {
 
   // Parse one known_hosts line into { revoked, certAuthority, hostField,
   // keyType, fingerprint } or null when it is a comment / blank / malformed.
-  // The fingerprint is the SHA-256 of the line's key blob.
+  // Certificates pin their underlying key, just like the live verifier.
   const parseKnownHostsLine = (rawLine) => {
     const line = String(rawLine || "").trim();
     if (!line || line.startsWith("#")) return null;

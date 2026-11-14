@@ -75,6 +75,7 @@ import {
   getSessionConnectionLabel,
 } from '../../domain/sessionTabTitle';
 import { cleanupClosedTerminalSessions } from './aiStateSnapshots';
+import { captureClosingTerminalSessions } from './terminalSessionCloseCapture';
 import { syncSessionHostLabels } from '../../domain/syncSessionHostLabels';
 import { useVaultSnapshotField } from './vaultSnapshotStore';
 
@@ -603,6 +604,7 @@ export const useSessionState = ({
     const closedIds = sessionsRef.current
       .filter(session => session.workspaceId === workspaceId)
       .map(session => session.id);
+    captureClosingTerminalSessions(closedIds);
     cleanupClosedTerminalSessions(closedIds);
     for (const sessionId of closedIds) {
       sessionPresentationStore.clearSession(sessionId);
@@ -626,6 +628,7 @@ export const useSessionState = ({
   }, [setActiveTabId]);
 
   const closeSessions = useCallback((sessionIds: string[]) => {
+    captureClosingTerminalSessions(sessionIds);
     cleanupClosedTerminalSessions(sessionIds);
     for (const sessionId of sessionIds) {
       sessionPresentationStore.clearSession(sessionId);

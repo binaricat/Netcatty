@@ -7,6 +7,19 @@ const fs = require("node:fs");
 const { stageRendererFileToTemp } = require("./stageUploadFile.cjs");
 
 function createPreloadApi(ctx) {
+  const sessionLogFinalizers = new Set();
+  let pendingSessionLogFinalization = null;
+  ctx.ipcRenderer?.on?.("app:finalize-session-logs", async (_event, { requestId }) => {
+    const pending = pendingSessionLogFinalization ??= Promise.allSettled(
+      [...sessionLogFinalizers].map((finalize) => Promise.resolve().then(finalize)),
+    );
+    const results = await pending;
+    if (pendingSessionLogFinalization === pending) pendingSessionLogFinalization = null;
+    ctx.ipcRenderer.send("app:session-logs-finalized", {
+      requestId,
+      success: results.every((result) => result.status === "fulfilled"),
+    });
+  });
   const terminalDataBacklog = ctx.terminalDataBacklog || null;
   const displayDataListeners = ctx.displayDataListeners || new Map();
   const closedTerminalDataSessions = ctx.closedTerminalDataSessions || null;
@@ -1544,6 +1557,10 @@ function createPreloadApi(ctx) {
   reportDirtyEditorsResult: (hasDirty, reason, options) => ipcRenderer.send("app:dirty-editors-result", {
     hasDirty, reason, requestId: options?.requestId, pending: options?.pending === true,
   }),
+  onFinalizeSessionLogs: (finalize) => {
+    sessionLogFinalizers.add(finalize);
+    return () => sessionLogFinalizers.delete(finalize);
+  },
   
   // Port Forwarding API
   startPortForward: async (options) => {
