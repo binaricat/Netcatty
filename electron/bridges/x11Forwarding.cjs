@@ -2,6 +2,7 @@ const net = require("node:net");
 const fs = require("node:fs");
 const { Transform } = require("node:stream");
 const { execFileSync } = require("node:child_process");
+const { createX11FdGuard } = require("./x11FdGuard.cjs");
 
 const X11_PORT_BASE = 6000;
 const MIT_MAGIC_COOKIE_PROTOCOL = "MIT-MAGIC-COOKIE-1";
@@ -253,11 +254,16 @@ function attachX11Forwarding(conn, options = {}) {
     const target = resolveX11DisplaySpec(display, { platform });
     const localSocket = createSocket();
     let acceptedChannel = null;
+    let guard = null;
     let settled = false;
 
     const cleanup = () => {
       if (acceptedChannel) destroyStream(acceptedChannel);
       destroyStream(localSocket);
+      if (guard) {
+        destroyStream(guard.toServer);
+        destroyStream(guard.toClient);
+      }
     };
 
     localSocket.once("connect", () => {
@@ -275,15 +281,19 @@ function attachX11Forwarding(conn, options = {}) {
       localSocket.on("error", () => cleanup());
       acceptedChannel.on("close", () => destroyStream(localSocket));
       localSocket.on("close", () => destroyStream(acceptedChannel));
+      guard = createX11FdGuard({ hiddenExtensions: options.hiddenExtensions, logger });
+      guard.toServer.on("error", cleanup);
+      guard.toClient.on("error", cleanup);
       const realCookie = resolveLocalAuthCookie();
       if (realCookie && fakeCookie) {
         acceptedChannel
           .pipe(createX11AuthTransform({ fakeCookie, realCookie }))
-          .pipe(localSocket)
-          .pipe(acceptedChannel);
+          .pipe(guard.toServer)
+          .pipe(localSocket);
       } else {
-        acceptedChannel.pipe(localSocket).pipe(acceptedChannel);
+        acceptedChannel.pipe(guard.toServer).pipe(localSocket);
       }
+      localSocket.pipe(guard.toClient).pipe(acceptedChannel);
     });
 
     localSocket.once("error", (err) => {

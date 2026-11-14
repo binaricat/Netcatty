@@ -34,6 +34,7 @@ export interface ProxyPanelProps {
     onClearProxy: () => void;
     onBack: () => void;
     onCancel: () => void;
+    allowClear?: boolean;
     layout?: AsidePanelLayout;
 }
 
@@ -51,6 +52,7 @@ export const ProxyPanel: React.FC<ProxyPanelPropsWithResize> = ({
     onClearProxy,
     onBack,
     onCancel,
+    allowClear = true,
     layout = 'overlay',
     resizable,
     persistWidthStorageKey,
@@ -346,7 +348,7 @@ export const ProxyPanel: React.FC<ProxyPanelPropsWithResize> = ({
                     </>
                 )}
 
-                {(proxyConfig?.host || proxyConfig?.command || selectedProxyProfileId || directProxy) && (
+                {allowClear && (proxyConfig?.host || proxyConfig?.command || selectedProxyProfileId || directProxy) && (
                     <Button variant="ghost" className="w-full h-10 text-destructive" onClick={onClearProxy}>
                         <Trash2 size={14} className="mr-2" /> {t('hostDetails.proxyPanel.remove')}
                     </Button>

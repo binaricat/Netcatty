@@ -112,6 +112,46 @@ test("isDefaultPowerShellPromptLine matches default shapes and rejects look-alik
   assert.equal(isDefaultPowerShellPromptLine(null), false);
 });
 
+test("PowerShell prompt helpers recognize remoting and debug prefixes", () => {
+  for (const prompt of [
+    "[192.168.1.10]: PS C:\\Users\\Administrator\\Documents>",
+    "[SERVER01]: PS C:\\>",
+    "[host.example.com]: PS C:\\Windows\\System32>",
+    "[fe80::1]: PS C:\\>",
+    "[DBG]: PS C:\\Users\\alice>",
+    "[SERVER01]: [DBG]: PS C:\\>",
+  ]) {
+    assert.equal(isDefaultPowerShellPromptLine(prompt), true, prompt);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt, prompt);
+  }
+});
+
+test("PowerShell prompt helpers reject malformed remoting prefixes and look-alikes", () => {
+  for (const line of [
+    "[host] PS C:\\>",
+    "prefix [host]: PS C:\\>",
+    "[]: PS C:\\>",
+    "[ho]st]: PS C:\\>",
+    "[ho\rst]: PS C:\\>",
+    "[ho\nst]: PS C:\\>",
+    "[host]:PS C:\\>",
+    "[host]: PS >",
+    "PS >",
+    "PSO>",
+    "ZIPS>",
+    "",
+    null,
+  ]) {
+    assert.equal(isDefaultPowerShellPromptLine(line), false, String(line));
+    assert.equal(extractTrailingIdlePrompt(line), "", String(line));
+  }
+});
+
+test("extractTrailingIdlePrompt preserves trailing space on a remoting prompt", () => {
+  const prompt = "[192.168.1.10]: PS C:\\Users\\Administrator\\Documents> ";
+  assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt);
+});
+
 test("extracts a trailing cmd.exe idle prompt", () => {
   // Windows OpenSSH default shell is cmd.exe; without capturing `C:\...>`
   // AI exec cannot select the cmd wrapper when shellKind is still unset.
