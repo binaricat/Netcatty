@@ -194,6 +194,9 @@ export function sanitizePortForwardRuleForAgent(rule: PortForwardingRule): Recor
     error: rule.error,
     createdAt: rule.createdAt,
     lastUsedAt: rule.lastUsedAt,
+    // Multi-mapping rules expose every listener so agents can discover and
+    // round-trip them; scalar-only rules keep the legacy response shape.
+    ...(rule.mappings && rule.mappings.length > 0 ? { mappings: rule.mappings } : {}),
   };
 }
 

@@ -70,4 +70,39 @@ describe('portForwardingAgentOps', () => {
     assert.equal(rejectedDuplicate.ok, false);
     if (!rejectedDuplicate.ok) assert.match(rejectedDuplicate.error, /does not support port forwarding/i);
   });
+
+  it('patches the first mapping when a scalar update hits a multi-mapping rule', () => {
+    const rule: PortForwardingRule = {
+      id: 'rule-multi', label: 'Multi', type: 'local', localPort: 8080, bindAddress: '127.0.0.1',
+      remoteHost: '127.0.0.1', remotePort: 80, hostId: 'host-1', status: 'active', createdAt: 10,
+      mappings: [
+        { localPort: 8080, remotePort: 80 },
+        { localPort: 8081, remotePort: 81 },
+      ],
+    };
+    const updated = updatePortForwardingRule([rule], [host], 'rule-multi', { localPort: 9080 });
+    assert.equal(updated.ok, true);
+    if (!updated.ok) return;
+    assert.deepEqual(updated.value.rule.mappings, [
+      { localPort: 9080, remotePort: 80 },
+      { localPort: 8081, remotePort: 81 },
+    ]);
+    assert.equal(updated.value.rule.localPort, 9080);
+    // The connection change is detected so callers restart the tunnel.
+    assert.equal(updated.value.rule.status, 'inactive');
+
+    const remoteUpdated = updatePortForwardingRule([rule], [host], 'rule-multi', { remotePort: 8000 });
+    assert.equal(remoteUpdated.ok, true);
+    if (remoteUpdated.ok) {
+      assert.deepEqual(remoteUpdated.value.rule.mappings, [
+        { localPort: 8080, remotePort: 8000 },
+        { localPort: 8081, remotePort: 81 },
+      ]);
+    }
+
+    // A scalar update colliding with a sibling's local port is rejected.
+    const duplicate = updatePortForwardingRule([rule], [host], 'rule-multi', { localPort: 8081 });
+    assert.equal(duplicate.ok, false);
+    if (!duplicate.ok) assert.match(duplicate.error, /Duplicate local port 8081/);
+  });
 });

@@ -83,6 +83,9 @@ function toRuntimeRecord(tunnelId, tunnel, revision = runtimeRevision) {
     phase: resolveRuntimePhase(tunnel),
     ...(tunnel?.error ? { error: tunnel.error } : {}),
     cleanupRequired: Boolean(tunnel?.cleanupFailed),
+    ...(tunnel?.mappingId !== undefined
+      ? { mappingId: tunnel.mappingId, localPort: tunnel.localPort, remotePort: tunnel.remotePort }
+      : {}),
     revision,
     updatedAt: tunnel?.updatedAt || Date.now(),
   };
@@ -283,6 +286,19 @@ function isLocalBindFailure(err) {
     || message.includes("address already in use")
     || message.includes("permission denied")
     || message.includes("listen");
+}
+
+// Per-mapping bind failures let the remaining mappings start (OpenSSH
+// ExitOnForwardFailure=no). Local/dynamic binds fail with EADDR*/listen
+// errors; remote binds fail the tcpip-forward request on the server, which
+// ssh2 reports as "Unable to bind to <addr>:<port>".
+function isMappingBindFailure(type, err) {
+  if (isLocalBindFailure(err)) return true;
+  if (type === "remote") {
+    const message = String(err?.message || "").toLowerCase();
+    return message.includes("unable to bind");
+  }
+  return false;
 }
 
 function destroyTunnelPipeEndpoint(endpoint) {
@@ -659,7 +675,9 @@ function bindPortForwardChannels({
           portForwardingTunnels.set(tunnelId, tunnelState);
           sendStatus?.("active");
           settled = true;
-          resolve({ tunnelId, success: true });
+          // Report the already-emitted status with the result: per-mapping
+          // listeners installed by callers miss the earlier "active" event.
+          resolve({ tunnelId, success: true, status: "active" });
         } catch (regErr) {
           try { server.close(); } catch { /* ignore */ }
           fail(regErr);
@@ -772,7 +790,9 @@ function bindPortForwardChannels({
             portForwardingTunnels.set(tunnelId, tunnelState);
             sendStatus?.("active");
             settled = true;
-            resolve({ tunnelId, success: true });
+            // Report the already-emitted status with the result: per-mapping
+            // listeners installed by callers miss the earlier "active" event.
+            resolve({ tunnelId, success: true, status: "active" });
           } catch (regErr) {
             try { conn.removeListener("tcp connection", onTcpConnection); } catch { /* ignore */ }
             const transport = tunnelState.connRef || null;
@@ -880,7 +900,10 @@ function bindPortForwardChannels({
           portForwardingTunnels.set(tunnelId, tunnelState);
           sendStatus?.("active");
           settled = true;
-          resolve({ tunnelId, success: true, localPort: assignedPort });
+          // Report the already-emitted status and the OS-assigned port with
+          // the result: per-mapping listeners installed by callers miss the
+          // earlier "active" event, and dynamic rules may bind port 0.
+          resolve({ tunnelId, success: true, status: "active", localPort: assignedPort });
         } catch (regErr) {
           try { server.close(); } catch { /* ignore */ }
           fail(regErr);
@@ -932,6 +955,9 @@ function publishTunnelStatus(tunnelId, tunnel, status, error = null) {
       status,
       error,
       ruleId: tunnel.ruleId,
+      ...(tunnel.mappingId !== undefined
+        ? { mappingId: tunnel.mappingId, localPort: tunnel.localPort, remotePort: tunnel.remotePort }
+        : {}),
       epoch: runtimeEvent.epoch,
       revision: runtimeEvent.revision,
       cleanupRequired: Boolean(tunnel.cleanupFailed),
@@ -1128,12 +1154,12 @@ const { safeSend } = require("./ipcUtils.cjs");
 async function startPortForward(event, payload) {
   const {
     ruleId,
-    tunnelId,
+    tunnelId: baseTunnelId,
     type, // 'local' | 'remote' | 'dynamic'
-    localPort,
+    localPort: requestedLocalPort,
     bindAddress = '127.0.0.1',
     remoteHost,
-    remotePort,
+    remotePort: requestedRemotePort,
     hostname,
     hostId,
     port = 22,
@@ -1172,12 +1198,43 @@ async function startPortForward(event, payload) {
   // channel on that same TCP connection. Dial a private SSH session instead.
   const allowTransportReuse = reuseTransport !== false && payload.singleChannelSsh !== true;
 
+  // Multi-mapping rules start one tunnel per mapping, all sharing ruleId,
+  // type, bindAddress and remoteHost — the pool then shares one SSH
+  // transport across them exactly as it does across independent rules.
+  const requestedMappings = Array.isArray(payload.mappings) && payload.mappings.length > 0
+    ? payload.mappings.map((mapping) => ({
+      localPort: Number(mapping?.localPort),
+      remotePort: mapping?.remotePort === undefined ? undefined : Number(mapping.remotePort),
+    }))
+    : null;
+  if (type === 'dynamic' && requestedMappings) {
+    throw new Error('mappings are not supported for dynamic forwarding.');
+  }
+  const startMappings = requestedMappings || [{
+    localPort: requestedLocalPort,
+    remotePort: requestedRemotePort,
+  }];
+
+  const startSingleMapping = async (mapping, mappingIndex) => {
+  const mappingId = mapping.localPort;
+  const tunnelId = requestedMappings ? `${baseTunnelId}-${mappingId}` : baseTunnelId;
+  const localPort = mapping.localPort;
+  const remotePort = mapping.remotePort;
+
   // The rule is the durable identity; tunnelId is only one renderer's
   // attempt. Reuse an in-flight/live tunnel so two windows cannot create
   // duplicate listeners for the same saved rule.
   if (ruleId) {
     for (const [existingTunnelId, existingTunnel] of portForwardingTunnels) {
       if (existingTunnel.ruleId !== ruleId) continue;
+      // Tunnels without a mappingId predate per-mapping tracking: they can
+      // only serve single-mapping requests. Otherwise the mapping's localPort
+      // must match exactly.
+      if (existingTunnel.mappingId === undefined) {
+        if (requestedMappings) continue;
+      } else if (existingTunnel.mappingId !== mappingId) {
+        continue;
+      }
       if (existingTunnel.cancelled) {
         if (existingTunnel.cleanupFailed) {
           return {
@@ -1235,6 +1292,11 @@ async function startPortForward(event, payload) {
     subscribers: new Map([[sender.id, sender]]),
     cancelled: false,
     sshTransportManaged: false,
+    // Per-mapping identity for multi-mapping rules; undefined keeps
+    // single-mapping runtime records byte-identical to the legacy shape.
+    ...(requestedMappings
+      ? { mappingId, localPort, remotePort }
+      : {}),
   };
   const sendStatus = (status, error = null) => {
     publishTunnelStatus(tunnelId, tunnelState, status, error);
@@ -1332,12 +1394,13 @@ async function startPortForward(event, payload) {
       }
       return sharedResult;
     } catch (shareErr) {
-      // Local bind failures (port in use, permission) cannot be fixed by a new
-      // SSH dial — re-auth would only re-prompt MFA. Only retry dedicated when
-      // the shared transport itself looks unusable.
-      if (isLocalBindFailure(shareErr)) {
+      // Bind failures cannot be fixed by a new SSH dial — re-auth would only
+      // re-prompt MFA. That covers local EADDR*/listen errors and the server
+      // rejecting a remote listen ("Unable to bind"); only retry dedicated
+      // when the shared transport itself looks unusable.
+      if (isMappingBindFailure(type, shareErr)) {
         console.warn(
-          `[PortForward] Shared transport bind failed for ${hostname} (local bind); not retrying dedicated:`,
+          `[PortForward] Shared transport bind failed for ${hostname} (bind failure); not retrying dedicated:`,
           shareErr?.message || shareErr,
         );
         try { detachSharedTransportLifecycle(tunnelState); } catch { /* ignore */ }
@@ -1796,6 +1859,63 @@ async function startPortForward(event, payload) {
 
     conn.connect(connectOpts);
   });
+  };
+
+  // Single-mapping starts keep the legacy result shape (and error-throwing
+  // behavior for auth/connection failures) untouched.
+  if (!requestedMappings) {
+    return startSingleMapping(startMappings[0], 0);
+  }
+
+  // Multi-mapping: mappings are independent (OpenSSH ExitOnForwardFailure=no
+  // semantics). A bind-like failure (port already in use, permissions) lets
+  // the remaining mappings start; an SSH-level failure (auth, unreachable,
+  // cancel) aborts the rest since they would fail identically.
+  const mappingResults = [];
+  let firstFailure = null;
+  let cancelled = false;
+  for (let mappingIndex = 0; mappingIndex < startMappings.length; mappingIndex++) {
+    const mapping = startMappings[mappingIndex];
+    let result;
+    try {
+      result = await startSingleMapping(mapping, mappingIndex);
+    } catch (err) {
+      result = { success: false, error: err?.message || String(err) };
+    }
+    const mappingResult = {
+      mappingId: mapping.localPort,
+      localPort: mapping.localPort,
+      ...(mapping.remotePort === undefined ? {} : { remotePort: mapping.remotePort }),
+      tunnelId: result?.tunnelId,
+      success: result?.success === true,
+      ...(result?.reused ? { reused: true } : {}),
+      ...(result?.cancelled ? { cancelled: true } : {}),
+      ...(result?.blockedByCleanup ? { blockedByCleanup: true } : {}),
+      ...(result?.status ? { status: result.status } : {}),
+      ...(result?.error ? { error: result.error } : {}),
+    };
+    mappingResults.push(mappingResult);
+    if (!mappingResult.success) {
+      if (firstFailure === null) {
+        firstFailure = mappingResult.error || 'Port forward failed.';
+      }
+      const bindLikeFailure = !mappingResult.cancelled
+        && isMappingBindFailure(type, { message: mappingResult.error || '' });
+      if (mappingResult.cancelled) cancelled = true;
+      if (!bindLikeFailure) break;
+    }
+  }
+  const first = mappingResults[0] || {};
+  const allSucceeded = mappingResults.length === startMappings.length
+    && mappingResults.every((entry) => entry.success);
+  return {
+    tunnelId: first.tunnelId || baseTunnelId,
+    success: allSucceeded,
+    ...(firstFailure ? { error: firstFailure } : {}),
+    ...(cancelled ? { cancelled: true } : {}),
+    ...(first.reused && allSucceeded ? { reused: true } : {}),
+    mappings: mappingResults,
+  };
 }
 
 /**
