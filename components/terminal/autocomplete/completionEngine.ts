@@ -21,6 +21,7 @@ import {
   getAvailableSpecs,
   normalizeCommandName,
   resolveNames,
+  type FigHostOs,
   type FigSpec,
   type FigSubcommand,
   type FigOption,
@@ -246,7 +247,7 @@ export async function getCompletions(
   options: {
     hostId?: string;
     hostGroup?: string;
-    os?: "linux" | "windows" | "macos";
+    os?: FigHostOs;
     maxResults?: number;
     /** Session ID for remote path completion */
     sessionId?: string;
@@ -288,7 +289,7 @@ export async function getCompletions(
 
   const ctx = parseCommandLine(input);
   const specResult: SpecSuggestionResult = ctx.commandName && ctx.wordIndex >= 0
-    ? await getSpecSuggestions(ctx)
+    ? await getSpecSuggestions(ctx, options.os)
     : { suggestions: [] };
   const suggestions: CompletionSuggestion[] = [];
   const seenSuggestionTexts = new Set<string>();
@@ -473,18 +474,21 @@ function normalizeHistoryPathPrefix(token: string): string {
 /**
  * Get suggestions from Fig spec + return resolved args (for path detection reuse).
  */
-async function getSpecSuggestions(ctx: CompletionContext): Promise<SpecSuggestionResult> {
+async function getSpecSuggestions(
+  ctx: CompletionContext,
+  os?: FigHostOs,
+): Promise<SpecSuggestionResult> {
   const suggestions: CompletionSuggestion[] = [];
 
-  const specAvailable = await hasSpec(ctx.commandName);
+  const specAvailable = await hasSpec(ctx.commandName, os);
   if (!specAvailable) {
     if (ctx.wordIndex === 0 && ctx.currentWord.length >= 1) {
-      return { suggestions: await getCommandNameSuggestions(ctx.currentWord) };
+      return { suggestions: await getCommandNameSuggestions(ctx.currentWord, os) };
     }
     return { suggestions };
   }
 
-  const spec = await loadSpec(ctx.commandName);
+  const spec = await loadSpec(ctx.commandName, os);
   if (!spec) return { suggestions };
 
   // If we're still typing the command name (partial match, not yet complete)
@@ -580,6 +584,15 @@ async function getSpecSuggestions(ctx: CompletionContext): Promise<SpecSuggestio
     appendOptionSuggestions(suggestions, ctx, currentToken, resolved.fallbackOptions);
   }
 
+  const hasAttachedArgumentSuggestions = appendAttachedOptionalArgumentSuggestions(
+    suggestions,
+    ctx,
+    resolved.options,
+  );
+  if (!hasAttachedArgumentSuggestions) {
+    appendAttachedOptionalArgumentSuggestions(suggestions, ctx, resolved.fallbackOptions);
+  }
+
   // Suggest argument values from suggestions in the spec
   if (resolved.args) {
     const args = Array.isArray(resolved.args) ? resolved.args : [resolved.args];
@@ -609,11 +622,14 @@ async function getSpecSuggestions(ctx: CompletionContext): Promise<SpecSuggestio
 }
 
 /**
- * Get command name suggestions by matching against available specs.
- * Uses the already-imported getAvailableSpecs directly (no dynamic self-import).
+ * Get command name suggestions by matching against the specs available for the
+ * target OS, so a platform-specific command is never suggested to another one.
  */
-async function getCommandNameSuggestions(prefix: string): Promise<CompletionSuggestion[]> {
-  const specs = await getAvailableSpecs();
+async function getCommandNameSuggestions(
+  prefix: string,
+  os?: FigHostOs,
+): Promise<CompletionSuggestion[]> {
+  const specs = await getAvailableSpecs(os);
   const lower = prefix.toLowerCase();
   const suggestions: CompletionSuggestion[] = [];
 
@@ -729,6 +745,55 @@ function mergeOptionLists(
   }
 
   return merged;
+}
+
+function appendAttachedOptionalArgumentSuggestions(
+  suggestions: CompletionSuggestion[],
+  ctx: CompletionContext,
+  options: FigOption[] | undefined,
+): boolean {
+  const currentToken = ctx.currentWord;
+  if (!options?.length || !currentToken) return false;
+
+  // An existing option name takes precedence over interpreting a short option
+  // prefix as an attached value.
+  if (options.some((option) => resolveNames(option.name).some((name) => name.startsWith(currentToken)))) {
+    return false;
+  }
+
+  let added = false;
+  for (const option of options) {
+    if (option.netcattyOptionalArgAttached !== true) continue;
+    const args = Array.isArray(option.args) ? option.args : option.args ? [option.args] : [];
+    const arg = args[0];
+    if (!arg?.isOptional || !arg.suggestions?.length) continue;
+
+    for (const name of resolveNames(option.name)) {
+      const shortOption = /^-[a-zA-Z0-9]$/.test(name);
+      const longOption = name.startsWith("--") && name.length > 2;
+      if (!shortOption && !longOption) continue;
+      const prefix = longOption ? `${name}=` : name;
+      if (!currentToken.startsWith(prefix)) continue;
+      const typedValue = currentToken.slice(prefix.length);
+      if (shortOption && !typedValue) continue;
+
+      for (const suggestion of arg.suggestions) {
+        const value = typeof suggestion === "string"
+          ? suggestion
+          : (Array.isArray(suggestion.name) ? suggestion.name[0] : suggestion.name);
+        if (!value.startsWith(typedValue) || value === typedValue) continue;
+        suggestions.push({
+          text: rebuildCommand(ctx.tokens, ctx.wordIndex, `${prefix}${value}`),
+          displayText: value,
+          description: typeof suggestion === "string" ? undefined : suggestion.description,
+          source: "arg",
+          score: 600,
+        });
+        added = true;
+      }
+    }
+  }
+  return added;
 }
 
 function appendOptionSuggestions(

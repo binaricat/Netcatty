@@ -390,13 +390,12 @@ export function useTerminalAutocomplete(
    */
   const typedBufferReliableRef = useRef<boolean>(true);
 
-  // Preload common specs on first mount (only if enabled)
+  // Warm the cache for this session's target OS, including when it changes.
   useEffect(() => {
     if (settings.enabled) {
-      preloadCommonSpecs();
+      preloadCommonSpecs(hostOs);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [settings.enabled, hostOs]);
 
   // Local Terminal: seed autocomplete history from ~/.zsh_history (etc.) once
   // per stable hostId so prefix suggestions match Ghostty-style histfile recall

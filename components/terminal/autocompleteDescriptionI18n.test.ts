@@ -217,6 +217,12 @@ test("committed zh-TW dictionary keeps zh-CN keys and Taiwan terminology", () =>
   assert.equal(traditional["Publishes a package to the npm registry"], "將軟體包釋出到 npm 軟體源");
   assert.equal(simplified["Show source"], "显示来源");
   assert.equal(traditional["Show source"], "顯示來源");
+  // git worktree is a working tree (工作树), not a workspace (工作区); the
+  // two Docker capability options must use one term.
+  assert.equal(simplified["Manage multiple working trees"], "管理多个工作树");
+  assert.equal(simplified["Remove a working tree"], "移除工作树");
+  assert.equal(simplified["Add Linux capabilities"], "添加 Linux 能力");
+  assert.equal(simplified["Drop Linux capabilities"], "丢弃 Linux 能力");
   const pathspecNulKey =
     "Only meaningful with --pathspec-from-file. Pathspec elements are separated wi";
   assert.equal(

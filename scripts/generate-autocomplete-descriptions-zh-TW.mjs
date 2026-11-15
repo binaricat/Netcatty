@@ -39,6 +39,34 @@ function printfTokens(text) {
 // Private-use mark so s2twp cannot rewrite 进程 before it becomes 行程.
 const PROCESS_MARK = "\u{E000}";
 
+// s2twp picks the wrong Taiwan term where the zh-CN phrase is ambiguous at a
+// word boundary or where OpenCC only has a mainland form. Each entry is a
+// literal post-conversion fix, applied after the 进程 placeholder is restored.
+const TAIWAN_PHRASE_FIXES = [
+  ["擴充套件正規表示式", "擴充正規表示式"],
+  ["擴充套件 E3", "擴充 E3"],
+  ["欄位連線", "欄位聯結"],
+  ["二進位制資料", "二進位資料"],
+  ["后綴", "字尾"],
+  ["執行檔例項", "執行檔"],
+  ["屏幕", "螢幕"],
+  ["文本", "文字"],
+  // Number bases and generic “extended” wording; Taiwan drops 制 and 套件.
+  ["進位制", "進位"],
+  ["擴充套件", "擴充"],
+  // “instance” in the cloud-resource sense.
+  ["例項", "執行個體"],
+  // Side effects of the generic 擴充套件→擴充 rule.
+  ["擴充頭", "擴充標頭"],
+  ["ALPN TLS 擴充", "ALPN TLS 擴充功能"],
+  ["NPN TLS 擴充", "NPN TLS 擴充功能"],
+  ["數據", "資料"],
+  // “extension” as a noun keeps 功能; the generic rule above only covers the
+  // adjective “extended” (擴充屬性, 擴充正規表示式, 擴充標頭).
+  ["Apple 的擴充", "Apple 的擴充功能"],
+  ["（Apple 擴充）", "（Apple 擴充功能）"],
+];
+
 /**
  * OpenCC s2twp resolves a few ambiguous simplified characters to the wrong
  * Traditional form in command descriptions. Each pattern below is limited to
@@ -73,11 +101,16 @@ function toTraditionalTaiwan(text, convert) {
     throw new Error("description already contains the 进程 placeholder");
   }
   const marked = text.replaceAll("进程", PROCESS_MARK);
-  const converted = applyPostConversionCorrections(convert(marked));
+  const converted = convert(marked);
   if (converted.includes("进程") || (marked.includes(PROCESS_MARK) && !converted.includes(PROCESS_MARK))) {
     throw new Error("OpenCC dropped the 进程 placeholder");
   }
-  return converted.replaceAll(PROCESS_MARK, "行程");
+  let traditional = converted.replaceAll(PROCESS_MARK, "行程");
+  for (const [from, to] of TAIWAN_PHRASE_FIXES) {
+    traditional = traditional.replaceAll(from, to);
+  }
+  // Phrase fixes run first so 后綴→字尾 is not broken by the 后→後 rule.
+  return applyPostConversionCorrections(traditional);
 }
 
 const source = JSON.parse(fs.readFileSync(sourcePath, "utf8"));

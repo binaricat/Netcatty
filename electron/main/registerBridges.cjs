@@ -20,6 +20,85 @@ function filterExcludedFigSpecs(specNames) {
   return specNames.filter((name) => !isExcludedFigSpec(name));
 }
 
+// The bundled specs for these commands describe the native BSD tools. Their
+// root-level local overrides describe GNU tools, so they must not replace the
+// bundled versions in macOS sessions.
+const macBundledFigSpecs = new Set(["base64", "date"]);
+
+async function loadFigSpec(electronDir, commandName, hostOs) {
+  // The renderer supplies command names; never allow them to escape the specs
+  // directory or resolve to excluded packages.
+  if (typeof commandName !== "string" || !commandName || commandName.startsWith("/") ||
+      commandName.startsWith("\\") || commandName.includes("..") ||
+      !/^[@a-zA-Z0-9._/+-]+$/.test(commandName) || isExcludedFigSpec(commandName)) return null;
+
+  const fs = require("fs");
+  const path = require("path");
+  const { pathToFileURL } = require("url");
+  const specDir = path.join(electronDir, "specs");
+  const platformSpec = hostOs === "macos" ? path.join(specDir, "macos", `${commandName}.js`) : null;
+  const localSpec = path.join(specDir, `${commandName}.js`);
+  const bundledSpec = path.join(electronDir, "..", "node_modules", "@withfig", "autocomplete", "build", `${commandName}.js`);
+  const specFile = platformSpec && fs.existsSync(platformSpec)
+    ? platformSpec
+    : !(hostOs === "macos" && macBundledFigSpecs.has(commandName)) && fs.existsSync(localSpec)
+      ? localSpec
+      : bundledSpec;
+  if (!fs.existsSync(specFile)) return null;
+  const mod = await import(pathToFileURL(specFile).href);
+  const spec = mod.default?.default ?? mod.default ?? null;
+  // IPC requires serializable data — JSON round-trip strips functions/symbols.
+  return spec ? JSON.parse(JSON.stringify(spec)) : null;
+}
+
+async function listFigSpecs(electronDir, hostOs) {
+  const fs = require("fs");
+  const path = require("path");
+  const mod = await import("@withfig/autocomplete");
+  const figSpecs = mod.default || [];
+  const specDir = path.join(electronDir, "specs");
+  const localNames = [];
+  // A macOS-only command must not appear in another session's command list:
+  // it would be suggested, then always load as null.
+  const dirs = hostOs === "macos" ? [specDir, path.join(specDir, "macos")] : [specDir];
+
+  // Every directory is optional and must be read independently.
+  for (const dir of dirs) {
+    try {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.name.endsWith(".js")) continue;
+        let isFile = entry.isFile();
+        if (entry.isSymbolicLink()) {
+          try { isFile = fs.statSync(path.join(dir, entry.name)).isFile(); } catch { /* dangling or inaccessible */ }
+        }
+        if (isFile) localNames.push(entry.name.slice(0, -3));
+      }
+    } catch { /* optional specs directory is unavailable */ }
+  }
+  return filterExcludedFigSpecs([...new Set([...figSpecs, ...localNames])]);
+}
+
+function registerFigSpecHandlers(ipcMain, electronDir) {
+  ipcMain.handle("netcatty:figspec:list", async (_event, hostOs) => {
+    try {
+      return await listFigSpecs(electronDir, hostOs);
+    } catch (err) {
+      console.warn("[Main] Failed to load fig spec list:", err?.message || err);
+      return [];
+    }
+  });
+  ipcMain.handle("netcatty:figspec:load", async (_event, commandName, hostOs) => {
+    try {
+      return await loadFigSpec(electronDir, commandName, hostOs);
+    } catch (err) {
+      // A broken spec module must not reject the renderer's invoke; completion
+      // degrades to "no suggestions" while the main log keeps the cause.
+      console.warn("[Main] Failed to load fig spec:", commandName, err?.message);
+      return null;
+    }
+  });
+}
+
 function waitForApplicationSpawn(child, requireCleanLauncherExit = false) {
   return new Promise((resolve, reject) => {
     const onSpawn = () => {
@@ -635,57 +714,8 @@ function createBridgeRegistrar(context) {
       }
     });
   
-    // Fig autocomplete spec loader — uses dynamic import() since @withfig/autocomplete is ESM
-    ipcMain.handle("netcatty:figspec:list", async () => {
-      try {
-        const fs = require("fs");
-        const mod = await import("@withfig/autocomplete");
-        const figSpecs = mod.default || [];
-        // Merge local specs (covers commands missing from @withfig/autocomplete)
-        const localSpecDir = path.join(electronDir, "specs");
-        let localNames = [];
-        try {
-          localNames = fs.readdirSync(localSpecDir)
-            .filter(f => f.endsWith(".js"))
-            .map(f => f.slice(0, -3));
-        } catch { /* no local specs dir */ }
-        const merged = filterExcludedFigSpecs([...new Set([...figSpecs, ...localNames])]);
-        return merged;
-      } catch (err) {
-        console.warn("[Main] Failed to load fig spec list:", err?.message || err);
-        return [];
-      }
-    });
-    ipcMain.handle("netcatty:figspec:load", async (_event, commandName) => {
-      try {
-        // Sanitize: reject absolute paths, path traversal, and non-spec characters
-        if (!commandName || commandName.startsWith("/") || commandName.startsWith("\\") ||
-            commandName.includes("..") || !/^[@a-zA-Z0-9._/+-]+$/.test(commandName)) return null;
-        if (isExcludedFigSpec(commandName)) return null;
-        const { pathToFileURL } = require("url");
-        const fs = require("fs");
-  
-        // Try local specs first (covers commands missing from @withfig/autocomplete)
-        const localSpec = path.join(electronDir, "specs", `${commandName}.js`);
-        if (fs.existsSync(localSpec)) {
-          const mod = await import(pathToFileURL(localSpec).href);
-          const spec = mod.default?.default ?? mod.default ?? null;
-          return spec ? JSON.parse(JSON.stringify(spec)) : null;
-        }
-  
-        // Fall back to @withfig/autocomplete
-        // Can't use `import("@withfig/autocomplete/build/...")` because the package's
-        // "exports" field restricts allowed import paths. Use file URL to bypass.
-        const specFile = path.join(electronDir, "..", "node_modules", "@withfig", "autocomplete", "build", `${commandName}.js`);
-        const mod = await import(pathToFileURL(specFile).href);
-        const spec = mod.default?.default ?? mod.default ?? null;
-        // IPC requires serializable data — JSON round-trip strips functions/symbols
-        return spec ? JSON.parse(JSON.stringify(spec)) : null;
-      } catch (err) {
-        console.warn("[Main] Failed to load fig spec:", commandName, err?.message);
-        return null;
-      }
-    });
+    // Fig specifications are shared by every terminal session.
+    registerFigSpecHandlers(ipcMain, electronDir);
   
     // Local directory listing for autocomplete (local terminal sessions)
     ipcMain.handle("netcatty:local:listdir", async (_event, payload) => {
@@ -1355,5 +1385,7 @@ module.exports = {
   createBridgeRegistrar,
   filterExcludedFigSpecs,
   isExcludedFigSpec,
+  loadFigSpec,
+  registerFigSpecHandlers,
   _waitForApplicationSpawnForTests: waitForApplicationSpawn,
 };

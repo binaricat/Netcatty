@@ -65,8 +65,9 @@ Total adopted: 177 unique English keys.
 - **awk**: the local macOS `awk` is BSD awk, while the spec also exposes
   gawk-specific options. The gawk manual confirms that `-c` is traditional
   compatibility mode (not POSIX), `-n` is `--non-decimal-data`, and `-t` is
-  `--lint-old` (not type checking). The zh-CN text follows the gawk manual;
-  `electron/specs/awk.js` itself is left unchanged.
+  `--lint-old` (not type checking). The zh-CN text follows the gawk manual, and
+  `electron/specs/awk.js` now carries matching English for `-n`, `-c` and `-t`
+  instead of the earlier Fig wording; the dictionary keys moved with the spec.
 - **sed**: the local macOS sed is BSD sed. Fig mixes BSD/Apple options
   (`-a`, `-I`, `-i`, `-l`) with GNU extensions (`e`, `F`, `v`, `z`) and shared
   options. In particular, BSD `-i` requires an extension while GNU `-i` treats
@@ -104,11 +105,11 @@ unique English strings.
 | --- | --- | --- |
 | awk | Assign a variable (var=value) | 赋值一个变量（var=value） |
 | awk | AWK program text (e.g. '{print $1}') | AWK 程序文本（例如 '{print $1}'） |
-| awk | Disable automatic input record splitting (gawk) | 识别输入数据中的八进制和十六进制值，请谨慎使用（gawk） |
+| awk | Recognize octal and hexadecimal values in input data (gawk) | 识别输入数据中的八进制和十六进制值，请谨慎使用（gawk） |
 | awk | Dump variables to file (gawk) | 将变量转储到文件（gawk） |
 | awk | e.g. ',' or '\t' | 例如 ',' 或 '\t' |
 | awk | Enable pretty-printed output | 启用美化（pretty-print）输出 |
-| awk | Enable type checking (gawk) | 对无法移植到原始 UNIX awk 的构造发出警告（gawk） |
+| awk | Warn about constructs not portable to the original Unix awk (gawk) | 对无法移植到原始 UNIX awk 的构造发出警告（gawk） |
 | awk | Include AWK source library | 包含 AWK 源库 |
 | awk | Input file(s) | 输入文件 |
 | awk | Load dynamic extension (gawk) | 加载动态扩展（gawk） |
@@ -119,7 +120,7 @@ unique English strings.
 | awk | Profile execution and write to file (gawk) | 分析执行情况并写入文件（gawk） |
 | awk | Read AWK program from file | 从文件读取 AWK 程序 |
 | awk | Read AWK program from file (like -f but disables command-line variable assignments) | 从文件读取 AWK 程序（类似 -f，但禁用命令行变量赋值） |
-| awk | Run in POSIX compatibility mode (gawk) | 以传统兼容模式运行，行为等同 Brian Kernighan 的 awk（gawk） |
+| awk | Run in traditional compatibility mode (gawk) | 以传统兼容模式运行，行为等同 Brian Kernighan 的 awk（gawk） |
 | awk | Sandbox mode — disable system(), I/O redirection (gawk) | 沙箱模式——禁用 system() 和 I/O 重定向（gawk） |
 | awk | Set field separator | 设置字段分隔符 |
 | awk | Specify AWK program text | 指定 AWK 程序文本 |
