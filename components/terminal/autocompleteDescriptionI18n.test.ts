@@ -209,6 +209,42 @@ test("committed zh-TW dictionary keeps zh-CN keys and Taiwan terminology", () =>
   assert.equal(traditional[SINCE], SINCE_TW);
   assert.equal(traditional[COMPRESSION_PROGRAM], "不根據歸檔字尾判斷壓縮程式");
 
+  // Semantic fixes: registry is a package source or image registry, not the
+  // Windows Registry; git --source prints a ref name, not source code.
+  assert.equal(simplified["Log in to a Docker registry"], "登录 Docker 镜像仓库");
+  assert.equal(traditional["Log in to a Docker registry"], "登入 Docker 映象倉庫");
+  assert.equal(simplified["Publishes a package to the npm registry"], "将软件包发布到 npm 软件源");
+  assert.equal(traditional["Publishes a package to the npm registry"], "將軟體包釋出到 npm 軟體源");
+  assert.equal(simplified["Show source"], "显示来源");
+  assert.equal(traditional["Show source"], "顯示來源");
+  const pathspecNulKey =
+    "Only meaningful with --pathspec-from-file. Pathspec elements are separated wi";
+  assert.equal(
+    simplified[pathspecNulKey],
+    "仅与 --pathspec-from-file 一起使用时有意义。路径规格元素以 NUL 字符分隔",
+  );
+  assert.match(traditional[pathspecNulKey], /NUL 字元/);
+
+  // OpenCC s2twp mis-resolves these ambiguous characters in command copy;
+  // the generator's correction table must keep them out of the dictionary.
+  for (const bad of ["隻", "髮", "錶", "複用", "后", "登錄檔", "註冊表"]) {
+    assert.equal(
+      Object.values(traditional).filter((value) => value.includes(bad)).length,
+      0,
+      `zh-TW still contains ${bad}`,
+    );
+  }
+  assert.equal(
+    Object.values(traditional).filter((value) => /(?<!合)併為/.test(value)).length,
+    0,
+    "zh-TW still contains 併為 where 並為 is required",
+  );
+  assert.equal(
+    Object.values(simplified).filter((value) => value.includes("注册表")).length,
+    0,
+    "zh-CN still contains 注册表 for a package/image registry",
+  );
+
   let processCount = 0;
   let tripCount = 0;
   for (const key of Object.keys(simplified)) {

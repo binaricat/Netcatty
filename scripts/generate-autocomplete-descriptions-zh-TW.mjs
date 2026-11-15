@@ -39,12 +39,41 @@ function printfTokens(text) {
 // Private-use mark so s2twp cannot rewrite 进程 before it becomes 行程.
 const PROCESS_MARK = "\u{E000}";
 
+/**
+ * OpenCC s2twp resolves a few ambiguous simplified characters to the wrong
+ * Traditional form in command descriptions. Each pattern below is limited to
+ * the sense these descriptions use; the committed-dictionary test asserts the
+ * bad forms never reach descriptions.zh-TW.json.
+ */
+const POST_CONVERSION_CORRECTIONS = [
+  // 隻 is a measure word (一隻鳥); these descriptions mean "only" (只).
+  [/隻/g, "只"],
+  // 髮 means hair; the source is 发送 (send).
+  [/髮/g, "發"],
+  // 錶 means a wristwatch; the source is 表现 (behave/appear).
+  [/錶/g, "表"],
+  // 复用 (reuse) is 復用; 複 stays for 複雜 and 複製.
+  [/複用/g, "復用"],
+  // "and/also" is 並為; 合併為 (merged into) keeps 併.
+  [/(?<!合)併為/g, "並為"],
+  // 后 is a queen; the source is 后 (after), which is 後 in Traditional.
+  [/后/g, "後"],
+];
+
+function applyPostConversionCorrections(text) {
+  let corrected = text;
+  for (const [pattern, replacement] of POST_CONVERSION_CORRECTIONS) {
+    corrected = corrected.replace(pattern, replacement);
+  }
+  return corrected;
+}
+
 function toTraditionalTaiwan(text, convert) {
   if (text.includes(PROCESS_MARK)) {
     throw new Error("description already contains the 进程 placeholder");
   }
   const marked = text.replaceAll("进程", PROCESS_MARK);
-  const converted = convert(marked);
+  const converted = applyPostConversionCorrections(convert(marked));
   if (converted.includes("进程") || (marked.includes(PROCESS_MARK) && !converted.includes(PROCESS_MARK))) {
     throw new Error("OpenCC dropped the 进程 placeholder");
   }
