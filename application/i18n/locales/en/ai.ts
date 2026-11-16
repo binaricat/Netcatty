@@ -69,6 +69,8 @@ export const enAiMessages: Messages = {
   'ai.providers.apiKey': 'API Key',
   'ai.providers.apiKey.placeholder': 'Enter API key',
   'ai.providers.apiKey.decrypting': 'Decrypting...',
+  'ai.providers.opencodeGo.help': 'Paste an OpenCode API key to use OpenCode Go. The base URL and model list are configured automatically.',
+  'ai.providers.opencodeGo.getKey': 'Get an API key',
   'ai.providers.baseUrl': 'Base URL',
   'ai.providers.baseUrl.anthropicHelp': 'Anthropic-compatible: host with or without /v1 (for example https://gateway.example or https://gateway.example/v1). Detection and chat both use /v1/models and /v1/messages.',
   'ai.providers.baseUrl.ollamaHelp': 'Local Ollama: http://localhost:11434/v1 (no API key). Ollama Cloud: https://ollama.com/v1 plus your cloud API key.',

@@ -41,6 +41,8 @@ export const ruAiMessages: Messages = {
   'ai.providers.apiKey': 'API-ключ',
   'ai.providers.apiKey.placeholder': 'Введите API-ключ',
   'ai.providers.apiKey.decrypting': 'Расшифровка...',
+  'ai.providers.opencodeGo.help': 'Вставьте API-ключ OpenCode, чтобы использовать OpenCode Go. Базовый URL и список моделей настроятся автоматически.',
+  'ai.providers.opencodeGo.getKey': 'Получить API-ключ',
   'ai.providers.baseUrl': 'Базовый URL',
   'ai.providers.baseUrl.anthropicHelp': 'Anthropic-совместимый: хост с /v1 или без (например https://gateway.example или https://gateway.example/v1). Проверка и чат используют /v1/models и /v1/messages.',
   'ai.providers.baseUrl.ollamaHelp': 'Локальный Ollama: http://localhost:11434/v1 (без API-ключа). Ollama Cloud: https://ollama.com/v1 и ключ Cloud.',

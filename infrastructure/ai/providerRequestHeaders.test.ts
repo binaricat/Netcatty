@@ -9,6 +9,7 @@ import {
 
 test("isOpencodeEndpoint matches opencode.ai hosts", () => {
   assert.equal(isOpencodeEndpoint("https://opencode.ai/zen/go/v1"), true);
+  assert.equal(isOpencodeEndpoint("https://opencode.ai/inference/go/openai/v1"), true);
   assert.equal(isOpencodeEndpoint("https://opencode.ai/zen/v1"), true);
   assert.equal(isOpencodeEndpoint("https://gateway.opencode.ai/v1"), true);
   assert.equal(isOpencodeEndpoint("https://opencode.ai"), true);

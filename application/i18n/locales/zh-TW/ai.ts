@@ -69,6 +69,8 @@ export const zhTWAiMessages: Messages = {
   'ai.providers.apiKey': 'API Key',
   'ai.providers.apiKey.placeholder': '輸入 API Key',
   'ai.providers.apiKey.decrypting': '解密中...',
+  'ai.providers.opencodeGo.help': '貼上 OpenCode API Key 即可使用 OpenCode Go，Base URL 與模型清單會自動設定。',
+  'ai.providers.opencodeGo.getKey': '取得 API Key',
   'ai.providers.baseUrl': 'Base URL',
   'ai.providers.baseUrl.anthropicHelp': 'Anthropic 相容：可填不帶或帶 /v1 的主機（例如 https://gateway.example 或 https://gateway.example/v1）。偵測與聊天都會請求 /v1/models、/v1/messages。',
   'ai.providers.baseUrl.ollamaHelp': '本機 Ollama：http://localhost:11434/v1（不需 API Key）。Ollama Cloud：https://ollama.com/v1，並填寫 Cloud API Key。',

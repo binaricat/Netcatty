@@ -7,6 +7,8 @@ configuration UI.
 
 - `anthropic.svg`, `openai.svg`, `google.svg`, `ollama.svg`, `openrouter.svg`,
   `custom.svg` — netcatty.
+- `opencode.svg` — OpenCode product mark, traced for monochrome UI display.
+  Brand logos remain the property of their respective owners.
 
 ## From [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Xiaomi_logo_(2021-).svg)
 

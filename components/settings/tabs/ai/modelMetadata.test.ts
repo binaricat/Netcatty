@@ -14,12 +14,14 @@ test("parseFetchedModels reads common context window fields from model list resp
         { id: "openrouter/model", name: "OpenRouter Model", context_length: 131072 },
         { id: "vercel/model", context_window: 262144 },
         { id: "custom/model", contextWindow: 65536 },
+        { id: "opencode-go/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", limit: { context: 1000000, output: 384000 } },
       ],
     }),
     [
       { id: "openrouter/model", name: "OpenRouter Model", contextWindow: 131072 },
       { id: "vercel/model", contextWindow: 262144 },
       { id: "custom/model", contextWindow: 65536 },
+      { id: "opencode-go/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", contextWindow: 1000000 },
     ],
   );
 });

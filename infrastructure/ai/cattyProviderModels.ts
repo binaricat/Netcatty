@@ -3,7 +3,7 @@ import { decryptField } from '../persistence/secureFieldAdapter';
 import { buildModelDiscoveryHeaders, resolveModelsDiscoveryEndpoint } from './modelDiscoveryHeaders';
 import { normalizeOllamaSdkBaseURL } from './ollamaCompatBaseUrl';
 import { buildProviderProbeUrl } from './providerConnectionProbe';
-import { sanitizeContextWindow } from './contextCompaction';
+import { readDiscoveredModelContextWindow } from './discoveredModelMetadata';
 import { PROVIDER_PRESETS, resolveProviderStyle, type ProviderConfig } from './types';
 import {
   buildProviderSeedModels,
@@ -95,13 +95,7 @@ function parseDiscoveredModels(parsed: unknown): ComposerPickerModel[] {
       if (!raw || typeof raw !== 'object') return null;
       const model = raw as Record<string, unknown>;
       if (typeof model.id !== 'string' || !model.id) return null;
-      const contextWindow = sanitizeContextWindow(
-        model.context_length
-          ?? model.context_window
-          ?? model.contextWindow
-          ?? model.context
-          ?? model.max_context_tokens,
-      );
+      const contextWindow = readDiscoveredModelContextWindow(model);
       return {
         id: model.id,
         name: typeof model.name === 'string' && model.name ? model.name : model.id,

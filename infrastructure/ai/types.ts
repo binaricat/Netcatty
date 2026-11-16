@@ -11,6 +11,7 @@ export type AIProviderId =
   | 'google'
   | 'ollama'
   | 'openrouter'
+  | 'opencode-go'
   | 'qwen'
   | 'deepseek'
   | 'kimi'
@@ -465,6 +466,42 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
   google: { name: 'Google AI', defaultBaseURL: 'https://generativelanguage.googleapis.com/v1beta' },
   ollama: { name: 'Ollama', defaultBaseURL: 'http://localhost:11434/v1', modelsEndpoint: '/models' },
   openrouter: { name: 'OpenRouter', defaultBaseURL: 'https://openrouter.ai/api/v1', modelsEndpoint: '/models' },
+  'opencode-go': {
+    name: 'OpenCode Go',
+    defaultBaseURL: 'https://opencode.ai/inference/go/openai/v1',
+    modelsEndpoint: '/models',
+    defaultModels: [
+      'deepseek-v4.1-flash',
+      'deepseek-v4-pro',
+      'glm-5.3',
+      'glm-5.3-flash',
+      'glm-5.2',
+      'kimi-k3',
+      'kimi-k3.1-pro',
+      'kimi-k2.7-code',
+      'qwen4-max',
+      'qwen3.8-max',
+      'qwen3.8-flash',
+      'qwen3.7-plus',
+      'minimax-m3',
+      'minimax-m3.1-flash',
+      'mimo-v2.6-pro',
+      'mimo-v2.6-flash',
+      'grok-4.7',
+      'gpt-5.6-luna',
+      'gpt-6-luna',
+      'claude-haiku-5-5',
+      'gemini-4-argon',
+      'longcat-2.0',
+      'step-5-preview',
+      'hy4',
+      'hy3',
+      'beam-free',
+      'iceman-contributor-free',
+      'longcat-2.5-free',
+      'hy4-flash-free',
+    ],
+  },
   qwen: {
     name: 'Qwen',
     defaultBaseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',

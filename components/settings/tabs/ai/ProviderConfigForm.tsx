@@ -16,6 +16,7 @@ import {
   type ProviderProbeHealth,
 } from "../../../../infrastructure/ai/providerConnectionProbe";
 import { encryptField, decryptField } from "../../../../infrastructure/persistence/secureFieldAdapter";
+import { OPENCODE_GO_PROVIDER_ID } from "../../../../infrastructure/ai/opencodeGo";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
@@ -605,6 +606,19 @@ export const ProviderConfigForm: React.FC<{
             </button>
           </div>
         </div>
+        {provider.providerId === OPENCODE_GO_PROVIDER_ID && (
+          <p className="text-[11px] text-muted-foreground/70">
+            {t('ai.providers.opencodeGo.help')}{' '}
+            <a
+              href="https://opencode.ai/console"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              {t('ai.providers.opencodeGo.getKey')}
+            </a>
+          </p>
+        )}
       </div>
 
       <ProviderHeadersEditor
