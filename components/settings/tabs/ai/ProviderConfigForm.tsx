@@ -372,7 +372,7 @@ export const ProviderConfigForm: React.FC<{
   }, [form.apiKey, customHeaders, form.skipTLSVerify, preset?.modelsEndpoint, provider.providerId, resolvedBaseURL, resolvedStyle, t]);
 
   const handleSave = useCallback(async () => {
-    if (isSaving || headersLoading || headersLoadError || !parsedHeaders.valid) return;
+    if (isSaving || (!fixedProtocol && (headersLoading || headersLoadError || !parsedHeaders.valid))) return;
     const cleanedParams: ProviderAdvancedParams = {};
     const ap = form.advancedParams;
     if (ap.maxTokens != null && Number.isFinite(ap.maxTokens) && ap.maxTokens > 0) cleanedParams.maxTokens = Math.max(1, Math.round(ap.maxTokens));
@@ -418,7 +418,11 @@ export const ProviderConfigForm: React.FC<{
     setIsSaving(true);
     setSaveError(false);
     try {
-      updates.customHeaders = await encryptProviderHeaders(customHeaders);
+      // Fixed-protocol providers hide the header editor; leave any stored
+      // headers untouched instead of overwriting them with the hidden rows.
+      if (!fixedProtocol) {
+        updates.customHeaders = await encryptProviderHeaders(customHeaders);
+      }
       // Encrypt API key before saving
       if (form.apiKey) {
         updates.apiKey = await encryptField(form.apiKey);
@@ -626,15 +630,18 @@ export const ProviderConfigForm: React.FC<{
         )}
       </div>
 
-      <ProviderHeadersEditor
-        rows={headerRows}
-        onChange={(rows) => { setHeaderRows(rows); setHeadersSourceVersion((version) => version + 1); }}
-        disabled={headersLoading || headersLoadError || isSaving}
-      />
-      {(!parsedHeaders.valid || headersLoadError || saveError) && (
-        <p role="alert" className="text-xs text-destructive">{t(!parsedHeaders.valid
-          ? 'ai.providers.headers.invalid' : headersLoadError
-            ? 'ai.providers.headers.loadError' : 'ai.providers.headers.saveError')}</p>
+      {!fixedProtocol && (
+        <ProviderHeadersEditor
+          rows={headerRows}
+          onChange={(rows) => { setHeaderRows(rows); setHeadersSourceVersion((version) => version + 1); }}
+          disabled={headersLoading || headersLoadError || isSaving}
+        />
+      )}
+      {((!fixedProtocol && (!parsedHeaders.valid || headersLoadError)) || saveError) && (
+        <p role="alert" className="text-xs text-destructive">{t(saveError
+          ? 'ai.providers.headers.saveError'
+          : !parsedHeaders.valid
+            ? 'ai.providers.headers.invalid' : 'ai.providers.headers.loadError')}</p>
       )}
 
       {/* Base URL */}
