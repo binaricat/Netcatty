@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  OPENCODE_CLIENT_USER_AGENT,
   OPENCODE_SESSION_HEADER,
   buildSdkRequestHeaders,
   isOpencodeEndpoint,
@@ -29,30 +30,42 @@ test("buildSdkRequestHeaders passes customHeaders through verbatim", () => {
   assert.deepEqual(headers, { "X-Custom": "a", Authorization: "Bearer x" });
 });
 
-test("buildSdkRequestHeaders adds the OpenCode session header for opencode endpoints", () => {
+test("buildSdkRequestHeaders adds OpenCode routing headers for opencode endpoints", () => {
   const headers = buildSdkRequestHeaders(
     { baseURL: "https://opencode.ai/zen/go/v1" },
     "chat-session-1",
   );
-  assert.deepEqual(headers, { [OPENCODE_SESSION_HEADER]: "chat-session-1" });
+  assert.deepEqual(headers, {
+    [OPENCODE_SESSION_HEADER]: "chat-session-1",
+    "User-Agent": OPENCODE_CLIENT_USER_AGENT,
+  });
 });
 
-test("buildSdkRequestHeaders adds no session header off opencode or without a session id", () => {
+test("buildSdkRequestHeaders only adds OpenCode headers on opencode hosts", () => {
   assert.deepEqual(
     buildSdkRequestHeaders({ baseURL: "https://api.deepseek.com/v1" }, "chat-session-1"),
     {},
   );
-  assert.deepEqual(buildSdkRequestHeaders({ baseURL: "https://opencode.ai/zen/go/v1" }), {});
+  assert.deepEqual(
+    buildSdkRequestHeaders({ baseURL: "https://opencode.ai/zen/go/v1" }),
+    { "User-Agent": OPENCODE_CLIENT_USER_AGENT },
+  );
   assert.deepEqual(buildSdkRequestHeaders({ baseURL: undefined }, "chat-session-1"), {});
 });
 
-test("buildSdkRequestHeaders lets a user-supplied session header win", () => {
+test("buildSdkRequestHeaders lets a user-supplied session and user agent win", () => {
   const headers = buildSdkRequestHeaders(
     {
       baseURL: "https://opencode.ai/zen/go/v1",
-      customHeaders: { "X-OpenCode-Session": "my-own-session" },
+      customHeaders: {
+        "X-OpenCode-Session": "my-own-session",
+        "User-Agent": "my-agent/2.0",
+      },
     },
     "chat-session-1",
   );
-  assert.deepEqual(headers, { "X-OpenCode-Session": "my-own-session" });
+  assert.deepEqual(headers, {
+    "X-OpenCode-Session": "my-own-session",
+    "User-Agent": "my-agent/2.0",
+  });
 });

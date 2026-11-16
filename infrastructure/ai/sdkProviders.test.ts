@@ -5,6 +5,7 @@ import { buildCattySdkMessages, createContinuationContext } from "./harness/turn
 import { ToolOutputStore } from "./harness/toolOutputStore";
 
 import { createModelFromConfig, resolveProviderEndpoint } from "./sdk/providers";
+import { OPENCODE_CLIENT_USER_AGENT } from "./providerRequestHeaders";
 import type { ProviderConfig } from "./types";
 
 function makeConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
@@ -318,6 +319,7 @@ test("SDK requests forward custom headers and scope OpenCode sessions", async (t
         await assert.rejects(model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] }));
         const request = requests.at(-1)!;
         assert.equal(request.headers.get("x-opencode-session"), sessionId);
+        assert.ok((request.headers.get("user-agent") ?? "").startsWith(OPENCODE_CLIENT_USER_AGENT));
         assert.equal(request.headers.get("x-test-header"), "configured");
       }
     }
