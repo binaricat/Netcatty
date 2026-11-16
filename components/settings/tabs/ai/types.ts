@@ -286,7 +286,7 @@ export const SETTINGS_ICON_PATHS: Record<SettingsIconId, string> = {
   google: "/ai/providers/google.svg",
   ollama: "/ai/providers/ollama.svg",
   openrouter: "/ai/providers/openrouter.svg",
-  "opencode-go": "/ai/providers/opencode.svg",
+  "opencode-go": "/ai/providers/opencode-go.svg",
   qwen: "/ai/providers/qwen.svg",
   deepseek: "/ai/providers/deepseek.svg",
   kimi: "/ai/providers/kimi.svg",

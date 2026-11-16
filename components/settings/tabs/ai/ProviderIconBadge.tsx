@@ -42,6 +42,12 @@ const UPLOAD_IMG_DIMENSIONS = {
   md: "w-8 h-8",
 } as const;
 
+const FULL_COLOR_RADIUS = {
+  xs: "rounded-[3px]",
+  sm: "rounded-[4px]",
+  md: "rounded-md",
+} as const;
+
 export const ProviderIconBadge: React.FC<Props> = (props) => {
   const size = props.size ?? "md";
   const dim = BADGE_DIMENSIONS[size];
@@ -86,7 +92,12 @@ export const ProviderIconBadge: React.FC<Props> = (props) => {
   if (fallbackId && fallbackId in SETTINGS_ICON_PATHS) {
     const fullColor = FULL_COLOR_PROVIDER_ICONS.has(fallbackId);
     return (
-      <div className={cn("rounded-md flex items-center justify-center shrink-0 overflow-hidden", dim, SETTINGS_ICON_COLORS[fallbackId])}>
+      <div className={cn(
+        "flex items-center justify-center shrink-0 overflow-hidden",
+        dim,
+        fullColor ? FULL_COLOR_RADIUS[size] : "rounded-md",
+        SETTINGS_ICON_COLORS[fallbackId],
+      )}>
         <img
           src={SETTINGS_ICON_PATHS[fallbackId]}
           alt=""
