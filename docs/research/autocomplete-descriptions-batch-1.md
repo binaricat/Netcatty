@@ -38,7 +38,12 @@ behavior and the discrepancy is recorded below.
 | --- | --- | --- |
 | command | Extract compressed files in a ZIP archive | 解压 ZIP 压缩包中的文件 |
 | `-l` | List the contents of a zip file without extracting | 列出 zip 文件内容而不解压 |
-| `-0` | Extract a zip file created in windows, containing files with non-ascii (chinese) filenames | 上游选项疑似错误，请核对当前 unzip 版本支持的参数 |
+| `-0` | Extract a zip file created in windows, containing files with non-ascii (chinese) filenames | 解压由 Windows 创建、包含非 ASCII（中文）文件名的 zip 文件 |
+
+> Note: the Fig spec's `-0` option is dubious (Info-ZIP unzip 6.00 has no
+> `-0`). The zh-CN value translates the English key faithfully instead of
+> showing an editorial note in the completion popup; fix the option name in a
+> local spec override if the upstream entry is confirmed wrong.
 
 ### make
 

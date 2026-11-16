@@ -143,7 +143,12 @@ unique English strings.
 | python, python3 | Disable the import of the module site and the site-dependent manipulations of sys.path that it entails | 禁用 site 模块的导入，以及随之进行的 sys.path 站点相关调整 |
 | python, python3 | Do -O and also discard docstrings | 执行 -O 的操作，并丢弃文档字符串 |
 | python, python3 | Don’t add the user site-packages directory to sys.path | 不将用户 site-packages 目录加入 sys.path |
-| python, python3 | Don’t display the copyright and version messages even in interactive mode | 上游选项疑似错误：交互模式下不显示版权和版本信息请用 -q |
+| python, python3 | Don’t display the copyright and version messages even in interactive mode | 即使在交互模式下也不显示版权和版本消息 |
+
+> Note: the Fig spec's `-g` option is not a real CPython flag (use `-q`). The
+> zh-CN value translates the English key faithfully instead of showing an
+> editorial note in the completion popup; fix the option name in a local spec
+> override if the upstream entry is confirmed wrong.
 | python, python3 | Execute the Python code in command. command can be one or more statements separated by newlines, with significant leading whitespace as in normal module code | 执行 command 中的 Python 代码。command 可以是用换行分隔的一条或多条语句，并像普通模块代码一样保留有意义的行首空白 |
 | python, python3 | Force the stdout and stderr streams to be unbuffered. This option has no effect on the stdin stream | 强制 stdout 和 stderr 不缓冲；此选项对 stdin 无效 |
 | python, python3 | If given, Python won’t try to write .pyc files on the import of source modules | 指定后，Python 在导入源模块时不会写入 .pyc 文件 |

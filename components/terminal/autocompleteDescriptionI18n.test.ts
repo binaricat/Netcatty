@@ -223,6 +223,37 @@ test("committed zh-TW dictionary keeps zh-CN keys and Taiwan terminology", () =>
   assert.equal(simplified["Remove a working tree"], "移除工作树");
   assert.equal(simplified["Add Linux capabilities"], "添加 Linux 能力");
   assert.equal(simplified["Drop Linux capabilities"], "丢弃 Linux 能力");
+  // Truncated upstream keys and semantic fixes verified against the local
+  // man pages and upstream help text.
+  assert.equal(
+    simplified["Fetch the remote’s copy of current branch and rebases it into the local copy"],
+    "获取远程上当前分支的副本，并将本地当前分支变基到该副本之上",
+  );
+  assert.equal(
+    simplified["Composition of primaries and operands"],
+    "主项（primaries）与操作数的组合",
+  );
+  assert.equal(
+    simplified["Selects the cipher to use for encrypting the data transfer. This option is directly passed to ssh(1)"],
+    "选择用于加密数据传输的密码规格。此选项直接传递给 ssh(1)",
+  );
+  assert.equal(
+    simplified["Extract a zip file created in windows, containing files with non-ascii (chinese) filenames"],
+    "解压由 Windows 创建、包含非 ASCII（中文）文件名的 zip 文件",
+  );
+  assert.equal(
+    simplified["For writing options: write to system-wide $(prefix)/etc/gitconfig rather than"],
+    "对于写入选项：写入系统级 $(prefix)/etc/gitconfig，而不是仓库的 .git/config",
+  );
+  assert.equal(
+    simplified["Don’t display the copyright and version messages even in interactive mode"],
+    "即使在交互模式下也不显示版权和版本消息",
+  );
+  assert.equal(simplified["List details of each working tree"], "列出每个工作树的详细信息");
+  assert.equal(
+    simplified["Show what revision and author last modified each line of a file"],
+    "显示文件中每一行的最后修改版本和作者",
+  );
   const pathspecNulKey =
     "Only meaningful with --pathspec-from-file. Pathspec elements are separated wi";
   assert.equal(

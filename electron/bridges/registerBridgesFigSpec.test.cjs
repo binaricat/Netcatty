@@ -181,6 +181,18 @@ test("each local specification directory can fail independently", async (t) => {
   assert.equal(list.includes("fixture-root-only"), false);
 });
 
+test("local git spec restores the missing blame description", async () => {
+  const electronDir = path.resolve(__dirname, "..");
+  const spec = await loadFigSpec(electronDir, "git", "linux");
+  const blame = spec.subcommands.find((subcommand) => subcommand.name === "blame");
+
+  assert.equal(
+    blame.description,
+    "Show what revision and author last modified each line of a file",
+  );
+  assert.ok(blame.options.length > 0);
+});
+
 test("missing specs return null while broken spec modules stay visible", async (t) => {
   const { electronDir, specDir } = createSpecFixture(t);
   fs.writeFileSync(path.join(specDir, "missing-import.js"), 'export { default } from "./absent-dependency.js";');

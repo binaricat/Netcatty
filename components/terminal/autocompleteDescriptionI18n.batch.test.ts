@@ -106,7 +106,7 @@ test("batch zh-TW spot checks cover corrected semantics", () => {
   );
   assert.equal(
     traditional["Extract a zip file created in windows, containing files with non-ascii (chinese) filenames"],
-    "上游選項疑似錯誤，請核對當前 unzip 版本支援的引數",
+    "解壓由 Windows 建立、包含非 ASCII（中文）檔名的 zip 檔案",
   );
   assert.equal(
     traditional["Turn on value of next option"],
@@ -122,7 +122,7 @@ test("zip, unzip, and make options localize without changing insertion text", as
     {
       input: "unzip -",
       option: "-0",
-      zhCn: "上游选项疑似错误，请核对当前 unzip 版本支持的参数",
+      zhCn: "解压由 Windows 创建、包含非 ASCII（中文）文件名的 zip 文件",
     },
     { input: "make -", option: "-N", zhCn: "启用指定的 NeXT 兼容选项（Apple 扩展）" },
     { input: "make --", option: "--warn-undefined-variables", zhCn: "引用未定义变量时发出警告" },

@@ -100,7 +100,7 @@ test("batch specs cover every description except the documented node shared-key 
 test("batch zh-TW spot checks cover generated terminology", () => {
   assert.equal(
     traditional["Don’t display the copyright and version messages even in interactive mode"],
-    "上游選項疑似錯誤：互動模式下不顯示版權和版本資訊請用 -q",
+    "即使在互動模式下也不顯示版權和版本訊息",
   );
   assert.equal(traditional["Watch input files"], "監視輸入檔案");
   assert.equal(
@@ -143,7 +143,7 @@ test("python, node, vim, sort, awk, and sed options localize without changing in
       input: "python -",
       option: "-g",
       key: "Don’t display the copyright and version messages even in interactive mode",
-      zhCn: "上游选项疑似错误：交互模式下不显示版权和版本信息请用 -q",
+      zhCn: "即使在交互模式下也不显示版权和版本消息",
     },
     {
       input: "python3 -",
