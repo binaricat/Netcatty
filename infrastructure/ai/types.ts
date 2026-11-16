@@ -76,6 +76,7 @@ export interface ProviderConfig {
 
 /** Pick the protocol family for a provider config, falling back from providerId when style is unset. */
 export function resolveProviderStyle(config: Pick<ProviderConfig, 'providerId' | 'style'>): ProviderStyle {
+  if (PROVIDER_PRESETS[config.providerId]?.fixedProtocol) return 'openai';
   if (config.style) return config.style;
   switch (config.providerId) {
     case 'anthropic':
@@ -87,8 +88,15 @@ export function resolveProviderStyle(config: Pick<ProviderConfig, 'providerId' |
   }
 }
 
-/** Pick the OpenAI request format. Missing or unknown values stay on Chat Completions. */
-export function resolveOpenAIApi(config: Pick<ProviderConfig, 'openaiApi'>): OpenAIApiFormat {
+/**
+ * Pick the OpenAI request format. Missing or unknown values stay on Chat
+ * Completions. Providers whose service only exposes one protocol also ignore
+ * a stale saved override.
+ */
+export function resolveOpenAIApi(
+  config: Pick<ProviderConfig, 'openaiApi'> & { providerId?: AIProviderId },
+): OpenAIApiFormat {
+  if (config.providerId && PROVIDER_PRESETS[config.providerId]?.fixedProtocol) return 'chat';
   return config.openaiApi === 'responses' ? 'responses' : 'chat';
 }
 
@@ -457,6 +465,12 @@ export interface ProviderPreset {
   defaultBaseURL: string;
   modelsEndpoint?: string;
   defaultModels?: readonly string[];
+  /**
+   * The service only speaks one wire protocol / request format. Hide those
+   * controls and ignore stored overrides so a stale config cannot route
+   * requests the wrong way.
+   */
+  fixedProtocol?: boolean;
 }
 
 // Provider presets for quick setup
@@ -470,6 +484,7 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
     name: 'OpenCode Go',
     defaultBaseURL: 'https://opencode.ai/inference/go/openai/v1',
     modelsEndpoint: '/models',
+    fixedProtocol: true,
     defaultModels: [
       'deepseek-v4.1-flash',
       'deepseek-v4-pro',

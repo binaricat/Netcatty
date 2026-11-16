@@ -29,6 +29,13 @@ test("resolveOpenAIApi defaults missing and unknown values to Chat Completions",
   assert.equal(resolveOpenAIApi({ openaiApi: "weird" as "chat" }), "chat");
 });
 
+test("fixed-protocol providers ignore stale style and request-format overrides", () => {
+  assert.equal(resolveProviderStyle({ providerId: "opencode-go", style: "anthropic" }), "openai");
+  assert.equal(resolveProviderStyle({ providerId: "opencode-go", style: "google" }), "openai");
+  assert.equal(resolveOpenAIApi({ providerId: "opencode-go", openaiApi: "responses" }), "chat");
+  assert.equal(resolveOpenAIApi({ providerId: "opencode-go", openaiApi: "chat" }), "chat");
+});
+
 test("domestic provider presets include editable OpenAI-compatible base URLs", () => {
   assert.equal(PROVIDER_PRESETS.qwen.defaultBaseURL, "https://dashscope.aliyuncs.com/compatible-mode/v1");
   assert.equal(PROVIDER_PRESETS.deepseek.defaultBaseURL, "https://api.deepseek.com/v1");

@@ -16,6 +16,7 @@ test('OpenCode Go ships as a first-class provider preset', () => {
   assert.equal(preset.name, 'OpenCode Go');
   assert.equal(preset.defaultBaseURL, 'https://opencode.ai/inference/go/openai/v1');
   assert.equal(preset.modelsEndpoint, '/models');
+  assert.equal(preset.fixedProtocol, true, 'protocol and request format are fixed by the service');
   assert.ok(
     preset.defaultModels?.includes(OPENCODE_GO_DEFAULT_MODEL),
     'the auto-selected model must be offered before discovery runs',
