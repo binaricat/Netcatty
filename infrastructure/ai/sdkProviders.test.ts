@@ -96,6 +96,55 @@ test("resolveProviderEndpoint keeps an explicit openrouter baseURL untouched", (
   assert.equal(result.baseURL, "https://proxy.example/v1");
 });
 
+test("resolveProviderEndpoint routes OpenCode Go models to their native gateway prefix", () => {
+  const base = {
+    id: "ocg",
+    providerId: "opencode-go" as const,
+    name: "OpenCode Go",
+    enabled: true,
+    baseURL: "https://opencode.ai/inference/go/openai/v1",
+  };
+  assert.equal(
+    resolveProviderEndpoint({ ...base, defaultModel: "kimi-k3" }, "openai", "key").baseURL,
+    "https://opencode.ai/inference/go/openai/v1",
+  );
+  assert.equal(
+    resolveProviderEndpoint({ ...base, defaultModel: "grok-4.7" }, "openai", "key").baseURL,
+    "https://opencode.ai/inference/go/openai/v1",
+  );
+  assert.equal(
+    resolveProviderEndpoint({ ...base, defaultModel: "qwen3.8-max" }, "anthropic", "key").baseURL,
+    "https://opencode.ai/inference/go/anthropic/v1",
+  );
+  assert.equal(
+    resolveProviderEndpoint({ ...base, defaultModel: "gemini-4-argon" }, "google", "key").baseURL,
+    "https://opencode.ai/inference/go/google/v1beta",
+  );
+});
+
+test("createModelFromConfig uses each OpenCode Go model's native SDK", () => {
+  const base = {
+    providerId: "opencode-go" as const,
+    baseURL: "https://opencode.ai/inference/go/openai/v1",
+  };
+  assert.equal(
+    (createModelFromConfig(makeConfig({ ...base, defaultModel: "kimi-k3" })) as { provider?: string }).provider,
+    "openai.chat",
+  );
+  assert.equal(
+    (createModelFromConfig(makeConfig({ ...base, defaultModel: "grok-4.7" })) as { provider?: string }).provider,
+    "openai.responses",
+  );
+  assert.match(
+    String((createModelFromConfig(makeConfig({ ...base, defaultModel: "qwen3.8-max" })) as { provider?: string }).provider ?? ""),
+    /^anthropic/,
+  );
+  assert.match(
+    String((createModelFromConfig(makeConfig({ ...base, defaultModel: "gemini-4-argon" })) as { provider?: string }).provider ?? ""),
+    /^google/,
+  );
+});
+
 test("resolveProviderEndpoint normalizes Anthropic-compat Base URL for @ai-sdk/anthropic", () => {
   // Claude Code style (bare host) must gain /v1 so chat hits …/v1/messages.
   assert.equal(

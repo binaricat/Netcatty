@@ -74,9 +74,29 @@ export interface ProviderConfig {
   advancedParams?: ProviderAdvancedParams;
 }
 
+/**
+ * Native protocol for a fixed-protocol provider's model, or undefined when the
+ * provider lets the user choose. Unknown model ids fall back to Chat
+ * Completions, which every OpenCode Go text model also serves.
+ */
+export function resolveProviderModelProtocol(
+  providerId: AIProviderId,
+  modelId: string | undefined,
+): FixedModelProtocol | undefined {
+  const preset = PROVIDER_PRESETS[providerId];
+  if (!preset?.fixedProtocol) return undefined;
+  return (modelId && preset.modelProtocols?.[modelId]) || 'chat';
+}
+
 /** Pick the protocol family for a provider config, falling back from providerId when style is unset. */
-export function resolveProviderStyle(config: Pick<ProviderConfig, 'providerId' | 'style'>): ProviderStyle {
-  if (PROVIDER_PRESETS[config.providerId]?.fixedProtocol) return 'openai';
+export function resolveProviderStyle(
+  config: Pick<ProviderConfig, 'providerId' | 'style'> & { defaultModel?: string },
+  modelId?: string,
+): ProviderStyle {
+  const fixedProtocol = resolveProviderModelProtocol(config.providerId, modelId ?? config.defaultModel);
+  if (fixedProtocol === 'messages') return 'anthropic';
+  if (fixedProtocol === 'google') return 'google';
+  if (fixedProtocol) return 'openai';
   if (config.style) return config.style;
   switch (config.providerId) {
     case 'anthropic':
@@ -89,14 +109,31 @@ export function resolveProviderStyle(config: Pick<ProviderConfig, 'providerId' |
 }
 
 /**
+ * Model discovery always runs on the OpenAI-compatible prefix for
+ * fixed-protocol providers, even when the selected model's native API is
+ * Messages or Google.
+ */
+export function resolveProviderDiscoveryStyle(
+  provider: Pick<ProviderConfig, 'providerId' | 'style'> & { defaultModel?: string },
+): ProviderStyle {
+  return PROVIDER_PRESETS[provider.providerId]?.fixedProtocol
+    ? 'openai'
+    : resolveProviderStyle(provider);
+}
+
+/**
  * Pick the OpenAI request format. Missing or unknown values stay on Chat
- * Completions. Providers whose service only exposes one protocol also ignore
- * a stale saved override.
+ * Completions. Fixed-protocol providers route each model to its native
+ * format, ignoring any stale saved override.
  */
 export function resolveOpenAIApi(
-  config: Pick<ProviderConfig, 'openaiApi'> & { providerId?: AIProviderId },
+  config: Pick<ProviderConfig, 'openaiApi'> & { providerId?: AIProviderId; defaultModel?: string },
+  modelId?: string,
 ): OpenAIApiFormat {
-  if (config.providerId && PROVIDER_PRESETS[config.providerId]?.fixedProtocol) return 'chat';
+  if (config.providerId) {
+    const fixedProtocol = resolveProviderModelProtocol(config.providerId, modelId ?? config.defaultModel);
+    if (fixedProtocol) return fixedProtocol === 'responses' ? 'responses' : 'chat';
+  }
   return config.openaiApi === 'responses' ? 'responses' : 'chat';
 }
 
@@ -466,12 +503,22 @@ export interface ProviderPreset {
   modelsEndpoint?: string;
   defaultModels?: readonly string[];
   /**
-   * The service only speaks one wire protocol / request format. Hide those
-   * controls and ignore stored overrides so a stale config cannot route
-   * requests the wrong way.
+   * The service fixes the wire protocol instead of exposing it as a user
+   * choice. Hide those controls and ignore stored overrides so a stale config
+   * cannot route requests the wrong way.
    */
   fixedProtocol?: boolean;
+  /**
+   * Native protocol per model for fixed-protocol services. Unknown ids fall
+   * back to Chat Completions, which every OpenCode Go text model serves.
+   */
+  modelProtocols?: Readonly<Record<string, FixedModelProtocol>>;
+  /** Endpoint prefix per native protocol for fixed-protocol services. */
+  protocolBaseURLs?: Partial<Record<FixedModelProtocol, string>>;
 }
+
+/** Wire protocol a fixed-protocol provider uses for one model. */
+export type FixedModelProtocol = 'chat' | 'responses' | 'messages' | 'google';
 
 // Provider presets for quick setup
 export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
@@ -485,6 +532,28 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
     defaultBaseURL: 'https://opencode.ai/inference/go/openai/v1',
     modelsEndpoint: '/models',
     fixedProtocol: true,
+    // OpenCode Go serves every text model through all four gateways, but each
+    // model has a native API that preserves its own reasoning/tool features.
+    modelProtocols: {
+      'grok-4.7': 'responses',
+      'gpt-5.6-luna': 'responses',
+      'gpt-6-luna': 'responses',
+      'muse-spark-1.2-contributor': 'responses',
+      'muse-spark-1.3-contributor': 'responses',
+      'claude-haiku-5-5': 'messages',
+      'minimax-m3': 'messages',
+      'qwen3.8-max': 'messages',
+      'qwen3.8-flash': 'messages',
+      'qwen3.7-plus': 'messages',
+      'qwen4-max': 'messages',
+      'gemini-4-argon': 'google',
+    },
+    protocolBaseURLs: {
+      chat: 'https://opencode.ai/inference/go/openai/v1',
+      responses: 'https://opencode.ai/inference/go/openai/v1',
+      messages: 'https://opencode.ai/inference/go/anthropic/v1',
+      google: 'https://opencode.ai/inference/go/google/v1beta',
+    },
     defaultModels: [
       'deepseek-v4.1-flash',
       'deepseek-v4-pro',

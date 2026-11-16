@@ -4,7 +4,7 @@ import { buildModelDiscoveryHeaders, resolveModelsDiscoveryEndpoint } from './mo
 import { normalizeOllamaSdkBaseURL } from './ollamaCompatBaseUrl';
 import { buildProviderProbeUrl } from './providerConnectionProbe';
 import { readDiscoveredModelContextWindow } from './discoveredModelMetadata';
-import { PROVIDER_PRESETS, resolveProviderStyle, type ProviderConfig } from './types';
+import { PROVIDER_PRESETS, resolveProviderDiscoveryStyle, type ProviderConfig } from './types';
 import {
   buildProviderSeedModels,
   mergeComposerModels,
@@ -120,7 +120,7 @@ export async function fetchProviderModelCatalog(
     };
   }
 
-  const style = resolveProviderStyle(provider);
+  const style = resolveProviderDiscoveryStyle(provider);
   const endpoint = resolveModelsDiscoveryEndpoint(style, undefined);
   const baseURL = resolveProviderDiscoveryBaseURL(provider);
   if (!endpoint || !baseURL || !bridge?.aiFetch) {
