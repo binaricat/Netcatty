@@ -913,3 +913,26 @@ test('rebindSessionScope clears source workspace views, covering both panel rebi
   const commandBody = panelSource.slice(commandStart, commandEnd);
   assert.match(commandBody, /rebindSessionScope\?\.\(target\.sessionId/);
 });
+
+test('round 4: rebind captures the PRE-rebind active map and demotes implicit source views in the same updater', () => {
+  const aiStateSource = readFileSync(new URL('../application/state/useAIState.ts', import.meta.url), 'utf8');
+  const rebindStart = aiStateSource.indexOf('const rebindSessionScope');
+  const rebindEnd = aiStateSource.indexOf('const exportSessionsBackup');
+  assert.ok(rebindStart !== -1 && rebindEnd !== -1 && rebindEnd > rebindStart, 'rebindSessionScope found');
+  const rebindBody = aiStateSource.slice(rebindStart, rebindEnd);
+
+  // The pre-rebind active map must be captured BEFORE rebindActiveSessionMap
+  // drops the source pointers — otherwise the implicit source keys are gone.
+  assert.match(rebindBody, /const preRebindActiveSessionIdMap\s*=/);
+  assert.ok(
+    rebindBody.indexOf('const preRebindActiveSessionIdMap') < rebindBody.indexOf('rebindActiveSessionMap(prev, sessionId, scopeKey)'),
+    'pre-rebind active map is captured before rebindActiveSessionMap clears the pointers',
+  );
+
+  // The captured PRE-rebind map feeds the SAME setPanelViewByScope updater that
+  // demotes explicit source views and sets the destination view (atomic: no
+  // intermediate state where resolveDisplayedPanelView can re-select sessions[0]).
+  assert.match(rebindBody, /demoteImplicitSourceViewsForSession\(/);
+  assert.ok(rebindBody.includes('preRebindActiveSessionIdMap,'), 'pre-rebind map is passed to the implicit-view demotion');
+  assert.match(rebindBody, /clearSessionViewsForSession\(prev, sessionId, scopeKey\)/);
+});

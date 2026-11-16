@@ -223,6 +223,38 @@ export function clearSessionViewsForSession(
   return next;
 }
 
+/**
+ * PR #4159 review fix (round 4): a restored chat has no explicit source view
+ * to demote. After a restart the active-session map is restored (localStorage /
+ * IndexedDB meta, issue #4125) but panelViewByScope is memory-only and starts
+ * empty, so clearSessionViewsForSession finds nothing. getSessionScopeMatchRank
+ * still lists the rebound chat at rank 1 in that scope, resolveDisplayedPanelView
+ * falls through to sessions[0], and the active-session effect recreates the
+ * pointer rebindActiveSessionMap removed — follow-up turns would run in the old
+ * workspace. Write an explicit draft view for every source scope key captured
+ * from the PRE-rebind active map (every key naming sessionId under a different
+ * scope), even when no explicit panel view existed, so the draft short-circuits
+ * that fallback. The destination scope is left for setSessionView.
+ */
+export function demoteImplicitSourceViewsForSession(
+  panelViewByScope: PanelViewByScope,
+  activeSessionIdMap: ActiveSessionIdMap,
+  sessionId: string,
+  keepScopeKey: string,
+): PanelViewByScope {
+  let next = panelViewByScope;
+
+  for (const [scopeKey, id] of Object.entries(activeSessionIdMap)) {
+    if (id !== sessionId || scopeKey === keepScopeKey) continue;
+    const updated = setDraftView(next, scopeKey);
+    if (updated !== next) {
+      next = updated;
+    }
+  }
+
+  return next;
+}
+
 export function updateDraftForScope(
   draftsByScope: DraftsByScope,
   scopeKey: string,
