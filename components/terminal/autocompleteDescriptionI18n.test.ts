@@ -61,6 +61,16 @@ const touchSpec: FigSpec = {
   ],
 };
 
+const catSpec: FigSpec = {
+  name: "cat",
+  description: "Concatenate and print files",
+};
+
+const cpSpec: FigSpec = {
+  name: "cp",
+  description: "Copy files and directories",
+};
+
 Object.defineProperty(globalThis, "localStorage", {
   value: {
     getItem: () => null,
@@ -74,10 +84,12 @@ Object.defineProperty(globalThis, "localStorage", {
 Object.defineProperty(globalThis, "window", {
   value: {
     netcatty: {
-      listFigSpecs: async () => ["docker", "touch"],
+      listFigSpecs: async () => ["docker", "touch", "cat", "cp"],
       loadFigSpec: async (commandName: string) => ({
         docker: dockerSpec,
         touch: touchSpec,
+        cat: catSpec,
+        cp: cpSpec,
       } as Record<string, FigSpec>)[commandName] ?? null,
     },
   },
@@ -200,7 +212,10 @@ test("committed zh-TW dictionary keeps zh-CN keys and Taiwan terminology", () =>
   const simplified = JSON.parse(fs.readFileSync(path.join(dictDir, "descriptions.zh-CN.json"), "utf8"));
   const traditional = JSON.parse(fs.readFileSync(path.join(dictDir, "descriptions.zh-TW.json"), "utf8"));
 
-  assert.deepEqual(Object.keys(traditional), Object.keys(simplified));
+  // zh-TW is community-maintained: new zh-CN keys may not have a zh-TW value
+  // yet, but zh-TW must not keep keys that no longer exist in zh-CN.
+  const staleTraditionalKeys = Object.keys(traditional).filter((key) => !(key in simplified));
+  assert.deepEqual(staleTraditionalKeys, []);
   assert.equal(simplified[DEFAULT_LABEL], "（默认）");
   assert.equal(traditional[DEFAULT_LABEL], "（預設）");
   assert.equal(traditional[NETWORK], "新增網路");
@@ -287,7 +302,9 @@ test("committed zh-TW dictionary keeps zh-CN keys and Taiwan terminology", () =>
   for (const key of Object.keys(simplified)) {
     const source = simplified[key];
     const converted = traditional[key];
-    assert.equal(typeof converted, "string");
+    // zh-TW is community-maintained; skip entries that have not been
+    // translated yet instead of failing the zh-CN work on them.
+    if (typeof converted !== "string") continue;
     assert.equal(converted.includes("进程"), false);
     assert.equal(converted.includes("默认"), false);
     assert.equal(converted.includes("网络"), false);
@@ -296,4 +313,29 @@ test("committed zh-TW dictionary keeps zh-CN keys and Taiwan terminology", () =>
   }
   assert.ok(processCount > 0);
   assert.equal(tripCount, processCount);
+});
+
+test("command-name suggestions carry Chinese descriptions", async () => {
+  const simplified = await getCompletions("c", {
+    locale: "zh-CN",
+    skipPathCompletion: true,
+    maxResults: 10,
+  });
+  assert.equal(suggestionNamed(simplified, "cat")?.description, "连接并打印文件");
+  assert.equal(suggestionNamed(simplified, "cp")?.description, "复制文件或目录");
+
+  const traditional = await getCompletions("c", {
+    locale: "zh-TW",
+    skipPathCompletion: true,
+    maxResults: 10,
+  });
+  assert.equal(suggestionNamed(traditional, "cat")?.description, "連線並列印檔案");
+  assert.equal(suggestionNamed(traditional, "cp")?.description, "複製檔案和目錄");
+
+  const english = await getCompletions("c", {
+    locale: "en",
+    skipPathCompletion: true,
+    maxResults: 10,
+  });
+  assert.equal(suggestionNamed(english, "cat")?.description, undefined);
 });

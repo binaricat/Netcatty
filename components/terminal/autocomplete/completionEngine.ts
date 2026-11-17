@@ -32,7 +32,10 @@ import {
   resolvePathComponents,
 } from "./remotePathCompleter";
 import { getSnippetSuggestions } from "./snippetCompleter";
-import { localizeSpecSuggestionDescriptions } from "./autocompleteDescriptionI18n";
+import {
+  localizeCommandSuggestionDescriptions,
+  localizeSpecSuggestionDescriptions,
+} from "./autocompleteDescriptionI18n";
 import type { AutocompleteHistoryScope, Snippet } from "../../../domain/models";
 import type { AutocompleteCwdSource } from "./terminalAutocompleteLayout";
 
@@ -460,7 +463,7 @@ export async function getCompletions(
     if (unique.length >= resultLimit) break;
   }
 
-  return unique;
+  return [...localizeCommandSuggestionDescriptions(unique, options.locale)];
 }
 
 function normalizeHistoryPathPrefix(token: string): string {

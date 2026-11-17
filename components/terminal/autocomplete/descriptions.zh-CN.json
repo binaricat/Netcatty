@@ -717,7 +717,7 @@
   "Copy a branch and its reflog": "复制分支及其引用日志",
   "Copy a branch, even if target exists": "即使目标已存在也复制分支",
   "Copy device contents as regular file": "将设备内容作为普通文件复制",
-  "Copy files and directories": "复制文件和目录",
+  "Copy files and directories": "复制文件或目录",
   "Copy files and directories to and from containers": "在容器与本地之间复制文件和目录",
   "Copy files using clonefile": "使用 clonefile 复制文件",
   "Copy files whole (without delta-xfer algorithm)": "完整复制文件（不使用 delta-xfer 算法）",

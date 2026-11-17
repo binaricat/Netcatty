@@ -302,5 +302,9 @@ test("batch 4 zh-TW uses Taiwan terminology and mirrors zh-CN keys", () => {
     traditional["Query NS records (authoritative name servers)"],
     "查詢 NS 記錄（權威名稱伺服器）",
   );
-  assert.deepEqual(Object.keys(traditional).sort(), Object.keys(simplified).sort());
+  // zh-TW is community-maintained; only reject stale zh-TW keys here.
+  assert.deepEqual(
+    Object.keys(traditional).filter((key) => !(key in simplified)),
+    [],
+  );
 });

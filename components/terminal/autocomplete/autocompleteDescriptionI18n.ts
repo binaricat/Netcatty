@@ -8,6 +8,8 @@
  * OpenCC s2twp via scripts/generate-autocomplete-descriptions-zh-TW.mjs.
  */
 
+import { COMMAND_DESCRIPTIONS } from "./commandDescriptions";
+
 type DescriptionDictionary = Record<string, string>;
 
 let zhCnDictionaryPromise: Promise<DescriptionDictionary> | undefined;
@@ -62,6 +64,32 @@ export async function localizeSpecSuggestionDescriptions<T extends { description
     if (!translated) return suggestion;
     changed = true;
     return { ...suggestion, description: translated };
+  });
+  return changed ? localized : suggestions;
+}
+
+/**
+ * Command-name suggestions have no description until the command's spec is
+ * loaded. Fill them from the generated command description map so the popup
+ * can show a short Chinese hint (e.g. "cp  复制文件或目录") without loading
+ * every spec. Non-Chinese locales keep their existing behaviour.
+ */
+export function localizeCommandSuggestionDescriptions<
+  T extends { source?: string; displayText?: string; description?: string },
+>(suggestions: readonly T[], locale: string | undefined): readonly T[] {
+  if (locale !== "zh-CN" && locale !== "zh-TW") return suggestions;
+  let changed = false;
+  const localized = suggestions.map((suggestion) => {
+    if (suggestion.source !== "command" || suggestion.description) return suggestion;
+    const entry = COMMAND_DESCRIPTIONS[suggestion.displayText ?? ""];
+    if (!entry) return suggestion;
+    const description =
+      locale === "zh-CN"
+        ? entry.zhCN ?? entry.en
+        : entry.zhTW ?? entry.zhCN ?? entry.en;
+    if (!description) return suggestion;
+    changed = true;
+    return { ...suggestion, description };
   });
   return changed ? localized : suggestions;
 }
