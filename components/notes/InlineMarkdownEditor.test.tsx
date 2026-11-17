@@ -459,6 +459,17 @@ test("note markdown toolbar remains usable in narrow panes", () => {
   );
 });
 
+test("MDX link dialog overlay stays inside the retained notes editor container", () => {
+  const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+
+  // Default MDXEditor popup target is document.body. Keep the overlay in the
+  // editor container so section `hidden` and vault visibility:hidden hide it (#4257).
+  assert.match(source, /const \[overlayContainer, setOverlayContainer\] = useState<HTMLElement \| null>\(null\);/);
+  assert.match(source, /setOverlayContainer\(\(current\) => \(current === node \? current : node\)\);/);
+  assert.match(source, /ref=\{setEditorContainer\}/);
+  assert.match(source, /overlayContainer=\{overlayContainer \?\? undefined\}/);
+});
+
 test("preview mode opens links directly without showing the edit hover action", () => {
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
 
