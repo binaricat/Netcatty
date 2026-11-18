@@ -323,3 +323,72 @@ test("OpenAI Chat sends inline image attachments as data URLs through the bridge
   }
   assert.equal(requests.length, 4);
 });
+
+test("Anthropic SDK sends x-api-key only on official host and adds Bearer on custom bases", async (t) => {
+  const browserGlobal = globalThis as typeof globalThis & { window?: unknown };
+  const originalWindow = browserGlobal.window;
+  t.after(() => { browserGlobal.window = originalWindow; });
+  const requests: Array<{ url: string; headers: Headers }> = [];
+  Reflect.set(globalThis, "window", {
+    netcatty: {
+      aiFetch: async (url: string, _method: string, headers: Record<string, string>) => {
+        requests.push({ url, headers: new Headers(headers) });
+        return { ok: false, status: 400, data: '{"error":{"message":"captured anthropic request"}}' };
+      },
+    },
+  });
+
+  const prompt = [{ role: "user" as const, content: [{ type: "text" as const, text: "hello" }] }];
+
+  for (const baseURL of [undefined, "https://api.anthropic.com", "https://api.anthropic.com/v1"]) {
+    const model = createModelFromConfig(makeConfig({
+      providerId: "anthropic",
+      style: "anthropic",
+      apiKey: "test-key",
+      baseURL,
+    }));
+    await assert.rejects(async () => await model.doGenerate({ prompt }));
+    const request = requests.at(-1)!;
+    assert.equal(request.headers.get("x-api-key"), "__IPC_SECURED__");
+    assert.equal(request.headers.get("authorization"), null);
+    assert.equal(request.headers.get("anthropic-version"), "2023-06-01");
+  }
+
+  for (const baseURL of [
+    "https://ark.cn-beijing.volces.com/api/plan",
+    "https://gateway.example/v1",
+  ]) {
+    const model = createModelFromConfig(makeConfig({
+      style: "anthropic",
+      apiKey: "test-key",
+      baseURL,
+    }));
+    await assert.rejects(async () => await model.doGenerate({ prompt }));
+    const request = requests.at(-1)!;
+    assert.equal(request.headers.get("x-api-key"), "__IPC_SECURED__");
+    assert.equal(request.headers.get("authorization"), "Bearer __IPC_SECURED__");
+    assert.equal(request.headers.get("anthropic-version"), "2023-06-01");
+  }
+
+  const overridden = createModelFromConfig(makeConfig({
+    style: "anthropic",
+    apiKey: "test-key",
+    baseURL: "https://ark.cn-beijing.volces.com/api/plan",
+    customHeaders: { Authorization: "Bearer custom-override" },
+  }));
+  await assert.rejects(async () => await overridden.doGenerate({ prompt }));
+  const overriddenReq = requests.at(-1)!;
+  assert.equal(overriddenReq.headers.get("x-api-key"), "__IPC_SECURED__");
+  assert.equal(overriddenReq.headers.get("authorization"), "Bearer custom-override");
+
+  const overriddenApiKey = createModelFromConfig(makeConfig({
+    style: "anthropic",
+    apiKey: "test-key",
+    baseURL: "https://ark.cn-beijing.volces.com/api/plan",
+    customHeaders: { "X-API-Key": "custom-x-api-key" },
+  }));
+  await assert.rejects(async () => await overriddenApiKey.doGenerate({ prompt }));
+  const overriddenApiKeyReq = requests.at(-1)!;
+  assert.equal(overriddenApiKeyReq.headers.get("x-api-key"), "custom-x-api-key");
+  assert.equal(overriddenApiKeyReq.headers.get("authorization"), "Bearer __IPC_SECURED__");
+});
