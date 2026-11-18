@@ -9,6 +9,22 @@
  * working proxy bases keep working.
  */
 
+/** Official Agent Plan accepts Claude Code's /api/plan base and Bearer auth.
+ * Keep this exact-origin/path exception separate from arbitrary custom proxies.
+ */
+export function isAnthropicAgentPlanEndpoint(baseURL: string | undefined): boolean {
+  if (!baseURL) return false;
+  try {
+    const url = new URL(baseURL.trim());
+    return url.protocol === "https:"
+      && url.hostname === "ark.cn-beijing.volces.com"
+      && !url.port && !url.username && !url.password && !url.search && !url.hash
+      && /^\/api\/plan(?:\/v1)?\/?$/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 /** Strip trailing slashes; empty input stays empty. */
 export function stripTrailingSlashes(url: string): string {
   return url.trim().replace(/\/+$/, "");
@@ -46,6 +62,7 @@ export function normalizeAnthropicSdkBaseURL(baseURL: string): string {
   const trimmed = stripTrailingSlashes(baseURL);
   if (!trimmed) return trimmed;
   if (anthropicBaseIncludesV1(trimmed)) return trimmed;
+  if (isAnthropicAgentPlanEndpoint(trimmed)) return `${trimmed}/v1`;
   if (!isBareOriginBaseURL(trimmed)) return trimmed;
   return `${trimmed}/v1`;
 }

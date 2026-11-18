@@ -1,4 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai';
+import { isAnthropicAgentPlanEndpoint } from '../anthropicCompatBaseUrl';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogle } from '@ai-sdk/google';
 import { wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
@@ -776,7 +777,7 @@ function createProviderModel(
 
     case 'anthropic':
       return createAnthropic({
-        apiKey,
+        ...(isAnthropicAgentPlanEndpoint(baseURL) ? { authToken: apiKey } : { apiKey }),
         baseURL,
         fetch: customFetch,
         headers: sdkHeaders,

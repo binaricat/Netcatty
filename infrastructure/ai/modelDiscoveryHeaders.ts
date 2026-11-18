@@ -1,3 +1,4 @@
+import { isAnthropicAgentPlanEndpoint } from "./anthropicCompatBaseUrl";
 import type { ProviderStyle } from "./types";
 
 /**
@@ -41,12 +42,15 @@ export function resolveModelsDiscoveryEndpoint(
 function buildDefaultModelDiscoveryHeaders(
   style: ProviderStyle,
   apiKey: string | undefined,
+  baseURL?: string,
 ): Record<string, string> {
   if (!apiKey) return {};
   switch (style) {
     case "anthropic":
       return {
-        "x-api-key": apiKey,
+        ...(isAnthropicAgentPlanEndpoint(baseURL)
+          ? { Authorization: `Bearer ${apiKey}` }
+          : { "x-api-key": apiKey }),
         "anthropic-version": "2023-06-01",
       };
     case "google":
@@ -61,8 +65,9 @@ export function buildModelDiscoveryHeaders(
   style: ProviderStyle,
   apiKey: string | undefined,
   customHeaders: Record<string, string> = {},
+  baseURL?: string,
 ): Record<string, string> {
-  const headers = buildDefaultModelDiscoveryHeaders(style, apiKey);
+  const headers = buildDefaultModelDiscoveryHeaders(style, apiKey, baseURL);
   const overridden = new Set(Object.keys(customHeaders).map((name) => name.toLowerCase()));
   return Object.fromEntries([
     ...Object.entries(headers).filter(([name]) => !overridden.has(name.toLowerCase())),

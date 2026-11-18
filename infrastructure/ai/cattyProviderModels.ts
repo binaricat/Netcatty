@@ -142,7 +142,7 @@ export async function fetchProviderModelCatalog(
       await bridge.aiAllowlistAddHost(baseURL);
     }
     const url = buildProviderProbeUrl(baseURL, endpoint);
-    const headers = buildModelDiscoveryHeaders(style, apiKey, await decryptProviderHeaders(provider.customHeaders));
+    const headers = buildModelDiscoveryHeaders(style, apiKey, await decryptProviderHeaders(provider.customHeaders), baseURL);
     const result = await bridge.aiFetch(
       url,
       'GET',

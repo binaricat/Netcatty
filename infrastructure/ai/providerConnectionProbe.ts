@@ -182,7 +182,7 @@ export async function probeProviderConnection(input: {
     await bridge.aiAllowlistAddHost(baseURL);
   }
   const url = buildProviderProbeUrl(baseURL, endpoint);
-  const headers = buildModelDiscoveryHeaders(input.style, input.apiKey, input.customHeaders);
+  const headers = buildModelDiscoveryHeaders(input.style, input.apiKey, input.customHeaders, baseURL);
   const result = await bridge.aiFetch(
     url,
     "GET",
