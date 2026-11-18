@@ -76,6 +76,7 @@ export const esAiMessages: Messages = {
   'ai.providers.test.ok': 'Conectado ({latency} ms)',
   'ai.providers.test.warn': 'Se alcanzó el endpoint, pero la respuesta parece incompleta ({latency} ms)',
   'ai.providers.test.warnSlow': 'Conectado, pero lento ({latency} ms)',
+  'ai.providers.test.modelListUnavailable': 'Lista de modelos no disponible (HTTP 404). Introduce el ID de un modelo y prueba un chat para verificar la conexión.',
   'ai.providers.test.error': 'Falló ({detail})',
   'ai.providers.test.missingBaseUrl': 'Primero ingresa una URL base',
   'ai.providers.test.missingApiKey': 'Primero ingresa una clave de API',

@@ -85,6 +85,7 @@ export const zhTWAiMessages: Messages = {
   'ai.providers.test.ok': '連線正常（{latency} ms）',
   'ai.providers.test.warn': '已連通，但回應不完整（{latency} ms）',
   'ai.providers.test.warnSlow': '已連通，但較慢（{latency} ms）',
+  'ai.providers.test.modelListUnavailable': '無法取得模型清單（HTTP 404）。請手動輸入模型 ID，再傳送一則訊息驗證連線。',
   'ai.providers.test.error': '檢測失敗（{detail}）',
   'ai.providers.test.missingBaseUrl': '請先填寫 Base URL',
   'ai.providers.test.missingApiKey': '請先填寫 API Key',

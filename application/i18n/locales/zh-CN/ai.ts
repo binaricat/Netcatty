@@ -85,6 +85,7 @@ export const zhCNAiMessages: Messages = {
   'ai.providers.test.ok': '连接正常（{latency} ms）',
   'ai.providers.test.warn': '已连通，但响应不完整（{latency} ms）',
   'ai.providers.test.warnSlow': '已连通，但较慢（{latency} ms）',
+  'ai.providers.test.modelListUnavailable': '无法获取模型列表（HTTP 404）。请手动填写模型 ID，再发送一条消息验证连接。',
   'ai.providers.test.error': '检测失败（{detail}）',
   'ai.providers.test.missingBaseUrl': '请先填写 Base URL',
   'ai.providers.test.missingApiKey': '请先填写 API Key',

@@ -339,9 +339,11 @@ export const ProviderConfigForm: React.FC<{
           message: t("ai.providers.test.ok", { latency }),
         });
       } else if (classified.health === "warn") {
-        const warnKey = classified.modelCount === 0 || classified.error
-          ? "ai.providers.test.warn"
-          : "ai.providers.test.warnSlow";
+        const warnKey = classified.notice === "model-list-unavailable"
+          ? "ai.providers.test.modelListUnavailable"
+          : classified.modelCount === 0 || classified.error
+            ? "ai.providers.test.warn"
+            : "ai.providers.test.warnSlow";
         setProbeResult({
           health: "warn",
           message: t(warnKey, { latency }),

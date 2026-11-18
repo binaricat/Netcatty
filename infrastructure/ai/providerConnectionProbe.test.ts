@@ -208,3 +208,43 @@ test("probeProviderConnection does not double /v1 for Anthropic AI SDK style bas
   assert.deepEqual(calls, ["https://gateway.example/v1/models"]);
   assert.equal(run.ok, true);
 });
+
+test("Volcengine Agent Plan OpenAI Detect distinguishes a missing catalog from a failed chat request", async () => {
+  const calls: Array<{ url: string; method?: string }> = [];
+  const run = (baseURL: string, status: number, style: "openai" | "anthropic" = "openai") =>
+    probeProviderConnection({
+      bridge: {
+        aiFetch: async (url, method) => {
+          calls.push({ url, method });
+          return { ok: false, status, data: "" };
+        },
+      },
+      baseURL,
+      apiKey: "fixture-key",
+      providerId: "custom",
+      style,
+      now: () => 0,
+    });
+
+  const base = "https://ark.cn-beijing.volces.com/api/plan/v3";
+  const missingCatalog = await run(base + "/", 404);
+  assert.deepEqual(missingCatalog, {
+    ok: true,
+    classification: { health: "warn", statusCode: 404, latencyMs: 0, notice: "model-list-unavailable" },
+  });
+  assert.deepEqual(calls, [{ url: base + "/models", method: "GET" }]);
+  for (const [url, status, style] of [
+    [base, 401, "openai"],
+    [base, 503, "openai"],
+    [base, 404, "anthropic"],
+    [base + "/typo", 404, "openai"],
+    ["https://ark.cn-beijing.volces.com/api/v3", 404, "openai"],
+    ["https://ark.cn-beijing.volces.com.evil.example/api/plan/v3", 404, "openai"],
+    ["https://example.test/api/plan/v3", 404, "openai"],
+  ] as const) {
+    const result = await run(url, status, style);
+    assert.ok(result.ok);
+    assert.equal(result.classification.health, "error", `${url}: ${status} (${style})`);
+    assert.equal(result.classification.notice, undefined);
+  }
+});

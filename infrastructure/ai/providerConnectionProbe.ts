@@ -15,6 +15,7 @@ export type ProviderProbeClassification = {
   latencyMs: number;
   statusCode: number;
   modelCount?: number;
+  notice?: "model-list-unavailable";
   error?: string;
 };
 
@@ -59,6 +60,17 @@ export function buildProviderProbeUrl(baseURL: string, endpoint: string): string
     path = path.replace(/^\/v1/i, "") || "/";
   }
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function isVolcengineAgentPlanCatalog(url: string): boolean {
+  try {
+    const target = new URL(url);
+    return target.origin === "https://ark.cn-beijing.volces.com"
+      && !target.username && !target.password && !target.search && !target.hash
+      && target.pathname === "/api/plan/v3/models";
+  } catch {
+    return false;
+  }
 }
 
 export function validateProviderProbeInputs(input: {
@@ -193,12 +205,21 @@ export async function probeProviderConnection(input: {
     undefined,
     input.skipTLSVerify,
   );
+  const latencyMs = Math.max(0, now() - startedAt);
+  // The Agent Plan chat endpoint can work even when this catalog returns 404.
+  // Do not reinterpret generic 404s, other protocols, or authentication errors.
+  if (input.style === "openai" && !result.ok && result.status === 404 && isVolcengineAgentPlanCatalog(url)) {
+    return {
+      ok: true,
+      classification: { health: "warn", statusCode: 404, latencyMs, notice: "model-list-unavailable" },
+    };
+  }
   return {
     ok: true,
     classification: classifyProviderProbeResponse({
       ok: result.ok,
       status: result.status ?? (result.ok ? 200 : 0),
-      latencyMs: Math.max(0, now() - startedAt),
+      latencyMs,
       data: result.data,
       error: result.error,
       slowThresholdMs: input.slowThresholdMs,

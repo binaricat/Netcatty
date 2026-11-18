@@ -85,6 +85,7 @@ export const enAiMessages: Messages = {
   'ai.providers.test.ok': 'Connected ({latency} ms)',
   'ai.providers.test.warn': 'Reached endpoint, but response looks incomplete ({latency} ms)',
   'ai.providers.test.warnSlow': 'Connected, but slow ({latency} ms)',
+  'ai.providers.test.modelListUnavailable': 'Model list unavailable (HTTP 404). Enter a model ID manually, then try a chat to verify the connection.',
   'ai.providers.test.error': 'Failed ({detail})',
   'ai.providers.test.missingBaseUrl': 'Enter a Base URL first',
   'ai.providers.test.missingApiKey': 'Enter an API key first',

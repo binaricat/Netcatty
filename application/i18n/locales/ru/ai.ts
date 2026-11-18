@@ -57,6 +57,7 @@ export const ruAiMessages: Messages = {
   'ai.providers.test.ok': 'Подключено ({latency} ms)',
   'ai.providers.test.warn': 'Эндпоинт доступен, но ответ выглядит неполным ({latency} ms)',
   'ai.providers.test.warnSlow': 'Подключено, но медленно ({latency} ms)',
+  'ai.providers.test.modelListUnavailable': 'Список моделей недоступен (HTTP 404). Введите ID модели вручную и отправьте сообщение в чате, чтобы проверить подключение.',
   'ai.providers.test.error': 'Ошибка ({detail})',
   'ai.providers.test.missingBaseUrl': 'Сначала укажите Base URL',
   'ai.providers.test.missingApiKey': 'Сначала укажите API-ключ',
