@@ -59,15 +59,36 @@ test("validateProviderProbeInputs requires base URL and API key except for ollam
   );
 });
 
-test("classifyProviderProbeResponse marks auth and transport failures as error", () => {
+test("classifyProviderProbeResponse marks auth, permission, server, and transport failures as error", () => {
   assert.equal(
     classifyProviderProbeResponse({ ok: false, status: 401, latencyMs: 120, error: "Unauthorized" }).health,
+    "error",
+  );
+  assert.equal(
+    classifyProviderProbeResponse({ ok: false, status: 403, latencyMs: 90 }).health,
+    "error",
+  );
+  assert.equal(
+    classifyProviderProbeResponse({ ok: false, status: 502, latencyMs: 200 }).health,
     "error",
   );
   assert.equal(
     classifyProviderProbeResponse({ ok: false, status: 0, latencyMs: 30, error: "Request timeout" }).health,
     "error",
   );
+});
+
+test("classifyProviderProbeResponse downgrades HTTP 404 models-list probe to warn", () => {
+  const result = classifyProviderProbeResponse({
+    ok: false,
+    status: 404,
+    latencyMs: 95,
+    data: "404 page not found",
+  });
+  assert.equal(result.health, "warn");
+  assert.equal(result.statusCode, 404);
+  assert.equal(result.latencyMs, 95);
+  assert.ok(result.error && result.error.includes("404"));
 });
 
 test("classifyProviderProbeResponse marks 2xx with models payload as ok", () => {
@@ -188,11 +209,11 @@ test("probeProviderConnection returns typed failures before fetch", async () => 
 });
 
 test("probeProviderConnection does not double /v1 for Anthropic AI SDK style bases", async () => {
-  const calls: string[] = [];
+  const calls: Array<{ url: string; headers?: Record<string, string> }> = [];
   const run = await probeProviderConnection({
     bridge: {
-      aiFetch: async (url) => {
-        calls.push(url);
+      aiFetch: async (url, _method, headers) => {
+        calls.push({ url, headers });
         return {
           ok: true,
           status: 200,
@@ -205,6 +226,90 @@ test("probeProviderConnection does not double /v1 for Anthropic AI SDK style bas
     providerId: "custom",
     style: "anthropic",
   });
-  assert.deepEqual(calls, ["https://gateway.example/v1/models"]);
+  assert.deepEqual(calls, [
+    {
+      url: "https://gateway.example/v1/models",
+      headers: {
+        "x-api-key": "sk-test",
+        Authorization: "Bearer sk-test",
+        "anthropic-version": "2023-06-01",
+      },
+    },
+  ]);
   assert.equal(run.ok, true);
+});
+
+test("probeProviderConnection keeps official Anthropic free of Bearer while custom gateways get Bearer and 404 warns", async () => {
+  const calls: Array<{ url: string; headers?: Record<string, string> }> = [];
+
+  const official = await probeProviderConnection({
+    bridge: {
+      aiFetch: async (url, _method, headers) => {
+        calls.push({ url, headers });
+        return {
+          ok: true,
+          status: 200,
+          data: JSON.stringify({ data: [{ id: "claude-sonnet-4-5" }] }),
+        };
+      },
+    },
+    baseURL: "https://api.anthropic.com",
+    apiKey: "sk-ant-test",
+    providerId: "anthropic",
+    style: "anthropic",
+  });
+  assert.equal(official.ok, true);
+  assert.deepEqual(calls[0], {
+    url: "https://api.anthropic.com/v1/models",
+    headers: {
+      "x-api-key": "sk-ant-test",
+      "anthropic-version": "2023-06-01",
+    },
+  });
+
+  const agentPlanOpenAI = await probeProviderConnection({
+    bridge: {
+      aiFetch: async (url, _method, headers) => {
+        calls.push({ url, headers });
+        return { ok: false, status: 404, data: "404 page not found" };
+      },
+    },
+    baseURL: "https://ark.cn-beijing.volces.com/api/plan/v3",
+    apiKey: "ark-key",
+    providerId: "custom",
+    style: "openai",
+  });
+  assert.equal(agentPlanOpenAI.ok, true);
+  if (!agentPlanOpenAI.ok) throw new Error("expected probe result");
+  assert.equal(agentPlanOpenAI.classification.health, "warn");
+  assert.equal(agentPlanOpenAI.classification.statusCode, 404);
+  assert.deepEqual(calls[1], {
+    url: "https://ark.cn-beijing.volces.com/api/plan/v3/models",
+    headers: { Authorization: "Bearer ark-key" },
+  });
+
+  const agentPlanAnthropic = await probeProviderConnection({
+    bridge: {
+      aiFetch: async (url, _method, headers) => {
+        calls.push({ url, headers });
+        return { ok: false, status: 404, data: "404 page not found" };
+      },
+    },
+    baseURL: "https://ark.cn-beijing.volces.com/api/plan",
+    apiKey: "ark-key",
+    providerId: "custom",
+    style: "anthropic",
+  });
+  assert.equal(agentPlanAnthropic.ok, true);
+  if (!agentPlanAnthropic.ok) throw new Error("expected probe result");
+  assert.equal(agentPlanAnthropic.classification.health, "warn");
+  assert.equal(agentPlanAnthropic.classification.statusCode, 404);
+  assert.deepEqual(calls[2], {
+    url: "https://ark.cn-beijing.volces.com/api/plan/v1/models",
+    headers: {
+      "x-api-key": "ark-key",
+      Authorization: "Bearer ark-key",
+      "anthropic-version": "2023-06-01",
+    },
+  });
 });
