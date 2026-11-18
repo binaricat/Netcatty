@@ -184,7 +184,7 @@ export async function softPauseTransfer(
     try { globalSftpTransferScheduler.pause(id); } catch { /* best-effort */ }
   }
 
-  const immediateStatus = task.isDirectory ? "paused" as const : "pausing" as const;
+  const immediateStatus = "pausing" as const;
   // Freeze via latch/status; leave lifecycleEpoch alone until bridge responds.
   host.setTasks(paintTreeStatus(
     host.getTasks(),
@@ -271,7 +271,11 @@ export async function softPauseTransfer(
         if (!pauseStillCurrent()) {
           return { id, result: { success: false, reason: "Pause superseded by resume" } };
         }
-        const result = await pauseOne(id);
+        // A rejected IPC is a failed acknowledgement, not proof of pause.
+        const result: Awaited<ReturnType<NonNullable<TransferControlBridge["pauseTransfer"]>>> = await pauseOne(id).catch((error: unknown) => ({
+          success: false,
+          reason: error instanceof Error ? error.message : "Could not pause transfer",
+        }));
         if (wasSuperseded(result)) return { id, result };
         const live = host.getTasks().find((candidate) => candidate.id === taskId);
         const userResumed = !pauseStillCurrent()
@@ -293,16 +297,26 @@ export async function softPauseTransfer(
       if (after.status !== "paused" && after.status !== "pausing") return;
       const byId = new Map(pauseResults.map((row) => [row.id, row.result]));
       const bridgeEpoch = maxBridgeLifecycleEpoch(pauseResults.map((row) => row.result));
-      // Final directory paint: parent + unfinished children all go paused (do not
-      // leave children stuck on transferring under a paused parent).
+      const liveTasks = host.getTasks();
+      const failed = pauseResults.filter(({ id, result }) => {
+        const live = liveTasks.find((candidate) => candidate.id === id);
+        return live && !["completed", "cancelled", "failed"].includes(live.status)
+          && !result.success && !isBenignPauseMiss(result.reason);
+      });
+      // Keep acknowledged children paused and retain the walk latch. Never
+      // auto-resume siblings to roll back a partial pause. Failed children may
+      // still be streaming; expose that truth and allow an explicit retry.
+      const pauseFailure = failed.length > 0
+        ? (failed[0].result.reason || "Could not pause all folder transfers")
+        : undefined;
       host.setTasks(host.getTasks().map((candidate) => {
         if (candidate.id === taskId) {
           return {
             ...candidate,
-            status: "paused" as const,
+            status: pauseFailure ? "pausing" as const : "paused" as const,
             speed: 0,
             checkpointBytes: candidate.transferredBytes,
-            pauseUnavailableReason: undefined,
+            pauseUnavailableReason: pauseFailure,
             phase: undefined,
             // Bridge epoch only — control-plane pauseEpoch must not poison ingest.
             ...(bridgeEpoch !== undefined ? { lifecycleEpoch: bridgeEpoch } : null),
@@ -311,24 +325,25 @@ export async function softPauseTransfer(
         if (candidate.parentTaskId !== taskId && !backendIds.includes(candidate.id)) return candidate;
         if (["completed", "cancelled", "failed"].includes(candidate.status)) return candidate;
         const result = byId.get(candidate.id);
+        const childFailed = result && !result.success && !isBenignPauseMiss(result.reason);
         const childEpoch = Number.isFinite(result?.lifecycleEpoch)
           ? (result!.lifecycleEpoch as number)
-          : bridgeEpoch;
+          : childFailed ? undefined : bridgeEpoch;
         return {
           ...candidate,
-          status: "paused" as const,
+          status: childFailed ? "transferring" as const : "paused" as const,
           speed: 0,
           checkpointBytes: result?.checkpointBytes ?? candidate.checkpointBytes ?? candidate.transferredBytes,
           resumeStage: result?.resumeStage ?? candidate.resumeStage,
           downloadCheckpointBytes: result?.downloadCheckpointBytes ?? candidate.downloadCheckpointBytes,
           uploadCheckpointBytes: result?.uploadCheckpointBytes ?? candidate.uploadCheckpointBytes,
           sourceFingerprint: result?.sourceFingerprint ?? candidate.sourceFingerprint,
-          pauseUnavailableReason: undefined,
+          pauseUnavailableReason: childFailed ? result.reason : undefined,
           ...(childEpoch !== undefined ? { lifecycleEpoch: childEpoch } : null),
         };
       }));
     })().catch(() => { /* best-effort */ });
-    return "paused";
+    return "pausing";
   }
 
   // Single-file: await soft-drain with supersede guards.
