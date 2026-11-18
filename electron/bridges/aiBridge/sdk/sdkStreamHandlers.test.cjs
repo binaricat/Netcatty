@@ -1940,6 +1940,13 @@ test("list-models refreshes a persisted catalog on use at the 12-hour boundary",
 
     t.mock.timers.setTime(now + maxAge);
     driver.listModels.mock.mockImplementation(async () => [{ id: "new", name: "New" }]);
+    const loadCached = () => handlers.get("netcatty:ai:sdk-agent:list-models")(
+      { sender: {} }, { sdkBackend: "claude", agentCommand: "/test/lkg-expiry", cacheOnly: true },
+    );
+    const cached = await loadCached();
+    assert.equal(cached.source, "last-known-good");
+    assert.deepEqual(cached.models.map(({ id }) => id), ["old"]);
+    assert.equal(driver.listModels.mock.callCount(), 1);
     const [first, second] = await Promise.all([load(), load()]);
     assert.equal(first.source, "live");
     assert.deepEqual(first.models.map(({ id }) => id), ["new"]);

@@ -1217,21 +1217,22 @@ function registerSdkStreamHandlers(ctx) {
 
         // In-flight entries are live fetches, so forced refreshes can share
         // them without replaying either memory or persisted cache results.
+        const cacheOnly = payload?.cacheOnly === true;
         const existing = sdkModelInFlight.get(cacheKey);
-        if (existing) return await existing;
+        if (existing && !cacheOnly) return await existing;
 
         const lastKnownPath = resolveLastKnownCatalogPath(electronModule);
         // Normal loads reuse a fresh catalog and revalidate stale ones on use.
         // A failed revalidation is briefly cached to avoid repeat queries when
         // switching panels; manual refresh bypasses the retry interval.
-        if (!force) {
+        if (!force || cacheOnly) {
           const failedRefresh = getSdkModelCacheEntry(sdkModelRefreshFailures, cacheKey, {
             ttlMs: MODEL_CATALOG_RETRY_MS,
           });
           if (failedRefresh) return failedRefresh.result;
 
           const lastKnown = readLastKnownCatalogEntry(lastKnownPath, cacheKey);
-          if (lastKnown && isFreshModelCatalog(lastKnown)) {
+          if (lastKnown && (cacheOnly || isFreshModelCatalog(lastKnown))) {
             console.debug(
               `[sdk] list-models(${backendKey}) serving last-known-good catalog from ${lastKnown.fetchedAt} without a live fetch`,
             );
@@ -1244,6 +1245,7 @@ function registerSdkStreamHandlers(ctx) {
             };
           }
         }
+        if (cacheOnly) return { ok: true, currentModelId: null, models: [] };
         const loadPromise = (async () => {
           const abortController = new AbortController();
           try {
