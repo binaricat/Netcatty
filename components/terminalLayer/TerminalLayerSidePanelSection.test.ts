@@ -374,3 +374,14 @@ test('side panel close button stays visible at every panel width', () => {
   assert.match(closeSlice, /className="h-7 w-7 shrink-0 rounded-md p-0 hover:bg-transparent"/);
   assert.doesNotMatch(closeSlice, /\bhidden\b|max-(sm|md|lg|xl):/);
 });
+
+test('magnified side-panel chrome thickens the accent stroke on low-DPR displays', () => {
+  const source = readFileSync(new URL('./TerminalLayerSidePanelSection.tsx', import.meta.url), 'utf8');
+  const overlay = source.slice(
+    source.indexOf('data-section="pane-magnification-overlay"'),
+    source.indexOf('data-section="pane-magnification-content"'),
+  );
+  assert.match(overlay, /overflow-hidden rounded-md border bg-background shadow-2xl/);
+  assert.match(overlay, /borderColor: sidePanelTheme\.accent,/);
+  assert.match(overlay, /resolveMagnifiedChromeBorderWidth\(/);
+});
