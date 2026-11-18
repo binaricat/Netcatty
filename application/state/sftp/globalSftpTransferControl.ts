@@ -338,7 +338,7 @@ export async function softPauseTransfer(
           downloadCheckpointBytes: result?.downloadCheckpointBytes ?? candidate.downloadCheckpointBytes,
           uploadCheckpointBytes: result?.uploadCheckpointBytes ?? candidate.uploadCheckpointBytes,
           sourceFingerprint: result?.sourceFingerprint ?? candidate.sourceFingerprint,
-          pauseUnavailableReason: childFailed ? result.reason : undefined,
+          pauseUnavailableReason: childFailed ? (result.reason || "Could not pause transfer") : undefined,
           ...(childEpoch !== undefined ? { lifecycleEpoch: childEpoch } : null),
         };
       }));

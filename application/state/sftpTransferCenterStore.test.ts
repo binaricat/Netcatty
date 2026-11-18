@@ -1505,6 +1505,7 @@ test("pause after terminal close works without any React owner", async () => {
 
   await store.pause("stale-dir");
 
+  await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(store.getSnapshot().tasks.find((row) => row.id === "stale-dir")?.status, "paused");
   assert.equal(isTransferPauseLatched("stale-dir"), true);
   assert.ok(pauseCalls.includes("stale-child"));
@@ -2413,6 +2414,7 @@ test("dedicated directory resume after soft-pause winds down then startFresh (no
 
   // Soft-pause paints paused under dedicated-resume.
   await store.pause("dir");
+  await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(store.getSnapshot().tasks.find((task) => task.id === "dir")?.status, "paused");
 
   // Resume must cancel soft-paused children, clear sticky latches, await wind-down, then startFresh.
@@ -2621,7 +2623,7 @@ test("async folder soft-drain does not re-pause after immediate resume", async (
 
   // Pause returns immediately (async soft-drain).
   await store.pause("dir-race");
-  assert.equal(store.getSnapshot().tasks.find((row) => row.id === "dir-race")?.status, "paused");
+  assert.equal(store.getSnapshot().tasks.find((row) => row.id === "dir-race")?.status, "pausing");
 
   // User hits resume before soft-drain finishes — full store resume (bumps epoch
   // + releases latch tree), which is what the UI does.
@@ -2690,21 +2692,27 @@ test("orphan directory pause stays latched even when some children hard-miss pau
 
   await store.pause("dir");
 
-  // Folder pause is async: UI is paused immediately; soft-drain may still be running.
+  // Folder pause stays pending until the child acknowledgements settle.
   const dir = store.getSnapshot().tasks.find((task) => task.id === "dir");
-  assert.equal(dir?.status, "paused", "folder parent must paint paused without waiting on children");
-  assert.equal(store.getSnapshot().tasks.find((task) => task.id === "c-ok")?.status, "paused");
-  assert.equal(store.getSnapshot().tasks.find((task) => task.id === "c-fail")?.status, "paused");
-  // Soft-drain is fire-and-forget — give it a tick to hit the bridge.
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(dir?.status, "pausing");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(store.getTask("c-ok")?.status, "paused");
+  assert.equal(store.getTask("c-fail")?.status, "transferring");
   assert.deepEqual(pauseCalls.sort(), ["c-fail", "c-ok"]);
   // Latch-first: do not bridge-resume partial successes (that re-opened the queue).
   assert.deepEqual(resumeCalls, []);
   assert.equal(
     store.getSnapshot().tasks.find((task) => task.id === "dir")?.status,
-    "paused",
-    "hard-miss soft-drain must not demote folder out of paused",
+    "pausing",
+    "hard miss keeps the folder latched without claiming a successful pause",
   );
+  assert.equal(store.getTask("dir")?.pauseUnavailableReason, "This transfer cannot be paused safely");
+  store.ingestBackgroundEvent({ type: "progress", transferId: "c-fail", transferred: 25, speed: 10 });
+  assert.equal(store.getTask("c-fail")?.status, "transferring");
+  assert.equal(store.getTask("c-fail")?.transferredBytes, 25);
+  store.patchTask("c-fail", { transferredBytes: 50, speed: 10 });
+  assert.equal(store.getTask("c-fail")?.status, "transferring");
+  assert.equal(store.getTask("c-fail")?.transferredBytes, 50);
 });
 
 test("dedicated resume source-changed marks attention and can reset checkpoint", async () => {
