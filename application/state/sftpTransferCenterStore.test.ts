@@ -2695,6 +2695,7 @@ test("orphan directory pause stays latched even when some children hard-miss pau
   // Folder pause stays pending until the child acknowledgements settle.
   const dir = store.getSnapshot().tasks.find((task) => task.id === "dir");
   assert.equal(dir?.status, "pausing");
+  const ownerSnapshotDuringDrain = store.getSnapshot().tasks.map((row) => ({ ...row }));
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(store.getTask("c-ok")?.status, "paused");
   assert.equal(store.getTask("c-fail")?.status, "transferring");
@@ -2707,6 +2708,11 @@ test("orphan directory pause stays latched even when some children hard-miss pau
     "hard miss keeps the folder latched without claiming a successful pause",
   );
   assert.equal(store.getTask("dir")?.pauseUnavailableReason, "This transfer cannot be paused safely");
+  store.publishOwner("dedicated-resume", ownerSnapshotDuringDrain);
+  assert.equal(store.getTask("dir")?.status, "pausing");
+  assert.equal(store.getTask("dir")?.pauseUnavailableReason, "This transfer cannot be paused safely");
+  assert.equal(store.getTask("c-ok")?.status, "paused");
+  assert.equal(store.getTask("c-fail")?.status, "transferring");
   store.ingestBackgroundEvent({ type: "progress", transferId: "c-fail", transferred: 25, speed: 10 });
   assert.equal(store.getTask("c-fail")?.status, "transferring");
   assert.equal(store.getTask("c-fail")?.transferredBytes, 25);

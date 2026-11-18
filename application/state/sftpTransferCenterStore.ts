@@ -353,9 +353,19 @@ export function mergeOwnerPublishedTask(
     // Only a strictly newer lifecycle epoch may re-open transferring (resume).
     const incomingPaused = incoming.status === "paused" || incoming.status === "pausing";
     const existingPaused = existing.status === "paused" || existing.status === "pausing";
+    // The panel can publish a snapshot from before the child acknowledgements
+    // arrived. Only a newer control decision may clear the folder's failure.
+    const rejectedFolderPause = existing.isDirectory && !existing.parentTaskId
+      && existing.status === "pausing" && !!existing.pauseUnavailableReason
+      && incomingLifecycleEpoch <= existingLifecycleEpoch
+      && isTransferPauseLatched(existing.id);
     const rejectedChildPause = parentStatus === "pausing"
       && !!existing.parentTaskId && existing.status === "transferring" && !!existing.pauseUnavailableReason;
-    if (rejectedChildPause && incomingLifecycleEpoch <= existingLifecycleEpoch) {
+    if (rejectedFolderPause) {
+      merged.status = "pausing";
+      merged.speed = 0;
+      merged.pauseUnavailableReason = existing.pauseUnavailableReason;
+    } else if (rejectedChildPause && incomingLifecycleEpoch <= existingLifecycleEpoch) {
       merged.status = "transferring";
       merged.pauseUnavailableReason = existing.pauseUnavailableReason;
     } else if (incomingPaused && incomingLifecycleEpoch >= existingLifecycleEpoch) {
