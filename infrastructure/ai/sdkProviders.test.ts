@@ -365,6 +365,9 @@ test("Anthropic SDK sends x-api-key only on official host and adds Bearer on cus
     }));
     await assert.rejects(async () => await model.doGenerate({ prompt }));
     const request = requests.at(-1)!;
+    assert.equal(request.url, baseURL.endsWith("/api/plan")
+      ? baseURL + "/v1/messages"
+      : baseURL + "/messages");
     assert.equal(request.headers.get("x-api-key"), "__IPC_SECURED__");
     assert.equal(request.headers.get("authorization"), "Bearer __IPC_SECURED__");
     assert.equal(request.headers.get("anthropic-version"), "2023-06-01");
