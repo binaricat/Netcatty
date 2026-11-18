@@ -1104,6 +1104,7 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
   const activeMagnifiedPane = !!activeTabId && magnifiedPane?.tabId === activeTabId
     ? magnifiedPane
     : null;
+  const devicePixelRatio = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
   const magnifiedSidePane = activeMagnifiedPane?.target.kind === 'side-panel'
     ? activeSidePanelPanes.find((pane) => pane.id === activeMagnifiedPane.target.paneId) ?? null
     : null;
@@ -1545,6 +1546,7 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
           className="absolute inset-3 flex flex-col overflow-hidden rounded-md border bg-background shadow-2xl animate-in fade-in zoom-in-95 duration-150"
           style={{
             borderColor: sidePanelTheme.accent,
+            borderWidth: devicePixelRatio < 1.5 ? 2 : 1,
             backgroundColor: sidePanelTheme.termBg,
             color: sidePanelTheme.termFg,
           }}

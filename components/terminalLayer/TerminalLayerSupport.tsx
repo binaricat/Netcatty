@@ -1439,10 +1439,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     observer.observe(surface);
     return () => observer.disconnect();
   }, [isMagnified]);
+  const devicePixelRatio = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
   const style: React.CSSProperties = resolvePaneMagnificationStyle(
     layoutStyle,
     isMagnified && !!magnifiedSurfaceBounds,
     magnifiedSurfaceBounds,
+    devicePixelRatio,
   );
 
   useLayoutEffect(() => {
@@ -1605,6 +1607,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       style={{
         ...style,
         borderColor: isMagnified && magnifiedSurfaceBounds ? sessionAppearanceTheme.colors.cursor : undefined,
+        borderWidth: isMagnified && magnifiedSurfaceBounds ? (devicePixelRatio < 1.5 ? 2 : 1) : undefined,
       }}
       tabIndex={-1}
       onClick={handlePaneClick}

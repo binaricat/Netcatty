@@ -90,6 +90,37 @@ test('magnification overlays the original layout without changing its rect', () 
   });
 });
 
+test('magnification snaps final inset edges at the default DPR of 1', () => {
+  assert.deepEqual(resolvePaneMagnificationStyle({}, true, {
+    left: 120.3, top: 80.6, width: 1400.4, height: 900.6,
+  }), {
+    position: 'fixed',
+    left: '132px', top: '93px', width: '1377px', height: '876px', zIndex: 50,
+  });
+});
+
+for (const [devicePixelRatio, expectedEdges] of [
+  [1, [132, 93, 1509, 969]],
+  [1.2, [159, 111, 1810, 1163]],
+  [1.25, [165, 116, 1886, 1212]],
+  [1.5, [198, 139, 2263, 1454]],
+  [2, [265, 185, 3017, 1938]],
+] as const) {
+  test(`magnification rounds each inset edge to device pixels at DPR ${devicePixelRatio}`, () => {
+    const bounds = { left: 120.3, top: 80.6, width: 1400.4, height: 900.6 };
+    const original = { left: '10.3px', width: '600.4px' };
+    assert.equal(resolvePaneMagnificationStyle(original, false, bounds, devicePixelRatio), original);
+    const style = resolvePaneMagnificationStyle(original, true, bounds, devicePixelRatio);
+    const left = Number.parseFloat(style.left as string);
+    const top = Number.parseFloat(style.top as string);
+    const right = left + Number.parseFloat(style.width as string);
+    const bottom = top + Number.parseFloat(style.height as string);
+    for (const [index, edge] of [left, top, right, bottom].entries()) {
+      assert.ok(Math.abs(edge * devicePixelRatio - expectedEdges[index]) < 1e-9);
+    }
+  });
+}
+
 test('two-pane magnification keeps the dormant pane geometry unchanged', () => {
   assert.deepEqual(resolveTwoPaneMagnificationStyle('left', true, true), {
     left: '12px', top: '12px', width: 'calc(100% - 24px)', height: 'calc(100% - 24px)', zIndex: 50,

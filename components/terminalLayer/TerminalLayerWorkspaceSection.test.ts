@@ -15,6 +15,17 @@ test("magnified terminal panes use the resolved terminal accent for border chrom
 
   assert.match(paneSource, /isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl /);
   assert.match(paneSource, /borderColor: isMagnified && magnifiedSurfaceBounds \? sessionAppearanceTheme\.colors\.cursor : undefined/);
+  assert.match(source, /const devicePixelRatio = typeof window === 'undefined' \? 1 : window\.devicePixelRatio \|\| 1;/);
+  assert.match(source, /resolvePaneMagnificationStyle\(\s*layoutStyle,\s*isMagnified && !!magnifiedSurfaceBounds,\s*magnifiedSurfaceBounds,\s*devicePixelRatio,\s*\)/);
+  assert.match(paneSource, /borderWidth: isMagnified && magnifiedSurfaceBounds \? \(devicePixelRatio < 1\.5 \? 2 : 1\) : undefined/);
+});
+
+test("magnified side-panel chrome thickens its accent border only at low DPR", () => {
+  const source = readFileSync(new URL("./TerminalLayerSidePanelSection.tsx", import.meta.url), "utf8");
+  const overlaySource = source.slice(source.indexOf('{overlayRoot && magnifiedSidePane && createPortal('));
+
+  assert.match(source, /const devicePixelRatio = typeof window === 'undefined' \? 1 : window\.devicePixelRatio \|\| 1;/);
+  assert.match(overlaySource, /borderColor: sidePanelTheme\.accent,\s*borderWidth: devicePixelRatio < 1\.5 \? 2 : 1,/);
 });
 
 test("terminal keyboard focus updates the pane selected for magnification", () => {

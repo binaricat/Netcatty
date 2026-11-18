@@ -96,15 +96,21 @@ export function resolvePaneMagnificationStyle(
   original: React.CSSProperties,
   magnified: boolean,
   surfaceBounds?: { left: number; top: number; width: number; height: number } | null,
+  devicePixelRatio = 1,
 ): React.CSSProperties {
   if (!magnified) return original;
   if (surfaceBounds) {
+    const snap = (value: number) => Math.round(value * devicePixelRatio) / devicePixelRatio;
+    const left = snap(surfaceBounds.left + 12);
+    const top = snap(surfaceBounds.top + 12);
+    const right = snap(surfaceBounds.left + surfaceBounds.width - 12);
+    const bottom = snap(surfaceBounds.top + surfaceBounds.height - 12);
     return {
       position: 'fixed',
-      left: `${surfaceBounds.left + 12}px`,
-      top: `${surfaceBounds.top + 12}px`,
-      width: `${Math.max(0, surfaceBounds.width - 24)}px`,
-      height: `${Math.max(0, surfaceBounds.height - 24)}px`,
+      left: `${left}px`,
+      top: `${top}px`,
+      width: `${Math.max(0, right - left)}px`,
+      height: `${Math.max(0, bottom - top)}px`,
       zIndex: 50,
     };
   }
