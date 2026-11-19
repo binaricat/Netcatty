@@ -392,6 +392,10 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
                   : setMimoPathInfo;
 
     setInfo(result);
+    const savedPaths = initialManagedPathsRef.current;
+    if (savedPaths && (commandSource === "auto" || (result?.available && result.path))) {
+      savedPaths[agentKey] = commandSource === "manual" ? result?.path ?? "" : "";
+    }
 
     let nextDefaultId: string | null = null;
     setExternalAgents((prev) => {
@@ -414,7 +418,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       apiKeyPresent?: boolean;
       refreshShellEnv?: boolean;
       commandSource?: "manual" | "auto";
-      removeUnavailableManualPath?: boolean;
+      recheckSavedPath?: boolean;
     },
   ) => {
     const bridge = getBridge();
@@ -461,7 +465,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         options?.commandSource === "manual"
         && customPath.trim()
         && !result?.available
-        && !options.removeUnavailableManualPath
+        && !options.recheckSavedPath
       ) {
         const setInfo = agentKey === "codex"
           ? setCodexPathInfo
@@ -525,9 +529,14 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         void resolveAgentPath(task.key, task.path, {
           ...task.options,
           commandSource: task.path ? "manual" : "auto",
-          removeUnavailableManualPath: Boolean(task.path),
-        }).finally(() => {
-          autoResolvedAgentStateRef.current[task.key] = "done";
+          recheckSavedPath: Boolean(task.path),
+        }).then((result) => {
+          if (result?.available) {
+            autoResolvedAgentStateRef.current[task.key] = "done";
+          } else {
+            // Retry a failed check on the next visit to the Agents tab.
+            delete autoResolvedAgentStateRef.current[task.key];
+          }
         });
       }, task.delayMs));
     return () => {

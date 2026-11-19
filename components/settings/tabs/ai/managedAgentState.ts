@@ -34,9 +34,17 @@ export function buildManagedAgentState(
   const managedId = `discovered_${agentKey}`;
   const managedAgents = prevAgents.filter((agent) => agent.id === managedId);
   const otherAgents = prevAgents.filter((agent) => agent.id !== managedId);
+  const existingManaged = managedAgents[0];
+  const savedManualPath = commandSource === "manual" && existingManaged?.commandSource !== "auto"
+    && isPathLikeCommand(existingManaged?.command);
 
   if (!pathInfo?.available || !pathInfo.path) {
-    const existingManaged = managedAgents.find((agent) => agent.id === managedId);
+    if (savedManualPath && existingManaged) {
+      return {
+        agents: prevAgents.map((agent) => agent.id === managedId ? { ...agent, available: false } : agent),
+        defaultAgentId,
+      };
+    }
     if (agentKey === "cursor" && (existingManaged?.apiKey || existingManaged?.cursorAuthMode === "cli-login")) {
       const defaults = AGENT_DEFAULTS[agentKey];
       const {
@@ -97,7 +105,6 @@ export function buildManagedAgentState(
     };
   }
 
-  const existingManaged = managedAgents.find((agent) => agent.id === managedId);
   const {
     acpCommand: _legacyCommand,
     acpArgs: _legacyArgs,
@@ -139,7 +146,9 @@ export function buildManagedAgentState(
     available: cursorModeAvailable,
     // Do not force-disable when only the current auth mode is temporarily
     // unavailable (user may switch modes). Send paths already require available.
-    enabled: managedAgents.length === 0
+    enabled: savedManualPath && existingManaged
+      ? existingManaged.enabled
+      : managedAgents.length === 0
       || (agentKey === "codebuddy" && existingManaged && !isPathLikeCommand(existingManaged.command))
       ? true
       : managedAgents.some((agent) => agent.enabled) || managedAgents.every((agent) => agent.available === false),
