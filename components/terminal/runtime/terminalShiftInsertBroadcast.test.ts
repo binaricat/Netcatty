@@ -7,7 +7,7 @@ import { buildSync } from "esbuild";
 import { JSDOM } from "jsdom";
 import ts from "typescript";
 
-test("native Shift+Insert broadcasts clipboard bytes once without an Insert key", async () => {
+test("Shift+Insert uses onPaste and broadcasts clipboard bytes once across keyboard modes", async () => {
   const root = fileURLToPath(new URL("../../..", import.meta.url));
   const layer = readFileSync(new URL("../../TerminalLayer.tsx", import.meta.url), "utf8");
   const start = layer.indexOf("  const handleBroadcastInput = useCallback(");
@@ -21,6 +21,8 @@ test("native Shift+Insert broadcasts clipboard bytes once without an Insert key"
       contents: `
         export { createXTermRuntime } from "./components/terminal/runtime/createXTermRuntime";
         export { DEFAULT_TERMINAL_SETTINGS } from "./domain/models/terminal";
+        export { DEFAULT_KEY_BINDINGS } from "./domain/models/keyBindings";
+        export { pasteTextIntoTerminal } from "./components/terminal/runtime/terminalUserPaste";
         export { resolveTerminalBroadcastTargetIds } from "./domain/terminalBroadcast";
         export { dispatchKittyKeyboardBroadcastInput } from "./components/terminal/runtime/kittyKeyboardBroadcast";
         export * from "./components/terminal/runtime/terminalPacedBroadcast";
@@ -50,7 +52,8 @@ test("native Shift+Insert broadcasts clipboard bytes once without an Insert key"
     `);
     dom.window.eval(bundle);
     const results = await dom.window.eval(`(async () => {
-      const {createXTermRuntime, DEFAULT_TERMINAL_SETTINGS, resolveTerminalBroadcastTargetIds,
+      const {createXTermRuntime, DEFAULT_TERMINAL_SETTINGS, DEFAULT_KEY_BINDINGS,
+        pasteTextIntoTerminal, resolveTerminalBroadcastTargetIds,
         dispatchKittyKeyboardBroadcastInput, markTerminalBroadcastUserInput,
         captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent} = runtimeTest;
       const ref = current => ({current});
@@ -60,71 +63,123 @@ test("native Shift+Insert broadcasts clipboard bytes once without an Insert key"
       const canUseDirectSessionWriteFallback = () => true;
       const isTerminalSensitiveInputActive = () => false;
       const wires = new Map();
+      const pasteCalls = new Map();
       const terminalBackend = {
         writeToSession:(id,data)=>wires.get(id).push(data), resizeSession(){}, openExternalAvailable:false,
       };
       ${dispatcher}
-      const make = (id, kittyKeyboardProtocolEnabled) => {
+      const make = (id, kittyKeyboardProtocolEnabled, options = {}) => {
         const container = document.createElement('div'); document.body.appendChild(container);
         wires.set(id, []);
+        pasteCalls.set(id, 0);
+        const terminalContextActionsRef = ref({});
         const host = {id,label:id,hostname:'localhost',protocol:'ssh',sshInputCompatibility:false};
-        return createXTermRuntime({
+        const runtime = createXTermRuntime({
           container, host, getHost:()=>host, sessionId:id, sessionRef:ref(id), statusRef:ref('connected'),
           fontFamilyId:'jetbrains-mono',resolvedFontFamily:'monospace',fontSize:14,
           terminalTheme:{colors:{background:'#111111',foreground:'#eeeeee',cursor:'#ffffff',selection:'#444444'}},
           terminalSettingsRef:ref({...DEFAULT_TERMINAL_SETTINGS,rendererType:'dom',fontLigatures:false,cursorBlink:false}),
-          terminalBackend,hotkeySchemeRef:ref('disabled'),keyBindingsRef:ref([]),onHotkeyActionRef:ref(undefined),
+          terminalBackend,hotkeySchemeRef:ref('pc'),
+          keyBindingsRef:ref(options.bindings ?? DEFAULT_KEY_BINDINGS),onHotkeyActionRef:ref(undefined),
+          terminalContextActionsRef, snippetsRef:ref(options.snippets ?? []),
+          onSnippetShortkeyRef:ref(options.onSnippet),
           isBroadcastEnabledRef:ref(true),onBroadcastInputRef:ref(handleBroadcastInput),
-          commandBufferRef:ref(''),requestSearchFocus(){},kittyKeyboardProtocolEnabled,
+          commandBufferRef:ref(''),requestSearchFocus:options.onSearch ?? (()=>{}),kittyKeyboardProtocolEnabled,
         });
+        terminalContextActionsRef.current.onPaste = async () => {
+          pasteCalls.set(id, pasteCalls.get(id) + 1);
+          if (options.delayed) await new Promise(resolve=>setTimeout(resolve,10));
+          pasteTextIntoTerminal(runtime.term, 'clipboard', {scrollOnPaste:false});
+        };
+        return runtime;
       };
       const results = [];
-      for (const bracketed of [false,true]) {
-        for (const delayed of [true,false]) {
-          for (const peerKitty of [false,true]) {
-            const source = make('source', false), peer = make('peer', peerKitty);
-            try {
-              sessionsRef.current = ['source','peer'].map(id=>({id,protocol:'ssh',workspaceId:'workspace'}));
-              if (peerKitty) await new Promise(resolve=>peer.term.write('\\x1b[>8u',resolve));
-              if (bracketed) await new Promise(resolve=>source.term.write('\\x1b[?2004h',resolve));
-              const key = new KeyboardEvent('keydown', {
-                bubbles:true,cancelable:true,key:'Insert',code:'Insert',keyCode:45,shiftKey:true,
-              });
-              source.term.textarea.dispatchEvent(key);
-              const beforePaste = [...wires.get('peer')];
-              if (delayed) await new Promise(resolve=>setTimeout(resolve,10));
-              // Supply the native clipboard event which Chromium emits for this chord.
-              const paste = new Event('paste', {bubbles:true,cancelable:true});
-              Object.defineProperty(paste,'clipboardData',{value:{getData:()=> 'clipboard'}});
-              source.term.textarea.dispatchEvent(paste);
-              source.term.textarea.dispatchEvent(new KeyboardEvent('keyup', {
-                bubbles:true,key:'Insert',code:'Insert',keyCode:45,shiftKey:true,
-              }));
-              results.push({bracketed,delayed,peerKitty,beforePaste,
-                prevented:key.defaultPrevented,source:[...wires.get('source')],peer:[...wires.get('peer')]});
-              // Ordinary Insert still uses the physical-key broadcast path.
-              if (!peerKitty) {
-                wires.get('source').length=0; wires.get('peer').length=0;
-                source.term.textarea.dispatchEvent(new KeyboardEvent('keydown', {
-                  bubbles:true,cancelable:true,key:'Insert',code:'Insert',keyCode:45,
+      const modes = [
+        {name:'legacy',kitty:false,setup:''},
+        {name:'native-kitty',kitty:false,setup:'\\x1b[>1u'},
+        {name:'native-kitty-all-keys',kitty:false,setup:'\\x1b[>8u'},
+        {name:'netcatty-kitty',kitty:true,setup:'\\x1b[>1u'},
+        {name:'win32',kitty:false,setup:'\\x1b[?9001h'},
+      ];
+      for (const mode of modes) {
+        for (const bracketed of [false,true]) {
+          for (const delayed of [true,false]) {
+            for (const peerKitty of [false,true]) {
+              const source = make('source', mode.kitty, {delayed}), peer = make('peer', peerKitty);
+              try {
+                sessionsRef.current = ['source','peer'].map(id=>({id,protocol:'ssh',workspaceId:'workspace'}));
+                if (mode.setup) await new Promise(resolve=>source.term.write(mode.setup,resolve));
+                if (peerKitty) await new Promise(resolve=>peer.term.write('\\x1b[>8u',resolve));
+                if (bracketed) await new Promise(resolve=>source.term.write('\\x1b[?2004h',resolve));
+                const key = new KeyboardEvent('keydown', {
+                  bubbles:true,cancelable:true,key:'Insert',code:'Insert',keyCode:45,shiftKey:true,
+                });
+                source.term.textarea.dispatchEvent(key);
+                if (delayed) await new Promise(resolve=>setTimeout(resolve,20));
+                source.term.textarea.dispatchEvent(new KeyboardEvent('keyup', {
+                  bubbles:true,key:'Insert',code:'Insert',keyCode:45,shiftKey:true,
                 }));
-                results.push({plainInsert:true,source:[...wires.get('source')],peer:[...wires.get('peer')]});
-              }
-            } finally { source.dispose(); peer.dispose(); }
+                results.push({mode:mode.name,bracketed,delayed,peerKitty,pasteCalls:pasteCalls.get('source'),
+                  prevented:key.defaultPrevented,source:[...wires.get('source')],peer:[...wires.get('peer')]});
+                // Ordinary Insert still uses the physical-key broadcast path.
+                if (!peerKitty && mode.name !== 'win32') {
+                  wires.get('source').length=0; wires.get('peer').length=0;
+                  source.term.textarea.dispatchEvent(new KeyboardEvent('keydown', {
+                    bubbles:true,cancelable:true,key:'Insert',code:'Insert',keyCode:45,
+                  }));
+                  results.push({plainInsert:true,mode:mode.name,pasteCalls:pasteCalls.get('source'),
+                    source:[...wires.get('source')],peer:[...wires.get('peer')]});
+                }
+                wires.get('source').length=0; wires.get('peer').length=0;
+                const pasteShortcut = new KeyboardEvent('keydown', {
+                  bubbles:true,cancelable:true,key:'V',code:'KeyV',keyCode:86,ctrlKey:true,shiftKey:true,
+                });
+                source.term.textarea.dispatchEvent(pasteShortcut);
+                if (delayed) await new Promise(resolve=>setTimeout(resolve,20));
+                source.term.textarea.dispatchEvent(new KeyboardEvent('keyup', {
+                  bubbles:true,key:'V',code:'KeyV',keyCode:86,ctrlKey:true,shiftKey:true,
+                }));
+                results.push({configuredPaste:true,mode:mode.name,bracketed,pasteCalls:pasteCalls.get('source'),
+                  prevented:pasteShortcut.defaultPrevented,source:[...wires.get('source')],peer:[...wires.get('peer')]});
+              } finally { source.dispose(); peer.dispose(); }
+            }
           }
         }
+      }
+      for (const shortcut of ['binding','snippet']) {
+        let searchCalls = 0, snippetCalls = 0;
+        const source = make('source', true, shortcut === 'binding'
+          ? {onSearch:()=>searchCalls++,bindings:DEFAULT_KEY_BINDINGS.map(binding=>binding.action === 'searchTerminal'
+              ? {...binding,pc:'Shift + Insert'} : binding)}
+          : {snippets:[{id:'snippet',shortkey:'Shift + Insert'}],onSnippet:()=>snippetCalls++});
+        try {
+          await new Promise(resolve=>source.term.write('\\x1b[>1u',resolve));
+          source.term.textarea.dispatchEvent(new KeyboardEvent('keydown', {
+            bubbles:true,cancelable:true,key:'Insert',code:'Insert',keyCode:45,shiftKey:true,
+          }));
+          results.push({shortcut,pasteCalls:pasteCalls.get('source'),snippetCalls,searchCalls,
+            source:[...wires.get('source')]});
+        } finally { source.dispose(); }
       }
       return JSON.stringify(results);
     })()`);
     for (const result of JSON.parse(results)) {
       if (result.plainInsert) {
+        assert.equal(result.pasteCalls, 1);
         assert.deepEqual(result.source, ["\x1b[2~"]);
         assert.deepEqual(result.peer, ["\x1b[2~"]);
         continue;
       }
+      if (result.shortcut) {
+        assert.equal(result.pasteCalls, 0, result.shortcut);
+        assert.equal(result.snippetCalls, result.shortcut === 'snippet' ? 1 : 0);
+        assert.equal(result.searchCalls, result.shortcut === 'binding' ? 1 : 0);
+        assert.deepEqual(result.source, []);
+        continue;
+      }
       const label = JSON.stringify(result);
-      assert.deepEqual(result.beforePaste, [], label);
-      assert.equal(result.prevented, false, "native paste must remain enabled: " + label);
+      assert.equal(result.pasteCalls, result.configuredPaste ? 2 : 1, label);
+      assert.equal(result.prevented, true, label);
       const expected = result.bracketed ? "\x1b[200~clipboard\x1b[201~" : "clipboard";
       assert.deepEqual(result.source, [expected], label);
       assert.deepEqual(result.peer, [expected], label);

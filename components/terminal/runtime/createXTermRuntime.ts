@@ -2601,6 +2601,18 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       }
     }
 
+    // Claim Shift+Insert as clipboard paste before Kitty/Win32 or xterm can
+    // encode it as an Insert key, while preserving user shortcut precedence.
+    if (
+      e.key === "Insert" && e.shiftKey
+      && !e.ctrlKey && !e.altKey && !e.metaKey
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      void ctx.terminalContextActionsRef?.current?.onPaste?.();
+      return false;
+    }
+
     // Sogou/macOS CJK punctuation: keydown still reports ASCII "," while the
     // full-width "，" arrives on insertText. Returning false (without
     // preventDefault) stops xterm/Kitty from sending the half-width key so the
@@ -2774,15 +2786,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           term.modes.applicationCursorKeysMode,
         ),
       };
-      return true;
-    }
-    // xterm leaves Shift+Insert to the browser's native paste handler. Fan out
-    // the clipboard data from onData instead of encoding an Insert key for
-    // peers or treating the paste as that key's pending legacy data (#4142).
-    if (
-      e.key === "Insert" && e.shiftKey
-      && !e.ctrlKey && !e.altKey && !e.metaKey
-    ) {
       return true;
     }
     if (!shouldDeferKittyKeyEvent(normalizedKittyEvent)) {
