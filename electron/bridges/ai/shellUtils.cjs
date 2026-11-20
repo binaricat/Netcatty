@@ -70,6 +70,10 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 //     the final `]` before `$`/`#` is the delimiter.
 const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\n\r]+)?\])[#$]$/;
 
+// Bracket PS1 without @host, with bash `\t` time: `[\u \t \w]$` -> `[root 12:04:23 ~]$` (#4276).
+// Require HH:MM:SS so loose `[word]$` output cannot count as idle.
+const BRACKET_TIME_POSIX_PROMPT_PATTERN = /^\[[^\s@\]]+\s+\d{2}:\d{2}:\d{2}(?:\s+[^\n\r\]]+)?\][#$]$/;
+
 // Space-separated bash PS1 `\u@\h \w $ ` renders as `user@host ~ $`.
 // macOS ships zsh with `%n@%m %1~ %#`, which renders as
 // `user@host ~ %` / `user@host My Project %`; privileged shells end in `#`.
@@ -137,6 +141,7 @@ function isDefaultPosixPromptLine(line) {
   const withoutEnvPrefix = normalized.replace(/^\([^()\n\r]+\)\s+/, "");
   return (
     POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    BRACKET_TIME_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     PAREN_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ALPINE_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ZSH_PROMPT_PATTERN.test(withoutEnvPrefix) ||
