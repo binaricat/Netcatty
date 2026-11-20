@@ -97,6 +97,7 @@
     "@withfig/autocomplete": "^2.692.3",
     "ajv": "8.18.0",
     "ajv-formats": "3.0.1",
+    "bidi-js": "1.0.3",
     "css-tree": "^3.2.1",
     "electron-updater": "^6.8.3",
     "http-proxy-agent": "^7.0.2",

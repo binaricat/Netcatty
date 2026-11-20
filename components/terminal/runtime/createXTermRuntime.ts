@@ -110,6 +110,7 @@ import {
   createTerminalLigatureController,
   terminalFontLigaturesEnabled,
 } from "./terminalFontLigatures";
+import { findRightToLeftRuns } from "./terminalBidiJoiner";
 import { createWebglRendererController } from "./webglRendererController";
 import { getSharedWebglContextBudget } from "./webglContextBudget";
 import {
@@ -1073,6 +1074,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const unicodeGraphemes = new UnicodeGraphemesAddon();
   term.loadAddon(unicodeGraphemes);
   term.unicode.activeVersion = '15-graphemes';
+
+  // Draw Arabic, Persian and Hebrew runs in display order with joined letters.
+  // Display only: the buffer, selection and copy keep the logical text.
+  term.registerCharacterJoiner(findRightToLeftRuns);
 
   trackRenderer();
 
