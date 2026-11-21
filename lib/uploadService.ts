@@ -17,6 +17,10 @@ import {
 } from "../domain/sftpConflict";
 import { isMissingStatError } from "../domain/sftpStatError";
 import { resolveSftpTransferConcurrency } from "../domain/sftpTransferConcurrency";
+import {
+  SFTP_VIRTUAL_FOLDER_UPLOAD_ERROR,
+  isVirtualFolderPseudoFileDrop,
+} from "../domain/sftpVirtualDrop";
 
 // ============================================================================
 // Types
@@ -257,8 +261,37 @@ async function uploadEntriesWithOptionalCompression(
     resolveConflict,
   } = config;
 
+  // Windows archive-window drags hand over "virtual" items without a real
+  // disk path. A folder dragged out of an archive arrives as one path-less,
+  // extension-less, empty pseudo-file whose content cannot be enumerated, so
+  // uploading would fabricate an empty file and its same-name conflict cannot
+  // honestly offer merge/replace (#3057). Fail those items fast with an
+  // actionable error; everything else keeps the regular flow.
+  const virtualFolderResults: UploadResult[] = [];
+  const uploadableEntries: DropEntry[] = [];
+  for (const entry of entries) {
+    if (isVirtualFolderPseudoFileDrop(entry)) {
+      virtualFolderResults.push({
+        fileName: entry.relativePath,
+        success: false,
+        error: SFTP_VIRTUAL_FOLDER_UPLOAD_ERROR,
+      });
+    } else {
+      uploadableEntries.push(entry);
+    }
+  }
+  if (uploadableEntries.length === 0) {
+    return virtualFolderResults;
+  }
+  entries = uploadableEntries;
+
+  const withVirtualFolderResults = (results: UploadResult[]): UploadResult[] => [
+    ...virtualFolderResults,
+    ...results,
+  ];
+
   if (!useCompressedUpload || isLocal || !sftpId) {
-    return uploadEntries(
+    return withVirtualFolderResults(await uploadEntries(
       entries,
       targetPath,
       sftpId,
@@ -270,12 +303,12 @@ async function uploadEntriesWithOptionalCompression(
       resolveConflict,
       config.targetHostId,
       config.fileTransferConcurrency,
-    );
+    ));
   }
 
   const rootGroups = Array.from(detectRootFolders(entries).entries());
   if (!rootGroups.some(([key]) => !key.startsWith("__file__"))) {
-    return uploadEntries(
+    return withVirtualFolderResults(await uploadEntries(
       entries,
       targetPath,
       sftpId,
@@ -287,7 +320,7 @@ async function uploadEntriesWithOptionalCompression(
       resolveConflict,
       config.targetHostId,
       config.fileTransferConcurrency,
-    );
+    ));
   }
 
   const statTarget = async (path: string) => {
@@ -350,7 +383,7 @@ async function uploadEntriesWithOptionalCompression(
 
     if (action === "stop") {
       await controller?.cancel();
-      return [{ fileName: info.rootName, success: false, cancelled: true }];
+      return withVirtualFolderResults([{ fileName: info.rootName, success: false, cancelled: true }]);
     }
     if (action === "skip") {
       resolvedResults.push({ fileName: info.rootName, success: false, cancelled: true });
@@ -397,7 +430,7 @@ async function uploadEntriesWithOptionalCompression(
     result.success || result.error !== compressionFallbackError
   ));
   if (regularEntries.length === 0) {
-    return [...resolvedResults, ...terminalCompressedResults];
+    return withVirtualFolderResults([...resolvedResults, ...terminalCompressedResults]);
   }
 
   const replayResolvedConflict: UploadConfig["resolveConflict"] = resolveConflict
@@ -419,7 +452,7 @@ async function uploadEntriesWithOptionalCompression(
     config.targetHostId,
     config.fileTransferConcurrency,
   );
-  return [...resolvedResults, ...terminalCompressedResults, ...regularResults];
+  return withVirtualFolderResults([...resolvedResults, ...terminalCompressedResults, ...regularResults]);
 }
 
 /**
