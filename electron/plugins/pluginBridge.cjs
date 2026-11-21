@@ -305,13 +305,22 @@ function registerPluginBridge(ipcMain, options) {
     }
     return manager;
   };
-  const handle = (channel, callback) => {
+  const handle = (channel, callback, allowUnconfigured = false) => {
     ipcMain.handle(channel, async (event, payload) => {
       if (!isTrustedSender(event)) throw new Error("Untrusted plugin management sender");
+      if (allowUnconfigured && !configured) return false;
       const activeManager = await resolveManager();
       return callback(activeManager, payload, event);
     });
   };
+  // Ordinary renderer lifecycles also run with the plugin runtime disabled.
+  // Only an unconfigured runtime is a no-op; initialization failures still reject.
+  const handleLifecycle = (channel, callback) => handle(channel, callback, true);
+  if (!configured) {
+    // Enabled AI/Agent adapters own these channels; never register over them.
+    handleLifecycle("netcatty:plugins:ai-host-ready", () => false);
+    handleLifecycle("netcatty:plugins:agent-host-ready", () => false);
+  }
   // These channels are called by ordinary host/terminal lifecycles even when
   // the experimental plugin runtime is disabled. Treat the disabled runtime as
   // an empty provider set instead of throwing (and making Electron print a
@@ -709,7 +718,7 @@ function registerPluginBridge(ipcMain, options) {
     if (!options.catalogService) throw new Error("Plugin catalog unavailable");
     return options.catalogService.install(payload?.id, payload?.selectionToken, payload?.sourceId, payload?.acceptedSourceId);
   });
-  handle(CHANNELS.interactionReady, async (_manager, payload, event) => {
+  handleLifecycle(CHANNELS.interactionReady, async (_manager, payload, event) => {
     if (!options.interactionService) throw new Error("Host interactions are unavailable");
     return options.interactionService.setReady(event.sender, payload?.ready);
   });
@@ -739,7 +748,7 @@ function registerPluginBridge(ipcMain, options) {
     if ("senderFrame" in event && (!event.senderFrame || event.senderFrame !== event.sender?.mainFrame)) throw new Error("Untrusted permission UI frame");
     return event.sender;
   };
-  handle(CHANNELS.permissionReady, async (_manager, payload, event) => options.permissionDecisionHost?.setReady(permissionSender(event), payload?.ready));
+  handleLifecycle(CHANNELS.permissionReady, async (_manager, payload, event) => options.permissionDecisionHost?.setReady(permissionSender(event), payload?.ready));
   handle(CHANNELS.permissionResponse, async (_manager, payload, event) => options.permissionDecisionHost?.respond(permissionSender(event), payload));
   handle(CHANNELS.setPermissionMode, async (_manager, payload) => {
     const pluginId = assertManagedPluginId(payload);
@@ -800,7 +809,7 @@ function registerPluginBridge(ipcMain, options) {
   ));
   handle(CHANNELS.restart, async (activeManager, payload) => activeManager.restart(payload?.pluginId));
   handle(CHANNELS.uninstall, async (activeManager, payload) => activeManager.uninstall(payload?.pluginId));
-  handle(CHANNELS.terminalTarget, async (_manager, target, event) => {
+  handleLifecycle(CHANNELS.terminalTarget, async (_manager, target, event) => {
     if (!options.interactionService) throw new Error("Host interactions unavailable");
     return options.interactionService.setTerminalTarget(event.sender, target);
   });
