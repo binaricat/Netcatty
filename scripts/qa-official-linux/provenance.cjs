@@ -6,14 +6,7 @@ const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { execFileSync } = require('node:child_process');
-const pinned = {
-  repository: 'binaricat/Netcatty', repositoryId: 1111357457,
-  sha: 'a23868ee88603d0182c5370fca851cb9d05d7f8f', run: 44901156879,
-  artifact: 14706239224, name: 'netcatty-linux-x64',
-  zipSha256: 'c6a3a18fd44592f6c8207aa5bbf82e6a034e7c15bf54e1633296f3ab0e0fb15c',
-  deb: 'Netcatty-0.0.0-sha-a23868e-linux-amd64.deb',
-  debSha256: 'd06498511d6298a3e0a46c3bed6626843ba3d9bed987b1d9a20c41874bc98929',
-};
+const pinned = require('./candidate.json');
 async function main() {
   assert(process.env.GH_TOKEN, 'Downloader needs actions:read token');
   const root = path.resolve(process.env.QA_ROOT);

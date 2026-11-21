@@ -8,6 +8,9 @@ Pinned candidate: `a23868ee88603d0182c5370fca851cb9d05d7f8f`, official main buil
 `44901156879`, Linux x64 artifact `14706239224`. The downloader verifies GitHub
 repository/run/job/artifact metadata, the immutable archive digest, and the deb
 digest recorded by that official Linux build. No older fallback is selected.
+All candidate identifiers and digests live in `candidate.json`; change them
+together only after read-only verification of the new official metadata. Each
+assertion report records its own candidate SHA. Do not mix candidate results.
 
 The official deb is extracted as the non-root runner. Its installer scripts are
 never executed: those scripts alter SUID/AppArmor. This is **extracted-package
