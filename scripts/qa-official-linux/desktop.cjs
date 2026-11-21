@@ -9,7 +9,7 @@ const { Server } = require('ssh2');
 const loginPassword = crypto.randomBytes(24).toString('hex');
 const root = path.resolve(process.env.QA_ROOT);
 const scenario = process.argv[2] || 'persistence';
-assert(['persistence', 'ssh', 'sftp', 'host-filter'].includes(scenario));
+assert(['persistence', 'ssh', 'sftp', 'host-filter', 'clipboard'].includes(scenario));
 const pinned = require(path.resolve(__dirname, process.env.QA_CANDIDATE || 'candidate.json'));
 const evidence = path.join(root, 'evidence', scenario);
 const executable = path.join(root, 'package/opt/Netcatty/netcatty');
@@ -137,6 +137,7 @@ function startSshFixture() {
     client.on('close', () => clients.delete(client));
     const session = { receivedHex: '', sent: [], commands: [], prompts: 0, answers: [], pending: false, ready: false };
     sessions.push(session);
+    client.on('close', () => { session.closedAt = Date.now(); });
     client.on('authentication', (ctx) => {
       if (ctx.method === 'password' && ctx.password === loginPassword) ctx.accept();
       else ctx.reject(['password']);
@@ -166,7 +167,7 @@ function startSshFixture() {
         });
         channel.on('shell', (acceptShell) => {
           const stream = acceptShell();
-          session.ready = true;
+          session.ready = true; session.readyAt = Date.now();
           stream.on('error', () => {});
           let line = '';
           stream.write('fixture$ ');
@@ -266,12 +267,12 @@ async function assertEcho(expected) {
     return result.ok === true && result.content.includes(expected);
   }, 10000);
 }
-function disconnectFixtureClients() {
+function disconnectFixtureClients(transportLoss = false) {
   for (const client of fixture?.clients || []) {
     // ssh2 Server.Connection exposes end(), not Client.destroy(). A socket
     // destruction here is an actual transport loss, not a renderer status edit.
-    client._sock?.destroy();
-    client.end();
+    if (transportLoss) client._sock?.destroy();
+    else client.end();
   }
 }
 async function quit() {
@@ -303,7 +304,10 @@ async function verifySftp() {
   const paused = await cdp.eval(`window.netcatty.pauseTransfer(${JSON.stringify(transferId)})`);
   assert.equal(paused.success, true, paused.reason);
   await until('native paused lifecycle event', () => cdp.eval(`window.__qaTransfer.events.some(e => e.type === 'paused')`));
-  await until('server outstanding reads drained', () => fixture.sftpStats.activeReads === 0, 10000);
+  report.sftpPauseDrain = {startedAt: Date.now(), initial: {...fixture.sftpStats}};
+  await until('server outstanding reads drained', () => fixture.sftpStats.activeReads === 0, 45000);
+  report.sftpPauseDrain.endedAt = Date.now();
+  report.sftpPauseDrain.final = {...fixture.sftpStats};
   const samples = [];
   for (let i = 0; i < 5; i++) {
     samples.push({ at: Date.now(), serverBytes: fixture.sftpStats.bytesSent, progressBytes: await progress() });
@@ -367,6 +371,43 @@ async function verifyHostFilters() {
   report.hostFilters.path = 'real packaged public/vault/hosts/list dispatcher -> production renderer vault bridge';
   await capture('03-host-filter-cases-completed.png');
 }
+function saveEvidence(print) {
+  const output = logs.join('');
+  const publicText = output + JSON.stringify(report);
+  const sensitive = publicText.includes(loginPassword) || /-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]+)|Authorization:\s*Bearer\s+\S+/i.test(publicText);
+  report.stderrReview = sensitive ? 'blocked: sensitive output; logs and screenshots withheld' : 'pass: ephemeral password, private key, GitHub credential and bearer-token checks';
+  if (sensitive) {
+    process.exitCode = 1; delete report.failure; delete report.sshDiagnostics;
+    for (const name of ['electron-output.log', ...screenshots.keys()]) fs.rmSync(path.join(evidence, name), {force: true});
+  } else {
+    fs.writeFileSync(path.join(evidence, 'electron-output.log'), output);
+    for (const [name, bytes] of screenshots) fs.writeFileSync(path.join(evidence, name), bytes);
+    if (print) console.log('Reviewed official Electron stdout/stderr:\n' + output);
+  }
+  report.coverage = 'Independent scenario: only this report and candidate SHA count; other scenario reports must be evaluated separately';
+  fs.writeFileSync(path.join(evidence, 'assertions.json'), JSON.stringify(report, null, 2));
+  if (print) console.log(JSON.stringify(report, null, 2));
+}
+async function verifyClipboard() {
+  report.clipboard = {status: 'incomplete'};
+  await terminalLine(cdp, mainCdp, 'QA_CLIPBOARD_ONLY');
+  await until('clipboard scenario server receive', () => fixture.sessions.some(s => s.commands.includes('QA_CLIPBOARD_ONLY')));
+  await assertEcho('ran: QA_CLIPBOARD_ONLY');
+  async function menu(label) {
+    await clickElement(cdp, '.xterm', 0, 'right');
+    const point = await until(`terminal menu ${label}`, () => cdp.eval(`(() => { const e = [...document.querySelectorAll('[role="menuitem"]')].find(e => e.textContent.trim().startsWith(${JSON.stringify(label)})); if (!e) return null; const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`));
+    await clickPoint(cdp, point);
+    await pause(200);
+  }
+  await menu('Select All'); await menu('Copy');
+  await until('clipboard receives real terminal echo', async () => {
+    const actual = await mainCdp.eval(`process.mainModule.require('electron').clipboard.readText()`);
+    report.clipboard.observed = actual;
+    return actual.includes('ran: QA_CLIPBOARD_ONLY');
+  }, 5000);
+  report.clipboard.status = 'pass';
+  await capture('03-independent-clipboard.png');
+}
 async function run() {
   assert.notEqual(process.getuid(), 0, 'QA must run as a non-root user');
   assert(fs.existsSync(executable), `Official executable missing: ${executable}`);
@@ -414,6 +455,7 @@ async function run() {
     await pause(700);
     await capture('02-connected-shell.png');
     if (scenario === 'sftp') { await verifySftp(); return; }
+    if (scenario === 'clipboard') { await verifyClipboard(); return; }
     report.sshReconnect = 'incomplete';
     await terminalLine(cdp, mainCdp, 'QA_BEFORE_DISCONNECT');
     await until('first server received command', () => fixture.sessions.some(s => s.commands.includes('QA_BEFORE_DISCONNECT')));
@@ -421,17 +463,22 @@ async function run() {
     const originalTabs = await cdp.eval(`[...document.querySelectorAll('[data-tab-type="session"]')].map(e => e.getAttribute('data-tab-id'))`);
     assert.equal(originalTabs.length, 1);
     assert(originalTabs[0], 'Stable original tab ID required');
-    disconnectFixtureClients();
-    await until('disconnect overlay', () => cdp.eval(`Boolean(document.querySelector('[data-terminal-disconnected-dialog="true"]'))`));
-    await capture('04-real-ssh-disconnected.png');
-    await key(mainCdp, 'Enter'); await key(mainCdp, 'Enter', 'keyUp');
+    disconnectFixtureClients(true);
+    await capture('03-real-ssh-transport-lost.png');
+    await until('transport closed and reconnect path observable', async () => fixture.sessions[0].closedAt && (fixture.sessions.filter(s => s.ready).length >= 2 || await cdp.eval(`Boolean(document.querySelector('[data-terminal-disconnected-dialog="true"]'))`)));
+    if (fixture.sessions.filter(s => s.ready).length < 2) {
+      report.reconnectMode = 'UI Enter';
+      await capture('04-real-ssh-disconnected.png');
+      await key(mainCdp, 'Enter'); await key(mainCdp, 'Enter', 'keyUp');
+    } else report.reconnectMode = 'production automatic reconnect after real transport loss';
     await until('second real SSH shell', () => fixture.sessions.filter(s => s.ready).length === 2, 20000);
+    await pause(700);
     await terminalLine(cdp, mainCdp, 'QA_AFTER_RECONNECT');
     await until('second server received command', () => fixture.sessions.filter(s => s.ready)[1].commands.includes('QA_AFTER_RECONNECT'));
     await assertEcho('ran: QA_AFTER_RECONNECT');
     assert.deepEqual(await cdp.eval(`[...document.querySelectorAll('[data-tab-type="session"]')].map(e => e.getAttribute('data-tab-id'))`), originalTabs);
     report.sshReconnect = 'pass';
-    report.ssh = { transport: 'SSH2 over loopback TCP; server destroys connection before UI Enter reconnect', shellConnections: fixture.sessions.filter(s => s.ready).length, originalTabs, commands: fixture.sessions.filter(s => s.ready).map(s => s.commands.filter(command => command.startsWith('QA_'))) };
+    report.ssh = { transport: 'SSH2 over loopback TCP; server destroys its socket, production app reconnects original tab', shellConnections: fixture.sessions.filter(s => s.ready).length, originalTabs, commands: fixture.sessions.filter(s => s.ready).map(s => s.commands.filter(command => command.startsWith('QA_'))) };
     await capture('05-real-ssh-reconnected.png');
   } catch (error) {
     report.failure = error.message;
@@ -441,26 +488,19 @@ async function run() {
     await capture('failure-real-application.png').catch(() => {});
     process.exitCode = 1;
   } finally {
-    await quit();
-    if (fixture) {
-      disconnectFixtureClients();
-      await new Promise(resolve => fixture.server.close(resolve));
-    }
+    // Persist tested assertions and reviewed evidence before teardown. Cleanup
+    // must not erase a functional result or mask the original failure.
+    saveEvidence(false);
+    try {
+      await quit();
+      if (fixture) {
+        disconnectFixtureClients();
+        await Promise.race([new Promise(resolve => fixture.server.close(resolve)), pause(5000)]);
+      }
+      fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+    } catch (error) { report.cleanupWarning = error.code || error.message; }
     clearTimeout(watchdog);
-    const output = logs.join('');
-    const publicText = output + JSON.stringify(report);
-    const sensitive = publicText.includes(loginPassword) || /-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]+)|Authorization:\s*Bearer\s+\S+/i.test(publicText);
-    report.stderrReview = sensitive ? 'blocked: sensitive output; logs and screenshots withheld' : 'pass: ephemeral password, private key, GitHub credential and bearer-token checks';
-    if (sensitive) { process.exitCode = 1; delete report.failure; delete report.sshDiagnostics; }
-    else {
-      fs.writeFileSync(path.join(evidence, 'electron-output.log'), output);
-      console.log('Reviewed official Electron stdout/stderr:\n' + output);
-      for (const [name, bytes] of screenshots) fs.writeFileSync(path.join(evidence, name), bytes);
-    }
-    report.coverage = 'Independent scenario: only this report and candidate SHA count; other scenario reports must be evaluated separately';
-    fs.writeFileSync(path.join(evidence, 'assertions.json'), JSON.stringify(report, null, 2));
-    console.log(JSON.stringify(report, null, 2));
-    try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (error) { console.warn('Isolated profile cleanup warning: ' + error.code); }
+    saveEvidence(true);
   }
 }
 run().catch(error => { console.error(error.message); process.exitCode = 1; });

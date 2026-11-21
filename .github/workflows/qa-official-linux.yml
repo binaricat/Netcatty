@@ -69,6 +69,9 @@ jobs:
         id: sftp
         if: always() && steps.provenance.outcome == 'success'
         run: xvfb-run -a -s '-screen 0 1440x1000x24 -nolisten tcp' node scripts/qa-official-linux/desktop.cjs sftp
+      - name: Independent clipboard UI check (never gates reconnect)
+        if: always() && steps.provenance.outcome == 'success'
+        run: xvfb-run -a -s '-screen 0 1440x1000x24 -nolisten tcp' node scripts/qa-official-linux/desktop.cjs clipboard
       - name: Independent new host filter compatibility and boundary checks
         if: always() && steps.provenance.outcome == 'success' && matrix.candidate == '9d4e90b'
         run: xvfb-run -a -s '-screen 0 1440x1000x24 -nolisten tcp' node scripts/qa-official-linux/desktop.cjs host-filter
