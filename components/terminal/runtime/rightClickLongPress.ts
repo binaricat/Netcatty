@@ -37,7 +37,7 @@ export function installRightClickLongPress(
     suppressContextMenu = false;
     if (event.button !== 2 || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey
       || !canStart()
-      || (event.target as Element | null)?.closest('[data-terminal-history-preview]')) return;
+      || (event.target as Element | null)?.closest('[data-terminal-history-preview], [data-section="terminal-compose-bar"]')) return;
     press = event;
     suppressContextMenu = true;
     timer = setTimeout(() => {
