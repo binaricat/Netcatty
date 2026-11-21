@@ -18,6 +18,7 @@ class FakePort extends EventEmitter {
   }
 
   postMessage(message, transfer = []) {
+    assert.ok(transfer.every((item) => !(item instanceof ArrayBuffer)), "MessagePortMain transfers ports only");
     this.sent.push(message);
     this.transferLists.push(transfer);
     if (message.method === "plugin.initialize") {
@@ -136,7 +137,8 @@ test("browser host waits for preload and the installed plugin RPC listener", asy
   });
   const transferable = new ArrayBuffer(8);
   runtime.router.send({ type: "transfer-test", transferable }, [transferable]);
-  assert.deepEqual(port1.transferLists.at(-1), [transferable]);
+  assert.deepEqual(port1.transferLists.at(-1), []);
+  assert.equal(port1.sent.at(-1).transferable.byteLength, 8);
   assert.equal(windowOptions.webPreferences.sandbox, true);
   assert.equal(windowOptions.webPreferences.nodeIntegration, false);
   assert.equal(windowOptions.webPreferences.contextIsolation, true);

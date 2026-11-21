@@ -66,6 +66,9 @@ lockDirectBrowserCapabilities();
 await startPluginRuntime({
   port,
   config,
+  // Electron's main-process port cannot deserialize transferred ArrayBuffers.
+  // Clone bounded binary envelopes while continuing to transfer MessagePorts.
+  transferArrayBuffers: false,
   loadPlugin: (entryUrl) => import(entryUrl),
 });
 window.postMessage({
