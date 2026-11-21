@@ -158,3 +158,40 @@ export function collectGlobalManagerAgentIds(rows: GlobalManagerRow[]): string[]
   for (const row of rows) seen.add(row.agentId);
   return Array.from(seen);
 }
+
+/**
+ * Build explicit rebind targets for every open workspace and terminal,
+ * carrying host IDs for both so host-based history filtering survives
+ * workspace dissolution and terminal reconnection.
+ */
+export function buildGlobalManagerRebindTargets(
+  workspaces: ReadonlyArray<{ id: string; title: string; hostIds?: ReadonlyArray<string> }>,
+  terminalInfos: ReadonlyArray<GlobalManagerTerminalInfo>,
+): GlobalManagerScopeTarget[] {
+  const targets: GlobalManagerScopeTarget[] = [];
+  const seen = new Set<string>();
+  for (const workspace of workspaces) {
+    if (seen.has(`workspace:${workspace.id}`)) continue;
+    seen.add(`workspace:${workspace.id}`);
+    const hostIds = workspace.hostIds && workspace.hostIds.length > 0
+      ? Array.from(new Set(workspace.hostIds.filter(Boolean)))
+      : undefined;
+    targets.push({
+      type: 'workspace',
+      targetId: workspace.id,
+      label: workspace.title,
+      hostIds: hostIds && hostIds.length > 0 ? hostIds : undefined,
+    });
+  }
+  for (const info of terminalInfos) {
+    if (!info.sessionId || seen.has(`terminal:${info.sessionId}`)) continue;
+    seen.add(`terminal:${info.sessionId}`);
+    targets.push({
+      type: 'terminal',
+      targetId: info.sessionId,
+      label: info.label || info.hostname,
+      hostIds: info.hostId ? [info.hostId] : undefined,
+    });
+  }
+  return targets;
+}

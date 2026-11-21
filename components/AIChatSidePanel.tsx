@@ -66,7 +66,10 @@ import {
 import { getScopedHistorySessions } from './ai/scopedHistorySessions';
 import { buildAiChatsListingEntries, canRebindChat, formatAiChatsListingNote, resolveRebindTargetFromArg, type AiChatsListingEntry } from './ai/aiChatsListing';
 import { GlobalAIChatSessionManager } from './ai/GlobalAIChatSessionManager';
-import type { GlobalManagerScopeTarget } from './ai/globalSessionManagerRows';
+import {
+  buildGlobalManagerRebindTargets,
+  type GlobalManagerScopeTarget,
+} from './ai/globalSessionManagerRows';
 import { resolveInheritedAIActiveSessionId } from '../domain/aiWorkspaceScopeInherit';
 import { resolveUndoLastTurnBoundary } from '../domain/aiUndoLastTurn';
 import { aiSessionIdSetEqual, exactScopeAISessionsEqual } from '../domain/aiSessionsForScope';
@@ -2154,26 +2157,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     [appTerminalSessions, terminalSessions],
   );
 
-  const managerRebindTargets = useMemo<GlobalManagerScopeTarget[]>(() => {
-    const targets: GlobalManagerScopeTarget[] = [];
-    const seen = new Set<string>();
-    for (const workspace of workspaces) {
-      if (seen.has(`workspace:${workspace.id}`)) continue;
-      seen.add(`workspace:${workspace.id}`);
-      targets.push({ type: 'workspace', targetId: workspace.id, label: workspace.title });
-    }
-    for (const info of managerTerminalInfos) {
-      if (!info.sessionId || seen.has(`terminal:${info.sessionId}`)) continue;
-      seen.add(`terminal:${info.sessionId}`);
-      targets.push({
-        type: 'terminal',
-        targetId: info.sessionId,
-        label: info.label || info.hostname,
-        hostIds: info.hostId ? [info.hostId] : undefined,
-      });
-    }
-    return targets;
-  }, [managerTerminalInfos, workspaces]);
+  const managerRebindTargets = useMemo<GlobalManagerScopeTarget[]>(
+    () => buildGlobalManagerRebindTargets(workspaces, managerTerminalInfos),
+    [managerTerminalInfos, workspaces],
+  );
 
   // "Open/switch" from the manager: exact-scope chats are rank-3 entries of
   // this panel's scoped history, so the ordinary selection path (pointer,

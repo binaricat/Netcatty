@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { AISession } from "../../infrastructure/ai/types.ts";
 import {
+  buildGlobalManagerRebindTargets,
   buildGlobalManagerRows,
   collectGlobalManagerAgentIds,
   filterGlobalManagerRows,
@@ -124,4 +125,23 @@ test("filter: title substring is case-insensitive; agent filter narrows; order p
   assert.deepEqual(both.map((row) => row.session.id), []);
 
   assert.deepEqual(collectGlobalManagerAgentIds(rows), ["catty", "codex"]);
+});
+
+test("rebind targets carry deduplicated member host IDs for workspaces and terminals", () => {
+  const targets = buildGlobalManagerRebindTargets(
+    [
+      { id: "w-1", title: "Prod", hostIds: ["h-1", "h-2", "h-1", ""] },
+      { id: "w-empty", title: "Empty" },
+    ],
+    [
+      { sessionId: "t-1", hostId: "h-1", label: "edge", hostname: "edge.example", connected: true },
+      { sessionId: "t-local", hostId: "", label: "Local", hostname: "localhost", connected: true },
+    ],
+  );
+  assert.deepEqual(targets, [
+    { type: "workspace", targetId: "w-1", label: "Prod", hostIds: ["h-1", "h-2"] },
+    { type: "workspace", targetId: "w-empty", label: "Empty", hostIds: undefined },
+    { type: "terminal", targetId: "t-1", label: "edge", hostIds: ["h-1"] },
+    { type: "terminal", targetId: "t-local", label: "Local", hostIds: undefined },
+  ]);
 });

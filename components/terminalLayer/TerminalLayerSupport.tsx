@@ -533,10 +533,43 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     showDraftView,
     updateDraft,
   } = aiConfig;
-  const aiPanelWorkspaces = useMemo(
-    () => (workspaces ?? []).map((workspace) => ({ id: workspace.id, title: workspace.title })),
-    [workspaces],
-  );
+  const previousAiPanelWorkspacesRef = useRef<Array<{ id: string; title: string; hostIds?: string[] }> | null>(null);
+  const aiPanelWorkspaces = useMemo(() => {
+    const hostIdBySessionId = new Map<string, string>();
+    for (const info of appTerminalSessions) {
+      if (info.sessionId && info.hostId) {
+        hostIdBySessionId.set(info.sessionId, info.hostId);
+      }
+    }
+    const next = (workspaces ?? []).map((workspace) => {
+      const hostIds = Array.from(
+        new Set(
+          collectSessionIds(workspace.root)
+            .map((sessionId) => hostIdBySessionId.get(sessionId))
+            .filter((hostId): hostId is string => !!hostId),
+        ),
+      );
+      return hostIds.length > 0
+        ? { id: workspace.id, title: workspace.title, hostIds }
+        : { id: workspace.id, title: workspace.title };
+    });
+    const prev = previousAiPanelWorkspacesRef.current;
+    if (
+      prev
+      && prev.length === next.length
+      && prev.every((entry, idx) => {
+        const candidate = next[idx];
+        if (entry.id !== candidate.id || entry.title !== candidate.title) return false;
+        const a = entry.hostIds ?? [];
+        const b = candidate.hostIds ?? [];
+        return a.length === b.length && a.every((id, i) => id === b[i]);
+      })
+    ) {
+      return prev;
+    }
+    previousAiPanelWorkspacesRef.current = next;
+    return next;
+  }, [workspaces, appTerminalSessions]);
   // Flattened open terminals across ALL tabs, built from the full terminal
   // session store upstream (see buildAllTerminalAiInfos): the global AI
   // session manager resolves chat scopes and rebind targets app-wide, and
