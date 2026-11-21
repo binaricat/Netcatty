@@ -1564,6 +1564,260 @@ async function startSerialSession(event, options) {
 }
 
 /**
+ * Start an eNSP Pro device console session.
+ *
+ * eNSP Pro devices expose no TCP console port: the platform relays keystrokes
+ * over SockJS + STOMP, so this session owns that transport instead of a PTY.
+ * The transport mimics a serial port (write + "data" events) so the shared exec
+ * helper can drive it the same way as a serial session.
+ */
+async function startEnspSession(event, options = {}) {
+  const { EnspPlatformClient } = require("./enspPro/platform.cjs");
+  const { EnspConsole } = require("./enspPro/console.cjs");
+
+  const sessionId = options.sessionId || randomUUID();
+  const host = String(options.host || "").trim();
+  const port = Number(options.port) || 8443;
+  const sandboxId = Number(options.sandboxId ?? options.sandbox);
+  const nodeId = Number(options.nodeId ?? options.node);
+  if (!host) throw new Error("eNSP Pro platform address is required");
+  if (!Number.isFinite(sandboxId) || !Number.isFinite(nodeId)) {
+    throw new Error("eNSP Pro sandbox id and device id are required");
+  }
+
+  console.log(`[eNSP] Starting console for sandbox ${sandboxId} / device ${nodeId} on ${host}:${port}`);
+
+  let logStreamToken = null;
+  const {
+    registerPendingBootAbort,
+    clearPendingBootAbort,
+  } = require("./sessionBootEpoch.cjs");
+  const pendingBootAbort = registerPendingBootAbort(sessionId, options?.bootEpoch);
+
+  let platform;
+  let enspConsole;
+  try {
+    platform = new EnspPlatformClient({ host, port });
+    await platform.login();
+    if (pendingBootAbort.signal.aborted) {
+      clearPendingBootAbort(sessionId, pendingBootAbort);
+      throw new Error("Connection superseded by a newer reconnect");
+    }
+    enspConsole = new EnspConsole({ host, port, sandboxId, nodeId, cookie: platform.cookieHeader });
+  } catch (err) {
+    try { enspConsole?.close(); } catch { /* ignore */ }
+    clearPendingBootAbort(sessionId, pendingBootAbort);
+    throw err;
+  }
+  clearPendingBootAbort(sessionId, pendingBootAbort);
+
+  const initialEncoding = normalizeTerminalEncoding(options.charset);
+  const decoderRef = { current: iconv.getDecoder(initialEncoding) };
+  const session = {
+    enspConsole,
+    type: "ensp",
+    protocol: "ensp",
+    shellKind: "raw",
+    encoding: initialEncoding,
+    // Kept for backward compatibility with aiBridge / mcpServerBridge which
+    // read session.serialEncoding for exec calls.
+    serialEncoding: initialEncoding,
+    decoderRef,
+    webContentsId: event.sender.id,
+    enspMeta: {
+      host,
+      port,
+      sandboxId,
+      nodeId,
+      sandboxName: options.sandboxName || "",
+      deviceName: options.deviceName || "",
+    },
+  };
+
+  const { claimSessionSlot } = require("./sessionBootEpoch.cjs");
+  const claim = claimSessionSlot(sessions, sessionId, session, options?.bootEpoch);
+  if (!claim.ok) {
+    try { enspConsole.close(); } catch { /* ignore */ }
+    throw new Error("Connection superseded by a newer reconnect");
+  }
+  openTerminalOutputSession(sessionId, event.sender);
+
+  if (options.sessionLog?.enabled && options.sessionLog?.directory) {
+    logStreamToken = sessionLogStreamManager.startStream(sessionId, {
+      hostLabel: options.label || `eNSP ${sandboxId}/${nodeId}`,
+      hostname: host,
+      directory: options.sessionLog.directory,
+      format: options.sessionLog.format || "txt",
+      timestampsEnabled: Boolean(options.sessionLog.timestampsEnabled),
+      startTime: Date.now(),
+    });
+    session.logStreamToken = logStreamToken;
+  }
+
+  let enspExitFinalized = false;
+  const finalizeEnspExit = ({ exitCode, error, reason }) => {
+    if (enspExitFinalized || sessions.get(sessionId) !== session) return;
+    enspExitFinalized = true;
+    sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+    const primaryId = session.webContentsId;
+    sessions.delete(sessionId);
+    if (session.closed) return;
+    fanoutSessionLifecycleEvent(
+      sessionId,
+      primaryId,
+      "netcatty:exit",
+      { sessionId, exitCode, ...(error ? { error } : {}), reason },
+      session._terminalSessionGeneration,
+    );
+  };
+
+  // eNSP recycles consoles that stay idle, and VRP asks for the device login
+  // password on first attach. Answer it once when the caller supplied one, and
+  // turn curious output into the prompt-detection state machine below.
+  let tail = "";
+  let passwordAnswers = 0;
+  let enterSent = false;
+  let pagerDisabled = Boolean(options.skipPagerDisable);
+  const devicePassword = typeof options.password === "string" ? options.password : "";
+  enspConsole.on("data", (text) => {
+    if (!text) return;
+    tail = `${tail}${text}`.slice(-500);
+    if (devicePassword) {
+      if (passwordAnswers < 2 && /confirm password:\s*$/iu.test(tail)) {
+        // Fresh device: the second prompt confirms the password we just chose.
+        passwordAnswers = 2;
+        tail = "";
+        enspConsole.write(`${devicePassword}\r`);
+      } else if (passwordAnswers < 2 && /enter password:\s*$/iu.test(tail)) {
+        // Fresh device: "Please configure the login password (8-16)".
+        passwordAnswers = 1;
+        tail = "";
+        enspConsole.write(`${devicePassword}\r`);
+      } else if (passwordAnswers === 0 && /password:\s*$/iu.test(tail)) {
+        // Configured device: a single login prompt, do not retry a wrong one.
+        passwordAnswers = 2;
+        tail = "";
+        enspConsole.write(`${devicePassword}\r`);
+      }
+    }
+    if (!enterSent && /press enter/iu.test(tail)) {
+      enterSent = true;
+      enspConsole.write("\r");
+    } else if (!pagerDisabled && /[>#]\s*$/u.test(tail)) {
+      pagerDisabled = true;
+      // Long vendor output stops at "---- More ----" and the next command is
+      // consumed as a pager key, so disable paging as soon as we have a prompt.
+      enspConsole.write("screen-length 0 temporary\r");
+    }
+    const contents = electronModule.webContents.fromId(session.webContentsId);
+    if (session.enspDisplayReady) {
+      emitTerminalSessionData(contents, sessionId, text, {
+        session,
+        cols: session.cols,
+        rows: session.rows,
+      });
+    } else {
+      // The device prints its banner as soon as the relay opens, which is
+      // usually before the renderer has subscribed to this session's output.
+      // Hold those bytes here and flush them on the display-ready signal.
+      session.enspBacklog = `${session.enspBacklog || ""}${text}`.slice(-65536);
+    }
+    sessionLogStreamManager.appendData(sessionId, text);
+  });
+  enspConsole.on("error", (err) => {
+    console.error(`[eNSP] Console error: ${err?.message || err}`);
+    finalizeEnspExit({ exitCode: 1, error: err?.message || String(err), reason: "error" });
+  });
+  enspConsole.on("close", (reason) => {
+    finalizeEnspExit({ exitCode: 0, reason: reason || "closed" });
+  });
+
+  session.enspDisplayReady = false;
+  session.enspBacklog = "";
+  // Called from the netcatty:terminal:display-ready IPC once the renderer has
+  // attached its data listener.
+  session.enspFlushBacklog = () => {
+    if (session.enspDisplayReady) return;
+    session.enspDisplayReady = true;
+    const pending = session.enspBacklog || "";
+    session.enspBacklog = "";
+    const contents = electronModule.webContents.fromId(session.webContentsId);
+    if (!pending) return;
+    emitTerminalSessionData(contents, sessionId, pending, {
+      session,
+      cols: session.cols,
+      rows: session.rows,
+    });
+  };
+
+  try {
+    await enspConsole.connect();
+  } catch (err) {
+    try { enspConsole.close(); } catch { /* ignore */ }
+    finalizeEnspExit({
+      exitCode: 1,
+      error: err?.message || String(err),
+      reason: "connect-failed",
+    });
+    throw err;
+  }
+
+  // The renderer attaches its data listener right after this IPC resolves.
+  // Flush the startup banner once it has had a moment to subscribe, so the
+  // device prompt is visible even if the display-ready signal is late.
+  const flushTimer = setTimeout(() => {
+    if (sessions.get(sessionId) !== session) return;
+    session.enspFlushBacklog?.();
+  }, 900);
+  if (typeof flushTimer.unref === "function") flushTimer.unref();
+
+  return { sessionId };
+}
+
+/**
+ * List the sandboxes and devices of an eNSP Pro platform so the connect dialog
+ * can offer them by name instead of asking for raw ids.
+ */
+async function listEnspDevices(_event, options = {}) {
+  const { EnspPlatformClient } = require("./enspPro/platform.cjs");
+  const host = String(options.host || "").trim();
+  const port = Number(options.port) || 8443;
+  if (!host) throw new Error("eNSP Pro platform address is required");
+  const platform = new EnspPlatformClient({ host, port });
+  await platform.login();
+  const { sandboxes, devices } = await platform.listDevices();
+  return {
+    host,
+    port,
+    sandboxes: sandboxes.map((sandbox) => ({
+      id: sandbox.id,
+      name: sandbox.name,
+      status: sandbox.status ?? null,
+      deviceCount: Array.isArray(sandbox.devices) ? sandbox.devices.length : 0,
+    })),
+    devices,
+  };
+}
+
+async function handleEnspDeviceAction(_event, payload = {}) {
+  const { EnspPlatformClient } = require("./enspPro/platform.cjs");
+  const host = String(payload.host || "").trim();
+  const port = Number(payload.port) || 8443;
+  const action = payload.action === "stop" ? "stop" : "start";
+  const sandboxId = Number(payload.sandboxId);
+  const nodeId = Number(payload.nodeId);
+  if (!host) throw new Error("eNSP Pro platform address is required");
+  if (!Number.isFinite(sandboxId) || !Number.isFinite(nodeId)) {
+    throw new Error("eNSP Pro sandbox id and device id are required");
+  }
+  const platform = new EnspPlatformClient({ host, port });
+  await platform.login();
+  if (action === "stop") await platform.stopDevice(sandboxId, nodeId);
+  else await platform.startDevice(sandboxId, nodeId);
+  return { ok: true, action, sandboxId, nodeId };
+}
+
+/**
  * Write data to a session
  */
 function cancelActiveYmodemSession(session) {
@@ -1796,6 +2050,8 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
         expandSerialBackspace(inputData, payload.serialEraseChar, session.encoding),
         session.encoding,
       ));
+    } else if (session.enspConsole) {
+      session.enspConsole.write(typeof outgoing === "string" ? outgoing : outgoing.toString("utf8"));
     } else {
       return false;
     }
@@ -2404,6 +2660,9 @@ function closeSession(event, payload) {
       session.socket.destroy();
     } else if (session.serialPort) {
       session.serialPort.close();
+    } else if (session.enspConsole) {
+      if (session.enspConnectTimer) clearTimeout(session.enspConnectTimer);
+      session.enspConsole.close();
     } else if (session.chainConnections) {
       // Non-stream session still carrying a jump-host chain (defensive).
       for (const c of session.chainConnections) {
@@ -2583,6 +2842,8 @@ function registerHandlers(ipcMain, options = {}) {
     const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
     const readyMain = findRegisteredMainWebContents(event?.sender?.id);
     if (!sessionId || readyMain?.id !== event?.sender?.id) return;
+    const session = sessions.get(sessionId);
+    if (session?.enspFlushBacklog) session.enspFlushBacklog();
     retryPendingAttachedSessionOutput(sessionId, event.sender.id);
   });
   setRestoreAttachedSessionOutput((sessionId, preferredHomeWebContentsId) =>
@@ -2609,6 +2870,9 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:et:start",
       "netcatty:serial:start",
       "netcatty:serial:list",
+      "netcatty:ensp:start",
+      "netcatty:ensp:list",
+      "netcatty:ensp:device-action",
       "netcatty:serial:ymodem-send",
       "netcatty:serial:ymodem-receive",
       "netcatty:local:defaultShell",
@@ -2683,6 +2947,9 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:mosh:start", wrapSessionStart(startMoshSession));
   ipcMain.handle("netcatty:et:start", wrapSessionStart(startEtSession));
   ipcMain.handle("netcatty:serial:start", wrapSessionStart(startSerialSession));
+  ipcMain.handle("netcatty:ensp:start", wrapSessionStart(startEnspSession));
+  ipcMain.handle("netcatty:ensp:list", listEnspDevices);
+  ipcMain.handle("netcatty:ensp:device-action", handleEnspDeviceAction);
   ipcMain.handle("netcatty:serial:list", listSerialPorts);
   ipcMain.handle("netcatty:serial:ymodem-send", sendSerialYmodem);
   ipcMain.handle("netcatty:serial:ymodem-receive", receiveSerialYmodem);
@@ -2837,6 +3104,13 @@ function cleanupAllSessions() {
         } catch (e) {
           // Ignore errors during cleanup
         }
+      } else if (session.enspConsole) {
+        try {
+          if (session.enspConnectTimer) clearTimeout(session.enspConnectTimer);
+          session.enspConsole.close();
+        } catch (e) {
+          // Ignore errors during cleanup
+        }
       }
       if (session.chainConnections) {
         for (const c of session.chainConnections) {
@@ -2872,6 +3146,9 @@ module.exports = {
   execOnEtSession,
   bundledEtClient,
   startSerialSession,
+  startEnspSession,
+  listEnspDevices,
+  handleEnspDeviceAction,
   sendSerialYmodem,
   receiveSerialYmodem,
   listSerialPorts,

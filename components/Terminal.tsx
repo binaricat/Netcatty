@@ -4195,6 +4195,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         sessionStarters.startPluginConnection(term);
       } else if (host.protocol === "serial") {
         sessionStarters.startSerial(term);
+      } else if (host.protocol === "ensp") {
+        sessionStarters.startEnsp(term);
       } else if (effectiveTerminalProtocol === 'local') {
         sessionStarters.startLocal(term);
       } else if (host.protocol === "telnet") {

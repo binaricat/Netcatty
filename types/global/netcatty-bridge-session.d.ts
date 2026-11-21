@@ -162,6 +162,45 @@ declare global {
       productId: string;
       pnpId: string;
     }>>;
+    startEnspSession?(options: {
+      sessionId?: string;
+      host: string;
+      port?: number;
+      sandboxId: number;
+      nodeId: number;
+      sandboxName?: string;
+      deviceName?: string;
+      /** VRP console password printed on first attach; empty leaves the prompt interactive. */
+      password?: string;
+      charset?: string;
+      sessionLog?: { enabled: boolean; directory: string; format: string; timestampsEnabled?: boolean };
+      bootEpoch?: number;
+    }): Promise<string>;
+    listEnspDevices?(options: {
+      host: string;
+      port?: number;
+    }): Promise<{
+      host: string;
+      port: number;
+      sandboxes: Array<{ id: number; name: string; status: number | null; deviceCount: number }>;
+      devices: Array<{
+        sandboxId: number;
+        sandboxName: string;
+        nodeId: number;
+        name: string;
+        deviceType: string;
+        status: number | null;
+        hostIp: string;
+        manageIp: string;
+      }>;
+    }>;
+    enspDeviceAction?(options: {
+      host: string;
+      port?: number;
+      sandboxId: number;
+      nodeId: number;
+      action: 'start' | 'stop';
+    }): Promise<{ ok: boolean; action: 'start' | 'stop'; sandboxId: number; nodeId: number }>;
     sendSerialYmodem?(sessionId: string, filePath: string): Promise<{
       success: boolean;
       fileName?: string;

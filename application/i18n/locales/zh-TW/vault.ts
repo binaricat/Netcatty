@@ -667,6 +667,7 @@ export const zhTWVaultMessages: Messages = {
   'terminal.connection.protocol.telnet': 'Telnet',
   'terminal.connection.protocol.mosh': 'Mosh',
   'terminal.connection.protocol.serial': '序列埠',
+  'terminal.connection.protocol.ensp': 'eNSP',
   'terminal.connection.protocol.local': '本機終端',
   'terminal.hostKey.unknownTitle': '確認主機指紋',
   'terminal.hostKey.changedTitle': '主機指紋已變化',

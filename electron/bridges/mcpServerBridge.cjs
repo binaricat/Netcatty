@@ -2197,6 +2197,117 @@ async function handleReadContext(params = {}) {
   return currentScopeError ? { ok: false, error: currentScopeError } : result;
 }
 
+// Vendor assistant runs entirely in the main process (browser automation), so the
+// external MCP surface can answer without a renderer window.
+async function handleVendorAsk(params = {}) {
+  const { askVendor } = require("./aiBridge/vendorAssistant/service.cjs");
+  return askVendor({
+    vendor: params.vendor,
+    question: params.question,
+    timeoutMs: params.timeoutMs,
+  });
+}
+
+async function handleVendorList() {
+  const { listVendors } = require("./aiBridge/vendorAssistant/service.cjs");
+  return listVendors();
+}
+
+// eNSP Pro exposes device consoles over the platform's own HTTP/STOMP channel,
+// so the session is opened from the main process and driven through the shared
+// session map rather than through a renderer tab.
+function matchEnspEntry(entries, key, fields) {
+  const needle = String(key ?? "").trim().toLowerCase();
+  if (!needle) return entries;
+  return entries.filter((entry) => fields.some((field) => String(entry[field] ?? "").trim().toLowerCase() === needle));
+}
+
+async function resolveEnspTarget(platform, params = {}) {
+  const { devices } = await platform.listDevices();
+  const deviceKey = String(params.device ?? "").trim();
+  const sandboxKey = String(params.sandbox ?? "").trim();
+  let candidates = devices;
+  if (sandboxKey) {
+    candidates = matchEnspEntry(devices, sandboxKey, ["sandboxName", "sandboxId"]);
+    if (!candidates.length) {
+      throw new Error(`eNSP Pro has no sandbox named "${sandboxKey}". Call ensp_list to see the available sandboxes.`);
+    }
+  }
+  if (!candidates.length) {
+    throw new Error("eNSP Pro has no devices in any sandbox. Start a device in the eNSP Pro web UI first.");
+  }
+  if (deviceKey) {
+    candidates = matchEnspEntry(candidates, deviceKey, ["name", "nodeId"]);
+    if (!candidates.length) {
+      throw new Error(`eNSP Pro has no device named "${deviceKey}" in that sandbox. Call ensp_list to see the available devices.`);
+    }
+  }
+  const sandboxIds = new Set(candidates.map((entry) => entry.sandboxId));
+  if (sandboxIds.size > 1) {
+    throw new Error(`Multiple eNSP sandboxes contain that device (${[...sandboxIds].join(", ")}); pass a sandbox name or id.`);
+  }
+  if (candidates.length > 1) {
+    const names = candidates.map((entry) => entry.name).join(", ");
+    throw new Error(`Multiple devices matched in that sandbox (${names}); pass a device name or node id.`);
+  }
+  return candidates[0];
+}
+
+async function handleEnspList(params = {}) {
+  const { EnspPlatformClient } = require("./enspPro/platform.cjs");
+  const host = String(params.host || "").trim();
+  const port = Number(params.port) || 8443;
+  if (!host) throw new Error("eNSP Pro platform address is required (host)");
+  const platform = new EnspPlatformClient({ host, port });
+  await platform.login();
+  const { devices } = await platform.listDevices();
+  const sandboxes = [...new Map(devices.map((entry) => [entry.sandboxId, entry.sandboxName])).entries()]
+    .map(([id, name]) => ({
+      id,
+      name,
+      deviceCount: devices.filter((entry) => entry.sandboxId === id).length,
+    }));
+  return { ok: true, host, port, sandboxes, devices };
+}
+
+async function handleEnspOpen(params = {}) {
+  const { EnspPlatformClient } = require("./enspPro/platform.cjs");
+  const terminalBridge = require("./terminalBridge.cjs");
+  const host = String(params.host || "").trim();
+  const port = Number(params.port) || 8443;
+  if (!host) throw new Error("eNSP Pro platform address is required (host)");
+  const platform = new EnspPlatformClient({ host, port });
+  await platform.login();
+  const target = await resolveEnspTarget(platform, params);
+  const win = typeof getMainWindowFn === "function" ? getMainWindowFn() : null;
+  const webContents = win && !win.isDestroyed?.() ? win.webContents : null;
+  if (!webContents) throw new Error("Netcatty main window is not available");
+  const { sessionId } = await terminalBridge.startEnspSession(
+    { sender: webContents },
+    {
+      host,
+      port,
+      sandboxId: target.sandboxId,
+      nodeId: target.nodeId,
+      sandboxName: target.sandboxName,
+      deviceName: target.name,
+      password: params.password,
+    },
+  );
+  syncLiveSessionsToExternalScope();
+  return {
+    ok: true,
+    sessionId,
+    host,
+    port,
+    protocol: "ensp",
+    sandboxId: target.sandboxId,
+    sandboxName: target.sandboxName,
+    nodeId: target.nodeId,
+    deviceName: target.name,
+  };
+}
+
 let builtinRpcHandlerRegistry = null;
 
 function getBuiltinRpcHandlerRegistry() {
@@ -2207,6 +2318,10 @@ function getBuiltinRpcHandlerRegistry() {
       "attachment.list": handleListAttachments,
       "attachment.read": handleReadAttachment,
       "harness.terminal.read_context": handleReadContext,
+      "harness.vendor_assistant.ask": handleVendorAsk,
+      "harness.vendor_assistant.list": handleVendorList,
+      "harness.ensp.open": handleEnspOpen,
+      "harness.ensp.list": handleEnspList,
       "terminal.execute": handleExec,
       "sftp.list": handleSftpList,
       "sftp.read": handleSftpRead,
@@ -2722,3 +2837,5 @@ module.exports = {
   dispatchBuiltinRpc: dispatch,
   EXTERNAL_MCP_CHAT_SESSION_ID,
 };
+
+

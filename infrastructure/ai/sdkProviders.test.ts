@@ -263,7 +263,7 @@ test("SDK requests forward custom headers and scope OpenCode sessions", async (t
           style,
           openaiApi,
           apiKey: "test-key",
-          baseURL: "https://opencode.ai/zen/go/v1",
+          baseURL: "https://opencode.ai/inference/go/v1",
           customHeaders: { "X-Test-Header": "configured" },
         }), { chatSessionId: sessionId });
         await assert.rejects(model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] }));
@@ -273,7 +273,7 @@ test("SDK requests forward custom headers and scope OpenCode sessions", async (t
       }
     }
   }
-  for (const baseURL of ["https://opencode.ai/zen/go/v1", "https://example.test/v1"]) {
+  for (const baseURL of ["https://opencode.ai/inference/go/v1", "https://example.test/v1"]) {
     for (const customHeaders of [undefined, { "X-OpenCode-Session": "override" }]) {
       const model = createModelFromConfig(makeConfig({ baseURL, apiKey: "test-key", customHeaders }), { chatSessionId: "automatic" });
       await assert.rejects(model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] }));

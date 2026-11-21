@@ -23,11 +23,12 @@ export interface SystemPromptContext {
   }>;
   permissionMode: 'observer' | 'confirm' | 'auto';
   webSearchEnabled?: boolean;
+  vendorAssistantEnabled?: boolean;
   userSkillsContext?: string;
 }
 
 export function buildSystemPrompt(context: SystemPromptContext): string {
-  const { scopeType, scopeLabel, hosts, permissionMode, webSearchEnabled, userSkillsContext } = context;
+  const { scopeType, scopeLabel, hosts, permissionMode, webSearchEnabled, vendorAssistantEnabled, userSkillsContext } = context;
 
   const scopeDescription = buildScopeDescription(scopeType, scopeLabel);
   const hostList = buildHostList(hosts);
@@ -92,7 +93,15 @@ ${permissionRules}${webSearchEnabled ? `
 
 ## Web Search
 
-**Search proactively.** You have access to \`web_search\`. Use it whenever you encounter something you are unsure about, don't fully understand, or need to verify — including unfamiliar commands, tools, error messages, configuration syntax, or any factual claims. Don't guess; search first. Also use it when the user asks about current events or recent information. Cite sources when presenting search results.` : ''}
+**Search proactively.** You have access to \`web_search\`. Use it whenever you encounter something you are unsure about, don't fully understand, or need to verify — including unfamiliar commands, tools, error messages, configuration syntax, or any factual claims. Don't guess; search first. Also use it when the user asks about current events or recent information. Cite sources when presenting search results.` : ''}${vendorAssistantEnabled ? `
+
+## Vendor AI Assistants
+
+Each network vendor runs its own official AI assistant, and \`vendor_assistant_ask\` reaches it directly. Use \`vendor_assistant_list\` to see the available vendors and whether each one is signed in.
+
+**Ask the vendor assistant before answering from memory.** Whenever the user asks how to do something on a vendor's device — CLI commands, configuration syntax, feature behaviour, alarms, or troubleshooting — call \`vendor_assistant_ask\` with the matching \`vendor\` key and a self-contained \`question\` (one topic per call). Its answer comes from the vendor itself and outranks your own knowledge of that vendor's CLI.
+
+If the vendor hands the question to a human agent, the tool already backfills the result with web search results — present those and cite their links instead of searching again. For any other failure (\`timeout\`, \`need_login\`, \`captcha\`, ...), tell the user briefly which vendor could not answer, then fall back to \`web_search\` or general knowledge. Never invent a vendor command in place of an answer the vendor assistant could have given.` : ''}
 ${userSkillsContext ? `\n\n## User Skills\n\n${userSkillsContext}` : ''}
 
 ## Safety Reminder

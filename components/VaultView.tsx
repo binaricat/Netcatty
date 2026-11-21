@@ -102,6 +102,7 @@ import {
   Identity,
   KnownHost,
   ManagedSource,
+  EnspConfig,
   ProxyProfile,
   SerialConfig,
   SSHKey,
@@ -241,6 +242,7 @@ interface VaultViewProps {
     config: SerialConfig,
     options?: { charset?: string },
   ) => void;
+  onConnectEnsp?: (config: EnspConfig) => void;
   onDeleteHost: (id: string) => void;
   onConnect: (host: Host) => void;
   onOpenHostFromNote?: (host: Host, source?: { noteId: string }) => void;
@@ -330,6 +332,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   onOpenQuickSwitcher,
   onCreateLocalTerminal,
   onConnectSerial,
+  onConnectEnsp,
   onDeleteHost,
   onConnect,
   onOpenHostFromNote,
@@ -386,6 +389,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const [renameGroupError, setRenameGroupError] = useState<string | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isSerialModalOpen, setIsSerialModalOpen] = useState(false);
+  const [isEnspModalOpen, setIsEnspModalOpen] = useState(false);
   const [isDeleteGroupOpen, setIsDeleteGroupOpen] = useState(false);
   const [deleteTargetPath, setDeleteTargetPath] = useState<string | null>(null);
   const [bulkDeleteGroupPaths, setBulkDeleteGroupPaths] = useState<string[]>(
@@ -1603,6 +1607,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           isRenameGroupOpen,
           isSearchQuickConnect,
           isSerialModalOpen,
+          isEnspModalOpen,
           Key,
           keyBindings,
           KeychainManager,
@@ -1629,6 +1634,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           onCommitPluginImporterData,
           onConnect,
           onConnectSerial,
+          onConnectEnsp,
           onCreateLocalTerminal,
           onDeleteHost,
           onImportOrReuseKey,
@@ -1697,6 +1703,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           setIsQuickConnectOpen,
           setIsRenameGroupOpen,
           setIsSerialModalOpen,
+          setIsEnspModalOpen,
           setLastPinnedId,
           setNewFolderName,
           setNewHostGroupPath,

@@ -1,7 +1,7 @@
 import type { FitAddon } from "@xterm/addon-fit";
 import type { SerializeAddon } from "@xterm/addon-serialize";
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from "react";
-import type { Host, Identity, KnownHost, SerialConfig, SSHKey, TerminalSession, TerminalSettings } from "../../../types";
+import type { EnspConfig, Host, Identity, KnownHost, SerialConfig, SSHKey, TerminalSession, TerminalSettings } from "../../../types";
 import type { PromptLineBreakState } from "./promptLineBreak";
 import type {
   PasswordPromptPickerState,
@@ -35,6 +35,10 @@ export type TerminalBackendApi = {
   ) => Promise<string>;
   startSerialSession: (
     options: Parameters<NonNullable<NetcattyBridge["startSerialSession"]>>[0],
+  ) => Promise<string>;
+  // Optional so existing test doubles keep compiling; eNSP hosts require it.
+  startEnspSession?: (
+    options: Parameters<NonNullable<NetcattyBridge["startEnspSession"]>>[0],
   ) => Promise<string>;
   startPluginConnection: (options: NetcattyPluginConnectionStartRequest & { signal?: AbortSignal }) => Promise<{
     sessionId: string;
@@ -186,6 +190,7 @@ export type TerminalSessionStartersContext = {
   terminalSettingsRef?: RefObject<TerminalSettings | undefined>;
   terminalBackend: TerminalBackendApi;
   serialConfig?: SerialConfig;
+  enspConfig?: EnspConfig;
   telnetLocalEchoRef?: RefObject<boolean>;
   sessionLog?: SessionLogConfig;
   sshDebugLogEnabled?: boolean;

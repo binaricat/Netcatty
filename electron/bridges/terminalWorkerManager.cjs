@@ -376,6 +376,7 @@ const SESSION_START_CHANNELS = new Set([
   "netcatty:mosh:start",
   "netcatty:et:start",
   "netcatty:serial:start",
+  "netcatty:ensp:start",
   "netcatty:local:reconnect",
   "netcatty:external:start",
 ]);
@@ -1945,7 +1946,7 @@ function createTerminalWorkerManager(options = {}) {
         opensOutputSession: channel === "netcatty:start"
           || channel === "netcatty:local:reconnect"
           || channel === "netcatty:external:start"
-          || /^(?:netcatty:)(?:local|telnet|mosh|et|serial):start$/u.test(channel),
+          || /^(?:netcatty:)(?:local|telnet|mosh|et|serial|ensp):start$/u.test(channel),
       });
     });
     let notifyClosedAfterPost = false;

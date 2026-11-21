@@ -1,8 +1,9 @@
 import { MouseEvent,useCallback,useEffect,useMemo,useRef,useState } from 'react';
 import { flushSync } from 'react-dom';
-import { ConnectionLog,Host,SerialConfig,Snippet,TerminalSession,Workspace,WorkspaceNode,WorkspaceViewMode } from '../../domain/models';
+import { ConnectionLog,EnspConfig,Host,SerialConfig,Snippet,TerminalSession,Workspace,WorkspaceNode,WorkspaceViewMode } from '../../domain/models';
 import { addLogView, getLogViewTabId, removeLogView, type LogView } from './logViewState';
 import {
+  createEnspTerminalSession,
   createHostTerminalSession,
   createLocalTerminalSession,
   createSerialTerminalSession,
@@ -571,6 +572,13 @@ export const useSessionState = ({
   const createSerialSession = useCallback((config: SerialConfig, options?: { charset?: string }) => {
     const sessionId = crypto.randomUUID();
     setSessions(prev => [...prev, createSerialTerminalSession(sessionId, config, options)]);
+    setActiveTabId(sessionId);
+    return sessionId;
+  }, [setActiveTabId]);
+
+  const createEnspSession = useCallback((config: EnspConfig) => {
+    const sessionId = crypto.randomUUID();
+    setSessions(prev => [...prev, createEnspTerminalSession(sessionId, config)]);
     setActiveTabId(sessionId);
     return sessionId;
   }, [setActiveTabId]);
@@ -1565,6 +1573,7 @@ export const useSessionState = ({
     resetWorkspaceRename,
     createLocalTerminal,
     createSerialSession,
+    createEnspSession,
     connectToHost,
     closeSession,
     closeSessions,

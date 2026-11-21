@@ -51,7 +51,7 @@ export interface EnvVar {
 }
 
 // Protocol type for connections
-export type BuiltInHostProtocol = 'ssh' | 'telnet' | 'mosh' | 'et' | 'local' | 'serial';
+export type BuiltInHostProtocol = 'ssh' | 'telnet' | 'mosh' | 'et' | 'local' | 'serial' | 'ensp';
 export type PluginHostProtocol = `plugin:${string}`;
 export type HostProtocol = BuiltInHostProtocol | PluginHostProtocol;
 export type PluginConfigurationValue =
@@ -133,6 +133,20 @@ export interface SerialConfig {
   // editors (e.g. a Linux console with readline) where one DEL already
   // removes a whole character and repeating it would over-delete.
   byteOrientedBackspace?: boolean;
+}
+
+// eNSP Pro device console. Devices have no TCP console port, so the session is
+// addressed as "platform + sandbox id + device id" and the platform relays the
+// console over its SockJS/STOMP channel.
+export interface EnspConfig {
+  host: string; // Platform address (https://<host>:<port>)
+  port: number; // Platform HTTPS port (default 8443)
+  sandboxId: number; // Sandbox (project) id inside the platform
+  nodeId: number; // Device id inside that sandbox
+  sandboxName?: string; // Display name captured when picking from the platform
+  deviceName?: string;
+  // VRP console login password. Empty leaves the "Password:" prompt interactive.
+  password?: string;
 }
 
 // Per-protocol configuration
@@ -275,6 +289,8 @@ export interface Host {
   telnetPassword?: string; // Telnet-specific password
   // Serial-specific configuration (for protocol='serial' hosts)
   serialConfig?: SerialConfig;
+  // eNSP Pro-specific configuration (for protocol='ensp' hosts)
+  enspConfig?: EnspConfig;
   // SFTP specific configuration
   sftpSudo?: boolean; // Use sudo for SFTP operations (requires password)
   // Remote file browser protocol: Auto tries SFTP then falls back to SCP-mode

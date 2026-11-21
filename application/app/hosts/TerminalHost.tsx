@@ -193,6 +193,7 @@ export function TerminalHost() {
       pickTerminalTheme,
       resolveSessionAppearance: resolveFocusedAppearance,
       handleConnectSerial: handlers.handleConnectSerial,
+      handleConnectEnsp: handlers.handleConnectEnsp,
       handleConnectToHost: handlers.handleConnectToHost,
       handleCreateLocalTerminal: handlers.handleCreateLocalTerminal,
       handleDefaultTerminalThemeChange,

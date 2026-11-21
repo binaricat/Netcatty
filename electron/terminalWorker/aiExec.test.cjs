@@ -47,6 +47,42 @@ test("worker shell readiness route reports prompt state read-only", () => {
   assert.deepEqual(handler(createFakeEvent(), { sessionId: 'gone' }), { ok: true, found: false });
 });
 
+test("worker telnet console exec writes through the session socket", async () => {
+  const socket = new FakeTelnetSocket();
+  const session = { type: "telnet-native", socket };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([["tel-1", session]]) });
+  const pending = ipcMain.handlers.get("netcatty:ai:exec")(createFakeEvent(), {
+    sessionId: "tel-1",
+    chatSessionId: "tel-chat",
+    command: "display version",
+    commandTimeoutMs: 8000,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.ok(
+    socket.writes.join("").includes("display version"),
+    "the command must be written to the telnet socket",
+  );
+  socket.emit("data", Buffer.from("<H3C>display version\r\nComware 7.1.075\r\n<H3C>"));
+  const result = await pending;
+  assert.equal(result.ok, true);
+  assert.match(result.stdout, /Comware 7\.1\.075/);
+});
+
+class FakeTelnetSocket extends EventEmitter {
+  constructor() {
+    super();
+    this.writes = [];
+  }
+
+  write(data) {
+    this.writes.push(String(data));
+    return true;
+  }
+
+  destroy() {}
+}
+
 class FakePty extends EventEmitter {
   constructor() {
     super();

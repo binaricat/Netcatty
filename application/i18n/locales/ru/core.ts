@@ -796,6 +796,8 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.startupCommandDelay.label': 'Задержка команды запуска (мс)',
   'settings.terminal.startupCommandDelay.desc': 'Сколько ждать после подключения перед отправкой команды запуска. Также используется между строками, если команда запуска многострочная. Увеличьте для медленных соединений.',
   'settings.terminal.keywordHighlight.title': 'Подсветка ключевых слов',
+  'settings.terminal.keywordHighlight.deviceConsole': 'Подсветка сетевых устройств',
+  'settings.terminal.keywordHighlight.deviceConsole.desc': 'Подсвечивает состояние линка, ошибки CLI, приглашение и введённую команду в консолях serial, eNSP Pro, Telnet и SSH сетевых устройств.',
   'settings.terminal.keywordHighlight.resetColors': 'Сбросить цвета по умолчанию',
   'settings.terminal.keywordHighlight.resetDefaults': 'Сбросить встроенные правила по умолчанию',
   'settings.terminal.keywordHighlight.resetBuiltIn': 'Восстановить стандартную метку и шаблоны',
