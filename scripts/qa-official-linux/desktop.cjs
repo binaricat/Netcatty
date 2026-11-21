@@ -69,16 +69,16 @@ class Devtools {
       this.ws.addEventListener('error', reject, { once: true });
     });
   }
-  send(method, params = {}) {
+  send(method, params = {}, timeoutMs = 10000) {
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 10000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, timeoutMs);
       this.pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); } });
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
-  async eval(expression) {
-    const result = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+  async eval(expression, timeoutMs = 10000) {
+    const result = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, timeoutMs);
     if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
     return result.result.value;
   }
@@ -293,8 +293,8 @@ async function verifySftp() {
   const targetPath = path.join(root, `download-${scenario}.bin`);
   const expectedSha256 = crypto.createHash('sha256').update(fixture.payload).digest('hex');
   const options = { transferId, sourcePath: '/qa-payload.bin', targetPath, sourceType: 'sftp', targetType: 'local', sourceSftpId: sftpId, totalBytes: fixture.payload.length, resumable: true };
-  await cdp.eval(`(() => { window.__qaTransfer = {events: [], done: false}; window.netcatty.onGlobalSftpTransferEvent(e => { if (e.transferId === ${JSON.stringify(transferId)}) window.__qaTransfer.events.push(e); }); window.netcatty.startStreamTransfer(${JSON.stringify(options)}).then(result => { window.__qaTransfer.result = result; window.__qaTransfer.done = true; }, error => { window.__qaTransfer.error = String(error); window.__qaTransfer.done = true; }); return true; })()`);
-  const progress = () => cdp.eval(`Math.max(0, ...window.__qaTransfer.events.map(e => e.transferred || 0))`);
+  await cdp.eval(`(() => { window.__qaTransfer = {events: [], done: false}; window.netcatty.onGlobalSftpTransferEvent(e => { if (e.transferId === ${JSON.stringify(transferId)}) window.__qaTransfer.events.push({...e, qaObservedAt: Date.now()}); }); window.netcatty.startStreamTransfer(${JSON.stringify(options)}).then(result => { window.__qaTransfer.result = result; window.__qaTransfer.done = true; }, error => { window.__qaTransfer.error = String(error); window.__qaTransfer.done = true; }); return true; })()`);
+  const progress = () => cdp.eval(`window.__qaTransfer.events.filter(e => typeof e.transferred === 'number').at(-1)?.transferred || 0`);
   report.stage = 'SFTP bytes and native progress';
   await until('real SFTP bytes and native progress', async () => fixture.sftpStats.bytesSent > 262144 && await progress() > 131072, 30000);
   await clickElement(cdp, 'button[aria-label="File Transfers"]');
@@ -304,21 +304,32 @@ async function verifySftp() {
   const paused = await cdp.eval(`window.netcatty.pauseTransfer(${JSON.stringify(transferId)})`);
   assert.equal(paused.success, true, paused.reason);
   await until('native paused lifecycle event', () => cdp.eval(`window.__qaTransfer.events.some(e => e.type === 'paused')`));
-  report.sftpPauseDrain = {startedAt: Date.now(), initial: {...fixture.sftpStats}};
-  await until('server outstanding reads drained', () => fixture.sftpStats.activeReads === 0, 45000);
+  report.sftpControl = {transferId, pauseAcknowledgedAt: Date.now(), paused};
+  report.sftpPauseDrain = {startedAt: Date.now(), initial: {...fixture.sftpStats}, samples: []};
+  // A transient zero in-flight count is not quiescence: the production runtime
+  // may start checkpoint fingerprint reads asynchronously after acknowledging
+  // pause. Keep the complete settling timeline and require sustained stability.
+  let stable = [];
+  await until('sustained actual SFTP bytes and native progress stop', async () => {
+    const sample = {at: Date.now(), serverBytes: fixture.sftpStats.bytesSent, activeReads: fixture.sftpStats.activeReads, progressBytes: await progress()};
+    report.sftpPauseDrain.samples.push(sample);
+    const previous = stable.at(-1);
+    if (previous && (previous.serverBytes !== sample.serverBytes || previous.progressBytes !== sample.progressBytes || sample.activeReads !== 0)) stable = [];
+    stable.push(sample);
+    if (stable.length < 6) { await pause(500); return false; }
+    return sample.activeReads === 0 && sample.at - stable[0].at >= 2500;
+  }, 60000);
+  const samples = stable;
   report.sftpPauseDrain.endedAt = Date.now();
   report.sftpPauseDrain.final = {...fixture.sftpStats};
-  const samples = [];
-  for (let i = 0; i < 5; i++) {
-    samples.push({ at: Date.now(), serverBytes: fixture.sftpStats.bytesSent, progressBytes: await progress() });
-    await pause(500);
-  }
-  assert(samples[0].serverBytes > 0 && samples[0].serverBytes < fixture.payload.length, 'Pause must happen mid-transfer');
-  assert(samples.every(s => s.serverBytes === samples[0].serverBytes), 'Actual SFTP server bytes changed while paused');
-  assert(samples.every(s => s.progressBytes === samples[0].progressBytes), 'Native progress changed while paused');
+  report.sftpPauseSamples = samples;
+  assert(samples[0].progressBytes > 0 && samples[0].progressBytes < fixture.payload.length, 'Pause must happen mid-transfer');
+  assert(samples.every(s => s.serverBytes === samples[0].serverBytes), 'Actual SFTP server bytes changed in stable pause window');
+  assert(samples.every(s => s.progressBytes === samples[0].progressBytes), 'Native progress changed in stable pause window');
   await capture('04-sftp-paused.png');
   report.stage = 'SFTP resume';
-  const resumed = await cdp.eval(`window.netcatty.resumeTransfer(${JSON.stringify(transferId)})`);
+  const resumed = await cdp.eval(`window.netcatty.resumeTransfer(${JSON.stringify(transferId)})`, 60000);
+  report.sftpControl.resumed = resumed;
   assert.equal(resumed.success, true, resumed.reason);
   await until('server and progress resume', async () => fixture.sftpStats.bytesSent > samples[0].serverBytes && await progress() > samples[0].progressBytes, 15000);
   await capture('05-sftp-resumed.png');
@@ -478,11 +489,13 @@ async function run() {
     await assertEcho('ran: QA_AFTER_RECONNECT');
     assert.deepEqual(await cdp.eval(`[...document.querySelectorAll('[data-tab-type="session"]')].map(e => e.getAttribute('data-tab-id'))`), originalTabs);
     report.sshReconnect = 'pass';
-    report.ssh = { transport: 'SSH2 over loopback TCP; server destroys its socket, production app reconnects original tab', shellConnections: fixture.sessions.filter(s => s.ready).length, originalTabs, commands: fixture.sessions.filter(s => s.ready).map(s => s.commands.filter(command => command.startsWith('QA_'))) };
+    report.ssh = { transport: 'SSH2 over loopback TCP; server destroys its socket, production app reconnects original tab', shellConnections: fixture.sessions.filter(s => s.ready).length, originalTabs, commands: fixture.sessions.filter(s => s.ready).map(s => s.commands.filter(command => command.startsWith('QA_'))), connections: fixture.sessions.filter(s => s.ready).map(({readyAt, closedAt}) => ({readyAt, closedAt})) };
     await capture('05-real-ssh-reconnected.png');
   } catch (error) {
     report.failure = error.message;
     report.failureCategory = 'Unresolved assertion; use focus and server receive diagnostics before assigning a product regression';
+    if (fixture) report.sftpServerAtFailure = {...fixture.sftpStats};
+    if (scenario === 'sftp' && cdp) report.sftpNativeAtFailure = await cdp.eval(`window.__qaTransfer`).catch(() => null);
     if (fixture) report.sshDiagnostics = fixture.sessions.map(({ready, receivedHex, commands, sent}) => ({ready, receivedHex, commands, sent}));
     if (report.launcher === 'not_run') report.launcher = 'fail';
     await capture('failure-real-application.png').catch(() => {});

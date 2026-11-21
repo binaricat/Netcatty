@@ -33,18 +33,24 @@ Independent scenarios prevent one functional assertion from skipping another:
 - `ssh`: actual encrypted SSH2 loopback transport through the production UI.
   Explicitly focus xterm's real input element, use native renderer input events,
   assert server receive and real terminal echo, destroy the server connection,
-  reconnect the original tab, assert a second shell and stable tab ID. Receive
+  reconnect the original tab, assert a second shell and stable tab ID. Accept the stock automatic reconnect
+  path or the visible manual reconnect path, recording which occurred. Receive
   hex, focus and echo diagnostics distinguish harness input failures from an
   established product regression.
 - `sftp`: establish a separate real SSH connection and SFTP subsystem, then invoke
   the production preload transfer API into the actual packaged native runtime.
   This covers real transport/control behavior, not a certification of UI button
   gestures. Capture transfer-center screenshots; pause mid-file; drain pending
-  reads; sample actual server bytes and native progress five times over 2.5 s;
+  reads and asynchronous checkpoint fingerprint work; retain every settling
+  sample; require at least 2.5 s of sustained actual server bytes and current
+  native-progress stability;
   assert both are unchanged; resume and assert both grow; finish and compare
   file length and SHA-256 to a deterministic 32 MiB payload. No component fixture,
   injected transfer implementation, or checkout-sourced bridge substitutes for
   the official package's transfer code.
+- `clipboard`: independently test real terminal Select All / Copy after proving
+  the command reached the server and the production terminal buffer. This
+  independent step cannot gate SSH reconnect or SFTP.
 - `host-filter` (9d4e90b only): seed synthetic vault hosts and call the actual
   packaged public/vault/hosts/list dispatcher and renderer bridge. Independently
   check no-filter compatibility, empty/non-string filters, multiword keyword
@@ -53,7 +59,9 @@ Independent scenarios prevent one functional assertion from skipping another:
 Evidence lives under scenario directories: `assertions.json`, reviewed
 `electron-output.log`, and real application screenshots named for each scene.
 `provenance.json` at the artifact root identifies the official package. Raw
-profiles and payloads are never uploaded. Logs and assertion diagnostics are
+profiles and payloads are never uploaded. Save tested assertions and reviewed
+evidence before cleanup; cleanup uses ssh2 end(), while only the intentional
+transport-loss scene destroys the test server socket. Logs and assertion diagnostics are
 checked for the ephemeral password, private keys, GitHub credentials and bearer
 headers before logs/screenshots are published; matches withhold those files and
 fail. Artifacts expire after three days. Read each assertion report: environment
