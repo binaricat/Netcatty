@@ -95,10 +95,10 @@ async function clickText(cdp, label, selector = 'button') {
   await clickPoint(cdp, point);
 }
 async function insertText(mainCdp, value) {
-  await mainCdp.eval(`process.mainModule.require('electron').BrowserWindow.getAllWindows()[0].webContents.insertText(${JSON.stringify(value)})`);
+  await mainCdp.eval(`process.mainModule.require('electron').BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html')).webContents.insertText(${JSON.stringify(value)})`);
 }
 async function key(mainCdp, code, type = 'keyDown') {
-  await mainCdp.eval(`process.mainModule.require('electron').BrowserWindow.getAllWindows()[0].webContents.sendInputEvent({type:${JSON.stringify(type)},keyCode:${JSON.stringify(code)}})`);
+  await mainCdp.eval(`process.mainModule.require('electron').BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html')).webContents.sendInputEvent({type:${JSON.stringify(type)},keyCode:${JSON.stringify(code)}})`);
 }
 async function typeLine(mainCdp, value) {
   for (const letter of value) await key(mainCdp, letter, 'char');
