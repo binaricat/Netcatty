@@ -16,6 +16,8 @@ const executable = path.join(root, 'package/opt/Netcatty/netcatty');
 const report = { candidate: pinned.sha, scenario, launcher: 'not_run', persistence: 'not_run', sshReconnect: 'not_run', sftpPauseResume: 'not_run', install: 'not_covered: extracted official deb; postinst never executed', sandbox: 'stock application configuration; no disabling switches or security changes' };
 const logs = [];
 const screenshots = new Map();
+let videoChild;
+const videoPath = path.join(root, 'sftp-pause-resume.mp4');
 let child, cdp, mainCdp, fixture;
 const profile = path.join(root, `profile-${scenario}`);
 let watchdog;
@@ -131,6 +133,8 @@ function startSshFixture() {
   for (let i = 0; i < payload.length; i++) payload[i] = i % 251;
   const sftpStats = { reads: 0, bytesSent: 0, activeReads: 0 };
   let nextReadAt = 0;
+  const protocol = {channels: [], opens: [], reads: [], closes: []};
+  let nextChannel = 0, nextHandle = 0, nextRead = 0;
   const server = new Server({ hostKeys: [privateKey] }, (client) => {
     clients.add(client);
     client.on('error', () => {});
@@ -148,20 +152,37 @@ function startSshFixture() {
         channel.on('pty', (acceptPty) => acceptPty && acceptPty());
         channel.on('sftp', acceptSftp => {
           const remote = acceptSftp();
+          const channelId = ++nextChannel;
+          protocol.channels.push({id: channelId, openedAt: Date.now()});
+          const handles = new Map();
           remote.on('error', () => {});
           const attrs = { size: payload.length, mode: 0o100644, uid: 1, gid: 1, atime: 1700000000, mtime: 1700000000 };
           remote.on('REALPATH', id => remote.name(id, [{ filename: '/', longname: '/', attrs: {...attrs, mode: 0o40755} }]));
           for (const operation of ['STAT', 'LSTAT', 'FSTAT']) remote.on(operation, id => remote.attrs(id, attrs));
-          remote.on('OPEN', id => remote.handle(id, Buffer.from('qa-source')));
-          remote.on('CLOSE', id => remote.status(id, 0));
-          remote.on('READ', (id, _handle, position, length) => {
+          remote.on('OPEN', (id, filePath, flags) => {
+            const handle = `qa-handle-${++nextHandle}`;
+            const info = {handle, channelId, path: String(filePath), flags, openedAt: Date.now()};
+            handles.set(handle, info); protocol.opens.push(info);
+            remote.handle(id, Buffer.from(handle));
+          });
+          remote.on('CLOSE', (id, handleBytes) => {
+            const handle = handleBytes.toString();
+            const info = handles.get(handle); if (info) info.closedAt = Date.now();
+            protocol.closes.push({handle, channelId, at: Date.now()});
+            remote.status(id, 0);
+          });
+          remote.on('READ', (id, handleBytes, position, length) => {
+            const handle = handleBytes.toString();
+            const request = {sequence: ++nextRead, channelId, handle, path: handles.get(handle)?.path, offset: position, length, logicalRangeStart: Math.floor(position / 32768) * 32768, receivedAt: Date.now()};
+            protocol.reads.push(request);
             sftpStats.reads++; sftpStats.activeReads++;
             const due = Math.max(Date.now(), nextReadAt); nextReadAt = due + 20;
             setTimeout(() => {
               sftpStats.activeReads--;
-              if (remote.destroyed) return;
-              if (position >= payload.length) remote.status(id, 1);
-              else { const bytes = payload.subarray(position, Math.min(payload.length, position + length)); remote.data(id, bytes); sftpStats.bytesSent += bytes.length; }
+              if (remote.destroyed) { request.droppedAt = Date.now(); return; }
+              request.repliedAt = Date.now();
+              if (position >= payload.length) { request.replyBytes = 0; remote.status(id, 1); }
+              else { const bytes = payload.subarray(position, Math.min(payload.length, position + length)); request.replyBytes = bytes.length; remote.data(id, bytes); sftpStats.bytesSent += bytes.length; }
             }, due - Date.now());
           });
         });
@@ -200,7 +221,7 @@ function startSshFixture() {
       });
     });
   });
-  return { server, sessions, clients, sftpStats, payload };
+  return { server, sessions, clients, sftpStats, payload, protocol };
 }
 
 async function launch() {
@@ -283,6 +304,27 @@ async function quit() {
   }
   cdp?.close(); mainCdp?.close(); cdp = mainCdp = undefined;
 }
+function observeLocalStage(stagePath, checkpointBytes) {
+  const stats = fs.statSync(stagePath);
+  const actual = fs.readFileSync(stagePath);
+  const prefix = actual.subarray(0, checkpointBytes);
+  const committedPrefixSha256 = crypto.createHash('sha256').update(prefix).digest('hex');
+  const expectedPrefix = crypto.createHash('sha256').update(fixture.payload.subarray(0, checkpointBytes)).digest('hex');
+  return {logicalSize: stats.size, allocatedBytes: stats.blocks * 512, committedBytesRead: prefix.length, committedPrefixSha256, committedPrefixMatchesPayload: prefix.length === checkpointBytes && committedPrefixSha256 === expectedPrefix, fullStageSha256: crypto.createHash('sha256').update(actual).digest('hex')};
+}
+function startPauseRecording() {
+  report.recording = {path: 'sftp-pause-resume.mp4', startedAt: Date.now(), source: 'actual isolated Xvfb display; 5 fps; no generated frames'};
+  videoChild = spawn('/usr/bin/ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'x11grab', '-video_size', '1440x1000', '-framerate', '5', '-i', process.env.DISPLAY, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-t', '120', videoPath], {env: {PATH: process.env.PATH, DISPLAY: process.env.DISPLAY, XAUTHORITY: process.env.XAUTHORITY}, stdio: ['ignore', 'ignore', 'pipe']});
+  videoChild.on('error', error => { report.recording.error = error.message; });
+  videoChild.stderr.on('data', bytes => logs.push('Recording: ' + bytes.toString()));
+}
+async function stopPauseRecording() {
+  if (!videoChild) return;
+  if (videoChild.exitCode === null && videoChild.signalCode === null) { videoChild.kill('SIGINT'); if (!await waitForExit(videoChild, 3000)) videoChild.kill('SIGKILL'); }
+  report.recording.endedAt = Date.now();
+  report.recording.exitCode = videoChild.exitCode;
+  videoChild = undefined;
+}
 async function verifySftp() {
   report.sftpPauseResume = 'incomplete';
   const sessionId = await cdp.eval(`document.querySelector('[data-tab-type="session"]').getAttribute('data-tab-id')`);
@@ -292,6 +334,8 @@ async function verifySftp() {
   const transferId = `qa-${crypto.randomUUID()}`;
   const targetPath = path.join(root, `download-${scenario}.bin`);
   const expectedSha256 = crypto.createHash('sha256').update(fixture.payload).digest('hex');
+  const stagePath = await mainCdp.eval(`process.mainModule.require(process.mainModule.require('electron').app.getAppPath() + '/electron/bridges/tempDirBridge.cjs').getTransferTempFilePath(${JSON.stringify(transferId)}, ${JSON.stringify(path.basename(targetPath))})`);
+  report.sftpStagePath = stagePath;
   const options = { transferId, sourcePath: '/qa-payload.bin', targetPath, sourceType: 'sftp', targetType: 'local', sourceSftpId: sftpId, totalBytes: fixture.payload.length, resumable: true };
   await cdp.eval(`(() => { window.__qaTransfer = {events: [], done: false}; window.netcatty.onGlobalSftpTransferEvent(e => { if (e.transferId === ${JSON.stringify(transferId)}) window.__qaTransfer.events.push({...e, qaObservedAt: Date.now()}); }); window.netcatty.startStreamTransfer(${JSON.stringify(options)}).then(result => { window.__qaTransfer.result = result; window.__qaTransfer.done = true; }, error => { window.__qaTransfer.error = String(error); window.__qaTransfer.done = true; }); return true; })()`);
   const progress = () => cdp.eval(`window.__qaTransfer.events.filter(e => typeof e.transferred === 'number').at(-1)?.transferred || 0`);
@@ -300,21 +344,34 @@ async function verifySftp() {
   await clickElement(cdp, 'button[aria-label="File Transfers"]');
   await pause(200);
   await capture('03-sftp-transferring.png');
+  const sharedChannel = fixture.protocol.channels[0].id;
+  const isolated = fixture.protocol.opens.filter(open => open.channelId !== sharedChannel && !open.closedAt && open.path === '/qa-payload.bin');
+  assert.equal(isolated.length, 1, 'Harness must identify one active isolated download handle');
+  const transferHandle = isolated[0].handle;
+  report.sftpHandleClassification = {sharedVerificationChannel: sharedChannel, isolatedDownload: {...isolated[0]}, basis: 'official concurrent-isolated download uses an isolated subsystem; fingerprint ranges use the shared browse subsystem; inspect sftp-protocol.json for every OPEN/READ/CLOSE'};
   report.stage = 'SFTP pause';
   const paused = await cdp.eval(`window.netcatty.pauseTransfer(${JSON.stringify(transferId)})`);
+  const pauseAcknowledgedAt = Date.now();
   assert.equal(paused.success, true, paused.reason);
   await until('native paused lifecycle event', () => cdp.eval(`window.__qaTransfer.events.some(e => e.type === 'paused')`));
-  report.sftpControl = {transferId, pauseAcknowledgedAt: Date.now(), paused};
+  report.sftpControl = {transferId, pauseAcknowledgedAt, paused};
+  const allowedRanges = new Set(fixture.protocol.reads.filter(read => read.handle === transferHandle && read.receivedAt <= pauseAcknowledgedAt).map(read => read.logicalRangeStart));
+  report.sftpControl.alreadyStartedDownloadRanges = [...allowedRanges].sort((a,b) => a-b);
+  report.sftpControl.inFlightDownloadReadsAtAcknowledgement = fixture.protocol.reads.filter(read => read.handle === transferHandle && read.receivedAt <= pauseAcknowledgedAt && (!read.repliedAt || read.repliedAt > pauseAcknowledgedAt)).map(read => read.sequence);
   report.sftpPauseDrain = {startedAt: Date.now(), initial: {...fixture.sftpStats}, samples: []};
   // A transient zero in-flight count is not quiescence: the production runtime
   // may start checkpoint fingerprint reads asynchronously after acknowledging
   // pause. Keep the complete settling timeline and require sustained stability.
   let stable = [];
   await until('sustained actual SFTP bytes and native progress stop', async () => {
-    const sample = {at: Date.now(), serverBytes: fixture.sftpStats.bytesSent, activeReads: fixture.sftpStats.activeReads, progressBytes: await progress()};
+    const native = await cdp.eval(`({done: window.__qaTransfer.done, completed: window.__qaTransfer.events.some(e => e.type === 'completed'), checkpoint: window.__qaTransfer.events.filter(e => typeof e.checkpointBytes === 'number').at(-1)?.checkpointBytes})`);
+    assert.equal(native.done, false, 'Transfer resolved before explicit resume');
+    assert.equal(native.completed, false, 'Transfer completed before explicit resume');
+    const checkpointBytes = native.checkpoint ?? paused.checkpointBytes ?? 0;
+    const sample = {at: Date.now(), serverBytes: fixture.sftpStats.bytesSent, activeReads: fixture.sftpStats.activeReads, progressBytes: await progress(), checkpointBytes, done: native.done, local: observeLocalStage(stagePath, checkpointBytes)};
     report.sftpPauseDrain.samples.push(sample);
     const previous = stable.at(-1);
-    if (previous && (previous.serverBytes !== sample.serverBytes || previous.progressBytes !== sample.progressBytes || sample.activeReads !== 0)) stable = [];
+    if (previous && (previous.serverBytes !== sample.serverBytes || previous.progressBytes !== sample.progressBytes || previous.checkpointBytes !== sample.checkpointBytes || previous.local.fullStageSha256 !== sample.local.fullStageSha256 || sample.activeReads !== 0)) stable = [];
     stable.push(sample);
     if (stable.length < 6) { await pause(500); return false; }
     return sample.activeReads === 0 && sample.at - stable[0].at >= 2500;
@@ -326,13 +383,33 @@ async function verifySftp() {
   assert(samples[0].progressBytes > 0 && samples[0].progressBytes < fixture.payload.length, 'Pause must happen mid-transfer');
   assert(samples.every(s => s.serverBytes === samples[0].serverBytes), 'Actual SFTP server bytes changed in stable pause window');
   assert(samples.every(s => s.progressBytes === samples[0].progressBytes), 'Native progress changed in stable pause window');
+  const unexpectedRangeStarts = fixture.protocol.reads.filter(read => read.handle === transferHandle && read.receivedAt > pauseAcknowledgedAt && !allowedRanges.has(read.logicalRangeStart));
+  report.sftpRangePauseAssertions = {transferHandle, logicalChunkBytes: 32768, noNewLogicalDownloadRangeStarts: unexpectedRangeStarts.length === 0, unexpectedRangeStarts, noCompleteBeforeResume: true};
+  assert.equal(unexpectedRangeStarts.length, 0, 'New logical download ranges started after pause acknowledgement');
+  assert(samples.every(sample => sample.local.committedPrefixMatchesPayload), 'Committed checkpoint bytes do not match source payload');
+  assert(samples.every(sample => sample.local.fullStageSha256 === samples[0].local.fullStageSha256), 'Local file contents changed during stable pause');
+  assert(samples.every(sample => sample.checkpointBytes === samples[0].checkpointBytes), 'Committed checkpoint changed during stable pause');
   await capture('04-sftp-paused.png');
+  startPauseRecording();
+  await pause(2000);
   report.stage = 'SFTP resume';
+  const finalPausedNative = await cdp.eval(`({done: window.__qaTransfer.done, completed: window.__qaTransfer.events.some(e => e.type === 'completed')})`);
+  assert.equal(finalPausedNative.done, false, 'Transfer resolved before resume request');
+  assert.equal(finalPausedNative.completed, false, 'Transfer completed before resume request');
+  report.sftpControl.resumeRequestedAt = Date.now();
+  const lateNewRanges = fixture.protocol.reads.filter(read => read.handle === transferHandle && read.receivedAt > pauseAcknowledgedAt && read.receivedAt < report.sftpControl.resumeRequestedAt && !allowedRanges.has(read.logicalRangeStart));
+  const newIsolatedHandles = fixture.protocol.opens.filter(open => open.channelId !== sharedChannel && open.handle !== transferHandle && open.openedAt > pauseAcknowledgedAt && open.openedAt < report.sftpControl.resumeRequestedAt);
+  report.sftpRangePauseAssertions.unexpectedRangeStarts = lateNewRanges;
+  report.sftpRangePauseAssertions.unclassifiedNewIsolatedHandles = newIsolatedHandles;
+  assert.equal(lateNewRanges.length, 0, 'New logical download range started before explicit resume');
+  assert.equal(newIsolatedHandles.length, 0, 'Unclassified isolated file handle opened while paused');
   const resumed = await cdp.eval(`window.netcatty.resumeTransfer(${JSON.stringify(transferId)})`, 60000);
   report.sftpControl.resumed = resumed;
   assert.equal(resumed.success, true, resumed.reason);
   await until('server and progress resume', async () => fixture.sftpStats.bytesSent > samples[0].serverBytes && await progress() > samples[0].progressBytes, 15000);
   await capture('05-sftp-resumed.png');
+  await pause(1500);
+  await stopPauseRecording();
   await until('native transfer completes', () => cdp.eval(`window.__qaTransfer.done`), 90000);
   const result = await cdp.eval(`window.__qaTransfer.result`);
   assert(result && !result.error && !result.cancelled, JSON.stringify(result));
@@ -383,15 +460,25 @@ async function verifyHostFilters() {
   await capture('03-host-filter-cases-completed.png');
 }
 function saveEvidence(print) {
+  if (fixture && scenario === 'sftp') {
+    const pauseAt = report.sftpControl?.pauseAcknowledgedAt;
+    const resumeAt = report.sftpControl?.resumeRequestedAt || Infinity;
+    report.sftpProtocolSummary = fixture.protocol.opens.map(open => {
+      const reads = fixture.protocol.reads.filter(read => read.handle === open.handle);
+      return {...open, role: open.handle === report.sftpHandleClassification?.isolatedDownload?.handle ? 'isolated payload download' : open.channelId === report.sftpHandleClassification?.sharedVerificationChannel ? 'shared browse / source verification' : 'unclassified', readCount: reads.length, repliedBytes: reads.reduce((n, read) => n + (read.replyBytes || 0), 0), readsReceivedWhilePaused: reads.filter(read => read.receivedAt > pauseAt && read.receivedAt < resumeAt).length, repliesWhilePaused: reads.filter(read => read.repliedAt > pauseAt && read.repliedAt < resumeAt).length};
+    });
+  }
   const output = logs.join('');
-  const publicText = output + JSON.stringify(report);
+  const publicText = output + JSON.stringify(report) + (fixture ? JSON.stringify(fixture.protocol) : '');
   const sensitive = publicText.includes(loginPassword) || /-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]+)|Authorization:\s*Bearer\s+\S+/i.test(publicText);
   report.stderrReview = sensitive ? 'blocked: sensitive output; logs and screenshots withheld' : 'pass: ephemeral password, private key, GitHub credential and bearer-token checks';
   if (sensitive) {
     process.exitCode = 1; delete report.failure; delete report.sshDiagnostics;
-    for (const name of ['electron-output.log', ...screenshots.keys()]) fs.rmSync(path.join(evidence, name), {force: true});
+    for (const name of ['electron-output.log', 'sftp-protocol.json', 'sftp-pause-resume.mp4', ...screenshots.keys()]) fs.rmSync(path.join(evidence, name), {force: true});
   } else {
     fs.writeFileSync(path.join(evidence, 'electron-output.log'), output);
+    if (fixture && scenario === 'sftp') fs.writeFileSync(path.join(evidence, 'sftp-protocol.json'), JSON.stringify(fixture.protocol, null, 2));
+    if (fs.existsSync(videoPath) && fs.statSync(videoPath).size > 1000) fs.copyFileSync(videoPath, path.join(evidence, 'sftp-pause-resume.mp4'));
     for (const [name, bytes] of screenshots) fs.writeFileSync(path.join(evidence, name), bytes);
     if (print) console.log('Reviewed official Electron stdout/stderr:\n' + output);
   }
@@ -503,6 +590,7 @@ async function run() {
   } finally {
     // Persist tested assertions and reviewed evidence before teardown. Cleanup
     // must not erase a functional result or mask the original failure.
+    await stopPauseRecording();
     saveEvidence(false);
     try {
       await quit();

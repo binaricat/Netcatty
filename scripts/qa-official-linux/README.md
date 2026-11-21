@@ -45,7 +45,14 @@ Independent scenarios prevent one functional assertion from skipping another:
   sample; require at least 2.5 s of sustained actual server bytes and current
   native-progress stability;
   assert both are unchanged; resume and assert both grow; finish and compare
-  file length and SHA-256 to a deterministic 32 MiB payload. No component fixture,
+  file length and SHA-256 to a deterministic 32 MiB payload. Record every READ
+  receive/reply with subsystem, unique handle, path, offset and logical range.
+  Separate the isolated payload handle from shared source-fingerprint reads;
+  permit only already-started payload ranges to drain after pause, forbid new
+  payload range starts before resume, and reject completion before resume.
+  Sample the production committed checkpoint, verify its actual local prefix
+  bytes against the source, and check the full staging-content hash remains
+  unchanged. Logical file length / preallocation is not counted as progress. No component fixture,
   injected transfer implementation, or checkout-sourced bridge substitutes for
   the official package's transfer code.
 - `clipboard`: independently test real terminal Select All / Copy after proving
@@ -57,7 +64,8 @@ Independent scenarios prevent one functional assertion from skipping another:
   matching, group path boundaries, case sensitivity and combined filters.
 
 Evidence lives under scenario directories: `assertions.json`, reviewed
-`electron-output.log`, and real application screenshots named for each scene.
+`electron-output.log`, `sftp-protocol.json` for the SFTP request/reply audit,
+optional actual-display `sftp-pause-resume.mp4`, and real application screenshots named for each scene.
 `provenance.json` at the artifact root identifies the official package. Raw
 profiles and payloads are never uploaded. Save tested assertions and reviewed
 evidence before cleanup; cleanup uses ssh2 end(), while only the intentional
