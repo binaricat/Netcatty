@@ -28,13 +28,14 @@ import {
   Underline,
   Undo2,
 } from "lucide-react";
-import React, { useMemo, useState } from "react";
+import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type MarkdownActionType } from "../../domain/notes";
 import { useAvailableFonts } from "../../application/state/fontStore";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import type { ActiveTextFormats, NoteEditorMode } from "./noteEditorTypes";
 import { EMPTY_ACTIVE_FORMATS } from "./noteEditorTypes";
-import { Dropdown, DropdownContent, DropdownTrigger } from "../ui/dropdown";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { ToolbarOverflowMenu, useToolbarOverflowClose } from "../ui/toolbar-item-layout";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui/select";
 import { cn } from "../../lib/utils";
 
@@ -61,6 +62,76 @@ export interface NoteModeDropdownProps {
 
 const FONT_SIZES = [12, 13, 14, 15, 16, 18, 20];
 const CODE_FONT_SIZES = [11, 12, 13, 14, 15, 16, 18];
+
+const toolbarButtonClass = "flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors";
+const overflowItemClass = "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors";
+
+// Preserve the format row's visual order, including the existing group boundaries.
+const FORMAT_ITEMS = [
+  { id: "undo", icon: Undo2, label: "undo" },
+  { id: "redo", icon: Redo2, label: "redo" },
+  { id: "typography", icon: Type, label: "typography", separator: true },
+  { id: "heading", icon: Heading, label: "headingLevel" },
+  { id: "bold", icon: Bold, label: "bold", format: "bold" },
+  { id: "italic", icon: Italic, label: "italic", format: "italic" },
+  { id: "strikethrough", icon: Strikethrough, label: "strikethrough", format: "strikethrough" },
+  { id: "underline", icon: Underline, label: "underline", format: "underline" },
+  { id: "code", icon: Code, label: "inlineCode", format: "code" },
+  { id: "bullet", icon: List, label: "bulletList", separator: true },
+  { id: "number", icon: ListOrdered, label: "orderedList" },
+  { id: "task", icon: CheckSquare, label: "taskList" },
+  { id: "quote", icon: Quote, label: "quote", separator: true },
+  { id: "codeblock", icon: FileCode, label: "codeBlock" },
+  { id: "math", icon: Sigma, label: "mathFormula" },
+  { id: "table", icon: TableIcon, label: "table" },
+  { id: "divider", icon: Minus, label: "divider" },
+  { id: "link", icon: LinkIcon, label: "link" },
+  { id: "image", icon: ImageIcon, label: "image" },
+] as const;
+
+// 26px icon buttons, 2px gaps; each separator adds 9px plus another gap.
+const formatRowWidth = (count: number) =>
+  count * 28 - 2 + FORMAT_ITEMS.slice(0, count).filter((item) => "separator" in item).length * 11;
+
+/** Nested controls follow the same keep-open / leaf-close contract as SFTP. */
+const NoteToolbarPopover: React.FC<{
+  label: string;
+  icon: React.ReactNode;
+  collapsed: boolean;
+  contentClassName: string;
+  children: React.ReactNode;
+}> = ({ label, icon, collapsed, contentClassName, children }) => {
+  const closeOverflow = useToolbarOverflowClose();
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={collapsed ? overflowItemClass : toolbarButtonClass}
+          title={label}
+          aria-label={label}
+          data-toolbar-overflow-keep-open="true"
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          {icon}
+          {collapsed && <span>{label}</span>}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className={contentClassName}
+        data-toolbar-nested-menu="true"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        onCloseAutoFocus={(event) => event.preventDefault()}
+        onClick={(event) => {
+          if ((event.target as Element).closest("button")) closeOverflow();
+        }}
+      >
+        {children}
+      </PopoverContent>
+    </Popover>
+  );
+};
 
 export const NoteModeDropdown: React.FC<NoteModeDropdownProps> = ({
   editorMode,
@@ -163,360 +234,229 @@ export const NoteToolbar: React.FC<NoteToolbarProps> = ({
 
   const isEditing = editorMode === "edit" || editorMode === "live" || editorMode === "source";
 
+  const formatRowRef = useRef<HTMLDivElement>(null);
+  const [availableWidth, setAvailableWidth] = useState(Infinity);
+
+  useLayoutEffect(() => {
+    const row = formatRowRef.current;
+    if (!row) return;
+    setAvailableWidth(row.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) setAvailableWidth(entry.contentRect.width);
+    });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [isEditing]);
+
   if (!isEditing) return null;
 
-  // Highlight style for toggles that are active at the current selection.
-  const formatButtonClass = (active: boolean) =>
-    cn(
-      "p-1.5 rounded-md transition-colors",
-      active
-        ? "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary"
-        : "hover:bg-muted text-muted-foreground hover:text-foreground",
+  let inlineCount = FORMAT_ITEMS.length;
+  if (formatRowWidth(inlineCount) > availableWidth) {
+    // Reserve a button and gap for the overflow trigger, then spill from the end.
+    while (inlineCount > 0 && formatRowWidth(inlineCount) + 28 > availableWidth) {
+      inlineCount -= 1;
+    }
+  }
+
+  const renderItem = (item: (typeof FORMAT_ITEMS)[number], collapsed = false) => {
+    const Icon = item.icon;
+    const label = t(`notes.toolbar.${item.label}`);
+    if (item.id === "typography") {
+      return (
+        <NoteToolbarPopover
+          key={item.id}
+          label={label}
+          icon={<Icon size={14} />}
+          collapsed={collapsed}
+          contentClassName="w-64 p-2.5 space-y-2.5 text-xs shadow-lg"
+        >
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+              <span>{t("notes.toolbar.customCodeFont")}</span>
+              <span className="text-[10px] opacity-70">
+                {t("notes.toolbar.fontsAvailable", { count: systemFontList.length })}
+              </span>
+            </div>
+
+            {/* Search Bar */}
+            <div className="relative flex items-center">
+              <Search size={12} className="absolute left-2 text-muted-foreground pointer-events-none" />
+              <input
+                type="text"
+                placeholder={t("notes.toolbar.searchFont")}
+                value={fontSearch}
+                onChange={(e) => setFontSearch(e.target.value)}
+                className="w-full pl-6 pr-2 py-1 rounded border border-border bg-background text-[11px] text-foreground outline-none focus:border-primary placeholder:text-muted-foreground/60"
+              />
+            </div>
+
+            {/* Scrollable Font List */}
+            <div className="space-y-0.5 max-h-52 overflow-y-auto pr-1">
+              {filteredFonts.length === 0 ? (
+                <div className="py-2 text-center text-muted-foreground text-[11px]">
+                  {t("notes.toolbar.noFontsFound")}
+                </div>
+              ) : (
+                filteredFonts.map((f) => (
+                  <button
+                    key={f.value}
+                    type="button"
+                    style={{ fontFamily: f.value || undefined }}
+                    className={cn(
+                      "w-full px-2 py-1 rounded text-left text-xs transition-colors flex items-center justify-between gap-1.5",
+                      (noteFontFamily || "") === f.value
+                        ? "bg-primary text-primary-foreground font-medium"
+                        : "hover:bg-secondary text-foreground",
+                    )}
+                    onClick={() => onChangeNoteFontFamily?.(f.value)}
+                  >
+                    <span className="truncate">{f.label}</span>
+                    {(noteFontFamily || "") === f.value && <Check size={12} className="shrink-0" />}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-border/60 pt-2">
+            <div className="text-[11px] font-medium text-muted-foreground mb-1">{t("notes.toolbar.bodyFontSize")}</div>
+            <div className="flex flex-wrap gap-1">
+              {FONT_SIZES.map((sz) => (
+                <button
+                  key={sz}
+                  type="button"
+                  className={cn(
+                    "px-2 py-0.5 rounded text-xs border transition-colors",
+                    (noteFontSize || 14) === sz
+                      ? "bg-primary text-primary-foreground border-primary font-medium"
+                      : "border-border hover:bg-secondary text-foreground",
+                  )}
+                  onClick={() => onChangeNoteFontSize?.(sz)}
+                >
+                  {sz}px
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="border-t border-border/60 pt-2">
+            <div className="text-[11px] font-medium text-muted-foreground mb-1">{t("notes.toolbar.codeFontSize")}</div>
+            <div className="flex flex-wrap gap-1">
+              {CODE_FONT_SIZES.map((sz) => (
+                <button
+                  key={sz}
+                  type="button"
+                  className={cn(
+                    "px-2 py-0.5 rounded text-xs border transition-colors font-mono",
+                    (noteCodeFontSize || 13) === sz
+                      ? "bg-primary text-primary-foreground border-primary font-medium"
+                      : "border-border hover:bg-secondary text-foreground",
+                  )}
+                  onClick={() => onChangeNoteCodeFontSize?.(sz)}
+                >
+                  {sz}px
+                </button>
+              ))}
+            </div>
+          </div>
+        </NoteToolbarPopover>
+      );
+    }
+    if (item.id === "heading") {
+      return (
+        <NoteToolbarPopover
+          key={item.id}
+          label={label}
+          icon={<Icon size={14} />}
+          collapsed={collapsed}
+          contentClassName="w-32 py-1 text-xs"
+        >
+          <button
+            type="button"
+            className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-secondary text-foreground transition-colors text-left"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onAction?.("h1")}
+          >
+            <Heading1 size={14} className="text-primary" />
+            <span>{t("notes.toolbar.h1")}</span>
+          </button>
+          <button
+            type="button"
+            className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-secondary text-foreground transition-colors text-left"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onAction?.("h2")}
+          >
+            <Heading2 size={14} className="text-primary" />
+            <span>{t("notes.toolbar.h2")}</span>
+          </button>
+          <button
+            type="button"
+            className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-secondary text-foreground transition-colors text-left"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onAction?.("h3")}
+          >
+            <Heading3 size={14} className="text-primary" />
+            <span>{t("notes.toolbar.h3")}</span>
+          </button>
+          <button
+            type="button"
+            className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-secondary text-foreground transition-colors text-left"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onAction?.("h4")}
+          >
+            <Heading4 size={14} className="text-primary" />
+            <span>{t("notes.toolbar.h4")}</span>
+          </button>
+        </NoteToolbarPopover>
+      );
+    }
+    const active = "format" in item && activeFormats[item.format];
+    return (
+      <button
+        key={item.id}
+        type="button"
+        className={cn(
+          collapsed ? overflowItemClass : toolbarButtonClass,
+          active && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary",
+        )}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => onAction?.(item.id)}
+        title={label}
+        aria-label={label}
+      >
+        <Icon size={14} />
+        {collapsed && <span>{label}</span>}
+      </button>
     );
+  };
 
   return (
     <div
       className={`flex items-center gap-1.5 px-3 py-1.5 border-b border-border/70 bg-card/40 text-xs select-none min-w-0 ${className}`}
     >
-      {/* Formatting Tools (Available in Live Preview & Source Mode) */}
-      <div className="flex flex-1 items-center gap-0.5 min-w-0 overflow-x-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border/70 [&::-webkit-scrollbar-track]:bg-transparent">
-
-          {/* Undo / Redo */}
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("undo")}
-            title={t("notes.toolbar.undo")}
-          >
-            <Undo2 size={14} />
-          </button>
-
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("redo")}
-            title={t("notes.toolbar.redo")}
-          >
-            <Redo2 size={14} />
-          </button>
-
-          <div className="h-4 w-px bg-border mx-1 shrink-0" />
-
-          {/* Code Font & Typography Settings Dropdown */}
-          <Dropdown>
-            <DropdownTrigger asChild>
-              <button
-                type="button"
-                className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                title={t("notes.toolbar.typography")}
-                onMouseDown={(e) => e.preventDefault()}
-              >
-                <Type size={14} />
-              </button>
-            </DropdownTrigger>
-            <DropdownContent align="start" className="w-64 p-2.5 space-y-2.5 z-50 text-xs shadow-lg">
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
-                  <span>{t("notes.toolbar.customCodeFont")}</span>
-                  <span className="text-[10px] opacity-70">
-                    {t("notes.toolbar.fontsAvailable", { count: systemFontList.length })}
-                  </span>
-                </div>
-
-                {/* Search Bar */}
-                <div className="relative flex items-center">
-                  <Search size={12} className="absolute left-2 text-muted-foreground pointer-events-none" />
-                  <input
-                    type="text"
-                    placeholder={t("notes.toolbar.searchFont")}
-                    value={fontSearch}
-                    onChange={(e) => setFontSearch(e.target.value)}
-                    className="w-full pl-6 pr-2 py-1 rounded border border-border bg-background text-[11px] text-foreground outline-none focus:border-primary placeholder:text-muted-foreground/60"
-                  />
-                </div>
-
-                {/* Scrollable Font List */}
-                <div className="space-y-0.5 max-h-52 overflow-y-auto pr-1">
-                  {filteredFonts.length === 0 ? (
-                    <div className="py-2 text-center text-muted-foreground text-[11px]">
-                      {t("notes.toolbar.noFontsFound")}
-                    </div>
-                  ) : (
-                    filteredFonts.map((f) => (
-                      <button
-                        key={f.value}
-                        type="button"
-                        style={{ fontFamily: f.value || undefined }}
-                        className={cn(
-                          "w-full px-2 py-1 rounded text-left text-xs transition-colors flex items-center justify-between gap-1.5",
-                          (noteFontFamily || "") === f.value
-                            ? "bg-primary text-primary-foreground font-medium"
-                            : "hover:bg-secondary text-foreground",
-                        )}
-                        onClick={() => onChangeNoteFontFamily?.(f.value)}
-                      >
-                        <span className="truncate">{f.label}</span>
-                        {(noteFontFamily || "") === f.value && <Check size={12} className="shrink-0" />}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div className="border-t border-border/60 pt-2">
-                <div className="text-[11px] font-medium text-muted-foreground mb-1">{t("notes.toolbar.bodyFontSize")}</div>
-                <div className="flex flex-wrap gap-1">
-                  {FONT_SIZES.map((sz) => (
-                    <button
-                      key={sz}
-                      type="button"
-                      className={cn(
-                        "px-2 py-0.5 rounded text-xs border transition-colors",
-                        (noteFontSize || 14) === sz
-                          ? "bg-primary text-primary-foreground border-primary font-medium"
-                          : "border-border hover:bg-secondary text-foreground",
-                      )}
-                      onClick={() => onChangeNoteFontSize?.(sz)}
-                    >
-                      {sz}px
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="border-t border-border/60 pt-2">
-                <div className="text-[11px] font-medium text-muted-foreground mb-1">{t("notes.toolbar.codeFontSize")}</div>
-                <div className="flex flex-wrap gap-1">
-                  {CODE_FONT_SIZES.map((sz) => (
-                    <button
-                      key={sz}
-                      type="button"
-                      className={cn(
-                        "px-2 py-0.5 rounded text-xs border transition-colors font-mono",
-                        (noteCodeFontSize || 13) === sz
-                          ? "bg-primary text-primary-foreground border-primary font-medium"
-                          : "border-border hover:bg-secondary text-foreground",
-                      )}
-                      onClick={() => onChangeNoteCodeFontSize?.(sz)}
-                    >
-                      {sz}px
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </DropdownContent>
-          </Dropdown>
-
-          {/* Heading Dropdown (Using Portal Dropdown to avoid clipping) */}
-          <Dropdown>
-            <DropdownTrigger asChild>
-              <button
-                type="button"
-                className="flex items-center gap-1 p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                onMouseDown={(e) => e.preventDefault()}
-                title={t("notes.toolbar.headingLevel")}
-              >
-                <Heading size={14} />
-              </button>
-            </DropdownTrigger>
-            <DropdownContent align="start" className="w-32 py-1 z-50 text-xs">
-              <button
-                type="button"
-                className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-secondary text-foreground transition-colors text-left"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onAction?.("h1")}
-              >
-                <Heading1 size={14} className="text-primary" />
-                <span>{t("notes.toolbar.h1")}</span>
-              </button>
-              <button
-                type="button"
-                className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-secondary text-foreground transition-colors text-left"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onAction?.("h2")}
-              >
-                <Heading2 size={14} className="text-primary" />
-                <span>{t("notes.toolbar.h2")}</span>
-              </button>
-              <button
-                type="button"
-                className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-secondary text-foreground transition-colors text-left"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onAction?.("h3")}
-              >
-                <Heading3 size={14} className="text-primary" />
-                <span>{t("notes.toolbar.h3")}</span>
-              </button>
-              <button
-                type="button"
-                className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-secondary text-foreground transition-colors text-left"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onAction?.("h4")}
-              >
-                <Heading4 size={14} className="text-primary" />
-                <span>{t("notes.toolbar.h4")}</span>
-              </button>
-            </DropdownContent>
-          </Dropdown>
-
-          {/* Inline Styles */}
-          <button
-            type="button"
-            className={formatButtonClass(activeFormats.bold)}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("bold")}
-            title={t("notes.toolbar.bold")}
-          >
-            <Bold size={14} />
-          </button>
-
-          <button
-            type="button"
-            className={formatButtonClass(activeFormats.italic)}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("italic")}
-            title={t("notes.toolbar.italic")}
-          >
-            <Italic size={14} />
-          </button>
-
-          <button
-            type="button"
-            className={formatButtonClass(activeFormats.strikethrough)}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("strikethrough")}
-            title={t("notes.toolbar.strikethrough")}
-          >
-            <Strikethrough size={14} />
-          </button>
-
-          <button
-            type="button"
-            className={formatButtonClass(activeFormats.underline)}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("underline")}
-            title={t("notes.toolbar.underline")}
-          >
-            <Underline size={14} />
-          </button>
-
-          <button
-            type="button"
-            className={formatButtonClass(activeFormats.code)}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("code")}
-            title={t("notes.toolbar.inlineCode")}
-          >
-            <Code size={14} />
-          </button>
-
-          <div className="h-4 w-px bg-border mx-1 shrink-0" />
-
-          {/* Lists */}
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("bullet")}
-            title={t("notes.toolbar.bulletList")}
-          >
-            <List size={14} />
-          </button>
-
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("number")}
-            title={t("notes.toolbar.orderedList")}
-          >
-            <ListOrdered size={14} />
-          </button>
-
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("task")}
-            title={t("notes.toolbar.taskList")}
-          >
-            <CheckSquare size={14} />
-          </button>
-
-          <div className="h-4 w-px bg-border mx-1 shrink-0" />
-
-          {/* Blocks */}
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("quote")}
-            title={t("notes.toolbar.quote")}
-          >
-            <Quote size={14} />
-          </button>
-
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("codeblock")}
-            title={t("notes.toolbar.codeBlock")}
-          >
-            <FileCode size={14} />
-          </button>
-
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("math")}
-            title={t("notes.toolbar.mathFormula")}
-          >
-            <Sigma size={14} />
-          </button>
-
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("table")}
-            title={t("notes.toolbar.table")}
-          >
-            <TableIcon size={14} />
-          </button>
-
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("divider")}
-            title={t("notes.toolbar.divider")}
-          >
-            <Minus size={14} />
-          </button>
-
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("link")}
-            title={t("notes.toolbar.link")}
-          >
-            <LinkIcon size={14} />
-          </button>
-
-          <button
-            type="button"
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onAction?.("image")}
-            title={t("notes.toolbar.image")}
-          >
-            <ImageIcon size={14} />
-          </button>
+      <div
+        ref={formatRowRef}
+        data-note-format-toolbar
+        className="flex flex-1 items-center gap-[2px] min-w-0 overflow-hidden"
+      >
+        {FORMAT_ITEMS.slice(0, inlineCount).map((item) => (
+          <React.Fragment key={item.id}>
+            {"separator" in item && <div className="h-4 w-px bg-border mx-[4px] shrink-0" />}
+            {renderItem(item)}
+          </React.Fragment>
+        ))}
+        <ToolbarOverflowMenu
+          hasItems={inlineCount < FORMAT_ITEMS.length}
+          label={t("terminal.toolbar.more")}
+          orientation="vertical"
+          buttonClassName={toolbarButtonClass}
+          contentClassName="max-h-[min(32rem,var(--radix-popover-content-available-height))] overflow-y-auto"
+          align="start"
+        >
+          <div className="flex min-w-[140px] flex-col">
+            {FORMAT_ITEMS.slice(inlineCount).map((item) => renderItem(item, true))}
+          </div>
+        </ToolbarOverflowMenu>
       </div>
     </div>
   );
