@@ -533,3 +533,25 @@ export function retainStoredModelPresetForCatalog(
 export function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/**
+ * A scope rebind must not race an in-flight agent turn: the stream keeps
+ * targeting the chat's OLD scope while the active map and panel pointer move
+ * underneath it, corrupting streaming state. Chosen over rejecting the rebind
+ * because `stopStreamingForSession` awaits `stopAgentTurn` +
+ * `waitForActiveTurn` — termination is cleanly observable, so awaiting the
+ * stop preserves the user's rebind intent instead of bouncing them with a
+ * "stop first" notice.
+ */
+export async function stopActiveTurnBeforeScopeRebind(
+  sessionId: string,
+  deps: {
+    abortControllersRef: { current: Map<string, unknown> };
+    streamingSessionIds: ReadonlySet<string>;
+    stopStreamingForSession: (id: string) => Promise<void>;
+  },
+): Promise<void> {
+  if (deps.abortControllersRef.current.has(sessionId) || deps.streamingSessionIds.has(sessionId)) {
+    await deps.stopStreamingForSession(sessionId);
+  }
+}
