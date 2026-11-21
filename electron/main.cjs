@@ -88,6 +88,10 @@ const path = require("node:path");
 const os = require("node:os");
 const fs = require("node:fs");
 const { execFile } = require("node:child_process");
+// Separate profile selection from renderer loading. In particular, source
+// builds serving dist/ still need a non-production profile.
+const { configureAppProfile } = require("./appProfile.cjs");
+const { isDev, effectiveDevServerUrl } = configureAppProfile(app, process.env.VITE_DEV_SERVER_URL);
 const { getCliDiscoveryFilePath } = require("./cli/discoveryPath.cjs");
 const {
   SSH_DEEP_LINK_CHANNEL,
@@ -291,15 +295,6 @@ app.on("web-contents-created", (_event, contents) => {
   });
 });
 
-// Application configuration
-const devServerUrl = process.env.VITE_DEV_SERVER_URL;
-// Never treat a packaged app as "dev" even if the user has VITE_DEV_SERVER_URL set globally.
-const isDev = !app.isPackaged && !!devServerUrl;
-const effectiveDevServerUrl = isDev ? devServerUrl : undefined;
-if (isDev) {
-  app.setName("Netcatty Dev");
-  app.setPath("userData", path.join(app.getPath("userData"), "dev"));
-}
 const { applyPortableDataDirectory } = require("./portableData.cjs");
 const portableData = applyPortableDataDirectory({ app });
 if (portableData) {
