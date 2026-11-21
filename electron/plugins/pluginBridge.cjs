@@ -804,7 +804,7 @@ function registerPluginBridge(ipcMain, options) {
     if (!options.interactionService) throw new Error("Host interactions unavailable");
     return options.interactionService.setTerminalTarget(event.sender, target);
   });
-  handle(CHANNELS.themeCatalog, async () => {
+  handlePassive(CHANNELS.themeCatalog, null, async () => {
     if (!options.themeService) throw new Error("Plugin themes are unavailable");
     return options.themeService.catalog();
   });
