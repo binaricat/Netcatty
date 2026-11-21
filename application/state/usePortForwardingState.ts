@@ -18,6 +18,7 @@ import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
 import {
   clearReconnectTimer,
   getActiveConnection,
+  getRuleMappingStates,
   hasActivePortForwardRuntime,
   getPortForwardRuntimeAuthority,
   initReconnectCancelListener,
@@ -34,6 +35,8 @@ import {
   type StopAllActivePortForwardsResult,
 } from "../../infrastructure/services/portForwardingService";
 import { useStoredViewMode, ViewMode } from "./useStoredViewMode";
+
+export { getRuleMappingStates };
 
 // Module-level ref-counts: these side effects must run at most once per
 // window, not per hook instance (the hook mounts from both App.tsx
@@ -689,7 +692,8 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
         existing.remoteHost !== incoming.remoteHost ||
         existing.remotePort !== incoming.remotePort ||
         existing.bindAddress !== incoming.bindAddress ||
-        existing.hostId !== incoming.hostId
+        existing.hostId !== incoming.hostId ||
+        JSON.stringify(existing.mappings ?? []) !== JSON.stringify(incoming.mappings ?? [])
       ) {
         // Connection-relevant config changed — tear down the old tunnel
         stopAndCleanupRule(existing.id);

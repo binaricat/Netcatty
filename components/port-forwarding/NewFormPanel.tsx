@@ -6,7 +6,7 @@ import { ChevronDown,Zap } from 'lucide-react';
 import React from 'react';
 import { isPortForwardingAutoReconnectEnabled } from '../../domain/portForwardingReconnect';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import { Host,PortForwardingRule,PortForwardingType } from '../../domain/models';
+import { Host,PortForwardingType } from '../../domain/models';
 import { cn } from '../../lib/utils';
 import { DistroAvatar } from '../DistroAvatar';
 import { TrafficDiagram } from '../TrafficDiagram';
@@ -22,12 +22,13 @@ import { Input } from '../ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { Label } from '../ui/label';
 import { Switch } from '../ui/switch';
-import { getTypeLabel } from './utils';
+import { getTypeLabel, getFormRows, type PortForwardingFormDraft } from './utils';
+import { MappingRows } from './MappingRows';
 
 export interface NewFormPanelProps extends AsidePanelResizeProps {
-    draft: Partial<PortForwardingRule>;
+    draft: PortForwardingFormDraft;
     hosts: Host[];
-    onDraftChange: (updates: Partial<PortForwardingRule>) => void;
+    onDraftChange: (updates: PortForwardingFormDraft) => void;
     onSave: () => void;
     onClose: () => void;
     onOpenHostSelector: () => void;
@@ -52,6 +53,7 @@ export const NewFormPanel: React.FC<NewFormPanelProps> = ({
 }) => {
     const { t } = useI18n();
     const selectedHost = hosts.find(h => h.id === draft.hostId);
+    const mappingRows = getFormRows(draft);
 
     return (
         <AsidePanel
@@ -99,17 +101,19 @@ export const NewFormPanel: React.FC<NewFormPanelProps> = ({
                     />
                 </div>
 
-                {/* Local Port */}
-                <div className="space-y-1">
-                    <Label className="text-[10px] text-muted-foreground">{t('pf.wizard.localConfig.localPort')}</Label>
-                    <Input
-                        type="number"
-                        placeholder={t('pf.wizard.placeholders.portExample', { port: 8080 })}
-                        className="h-10"
-                        value={draft.localPort || ''}
-                        onChange={e => onDraftChange({ localPort: parseInt(e.target.value) || undefined })}
-                    />
-                </div>
+                {/* Local Port (dynamic SOCKS listen port only; local/remote use the mapping rows below) */}
+                {draft.type === 'dynamic' && (
+                    <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground">{t('pf.wizard.localConfig.localPort')}</Label>
+                        <Input
+                            type="number"
+                            placeholder={t('pf.wizard.placeholders.portExample', { port: 8080 })}
+                            className="h-10"
+                            value={draft.localPort || ''}
+                            onChange={e => onDraftChange({ localPort: parseInt(e.target.value) || undefined })}
+                        />
+                    </div>
+                )}
 
                 {/* Bind Address */}
                 <div className="space-y-1">
@@ -159,16 +163,17 @@ export const NewFormPanel: React.FC<NewFormPanelProps> = ({
                             />
                         </div>
 
-                        <div className="space-y-1">
-                            <Label className="text-[10px] text-muted-foreground">{t('pf.wizard.destination.port')}</Label>
-                            <Input
-                                type="number"
-                                placeholder={t('pf.wizard.placeholders.portExample', { port: 3306 })}
-                                className="h-10"
-                                value={draft.remotePort || ''}
-                                onChange={e => onDraftChange({ remotePort: parseInt(e.target.value) || undefined })}
-                            />
-                        </div>
+                        <MappingRows
+                            rows={mappingRows}
+                            onChange={(rows) => {
+                                const first = rows[0] ?? {};
+                                onDraftChange({
+                                    mappingRows: rows,
+                                    localPort: first.localPort,
+                                    remotePort: first.remotePort,
+                                });
+                            }}
+                        />
                     </>
                 )}
 

@@ -2512,3 +2512,61 @@ for (const type of ["local", "remote", "dynamic"] as const) {
     assert.equal(getActiveConnection(liveRule.id)?.reconnectTimerCallback, undefined);
   });
 }
+
+test("reconcile adopts a recovered mapping tunnel for a lost placeholder", async (t) => {
+  const mappingRule = rule({
+    id: "placeholder-recovery-rule",
+    localPort: 18080,
+    mappings: [
+      { localPort: 18080, remotePort: 8080 },
+      { localPort: 19090, remotePort: 9090 },
+    ],
+  });
+  let records: Array<Record<string, unknown>> = [
+    { ruleId: mappingRule.id, tunnelId: "tunnel-a", type: "local", phase: "active", mappingId: 18080, localPort: 18080, remotePort: 8080 },
+  ];
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { netcatty: {
+      startPortForward: async () => ({
+        success: false,
+        error: "second mapping failed to bind",
+        mappings: [
+          { mappingId: 18080, localPort: 18080, remotePort: 8080, tunnelId: "tunnel-a", success: true, status: "active" },
+          { mappingId: 19090, localPort: 19090, remotePort: 9090, success: false, error: "EADDRINUSE" },
+        ],
+      }),
+      stopPortForwardByRuleId: async () => ({ stopped: 1, failed: 0, errors: [] }),
+      onPortForwardStatus: () => () => undefined,
+      getPortForwardSnapshot: async () => ({ epoch: "test", revision: 1, records }),
+    } },
+  });
+  t.after(async () => {
+    await stopAndCleanupRuleAndWait(mappingRule.id);
+  });
+  await startPortForward(mappingRule, host(), [], [], [], () => undefined, false);
+  let connection = getActiveConnection(mappingRule.id)!;
+  assert.equal(connection.status, "partial");
+  assert.equal(connection.mappings?.get(19090)?.tunnelId, "");
+
+  // Another window retried the failed mapping: the backend now has a tunnel.
+  records = [
+    { ruleId: mappingRule.id, tunnelId: "tunnel-a", type: "local", phase: "active", mappingId: 18080, localPort: 18080, remotePort: 8080 },
+    { ruleId: mappingRule.id, tunnelId: "tunnel-b", type: "local", phase: "active", mappingId: 19090, localPort: 19090, remotePort: 9090 },
+  ];
+  await reconcileWithBackend();
+  connection = getActiveConnection(mappingRule.id)!;
+  assert.equal(connection.mappings?.get(19090)?.tunnelId, "tunnel-b");
+  assert.equal(connection.status, "active");
+
+  // That tunnel later disappears: loss detection must catch it again instead
+  // of exempting the mapping forever because of the old empty tunnelId.
+  records = [
+    { ruleId: mappingRule.id, tunnelId: "tunnel-a", type: "local", phase: "active", mappingId: 18080, localPort: 18080, remotePort: 8080 },
+  ];
+  await reconcileWithBackend();
+  connection = getActiveConnection(mappingRule.id)!;
+  assert.equal(connection.mappings?.get(19090)?.status, "error");
+  assert.equal(connection.mappings?.get(19090)?.tunnelId, "");
+  assert.equal(connection.status, "partial");
+});

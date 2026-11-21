@@ -49,3 +49,21 @@ test("portforward rule mutations delegate to the renderer vault", async () => {
     "portforward.rules.create", "portforward.rules.update", "portforward.rules.duplicate", "portforward.rules.delete",
   ]);
 });
+
+test("portforward rule mutations pass mappings through to the renderer vault", async () => {
+  const calls = [];
+  const service = createPortForwardService({
+    invokeVaultAgent: async (op, params) => {
+      calls.push({ op, params });
+      return { ok: true };
+    },
+  });
+  const mappings = JSON.stringify([
+    { localPort: 8080, remotePort: 80 },
+    { localPort: 9090, remotePort: 90 },
+  ]);
+  await service.createRule({ label: "Multi", type: "local", localPort: 8080, remotePort: 80, hostId: "host-1", mappings });
+  await service.updateRule({ ruleId: "rule-1", mappings });
+  assert.equal(calls[0].params.mappings, mappings);
+  assert.equal(calls[1].params.mappings, mappings);
+});
