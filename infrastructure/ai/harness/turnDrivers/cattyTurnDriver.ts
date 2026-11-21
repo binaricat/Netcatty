@@ -213,8 +213,8 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     context.activeProvider.id,
     context.activeProvider.providerId,
     activeModelId,
-    resolveProviderStyle(context.activeProvider) === 'openai'
-      && resolveOpenAIApi(context.activeProvider) === 'responses',
+    resolveProviderStyle(context.activeProvider, activeModelId) === 'openai'
+      && resolveOpenAIApi(context.activeProvider, activeModelId) === 'responses',
   );
 
   ui.setStreamingForScope(sessionId, true);
@@ -296,6 +296,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         ),
         activeModelId,
       ),
+      activeModelId,
     );
     const preserveStatelessResponsesReasoning = reasoningProviderOptions?.openai?.store === false;
     // Anthropic-compatible providers validate signed thinking blocks: every
@@ -306,7 +307,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     // Anthropic-format endpoint is strict about this even for earlier turns).
     // Keep the reasoning parts buildCattySdkMessages replayed instead of
     // pruning them like generic Chat Completions histories.
-    const preserveAnthropicThinkingReplay = resolveProviderStyle(context.activeProvider) === 'anthropic';
+    const preserveAnthropicThinkingReplay = resolveProviderStyle(context.activeProvider, activeModelId) === 'anthropic';
     // allowStripSignedThinking computed once above (DeepSeek must keep signed thinking).
     const preserveReasoningForStream = preserveStatelessResponsesReasoning || preserveAnthropicThinkingReplay;
     const reasoningReserveTokens = estimateReasoningOutputReserve(reasoningProviderOptions);

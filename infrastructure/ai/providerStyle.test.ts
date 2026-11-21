@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PROVIDER_PRESETS, resolveOpenAIApi, resolveProviderStyle } from "./types";
+import { PROVIDER_PRESETS, resolveOpenAIApi, resolveProviderDiscoveryStyle, resolveProviderStyle } from "./types";
 
 test("resolveProviderStyle prefers an explicit style override", () => {
   assert.equal(resolveProviderStyle({ providerId: "custom", style: "anthropic" }), "anthropic");
@@ -17,7 +17,7 @@ test("resolveProviderStyle falls back to providerId for google", () => {
 });
 
 test("resolveProviderStyle treats every other providerId as the OpenAI-compatible family", () => {
-  for (const providerId of ["openai", "ollama", "openrouter", "qwen", "deepseek", "kimi", "zhipu", "doubao", "mimo", "custom"] as const) {
+  for (const providerId of ["openai", "ollama", "openrouter", "opencode-go", "qwen", "deepseek", "kimi", "zhipu", "doubao", "mimo", "custom"] as const) {
     assert.equal(resolveProviderStyle({ providerId }), "openai", `expected openai for ${providerId}`);
   }
 });
@@ -27,6 +27,33 @@ test("resolveOpenAIApi defaults missing and unknown values to Chat Completions",
   assert.equal(resolveOpenAIApi({ openaiApi: "chat" }), "chat");
   assert.equal(resolveOpenAIApi({ openaiApi: "responses" }), "responses");
   assert.equal(resolveOpenAIApi({ openaiApi: "weird" as "chat" }), "chat");
+});
+
+test("fixed-protocol providers ignore stale style and request-format overrides", () => {
+  assert.equal(resolveProviderStyle({ providerId: "opencode-go", style: "anthropic" }), "openai");
+  assert.equal(resolveProviderStyle({ providerId: "opencode-go", style: "google" }), "openai");
+  assert.equal(resolveOpenAIApi({ providerId: "opencode-go", openaiApi: "responses" }), "chat");
+  assert.equal(resolveOpenAIApi({ providerId: "opencode-go", openaiApi: "chat" }), "chat");
+});
+
+test("OpenCode Go routes each model to its native wire protocol", () => {
+  assert.equal(resolveProviderStyle({ providerId: "opencode-go", defaultModel: "kimi-k3" }), "openai");
+  assert.equal(resolveOpenAIApi({ providerId: "opencode-go", defaultModel: "kimi-k3" }), "chat");
+  assert.equal(resolveProviderStyle({ providerId: "opencode-go", defaultModel: "grok-4.7" }), "openai");
+  assert.equal(resolveOpenAIApi({ providerId: "opencode-go", defaultModel: "grok-4.7" }), "responses");
+  assert.equal(resolveProviderStyle({ providerId: "opencode-go", defaultModel: "qwen3.8-max" }), "anthropic");
+  assert.equal(resolveProviderStyle({ providerId: "opencode-go" }, "claude-haiku-5-5"), "anthropic");
+  assert.equal(resolveProviderStyle({ providerId: "opencode-go", defaultModel: "gemini-4-argon" }), "google");
+  assert.equal(resolveProviderStyle({ providerId: "opencode-go", defaultModel: "future-model" }), "openai");
+});
+
+test("model discovery for fixed-protocol providers stays on the OpenAI prefix", () => {
+  assert.equal(
+    resolveProviderDiscoveryStyle({ providerId: "opencode-go", defaultModel: "qwen3.8-max" }),
+    "openai",
+  );
+  assert.equal(resolveProviderDiscoveryStyle({ providerId: "deepseek" }), "openai");
+  assert.equal(resolveProviderDiscoveryStyle({ providerId: "anthropic" }), "anthropic");
 });
 
 test("domestic provider presets include editable OpenAI-compatible base URLs", () => {

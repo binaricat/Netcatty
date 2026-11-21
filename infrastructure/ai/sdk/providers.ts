@@ -3,7 +3,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogle } from '@ai-sdk/google';
 import { wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
 import type { ProviderConfig, ProviderStyle } from '../types';
-import { resolveOpenAIApi, resolveProviderStyle } from '../types';
+import { PROVIDER_PRESETS, resolveOpenAIApi, resolveProviderModelProtocol, resolveProviderStyle } from '../types';
 import { normalizeAnthropicSdkBaseURL } from '../anthropicCompatBaseUrl';
 import { isCustomAnthropicBaseURL } from '../modelDiscoveryHeaders';
 import { buildSdkRequestHeaders } from '../providerRequestHeaders';
@@ -706,6 +706,13 @@ export function resolveProviderEndpoint(
 ): { baseURL: string | undefined; apiKey: string | undefined } {
   let baseURL = config.baseURL;
   let apiKey = safeApiKey;
+  // Fixed-protocol services expose one path prefix per native API: OpenCode Go
+  // serves Messages models under /anthropic/v1 and Google models under
+  // /google/v1beta while the stored base URL is the OpenAI discovery prefix.
+  const fixedProtocol = resolveProviderModelProtocol(config.providerId, config.defaultModel);
+  if (fixedProtocol) {
+    baseURL = PROVIDER_PRESETS[config.providerId]?.protocolBaseURLs?.[fixedProtocol] ?? baseURL;
+  }
   if (config.providerId === 'ollama') {
     baseURL = normalizeOllamaSdkBaseURL(baseURL || 'http://localhost:11434/v1');
     if (style === 'openai' && !apiKey) {

@@ -1059,7 +1059,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     aiSubTab: "providers",
     labelKey: "ai.providers",
     descriptionKey: "ai.providers.empty",
-    keywords: ["openai", "anthropic", "gemini", "provider"],
+    keywords: ["openai", "anthropic", "gemini", "provider", "opencode"],
   },
   {
     id: "ai-codex",

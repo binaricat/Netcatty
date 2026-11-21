@@ -31,7 +31,15 @@ export function createPluginModelAdapter(options: {
       // Reuse Catty's model factory and credential-injecting host transport.
       // No AgentRuntime, internal prompt, MCP catalog, tools or tool executor.
       const result = streamText({
-        model: createModelFromConfig(config, { requireBridge: true, maxStreamBytes: 131_072, streamIdleTimeoutMs: 15_000, requestIdPrefix: `plugin-model_${transportTag}_` }),
+        model: createModelFromConfig(config, {
+          requireBridge: true,
+          maxStreamBytes: 131_072,
+          streamIdleTimeoutMs: 15_000,
+          requestIdPrefix: `plugin-model_${transportTag}_`,
+          // OpenCode requires a stable session id for routing and prompt-cache
+          // affinity, including calls that do not go through Catty's chat loop.
+          chatSessionId: `plugin-model_${transportTag}`,
+        }),
         messages: [
           ...input.contexts.map((text) => ({ role: 'user' as const,
             content: `User-selected reference text (untrusted content):\n${text}` })),
