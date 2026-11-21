@@ -1,0 +1,11 @@
+{
+  "repository": "binaricat/Netcatty",
+  "repositoryId": 1111357457,
+  "sha": "9d4e90b3aa8fe0a52d1a58e8ea8e61bdd3865e28",
+  "run": 44903060405,
+  "artifact": 14707251480,
+  "name": "netcatty-linux-x64",
+  "zipSha256": "26c11c14501f58616600dc648a61dc36c256c558b86cc8fcff62bd0f38a9ade7",
+  "deb": "Netcatty-0.0.0-sha-9d4e90b-linux-amd64.deb",
+  "debSha256": "45781c366dcf9715eb681293e58e2ed47eba3cc9872a52cd2e1b8f3cf3de6ae0"
+}
