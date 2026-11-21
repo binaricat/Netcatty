@@ -193,7 +193,10 @@ async function launch() {
     const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
     return targets.find(item => item.type === 'page' && /index\.html/.test(item.url));
   }, 30000);
-  assert(target.url.startsWith('file://'), 'Must load packaged app, not a fixture or dev server');
+  const rendererUrl = new URL(target.url);
+  assert.equal(rendererUrl.protocol, 'app:', 'Official production renderer protocol');
+  assert.equal(rendererUrl.host, 'netcatty');
+  assert.equal(rendererUrl.pathname, '/index.html');
   cdp = new Devtools(target.webSocketDebuggerUrl);
   await cdp.connect();
   await cdp.send('Page.bringToFront');
