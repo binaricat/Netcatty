@@ -144,7 +144,11 @@ export function usePluginViewLifecycle({
   const close = useCallback(async () => {
     setRequested(null);
     if (activeView) pluginViewSessions.closeView(activeView.view.id);
-    if (activePluginTab) pluginViewTabStore.close(activePluginTab.id);
+    // An overlay can be requested while a different plugin tab stays active.
+    // Dismissing that overlay must not close the tab underneath it.
+    if (activeView?.view.location === 'tab' && activePluginTab?.viewId === activeView.view.id) {
+      pluginViewTabStore.close(activePluginTab.id);
+    }
   }, [activePluginTab, activeView]);
 
   useEffect(() => {

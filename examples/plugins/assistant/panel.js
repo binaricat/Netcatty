@@ -3,6 +3,19 @@ export function mount(root, context, viewId) {
   const onDispose = (stop) => cleanup.push(stop);
   const subscribeMessage = (listener) => { const sub = context.views.onDidReceiveMessage(viewId, listener); cleanup.push(() => sub.dispose()); return sub; };
 const element = (id) => root.querySelector("#" + id);
+// Keep the newest output visible within the host's per-node and total limits.
+// Chunking avoids closing a healthy view when an ordinary response exceeds 8 KB.
+let outputText = ''; let outputTruncated = false;
+function showOutput(text, append = false) {
+  const combined = append ? outputText + text : text;
+  outputTruncated = (append && outputTruncated) || combined.length > 32768;
+  outputText = combined.slice(-32768);
+  const nodes = [];
+  if (outputTruncated) nodes.push(root.ownerDocument.createTextNode('[Earlier output omitted; showing the latest 32,768 characters.]\n\n'));
+  for (let offset = 0; offset < outputText.length; offset += 4096) nodes.push(root.ownerDocument.createTextNode(outputText.slice(offset, offset + 4096)));
+  element('response').replaceChildren(...nodes);
+}
+
 const invoke = (operation, params = {}) => context.commands.executeCommand(`com.netcatty.assistant.${operation}`, params);
 let chat;
 let turn;
@@ -90,7 +103,7 @@ element('compose').addEventListener('submit', async (event) => {
   }
   const run = ++generation;
   busy(true); element('status').textContent = 'Streaming...';
-  element('response').textContent = ''; element('usage').textContent = '';
+  showOutput(''); element('usage').textContent = '';
   try {
     // No inference has been requested yet, so an expired session can be
     // replaced before this explicit Send. Never retry a failed send/read.
@@ -103,7 +116,7 @@ element('compose').addEventListener('submit', async (event) => {
       const chunk = await invoke('read', { turnHandle: turn });
       if (run !== generation) return;
       if (chunk.kind === 'end') break;
-      if (chunk.kind === 'text') element('response').textContent += chunk.text;
+      if (chunk.kind === 'text') showOutput(chunk.text, true);
       if (chunk.kind === 'usage') element('usage').textContent = `${chunk.inputTokens ?? '?'} input tokens · ${chunk.outputTokens ?? '?'} output tokens`;
     }
     element('status').textContent = 'Complete';
