@@ -7,6 +7,7 @@ const { sshForwardFixture } = require("./fixtures/sshForwardFixture.cjs");
 const { openHostByteStream } = require("./hostByteStreamTransport.cjs");
 const { PluginByteStreamBroker } = require("./byteStreamBroker.cjs");
 const { listPortForwards } = require("../bridges/portForwardingBridge.cjs");
+const hostKeyVerifier = require("../bridges/hostKeyVerifier.cjs");
 
 async function fixture(t, options) {
   const sockets = new Set();
@@ -66,4 +67,39 @@ test("a refused destination cannot leave a stream or SSH transport usable", { ti
   await assert.rejects(f.broker.connect(f.endpoint, f.context, { open: f.open }));
   assert.equal(f.broker.connections.size, 0);
   assert.equal(f.ssh.sessions, 0);
+});
+
+test("host-key verification routes plugin-stream requests and cancels pending prompts on abort", { timeout: 15000 }, async (t) => {
+  const f = await fixture(t);
+  f.ssh.options.verifyHostKeys = true;
+  const prompts = [];
+  f.ssh.sender.send = (channel, payload) => {
+    if (channel === "netcatty:host-key:verify") {
+      prompts.push(payload);
+      hostKeyVerifier.handleResponse({ sender: f.ssh.sender }, { requestId: payload.requestId, accept: true, addToKnownHosts: false });
+    }
+  };
+  const handle = await f.broker.connect(f.endpoint, f.context, { open: f.open });
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0].sessionId, /^plugin-stream-/);
+  const bytes = Buffer.from("verified host-key bytes");
+  await f.broker.write(handle.handleId, bytes, f.context);
+  assert.deepEqual(Buffer.from(await f.broker.read(handle.handleId, f.context)), bytes);
+  f.broker.close(handle.handleId, f.context);
+
+  const f2 = await fixture(t);
+  f2.ssh.options.verifyHostKeys = true;
+  let prompted;
+  const sawPrompt = new Promise((resolve) => { prompted = resolve; });
+  f2.ssh.sender.send = (channel, payload) => {
+    if (channel === "netcatty:host-key:verify") prompted(payload);
+  };
+  const pending = f2.broker.connect(f2.endpoint, f2.context, { open: f2.open });
+  void pending.catch(() => {});
+  const req = await sawPrompt;
+  assert.match(req.sessionId, /^plugin-stream-/);
+  assert.ok(hostKeyVerifier.getRequests().has(req.requestId));
+  f2.controller.abort();
+  await assert.rejects(pending);
+  assert.equal(hostKeyVerifier.getRequests().has(req.requestId), false);
 });

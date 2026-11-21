@@ -5,6 +5,7 @@ const net = require("node:net");
 const tls = require("node:tls");
 const { canonicalizeStreamEndpoint } = require("./byteStreamEndpoint.cjs");
 const { openBoundedForwardOut } = require("../bridges/boundedSshChannelOpen.cjs");
+const hostKeyVerifier = require("../bridges/hostKeyVerifier.cjs");
 
 // Host-only adapter: authentication uses the established SSH flow, but no
 // listener, terminal, shell, startup command, or shared terminal lease exists.
@@ -17,6 +18,7 @@ async function openHostByteStream({ sender, connectionOptions, endpoint, signal,
   let closing;
   const close = () => {
     socket?.destroy();
+    hostKeyVerifier.cancelRequestsForSession(tunnelId);
     closing ??= bridge.stopPortForward(event, { tunnelId }).catch(() => {});
     return closing;
   };
@@ -67,6 +69,7 @@ async function openHostByteStream({ sender, connectionOptions, endpoint, signal,
     // A cancelled early dial may have published its tunnel after the initial
     // stop; always retry cleanup after start settles.
     socket?.destroy();
+    hostKeyVerifier.cancelRequestsForSession(tunnelId);
     await bridge.stopPortForward(event, { tunnelId }).catch(() => {});
     signal.removeEventListener("abort", abort);
     throw new Error("The selected server or destination could not be connected");
