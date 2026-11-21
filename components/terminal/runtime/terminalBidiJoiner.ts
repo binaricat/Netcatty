@@ -1,4 +1,5 @@
 import bidiFactory from "bidi-js";
+import rtlCharacterPattern from "../../../lib/terminalRtlCharacter.json";
 
 /**
  * Display-only right-to-left support for xterm.js (issue #4261).
@@ -24,18 +25,36 @@ import bidiFactory from "bidi-js";
  * not right-aligned.
  */
 
-// Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan, Mandaic and the Arabic
-// presentation forms, plus the RTL scripts outside the BMP. A cheap check that
-// keeps the full algorithm off the hot path for left-to-right lines.
-const RTL_CHARACTER = /[֐-ࣿיִ-﷿ﹰ-ﻼ]|[\uD802\uD803\uD83A\uD83B]/;
+// RTL scripts and directional controls in the BMP and supplementary planes.
+// The Unicode flag makes the supplementary bounds code points, not UTF-16
+// lead surrogates (which would also match unrelated non-RTL characters).
+const RTL_CHARACTER = new RegExp(rtlCharacterPattern, "u");
+const SURROGATE_PAIR = /[\uD800-\uDBFF][\uDC00-\uDFFF]/g;
+
+// bidi-js 1.0.3 looks up string[i] rather than a full code point. Project
+// astral characters to BMP characters of the same bidi class for this
+// calculation only. Two copies retain the original UTF-16 offsets expected
+// by xterm; the actual glyphs (and terminal buffer) are never replaced.
+const BIDI_CLASS_PROXY: Readonly<Record<string, string>> = {
+  L: "a", R: "א", AL: "ا", EN: "0", AN: "٠", NSM: "\u0301",
+  ON: "!", BN: "\u00ad", ET: "$", CS: ",", ES: "+",
+};
 
 let bidi: ReturnType<typeof bidiFactory> | null = null;
 
+export function mightContainRightToLeft(text: string): boolean {
+  return RTL_CHARACTER.test(text);
+}
+
 export function findRightToLeftRuns(text: string): [number, number][] {
-  if (!RTL_CHARACTER.test(text)) return [];
+  if (!mightContainRightToLeft(text)) return [];
 
   bidi ??= bidiFactory();
-  const { levels } = bidi.getEmbeddingLevels(text, "ltr");
+  const classifier = bidi;
+  const projected = text.replace(SURROGATE_PAIR, (character) =>
+    (BIDI_CLASS_PROXY[classifier.getBidiCharTypeName(character)] ?? "!").repeat(2),
+  );
+  const { levels } = classifier.getEmbeddingLevels(projected, "ltr");
 
   const ranges: [number, number][] = [];
   let start = -1;

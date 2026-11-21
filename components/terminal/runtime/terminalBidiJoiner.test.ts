@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createPaneBidiJoiner, findRightToLeftRuns } from "./terminalBidiJoiner";
+import { createPaneBidiJoiner, findRightToLeftRuns, mightContainRightToLeft } from "./terminalBidiJoiner";
 
 const slice = (text: string, ranges: [number, number][]) =>
   ranges.map(([start, end]) => text.slice(start, end));
@@ -10,6 +10,19 @@ test("pure left-to-right text is left alone", () => {
   assert.deepEqual(findRightToLeftRuns("ls -la /var/log 2>&1 | grep error"), []);
   assert.deepEqual(findRightToLeftRuns("10.0.0.138 (eth0) 100%"), []);
   assert.deepEqual(findRightToLeftRuns(""), []);
+});
+
+test("the cheap detection gate rejects the ASCII and unrelated astral characters", () => {
+  assert.equal(mightContainRightToLeft(String.raw`update DEPLOY 0 2 3 \uD802`), false);
+  assert.equal(mightContainRightToLeft("shell 🛠️ 👍"), false);
+  assert.equal(mightContainRightToLeft("𞤀𞤤"), true);
+});
+
+test("supplementary RTL stays whole and returns xterm UTF-16 offsets", () => {
+  const adlam = "𞤀𞤤";
+  const text = `🛠 ${adlam} x`;
+  assert.deepEqual(findRightToLeftRuns(text), [[3, 7]]);
+  assert.deepEqual(findRightToLeftRuns(`${adlam} 123`), [[0, 8]]);
 });
 
 test("Persian prose is one run so the browser can order and join it", () => {

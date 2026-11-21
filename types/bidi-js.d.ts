@@ -11,6 +11,7 @@ declare module "bidi-js" {
   }
 
   interface Bidi {
+    getBidiCharTypeName(char: string): string;
     getEmbeddingLevels(text: string, baseDirection?: "ltr" | "rtl"): BidiEmbeddingLevels;
   }
 
