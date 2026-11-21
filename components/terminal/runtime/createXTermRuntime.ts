@@ -110,6 +110,7 @@ import {
   createTerminalLigatureController,
   terminalFontLigaturesEnabled,
 } from "./terminalFontLigatures";
+import { createPaneBidiJoiner, findRightToLeftRuns } from "./terminalBidiJoiner";
 import { createWebglRendererController } from "./webglRendererController";
 import { getSharedWebglContextBudget } from "./webglContextBudget";
 import {
@@ -1073,6 +1074,22 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const unicodeGraphemes = new UnicodeGraphemesAddon();
   term.loadAddon(unicodeGraphemes);
   term.unicode.activeVersion = '15-graphemes';
+
+  // Draw Arabic, Persian and Hebrew runs in display order with joined letters.
+  // Display only: the buffer, selection and copy keep the logical text.
+  term.registerCharacterJoiner(performanceConfig.useWebGLAddon
+    ? createPaneBidiJoiner(
+      () => webglController.getAddon() !== null,
+      () => {
+        if (runtimeDisposed) return;
+        // The pinned WebGL addon allocates a maximum-size atlas page for a
+        // wide joined glyph. Prevent attach/recovery again for just this pane.
+        webglController.dispose();
+        logger.info("[XTerm] Using DOM renderer for right-to-left text in this pane");
+        repaintTerminal();
+      },
+    )
+    : findRightToLeftRuns);
 
   trackRenderer();
 
