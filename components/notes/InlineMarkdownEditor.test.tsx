@@ -392,10 +392,9 @@ test("note editor exposes its modes from a borderless title-row dropdown", () =>
   // The app-owned NoteToolbar (not MDXEditor's toolbarPlugin) hosts the
   // formatting controls; MDXEditor must not render its own toolbar.
   assert.doesNotMatch(source, /toolbarPlugin\(/);
-  assert.match(toolbarSource, /onAction\?\.\("undo"\)/);
-  assert.match(toolbarSource, /onAction\?\.\("redo"\)/);
-  assert.match(toolbarSource, /<Undo2 size=\{14\} \/>/);
-  assert.match(toolbarSource, /<Redo2 size=\{14\} \/>/);
+  assert.match(toolbarSource, /id: "undo", icon: Undo2/);
+  assert.match(toolbarSource, /id: "redo", icon: Redo2/);
+  assert.match(toolbarSource, /onAction\?\.\(item\.id\)/);
   // Preview and edit both use MDXEditor (readOnly in preview).
   assert.match(source, /readOnly=\{editorMode === "preview"\}/);
   assert.match(source, /key=\{editorMode\}/);
@@ -439,24 +438,10 @@ test("note markdown toolbar remains usable in narrow panes", () => {
     styles,
     /\.netcatty-mdx-editor\s*\{[^}]*transform:\s*translateZ\(0\);/s,
   );
-  // The app-owned NoteToolbar scrolls horizontally when the pane is narrow so
-  // formatting buttons are never clipped; the scrollbar stays visible.
-  assert.match(
-    toolbarSource,
-    /overflow-x-auto [^"]*\[scrollbar-width:thin\]/,
-  );
-  assert.match(
-    toolbarSource,
-    /\[&::-webkit-scrollbar\]:h-1\.5/,
-  );
-  assert.match(
-    toolbarSource,
-    /\[&::-webkit-scrollbar-thumb\]:bg-border\/70/,
-  );
-  assert.match(
-    toolbarSource,
-    /flex flex-1 items-center gap-0\.5 min-w-0 overflow-x-auto/,
-  );
+  // The app-owned NoteToolbar collapses excess controls into the shared menu.
+  assert.match(toolbarSource, /<ToolbarOverflowMenu/);
+  assert.match(toolbarSource, /data-note-format-toolbar/);
+  assert.doesNotMatch(toolbarSource, /overflow-x-auto|scrollbar-width:thin|webkit-scrollbar/);
 });
 
 test("MDX link dialog overlay stays inside the retained notes editor container", () => {
