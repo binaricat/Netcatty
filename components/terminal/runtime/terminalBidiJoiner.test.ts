@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { findRightToLeftRuns } from "./terminalBidiJoiner";
+import { createPaneBidiJoiner, findRightToLeftRuns } from "./terminalBidiJoiner";
 
 const slice = (text: string, ranges: [number, number][]) =>
   ranges.map(([start, end]) => text.slice(start, end));
@@ -73,4 +73,43 @@ test("ranges are sorted and do not overlap", () => {
   for (let i = 1; i < ranges.length; i++) {
     assert.ok(ranges[i][0] >= ranges[i - 1][1]);
   }
+});
+
+test("ASCII output never requests a DOM-only renderer", async () => {
+  let switches = 0;
+  const join = createPaneBidiJoiner(() => true, () => { switches++; });
+  assert.deepEqual(join("192.0.2.1: ready"), []);
+  assert.deepEqual(join("100 lines of output"), []);
+  await Promise.resolve();
+  assert.equal(switches, 0);
+});
+
+test("RTL joins are withheld from WebGL until the pane switches once to DOM", async () => {
+  let webgl = true;
+  let switches = 0;
+  const join = createPaneBidiJoiner(() => webgl, () => {
+    switches++;
+    webgl = false;
+  });
+  const short = "سلام دنیا";
+  const long = "این یک جمله فارسی معمولی برای بررسی خوانایی متن در یک پنجره عریض است";
+  assert.deepEqual(join(short), []);
+  assert.deepEqual(join(long), []);
+  assert.equal(switches, 0);
+
+  await Promise.resolve();
+  assert.equal(switches, 1);
+  assert.deepEqual(join(short), [[0, short.length]]);
+  assert.deepEqual(join(long), [[0, long.length]]);
+  await Promise.resolve();
+  assert.equal(switches, 1);
+});
+
+test("RTL received before deferred WebGL activation keeps the pane on DOM", async () => {
+  let switches = 0;
+  const text = "سلام";
+  const join = createPaneBidiJoiner(() => false, () => { switches++; });
+  assert.deepEqual(join(text), [[0, text.length]]);
+  await Promise.resolve();
+  assert.equal(switches, 1);
 });

@@ -8,10 +8,10 @@ import bidiFactory from "bidi-js";
  * drawn in their isolated forms. xterm.js has no bidi support of its own
  * (xtermjs/xterm.js#701).
  *
- * Both of its renderers (WebGL and DOM) do honour character joiners: a joined
- * range is drawn as one string by the browser's text engine, which reorders
- * the range (UAX #9), shapes Arabic letters into their joined forms and
- * mirrors brackets. The buffer is never changed, so selection, copy, search
+ * The DOM renderer draws joined ranges as one string, allowing the browser to
+ * reorder and shape Arabic letters and mirror brackets. The WebGL addon also
+ * supports joiners, but long joined RTL runs can exhaust its glyph texture,
+ * so a pane that needs RTL shaping stays on DOM. The buffer is never changed, so selection, copy, search
  * and cursor positions keep working on the logical text. xterm.js also draws
  * a range cell by cell again while the cursor is inside it or a selection
  * only partly covers it, so editing an RTL word shows the logical cells.
@@ -50,4 +50,23 @@ export function findRightToLeftRuns(text: string): [number, number][] {
     }
   }
   return ranges;
+}
+
+/** Keep wide RTL glyphs out of the WebGL atlas, without changing other panes. */
+export function createPaneBidiJoiner(
+  isWebglActive: () => boolean,
+  stayOnDom: () => void,
+): typeof findRightToLeftRuns {
+  let requestedDom = false;
+  return (text) => {
+    const ranges = findRightToLeftRuns(text);
+    if (ranges.length === 0) return ranges;
+
+    if (!requestedDom) {
+      requestedDom = true;
+      // Do not dispose the current renderer from inside its render callback.
+      queueMicrotask(stayOnDom);
+    }
+    return isWebglActive() ? [] : ranges;
+  };
 }
