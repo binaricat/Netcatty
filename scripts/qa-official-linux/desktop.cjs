@@ -177,7 +177,7 @@ async function launch() {
   const inspectPort = await freePort();
   // Build an allowlist environment. No GitHub/Actions tokens, provider credentials,
   // development server, NODE_OPTIONS, preload overrides or no-sandbox escape hatch.
-  const env = { PATH: process.env.PATH, DISPLAY: process.env.DISPLAY, LANG: 'en_US.UTF-8',
+  const env = { PATH: process.env.PATH, DISPLAY: process.env.DISPLAY, XAUTHORITY: process.env.XAUTHORITY, LANG: 'en_US.UTF-8',
     HOME: path.join(root, 'home'), XDG_CONFIG_HOME: path.join(root, 'config'),
     XDG_CACHE_HOME: path.join(root, 'cache'), XDG_DATA_HOME: path.join(root, 'data'),
     XDG_RUNTIME_DIR: path.join(root, 'runtime'), TMPDIR: path.join(root, 'tmp') };
@@ -319,6 +319,7 @@ async function run() {
     if (sensitive) process.exitCode = 1;
     else {
       fs.writeFileSync(path.join(evidence, 'electron-output.log'), output);
+      console.log('Reviewed official Electron stdout/stderr:\n' + output);
       for (const [name, bytes] of screenshots) fs.writeFileSync(path.join(evidence, name), bytes);
     }
     report.coverage = 'Incremental probe: SFTP pause/progress/resume/SHA-256 remains uncovered; green means only explicitly passed assertions';
