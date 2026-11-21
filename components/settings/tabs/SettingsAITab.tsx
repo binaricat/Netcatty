@@ -68,6 +68,7 @@ import {
   areExternalAgentListsEqual,
   buildManagedAgentState,
   getInitialManagedAgentPaths,
+  getUnavailablePreferredHarness,
   updateCodebuddyManagedEnv,
   updateCodebuddyManagedOptions,
 } from "./ai/managedAgentState";
@@ -655,13 +656,22 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     [removeProvider, editingProviderId, removeProviderConfirm],
   );
 
-  // Agent options for default agent
-  const agentOptions = useMemo(() => [
-    { value: "catty", label: t('ai.defaultAgent.catty'), icon: <AgentIconBadge agent={{ id: "catty", type: "builtin" }} size="xs" variant="plain" /> },
-    ...externalAgents
-      .filter((a) => canSendWithAgent(a.id, externalAgents))
-      .map((a) => ({ value: a.id, label: a.name, icon: <AgentIconBadge agent={a} size="xs" variant="plain" /> })),
-  ], [externalAgents, t]);
+  // Agent options for default agent. Include a saved default that is temporarily offline as a disabled option.
+  // This preserves the setting without offering that harness for new selections.
+  const agentOptions = useMemo(() => {
+    const unavailable = getUnavailablePreferredHarness(externalAgents, defaultAgentId);
+    return [
+      { value: "catty", label: t('ai.defaultAgent.catty'), icon: <AgentIconBadge agent={{ id: "catty", type: "builtin" }} size="xs" variant="plain" /> },
+      ...externalAgents
+        .filter((a) => a === unavailable || canSendWithAgent(a.id, externalAgents))
+        .map((a) => ({
+          value: a.id,
+          label: a === unavailable ? `${a.name} (${t('ai.defaultAgent.unavailable')})` : a.name,
+          icon: <AgentIconBadge agent={a} size="xs" variant="plain" />,
+          disabled: a === unavailable ? true : undefined,
+        })),
+    ];
+  }, [externalAgents, defaultAgentId, t]);
 
   useEffect(() => {
     if (!agentOptions.some((option) => option.value === defaultAgentId)) {

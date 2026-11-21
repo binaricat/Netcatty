@@ -333,6 +333,7 @@ export const enAiMessages: Messages = {
   'ai.defaultAgent': 'Default Agent',
   'ai.defaultAgent.description': 'Agent to use when starting a new AI session',
   'ai.defaultAgent.catty': 'Catty (Built-in)',
+  'ai.defaultAgent.unavailable': 'Unavailable',
   'ai.toolAccess.title': 'Tool Access',
   'ai.toolAccess.mode': 'Netcatty Access Mode',
   'ai.toolAccess.description': 'Choose how external agents access Netcatty sessions. MCP exposes the built-in server, while Skills + CLI points agents to the local Netcatty skill and CLI commands.',

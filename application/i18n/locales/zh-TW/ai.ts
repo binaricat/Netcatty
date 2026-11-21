@@ -333,6 +333,7 @@ export const zhTWAiMessages: Messages = {
   'ai.defaultAgent': '預設 Agent',
   'ai.defaultAgent.description': '建立新 AI 工作階段時使用的 Agent',
   'ai.defaultAgent.catty': 'Catty（內建）',
+  'ai.defaultAgent.unavailable': '暫時無法使用',
   'ai.toolAccess.title': '工具介接',
   'ai.toolAccess.mode': 'Netcatty 介接模式',
   'ai.toolAccess.description': '選擇外部 Agent 存取 Netcatty 工作階段的方式。MCP 會公開內建伺服器，Skills + CLI 會引導 Agent 讀取本機 Skill 並呼叫 Netcatty CLI。',

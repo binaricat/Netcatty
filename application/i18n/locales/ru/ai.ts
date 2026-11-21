@@ -273,6 +273,7 @@ export const ruAiMessages: Messages = {
   'ai.defaultAgent': 'Агент по умолчанию',
   'ai.defaultAgent.description': 'Агент, который будет использоваться при запуске новой AI-сессии',
   'ai.defaultAgent.catty': 'Catty (встроенный)',
+  'ai.defaultAgent.unavailable': 'Недоступен',
   'ai.toolAccess.title': 'Доступ к инструментам',
   'ai.toolAccess.mode': 'Режим доступа Netcatty',
   'ai.toolAccess.description': 'Выберите, как внешние агенты получают доступ к сессиям Netcatty. MCP предоставляет встроенный сервер, а Skills + CLI указывает агентам на локальный skill Netcatty и команды CLI.',

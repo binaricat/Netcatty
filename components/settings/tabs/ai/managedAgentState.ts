@@ -1,11 +1,25 @@
 import type { ExternalAgentConfig } from "../../../../infrastructure/ai/types";
 import {
   type ManagedAgentKey,
+  getExternalAgentSdkBackend,
   isPathLikeCommand,
 } from "../../../../infrastructure/ai/managedAgents";
 import type { AgentPathInfo } from "./types";
 import { AGENT_DEFAULTS, isCursorAvailableForMode } from "./types";
 import { buildCodebuddyEnv } from "./codebuddyConfigEnv";
+
+/** A saved, enabled harness can remain preferred while its version probe fails. */
+export function getUnavailablePreferredHarness(
+  agents: ExternalAgentConfig[],
+  defaultAgentId: string,
+): ExternalAgentConfig | undefined {
+  return agents.find((agent) =>
+    agent.id === defaultAgentId &&
+    Object.keys(AGENT_DEFAULTS).some((key) => agent.id === `discovered_${key}`) &&
+    agent.enabled && agent.available === false &&
+    agent.commandSource !== "auto" && isPathLikeCommand(agent.command) &&
+    Boolean(getExternalAgentSdkBackend(agent)));
+}
 
 function getAutoManagedAgentStoredPath(
   agents: ExternalAgentConfig[],
