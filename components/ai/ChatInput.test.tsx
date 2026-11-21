@@ -69,6 +69,12 @@ test('parked composer closes body-portaled menus', () => {
   assert.match(source, /becameParked/);
 });
 
+test('opens the SDK model picker and starts its catalog check without awaiting it', () => {
+  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
+  assert.match(source, /setActiveMenu\('model'\);\s*if \(!hasProviderSwitcher\) onModelPickerOpen\?\.\(\);\s*} else/);
+  assert.match(source, /prev\.onModelPickerOpen === next\.onModelPickerOpen/);
+});
+
 test('first keystrokes stay local so IME and Chromium spellcheck cannot stall the composer', () => {
   const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
   assert.match(source, /spellCheck=\{false\}/);

@@ -31,6 +31,8 @@ const VALID_BACKENDS = new Set(listBackends());
 // (issue #2184).
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MODEL_CACHE_MAX_ENTRIES = 32;
+const MODEL_CATALOG_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const MODEL_CATALOG_RETRY_MS = 15 * 60 * 1000;
 const MODEL_LIST_TIMEOUT_MS = 10000;
 // Per-backend overrides for the catalog budget above. MiMo cold-boots a
 // dedicated `mimo serve` process for every catalog pull (unlike OpenCode's
@@ -39,6 +41,7 @@ const MODEL_LIST_TIMEOUT_MS = 10000;
 const MODEL_LIST_TIMEOUT_OVERRIDES_MS = { mimo: 30_000 };
 const sdkModelCache = new Map();
 const sdkModelInFlight = new Map();
+const sdkModelRefreshFailures = new Map();
 const {
   parseSdkSessionIdentity: parseSdkSessionIdentityPayload,
   normalizeSdkRuntime,
@@ -221,6 +224,10 @@ function remapLastKnownCurrentModelId(lastKnown) {
       && model.thinkingLevels.some((level) => `${model.id}/${level}` === lastKnown.currentModelId)))
     ? lastKnown.currentModelId
     : lastKnown.models[0]?.id ?? null;
+}
+
+function isFreshModelCatalog(catalog) {
+  return Date.now() - Date.parse(catalog.fetchedAt) < MODEL_CATALOG_MAX_AGE_MS;
 }
 
 /**
@@ -1210,19 +1217,22 @@ function registerSdkStreamHandlers(ctx) {
 
         // In-flight entries are live fetches, so forced refreshes can share
         // them without replaying either memory or persisted cache results.
+        const cacheOnly = payload?.cacheOnly === true;
         const existing = sdkModelInFlight.get(cacheKey);
-        if (existing) return await existing;
+        if (existing && !cacheOnly) return await existing;
 
         const lastKnownPath = resolveLastKnownCatalogPath(electronModule);
-        // LKG-first policy: a non-force load never spends the live-fetch budget
-        // while a persisted catalog exists — the picker hydrates instantly from
-        // disk (source 'last-known-good', persisted fetchedAt for the chip) and
-        // the user refreshes manually. Only a cache miss with no persisted
-        // entry (fresh install, new profile fingerprint) goes live
-        // automatically. force skips this branch and always attempts live.
-        if (!force) {
+        // Normal loads reuse a fresh catalog and revalidate stale ones on use.
+        // A failed revalidation is briefly cached to avoid repeat queries when
+        // switching panels; manual refresh bypasses the retry interval.
+        if (!force || cacheOnly) {
+          const failedRefresh = getSdkModelCacheEntry(sdkModelRefreshFailures, cacheKey, {
+            ttlMs: MODEL_CATALOG_RETRY_MS,
+          });
+          if (failedRefresh) return failedRefresh.result;
+
           const lastKnown = readLastKnownCatalogEntry(lastKnownPath, cacheKey);
-          if (lastKnown) {
+          if (lastKnown && (cacheOnly || isFreshModelCatalog(lastKnown))) {
             console.debug(
               `[sdk] list-models(${backendKey}) serving last-known-good catalog from ${lastKnown.fetchedAt} without a live fetch`,
             );
@@ -1235,6 +1245,7 @@ function registerSdkStreamHandlers(ctx) {
             };
           }
         }
+        if (cacheOnly) return { ok: true, currentModelId: null, models: [] };
         const loadPromise = (async () => {
           const abortController = new AbortController();
           try {
@@ -1263,6 +1274,7 @@ function registerSdkStreamHandlers(ctx) {
               abortController,
             );
             const { currentModelId, models } = normalizeSdkListModelsResult(raw);
+            sdkModelRefreshFailures.delete(cacheKey);
             const fetchedAt = new Date().toISOString();
             // Do not cache degraded empty catalogs: listOpenCodeModels and
             // other drivers often return [] on timeout/startup failure, and
@@ -1316,7 +1328,7 @@ function registerSdkStreamHandlers(ctx) {
               console.debug(
                 `[sdk] list-models(${backendKey}) unavailable, serving last-known-good catalog from ${lastKnown.fetchedAt}`,
               );
-              return {
+              const result = {
                 ok: true,
                 currentModelId: remapLastKnownCurrentModelId(lastKnown),
                 models: lastKnown.models,
@@ -1324,6 +1336,12 @@ function registerSdkStreamHandlers(ctx) {
                 source: "last-known-good",
                 fetchedAt: lastKnown.fetchedAt,
               };
+              if (!isFreshModelCatalog(lastKnown)) {
+                setSdkModelCacheEntry(sdkModelRefreshFailures, cacheKey, { at: Date.now(), result }, {
+                  ttlMs: MODEL_CATALOG_RETRY_MS,
+                });
+              }
+              return result;
             }
             console.debug(`[sdk] list-models(${backendKey}) unavailable, using curated presets`);
             return {
