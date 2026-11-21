@@ -44,18 +44,27 @@ jobs:
       - name: Install isolated QA dependencies without lifecycle scripts
         run: npm ci --prefix scripts/qa-official-linux --ignore-scripts --no-audit --no-fund
       - name: Verify official run, artifact ZIP and deb; extract without installer scripts
+        id: provenance
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/qa-official-linux/provenance.cjs
-      - name: Real official Electron with stock sandbox (no fallback)
-        run: |
-          test "$(id -u)" -ne 0
-          xvfb-run -a -s '-screen 0 1440x1000x24 -nolisten tcp' node scripts/qa-official-linux/desktop.cjs
+      - name: Persistence through real official Electron restart
+        id: persistence
+        if: success()
+        run: xvfb-run -a -s '-screen 0 1440x1000x24 -nolisten tcp' node scripts/qa-official-linux/desktop.cjs persistence
+      - name: Real SSH disconnect and original-tab reconnect
+        id: ssh
+        if: always() && steps.provenance.outcome == 'success'
+        run: xvfb-run -a -s '-screen 0 1440x1000x24 -nolisten tcp' node scripts/qa-official-linux/desktop.cjs ssh
+      - name: Independent real SFTP pause, stable bytes, resume and SHA-256
+        id: sftp
+        if: always() && steps.provenance.outcome == 'success'
+        run: xvfb-run -a -s '-screen 0 1440x1000x24 -nolisten tcp' node scripts/qa-official-linux/desktop.cjs sftp
       - name: Record explicit scope
         if: always()
         run: |
           echo 'Official a23868ee88603d0182c5370fca851cb9d05d7f8f / run 44901156879 / artifact 14706239224' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Incremental probe: read assertions.json and real screenshots. SFTP pause/resume is NOT COVERED. Stock sandbox launch failures are failures, never feature passes. This is extracted-package execution, not system-install acceptance.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Read independent persistence, ssh and sftp assertions.json reports and real screenshots; a failure in one scenario does not skip the others. Stock sandbox launch failures are failures, never feature passes. This is extracted-package execution, not system-install acceptance.' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload reviewed QA evidence (3 days)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
