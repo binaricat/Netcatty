@@ -23,10 +23,19 @@ jobs:
       github.event.pull_request.head.repo.full_name == 'binaricat/Netcatty' &&
       github.event.pull_request.head.ref == 'qa/official-linux-a23868e' &&
       github.event.pull_request.draft == true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - candidate: a23868e
+            config: candidate.json
+          - candidate: 9d4e90b
+            config: candidate-9d4e90b.json
     runs-on: ubuntu-22.04
     timeout-minutes: 12
     env:
-      QA_ROOT: /tmp/netcatty-official-qa
+      QA_ROOT: /tmp/netcatty-official-qa-${{ matrix.candidate }}
+      QA_CANDIDATE: ${{ matrix.config }}
     steps:
       - name: Checkout QA harness without persisted credentials
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -60,16 +69,19 @@ jobs:
         id: sftp
         if: always() && steps.provenance.outcome == 'success'
         run: xvfb-run -a -s '-screen 0 1440x1000x24 -nolisten tcp' node scripts/qa-official-linux/desktop.cjs sftp
+      - name: Independent new host filter compatibility and boundary checks
+        if: always() && steps.provenance.outcome == 'success' && matrix.candidate == '9d4e90b'
+        run: xvfb-run -a -s '-screen 0 1440x1000x24 -nolisten tcp' node scripts/qa-official-linux/desktop.cjs host-filter
       - name: Record explicit scope
         if: always()
         run: |
-          echo 'Official a23868ee88603d0182c5370fca851cb9d05d7f8f / run 44901156879 / artifact 14706239224' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Candidate ${{ matrix.candidate }}; exact official SHA/run/artifact/digests are recorded in provenance.json' >> "$GITHUB_STEP_SUMMARY"
           echo 'Read independent persistence, ssh and sftp assertions.json reports and real screenshots; a failure in one scenario does not skip the others. Stock sandbox launch failures are failures, never feature passes. This is extracted-package execution, not system-install acceptance.' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload reviewed QA evidence (3 days)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: official-linux-a23868e-probe-${{ github.run_id }}
-          path: /tmp/netcatty-official-qa/evidence/
+          name: official-linux-${{ matrix.candidate }}-qa-${{ github.run_id }}
+          path: /tmp/netcatty-official-qa-${{ matrix.candidate }}/evidence/
           retention-days: 3
           if-no-files-found: warn

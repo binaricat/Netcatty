@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { execFileSync } = require('node:child_process');
-const pinned = require('./candidate.json');
+const pinned = require(path.resolve(__dirname, process.env.QA_CANDIDATE || 'candidate.json'));
 async function main() {
   assert(process.env.GH_TOKEN, 'Downloader needs actions:read token');
   const root = path.resolve(process.env.QA_ROOT);

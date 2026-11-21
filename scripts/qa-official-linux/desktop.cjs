@@ -258,19 +258,21 @@ async function capture(name) {
   screenshots.set(name, bytes);
 }
 async function assertEcho(expected) {
-  // xterm renders to canvas. Read its actual selection through the production
-  // Select All / Copy menu and native clipboard, not document.body.innerText.
-  async function menu(label) {
-    await clickElement(cdp, '.xterm', 0, 'right');
-    const point = await until(`terminal menu ${label}`, () => cdp.eval(`(() => { const e = [...document.querySelectorAll('[role="menuitem"]')].find(e => e.textContent.trim().startsWith(${JSON.stringify(label)})); if (!e) return null; const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`));
-    await clickPoint(cdp, point);
+  const sessionId = await cdp.eval(`document.querySelector('[data-tab-type="session"]').getAttribute('data-tab-id')`);
+  const params = {sessionId, scopedSessionIds: [sessionId], range: 'tail', maxLines: 80};
+  await until('server echo in production xterm reader', async () => {
+    const result = await mainCdp.eval(`process.mainModule.require(process.mainModule.require('electron').app.getAppPath() + '/electron/bridges/mcpServerBridge.cjs').dispatchBuiltinRpc('netcatty/readContext', ${JSON.stringify(params)})`);
+    report.terminalRead = result;
+    return result.ok === true && result.content.includes(expected);
+  }, 10000);
+}
+function disconnectFixtureClients() {
+  for (const client of fixture?.clients || []) {
+    // ssh2 Server.Connection exposes end(), not Client.destroy(). A socket
+    // destruction here is an actual transport loss, not a renderer status edit.
+    client._sock?.destroy();
+    client.end();
   }
-  await pause(500);
-  await menu('Select All');
-  await menu('Copy');
-  const text = await mainCdp.eval(`process.mainModule.require('electron').clipboard.readText()`);
-  assert(text.includes(expected), 'Expected server echo absent from real xterm buffer');
-  await key(mainCdp, 'Escape'); await key(mainCdp, 'Escape', 'keyUp');
 }
 async function quit() {
   if (mainCdp) await mainCdp.eval(`process.mainModule.require('electron').app.quit()`).catch(() => {});
@@ -283,6 +285,7 @@ async function quit() {
 async function verifySftp() {
   report.sftpPauseResume = 'incomplete';
   const sessionId = await cdp.eval(`document.querySelector('[data-tab-type="session"]').getAttribute('data-tab-id')`);
+  report.stage = 'SFTP open on existing production SSH session';
   const sftpId = await cdp.eval(`window.netcatty.openSftpForSession(${JSON.stringify(sessionId)}, {reuseExactSessionOnly: true})`);
   assert(sftpId, 'Real packaged app must open SFTP on the SSH transport');
   const transferId = `qa-${crypto.randomUUID()}`;
@@ -291,10 +294,12 @@ async function verifySftp() {
   const options = { transferId, sourcePath: '/qa-payload.bin', targetPath, sourceType: 'sftp', targetType: 'local', sourceSftpId: sftpId, totalBytes: fixture.payload.length, resumable: true };
   await cdp.eval(`(() => { window.__qaTransfer = {events: [], done: false}; window.netcatty.onGlobalSftpTransferEvent(e => { if (e.transferId === ${JSON.stringify(transferId)}) window.__qaTransfer.events.push(e); }); window.netcatty.startStreamTransfer(${JSON.stringify(options)}).then(result => { window.__qaTransfer.result = result; window.__qaTransfer.done = true; }, error => { window.__qaTransfer.error = String(error); window.__qaTransfer.done = true; }); return true; })()`);
   const progress = () => cdp.eval(`Math.max(0, ...window.__qaTransfer.events.map(e => e.transferred || 0))`);
+  report.stage = 'SFTP bytes and native progress';
   await until('real SFTP bytes and native progress', async () => fixture.sftpStats.bytesSent > 262144 && await progress() > 131072, 30000);
   await clickElement(cdp, 'button[aria-label="File Transfers"]');
   await pause(200);
   await capture('03-sftp-transferring.png');
+  report.stage = 'SFTP pause';
   const paused = await cdp.eval(`window.netcatty.pauseTransfer(${JSON.stringify(transferId)})`);
   assert.equal(paused.success, true, paused.reason);
   await until('native paused lifecycle event', () => cdp.eval(`window.__qaTransfer.events.some(e => e.type === 'paused')`));
@@ -308,6 +313,7 @@ async function verifySftp() {
   assert(samples.every(s => s.serverBytes === samples[0].serverBytes), 'Actual SFTP server bytes changed while paused');
   assert(samples.every(s => s.progressBytes === samples[0].progressBytes), 'Native progress changed while paused');
   await capture('04-sftp-paused.png');
+  report.stage = 'SFTP resume';
   const resumed = await cdp.eval(`window.netcatty.resumeTransfer(${JSON.stringify(transferId)})`);
   assert.equal(resumed.success, true, resumed.reason);
   await until('server and progress resume', async () => fixture.sftpStats.bytesSent > samples[0].serverBytes && await progress() > samples[0].progressBytes, 15000);
@@ -322,12 +328,51 @@ async function verifySftp() {
   report.sftp = { invocation: 'production preload API -> packaged native transfer runtime, actual loopback SSH2 SFTP; no substituted bridge', transferId, bytes: fixture.payload.length, paused, resumed, pauseSamples: samples, finalServer: fixture.sftpStats, expectedSha256, actualSha256, events: await cdp.eval(`window.__qaTransfer.events`) };
   await capture('06-sftp-completed.png');
 }
+async function verifyHostFilters() {
+  report.hostFilters = {status: 'incomplete', cases: []};
+  const hosts = [
+    {id: 'web', label: 'QA WEB', hostname: '127.0.0.1', username: 'deploy', group: 'prod/web', tags: ['Nginx'], os: 'linux'},
+    {id: 'db', label: 'QA DB', hostname: '127.0.0.2', username: 'root', group: 'prod/db', tags: ['postgres'], os: 'linux'},
+    {id: 'old', label: 'QA OLD', hostname: '127.0.0.3', username: 'root', group: 'production-old', tags: [], os: 'linux'},
+    {id: 'prod-root', label: 'QA PROD ROOT', hostname: '127.0.0.4', username: 'ops', group: 'prod', tags: [], os: 'linux'},
+    {id: 'ungrouped', label: 'QA UNGROUPED', hostname: '127.0.0.5', username: 'ops', tags: [], os: 'linux'},
+  ];
+  await cdp.eval(`localStorage.setItem('netcatty_hosts_v1', ${JSON.stringify(JSON.stringify(hosts))})`);
+  await cdp.send('Page.reload');
+  await until('synthetic filter host vault loaded', () => cdp.eval(`document.body.innerText.includes('QA UNGROUPED')`));
+  await capture('02-host-filter-vault.png');
+  const all = hosts.map(h => h.id).sort();
+  const cases = [
+    [{}, all],
+    [{query: '  ', group: ''}, all],
+    [{query: 123, group: null}, all],
+    [{query: 'WEB nginx'}, ['web']],
+    [{query: 'root DB'}, ['db']],
+    [{query: 'production'}, []],
+    [{group: 'prod'}, ['db', 'prod-root', 'web']],
+    [{group: 'prod/web'}, ['web']],
+    [{group: ' prod/ '}, ['db', 'prod-root', 'web']],
+    [{group: 'PROD'}, []],
+    [{group: 'prod', query: 'postgres'}, ['db']],
+  ];
+  for (const [params, expected] of cases) {
+    const result = await mainCdp.eval(`process.mainModule.require(process.mainModule.require('electron').app.getAppPath() + '/electron/bridges/mcpServerBridge.cjs').dispatchBuiltinRpc('public/vault/hosts/list', ${JSON.stringify(params)})`);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const ids = result.hosts.map(h => h.id).sort();
+    report.hostFilters.cases.push({params, ids, expected});
+    assert.deepEqual(ids, expected);
+    assert(result.hosts.every(h => !('password' in h) && !('privateKey' in h)));
+  }
+  report.hostFilters.status = 'pass';
+  report.hostFilters.path = 'real packaged public/vault/hosts/list dispatcher -> production renderer vault bridge';
+  await capture('03-host-filter-cases-completed.png');
+}
 async function run() {
   assert.notEqual(process.getuid(), 0, 'QA must run as a non-root user');
   assert(fs.existsSync(executable), `Official executable missing: ${executable}`);
   fs.mkdirSync(evidence, { recursive: true });
   assert(!fs.existsSync(profile), 'QA profile must start clean');
-  watchdog = setTimeout(() => { child?.kill('SIGKILL'); process.exit(1); }, 180000);
+  watchdog = setTimeout(() => { fs.writeFileSync(path.join(evidence, 'watchdog.json'), JSON.stringify({candidate: pinned.sha, scenario, failure: 'Scenario exceeded 180 seconds', stage: report.stage || 'desktop'})); child?.kill('SIGKILL'); process.exit(1); }, 180000);
   try {
     await launch();
     await capture('01-official-launch.png');
@@ -376,7 +421,7 @@ async function run() {
     const originalTabs = await cdp.eval(`[...document.querySelectorAll('[data-tab-type="session"]')].map(e => e.getAttribute('data-tab-id'))`);
     assert.equal(originalTabs.length, 1);
     assert(originalTabs[0], 'Stable original tab ID required');
-    for (const client of fixture.clients) client.destroy();
+    disconnectFixtureClients();
     await until('disconnect overlay', () => cdp.eval(`Boolean(document.querySelector('[data-terminal-disconnected-dialog="true"]'))`));
     await capture('04-real-ssh-disconnected.png');
     await key(mainCdp, 'Enter'); await key(mainCdp, 'Enter', 'keyUp');
@@ -398,7 +443,7 @@ async function run() {
   } finally {
     await quit();
     if (fixture) {
-      for (const client of fixture.clients) client.destroy();
+      disconnectFixtureClients();
       await new Promise(resolve => fixture.server.close(resolve));
     }
     clearTimeout(watchdog);
@@ -415,7 +460,7 @@ async function run() {
     report.coverage = 'Independent scenario: only this report and candidate SHA count; other scenario reports must be evaluated separately';
     fs.writeFileSync(path.join(evidence, 'assertions.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));
-    fs.rmSync(profile, { recursive: true, force: true });
+    try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (error) { console.warn('Isolated profile cleanup warning: ' + error.code); }
   }
 }
 run().catch(error => { console.error(error.message); process.exitCode = 1; });
