@@ -203,7 +203,7 @@ async function launch() {
   const inspector = await until('official Electron main inspector', async () => (await (await fetch(`http://127.0.0.1:${inspectPort}/json/list`)).json())[0]);
   mainCdp = new Devtools(inspector.webSocketDebuggerUrl);
   await mainCdp.connect();
-  const runtime = await mainCdp.eval(`(() => { const { app, BrowserWindow } = process.mainModule.require('electron'); const win = BrowserWindow.getAllWindows().find(w => /index\\.html/.test(w.webContents.getURL())); win.focus(); return { packaged: app.isPackaged, appPath: app.getAppPath(), profile: app.getPath('userData'), argv: process.argv, uid: process.getuid(), electron: process.versions.electron, rendererPreferences: { sandbox: win.webContents.getLastWebPreferences().sandbox, contextIsolation: win.webContents.getLastWebPreferences().contextIsolation, nodeIntegration: win.webContents.getLastWebPreferences().nodeIntegration } }; })()`);
+  const runtime = await mainCdp.eval(`(() => { const { app, BrowserWindow } = process.mainModule.require('electron'); const win = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html')); win.focus(); return { packaged: app.isPackaged, appPath: app.getAppPath(), profile: app.getPath('userData'), argv: process.argv, uid: process.getuid(), electron: process.versions.electron, rendererPreferences: { sandbox: win.webContents.getLastWebPreferences().sandbox, contextIsolation: win.webContents.getLastWebPreferences().contextIsolation, nodeIntegration: win.webContents.getLastWebPreferences().nodeIntegration } }; })()`);
   assert.equal(runtime.packaged, true);
   assert(runtime.appPath.endsWith('/resources/app.asar'));
   assert.equal(runtime.profile, profile);
