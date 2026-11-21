@@ -196,6 +196,16 @@ export type FeatureId = string;
 
 export type FilesystemDirectoryEnumerationFeature = "filesystem.directory-enumeration";
 
+export type HostByteStreamConnectRequest = {
+  target: VaultHostRef;
+  expectedRevision: string;
+  endpoint: ByteStreamEndpoint;
+};
+
+export type HostByteStreamFeature = "network.host-byte-streams";
+
+export type HostByteStreamLimits = {"connectionsPerRuntime":4,"connectionsTotal":64,"chunkBytes":65536,"bufferBytes":65536,"connectionBytes":67108864,"connectMs":120000,"idleMs":300000,"lifetimeMs":1800000};
+
 export type HostClipboardReadRequest = {
   kind: "clipboard.read";
   title: string;
@@ -306,7 +316,7 @@ export type HostInteractionResult = ({
 }) | ({
   cancelled: false;
   value: (string) | (true) | (SharedTerminalSelection);
-}) | (VaultHostSelectedResult) | (VaultHostActionAccepted);
+}) | (VaultHostSelectedResult) | (VaultHostActionAccepted) | (ByteStreamConnectionDescriptor);
 
 export type HostQuickPickItem = {
   id: string;
@@ -532,7 +542,7 @@ export type MenuLocation = "commandPalette" | "application" | "host/context" | "
 
 export type NetworkCredentialLeaseFeature = "network.credential-lease";
 
-export type NonResourceScopedPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "secrets" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose";
+export type NonResourceScopedPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "secrets" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose" | "network.hostStream";
 
 export type NullableRpcId = (RpcId) | (null);
 
@@ -1132,7 +1142,7 @@ export type PluginNetworkResponse = {
   };
 };
 
-export type PluginPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "network" | "network.stream" | "filesystem.read" | "filesystem.write" | "secrets" | "companion.execute" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose";
+export type PluginPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "network" | "network.stream" | "filesystem.read" | "filesystem.write" | "secrets" | "companion.execute" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose" | "network.hostStream";
 
 export type PluginSelectedContextContent = {
   handle: string;
@@ -1745,6 +1755,11 @@ export type VaultHostActionRequest = ({
   kind: "vault.requestConnect";
   target: VaultHostRef;
   expectedRevision: string;
+}) | ({
+  target: VaultHostRef;
+  expectedRevision: string;
+  endpoint: ByteStreamEndpoint;
+  kind: "network.stream.connectViaHost";
 });
 
 export type VaultHostActionResult = ({

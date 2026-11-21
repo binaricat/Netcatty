@@ -9,8 +9,9 @@ import {
   toPendingPortForwardHostKeyVerification,
 } from "./hostKeyVerification.ts";
 
-test("isPortForwardHostKeySessionId only accepts port-forward tunnel sessions", () => {
+test("isPortForwardHostKeySessionId accepts port-forward and plugin host-stream sessions", () => {
   assert.equal(isPortForwardHostKeySessionId("pf-rule-1-123456"), true);
+  assert.equal(isPortForwardHostKeySessionId("plugin-stream-550e8400-e29b-41d4-a716-446655440000"), true);
   assert.equal(isPortForwardHostKeySessionId("session-1"), false);
   assert.equal(isPortForwardHostKeySessionId(undefined), false);
 });

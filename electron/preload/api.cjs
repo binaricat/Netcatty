@@ -143,6 +143,7 @@ function createPreloadApi(ctx) {
     return () => ipcRenderer.removeListener("netcatty:plugins:ai-host-request", listener);
   },
   setPluginInteractionReady: (ready) => ipcRenderer.invoke("netcatty:plugins:interaction-ready", { ready }),
+  openPluginHostStream: (payload) => ipcRenderer.invoke("netcatty:plugins:host-stream-open", payload),
   respondPluginInteraction: (response) => ipcRenderer.invoke("netcatty:plugins:interaction-response", response),
   onPluginInteraction: (callback) => {
     const listener = (_event, payload) => callback(payload);
