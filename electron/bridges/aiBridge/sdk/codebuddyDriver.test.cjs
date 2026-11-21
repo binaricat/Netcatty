@@ -59,40 +59,28 @@ test("buildCodebuddyQueryOptions wires SDK options in isolated mode", () => {
   assert.equal(opts.pathToCodebuddyCode, "/opt/codebuddy/bin/codebuddy");
   assert.equal(opts.abortController, ac);
   assert.equal(opts.resume, "sess-1");
-  assert.ok(!("tools" in opts));
+  assert.deepEqual(opts.tools, []);
   // allowedTools:[] would prevent injected Netcatty MCP tools from running.
   assert.ok(!("allowedTools" in opts));
-  assert.ok(opts.disallowedTools.includes("Bash"));
+  assert.equal(opts.strictMcpConfig, true);
+  assert.equal(opts.mcpServers["netcatty-remote-hosts"].defer_loading, false);
   assert.ok(opts.disallowedTools.includes("AskUserQuestion"));
   assert.equal(opts.mcpServers["netcatty-remote-hosts"].type, "stdio");
   assert.deepEqual(opts.mcpServers["netcatty-remote-hosts"].env, { NETCATTY_MCP_PORT: "1" });
 });
 
-test("mcp and default mode block built-ins while preserving injected MCP servers", () => {
+test("mcp and default mode allow only the app-managed MCP configuration", () => {
   for (const toolIntegrationMode of ["mcp", undefined]) {
     const opts = buildCodebuddyQueryOptions({
       toolIntegrationMode,
       injectedMcpServers: [{ name: "netcatty", command: "/abs/electron" }],
     });
-    assert.ok(!("tools" in opts));
+    assert.deepEqual(opts.tools, []);
     assert.ok(!("allowedTools" in opts));
-    assert.equal(opts.permissionMode, "bypassPermissions");
-    for (const name of ["Bash", "PowerShell", "Read", "Edit", "Write", "Agent", "Skill", "AskUserQuestion"]) {
-      assert.ok(opts.disallowedTools.includes(name), `${name} must stay disabled`);
-    }
+    assert.deepEqual(opts.settingSources, []);
+    assert.equal(opts.strictMcpConfig, true);
     assert.equal(opts.mcpServers.netcatty.command, "/abs/electron");
-  }
-});
-
-test("mcp mode omits --tools under the SDK serialization rule", () => {
-  for (const toolIntegrationMode of ["mcp", undefined]) {
-    const opts = buildCodebuddyQueryOptions({ toolIntegrationMode });
-    const args = [];
-    // @tencent-ai/agent-sdk lib/transport/process-transport.js
-    if (opts.tools !== undefined) {
-      args.push("--tools", opts.tools.join(","));
-    }
-    assert.deepEqual(args, []);
+    assert.equal(opts.mcpServers.netcatty.defer_loading, false);
   }
 });
 
