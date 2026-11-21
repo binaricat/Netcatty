@@ -68,6 +68,90 @@ async function renderManager(dom: ReturnType<typeof installDomEnvironment>, prop
 const rows = (renderer: { container: HTMLElement }) =>
   Array.from(renderer.container.querySelectorAll<HTMLElement>('[data-session-id]'));
 
+function installRadixGlobals(dom: ReturnType<typeof installDomEnvironment>) {
+  const globalAsRecord = globalThis as Record<string, unknown>;
+  const saved = new Map<string, { existed: boolean; value: unknown }>();
+  const setGlobal = (key: string, value: unknown) => {
+    saved.set(key, { existed: Object.prototype.hasOwnProperty.call(globalAsRecord, key), value: globalAsRecord[key] });
+    globalAsRecord[key] = value;
+  };
+
+  for (const key of [
+    "MutationObserver",
+    "NodeFilter",
+    "Element",
+    "HTMLElement",
+    "HTMLInputElement",
+    "HTMLTextAreaElement",
+    "HTMLButtonElement",
+    "HTMLAnchorElement",
+    "HTMLSelectElement",
+    "DocumentFragment",
+    "Text",
+    "CharacterData",
+    "ShadowRoot",
+    "SVGElement",
+    "DOMRect",
+  ] as const) {
+    const winValue = (dom.window as unknown as Record<string, unknown>)[key];
+    if (globalAsRecord[key] == null && winValue != null) {
+      setGlobal(key, winValue);
+    }
+  }
+  if (globalAsRecord.ResizeObserver == null) {
+    setGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+  }
+  if (globalAsRecord.PointerEvent == null) {
+    setGlobal("PointerEvent", dom.window.MouseEvent);
+  }
+  const proto = dom.window.HTMLElement.prototype as unknown as Record<string, unknown>;
+  if (typeof proto.hasPointerCapture !== "function") proto.hasPointerCapture = () => false;
+  if (typeof proto.releasePointerCapture !== "function") proto.releasePointerCapture = () => {};
+  if (typeof proto.setPointerCapture !== "function") proto.setPointerCapture = () => {};
+  if (typeof proto.scrollIntoView !== "function") proto.scrollIntoView = () => {};
+
+  return () => {
+    for (const [key, entry] of saved) {
+      if (entry.existed) {
+        globalAsRecord[key] = entry.value;
+      } else {
+        delete globalAsRecord[key];
+      }
+    }
+  };
+}
+
+async function openSelectOptions(
+  dom: ReturnType<typeof installDomEnvironment>,
+  trigger: HTMLElement,
+): Promise<HTMLElement[]> {
+  await dispatchDomEvent(trigger, new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  return Array.from(dom.document.body.querySelectorAll<HTMLElement>('[role="option"]'));
+}
+
+async function pickSelectOptionByText(
+  dom: ReturnType<typeof installDomEnvironment>,
+  trigger: HTMLElement,
+  match: string | RegExp,
+) {
+  const options = await openSelectOptions(dom, trigger);
+  const option = options.find((el) => {
+    const text = el.textContent ?? "";
+    return typeof match === "string" ? text.trim() === match : match.test(text);
+  });
+  assert.ok(
+    option,
+    `select option ${String(match)} missing; saw: ${options.map((el) => el.textContent).join(", ")}`,
+  );
+  await dispatchDomEvent(option, new dom.window.MouseEvent("click", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+}
+
 async function clickButtonInRow(
   dom: ReturnType<typeof installDomEnvironment>,
   renderer: { container: HTMLElement },
@@ -130,6 +214,11 @@ test("open is enabled only for current-scope chats; export works for all", async
     );
     assert.ok(openOther, "other-scope row renders the disabled open affordance");
     assert.equal(openOther.disabled, true, "cross-scope activation is not faked");
+    assert.equal(
+      openOther.parentElement?.tagName,
+      "SPAN",
+      "disabled open button is wrapped in a span so Tooltip hover events still fire",
+    );
 
     await clickButtonInRow(dom, renderer, "other", t("ai.chat.managerExportOne"));
     assert.deepEqual(exported, ["other"]);
@@ -164,6 +253,7 @@ test("search narrows by title substring (case-insensitive)", async () => {
 
 test("rebind: dangling chat to current panel scope", async () => {
   const dom = installDomEnvironment();
+  const restoreGlobals = installRadixGlobals(dom);
   try {
     const props = baseProps();
     props.sessions = [
@@ -174,13 +264,11 @@ test("rebind: dangling chat to current panel scope", async () => {
     const renderer = await renderManager(dom, props);
 
     await clickButtonInRow(dom, renderer, "gone", t("ai.chat.managerRebind"));
-    const picker = renderer.container.querySelector<HTMLSelectElement>(
-      '[data-section="ai-manager-rebind-picker"] select',
+    const trigger = renderer.container.querySelector<HTMLElement>(
+      '[data-section="ai-manager-rebind-picker"] [role="combobox"]',
     );
-    assert.ok(picker, "picker opens");
-    const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value")!.set!;
-    setValue.call(picker, "here");
-    await dispatchDomEvent(picker, new dom.window.Event("change", { bubbles: true }));
+    assert.ok(trigger, "picker opens");
+    await pickSelectOptionByText(dom, trigger, t("ai.chat.managerRebindHere"));
 
     assert.deepEqual(rebinds, [{ sessionId: "gone", type: "terminal", targetId: "t-1" }]);
     assert.equal(
@@ -189,12 +277,14 @@ test("rebind: dangling chat to current panel scope", async () => {
       "picker closes after choosing",
     );
   } finally {
+    restoreGlobals();
     dom.cleanup();
   }
 });
 
 test("rebind: cross-workspace target picker rewrites scope to the picked target", async () => {
   const dom = installDomEnvironment();
+  const restoreGlobals = installRadixGlobals(dom);
   try {
     const props = baseProps();
     props.sessions = [
@@ -205,25 +295,28 @@ test("rebind: cross-workspace target picker rewrites scope to the picked target"
     const renderer = await renderManager(dom, props);
 
     await clickButtonInRow(dom, renderer, "term", t("ai.chat.managerRebind"));
-    const picker = renderer.container.querySelector<HTMLSelectElement>(
-      '[data-section="ai-manager-rebind-picker"] select',
+    const trigger = renderer.container.querySelector<HTMLElement>(
+      '[data-section="ai-manager-rebind-picker"] [role="combobox"]',
     );
-    assert.ok(picker);
-    const options = Array.from(picker.options).map((option) => option.textContent);
-    assert.ok(options.some((text) => text!.includes("Prod")), "workspace targets are listed");
-    assert.ok(options.some((text) => text!.includes("core")), "other-tab terminal targets are listed");
-    const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value")!.set!;
-    setValue.call(picker, "workspace:w-1");
-    await dispatchDomEvent(picker, new dom.window.Event("change", { bubbles: true }));
+    assert.ok(trigger);
+    const options = await openSelectOptions(dom, trigger);
+    const optionTexts = options.map((option) => option.textContent ?? "");
+    assert.ok(optionTexts.some((text) => text.includes("Prod")), "workspace targets are listed");
+    assert.ok(optionTexts.some((text) => text.includes("core")), "other-tab terminal targets are listed");
+    const prodOption = options.find((option) => (option.textContent ?? "").includes("Prod"))!;
+    await dispatchDomEvent(prodOption, new dom.window.MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     assert.deepEqual(rebinds, [{ sessionId: "term", type: "workspace", targetId: "w-1" }]);
   } finally {
+    restoreGlobals();
     dom.cleanup();
   }
 });
 
 test("rebind: 'This panel' preserves the panel scope host ids", async () => {
   const dom = installDomEnvironment();
+  const restoreGlobals = installRadixGlobals(dom);
   try {
     const props = baseProps();
     props.currentScopeHostIds = ["h-1"];
@@ -235,22 +328,22 @@ test("rebind: 'This panel' preserves the panel scope host ids", async () => {
     const renderer = await renderManager(dom, props);
 
     await clickButtonInRow(dom, renderer, "gone", t("ai.chat.managerRebind"));
-    const picker = renderer.container.querySelector<HTMLSelectElement>(
-      '[data-section="ai-manager-rebind-picker"] select',
+    const trigger = renderer.container.querySelector<HTMLElement>(
+      '[data-section="ai-manager-rebind-picker"] [role="combobox"]',
     );
-    assert.ok(picker);
-    const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value")!.set!;
-    setValue.call(picker, "here");
-    await dispatchDomEvent(picker, new dom.window.Event("change", { bubbles: true }));
+    assert.ok(trigger);
+    await pickSelectOptionByText(dom, trigger, t("ai.chat.managerRebindHere"));
 
     assert.deepEqual(rebinds, [{ sessionId: "gone", hostIds: ["h-1"] }], "destination host association survives the scope rewrite");
   } finally {
+    restoreGlobals();
     dom.cleanup();
   }
 });
 
 test("rebind: explicit target host ids pass through to onRebind", async () => {
   const dom = installDomEnvironment();
+  const restoreGlobals = installRadixGlobals(dom);
   try {
     const props = baseProps();
     props.rebindTargets = [
@@ -264,22 +357,22 @@ test("rebind: explicit target host ids pass through to onRebind", async () => {
     const renderer = await renderManager(dom, props);
 
     await clickButtonInRow(dom, renderer, "term", t("ai.chat.managerRebind"));
-    const picker = renderer.container.querySelector<HTMLSelectElement>(
-      '[data-section="ai-manager-rebind-picker"] select',
+    const trigger = renderer.container.querySelector<HTMLElement>(
+      '[data-section="ai-manager-rebind-picker"] [role="combobox"]',
     );
-    assert.ok(picker);
-    const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value")!.set!;
-    setValue.call(picker, "terminal:t-2");
-    await dispatchDomEvent(picker, new dom.window.Event("change", { bubbles: true }));
+    assert.ok(trigger);
+    await pickSelectOptionByText(dom, trigger, /core/);
 
     assert.deepEqual(rebinds, [{ sessionId: "term", hostIds: ["h-2"] }]);
   } finally {
+    restoreGlobals();
     dom.cleanup();
   }
 });
 
 test("agent filter resets when its agent loses the last chat; 'all' option clears manually", async () => {
   const dom = installDomEnvironment();
+  const restoreGlobals = installRadixGlobals(dom);
   try {
     const { GlobalAIChatSessionManager } = await import("./GlobalAIChatSessionManager.tsx");
     const { I18nProvider } = await import("../../application/i18n/I18nProvider.tsx");
@@ -298,19 +391,12 @@ test("agent filter resets when its agent loses the last chat; 'all' option clear
       </I18nProvider>,
     );
 
-    const filterSelect = () => renderer.container.querySelector<HTMLSelectElement>(
-      `select[aria-label="${t("ai.chat.managerFilterAllAgents")}"]`,
+    const filterTrigger = () => renderer.container.querySelector<HTMLElement>(
+      `[role="combobox"][aria-label="${t("ai.chat.managerFilterAllAgents")}"]`,
     );
-    assert.ok(filterSelect(), "agent filter renders with more than one agent");
-    const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value")!.set!;
-    setValue.call(filterSelect(), "codex");
-    await dispatchDomEvent(filterSelect(), new dom.window.Event("change", { bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(filterTrigger(), "agent filter renders with more than one agent");
+    await pickSelectOptionByText(dom, filterTrigger()!, "Codex");
     assert.deepEqual(rows(renderer).map((row) => row.dataset.sessionId), ["codex-1"]);
-    assert.ok(
-      Array.from(filterSelect()!.options).some((option) => option.value === "all"),
-      "manual clear affordance: the 'all' option is selectable",
-    );
 
     // Deleting the last chat of the filtered agent: the parent drops it and
     // re-renders with the updated store (a second agent keeps the filter UI
@@ -328,7 +414,10 @@ test("agent filter resets when its agent loses the last chat; 'all' option clear
     );
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    assert.equal(filterSelect()!.value, "all", "stale agent filter resets to 'all'");
+    assert.ok(
+      (filterTrigger()!.textContent ?? "").includes(t("ai.chat.managerFilterAllAgents")),
+      "stale agent filter resets to 'all'",
+    );
     assert.deepEqual(
       rows(renderer).map((row) => row.dataset.sessionId),
       ["catty-1", "gemini-1"],
@@ -336,48 +425,23 @@ test("agent filter resets when its agent loses the last chat; 'all' option clear
     );
 
     // Manual clear: pick a present agent, then choose 'all' to clear.
-    setValue.call(filterSelect(), "catty");
-    await dispatchDomEvent(filterSelect(), new dom.window.Event("change", { bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await pickSelectOptionByText(dom, filterTrigger()!, /Catty/);
     assert.deepEqual(rows(renderer).map((row) => row.dataset.sessionId), ["catty-1"]);
-    setValue.call(filterSelect(), "all");
-    await dispatchDomEvent(filterSelect(), new dom.window.Event("change", { bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await pickSelectOptionByText(dom, filterTrigger()!, t("ai.chat.managerFilterAllAgents"));
     assert.deepEqual(
       rows(renderer).map((row) => row.dataset.sessionId),
       ["catty-1", "gemini-1"],
       "'all' clears the filter",
     );
   } finally {
+    restoreGlobals();
     dom.cleanup();
   }
 });
 
 test("delete is confirm-gated: cancel keeps the row, confirm removes it", async () => {
   const dom = installDomEnvironment();
-  // Radix Dialog's FocusScope/DismissableLayer need DOM globals that jsdom's
-  // window provides but installDomEnvironment does not copy onto Node globals.
-  const globalAsRecord = globalThis as Record<string, unknown>;
-  for (const key of [
-    "MutationObserver",
-    "NodeFilter",
-    "Element",
-    "HTMLElement",
-    "HTMLInputElement",
-    "HTMLTextAreaElement",
-    "HTMLButtonElement",
-    "HTMLAnchorElement",
-    "HTMLSelectElement",
-    "DocumentFragment",
-    "Text",
-    "CharacterData",
-    "ShadowRoot",
-    "SVGElement",
-  ] as const) {
-    if (globalAsRecord[key] == null) {
-      globalAsRecord[key] = (dom.window as unknown as Record<string, unknown>)[key];
-    }
-  }
+  const restoreGlobals = installRadixGlobals(dom);
   try {
     const props = baseProps();
     props.sessions = [
@@ -396,6 +460,7 @@ test("delete is confirm-gated: cancel keeps the row, confirm removes it", async 
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.deepEqual(deleted, ["victim"]);
   } finally {
+    restoreGlobals();
     dom.cleanup();
   }
 });

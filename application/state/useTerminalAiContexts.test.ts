@@ -74,4 +74,14 @@ test("AIChatPanelsHost receives store-derived terminal infos instead of deriving
     "utf8",
   );
   assert.match(bridgeSource, /appTerminalInfos/);
+
+  const contextsHookSource = readFileSync(
+    new URL("./useTerminalAiContexts.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    contextsHookSource,
+    /retainStableAiTerminalSessionInfos/,
+    "appTerminalInfos must retain array identity across structurally identical terminal updates",
+  );
 });

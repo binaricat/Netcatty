@@ -1,7 +1,10 @@
 import type React from 'react';
 import { useCallback, useMemo, useRef } from 'react';
 
-import { retainStableAiPanelContexts } from '../../domain/aiPanelContextsEqual';
+import {
+  retainStableAiPanelContexts,
+  retainStableAiTerminalSessionInfos,
+} from '../../domain/aiPanelContextsEqual';
 import {
   buildAITerminalSessionInfo,
   type AIPanelContext,
@@ -126,9 +129,13 @@ export function useTerminalAiContexts({
     return retained;
   }, [sessions, workspaces, mountedAiTabIds, sessionHostsMap, hosts, portForwardingRules]);
 
+  const previousAppTerminalInfosRef = useRef<AITerminalSessionInfo[] | null>(null);
   const appTerminalInfos = useMemo(() => {
     const localOs = detectLocalOs(navigator.userAgent || navigator.platform);
-    return buildAllTerminalAiInfos(sessions, sessionHostsMap, hosts, portForwardingRules, localOs);
+    const next = buildAllTerminalAiInfos(sessions, sessionHostsMap, hosts, portForwardingRules, localOs);
+    const retained = retainStableAiTerminalSessionInfos(previousAppTerminalInfosRef.current, next);
+    previousAppTerminalInfosRef.current = retained;
+    return retained;
   }, [sessions, sessionHostsMap, hosts, portForwardingRules]);
 
   const resolveAIExecutorContext = useCallback((scope: {

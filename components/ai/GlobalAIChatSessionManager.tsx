@@ -5,6 +5,13 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
 import { Input } from '../ui/input';
 import { ScrollArea } from '../ui/scroll-area';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { SESSION_HISTORY_ROW_CLASSNAMES } from './sessionHistoryLayout';
@@ -90,9 +97,12 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
     [sessions, activeSessionIdMap, currentScopeType, currentScopeTargetId, workspaces, terminalInfos, externalAgents, t],
   );
   const agentIds = useMemo(() => collectGlobalManagerAgentIds(rows), [rows]);
+  const effectiveAgentFilter = agentFilter !== 'all' && agentIds.includes(agentFilter)
+    ? agentFilter
+    : 'all';
   const filteredRows = useMemo(
-    () => filterGlobalManagerRows(rows, { query: searchQuery, agentId: agentFilter }),
-    [rows, searchQuery, agentFilter],
+    () => filterGlobalManagerRows(rows, { query: searchQuery, agentId: effectiveAgentFilter }),
+    [rows, searchQuery, effectiveAgentFilter],
   );
 
   useEffect(() => {
@@ -169,19 +179,24 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
           )}
         </div>
         {agentIds.length > 1 && (
-          <select
-            value={agentFilter}
-            aria-label={t('ai.chat.managerFilterAllAgents')}
-            onChange={(event) => setAgentFilter(event.target.value)}
-            className="h-7 w-full rounded-md border border-input bg-background px-2 text-[12px] text-foreground focus:outline-none cursor-pointer"
-          >
-            <option value="all">{t('ai.chat.managerFilterAllAgents')}</option>
-            {agentIds.map((agentId) => (
-              <option key={agentId} value={agentId}>
-                {rows.find((row) => row.agentId === agentId)?.agentLabel ?? agentId}
-              </option>
-            ))}
-          </select>
+          <Select value={effectiveAgentFilter} onValueChange={setAgentFilter}>
+            <SelectTrigger
+              aria-label={t('ai.chat.managerFilterAllAgents')}
+              className="h-7 w-full px-2 text-[12px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-[12px]">
+                {t('ai.chat.managerFilterAllAgents')}
+              </SelectItem>
+              {agentIds.map((agentId) => (
+                <SelectItem key={agentId} value={agentId} className="text-[12px]">
+                  {rows.find((row) => row.agentId === agentId)?.agentLabel ?? agentId}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
       </div>
       <ScrollArea className="flex-1">
@@ -249,6 +264,7 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
+                              type="button"
                               onClick={() => onSelect(row.session.id)}
                               aria-label={t('ai.chat.managerOpen')}
                               className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
@@ -261,14 +277,17 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
                       ) : (
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <button
-                              disabled
-                              aria-disabled="true"
-                              aria-label={t('ai.chat.managerOpenDisabled')}
-                              className={cn(SESSION_HISTORY_ROW_CLASSNAMES.deleteButton, 'opacity-30 cursor-not-allowed')}
-                            >
-                              <Play size={12} />
-                            </button>
+                            <span className="inline-flex cursor-not-allowed">
+                              <button
+                                type="button"
+                                disabled
+                                aria-disabled="true"
+                                aria-label={t('ai.chat.managerOpenDisabled')}
+                                className={cn(SESSION_HISTORY_ROW_CLASSNAMES.deleteButton, 'opacity-30 pointer-events-none')}
+                              >
+                                <Play size={12} />
+                              </button>
+                            </span>
                           </TooltipTrigger>
                           <TooltipContent>{t('ai.chat.managerOpenDisabled')}</TooltipContent>
                         </Tooltip>
@@ -276,6 +295,7 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <button
+                            type="button"
                             onClick={() => onExport(row.session.id)}
                             aria-label={t('ai.chat.managerExportOne')}
                             className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
@@ -288,6 +308,7 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <button
+                            type="button"
                             onClick={() => setRebindSession(
                               rebindSession?.id === row.session.id ? null : row.session,
                             )}
@@ -302,6 +323,7 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <button
+                            type="button"
                             onClick={() => setDeleteTarget(row.session)}
                             aria-label={t('common.delete')}
                             className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
@@ -315,32 +337,37 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
                   </div>
                   {rebindSession?.id === row.session.id && (
                     <div className="py-1.5 pl-1 border-b border-border/20" data-section="ai-manager-rebind-picker">
-                      <select
-                        value=""
-                        aria-label={t('ai.chat.managerRebindPick')}
-                        onChange={(event) => chooseRebindTarget(event.target.value)}
-                        className="h-7 w-full rounded-md border border-input bg-background px-2 text-[12px] text-foreground focus:outline-none cursor-pointer"
-                      >
-                        <option value="">{t('ai.chat.managerRebindPick')}</option>
-                        {currentScopeTargetId
-                          && (
-                            row.session.scopeDangling
-                            || row.session.scope.type !== currentScopeType
-                            || row.session.scope.targetId !== currentScopeTargetId
-                          ) && (
-                          <option value="here">{t('ai.chat.managerRebindHere')}</option>
-                        )}
-                        {rebindTargets.map((target) => (
-                          <option
-                            key={`${target.type}:${target.targetId}`}
-                            value={`${target.type}:${target.targetId}`}
-                          >
-                            {target.type === 'workspace'
-                              ? `${t('ai.chat.chatsScopeWorkspace')}: ${target.label}`
-                              : `${t('ai.chat.chatsScopeTerminal')}: ${target.label}`}
-                          </option>
-                        ))}
-                      </select>
+                      <Select value="" onValueChange={chooseRebindTarget}>
+                        <SelectTrigger
+                          aria-label={t('ai.chat.managerRebindPick')}
+                          className="h-7 w-full px-2 text-[12px]"
+                        >
+                          <SelectValue placeholder={t('ai.chat.managerRebindPick')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {currentScopeTargetId
+                            && (
+                              row.session.scopeDangling
+                              || row.session.scope.type !== currentScopeType
+                              || row.session.scope.targetId !== currentScopeTargetId
+                            ) && (
+                            <SelectItem value="here" className="text-[12px]">
+                              {t('ai.chat.managerRebindHere')}
+                            </SelectItem>
+                          )}
+                          {rebindTargets.map((target) => (
+                            <SelectItem
+                              key={`${target.type}:${target.targetId}`}
+                              value={`${target.type}:${target.targetId}`}
+                              className="text-[12px]"
+                            >
+                              {target.type === 'workspace'
+                                ? `${t('ai.chat.chatsScopeWorkspace')}: ${target.label}`
+                                : `${t('ai.chat.chatsScopeTerminal')}: ${target.label}`}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
                 </React.Fragment>
