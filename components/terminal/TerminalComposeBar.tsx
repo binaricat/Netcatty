@@ -360,9 +360,11 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
 
   const sendToAll = composeSendToAll ?? Boolean(isBroadcastEnabled);
   const handleBroadcastContextMenu = useCallback((event: React.MouseEvent) => {
+    // A solo composer is inside the terminal's context-menu trigger, but this
+    // gesture must never run a terminal action (such as paste into the PTY).
+    event.stopPropagation();
     if (!isBroadcastEnabled && !sendToAll) return;
     event.preventDefault();
-    event.stopPropagation();
     setBroadcastMenuAnchor({
       x: event.clientX,
       y: event.clientY,

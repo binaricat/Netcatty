@@ -65,3 +65,24 @@ test('disabled or mouse-owned gestures retain the full original event sequence',
   dispose();
   dom.window.close();
 });
+
+
+test('right-click in the compose bar is never captured or replayed as terminal paste', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const dom = new JSDOM('<div id="root"><div data-section="terminal-compose-bar"><textarea></textarea></div></div>');
+  const root = dom.window.document.querySelector<HTMLElement>('#root')!;
+  const compose = root.querySelector('textarea')!;
+  const dispose = installRightClickLongPress(root, () => true);
+  const seen: EventTarget[] = [];
+  root.addEventListener('contextmenu', (event) => seen.push(event.target!));
+  const fire = (type: string) => compose.dispatchEvent(new dom.window.MouseEvent(type, {
+    bubbles: true, cancelable: true, button: 2, buttons: type === 'mouseup' ? 0 : 2,
+  }));
+  fire('mousedown');
+  fire('contextmenu');
+  t.mock.timers.tick(RIGHT_CLICK_LONG_PRESS_MS);
+  fire('mouseup');
+  assert.deepEqual(seen, [compose], 'only the original composer event should be delivered');
+  dispose();
+  dom.window.close();
+});
