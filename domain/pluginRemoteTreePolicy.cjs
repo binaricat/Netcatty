@@ -44,6 +44,7 @@ function validatePluginRemoteTree(root) {
       || !Array.isArray(node.children) || !record(node.attributes)
       || Object.keys(node).some((key) => !["id", "type", "element", "attributes", "children"].includes(key))) throw new TypeError("Forbidden view element");
     if (VOID_ELEMENTS.has(node.element) && node.children.length) throw new TypeError("Void view elements cannot have children");
+    if (node.element === "textarea" && node.children.some((child) => !record(child) || ![3, 8].includes(child.type))) throw new TypeError("Textarea only accepts text");
     const attributes = Object.entries(node.attributes);
     if (attributes.length > 64) throw new TypeError("Too many view attributes");
     for (const [name, value] of attributes) {
