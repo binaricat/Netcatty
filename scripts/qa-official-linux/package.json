@@ -1,0 +1,7 @@
+{
+  "name": "netcatty-official-linux-qa",
+  "private": true,
+  "version": "1.0.0",
+  "description": "QA harness dependencies only; never bundled in Netcatty",
+  "dependencies": { "ssh2": "1.17.0" }
+}

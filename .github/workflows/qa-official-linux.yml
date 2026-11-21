@@ -1,0 +1,66 @@
+name: QA official Linux candidate (incremental probe)
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/qa-official-linux.yml
+      - scripts/qa-official-linux/**
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: qa-official-linux-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  official-package-probe:
+    if: >-
+      github.repository == 'binaricat/Netcatty' &&
+      github.event.pull_request.head.repo.full_name == 'binaricat/Netcatty' &&
+      github.event.pull_request.head.ref == 'qa/official-linux-a23868e' &&
+      github.event.pull_request.draft == true
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    env:
+      QA_ROOT: ${{ runner.temp }}/netcatty-official-qa
+    steps:
+      - name: Checkout QA harness without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Node for QA harness only
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.11.1'
+      - name: Stock desktop runtime dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xvfb libgtk-3-0 libnss3 libasound2 libgbm1 libatk-bridge2.0-0 libxss1 libsecret-1-0
+      - name: Install isolated QA dependencies without lifecycle scripts
+        run: npm ci --prefix scripts/qa-official-linux --ignore-scripts --no-audit --no-fund
+      - name: Verify official run, artifact ZIP and deb; extract without installer scripts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/qa-official-linux/provenance.cjs
+      - name: Real official Electron with stock sandbox (no fallback)
+        run: |
+          test "$(id -u)" -ne 0
+          xvfb-run -a -s '-screen 0 1440x1000x24 -nolisten tcp' node scripts/qa-official-linux/desktop.cjs
+      - name: Record explicit scope
+        if: always()
+        run: |
+          echo 'Official a23868ee88603d0182c5370fca851cb9d05d7f8f / run 44901156879 / artifact 14706239224' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Incremental probe: read assertions.json and real screenshots. SFTP pause/resume is NOT COVERED. Stock sandbox launch failures are failures, never feature passes. This is extracted-package execution, not system-install acceptance.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload reviewed QA evidence (3 days)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: official-linux-a23868e-probe-${{ github.run_id }}
+          path: ${{ runner.temp }}/netcatty-official-qa/evidence/
+          retention-days: 3
+          if-no-files-found: warn
