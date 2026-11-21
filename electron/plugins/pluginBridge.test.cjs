@@ -53,6 +53,7 @@ test("disabled plugin runtime keeps passive host integration channels quiet", as
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.terminalProviders)({}, {}), []);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.terminalSessionEvent)({}, {}), []);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.extensionProviders)({}, {}), []);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.themeCatalog)({}), null);
   assert.equal(await ipcMain.handlers.get(CHANNELS.credentialCatalogUpdate)({}, { entries: [] }), 0);
   assert.equal(await ipcMain.handlers.get(CHANNELS.setScopeCatalog)({}, {}), null);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.getScopeCatalog)({}, {}), {
