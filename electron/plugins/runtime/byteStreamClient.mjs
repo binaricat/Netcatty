@@ -1,9 +1,11 @@
 import { PluginError } from "@netcatty/plugin-sdk";
 import { PLUGIN_BYTE_STREAM_FEATURE } from "@netcatty/plugin-contract";
 
-export async function connectByteStream({ client, streams, subscriptions, enabledFeatures }, request, cancellationToken) {
+export async function connectByteStream({ client, streams, subscriptions, enabledFeatures }, request, cancellationToken, viaHost = false) {
   if (!enabledFeatures.includes(PLUGIN_BYTE_STREAM_FEATURE)) throw new PluginError("unsupported", "Byte stream feature is unavailable");
-  const descriptor = await client.request("network.stream.connect", request, { cancellationToken });
+  if (viaHost && !enabledFeatures.includes("network.host-byte-streams")) throw new PluginError("unsupported", "Host byte stream feature is unavailable");
+  const descriptor = await client.request(viaHost ? "network.stream.connectViaHost" : "network.stream.connect", request, { cancellationToken, ...(viaHost ? { deadlineMs: 120_000 } : {}) });
+  if (descriptor.cancelled) throw new PluginError("cancelled", "Host connection cancelled");
   let readable;
   let writable;
   let readablePromise;

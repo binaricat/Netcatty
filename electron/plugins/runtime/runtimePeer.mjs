@@ -95,7 +95,7 @@ function closeTransferredPorts(ports) {
   for (const port of ports ?? []) port?.close?.();
 }
 
-function createTransportAdapter(port) {
+function createTransportAdapter(port, transferArrayBuffers) {
   const listeners = new Set();
   const handle = (event) => {
     const value = messageData(event);
@@ -106,7 +106,9 @@ function createTransportAdapter(port) {
   port.start?.();
   return {
     post(message, transfer = []) {
-      port.postMessage(message, transfer);
+      port.postMessage(message, transferArrayBuffers
+        ? transfer
+        : transfer.filter((item) => !(item instanceof ArrayBuffer)));
     },
     onMessage(listener) {
       listeners.add(listener);
@@ -388,6 +390,8 @@ function createPluginContext(config, client, runtimeApi) {
     writeText: (text, title) => interact({ kind: "clipboard.write", title, text }).then((value) => value === true),
   };
   const network = {
+    connectViaHost: (request, cancellationToken) => connectByteStream({ client, streams: runtimeApi.streams, subscriptions,
+      enabledFeatures: config.enabledFeatures }, request, cancellationToken, true),
     connect: (request, cancellationToken) => connectByteStream({ client, streams: runtimeApi.streams, subscriptions,
       enabledFeatures: config.enabledFeatures }, request, cancellationToken),
     request: (request) => client.request("network.request", request, {
@@ -606,9 +610,10 @@ export async function startPluginRuntime({
   port,
   config,
   loadPlugin,
+  transferArrayBuffers = true,
   loadTerminalInterceptorTransport: loadTerminalInterceptorTransportForRuntime = loadTerminalInterceptorTransport,
 }) {
-  const transport = createTransportAdapter(port);
+  const transport = createTransportAdapter(port, transferArrayBuffers);
   const client = createHostClient(transport);
   const cancellation = new Map();
   let plugin;

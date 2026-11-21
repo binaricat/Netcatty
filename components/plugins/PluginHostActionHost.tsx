@@ -14,7 +14,8 @@ export function PluginHostActionHost() {
   if (!entry) return null;
   const request = entry.prompt.request;
   const selection = request.kind === 'vault.selectHosts';
-  const connection = request.kind === 'vault.requestConnect';
+  const stream = request.kind === 'network.stream.connectViaHost';
+  const connection = request.kind === 'vault.requestConnect' || stream;
   const effective = entry.host ? applyGroupDefaults(entry.host, entry.host.group ? resolveGroupDefaults(entry.host.group, entry.groups) : {}) : undefined;
   const protocol = effective ? resolveEffectiveTerminalProtocol(effective) : undefined;
   return <Dialog open onOpenChange={(open) => { if (!open) void state.respond('cancel'); }}>
@@ -32,13 +33,14 @@ export function PluginHostActionHost() {
         <p className="break-all text-sm font-medium">{effective.label}</p>
         <p className="break-all text-sm">{protocol !== 'local' && effective.username ? `${effective.username}@` : ''}{effective.hostname}{protocol !== 'local' && effective.port ? `:${effective.port}` : ''} ({protocol})</p>
         {protocol === 'local' && <p className="text-sm font-medium" role="note">{t('plugins.hostActions.localExecution')}</p>}
+        {stream ? <><p className="text-sm font-medium break-all">{request.endpoint}</p><p className="text-sm">{t('plugins.hostActions.streamNote')}</p></> : <>
         <p className="text-sm" role="note">{t(entry.scriptsRun ? 'plugins.hostActions.scriptsRun' : 'plugins.hostActions.noScripts')}</p>
-        <p className="text-xs text-muted-foreground">{t('plugins.hostActions.connectionNote')}</p>
+        <p className="text-xs text-muted-foreground">{t('plugins.hostActions.connectionNote')}</p></>}
       </> : request.kind === 'vault.requestHostDraft' ? <PluginHostDraftPreview key={entry.prompt.requestId} before={entry.host} draft={request.draft} managedSources={entry.managedSources} busy={state.busy} onConfirm={(draft) => void state.respond('submit', draft)} /> : null}
       {state.error && <p role="alert" className="text-sm text-destructive">{t('plugins.hostActions.failed')}</p>}
       <DialogFooter className={selection ? 'p-3 border-t' : undefined}>
         <Button variant="outline" disabled={state.busy} onClick={() => void state.respond('cancel')}>{t('common.cancel')}</Button>
-        {connection && <Button disabled={state.busy} onClick={() => void state.respond('submit')}>{t('common.connect')}</Button>}
+        {connection && <Button disabled={state.busy || (stream && protocol !== 'ssh')} onClick={() => void state.respond('submit')}>{t('common.connect')}</Button>}
       </DialogFooter>
     </DialogContent>
   </Dialog>;

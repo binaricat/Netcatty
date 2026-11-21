@@ -33,6 +33,7 @@ const PERMISSION_DESCRIPTIONS = {
   "sftp.read": [true, "Read remote files", "Read remote file content through supported host APIs.", "读取远程文件", "通过支持的宿主 API 读取远程文件内容。"],
   "sftp.write": [true, "Change remote files", "Write or change remote files through supported host APIs.", "修改远程文件", "通过支持的宿主 API 写入或修改远程文件。"],
   network: [true, "Network requests", "Contact approved origins. Data sent to them leaves this device.", "网络请求", "访问已批准的网络来源。发送的数据会离开此设备。"],
+  "network.hostStream": [true, "Connections through saved servers", "Send and receive arbitrary data through a selected SSH server to a destination reviewed for each connection. Does not expose SSH credentials.", "通过已有服务器连接", "通过选定的 SSH 服务器向每次确认的地址和端口收发数据，不提供 SSH 密码或私钥。"],
   "network.stream": [true, "TCP and TLS connections", "Send and receive data over TCP or TLS at approved endpoints. Data may leave this device.", "TCP 和 TLS 连接", "通过 TCP 或 TLS 与已批准的端点收发数据。数据可能离开此设备。"],
   "filesystem.read": [true, "Read local files", "Read approved local paths, which may contain sensitive files.", "读取本地文件", "读取已批准的本地路径，其中可能包含敏感文件。"],
   "filesystem.write": [true, "Change local files", "Write to approved local paths; existing content may be changed.", "修改本地文件", "写入已批准的本地路径，可能改变现有文件内容。"],

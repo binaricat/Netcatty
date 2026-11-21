@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HostInteractionPrompt, VaultHostActionRequest } from '@netcatty/plugin-contract';
+import { preparePluginHostStream } from '../../infrastructure/services/pluginHostStreamService';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import { getAppHandlers } from '../app/appHandlersBridge';
-import { getAppAppLockRuntime, getAppVaultRuntime } from './appRuntimeBridge';
+import { getAppAppLockRuntime, getAppVaultRuntime, getAppSettingsRuntime } from './appRuntimeBridge';
 import { PluginHostActionResources } from './pluginHostActionResources';
 import { executePluginHostAction, type PluginHostAction } from './pluginHostActionExecution';
 import { pluginHostRunsSavedScripts, type PluginHostDraftFields } from '../../domain/pluginHostActions';
@@ -46,7 +47,7 @@ export function usePluginHostActions() {
     const vault = getVault();
     const target = entry.prompt.vaultTarget;
     if (target && resources.current.resolve(target.resourceId, target.revision) !== entry.host) throw new Error('Selected host changed');
-    if (entry.prompt.request.kind === 'vault.requestConnect' && (vault.groupConfigs !== entry.groups || vault.snippets !== entry.snippets)) {
+    if ((entry.prompt.request.kind === 'vault.requestConnect' || entry.prompt.request.kind === 'network.stream.connectViaHost') && (vault.groupConfigs !== entry.groups || vault.snippets !== entry.snippets)) {
       throw new Error('Saved connection settings changed');
     }
     if (entry.prompt.request.kind === 'vault.requestHostDraft' && vault.managedSources !== entry.managedSources) throw new Error('Managed sources changed during draft review');
@@ -70,6 +71,29 @@ export function usePluginHostActions() {
       assertCurrent(entry);
       const request = entry.prompt.request;
       const target = entry.prompt.vaultTarget;
+      if (request.kind === 'network.stream.connectViaHost' && target && entry.host) {
+        const vault = getVault();
+        const settings = getAppSettingsRuntime();
+        if (!settings || !bridge.openPluginHostStream) throw new Error('Host stream unavailable');
+        const connectionOptions = await preparePluginHostStream(entry.host, vault, settings.terminalSettings);
+        const assertPrepared = () => {
+          assertCurrent(entry);
+          const latest = getVault();
+          if (latest.keys !== vault.keys || latest.identities !== vault.identities || latest.proxyProfiles !== vault.proxyProfiles
+            || latest.hosts !== vault.hosts || latest.knownHosts !== vault.knownHosts || getAppSettingsRuntime()?.terminalSettings !== settings.terminalSettings) throw new Error('Connection settings changed');
+        };
+        assertPrepared();
+        await executePluginHostAction({ kind: 'connect', target }, {
+          getVault, resources: resources.current, assertCurrent: assertPrepared,
+          authorizeCommit: async () => { assertPrepared(); },
+          connect: async () => {
+            assertPrepared();
+            entry.claimed = true;
+            await bridge.openPluginHostStream!({ response: { requestId: entry.prompt.requestId, actionToken: entry.prompt.actionToken, action: 'commit' }, connectionOptions });
+          },
+        });
+        return;
+      }
       let action: PluginHostAction;
       if (request.kind === 'vault.requestConnect' && target) action = { kind: 'connect', target };
       else if (request.kind === 'vault.requestHostDraft' && entry.prompt.reviewedDraft) {
@@ -105,7 +129,7 @@ export function usePluginHostActions() {
         current.current = null; setReview(null); setBusy(false); responding.current = false;
         return;
       }
-      if (!event.request.kind.startsWith('vault.')) return;
+      if (!event.request.kind.startsWith('vault.') && event.request.kind !== 'network.stream.connectViaHost') return;
       const prompt = event as VaultHostPrompt;
       try {
         if (prompt.phase === 'commit') {
