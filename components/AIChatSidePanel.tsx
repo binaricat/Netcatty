@@ -1610,14 +1610,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   }, [currentAgentId, enterScopeDraftMode, updateScopeDraft]);
 
 
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(async (textOverride?: string) => {
     const draft = currentDraftRef.current;
     const currentPanelView = panelViewRef.current;
     const currentSessionView = activeSessionRef.current;
-    if (!validateNoteMentions(draft?.attachments ?? [])) return;
-    const trimmed = draft?.text.trim() ?? '';
+    if (textOverride === undefined && !validateNoteMentions(draft?.attachments ?? [])) return;
+    const trimmed = (textOverride ?? draft?.text ?? '').trim();
     const sendScopeKey = scopeKey;
-    const attachments = (draft?.attachments ?? []).map((file) => ({
+    const attachments = (textOverride === undefined ? draft?.attachments ?? [] : []).map((file) => ({
       base64Data: file.base64Data,
       mediaType: file.mediaType,
       filename: file.filename,
@@ -1645,12 +1645,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const agentConfig = sendAgentId !== 'catty' ? findEnabledExternalAgent(externalAgents, sendAgentId) : undefined;
     if (sendAgentId !== 'catty' && !agentConfig) return;
 
-    const selectedSkillSlugs = draft?.selectedUserSkillSlugs ?? [];
+    const selectedSkillSlugs = textOverride === undefined ? draft?.selectedUserSkillSlugs ?? [] : [];
     const modelPrompt = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
     const modelAttachments = attachments.filter((attachment) => !isInlineTextAttachment(attachment));
     const isDraftMode = currentPanelView.mode === 'draft';
 
-    flushDraftText();
+    if (textOverride === undefined) flushDraftText();
     const submittedText = draft?.text ?? '';
     const keepPendingAfterSend = () => {
       const pending = pendingComposerTextRef.current;
@@ -1739,7 +1739,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         const createdSession = createSession(scope, sendAgentId);
         sessionId = createdSession.id;
         currentSession = createdSession;
-        clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+        if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
         showScopeSessionView(createdSession.id);
         setActiveSessionId(createdSession.id);
         sessionSendGateKey = sessionId;
@@ -1770,7 +1770,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProvider'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {
-          clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+          if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
           showScopeSessionView(sessionId);
         }
         return;
@@ -1785,7 +1785,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProviderModel'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {
-          clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+          if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
           showScopeSessionView(sessionId);
         }
         return;
@@ -1798,7 +1798,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         ...(selectedSkillSlugs.length > 0 ? { selectedUserSkillSlugs: selectedSkillSlugs } : {}),
         timestamp: Date.now(),
       });
-      clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+      if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
       showScopeSessionView(sessionId);
       setActiveSessionId(sessionId);
       setStreamingForScope(sessionId, true);

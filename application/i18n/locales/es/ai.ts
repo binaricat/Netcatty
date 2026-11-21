@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const esAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': 'Se alcanzó el límite del bucle de herramientas ({limit} iteraciones). Puedes continuar en este chat. Las tareas de terminal en ejecución no se detienen.',
+  'ai.chat.continue': 'Continuar',
   'ai.chat.attachmentContentUnavailable': 'Contenido no disponible en este dispositivo',
   // AI Settings
   'ai.agentSettings': 'Configuración del agente',

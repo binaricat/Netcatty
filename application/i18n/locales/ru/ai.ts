@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const ruAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': 'Достигнут лимит цикла инструментов ({limit} итераций). Можно продолжить в этом чате. Запущенные задачи терминала не останавливаются.',
+  'ai.chat.continue': 'Продолжить',
   'ai.chat.attachmentContentUnavailable': 'Содержимое недоступно на этом устройстве',
   'ai.chat.contextUsage': 'Контекст: {used} / {max} токенов',
   // AI Settings
