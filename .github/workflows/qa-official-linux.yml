@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 12
     env:
-      QA_ROOT: ${{ runner.temp }}/netcatty-official-qa
+      QA_ROOT: /tmp/netcatty-official-qa
     steps:
       - name: Checkout QA harness without persisted credentials
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -61,6 +61,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: official-linux-a23868e-probe-${{ github.run_id }}
-          path: ${{ runner.temp }}/netcatty-official-qa/evidence/
+          path: /tmp/netcatty-official-qa/evidence/
           retention-days: 3
           if-no-files-found: warn
