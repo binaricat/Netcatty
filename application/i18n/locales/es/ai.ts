@@ -335,6 +335,7 @@ export const esAiMessages: Messages = {
   'ai.defaultAgent': 'Agente predeterminado',
   'ai.defaultAgent.description': 'Agente que se usará al iniciar una nueva sesión de IA',
   'ai.defaultAgent.catty': 'Catty (Integrado)',
+  'ai.defaultAgent.unavailable': 'No disponible',
   'ai.toolAccess.title': 'Acceso a herramientas',
   'ai.toolAccess.mode': 'Modo de acceso de Netcatty',
   'ai.toolAccess.description': 'Elige cómo acceden los agentes externos a las sesiones de Netcatty. MCP expone el servidor integrado, mientras que Habilidades + CLI apunta a los agentes hacia las habilidades locales de Netcatty y los comandos de CLI.',

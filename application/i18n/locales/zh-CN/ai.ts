@@ -335,6 +335,7 @@ export const zhCNAiMessages: Messages = {
   'ai.defaultAgent': '默认 Agent',
   'ai.defaultAgent.description': '创建新 AI 会话时使用的 Agent',
   'ai.defaultAgent.catty': 'Catty（内置）',
+  'ai.defaultAgent.unavailable': '暂不可用',
   'ai.toolAccess.title': '工具接入',
   'ai.toolAccess.mode': 'Netcatty 接入模式',
   'ai.toolAccess.description': '选择外部 Agent 访问 Netcatty 会话的方式。MCP 会暴露内置服务器，Skills + CLI 会引导 Agent 读取本地 Skill 并调用 Netcatty CLI。',
