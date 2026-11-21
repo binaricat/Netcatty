@@ -30,19 +30,28 @@ if (!process.versions.electron) {
     await win.webContents.insertCSS(fs.readFileSync(require.resolve("@xterm/xterm/css/xterm.css"), "utf8"));
     const measurement = await win.webContents.executeJavaScript(`(async () => {
       ${bundle}
-      const term = new rtlTest.Terminal({cols: 30, rows: 8, fontSize: 24, fontFamily: "serif", allowProposedApi: true});
+      const fontFamily = '"Noto Sans Mono", "DejaVu Sans", monospace';
+      const term = new rtlTest.Terminal({cols: 30, rows: 8, fontSize: 24, fontFamily, allowProposedApi: true});
       term.open(document.querySelector("#terminal"));
       term.registerCharacterJoiner(text => text.startsWith("ffi") ? [[0, 3]] : rtlTest.findRightToLeftRuns(text));
       const a = "יייייייי", b = "שששששששש";
       const ctx = document.createElement("canvas").getContext("2d");
-      ctx.font = "24px serif";
+      ctx.font = "24px " + fontFamily;
       await new Promise(resolve => term.write(a + " Z\\r\\n" + b + " Z\\r\\n01234567 Z\\r\\nffi Z\\r\\n", resolve));
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const rows = [...document.querySelectorAll(".xterm-rows > div")].slice(0, 4);
       const geometry = rows.map(row => {
         const spans = [...row.children];
         const suffix = spans.find(span => span.textContent.includes("Z"));
+        const content = spans[0].firstElementChild ?? spans[0];
+        const range = document.createRange();
+        range.selectNodeContents(content);
+        const glyphs = range.getBoundingClientRect();
+        const cellBox = spans[0].getBoundingClientRect();
         return {
+          glyphWidth: glyphs.width,
+          glyphRight: glyphs.right - cellBox.left,
+          transform: content.style.transform,
           marker: suffix.getBoundingClientRect().right - row.getBoundingClientRect().left,
           joinedWidth: spans[0].getBoundingClientRect().width,
           text: row.textContent,
@@ -61,6 +70,11 @@ if (!process.versions.electron) {
     // Ensure the fixture actually exercises unequal font metrics rather than
     // passing accidentally on a monospace/fallback-only test environment.
     assert.ok(Math.abs(measurement.natural[0] - measurement.natural[1]) > 8);
+    assert.ok(measurement.natural[1] > measurement.cell * 8 + 8, "wide fallback must exceed its cell allocation");
+    assert.notEqual(wide.transform, "", "nominally oversized RTL glyphs must actually fit, not just clip");
+    assert.equal(wide.overflow, "", "RTL text must not be hidden by overflow clipping");
+    assert.ok(wide.glyphRight <= wide.joinedWidth + 1, JSON.stringify(measurement));
+    assert.equal(thin.transform, "", "narrow RTL text must not be unnecessarily rescaled");
     for (const row of [thin, wide]) {
       assert.match(row.text, / Z/);
       assert.ok(Math.abs(row.joinedWidth - measurement.cell * 8) <= 1, JSON.stringify(measurement));

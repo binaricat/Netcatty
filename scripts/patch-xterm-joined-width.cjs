@@ -13,12 +13,30 @@ const VERSION = "6.1.0-beta.292";
 // Share the terminalBidiJoiner gate. Scope this fix to the new RTL
 // shaping path; leave the existing ASCII font-ligature renderer unchanged.
 const rtl = new RegExp(require("../lib/terminalRtlCharacter.json"), "u");
+// Keep the outer span exactly on the grid. When wider fallback glyphs would
+// extend into the next cell, compress the complete shaped text horizontally
+// in an inner span. Keep the untouched text together for browser bidi/shaping,
+// and avoid measuring DOM layout during rendering: xterm's existing spacing
+// calculation already supplies the difference from the cached natural width.
 const patches = [
-  ["xterm.js", "k!==this.defaultSpacing&&(w.style.letterSpacing=`\${k}px`)",
-    `H&&${rtl}.test($)?(w.style.width=\`\${y*_}px\`,w.style.letterSpacing="0px",w.style.overflow="clip"):k!==this.defaultSpacing&&(w.style.letterSpacing=\`\${k}px\`)`],
-  ["xterm.mjs", "Ot!==this.defaultSpacing&&(I.style.letterSpacing=`\${Ot}px`)",
-    `fi&&${rtl}.test(_i)?(I.style.width=\`\${Rr*h}px\`,I.style.letterSpacing="0px",I.style.overflow="clip"):Ot!==this.defaultSpacing&&(I.style.letterSpacing=\`\${Ot}px\`)`],
-];
+  { file: "xterm.js", joined: "H", chars: "$", span: "w", width: "y*_", spacing: "k", rows: "m" },
+  { file: "xterm.mjs", joined: "fi", chars: "_i", span: "I", width: "Rr*h", spacing: "Ot", rows: "p" },
+].map(({ file, joined, chars, span, width, spacing, rows }) => {
+  const defaultSpacing = `${spacing}!==this.defaultSpacing&&(${span}.style.letterSpacing=\`\${${spacing}}px\`)`;
+  const original = `,${defaultSpacing},${rows}.push(${span}),`;
+  const replacement = [
+    `;if(${joined}&&${rtl}.test(${chars})){`,
+    `const allocated=${width};${span}.style.width=allocated+"px";${span}.style.letterSpacing="0px";`,
+    `if(${spacing}<0&&allocated>0){`,
+    'const run=this._document.createElement("span");',
+    `run.textContent=${span}.textContent;`,
+    'run.style.transformOrigin="left center";',
+    `run.style.transform="scaleX("+allocated/(allocated-${spacing})+")";`,
+    `${span}.replaceChildren(run);`,
+    `}}else{${defaultSpacing}}${rows}.push(${span}),`,
+  ].join("");
+  return [file, original, replacement];
+});
 
 function patchJoinedWidth(source, original, replacement) {
   if (source.split(replacement).length === 2 && !source.replace(replacement, "").includes(original)) return source;
@@ -29,7 +47,7 @@ function patchJoinedWidth(source, original, replacement) {
 function patchInstalledXterm(root = process.cwd()) {
   const base = path.resolve(root, "node_modules/@xterm/xterm");
   const version = JSON.parse(fs.readFileSync(path.join(base, "package.json"), "utf8")).version;
-  if (version !== VERSION) throw new Error(`unsupported @xterm/xterm \${version}; expected \${VERSION}`);
+  if (version !== VERSION) throw new Error(`unsupported @xterm/xterm ${version}; expected ${VERSION}`);
   const files = patches.map(([file, original, replacement]) => {
     const filename = path.join(base, "lib", file);
     const source = fs.readFileSync(filename, "utf8");
