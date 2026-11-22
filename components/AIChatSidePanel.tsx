@@ -101,6 +101,7 @@ import {
   shouldLoadSdkRuntimeModels,
   shouldUseStoredAgentModel,
   stopActiveTurnBeforeScopeRebind,
+  syncWorkspaceAnchorsForScopeRebind,
   type SdkRuntimeModelCatalog,
   type SdkRuntimeModelCatalogSource,
 } from './AIChatSidePanelHelpers';
@@ -603,6 +604,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         stopStreamingForSession,
       });
       rebindSessionScope?.(target.sessionId, { type: scopeType, targetId: scopeTargetId, hostIds: scopeHostIds });
+      syncWorkspaceAnchorsForScopeRebind(
+        target.sessionId,
+        { type: scopeType, targetId: scopeTargetId },
+        workspaces,
+        onSetWorkspaceAnchorChat,
+      );
       toast.success(t('ai.chat.rebindDone').replace('{title}', target.title));
     } else {
       toast.warning(t('ai.chat.rebindUsage'));
@@ -624,7 +631,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }
     lastChatsListingRef.current = remaining;
     setPanelCommandNote(formatAiChatsListingNote(remaining, t));
-  }, [abortControllersRef, liveScopeTargetIds, rebindSessionScope, scopeHostIds, scopeTargetId, scopeType, sessions, stopStreamingForSession, streamingSessionIds, t, workspaces, workspaceMemberTerminalIds]);
+  }, [abortControllersRef, liveScopeTargetIds, onSetWorkspaceAnchorChat, rebindSessionScope, scopeHostIds, scopeTargetId, scopeType, sessions, stopStreamingForSession, streamingSessionIds, t, workspaces, workspaceMemberTerminalIds]);
 
   // Manual durability actions (history drawer header). Export writes the
   // whole store to a user-chosen JSON file; import merges by id.
@@ -2226,6 +2233,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       targetId: target.targetId,
       hostIds: target.hostIds,
     });
+    syncWorkspaceAnchorsForScopeRebind(
+      sessionId,
+      target,
+      workspaces,
+      onSetWorkspaceAnchorChat,
+    );
     const session = sessions.find((item) => item.id === sessionId);
     toast.success(
       t('ai.chat.managerRebindDone')
@@ -2235,7 +2248,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
             ? t('ai.chat.chatsScopeWorkspace')
             : t('ai.chat.chatsScopeTerminal'))),
     );
-  }, [abortControllersRef, rebindSessionScope, sessions, stopStreamingForSession, streamingSessionIds, t]);
+  }, [abortControllersRef, onSetWorkspaceAnchorChat, rebindSessionScope, sessions, stopStreamingForSession, streamingSessionIds, t, workspaces]);
 
   const handleManagerDelete = useCallback(async (sessionId: string) => {
     if (abortControllersRef.current.has(sessionId) || streamingSessionIds.has(sessionId)) {

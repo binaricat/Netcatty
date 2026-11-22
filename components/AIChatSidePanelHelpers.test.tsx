@@ -22,6 +22,7 @@ import {
   shouldLoadSdkRuntimeModels,
   shouldUseStoredAgentModel,
   stopActiveTurnBeforeScopeRebind,
+  syncWorkspaceAnchorsForScopeRebind,
 } from './AIChatSidePanelHelpers';
 import { createRequire } from 'node:module';
 import type { AgentModelPreset, ExternalAgentConfig } from '../infrastructure/ai/types';
@@ -935,4 +936,44 @@ test('round 4: rebind captures the PRE-rebind active map and demotes implicit so
   assert.match(rebindBody, /demoteImplicitSourceViewsForSession\(/);
   assert.ok(rebindBody.includes('preRebindActiveSessionIdMap,'), 'pre-rebind map is passed to the implicit-view demotion');
   assert.match(rebindBody, /clearSessionViewsForSession\(prev, sessionId, scopeKey\)/);
+});
+
+test('syncWorkspaceAnchorsForScopeRebind clears persisted source anchors and pins destination workspace', () => {
+  const calls: Array<[string, string | null]> = [];
+  const workspaces = [
+    { id: 'ws-a', anchorChatId: 'chat-1' },
+    { id: 'ws-b', anchorChatId: 'chat-2' },
+    { id: 'ws-c', anchorChatId: 'chat-1' },
+  ];
+
+  syncWorkspaceAnchorsForScopeRebind(
+    'chat-1',
+    { type: 'workspace', targetId: 'ws-b' },
+    workspaces,
+    (workspaceId, chatId) => calls.push([workspaceId, chatId]),
+  );
+  assert.deepEqual(calls, [
+    ['ws-a', null],
+    ['ws-c', null],
+    ['ws-b', 'chat-1'],
+  ]);
+
+  // Rebinding to a terminal clears source workspace anchors without pinning any workspace.
+  calls.length = 0;
+  syncWorkspaceAnchorsForScopeRebind(
+    'chat-1',
+    { type: 'terminal', targetId: 'term-1' },
+    [{ id: 'ws-a', anchorChatId: 'chat-1' }, { id: 'ws-b', anchorChatId: 'chat-2' }],
+    (workspaceId, chatId) => calls.push([workspaceId, chatId]),
+  );
+  assert.deepEqual(calls, [['ws-a', null]]);
+
+  // Both panel rebind paths invoke syncWorkspaceAnchorsForScopeRebind.
+  const panelSource = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
+  const managerStart = panelSource.indexOf('const handleManagerRebind');
+  const managerEnd = panelSource.indexOf('const handleManagerDelete');
+  assert.match(panelSource.slice(managerStart, managerEnd), /syncWorkspaceAnchorsForScopeRebind\(/);
+  const commandStart = panelSource.indexOf('const handleRebindChat');
+  const commandEnd = panelSource.indexOf('// Manual durability actions');
+  assert.match(panelSource.slice(commandStart, commandEnd), /syncWorkspaceAnchorsForScopeRebind\(/);
 });

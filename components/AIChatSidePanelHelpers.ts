@@ -555,3 +555,29 @@ export async function stopActiveTurnBeforeScopeRebind(
     await deps.stopStreamingForSession(sessionId);
   }
 }
+
+/**
+ * Keep persisted workspace `anchorChatId` pointers in sync when a chat is
+ * rebound to another scope: clear every OTHER workspace whose anchor still
+ * points at `sessionId` (so a relaunch cannot reopen the moved chat inside its
+ * former workspace), and pin the destination workspace when rebinding to one.
+ */
+export function syncWorkspaceAnchorsForScopeRebind(
+  sessionId: string,
+  target: { type: 'terminal' | 'workspace'; targetId: string },
+  workspaces: ReadonlyArray<{ id: string; anchorChatId?: string }>,
+  onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void,
+): void {
+  if (!onSetWorkspaceAnchorChat) return;
+  for (const workspace of workspaces) {
+    if (workspace.anchorChatId !== sessionId) continue;
+    if (target.type === 'workspace' && workspace.id === target.targetId) continue;
+    onSetWorkspaceAnchorChat(workspace.id, null);
+  }
+  if (target.type === 'workspace') {
+    const dest = workspaces.find((workspace) => workspace.id === target.targetId);
+    if (!dest || dest.anchorChatId !== sessionId) {
+      onSetWorkspaceAnchorChat(target.targetId, sessionId);
+    }
+  }
+}
