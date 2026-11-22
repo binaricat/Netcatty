@@ -93,3 +93,43 @@ export function getScopedHistorySessions(
 export function _getScopedHistoryCacheSizeForTests(sessions: AISession[]): number {
   return historyCache.get(sessions)?.size ?? 0;
 }
+
+/**
+ * Pick the highest-ranked session eligible for implicit workspace auto-resume.
+ * Only exact workspace matches and member-terminal chats (rank >= 3) qualify;
+ * rank-1 chats from OTHER workspaces remain visible in the history drawer but
+ * are never implicitly resumed into this workspace (preventing a source
+ * workspace from re-opening a chat rebound to another workspace after restart).
+ */
+export function getPreferredAutoResumeSessionId(
+  historySessions: readonly AISession[],
+  scopeType: 'terminal' | 'workspace',
+  scopeTargetId: string | undefined,
+  scopeHostIds: string[] | undefined,
+  activeTerminalSessionIds: Set<string>,
+  workspaceMemberTerminalIds?: Set<string>,
+  activeSessionIdMap?: Readonly<Record<string, string | null | undefined>>,
+): string | null {
+  const workspaceMemberActiveSessionIds = new Set<string>();
+  if (scopeType === 'workspace' && workspaceMemberTerminalIds && activeSessionIdMap) {
+    for (const terminalId of workspaceMemberTerminalIds) {
+      const sessionId = activeSessionIdMap[`terminal:${terminalId}`];
+      if (sessionId) workspaceMemberActiveSessionIds.add(sessionId);
+    }
+  }
+  for (const session of historySessions) {
+    const rank = getSessionScopeMatchRank(
+      session,
+      scopeType,
+      scopeTargetId,
+      scopeHostIds,
+      activeTerminalSessionIds,
+      workspaceMemberTerminalIds,
+      workspaceMemberActiveSessionIds,
+    );
+    if (rank >= 3) {
+      return session.id;
+    }
+  }
+  return null;
+}

@@ -64,7 +64,10 @@ import {
   isAIChatSessionStreaming,
   type DefaultTargetSessionHint,
 } from '../application/state/useAIChatStreaming';
-import { getScopedHistorySessions } from './ai/scopedHistorySessions';
+import {
+  getPreferredAutoResumeSessionId,
+  getScopedHistorySessions,
+} from './ai/scopedHistorySessions';
 import { buildAiChatsListingEntries, canRebindChat, formatAiChatsListingNote, resolveRebindTargetFromArg, type AiChatsListingEntry } from './ai/aiChatsListing';
 import { GlobalAIChatSessionManager } from './ai/GlobalAIChatSessionManager';
 import {
@@ -459,8 +462,22 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const workspaceAnchorChatId = scopeType === 'workspace'
     ? workspaces.find((workspace) => workspace.id === scopeTargetId)?.anchorChatId
     : undefined;
-  // getScopedHistorySessions orders by scope match first, recency second.
-  const preferredHistorySessionId = historySessions[0]?.id ?? null;
+  // Implicit workspace auto-resume only considers exact workspace or member-
+  // terminal matches (rank >= 3) so a workspace never silently re-opens a chat
+  // bound to another workspace (e.g. after rebinding its last chat away and
+  // restarting). Other-workspace chats remain manually selectable in history.
+  const preferredHistorySessionId = useMemo(
+    () => getPreferredAutoResumeSessionId(
+      historySessions,
+      scopeType,
+      scopeTargetId,
+      scopeHostIds,
+      activeTerminalSessionIds,
+      workspaceMemberTerminalIds,
+      activeSessionIdMap,
+    ),
+    [historySessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalSessionIds, workspaceMemberTerminalIds, activeSessionIdMap],
+  );
   const normalizedPanelView = useMemo<AIPanelView>(
     () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId, preferredHistorySessionId),
     [explicitPanelView, currentDraft, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId, preferredHistorySessionId],
