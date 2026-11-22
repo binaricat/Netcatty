@@ -7,6 +7,7 @@ const path = require('node:path');
 const http = require('node:http');
 const net = require('node:net');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 const { spawn, execFileSync } = require('node:child_process');
 const { chromium } = require('playwright-core');
 const pinned = require('./candidate.json');
@@ -187,7 +188,10 @@ async function startModel() {
   return { server, calls, port: server.address().port };
 }
 async function screenshot(name, target = page) {
-  if (target && !target.isClosed()) await target.screenshot({ path: path.join(staging, `${name}.png`), timeout: 10000 });
+  if (target && !target.isClosed()) {
+    const png = await target.screenshot({ path: path.join(staging, `${name}.png`), timeout: 10000 });
+    (report.screenshots ||= []).push({ name: `${name}.png`, bytes: png.length, width: png.readUInt32BE(16), height: png.readUInt32BE(20), sha256: crypto.createHash('sha256').update(png).digest('hex'), scope: 'Actual native application renderer' });
+  }
 }
 async function launch(label, expectedVersion) {
   assert(fs.existsSync(executable), 'Official installer must create Netcatty.exe');
@@ -302,8 +306,9 @@ async function saveHost() {
   await page.getByPlaceholder('IP or Hostname', { exact: true }).fill('127.0.0.1');
   await page.getByPlaceholder('Username', { exact: true }).fill('synthetic-qa');
   await page.locator('button[aria-label="Save"]').click();
-  await page.getByText(hostLabel, { exact: true }).first().waitFor();
   await until('GUI saved loopback host', async () => (await snapshot()).hosts?.some(h => h.label === hostLabel && (h.hostname === '127.0.0.1' || h.address === '127.0.0.1')));
+  await page.getByText(hostLabel, { exact: true }).filter({ visible: true }).first().waitFor();
+  event('Synthetic host saved through actual GUI');
 }
 async function aiPanel(restore = false) {
   if (!restore) {
@@ -426,7 +431,11 @@ async function finish() {
     if (report.error && browser) {
       for (const [index, target] of browser.contexts()[0].pages().entries()) {
         try { await screenshot(`failure-${index}`, target); } catch {}
-        try { fs.writeFileSync(path.join(evidence, `failure-${index}-visible-ui.txt`), await target.locator('body').innerText({ timeout: 3000 })); } catch {}
+        try {
+          const text = await target.locator('body').innerText({ timeout: 3000 });
+          fs.writeFileSync(path.join(evidence, `failure-${index}-visible-ui.txt`), text);
+          (report.failureVisibleUI ||= []).push({ page: index, text: text.slice(-14000) });
+        } catch {}
       }
     }
     if (report.error && app && !browser) report.nativeFailureDiagnostic = installerDiagnostic('application-launch-failure', app.pid);
