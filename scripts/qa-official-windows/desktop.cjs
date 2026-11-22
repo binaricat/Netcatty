@@ -286,7 +286,7 @@ async function saveHost() {
   await page.getByPlaceholder('Label (e.g., Production Server)', { exact: true }).fill(hostLabel);
   await page.getByPlaceholder('IP or Hostname', { exact: true }).fill('127.0.0.1');
   await page.getByPlaceholder('Username', { exact: true }).fill('synthetic-qa');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.locator('button[aria-label="Save"]').click();
   await page.getByText(hostLabel, { exact: true }).first().waitFor();
   await until('GUI saved loopback host', async () => (await snapshot()).hosts?.some(h => h.label === hostLabel && (h.hostname === '127.0.0.1' || h.address === '127.0.0.1')));
 }
