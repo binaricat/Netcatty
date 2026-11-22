@@ -1,0 +1,62 @@
+name: QA official Windows install and AI history
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/qa-official-windows.yml
+      - scripts/qa-official-windows/**
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: qa-official-windows-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  installed-windows-history:
+    if: >-
+      github.repository == 'binaricat/Netcatty' &&
+      github.event.pull_request.head.repo.full_name == 'binaricat/Netcatty' &&
+      github.event.pull_request.head.ref == 'qa/official-linux-a23868e' &&
+      github.event.pull_request.draft == true
+    runs-on: windows-2022
+    timeout-minutes: 18
+    env:
+      QA_ROOT: '${{ github.workspace }}\..\netcatty-windows-qa'
+      QA_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout only the authorized QA head without saved credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Node for QA harness
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.11.1'
+      - name: Install only QA dependencies without lifecycle scripts or browsers
+        run: npm ci --prefix scripts/qa-official-windows --ignore-scripts --no-audit --no-fund
+      - name: Verify released installer and exact official Windows artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/qa-official-windows/provenance.cjs
+      - name: Real installed GUI baseline, replacement, migration and restart
+        run: node scripts/qa-official-windows/desktop.cjs
+      - name: Record acceptance scope
+        if: always()
+        shell: pwsh
+        run: |
+          'Read assertions.json for individual outcomes, provenance.json for hashes, and actual native renderer PNGs. A failed launcher or harness is not a migration pass. The candidate has a 0.0.0-sha version; this is not released automatic-updater acceptance.' >> $env:GITHUB_STEP_SUMMARY
+          'Standard ephemeral windows-2022 runner, normal per-user official NSIS, synthetic data, same isolated profile and app origin, deterministic loopback model only; no security changes. Linux evidence remains in its earlier independent workflow.' >> $env:GITHUB_STEP_SUMMARY
+      - name: Upload reviewed assertions, installer logs and native renderer PNGs (3 days)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-windows-9d4e90b-${{ github.event.pull_request.head.sha }}
+          path: '${{ env.QA_ROOT }}\evidence\'
+          retention-days: 3
+          if-no-files-found: warn

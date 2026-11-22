@@ -1,0 +1,7 @@
+{
+  "name": "netcatty-official-windows-qa",
+  "private": true,
+  "version": "1.0.0",
+  "description": "QA-only native installed Windows application acceptance",
+  "dependencies": { "playwright-core": "1.56.1" }
+}
