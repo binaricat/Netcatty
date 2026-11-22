@@ -1,0 +1,17 @@
+{
+  "repository": "binaricat/Netcatty",
+  "repositoryId": 1111357457,
+  "sha": "9d4e90b3aa8fe0a52d1a58e8ea8e61bdd3865e28",
+  "run": 44903060405,
+  "buildJob": 136843406473,
+  "artifact": 14706977005,
+  "name": "netcatty-macos",
+  "archiveBytes": 594675248,
+  "zipSha256": "9c2484a19db5fc74d201bbe8dbdd11101a6a36360a99743a4fe2d90a48369ef1",
+  "version": "0.0.0-sha-9d4e90b",
+  "bundleId": "com.netcatty.app",
+  "dmgs": {
+    "arm64": "Netcatty-0.0.0-sha-9d4e90b-mac-arm64.dmg",
+    "x64": "Netcatty-0.0.0-sha-9d4e90b-mac-x64.dmg"
+  }
+}

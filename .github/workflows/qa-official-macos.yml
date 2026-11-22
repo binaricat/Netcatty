@@ -1,0 +1,74 @@
+name: QA official macOS native launch and SSH
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/qa-official-macos.yml
+      - scripts/qa-official-macos/**
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: qa-official-macos-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  official-macos-smoke:
+    if: >-
+      github.repository == 'binaricat/Netcatty' &&
+      github.event.pull_request.head.repo.full_name == 'binaricat/Netcatty' &&
+      github.event.pull_request.head.ref == 'qa/official-linux-a23868e' &&
+      github.event.pull_request.draft == true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    env:
+      QA_ROOT: '${{ github.workspace }}/.qa-macos-${{ matrix.arch }}'
+      QA_ARCH: ${{ matrix.arch }}
+      QA_RUNNER: ${{ matrix.runner }}
+      QA_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout exact authorized QA head without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Native Node for isolated QA harness
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.11.1'
+          architecture: ${{ matrix.arch }}
+      - name: Install only QA dependencies without lifecycle scripts or browsers
+        run: npm ci --prefix scripts/qa-official-macos --ignore-scripts --no-audit --no-fund
+      - name: Verify exact successful official push artifact and archive digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/qa-official-macos/provenance.cjs
+      - name: Verify DMG, copy read-only mounted app, require Developer ID and notarized Gatekeeper acceptance
+        run: node scripts/qa-official-macos/verify-install.cjs
+      - name: Actual native first launch and real GUI SSH roundtrip
+        run: node scripts/qa-official-macos/desktop.cjs
+      - name: Record exact scope
+        if: always()
+        run: |
+          echo 'Read provenance.json, verification.json and assertions.json individually. DMG integrity is separate from the inner APP signature/ticket/Gatekeeper result. OS blockers are failures, never bypassed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Exact official 9d4e90b candidate only, standard hosted native architecture, fresh synthetic profile, loopback SSH/DevTools. No Finder-quarantine, LAN, updater, personal-device or final merged revision coverage.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain per-architecture reviewed logs, assertions and actual native PNGs (3 days)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-macos-${{ matrix.arch }}-9d4e90b-${{ github.run_id }}
+          path: '${{ env.QA_ROOT }}/evidence/'
+          retention-days: 3
+          if-no-files-found: warn

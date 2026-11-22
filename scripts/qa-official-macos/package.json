@@ -1,0 +1,10 @@
+{
+  "name": "netcatty-official-macos-qa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "QA-only official macOS native launch and loopback SSH",
+  "dependencies": {
+    "playwright-core": "1.56.1",
+    "ssh2": "1.17.0"
+  }
+}
