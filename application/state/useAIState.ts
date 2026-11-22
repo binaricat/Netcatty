@@ -289,7 +289,8 @@ export function useAIState() {
         if (localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_SESSION_MAP) == null) {
           const mirrored = await readActiveSessionMapFromIdb();
           if (cancelled) return;
-          if (mirrored && Object.keys(mirrored).length > 0) {
+          if (mirrored && Object.keys(mirrored).length > 0
+            && localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_SESSION_MAP) == null) {
             localStorageAdapter.write(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, mirrored);
             setLatestAIActiveSessionMapSnapshot(mirrored);
             setActiveSessionIdMapRaw(mirrored);
@@ -463,10 +464,10 @@ export function useAIState() {
 
   useEffect(() => {
     setLatestAIActiveSessionMapSnapshot(activeSessionIdMap);
-    // Issue #4123: mirror the active-pointer map into the IndexedDB meta
-    // store (localStorage stays written at the mutation sites as before).
-    void mirrorActiveSessionMapToIdb(activeSessionIdMap);
-  }, [activeSessionIdMap]);
+    // Do not overwrite the IndexedDB fallback with the initial empty
+    // state before the boot effect has a chance to read it.
+    if (sessionsHydrated) void mirrorActiveSessionMapToIdb(activeSessionIdMap);
+  }, [activeSessionIdMap, sessionsHydrated]);
 
   useEffect(() => {
     setLatestAIDraftsByScopeSnapshot(draftsByScope);
@@ -513,22 +514,17 @@ export function useAIState() {
   }, [sessions, activeSessionIdMap, sessionsHydrated]);
 
   const setActiveSessionId = useCallback((scopeKey: string, id: string | null) => {
-    let nextActiveSessionIdMap: Record<string, string | null> | null = null;
+    // React can defer a functional updater. Persist the selection from
+    // the synchronous snapshot so batched selections cannot miss a write.
+    const current = latestAIActiveSessionMapSnapshot
+      ?? localStorageAdapter.read<Record<string, string | null>>(STORAGE_KEY_AI_ACTIVE_SESSION_MAP)
+      ?? {};
+    if (current[scopeKey] === id) return;
 
-    setActiveSessionIdMapRaw(prev => {
-      if (prev[scopeKey] === id) {
-        return prev;
-      }
-
-      const next = { ...prev, [scopeKey]: id };
-      nextActiveSessionIdMap = next;
-      return next;
-    });
-
-    if (!nextActiveSessionIdMap) return;
-
-    setLatestAIActiveSessionMapSnapshot(nextActiveSessionIdMap);
-    localStorageAdapter.write(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, nextActiveSessionIdMap);
+    const next = { ...current, [scopeKey]: id };
+    setLatestAIActiveSessionMapSnapshot(next);
+    localStorageAdapter.write(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, next);
+    setActiveSessionIdMapRaw(next);
     emitAIStateChanged(STORAGE_KEY_AI_ACTIVE_SESSION_MAP);
   }, []);
 
