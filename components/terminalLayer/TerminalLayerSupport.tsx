@@ -293,7 +293,7 @@ interface AIChatPanelsHostProps {
    * all tabs) — the global session manager's rebind targets and dangling
    * detection must include terminals whose tab has no mounted AI context.
    */
-  appTerminalSessions: AITerminalSessionInfo[];
+  appTerminalSessions?: AITerminalSessionInfo[];
   resolveExecutorContext: (scope: {
     type: 'terminal' | 'workspace';
     targetId?: string;
@@ -543,7 +543,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   const previousAiPanelWorkspacesRef = useRef<Array<{ id: string; title: string; anchorChatId?: string; hostIds?: string[] }> | null>(null);
   const aiPanelWorkspaces = useMemo(() => {
     const hostIdBySessionId = new Map<string, string>();
-    for (const info of appTerminalSessions) {
+    for (const info of appTerminalSessions ?? []) {
       if (info.sessionId && info.hostId) {
         hostIdBySessionId.set(info.sessionId, info.hostId);
       }
