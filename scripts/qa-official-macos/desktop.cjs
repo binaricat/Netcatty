@@ -20,6 +20,7 @@ const report = { candidate: pinned.sha, arch, qaHead: process.env.QA_HEAD_SHA, r
 const logs = [], images = new Map(), clients = new Set();
 let app, browser, page, inspector, server, watchdog, finishing;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+function stage(name) { report.stage = name; console.log(`QA_MAC_STAGE ${name}`); }
 async function until(label, check, timeout = 20000) {
   const end = Date.now() + timeout; let last;
   while (Date.now() < end) {
@@ -112,6 +113,7 @@ async function startSsh() {
   return server.address().port;
 }
 async function launch() {
+  stage('launch verified installed app executable');
   const debugPort = await freePort(), inspectPort = await freePort();
   app = spawn(executable, [`--user-data-dir=${profile}`, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${debugPort}`, `--inspect=127.0.0.1:${inspectPort}`], { cwd: path.dirname(executable), env: environment(), stdio: ['ignore', 'pipe', 'pipe'] });
   app.on('error', error => logs.push(error.stack));
@@ -121,6 +123,7 @@ async function launch() {
     return (await (await fetch(`http://127.0.0.1:${inspectPort}/json/list`, { signal: AbortSignal.timeout(1000) })).json())[0];
   }, 45000);
   inspector = new Inspector(target.webSocketDebuggerUrl); await inspector.connect();
+  stage('native inspector connected; await real GUI');
   await until('actual native renderer DOM ready', () => inspector.eval(async () => {
     const e = process.mainModule.require('electron'), w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html'));
     return !!w && !w.webContents.isLoadingMainFrame() && await w.webContents.executeJavaScript("!!document.querySelector('input[placeholder^=\"Find a host\"]')");
@@ -136,6 +139,7 @@ async function launch() {
   assert.equal(n.noSandbox, false); assert.equal(n.disableSetuidSandbox, false); assert.equal(n.preferences.contextIsolation, true); assert.equal(n.preferences.nodeIntegration, false); assert.equal(n.preferences.webSecurity, true);
   report.sandboxScope = `Unmodified stock renderer sandbox:${n.preferences.sandbox}; this is not full renderer-sandbox certification`;
   await capture('00-native-launch');
+  stage('native GUI identity and initial capture verified');
   for (const port of [debugPort, inspectPort]) {
     const output = execFileSync('/usr/sbin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8', timeout: 10000 });
     assert(!/\*:|0\.0\.0\.0:|\[::\]:/.test(output), 'Debugger must not listen publicly'); assert(/127\.0\.0\.1:|\[::1\]:/.test(output));
@@ -146,8 +150,10 @@ async function launch() {
   await page.getByPlaceholder(/^Find a host/).waitFor();
   report.firstLaunch = 'passed: actual installed official native GUI, fresh synthetic profile, stock protections';
   await capture('01-first-launch');
+  stage('first GUI launch passed');
 }
 async function ssh(port) {
+  stage('normal GUI quick-connect to owned loopback SSH');
   report.ssh = 'incomplete';
   await page.getByPlaceholder(/^Find a host/).fill(`ssh -p ${port} fixture@127.0.0.1`);
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
@@ -160,6 +166,7 @@ async function ssh(port) {
   await page.getByText('Confirm this host key', { exact: false }).first().waitFor();
   await page.getByRole('button', { name: 'Add and continue', exact: true }).click();
   await until('actual authenticated SSH shell', () => report.fixtureEvents.some(e => e.kind === 'shell'));
+  stage('real authenticated SSH shell accepted by fixture');
   await until('actual xterm input mounted', () => page.evaluate(() => [...document.querySelectorAll('.xterm-helper-textarea')].some(e => e.closest('.xterm')?.getBoundingClientRect().width > 0)));
   await capture('02-real-ssh-connected');
   report.inputFocus = await page.evaluate(() => { const e = [...document.querySelectorAll('.xterm-helper-textarea')].find(e => e.closest('.xterm')?.getBoundingClientRect().width > 0); e.focus(); return { focused: document.activeElement === e, tag: document.activeElement.tagName }; });
@@ -176,12 +183,19 @@ async function ssh(port) {
   });
   report.ssh = 'passed: encrypted SSH authentication + PTY/shell, server unique-command receipt, explicit server acknowledgement in production live terminal buffer';
   report.tabId = tabId; await sleep(150); await capture('03-real-ssh-roundtrip');
+  stage('real SSH roundtrip passed');
 }
 async function quit() {
+  if (inspector) {
+    try { if (app?.exitCode === null && app?.signalCode === null) await inspector.eval("setImmediate(() => process.mainModule.require('electron').app.quit()); true"); }
+    finally { inspector.close(); inspector = null; }
+  }
   if (!app || app.exitCode !== null || app.signalCode !== null) return;
-  if (inspector) { try { await inspector.eval("setImmediate(() => process.mainModule.require('electron').app.quit()); true"); } finally { inspector.close(); inspector = null; } }
-  const exited = await new Promise(resolve => { const timer = setTimeout(() => resolve(false), 15000); app.once('exit', () => { clearTimeout(timer); resolve(true); }); });
-  if (!exited) { report.cleanupWarning = 'App did not finish normal quit within 15 seconds'; app.kill('SIGTERM'); }
+  const exited = await new Promise(resolve => { const timer = setTimeout(() => resolve(false), 10000); app.once('exit', () => { clearTimeout(timer); resolve(true); }); });
+  if (!exited && app.exitCode === null && app.signalCode === null) {
+    report.cleanupWarning = 'Normal quit exceeded 10 seconds; terminate only the owned ephemeral QA app'; app.kill('SIGTERM'); await sleep(1500);
+    if (app.exitCode === null && app.signalCode === null) app.kill('SIGKILL');
+  }
 }
 function save() {
   const output = logs.join('');
@@ -201,7 +215,12 @@ async function finish() {
     for (const client of clients) client.end();
     if (server) { server.close(); await sleep(200); }
     try { await quit(); } catch (error) { report.cleanupWarning = error.message; app?.kill('SIGTERM'); }
-    save(); console.log(JSON.stringify(report, null, 2));
+    for (const client of clients) client._sock?.destroy(); // Owned fixture teardown only, after SSH assertions.
+    if (browser) await Promise.race([browser.close().catch(() => {}), sleep(2000)]);
+    report.applicationExit = app && { pid: app.pid, code: app.exitCode, signal: app.signalCode };
+    save();
+    if (report.stderrReview.startsWith('passed')) console.log('Reviewed actual application output:\n' + logs.join(''));
+    await new Promise(resolve => process.stdout.write(JSON.stringify(report, null, 2) + '\n', resolve));
   })();
   return finishing;
 }
@@ -212,4 +231,6 @@ async function main() {
   watchdog = setTimeout(() => { report.error = 'Native scenario exceeded 240 seconds'; process.exitCode = 1; finish().finally(() => process.exit(1)); }, 240000);
   const port = await startSsh(); await launch(); await ssh(port);
 }
-main().catch(error => { report.error = error.stack; process.exitCode = 1; }).finally(finish);
+main().catch(error => { report.error = error.stack; process.exitCode = 1; }).then(async () => {
+  await finish(); process.exit(process.exitCode || 0); // Do not let stale automation transports keep a finished QA step alive.
+}).catch(error => { console.error(error.stack); process.exit(1); });
