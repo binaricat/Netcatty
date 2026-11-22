@@ -92,19 +92,52 @@ export function getPaneMagnificationShortcutLabel(
   return (hotkeyScheme === 'mac' ? binding?.mac : binding?.pc)?.replace(/ \+ /g, '+') ?? '';
 }
 
+export function resolveMagnifiedChromeBorderWidth(devicePixelRatio = 1): number {
+  return devicePixelRatio > 0 && devicePixelRatio < 1.5 ? 2 : 1;
+}
+
+export function snapCssRectToDevicePixels(
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+  devicePixelRatio = 1,
+): { left: number; top: number; width: number; height: number } {
+  const dpr = devicePixelRatio > 0 ? devicePixelRatio : 1;
+  const snap = (value: number) => Math.round(value * dpr) / dpr;
+  const snappedLeft = snap(left);
+  const snappedTop = snap(top);
+  const snappedRight = snap(right);
+  const snappedBottom = snap(bottom);
+  return {
+    left: snappedLeft,
+    top: snappedTop,
+    width: Math.max(0, snappedRight - snappedLeft),
+    height: Math.max(0, snappedBottom - snappedTop),
+  };
+}
+
 export function resolvePaneMagnificationStyle(
   original: React.CSSProperties,
   magnified: boolean,
   surfaceBounds?: { left: number; top: number; width: number; height: number } | null,
+  devicePixelRatio = 1,
 ): React.CSSProperties {
   if (!magnified) return original;
   if (surfaceBounds) {
+    const snapped = snapCssRectToDevicePixels(
+      surfaceBounds.left + 12,
+      surfaceBounds.top + 12,
+      surfaceBounds.left + surfaceBounds.width - 12,
+      surfaceBounds.top + surfaceBounds.height - 12,
+      devicePixelRatio,
+    );
     return {
       position: 'fixed',
-      left: `${surfaceBounds.left + 12}px`,
-      top: `${surfaceBounds.top + 12}px`,
-      width: `${Math.max(0, surfaceBounds.width - 24)}px`,
-      height: `${Math.max(0, surfaceBounds.height - 24)}px`,
+      left: `${snapped.left}px`,
+      top: `${snapped.top}px`,
+      width: `${snapped.width}px`,
+      height: `${snapped.height}px`,
       zIndex: 50,
     };
   }

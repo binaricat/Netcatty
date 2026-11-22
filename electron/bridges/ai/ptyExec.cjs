@@ -27,6 +27,7 @@ const {
   stripAnsi,
 } = require("./ptyExecHelpers.cjs");
 const { extractTrailingIdlePrompt } = require("./shellUtils.cjs");
+const { READINESS_UNKNOWN, SHELL_READINESS_UNKNOWN_MESSAGE } = require("./shellReadinessState.cjs");
 const { getSessionSnapshot } = require("../terminalInterruptDiagnostics.cjs");
 const { createJobStartupDiag } = require("./jobStartupDiagnostics.cjs");
 
@@ -70,6 +71,7 @@ function startPtyJob(ptyStream, command, options) {
     sessionId = null,
     diagnosticsSession = null,
     getReadyPrompt,
+    classifyReadiness,
     beforeInput,
     promptWaitTimeoutMs = 30000,
     typedInput = false,
@@ -84,6 +86,30 @@ function startPtyJob(ptyStream, command, options) {
   let waitingForPrompt = typeof getReadyPrompt === "function";
   let readinessFailureCode = null;
   let waitingForInputGuard = typeof beforeInput === "function";
+
+  // #4195: an empty prompt at the bounded wait deadline is resolved into a
+  // PROVEN-busy hard block (unchanged) or an honest, actionable `unknown`.
+  // A missing/ambiguous classifier always fails closed to busy, so #4110's
+  // false-ready guards and legacy callers without classifyReadiness keep the
+  // exact SHELL_NOT_READY behavior. `unknown` NEVER sends the queued command.
+  function resolveUnreadyOutcome() {
+    if (typeof classifyReadiness !== "function") return "busy";
+    try {
+      return classifyReadiness() === "unknown" ? "unknown" : "busy";
+    } catch {
+      return "busy";
+    }
+  }
+
+  function finishUnready(busyMessage) {
+    if (resolveUnreadyOutcome() === "unknown") {
+      readinessFailureCode = READINESS_UNKNOWN;
+      finish("", -1, SHELL_READINESS_UNKNOWN_MESSAGE);
+    } else {
+      readinessFailureCode = "SHELL_NOT_READY";
+      finish("", -1, busyMessage);
+    }
+  }
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
   let resolvedShellKind = resolveEffectiveShellKind(shellKind, expectedPrompt, {
@@ -203,10 +229,12 @@ function startPtyJob(ptyStream, command, options) {
     wallTimeoutId = setTimeout(() => {
       if (finished) return;
       if (waitingForPrompt || waitingForInputGuard) {
-        readinessFailureCode = waitingForPrompt ? "SHELL_NOT_READY" : "EXECUTION_NOT_AUTHORIZED";
-        finish("", -1, waitingForPrompt
-          ? "Shell prompt is not ready; no command was sent"
-          : "Execution authorization timed out; no command was sent");
+        if (waitingForPrompt) {
+          finishUnready("Shell prompt is not ready; no command was sent");
+        } else {
+          readinessFailureCode = "EXECUTION_NOT_AUTHORIZED";
+          finish("", -1, "Execution authorization timed out; no command was sent");
+        }
         return;
       }
       if (pendingEnd) {
@@ -1017,8 +1045,10 @@ function startPtyJob(ptyStream, command, options) {
         return;
       }
       if (Date.now() >= deadline) {
-        readinessFailureCode = "SHELL_NOT_READY";
-        finish("", -1, "Shell prompt is not ready (startup, busy program, pending input, or unrecognized prompt); no command was sent");
+        // Same bounded 30s budget, unchanged. Only the *verdict* differs:
+        // proven-busy stays a hard block; an unrecognized prompt on a live
+        // shell becomes an honest, non-terminal, actionable `unknown`.
+        finishUnready("Shell prompt is not ready (startup, busy program, pending input, or unrecognized prompt); no command was sent");
         return;
       }
       readinessTimer = setTimeout(checkReady, Math.min(50, deadline - Date.now()));
@@ -1062,6 +1092,7 @@ function startPtyJob(ptyStream, command, options) {
  * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
  * @param {string} [options.expectedPrompt] - Last observed idle prompt for exact fallback matching
  * @param {() => string} [options.getReadyPrompt] - Read current prompt; wait without writing until non-empty
+ * @param {() => "busy"|"unknown"} [options.classifyReadiness] - At the bounded wait deadline, classify an empty prompt as PROVEN busy (hard SHELL_NOT_READY) or an honest actionable `unknown` (SHELL_READINESS_UNKNOWN). Absent/ambiguous ⇒ busy (fail closed). Never sends the command for `unknown`.
  * @param {function} [options.beforeInput] - Revalidate authorization before the first PTY byte (may return a promise)
  * @param {number} [options.promptWaitTimeoutMs=30000] - Bounded pre-input wait (maximum 30 seconds)
  * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution

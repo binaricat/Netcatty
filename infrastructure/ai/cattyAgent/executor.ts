@@ -29,6 +29,7 @@ export interface NetcattyBridge {
     stderr?: string;
     exitCode?: number;
     error?: string;
+    code?: string;
   }>;
   /**
    * Cancel any in-flight Catty Agent command execution scoped to the
@@ -71,6 +72,13 @@ export interface ExecutorContext {
 /** Convert a shared ToolExecResult into the executor's ToolResult format. */
 function toToolResult(toolCallId: string, r: ToolExecResult): ToolResult {
   if (r.ok === false) {
+    // #4195: an unrecognized prompt on a live shell is an actionable,
+    // non-terminal state, not a fatal tool error. The exec gate already refused
+    // to send the command; surface the honest + viable-path hint as a normal
+    // tool result (no isError) so the agent inspects / re-checks / confirms.
+    if (r.code === 'SHELL_READINESS_UNKNOWN') {
+      return { toolCallId, content: r.error };
+    }
     if (
       typeof r.data === 'object'
       && r.data !== null

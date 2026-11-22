@@ -1913,6 +1913,16 @@ function createSessionBackedSftpClient(sessionId, sshClient, options = {}) {
       const attrs = await statAsync(sftp, remotePath);
       return statResultFromAttrs(attrs);
     },
+    async lstat(remotePath) {
+      const sftp = await requireSftpChannel(client);
+      // Copy preflights must inspect link nodes, never their followed targets.
+      // lstatAsync falls back to STAT when LSTAT is absent, so reject first.
+      if (typeof sftp.lstat !== "function") {
+        throw Object.assign(new Error("Remote server does not support LSTAT"), { code: "ENOTSUP" });
+      }
+      const attrs = await lstatAsync(sftp, remotePath);
+      return statResultFromAttrs(attrs);
+    },
     async realPath(remotePath) {
       const sftp = await requireSftpChannel(client);
       return await realpathAsync(sftp, remotePath);
@@ -2527,6 +2537,7 @@ const {
   lstatSftp,
   chmodSftp,
   extractSftpArchive,
+  createSftpArchive,
   getSftpHomeDir,
 } = fileOpsApi;
 
@@ -2723,6 +2734,7 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:sftp:lstat",
       "netcatty:sftp:chmod",
       "netcatty:sftp:extract",
+      "netcatty:sftp:createArchive",
       "netcatty:sftp:homeDir",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel, ownership));
     return;
@@ -2746,6 +2758,7 @@ function registerHandlers(ipcMain, options = {}) {
     ["netcatty:sftp:lstat", lstatSftp],
     ["netcatty:sftp:chmod", chmodSftp],
     ["netcatty:sftp:extract", extractSftpArchive],
+    ["netcatty:sftp:createArchive", createSftpArchive],
     ["netcatty:sftp:homeDir", getSftpHomeDir],
   ].forEach(([channel, handler]) => registerActivityHandle(ipcMain, channel, handler, ownership));
 }
@@ -2794,6 +2807,7 @@ module.exports = {
   lstatSftp,
   chmodSftp,
   extractSftpArchive,
+  createSftpArchive,
   getSftpHomeDir,
   resolveEncodingForRequest,
   _tryFastShellDirectoryDeleteForTests: tryFastShellDirectoryDelete,

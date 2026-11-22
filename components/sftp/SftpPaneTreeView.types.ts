@@ -18,12 +18,14 @@ export interface SftpPaneTreeViewProps {
   openRenameDialog: (entryPath: string) => void;
   openDeleteConfirm: (targets: string[]) => void;
   onCopyToOtherPane: (files: SftpTransferSource[]) => void;
+  onDuplicateEntries?: (files: SftpTransferSource[]) => void;
   onReceiveFromOtherPane: (files: SftpTransferSource[]) => void;
   onOpenFileWithSystemDefault?: (entry: SftpFileEntry, fullPath?: string) => void;
   onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;
   onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onExtractArchive?: (entry: SftpFileEntry, fullPath?: string) => void | Promise<void>;
+  onCreateArchive?: (sourcePaths: string[]) => void;
   onEditPermissions?: (entry: SftpFileEntry, fullPath?: string) => void;
   draggedFiles: (SftpTransferSource & { side: 'left' | 'right' })[] | null;
   openNewFolderDialog: (targetPath: string) => void;

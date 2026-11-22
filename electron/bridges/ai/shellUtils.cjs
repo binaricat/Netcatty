@@ -50,11 +50,12 @@ function formatSyntheticEcho(command) {
 }
 
 // Default PowerShell prompt (e.g. `PS C:\Users\alice>`, `PS>`,
-// `PS /home/alice>`). Anchored so command output that merely starts with
-// `PS` (e.g. `PSO>`) doesn't match. The `\S` after `\s+` rejects literal
+// `PS /home/alice>`), with optional Enter-PSSession / remoting `[host]: `
+// and debug `[DBG]: ` prefixes. Anchored so command output that merely
+// starts with `PS` (e.g. `PSO>`) doesn't match. The `\S` after `\s+` rejects literal
 // `"PS >"` (which the default prompt never emits) so a script that prints
 // such a line can't trick prompt-driven shell-kind selection.
-const POWERSHELL_PROMPT_PATTERN = /^PS(?:\s+\S.*)?>$/;
+const POWERSHELL_PROMPT_PATTERN = /^(?:\[[^\]\r\n]+\]: )*PS(?:\s+\S.*)?>$/;
 
 // Default cmd.exe prompt (e.g. `C:\>`, `C:\Users\alice>`, `D:\data>`).
 // Drive letter + optional path + `>`. Rejects `C: >` (space before `>`) and
@@ -69,12 +70,17 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 //     the final `]` before `$`/`#` is the delimiter.
 const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\n\r]+)?\])[#$]$/;
 
+// Bracket PS1 without @host, with bash `\t` time: `[\u \t \w]$` -> `[root 12:04:23 ~]$` (#4276).
+// Require HH:MM:SS so loose `[word]$` output cannot count as idle.
+const BRACKET_TIME_POSIX_PROMPT_PATTERN = /^\[[^\s@\]]+\s+\d{2}:\d{2}:\d{2}(?:\s+[^\n\r\]]+)?\][#$]$/;
+
+// Space-separated bash PS1 `\u@\h \w $ ` renders as `user@host ~ $`.
 // macOS ships zsh with `%n@%m %1~ %#`, which renders as
 // `user@host ~ %` / `user@host My Project %`; privileged shells end in `#`.
 // Allow spaces in the path, but keep prompt delimiters excluded so a prompt
 // followed by input (`user@host ~ % echo %`) cannot count as idle. Requiring
 // whitespace before the marker also rejects output such as `user@host 100%`.
-const ZSH_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+ [^\s%#$][^%#$\r\n]* [%#]$/;
+const ZSH_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+ [^\s%#$][^%#$\r\n]* [#$%]$/;
 
 // SteamOS/Deck-style prompt: `(user@host path)$`. Allow markers and balanced
 // single-level parentheses in the path, but not an early closing delimiter:
@@ -135,6 +141,7 @@ function isDefaultPosixPromptLine(line) {
   const withoutEnvPrefix = normalized.replace(/^\([^()\n\r]+\)\s+/, "");
   return (
     POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    BRACKET_TIME_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     PAREN_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ALPINE_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ZSH_PROMPT_PATTERN.test(withoutEnvPrefix) ||

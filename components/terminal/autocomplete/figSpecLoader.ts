@@ -154,6 +154,7 @@ export const COMMON_FIG_SPECS = [
   "systemctl", "journalctl", "apt", "yum", "dnf", "brew",
   "vim", "nano", "less", "head", "tail", "sort",
   "awk", "sed", "chmod", "chown", "cp", "mv", "rm", "mkdir",
+  "ln", "stat", "wc", "cut", "uniq", "tee", "xargs",
 ] as const;
 
 /**

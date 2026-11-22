@@ -45,6 +45,7 @@ export type SessionSnapshotActions = Pick<
   | 'resetWorkspaceRename'
   | 'removeSessionFromWorkspace'
   | 'setWorkspaceFocusedSession'
+  | 'setWorkspaceAnchorChat'
   | 'toggleWorkspaceViewMode'
   // Terminal / chrome mutators previously read only via App session runtime.
   | 'createLocalTerminal'
@@ -56,6 +57,7 @@ export type SessionSnapshotActions = Pick<
   | 'createWorkspaceWithHosts'
   | 'createWorkspaceFromSessions'
   | 'addSessionToWorkspace'
+  | 'moveWorkspacePane'
   | 'appendHostToWorkspace'
   | 'appendHostToWorkspaceConfirmed'
   | 'appendLocalTerminalToWorkspace'

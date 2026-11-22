@@ -109,8 +109,10 @@ export interface AIChatSidePanelProps {
   scopeLabel?: string;
   /** Workspace focused pane; preferred when inheriting AI chat after merge. */
   focusedSessionId?: string;
-  /** Live workspaces, used to resolve workspace titles for `/chats` and member host IDs for explicit workspace rebinds. */
-  workspaces?: Array<{ id: string; title: string; hostIds?: string[] }>;
+  /** Issue #4098 phase 2: pin the AI chat a workspace scope is anchored to. */
+  onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void;
+  /** Live workspaces (with their anchor chat and member host IDs), used for scope titles, anchor resolution, and explicit workspace rebinds. */
+  workspaces?: Array<{ id: string; title: string; anchorChatId?: string; hostIds?: string[] }>;
   /** All currently live terminal (and workspace) scope target ids. */
   liveScopeTargetIds?: Set<string>;
   /** App-wide open terminal infos (all tabs), for the global session manager's rebind targets and dangling detection. */

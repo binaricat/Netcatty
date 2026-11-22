@@ -127,6 +127,8 @@ export interface SendToCattyContext {
 }
 
 export interface SendToExternalContext {
+  scopeType?: 'terminal' | 'workspace' | 'global';
+  scopeTargetId?: string;
   existingSessionId?: string;
   updateExternalSessionId?: (sessionId: string, externalSessionId: string | undefined) => void;
   historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;

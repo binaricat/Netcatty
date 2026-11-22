@@ -377,7 +377,7 @@ test('move-focus shortcut cannot send input behind a magnified pane', () => {
   assert.equal(moveCalls, 0);
 });
 
-test('Escape restores magnification after transient dialogs are closed', () => {
+test('Escape leaves magnification unchanged and reaches the terminal', () => {
   let restores = 0;
   let prevented = false;
   let stopped = false;
@@ -405,30 +405,29 @@ test('Escape restores magnification after transient dialogs are closed', () => {
     },
   }), event);
 
-  assert.equal(restores, 1);
-  assert.equal(prevented, true);
-  assert.equal(stopped, true);
+  assert.equal(restores, 0);
+  assert.equal(prevented, false);
+  assert.equal(stopped, false);
 });
 
-test('consumed Escape does not restore magnification', () => {
-  let restores = 0;
+test('Escape closes the quick switcher', () => {
+  let open = true;
   handleEscapeKeyDownImpl(() => ({
-    isQuickSwitcherOpen: false,
-    setIsQuickSwitcherOpen: () => {},
-    terminalPaneMagnificationRef: {
-      current: {
-        getState: () => 'focused',
-        focus: () => false,
-        restore: () => {
-          restores += 1;
-          return true;
-        },
-        toggle: () => false,
-      },
-    },
+    isQuickSwitcherOpen: open,
+    setIsQuickSwitcherOpen: (value: boolean) => { open = value; },
+  }), { key: 'Escape', defaultPrevented: false } as KeyboardEvent);
+
+  assert.equal(open, false);
+});
+
+test('consumed Escape leaves the quick switcher open', () => {
+  let open = true;
+  handleEscapeKeyDownImpl(() => ({
+    isQuickSwitcherOpen: open,
+    setIsQuickSwitcherOpen: (value: boolean) => { open = value; },
   }), { key: 'Escape', defaultPrevented: true } as KeyboardEvent);
 
-  assert.equal(restores, 0);
+  assert.equal(open, true);
 });
 
 test('close tab hotkey routes native plugin view tabs through their owner', () => {

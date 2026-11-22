@@ -264,7 +264,7 @@ function AppViewInner({ domains }: AppViewProps) {
   useMainWindowInputFocusRecovery({ onPageHidden: dismissTransientOverlays });
 
   const {
-    addShellHistoryEntry, clearAllCommandHistory, removeShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace,
+    addShellHistoryEntry, clearAllCommandHistory, removeShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace, moveWorkspacePane,
     clearAndRemoveSource, clearAndRemoveSources, closeLogView, closeSession, closeTabsBatch, closeWorkspace, commitPluginImporterData, commitVaultImportTransaction, commitVaultGroupMutation, copySessionToNewWindowWithCurrentShell, copySessionWithCurrentShell, duplicateSessionWithCurrentShell, copyWorkspaceWithCurrentShell,
     convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts,
     customGroups, currentTerminalTheme, deepLinkHostDraft, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict,
@@ -279,7 +279,7 @@ function AppViewInner({ domains }: AppViewProps) {
     resolveEmptyVaultConflict, resolveSessionAppearance, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
     sessions, setActiveTabId, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap,
     setNavigateToSection, setTerminalFontFamilyId, setTerminalFontSize, setVaultFocusRequest, updateSessionFontSize, updateSessionRestoreCwd, updateSessionDynamicTitle, updateSessionCodingCliProvider, clearSessionFontSizeOverride,
-    setWorkspaceFocusedSession, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior,
+    setWorkspaceFocusedSession, setWorkspaceAnchorChat, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior,
     sftpShowHiddenFiles, sftpUseCompressedUpload, snippetPackages, snippets, splitSessionWithCurrentShell, startSessionRename,
     startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById,
     toggleBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, terminalPaneMagnificationRef, sftpPaneMagnificationRef, toggleWorkspaceViewMode, unmanageSource,
@@ -774,12 +774,14 @@ function AppViewInner({ domains }: AppViewProps) {
           onTerminalDataCapture={handleTerminalDataCapture}
           onCreateWorkspaceFromSessions={createWorkspaceFromSessions}
           onAddSessionToWorkspace={addSessionToWorkspace}
+          onMoveWorkspacePane={moveWorkspacePane}
           onRequestAddToWorkspace={handleRequestAddToWorkspace}
           onAppendHostToWorkspace={handleAppendHostToWorkspace}
           onUpdateSplitSizes={updateSplitSizes}
           onSetDraggingSessionId={setDraggingSessionId}
           onToggleWorkspaceViewMode={toggleWorkspaceViewMode}
           onSetWorkspaceFocusedSession={setWorkspaceFocusedSession}
+          onSetWorkspaceAnchorChat={setWorkspaceAnchorChat}
           onReorderWorkspaceSessions={reorderWorkspaceSessions}
           onReorderTabs={reorderWorkTabs}
           onCopySession={copySessionWithCurrentShell}

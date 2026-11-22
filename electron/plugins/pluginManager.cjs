@@ -76,6 +76,7 @@ class PluginManager {
           enable: options?.enable,
           catalog: options?.catalog,
           source: options?.source,
+          expectedPackage: options?.expectedPackage,
           beforeActivate: async ({ pluginId, previousPlugin }) => {
             options?.sourceGuard?.();
             if (!previousPlugin?.enabled) return;

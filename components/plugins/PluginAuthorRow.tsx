@@ -16,8 +16,8 @@ export function PluginAuthorRow({ entry, plugin, sourceId, showSource = false }:
   const showImage = avatar && avatar.length <= 700_000 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(avatar) && failed !== imageKey;
   const source = plugin?.source;
   const sourceKey = source?.kind === 'third-party' ? 'thirdparty' : source?.kind === 'official' || source?.kind === 'local' ? source.kind : undefined;
-  const sourceLabel = t(sourceKey ? `settings.plugins.sources.short.${sourceKey}` : 'settings.plugins.landing.sourceUnknown');
-  const sourceDescription = sourceKey
+  const sourceLabel = source?.kind === 'github' ? 'GitHub' : t(sourceKey ? `settings.plugins.sources.short.${sourceKey}` : 'settings.plugins.landing.sourceUnknown');
+  const sourceDescription = source?.kind === 'github' ? [source.origin, source.tag, source.commit].filter(Boolean).join(' · ') : sourceKey
     ? [t(`settings.plugins.sources.${sourceKey}`), source?.name, source?.origin].filter(Boolean).join(' · ')
     : sourceLabel;
   const SourceIcon = source?.kind === 'local' ? HardDrive : source?.kind === 'official' ? Store : Globe;

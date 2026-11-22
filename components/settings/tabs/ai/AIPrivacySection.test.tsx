@@ -70,11 +70,13 @@ test('rejected privacy draft stays open and accepted draft commits once and retu
     accepted = true;
     await input(1, 'INTERNAL_[A-Z0-9]+');
     await click('Apply');
+    // Radix restores focus on a later frame; flush it before asserting.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     const saved = JSON.parse(dom.window.localStorage.getItem(STORAGE_KEY_AI_PRIVACY)!);
     assert.deepEqual(saved, { enabled: true, redactPrivateIps: false, cidrs: ['192.0.2.0/24', '2001:db8::/32'], patterns: ['INTERNAL_[A-Z0-9]+'] });
     assert.deepEqual(calls[1], { redaction: saved });
     assert.equal(document.querySelector('[role="dialog"]'), null);
-    assert.equal(document.activeElement, trigger);
+    assert.ok(document.activeElement === trigger, "focus returns to the dialog opener");
     assert.match(document.querySelector('[role="status"]')!.textContent!, /new managed conversation/);
     await click('Configure privacy');
     assert.equal(document.querySelectorAll('textarea')[1].value, 'INTERNAL_[A-Z0-9]+');

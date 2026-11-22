@@ -7,6 +7,19 @@ const fs = require("node:fs");
 const { stageRendererFileToTemp } = require("./stageUploadFile.cjs");
 
 function createPreloadApi(ctx) {
+  const sessionLogFinalizers = new Set();
+  let pendingSessionLogFinalization = null;
+  ctx.ipcRenderer?.on?.("app:finalize-session-logs", async (_event, { requestId }) => {
+    const pending = pendingSessionLogFinalization ??= Promise.allSettled(
+      [...sessionLogFinalizers].map((finalize) => Promise.resolve().then(finalize)),
+    );
+    const results = await pending;
+    if (pendingSessionLogFinalization === pending) pendingSessionLogFinalization = null;
+    ctx.ipcRenderer.send("app:session-logs-finalized", {
+      requestId,
+      success: results.every((result) => result.status === "fulfilled"),
+    });
+  });
   const terminalDataBacklog = ctx.terminalDataBacklog || null;
   const displayDataListeners = ctx.displayDataListeners || new Map();
   const closedTerminalDataSessions = ctx.closedTerminalDataSessions || null;
@@ -147,6 +160,9 @@ function createPreloadApi(ctx) {
   },
   getPluginPermissions: (pluginId) => ipcRenderer.invoke("netcatty:plugins:permissions", { pluginId }),
   revokePluginPermissions: (pluginId) => ipcRenderer.invoke("netcatty:plugins:revoke-permissions", { pluginId }),
+  prepareGitHubPlugin: (repository) => ipcRenderer.invoke("netcatty:plugins:github-prepare", { repository }),
+  installGitHubPlugin: (token) => ipcRenderer.invoke("netcatty:plugins:github-install", { token }),
+  discardGitHubPlugin: (token) => ipcRenderer.invoke("netcatty:plugins:github-discard", { token }),
   installPluginPackage: (archivePath, options) => ipcRenderer.invoke("netcatty:plugins:install", {
     archivePath,
     enable: options?.enable === true,
@@ -1010,6 +1026,9 @@ function createPreloadApi(ctx) {
   extractSftpArchive: async (sftpId, path, encoding) => {
     return ipcRenderer.invoke("netcatty:sftp:extract", { sftpId, path, encoding });
   },
+  createSftpArchive: async (sftpId, options, encoding) => {
+    return ipcRenderer.invoke("netcatty:sftp:createArchive", { sftpId, options, encoding });
+  },
   getSftpHomeDir: async (sftpId, encoding) => {
     return ipcRenderer.invoke("netcatty:sftp:homeDir", { sftpId, encoding });
   },
@@ -1538,6 +1557,10 @@ function createPreloadApi(ctx) {
   reportDirtyEditorsResult: (hasDirty, reason, options) => ipcRenderer.send("app:dirty-editors-result", {
     hasDirty, reason, requestId: options?.requestId, pending: options?.pending === true,
   }),
+  onFinalizeSessionLogs: (finalize) => {
+    sessionLogFinalizers.add(finalize);
+    return () => sessionLogFinalizers.delete(finalize);
+  },
   
   // Port Forwarding API
   startPortForward: async (options) => {

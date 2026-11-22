@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const esAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': 'Se alcanzó el límite del bucle de herramientas ({limit} iteraciones). Puedes continuar en este chat. Las tareas de terminal en ejecución no se detienen.',
+  'ai.chat.continue': 'Continuar',
   'ai.chat.attachmentContentUnavailable': 'Contenido no disponible en este dispositivo',
   // AI Settings
   'ai.agentSettings': 'Configuración del agente',
@@ -333,6 +335,7 @@ export const esAiMessages: Messages = {
   'ai.defaultAgent': 'Agente predeterminado',
   'ai.defaultAgent.description': 'Agente que se usará al iniciar una nueva sesión de IA',
   'ai.defaultAgent.catty': 'Catty (Integrado)',
+  'ai.defaultAgent.unavailable': 'No disponible',
   'ai.toolAccess.title': 'Acceso a herramientas',
   'ai.toolAccess.mode': 'Modo de acceso de Netcatty',
   'ai.toolAccess.description': 'Elige cómo acceden los agentes externos a las sesiones de Netcatty. MCP expone el servidor integrado, mientras que Habilidades + CLI apunta a los agentes hacia las habilidades locales de Netcatty y los comandos de CLI.',
@@ -736,6 +739,8 @@ export const esAiMessages: Messages = {
 
   // Unified tooltips for terminal workspace and top tabs (issue #954)
   'terminal.layer.addTerminal': 'Agregar terminal',
+  'terminal.layer.emptyWorkspace': 'No hay terminales en este espacio de trabajo',
+  'terminal.layer.emptyWorkspaceHint': 'Agrega un terminal local o conecta un host para comenzar.',
   'terminal.layer.switchToSplitView': 'Cambiar a vista dividida',
   'terminal.layer.sftp': 'SFTP',
   'terminal.layer.scripts': 'Scripts',

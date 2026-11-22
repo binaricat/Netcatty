@@ -362,6 +362,7 @@ const WORKSPACE_CTX_KEYS = [
   'setDropHint',
   'computeSplitHint',
   'handleWorkspaceDrop',
+  'onRequestAddToWorkspace',
   'sessions',
   'sessionHostsMap',
   'sftpAuthHostBySessionId',
@@ -421,6 +422,7 @@ const WORKSPACE_CTX_KEYS = [
   'handleCommandExecuted',
   'handleCommandSubmitted',
   'onSetWorkspaceFocusedSession',
+  'onSetWorkspaceAnchorChat',
   'onSplitSession',
   'isBroadcastEnabled',
   'isComposeSendToAll',
@@ -450,6 +452,7 @@ const WORKSPACE_CTX_KEYS = [
   'onReorderTabs',
   'onStartSessionDrag',
   'onEndSessionDrag',
+  'onDropWorkspacePane',
   'isGlobalBroadcastEnabled',
   'isGlobalComposeSendToAll',
   'canUseGlobalBroadcast',
@@ -532,6 +535,7 @@ export function terminalLayerFocusSidebarPropsEqual(prev: Ctx, next: Ctx): boole
     && eq(prev, next, 'onCopySessionToNewWindow')
     && eq(prev, next, 'onRemoveSessionFromWorkspace')
     && eq(prev, next, 'onSetWorkspaceFocusedSession')
+    && eq(prev, next, 'onSetWorkspaceAnchorChat')
     && eq(prev, next, 'onToggleWorkspaceViewMode')
     && eq(prev, next, 'onSubmitSessionRename');
 }

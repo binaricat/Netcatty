@@ -86,10 +86,13 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "vault.host.get": {
     hostId: { type: "string", description: "Vault host ID." },
   },
-  "vault.host.list": {},
+  "vault.host.list": {
+    query: { type: "string", optional: true, description: "Optional case-insensitive search text. Every space-separated word must match the label, hostname, username, or tags. Does not search group." },
+    group: { type: "string", optional: true, description: "Optional group path (e.g. prod). Includes subgroups: prod matches prod/web but not production. Case-sensitive." },
+  },
   "vault.host.open": {
     hostId: { type: "string", description: "Vault host ID to open. Use vault_hosts_list / host_get to resolve id from label or hostname." },
-    workspaceId: { type: "string", optional: true, description: "Target workspace ID or current (active workspace). Applies to newly opened sessions; reused sessions retain their placement. Omit for a standalone tab." },
+    workspaceId: { type: "string", optional: true, description: "Target workspace ID. Omit to open into the invoking chat's bound workspace (workspace chat → that workspace; terminal chat → that terminal's workspace); unbound chats get a standalone tab. 'current' means the chat's bound workspace, or the active workspace when unbound. Applies to newly opened sessions; reused sessions retain their placement." },
     newTab: { type: "string", optional: true, description: "true or false. Force a brand-new tab even when a session for this host already exists. Default false — reuse the existing session." },
   },
   "vault.hosts.create": {
@@ -418,7 +421,7 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "session.environment":
     "Call this first for any task involving a live Netcatty terminal, remote server, SSH session, SFTP path, or terminal tab. Select the target by label or hostname, then pass its sessionId to terminal and SFTP tools. Call it again after the user opens, closes, or renames a session.",
   "terminal.execute":
-    "Use this instead of the local shell when the command is intended for a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd).",
+    "Use this instead of the local shell when the command is intended for a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd). If the shell prompt cannot be recognized while the connection is alive and no busy signal is present, the command is NOT sent and the tool returns SHELL_READINESS_UNKNOWN (a recoverable, non-terminal result, not a failed command): do not blind-type into a possible password prompt — inspect the terminal read-only with get_environment or terminal_read_context, re-check readiness after the user presses Enter, reuse another idle session, or ask the user to confirm the prompt before retrying.",
   "terminal.start":
     "Use this instead of the local shell for long-running commands on a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes. Shell state such as cd or export does not persist between calls — combine cd with the command.",
   "terminal.poll":
@@ -430,7 +433,7 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "vault.host.open":
     "Reuse-first: if this hostId already has a connected or connecting session with matching connection settings (including one auto-reconnecting after a drop, which keeps the same sessionId), that sessionId is returned and no new tab is opened — retry terminal_execute against it rather than reopening the host. Open a new tab only when get_environment shows no session for the host, when the task truly needs a parallel connection, or with newTab true. Call session_close when finished only for a newly opened session (reused is not true). A reused session keeps its original owner; do not close it as task cleanup. Disconnected or restored tabs needing user action are not reused. Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
   "vault.host.list":
-    "Use when the user names a saved Netcatty host but get_environment has no matching live session. Resolve the hostId here, call host_open, then call get_environment to obtain the new sessionId.",
+    "Use when the user names a saved Netcatty host but get_environment has no matching live session. Resolve the hostId here, call host_open, then call get_environment to obtain the new sessionId. Use query with the host name the user gave, or group, to narrow the list instead of returning every host.",
   "vault.host.import":
     "Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, FinalShell JSON, ssh_config). If attached host text is unknown or auto-detection fails, use read_attachment content, extract fields yourself, and call vault_hosts_create.",
   "vault.hosts.create":

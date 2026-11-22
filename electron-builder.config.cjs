@@ -69,6 +69,7 @@ module.exports = {
         // fail-closed prompt classifier at runtime.
         'domain/terminalPromptSecurity.shared.cjs',
         'domain/pluginRuntimePolicy.cjs',
+        'domain/pluginGitHubRepository.cjs',
         'domain/pluginPermissionDescriptions.cjs',
         'domain/pluginThemePack.cjs',
         'domain/pluginRemoteTreePolicy.cjs',
@@ -83,6 +84,7 @@ module.exports = {
         // is excluded below, so the shared TOTP runtime must be listed.
         'domain/totp.shared.cjs',
         'domain/totpPrompt.shared.cjs',
+        'domain/sshPublicKey.shared.cjs',
         'lib/**/*.cjs',
         'lib/**/*.json',
         'skills/**/*',

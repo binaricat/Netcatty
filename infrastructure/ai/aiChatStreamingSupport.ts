@@ -98,29 +98,42 @@ export function formatToolErrorContent(error: unknown, fallback = 'Tool executio
   return JSON.stringify({ error: fallback });
 }
 
+// Non-terminal readiness verdict surfaced by the terminal.execute gate
+// (#4195/#4198). Kept in sync with READINESS_UNKNOWN in
+// electron/bridges/ai/shellReadinessState.cjs and SHELL_READINESS_UNKNOWN_CODE
+// in electron/capabilities/codegen/mcpToolRegistry.cjs. The active Catty SDK
+// path (capabilityTools.ts -> agentEventAdapter.ts -> AgentRuntime) preserves
+// this `code` on the result so every error classifier can honour it.
+export const SHELL_READINESS_UNKNOWN_CODE = 'SHELL_READINESS_UNKNOWN';
+
 /** Detect tool results that represent errors/denials (e.g. `{ error: "..." }` or `{ ok: false }`) */
 export function isToolResultError(output: unknown): boolean {
   if (output == null) return false;
-  
+
   if (typeof output === 'object') {
     const obj = output as Record<string, unknown>;
+    // #4198: an unrecognized prompt on a live shell is an actionable,
+    // non-terminal state. Even if an `error` field is present, never flag it
+    // as a fatal tool error / session blocker.
+    if (obj.code === SHELL_READINESS_UNKNOWN_CODE) return false;
     // Check for explicit error objects
     if ('error' in obj && typeof obj.error === 'string') return true;
     if ('ok' in obj && obj.ok === false) return true;
   }
-  
+
   // Check stringified JSON (common for tool result wrapping)
   if (typeof output === 'string') {
     try {
       const parsed = JSON.parse(output);
       if (parsed && typeof parsed === 'object') {
         const parsedObj = parsed as Record<string, unknown>;
+        if (parsedObj.code === SHELL_READINESS_UNKNOWN_CODE) return false;
         if ('error' in parsedObj && typeof parsedObj.error === 'string') return true;
         if ('ok' in parsedObj && parsedObj.ok === false) return true;
       }
     } catch { /* not JSON, not an error */ }
   }
-  
+
   return false;
 }
 

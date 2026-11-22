@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const enAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': 'Tool-loop limit ({limit} iterations) reached. You can continue in this chat. Running terminal jobs are not stopped.',
+  'ai.chat.continue': 'Continue',
   'ai.chat.attachmentContentUnavailable': 'Content not available on this device',
   // AI Settings
   'ai.agentSettings': 'Agent Settings',
@@ -333,6 +335,7 @@ export const enAiMessages: Messages = {
   'ai.defaultAgent': 'Default Agent',
   'ai.defaultAgent.description': 'Agent to use when starting a new AI session',
   'ai.defaultAgent.catty': 'Catty (Built-in)',
+  'ai.defaultAgent.unavailable': 'Unavailable',
   'ai.toolAccess.title': 'Tool Access',
   'ai.toolAccess.mode': 'Netcatty Access Mode',
   'ai.toolAccess.description': 'Choose how external agents access Netcatty sessions. MCP exposes the built-in server, while Skills + CLI points agents to the local Netcatty skill and CLI commands.',
@@ -736,6 +739,8 @@ export const enAiMessages: Messages = {
 
   // Unified tooltips for terminal workspace and top tabs (issue #954)
   'terminal.layer.addTerminal': 'Add Terminal',
+  'terminal.layer.emptyWorkspace': 'No terminals in this workspace',
+  'terminal.layer.emptyWorkspaceHint': 'Add a local terminal or connect to a host to get started.',
   'terminal.layer.switchToSplitView': 'Switch to Split View',
   'terminal.layer.sftp': 'SFTP',
   'terminal.layer.scripts': 'Scripts',

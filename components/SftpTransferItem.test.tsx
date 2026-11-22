@@ -206,6 +206,23 @@ test("surfaces pause unavailable reason on a transferring row", () => {
   assert.match(markup, /This transfer cannot be paused yet/);
 });
 
+test("shows a settled folder pause failure with retry and resume instead of a spinner", () => {
+  const markup = renderTransferItem({
+    ...baseTask,
+    isDirectory: true,
+    status: "pausing",
+    error: undefined,
+    speed: 0,
+    resumable: true,
+    pauseUnavailableReason: "This transfer cannot be paused yet",
+  }, { onPause: () => {}, onResume: () => {} });
+
+  assert.match(markup, /This transfer cannot be paused yet/);
+  assert.match(markup, /aria-label="Pause: archive\.tar\.gz"/);
+  assert.match(markup, /aria-label="Resume: archive\.tar\.gz"/);
+  assert.doesNotMatch(markup, /aria-busy="true"|aria-label="Pausing:/);
+});
+
 test("renders child resize handle as a keyboard-reachable separator", () => {
   const markup = renderTransferItem(
     {

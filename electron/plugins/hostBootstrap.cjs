@@ -1,6 +1,12 @@
 "use strict";
 
+const { isPluginDevelopmentEnabled } = require("./constants.cjs");
+
 function startPluginHost(options) {
+  // The plugin platform is not shipping in this release. Keep its data
+  // untouched and allow existing developer workflows to opt in as before.
+  if (!isPluginDevelopmentEnabled(options.env)) return null;
+
   const reportFailure = (message, error) => {
     try { options.logger?.error?.(message, error); } catch {}
   };

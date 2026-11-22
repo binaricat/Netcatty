@@ -541,3 +541,98 @@ test("late pause acknowledgement cannot restart a cancelling stream before settl
   await pause;
   assert.equal(resumes, 0);
 });
+
+for (const rejected of [false, true]) {
+  test(`folder pause retains successful children without claiming failed children paused: rejected=${rejected}`, async (t) => {
+    t.after(resetTransferPauseLatchesForTests);
+    let fail = true;
+    let resumes = 0;
+    const id = `partial-folder-${rejected}`;
+    const { host, getTasks } = createHost([
+      { ...makeTask(id), isDirectory: true },
+      { ...makeTask(`${id}-ok`), parentTaskId: id },
+      { ...makeTask(`${id}-bad`), parentTaskId: id },
+    ], () => ({
+      pauseTransfer: async (childId) => {
+        if (fail && childId.endsWith('-bad')) {
+          if (rejected) throw new Error('pause IPC unavailable');
+          return { success: false, reason: 'This transfer cannot be paused safely' };
+        }
+        return { success: true, checkpointBytes: 10 };
+      },
+      resumeTransfer: async () => { resumes++; return { success: true }; },
+    }));
+    await softPauseTransfer(host, id);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(getTasks()[0].status, 'pausing');
+    assert.match(getTasks()[0].pauseUnavailableReason || '', /pause/i);
+    assert.equal(getTasks()[1].status, 'paused');
+    assert.equal(getTasks()[2].status, 'transferring');
+    assert.equal(isTransferPauseLatched(id), true);
+    assert.equal(resumes, 0, 'failed pause must not resume successful siblings');
+    fail = false;
+    await softPauseTransfer(host, id);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.ok(getTasks().every(row => row.status === 'paused'));
+    assert.equal(getTasks()[0].pauseUnavailableReason, undefined);
+  });
+}
+
+test('folder pause does not claim success while acknowledgements are pending or retry budget expires', async (t) => {
+  t.after(resetTransferPauseLatchesForTests);
+  const id = 'slow-start-folder';
+  let calls = 0;
+  const { host, getTasks } = createHost([
+    { ...makeTask(id), isDirectory: true },
+    { ...makeTask(`${id}-child`), parentTaskId: id },
+  ], () => ({ pauseTransfer: async () => {
+    calls++;
+    return { success: false, reason: 'This transfer cannot be paused yet' };
+  } }));
+  assert.equal(await softPauseTransfer(host, id), 'pausing');
+  assert.equal(getTasks()[0].status, 'pausing');
+  // Wait for the bounded startup retry budget (four 40ms delays).
+  await new Promise(resolve => setTimeout(resolve, 220));
+  assert.equal(calls, 5);
+  assert.equal(getTasks()[0].status, 'pausing');
+  assert.match(getTasks()[0].pauseUnavailableReason || '', /cannot be paused yet/);
+  assert.equal(getTasks()[1].status, 'transferring');
+});
+
+test('explicit resume after partial folder pause releases successful siblings and walk latch', async (t) => {
+  t.after(resetTransferPauseLatchesForTests);
+  const id = 'resume-partial-folder';
+  const resumed: string[] = [];
+  const { host, getTasks } = createHost([
+    { ...makeTask(id), isDirectory: true },
+    { ...makeTask(`${id}-ok`), parentTaskId: id },
+    { ...makeTask(`${id}-bad`), parentTaskId: id },
+  ], () => ({
+    pauseTransfer: async childId => childId.endsWith('-ok')
+      ? { success: true } : { success: false, reason: 'Pause rejected' },
+    resumeTransfer: async childId => { resumed.push(childId); return { success: true }; },
+  }));
+  await softPauseTransfer(host, id);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal((await softResumeTransfer(host, id)).handled, true);
+  assert.equal(isTransferPauseLatched(id), false);
+  assert.ok(getTasks().every(row => row.status === 'transferring'));
+  assert.deepEqual(resumed.sort(), [`${id}-bad`, `${id}-ok`]);
+});
+
+test('child completion during a rejected folder pause does not leave a false failure', async (t) => {
+  t.after(resetTransferPauseLatchesForTests);
+  const id = 'completed-during-folder-pause';
+  let finish!: (result: { success: boolean; reason: string }) => void;
+  const { host, getTasks } = createHost([
+    { ...makeTask(id), isDirectory: true },
+    { ...makeTask(`${id}-child`), parentTaskId: id },
+  ], () => ({ pauseTransfer: () => new Promise(resolve => { finish = resolve; }) }));
+  await softPauseTransfer(host, id);
+  host.setTasks(getTasks().map(row => row.parentTaskId ? { ...row, status: 'completed' } : row));
+  finish({ success: false, reason: 'Pause rejected' });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(getTasks()[0].status, 'paused');
+  assert.equal(getTasks()[0].pauseUnavailableReason, undefined);
+  assert.equal(getTasks()[1].status, 'completed');
+});

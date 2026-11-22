@@ -40,6 +40,7 @@ const CUSTOM_CSS_HELP_PROSE_CLASS =
   "text-xs text-foreground/90 leading-relaxed [&>*:first-child]:mt-0 [&>*:last-child]:mb-0";
 
 function SettingsAppearanceTab(props: {
+  pluginRuntimeAvailable: boolean;
   theme: "dark" | "light" | "system";
   resolvedTheme: "dark" | "light";
   setTheme: (theme: "dark" | "light" | "system") => void;
@@ -366,7 +367,9 @@ function SettingsAppearanceTab(props: {
             {renderThemeSwatches(visibleUiThemes, visibleUiThemeId, setVisibleUiThemeId)}
           </div>
         </SettingsAnchor>
-        <PluginThemePicker mode={resolvedTheme} onRestore={() => (resolvedTheme === "dark" ? setDarkUiThemeId : setLightUiThemeId)(resolvedTheme === "dark" ? "midnight" : "snow")} />
+        {props.pluginRuntimeAvailable && (
+          <PluginThemePicker mode={resolvedTheme} onRestore={() => (resolvedTheme === "dark" ? setDarkUiThemeId : setLightUiThemeId)(resolvedTheme === "dark" ? "midnight" : "snow")} />
+        )}
         {pluginThemeError && <p role="alert" className="text-xs text-destructive">{pluginThemeError}</p>}
         <SettingRow
           anchorId="appearance-accent-mode"

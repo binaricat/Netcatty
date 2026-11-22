@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const zhCNAiMessages: Messages = {
+  'ai.chat.iterationLimitReached': '已达到工具循环上限（{limit} 次迭代）。你可以在此对话中继续，正在运行的终端任务不会停止。',
+  'ai.chat.continue': '继续',
   'ai.chat.attachmentContentUnavailable': '附件内容未保留在此设备',
   // AI Settings
   'ai.agentSettings': 'Agent 设置',
@@ -333,6 +335,7 @@ export const zhCNAiMessages: Messages = {
   'ai.defaultAgent': '默认 Agent',
   'ai.defaultAgent.description': '创建新 AI 会话时使用的 Agent',
   'ai.defaultAgent.catty': 'Catty（内置）',
+  'ai.defaultAgent.unavailable': '暂不可用',
   'ai.toolAccess.title': '工具接入',
   'ai.toolAccess.mode': 'Netcatty 接入模式',
   'ai.toolAccess.description': '选择外部 Agent 访问 Netcatty 会话的方式。MCP 会暴露内置服务器，Skills + CLI 会引导 Agent 读取本地 Skill 并调用 Netcatty CLI。',
@@ -736,6 +739,8 @@ export const zhCNAiMessages: Messages = {
 
   // 统一终端工作区和顶部标签的 tooltip 文案 (issue #954)
   'terminal.layer.addTerminal': '添加终端',
+  'terminal.layer.emptyWorkspace': '工作区中还没有终端',
+  'terminal.layer.emptyWorkspaceHint': '添加本地终端或连接主机，开始使用这个工作区。',
   'terminal.layer.switchToSplitView': '切换到分屏视图',
   'terminal.layer.sftp': '文件传输',
   'terminal.layer.scripts': '脚本',

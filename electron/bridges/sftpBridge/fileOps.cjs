@@ -1076,6 +1076,40 @@ function createFileOpsApi(ctx) {
       return true;
     }
 
+    /** Create a remote archive with an explicit, non-destructive publish step. */
+    async function createSftpArchive(_event, payload) {
+      const client = sftpClients.get(payload?.sftpId);
+      if (!client) throw new Error("SFTP session not found");
+      if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
+        const error = new Error(
+          "This host is configured for single-channel SSH. Creating an archive requires a shell channel, which this file-transfer login cannot open.",
+        );
+        error.code = "ERR_SFTP_SINGLE_CHANNEL_EXEC";
+        throw error;
+      }
+      if (!client.client || typeof client.client.exec !== "function" || typeof execRemoteShellCommand !== "function") {
+        throw new Error("SSH exec unavailable");
+      }
+      const {
+        buildCreateArchiveCommand,
+        parseCreateArchiveResult,
+        CREATE_ARCHIVE_OPEN_TIMEOUT_MS,
+        CREATE_ARCHIVE_RUN_TIMEOUT_MS,
+        CREATE_ARCHIVE_MAX_OUTPUT_BYTES,
+      } = require("./archiveCreate.cjs");
+      const encoding = resolveEncodingForRequest(payload.sftpId, payload.encoding);
+      const command = buildCreateArchiveCommand(payload.options, { encoding });
+      const signal = payload?.abortSignal || null;
+      throwIfAborted(signal);
+      const result = await execRemoteShellCommand(client.client, command, {
+        signal,
+        openingTimeoutMs: CREATE_ARCHIVE_OPEN_TIMEOUT_MS,
+        runTimeoutMs: CREATE_ARCHIVE_RUN_TIMEOUT_MS,
+        maxOutputBytes: CREATE_ARCHIVE_MAX_OUTPUT_BYTES,
+      });
+      return parseCreateArchiveResult(result.stdout);
+    }
+
     /**
      * Extract a remote archive into its parent directory via SSH exec.
      */
@@ -1279,6 +1313,7 @@ function createFileOpsApi(ctx) {
       lstatSftp,
       chmodSftp,
       extractSftpArchive,
+      createSftpArchive,
       getSftpHomeDir,
     };
   }

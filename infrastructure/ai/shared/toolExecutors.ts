@@ -19,7 +19,7 @@ import { executeWebSearchProvider } from './webSearchProviders';
 /** Discriminated union returned by every shared executor. */
 export type ToolExecResult<T = unknown> =
   | { ok: true; data: T }
-  | { ok: false; error: string; data?: T };
+  | { ok: false; error: string; data?: T; code?: string };
 
 // ---------------------------------------------------------------------------
 // Dependencies bundle
@@ -99,11 +99,14 @@ export async function executeTerminalExecute(
   }
 
   const result = await bridge.aiExec(sessionId, command, deps.chatSessionId);
-  // Real execution failures (timeout, disconnect, no stream) have an `error` field
+  // Real execution failures (timeout, disconnect, no stream) have an `error` field.
+  // Propagate `code` so consumers can distinguish an actionable, non-terminal
+  // SHELL_READINESS_UNKNOWN from a fatal error (#4195).
   if (!result.ok && result.error) {
     return {
       ok: false,
       error: result.error,
+      code: result.code,
       data: {
         stdout: result.stdout || '',
         stderr: result.stderr || '',

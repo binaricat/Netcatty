@@ -69,3 +69,16 @@ test('a failing source leaves other fresh source results intact and missing APIs
   assert.equal(result.failedSources, 1); assert.equal(result.checked, 1); assert.equal(result.skipped, 1); assert.equal(result.updates[0].sourceId, official.id);
   await assert.rejects(checkPluginUpdates({}), /unavailable/);
 });
+
+test('GitHub repository bindings remain skipped by registry update checks', async () => {
+  const github: NetcattyPluginSource = { id: 'github:synthetic', kind: 'github', name: 'owner/repo', origin: 'https://github.com/owner/repo', tag: 'v1.0.0', commit: 'a'.repeat(40) };
+  const installed = [plugin('com.example.github', '1.0.0', github)];
+  const result = await checkPluginUpdates({
+    async listPlugins() { return installed; },
+    async listPluginSources() { return [github]; },
+    async listPluginCatalog() { throw new Error('A repository is not a registry'); },
+  });
+  assert.equal(result.checked, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(result.failedSources, 0);
+});

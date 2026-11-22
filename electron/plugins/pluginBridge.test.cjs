@@ -53,6 +53,7 @@ test("disabled plugin runtime keeps passive host integration channels quiet", as
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.terminalProviders)({}, {}), []);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.terminalSessionEvent)({}, {}), []);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.extensionProviders)({}, {}), []);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.themeCatalog)({}), null);
   assert.equal(await ipcMain.handlers.get(CHANNELS.credentialCatalogUpdate)({}, { entries: [] }), 0);
   assert.equal(await ipcMain.handlers.get(CHANNELS.setScopeCatalog)({}, {}), null);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.getScopeCatalog)({}, {}), {
@@ -1768,4 +1769,18 @@ test("policy edits require trusted UI and the exact source/version/policy revisi
   assert.equal(await edit({ trusted: true }, { ...payload, policyRevision: engine.getPolicyRevision(plugin) }), true);
   assert.equal(mode, "allow");
   engine.shutdown();
+});
+
+test("GitHub management IPC rejects untrusted senders before initialization or retrieval", async () => {
+  let initialized = 0;
+  const ipcMain = createIpcMain();
+  registerPluginBridge(ipcMain, {
+    manager: { initialize: async () => { initialized++; } },
+    isTrustedSender: () => false,
+  });
+  for (const channel of [CHANNELS.githubPrepare, CHANNELS.githubInstall, CHANNELS.githubDiscard]) {
+    assert.equal(typeof ipcMain.handlers.get(channel), 'function');
+    await assert.rejects(ipcMain.handlers.get(channel)({ sender: {} }, { repository: 'owner/repo', token: 'unknown' }), /Untrusted plugin management sender/);
+  }
+  assert.equal(initialized, 0);
 });

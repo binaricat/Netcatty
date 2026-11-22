@@ -50,6 +50,7 @@ import {
   tryBeginSendForKey,
 } from './ai/draftSendGate';
 import { draftsByScopeEqualIgnoringComposerText, selectDraftForAgentSwitch } from '../application/state/aiDraftState';
+import { latestAIActiveSessionMapSnapshot, latestAISessionsSnapshot } from '../application/state/aiStateSnapshots';
 import { sanitizeContextWindow } from '../infrastructure/ai/contextCompaction';
 import {
   buildPromptWithTerminalSelectionAttachments,
@@ -322,6 +323,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   scopeHostIds,
   scopeLabel,
   focusedSessionId,
+  onSetWorkspaceAnchorChat,
   workspaces = [],
   terminalSessions = [],
   appTerminalSessions,
@@ -451,9 +453,16 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     preferredTerminalId: focusedSessionId,
     visibleSessionIds: visibleHistorySessionIds,
   });
+  // Issue #4098 phase 2: this workspace's anchored chat — used by the panel
+  // view resolver before any positional fallback could apply.
+  const workspaceAnchorChatId = scopeType === 'workspace'
+    ? workspaces.find((workspace) => workspace.id === scopeTargetId)?.anchorChatId
+    : undefined;
+  // getScopedHistorySessions orders by scope match first, recency second.
+  const preferredHistorySessionId = historySessions[0]?.id ?? null;
   const normalizedPanelView = useMemo<AIPanelView>(
-    () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId, scopeType),
-    [explicitPanelView, currentDraft, historySessions, persistedSessionId, scopeType],
+    () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId, preferredHistorySessionId),
+    [explicitPanelView, currentDraft, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId, preferredHistorySessionId],
   );
   const activeSession = useMemo(
     () => resolveDisplayedSession(normalizedPanelView, historySessions),
@@ -677,6 +686,21 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }, { initialDelayMs: 250 });
   }, [isVisible, terminalSessions, activeSessionId]);
 
+  // Workspace maintenance can retarget an inherited chat earlier in this same
+  // passive-effect flush. Before clearing a selection, recheck its membership
+  // against the synchronous snapshot instead of this render's old history.
+  const isSessionVisibleInCurrentScope = useCallback((sessionId: string) => (
+    getScopedHistorySessions(
+      latestAISessionsSnapshot ?? sessions,
+      scopeType,
+      scopeTargetId,
+      scopeHostIds,
+      activeTerminalSessionIds,
+      workspaceMemberTerminalIds,
+      latestAIActiveSessionMapSnapshot ?? activeSessionIdMap,
+    ).some((session) => session.id === sessionId)
+  ), [sessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalSessionIds, workspaceMemberTerminalIds, activeSessionIdMap]);
+
   useEffect(() => {
     if (!isVisible) return;
     // Predicate must match normalizePanelView's list (scoped history), not the
@@ -684,15 +708,22 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     if (!shouldForceDraftViewSync(
       explicitPanelView,
       normalizedPanelView,
-      (sessionId) => historySessions.some((session) => session.id === sessionId),
+      isSessionVisibleInCurrentScope,
     )) {
       return;
     }
     showDraftView(scopeKey);
-  }, [isVisible, normalizedPanelView, explicitPanelView, scopeKey, historySessions, showDraftView]);
+  }, [isVisible, normalizedPanelView, explicitPanelView, scopeKey, isSessionVisibleInCurrentScope, showDraftView]);
 
   useEffect(() => {
     if (!activeSession) return;
+
+    // Issue #4098 phase 2: a chat becoming active in the workspace scope pins
+    // the workspace's anchorChatId so member loss / restart resolve by id,
+    // never by position.
+    if (scopeType === 'workspace' && scopeTargetId && isVisible) {
+      onSetWorkspaceAnchorChat?.(scopeTargetId, activeSession.id);
+    }
 
     if (isVisible && activeSessionIdMap[scopeKey] !== activeSession.id) {
       setActiveSessionId(activeSession.id);
@@ -701,18 +732,24 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     activeSession,
     activeSessionIdMap,
     scopeKey,
+    scopeType,
+    scopeTargetId,
     isVisible,
+    onSetWorkspaceAnchorChat,
     setActiveSessionId,
   ]);
 
   useEffect(() => {
     if (!isVisible) return;
     if (normalizedPanelView.mode !== 'draft') return;
-    // Keep ownership while an explicit session is still displayable in this
-    // scope (normalize has not demoted it). Out-of-scope / missing ids clear.
+    // Keep a selection that maintenance just made displayable, but always
+    // honor an explicit New Chat draft. Out-of-scope / missing ids still clear.
+    const selectedSessionId = explicitPanelView?.mode === 'session'
+      ? explicitPanelView.sessionId : persistedSessionId;
     if (
-      explicitPanelView?.mode === 'session'
-      && historySessions.some((session) => session.id === explicitPanelView.sessionId)
+      explicitPanelView?.mode !== 'draft'
+      && selectedSessionId
+      && isSessionVisibleInCurrentScope(selectedSessionId)
     ) {
       return;
     }
@@ -722,7 +759,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     isVisible,
     normalizedPanelView.mode,
     explicitPanelView,
-    historySessions,
+    isSessionVisibleInCurrentScope,
     persistedSessionId,
     setActiveSessionId,
   ]);
@@ -1609,14 +1646,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   }, [currentAgentId, enterScopeDraftMode, updateScopeDraft]);
 
 
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(async (textOverride?: string) => {
     const draft = currentDraftRef.current;
     const currentPanelView = panelViewRef.current;
     const currentSessionView = activeSessionRef.current;
-    if (!validateNoteMentions(draft?.attachments ?? [])) return;
-    const trimmed = draft?.text.trim() ?? '';
+    if (textOverride === undefined && !validateNoteMentions(draft?.attachments ?? [])) return;
+    const trimmed = (textOverride ?? draft?.text ?? '').trim();
     const sendScopeKey = scopeKey;
-    const attachments = (draft?.attachments ?? []).map((file) => ({
+    const attachments = (textOverride === undefined ? draft?.attachments ?? [] : []).map((file) => ({
       base64Data: file.base64Data,
       mediaType: file.mediaType,
       filename: file.filename,
@@ -1644,12 +1681,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const agentConfig = sendAgentId !== 'catty' ? findEnabledExternalAgent(externalAgents, sendAgentId) : undefined;
     if (sendAgentId !== 'catty' && !agentConfig) return;
 
-    const selectedSkillSlugs = draft?.selectedUserSkillSlugs ?? [];
+    const selectedSkillSlugs = textOverride === undefined ? draft?.selectedUserSkillSlugs ?? [] : [];
     const modelPrompt = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
     const modelAttachments = attachments.filter((attachment) => !isInlineTextAttachment(attachment));
     const isDraftMode = currentPanelView.mode === 'draft';
 
-    flushDraftText();
+    if (textOverride === undefined) flushDraftText();
     const submittedText = draft?.text ?? '';
     const keepPendingAfterSend = () => {
       const pending = pendingComposerTextRef.current;
@@ -1738,7 +1775,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         const createdSession = createSession(scope, sendAgentId);
         sessionId = createdSession.id;
         currentSession = createdSession;
-        clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+        if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
         showScopeSessionView(createdSession.id);
         setActiveSessionId(createdSession.id);
         sessionSendGateKey = sessionId;
@@ -1769,7 +1806,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProvider'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {
-          clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+          if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
           showScopeSessionView(sessionId);
         }
         return;
@@ -1784,7 +1821,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProviderModel'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {
-          clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+          if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
           showScopeSessionView(sessionId);
         }
         return;
@@ -1797,7 +1834,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         ...(selectedSkillSlugs.length > 0 ? { selectedUserSkillSlugs: selectedSkillSlugs } : {}),
         timestamp: Date.now(),
       });
-      clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+      if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
       showScopeSessionView(sessionId);
       setActiveSessionId(sessionId);
       setStreamingForScope(sessionId, true);
@@ -1824,6 +1861,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         try {
           const existingExternalSessionId = currentSession?.externalSessionId;
           await sendToExternalAgent(sessionId, assistantMsgId, modelPrompt, agentConfig, abortController, modelAttachments, {
+            scopeType,
+            scopeTargetId,
             existingSessionId: existingExternalSessionId,
             updateExternalSessionId: updateSessionExternalSessionId,
             historyMessages: buildExternalAgentHistoryMessagesForBridge(currentSession?.messages ?? [], existingExternalSessionId),

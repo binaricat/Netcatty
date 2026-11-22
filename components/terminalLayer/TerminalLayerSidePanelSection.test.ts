@@ -359,3 +359,29 @@ test('available-width observer releases a removed focus sidebar immediately', ()
   assert.match(sectionSource, /if \(observedFocusSidebar\) resizeObserver\.unobserve\(observedFocusSidebar\)/);
   assert.match(sectionSource, /observedFocusSidebar = null/);
 });
+
+test('side panel close button stays visible at every panel width', () => {
+  const sectionSource = readFileSync(new URL('./TerminalLayerSidePanelSection.tsx', import.meta.url), 'utf8');
+
+  // The toolbar close button is the panel's only dismiss control and the
+  // rightmost item of the nowrap toolbar row. Closing is a core function, so
+  // it must never be a flex-shrink victim and must never carry responsive
+  // hiding classes; secondary toolbar actions yield first instead.
+  const closeLabelIndex = sectionSource.indexOf("t('terminal.layer.closePanel')");
+  assert.ok(closeLabelIndex > 0, 'close button tooltip label is rendered');
+  const closeSlice = sectionSource.slice(Math.max(0, closeLabelIndex - 600), closeLabelIndex);
+  assert.match(closeSlice, /onClick=\{handleCloseSidePanel\}/);
+  assert.match(closeSlice, /className="h-7 w-7 shrink-0 rounded-md p-0 hover:bg-transparent"/);
+  assert.doesNotMatch(closeSlice, /\bhidden\b|max-(sm|md|lg|xl):/);
+});
+
+test('magnified side-panel chrome thickens the accent stroke on low-DPR displays', () => {
+  const source = readFileSync(new URL('./TerminalLayerSidePanelSection.tsx', import.meta.url), 'utf8');
+  const overlay = source.slice(
+    source.indexOf('data-section="pane-magnification-overlay"'),
+    source.indexOf('data-section="pane-magnification-content"'),
+  );
+  assert.match(overlay, /overflow-hidden rounded-md border bg-background shadow-2xl/);
+  assert.match(overlay, /borderColor: sidePanelTheme\.accent,/);
+  assert.match(overlay, /resolveMagnifiedChromeBorderWidth\(/);
+});

@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentEventListener } from './types';
-import { resolveStreamChunkToolCallId } from '../aiChatStreamingSupport';
+import { resolveStreamChunkToolCallId, SHELL_READINESS_UNKNOWN_CODE } from '../aiChatStreamingSupport';
 
 let eventCounter = 0;
 
@@ -40,12 +40,18 @@ function isToolResultError(output: unknown): boolean {
   if (output == null) return false;
   if (typeof output === 'object') {
     const obj = output as Record<string, unknown>;
+    // #4198 (round 2): an unrecognized prompt on a live shell is an actionable,
+    // non-terminal state. Honour the preserved `code` so this result is never
+    // emitted as `isError: true` (which AgentRuntime stores as an open-session
+    // blocker), even if an `error` field is present. All other codes untouched.
+    if (obj.code === SHELL_READINESS_UNKNOWN_CODE) return false;
     if ('error' in obj && typeof obj.error === 'string') return true;
     if ('ok' in obj && obj.ok === false) return true;
   }
   if (typeof output === 'string') {
     try {
       const parsed = JSON.parse(output) as Record<string, unknown>;
+      if (parsed.code === SHELL_READINESS_UNKNOWN_CODE) return false;
       if ('error' in parsed && typeof parsed.error === 'string') return true;
       if ('ok' in parsed && parsed.ok === false) return true;
     } catch {

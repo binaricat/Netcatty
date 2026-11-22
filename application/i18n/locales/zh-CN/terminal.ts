@@ -969,7 +969,7 @@ export const zhCNTerminalMessages: Messages = {
   'snippets.variables.placeholderDefault': '默认：{value}',
   'snippets.variables.required': '请填写此变量',
   'snippets.variables.run': '运行',
-  'snippets.field.variablesHelp': '在脚本中使用 {{名称}} 或 {{名称:默认值}} 定义变量。',
+  'snippets.field.variablesHelp': '在脚本中使用 {{name}} 或 {{name:default}} 作为占位符。',
   'snippets.field.variablesDetected': '变量',
   'snippets.field.variableDefault': '默认 {value}',
 

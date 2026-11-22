@@ -36,6 +36,12 @@ export interface UseSftpTransfersResult {
       sourcePath?: string;
       sourceConnectionId?: string;
       targetPath?: string;
+      /**
+       * Create copies next to the originals instead of prompting for the
+       * same-name conflict. Each source name is resolved to the next free
+       * `name (copy)`, `name (copy 2)`, ... before the transfer starts.
+       */
+      duplicate?: boolean;
       onTransferComplete?: (result: TransferResult) => void | Promise<void>;
     },
   ) => Promise<TransferResult[]>;

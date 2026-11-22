@@ -64,7 +64,7 @@ import { PersistentSidePanelPortal, SidePanelMountedContent } from './terminalLa
 import { usePluginTerminalSidebar } from '../../application/state/usePluginTerminalSidebar';
 import { PluginTerminalSidebarPageHost } from '../plugins/PluginTerminalSidebar';
 import { PluginContributionIcon } from '../plugins/PluginContributionIcon';
-import { getPaneMagnificationShortcutLabel } from '../../domain/paneMagnification';
+import { getPaneMagnificationShortcutLabel, resolveMagnifiedChromeBorderWidth } from '../../domain/paneMagnification';
 
 const MemoizedSidePanelMountedContent = memo(
   SidePanelMountedContent,
@@ -1479,7 +1479,7 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
                   <Btn
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                    className="h-7 w-7 shrink-0 rounded-md p-0 hover:bg-transparent"
                     style={{ color: sidePanelTheme.mutedFg }}
                     onClick={handleCloseSidePanel}
                   >
@@ -1545,6 +1545,9 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
           className="absolute inset-3 flex flex-col overflow-hidden rounded-md border bg-background shadow-2xl animate-in fade-in zoom-in-95 duration-150"
           style={{
             borderColor: sidePanelTheme.accent,
+            borderWidth: resolveMagnifiedChromeBorderWidth(
+              typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1),
+            ),
             backgroundColor: sidePanelTheme.termBg,
             color: sidePanelTheme.termFg,
           }}
@@ -1577,7 +1580,7 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
             data-section="pane-magnification-hint"
           >
             {t('terminal.paneMagnification.hint')}: {sidePanelToolLabels.get(magnifiedSidePane.tool) ?? magnifiedSidePane.tool}
-            {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel} / Esc` : ' · Esc'}
+            {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel}` : ''}
           </div>
         )}
       </div>,
