@@ -401,13 +401,16 @@ async function main() {
   }
   await launch('candidate-after-install', pinned.version);
   panel = await aiPanel(true);
-  await panel.getByText('QA_BETA_REPLY_TWO', { exact: true }).waitFor({ timeout: 30000 });
   const migrated = await until('IDB migration completed', async () => {
     const value = await snapshot();
     return value.idb?.meta.some(m => m.key === 'migrationCompleted' && m.value?.migrationCompleted === true) && value;
   });
-  report.migratedChats = await assertChats(baseline, migrated);
   fs.writeFileSync(path.join(evidence, 'candidate-migrated-storage.json'), JSON.stringify(migrated, null, 2));
+  report.migratedChats = await assertChats(baseline, migrated);
+  report.candidateInitialView = { automaticallyOpenedBeta: await panel.getByText('QA_BETA_REPLY_TWO', { exact: true }).isVisible(), visibleText: await panel.innerText(), policy: 'Stock panelViewByScope is memory-only; exact persisted active pointer checked before any chat selection' };
+  await screenshot('candidate-initial-view-before-history-selection');
+  if (!report.candidateInitialView.automaticallyOpenedBeta) await chooseChat(panel, 'QA_BETA_USER_ONE');
+  await panel.getByText('QA_BETA_REPLY_TWO', { exact: true }).waitFor();
   await screenshot('03-candidate-beta-active');
   await chooseChat(panel, 'QA_ALPHA_USER_ONE'); await screenshot('04-candidate-alpha');
   await chooseChat(panel, 'QA_BETA_USER_ONE');
@@ -415,10 +418,13 @@ async function main() {
   await send(panel, 'QA_BETA_AFTER_UPGRADE'); await screenshot('05-candidate-appended');
   await quit(); await launch('candidate-restarted', pinned.version);
   panel = await aiPanel(true);
-  await panel.getByText('QA_BETA_REPLY_AFTER_UPGRADE', { exact: true }).waitFor({ timeout: 30000 });
   const restarted = await snapshot();
-  report.restartedChats = await assertChats(baseline, restarted, true);
   fs.writeFileSync(path.join(evidence, 'candidate-restarted-storage.json'), JSON.stringify(restarted, null, 2));
+  report.restartedChats = await assertChats(baseline, restarted, true);
+  report.restartInitialView = { automaticallyOpenedBeta: await panel.getByText('QA_BETA_REPLY_AFTER_UPGRADE', { exact: true }).isVisible(), visibleText: await panel.innerText(), policy: 'Report automatic view restoration separately from unchanged IndexedDB active pointer and complete persisted turns' };
+  await screenshot('restarted-initial-view-before-history-selection');
+  if (!report.restartInitialView.automaticallyOpenedBeta) await chooseChat(panel, 'QA_BETA_USER_ONE');
+  await panel.getByText('QA_BETA_REPLY_AFTER_UPGRADE', { exact: true }).waitFor();
   await screenshot('06-candidate-restarted');
   report.restartPersistence = 'passed';
   await quit(); event('Windows installed real GUI acceptance completed');

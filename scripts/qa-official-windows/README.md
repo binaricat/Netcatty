@@ -29,6 +29,11 @@ verify the appended turn and original chats persist.
 
 Both candidate snapshots must have IndexedDB `meta.activeSessionMap` directly;
 legacy localStorage is not accepted as a substitute for migration evidence.
+The stock panel's draft/chat display intent is memory-only. Record and capture
+the initial candidate/restarted view before any navigation. If it opens the
+Recent/draft view, verify the original IndexedDB active pointer first, then
+select the existing chat through normal history UI. Do not call that selection
+automatic restoration of the previously visible conversation.
 
 Both installers use normal silent per-user NSIS arguments. The candidate version
 `0.0.0-sha-9d4e90b` is below 1.1.90, so this is **not** released automatic updater
