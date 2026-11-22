@@ -60,7 +60,7 @@ async function freePort() {
   return port;
 }
 function isolatedEnvironment(installer = false) {
-  const allowed = ['PATH', 'SystemRoot', 'SystemDrive', 'WINDIR', 'ComSpec', 'PATHEXT', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramData', 'ALLUSERSPROFILE', 'PUBLIC', 'OS', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS', 'USERNAME', 'USERDOMAIN', 'USERDNSDOMAIN'];
+  const allowed = ['PATH', 'SystemRoot', 'SystemDrive', 'WINDIR', 'ComSpec', 'PATHEXT', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramData', 'ALLUSERSPROFILE', 'PUBLIC', 'OS', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS', 'USERNAME', 'USERDOMAIN', 'USERDNSDOMAIN', 'COMPUTERNAME', 'SESSIONNAME', 'PSModulePath', 'PSHOME'];
   const env = {};
   for (const key of allowed) if (process.env[key]) env[key] = process.env[key];
   Object.assign(env, { USERPROFILE: home, HOME: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), TEMP: path.join(root, 'temp'), TMP: path.join(root, 'temp') });
@@ -71,7 +71,21 @@ function isolatedEnvironment(installer = false) {
   if (installer) for (const key of ['USERPROFILE', 'HOME', 'APPDATA', 'LOCALAPPDATA', 'HOMEDRIVE', 'HOMEPATH']) if (process.env[key]) env[key] = process.env[key];
   return env;
 }
-function installerDiagnostic(label) {
+function osCommand(script, timeout = 20000, extra = {}) {
+  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { env: { ...isolatedEnvironment(true), ...extra }, encoding: 'utf8', timeout });
+}
+function installerDiagnostic(label, pid) {
+  const result = { executableExists: fs.existsSync(executable), installFiles: fs.existsSync(installDir) ? fs.readdirSync(installDir) : [] };
+  try {
+    result.process = osCommand(`Get-CimInstance Win32_Process -Filter "ProcessId=$env:QA_NSIS_PID" | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine | ConvertTo-Json; Get-Process | Where-Object {$_.ProcessName -like '*Netcatty*'} | Select-Object ProcessName,Id,MainWindowTitle,Responding,SessionId | ConvertTo-Json`, 10000, { QA_NSIS_PID: String(pid) });
+  } catch (error) { result.processError = error.message; }
+  try {
+    result.desktop = osCommand(`Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing
+      $b = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+      $bitmap = [Drawing.Bitmap]::new($b.Width,$b.Height); $g = [Drawing.Graphics]::FromImage($bitmap)
+      $g.CopyFromScreen($b.Location,[Drawing.Point]::Empty,$b.Size)
+      $bitmap.Save($env:QA_NATIVE_PNG,[Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $bitmap.Dispose(); 'Actual OS desktop captured'`, 10000, { QA_NATIVE_PNG: path.join(staging, `installer-${label.replace(/[^a-z0-9]/gi, '-')}.png`) });
+  } catch (error) { result.desktopError = error.message; }
   try {
     const source = `using System; using System.Text; using System.Runtime.InteropServices;
       public class QaWindows { public delegate bool Callback(IntPtr h, IntPtr p);
@@ -93,17 +107,10 @@ function installerDiagnostic(label) {
           },[IntPtr]::Zero) | Out-Null
         }; return $true
       },[IntPtr]::Zero) | Out-Null
-      $items | ConvertTo-Json -Depth 5
-      try {
-        Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing
-        $b = [Windows.Forms.Screen]::PrimaryScreen.Bounds
-        $bitmap = [Drawing.Bitmap]::new($b.Width,$b.Height); $g = [Drawing.Graphics]::FromImage($bitmap)
-        $g.CopyFromScreen($b.Location,[Drawing.Point]::Empty,$b.Size)
-        $bitmap.Save($env:QA_NATIVE_PNG,[Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $bitmap.Dispose()
-      } catch { Write-Output "Desktop capture unavailable: $_" }`;
-    const text = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { env: { ...isolatedEnvironment(true), QA_NATIVE_SOURCE: source, QA_NATIVE_PNG: path.join(staging, `installer-${label.replace(/[^a-z0-9]/gi, '-')}.png`) }, encoding: 'utf8', timeout: 15000 });
-    return { windows: text, executableExists: fs.existsSync(executable), installFiles: fs.existsSync(installDir) ? fs.readdirSync(installDir) : [] };
-  } catch (error) { return { diagnosticError: error.message, executableExists: fs.existsSync(executable) }; }
+      $items | ConvertTo-Json -Depth 5`;
+    result.windows = osCommand(script, 10000, { QA_NATIVE_SOURCE: source });
+  } catch (error) { result.windowError = error.message; }
+  return result;
 }
 class Inspector {
   constructor(url) {
@@ -135,14 +142,12 @@ async function install(installer, label, uninstall = false) {
   assert(!app || app.exitCode !== null, 'Close app before official installer');
   const args = uninstall ? ['/S', '/currentuser'] : ['/S', '/currentuser', `/D=${installDir}`];
   const started = Date.now();
-  const child = spawn(installer, args, { env: isolatedEnvironment(true), windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(installer, args, { env: isolatedEnvironment(true), windowsHide: false, stdio: 'ignore' });
   let output = '';
-  child.stdout.on('data', part => { output += part; });
-  child.stderr.on('data', part => { output += part; });
   let spawnError;
   child.on('error', error => { spawnError = error; });
   const completed = await childExit(child, 90000);
-  const diagnostic = !completed ? installerDiagnostic(label) : undefined;
+  const diagnostic = !completed ? installerDiagnostic(label, child.pid) : undefined;
   if (!completed) child.kill();
   const result = { label, installer: path.basename(installer), arguments: args, exitCode: child.exitCode, completed, durationMs: Date.now() - started, output, error: spawnError?.message, diagnostic };
   report.installers.push(result); event(`installer ${label}`, result);
@@ -325,6 +330,8 @@ async function main() {
   assert(!process.env.GH_TOKEN && !process.env.GITHUB_TOKEN, 'Application/test step must not receive GitHub token');
   fs.mkdirSync(evidence, { recursive: true }); fs.mkdirSync(staging, { recursive: true });
   assert(!fs.existsSync(profile), 'Only a fresh QA profile may be seeded');
+  report.processPreflight = osCommand("'QA_WINDOWS_PROCESS_PREFLIGHT'; [Environment]::UserName; [Environment]::OSVersion.VersionString", 10000);
+  event('Windows process preflight passed');
   watchdog = setTimeout(() => { report.error = 'Harness global timeout'; finish().finally(() => process.exit(1)); }, 11 * 60 * 1000);
   fixture = await startModel();
   assert(await install(path.join(root, pinned.baseline.installer), 'baseline v1.1.90'), 'Baseline NSIS failed'); report.baselineInstall = 'passed';

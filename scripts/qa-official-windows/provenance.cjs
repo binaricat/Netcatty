@@ -71,12 +71,14 @@ async function main() {
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', extract], {
     env: { ...process.env, GH_TOKEN: '', QA_ZIP: zip, QA_INSTALLER: pinned.installer, QA_OUTPUT: path.join(root, pinned.installer) }, timeout: 30000,
   });
-  fs.writeFileSync(path.join(evidence, 'provenance.json'), JSON.stringify({
+  const provenance = {
     ...pinned, officialWindowsJob: job.id, verifiedAt: new Date().toISOString(),
     candidateInstallerSha256: await digest(path.join(root, pinned.installer)),
     candidateInstallerDigestSource: 'Computed from exact entry in verified official artifact ZIP',
     baselineMode: 'Public released NSIS installer', candidateMode: 'Official CI NSIS installer; prerelease version, not released updater acceptance',
-  }, null, 2));
+  };
+  fs.writeFileSync(path.join(evidence, 'provenance.json'), JSON.stringify(provenance, null, 2));
+  console.log(JSON.stringify(provenance, null, 2));
   console.log(`Verified ${pinned.baseline.tag} and official ${pinned.sha}, artifact ${pinned.artifact}`);
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });
