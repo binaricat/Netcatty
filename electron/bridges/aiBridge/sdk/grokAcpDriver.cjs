@@ -19,6 +19,7 @@
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { StringDecoder } = require("node:string_decoder");
+const { closeReasoning } = require("./sdkDriverUtils.cjs");
 const {
   GROK_MCP_MODE_DISALLOWED_LOCAL_TOOLS,
   createLineBuffer,
@@ -615,13 +616,6 @@ function resultToText(result) {
     try { return JSON.stringify(result); } catch { return String(result); }
   }
   return String(result);
-}
-
-function closeReasoning(state, emitter) {
-  if (state?.reasoningOpen) {
-    emitter.reasoningEnd();
-    state.reasoningOpen = false;
-  }
 }
 
 /**

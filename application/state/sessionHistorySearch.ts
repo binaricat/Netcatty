@@ -5,7 +5,7 @@ import {
   type SessionHistorySearchTarget,
   type SessionSearchIndex,
 } from '../../domain/sessionHistorySearch';
-import { prepareSearchQuery, truncateQueryForMatch } from '../../lib/searchMatcher';
+import { prepareSearchQuery, truncateQueryForMatch } from '../../domain/searchMatcher';
 
 /**
  * Memory bounds for the per-session search index cache. `filterSessionHistory`

@@ -84,7 +84,6 @@ export const esCoreMessages: Messages = {
   'common.edit': 'Editar',
   'common.clear': 'Limpiar',
   'common.optional': 'Opcional',
-  'common.selectPlaceholder': 'Seleccionar...',
   'common.add': 'Agregar',
   'common.rename': 'Renombrar',
   'common.refresh': 'Actualizar',
@@ -124,11 +123,9 @@ export const esCoreMessages: Messages = {
   'field.label': 'Etiqueta',
   'field.type': 'Tipo',
   'auth.keyType': 'Tipo {type}',
-  'auth.showAllKeys': 'Mostrar todas las claves',
 
   // Dialogs / prompts
   'confirm.deleteHost': '¿Eliminar el host "{name}"?',
-  'confirm.deleteIdentity': '¿Eliminar la identidad "{name}"?',
   'confirm.removeProvider': '¿Quitar el proveedor "{name}"?',
   'confirm.closeBusyTerminal.title': 'Confirmar cierre',
   'confirm.closeBusyTerminal.message': 'El proceso "{command}" aún se está ejecutando y se terminará.',
@@ -401,7 +398,6 @@ export const esCoreMessages: Messages = {
   'tray.status.inactive': 'Inactivo',
   'tray.status.error': 'Error',
   'tray.status.unknown': 'Desconocido',
-  'tray.recentHosts': 'Hosts recientes',
   'tray.empty.title': 'Nada por aquí todavía',
   'tray.empty.subtitle': 'Ve a conectarte a un servidor, te extrañan 🚀',
   'tray.quit': 'Salir de Netcatty',
@@ -460,9 +456,6 @@ export const esCoreMessages: Messages = {
   'update.downloadFailed.message': 'No se pudo descargar la actualización. Puedes descargarla manualmente.',
   'update.needsSave.title': 'Cambios sin guardar',
   'update.needsSave.message': 'Primero guarda los editores abiertos y luego haz clic en Reiniciar ahora de nuevo para instalar la actualización.',
-  'update.openReleases': 'Abrir versiones',
-  'update.remindLater': 'Recordarme después',
-  'update.skipVersion': 'Omitir esta versión',
 
   // Settings > Appearance
   'settings.appearance.uiTheme': 'Tema de la interfaz',
@@ -1083,8 +1076,6 @@ Resalta el panel dividido enfocado:
   'settings.shortcuts.binding.sftp-navigate-to': 'Ir al directorio seleccionado',
 
   // Context menus / common actions
-  'action.newHost': 'Nuevo host',
-  'action.newSubfolder': 'Nueva subcarpeta',
   'action.copyPublicKey': 'Copiar clave pública',
   'action.keyExport': 'Exportar clave',
   'action.edit': 'Editar',
@@ -1319,12 +1310,9 @@ Resalta el panel dividido enfocado:
   "settings.plugins.manager.remove": "Desinstalar",
   "settings.plugins.manager.removeNote": "La desinstalación elimina el código y los datos KV locales. Se conservan los ajustes del usuario, los secretos y los datos auxiliares de sincronización.",
   "settings.plugins.permissions.statusUnknown": "Estado desconocido",
-  "plugins.sidebar.extensions": "Páginas de extensiones",
   "plugins.sidebar.selectTerminal": "Selecciona primero un terminal abierto.",
   "plugins.sidebar.loading": "Cargando página de extensión…",
   "plugins.vault.loading": "Cargando página del plugin…",
-  "plugins.vault.extensions": "Extensiones",
-  "plugins.vault.back": "Volver a hosts",
   "plugins.interaction.title": "Solicitud de complemento",
   "plugins.interaction.sharing": "El texto compartido estará disponible para este complemento y sus capacidades autorizadas, incluida la red. Leer no autoriza un nuevo destino de red.",
   "plugins.interaction.input": "Introducir texto",

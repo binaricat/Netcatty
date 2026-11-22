@@ -204,29 +204,6 @@ export interface ToolResult {
   isError?: boolean;
 }
 
-export interface ChatParams {
-  model: string;
-  messages: ChatMessage[];
-  tools?: ToolDefinition[];
-  temperature?: number;
-  maxTokens?: number;
-  systemPrompt?: string;
-}
-
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>; // JSON Schema
-}
-
-// Streaming events
-export type ChatStreamEvent =
-  | { type: 'text'; content: string }
-  | { type: 'thinking'; content: string }
-  | { type: 'tool_call'; toolCall: ToolCall }
-  | { type: 'error'; error: string }
-  | { type: 'done'; usage?: { promptTokens: number; completionTokens: number } };
-
 // AI Session types
 export interface AISession {
   id: string;
@@ -438,20 +415,6 @@ export function normalizeResponseIdleTimeoutSeconds(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS;
   return Math.min(MAX_RESPONSE_IDLE_TIMEOUT_SECONDS, Math.max(1, value));
 }
-
-export const DEFAULT_AI_SETTINGS: AISettings = {
-  providers: [],
-  activeProviderId: '',
-  activeModelId: '',
-  globalPermissionMode: 'confirm',
-  toolIntegrationMode: 'mcp',
-  externalAgents: [],
-  defaultAgentId: 'catty',
-  commandBlocklist: [...DEFAULT_COMMAND_BLOCKLIST],
-  commandTimeout: DEFAULT_COMMAND_TIMEOUT_SECONDS,
-  responseIdleTimeout: DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
-  maxIterations: 20,
-};
 
 export interface ProviderPreset {
   name: string;

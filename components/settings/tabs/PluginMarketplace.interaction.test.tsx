@@ -6,7 +6,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import { I18nProvider } from '../../../application/i18n/I18nProvider';
-import { PluginMarketplaceContent } from './PluginMarketplace';
+import { filterPluginCatalog, PluginMarketplaceContent } from './PluginMarketplace';
 import type { usePluginCatalog } from '../../../application/state/usePluginCatalog';
 
 const infoDom = new JSDOM('<!doctype html><html><body></body></html>');
@@ -179,4 +179,11 @@ test('a mirror cannot claim another source installation or offer cross-source re
   assert.match(detail, /installed from another source/);
   assert.match(detail, /https:\/\/plugins.netcatty.app/);
   assert.match(detail, /disabled=""[^>]*>Install this version/);
+});
+
+test('catalog search matches name, author and description without case sensitivity', () => {
+  const sample = [{ id: 'a', name: 'Starter', author: 'Netcatty', description: 'Local greeting' }] as NetcattyPluginCatalogEntry[];
+  for (const query of ['starter', 'NETCATTY', ' greeting ']) assert.equal(filterPluginCatalog(sample, query).length, 1);
+  assert.equal(filterPluginCatalog(sample, 'unrelated').length, 0);
+  assert.equal(filterPluginCatalog(sample, '').length, 1);
 });

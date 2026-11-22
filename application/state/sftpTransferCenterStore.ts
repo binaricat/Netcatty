@@ -2688,14 +2688,6 @@ const browserPersistence: StorePersistence | undefined = typeof globalThis.local
 
 export const sftpTransferCenterStore = createSftpTransferCenterStore(browserPersistence);
 
-export function useSftpTransferCenter(): SftpTransferCenterSnapshot {
-  return useSyncExternalStore(
-    sftpTransferCenterStore.subscribe,
-    sftpTransferCenterStore.getSnapshot,
-    sftpTransferCenterStore.getSnapshot,
-  );
-}
-
 /** Badge only — stable when counts are unchanged so TopTabs does not re-render every progress byte. */
 export function useSftpTransferCenterBadge(): { count: number; hasAttention: boolean } {
   return useSyncExternalStore(

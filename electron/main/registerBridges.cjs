@@ -1,6 +1,5 @@
 "use strict";
 
-let bridgesRegistered = false;
 let cloudSyncSessionPassword = null;
 const perfTrace = require("../perfTrace.cjs");
 const { readClipboardFiles, readClipboardImage, hasClipboardImage } = require("../bridges/clipboardFiles.cjs");

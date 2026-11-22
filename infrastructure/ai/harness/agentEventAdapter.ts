@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentEventListener } from './types';
+import type { AgentEvent } from './types';
 import { resolveStreamChunkToolCallId, SHELL_READINESS_UNKNOWN_CODE } from '../aiChatStreamingSupport';
 
 let eventCounter = 0;
@@ -315,9 +315,3 @@ export function mapCattyStreamChunkToAgentEvents(
 }
 
 export { isStepHandleNoticeMessage };
-
-export function createHarnessEventSink(
-  listener: AgentEventListener,
-): AgentEventListener {
-  return (event) => listener(event);
-}

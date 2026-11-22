@@ -23,7 +23,6 @@
 !CODE_OF_CONDUCT.md
 !CODE_SIGNING_POLICY.md
 !CONTRIBUTING.md
-!ET_INTEGRATION_CHECKLIST.md
 !LICENSE
 !PRIVACY.md
 !README.ja-JP.md
@@ -38,7 +37,6 @@
 !index.css
 !index.html
 !index.tsx
-!metadata.json
 !package-lock.json
 !package.json
 !tsconfig.json

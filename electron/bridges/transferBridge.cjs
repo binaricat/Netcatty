@@ -8,6 +8,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { Readable } = require("node:stream");
 const tempDirBridge = require("./tempDirBridge.cjs");
+const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
 const {
   encodePathForSession,
   ensureRemoteDirForSession,
@@ -8316,12 +8317,6 @@ async function sameHostCopyDirectory(event, payload) {
       transfer.leasedSftpIds = [];
     }
   }
-}
-
-function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
-  ipcMain.handle(channel, (event, payload) => terminalWorkerManager.request(channel, payload, {
-    webContentsId: event?.sender?.id,
-  }));
 }
 
 /**

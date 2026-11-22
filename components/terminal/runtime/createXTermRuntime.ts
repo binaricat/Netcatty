@@ -69,7 +69,7 @@ import {
   installEraseInDisplayHandlers,
 } from "../clearTerminalViewport";
 import { pulseCopyOnSelectUserCommand } from "../copyOnSelect";
-import { getTerminalSelectionForClipboard } from "../normalizeTerminalSelection";
+import { getTerminalSelectionForClipboard } from "../../../domain/terminalSelection";
 import {
   createKittyKeyboardSessionStateStore,
   encodeKittyCompositionText,

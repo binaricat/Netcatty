@@ -7,7 +7,7 @@ import {
   isPortForwardHostKeySessionId,
   removePortForwardHostKeyVerification,
   toPendingPortForwardHostKeyVerification,
-} from "./hostKeyVerification.ts";
+} from "../../domain/portForwardHostKey.ts";
 
 test("isPortForwardHostKeySessionId only accepts port-forward tunnel sessions", () => {
   assert.equal(isPortForwardHostKeySessionId("pf-rule-1-123456"), true);

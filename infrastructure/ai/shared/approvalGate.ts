@@ -73,14 +73,6 @@ function refreshPermissionGrantsFromStorage(): void {
   );
 }
 
-export function setGrantPersister(persister: GrantPersister | null): void {
-  grantPersisterStack.length = 0;
-  if (persister) {
-    grantPersisterStack.push(persister);
-  }
-  grantPersister = persister;
-}
-
 /** Register a grant persister; supports multiple mounted AI panels via a stack. */
 export function registerGrantPersister(persister: GrantPersister): () => void {
   grantPersisterStack.push(persister);
@@ -419,13 +411,6 @@ export function clearPendingApprovalIds(toolCallIds: string[]): void {
       try { listener(clearedIds); } catch { /* ignore listener errors */ }
     }
   }
-}
-
-/**
- * Check if a specific toolCallId has a pending approval.
- */
-export function hasPendingApproval(toolCallId: string): boolean {
-  return pendingApprovals.has(toolCallId);
 }
 
 /**

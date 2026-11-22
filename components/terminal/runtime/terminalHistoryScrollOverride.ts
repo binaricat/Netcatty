@@ -1,4 +1,4 @@
-import { joinSoftWrappedRows } from "../normalizeTerminalSelection";
+import { joinSoftWrappedRows } from "../../../domain/terminalSelection";
 
 type WheelLike = Pick<
   WheelEvent,

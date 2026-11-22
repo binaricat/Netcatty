@@ -6,14 +6,11 @@ const path = require("node:path");
 
 const { PLUGIN_RPC_MAX_RAW_BYTES } = require("./constants.cjs");
 const { PluginRpcError, RPC_ERRORS } = require("./rpcRouter.cjs");
+const { invalidArgument } = require("./validationUtils.cjs");
 
 const MAX_FILESYSTEM_BYTES = PLUGIN_RPC_MAX_RAW_BYTES;
 const MAX_DIRECTORY_ENTRIES = 1_000;
 const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
-
-function invalidArgument(message) {
-  return new PluginRpcError(RPC_ERRORS.invalidArgument, message);
-}
 
 function assertAbsolutePath(value) {
   if (

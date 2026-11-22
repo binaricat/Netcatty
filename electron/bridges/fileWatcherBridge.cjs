@@ -9,6 +9,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
 
 // Map of watchId -> { watcher, localPath, remotePath, sftpId, lastModified, lastSize }
 const activeWatchers = new Map();
@@ -586,12 +587,6 @@ function listWatchers() {
     });
   }
   return watchers;
-}
-
-function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
-  ipcMain.handle(channel, (event, payload) => terminalWorkerManager.request(channel, payload, {
-    webContentsId: event?.sender?.id,
-  }));
 }
 
 /**

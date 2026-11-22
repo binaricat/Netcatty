@@ -11,7 +11,7 @@ import {
   matchesWordPrefixQuery,
   matchesWorkspaceHostPickerQuery,
   resetPinyinCacheForTests,
-} from "../lib/searchMatcher.ts";
+} from "./searchMatcher.ts";
 
 test("shared pinyin search reaches later fields after a long first field", () => {
   const prefix = "a".repeat(256);

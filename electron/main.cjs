@@ -498,9 +498,7 @@ function getAppLockReopenWindows() {
 // Shared state
 const sessions = new Map();
 const sftpClients = new Map();
-const keyRoot = path.join(os.homedir(), ".netcatty", "keys");
 const APP_LOCK_SETTINGS_FILE = "app-lock-settings.json";
-let cloudSyncSessionPassword = null;
 const CLOUD_SYNC_PASSWORD_FILE = "netcatty_cloud_sync_master_password_v1";
 let appLockSettingsStore = null;
 const appLockRuntimeBridge = createAppLockRuntimeBridge();
@@ -526,31 +524,6 @@ function getAppLockNativeWindowHandle() {
   const win = getLiveAppLockWindows()[0] || null;
   return win ? win.getNativeWindowHandle() : null;
 }
-
-// Key management helpers
-const ensureKeyDir = async () => {
-  try {
-    await fs.promises.mkdir(keyRoot, { recursive: true, mode: 0o700 });
-  } catch (err) {
-    console.warn("Unable to ensure key cache dir", err);
-  }
-};
-
-const writeKeyToDisk = async (keyId, privateKey) => {
-  if (!privateKey) return null;
-  await ensureKeyDir();
-  const safeId = String(keyId || "temp").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120);
-  const filename = `${safeId}.pem`;
-  const target = path.join(keyRoot, filename);
-  const normalized = privateKey.endsWith("\n") ? privateKey : `${privateKey}\n`;
-  try {
-    await fs.promises.writeFile(target, normalized, { mode: 0o600 });
-    return target;
-  } catch (err) {
-    console.error("Failed to persist private key", err);
-    return null;
-  }
-};
 
 const { createBridgeRegistrar } = require("./main/registerBridges.cjs");
 
@@ -1775,6 +1748,4 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
 module.exports = {
   sessions,
   sftpClients,
-  ensureKeyDir,
-  writeKeyToDisk,
 };

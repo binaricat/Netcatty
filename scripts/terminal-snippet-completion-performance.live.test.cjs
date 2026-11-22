@@ -28,7 +28,7 @@ if (!process.versions.electron) {
       stdin: {
         contents: [
           'export { getCompletions } from "./components/terminal/autocomplete/completionEngine";',
-          'export { resetPinyinCacheForTests, getPinyinCacheStatsForTests } from "./lib/searchMatcher";',
+          'export { resetPinyinCacheForTests, getPinyinCacheStatsForTests } from "./domain/searchMatcher";',
         ].join("\n"),
         resolveDir: root,
         loader: "ts",

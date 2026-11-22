@@ -13,7 +13,7 @@ import {
 } from "../clipboardImagePaste";
 import { handleTerminalClipboardPaste, pasteTextWithMultilineConfirm } from "../terminalClipboardPaste";
 import { pulseCopyOnSelectUserCommand } from "../copyOnSelect";
-import { getTerminalSelectionForClipboard } from "../normalizeTerminalSelection";
+import { getTerminalSelectionForClipboard } from "../../../domain/terminalSelection";
 import {
   getHistoryPreviewSelectionFromRoot,
   requestHistoryPreviewHide,
