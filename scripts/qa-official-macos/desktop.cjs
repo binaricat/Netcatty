@@ -66,15 +66,14 @@ function keepImage(name, bytes) {
   report.screenshots.push({ name, bytes: bytes.length, width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20), sha256: crypto.createHash('sha256').update(bytes).digest('hex'), source: 'Actual installed native renderer capture' });
 }
 async function capture(name) {
-  if (page && !page.isClosed()) keepImage(`${arch}-${name}.png`, await page.screenshot({ timeout: 10000 }));
-  else if (inspector) {
+  if (inspector) {
     const encoded = await inspector.eval(async () => {
       const e = process.mainModule.require('electron');
       const w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html'));
       return w ? (await w.webContents.capturePage()).toPNG().toString('base64') : null;
     });
     if (encoded) keepImage(`${arch}-${name}.png`, Buffer.from(encoded, 'base64'));
-  }
+  } else if (page && !page.isClosed()) keepImage(`${arch}-${name}.png`, await page.screenshot({ timeout: 10000 }));
 }
 function event(kind, detail = {}) { report.fixtureEvents.push({ at: new Date().toISOString(), kind, ...detail }); }
 async function startSsh() {
@@ -133,7 +132,6 @@ async function launch() {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`, { timeout: 30000 }); browser.contexts()[0].setDefaultTimeout(12000);
   page = await until('actual installed app page', () => browser.contexts()[0].pages().find(p => p.url().startsWith('app://netcatty/index.html') && !p.url().includes('settings')));
   await page.getByPlaceholder(/^Find a host/).waitFor({ timeout: 45000 });
-  await capture('00-native-launch');
   inspector = new Inspector(target.webSocketDebuggerUrl); await inspector.connect();
   report.nativeInspectorPreflight = await inspector.eval('({pid:process.pid, platform:process.platform, arch:process.arch})');
   stage('actual renderer ready; inspect native app identity');
@@ -147,6 +145,12 @@ async function launch() {
   assert.equal(n.executable, executable); assert.equal(n.profile, profile); assert(n.appPath.endsWith('/Netcatty.app/Contents/Resources/app.asar'));
   assert.equal(n.noSandbox, false); assert.equal(n.disableSetuidSandbox, false); assert.equal(n.preferences.contextIsolation, true); assert.equal(n.preferences.nodeIntegration, false); assert.equal(n.preferences.webSecurity, true);
   report.sandboxScope = `Unmodified stock renderer sandbox:${n.preferences.sandbox}; this is not full renderer-sandbox certification`;
+  await until('native window resize applied', () => inspector.eval(() => {
+    const w = process.mainModule.require('electron').BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html'));
+    return w.isVisible() && w.getBounds().width === 1440;
+  }));
+  await sleep(300);
+  await capture('00-native-launch');
   stage('native GUI identity and initial capture verified');
   for (const port of [debugPort, inspectPort]) {
     const output = execFileSync('/usr/sbin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8', timeout: 10000 });
