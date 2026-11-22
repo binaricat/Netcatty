@@ -64,8 +64,16 @@ import {
   isAIChatSessionStreaming,
   type DefaultTargetSessionHint,
 } from '../application/state/useAIChatStreaming';
-import { getScopedHistorySessions } from './ai/scopedHistorySessions';
+import {
+  getPreferredAutoResumeSessionId,
+  getScopedHistorySessions,
+} from './ai/scopedHistorySessions';
 import { buildAiChatsListingEntries, canRebindChat, formatAiChatsListingNote, resolveRebindTargetFromArg, type AiChatsListingEntry } from './ai/aiChatsListing';
+import { GlobalAIChatSessionManager } from './ai/GlobalAIChatSessionManager';
+import {
+  buildGlobalManagerRebindTargets,
+  type GlobalManagerScopeTarget,
+} from './ai/globalSessionManagerRows';
 import { resolveInheritedAIActiveSessionId } from '../domain/aiWorkspaceScopeInherit';
 import { resolveUndoLastTurnBoundary } from '../domain/aiUndoLastTurn';
 import { aiSessionIdSetEqual, exactScopeAISessionsEqual } from '../domain/aiSessionsForScope';
@@ -95,6 +103,8 @@ import {
   appendRetainedStoredModelPreset,
   shouldLoadSdkRuntimeModels,
   shouldUseStoredAgentModel,
+  stopActiveTurnBeforeScopeRebind,
+  syncWorkspaceAnchorsForScopeRebind,
   type SdkRuntimeModelCatalog,
   type SdkRuntimeModelCatalogSource,
 } from './AIChatSidePanelHelpers';
@@ -320,6 +330,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   onSetWorkspaceAnchorChat,
   workspaces = [],
   terminalSessions = [],
+  appTerminalSessions,
   liveScopeTargetIds,
   resolveExecutorContext,
   isVisible = true,
@@ -451,8 +462,22 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const workspaceAnchorChatId = scopeType === 'workspace'
     ? workspaces.find((workspace) => workspace.id === scopeTargetId)?.anchorChatId
     : undefined;
-  // getScopedHistorySessions orders by scope match first, recency second.
-  const preferredHistorySessionId = historySessions[0]?.id ?? null;
+  // Implicit workspace auto-resume only considers exact workspace or member-
+  // terminal matches (rank >= 3) so a workspace never silently re-opens a chat
+  // bound to another workspace (e.g. after rebinding its last chat away and
+  // restarting). Other-workspace chats remain manually selectable in history.
+  const preferredHistorySessionId = useMemo(
+    () => getPreferredAutoResumeSessionId(
+      historySessions,
+      scopeType,
+      scopeTargetId,
+      scopeHostIds,
+      activeTerminalSessionIds,
+      workspaceMemberTerminalIds,
+      activeSessionIdMap,
+    ),
+    [historySessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalSessionIds, workspaceMemberTerminalIds, activeSessionIdMap],
+  );
   const normalizedPanelView = useMemo<AIPanelView>(
     () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId, preferredHistorySessionId),
     [explicitPanelView, currentDraft, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId, preferredHistorySessionId],
@@ -523,6 +548,28 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     handleRenameSession(activeSessionRef.current?.id ?? null, title);
   }, [handleRenameSession]);
 
+  // Defined before the /rebind command handler, which must await turn
+  // termination before rewriting a chat's scope.
+  const stopStreamingForSession = useCallback(async (sessionId: string) => {
+    const controller = abortControllersRef.current.get(sessionId);
+    setStreamingForScope(sessionId, false);
+    updateLastMessage(sessionId, (msg) => ({
+      ...msg,
+      statusText: '',
+      executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
+    }));
+    await stopAgentTurn({
+      chatSessionId: sessionId,
+      abortController: controller,
+      bridge: getNetcattyBridge(),
+      reason: 'user',
+    });
+    await getAgentRuntime().waitForActiveTurn(sessionId);
+    if (controller && abortControllersRef.current.get(sessionId) === controller) {
+      abortControllersRef.current.delete(sessionId);
+    }
+  }, [setStreamingForScope, updateLastMessage, abortControllersRef]);
+
   const handleListChats = useCallback(() => {
     // Prefer the app-wide live target set so chats bound to other still-open
     // terminals are not mislabelled dangling / offered for /rebind.
@@ -551,7 +598,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   // `/rebind <n>`: rebind the nth dangling chat from the last /chats listing
   // to this panel's current scope. Panel action — no agent round-trip.
-  const handleRebindChat = useCallback((arg: string) => {
+  const handleRebindChat = useCallback(async (arg: string) => {
     if (!scopeTargetId) {
       toast.warning(t('ai.chat.rebindUnavailable'));
       return;
@@ -566,7 +613,20 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     for (const workspace of workspaces) liveTargets.add(workspace.id);
     liveTargets.add(scopeTargetId);
     if (canRebindChat(session, liveTargets)) {
+      // Same race as the manager rebind: stop any in-flight turn first so the
+      // scope rewrite never happens under a live stream.
+      await stopActiveTurnBeforeScopeRebind(target.sessionId, {
+        abortControllersRef,
+        streamingSessionIds,
+        stopStreamingForSession,
+      });
       rebindSessionScope?.(target.sessionId, { type: scopeType, targetId: scopeTargetId, hostIds: scopeHostIds });
+      syncWorkspaceAnchorsForScopeRebind(
+        target.sessionId,
+        { type: scopeType, targetId: scopeTargetId },
+        workspaces,
+        onSetWorkspaceAnchorChat,
+      );
       toast.success(t('ai.chat.rebindDone').replace('{title}', target.title));
     } else {
       toast.warning(t('ai.chat.rebindUsage'));
@@ -588,7 +648,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }
     lastChatsListingRef.current = remaining;
     setPanelCommandNote(formatAiChatsListingNote(remaining, t));
-  }, [liveScopeTargetIds, rebindSessionScope, scopeHostIds, scopeTargetId, scopeType, sessions, t, workspaces, workspaceMemberTerminalIds]);
+  }, [abortControllersRef, liveScopeTargetIds, onSetWorkspaceAnchorChat, rebindSessionScope, scopeHostIds, scopeTargetId, scopeType, sessions, stopStreamingForSession, streamingSessionIds, t, workspaces, workspaceMemberTerminalIds]);
 
   // Manual durability actions (history drawer header). Export writes the
   // whole store to a user-chosen JSON file; import merges by id.
@@ -2025,26 +2085,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   }, [
     validateNoteMentions, canSteerCurrentTurn, clearScopeDraft, steerExternalAgent, steeringSessionId]);
 
-  const stopStreamingForSession = useCallback(async (sessionId: string) => {
-    const controller = abortControllersRef.current.get(sessionId);
-    setStreamingForScope(sessionId, false);
-    updateLastMessage(sessionId, (msg) => ({
-      ...msg,
-      statusText: '',
-      executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
-    }));
-    await stopAgentTurn({
-      chatSessionId: sessionId,
-      abortController: controller,
-      bridge: getNetcattyBridge(),
-      reason: 'user',
-    });
-    await getAgentRuntime().waitForActiveTurn(sessionId);
-    if (controller && abortControllersRef.current.get(sessionId) === controller) {
-      abortControllersRef.current.delete(sessionId);
-    }
-  }, [setStreamingForScope, updateLastMessage, abortControllersRef]);
-
   const { addGrant } = useAIPermissionGrantsState();
 
   useEffect(() => {
@@ -2172,6 +2212,122 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     ],
   );
 
+  // ── Global AI session manager (issue #4098 phases 4-5) ──
+  // App-wide open terminals (all tabs) feed the manager's scope resolution
+  // and rebind picker; fall back to this tab's terminals when absent.
+  const managerTerminalInfos = useMemo(
+    () => appTerminalSessions ?? terminalSessions,
+    [appTerminalSessions, terminalSessions],
+  );
+
+  const managerRebindTargets = useMemo<GlobalManagerScopeTarget[]>(
+    () => buildGlobalManagerRebindTargets(workspaces, managerTerminalInfos),
+    [managerTerminalInfos, workspaces],
+  );
+
+  // "Open/switch" from the manager: exact-scope chats are rank-3 entries of
+  // this panel's scoped history, so the ordinary selection path (pointer,
+  // panel view, drawer close) resolves them. Cross-scope activation is
+  // deliberately deferred (issue #4098 phase 5) — other-scope rows offer
+  // rebind instead of faking activation.
+  const handleManagerActivate = useCallback((sessionId: string) => {
+    handleSelectSession(sessionId);
+  }, [handleSelectSession]);
+
+  const handleManagerRebind = useCallback(async (sessionId: string, target: GlobalManagerScopeTarget) => {
+    if (!rebindSessionScope) return;
+    // A rebinding while a turn streams into the chat corrupts streaming state
+    // (the stream targets the old scope while the active map/pointer move).
+    // Await the stop instead of rejecting: stopStreamingForSession cleanly
+    // awaits termination, so the user's rebind intent is preserved.
+    await stopActiveTurnBeforeScopeRebind(sessionId, {
+      abortControllersRef,
+      streamingSessionIds,
+      stopStreamingForSession,
+    });
+    rebindSessionScope(sessionId, {
+      type: target.type,
+      targetId: target.targetId,
+      hostIds: target.hostIds,
+    });
+    syncWorkspaceAnchorsForScopeRebind(
+      sessionId,
+      target,
+      workspaces,
+      onSetWorkspaceAnchorChat,
+    );
+    const session = sessions.find((item) => item.id === sessionId);
+    toast.success(
+      t('ai.chat.managerRebindDone')
+        .replace('{title}', session?.title || t('ai.chat.untitled'))
+        .replace('{target}', target.label
+          || (target.type === 'workspace'
+            ? t('ai.chat.chatsScopeWorkspace')
+            : t('ai.chat.chatsScopeTerminal'))),
+    );
+  }, [abortControllersRef, onSetWorkspaceAnchorChat, rebindSessionScope, sessions, stopStreamingForSession, streamingSessionIds, t, workspaces]);
+
+  const handleManagerDelete = useCallback(async (sessionId: string) => {
+    if (abortControllersRef.current.has(sessionId) || streamingSessionIds.has(sessionId)) {
+      await stopStreamingForSession(sessionId);
+    }
+    // No scopeKey: this is a cross-scope surface, so the deleting panel is
+    // not necessarily the chat's owning panel. Stale active pointers of ANY
+    // panel are nulled by the #4125 validation effect in useAIState (it runs
+    // against the post-delete session set) and matching stale panel views are
+    // pruned alongside. Deleting the last chat is safe against resurrection:
+    // writeSessionsForStorage records the id as intentionally deleted and the
+    // #4125 migrationCompleted marker keeps the legacy localStorage key from
+    // re-seeding an empty IndexedDB store on the next boot.
+    deleteSession(sessionId);
+  }, [abortControllersRef, deleteSession, stopStreamingForSession, streamingSessionIds]);
+
+  const handleManagerExport = useCallback((sessionId: string) => {
+    void exportSessionsBackup?.([sessionId]).then((filePath) => {
+      if (filePath == null) {
+        toast.warning(t('ai.chat.exportUnavailable'));
+        return;
+      }
+      toast.success(
+        filePath
+          ? t('ai.chat.exportDone').replace('{path}', filePath)
+          : t('ai.chat.exportDoneNoPath'),
+      );
+    });
+  }, [exportSessionsBackup, t]);
+
+  const globalManagerNode = useMemo(() => (
+    <GlobalAIChatSessionManager
+      sessions={sessions}
+      activeSessionIdMap={activeSessionIdMap}
+      currentScopeType={scopeType}
+      currentScopeTargetId={scopeTargetId}
+      currentScopeHostIds={scopeHostIds}
+      workspaces={workspaces}
+      terminalInfos={managerTerminalInfos}
+      externalAgents={externalAgents}
+      rebindTargets={managerRebindTargets}
+      onSelect={handleManagerActivate}
+      onRebind={handleManagerRebind}
+      onDelete={(sessionId) => { void handleManagerDelete(sessionId); }}
+      onExport={handleManagerExport}
+    />
+  ), [
+    sessions,
+    activeSessionIdMap,
+    scopeType,
+    scopeTargetId,
+    scopeHostIds,
+    workspaces,
+    managerTerminalInfos,
+    externalAgents,
+    managerRebindTargets,
+    handleManagerActivate,
+    handleManagerRebind,
+    handleManagerDelete,
+    handleManagerExport,
+  ]);
+
   const handleAgentChange = useCallback((agentId: string) => {
     showScopeDraftView();
     ensureScopeDraft(agentId);
@@ -2236,6 +2392,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         onDismissPanelCommandNote={() => setPanelCommandNote(null)}
         onExportSessions={handleExportSessions}
         onImportSessions={handleImportSessions}
+        globalManagerNode={globalManagerNode}
         canUndoLastTurn={canUndoLastTurn}
         handleUndoLastTurn={undoLastTurnInSession ? handleUndoLastTurn : undefined}
         handleSteer={handleSteer}
@@ -2367,6 +2524,7 @@ export function aiChatSidePanelPropsAreEqual(
   if ((prev.isVisible ?? true) !== (next.isVisible ?? true)) return false;
   if (prev.scopeHostIds !== next.scopeHostIds) return false;
   if (prev.terminalSessions !== next.terminalSessions) return false;
+  if (prev.appTerminalSessions !== next.appTerminalSessions) return false;
   if (prev.liveScopeTargetIds !== next.liveScopeTargetIds) return false;
   if (prev.workspaces !== next.workspaces) return false;
   if (prev.resolveExecutorContext !== next.resolveExecutorContext) return false;

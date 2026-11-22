@@ -48,6 +48,8 @@ import {
 import {
   activateDraftView,
   clearScopeDraftState,
+  clearSessionViewsForSession,
+  demoteImplicitSourceViewsForSession,
   draftsByScopeEqualIgnoringAllComposerText,
   ensureDraftForScopeState,
   pruneStaleSessionPanelViews,
@@ -1146,6 +1148,15 @@ export function useAIState() {
     scope: { type: 'terminal' | 'workspace'; targetId: string; hostIds?: string[] },
   ) => {
     const scopeKey = `${scope.type}:${scope.targetId}`;
+    // Capture the PRE-rebind active map before rebindActiveSessionMap drops the
+    // source pointers (issue #4159 round 4). After a restart the active map is
+    // restored but panelViewByScope is memory-only and starts empty, so a scope
+    // whose only chat is rebound has no explicit view for the round-3 purge to
+    // demote. These keys are the implicit source views we must write to draft.
+    const preRebindActiveSessionIdMap =
+      latestAIActiveSessionMapSnapshot
+        ?? localStorageAdapter.read<Record<string, string | null>>(STORAGE_KEY_AI_ACTIVE_SESSION_MAP)
+        ?? {};
     setSessionsRaw(prev => {
       const next = prev.map(s => {
         if (s.id !== sessionId) return s;
@@ -1181,18 +1192,43 @@ export function useAIState() {
       return next;
     });
     // Open the rebound chat in this panel; active-map alone loses to an
-    // explicit draft/session panelView that still points elsewhere.
-    setPanelViewByScope((prev) => setSessionView(prev, scopeKey, sessionId));
+    // explicit draft/session panelView that still points elsewhere. Clear any
+    // SOURCE scope's view that still points at this chat first: the moved chat
+    // stays rank-1 visible in the source workspace, so a surviving view would
+    // let its active-session effect recreate the pointer rebindActiveSessionMap
+    // just removed (follow-up turns would still use the source executor).
+    // Restored sessions have no explicit source view at all (empty panel views),
+    // so also demote the implicit source scopes from the PRE-rebind active map.
+    // Both demotions + the destination view land in ONE updater (no intermediate
+    // state where the rank-1 fallback could re-select the moved chat).
+    setPanelViewByScope((prev) =>
+      setSessionView(
+        demoteImplicitSourceViewsForSession(
+          clearSessionViewsForSession(prev, sessionId, scopeKey),
+          preRebindActiveSessionIdMap,
+          sessionId,
+          scopeKey,
+        ),
+        scopeKey,
+        sessionId,
+      ),
+    );
   }, [persistSessions, setPanelViewByScope]);
 
   // Manual durability escape hatch (issue #4015 follow-up): export the
   // current store to a user-chosen JSON file, or import one back in.
   // Import is an explicit action, so it may overwrite the live store.
-  const exportSessionsBackup = useCallback(async (): Promise<string | null> => {
+  // With `sessionIds`, export only those chats (global session manager,
+  // issue #4098 phase 4) — import merges by id, so a single-chat export
+  // restores just that chat.
+  const exportSessionsBackup = useCallback(async (sessionIds?: readonly string[]): Promise<string | null> => {
     const bridge = getAIBridge();
     if (!bridge?.aiSessionsBackupExport) return null;
+    const source = sessionIds && sessionIds.length > 0
+      ? sessionsRef.current.filter((session) => sessionIds.includes(session.id))
+      : sessionsRef.current;
     const result = await bridge.aiSessionsBackupExport({
-      json: JSON.stringify(sessionsRef.current),
+      json: JSON.stringify(source),
     });
     return result?.success ? (result.filePath ?? '') : null;
   }, []);

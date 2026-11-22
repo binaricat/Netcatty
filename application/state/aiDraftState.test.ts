@@ -6,6 +6,8 @@ import {
   bumpDraftMutationVersionState,
   bumpDraftUploadGenerationState,
   clearScopeDraftState,
+  clearSessionViewsForSession,
+  demoteImplicitSourceViewsForSession,
   createEmptyDraft,
   ensureDraftForScopeState,
   getDraftMutationVersionState,
@@ -216,6 +218,139 @@ test("pruneStaleSessionPanelViews returns the original ref when nothing is stale
   );
 
   assert.equal(next, panelViewByScope);
+});
+
+test("clearSessionViewsForSession clears the rebound chat's source views and keeps the destination + unrelated scopes", () => {
+  // Mirrors rebindSessionScope: source A shows chat-1, destination B is set to
+  // chat-1, and unrelated scopes keep their own chats/drafts.
+  const panelViewByScope = {
+    "workspace:A": { mode: "session", sessionId: "chat-1" },
+    "workspace:A-alias": { mode: "session", sessionId: "chat-1" },
+    "workspace:B": { mode: "session", sessionId: "prev-b" },
+    "workspace:C": { mode: "session", sessionId: "chat-2" },
+    "workspace:D": { mode: "draft" },
+  } satisfies Record<string, { mode: "draft" } | { mode: "session"; sessionId: string }>;
+
+  const next = setSessionView(
+    clearSessionViewsForSession(panelViewByScope, "chat-1", "workspace:B"),
+    "workspace:B",
+    "chat-1",
+  );
+
+  assert.deepEqual(next, {
+    "workspace:A": { mode: "draft" },
+    "workspace:A-alias": { mode: "draft" },
+    "workspace:B": { mode: "session", sessionId: "chat-1" },
+    "workspace:C": { mode: "session", sessionId: "chat-2" },
+    "workspace:D": { mode: "draft" },
+  });
+  // The destination's prior view must not be cleared by the purge (setSessionView
+  // overwrites it), and unrelated scopes must keep their exact view objects.
+  assert.equal(next["workspace:C"], panelViewByScope["workspace:C"]);
+  assert.equal(next["workspace:D"], panelViewByScope["workspace:D"]);
+});
+
+test("clearSessionViewsForSession returns the original ref when no other scope points at the chat", () => {
+  const panelViewByScope = {
+    "workspace:B": { mode: "session", sessionId: "chat-2" },
+    "workspace:C": { mode: "draft" },
+  } satisfies Record<string, { mode: "draft" } | { mode: "session"; sessionId: string }>;
+
+  const next = clearSessionViewsForSession(panelViewByScope, "chat-1", "workspace:B");
+
+  assert.equal(next, panelViewByScope);
+});
+
+// Mirrors rebindSessionScope's single setPanelViewByScope updater: explicit
+// source views are purged, implicit source scopes from the pre-rebind active
+// map are demoted to draft, and the destination view is (re)set to the chat.
+function applyRebindViewUpdates(
+  panelViewByScope: Record<string, { mode: "draft" } | { mode: "session"; sessionId: string }>,
+  activeSessionIdMap: Record<string, string | null>,
+  sessionId: string,
+  keepScopeKey: string,
+) {
+  return setSessionView(
+    demoteImplicitSourceViewsForSession(
+      clearSessionViewsForSession(panelViewByScope, sessionId, keepScopeKey),
+      activeSessionIdMap,
+      sessionId,
+      keepScopeKey,
+    ),
+    keepScopeKey,
+    sessionId,
+  );
+}
+
+test("round 4 RESTORED: rebind of a restored chat demotes implicit source scopes when panel views are empty", () => {
+  // Post-restart (issue #4125): the active-session map is restored from the
+  // IndexedDB meta store, but panelViewByScope is memory-only and starts EMPTY.
+  // chat-1 is A's only session; rebinding it to B has no explicit source view
+  // for the round-3 purge to demote. A's implicit view must be written to draft.
+  const activeSessionIdMap = {
+    "workspace:A": "chat-1",
+    "workspace:C": "chat-2",
+  };
+
+  const next = applyRebindViewUpdates({}, activeSessionIdMap, "chat-1", "workspace:B");
+
+  assert.deepEqual(next, {
+    // A had no explicit view but was an implicit source via the restored map:
+    // it now has an explicit draft view that blocks the sessions[0] fallback.
+    "workspace:A": { mode: "draft" },
+    // Destination still points at the rebound chat.
+    "workspace:B": { mode: "session", sessionId: "chat-1" },
+  });
+  // Unrelated scope C (its active pointer named chat-2, not chat-1) is not a
+  // source scope and must not gain any view.
+  assert.equal(next["workspace:C"], undefined);
+});
+
+test("round 4: rebind keeps explicit source views demoted and leaves unrelated + target scopes intact", () => {
+  const activeSessionIdMap = {
+    "workspace:A": "chat-1",
+    "workspace:A-alias": "chat-1",
+    "workspace:C": "chat-2",
+  };
+  const panelViewByScope = {
+    "workspace:A": { mode: "session", sessionId: "chat-1" },
+    "workspace:A-alias": { mode: "session", sessionId: "chat-1" },
+    "workspace:B": { mode: "session", sessionId: "prev-b" },
+    "workspace:C": { mode: "session", sessionId: "chat-2" },
+    "workspace:D": { mode: "draft" },
+  } satisfies Record<string, { mode: "draft" } | { mode: "session"; sessionId: string }>;
+
+  const next = applyRebindViewUpdates(panelViewByScope, activeSessionIdMap, "chat-1", "workspace:B");
+
+  assert.deepEqual(next, {
+    "workspace:A": { mode: "draft" },
+    "workspace:A-alias": { mode: "draft" },
+    "workspace:B": { mode: "session", sessionId: "chat-1" },
+    "workspace:C": { mode: "session", sessionId: "chat-2" },
+    "workspace:D": { mode: "draft" },
+  });
+  // Unrelated scopes keep their exact objects; the destination is overwritten
+  // by setSessionView, not by the purge.
+  assert.equal(next["workspace:C"], panelViewByScope["workspace:C"]);
+  assert.equal(next["workspace:D"], panelViewByScope["workspace:D"]);
+});
+
+test("round 4: implicit source keys come from the PRE-rebind active map (post-clear would miss them)", () => {
+  // rebindActiveSessionMap drops A's pointer to chat-1 before views are
+  // written. Feeding the post-clear map to the demotion would miss A entirely,
+  // so the source keys MUST be captured before rebindActiveSessionMap runs.
+  const preRebind = { "workspace:A": "chat-1", "workspace:B": "chat-1" };
+  const postClear = { "workspace:B": "chat-1" };
+
+  const fromPreRebind = demoteImplicitSourceViewsForSession(
+    {}, preRebind, "chat-1", "workspace:B",
+  );
+  assert.deepEqual(fromPreRebind, { "workspace:A": { mode: "draft" } });
+
+  const fromPostClear = demoteImplicitSourceViewsForSession(
+    {}, postClear, "chat-1", "workspace:B",
+  );
+  assert.deepEqual(fromPostClear, {});
 });
 
 test("clearScopeDraftState removes both the draft and current panel view", () => {

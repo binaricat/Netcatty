@@ -288,6 +288,12 @@ interface AIChatPanelsHostProps {
   /** All live terminal+workspace target ids (for /chats dangling detection). */
   liveScopeTargetIds: Set<string>;
   contextsByTabId: Map<string, AIPanelContext>;
+  /**
+   * Per-session AI info for EVERY live terminal (full terminal session store,
+   * all tabs) — the global session manager's rebind targets and dangling
+   * detection must include terminals whose tab has no mounted AI context.
+   */
+  appTerminalSessions?: AITerminalSessionInfo[];
   resolveExecutorContext: (scope: {
     type: 'terminal' | 'workspace';
     targetId?: string;
@@ -461,6 +467,7 @@ function aiChatPanelsHostAreEqual(
   if (prev.mountedTabIds !== next.mountedTabIds) return false;
   if (prev.liveScopeTargetIds !== next.liveScopeTargetIds) return false;
   if (prev.contextsByTabId !== next.contextsByTabId) return false;
+  if (prev.appTerminalSessions !== next.appTerminalSessions) return false;
   if (prev.activeSidePanelTab !== next.activeSidePanelTab) return false;
   if (prev.pendingTerminalSelection !== next.pendingTerminalSelection) return false;
   if (prev.onPendingTerminalSelectionConsumed !== next.onPendingTerminalSelectionConsumed) return false;
@@ -503,6 +510,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   activeSidePanelTab,
   liveScopeTargetIds,
   contextsByTabId,
+  appTerminalSessions,
   resolveExecutorContext,
   pendingTerminalSelection,
   onPendingTerminalSelectionConsumed,
@@ -532,14 +540,49 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     showDraftView,
     updateDraft,
   } = aiConfig;
-  const aiPanelWorkspaces = useMemo(
-    () => (workspaces ?? []).map((workspace) => ({
-      id: workspace.id,
-      title: workspace.title,
-      anchorChatId: workspace.anchorChatId,
-    })),
-    [workspaces],
-  );
+  const previousAiPanelWorkspacesRef = useRef<Array<{ id: string; title: string; anchorChatId?: string; hostIds?: string[] }> | null>(null);
+  const aiPanelWorkspaces = useMemo(() => {
+    const hostIdBySessionId = new Map<string, string>();
+    for (const info of appTerminalSessions ?? []) {
+      if (info.sessionId && info.hostId) {
+        hostIdBySessionId.set(info.sessionId, info.hostId);
+      }
+    }
+    const next = (workspaces ?? []).map((workspace) => {
+      const hostIds = Array.from(
+        new Set(
+          collectSessionIds(workspace.root)
+            .map((sessionId) => hostIdBySessionId.get(sessionId))
+            .filter((hostId): hostId is string => !!hostId),
+        ),
+      );
+      return hostIds.length > 0
+        ? { id: workspace.id, title: workspace.title, anchorChatId: workspace.anchorChatId, hostIds }
+        : { id: workspace.id, title: workspace.title, anchorChatId: workspace.anchorChatId };
+    });
+    const prev = previousAiPanelWorkspacesRef.current;
+    if (
+      prev
+      && prev.length === next.length
+      && prev.every((entry, idx) => {
+        const candidate = next[idx];
+        if (
+          entry.id !== candidate.id
+          || entry.title !== candidate.title
+          || entry.anchorChatId !== candidate.anchorChatId
+        ) {
+          return false;
+        }
+        const a = entry.hostIds ?? [];
+        const b = candidate.hostIds ?? [];
+        return a.length === b.length && a.every((id, i) => id === b[i]);
+      })
+    ) {
+      return prev;
+    }
+    previousAiPanelWorkspacesRef.current = next;
+    return next;
+  }, [workspaces, appTerminalSessions]);
 
   useEffect(() => {
     if (!pendingTerminalSelection) return;
@@ -650,6 +693,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     workspaces={aiPanelWorkspaces}
                     onSetWorkspaceAnchorChat={onSetWorkspaceAnchorChat}
                     terminalSessions={context.terminalSessions}
+                    appTerminalSessions={appTerminalSessions}
                     liveScopeTargetIds={liveScopeTargetIds}
                     resolveExecutorContext={resolveExecutorContext}
                     isVisible={isVisible}

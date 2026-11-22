@@ -321,7 +321,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     sidePanelLiveStore.update(sidePanelLiveSnapshot);
   }, [sidePanelLiveSnapshot]);
 
-  const { aiContextsByTabId, resolveAIExecutorContext } = useTerminalAiContexts({
+  const { aiContextsByTabId, appTerminalInfos, resolveAIExecutorContext } = useTerminalAiContexts({
     hosts: s.hosts,
     hostsRef: s.hostsRef,
     portForwardingRules: s.portForwardingRules,
@@ -442,6 +442,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     AIChatPanelsHost: s.AIChatPanelsHost,
     AISidePanelStateRoot: s.AISidePanelStateRoot,
     aiContextsByTabId,
+    appTerminalInfos,
     Array: s.Array,
     Button: s.Button,
     cn,
@@ -700,6 +701,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     activeTerminalSessionIdForSftp,
     activeWorkspace,
     aiContextsByTabId,
+    appTerminalInfos,
     computeSplitHint,
     dropHint,
     s.draggingSessionId,
