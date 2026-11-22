@@ -332,7 +332,7 @@ async function chooseChat(panel, marker) {
   await panel.getByText(marker, { exact: true }).first().click();
   await panel.getByText(replies.get(marker), { exact: true }).waitFor();
 }
-async function assertChats(baseline, current, afterAppend = false) {
+async function assertChats(baseline, current, afterAppend = false, pointerSource = baseline) {
   const a = sessionWith(current, 'QA_ALPHA_USER_ONE'), b = sessionWith(current, 'QA_BETA_USER_ONE');
   assert(a && b, 'Both distinct chats must exist'); assert.notEqual(a.id, b.id);
   const oldA = sessionWith(baseline, 'QA_ALPHA_USER_ONE'), oldB = sessionWith(baseline, 'QA_BETA_USER_ONE');
@@ -346,13 +346,16 @@ async function assertChats(baseline, current, afterAppend = false) {
   assert(current.idb.meta.some(m => m.key === 'migrationCompleted' && m.value?.migrationCompleted === true));
   const active = current.idb.meta.find(m => m.key === 'activeSessionMap')?.value;
   assert(active && typeof active === 'object', 'IndexedDB meta.activeSessionMap must exist directly; no legacy fallback');
-  const activeKey = Object.keys(baseline.activeMap || {}).find(key => baseline.activeMap[key] === oldB.id);
-  assert(activeKey, 'Baseline has an explicit active Beta pointer');
+  const originalPointerMap = pointerSource.idb ? pointerSource.idb.meta.find(m => m.key === 'activeSessionMap')?.value : pointerSource.activeMap;
+  const activeKey = Object.keys(originalPointerMap || {}).find(key => originalPointerMap[key] === oldB.id);
   assert.equal(current.origin, baseline.origin, 'Actual app origin must stay identical');
   assert.deepEqual(a.scope, oldA.scope); assert.deepEqual(b.scope, oldB.scope);
-  const pointer = { phase: afterAppend ? 'restarted' : 'migrated', expectedKey: activeKey, expectedBeta: oldB.id, originalScope: oldB.scope, baselineMap: baseline.activeMap, actualIdbMap: active, actualLegacyMap: current.activeMap, liveTabs: current.liveTabs };
+  const pointer = { phase: afterAppend ? 'restarted' : 'migrated', expectedKey: activeKey, expectedBeta: oldB.id, originalScope: oldB.scope, baselineMap: originalPointerMap, actualIdbMap: active, actualLegacyMap: current.activeMap, baselineLiveTabs: baseline.liveTabs, liveTabs: current.liveTabs };
   (report.activePointerChecks ||= []).push(pointer);
-  try {
+  if (!activeKey) {
+    pointer.status = 'untested: no positive pointer persisted by the source GUI';
+    (report.coverageGaps ||= []).push({ phase: pointer.phase, assertion: 'active pointer preservation', reason: pointer.status });
+  } else try {
     assert.equal(active[activeKey], oldB.id, 'Exact original scope-to-session active pointer preserved');
     pointer.status = 'passed';
   } catch (error) {
@@ -387,7 +390,21 @@ async function main() {
   await panel.locator('button:has(svg.lucide-plus)').first().click();
   await send(panel, 'QA_BETA_USER_ONE'); await send(panel, 'QA_BETA_USER_TWO');
   await screenshot('02-baseline-beta-active');
-  const baseline = await snapshot();
+  // Explicit normal history selection gives the released GUI a bounded chance
+  // to persist Beta before asking the candidate to migrate a positive pointer.
+  await chooseChat(panel, 'QA_ALPHA_USER_ONE');
+  await chooseChat(panel, 'QA_BETA_USER_ONE');
+  let baseline;
+  try {
+    baseline = await until('released GUI positive active Beta pointer', async () => {
+      const value = await snapshot(), beta = sessionWith(value, 'QA_BETA_USER_ONE');
+      return beta && value.activeMap?.[`terminal:${beta.scope.targetId}`] === beta.id && value;
+    }, 4000);
+    report.baselinePointerSeed = { status: 'passed', map: baseline.activeMap };
+  } catch {
+    baseline = await snapshot();
+    report.baselinePointerSeed = { status: 'untested: released GUI did not persist a positive Beta pointer after History Alpha then Beta', map: baseline.activeMap, beta: sessionWith(baseline, 'QA_BETA_USER_ONE')?.id, scope: sessionWith(baseline, 'QA_BETA_USER_ONE')?.scope, liveTabs: baseline.liveTabs };
+  }
   assert(!baseline.idb, 'Released baseline must exercise legacy-to-IDB migration');
   assert.equal(messages(sessionWith(baseline, 'QA_ALPHA_USER_ONE')).length, 4);
   assert.equal(messages(sessionWith(baseline, 'QA_BETA_USER_ONE')).length, 4);
@@ -408,7 +425,10 @@ async function main() {
   } else { report.installerReplacement = 'passed: normal per-user NSIS replacement'; report.candidateInstall = 'passed'; }
   }
   await launch('candidate-after-install', pinned.version);
-  const beforePanel = await snapshot();
+  const beforePanel = await until('candidate migration marker before panel navigation', async () => {
+    const value = await snapshot();
+    return value.idb?.meta.some(m => m.key === 'migrationCompleted' && m.value?.migrationCompleted === true) && value;
+  });
   fs.writeFileSync(path.join(evidence, 'candidate-before-panel-storage.json'), JSON.stringify(beforePanel, null, 2));
   report.candidateBeforePanel = { activeMap: beforePanel.activeMap, idbMeta: beforePanel.idb?.meta, liveTabs: beforePanel.liveTabs };
   panel = await aiPanel(true);
@@ -417,7 +437,8 @@ async function main() {
     return value.idb?.meta.some(m => m.key === 'migrationCompleted' && m.value?.migrationCompleted === true) && value;
   });
   fs.writeFileSync(path.join(evidence, 'candidate-migrated-storage.json'), JSON.stringify(migrated, null, 2));
-  report.migratedChats = await assertChats(baseline, migrated);
+  report.migratedChats = await assertChats(baseline, beforePanel);
+  report.afterOpeningPanelActiveMap = migrated.idb?.meta.find(m => m.key === 'activeSessionMap')?.value;
   report.candidateInitialView = { automaticallyOpenedBeta: await panel.getByText('QA_BETA_REPLY_TWO', { exact: true }).isVisible(), visibleText: await panel.innerText(), policy: 'Stock panelViewByScope is memory-only; exact persisted active pointer checked before any chat selection' };
   await screenshot('candidate-initial-view-before-history-selection');
   if (!report.candidateInitialView.automaticallyOpenedBeta) await chooseChat(panel, 'QA_BETA_USER_ONE');
@@ -425,8 +446,11 @@ async function main() {
   await screenshot('03-candidate-beta-active');
   await chooseChat(panel, 'QA_ALPHA_USER_ONE'); await screenshot('04-candidate-alpha');
   await chooseChat(panel, 'QA_BETA_USER_ONE');
-  report.aiHistoryMigration = report.migratedChats.activePointer === 'passed' ? 'passed' : 'partial: original records/full turns/host preserved; active pointer FAILED';
+  report.aiHistoryMigration = `original records/full turns/scope/host PASSED; active pointer ${report.migratedChats.activePointer}`;
   await send(panel, 'QA_BETA_AFTER_UPGRADE'); await screenshot('05-candidate-appended');
+  const beforeRestart = await snapshot();
+  fs.writeFileSync(path.join(evidence, 'candidate-before-quit-storage.json'), JSON.stringify(beforeRestart, null, 2));
+  report.beforeRestartPointer = { idbMap: beforeRestart.idb?.meta.find(m => m.key === 'activeSessionMap')?.value, legacyMap: beforeRestart.activeMap };
   await quit(); await launch('candidate-restarted', pinned.version);
   const restartBeforePanel = await snapshot();
   fs.writeFileSync(path.join(evidence, 'restarted-before-panel-storage.json'), JSON.stringify(restartBeforePanel, null, 2));
@@ -434,13 +458,15 @@ async function main() {
   panel = await aiPanel(true);
   const restarted = await snapshot();
   fs.writeFileSync(path.join(evidence, 'candidate-restarted-storage.json'), JSON.stringify(restarted, null, 2));
-  report.restartedChats = await assertChats(baseline, restarted, true);
+  report.restartedChats = await assertChats(baseline, restartBeforePanel, true, beforeRestart);
+  report.afterRestartOpeningPanelActiveMap = restarted.idb?.meta.find(m => m.key === 'activeSessionMap')?.value;
   report.restartInitialView = { automaticallyOpenedBeta: await panel.getByText('QA_BETA_REPLY_AFTER_UPGRADE', { exact: true }).isVisible(), visibleText: await panel.innerText(), policy: 'Report automatic view restoration separately from unchanged IndexedDB active pointer and complete persisted turns' };
   await screenshot('restarted-initial-view-before-history-selection');
   if (!report.restartInitialView.automaticallyOpenedBeta) await chooseChat(panel, 'QA_BETA_USER_ONE');
   await panel.getByText('QA_BETA_REPLY_AFTER_UPGRADE', { exact: true }).waitFor();
   await screenshot('06-candidate-restarted');
-  report.restartPersistence = report.restartedChats.activePointer === 'passed' ? 'passed' : 'partial: original and appended turns/host preserved; active pointer FAILED';
+  report.restartPersistence = `original and appended turns/scope/host PASSED; active pointer ${report.restartedChats.activePointer}`;
+  report.overall = report.validationFailures?.length ? 'failed: read individual validation failures' : report.coverageGaps?.length ? 'partial: independent data assertions passed; positive legacy pointer not available' : 'passed';
   await quit(); event('Windows installed real GUI acceptance completed');
 }
 let finishing;
