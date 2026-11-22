@@ -157,7 +157,7 @@ test("continuedCompositionPrefix returns the hypothesis already on the PTY", () 
 type Harness = ImeCompositionCommitTarget & {
   compositionstart: () => void;
   compositionend: () => void;
-  keydown: (event: { keyCode: number }) => boolean;
+  keydown: (event: { key?: string; keyCode: number }) => boolean;
   sent: string[];
 };
 
@@ -494,6 +494,116 @@ test("filtered formatting characters do not break final composition deduplicatio
   helper.compositionend();
   await flushTimers();
   assert.deepEqual(helper.sent, ["ab", "X"]);
+});
+
+test("mid-composition Unidentified keydown does not prematurely flush before polish", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = "测试版本一点一点九零了";
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  assert.equal(helper.keydown({ key: "Unidentified", keyCode: 0 }), false);
+  assert.deepEqual(helper.sent, []);
+
+  helper._textarea.value = "测试版本1.1.90了";
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, ["测试版本1.1.90了"]);
+});
+
+test("trailing compositionend after early synchronous flush emits only the diff", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = "测试版本一点一点九零了";
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  // Simulate a non-sentinel mid-composition keydown triggering _finalizeComposition(false)
+  helper.keydown({ key: "F24", keyCode: 135 });
+  assert.deepEqual(helper.sent, ["测试版本一点一点九零了"]);
+
+  helper._textarea.value = "测试版本1.1.90了";
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, [
+    "测试版本一点一点九零了",
+    BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE,
+    "1.1.90了",
+  ]);
+});
+
+test("trailing compositionend after early synchronous flush ignores identical text", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = "测试语音输入文本";
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  helper.keydown({ key: "F24", keyCode: 135 });
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, ["测试语音输入文本"]);
+});
+
+test("trailing empty compositionend after Enter cleared textarea sends no backspace", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = "你好";
+  helper._compositionPosition = { start: 0, end: 2 };
+  helper.keydown({ key: "Enter", keyCode: 13 });
+  helper._textarea.value = "";
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, ["你好"]);
+});
+
+test("consecutive rewrite composition replaces prior committed utterance in place", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = "测试版本一点一点九零了";
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  helper.compositionend();
+  await flushTimers();
+
+  helper.compositionstart();
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  helper._textarea.value = "测试版本1.1.90了";
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, [
+    "测试版本一点一点九零了",
+    BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE,
+    "1.1.90了",
+  ]);
+});
+
+test("consecutive normal compositions starting after committed text still send both words", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = "你好";
+  helper._compositionPosition = { start: 0, end: 2 };
+  helper.compositionend();
+  await flushTimers();
+
+  helper.compositionstart();
+  helper._compositionPosition = { start: 2, end: 2 };
+  helper._textarea.value = "你好你好";
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, ["你好", "你好"]);
 });
 
 test("keepLiveImeTranscriptionSingle is a no-op without a composition helper", () => {
