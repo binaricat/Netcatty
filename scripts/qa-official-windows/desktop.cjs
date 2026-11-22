@@ -190,7 +190,7 @@ async function launch(label, expectedVersion) {
   assert(fs.existsSync(executable), 'Official installer must create Netcatty.exe');
   const port = await freePort(), inspectPort = await freePort();
   app = spawn(executable, [`--user-data-dir=${profile}`, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`, `--inspect=127.0.0.1:${inspectPort}`], {
-    cwd: installDir, env: isolatedEnvironment(), windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: path.dirname(executable), env: isolatedEnvironment(), windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'],
   });
   app.on('error', error => logs.push(`${label}: ${error.message}`));
   for (const name of ['stdout', 'stderr']) app[name].on('data', part => logs.push(`[${label} ${name}] ${part}`));
@@ -205,10 +205,11 @@ async function launch(label, expectedVersion) {
     const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(1000) });
     return (await response.json()).webSocketDebuggerUrl;
   }, 45000);
-  browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 30000 });
-  browser.contexts()[0].setDefaultTimeout(12000);
-  page = await until(`${label} actual app page`, () => browser.contexts()[0].pages().find(p => p.url().startsWith('app://netcatty/index.html') && !p.url().includes('settings')));
-  await page.locator('[data-section="top-tabs-toolbar-actions"]').waitFor({ timeout: 45000 });
+  await until(`${label} actual native renderer ready`, () => inspector.eval(`(async () => {
+    const e = process.mainModule.require('electron');
+    const w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html') && !w.webContents.getURL().includes('settings'));
+    return !!w && !w.webContents.isLoadingMainFrame() && await w.webContents.executeJavaScript('!!document.querySelector(\'[data-section="top-tabs-toolbar-actions"]\')');
+  })()`), 45000);
   const native = await inspector.eval(`(() => {
     const e = process.mainModule.require('electron');
     const w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html') && !w.webContents.getURL().includes('settings'));
@@ -217,13 +218,24 @@ async function launch(label, expectedVersion) {
       origin:w.webContents.getURL(), argv:process.argv, preferences:w.webContents.getLastWebPreferences(),
       noSandbox:e.app.commandLine.hasSwitch('no-sandbox'), disableSetuidSandbox:e.app.commandLine.hasSwitch('disable-setuid-sandbox') };
   })()`);
+  report.launches.push({ label, ...native });
   assert.equal(native.version, expectedVersion);
   assert.equal(native.packaged, true);
   assert.equal(path.resolve(native.profile).toLowerCase(), profile.toLowerCase());
   assert.equal(path.resolve(native.executable).toLowerCase(), executable.toLowerCase());
   assert(native.appPath.toLowerCase().startsWith(path.dirname(executable).toLowerCase()));
   assert.equal(native.noSandbox, false); assert.equal(native.disableSetuidSandbox, false);
-  report.launches.push({ label, ...native }); event(`launched ${label}`, { version: native.version, origin: native.origin });
+  event(`launched ${label}`, { version: native.version, origin: native.origin });
+  const nativePng = await inspector.eval(`(async () => {
+    const e = process.mainModule.require('electron');
+    const w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html') && !w.webContents.getURL().includes('settings'));
+    return (await w.webContents.capturePage()).toPNG().toString('base64');
+  })()`);
+  fs.writeFileSync(path.join(staging, `native-launch-${label}.png`), Buffer.from(nativePng, 'base64'));
+  browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 30000 });
+  browser.contexts()[0].setDefaultTimeout(12000);
+  page = await until(`${label} actual app page`, () => browser.contexts()[0].pages().find(p => p.url().startsWith('app://netcatty/index.html') && !p.url().includes('settings')));
+  await page.locator('[data-section="top-tabs-toolbar-actions"]').waitFor({ timeout: 15000 });
   await screenshot(`launch-${label}`);
   return native.version;
 }
