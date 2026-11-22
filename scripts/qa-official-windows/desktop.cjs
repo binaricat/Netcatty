@@ -6,15 +6,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const net = require('node:net');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const { chromium } = require('playwright-core');
 const pinned = require('./candidate.json');
 const root = path.resolve(process.env.QA_ROOT);
 const evidence = path.join(root, 'evidence');
 const staging = path.join(root, 'unreviewed');
-const home = path.join(root, 'synthetic-user');
+const home = path.join(root, 'user');
 const profile = path.join(root, 'profile');
-const installDir = path.join(home, 'AppData', 'Local', 'Programs', 'NetcattyQA');
+const installDir = path.join(root, 'app');
 const executable = path.join(installDir, 'Netcatty.exe');
 const hostLabel = 'QA Windows Loopback';
 const report = {
@@ -59,13 +59,51 @@ async function freePort() {
   await new Promise(resolve => server.close(resolve));
   return port;
 }
-function isolatedEnvironment() {
-  const allowed = ['PATH', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramData', 'OS', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS', 'USERNAME', 'USERDOMAIN'];
+function isolatedEnvironment(installer = false) {
+  const allowed = ['PATH', 'SystemRoot', 'SystemDrive', 'WINDIR', 'ComSpec', 'PATHEXT', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramData', 'ALLUSERSPROFILE', 'PUBLIC', 'OS', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS', 'USERNAME', 'USERDOMAIN', 'USERDNSDOMAIN'];
   const env = {};
   for (const key of allowed) if (process.env[key]) env[key] = process.env[key];
   Object.assign(env, { USERPROFILE: home, HOME: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), TEMP: path.join(root, 'temp'), TMP: path.join(root, 'temp') });
   for (const dir of [home, env.APPDATA, env.LOCALAPPDATA, env.TEMP]) fs.mkdirSync(dir, { recursive: true });
+  // NSIS uses the real ephemeral Windows user's shell folders. Its explicit
+  // installation directory remains QA-owned; only the application gets the
+  // synthetic home/profile. Do not change Windows account or registry paths.
+  if (installer) for (const key of ['USERPROFILE', 'HOME', 'APPDATA', 'LOCALAPPDATA', 'HOMEDRIVE', 'HOMEPATH']) if (process.env[key]) env[key] = process.env[key];
   return env;
+}
+function installerDiagnostic(label) {
+  try {
+    const source = `using System; using System.Text; using System.Runtime.InteropServices;
+      public class QaWindows { public delegate bool Callback(IntPtr h, IntPtr p);
+      [DllImport("user32.dll")] public static extern bool EnumWindows(Callback cb, IntPtr p);
+      [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h, Callback cb, IntPtr p);
+      [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder b, int n);
+      [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); }`;
+    const script = `Add-Type -TypeDefinition $env:QA_NATIVE_SOURCE
+      $items = [Collections.Generic.List[object]]::new()
+      [QaWindows]::EnumWindows({param($h,$p)
+        [uint32]$owner = 0; [void][QaWindows]::GetWindowThreadProcessId($h,[ref]$owner)
+        $proc = Get-Process -Id $owner -ErrorAction SilentlyContinue
+        if ($proc.ProcessName -like '*Netcatty*') {
+          $text = [Text.StringBuilder]::new(4096); [void][QaWindows]::GetWindowText($h,$text,4096)
+          $items.Add(@{process=$proc.ProcessName;pid=$owner;text=$text.ToString()})
+          [QaWindows]::EnumChildWindows($h,{param($child,$unused)
+            $body = [Text.StringBuilder]::new(4096); [void][QaWindows]::GetWindowText($child,$body,4096)
+            if ($body.Length) {$items.Add(@{childText=$body.ToString()})}; return $true
+          },[IntPtr]::Zero) | Out-Null
+        }; return $true
+      },[IntPtr]::Zero) | Out-Null
+      $items | ConvertTo-Json -Depth 5
+      try {
+        Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing
+        $b = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+        $bitmap = [Drawing.Bitmap]::new($b.Width,$b.Height); $g = [Drawing.Graphics]::FromImage($bitmap)
+        $g.CopyFromScreen($b.Location,[Drawing.Point]::Empty,$b.Size)
+        $bitmap.Save($env:QA_NATIVE_PNG,[Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $bitmap.Dispose()
+      } catch { Write-Output "Desktop capture unavailable: $_" }`;
+    const text = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { env: { ...isolatedEnvironment(true), QA_NATIVE_SOURCE: source, QA_NATIVE_PNG: path.join(staging, `installer-${label.replace(/[^a-z0-9]/gi, '-')}.png`) }, encoding: 'utf8', timeout: 15000 });
+    return { windows: text, executableExists: fs.existsSync(executable), installFiles: fs.existsSync(installDir) ? fs.readdirSync(installDir) : [] };
+  } catch (error) { return { diagnosticError: error.message, executableExists: fs.existsSync(executable) }; }
 }
 class Inspector {
   constructor(url) {
@@ -97,15 +135,16 @@ async function install(installer, label, uninstall = false) {
   assert(!app || app.exitCode !== null, 'Close app before official installer');
   const args = uninstall ? ['/S', '/currentuser'] : ['/S', '/currentuser', `/D=${installDir}`];
   const started = Date.now();
-  const child = spawn(installer, args, { env: isolatedEnvironment(), windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(installer, args, { env: isolatedEnvironment(true), windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout.on('data', part => { output += part; });
   child.stderr.on('data', part => { output += part; });
   let spawnError;
   child.on('error', error => { spawnError = error; });
   const completed = await childExit(child, 90000);
+  const diagnostic = !completed ? installerDiagnostic(label) : undefined;
   if (!completed) child.kill();
-  const result = { label, installer: path.basename(installer), arguments: args, exitCode: child.exitCode, completed, durationMs: Date.now() - started, output, error: spawnError?.message };
+  const result = { label, installer: path.basename(installer), arguments: args, exitCode: child.exitCode, completed, durationMs: Date.now() - started, output, error: spawnError?.message, diagnostic };
   report.installers.push(result); event(`installer ${label}`, result);
   return completed && child.exitCode === 0 && !spawnError;
 }
@@ -158,7 +197,7 @@ async function launch(label, expectedVersion) {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 30000 });
   browser.contexts()[0].setDefaultTimeout(12000);
   page = await until(`${label} actual app page`, () => browser.contexts()[0].pages().find(p => p.url().startsWith('app://netcatty/index.html') && !p.url().includes('settings')));
-  await page.getByPlaceholder(/^Find a host/).waitFor({ timeout: 45000 });
+  await page.locator('[data-section="top-tabs-toolbar-actions"]').waitFor({ timeout: 45000 });
   const native = await inspector.eval(`(() => {
     const e = process.mainModule.require('electron');
     const w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html') && !w.webContents.getURL().includes('settings'));
@@ -174,6 +213,7 @@ async function launch(label, expectedVersion) {
   assert(native.appPath.toLowerCase().startsWith(installDir.toLowerCase()));
   assert.equal(native.noSandbox, false); assert.equal(native.disableSetuidSandbox, false);
   report.launches.push({ label, ...native }); event(`launched ${label}`, { version: native.version, origin: native.origin });
+  await screenshot(`launch-${label}`);
   return native.version;
 }
 async function quit() {

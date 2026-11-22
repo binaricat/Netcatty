@@ -26,7 +26,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 18
     env:
-      QA_ROOT: '${{ github.workspace }}\..\netcatty-windows-qa'
+      QA_ROOT: '${{ github.workspace }}\.qa-win-runtime'
       QA_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: Checkout only the authorized QA head without saved credentials
