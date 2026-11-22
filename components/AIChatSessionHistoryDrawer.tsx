@@ -93,7 +93,7 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
     <div className="flex-1 flex flex-col min-h-0">
       <div className="px-4 py-2.5 flex items-center justify-between shrink-0 border-b border-border/30">
         <div className="flex items-center gap-2 min-w-0">
-          {globalManager && (
+          {globalManager ? (
             <div className="flex items-center rounded-md border border-border/40 p-0.5 shrink-0" role="tablist">
               <button
                 type="button"
@@ -124,12 +124,11 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
                 {t('ai.chat.managerAllChatsTab')}
               </button>
             </div>
+          ) : (
+            <span className="text-[13px] font-medium text-foreground/80 truncate">
+              {t('ai.chat.allSessions')}
+            </span>
           )}
-          <span className="text-[13px] font-medium text-foreground/80 truncate">
-            {view === 'global' && globalManager
-              ? t('ai.chat.managerAllChatsTab')
-              : t('ai.chat.allSessions')}
-          </span>
         </div>
         <div className="flex items-center gap-2">
           {onImportSessions && (
