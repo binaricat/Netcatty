@@ -32,9 +32,11 @@ async function until(label, check, timeout = 20000) {
 async function freePort() { const s = net.createServer(); await new Promise(r => s.listen(0, '127.0.0.1', r)); const p = s.address().port; await new Promise(r => s.close(r)); return p; }
 function environment() {
   const env = {};
-  for (const key of ['PATH', 'USER', 'LOGNAME', 'SHELL', '__CF_USER_TEXT_ENCODING', 'XPC_FLAGS', 'XPC_SERVICE_NAME', 'COMMAND_MODE']) if (process.env[key]) env[key] = process.env[key];
-  Object.assign(env, { HOME: path.join(root, 'home'), TMPDIR: path.join(root, 'tmp') + '/', LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' });
-  fs.mkdirSync(env.HOME, { recursive: true }); fs.mkdirSync(env.TMPDIR, { recursive: true });
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SHELL', '__CF_USER_TEXT_ENCODING', 'XPC_FLAGS', 'XPC_SERVICE_NAME', 'COMMAND_MODE']) if (process.env[key]) env[key] = process.env[key];
+  Object.assign(env, { LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' });
+  // Preserve the ephemeral VM's normal OS home/bootstrap and temporary paths.
+  // Only app userData is isolated; never substitute/disable the OS keychain.
+  report.environment = { home: env.HOME, tmpdir: env.TMPDIR, isolatedAppProfile: profile, inheritedKeys: Object.keys(env) };
   return env;
 }
 class Inspector {
@@ -123,6 +125,7 @@ async function launch() {
     return (await (await fetch(`http://127.0.0.1:${inspectPort}/json/list`, { signal: AbortSignal.timeout(1000) })).json())[0];
   }, 45000);
   inspector = new Inspector(target.webSocketDebuggerUrl); await inspector.connect();
+  report.nativeInspectorPreflight = await inspector.eval('({pid:process.pid, platform:process.platform, arch:process.arch})');
   stage('native inspector connected; await real GUI');
   await until('actual native renderer DOM ready', () => inspector.eval(async () => {
     const e = process.mainModule.require('electron'), w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html'));

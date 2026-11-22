@@ -16,7 +16,8 @@ presented as APP notarization. No OS/security/xattr/quarantine/privacy settings
 are modified; an assessment preventing launch stops the GUI step.
 
 The unmodified installed app executable launches its real native GUI with a
-fresh synthetic profile and an allowlisted process environment. Actual app
+fresh synthetic profile and an allowlisted process environment retaining the
+ephemeral VM's standard HOME/TMPDIR for ordinary macOS services. Actual app
 version/path/origin/profile/architecture and stock web preferences are recorded.
 Renderer automation and screenshots use loopback CDP/native capture, without
 accessibility or screen-recording permission grants. No browser/UI fixture or
