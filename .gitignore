@@ -48,6 +48,9 @@
 # --- Layer 2: allowlist root directories ---
 # Un-ignore the directory entry, then everything under it. Git does not
 # traverse ignored directories, so both steps are required.
+!.agents/
+/.agents/*
+!/.agents/environment.json
 !.github/
 !.github/**
 !application/
