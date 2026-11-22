@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const net = require('node:net');
+const vm = require('node:vm');
 const { spawn, execFileSync } = require('node:child_process');
 const { chromium } = require('playwright-core');
 const pinned = require('./candidate.json');
@@ -40,7 +41,7 @@ async function until(label, check, timeout = 20000) {
   const deadline = Date.now() + timeout;
   let last;
   while (Date.now() < deadline) {
-    try { const result = await check(); if (result) return result; } catch (error) { last = error; }
+    try { const result = await check(); if (result) return result; } catch (error) { if (error instanceof SyntaxError) throw error; last = error; }
     await sleep(200);
   }
   throw new Error(`Timed out: ${label}${last ? `: ${last.message}` : ''}`);
@@ -128,6 +129,8 @@ class Inspector {
     await new Promise((resolve, reject) => { this.ws.addEventListener('open', resolve, { once: true }); this.ws.addEventListener('error', reject, { once: true }); });
   }
   async eval(expression) {
+    if (typeof expression === 'function') expression = `(${expression.toString()})()`;
+    new vm.Script(expression); // Validate generated debugger code before sending.
     const id = ++this.id;
     const result = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Native inspector timeout')); }, 12000);
@@ -205,11 +208,11 @@ async function launch(label, expectedVersion) {
     const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(1000) });
     return (await response.json()).webSocketDebuggerUrl;
   }, 45000);
-  await until(`${label} actual native renderer ready`, () => inspector.eval(`(async () => {
+  await until(`${label} actual native renderer ready`, () => inspector.eval(async () => {
     const e = process.mainModule.require('electron');
     const w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html') && !w.webContents.getURL().includes('settings'));
-    return !!w && !w.webContents.isLoadingMainFrame() && await w.webContents.executeJavaScript('!!document.querySelector(\'[data-section="top-tabs-toolbar-actions"]\')');
-  })()`), 45000);
+    return !!w && !w.webContents.isLoadingMainFrame() && await w.webContents.executeJavaScript("!!document.querySelector('[data-section=\"top-tabs-toolbar-actions\"]')");
+  }), 45000);
   const native = await inspector.eval(`(() => {
     const e = process.mainModule.require('electron');
     const w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html') && !w.webContents.getURL().includes('settings'));
