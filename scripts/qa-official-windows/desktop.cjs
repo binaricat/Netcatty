@@ -10,7 +10,7 @@ const vm = require('node:vm');
 const crypto = require('node:crypto');
 const { spawn, execFileSync } = require('node:child_process');
 const { chromium } = require('playwright-core');
-const pinned = require('./candidate.json');
+const pinned = require(path.resolve(__dirname, process.env.QA_CANDIDATE || 'candidate.json'));
 const portable = process.env.QA_MODE === 'portable';
 const root = path.resolve(process.env.QA_ROOT);
 const evidence = path.join(root, 'evidence');
@@ -22,6 +22,7 @@ let executable = path.join(installDir, 'Netcatty.exe');
 const hostLabel = 'QA Windows Loopback';
 const report = {
   candidate: pinned.sha, qaHead: process.env.QA_HEAD_SHA, mode: portable ? 'portable ZIP' : 'NSIS installed',
+  testPackageOrigin: pinned.qaBuilt ? 'Exact trusted fix SHA, CI QA-built NSIS; unsigned/unreleased, not released automatic updater acceptance' : 'Pinned official package',
   baselineInstall: 'not_run', baselineGuiSeed: 'not_run', installerReplacement: 'not_run',
   candidateInstall: 'not_run', aiHistoryMigration: 'not_run', restartPersistence: 'not_run',
   scope: portable ? 'Independent official Windows ZIP extraction and real native Electron GUI migration; no installation, replacement or updater coverage. CDP PNGs are actual renderer captures. Synthetic data only.' : 'Real per-user NSIS and installed native Electron renderer on ephemeral windows-2022; CDP PNGs are actual renderer captures, not OS desktop captures. Synthetic data only.',
@@ -448,7 +449,11 @@ async function main() {
   await chooseChat(panel, 'QA_BETA_USER_ONE');
   report.aiHistoryMigration = `original records/full turns/scope/host PASSED; active pointer ${report.migratedChats.activePointer}`;
   await send(panel, 'QA_BETA_AFTER_UPGRADE'); await screenshot('05-candidate-appended');
-  const beforeRestart = await snapshot();
+  const beforeRestart = pinned.requirePositiveCandidatePointer ? await until('patched candidate persists a positive Beta pointer before quit', async () => {
+    const value = await snapshot(), beta = sessionWith(value, 'QA_BETA_USER_ONE');
+    const map = value.idb?.meta.find(m => m.key === 'activeSessionMap')?.value;
+    return beta && map?.[`${beta.scope.type}:${beta.scope.targetId ?? ''}`] === beta.id && value;
+  }, 5000) : await snapshot();
   fs.writeFileSync(path.join(evidence, 'candidate-before-quit-storage.json'), JSON.stringify(beforeRestart, null, 2));
   report.beforeRestartPointer = { idbMap: beforeRestart.idb?.meta.find(m => m.key === 'activeSessionMap')?.value, legacyMap: beforeRestart.activeMap };
   await quit(); await launch('candidate-restarted', pinned.version);
@@ -466,6 +471,7 @@ async function main() {
   await panel.getByText('QA_BETA_REPLY_AFTER_UPGRADE', { exact: true }).waitFor();
   await screenshot('06-candidate-restarted');
   report.restartPersistence = `original and appended turns/scope/host PASSED; active pointer ${report.restartedChats.activePointer}`;
+  report.targetedCandidateRestartRegression = report.restartedChats.activePointer === 'passed' ? 'passed: positive candidate-created IDB Beta pointer and full new/original contents survived complete restart' : 'failed or untested: read activePointerChecks';
   report.overall = report.validationFailures?.length ? 'failed: read individual validation failures' : report.coverageGaps?.length ? 'partial: independent data assertions passed; positive legacy pointer not available' : 'passed';
   await quit(); event('Windows installed real GUI acceptance completed');
 }

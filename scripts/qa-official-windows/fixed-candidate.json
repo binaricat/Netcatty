@@ -1,0 +1,18 @@
+{
+  "repository": "binaricat/Netcatty",
+  "repositoryId": 1111357457,
+  "sha": "4516d3aed7cb54862dabd53abb56a7f90fba3212",
+  "base": "9d4e90b3aa8fe0a52d1a58e8ea8e61bdd3865e28",
+  "sourcePr": 4302,
+  "qaBuilt": true,
+  "requirePositiveCandidatePointer": true,
+  "version": "0.0.0-sha-4516d3a",
+  "installer": "Netcatty-0.0.0-sha-4516d3a-win-x64.exe",
+  "baseline": {
+    "tag": "v1.1.90",
+    "asset": 677167660,
+    "installer": "Netcatty-1.1.90-win-x64.exe",
+    "sha256": "cf6a028a0286264fd1e315025b1f78e8c96c468d6a22d5058b64319410debdc9",
+    "url": "https://github.com/binaricat/Netcatty/releases/download/v1.1.90/Netcatty-1.1.90-win-x64.exe"
+  }
+}

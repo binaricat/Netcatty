@@ -65,3 +65,101 @@ jobs:
           path: '${{ env.QA_ROOT }}\evidence\'
           retention-days: 3
           if-no-files-found: warn
+
+  fixed-windows-package:
+    name: Build exact 4516d3a Windows QA NSIS (unsigned, never publish)
+    if: >-
+      github.repository == 'binaricat/Netcatty' &&
+      github.event.pull_request.head.repo.full_name == 'binaricat/Netcatty' &&
+      github.event.pull_request.head.ref == 'qa/official-linux-a23868e' &&
+      github.event.pull_request.draft == true
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      QA_FIX_SOURCE: '${{ github.workspace }}\fixed-source'
+      QA_BUILD_OUTPUT: '${{ github.workspace }}\qa-fixed-package'
+      QA_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    outputs:
+      installer_sha: ${{ steps.build.outputs.installer_sha }}
+      artifact_id: ${{ steps.package.outputs.artifact-id }}
+      artifact_digest: ${{ steps.package.outputs.artifact-digest }}
+    steps:
+      - name: Checkout authorized QA harness without saved credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Separate exact trusted same-repository fix checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: binaricat/Netcatty
+          ref: 4516d3aed7cb54862dabd53abb56a7f90fba3212
+          path: fixed-source
+          persist-credentials: false
+      - name: Node 22 for repository Windows packaging conventions
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22.21.1'
+      - name: Build real NSIS with stock MSVC and existing pack:win-x64
+        id: build
+        run: node scripts/qa-official-windows/build-fixed.cjs
+      - name: Retain exact QA installer, build provenance and reviewed logs (3 days)
+        id: package
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-fixed-windows-4516d3a-${{ github.run_id }}
+          path: '${{ env.QA_BUILD_OUTPUT }}\'
+          retention-days: 3
+          if-no-files-found: warn
+
+  fixed-installed-windows-history:
+    name: Test real installed exact 4516d3a fix and positive pointer restart
+    needs: fixed-windows-package
+    if: >-
+      github.repository == 'binaricat/Netcatty' &&
+      github.event.pull_request.head.repo.full_name == 'binaricat/Netcatty' &&
+      github.event.pull_request.head.ref == 'qa/official-linux-a23868e' &&
+      github.event.pull_request.draft == true
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      QA_ROOT: '${{ github.workspace }}\.qa-fixed-win-runtime'
+      QA_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      QA_MODE: nsis
+      QA_CANDIDATE: fixed-candidate.json
+      QA_FIXED_ARTIFACT: '${{ github.workspace }}\qa-fixed-input'
+      QA_EXPECTED_INSTALLER_SHA: ${{ needs.fixed-windows-package.outputs.installer_sha }}
+      QA_BUILD_ARTIFACT_ID: ${{ needs.fixed-windows-package.outputs.artifact_id }}
+      QA_BUILD_ARTIFACT_DIGEST: ${{ needs.fixed-windows-package.outputs.artifact_digest }}
+    steps:
+      - name: Checkout same QA harness without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Node for actual native application harness
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.11.1'
+      - name: Retrieve only this run's exact SHA QA package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: qa-fixed-windows-4516d3a-${{ github.run_id }}
+          path: '${{ env.QA_FIXED_ARTIFACT }}'
+      - name: Install QA dependencies without scripts or browsers
+        run: npm ci --prefix scripts/qa-official-windows --ignore-scripts --no-audit --no-fund
+      - name: Verify same-run package SHA and official v1.1.90 baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/qa-official-windows/provenance-fixed.cjs
+      - name: Real normal NSIS replacement, UI history, appended reply and strict restart
+        run: node scripts/qa-official-windows/desktop.cjs
+      - name: Retain exact fix assertions and actual native PNGs (3 days)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-fixed-nsis-history-4516d3a-${{ github.event.pull_request.head.sha }}
+          path: '${{ env.QA_ROOT }}\evidence\'
+          retention-days: 3
+          if-no-files-found: warn

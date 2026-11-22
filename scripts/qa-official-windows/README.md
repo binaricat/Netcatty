@@ -17,6 +17,25 @@ explicit disposable profile, even if NSIS fails. ZIP extraction does not certify
 installation, overinstallation, NSIS portable launchers or automatic updates.
 The two modes use fresh independent VMs and separately named evidence artifacts.
 
+The separate exact-fix jobs pin same-repository PR #4302 commit
+`4516d3aed7cb54862dabd53abb56a7f90fba3212`, based on frozen main 9d4e90b.
+If no exact standard package exists, a separate checkout on standard
+windows-2022 runs the existing Node 22/MSVC/npm ci/pack:win-x64 conventions.
+Only the normal non-release version metadata is set. Application source is not
+patched while packaging. The build child receives a Windows environment
+allowlist with no Actions credentials; signing/distribution credentials are not
+supplied and publishing is disabled. The resulting NSIS is explicitly
+CI QA-built, unsigned and unreleased. Its exact SHA-256, source SHA and QA run
+are verified in a separate fresh desktop job before normal installation.
+
+The fix acceptance uses the same real released v1.1.90 GUI baseline and native
+NSIS/history harness. A positive candidate-created Beta pointer in IndexedDB is
+a mandatory precondition before normal quit. That exact pointer must survive
+complete restart before panel interaction, alongside both original chats,
+saved host and new reply. Panel display intent remains memory-only: manual
+history opening after restart is not claimed as automatic conversation reopen.
+The old official 9d4e90b control and its original retained failure are separate.
+
 The installed real v1.1.90 GUI configures a deterministic loopback-only OpenAI
 provider, saves one synthetic loopback host, and creates two distinct chats with
 two complete user/assistant turns each. Beta remains active. No localStorage,
