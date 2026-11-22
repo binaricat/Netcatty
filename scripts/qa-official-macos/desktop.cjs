@@ -124,13 +124,19 @@ async function launch() {
     assert.equal(app.exitCode, null, 'Actual app exited; read real stderr');
     return (await (await fetch(`http://127.0.0.1:${inspectPort}/json/list`, { signal: AbortSignal.timeout(1000) })).json())[0];
   }, 45000);
+  stage('await actual renderer CDP target before native identity inspection');
+  await until('official app renderer target', async () => {
+    const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`, { signal: AbortSignal.timeout(1000) })).json();
+    report.rendererTargets = targets.map(t => ({ type: t.type, url: t.url, title: t.title }));
+    return targets.some(t => t.type === 'page' && t.url.startsWith('app://netcatty/index.html'));
+  }, 45000);
+  browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`, { timeout: 30000 }); browser.contexts()[0].setDefaultTimeout(12000);
+  page = await until('actual installed app page', () => browser.contexts()[0].pages().find(p => p.url().startsWith('app://netcatty/index.html') && !p.url().includes('settings')));
+  await page.getByPlaceholder(/^Find a host/).waitFor({ timeout: 45000 });
+  await capture('00-native-launch');
   inspector = new Inspector(target.webSocketDebuggerUrl); await inspector.connect();
   report.nativeInspectorPreflight = await inspector.eval('({pid:process.pid, platform:process.platform, arch:process.arch})');
-  stage('native inspector connected; await real GUI');
-  await until('actual native renderer DOM ready', () => inspector.eval(async () => {
-    const e = process.mainModule.require('electron'), w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html'));
-    return !!w && !w.webContents.isLoadingMainFrame() && await w.webContents.executeJavaScript("!!document.querySelector('input[placeholder^=\"Find a host\"]')");
-  }), 45000);
+  stage('actual renderer ready; inspect native app identity');
   report.native = await inspector.eval(() => {
     const e = process.mainModule.require('electron'), w = e.BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith('app://netcatty/index.html'));
     w.setSize(1440, 1000); w.show(); w.focus();
@@ -141,16 +147,12 @@ async function launch() {
   assert.equal(n.executable, executable); assert.equal(n.profile, profile); assert(n.appPath.endsWith('/Netcatty.app/Contents/Resources/app.asar'));
   assert.equal(n.noSandbox, false); assert.equal(n.disableSetuidSandbox, false); assert.equal(n.preferences.contextIsolation, true); assert.equal(n.preferences.nodeIntegration, false); assert.equal(n.preferences.webSecurity, true);
   report.sandboxScope = `Unmodified stock renderer sandbox:${n.preferences.sandbox}; this is not full renderer-sandbox certification`;
-  await capture('00-native-launch');
   stage('native GUI identity and initial capture verified');
   for (const port of [debugPort, inspectPort]) {
     const output = execFileSync('/usr/sbin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8', timeout: 10000 });
     assert(!/\*:|0\.0\.0\.0:|\[::\]:/.test(output), 'Debugger must not listen publicly'); assert(/127\.0\.0\.1:|\[::1\]:/.test(output));
     (report.debuggerListeners ||= []).push({ port, output });
   }
-  browser = await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`, { timeout: 30000 }); browser.contexts()[0].setDefaultTimeout(12000);
-  page = await until('actual installed app page', () => browser.contexts()[0].pages().find(p => p.url().startsWith('app://netcatty/index.html') && !p.url().includes('settings')));
-  await page.getByPlaceholder(/^Find a host/).waitFor();
   report.firstLaunch = 'passed: actual installed official native GUI, fresh synthetic profile, stock protections';
   await capture('01-first-launch');
   stage('first GUI launch passed');
