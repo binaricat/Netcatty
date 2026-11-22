@@ -8,6 +8,14 @@
   "zipSha256": "3a197f7b2510e34547168b066a470e70c454610500639670e356a8a24da1e502",
   "installer": "Netcatty-0.0.0-sha-9d4e90b-win-x64.exe",
   "version": "0.0.0-sha-9d4e90b",
+  "portableZip": "Netcatty-0.0.0-sha-9d4e90b-win-x64.zip",
+  "portableBaseline": {
+    "tag": "v1.1.90",
+    "asset": 677167676,
+    "installer": "Netcatty-1.1.90-win-x64.zip",
+    "sha256": "df057f03d122fb541168868d2d203c3723b8b731a663dbdaa5bc38390a742b88",
+    "url": "https://github.com/binaricat/Netcatty/releases/download/v1.1.90/Netcatty-1.1.90-win-x64.zip"
+  },
   "baseline": {
     "tag": "v1.1.90",
     "asset": 677167660,

@@ -7,6 +7,9 @@ const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { execFileSync } = require('node:child_process');
 const pinned = require('./candidate.json');
+const portable = process.env.QA_MODE === 'portable';
+const baseline = portable ? pinned.portableBaseline : pinned.baseline;
+const entry = portable ? pinned.portableZip : pinned.installer;
 const root = path.resolve(process.env.QA_ROOT);
 const evidence = path.join(root, 'evidence');
 const digest = async file => {
@@ -46,13 +49,13 @@ async function main() {
   assert.equal(artifact.workflow_run.head_sha, pinned.sha);
   assert.equal(artifact.workflow_run.head_repository_id, pinned.repositoryId);
   assert.equal(artifact.digest, `sha256:${pinned.zipSha256}`);
-  const release = await api(`/releases/tags/${pinned.baseline.tag}`);
-  const asset = release.assets.find(item => item.id === pinned.baseline.asset);
-  assert.equal(asset?.name, pinned.baseline.installer);
-  assert.equal(asset.digest, `sha256:${pinned.baseline.sha256}`);
-  assert.equal(asset.browser_download_url, pinned.baseline.url);
-  await download(await fetch(pinned.baseline.url, { signal: AbortSignal.timeout(120000) }), path.join(root, pinned.baseline.installer));
-  assert.equal(await digest(path.join(root, pinned.baseline.installer)), pinned.baseline.sha256);
+  const release = await api(`/releases/tags/${baseline.tag}`);
+  const asset = release.assets.find(item => item.id === baseline.asset);
+  assert.equal(asset?.name, baseline.installer);
+  assert.equal(asset.digest, `sha256:${baseline.sha256}`);
+  assert.equal(asset.browser_download_url, baseline.url);
+  await download(await fetch(baseline.url, { signal: AbortSignal.timeout(120000) }), path.join(root, baseline.installer));
+  assert.equal(await digest(path.join(root, baseline.installer)), baseline.sha256);
   const response = await fetch(`${base}/actions/artifacts/${pinned.artifact}/zip`, { headers, redirect: 'manual', signal: AbortSignal.timeout(30000) });
   assert.equal(response.status, 302);
   const location = new URL(response.headers.get('location'));
@@ -69,13 +72,30 @@ async function main() {
       [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $env:QA_OUTPUT, $false)
     } finally { $z.Dispose() }`;
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', extract], {
-    env: { ...process.env, GH_TOKEN: '', QA_ZIP: zip, QA_INSTALLER: pinned.installer, QA_OUTPUT: path.join(root, pinned.installer) }, timeout: 30000,
+    env: { ...process.env, GH_TOKEN: '', QA_ZIP: zip, QA_INSTALLER: entry, QA_OUTPUT: path.join(root, entry) }, timeout: 30000,
   });
+  if (portable) {
+    const unpack = `Add-Type -AssemblyName System.IO.Compression.FileSystem
+      $destination = [IO.Path]::GetFullPath($env:QA_DEST) + [IO.Path]::DirectorySeparatorChar
+      $z = [IO.Compression.ZipFile]::OpenRead($env:QA_ARCHIVE)
+      try { foreach ($e in $z.Entries) {
+        $target = [IO.Path]::GetFullPath([IO.Path]::Combine($destination,$e.FullName))
+        if (-not $target.StartsWith($destination,[StringComparison]::OrdinalIgnoreCase)) { throw 'ZIP path outside isolated root' }
+        if ($e.Name -eq '') { [void][IO.Directory]::CreateDirectory($target) }
+        else { [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target)); [IO.Compression.ZipFileExtensions]::ExtractToFile($e,$target,$false) }
+      }} finally { $z.Dispose() }`;
+    for (const [archive, dest] of [[baseline.installer, 'baseline-portable'], [entry, 'candidate-portable']]) {
+      execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', unpack], { env: { ...process.env, GH_TOKEN: '', QA_ARCHIVE: path.join(root, archive), QA_DEST: path.join(root, dest) }, timeout: 60000 });
+      assert(fs.existsSync(path.join(root, dest, 'Netcatty.exe')));
+    }
+  }
   const provenance = {
-    ...pinned, officialWindowsJob: job.id, verifiedAt: new Date().toISOString(),
-    candidateInstallerSha256: await digest(path.join(root, pinned.installer)),
-    candidateInstallerDigestSource: 'Computed from exact entry in verified official artifact ZIP',
-    baselineMode: 'Public released NSIS installer', candidateMode: 'Official CI NSIS installer; prerelease version, not released updater acceptance',
+    ...pinned, mode: process.env.QA_MODE || 'nsis', testedBaseline: baseline,
+    officialWindowsJob: job.id, verifiedAt: new Date().toISOString(),
+    candidateEntry: entry, candidateEntrySha256: await digest(path.join(root, entry)),
+    candidateEntryDigestSource: 'Computed from exact entry in verified official artifact ZIP',
+    baselineMode: portable ? 'Public released Windows ZIP, extraction only' : 'Public released NSIS installer',
+    candidateMode: portable ? 'Official CI Windows ZIP, extraction only; no installer/updater coverage' : 'Official CI NSIS installer; prerelease version, not released updater acceptance',
   };
   fs.writeFileSync(path.join(evidence, 'provenance.json'), JSON.stringify(provenance, null, 2));
   console.log(JSON.stringify(provenance, null, 2));

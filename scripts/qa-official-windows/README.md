@@ -9,6 +9,14 @@ does not modify the product, release packages, main, or the earlier Linux job.
 build job, artifact metadata and archive SHA-256 before extracting the one named
 NSIS installer. The Actions read token exists only in this downloader step.
 
+An independent `portable` matrix job verifies the public v1.1.90 Windows ZIP
+SHA-256 `df057f03d122fb541168868d2d203c3723b8b731a663dbdaa5bc38390a742b88`
+and extracts the exact candidate Windows ZIP entry from the same verified
+official artifact. It runs the identical actual-GUI migration assertions on an
+explicit disposable profile, even if NSIS fails. ZIP extraction does not certify
+installation, overinstallation, NSIS portable launchers or automatic updates.
+The two modes use fresh independent VMs and separately named evidence artifacts.
+
 The installed real v1.1.90 GUI configures a deterministic loopback-only OpenAI
 provider, saves one synthetic loopback host, and creates two distinct chats with
 two complete user/assistant turns each. Beta remains active. No localStorage,
@@ -18,6 +26,9 @@ storage observations compare original session IDs, full messages and scope,
 the exact active pointer, saved host and the IndexedDB migration marker. The
 candidate sends another normal GUI message, quits normally and restarts to
 verify the appended turn and original chats persist.
+
+Both candidate snapshots must have IndexedDB `meta.activeSessionMap` directly;
+legacy localStorage is not accepted as a substitute for migration evidence.
 
 Both installers use normal silent per-user NSIS arguments. The candidate version
 `0.0.0-sha-9d4e90b` is below 1.1.90, so this is **not** released automatic updater

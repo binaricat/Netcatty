@@ -9,19 +9,20 @@ const net = require('node:net');
 const { spawn, execFileSync } = require('node:child_process');
 const { chromium } = require('playwright-core');
 const pinned = require('./candidate.json');
+const portable = process.env.QA_MODE === 'portable';
 const root = path.resolve(process.env.QA_ROOT);
 const evidence = path.join(root, 'evidence');
 const staging = path.join(root, 'unreviewed');
 const home = path.join(root, 'user');
 const profile = path.join(root, 'profile');
 const installDir = path.join(root, 'app');
-const executable = path.join(installDir, 'Netcatty.exe');
+let executable = path.join(installDir, 'Netcatty.exe');
 const hostLabel = 'QA Windows Loopback';
 const report = {
-  candidate: pinned.sha, qaHead: process.env.QA_HEAD_SHA,
+  candidate: pinned.sha, qaHead: process.env.QA_HEAD_SHA, mode: portable ? 'portable ZIP' : 'NSIS installed',
   baselineInstall: 'not_run', baselineGuiSeed: 'not_run', installerReplacement: 'not_run',
   candidateInstall: 'not_run', aiHistoryMigration: 'not_run', restartPersistence: 'not_run',
-  scope: 'Real per-user NSIS and installed native Electron renderer on ephemeral windows-2022; CDP PNGs are actual renderer captures, not OS desktop captures. Synthetic data only.',
+  scope: portable ? 'Independent official Windows ZIP extraction and real native Electron GUI migration; no installation, replacement or updater coverage. CDP PNGs are actual renderer captures. Synthetic data only.' : 'Real per-user NSIS and installed native Electron renderer on ephemeral windows-2022; CDP PNGs are actual renderer captures, not OS desktop captures. Synthetic data only.',
   updater: 'not_covered: CI candidate 0.0.0-sha version is not a released automatic updater test',
   security: 'Stock application sandbox settings; no disabling flags, privilege or system security changes',
   events: [], installers: [], launches: [],
@@ -199,6 +200,11 @@ async function launch(label, expectedVersion) {
     return (await response.json())[0];
   }, 45000);
   inspector = new Inspector(info.webSocketDebuggerUrl); await inspector.connect();
+  await until(`${label} Chromium debugger ready`, async () => {
+    assert.equal(app.exitCode, null, 'Real app exited before Chromium debugger');
+    const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(1000) });
+    return (await response.json()).webSocketDebuggerUrl;
+  }, 45000);
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 30000 });
   browser.contexts()[0].setDefaultTimeout(12000);
   page = await until(`${label} actual app page`, () => browser.contexts()[0].pages().find(p => p.url().startsWith('app://netcatty/index.html') && !p.url().includes('settings')));
@@ -215,7 +221,7 @@ async function launch(label, expectedVersion) {
   assert.equal(native.packaged, true);
   assert.equal(path.resolve(native.profile).toLowerCase(), profile.toLowerCase());
   assert.equal(path.resolve(native.executable).toLowerCase(), executable.toLowerCase());
-  assert(native.appPath.toLowerCase().startsWith(installDir.toLowerCase()));
+  assert(native.appPath.toLowerCase().startsWith(path.dirname(executable).toLowerCase()));
   assert.equal(native.noSandbox, false); assert.equal(native.disableSetuidSandbox, false);
   report.launches.push({ label, ...native }); event(`launched ${label}`, { version: native.version, origin: native.origin });
   await screenshot(`launch-${label}`);
@@ -316,7 +322,10 @@ async function assertChats(baseline, current, afterAppend = false) {
   assert.equal(messages(b).length, afterAppend ? 6 : 4);
   if (afterAppend) assert.deepEqual(messages(b).slice(-2).map(m => [m.role, m.content]), [['user', 'QA_BETA_AFTER_UPGRADE'], ['assistant', 'QA_BETA_REPLY_AFTER_UPGRADE']]);
   assert(current.hosts.some(h => h.id === baseline.hosts.find(h => h.label === hostLabel).id && h.label === hostLabel));
-  const active = current.idb?.meta.find(m => m.key === 'activeSessionMap')?.value || current.activeMap;
+  assert(current.idb, 'Candidate must use the real AI IndexedDB');
+  assert(current.idb.meta.some(m => m.key === 'migrationCompleted' && m.value?.migrationCompleted === true));
+  const active = current.idb.meta.find(m => m.key === 'activeSessionMap')?.value;
+  assert(active && typeof active === 'object', 'IndexedDB meta.activeSessionMap must exist directly; no legacy fallback');
   assert(Object.values(active || {}).includes(b.id), 'Active conversation Beta must persist');
   const activeKey = Object.keys(baseline.activeMap || {}).find(key => baseline.activeMap[key] === oldB.id);
   assert(activeKey, 'Baseline has an explicit active Beta pointer');
@@ -334,7 +343,14 @@ async function main() {
   event('Windows process preflight passed');
   watchdog = setTimeout(() => { report.error = 'Harness global timeout'; finish().finally(() => process.exit(1)); }, 11 * 60 * 1000);
   fixture = await startModel();
-  assert(await install(path.join(root, pinned.baseline.installer), 'baseline v1.1.90'), 'Baseline NSIS failed'); report.baselineInstall = 'passed';
+  if (portable) {
+    executable = path.join(root, 'baseline-portable', 'Netcatty.exe');
+    report.baselineInstall = 'not_covered: official ZIP extraction';
+    report.installerReplacement = 'not_covered: separate portable migration job';
+    report.candidateInstall = 'not_covered: official ZIP extraction';
+  } else {
+    assert(await install(path.join(root, pinned.baseline.installer), 'baseline v1.1.90'), 'Baseline NSIS failed'); report.baselineInstall = 'passed';
+  }
   await launch('baseline', '1.1.90');
   await configureProvider(); await saveHost();
   let panel = await aiPanel();
@@ -349,6 +365,8 @@ async function main() {
   assert.equal(messages(sessionWith(baseline, 'QA_BETA_USER_ONE')).length, 4);
   fs.writeFileSync(path.join(evidence, 'baseline-storage.json'), JSON.stringify(baseline, null, 2));
   report.baselineGuiSeed = 'passed'; await quit();
+  if (portable) executable = path.join(root, 'candidate-portable', 'Netcatty.exe');
+  else {
   const replaced = await install(path.join(root, pinned.installer), 'candidate replacement');
   if (!replaced) {
     report.installerReplacement = 'blocked_or_failed: see installer exit/output; CI version is older than 1.1.90';
@@ -360,6 +378,7 @@ async function main() {
     assert(await install(path.join(root, pinned.installer), 'candidate fresh install preserving QA profile'), 'Candidate fresh NSIS failed');
     report.candidateInstall = 'passed: fresh install after normal baseline uninstall; migration uses original profile';
   } else { report.installerReplacement = 'passed: normal per-user NSIS replacement'; report.candidateInstall = 'passed'; }
+  }
   await launch('candidate-after-install', pinned.version);
   panel = await aiPanel(true);
   await panel.getByText('QA_BETA_REPLY_TWO', { exact: true }).waitFor({ timeout: 30000 });
@@ -395,6 +414,7 @@ async function finish() {
         try { fs.writeFileSync(path.join(evidence, `failure-${index}-visible-ui.txt`), await target.locator('body').innerText({ timeout: 3000 })); } catch {}
       }
     }
+    if (report.error && app && !browser) report.nativeFailureDiagnostic = installerDiagnostic('application-launch-failure', app.pid);
     try { await quit(); } catch (error) { report.cleanupError = error.message; app?.kill(); }
     if (fixture) { fixture.server.closeAllConnections(); fixture.server.close(); report.modelCalls = fixture.calls; }
     const stderr = logs.join('\n');
@@ -403,6 +423,7 @@ async function finish() {
     report.evidenceReview = secretPattern.test(stderr) ? 'failed: raw app logs and PNGs withheld' : 'passed: app logs checked for credential patterns; only known synthetic GUI data';
     if (!secretPattern.test(stderr)) {
       fs.writeFileSync(path.join(evidence, 'app-output.log'), stderr);
+      console.log('Reviewed actual application output:\n' + stderr);
       for (const file of fs.readdirSync(staging)) fs.copyFileSync(path.join(staging, file), path.join(evidence, file));
     } else { report.error ||= 'Evidence sensitive-data review failed'; process.exitCode = 1; }
     fs.writeFileSync(path.join(evidence, 'assertions.json'), JSON.stringify(report, null, 2));
