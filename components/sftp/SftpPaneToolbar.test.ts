@@ -600,3 +600,95 @@ test("bookmark list renders saved paths as selectable rows", () => {
   assert.match(markup, /aria-label="Remove bookmark"/);
   assert.match(markup, /focus-visible:opacity-100/);
 });
+
+test("toolbar renders Back and Forward buttons disabled when history is empty and enables them from pane navHistory", () => {
+  const basePane: SftpPane = {
+    id: "pane-1",
+    connection: {
+      id: "conn-1",
+      hostId: "host-1",
+      hostLabel: "Example",
+      status: "connected",
+      currentPath: "/var",
+      homeDir: "/home/app",
+      isLocal: false,
+    },
+    files: [],
+    loading: false,
+    reconnecting: false,
+    error: null,
+    connectionLogs: [],
+    selectedFiles: new Set(),
+    filter: "",
+    filenameEncoding: "auto",
+    showHiddenFiles: false,
+    transferMutationToken: 0,
+  };
+
+  const renderWithPane = (pane: SftpPane) =>
+    renderToStaticMarkup(
+      React.createElement(SftpPaneToolbar, {
+        t: (key: string) => ({
+          "sftp.goBack": "Go back",
+          "sftp.goForward": "Go forward",
+        }[key] ?? key),
+        pane,
+        onNavigateTo: () => {},
+        onNavigateBack: () => {},
+        onNavigateForward: () => {},
+        onSetFilter: () => {},
+        onSetFilenameEncoding: () => {},
+        onRefresh: () => {},
+        showFilterBar: false,
+        setShowFilterBar: () => {},
+        filterInputRef: { current: null },
+        isEditingPath: false,
+        editingPathValue: "",
+        setEditingPathValue: () => {},
+        setShowPathSuggestions: () => {},
+        showPathSuggestions: false,
+        setPathSuggestionIndex: () => {},
+        pathSuggestions: [],
+        pathSuggestionIndex: -1,
+        pathInputRef: { current: null },
+        pathDropdownRef: { current: null },
+        handlePathBlur: () => {},
+        handlePathKeyDown: () => {},
+        handlePathDoubleClick: () => {},
+        handlePathSubmit: () => {},
+        getNextUntitledName: () => "untitled",
+        setNewFileName: () => {},
+        setFileNameError: () => {},
+        setShowNewFileDialog: () => {},
+        setShowNewFolderDialog: () => {},
+        setNewFolderName: () => {},
+        bookmarks: [],
+        isCurrentPathBookmarked: false,
+        onToggleBookmark: () => {},
+        onAddGlobalBookmark: () => {},
+        isCurrentPathGlobalBookmarked: false,
+        onNavigateToBookmark: () => {},
+        onDeleteBookmark: () => {},
+        showHiddenFiles: false,
+        onToggleShowHiddenFiles: () => {},
+        viewMode: "list",
+        onSetViewMode: () => {},
+      }),
+    );
+
+  const emptyMarkup = renderWithPane({
+    ...basePane,
+    navHistory: { entries: ["/var"], index: 0, maxEntries: 50 },
+  });
+  assert.match(emptyMarkup, /aria-label="Go back"[^>]*disabled/);
+  assert.match(emptyMarkup, /aria-label="Go forward"[^>]*disabled/);
+
+  const midMarkup = renderWithPane({
+    ...basePane,
+    navHistory: { entries: ["/home/app", "/var", "/etc"], index: 1, maxEntries: 50 },
+  });
+  assert.match(midMarkup, /aria-label="Go back"/);
+  assert.doesNotMatch(midMarkup, /aria-label="Go back"[^>]*disabled/);
+  assert.match(midMarkup, /aria-label="Go forward"/);
+  assert.doesNotMatch(midMarkup, /aria-label="Go forward"[^>]*disabled/);
+});

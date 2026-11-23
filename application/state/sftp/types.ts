@@ -1,4 +1,5 @@
 import { Host, KnownHost, SftpConnection, SftpFileEntry, SftpFilenameEncoding } from "../../../domain/models";
+import { createNavHistory, type SftpNavHistory } from "../../../domain/sftpNavHistory";
 
 export interface SftpPane {
   id: string;
@@ -13,6 +14,7 @@ export interface SftpPane {
   filenameEncoding: SftpFilenameEncoding;
   showHiddenFiles: boolean;
   transferMutationToken: number;
+  navHistory?: SftpNavHistory;
 }
 
 export interface SftpHostKeyInfo {
@@ -57,6 +59,7 @@ export const createEmptyPane = (
   filenameEncoding: "auto",
   showHiddenFiles,
   transferMutationToken: 0,
+  navHistory: createNavHistory(),
 });
 
 // File watch event types

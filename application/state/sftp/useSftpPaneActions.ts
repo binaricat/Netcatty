@@ -24,6 +24,13 @@ import {
   setDirectoryCacheEntry,
   type DirectoryListingCache,
 } from "./directoryListingCache";
+import {
+  applySftpNavHistoryTransition,
+  createNavHistory,
+  goBack,
+  goForward,
+  type SftpNavHistoryTransitionMode,
+} from "../../../domain/sftpNavHistory";
 
 /** Shared empty set for navigation resets — never mutate this. */
 const EMPTY_SET = new Set<string>();
@@ -58,10 +65,14 @@ export type SftpNavigateOptions = {
   shouldApply?: () => boolean;
   /** Restore the previous listing without showing a pane error. */
   quiet?: boolean;
+  /** Controls how a successful navigation updates per-pane history. Defaults to "push". */
+  historyMode?: SftpNavHistoryTransitionMode;
 };
 
 interface UseSftpPaneActionsResult {
   navigateTo: (side: "left" | "right", path: string, options?: SftpNavigateOptions) => Promise<SftpNavigateResult>;
+  navigateBack: (side: "left" | "right") => Promise<SftpNavigateResult>;
+  navigateForward: (side: "left" | "right") => Promise<SftpNavigateResult>;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   navigateUp: (side: "left" | "right") => Promise<void>;
   openEntry: (side: "left" | "right", entry: SftpFileEntry) => Promise<void>;
@@ -183,6 +194,7 @@ export const useSftpPaneActions = ({
       );
 
       const connectionId = pane.connection.id;
+      const historyMode: SftpNavHistoryTransitionMode = options?.historyMode ?? "push";
       const requestId = ++navSeqRef.current[side];
       const cacheKey = makeCacheKey(connectionId, normalizedPath, pane.filenameEncoding);
       const clearFilterForPathChange = shouldClearSftpFilterForPathChange(pane.connection.currentPath, normalizedPath);
@@ -214,6 +226,13 @@ export const useSftpPaneActions = ({
           error: null,
           selectedFiles: EMPTY_SET,
           filter: clearFilterForPathChange ? "" : prev.filter,
+          navHistory: applySftpNavHistoryTransition({
+            history: prev.navHistory,
+            currentPath: prev.connection?.currentPath,
+            targetPath: normalizedPath,
+            mode: historyMode,
+            isSamePath: isSameSftpPath,
+          }),
         }));
         if (!pane.connection.isLocal) {
           // Use hostId as the shared cache key — this is safe because the
@@ -385,6 +404,13 @@ export const useSftpPaneActions = ({
           loading: false,
           selectedFiles: EMPTY_SET,
           filter: clearFilterForPathChange ? "" : prev.filter,
+          navHistory: applySftpNavHistoryTransition({
+            history: prev.navHistory,
+            currentPath: previousPath,
+            targetPath: normalizedPath,
+            mode: historyMode,
+            isSamePath: isSameSftpPath,
+          }),
         }));
         if (!pane.connection.isLocal) {
           setSharedRemoteHostCache(getActivePaneCacheKey(side, pane.connection.hostId, pane.connection.id), {
@@ -480,7 +506,11 @@ export const useSftpPaneActions = ({
           }
           return;
         }
-        await navigateTo(side, pane.connection.currentPath, { force: true, tabId: options?.tabId });
+        await navigateTo(side, pane.connection.currentPath, {
+          force: true,
+          tabId: options?.tabId,
+          historyMode: "none",
+        });
       } else if (!pane?.connection && pane?.error) {
         // For background tabs, don't trigger reconnection (it operates on
         // the active tab). Just leave the error state for the user to see
@@ -502,6 +532,30 @@ export const useSftpPaneActions = ({
       }
     },
     [getActivePane, leftTabsRef, rightTabsRef, navigateTo, updateActiveTab, lastConnectedHostRef, sftpSessionsRef],
+  );
+
+  const navigateBack = useCallback(
+    async (side: "left" | "right"): Promise<SftpNavigateResult> => {
+      const pane = getActivePane(side);
+      if (!pane?.connection) return "aborted";
+      const history = pane.navHistory ?? createNavHistory(pane.connection.currentPath);
+      const step = goBack(history);
+      if (!step.path) return "aborted";
+      return navigateTo(side, step.path, { historyMode: "back" });
+    },
+    [getActivePane, navigateTo],
+  );
+
+  const navigateForward = useCallback(
+    async (side: "left" | "right"): Promise<SftpNavigateResult> => {
+      const pane = getActivePane(side);
+      if (!pane?.connection) return "aborted";
+      const history = pane.navHistory ?? createNavHistory(pane.connection.currentPath);
+      const step = goForward(history);
+      if (!step.path) return "aborted";
+      return navigateTo(side, step.path, { historyMode: "forward" });
+    },
+    [getActivePane, navigateTo],
   );
 
   const navigateUp = useCallback(
@@ -1060,6 +1114,8 @@ export const useSftpPaneActions = ({
 
   return {
     navigateTo,
+    navigateBack,
+    navigateForward,
     refresh,
     navigateUp,
     openEntry,

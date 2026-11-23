@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Bookmark, Check, ClipboardCopy, Eye, EyeOff, FilePlus, Folder, FolderPlus, FolderSync, Globe, GripVertical, Home, Languages, List, ListTree, Pencil, RefreshCw, Rows3, Search, Terminal, TerminalSquare, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bookmark, Check, ClipboardCopy, Eye, EyeOff, FilePlus, Folder, FolderPlus, FolderSync, Globe, GripVertical, Home, Languages, List, ListTree, Pencil, RefreshCw, Rows3, Search, Terminal, TerminalSquare, Trash2, X } from "lucide-react";
+import { canGoBack, canGoForward } from "../../domain/sftpNavHistory";
 import {
   getNextSftpListDensity,
   getSftpListDensityToggleLabelKey,
@@ -191,6 +192,8 @@ interface SftpPaneToolbarProps {
   t: (key: string, params?: Record<string, unknown>) => string;
   pane: SftpPane;
   onNavigateTo: (path: string) => void;
+  onNavigateBack?: () => void;
+  onNavigateForward?: () => void;
   onSetFilter: (value: string) => void;
   onSetFilenameEncoding: (encoding: SftpFilenameEncoding) => void;
   onRefresh: () => void;
@@ -493,6 +496,8 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   t,
   pane,
   onNavigateTo,
+  onNavigateBack,
+  onNavigateForward,
   onSetFilter,
   onSetFilenameEncoding,
   onRefresh,
@@ -665,6 +670,17 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   }, [displayPath, t]);
 
   const isRemote = !pane.connection?.isLocal;
+  const isNavHistoryInteractive = Boolean(
+    pane.connection
+    && !pane.reconnecting
+    && pane.connection.status !== "connecting",
+  );
+  const canNavigateBack = Boolean(
+    isNavHistoryInteractive && onNavigateBack && pane.navHistory && canGoBack(pane.navHistory),
+  );
+  const canNavigateForward = Boolean(
+    isNavHistoryInteractive && onNavigateForward && pane.navHistory && canGoForward(pane.navHistory),
+  );
   const viewModeToggleTarget = getSftpViewModeToggleTarget(viewMode);
   const viewModeToggleLabel = t(viewModeToggleTarget.labelKey);
   const listDensityToggleTarget = getNextSftpListDensity(listDensity);
@@ -1330,10 +1346,49 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
         data-section="terminal-sftp-toolbar"
       >
         <div
-          className="h-7 px-2 flex items-center min-w-0"
+          className="h-7 px-2 flex items-center gap-1 min-w-0"
           data-section="terminal-sftp-path-row"
         >
-          {pathEditor}
+          <div
+            className="flex items-center gap-0.5 shrink-0"
+            data-section="terminal-sftp-nav-history"
+          >
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label={t("sftp.goBack")}
+                  disabled={!canNavigateBack}
+                  onClick={onNavigateBack}
+                >
+                  <ArrowLeft size={13} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("sftp.goBack")}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label={t("sftp.goForward")}
+                  disabled={!canNavigateForward}
+                  onClick={onNavigateForward}
+                >
+                  <ArrowRight size={13} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("sftp.goForward")}</TooltipContent>
+            </Tooltip>
+          </div>
+          <div className="flex-1 min-w-0">
+            {pathEditor}
+          </div>
         </div>
 
         <div

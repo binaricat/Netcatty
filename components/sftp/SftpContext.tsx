@@ -35,6 +35,8 @@ export interface SftpPaneCallbacks {
     onDisconnect: () => Promise<boolean>;
     onPrepareSelection: () => void;
     onNavigateTo: (path: string) => void;
+    onNavigateBack: () => void;
+    onNavigateForward: () => void;
     onNavigateUp: () => void;
     onRefresh: () => void;
     onRefreshTab: (tabId: string) => void;

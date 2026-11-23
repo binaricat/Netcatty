@@ -1161,6 +1161,8 @@ Vaults 标签保持扁平，不使用这块背景。
   'sftp.encoding.auto': '自动',
   'sftp.encoding.utf8': 'UTF-8',
   'sftp.encoding.gb18030': 'GB18030',
+  'sftp.goBack': '后退',
+  'sftp.goForward': '前进',
   'sftp.goHome': '返回主目录',
   'sftp.goRoot': '回到根目录',
   'sftp.folderName': '文件夹名称',
