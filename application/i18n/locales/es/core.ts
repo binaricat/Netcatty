@@ -1037,6 +1037,7 @@ Resalta el panel dividido enfocado:
   'settings.shortcuts.binding.close-tab': 'Cerrar pestaña',
   'settings.shortcuts.binding.close-session': 'Cerrar panel de sesión',
   'settings.shortcuts.binding.new-tab': 'Nueva pestaña local',
+  'settings.shortcuts.binding.reopen-closed-tab': 'Reabrir pestaña cerrada',
   'settings.shortcuts.binding.copy': 'Copiar desde la terminal',
   'settings.shortcuts.binding.paste': 'Pegar en la terminal',
   'settings.shortcuts.binding.paste-selection': 'Pegar selección en la terminal',

@@ -816,7 +816,7 @@ export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: st
 }
 
 export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string, e: KeyboardEvent) {
-  const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, canUseGlobalBroadcast, closePluginViewTab, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, isPluginViewTabId, isQuickSwitcherOpen, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, sftpPaneMagnificationRef, splitSessionWithCurrentShell, systemInfoRef, terminalPaneMagnificationRef, toEditorTabId, toggleBroadcast, toggleGlobalBroadcast, toggleHostTree, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWindowOpacity, workspaces } = getCtx();
+  const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, canUseGlobalBroadcast, closePluginViewTab, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, hostsById, isEditorTabId, isPluginViewTabId, isQuickSwitcherOpen, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, reopenLastClosedTab, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, sftpPaneMagnificationRef, splitSessionWithCurrentShell, systemInfoRef, terminalPaneMagnificationRef, toEditorTabId, toggleBroadcast, toggleGlobalBroadcast, toggleHostTree, toggleScriptsSidePanelRef, toggleSidePanelRef, toggleWindowOpacity, workspaces } = getCtx();
 {
     const shortcutTabs = buildNumberShortcutTabTargets({
       showSftpTab: settings.showSftpTab ?? true,
@@ -960,6 +960,39 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
           localHostname: systemInfoRef.current.hostname,
           saved: false,
         });
+        break;
+      }
+      case 'reopenClosedTab': {
+        const reopened = reopenLastClosedTab?.({
+          availableHostIds: hostsById ? new Set(hostsById.keys()) : undefined,
+          hostsById,
+        });
+        if (reopened && addConnectionLogRef?.current) {
+          const reopenedSessions = reopened.kind === 'session'
+            ? [reopened.session]
+            : reopened.sessions;
+          const localUsername = systemInfoRef?.current?.username ?? '';
+          const localHostname = systemInfoRef?.current?.hostname ?? '';
+          const startTime = Date.now();
+          for (const reopenedSession of reopenedSessions) {
+            addConnectionLogRef.current({
+              sessionId: reopenedSession.id,
+              hostId: reopenedSession.protocol === 'local' && reopenedSession.hostId === 'local-terminal'
+                ? ''
+                : reopenedSession.hostId,
+              hostLabel: reopenedSession.hostLabel,
+              hostname: reopenedSession.hostname,
+              username: reopenedSession.protocol === 'local'
+                ? localUsername
+                : reopenedSession.username,
+              protocol: reopenedSession.protocol || 'ssh',
+              startTime,
+              localUsername,
+              localHostname,
+              saved: false,
+            });
+          }
+        }
         break;
       }
       case 'openHosts':

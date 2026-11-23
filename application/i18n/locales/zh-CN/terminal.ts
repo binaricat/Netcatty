@@ -582,6 +582,7 @@ export const zhCNTerminalMessages: Messages = {
   'settings.shortcuts.binding.close-tab': '关闭标签页',
   'settings.shortcuts.binding.close-session': '关闭会话窗格',
   'settings.shortcuts.binding.new-tab': '新建本地标签页',
+  'settings.shortcuts.binding.reopen-closed-tab': '重新打开关闭的标签页',
   'settings.shortcuts.binding.copy': '从终端复制',
   'settings.shortcuts.binding.paste': '粘贴到终端',
   'settings.shortcuts.binding.paste-selection': '将选区粘贴到终端',

@@ -1037,6 +1037,7 @@ Highlight the focused split pane:
   'settings.shortcuts.binding.close-tab': 'Close Tab',
   'settings.shortcuts.binding.close-session': 'Close Session Pane',
   'settings.shortcuts.binding.new-tab': 'New Local Tab',
+  'settings.shortcuts.binding.reopen-closed-tab': 'Reopen Closed Tab',
   'settings.shortcuts.binding.copy': 'Copy from Terminal',
   'settings.shortcuts.binding.paste': 'Paste to Terminal',
   'settings.shortcuts.binding.paste-selection': 'Paste Selection to Terminal',

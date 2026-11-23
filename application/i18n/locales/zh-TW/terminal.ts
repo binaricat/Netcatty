@@ -582,6 +582,7 @@ export const zhTWTerminalMessages: Messages = {
   'settings.shortcuts.binding.close-tab': '關閉分頁',
   'settings.shortcuts.binding.close-session': '關閉工作階段窗格',
   'settings.shortcuts.binding.new-tab': '新增本機分頁',
+  'settings.shortcuts.binding.reopen-closed-tab': '重新開啟關閉的分頁',
   'settings.shortcuts.binding.copy': '從終端複製',
   'settings.shortcuts.binding.paste': '貼上到終端',
   'settings.shortcuts.binding.paste-selection': '將選區貼上到終端',

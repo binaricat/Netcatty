@@ -77,6 +77,15 @@ import {
 import { cleanupClosedTerminalSessions } from './aiStateSnapshots';
 import { captureClosingTerminalSessions } from './terminalSessionCloseCapture';
 import { syncSessionHostLabels } from '../../domain/syncSessionHostLabels';
+import {
+  createClosedSessionEntry,
+  createClosedWorkspaceEntry,
+  materializeClosedTabEntry,
+  popClosedTabEntry,
+  pushClosedTabEntry,
+  type ClosedTabEntry,
+  type ReopenClosedTabMaterialized,
+} from '../../domain/closedTabHistory';
 import { useVaultSnapshotField } from './vaultSnapshotStore';
 
 export function addWorkspaceIfMissing(
@@ -278,6 +287,10 @@ export const useSessionState = ({
   const [restorePreviousSessionRevision, setRestorePreviousSessionRevision] = useState(0);
   const sessionsRef = useRef(sessions);
   const tabOrderRef = useRef(tabOrder);
+  // Bounded in-memory LIFO stack of recently closed standalone tabs and split
+  // workspaces (Cmd/Ctrl+Shift+T). Kept in a ref so closing tabs adds no extra
+  // React re-renders and never persists ephemeral/session data to localStorage.
+  const closedTabHistoryRef = useRef<ClosedTabEntry[]>([]);
   const scheduleSessionRestorePersistRef = useRef<() => void>(() => {});
   const sessionRestoreCwdByIdRef = useRef(
     new Map(
@@ -601,9 +614,17 @@ export const useSessionState = ({
   }, []);
 
   const closeWorkspace = useCallback((workspaceId: string) => {
-    const closedIds = sessionsRef.current
-      .filter(session => session.workspaceId === workspaceId)
-      .map(session => session.id);
+    const closingWorkspace = workspacesRef.current.find(w => w.id === workspaceId);
+    const closingSessions = sessionsRef.current.filter(session => session.workspaceId === workspaceId);
+    if (closingWorkspace && closingSessions.length > 0) {
+      const closedEntry = createClosedWorkspaceEntry(closingWorkspace, closingSessions, {
+        cwdBySessionId: sessionRestoreCwdByIdRef.current,
+      });
+      if (closedEntry) {
+        closedTabHistoryRef.current = pushClosedTabEntry(closedTabHistoryRef.current, closedEntry);
+      }
+    }
+    const closedIds = closingSessions.map(session => session.id);
     captureClosingTerminalSessions(closedIds);
     cleanupClosedTerminalSessions(closedIds);
     for (const sessionId of closedIds) {
@@ -628,6 +649,16 @@ export const useSessionState = ({
   }, [setActiveTabId]);
 
   const closeSessions = useCallback((sessionIds: string[]) => {
+    for (const sessionId of new Set(sessionIds)) {
+      const targetSession = sessionsRef.current.find(session => session.id === sessionId);
+      if (!targetSession) continue;
+      const closedEntry = createClosedSessionEntry(targetSession, {
+        lastCwd: sessionRestoreCwdByIdRef.current.get(sessionId),
+      });
+      if (closedEntry) {
+        closedTabHistoryRef.current = pushClosedTabEntry(closedTabHistoryRef.current, closedEntry);
+      }
+    }
     captureClosingTerminalSessions(sessionIds);
     cleanupClosedTerminalSessions(sessionIds);
     for (const sessionId of sessionIds) {
@@ -655,6 +686,46 @@ export const useSessionState = ({
       activeTabStore.setActiveTabId(result.activeTabId, { recordPrevious: false });
     }
   }, []);
+
+  const reopenLastClosedTab = useCallback((options?: {
+    availableHostIds?: ReadonlySet<string>;
+    hostsById?: ReadonlyMap<string, Host>;
+  }): ReopenClosedTabMaterialized | null => {
+    const { entry, nextHistory } = popClosedTabEntry(closedTabHistoryRef.current, {
+      availableHostIds: options?.availableHostIds,
+    });
+    closedTabHistoryRef.current = nextHistory;
+    if (!entry) return null;
+
+    const materialized = materializeClosedTabEntry(entry, {
+      hostsById: options?.hostsById,
+    });
+    if (!materialized) return null;
+
+    if (materialized.kind === 'session') {
+      const reopenedSession = materialized.session;
+      setSessions(prev => addTerminalSessionIfMissing(prev, reopenedSession));
+      setTabOrder(prev => (prev.includes(reopenedSession.id) ? prev : [...prev, reopenedSession.id]));
+      setActiveTabId(reopenedSession.id);
+      return materialized;
+    }
+
+    const { workspace, sessions: reopenedSessions } = materialized;
+    const reopenedSessionIds = new Set(reopenedSessions.map(s => s.id));
+    setSessions(prev => {
+      if (prev.some(s => reopenedSessionIds.has(s.id))) return prev;
+      return [...prev, ...reopenedSessions];
+    });
+    setWorkspaces(prev => addWorkspaceIfMissing(prev, workspace));
+    setTabOrder(prev => (prev.includes(workspace.id) ? prev : [...prev, workspace.id]));
+    setActiveTabId(workspace.id);
+    return materialized;
+  }, [setActiveTabId]);
+
+  const getClosedTabHistoryCount = useCallback(
+    () => closedTabHistoryRef.current.length,
+    [],
+  );
 
   const closeSession = useCallback((sessionId: string, e?: MouseEvent) => {
     e?.stopPropagation();
@@ -1569,6 +1640,8 @@ export const useSessionState = ({
     closeSession,
     closeSessions,
     closeWorkspace,
+    reopenLastClosedTab,
+    getClosedTabHistoryCount,
     updateSessionStatus,
     updateSessionFontSize,
     clearSessionFontSizeOverride,

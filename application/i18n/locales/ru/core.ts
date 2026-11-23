@@ -951,6 +951,7 @@ export const ruCoreMessages: Messages = {
   'settings.shortcuts.binding.close-tab': 'Закрыть вкладку',
   'settings.shortcuts.binding.close-session': 'Закрыть панель сессии',
   'settings.shortcuts.binding.new-tab': 'Новая локальная вкладка',
+  'settings.shortcuts.binding.reopen-closed-tab': 'Повторно открыть закрытую вкладку',
   'settings.shortcuts.binding.copy': 'Копировать из терминала',
   'settings.shortcuts.binding.paste': 'Вставить в терминал',
   'settings.shortcuts.binding.paste-selection': 'Вставить выделение в терминал',
