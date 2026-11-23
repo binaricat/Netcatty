@@ -8,6 +8,15 @@ const OSC_CONTROL_PATTERN = new RegExp(
   "gu",
 );
 const MAX_PROMPT_SECURITY_TAIL_CHARS = 2_048;
+const PROMPT_MARKER_LINE_PATTERN = /^[#$]$/u;
+const BRACKETED_PROMPT_IDENTITY_PATTERN =
+  /\[([^\s@\[\]]+)@([^\s\]:]+)(?:\s+[^\n\r\]]*)?\]/u;
+const SPACED_PROMPT_IDENTITY_PATTERN =
+  /(?:^|\s)([^\s@]+)\s+@\s+([^\s\]]+)/u;
+const POSIX_PROMPT_IDENTITY_PATTERN =
+  /(?:^|[\s(])([^\s@():\]]+)@([^\s\]:]+)(?=[:)\s/]|$)/u;
+const PROMPT_HOST_PATTERN =
+  /^(?:\[[A-Fa-f0-9:.]+\]|[A-Za-z0-9_][A-Za-z0-9_.-]*)$/u;
 
 const SENSITIVE_ENGLISH_LABEL = [
   String.raw`pass(?:word|phrase|code)`,
@@ -141,6 +150,50 @@ function isPlausibleShellPromptBody(body) {
   return /^[a-z0-9_.-]+$/u.test(trimmed);
 }
 
+function promptHostnameFromLine(line) {
+  const text = String(line || "");
+  for (const pattern of [
+    BRACKETED_PROMPT_IDENTITY_PATTERN,
+    SPACED_PROMPT_IDENTITY_PATTERN,
+    POSIX_PROMPT_IDENTITY_PATTERN,
+  ]) {
+    const match = pattern.exec(text);
+    if (!match) continue;
+    const hostname = match[2].replace(/[.,;]+$/u, "");
+    if (PROMPT_HOST_PATTERN.test(hostname)) return hostname;
+  }
+  return null;
+}
+
+function extractTerminalPromptHostname(value) {
+  const plain = stripTerminalControlSequences(value);
+  if (!plain) return null;
+  if (isSensitiveTerminalChallenge(plain)) return null;
+
+  const lines = splitTerminalLogicalLines(plain);
+  let markerIndex = lines.length - 1;
+  while (markerIndex >= 0 && lines[markerIndex].trim().length === 0) {
+    markerIndex -= 1;
+  }
+  if (markerIndex < 0) return null;
+
+  const markerLine = lines[markerIndex].trim();
+  if (!PROMPT_MARKER_LINE_PATTERN.test(markerLine)) {
+    return /[#$]$/u.test(markerLine)
+      ? promptHostnameFromLine(markerLine)
+      : null;
+  }
+
+  let identityIndex = markerIndex - 1;
+  while (identityIndex >= 0 && lines[identityIndex].trim().length === 0) {
+    identityIndex -= 1;
+  }
+  if (identityIndex < 0) return null;
+  const identityLine = lines[identityIndex];
+  if (isSensitiveTerminalChallenge(identityLine)) return null;
+  return promptHostnameFromLine(identityLine);
+}
+
 function hasTypedInputAfterConfirmedPrompt(line, options = {}) {
   for (let i = 0; i < line.length - 1; i += 1) {
     const ch = line[i];
@@ -178,4 +231,5 @@ module.exports = {
   splitTerminalLogicalLines,
   isBashPs2ContinuationLine,
   isUntrustedTerminalInputPrompt,
+  extractTerminalPromptHostname,
 };

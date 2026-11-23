@@ -21,3 +21,4 @@ export function isUntrustedTerminalInputPrompt(
   value: string,
   options?: ConfirmedPromptOptions,
 ): boolean;
+export function extractTerminalPromptHostname(value: string): string | null;

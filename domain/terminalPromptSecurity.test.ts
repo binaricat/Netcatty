@@ -14,7 +14,41 @@ import {
 const require = createRequire(import.meta.url);
 const sharedPromptSecurity = require('./terminalPromptSecurity.shared.cjs') as {
   isUntrustedTerminalInputPrompt: typeof isUntrustedTerminalInputPrompt;
+  extractTerminalPromptHostname(value: string): string | null;
 };
+
+const promptHostname = (text: string) =>
+  sharedPromptSecurity.extractTerminalPromptHostname(text);
+
+test('extractTerminalPromptHostname accepts a bracketed prompt host', () => {
+  assert.equal(
+    promptHostname('[root@k8s-10-1-64-1 ~]# '),
+    'k8s-10-1-64-1',
+  );
+});
+
+test('extractTerminalPromptHostname accepts a decorated two-line prompt', () => {
+  assert.equal(
+    promptHostname(
+      '[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\n# ',
+    ),
+    'k8s-10-1-64-1',
+  );
+});
+
+test('extractTerminalPromptHostname accepts user-at-host with spaced ys identity', () => {
+  assert.equal(
+    promptHostname('# root @ target-01 in ~ [12:34:56]\n# '),
+    'target-01',
+  );
+});
+
+test('extractTerminalPromptHostname rejects ambiguous and sensitive text', () => {
+  assert.equal(promptHostname('welcome\n# '), null);
+  assert.equal(promptHostname('copied output\n# '), null);
+  assert.equal(promptHostname('Password:\n# '), null);
+  assert.equal(promptHostname('[root@host ~] no trailing marker'), null);
+});
 
 test('terminal prompt security recognizes password, MFA, OTP, PIN, and CJK challenges', () => {
   const challenges = [
