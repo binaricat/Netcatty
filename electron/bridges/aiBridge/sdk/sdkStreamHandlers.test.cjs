@@ -2205,6 +2205,76 @@ test("list-models skips Cursor CLI probes during cacheOnly hydration and warm/fr
   }
 });
 
+test("list-models reprobes a moved Cursor executable during stale automatic revalidation", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const now = Date.parse("2026-11-18T00:00:00Z");
+  const expiredAt = now + 12 * 60 * 60 * 1000;
+  t.mock.timers.enable({ apis: ["Date"], now });
+  let currentCursorBin = "/old/cursor-agent";
+  let probeCalls = 0;
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/cursor-moved-bin" }),
+    probeCursorCliAuth: async () => {
+      probeCalls += 1;
+      return { authenticated: true, authSource: "cli-login", email: "a@b.c", binPath: currentCursorBin };
+    },
+  });
+  ctx.sdkModelKeyAliases.clear();
+  ctx.cursorCliBinCache.clear();
+  try {
+    const driver = getDriver("cursor");
+    t.mock.method(driver, "listModels", async ({ cursorCliBinPath }) => {
+      if (cursorCliBinPath === "/old/cursor-agent") return [{ id: "old-model", name: "Old Model" }];
+      if (cursorCliBinPath === "/new/cursor-agent") return [{ id: "new-model", name: "New Model" }];
+      return [];
+    });
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const request = {
+      sdkBackend: "cursor",
+      agentCommand: "cursor",
+      agentEnv: { NETCATTY_CURSOR_AUTH_MODE: "cli-login", NETCATTY_CURSOR_CLI_BIN: "cursor" },
+    };
+
+    // 1. Seed with /old/cursor-agent.
+    const seeded = await listModels({ sender: {} }, request);
+    assert.equal(seeded.source, "live");
+    assert.deepEqual(seeded.models.map(({ id }) => id), ["old-model"]);
+    assert.equal(probeCalls, 1);
+
+    // 2. Move cursor-agent to /new/cursor-agent, advance 12h, and restart.
+    currentCursorBin = "/new/cursor-agent";
+    t.mock.timers.setTime(expiredAt);
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    ctx.cursorCliBinCache.clear();
+
+    // cacheOnly hydrates stale models immediately without probing or pinning the old binary.
+    const cached = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(cached.source, "last-known-good");
+    assert.deepEqual(cached.models.map(({ id }) => id), ["old-model"]);
+    assert.equal(probeCalls, 1);
+
+    // Automatic stale revalidation re-probes, discovers /new/cursor-agent, and refreshes live models.
+    const refreshed = await listModels({ sender: {} }, request);
+    assert.equal(refreshed.source, "live");
+    assert.deepEqual(refreshed.models.map(({ id }) => id), ["new-model"]);
+    assert.equal(probeCalls, 2);
+
+    // Subsequent cacheOnly after restart recovers the new catalog via the updated alias.
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    ctx.cursorCliBinCache.clear();
+    const afterUpdate = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(afterUpdate.source, "last-known-good");
+    assert.deepEqual(afterUpdate.models.map(({ id }) => id), ["new-model"]);
+    assert.equal(probeCalls, 2);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    ctx.cursorCliBinCache.clear();
+    cleanup();
+  }
+});
+
 test("list-models cacheOnly avoids synchronous PATH discovery and never hydrates a bare command from another explicit binary", async (t) => {
   const { getDriver } = require("./index.cjs");
   let syncPathCalls = 0;

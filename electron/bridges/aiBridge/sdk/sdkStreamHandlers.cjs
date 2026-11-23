@@ -1397,7 +1397,9 @@ function registerSdkStreamHandlers(ctx) {
           if (aliasedKey) {
             const aliasedImmediate = tryServeCachedCatalog(aliasedKey);
             if (aliasedImmediate) {
-              cacheCursorBinFromKey(aliasedKey);
+              if (aliasedImmediate.value?.source === "live" || isFreshModelCatalog(aliasedImmediate.value)) {
+                cacheCursorBinFromKey(aliasedKey);
+              }
               return aliasedImmediate.value;
             }
           }
@@ -1427,7 +1429,9 @@ function registerSdkStreamHandlers(ctx) {
                 const asyncKey = buildSdkModelCacheKey(backendKey, asyncBinPath, env, runtimeKey);
                 const asyncImmediate = tryServeCachedCatalog(asyncKey);
                 if (asyncImmediate) {
-                  cacheCursorBinFromKey(asyncKey);
+                  if (asyncImmediate.value?.source === "live" || isFreshModelCatalog(asyncImmediate.value)) {
+                    cacheCursorBinFromKey(asyncKey);
+                  }
                   recordResolvedKeyAlias(asyncKey);
                   return asyncImmediate.value;
                 }
@@ -1494,26 +1498,29 @@ function registerSdkStreamHandlers(ctx) {
               }
             }
           }
-          if (stillSentinel || force) {
-            let resolvedCursorBin = null;
-            if (typeof probeCursorCliAuth === "function") {
-              try {
-                const cliAuth = await probeCursorCliAuth({ env: shellEnv });
-                if (cliAuth?.binPath) resolvedCursorBin = cliAuth.binPath;
-              } catch { /* best effort */ }
-            }
-            if (!resolvedCursorBin && !cursorCliBinPath) {
-              // Only `cursor-agent` — bare `agent` collides with other CLIs (e.g. Grok).
-              resolvedCursorBin = await resolveCliFromPathAsync?.("cursor-agent", shellEnv)
-                || null;
-            }
-            if (resolvedCursorBin) {
-              cursorCliBinPath = resolvedCursorBin;
-              setSdkModelCacheEntry(cursorCliBinCache, cursorBinCacheKey, {
-                at: Date.now(),
-                binPath: resolvedCursorBin,
-              }, { ttlMs: MODEL_CATALOG_MAX_AGE_MS });
-            }
+          // Any non-cached load (missing catalog, stale >=12h revalidation, or
+          // forced refresh) re-probes the sentinel so a moved cursor-agent
+          // binary is discovered automatically instead of staying pinned.
+          let resolvedCursorBin = null;
+          if (typeof probeCursorCliAuth === "function") {
+            try {
+              const cliAuth = await probeCursorCliAuth({ env: shellEnv });
+              if (cliAuth?.binPath) resolvedCursorBin = cliAuth.binPath;
+            } catch { /* best effort */ }
+          }
+          if (!resolvedCursorBin && (!cursorCliBinPath || stillSentinel)) {
+            // Only `cursor-agent` — bare `agent` collides with other CLIs (e.g. Grok).
+            resolvedCursorBin = await resolveCliFromPathAsync?.("cursor-agent", shellEnv)
+              || null;
+          }
+          if (resolvedCursorBin) {
+            cursorCliBinPath = resolvedCursorBin;
+            setSdkModelCacheEntry(cursorCliBinCache, cursorBinCacheKey, {
+              at: Date.now(),
+              binPath: resolvedCursorBin,
+            }, { ttlMs: MODEL_CATALOG_MAX_AGE_MS });
+          } else {
+            cursorCliBinCache.delete(cursorBinCacheKey);
           }
           const resolvedCacheKey = buildCacheKey();
           if (resolvedCacheKey !== cacheKey) {
@@ -1524,7 +1531,7 @@ function registerSdkStreamHandlers(ctx) {
               recordResolvedKeyAlias(cacheKey);
               return result;
             }
-          } else {
+          } else if (!resolvedCursorBin) {
             const fallbackAliasedKey = resolveAliasedKey();
             if (fallbackAliasedKey && fallbackAliasedKey !== cacheKey) {
               cacheKey = fallbackAliasedKey;
