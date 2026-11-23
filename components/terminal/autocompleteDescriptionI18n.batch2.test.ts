@@ -100,7 +100,7 @@ test("batch specs cover every description except the documented node shared-key 
 test("batch zh-TW spot checks cover generated terminology", () => {
   assert.equal(
     traditional["Don’t display the copyright and version messages even in interactive mode"],
-    "上游選項疑似錯誤：互動模式下不顯示版權和版本資訊請用 -q",
+    "即使在互動模式下也不顯示版權和版本訊息",
   );
   assert.equal(traditional["Watch input files"], "監視輸入檔案");
   assert.equal(
@@ -116,12 +116,12 @@ test("batch zh-TW spot checks cover generated terminology", () => {
     "未停用自動列印時，先列印模式空間；隨後用下一行輸入替換模式空間。若無更多輸入則退出。",
   );
   assert.equal(
-    traditional["Run in POSIX compatibility mode (gawk)"],
+    traditional["Run in traditional compatibility mode (gawk)"],
     "以傳統相容模式執行，行為等同 Brian Kernighan 的 awk（gawk）",
   );
   assert.equal(
     traditional["Interprets regular expressions as extended (modern) regular expressions rather than basic regular expressions"],
-    "將正規表示式解釋為擴充套件（現代）正規表示式，而不是基本正規表示式",
+    "將正規表示式解釋為擴充（現代）正規表示式，而不是基本正規表示式",
   );
 });
 
@@ -143,7 +143,7 @@ test("python, node, vim, sort, awk, and sed options localize without changing in
       input: "python -",
       option: "-g",
       key: "Don’t display the copyright and version messages even in interactive mode",
-      zhCn: "上游选项疑似错误：交互模式下不显示版权和版本信息请用 -q",
+      zhCn: "即使在交互模式下也不显示版权和版本消息",
     },
     {
       input: "python3 -",
@@ -202,19 +202,19 @@ test("python, node, vim, sort, awk, and sed options localize without changing in
     {
       input: "awk -",
       option: "-c",
-      key: "Run in POSIX compatibility mode (gawk)",
+      key: "Run in traditional compatibility mode (gawk)",
       zhCn: "以传统兼容模式运行，行为等同 Brian Kernighan 的 awk（gawk）",
     },
     {
       input: "awk -",
       option: "-n",
-      key: "Disable automatic input record splitting (gawk)",
+      key: "Recognize octal and hexadecimal values in input data (gawk)",
       zhCn: "识别输入数据中的八进制和十六进制值，请谨慎使用（gawk）",
     },
     {
       input: "awk -",
       option: "-t",
-      key: "Enable type checking (gawk)",
+      key: "Warn about constructs not portable to the original Unix awk (gawk)",
       zhCn: "对无法移植到原始 UNIX awk 的构造发出警告（gawk）",
     },
     {
