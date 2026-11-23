@@ -115,7 +115,12 @@ function installWindowsNodePtyPrebuild(unpackedDir, arch = "x64") {
   return installed;
 }
 
-function normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile, arch = "x64" }) {
+function normalizeBundledWindowsNatives({
+  unpackedDir,
+  sqlite3WindowsFile,
+  windowsProcessTreeFile = null,
+  arch = "x64",
+}) {
   assertSupportedCrossWindowsArch(arch);
   if (!fs.existsSync(unpackedDir)) {
     throw new Error(`[crossWinNative] Missing unpacked app directory: ${unpackedDir}`);
@@ -127,6 +132,14 @@ function normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile, arch 
       : null;
   if (!sqlite3Bytes || !isPortableExecutableFile(sqlite3Bytes)) {
     throw new Error("[crossWinNative] A Windows sqlite3 prebuild is required");
+  }
+  const windowsProcessTreeBytes = Buffer.isBuffer(windowsProcessTreeFile)
+    ? windowsProcessTreeFile
+    : windowsProcessTreeFile
+      ? fs.readFileSync(windowsProcessTreeFile)
+      : null;
+  if (windowsProcessTreeFile && (!windowsProcessTreeBytes || !isPortableExecutableFile(windowsProcessTreeBytes))) {
+    throw new Error("[crossWinNative] Provided windows-process-tree module is not a Windows x64 PE");
   }
 
   const removed = [];
@@ -144,6 +157,17 @@ function normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile, arch 
   }
 
   const installedNodePty = installWindowsNodePtyPrebuild(unpackedDir, arch);
+  const replacedSet = new Set(installedNodePty);
+
+  const windowsProcessTreeRelative =
+    "node_modules/@vscode/windows-process-tree/build/Release/windows_process_tree.node";
+  let windowsProcessTreeTarget = null;
+  if (windowsProcessTreeBytes) {
+    windowsProcessTreeTarget = path.join(unpackedDir, windowsProcessTreeRelative);
+    fs.mkdirSync(path.dirname(windowsProcessTreeTarget), { recursive: true });
+    fs.writeFileSync(windowsProcessTreeTarget, windowsProcessTreeBytes);
+    replacedSet.add(windowsProcessTreeRelative);
+  }
 
   const sqlite3Target = path.join(
     unpackedDir,
@@ -152,8 +176,7 @@ function normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile, arch 
   fs.mkdirSync(path.dirname(sqlite3Target), { recursive: true });
   fs.writeFileSync(sqlite3Target, sqlite3Bytes);
 
-  const installedSet = new Set(installedNodePty);
-  const asarEntriesToRemove = removed.filter((entry) => !installedSet.has(entry));
+  const asarEntriesToRemove = removed.filter((entry) => !replacedSet.has(entry));
 
   assertWindowsNativePayload(unpackedDir);
   return {
@@ -161,6 +184,7 @@ function normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile, arch 
     installedNodePty,
     asarEntriesToRemove,
     sqlite3Target,
+    windowsProcessTreeTarget,
   };
 }
 
@@ -202,13 +226,23 @@ function downloadWindowsSqlite3Prebuild(projectDir) {
   }
 }
 
-function normalizeCrossWindowsApp({ appOutDir, projectDir, arch = "x64" }) {
+function normalizeCrossWindowsApp({
+  appOutDir,
+  projectDir,
+  arch = "x64",
+  windowsProcessTreeFile = process.env.NETCATTY_WIN_PROCESS_TREE_NODE || null,
+}) {
   assertSupportedCrossWindowsArch(arch);
   const resourcesDir = path.join(appOutDir, "resources");
   const unpackedDir = path.join(resourcesDir, "app.asar.unpacked");
   const asarPath = path.join(resourcesDir, "app.asar");
   const sqlite3WindowsFile = downloadWindowsSqlite3Prebuild(projectDir);
-  const result = normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile, arch });
+  const result = normalizeBundledWindowsNatives({
+    unpackedDir,
+    sqlite3WindowsFile,
+    windowsProcessTreeFile,
+    arch,
+  });
   assertWindowsNativePayload(resourcesDir, { asarPath });
   return result;
 }

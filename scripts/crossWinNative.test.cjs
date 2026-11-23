@@ -123,6 +123,57 @@ test("cross-built Windows payload fails closed when required node-pty prebuild f
   );
 });
 
+test("cross-built Windows payload installs optional Windows process-tree addon when provided", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-win-native-wpt-"));
+  const sqliteSource = path.join(root, "sqlite3-win32-x64.node");
+  const wptSource = path.join(root, "windows_process_tree-win32-x64.node");
+  const unpackedDir = path.join(root, "app.asar.unpacked");
+
+  writeFixture(sqliteSource, peBuffer());
+  writeFixture(wptSource, peBuffer());
+  writeFixture(
+    path.join(unpackedDir, "node_modules/@vscode/windows-process-tree/build/Release/windows_process_tree.node"),
+    Buffer.from([0xcf, 0xfa, 0xed, 0xfe]),
+  );
+  for (const relativeFile of [
+    "conpty.node",
+    "conpty/conpty.dll",
+    "conpty/OpenConsole.exe",
+  ]) {
+    writeFixture(
+      path.join(unpackedDir, "node_modules/node-pty/prebuilds/win32-x64", relativeFile),
+      peBuffer(),
+    );
+  }
+
+  const result = normalizeBundledWindowsNatives({
+    unpackedDir,
+    sqlite3WindowsFile: sqliteSource,
+    windowsProcessTreeFile: wptSource,
+  });
+
+  const installedWpt = path.join(
+    unpackedDir,
+    "node_modules/@vscode/windows-process-tree/build/Release/windows_process_tree.node",
+  );
+  assert.equal(fs.existsSync(installedWpt), true);
+  assert.equal(fs.readFileSync(installedWpt).subarray(0, 2).toString(), "MZ");
+  assert.equal(
+    result.asarEntriesToRemove.includes(
+      "node_modules/@vscode/windows-process-tree/build/Release/windows_process_tree.node",
+    ),
+    false,
+  );
+  assert.throws(
+    () => normalizeBundledWindowsNatives({
+      unpackedDir,
+      sqlite3WindowsFile: sqliteSource,
+      windowsProcessTreeFile: Buffer.from([0xcf, 0xfa, 0xed, 0xfe]),
+    }),
+    /not a Windows x64 PE/,
+  );
+});
+
 test("cross-built Windows validation rejects fake MZ and wrong-architecture PE modules", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-win-native-invalid-"));
   writeFixture(path.join(root, "fake.node"), Buffer.from("MZnot-a-pe"));
