@@ -39,6 +39,7 @@ function setupDom(t: test.TestContext) {
   const root = createRoot(document.getElementById("root")!);
   t.after(async () => {
     activeTabStore.setActiveTabId("vault");
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
     await act(async () => root.unmount());
     dom.window.close();
     for (const [key, descriptor] of previous) {
