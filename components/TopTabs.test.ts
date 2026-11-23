@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import type { TerminalSession } from "../types";
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -44,14 +45,28 @@ const {
   sessionPresentationStore,
 } = await import("../application/state/sessionPresentationStore.ts");
 
+const topTabSession = (
+  id: string,
+  hostId: string,
+  overrides: Partial<TerminalSession> = {},
+): TerminalSession => ({
+  id,
+  hostId,
+  hostLabel: "jump",
+  username: "root",
+  hostname: "jump",
+  status: "connected",
+  ...overrides,
+});
+
 test("host tree tab gutter fills the remaining sidebar width", () => {
   assert.equal(computeHostTreeTabGutter(280, 120), 160);
 });
 
 test("workspace tabs resolve generated labels from live prompt hosts", () => {
   const sessions = [
-    { id: "s1", customName: "", hostLabel: "jump", hostId: "h1", promptHostname: "" },
-    { id: "s2", customName: "", hostLabel: "jump", hostId: "h2", promptHostname: "" },
+    topTabSession("s1", "h1", { customName: "", promptHostname: "" }),
+    topTabSession("s2", "h2", { customName: "", promptHostname: "" }),
   ];
   const workspace = {
     title: "jump/jump",
@@ -73,7 +88,7 @@ test("workspace tabs resolve generated labels from live prompt hosts", () => {
 
 test("workspace tabs keep explicit names ahead of live prompt hosts", () => {
   const sessions = [
-    { id: "s1", customName: "", hostLabel: "jump", hostId: "h1", promptHostname: "" },
+    topTabSession("s1", "h1", { customName: "", promptHostname: "" }),
   ];
   publishSessionPromptHost("s1", "target-a");
   assert.equal(
