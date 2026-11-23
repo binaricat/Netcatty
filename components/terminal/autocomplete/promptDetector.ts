@@ -822,22 +822,21 @@ function findPromptBoundary(lineText: string): number {
       // A prompt $ is typically preceded by: space, ), ], digit, username chars, or is at position 0.
       // A variable $ is typically inside a command: echo $HOME, export PATH=$PATH:...
       //
-      // Heuristic: if the $ is preceded by a letter/digit/underscore without a space before it
-      // (i.e., it's part of a token like "echo" or "=$PATH"), it's likely a variable.
+      // Standard Linux/BSD prompts also end with `:/$ ` when the shell's cwd is `/`
+      // (e.g. `ubuntu@server:/$ `, `(venv) user@host:/$ `, `host:/$ `, `/$ `).
+      const prefixBeforeDollar = lineText.slice(0, i);
+      const prev = i > 0 ? lineText[i - 1] : "";
+      const isRootOrSlashPathPrompt =
+        prev === "/" &&
+        !prefixBeforeDollar.includes("://") &&
+        (prefixBeforeDollar === "/" ||
+          /(?:^|\s)[\w.@-]+:\/(?:[^\s]*\/)?$/.test(prefixBeforeDollar));
+
       if (i > 0) {
-        const prev = lineText[i - 1];
-        // If preceded by = or / or another non-separator, it's a variable reference
-        if (prev === "=" || prev === "/" || prev === ":") continue;
-        // If preceded by a letter and there's no space between, it could be $HOME-style
-        // But actually: "user@host:~$ " has letter before $. So check if there's
-        // a valid prompt pattern before the $.
+        // If preceded by = or : or a non-prompt /, it's likely a variable reference
+        if (prev === "=" || prev === ":" || (prev === "/" && !isRootOrSlashPathPrompt)) continue;
       }
 
-      // Check what follows: if after "$ " there's more content with $ in variable positions
-      // Actually the simplest reliable check: if the character after the space is alphanumeric
-      // or $ or (, this is likely the START of a command (i.e., this $ IS the prompt ending).
-      // That's always true for a prompt. So the $ check is really about false positives mid-line.
-      //
       // Better heuristic: if we haven't seen a space before this $ (meaning the $ is inside
       // the first token), it's likely a prompt. If we've already passed spaces (meaning
       // we're past the first "word"), a $ is more likely a variable.
@@ -848,10 +847,10 @@ function findPromptBoundary(lineText: string): number {
       // If there was a space before this $, it might be mid-command (like "echo $HOME")
       // Only accept if the $ is reasonably close to common prompt patterns
       if (seenSpaceBeforeDollar) {
-        // Check if this looks like a bracketed prompt ending: "]$ " or ")$ "
+        // Check if this looks like a bracketed or host:path prompt ending: "]$ ", ")$ ", "user@host:/$ "
         if (i > 0 && (lineText[i - 1] === "]" || lineText[i - 1] === ")" ||
-            lineText[i - 1] === " " || lineText[i - 1] === "~")) {
-          // Likely a prompt ending like [user@host ~]$
+            lineText[i - 1] === " " || lineText[i - 1] === "~" || isRootOrSlashPathPrompt)) {
+          // Likely a prompt ending like [user@host ~]$ or (venv) user@host:/$
         } else {
           continue; // Skip — likely a variable reference mid-command
         }
