@@ -3,9 +3,11 @@ import type { CodingCliProviderId } from './codingCliProviders';
 import { normalizeCodingCliTitle } from './codingCliTitleParse';
 import type { DynamicTabTitleMode } from './models/terminal';
 
-/** Static connection label: user rename or host label. */
-export const getSessionConnectionLabel = (session: Pick<TerminalSession, 'customName' | 'hostLabel'>): string => {
-  return session.customName || session.hostLabel || '';
+/** Connection label: user rename, live prompt host, then configured host label. */
+export const getSessionConnectionLabel = (
+  session: Pick<TerminalSession, 'customName' | 'hostLabel' | 'promptHostname'>,
+): string => {
+  return session.customName || session.promptHostname || session.hostLabel || '';
 };
 
 /**
@@ -37,7 +39,10 @@ export const buildMergedWorkspaceTitle = (
   return `${base}/${joining}`;
 };
 
-type WorkspaceTabLabelSession = Pick<TerminalSession, 'id' | 'customName' | 'hostLabel' | 'hostId'>;
+type WorkspaceTabLabelSession = Pick<
+  TerminalSession,
+  'id' | 'customName' | 'hostLabel' | 'hostId' | 'promptHostname'
+>;
 
 /**
  * Recompute a merged workspace's composed title from its *current* member
@@ -130,7 +135,10 @@ export const resolveCodingCliProviderIconUpdate = ({
  * Uses the shell-reported title according to the global dynamic title mode.
  */
 export const resolveSessionTabTitle = (
-  session: Pick<TerminalSession, 'customName' | 'hostLabel' | 'dynamicTitle' | 'codingCliProviderId'>,
+  session: Pick<
+    TerminalSession,
+    'customName' | 'hostLabel' | 'promptHostname' | 'dynamicTitle' | 'codingCliProviderId'
+  >,
   dynamicTabTitleMode: DynamicTabTitleMode = 'agent',
 ): string => {
   const connectionLabel = getSessionConnectionLabel(session);

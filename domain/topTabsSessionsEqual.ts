@@ -3,8 +3,8 @@ import type { TerminalSession } from './models';
 
 /**
  * TopTabs session list equality: structural pane-critical fields only.
- * Presentation (dynamicTitle / codingCliProviderId) is merged from
- * sessionPresentationStore inside TopTabsInner.
+ * Presentation (dynamicTitle / promptHostname / codingCliProviderId) is merged
+ * from sessionPresentationStore inside TopTabsInner.
  */
 export function topTabsSessionsEqual(
   prev: readonly TerminalSession[] | null | undefined,

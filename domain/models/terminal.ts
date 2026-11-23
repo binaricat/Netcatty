@@ -732,6 +732,8 @@ export interface TerminalSession {
   customName?: string;
   /** Runtime shell-reported window title (OSC 0/2), shown on tabs when enabled */
   dynamicTitle?: string;
+  /** Runtime hostname detected from the current shell prompt (presentation only) */
+  promptHostname?: string;
   /** Sticky coding CLI provider detected from launch command or window title */
   codingCliProviderId?: CodingCliProviderId;
   /** Runtime marker for sessions reconstructed from startup restore. */

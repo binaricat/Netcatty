@@ -85,6 +85,36 @@ test('resolveSessionTabTitle strips agent spinner prefixes from dynamic titles',
   );
 });
 
+test('resolveSessionTabTitle uses a detected prompt host ahead of hostLabel', () => {
+  assert.equal(
+    resolveSessionTabTitle({
+      hostLabel: 'jumpserver',
+      promptHostname: '10.1.64.1',
+    }),
+    '10.1.64.1',
+  );
+});
+
+test('resolveSessionTabTitle keeps user and agent titles ahead of prompt host', () => {
+  assert.equal(
+    resolveSessionTabTitle({
+      customName: 'my target',
+      hostLabel: 'jumpserver',
+      promptHostname: '10.1.64.1',
+    }),
+    'my target',
+  );
+  assert.equal(
+    resolveSessionTabTitle({
+      hostLabel: 'jumpserver',
+      promptHostname: '10.1.64.1',
+      dynamicTitle: 'claude: deploy',
+      codingCliProviderId: 'claude',
+    }),
+    'claude: deploy',
+  );
+});
+
 test('coding CLI icon updates stop without clearing the current icon when dynamic titles are off', () => {
   assert.equal(shouldUpdateCodingCliTabIcon('off'), false);
   assert.equal(shouldUpdateCodingCliTabIcon('agent'), true);
