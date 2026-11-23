@@ -343,6 +343,22 @@ async function afterPack(context) {
   }
 
   if (context.electronPlatformName === "win32") {
+    if (process.env.NETCATTY_SKIP_WINDOWS_PTY_PATCH === "1") {
+      const { normalizeCrossWindowsApp } = require("./crossWinNative.cjs");
+      const projectDir = context.packager.appDir || context.packager.projectDir;
+      const normalized = normalizeCrossWindowsApp({
+        appOutDir: context.appOutDir,
+        projectDir,
+      });
+      pruneAsarHeaderEntries(
+        path.join(appResourcesDir(context), "app.asar"),
+        normalized.asarEntriesToRemove,
+      );
+      console.warn(
+        `[afterPack] Cross-built Windows payload normalized: removed ${normalized.removed.length} host-native path(s), installed Windows sqlite3`,
+      );
+      return;
+    }
     const projectDir = context.packager.appDir || context.packager.projectDir;
     rebuildPatchedNodePty({ projectDir, platform: "win32", arch: context.arch });
     copyPatchedNodePtyToPackagedApp({

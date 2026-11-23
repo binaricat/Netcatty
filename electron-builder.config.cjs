@@ -285,11 +285,11 @@ module.exports = {
         extraResources: [
             ...moshExtraResources('win32'),
             ...etExtraResources('win32'),
-            {
+            ...(process.env.NETCATTY_SKIP_WINDOWS_HELLO_HELPER === '1' ? [] : [{
                 from: 'electron/bridges/windowsHelloHelper/build/${arch}/NetcattyWindowsHello.exe',
                 to: 'windowsHello/NetcattyWindowsHello.exe',
                 filter: ['**/*']
-            }
+            }])
         ]
     },
     portable: {
