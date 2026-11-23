@@ -16,7 +16,6 @@ import {
   DEFAULT_ENCRYPTED_SYNC_OBJECT_KEY,
 } from '../../../domain/encryptedObjectStorage';
 import type {
-  CloudProvider,
   OAuthTokens,
   ProviderAccount,
   SyncedFile,
@@ -380,8 +379,4 @@ export function webdavEncryptedObjectCapabilities(): EncryptedObjectStorageCapab
     conditionalWrites: false,
     atomicReplacement: true,
   };
-}
-
-export function isWebdavProvider(provider: CloudProvider): boolean {
-  return provider === 'webdav';
 }

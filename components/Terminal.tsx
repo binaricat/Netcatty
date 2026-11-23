@@ -155,7 +155,7 @@ import { createReplaySafeTerminalLogSanitizer } from "./terminal/replaySafeTermi
 import { createConnectionLogBuffer } from "./terminal/connectionLogBuffer";
 import { createProgrammaticCommandLogRewriter, type ProgrammaticCommandLogRewrite } from "./terminal/programmaticCommandLog";
 import { getSessionLogInitialLine } from "./terminal/sessionLogInitialLine";
-import { getTerminalSelectionForClipboard } from "./terminal/normalizeTerminalSelection";
+import { getTerminalSelectionForClipboard } from "../domain/terminalSelection";
 import { getHistoryPreviewSelectionFromRoot } from "./terminal/runtime/terminalHistoryScrollOverride";
 import { createTerminalOutputHistoryPreview } from "./terminal/runtime/terminalOutputHistory";
 import { useZmodemTransfer } from "./terminal/hooks/useZmodemTransfer";

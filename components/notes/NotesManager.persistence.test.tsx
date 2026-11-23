@@ -7,7 +7,10 @@ import type { VaultNote } from "../../domain/models.ts";
 // JSDOM has no stylesheet loader. All editor/application JavaScript stays real.
 register(`data:text/javascript,${encodeURIComponent(`
   export async function load(url, context, nextLoad) {
-    if (url.endsWith("/components/notes/noteMath.scss")) {
+    if (
+      url.endsWith("/components/notes/noteMath.scss")
+      || url.endsWith("/components/notes/mdxEditor.css")
+    ) {
       return { format: "module", source: "export {};", shortCircuit: true };
     }
     return nextLoad(url, context);

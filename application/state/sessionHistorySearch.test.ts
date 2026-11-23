@@ -9,7 +9,7 @@ import {
   PINYIN_CACHE_MAX_CHARS,
   getPinyinCacheStatsForTests,
   resetPinyinCacheForTests,
-} from "../../lib/searchMatcher.ts";
+} from "../../domain/searchMatcher.ts";
 import { createSessionHistorySearch } from "./sessionHistorySearch.ts";
 
 // One instance for the whole file: it keeps the pre-factory semantics of every

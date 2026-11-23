@@ -13,20 +13,17 @@ const {
   formatDiscoveryEnvCliFlags,
 } = require("../../cli/externalMcpDiscoveryPath.cjs");
 
-function loadShellUtils() {
-  return require("../ai/shellUtils.cjs");
-}
+const {
+  loadShellUtils,
+  quoteCommandArg,
+  pathsMatch,
+  extractCommandExecutable,
+  hasRequiredDiscoveryEnv,
+  summarizeFailure: summarizeCliFailure,
+} = require("./cliSetupBase.cjs");
 
 function formatGrokCommandText(args) {
   return ["grok", ...args.map(quoteCommandArg)].join(" ");
-}
-
-function quoteCommandArg(value) {
-  if (typeof value !== "string" || value.length === 0) return '""';
-  // Match ExternalMcpCard quoteShellArg so copyable commands stay shell-safe
-  // for paths with spaces, quotes, apostrophes, or backslashes.
-  if (!/[\s"'\\]/u.test(value)) return value;
-  return `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
 }
 
 function formatExistingCommand(entry) {
@@ -121,34 +118,6 @@ function normalizeGrokListEntry(entry) {
   };
 }
 
-function normalizePathForCompare(value) {
-  if (typeof value !== "string") return "";
-  let normalized = value.trim().replace(/^["']|["']$/gu, "");
-  if (process.platform === "win32") {
-    normalized = normalized.replace(/\.cmd$/iu, "");
-  }
-  return normalized;
-}
-
-function pathsMatch(left, right) {
-  return normalizePathForCompare(left) === normalizePathForCompare(right);
-}
-
-function extractCommandExecutable(commandText) {
-  if (typeof commandText !== "string") return "";
-  const trimmed = commandText.trim();
-  if (!trimmed) return "";
-  const dashDashIndex = trimmed.lastIndexOf(" -- ");
-  const candidate = dashDashIndex >= 0
-    ? trimmed.slice(dashDashIndex + 4).trim()
-    : trimmed;
-  const match = candidate.match(/("(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s]+)/u);
-  if (!match) return candidate;
-  const remainder = candidate.slice(match[0].length).trim();
-  if (remainder) return "";
-  return match[1];
-}
-
 function getEntryCommand(entry) {
   if (!entry) return null;
   if (entry.transport?.type === "stdio" || entry.transport?.command) {
@@ -163,14 +132,6 @@ function getEntryCommand(entry) {
     return null;
   }
   return formatExistingCommand(entry);
-}
-
-function hasRequiredDiscoveryEnv(entryEnv, discoveryEnv) {
-  const required = discoveryEnv && typeof discoveryEnv === "object" ? discoveryEnv : {};
-  const keys = Object.keys(required).filter((key) => typeof required[key] === "string" && required[key]);
-  if (keys.length === 0) return true;
-  if (!entryEnv || typeof entryEnv !== "object") return false;
-  return keys.every((key) => String(entryEnv[key] || "") === String(required[key]));
 }
 
 function getGrokEntryEnv(entry) {
@@ -317,7 +278,7 @@ function createExternalMcpGrokSetup(options = {}) {
   }
 
   function summarizeFailure(result, fallback) {
-    return String(result?.stderr || result?.stdout || fallback || "Grok command failed").trim();
+    return summarizeCliFailure(result, fallback, "Grok command failed");
   }
 
   async function getStatus() {

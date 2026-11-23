@@ -3,7 +3,7 @@ import { Download, Pencil, Search, Trash2, Upload, X } from 'lucide-react';
 import type { AISession } from '../infrastructure/ai/types';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { cn } from '../lib/utils';
-import { MAX_SEARCH_QUERY_LENGTH, truncateQueryForMatch } from '../lib/searchMatcher';
+import { MAX_SEARCH_QUERY_LENGTH, truncateQueryForMatch } from '../domain/searchMatcher';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';

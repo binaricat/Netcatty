@@ -178,13 +178,6 @@ export function adjustSaturationToken(hsl: string, factor: number): string {
   return `${parts[0]} ${Math.round(newS * 10) / 10}% ${parts[2]}`;
 }
 
-export type { TerminalThemePreviewState } from './terminalThemePreview';
-export {
-  emptyTerminalThemePreview,
-  listThemePreviewSessionIds,
-  resolvePaneThemePreviewId,
-} from './terminalThemePreview';
-
 export const clearTerminalPreviewVars = (sessionId: string | null) => {
   if (!sessionId || typeof document === 'undefined') return;
   const pane = document.querySelector<HTMLElement>(`[data-session-id="${sessionId}"]`);

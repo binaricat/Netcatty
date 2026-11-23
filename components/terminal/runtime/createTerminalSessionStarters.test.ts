@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createMockTerminalBackend } from "./testSupport/starterHarness";
 
 import {
   createTerminalSessionStarters,
@@ -1663,28 +1664,12 @@ test("ET keeps automatic jump discovery available with an unreadable saved passw
 
 test("startSSH forwards custom ProxyCommand to the SSH bridge", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = {
     host: {
       id: "host-1",
@@ -1745,28 +1730,12 @@ test("startSSH forwards custom ProxyCommand to the SSH bridge", async () => {
 
 test("startSSH resolves target proxy credentials from an identity", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -1804,28 +1773,12 @@ test("startSSH resolves target proxy credentials from an identity", async () => 
 
 test("startSSH resolves jump host proxy credentials from an identity", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -1885,29 +1838,13 @@ test("startSSH shows jump-host auth failures without opening target auth retry",
   let retryMessage: string | null = "previous retry";
   let status = "";
   const progressLogs: string[] = [];
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       const err = new Error('Jump host authentication failed for "Bastion": All configured authentication methods failed');
       (err as Error & { isJumpHostAuthError?: boolean }).isJumpHostAuthError = true;
       throw err;
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -1950,29 +1887,13 @@ test("startSSH shows jump-host auth failures without opening target auth retry",
 test("startSSH recognizes Electron-prefixed jump-host auth failures", async () => {
   let error = "";
   let needsAuth = false;
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       throw new Error(
         'Error invoking remote method "netcatty:start": Error: Jump host authentication failed for "Bastion": All configured authentication methods failed',
       );
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     setNeedsAuth: (value: boolean) => { needsAuth = value; },
@@ -1990,28 +1911,12 @@ test("startSSH does not open auth retry for socket errors mentioning auth in hos
   let needsAuth = false;
   let retryMessage: string | null = "previous retry";
   let status = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       const err = new Error("Connection reset by auth-bastion.example.com");
       throw err;
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -2046,27 +1951,11 @@ test("startSSH does not open auth retry for socket errors mentioning auth in hos
 test("startSSH does not open auth retry for non-login permission denied errors", async () => {
   let needsAuth = false;
   let error = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       throw new Error("Permission denied opening channel to auth-bastion.example.com");
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     setNeedsAuth: (value: boolean) => { needsAuth = value; },
@@ -2082,28 +1971,12 @@ test("startSSH does not open auth retry for non-login permission denied errors",
 test("startSSH rejects missing saved proxy profiles before connecting", async () => {
   let started = false;
   let error = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       started = true;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -2125,28 +1998,12 @@ test("startSSH rejects missing saved proxy profiles before connecting", async ()
 test("startSSH rejects missing saved proxy profiles on jump hosts before connecting", async () => {
   let started = false;
   let error = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       started = true;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -2175,28 +2032,12 @@ test("startSSH rejects missing saved proxy profiles on jump hosts before connect
 test("startSSH rejects missing proxy identities before connecting", async () => {
   let started = false;
   let error = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       started = true;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -2224,28 +2065,12 @@ test("startSSH rejects missing proxy identities before connecting", async () => 
 test("startSSH rejects incomplete proxy identities before connecting", async () => {
   let started = false;
   let error = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       started = true;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -2280,28 +2105,12 @@ test("startSSH rejects incomplete proxy identities before connecting", async () 
 test("startSSH rejects proxy identities with blank usernames even when passwords are encrypted", async () => {
   let started = false;
   let error = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       started = true;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -2337,28 +2146,12 @@ test("startSSH rejects proxy identities with blank usernames even when passwords
 test("startSSH rejects target proxy identity passwords that cannot be decrypted", async () => {
   let started = false;
   let error = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       started = true;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -2393,28 +2186,12 @@ test("startSSH rejects target proxy identity passwords that cannot be decrypted"
 test("startSSH rejects missing jump host proxy identities before connecting", async () => {
   let started = false;
   let error = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       started = true;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -2449,28 +2226,12 @@ test("startSSH rejects missing jump host proxy identities before connecting", as
 test("startSSH rejects incomplete jump host proxy identities before connecting", async () => {
   let started = false;
   let error = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       started = true;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -2514,28 +2275,12 @@ test("startSSH rejects incomplete jump host proxy identities before connecting",
 test("startSSH rejects jump host proxy identity passwords that cannot be decrypted", async () => {
   let started = false;
   let error = "";
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       started = true;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     terminalBackend,
     host: {
@@ -2578,29 +2323,13 @@ test("startSSH rejects jump host proxy identity passwords that cannot be decrypt
 test("startSSH sends key and password together in one connection for publickey+password MFA hosts", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
   let startCalls = 0;
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       startCalls += 1;
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = {
     host: {
       id: "host-1",
@@ -2664,13 +2393,7 @@ test("startSSH resets the TCP dial timeout state before password fallback", asyn
   let startCalls = 0;
   const startOptions: Record<string, unknown>[] = [];
   const tcpDialState: boolean[] = [];
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       startCalls += 1;
       startOptions.push(options);
@@ -2680,20 +2403,11 @@ test("startSSH resets the TCP dial timeout state before password fallback", asyn
       }
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
     onChainProgress: (listener: typeof chainProgressListener) => {
       chainProgressListener = listener;
       return noop;
     },
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     host: {
       id: "host-1",
@@ -2737,33 +2451,18 @@ test("startSSH resets the TCP dial timeout state when a jump host starts forward
     error?: string,
   ) => void = noop;
   const tcpDialState: boolean[] = [];
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
       chainProgressListener("session-1", 1, 2, "bastion.example.test", "tcp-connected");
       chainProgressListener("session-1", 1, 2, "bastion.example.test", "forwarding");
       chainProgressListener("session-1", 2, 2, "target.example.test", "tcp-connected");
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
     onChainProgress: (listener: typeof chainProgressListener) => {
       chainProgressListener = listener;
       return noop;
     },
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     host: {
       id: "host-1",
@@ -2793,28 +2492,12 @@ test("startSSH resets the TCP dial timeout state when a jump host starts forward
 
 test("startSSH forwards the saved sudo autofill password to the SSH bridge", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     host: {
       id: "host-1",
@@ -2835,28 +2518,13 @@ test("startSSH forwards the saved sudo autofill password to the SSH bridge", asy
 test("startSSH enables sudo autofill only with the host saved password", async () => {
   let onData: ((data: string) => void) | null = null;
   const sent: string[] = [];
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
+  const terminalBackend = createMockTerminalBackend({
     onSessionData: (_id: string, cb: (data: string) => void) => {
       onData = cb;
       return noop;
     },
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
     writeToSession: (_id: string, data: string) => sent.push(data),
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     host: {
       id: "host-1",
@@ -2880,28 +2548,14 @@ test("startSSH does not use unsaved retry passwords for sudo autofill", async ()
   let onData: ((data: string) => void) | null = null;
   const sent: string[] = [];
   let captured: NetcattySSHOptions | undefined;
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: NetcattySSHOptions) => { captured = options; return "ssh-session"; },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
     onSessionData: (_id: string, cb: (data: string) => void) => {
       onData = cb;
       return noop;
     },
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
     writeToSession: (_id: string, data: string) => sent.push(data),
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     host: {
       id: "host-1",
@@ -2950,28 +2604,13 @@ test("startSSH does not use unsaved retry passwords for sudo autofill", async ()
 test("startSSH uses pending saved auth for sudo autofill on the first saved connection", async () => {
   let onData: ((data: string) => void) | null = null;
   const sent: string[] = [];
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
+  const terminalBackend = createMockTerminalBackend({
     onSessionData: (_id: string, cb: (data: string) => void) => {
       onData = cb;
       return noop;
     },
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
     writeToSession: (_id: string, data: string) => sent.push(data),
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     host: {
       id: "host-1",
@@ -3002,28 +2641,13 @@ test("startSSH uses pending saved auth for sudo autofill on the first saved conn
 test("startSSH does not use merged group default passwords for sudo autofill", async () => {
   let onData: ((data: string) => void) | null = null;
   const sent: string[] = [];
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
+  const terminalBackend = createMockTerminalBackend({
     onSessionData: (_id: string, cb: (data: string) => void) => {
       onData = cb;
       return noop;
     },
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
     writeToSession: (_id: string, data: string) => sent.push(data),
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     host: {
       id: "host-1",
@@ -3045,28 +2669,13 @@ test("startSSH does not use merged group default passwords for sudo autofill", a
 test("startSSH uses the provided sudo autofill password", async () => {
   let onData: ((data: string) => void) | null = null;
   const sent: string[] = [];
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
+  const terminalBackend = createMockTerminalBackend({
     onSessionData: (_id: string, cb: (data: string) => void) => {
       onData = cb;
       return noop;
     },
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
     writeToSession: (_id: string, data: string) => sent.push(data),
-    resizeSession: noop,
-  };
+  });
   const ctx = createStarterContext({
     host: {
       id: "host-1",
@@ -3089,25 +2698,7 @@ test("startSerial captures direct connected banner in terminal log data", async 
   const capturedLogData: string[] = [];
   const writtenData: string[] = [];
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  const terminalBackend = createMockTerminalBackend();
 
   const ctx = {
     host: {
@@ -3175,28 +2766,12 @@ test("local session captures paste cleanup writes in terminal log data", async (
   const writes: string[] = [];
   let onData: ((data: string) => void) | null = null;
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
+  const terminalBackend = createMockTerminalBackend({
     onSessionData: (_id: string, cb: (data: string) => void) => {
       onData = cb;
       return noop;
     },
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const ctx = {
     host: {
@@ -3301,27 +2876,11 @@ test("local session runs startup command after attaching", async () => {
   const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
   const attached: string[] = [];
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
+  const terminalBackend = createMockTerminalBackend({
     writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
       sessionWrites.push({ id, data, automated: options?.automated });
     },
-    resizeSession: noop,
-  };
+  });
 
   const ctx = createStarterContext({
     host: {
@@ -3618,27 +3177,11 @@ test("startup command suppression is consumed only when scheduling", () => {
 test("restored local reconnect runs the host startup command while automatic retry suppresses it", async () => {
   const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
+  const terminalBackend = createMockTerminalBackend({
     writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
       sessionWrites.push({ id, data, automated: options?.automated });
     },
-    resizeSession: noop,
-  };
+  });
 
   const ctx = createStarterContext({
     host: {
@@ -3890,28 +3433,12 @@ for (const { name, hostDirectory, globalDirectory, expectedDirectory } of [
 ]) {
 test(`local session start ${name}`, async () => {
   let capturedOptions: Record<string, unknown> | null = null;
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
+  const terminalBackend = createMockTerminalBackend({
     startLocalSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "local-session";
     },
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const ctx = createStarterContext({
     host: {
@@ -3937,27 +3464,11 @@ test("local session restores cwd before startup command after attaching", async 
   const executedCommands: string[] = [];
   const progressLogs: string[] = [];
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
+  const terminalBackend = createMockTerminalBackend({
     writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
       sessionWrites.push({ id, data, automated: options?.automated });
     },
-    resizeSession: noop,
-  };
+  });
 
   const restoreCwdIntentRef = {
     current: { cwd: "/srv/app dir", command: "cd -- '/srv/app dir'" },
@@ -4001,27 +3512,11 @@ test("ssh session restores cwd before startup command after attaching", async ()
   const progressLogs: string[] = [];
   const restoredCwds: string[] = [];
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
+  const terminalBackend = createMockTerminalBackend({
     writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
       sessionWrites.push({ id, data, automated: options?.automated });
     },
-    resizeSession: noop,
-  };
+  });
 
   const restoreCwdIntentRef = {
     current: { cwd: "/srv/app dir", command: "cd -- '/srv/app dir'" },
@@ -4063,28 +3558,12 @@ test("local session keeps timestamp anchors for preserved scrollback when reusin
   let onData: ((data: string) => void) | null = null;
   let cursorLine = 0;
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
+  const terminalBackend = createMockTerminalBackend({
     onSessionData: (_id: string, cb: (data: string) => void) => {
       onData = cb;
       return noop;
     },
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const ctx = {
     host: {
@@ -4175,28 +3654,12 @@ test("session data waits for prior terminal writes before evaluating prompt line
   let cursorX = 0;
   let lineText = "";
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
+  const terminalBackend = createMockTerminalBackend({
     onSessionData: (_id: string, cb: (data: string) => void) => {
       onData = cb;
       return noop;
     },
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const promptState = createPromptLineBreakState();
   promptState.lastPromptText = "$ ";
@@ -4287,28 +3750,12 @@ test("prompt line break display insertion does not mutate captured session log d
   let cursorX = 0;
   let lineText = "";
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
+  const terminalBackend = createMockTerminalBackend({
     onSessionData: (_id: string, cb: (data: string) => void) => {
       onData = cb;
       return noop;
     },
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const promptState = createPromptLineBreakState();
   promptState.lastPromptText = "$ ";
@@ -4397,19 +3844,7 @@ test("local session exit text waits for pending terminal output writes", async (
   let onData: ((data: string) => void) | null = null;
   let onExit: ((evt: { reason?: "closed" }) => void) | null = null;
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
+  const terminalBackend = createMockTerminalBackend({
     onSessionData: (_id: string, cb: (data: string) => void) => {
       onData = cb;
       return noop;
@@ -4418,10 +3853,7 @@ test("local session exit text waits for pending terminal output writes", async (
       onExit = cb;
       return noop;
     },
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const ctx = {
     host: {
@@ -4486,28 +3918,12 @@ test("startSSH allows jump hosts that use reference key files with unavailable s
   let capturedOptions: Record<string, unknown> | null = null;
   let error = "";
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const ctx = {
     host: {
@@ -4577,28 +3993,12 @@ test("startSSH allows jump hosts that use reference key files with unavailable s
 test("startSSH forwards per-host SSH settings to the native bridge", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const ctx = {
     host: {
@@ -4659,28 +4059,12 @@ test("startSSH forwards per-host SSH settings to the native bridge", async () =>
 test("startSSH omits identity file paths when password auth is selected", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const ctx = {
     host: {
@@ -4743,28 +4127,12 @@ test("startSSH passes known host records to the SSH bridge", async () => {
     discoveredAt: 1,
   }];
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const ctx = {
     host: {
@@ -4820,28 +4188,12 @@ test("startSSH passes known host records to the SSH bridge", async () => {
 test("startSSH omits jump host identity file paths when password auth is selected", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const ctx = {
     host: {
@@ -4903,28 +4255,12 @@ test("startSSH omits jump host identity file paths when password auth is selecte
 test("startSSH sends local identity file paths with saved passwords for key auth", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
 
-  const terminalBackend = {
-    backendAvailable: () => true,
-    telnetAvailable: () => true,
-    moshAvailable: () => true,
-    localAvailable: () => true,
-    serialAvailable: () => true,
-    execAvailable: () => true,
+  const terminalBackend = createMockTerminalBackend({
     startSSHSession: async (options: Record<string, unknown>) => {
       capturedOptions = options;
       return "ssh-session";
     },
-    startTelnetSession: async () => "telnet-session",
-    startMoshSession: async () => "mosh-session",
-    startLocalSession: async () => "local-session",
-    startSerialSession: async () => "serial-session",
-    execCommand: async () => ({}),
-    onSessionData: () => noop,
-    onSessionExit: () => noop,
-    onChainProgress: () => noop,
-    writeToSession: noop,
-    resizeSession: noop,
-  };
+  });
 
   const ctx = {
     host: {

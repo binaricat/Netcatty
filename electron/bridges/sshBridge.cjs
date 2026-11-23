@@ -21,6 +21,8 @@ const { createProxySocket, runWhenProxyConnectionReady } = require("./proxyUtils
 const { attachX11Forwarding } = require("./x11Forwarding.cjs");
 const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
 const {
+  PREFERRED_KEY_NAMES,
+  SSH_KEY_PATTERN,
   buildAuthHandler,
   createKeyboardInteractiveHandler,
   createOrderedStringAuthHandler,
@@ -31,6 +33,9 @@ const {
   applyAuthToConnOpts,
   safeSend: authSafeSend,
   requestPassphrasesForEncryptedKeys,
+  isKeyEncrypted,
+  findDefaultPrivateKey,
+  findAllDefaultPrivateKeys,
   findAllDefaultPrivateKeys: findAllDefaultPrivateKeysFromHelper,
   getSshAgentSocket,
   getAvailableAgentSocket: getAvailableSystemAgentSocket,
@@ -62,11 +67,6 @@ const { createSshPingLatencyProbe } = require("./sshBridge/sshPingLatency.cjs");
 const {
   configureTerminalSessionDataEmitter,
 } = require("./emitTerminalSessionData.cjs");
-
-// Default SSH key names in priority order (preferred keys tried first)
-const PREFERRED_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
-// Match any private key file: id_* but not *.pub
-const SSH_KEY_PATTERN = /^id_[\w-]+$/;
 const {
   createStartSessionApi,
   cancelTestConnection,
@@ -82,168 +82,6 @@ function hasUsableProxy(proxy) {
   if (!proxy) return false;
   if (proxy.type === "command") return !!proxy.command?.trim();
   return !!(proxy.host && proxy.port);
-}
-
-/**
- * Quick check if file content looks like an SSH private key.
- * Rejects non-key files that happen to match the id_* filename pattern.
- */
-function looksLikePrivateKey(content) {
-  if (!content || typeof content !== "string") return false;
-  const trimmed = content.trimStart();
-  return trimmed.startsWith("-----BEGIN") ||
-    trimmed.startsWith("openssh-key-v1") ||
-    trimmed.startsWith("PuTTY-User-Key-File");
-}
-
-/**
- * Check if an SSH private key is encrypted (requires passphrase)
- * @param {string} keyContent - The content of the private key file
- * @returns {boolean} - True if the key is encrypted
- */
-function isKeyEncrypted(keyContent) {
-  // Check for PuTTY PPK encrypted format
-  const ppkEncMatch = keyContent.match(/^Encryption:\s*(.+)$/m);
-  if (ppkEncMatch && ppkEncMatch[1].trim() !== "none") {
-    return true;
-  }
-
-  // Check for PKCS#8 encrypted format (-----BEGIN ENCRYPTED PRIVATE KEY-----)
-  if (keyContent.includes("-----BEGIN ENCRYPTED PRIVATE KEY-----")) {
-    return true;
-  }
-
-  // Check for legacy PEM format encryption (e.g., RSA PRIVATE KEY with encryption)
-  if (keyContent.includes("Proc-Type:") && keyContent.includes("ENCRYPTED")) {
-    return true;
-  }
-
-  // Check for OpenSSH format keys
-  if (keyContent.includes("-----BEGIN OPENSSH PRIVATE KEY-----")) {
-    try {
-      // Extract the base64 content between the markers
-      const base64Match = keyContent.match(
-        /-----BEGIN OPENSSH PRIVATE KEY-----\s*([\s\S]*?)\s*-----END OPENSSH PRIVATE KEY-----/
-      );
-      if (base64Match) {
-        const base64Content = base64Match[1].replace(/\s/g, "");
-        const keyBuffer = Buffer.from(base64Content, "base64");
-
-        // OpenSSH key format: "openssh-key-v1\0" followed by cipher name
-        // If ciphername is "none", the key is not encrypted
-        const authMagic = "openssh-key-v1\0";
-        if (keyBuffer.toString("ascii", 0, authMagic.length) === authMagic) {
-          // After magic, read ciphername (length-prefixed string)
-          let offset = authMagic.length;
-          const cipherNameLen = keyBuffer.readUInt32BE(offset);
-          offset += 4;
-          const cipherName = keyBuffer.toString("ascii", offset, offset + cipherNameLen);
-          return cipherName !== "none";
-        }
-      }
-    } catch {
-      // If parsing fails, assume it might be encrypted to be safe
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
- * Find default SSH private key from user's ~/.ssh directory
- * Skips encrypted keys that require a passphrase to allow password/keyboard-interactive auth
- * @returns {Promise<{ privateKey: string, keyPath: string, keyName: string } | null>}
- */
-async function findDefaultPrivateKey() {
-  const sshDir = path.join(os.homedir(), ".ssh");
-  // Scan ~/.ssh/ for all files matching id_* (same as Tabby/OpenSSH),
-  // with preferred key types tried first
-  let allNames = [];
-  try {
-    const entries = await fs.promises.readdir(sshDir);
-    allNames = entries.filter(f => SSH_KEY_PATTERN.test(f));
-  } catch {
-    return null;
-  }
-  // Sort: preferred keys first (in order), then rest alphabetically
-  const preferred = PREFERRED_KEY_NAMES.filter(n => allNames.includes(n));
-  const rest = allNames.filter(n => !PREFERRED_KEY_NAMES.includes(n)).sort();
-  const sorted = [...preferred, ...rest];
-  log("Searching for default SSH keys", { sshDir, found: sorted });
-
-  for (const name of sorted) {
-    const keyPath = path.join(sshDir, name);
-    try {
-      const privateKey = await readFileNoFollow(keyPath);
-      if (!privateKey) continue;
-      if (!looksLikePrivateKey(privateKey)) {
-        log("Skipping non-key file", { keyPath, keyName: name });
-        continue;
-      }
-      const encrypted = isKeyEncrypted(privateKey);
-      log("Key file read", { keyPath, keyName: name, encrypted, keyLength: privateKey.length });
-      if (encrypted) {
-        log("Skipping encrypted default key", { keyPath, keyName: name });
-        continue;
-      }
-      log("Found default key", { keyPath, keyName: name });
-      return { privateKey, keyPath, keyName: name };
-    } catch (e) {
-      log("Failed to read default key", { keyPath, error: e.message });
-      continue;
-    }
-  }
-  log("No suitable default SSH key found");
-  return null;
-}
-
-/**
- * Find ALL default SSH private keys from user's ~/.ssh directory
- * Returns all non-encrypted keys for fallback authentication
- * @returns {Promise<Array<{ privateKey: string, keyPath: string, keyName: string }>>}
- */
-async function findAllDefaultPrivateKeys() {
-  const sshDir = path.join(os.homedir(), ".ssh");
-  let allNames = [];
-  try {
-    const entries = await fs.promises.readdir(sshDir);
-    allNames = entries.filter(f => SSH_KEY_PATTERN.test(f));
-  } catch {
-    return [];
-  }
-  const preferred = PREFERRED_KEY_NAMES.filter(n => allNames.includes(n));
-  const rest = allNames.filter(n => !PREFERRED_KEY_NAMES.includes(n)).sort();
-  const sorted = [...preferred, ...rest];
-  log("Searching for ALL default SSH keys", { sshDir, found: sorted });
-
-  const promises = sorted.map(async (name) => {
-    const keyPath = path.join(sshDir, name);
-    try {
-      const privateKey = await readFileNoFollow(keyPath);
-      if (!privateKey) return null;
-      if (!looksLikePrivateKey(privateKey)) {
-        log("Skipping non-key file", { keyPath, keyName: name });
-        return null;
-      }
-      const encrypted = isKeyEncrypted(privateKey);
-      if (!encrypted) {
-        log("Found default key for fallback", { keyPath, keyName: name });
-        return { privateKey, keyPath, keyName: name };
-      } else {
-        log("Skipping encrypted key", { keyPath, keyName: name });
-        return null;
-      }
-    } catch (e) {
-      log("Failed to read key", { keyPath, error: e.message });
-      return null;
-    }
-  });
-
-  const results = await Promise.all(promises);
-  const keys = results.filter(Boolean);
-  log("Found default SSH keys", { count: keys.length, keyNames: keys.map(k => k.keyName) });
-  return keys;
 }
 
 const WIN_SSH_AGENT_PIPE = "\\\\.\\pipe\\openssh-ssh-agent";

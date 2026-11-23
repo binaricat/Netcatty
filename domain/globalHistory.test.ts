@@ -10,7 +10,7 @@ import {
   toGlobalHistoryDisplayEntries,
 } from './globalHistory.ts';
 import { NETCATTY_AI_HISTORY_MARKER } from './remoteHistory.ts';
-import { buildDockerExecShellCommand, buildDockerLogsCommand } from './systemManager/dockerShell.ts';
+import { buildContainerExecShellCommand, buildContainerLogsCommand } from './systemManager/containerRuntime.ts';
 import { buildTmuxAttachCommand } from './systemManager/tmuxShell.ts';
 import type { ShellHistoryEntry } from './models';
 
@@ -36,8 +36,8 @@ test('shouldRecordGlobalHistoryCommand: rejects empty and AI marker commands', (
 });
 
 test('shouldRecordGlobalHistoryCommand: rejects Netcatty managed Docker and tmux startup commands', () => {
-  assert.equal(shouldRecordGlobalHistoryCommand(buildDockerExecShellCommand('587abcdef123')), false);
-  assert.equal(shouldRecordGlobalHistoryCommand(buildDockerLogsCommand('587abcdef123')), false);
+  assert.equal(shouldRecordGlobalHistoryCommand(buildContainerExecShellCommand('docker', '587abcdef123')), false);
+  assert.equal(shouldRecordGlobalHistoryCommand(buildContainerLogsCommand('docker', '587abcdef123')), false);
   assert.equal(shouldRecordGlobalHistoryCommand(buildTmuxAttachCommand('my-session')), false);
   assert.equal(shouldRecordGlobalHistoryCommand(buildTmuxAttachCommand('my-session', 2)), false);
   assert.equal(shouldRecordGlobalHistoryCommand('docker ps -a'), true);
@@ -59,7 +59,7 @@ test('mergeGlobalHistoryOnAppend: trims and prepends a new command', () => {
 
 test('sanitizeGlobalHistoryEntries: removes persisted Netcatty managed startup commands', () => {
   const entries = [
-    baseEntry({ id: 'a', command: buildDockerLogsCommand('587abcdef123') }),
+    baseEntry({ id: 'a', command: buildContainerLogsCommand('docker', '587abcdef123') }),
     baseEntry({ id: 'b', command: 'docker ps -a' }),
     baseEntry({ id: 'c', command: buildTmuxAttachCommand('my-session') }),
   ];
