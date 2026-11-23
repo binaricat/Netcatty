@@ -1695,9 +1695,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       if (term && !await flushPendingTerminalWritesBeforeHibernate(term)) {
         throw new Error("Terminal output did not drain before quit capture");
       }
+      try {
+        const detached = await netcattyBridge.get()?.getDetachedTerminalReplayData?.(sessionId);
+        if (detached?.success && typeof detached.data === "string" && detached.data.length > 0) {
+          captureTerminalLogData(detached.data);
+        }
+      } catch {
+        // Best-effort: still finalize local log data if replay query is unavailable.
+      }
       await handleTerminalDataCaptureOnce(sessionId, finalizeTerminalLogData(), { finalized: true });
     });
-  }, [attachExistingSession, restoreState, sessionId, finalizeTerminalLogData, handleTerminalDataCaptureOnce]);
+  }, [attachExistingSession, captureTerminalLogData, restoreState, sessionId, finalizeTerminalLogData, handleTerminalDataCaptureOnce]);
 
   const attachHomeWebContentsIdRef = useRef<number | null | undefined>(undefined);
 

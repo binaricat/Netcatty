@@ -769,6 +769,16 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             terminalLogSanitizerRef.current = createReplaySafeTerminalLogSanitizer({
               alternateScreenActive: isTerminalAlternateScreenActive(term),
             });
+            // If an earlier popup crashed before restoring output to home,
+            // replay its retained delta into both xterm and the log buffer.
+            if (typeof snap.pendingReplay === "string" && snap.pendingReplay.length > 0) {
+              captureTerminalLogData(snap.pendingReplay);
+              try {
+                await new Promise<void>((resolve) => term.write(snap.pendingReplay!, resolve));
+              } catch (replayErr) {
+                logger.warn("Failed to write pending detached replay to popup terminal", replayErr);
+              }
+            }
 
             const rebind = await terminalBackend.rebindSessionOutput?.(
               sessionId,

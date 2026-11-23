@@ -182,6 +182,10 @@ declare global {
       error?: string;
       popupId?: string;
     }>;
+    closeTerminalPopup?(popupId: string): Promise<{
+      success: boolean;
+      error?: string;
+    }>;
     logDiagnostic?(payload: {
       source: string;
       message: string;

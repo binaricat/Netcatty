@@ -172,6 +172,7 @@ const {
   failAttachPopupAuthorization,
   markAttachPopupAttached,
   markAttachPopupReady,
+  peekDetachedReplayData,
   setAttachHomeLookup,
   setFanoutSessionExit,
   takeDetachedReplayData,
@@ -242,7 +243,7 @@ function requestTerminalSessionSnapshot(event, payload, terminalWorkerManager = 
       pendingTerminalSnapshots.delete(requestId);
       resolve({ success: false, snapshot: "", error: "timeout" });
     }, TERMINAL_SNAPSHOT_TIMEOUT_MS);
-    pendingTerminalSnapshots.set(requestId, { resolve, timeout, webContentsId: home.id });
+    pendingTerminalSnapshots.set(requestId, { resolve, timeout, webContentsId: home.id, sessionId });
     try {
       home.send("netcatty:terminal:snapshot-request", { sessionId, requestId });
     } catch (err) {
@@ -276,6 +277,7 @@ function handleTerminalSessionSnapshotResponse(event, payload) {
       : undefined,
     cwd: payload?.cwd === null ? null : typeof payload?.cwd === "string" ? payload.cwd : undefined,
     title: payload?.title === null ? null : typeof payload?.title === "string" ? payload.title : undefined,
+    pendingReplay: peekDetachedReplayData(pending.sessionId) || undefined,
   });
 }
 
@@ -2555,6 +2557,18 @@ function registerHandlers(ipcMain, options = {}) {
     const error = typeof payload?.error === "string" ? payload.error : "";
     const ok = failAttachPopupAuthorization(authorization, sessionId, event?.sender?.id, error);
     return ok ? { success: true } : { success: false, error: "Unauthorized attach request" };
+  });
+  ipcMain.handle("netcatty:terminal:getDetachedReplayData", (event, payload) => {
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+    if (!sessionId) return { success: false, data: "" };
+    const senderId = event?.sender?.id;
+    const homeId = terminalWorkerManager?.getAttachHomeWebContentsId?.(sessionId)
+      ?? attachHomeWebContentsIds.get(sessionId)
+      ?? null;
+    if (typeof senderId !== "number" || homeId !== senderId) {
+      return { success: true, data: "" };
+    }
+    return { success: true, data: peekDetachedReplayData(sessionId) };
   });
   ipcMain.handle("netcatty:terminal:setFlowPausedAndWait", async (event, payload) => {
     const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";

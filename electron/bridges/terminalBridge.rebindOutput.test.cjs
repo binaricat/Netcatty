@@ -933,3 +933,80 @@ test("moved tab from a peer session window receives applySnapshot and restoreOut
     registry.releaseAttachPopupAuthorization(authorization);
   }
 });
+
+test("reopening preserves pending detached replay data and home shutdown can read it", async () => {
+  const { EventEmitter } = require("node:events");
+  const { createPreloadApi } = require("../preload/api.cjs");
+  const { bridge, fakeChannel } = loadTerminalBridgeWithMocks();
+  const registry = require("./terminalAttachRestore.cjs");
+  const sessionId = "session-pending-replay";
+  const authorization = "grant-pending-replay";
+  const homeIpc = new EventEmitter();
+  const home = {
+    id: 111,
+    isDestroyed: () => false,
+    send: (channel, payload) => homeIpc.emit(channel, {}, payload),
+  };
+  const popup = { id: 112, isDestroyed: () => false };
+  const other = { id: 113, isDestroyed: () => false };
+  const handles = new Map();
+  const listeners = new Map();
+  const worker = {
+    getAttachHomeWebContentsId: () => home.id,
+    getSessionOwnerWebContentsId: () => home.id,
+    rebindOutputSession: async () => ({ success: true, previousWebContentsId: home.id, webContentsId: popup.id }),
+  };
+  bridge.init({
+    sessions: new Map([[sessionId, { webContentsId: home.id }]]),
+    electronModule: { webContents: { fromId: (id) => (id === home.id ? home : popup) } },
+    terminalOutputChannel: fakeChannel,
+  });
+  bridge.registerHandlers({
+    handle: (channel, fn) => handles.set(channel, fn),
+    on: (channel, fn) => listeners.set(channel, fn),
+  }, { terminalWorkerManager: worker });
+
+  homeIpc.send = (channel, payload) => listeners.get(channel)({ sender: home }, payload);
+  const homeApi = createPreloadApi({ ipcRenderer: homeIpc, webUtils: {} });
+  const unsubReq = homeApi.onTerminalSessionSnapshotRequest(({ requestId }) => {
+    homeApi.respondTerminalSessionSnapshot(requestId, "home-before-crash");
+  });
+
+  try {
+    // Retain unrecovered replay data from an earlier crashed popup.
+    registry.startDetachedReplayCapture(sessionId);
+    registry.appendDetachedReplayData(sessionId, "lost-during-crash\r\n");
+
+    // Reopening a second popup must preserve that buffer and include it in snapshot response.
+    registry.registerAttachPopupAuthorization(authorization, sessionId, popup.id, { ownsLifetime: true });
+    const snap = await handles.get("netcatty:terminal:requestSnapshot")(
+      { sender: popup },
+      { sessionId, authorization },
+    );
+    assert.equal(snap.success, true);
+    assert.equal(snap.snapshot, "home-before-crash");
+    assert.equal(snap.pendingReplay, "lost-during-crash\r\n");
+
+    await handles.get("netcatty:terminal:rebindOutput")(
+      { sender: popup },
+      { sessionId, authorization },
+    );
+    assert.equal(registry.peekDetachedReplayData(sessionId), "lost-during-crash\r\n");
+
+    // Home shutdown can read detached replay data, while unrelated renderers receive empty string.
+    const homeRead = await handles.get("netcatty:terminal:getDetachedReplayData")(
+      { sender: home },
+      { sessionId },
+    );
+    assert.deepEqual(homeRead, { success: true, data: "lost-during-crash\r\n" });
+    const otherRead = await handles.get("netcatty:terminal:getDetachedReplayData")(
+      { sender: other },
+      { sessionId },
+    );
+    assert.deepEqual(otherRead, { success: true, data: "" });
+  } finally {
+    unsubReq();
+    registry.releaseAttachPopupAuthorization(authorization);
+    registry.clearDetachedReplayCapture(sessionId);
+  }
+});

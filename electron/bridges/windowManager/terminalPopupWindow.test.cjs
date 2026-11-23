@@ -585,3 +585,88 @@ test("attach-closed notification waits until async output restoration succeeds",
     setRestoreAttachedSessionOutput(null);
   }
 });
+
+test("reopening a moved tab cancels stale close notifications from an earlier crashed popup", async () => {
+  let restoreAttempt = 0;
+  setRestoreAttachedSessionOutput(() => {
+    restoreAttempt += 1;
+    if (restoreAttempt === 1) {
+      return Promise.resolve({ success: false, restored: false, error: "temporary" });
+    }
+    return Promise.resolve({ success: true, restored: true });
+  });
+  try {
+    const sourceMessages = [];
+    const sourceWindow = {
+      isDestroyed() { return false; },
+      webContents: { send(channel, payload) { sourceMessages.push({ channel, payload }); } },
+    };
+    const popups = [];
+    class ReopenStub {
+      constructor() {
+        popups.push(this);
+        this.destroyed = false;
+        this.handlers = new Map();
+        const wcId = 130 + popups.length;
+        this.webContents = {
+          id: wcId,
+          on() {},
+          send(channel, payload) {
+            if (channel === "netcatty:window:terminalPopupConfig" && payload?.attachAuthorization) {
+              queueMicrotask(() => {
+                markAttachPopupAttached(payload.attachAuthorization, payload.attachSessionId, wcId);
+                markAttachPopupReady(payload.attachAuthorization, payload.attachSessionId, wcId);
+              });
+            }
+          },
+          setWindowOpenHandler() {},
+        };
+      }
+      on(channel, handler) { this.handlers.set(channel, handler); }
+      isDestroyed() { return this.destroyed; }
+      isVisible() { return true; }
+      loadURL() { return Promise.resolve(); }
+      setBackgroundColor() {}
+      destroy() {
+        this.destroyed = true;
+        this.handlers.get("closed")?.();
+      }
+    }
+
+    const api = createTerminalPopupWindowApi({
+      mainWindow: sourceWindow,
+      currentTheme: "light",
+      V8_CACHE_OPTIONS: "bypassHeatCheck",
+      resolveFrontendBackgroundColor() { return "#fff"; },
+      resolveSettingsWindowBounds() { return {}; },
+      createExternalOnlyWindowOpenHandler() { return {}; },
+      applyWindowOpacityToWindow() {},
+      getDevRendererBaseUrl(url) { return url; },
+      showAndFocusWindow() {},
+      registerAppContentWindow() {},
+      unregisterAppContentWindow() {},
+      notifyAppContentWindowClosed() {},
+    });
+
+    await api.openTerminalPopupWindow(
+      { BrowserWindow: ReopenStub, nativeTheme: {}, shell: {} },
+      { preload: "/tmp/preload.cjs", isDev: false, appIcon: null, isMac: false, electronDir: __dirname, sourceWindow },
+      { popupId: "move-old", title: "Old", attachSessionId: "s-reopen", moveSession: true, sourceSession: { id: "s-reopen" } },
+    );
+    popups[0].destroy();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(sourceMessages, []);
+
+    // Reopen before the old popup's retry timer fires.
+    await api.openTerminalPopupWindow(
+      { BrowserWindow: ReopenStub, nativeTheme: {}, shell: {} },
+      { preload: "/tmp/preload.cjs", isDev: false, appIcon: null, isMac: false, electronDir: __dirname, sourceWindow },
+      { popupId: "move-new", title: "New", attachSessionId: "s-reopen", moveSession: true, sourceSession: { id: "s-reopen" } },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.deepEqual(sourceMessages, [], "stale popup must not unhide the tab while the new popup owns it");
+    popups[1].destroy();
+  } finally {
+    setRestoreAttachedSessionOutput(null);
+  }
+});

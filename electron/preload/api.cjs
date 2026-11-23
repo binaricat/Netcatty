@@ -568,6 +568,9 @@ function createPreloadApi(ctx) {
   openTerminalPopup: async (payload) => {
     return ipcRenderer.invoke("netcatty:window:openTerminalPopup", payload);
   },
+  closeTerminalPopup: async (popupId) => {
+    return ipcRenderer.invoke("netcatty:window:closeTerminalPopup", popupId);
+  },
   logDiagnostic: async (payload) => {
     return ipcRenderer.invoke("netcatty:diagnostics:log", payload);
   },
@@ -743,6 +746,8 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:terminal:reportAttachReady", { sessionId, authorization }),
   reportTerminalAttachFailed: (sessionId, authorization, error) =>
     ipcRenderer.invoke("netcatty:terminal:reportAttachFailed", { sessionId, authorization, error }),
+  getDetachedTerminalReplayData: (sessionId) =>
+    ipcRenderer.invoke("netcatty:terminal:getDetachedReplayData", { sessionId }),
   onTerminalPopupPrepareClose: (cb) => {
     const handler = (_event, payload) => cb?.(payload);
     ipcRenderer.on("netcatty:terminal-popup:prepare-close", handler);

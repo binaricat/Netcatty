@@ -748,7 +748,12 @@ export async function moveSessionToNewWindowImpl(getCtx: AppContextGetter, sessi
     const latestCtx = getCtx();
     const latestSessions: TerminalSession[] = latestCtx.sessions ?? sessions;
     const stillPresent = latestSessions.find((item: TerminalSession) => item.id === sessionId);
-    if (!stillPresent || stillPresent.workspaceId || stillPresent.hiddenFromTabs) return true;
+    if (!stillPresent || stillPresent.workspaceId || stillPresent.hiddenFromTabs) {
+      if (typeof result.popupId === 'string' && result.popupId) {
+        void bridge.closeTerminalPopup?.(result.popupId);
+      }
+      return false;
+    }
 
     const latestGetActiveTabId = latestCtx.getActiveTabId ?? getActiveTabId;
     const latestGetOrderedTabs = latestCtx.getOrderedTabs ?? getOrderedTabs;

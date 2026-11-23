@@ -184,6 +184,11 @@ function createTerminalPopupWindowApi(ctx) {
       const notifyAttachClosed = () => {
         clearRestoreRetryTimer();
         if (!attachSessionId || attachClosedNotified) return;
+        // If a newer attach popup already took over this session, do not unhide the tab.
+        if (attachSessionPopups.has(attachSessionId)) {
+          attachClosedNotified = true;
+          return;
+        }
         attachClosedNotified = true;
         // Lets a tab moved into this popup reappear in the window it came from.
         try {
@@ -195,7 +200,12 @@ function createTerminalPopupWindowApi(ctx) {
         }
       };
       const scheduleAttachRestoreRetry = (attempt = 0) => {
-        if (attachClosedNotified || !attachSessionId || !isLiveWindow(homeWindow)) {
+        if (
+          attachClosedNotified
+          || !attachSessionId
+          || !isLiveWindow(homeWindow)
+          || attachSessionPopups.has(attachSessionId)
+        ) {
           clearRestoreRetryTimer();
           return;
         }
@@ -204,9 +214,16 @@ function createTerminalPopupWindowApi(ctx) {
         clearRestoreRetryTimer();
         restoreRetryTimer = setTimeout(() => {
           restoreRetryTimer = null;
-          if (attachClosedNotified || !isLiveWindow(homeWindow)) return;
+          if (
+            attachClosedNotified
+            || !isLiveWindow(homeWindow)
+            || attachSessionPopups.has(attachSessionId)
+          ) {
+            return;
+          }
           void Promise.resolve(restoreAttachedSessionOutput(attachSessionId))
             .then((res) => {
+              if (attachSessionPopups.has(attachSessionId)) return;
               if (!res || res.success || res.unavailable) {
                 notifyAttachClosed();
               } else {
@@ -261,7 +278,7 @@ function createTerminalPopupWindowApi(ctx) {
         unregisterAppContentWindow(win);
         notifyAppContentWindowClosed(win);
       };
-      terminalPopupWindows.set(popupId, { releaseLifecycle, win });
+      terminalPopupWindows.set(popupId, { releaseLifecycle, win, homeWindow });
       if (attachSessionId) {
         attachSessionPopups.set(attachSessionId, popupId);
         registerAttachPopupAuthorization(
@@ -440,12 +457,15 @@ function createTerminalPopupWindowApi(ctx) {
       }
     }
 
-    function closeTerminalPopupWindow(popupId) {
+    function closeTerminalPopupWindow(popupId, requesterWindow = null) {
       const record = terminalPopupWindows.get(popupId);
-      if (!record) return;
+      if (!record) return false;
+      if (requesterWindow && record.homeWindow && requesterWindow !== record.homeWindow && requesterWindow !== record.win) {
+        return false;
+      }
       if (!isLiveWindow(record.win)) {
         record.releaseLifecycle();
-        return;
+        return true;
       }
       try {
         record.win.close();
@@ -458,6 +478,7 @@ function createTerminalPopupWindowApi(ctx) {
           record.releaseLifecycle();
         }
       }
+      return true;
     }
 
     return {

@@ -17,7 +17,18 @@ const MAX_DETACHED_REPLAY_CHARS = 512 * 1024;
 
 function startDetachedReplayCapture(sessionId) {
   if (!sessionId) return;
-  detachedReplayBuffers.set(sessionId, { chunks: [], length: 0 });
+  // Preserve any retained replay data from an unrecovered crash so reopening
+  // the session does not drop output missing from the home terminal.
+  if (!detachedReplayBuffers.has(sessionId)) {
+    detachedReplayBuffers.set(sessionId, { chunks: [], length: 0 });
+  }
+}
+
+function peekDetachedReplayData(sessionId) {
+  if (!sessionId) return "";
+  const entry = detachedReplayBuffers.get(sessionId);
+  if (!entry || entry.chunks.length === 0) return "";
+  return entry.chunks.join("");
 }
 
 function appendDetachedReplayData(sessionId, data) {
@@ -96,8 +107,14 @@ function settleAttachPopupOutcome(grant, outcome) {
   }
 }
 
+function clearAttachRestoreListeners(sessionId) {
+  if (sessionId) pendingAttachRestoreListeners.delete(sessionId);
+}
+
 function registerAttachPopupAuthorization(token, sessionId, webContentsId, options = {}) {
   if (!token || !sessionId || typeof webContentsId !== "number") return false;
+  // A new attachment supersedes any stale pending-restore listeners from an earlier popup.
+  clearAttachRestoreListeners(sessionId);
   let resolveOutcome = null;
   const outcomePromise = new Promise((resolve) => {
     resolveOutcome = resolve;
@@ -122,6 +139,7 @@ function markAttachPopupAttached(token, sessionId, webContentsId) {
   if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
   const grant = attachPopupAuthorizations.get(token);
   grant.attached = true;
+  clearAttachRestoreListeners(sessionId);
   startDetachedReplayCapture(sessionId);
   return true;
 }
@@ -312,8 +330,10 @@ module.exports = {
   waitForAttachPopupOutcome,
   clearAttachPopupAttached,
   onAttachOutputRestored,
+  clearAttachRestoreListeners,
   startDetachedReplayCapture,
   appendDetachedReplayData,
+  peekDetachedReplayData,
   takeDetachedReplayData,
   clearDetachedReplayCapture,
   markAttachPopupClosePrepared,

@@ -319,3 +319,32 @@ test("moveSessionToNewWindowImpl selects the adjacent ordered visible tab when m
   assert.equal(result, true);
   assert.deepEqual(calls, [["poppedOut", "session-1", true], ["active", "ws-1"]]);
 });
+
+test("moveSessionToNewWindowImpl closes the popup if the tab moved into a workspace during startup", async () => {
+  const closedPopups: string[] = [];
+  let sessions: TerminalSession[] = [sourceSession()];
+  const calls: unknown[][] = [];
+  const getCtx = () => ({
+    netcattyBridge: {
+      get: () => ({
+        openTerminalPopup: async () => {
+          sessions = [sourceSession({ workspaceId: "ws-late" })];
+          return { success: true, popupId: "popup-late" };
+        },
+        closeTerminalPopup: async (popupId: string) => {
+          closedPopups.push(popupId);
+          return { success: true };
+        },
+      }),
+    },
+    sessions,
+    setActiveTabId: (id: string) => calls.push(["active", id]),
+    setSessionPoppedOut: (id: string, poppedOut: boolean) => calls.push(["poppedOut", id, poppedOut]),
+    t: (key: string) => key,
+    toast: { error: () => {} },
+  });
+
+  assert.equal(await moveSessionToNewWindowImpl(getCtx, "session-1"), false);
+  assert.deepEqual(closedPopups, ["popup-late"]);
+  assert.deepEqual(calls, []);
+});
