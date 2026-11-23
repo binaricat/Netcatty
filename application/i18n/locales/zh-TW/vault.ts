@@ -408,6 +408,8 @@ export const zhTWVaultMessages: Messages = {
   'localShell.field.shellResolved': '啟動 {command}',
   'localShell.field.startDir': '啟動目錄',
   'localShell.field.startDirPlaceholder': '繼承全域起始目錄（未設定時為主目錄）',
+  'localShell.field.startupCommandPlaceholder': 'Shell 啟動後執行的指令（例如：npm run dev）',
+  'localShell.field.startupCommandDesc': '本地 Shell 在啟動目錄開啟後自動執行該指令。',
   'localShell.saveAndConnect': '儲存並開啟',
 
   'hostDetails.plugin.title': '外掛程式連線',

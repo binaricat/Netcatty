@@ -994,6 +994,8 @@ export const enVaultMessages: Messages = {
   'localShell.field.shellResolved': 'Runs {command}',
   'localShell.field.startDir': 'Start directory',
   'localShell.field.startDirPlaceholder': 'Inherit global start directory (home if unset)',
+  'localShell.field.startupCommandPlaceholder': 'Command to run after shell starts (e.g. npm run dev)',
+  'localShell.field.startupCommandDesc': 'Runs automatically after the local shell starts in the configured directory.',
   'localShell.saveAndConnect': 'Save & Connect',
 
   'hostDetails.plugin.title': 'Plugin connection',

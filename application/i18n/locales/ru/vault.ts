@@ -1032,6 +1032,8 @@ export const ruVaultMessages: Messages = {
   'localShell.field.shellResolved': 'Запускает {command}',
   'localShell.field.startDir': 'Начальный каталог',
   'localShell.field.startDirPlaceholder': 'Использовать общий начальный каталог (иначе домашний)',
+  'localShell.field.startupCommandPlaceholder': 'Команда после запуска оболочки (например, npm run dev)',
+  'localShell.field.startupCommandDesc': 'Выполняется автоматически после запуска локальной оболочки в указанном каталоге.',
   'localShell.saveAndConnect': 'Сохранить и открыть',
 
   'hostDetails.plugin.title': 'Подключение плагина',

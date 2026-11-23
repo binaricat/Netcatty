@@ -408,6 +408,8 @@ export const zhCNVaultMessages: Messages = {
   'localShell.field.shellResolved': '启动 {command}',
   'localShell.field.startDir': '启动目录',
   'localShell.field.startDirPlaceholder': '继承全局起始目录（未设置时为主目录）',
+  'localShell.field.startupCommandPlaceholder': 'Shell 启动后执行的命令（例如：npm run dev）',
+  'localShell.field.startupCommandDesc': '本地 Shell 在启动目录打开后自动执行该命令。',
   'localShell.saveAndConnect': '保存并打开',
 
   'hostDetails.plugin.title': '插件连接',
