@@ -177,6 +177,7 @@ export function encryptedObjectStorageAsCloudAdapter(
      * (WebDAV pad+verify). Plugin providers keep host-owned verify.
      */
     assumeVerifiedWrites?: boolean;
+    remoteInspection?: Pick<CloudAdapter, 'inspectRemote' | 'remoteValidator'>;
   } = {},
 ): CloudAdapter {
   const objectKey = options.objectKey ?? DEFAULT_ENCRYPTED_SYNC_OBJECT_KEY;
@@ -235,6 +236,10 @@ export function encryptedObjectStorageAsCloudAdapter(
     get resourceId() {
       return resourceId;
     },
+    get remoteValidator() {
+      return options.remoteInspection?.remoteValidator;
+    },
+    inspectRemote: options.remoteInspection?.inspectRemote?.bind(options.remoteInspection),
     signOut() {
       authenticated = false;
       sessionConnected = false;
