@@ -1415,6 +1415,17 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       ).then((result) => {
         if (cancelled || sdkRuntimeModelCache.read(target.cacheKey)) return;
         if (result?.ok && result.models?.length) {
+          setRuntimeModelWarnings((current) => {
+            const agent = externalAgentsRef.current.find((item) => item.id === target.agentId);
+            if (buildExternalAgentRuntimeModelTarget(agent)?.cacheKey !== target.cacheKey) return current;
+            return reconcileRuntimeModelWarning(
+              current,
+              target.agentId,
+              target.cacheKey,
+              Boolean(result.warning),
+              t('ai.chat.modelCatalogWarning'),
+            );
+          });
           applySdkRuntimeModelCatalog(target, toSdkRuntimeModelCatalog({
             ...result, models: result.models,
           }));

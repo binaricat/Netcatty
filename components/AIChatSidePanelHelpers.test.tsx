@@ -685,6 +685,14 @@ test('reconcileRuntimeModelWarning clears only the banner that belongs to this c
   assert.equal(reconcileRuntimeModelWarning(current, 'copilot', 'k2', false, 'warn'), current);
 });
 
+test('cacheOnly hydration in AIChatSidePanel reconciles cached refresh warnings before applying persisted models', () => {
+  const source = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
+  assert.match(
+    source,
+    /target\.codexRuntime, false, true,\s*\)\.then\(\(result\) => \{[\s\S]*?reconcileRuntimeModelWarning\([\s\S]*?Boolean\(result\.warning\)[\s\S]*?applySdkRuntimeModelCatalog\(/,
+  );
+});
+
 test('renderer model cache env hints cover every key the main-process catalog cache fingerprints', () => {
   // Both caches must split on the same profile-affecting environment: a key that
   // only the main process knows lets the renderer serve one profile's catalog to another.

@@ -23,15 +23,37 @@ function buildLastKnownCatalogPath(userDataDir) {
   return path.join(userDataDir, LAST_KNOWN_CATALOG_FILE);
 }
 
-/** Read the whole store; any corruption or absence degrades to {}. */
-function readLastKnownCatalogStore(filePath) {
+/** Read the full store object ({ entries, aliases }); any corruption degrades to empty maps. */
+function readLastKnownCatalogFile(filePath) {
   try {
     const parsed = JSON.parse(readFileSync(filePath, "utf8"));
-    if (!parsed || parsed.version !== LAST_KNOWN_STORE_VERSION) return {};
-    return parsed.entries && typeof parsed.entries === "object" ? parsed.entries : {};
+    if (!parsed || parsed.version !== LAST_KNOWN_STORE_VERSION) return { entries: {}, aliases: {} };
+    return {
+      entries: parsed.entries && typeof parsed.entries === "object" ? parsed.entries : {},
+      aliases: parsed.aliases && typeof parsed.aliases === "object" ? parsed.aliases : {},
+    };
   } catch {
-    return {};
+    return { entries: {}, aliases: {} };
   }
+}
+
+/** Read the whole store; any corruption or absence degrades to {}. */
+function readLastKnownCatalogStore(filePath) {
+  return readLastKnownCatalogFile(filePath).entries;
+}
+
+function pruneAliasesForEntries(aliases, entries) {
+  const pruned = {};
+  const validPairs = Object.entries(aliases || {}).filter(
+    ([aliasKey, targetKey]) => typeof aliasKey === "string"
+      && typeof targetKey === "string"
+      && Object.prototype.hasOwnProperty.call(entries, targetKey),
+  );
+  const capped = validPairs.slice(-LAST_KNOWN_MAX_ENTRIES);
+  for (const [aliasKey, targetKey] of capped) {
+    pruned[aliasKey] = targetKey;
+  }
+  return pruned;
 }
 
 /**
@@ -46,29 +68,41 @@ function readLastKnownCatalogEntry(filePath, cacheKey) {
 }
 
 /**
- * Find the most recently fetched persisted catalog matching a backend, runtime,
- * and environment hash without probing PATH for a binary path (used by
- * side-effect-free cacheOnly hydration for bare commands and Cursor sentinels).
+ * Resolve a persisted alias (for a bare command or Cursor sentinel) back to
+ * its exact persisted catalog cache key, or null if absent/evicted.
  */
-function findLatestLastKnownCatalogEntry(filePath, { backendKey, runtime, envHash } = {}) {
-  if (!filePath || !backendKey || !runtime || !envHash) return null;
-  const entries = readLastKnownCatalogStore(filePath);
-  let best = null;
-  let bestTime = -Infinity;
-  for (const [key, entry] of Object.entries(entries)) {
-    if (!entry || !Array.isArray(entry.models) || entry.models.length === 0) continue;
-    const parts = key.split("\u0000");
-    if (parts.length !== 4 || parts[0] !== backendKey || parts[2] !== runtime || parts[3] !== envHash) {
-      continue;
-    }
-    const fetchedAtMs = Date.parse(entry.fetchedAt || "");
-    const sortTime = Number.isFinite(fetchedAtMs) ? fetchedAtMs : 0;
-    if (!best || sortTime > bestTime) {
-      best = entry;
-      bestTime = sortTime;
-    }
+function readLastKnownCatalogAlias(filePath, aliasKey) {
+  if (!filePath || !aliasKey) return null;
+  const { entries, aliases } = readLastKnownCatalogFile(filePath);
+  const targetKey = aliases[aliasKey];
+  if (typeof targetKey !== "string" || !Object.prototype.hasOwnProperty.call(entries, targetKey)) {
+    return null;
   }
-  return best;
+  return targetKey;
+}
+
+/**
+ * Persist a mapping from a side-effect-free alias key (bare command or Cursor
+ * sentinel) to its resolved catalog cache key so cacheOnly hydration can
+ * recover the exact entry across restarts without PATH/auth probing or
+ * cross-matching explicit custom binaries.
+ */
+function writeLastKnownCatalogAlias(filePath, aliasKey, targetKey) {
+  if (!filePath || !aliasKey || !targetKey || aliasKey === targetKey) return false;
+  try {
+    const { entries, aliases } = readLastKnownCatalogFile(filePath);
+    if (!Object.prototype.hasOwnProperty.call(entries, targetKey)) return false;
+    if (aliases[aliasKey] === targetKey) return false;
+    const nextAliases = pruneAliasesForEntries({ ...aliases, [aliasKey]: targetKey }, entries);
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({ version: LAST_KNOWN_STORE_VERSION, entries, aliases: nextAliases }, null, 2)}\n`,
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -82,7 +116,7 @@ function findLatestLastKnownCatalogEntry(filePath, { backendKey, runtime, envHas
 function refreshLastKnownCatalogCurrentId(filePath, cacheKey, currentModelId) {
   if (!filePath || !cacheKey || !currentModelId) return false;
   try {
-    const entries = readLastKnownCatalogStore(filePath);
+    const { entries, aliases } = readLastKnownCatalogFile(filePath);
     const entry = entries[cacheKey];
     if (!entry || !Array.isArray(entry.models) || entry.models.length === 0) return false;
     if (entry.currentModelId === currentModelId) return false;
@@ -104,7 +138,11 @@ function refreshLastKnownCatalogCurrentId(filePath, cacheKey, currentModelId) {
       models.push({ id: currentModelId, name: currentModelId });
     }
     entries[cacheKey] = { ...entry, models, currentModelId };
-    writeFileSync(filePath, `${JSON.stringify({ version: LAST_KNOWN_STORE_VERSION, entries }, null, 2)}\n`);
+    const nextAliases = pruneAliasesForEntries(aliases, entries);
+    const payload = Object.keys(nextAliases).length > 0
+      ? { version: LAST_KNOWN_STORE_VERSION, entries, aliases: nextAliases }
+      : { version: LAST_KNOWN_STORE_VERSION, entries };
+    writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
     return true;
   } catch {
     return false;
@@ -136,7 +174,7 @@ function writeLastKnownCatalogEntry(filePath, cacheKey, { backend, models, curre
     }
   }
   try {
-    const entries = readLastKnownCatalogStore(filePath);
+    const { entries, aliases } = readLastKnownCatalogFile(filePath);
     entries[cacheKey] = {
       backend: String(backend || ""),
       models: trimmedModels,
@@ -151,8 +189,12 @@ function writeLastKnownCatalogEntry(filePath, cacheKey, { backend, models, curre
     while (orderedKeys.length > LAST_KNOWN_MAX_ENTRIES) {
       delete entries[orderedKeys.shift()];
     }
+    const nextAliases = pruneAliasesForEntries(aliases, entries);
+    const payload = Object.keys(nextAliases).length > 0
+      ? { version: LAST_KNOWN_STORE_VERSION, entries, aliases: nextAliases }
+      : { version: LAST_KNOWN_STORE_VERSION, entries };
     mkdirSync(path.dirname(filePath), { recursive: true });
-    writeFileSync(filePath, `${JSON.stringify({ version: LAST_KNOWN_STORE_VERSION, entries }, null, 2)}\n`);
+    writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
     return true;
   } catch {
     return false;
@@ -164,9 +206,10 @@ module.exports = {
   LAST_KNOWN_MAX_ENTRIES,
   LAST_KNOWN_MAX_MODELS,
   buildLastKnownCatalogPath,
-  findLatestLastKnownCatalogEntry,
+  readLastKnownCatalogAlias,
   readLastKnownCatalogEntry,
   readLastKnownCatalogStore,
   refreshLastKnownCatalogCurrentId,
+  writeLastKnownCatalogAlias,
   writeLastKnownCatalogEntry,
 };
