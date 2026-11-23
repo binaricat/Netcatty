@@ -245,6 +245,15 @@ test("clicking any row opens it directly; overflow menu handles export", async (
 
     await clickMenuItemInRow(dom, renderer, "other", t("ai.chat.managerExportOne"));
     assert.deepEqual(exported, ["other"]);
+
+    // Keyboard activation on the nested overflow menu trigger must not bubble to row selection.
+    const hereRow = rows(renderer).find((el) => el.dataset.sessionId === "here")!;
+    const menuTrigger = hereRow.querySelector<HTMLButtonElement>(
+      `button[aria-label="${t("ai.chat.managerMoreActions")}"]`,
+    )!;
+    await dispatchDomEvent(menuTrigger, new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await dispatchDomEvent(menuTrigger, new dom.window.KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    assert.deepEqual(selected, ["here", "other", "gone"], "nested button keydown does not activate the row");
   } finally {
     restoreGlobals();
     dom.cleanup();

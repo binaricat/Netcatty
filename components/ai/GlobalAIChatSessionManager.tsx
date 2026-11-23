@@ -267,6 +267,7 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
                         if (!isRenaming && row.canActivate) onSelect(row.session.id);
                       }}
                       onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
                         if (!isRenaming && row.canActivate && (e.key === 'Enter' || e.key === ' ')) {
                           e.preventDefault();
                           onSelect(row.session.id);
