@@ -55,6 +55,24 @@ test('macOS default zsh prompt is recognized as an idle prompt', async () => {
   assert.equal(pty.writes.length, 1);
 });
 
+test('decorated two-line host prompt is ready for command execution', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const prompt = '[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ';
+  trackSessionIdlePrompt(session, `Last login\r\n${prompt}`);
+  assert.equal(readyPrompt(session), prompt);
+
+  const job = startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  });
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
 test('zsh prompt with pending input does not become ready', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
   const pty = new TestPty();

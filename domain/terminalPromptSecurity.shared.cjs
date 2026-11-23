@@ -12,9 +12,9 @@ const PROMPT_MARKER_LINE_PATTERN = /^[#$]$/u;
 const BRACKETED_PROMPT_IDENTITY_PATTERN =
   /\[([^\s@\[\]]+)@([^\s\]:]+)(?:\s+[^\n\r\]]*)?\]/u;
 const SPACED_PROMPT_IDENTITY_PATTERN =
-  /(?:^|\s)([^\s@]+)\s+@\s+([^\s\]]+)/u;
+  /^#\s+([^\s@]+)\s+@\s+([^\s\]]+)/u;
 const POSIX_PROMPT_IDENTITY_PATTERN =
-  /(?:^|[\s(])([^\s@():\]]+)@([^\s\]:]+)(?=[:)\s/]|$)/u;
+  /^(?:\([^()\n]+\)\s+)?([^\s@():\]]+)@([^\s\]:]+)(?=[:)\s/]|$)/u;
 const PROMPT_HOST_PATTERN =
   /^(?:\[[A-Fa-f0-9:.]+\]|[A-Za-z0-9_][A-Za-z0-9_.-]*)$/u;
 

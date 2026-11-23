@@ -551,6 +551,23 @@ test("extractTrailingIdlePrompt recognizes a two-line user@host then bare $/# PS
   assert.equal(isDefaultPosixPromptLine("# "), false);
 });
 
+test("recognizes a decorated two-line host prompt as idle", () => {
+  const prompt = "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ";
+  assert.equal(
+    extractTrailingIdlePrompt(`command output\r\n${prompt}`),
+    prompt,
+  );
+
+  const session = {};
+  trackSessionIdlePrompt(session, `Last login...\r\n${prompt}`);
+  assert.equal(getFreshIdlePrompt(session), prompt);
+});
+
+test("does not recognize arbitrary or sensitive text before a bare marker", () => {
+  assert.equal(extractTrailingIdlePrompt("copied output\n# "), "");
+  assert.equal(extractTrailingIdlePrompt("Password:\n# "), "");
+});
+
 test("trackSessionIdlePrompt and getFreshIdlePrompt accept a two-line user@host PS1", () => {
   const session = {};
   const prompt = "user@host: /home/foo\n$ ";

@@ -9,6 +9,9 @@
 const { execFile, execFileSync } = require("node:child_process");
 const { existsSync, readFileSync, statSync } = require("node:fs");
 const path = require("node:path");
+const {
+  extractTerminalPromptHostname,
+} = require("../../../domain/terminalPromptSecurity.shared.cjs");
 
 // ── ANSI / URL regexes ──
 
@@ -228,6 +231,7 @@ function extractTrailingIdlePrompt(output) {
     if (
       POSIX_PROMPT_HOST_LINE_PATTERN.test(previousHostLine)
       || OH_MY_ZSH_YS_HOST_LINE_PATTERN.test(previousHostLine)
+      || extractTerminalPromptHostname(`${previousRightTrimmed}\n${rightTrimmed}`)
     ) {
       return `${lines.slice(hostIndex).join("\n")}\n${lastLine}`;
     }
