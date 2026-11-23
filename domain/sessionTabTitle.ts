@@ -142,11 +142,19 @@ export const resolveSessionTabTitle = (
   dynamicTabTitleMode: DynamicTabTitleMode = 'agent',
 ): string => {
   const connectionLabel = getSessionConnectionLabel(session);
-  if (dynamicTabTitleMode === 'off') {
-    return connectionLabel;
-  }
   if (session.customName) {
     return session.customName;
+  }
+  if (dynamicTabTitleMode !== 'off' && session.codingCliProviderId) {
+    const agentTitle = session.dynamicTitle?.trim();
+    if (agentTitle) return normalizeCodingCliTitle(agentTitle) || agentTitle;
+  }
+  const promptHostname = session.promptHostname?.trim();
+  if (promptHostname) {
+    return promptHostname;
+  }
+  if (dynamicTabTitleMode === 'off') {
+    return connectionLabel;
   }
   if (dynamicTabTitleMode === 'agent' && !session.codingCliProviderId) {
     return connectionLabel;

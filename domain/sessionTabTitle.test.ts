@@ -115,6 +115,20 @@ test('resolveSessionTabTitle keeps user and agent titles ahead of prompt host', 
   );
 });
 
+test('resolveSessionTabTitle prefers the live prompt host over a generic shell title', () => {
+  assert.equal(
+    resolveSessionTabTitle(
+      {
+        hostLabel: 'jumpserver',
+        promptHostname: '10.1.64.1',
+        dynamicTitle: 'jie.zhao@jumpssh.riverbegin.cn:2222',
+      },
+      'all',
+    ),
+    '10.1.64.1',
+  );
+});
+
 test('coding CLI icon updates stop without clearing the current icon when dynamic titles are off', () => {
   assert.equal(shouldUpdateCodingCliTabIcon('off'), false);
   assert.equal(shouldUpdateCodingCliTabIcon('agent'), true);

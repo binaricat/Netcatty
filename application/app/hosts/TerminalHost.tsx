@@ -256,6 +256,7 @@ export function TerminalHost() {
       updateSessionFontSize: sessionActions?.updateSessionFontSize,
       updateSessionRestoreCwd: sessionActions?.updateSessionRestoreCwd,
       updateSessionDynamicTitle: sessionActions?.updateSessionDynamicTitle,
+      updateSessionPromptHost: sessionActions?.updateSessionPromptHost,
       updateSessionCodingCliProvider: sessionActions?.updateSessionCodingCliProvider,
       updateTerminalSetting: terminalSettingsActions?.updateTerminalSetting,
       workspaces: session.workspaces,
