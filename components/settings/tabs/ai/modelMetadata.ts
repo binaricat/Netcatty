@@ -1,4 +1,5 @@
 import { sanitizeContextWindow } from "../../../../infrastructure/ai/contextCompaction";
+import { readDiscoveredModelContextWindow } from "../../../../infrastructure/ai/discoveredModelMetadata";
 import type { FetchedModel } from "./types";
 
 export function parseFetchedModels(parsed: unknown): FetchedModel[] {
@@ -34,11 +35,5 @@ export function mergeModelContextWindow(
 }
 
 function resolveModelContextWindow(model: Record<string, unknown>): number | undefined {
-  return sanitizeContextWindow(
-    model.context_length
-      ?? model.context_window
-      ?? model.contextWindow
-      ?? model.context
-      ?? model.max_context_tokens,
-  );
+  return readDiscoveredModelContextWindow(model);
 }
