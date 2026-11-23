@@ -531,19 +531,25 @@ test("valid POSIX child names with backslashes or control characters fall back o
 
 test("selected root that turns into a symlink falls back only after full archive validation", { skip: process.platform === "win32" }, async t => {
   const { PassThrough } = require("node:stream");
-  for (const variant of ["root-symlink-fallback", "root-symlink-truncated", "root-symlink-escape"]) {
+  for (const variant of ["root-symlink-sibling", "root-symlink-external", "root-symlink-selected-peer", "root-symlink-truncated", "root-symlink-nested-escape"]) {
     await t.test(variant, async tt => {
       const f = await fixture(tt);
-      const items = variant === "root-symlink-escape"
-        ? [
-            [{ name: "a", type: "symlink", linkname: "/etc/passwd" }],
-            [{ name: "b", type: "directory" }],
-          ]
-        : [
-            [{ name: "a", type: "symlink", linkname: "b" }],
-            [{ name: "b", type: "directory" }],
-            [{ name: "b/file.txt" }, "payload"],
-          ];
+      const selected = variant === "root-symlink-sibling" || variant === "root-symlink-external" ? ["a"] : ["a", "b"];
+      const items = variant === "root-symlink-sibling"
+        ? [[{ name: "a", type: "symlink", linkname: "b" }]]
+        : variant === "root-symlink-external"
+          ? [[{ name: "a", type: "symlink", linkname: "/opt/real-app" }]]
+          : variant === "root-symlink-nested-escape"
+            ? [
+                [{ name: "a", type: "symlink", linkname: "b" }],
+                [{ name: "b", type: "directory" }],
+                [{ name: "b/bad", type: "symlink", linkname: "/etc/passwd" }],
+              ]
+            : [
+                [{ name: "a", type: "symlink", linkname: "b" }],
+                [{ name: "b", type: "directory" }],
+                [{ name: "b/file.txt" }, "payload"],
+              ];
       await f.archive(items);
       let data = await fsp.readFile(f.file);
       if (variant === "root-symlink-truncated") data = data.subarray(0, data.length - 512);
@@ -555,13 +561,13 @@ test("selected root that turns into a symlink falls back only after full archive
         setImmediate(() => { channel.emit("exit", 0); channel.end(data); });
       } } };
       const download = downloadPacked({ client,
-        payload: { sftpId: "s", names: ["a", "b"], remoteDirectory: "/srv", localDirectory: f.local, transferId: variant },
+        payload: { sftpId: "s", names: selected, remoteDirectory: "/srv", localDirectory: f.local, transferId: variant },
         encoding: "utf-8", execProbe: async () => ({ stdout: "NC_PACK_TAR" }),
       });
-      if (variant === "root-symlink-fallback") {
-        assert.deepEqual(await download, { status: "fallback", reason: "unsupported" });
-      } else {
+      if (variant === "root-symlink-truncated" || variant === "root-symlink-nested-escape") {
         await assert.rejects(download, /incomplete|unexpected end|symbolic link/i);
+      } else {
+        assert.deepEqual(await download, { status: "fallback", reason: "unsupported" });
       }
       assert.deepEqual(await fsp.readdir(f.local), [], "root symlink must not publish locally");
       assert.deepEqual(await fsp.readdir(tempDirBridge.getTempDir()), [".netcatty-managed-temp"], "managed staging is always cleaned");

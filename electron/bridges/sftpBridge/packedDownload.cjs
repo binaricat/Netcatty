@@ -268,17 +268,29 @@ async function extractArchive(file, stage, gzip, selectedNames, signal) {
           if (!requiresRegularDownload) await fsp.link(path.join(stage, target), dest);
         } else if (header.type === "symlink") {
           const link = header.linkname;
-          if (typeof link !== "string" || !link || path.posix.isAbsolute(link) || /^[a-z]:/i.test(link) || /\0/u.test(link)
+          if (typeof link !== "string" || !link || /\0/u.test(link)) {
+            throw new Error("Unsafe symbolic link in packed download: " + relative);
+          }
+          if (parent === ".") {
+            // Selected symbolic links must use ordinary SFTP transfer (which
+            // follows selected roots), even when the link points outside the
+            // selection (e.g. a -> b or a -> /opt/app). Never materialize it
+            // locally; finish validating the rest of the archive before fallback.
+            requiresRegularDownload = true;
+            entries.set(relative, "symlink");
+            entry.resume();
+            continue;
+          }
+          if (path.posix.isAbsolute(link) || /^[a-z]:/i.test(link)
               || (process.platform === "win32" && /[\\\x01-\x1f]/u.test(link))
               || !names.has(path.posix.join(parent, link).split("/")[0])) {
             throw new Error("Unsafe symbolic link in packed download: " + relative);
           }
-          if (parent === "." || link.split("/").includes("..") || /[\\\x01-\x1f\ufffd]/u.test(link)) {
-            // Selected symbolic links must use ordinary SFTP transfer (which
-            // follows selected roots), and relative parent links or POSIX-only
-            // special characters are outside this extractor. Validate the REST
-            // of the archive before allowing ordinary SFTP fallback;
-            // corrupt/truncated archives must still be hard errors.
+          if (link.split("/").includes("..") || /[\\\x01-\x1f\ufffd]/u.test(link)) {
+            // Relative parent links or POSIX-only special characters are
+            // outside this extractor. Validate the REST of the archive before
+            // allowing ordinary SFTP fallback; corrupt/truncated archives must
+            // still be hard errors.
             requiresRegularDownload = true;
             entries.set(relative, "symlink");
             entry.resume();
