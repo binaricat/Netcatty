@@ -270,6 +270,7 @@ test('host-like copied output before a bare marker never receives a command', as
     'see [root@prod] logs\n# ',
     '[root@prod] copied output\n# ',
     'root@prod output\n# ',
+    '[root@prod] version = 1.2\n# ',
   ]) {
     const pty = new TestPty();
     const session = { _promptTrackTail: '', lastIdlePrompt: '' };

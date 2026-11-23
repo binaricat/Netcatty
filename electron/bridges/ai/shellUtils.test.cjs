@@ -614,6 +614,7 @@ test("does not recognize host-like text embedded in copied output before a bare 
     "see [root@prod] logs\n# ",
     "[root@prod] copied output\n# ",
     "root@prod output\n# ",
+    "[root@prod] version = 1.2\n# ",
   ]) {
     assert.equal(extractTrailingIdlePrompt(output), "", output);
   }

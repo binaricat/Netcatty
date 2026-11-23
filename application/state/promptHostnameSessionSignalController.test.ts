@@ -68,5 +68,19 @@ test('prompt host controller ignores host-like text embedded in copied output', 
   controller.handleTerminalOutput('ssh-1', 'see [root@prod] logs\n# ');
   controller.handleTerminalOutput('ssh-1', '[root@prod] copied output\n# ');
   controller.handleTerminalOutput('ssh-1', 'root@prod output\n# ');
+  controller.handleTerminalOutput('ssh-1', '[root@prod] version = 1.2\n# ');
   assert.deepEqual(changes, []);
+});
+
+test('prompt host controller publishes common zsh, Alpine, and macOS root prompt hosts', () => {
+  for (const [prompt, hostname] of [
+    ['alice@target-a ~ % ', 'target-a'],
+    ['alice@target-b ~ # ', 'target-b'],
+    ['target-c:~# ', 'target-c'],
+    ['target-d:~ root# ', 'target-d'],
+  ]) {
+    const { changes, controller } = createHarness();
+    controller.handleTerminalOutput('ssh-1', prompt);
+    assert.deepEqual(changes, [['ssh-1', hostname]]);
+  }
 });

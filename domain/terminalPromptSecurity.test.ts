@@ -55,9 +55,17 @@ test('extractTerminalPromptHostname rejects host-like text embedded in copied ou
     'see [root@prod] logs\n# ',
     '[root@prod] copied output\n# ',
     'root@prod output\n# ',
+    '[root@prod] version = 1.2\n# ',
   ]) {
     assert.equal(promptHostname(text), null, text);
   }
+});
+
+test('extractTerminalPromptHostname recognizes zsh, Alpine, and macOS root prompts', () => {
+  assert.equal(promptHostname('alice@target ~ % '), 'target');
+  assert.equal(promptHostname('alice@target ~ # '), 'target');
+  assert.equal(promptHostname('target:~# '), 'target');
+  assert.equal(promptHostname('target:~ root# '), 'target');
 });
 
 test('terminal prompt security recognizes password, MFA, OTP, PIN, and CJK challenges', () => {

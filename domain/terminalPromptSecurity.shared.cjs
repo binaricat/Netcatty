@@ -8,13 +8,19 @@ const OSC_CONTROL_PATTERN = new RegExp(
   "gu",
 );
 const MAX_PROMPT_SECURITY_TAIL_CHARS = 2_048;
-const PROMPT_MARKER_LINE_PATTERN = /^[#$]$/u;
+const PROMPT_MARKER_LINE_PATTERN = /^[#$%]$/u;
 const BRACKETED_PROMPT_IDENTITY_PATTERN =
-  /^(?:\([^()\r\n]+\)\s+)?\[([^\s@\]]+)@([^\s\]:#$%]+)(?:\s+[^\]\r\n]+)?\](?:[$#%]|\s+[A-Za-z][A-Za-z0-9_.-]{0,31}\s*=\s*[A-Fa-f0-9:.]+)?$/u;
+  /^(?:\([^()\r\n]+\)\s+)?\[([^\s@\]]+)@([^\s\]:#$%]+)(?:\s+[^\]\r\n]+)?\](?:[$#%]|\s+[A-Za-z][A-Za-z0-9_.-]{0,31}\s*=\s*(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d))?$/u;
 const SPACED_PROMPT_IDENTITY_PATTERN =
   /^#\s+([^\s@]+)\s+@\s+([^\s\]]+)/u;
 const POSIX_PROMPT_IDENTITY_PATTERN =
   /^(?:\([^()\r\n]+\)\s+)?([^\s@():\]]+)@([^\s\]:#$%]+)(?::[^\r\n#$%]*)?[$#%]?$/u;
+const ZSH_PROMPT_IDENTITY_PATTERN =
+  /^([^\s@]+)@([^\s%]+)\s+[^%\r\n]+[%#]$/u;
+const ALPINE_PROMPT_IDENTITY_PATTERN =
+  /^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?:~|\/[^#$>\\\s]*)[#$]?$/u;
+const MACOS_ROOT_PROMPT_IDENTITY_PATTERN =
+  /^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?:~|\/[^#$>\\\s]*)\s+[A-Za-z0-9_.-]+[#$]?$/u;
 const PROMPT_HOST_PATTERN =
   /^(?:\[[A-Fa-f0-9:.]+\]|[A-Za-z0-9_][A-Za-z0-9_.-]*)$/u;
 
@@ -152,14 +158,17 @@ function isPlausibleShellPromptBody(body) {
 
 function promptHostnameFromLine(line) {
   const text = String(line || "");
-  for (const pattern of [
-    BRACKETED_PROMPT_IDENTITY_PATTERN,
-    SPACED_PROMPT_IDENTITY_PATTERN,
-    POSIX_PROMPT_IDENTITY_PATTERN,
+  for (const [pattern, hostnameGroup] of [
+    [BRACKETED_PROMPT_IDENTITY_PATTERN, 2],
+    [SPACED_PROMPT_IDENTITY_PATTERN, 2],
+    [POSIX_PROMPT_IDENTITY_PATTERN, 2],
+    [ZSH_PROMPT_IDENTITY_PATTERN, 2],
+    [MACOS_ROOT_PROMPT_IDENTITY_PATTERN, 1],
+    [ALPINE_PROMPT_IDENTITY_PATTERN, 1],
   ]) {
     const match = pattern.exec(text);
     if (!match) continue;
-    const hostname = match[2].replace(/[.,;]+$/u, "");
+    const hostname = match[hostnameGroup].replace(/[.,;]+$/u, "");
     if (PROMPT_HOST_PATTERN.test(hostname)) return hostname;
   }
   return null;
@@ -179,7 +188,7 @@ function extractTerminalPromptHostname(value) {
 
   const markerLine = lines[markerIndex].trim();
   if (!PROMPT_MARKER_LINE_PATTERN.test(markerLine)) {
-    return /[#$]$/u.test(markerLine)
+    return /[#$%]$/u.test(markerLine)
       ? promptHostnameFromLine(markerLine)
       : null;
   }
