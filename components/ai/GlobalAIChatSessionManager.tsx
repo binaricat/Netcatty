@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Download, FolderInput, Play, Search, Trash2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Download, FolderInput, MoreHorizontal, Pencil, Search, Trash2, X } from 'lucide-react';
 import type { AISession, ExternalAgentConfig } from '../../infrastructure/ai/types';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
+import { Dropdown, DropdownContent, DropdownTrigger } from '../ui/dropdown';
 import { Input } from '../ui/input';
 import { ScrollArea } from '../ui/scroll-area';
 import {
@@ -12,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/select';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { SESSION_HISTORY_ROW_CLASSNAMES } from './sessionHistoryLayout';
 import { formatRelativeTime } from '../AIChatSessionHistoryDrawer';
@@ -20,18 +20,19 @@ import {
   buildGlobalManagerRows,
   collectGlobalManagerAgentIds,
   filterGlobalManagerRows,
+  type GlobalManagerHostInfo,
   type GlobalManagerScopeTarget,
   type GlobalManagerTerminalInfo,
 } from './globalSessionManagerRows';
 
 // -------------------------------------------------------------------
-// Global AI Session Manager (issue #4098 phases 4-5)
+// Global AI Session Manager
 // -------------------------------------------------------------------
-// A scope-agnostic view over every AI chat in the store with per-chat
-// actions: open/switch (current scope only), rebind (dangling → here, or
-// to any open workspace/terminal), per-chat export, and confirm-gated
-// delete. Deliberately NOT part of this surface: cleanup/eviction semantics
-// (#4015 R2) and cross-scope activation.
+// Scope-agnostic view over all saved AI chats. Clicking any chat opens
+// it directly in the viewing panel (automatically attaching past chats
+// to the current panel). Secondary management actions (rename, export,
+// move to another open terminal/workspace, confirm-gated delete) live
+// inside a single overflow menu so rows stay calm and scannable.
 // -------------------------------------------------------------------
 
 interface GlobalAIChatSessionManagerProps {
@@ -40,24 +41,22 @@ interface GlobalAIChatSessionManagerProps {
   currentScopeType: 'terminal' | 'workspace';
   currentScopeTargetId?: string;
   /**
-   * Host ids of the viewing panel's own scope; carried onto chats rebound
-   * with "This panel" so the destination's host association survives the
-   * scope rewrite instead of being orphaned.
+   * Host ids of the viewing panel's own scope; carried onto chats moved to
+   * "This panel" so the destination's host association survives.
    */
   currentScopeHostIds?: ReadonlyArray<string>;
   workspaces: ReadonlyArray<{ id: string; title: string }>;
   terminalInfos: ReadonlyArray<GlobalManagerTerminalInfo>;
+  hosts?: ReadonlyArray<GlobalManagerHostInfo>;
   externalAgents: ExternalAgentConfig[];
   rebindTargets: GlobalManagerScopeTarget[];
   onSelect: (sessionId: string) => void;
   onRebind: (sessionId: string, target: GlobalManagerScopeTarget) => void;
+  onRename?: (sessionId: string, title: string) => void;
   onDelete: (sessionId: string) => void;
   onExport: (sessionId: string) => void;
 }
 
-// Render guard, mirroring the scoped drawer. The store is capped well below
-// this by retention (MAX_STORED_SESSIONS), but the manager must stay cheap
-// even on stores grown before the cap existed (~2k sessions).
 const MANAGER_RENDER_BATCH = 80;
 const MANAGER_RENDER_STEP = 60;
 
@@ -69,10 +68,12 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
   currentScopeHostIds,
   workspaces,
   terminalInfos,
+  hosts,
   externalAgents,
   rebindTargets,
   onSelect,
   onRebind,
+  onRename,
   onDelete,
   onExport,
 }) => {
@@ -81,7 +82,11 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
   const [agentFilter, setAgentFilter] = useState<string>('all');
   const [renderCount, setRenderCount] = useState(MANAGER_RENDER_BATCH);
   const [deleteTarget, setDeleteTarget] = useState<AISession | null>(null);
-  const [rebindSession, setRebindSession] = useState<AISession | null>(null);
+  const [moveSession, setMoveSession] = useState<AISession | null>(null);
+  const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null);
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   const rows = useMemo(
     () => buildGlobalManagerRows({
@@ -91,12 +96,14 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
       currentScopeTargetId,
       workspaces,
       terminalInfos,
+      hosts,
       externalAgents,
       t,
     }),
-    [sessions, activeSessionIdMap, currentScopeType, currentScopeTargetId, workspaces, terminalInfos, externalAgents, t],
+    [sessions, activeSessionIdMap, currentScopeType, currentScopeTargetId, workspaces, terminalInfos, hosts, externalAgents, t],
   );
   const agentIds = useMemo(() => collectGlobalManagerAgentIds(rows), [rows]);
+  const showAgentMeta = agentIds.length > 1;
   const effectiveAgentFilter = agentFilter !== 'all' && agentIds.includes(agentFilter)
     ? agentFilter
     : 'all';
@@ -109,15 +116,15 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
     setRenderCount(MANAGER_RENDER_BATCH);
   }, [searchQuery, agentFilter]);
 
-  // Deleting the last chat of the filtered agent must not leave the manager
-  // pointing at an agent with no rows (the select would show a blank value
-  // and the list a permanent "no matches"). Reset to "all"; the select's
-  // built-in "all" option stays the manual clear affordance.
   useEffect(() => {
     if (agentFilter !== 'all' && !agentIds.includes(agentFilter)) {
       setAgentFilter('all');
     }
   }, [agentFilter, agentIds]);
+
+  useEffect(() => {
+    if (renamingSessionId) renameInputRef.current?.focus();
+  }, [renamingSessionId]);
 
   const displayedRows = filteredRows.slice(0, renderCount);
   const hiddenRowCount = Math.max(0, filteredRows.length - renderCount);
@@ -128,14 +135,33 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
     setDeleteTarget(null);
   };
 
-  const chooseRebindTarget = (value: string) => {
-    if (!rebindSession || !value) return;
+  const beginRename = (session: AISession) => {
+    setOpenMenuSessionId(null);
+    setRenamingSessionId(session.id);
+    setRenameDraft(session.title || '');
+  };
+
+  const commitRename = () => {
+    if (renamingSessionId && renameDraft.trim()) {
+      onRename?.(renamingSessionId, renameDraft.trim());
+    }
+    setRenamingSessionId(null);
+    setRenameDraft('');
+  };
+
+  const getOtherMoveTargets = (session: AISession) =>
+    rebindTargets.filter(
+      (target) =>
+        session.scopeDangling
+        || target.type !== session.scope.type
+        || target.targetId !== session.scope.targetId,
+    );
+
+  const chooseMoveTarget = (value: string) => {
+    if (!moveSession || !value) return;
     if (value === 'here') {
       if (!currentScopeTargetId) return;
-      // Preserve the destination's host association: rewriting the scope
-      // without hostIds would orphan the host linkage the panel maintains
-      // for terminal-scope reconnection.
-      onRebind(rebindSession.id, {
+      onRebind(moveSession.id, {
         type: currentScopeType,
         targetId: currentScopeTargetId,
         label: '',
@@ -145,15 +171,15 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
       });
     } else {
       const target = rebindTargets.find((candidate) => `${candidate.type}:${candidate.targetId}` === value);
-      if (target) onRebind(rebindSession.id, target);
+      if (target) onRebind(moveSession.id, target);
     }
-    setRebindSession(null);
+    setMoveSession(null);
   };
 
   return (
     <div className="flex-1 flex flex-col min-h-0" data-section="ai-global-session-manager">
-      <div className="px-3 py-2 shrink-0 border-b border-border/30 space-y-2">
-        <div className="relative">
+      <div className="px-3 py-2 shrink-0 border-b border-border/30 flex items-center gap-1.5">
+        <div className="relative flex-1 min-w-0">
           <Search
             size={13}
             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 pointer-events-none"
@@ -178,11 +204,11 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
             </button>
           )}
         </div>
-        {agentIds.length > 1 && (
+        {showAgentMeta && (
           <Select value={effectiveAgentFilter} onValueChange={setAgentFilter}>
             <SelectTrigger
               aria-label={t('ai.chat.managerFilterAllAgents')}
-              className="h-7 w-full px-2 text-[12px]"
+              className="h-8 w-auto max-w-[120px] shrink-0 px-2 text-[12px]"
             >
               <SelectValue />
             </SelectTrigger>
@@ -218,160 +244,221 @@ export const GlobalAIChatSessionManager: React.FC<GlobalAIChatSessionManagerProp
                   {t('ai.chat.loadMoreSessions').replace('{n}', String(hiddenRowCount))}
                 </button>
               )}
-              {displayedRows.map((row) => (
-                <React.Fragment key={row.session.id}>
-                  <div
-                    className={cn(SESSION_HISTORY_ROW_CLASSNAMES.row, 'cursor-default')}
-                    data-session-id={row.session.id}
-                    data-scope-state={row.scopeState}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className={cn(SESSION_HISTORY_ROW_CLASSNAMES.title, 'shrink')}>
-                          {row.title}
-                        </span>
-                        <span
-                          className={cn(
-                            'shrink-0 rounded px-1 text-[10px] leading-4',
-                            row.scopeState === 'dangling'
-                              ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                              : row.scopeState === 'active'
-                                ? 'bg-primary/15 text-primary'
-                                : 'bg-muted text-muted-foreground/70',
+              {displayedRows.map((row) => {
+                const otherMoveTargets = getOtherMoveTargets(row.session);
+                const canMoveElsewhere = otherMoveTargets.length > 0;
+                const isRenaming = renamingSessionId === row.session.id;
+                const isMenuOpen = openMenuSessionId === row.session.id;
+                const subtitleParts: string[] = [];
+                if (row.scopeLabel) subtitleParts.push(row.scopeLabel);
+                if (showAgentMeta) subtitleParts.push(row.agentLabel);
+                if (row.messageCount > 0) {
+                  subtitleParts.push(
+                    t('ai.chat.managerMessagesCount').replace('{n}', String(row.messageCount)),
+                  );
+                }
+
+                return (
+                  <React.Fragment key={row.session.id}>
+                    <div
+                      role="button"
+                      tabIndex={row.canActivate ? 0 : -1}
+                      onClick={() => {
+                        if (!isRenaming && row.canActivate) onSelect(row.session.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
+                        if (!isRenaming && row.canActivate && (e.key === 'Enter' || e.key === ' ')) {
+                          e.preventDefault();
+                          onSelect(row.session.id);
+                        }
+                      }}
+                      className={cn(
+                        SESSION_HISTORY_ROW_CLASSNAMES.row,
+                        row.isCurrentActive
+                          ? 'text-foreground'
+                          : 'text-foreground/75 hover:text-foreground',
+                        !row.canActivate && 'cursor-default',
+                      )}
+                      data-session-id={row.session.id}
+                      data-scope-state={row.scopeState}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {row.isCurrentActive && (
+                            <span
+                              className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary"
+                              aria-hidden
+                            />
                           )}
+                          <span className={cn(SESSION_HISTORY_ROW_CLASSNAMES.title, 'shrink')}>
+                            {isRenaming ? (
+                              <Input
+                                ref={renameInputRef}
+                                type="text"
+                                value={renameDraft}
+                                aria-label={t('ai.chat.renameChat')}
+                                onClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => {
+                                  e.stopPropagation();
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    commitRename();
+                                  } else if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setRenamingSessionId(null);
+                                    setRenameDraft('');
+                                  }
+                                }}
+                                onChange={(e) => setRenameDraft(e.target.value)}
+                                onBlur={commitRename}
+                                className="h-6 text-[12px]"
+                              />
+                            ) : (
+                              row.title
+                            )}
+                          </span>
+                          {row.isActiveElsewhere && (
+                            <span className="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 text-muted-foreground/75">
+                              {t('ai.chat.managerBadgeActive')}
+                            </span>
+                          )}
+                        </div>
+                        {subtitleParts.length > 0 && (
+                          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground/50 min-w-0">
+                            {subtitleParts.map((part, index) => (
+                              <React.Fragment key={`${row.session.id}-meta-${index}`}>
+                                {index > 0 && <span aria-hidden>·</span>}
+                                <span className={index === 0 ? 'truncate' : 'shrink-0'}>
+                                  {part}
+                                </span>
+                              </React.Fragment>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className={SESSION_HISTORY_ROW_CLASSNAMES.meta}>
+                        <span className={SESSION_HISTORY_ROW_CLASSNAMES.time}>
+                          {formatRelativeTime(new Date(row.session.updatedAt), t)}
+                        </span>
+                        <Dropdown
+                          open={isMenuOpen}
+                          onOpenChange={(open) => setOpenMenuSessionId(open ? row.session.id : null)}
                         >
-                          {t(row.scopeState === 'dangling'
-                            ? 'ai.chat.chatsScopeDangling'
-                            : row.scopeState === 'active'
-                              ? 'ai.chat.managerBadgeActive'
-                              : 'ai.chat.managerBadgeIdle')}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground/50 min-w-0">
-                        <span className="truncate">{row.agentLabel}</span>
-                        <span aria-hidden>·</span>
-                        <span className="truncate">{row.scopeLabel}</span>
-                        <span aria-hidden>·</span>
-                        <span className="shrink-0">
-                          {t('ai.chat.managerMessagesCount').replace('{n}', String(row.messageCount))}
-                        </span>
-                        <span aria-hidden>·</span>
-                        <span className="shrink-0">{formatRelativeTime(new Date(row.session.updatedAt), t)}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {row.canActivate ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
+                          <DropdownTrigger asChild>
                             <button
                               type="button"
-                              onClick={() => onSelect(row.session.id)}
-                              aria-label={t('ai.chat.managerOpen')}
-                              className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
+                              aria-label={t('ai.chat.managerMoreActions')}
+                              onClick={(e) => e.stopPropagation()}
+                              className={cn(
+                                'p-0.5 text-muted-foreground/60 hover:text-foreground transition-all cursor-pointer shrink-0',
+                                isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100',
+                              )}
                             >
-                              <Play size={12} />
+                              <MoreHorizontal size={13} />
                             </button>
-                          </TooltipTrigger>
-                          <TooltipContent>{t('ai.chat.managerOpen')}</TooltipContent>
-                        </Tooltip>
-                      ) : (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex cursor-not-allowed">
+                          </DropdownTrigger>
+                          <DropdownContent
+                            align="end"
+                            className="min-w-[144px] p-1"
+                            keyboardNavigation
+                          >
+                            {onRename && (
                               <button
                                 type="button"
-                                disabled
-                                aria-disabled="true"
-                                aria-label={t('ai.chat.managerOpenDisabled')}
-                                className={cn(SESSION_HISTORY_ROW_CLASSNAMES.deleteButton, 'opacity-30 pointer-events-none')}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  beginRename(row.session);
+                                }}
+                                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-foreground/85 hover:bg-muted cursor-pointer"
                               >
-                                <Play size={12} />
+                                <Pencil size={12} className="shrink-0 text-muted-foreground" />
+                                <span>{t('ai.chat.renameChat')}</span>
                               </button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>{t('ai.chat.managerOpenDisabled')}</TooltipContent>
-                        </Tooltip>
-                      )}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() => onExport(row.session.id)}
-                            aria-label={t('ai.chat.managerExportOne')}
-                            className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
-                          >
-                            <Download size={12} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>{t('ai.chat.managerExportOne')}</TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() => setRebindSession(
-                              rebindSession?.id === row.session.id ? null : row.session,
                             )}
-                            aria-label={t('ai.chat.managerRebind')}
-                            className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
-                          >
-                            <FolderInput size={12} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>{t('ai.chat.managerRebind')}</TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteTarget(row.session)}
-                            aria-label={t('common.delete')}
-                            className={SESSION_HISTORY_ROW_CLASSNAMES.deleteButton}
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>{t('common.delete')}</TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </div>
-                  {rebindSession?.id === row.session.id && (
-                    <div className="py-1.5 pl-1 border-b border-border/20" data-section="ai-manager-rebind-picker">
-                      <Select value="" onValueChange={chooseRebindTarget}>
-                        <SelectTrigger
-                          aria-label={t('ai.chat.managerRebindPick')}
-                          className="h-7 w-full px-2 text-[12px]"
-                        >
-                          <SelectValue placeholder={t('ai.chat.managerRebindPick')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {currentScopeTargetId
-                            && (
-                              row.session.scopeDangling
-                              || row.session.scope.type !== currentScopeType
-                              || row.session.scope.targetId !== currentScopeTargetId
-                            ) && (
-                            <SelectItem value="here" className="text-[12px]">
-                              {t('ai.chat.managerRebindHere')}
-                            </SelectItem>
-                          )}
-                          {rebindTargets.map((target) => (
-                            <SelectItem
-                              key={`${target.type}:${target.targetId}`}
-                              value={`${target.type}:${target.targetId}`}
-                              className="text-[12px]"
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMenuSessionId(null);
+                                onExport(row.session.id);
+                              }}
+                              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-foreground/85 hover:bg-muted cursor-pointer"
                             >
-                              {target.type === 'workspace'
-                                ? `${t('ai.chat.chatsScopeWorkspace')}: ${target.label}`
-                                : `${t('ai.chat.chatsScopeTerminal')}: ${target.label}`}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                              <Download size={12} className="shrink-0 text-muted-foreground" />
+                              <span>{t('ai.chat.managerExportOne')}</span>
+                            </button>
+                            {canMoveElsewhere && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenMenuSessionId(null);
+                                  setMoveSession(
+                                    moveSession?.id === row.session.id ? null : row.session,
+                                  );
+                                }}
+                                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-foreground/85 hover:bg-muted cursor-pointer"
+                              >
+                                <FolderInput size={12} className="shrink-0 text-muted-foreground" />
+                                <span>{t('ai.chat.managerRebind')}</span>
+                              </button>
+                            )}
+                            <div className="my-1 h-px bg-border/50" />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMenuSessionId(null);
+                                setDeleteTarget(row.session);
+                              }}
+                              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-destructive hover:bg-destructive/10 cursor-pointer"
+                            >
+                              <Trash2 size={12} className="shrink-0" />
+                              <span>{t('common.delete')}</span>
+                            </button>
+                          </DropdownContent>
+                        </Dropdown>
+                      </div>
                     </div>
-                  )}
-                </React.Fragment>
-              ))}
+                    {moveSession?.id === row.session.id && (
+                      <div className="py-1.5 pl-1 border-b border-border/20" data-section="ai-manager-rebind-picker">
+                        <Select value="" onValueChange={chooseMoveTarget}>
+                          <SelectTrigger
+                            aria-label={t('ai.chat.managerRebindPick')}
+                            className="h-7 w-full px-2 text-[12px]"
+                          >
+                            <SelectValue placeholder={t('ai.chat.managerRebindPick')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {currentScopeTargetId
+                              && (
+                                row.session.scopeDangling
+                                || row.session.scope.type !== currentScopeType
+                                || row.session.scope.targetId !== currentScopeTargetId
+                              ) && (
+                              <SelectItem value="here" className="text-[12px]">
+                                {t('ai.chat.managerRebindHere')}
+                              </SelectItem>
+                            )}
+                            {otherMoveTargets.map((target) => (
+                              <SelectItem
+                                key={`${target.type}:${target.targetId}`}
+                                value={`${target.type}:${target.targetId}`}
+                                className="text-[12px]"
+                              >
+                                {target.type === 'workspace'
+                                  ? `${t('ai.chat.chatsScopeWorkspace')}: ${target.label}`
+                                  : `${t('ai.chat.chatsScopeTerminal')}: ${target.label}`}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </>
           )}
         </div>

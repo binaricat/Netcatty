@@ -38,6 +38,10 @@ function baseProps() {
       { sessionId: "t-1", hostId: "h-1", label: "edge", hostname: "edge.example", connected: true },
       { sessionId: "t-2", hostId: "h-2", label: "core", hostname: "core.example", connected: true },
     ],
+    hosts: [
+      { id: "h-1", label: "edge", hostname: "edge.example" },
+      { id: "h-old", label: "legacy-box", hostname: "10.0.0.9" },
+    ],
     externalAgents,
     rebindTargets: [
       { type: "workspace" as const, targetId: "w-1", label: "Prod" },
@@ -45,6 +49,7 @@ function baseProps() {
     ],
     onSelect: (_sessionId: string) => {},
     onRebind: (_sessionId: string, _target: { type: string; targetId: string; hostIds?: string[] }) => {},
+    onRename: undefined as ((_sessionId: string, _title: string) => void) | undefined,
     onDelete: (_sessionId: string) => {},
     onExport: (_sessionId: string) => {},
   };
@@ -108,6 +113,12 @@ function installRadixGlobals(dom: ReturnType<typeof installDomEnvironment>) {
   if (globalAsRecord.PointerEvent == null) {
     setGlobal("PointerEvent", dom.window.MouseEvent);
   }
+  if (globalAsRecord.requestAnimationFrame == null) {
+    setGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 0));
+  }
+  if (globalAsRecord.cancelAnimationFrame == null) {
+    setGlobal("cancelAnimationFrame", (id: ReturnType<typeof setTimeout>) => clearTimeout(id));
+  }
   const proto = dom.window.HTMLElement.prototype as unknown as Record<string, unknown>;
   if (typeof proto.hasPointerCapture !== "function") proto.hasPointerCapture = () => false;
   if (typeof proto.releasePointerCapture !== "function") proto.releasePointerCapture = () => {};
@@ -152,20 +163,31 @@ async function pickSelectOptionByText(
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
-async function clickButtonInRow(
+async function clickMenuItemInRow(
   dom: ReturnType<typeof installDomEnvironment>,
   renderer: { container: HTMLElement },
   sessionId: string,
-  label: string,
+  itemLabel: string,
 ) {
   const row = rows(renderer).find((row) => row.dataset.sessionId === sessionId);
   assert.ok(row, `row ${sessionId} missing`);
-  const button = row.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-  assert.ok(button, `button ${label} missing in row ${sessionId}`);
-  await dispatchDomEvent(button, new dom.window.MouseEvent("click", { bubbles: true }));
+  const menuTrigger = row.querySelector<HTMLButtonElement>(
+    `button[aria-label="${t("ai.chat.managerMoreActions")}"]`,
+  );
+  assert.ok(menuTrigger, `more-actions trigger missing in row ${sessionId}`);
+  await dispatchDomEvent(menuTrigger, new dom.window.MouseEvent("click", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const buttons = Array.from(dom.document.body.querySelectorAll<HTMLButtonElement>("button"));
+  const menuItem = buttons.find((button) => (button.textContent ?? "").trim() === itemLabel);
+  assert.ok(
+    menuItem,
+    `menu item "${itemLabel}" missing; saw: ${buttons.map((b) => (b.textContent ?? "").trim()).filter(Boolean).join(", ")}`,
+  );
+  await dispatchDomEvent(menuItem, new dom.window.MouseEvent("click", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
-test("manager lists chats from every scope with state badges and current marker", async () => {
+test("manager lists chats from every scope with host context and no detached jargon", async () => {
   const dom = installDomEnvironment();
   try {
     const props = baseProps();
@@ -173,7 +195,7 @@ test("manager lists chats from every scope with state badges and current marker"
       makeSession({ id: "here", title: "Here chat", scope: { type: "terminal", targetId: "t-1" } }),
       makeSession({ id: "other", title: "Other terminal chat", scope: { type: "terminal", targetId: "t-2" } }),
       makeSession({ id: "ws", title: "Workspace chat", scope: { type: "workspace", targetId: "w-1" } }),
-      makeSession({ id: "gone", title: "Dangling chat", scope: { type: "terminal", targetId: "t-gone" } }),
+      makeSession({ id: "gone", title: "Past chat", scope: { type: "terminal", targetId: "t-gone", hostIds: ["h-old"] } }),
     ];
     props.activeSessionIdMap = { "terminal:t-1": "here", "terminal:t-2": "other" };
     const renderer = await renderManager(dom, props);
@@ -185,19 +207,29 @@ test("manager lists chats from every scope with state badges and current marker"
     assert.equal(rowById.get("ws")!.dataset.scopeState, "idle");
     assert.equal(rowById.get("gone")!.dataset.scopeState, "dangling");
     assert.ok(rowById.get("ws")!.textContent!.includes("Prod"));
-    assert.ok(rowById.get("gone")!.textContent!.includes(t("ai.chat.chatsScopeDangling")));
+    assert.ok(rowById.get("gone")!.textContent!.includes("legacy-box"), "closed-terminal chat displays host name");
+    assert.ok(
+      !rowById.get("gone")!.textContent!.includes(t("ai.chat.chatsScopeDangling")),
+      "scary detached label is not shown in rows",
+    );
+    assert.ok(
+      !rowById.get("ws")!.textContent!.includes(t("ai.chat.managerBadgeIdle")),
+      "redundant idle badge is omitted",
+    );
   } finally {
     dom.cleanup();
   }
 });
 
-test("open is enabled only for current-scope chats; export works for all", async () => {
+test("clicking any row opens it directly; overflow menu handles export", async () => {
   const dom = installDomEnvironment();
+  const restoreGlobals = installRadixGlobals(dom);
   try {
     const props = baseProps();
     props.sessions = [
       makeSession({ id: "here", title: "Here chat", scope: { type: "terminal", targetId: "t-1" } }),
       makeSession({ id: "other", title: "Other terminal chat", scope: { type: "terminal", targetId: "t-2" } }),
+      makeSession({ id: "gone", title: "Past chat", scope: { type: "terminal", targetId: "t-gone" } }),
     ];
     const selected: string[] = [];
     const exported: string[] = [];
@@ -205,24 +237,25 @@ test("open is enabled only for current-scope chats; export works for all", async
     props.onExport = (id) => exported.push(id);
     const renderer = await renderManager(dom, props);
 
-    await clickButtonInRow(dom, renderer, "here", t("ai.chat.managerOpen"));
-    assert.deepEqual(selected, ["here"]);
+    for (const id of ["here", "other", "gone"]) {
+      const row = rows(renderer).find((el) => el.dataset.sessionId === id)!;
+      await dispatchDomEvent(row, new dom.window.MouseEvent("click", { bubbles: true }));
+    }
+    assert.deepEqual(selected, ["here", "other", "gone"], "every row is 1-click openable");
 
-    const otherRow = rows(renderer).find((row) => row.dataset.sessionId === "other")!;
-    const openOther = otherRow.querySelector<HTMLButtonElement>(
-      `button[aria-label="${t("ai.chat.managerOpenDisabled")}"]`,
-    );
-    assert.ok(openOther, "other-scope row renders the disabled open affordance");
-    assert.equal(openOther.disabled, true, "cross-scope activation is not faked");
-    assert.equal(
-      openOther.parentElement?.tagName,
-      "SPAN",
-      "disabled open button is wrapped in a span so Tooltip hover events still fire",
-    );
-
-    await clickButtonInRow(dom, renderer, "other", t("ai.chat.managerExportOne"));
+    await clickMenuItemInRow(dom, renderer, "other", t("ai.chat.managerExportOne"));
     assert.deepEqual(exported, ["other"]);
+
+    // Keyboard activation on the nested overflow menu trigger must not bubble to row selection.
+    const hereRow = rows(renderer).find((el) => el.dataset.sessionId === "here")!;
+    const menuTrigger = hereRow.querySelector<HTMLButtonElement>(
+      `button[aria-label="${t("ai.chat.managerMoreActions")}"]`,
+    )!;
+    await dispatchDomEvent(menuTrigger, new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await dispatchDomEvent(menuTrigger, new dom.window.KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    assert.deepEqual(selected, ["here", "other", "gone"], "nested button keydown does not activate the row");
   } finally {
+    restoreGlobals();
     dom.cleanup();
   }
 });
@@ -251,26 +284,28 @@ test("search narrows by title substring (case-insensitive)", async () => {
   }
 });
 
-test("rebind: dangling chat to current panel scope", async () => {
+test("move action in overflow menu attaches a past chat to current panel with host ids", async () => {
   const dom = installDomEnvironment();
   const restoreGlobals = installRadixGlobals(dom);
   try {
     const props = baseProps();
+    props.currentScopeHostIds = ["h-1"];
     props.sessions = [
-      makeSession({ id: "gone", title: "Dangling chat", scope: { type: "terminal", targetId: "t-gone" } }),
+      makeSession({ id: "gone", title: "Past chat", scope: { type: "terminal", targetId: "t-gone" } }),
     ];
-    const rebinds: Array<{ sessionId: string; type: string; targetId: string }> = [];
-    props.onRebind = (sessionId, target) => rebinds.push({ sessionId, type: target.type, targetId: target.targetId });
+    const rebinds: Array<{ sessionId: string; type: string; targetId: string; hostIds?: string[] }> = [];
+    props.onRebind = (sessionId, target) =>
+      rebinds.push({ sessionId, type: target.type, targetId: target.targetId, hostIds: target.hostIds });
     const renderer = await renderManager(dom, props);
 
-    await clickButtonInRow(dom, renderer, "gone", t("ai.chat.managerRebind"));
+    await clickMenuItemInRow(dom, renderer, "gone", t("ai.chat.managerRebind"));
     const trigger = renderer.container.querySelector<HTMLElement>(
       '[data-section="ai-manager-rebind-picker"] [role="combobox"]',
     );
     assert.ok(trigger, "picker opens");
     await pickSelectOptionByText(dom, trigger, t("ai.chat.managerRebindHere"));
 
-    assert.deepEqual(rebinds, [{ sessionId: "gone", type: "terminal", targetId: "t-1" }]);
+    assert.deepEqual(rebinds, [{ sessionId: "gone", type: "terminal", targetId: "t-1", hostIds: ["h-1"] }]);
     assert.equal(
       renderer.container.querySelector('[data-section="ai-manager-rebind-picker"]'),
       null,
@@ -282,88 +317,31 @@ test("rebind: dangling chat to current panel scope", async () => {
   }
 });
 
-test("rebind: cross-workspace target picker rewrites scope to the picked target", async () => {
-  const dom = installDomEnvironment();
-  const restoreGlobals = installRadixGlobals(dom);
-  try {
-    const props = baseProps();
-    props.sessions = [
-      makeSession({ id: "term", title: "Terminal chat", scope: { type: "terminal", targetId: "t-1" } }),
-    ];
-    const rebinds: Array<{ sessionId: string; type: string; targetId: string }> = [];
-    props.onRebind = (sessionId, target) => rebinds.push({ sessionId, type: target.type, targetId: target.targetId });
-    const renderer = await renderManager(dom, props);
-
-    await clickButtonInRow(dom, renderer, "term", t("ai.chat.managerRebind"));
-    const trigger = renderer.container.querySelector<HTMLElement>(
-      '[data-section="ai-manager-rebind-picker"] [role="combobox"]',
-    );
-    assert.ok(trigger);
-    const options = await openSelectOptions(dom, trigger);
-    const optionTexts = options.map((option) => option.textContent ?? "");
-    assert.ok(optionTexts.some((text) => text.includes("Prod")), "workspace targets are listed");
-    assert.ok(optionTexts.some((text) => text.includes("core")), "other-tab terminal targets are listed");
-    const prodOption = options.find((option) => (option.textContent ?? "").includes("Prod"))!;
-    await dispatchDomEvent(prodOption, new dom.window.MouseEvent("click", { bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    assert.deepEqual(rebinds, [{ sessionId: "term", type: "workspace", targetId: "w-1" }]);
-  } finally {
-    restoreGlobals();
-    dom.cleanup();
-  }
-});
-
-test("rebind: 'This panel' preserves the panel scope host ids", async () => {
-  const dom = installDomEnvironment();
-  const restoreGlobals = installRadixGlobals(dom);
-  try {
-    const props = baseProps();
-    props.currentScopeHostIds = ["h-1"];
-    props.sessions = [
-      makeSession({ id: "gone", title: "Dangling chat", scope: { type: "terminal", targetId: "t-gone" } }),
-    ];
-    const rebinds: Array<{ sessionId: string; hostIds?: string[] }> = [];
-    props.onRebind = (sessionId, target) => rebinds.push({ sessionId, hostIds: target.hostIds });
-    const renderer = await renderManager(dom, props);
-
-    await clickButtonInRow(dom, renderer, "gone", t("ai.chat.managerRebind"));
-    const trigger = renderer.container.querySelector<HTMLElement>(
-      '[data-section="ai-manager-rebind-picker"] [role="combobox"]',
-    );
-    assert.ok(trigger);
-    await pickSelectOptionByText(dom, trigger, t("ai.chat.managerRebindHere"));
-
-    assert.deepEqual(rebinds, [{ sessionId: "gone", hostIds: ["h-1"] }], "destination host association survives the scope rewrite");
-  } finally {
-    restoreGlobals();
-    dom.cleanup();
-  }
-});
-
-test("rebind: explicit target host ids pass through to onRebind", async () => {
+test("move action in overflow menu moves a chat to another workspace or terminal", async () => {
   const dom = installDomEnvironment();
   const restoreGlobals = installRadixGlobals(dom);
   try {
     const props = baseProps();
     props.rebindTargets = [
+      { type: "workspace" as const, targetId: "w-1", label: "Prod" },
       { type: "terminal" as const, targetId: "t-2", label: "core", hostIds: ["h-2"] },
     ];
     props.sessions = [
       makeSession({ id: "term", title: "Terminal chat", scope: { type: "terminal", targetId: "t-1" } }),
     ];
-    const rebinds: Array<{ sessionId: string; hostIds?: string[] }> = [];
-    props.onRebind = (sessionId, target) => rebinds.push({ sessionId, hostIds: target.hostIds });
+    const rebinds: Array<{ sessionId: string; type: string; targetId: string; hostIds?: string[] }> = [];
+    props.onRebind = (sessionId, target) =>
+      rebinds.push({ sessionId, type: target.type, targetId: target.targetId, hostIds: target.hostIds });
     const renderer = await renderManager(dom, props);
 
-    await clickButtonInRow(dom, renderer, "term", t("ai.chat.managerRebind"));
+    await clickMenuItemInRow(dom, renderer, "term", t("ai.chat.managerRebind"));
     const trigger = renderer.container.querySelector<HTMLElement>(
       '[data-section="ai-manager-rebind-picker"] [role="combobox"]',
     );
     assert.ok(trigger);
     await pickSelectOptionByText(dom, trigger, /core/);
 
-    assert.deepEqual(rebinds, [{ sessionId: "term", hostIds: ["h-2"] }]);
+    assert.deepEqual(rebinds, [{ sessionId: "term", type: "terminal", targetId: "t-2", hostIds: ["h-2"] }]);
   } finally {
     restoreGlobals();
     dom.cleanup();
@@ -398,9 +376,6 @@ test("agent filter resets when its agent loses the last chat; 'all' option clear
     await pickSelectOptionByText(dom, filterTrigger()!, "Codex");
     assert.deepEqual(rows(renderer).map((row) => row.dataset.sessionId), ["codex-1"]);
 
-    // Deleting the last chat of the filtered agent: the parent drops it and
-    // re-renders with the updated store (a second agent keeps the filter UI
-    // mounted, so the reset is observable).
     props.sessions = [
       makeSession({ id: "catty-1", agentId: "catty", title: "Catty chat" }),
       makeSession({ id: "gemini-1", agentId: "gemini", title: "Gemini chat" }),
@@ -424,7 +399,6 @@ test("agent filter resets when its agent loses the last chat; 'all' option clear
       "rows are visible again after the reset",
     );
 
-    // Manual clear: pick a present agent, then choose 'all' to clear.
     await pickSelectOptionByText(dom, filterTrigger()!, /Catty/);
     assert.deepEqual(rows(renderer).map((row) => row.dataset.sessionId), ["catty-1"]);
     await pickSelectOptionByText(dom, filterTrigger()!, t("ai.chat.managerFilterAllAgents"));
@@ -439,7 +413,7 @@ test("agent filter resets when its agent loses the last chat; 'all' option clear
   }
 });
 
-test("delete is confirm-gated: cancel keeps the row, confirm removes it", async () => {
+test("delete in overflow menu is confirm-gated: confirm removes the chat", async () => {
   const dom = installDomEnvironment();
   const restoreGlobals = installRadixGlobals(dom);
   try {
@@ -451,7 +425,7 @@ test("delete is confirm-gated: cancel keeps the row, confirm removes it", async 
     props.onDelete = (id) => deleted.push(id);
     const renderer = await renderManager(dom, props);
 
-    await clickButtonInRow(dom, renderer, "victim", t("common.delete"));
+    await clickMenuItemInRow(dom, renderer, "victim", t("common.delete"));
     assert.deepEqual(deleted, [], "no deletion before confirmation");
 
     const confirmButton = dom.document.body.querySelector<HTMLButtonElement>("button.bg-destructive");
@@ -465,7 +439,7 @@ test("delete is confirm-gated: cancel keeps the row, confirm removes it", async 
   }
 });
 
-test("history drawer hosts the manager behind a scoped/global toggle", async () => {
+test("history drawer hosts the manager behind a current/all toggle", async () => {
   const dom = installDomEnvironment();
   try {
     const { SessionHistoryDrawer } = await import("../AIChatSessionHistoryDrawer.tsx");
@@ -476,7 +450,7 @@ test("history drawer hosts the manager behind a scoped/global toggle", async () 
     const props = baseProps();
     props.sessions = [
       makeSession({ id: "here", title: "Here chat", scope: { type: "terminal", targetId: "t-1" } }),
-      makeSession({ id: "gone", title: "Dangling chat", scope: { type: "terminal", targetId: "t-gone" } }),
+      makeSession({ id: "gone", title: "Past chat", scope: { type: "terminal", targetId: "t-gone" } }),
     ];
     await renderer.render(
       <I18nProvider locale="en">
@@ -496,16 +470,16 @@ test("history drawer hosts the manager behind a scoped/global toggle", async () 
     assert.equal(
       renderer.container.querySelector('[data-section="ai-global-session-manager"]'),
       null,
-      "scoped view is the default tab",
+      "current tab is the default tab",
     );
     const tabs = renderer.container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-    assert.equal(tabs.length, 2, "scope/global toggle renders");
+    assert.equal(tabs.length, 2, "current/all toggle renders");
     await dispatchDomEvent(tabs[1], new dom.window.MouseEvent("click", { bubbles: true }));
 
     const manager = renderer.container.querySelector('[data-section="ai-global-session-manager"]');
-    assert.ok(manager, "global tab renders the manager");
+    assert.ok(manager, "all tab renders the manager");
     const rowIds = rows(renderer).map((row) => row.dataset.sessionId);
-    assert.ok(rowIds.includes("gone"), "global view shows chats outside the drawer's scoped list");
+    assert.ok(rowIds.includes("gone"), "all view shows chats outside the drawer's current list");
   } finally {
     dom.cleanup();
   }
