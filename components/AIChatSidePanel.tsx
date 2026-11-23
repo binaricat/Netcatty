@@ -1265,6 +1265,15 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         ? prev
         : { ...prev, [agentId]: { cacheKey: target.cacheKey, models: catalogPresets, catalogUnavailable: Boolean(catalog.warning) } }
     ));
+    // Another path (e.g. send preflight or picker open) applied the catalog
+    // before the deferred idle callback scheduled in the visibility effect:
+    // clear its stale pending flag so the composer stops claiming models are loading.
+    setRuntimeModelLoading((prev) => {
+      if (!prev[agentId] || prev[agentId].cacheKey !== target.cacheKey) return prev;
+      const { [agentId]: _removed, ...rest } = prev;
+      return rest;
+    });
+
     const normalizedStoredModelId = normalizeStoredAgentModelSelection(
       agentModelMapRef.current[agentId],
       runtimePresets,
@@ -1386,33 +1395,60 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     // even when the user never selected OpenCode (#2184). Manual refresh still
     // passes force via the model selector path. Defer the network refresh so
     // expand → first type does not wait on CLI model listing.
+    const clearRuntimeModelLoading = () => {
+      setRuntimeModelLoading((prev) => {
+        if (!prev[target.agentId] || prev[target.agentId].cacheKey !== target.cacheKey) return prev;
+        const { [target.agentId]: _removed, ...rest } = prev;
+        return rest;
+      });
+    };
     let cancelled = false;
+    let idleFired = false;
+    let loadSettled = false;
     if (!cached) {
       // Hydrate persisted choices during the idle delay, including stale
-      // catalogs. This request never starts a runtime query.
+      // catalogs. This request never starts a runtime query. Only show the
+      // loading indicator when no persisted models exist yet (#3584).
       void getNetcattyBridge()?.aiSdkAgentListModels?.(
         target.sdkBackend, undefined, undefined, `models_${target.agentId}`,
         target.agentEnv, target.agentCommand, target.codexRuntime, false, true,
       ).then((result) => {
         if (cancelled || sdkRuntimeModelCache.read(target.cacheKey)) return;
-        if (!result?.ok || !result.models?.length) return;
-        applySdkRuntimeModelCatalog(target, toSdkRuntimeModelCatalog({
-          ...result, models: result.models,
-        }));
+        if (result?.ok && result.models?.length) {
+          applySdkRuntimeModelCatalog(target, toSdkRuntimeModelCatalog({
+            ...result, models: result.models,
+          }));
+          return;
+        }
+        if (!loadSettled) {
+          setRuntimeModelLoading((prev) => (
+            prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
+          ));
+        }
       }).catch((err) => {
         console.debug('[AIChatSidePanel] Failed to read cached agent models:', err);
+        if (!cancelled && !loadSettled && !sdkRuntimeModelCache.read(target.cacheKey)) {
+          setRuntimeModelLoading((prev) => (
+            prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
+          ));
+        }
       });
     }
     const cancelIdle = scheduleWhenAiComposerIdle(() => {
+      idleFired = true;
       void loadSdkRuntimeModelCatalog(target).then((catalog) => {
         if (cancelled || !catalog) return;
         applySdkRuntimeModelCatalog(target, catalog, { adoptCurrentModel: true });
+      }).finally(() => {
+        loadSettled = true;
+        clearRuntimeModelLoading();
       });
     });
 
     return () => {
       cancelled = true;
       cancelIdle();
+      if (!idleFired) clearRuntimeModelLoading();
     };
   }, [
     isVisible,

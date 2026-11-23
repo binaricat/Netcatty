@@ -1998,6 +1998,113 @@ test("list-models keeps stale models after failure and limits automatic retries"
   }
 });
 
+test("list-models preserves saved rows, original timestamp, and retry interval when automatic stale refresh returns only currentModelId", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const now = Date.parse("2026-11-18T00:00:00Z");
+  const expiredAt = now + 12 * 60 * 60 * 1000;
+  const retryAt = expiredAt + 15 * 60 * 1000;
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const { handlers, catalogFile, cleanup } = makeLastKnownCtx();
+  try {
+    const driver = getDriver("claude");
+    const initialModels = [
+      { id: "old-a", name: "Old A" },
+      { id: "old-b", name: "Old B" },
+    ];
+    t.mock.method(driver, "listModels", async () => ({
+      currentModelId: "old-a",
+      models: initialModels,
+    }));
+    const load = (force = false) => handlers.get("netcatty:ai:sdk-agent:list-models")(
+      { sender: {} }, { sdkBackend: "claude", agentCommand: "/test/lkg-stale-current-only", force },
+    );
+    const seeded = await load();
+    assert.equal(seeded.source, "live");
+    assert.deepEqual(seeded.models, initialModels);
+
+    t.mock.timers.setTime(expiredAt);
+    driver.listModels.mock.mockImplementation(async () => ({
+      currentModelId: "old-b",
+      models: [],
+    }));
+    const preserved = await load();
+    assert.equal(driver.listModels.mock.callCount(), 2);
+    assert.equal(preserved.ok, true);
+    assert.equal(preserved.source, "last-known-good");
+    assert.equal(preserved.fetchedAt, seeded.fetchedAt);
+    assert.equal(preserved.currentModelId, "old-b");
+    assert.deepEqual(preserved.models, initialModels);
+    assert.equal(preserved.warning, undefined);
+
+    const [cacheKey] = Object.keys(readLastKnownCatalogStore(catalogFile));
+    const persisted = readLastKnownCatalogEntry(catalogFile, cacheKey);
+    assert.equal(persisted.fetchedAt, seeded.fetchedAt);
+    assert.equal(persisted.currentModelId, "old-b");
+    assert.deepEqual(persisted.models, initialModels);
+
+    // Degraded retry interval applies because the full catalog was not refreshed.
+    t.mock.timers.setTime(retryAt - 1);
+    assert.deepEqual(await load(), preserved);
+    assert.equal(driver.listModels.mock.callCount(), 2);
+
+    // After the retry interval, automatic refresh runs again; an unlisted
+    // current-only id is synthesized without discarding the saved rows or age.
+    t.mock.timers.setTime(retryAt);
+    driver.listModels.mock.mockImplementation(async () => ({
+      currentModelId: "new-current",
+      models: [],
+    }));
+    const retried = await load();
+    assert.equal(driver.listModels.mock.callCount(), 3);
+    assert.equal(retried.source, "last-known-good");
+    assert.equal(retried.fetchedAt, seeded.fetchedAt);
+    assert.equal(retried.currentModelId, "new-current");
+    assert.deepEqual(retried.models, [
+      ...initialModels,
+      { id: "new-current", name: "new-current" },
+    ]);
+
+    // A full catalog response replaces the stale rows and clears retry state.
+    const freshModels = [
+      { id: "live-1", name: "Live 1" },
+      { id: "live-2", name: "Live 2" },
+    ];
+    driver.listModels.mock.mockImplementation(async () => ({
+      currentModelId: "live-1",
+      models: freshModels,
+    }));
+    const forced = await load(true);
+    assert.equal(forced.source, "live");
+    assert.equal(forced.currentModelId, "live-1");
+    assert.deepEqual(forced.models, freshModels);
+    assert.notEqual(forced.fetchedAt, seeded.fetchedAt);
+    assert.equal(driver.listModels.mock.callCount(), 4);
+    assert.deepEqual(await load(), forced);
+    assert.equal(driver.listModels.mock.callCount(), 4);
+  } finally {
+    cleanup();
+  }
+});
+
+test("list-models cacheOnly returns empty without invoking the driver on a cold cache", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const { handlers, cleanup } = makeLastKnownCtx();
+  try {
+    const driver = getDriver("claude");
+    t.mock.method(driver, "listModels", async () => {
+      throw new Error("cacheOnly must not invoke driver.listModels");
+    });
+    const result = await handlers.get("netcatty:ai:sdk-agent:list-models")(
+      { sender: {} },
+      { sdkBackend: "claude", agentCommand: "/test/lkg-cache-only-cold", cacheOnly: true },
+    );
+    assert.deepEqual(result, { ok: true, currentModelId: null, models: [] });
+    assert.equal(driver.listModels.mock.callCount(), 0);
+  } finally {
+    cleanup();
+  }
+});
+
 test("list-models force refresh bypasses warm memory and last-known-good and updates both caches", async (t) => {
   const { getDriver } = require("./index.cjs");
   const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx();

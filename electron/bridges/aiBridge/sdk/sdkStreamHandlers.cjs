@@ -227,7 +227,8 @@ function remapLastKnownCurrentModelId(lastKnown) {
 }
 
 function isFreshModelCatalog(catalog) {
-  return Date.now() - Date.parse(catalog.fetchedAt) < MODEL_CATALOG_MAX_AGE_MS;
+  const fetchedAtMs = Date.parse(catalog?.fetchedAt || "");
+  return Number.isFinite(fetchedAtMs) && Date.now() - fetchedAtMs < MODEL_CATALOG_MAX_AGE_MS;
 }
 
 /**
@@ -1274,6 +1275,42 @@ function registerSdkStreamHandlers(ctx) {
               abortController,
             );
             const { currentModelId, models } = normalizeSdkListModelsResult(raw);
+            if (models.length === 0 && currentModelId && !force) {
+              const existingLastKnown = readLastKnownCatalogEntry(lastKnownPath, cacheKey);
+              if (existingLastKnown) {
+                // Automatic stale-catalog revalidation returned only a current
+                // model id without catalog rows: treat it as incomplete so the
+                // picker keeps its saved choices and original catalog age while
+                // honoring the reported current id.
+                refreshLastKnownCatalogCurrentId(lastKnownPath, cacheKey, currentModelId);
+                const preserved = readLastKnownCatalogEntry(lastKnownPath, cacheKey) || existingLastKnown;
+                const hasCurrentRow = preserved.models.some((model) => model && (
+                  model.id === currentModelId
+                  || (Array.isArray(model.thinkingLevels)
+                    && model.thinkingLevels.some((level) => `${model.id}/${level}` === currentModelId))
+                ));
+                const preservedModels = hasCurrentRow
+                  ? preserved.models
+                  : [...preserved.models, { id: currentModelId, name: currentModelId }];
+                const result = {
+                  ok: true,
+                  currentModelId: remapLastKnownCurrentModelId({
+                    ...preserved,
+                    models: preservedModels,
+                    currentModelId,
+                  }),
+                  models: preservedModels,
+                  source: "last-known-good",
+                  fetchedAt: preserved.fetchedAt,
+                };
+                if (!isFreshModelCatalog(preserved)) {
+                  setSdkModelCacheEntry(sdkModelRefreshFailures, cacheKey, { at: Date.now(), result }, {
+                    ttlMs: MODEL_CATALOG_RETRY_MS,
+                  });
+                }
+                return result;
+              }
+            }
             sdkModelRefreshFailures.delete(cacheKey);
             const fetchedAt = new Date().toISOString();
             // Do not cache degraded empty catalogs: listOpenCodeModels and
@@ -1670,6 +1707,7 @@ function registerSdkStreamHandlers(ctx) {
     ctx.sdkRequestSessions = sdkRequestSessions;
     ctx.sdkRequestRuntimes = sdkRequestRuntimes;
     ctx.sdkModelCache = sdkModelCache; // exposed for catalog tests
+    ctx.sdkModelRefreshFailures = sdkModelRefreshFailures; // exposed for catalog tests
     ctx.codexAppServerRuntime = codexAppServerRuntime;
     ctx.codebuddySessionManager = codebuddySessionManager;
   }
