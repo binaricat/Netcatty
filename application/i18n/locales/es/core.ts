@@ -1461,6 +1461,7 @@ Resalta el panel dividido enfocado:
   'plugins.hostActions.selectionNote': 'Solo se comparten los nombres, direcciones, usuarios, protocolos, grupos y etiquetas guardados de los equipos seleccionados. Los grupos solo incluyen los equipos seleccionados ahora. Las solicitudes posteriores de edición o conexión siguen los permisos de este complemento.',
   'plugins.hostActions.create': 'Revisar borrador de equipo',
   'plugins.hostActions.edit': 'Revisar cambios del equipo',
+  'plugins.hostActions.streamNote': 'Permite que este complemento envíe y reciba datos en este destino a través del servidor SSH seleccionado. Las direcciones se resuelven en ese servidor. Esto puede leer o modificar datos de bases de datos. No se abrirá ninguna terminal ni se ejecutarán scripts de inicio. Las contraseñas y claves SSH permanecen en la aplicación. Selecciona un servidor SSH para continuar.',
   'plugins.hostActions.connect': 'Confirmar conexión',
   'plugins.hostActions.fieldDiff': 'Cambios que se guardarán',
   'plugins.hostActions.defaultsWarning': 'Se aplican los ajustes de conexión guardados. Cambiar el grupo puede cambiar la autenticación, el proxy y los scripts heredados.',

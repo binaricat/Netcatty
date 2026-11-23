@@ -1374,6 +1374,7 @@ Vaults 分頁維持扁平，不使用這塊背景。
   'plugins.hostActions.selectionNote': '僅向此外掛分享所選主機的中繼資料：名稱、位址、使用者名稱、協定、群組和標籤。選擇群組僅包含本次選取的成員。後續編輯或連線請求遵循此外掛的權限設定。',
   'plugins.hostActions.create': '預覽主機草稿',
   'plugins.hostActions.edit': '預覽主機修改',
+  'plugins.hostActions.streamNote': '允許此外掛透過選定的 SSH 伺服器向以上位址與連接埠收發資料。位址由該伺服器解析，可能讀取或修改資料庫資料。不會開啟終端機或執行啟動腳本，SSH 密碼與私鑰不會交給外掛。請選擇 SSH 伺服器。',
   'plugins.hostActions.connect': '確認連線',
   'plugins.hostActions.fieldDiff': '即將儲存的修改',
   'plugins.hostActions.defaultsWarning': '將套用已儲存的連線預設設定。修改群組可能改變繼承的驗證、代理和指令碼設定。',

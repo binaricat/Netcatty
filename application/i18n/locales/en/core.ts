@@ -1461,6 +1461,7 @@ Highlight the focused split pane:
   'plugins.hostActions.selectionNote': 'Only the selected hosts\' saved labels, addresses, usernames, protocols, groups and tags are shared. Group selection includes only the hosts selected now. Later edit or connection requests follow this plugin\'s permission settings.',
   'plugins.hostActions.create': 'Review host draft',
   'plugins.hostActions.edit': 'Review host changes',
+  'plugins.hostActions.streamNote': 'Allow this plugin to send and receive data at this destination through the selected SSH server. Addresses are resolved on that server. This may read or change database data. No terminal or startup scripts will run. SSH passwords and keys stay in the app. Select an SSH server to continue.',
   'plugins.hostActions.connect': 'Confirm connection',
   'plugins.hostActions.fieldDiff': 'Changes to save',
   'plugins.hostActions.defaultsWarning': 'Saved connection defaults apply. Changing a group can change inherited authentication, proxy settings and scripts.',
