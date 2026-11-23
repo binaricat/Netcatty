@@ -61,3 +61,12 @@ test('prompt host controller ignores ambiguous, sensitive, and local output', ()
   controller.handleTerminalOutput('local-1', '[root@10.1.64.1 ~]# ');
   assert.deepEqual(changes, []);
 });
+
+test('prompt host controller ignores host-like text embedded in copied output', () => {
+  const { changes, controller } = createHarness();
+  controller.handleTerminalOutput('ssh-1', '[root@jump.example.com ~]# ');
+  controller.handleTerminalOutput('ssh-1', 'see [root@prod] logs\n# ');
+  controller.handleTerminalOutput('ssh-1', '[root@prod] copied output\n# ');
+  controller.handleTerminalOutput('ssh-1', 'root@prod output\n# ');
+  assert.deepEqual(changes, []);
+});

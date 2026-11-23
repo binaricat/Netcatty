@@ -50,6 +50,16 @@ test('extractTerminalPromptHostname rejects ambiguous and sensitive text', () =>
   assert.equal(promptHostname('[root@host ~] no trailing marker'), null);
 });
 
+test('extractTerminalPromptHostname rejects host-like text embedded in copied output', () => {
+  for (const text of [
+    'see [root@prod] logs\n# ',
+    '[root@prod] copied output\n# ',
+    'root@prod output\n# ',
+  ]) {
+    assert.equal(promptHostname(text), null, text);
+  }
+});
+
 test('terminal prompt security recognizes password, MFA, OTP, PIN, and CJK challenges', () => {
   const challenges = [
     'Password: ',

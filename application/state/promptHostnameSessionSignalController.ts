@@ -26,7 +26,13 @@ export function createPromptHostnameSessionSignalController({
   return {
     handleTerminalOutput(sessionId: string, chunk: string): void {
       const session = getSession(sessionId);
-      if (!session || (session.protocol ?? 'ssh') !== 'ssh') return;
+      if (!session) {
+        tails.delete(sessionId);
+        baselines.delete(sessionId);
+        published.delete(sessionId);
+        return;
+      }
+      if ((session.protocol ?? 'ssh') !== 'ssh') return;
 
       const combined = `${tails.get(sessionId) ?? ''}${chunk}`;
       tails.set(sessionId, combined.slice(-tailLimit));

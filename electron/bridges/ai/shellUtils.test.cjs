@@ -609,6 +609,16 @@ test("does not recognize arbitrary or sensitive text before a bare marker", () =
   assert.equal(extractTrailingIdlePrompt("Password:\n# "), "");
 });
 
+test("does not recognize host-like text embedded in copied output before a bare marker", () => {
+  for (const output of [
+    "see [root@prod] logs\n# ",
+    "[root@prod] copied output\n# ",
+    "root@prod output\n# ",
+  ]) {
+    assert.equal(extractTrailingIdlePrompt(output), "", output);
+  }
+});
+
 test("trackSessionIdlePrompt and getFreshIdlePrompt accept a two-line user@host PS1", () => {
   const session = {};
   const prompt = "user@host: /home/foo\n$ ";

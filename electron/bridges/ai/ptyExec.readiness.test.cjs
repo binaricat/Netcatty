@@ -265,6 +265,26 @@ test('readiness failure does not echo a command or interrupt a waiting program',
   assert.deepEqual(interrupts, []);
 });
 
+test('host-like copied output before a bare marker never receives a command', async () => {
+  for (const output of [
+    'see [root@prod] logs\n# ',
+    '[root@prod] copied output\n# ',
+    'root@prod output\n# ',
+  ]) {
+    const pty = new TestPty();
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, output);
+    const result = await startPtyJob(pty, 'echo forbidden', {
+      shellKind: 'posix',
+      getReadyPrompt: () => readyPrompt(session),
+      promptWaitTimeoutMs: 25,
+      timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.code, 'SHELL_NOT_READY', output);
+    assert.deepEqual(pty.writes, [], output);
+  }
+});
+
 test('wall deadline during startup fails without writing or interrupting', async () => {
   const pty = new TestPty();
   const result = await startPtyJob(pty, 'echo OK', {

@@ -10,11 +10,11 @@ const OSC_CONTROL_PATTERN = new RegExp(
 const MAX_PROMPT_SECURITY_TAIL_CHARS = 2_048;
 const PROMPT_MARKER_LINE_PATTERN = /^[#$]$/u;
 const BRACKETED_PROMPT_IDENTITY_PATTERN =
-  /\[([^\s@\]]+)@([^\s\]:]+)(?:\s+[^\n\r\]]*)?\]/u;
+  /^(?:\([^()\r\n]+\)\s+)?\[([^\s@\]]+)@([^\s\]:#$%]+)(?:\s+[^\]\r\n]+)?\](?:[$#%]|\s+[A-Za-z][A-Za-z0-9_.-]{0,31}\s*=\s*[A-Fa-f0-9:.]+)?$/u;
 const SPACED_PROMPT_IDENTITY_PATTERN =
   /^#\s+([^\s@]+)\s+@\s+([^\s\]]+)/u;
 const POSIX_PROMPT_IDENTITY_PATTERN =
-  /^(?:\([^()\n]+\)\s+)?([^\s@():\]]+)@([^\s\]:]+)(?=[:)\s/]|$)/u;
+  /^(?:\([^()\r\n]+\)\s+)?([^\s@():\]]+)@([^\s\]:#$%]+)(?::[^\r\n#$%]*)?[$#%]?$/u;
 const PROMPT_HOST_PATTERN =
   /^(?:\[[A-Fa-f0-9:.]+\]|[A-Za-z0-9_][A-Za-z0-9_.-]*)$/u;
 
