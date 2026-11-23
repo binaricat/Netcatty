@@ -1417,8 +1417,8 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:cloudSync:webdav:initialize", { config }),
   cloudSyncWebdavUpload: (config, syncedFile) =>
     ipcRenderer.invoke("netcatty:cloudSync:webdav:upload", { config, syncedFile }),
-  cloudSyncWebdavDownload: (config) =>
-    ipcRenderer.invoke("netcatty:cloudSync:webdav:download", { config }),
+  cloudSyncWebdavDownload: (config, etag) =>
+    ipcRenderer.invoke("netcatty:cloudSync:webdav:download", { config, etag }),
   cloudSyncWebdavDelete: (config) =>
     ipcRenderer.invoke("netcatty:cloudSync:webdav:delete", { config }),
 
