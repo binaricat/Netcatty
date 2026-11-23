@@ -27,6 +27,7 @@ const CHANNELS = Object.freeze({
   logClear: "netcatty:plugins:log-clear",
   terminalTarget: "netcatty:plugins:terminal-target",
   interactionReady: "netcatty:plugins:interaction-ready",
+  hostStreamOpen: "netcatty:plugins:host-stream-open",
   interactionResponse: "netcatty:plugins:interaction-response",
   list: "netcatty:plugins:list",
   permissions: "netcatty:plugins:permissions",
@@ -714,6 +715,10 @@ function registerPluginBridge(ipcMain, options) {
   handlePassive(CHANNELS.interactionReady, false, async (_manager, payload, event) => {
     if (!options.interactionService) throw new Error("Host interactions are unavailable");
     return options.interactionService.setReady(event.sender, payload?.ready);
+  });
+  handle(CHANNELS.hostStreamOpen, async (_manager, payload, event) => {
+    if (!options.interactionService || !payload?.connectionOptions || payload?.response?.action !== "commit") throw new Error("Reviewed host connection is unavailable");
+    return options.interactionService.respond(event.sender, payload.response, payload.connectionOptions);
   });
   handle(CHANNELS.interactionResponse, async (_manager, payload, event) => {
     if (!options.interactionService) throw new Error("Host interactions are unavailable");

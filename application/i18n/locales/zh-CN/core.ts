@@ -1373,6 +1373,7 @@ Vaults 标签保持扁平，不使用这块背景。
   'plugins.hostActions.selectionNote': '仅向此插件共享所选主机的元数据：名称、地址、用户名、协议、分组和标签。选择分组仅包含本次选中的成员。后续编辑或连接请求遵循此插件的权限设置。',
   'plugins.hostActions.create': '预览主机草稿',
   'plugins.hostActions.edit': '预览主机修改',
+  'plugins.hostActions.streamNote': '允许此插件通过选定的 SSH 服务器向以上地址和端口收发数据。地址由该服务器解析，可能读取或修改数据库数据。不打开终端、不运行启动脚本，SSH 密码和私钥不会交给插件。请选择 SSH 服务器。',
   'plugins.hostActions.connect': '确认连接',
   'plugins.hostActions.fieldDiff': '即将保存的修改',
   'plugins.hostActions.defaultsWarning': '将应用已保存的连接默认设置。修改分组可能改变继承的认证、代理和脚本设置。',

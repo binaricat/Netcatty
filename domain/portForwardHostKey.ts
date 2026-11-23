@@ -9,7 +9,7 @@ import {
 export type { HostKeyInfo, HostKeyVerificationRequest };
 
 export const isPortForwardHostKeySessionId = (sessionId?: string): boolean => {
-  return typeof sessionId === "string" && sessionId.startsWith("pf-");
+  return typeof sessionId === "string" && (sessionId.startsWith("pf-") || sessionId.startsWith("plugin-stream-"));
 };
 
 export type PortForwardHostKeyRequest = HostKeyVerificationRequest & {

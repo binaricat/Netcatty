@@ -19,7 +19,7 @@ export function usePluginHostInteractions() {
         if (current.current?.requestId !== event.requestId) return;
         current.current = null; setPrompt(null);
       } else {
-        if (event.request.kind.startsWith('vault.')) return;
+        if (event.request.kind.startsWith('vault.') || event.request.kind === 'network.stream.connectViaHost') return;
         current.current = event as UiPrompt;
         if (event.request.kind === 'terminal.selection.read' && event.phase === 'request') {
           setPrompt(null);
