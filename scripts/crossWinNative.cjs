@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const asar = require("@electron/asar");
 
 const HOST_NATIVE_FILES = [
   "node_modules/@serialport/bindings-cpp/build/Release/bindings.node",
@@ -11,14 +12,18 @@ const HOST_NATIVE_FILES = [
   "node_modules/@vscode/windows-process-tree/build/Release/windows_process_tree.node",
 ];
 
-function isPortableExecutableFile(file) {
-  const fd = fs.openSync(file, "r");
-  try {
-    const magic = Buffer.alloc(2);
-    return fs.readSync(fd, magic, 0, 2, 0) === 2 && magic[0] === 0x4d && magic[1] === 0x5a;
-  } finally {
-    fs.closeSync(fd);
-  }
+function readPeMachine(fileOrBuffer) {
+  const bytes = Buffer.isBuffer(fileOrBuffer) ? fileOrBuffer : fs.readFileSync(fileOrBuffer);
+  if (bytes.length < 0x40 || bytes[0] !== 0x4d || bytes[1] !== 0x5a) return null;
+  const peOffset = bytes.readUInt32LE(0x3c);
+  if (peOffset > bytes.length - 24) return null;
+  if (bytes[peOffset] !== 0x50 || bytes[peOffset + 1] !== 0x45
+    || bytes[peOffset + 2] !== 0 || bytes[peOffset + 3] !== 0) return null;
+  return bytes.readUInt16LE(peOffset + 4);
+}
+
+function isPortableExecutableFile(fileOrBuffer) {
+  return readPeMachine(fileOrBuffer) === 0x8664;
 }
 
 function listNativeFiles(root) {
@@ -32,13 +37,23 @@ function listNativeFiles(root) {
   return files;
 }
 
-function assertWindowsNativePayload(unpackedDir) {
-  const incompatible = listNativeFiles(unpackedDir)
+function assertWindowsNativePayload(root, { asarPath } = {}) {
+  const incompatible = listNativeFiles(root)
     .filter((file) => !isPortableExecutableFile(file))
-    .map((file) => path.relative(unpackedDir, file));
+    .map((file) => path.relative(root, file));
+  if (asarPath && fs.existsSync(asarPath)) {
+    for (const entry of asar.listPackage(asarPath)) {
+      if (!entry.endsWith(".node")) continue;
+      const relativePath = entry.replace(/^\//, "");
+      const bytes = asar.extractFile(asarPath, relativePath);
+      if (!isPortableExecutableFile(bytes)) {
+        incompatible.push(`${asarPath}:${relativePath}`);
+      }
+    }
+  }
   if (incompatible.length > 0) {
     throw new Error(
-      `[crossWinNative] Windows payload still contains non-PE native modules: ${incompatible.join(", ")}`,
+      `[crossWinNative] Windows payload still contains native modules that are not a Windows x64 PE: ${incompatible.join(", ")}`,
     );
   }
 }
@@ -52,7 +67,7 @@ function normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile }) {
     : sqlite3WindowsFile
       ? fs.readFileSync(sqlite3WindowsFile)
       : null;
-  if (!sqlite3Bytes || sqlite3Bytes[0] !== 0x4d || sqlite3Bytes[1] !== 0x5a) {
+  if (!sqlite3Bytes || !isPortableExecutableFile(sqlite3Bytes)) {
     throw new Error("[crossWinNative] A Windows sqlite3 prebuild is required");
   }
 
@@ -122,8 +137,10 @@ function downloadWindowsSqlite3Prebuild(projectDir) {
 function normalizeCrossWindowsApp({ appOutDir, projectDir }) {
   const resourcesDir = path.join(appOutDir, "resources");
   const unpackedDir = path.join(resourcesDir, "app.asar.unpacked");
+  const asarPath = path.join(resourcesDir, "app.asar");
   const sqlite3WindowsFile = downloadWindowsSqlite3Prebuild(projectDir);
   const result = normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile });
+  assertWindowsNativePayload(resourcesDir, { asarPath });
   return {
     ...result,
     asarEntriesToRemove: result.removed,
@@ -137,4 +154,5 @@ module.exports = {
   isPortableExecutableFile,
   normalizeBundledWindowsNatives,
   normalizeCrossWindowsApp,
+  readPeMachine,
 };

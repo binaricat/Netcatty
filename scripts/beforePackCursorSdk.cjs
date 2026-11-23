@@ -71,12 +71,13 @@ function ensureCursorSdkPlatformPackages({
 function beforePackCursorSdk(context = {}) {
   const projectDir = context.appDir || process.cwd();
   const platform = context.electronPlatformName || process.platform;
+  const hostPlatform = context.hostPlatform || process.platform;
   const arch = normalizeWindowsHelperArch(context.arch || process.env.npm_config_arch || process.arch);
   const ensureCursor = context.ensureCursorSdkPlatformPackages || ensureCursorSdkPlatformPackages;
   ensureCursor({ projectDir, platform });
   const buildHelper = context.buildWindowsHelloHelper || buildWindowsHelloHelper;
   if (platform === "win32") {
-    if (process.env.NETCATTY_SKIP_WINDOWS_HELLO_HELPER === "1") {
+    if (hostPlatform !== "win32" || process.env.NETCATTY_SKIP_WINDOWS_HELLO_HELPER === "1") {
       console.warn("[windowsHelloHelper] Skipped for cross-platform packaging");
       return;
     }
