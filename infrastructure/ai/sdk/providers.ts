@@ -77,10 +77,22 @@ function getBridge(): BridgeAPI | null {
 }
 
 /**
- * Detect whether a request is likely a streaming request.
- * AI SDK streaming requests use POST with `"stream": true` in the body.
+ * Detect whether a request expects an SSE stream from the provider.
+ * OpenAI/Anthropic SDKs send `"stream": true` in the JSON body; Google
+ * Generative AI uses `:streamGenerateContent?alt=sse` on the URL instead.
  */
-function isStreamingRequest(init?: RequestInit): boolean {
+export function isStreamingRequest(url: string, init?: RequestInit): boolean {
+  try {
+    const parsedUrl = new URL(url);
+    if (
+      parsedUrl.pathname.endsWith(':streamGenerateContent')
+      && parsedUrl.searchParams.get('alt')?.toLowerCase() === 'sse'
+    ) {
+      return true;
+    }
+  } catch {
+    // Fall through to body inspection for relative or malformed URLs.
+  }
   if (!init?.body) return false;
   try {
     const bodyStr = typeof init.body === 'string' ? init.body : null;
@@ -505,7 +517,7 @@ export function createBridgeFetchForSDK(
     if (delegatedId && (!/^agent-model_[0-9a-f-]{36}_[0-9a-f-]{36}_$/.test(requestContext?.requestIdPrefix ?? '')
       || !requestContext?.requestIdPrefix?.startsWith(`agent-model_${delegatedId}_`))) throw Error('Delegated model request identity required');
     // Streaming path
-    if (isStreamingRequest(resolvedInit)) {
+    if (isStreamingRequest(url, resolvedInit)) {
       const prefix = requestContext?.requestIdPrefix ?? '';
       const requestId = `${prefix}sdk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const captureOpenAIChatFields = createOpenAIChatStreamFieldCapture(requestContext);
