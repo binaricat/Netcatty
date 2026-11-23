@@ -45,6 +45,7 @@ function mountHarness(options?: {
   rightInitialPath?: string;
   failingPaths?: Set<string>;
   dirCacheTtlMs?: number;
+  listDir?: (dirPath: string) => Promise<SftpFileEntry[]>;
 }) {
   const previousActFlag = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -82,6 +83,9 @@ function mountHarness(options?: {
 
   const listDir = async (dirPath: string): Promise<SftpFileEntry[]> => {
     listedPaths.push(dirPath);
+    if (options?.listDir) {
+      return options.listDir(dirPath);
+    }
     if (failingPaths.has(dirPath)) {
       throw new Error(`Permission denied: ${dirPath}`);
     }
@@ -277,6 +281,142 @@ test("host switch resets navigation history so previous host paths cannot be nav
     assert.equal(canGoBack(harness.getPane("left").navHistory!), false);
     assert.equal(canGoForward(harness.getPane("left").navHistory!), false);
     assert.equal(await harness.actions.navigateBack("left"), "aborted");
+  } finally {
+    await harness.unmount();
+  }
+});
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+test("mid-flight refresh inherits pending push navigation and clears cleanly on settle or failure", async () => {
+  const pendingLoads: Array<{ path: string; deferred: ReturnType<typeof createDeferred<SftpFileEntry[]>> }> = [];
+  const harness = mountHarness({
+    dirCacheTtlMs: 0,
+    listDir: (dirPath) => {
+      if (dirPath === "/slow" || dirPath === "/slow-fail") {
+        const deferred = createDeferred<SftpFileEntry[]>();
+        pendingLoads.push({ path: dirPath, deferred });
+        return deferred.promise;
+      }
+      return Promise.resolve([]);
+    },
+  });
+
+  try {
+    await harness.render();
+
+    // Start slow navigation to /slow, then refresh mid-flight before /slow settles.
+    const slowNavPromise = harness.actions.navigateTo("left", "/slow");
+    assert.equal(harness.getPane("left").connection?.currentPath, "/slow");
+    assert.equal(harness.getPane("left").loading, true);
+    assert.deepEqual(harness.getPane("left").navHistory?.entries, ["/home/alice"]);
+
+    const refreshPromise = harness.actions.refresh("left");
+    assert.equal(pendingLoads.length, 2);
+
+    // Original slow navigation finishes first (superseded), then refresh settles.
+    pendingLoads[0].deferred.resolve([]);
+    assert.equal(await slowNavPromise, "superseded");
+    pendingLoads[1].deferred.resolve([]);
+    await refreshPromise;
+
+    assert.equal(harness.getPane("left").connection?.currentPath, "/slow");
+    assert.deepEqual(harness.getPane("left").navHistory?.entries, ["/home/alice", "/slow"]);
+    assert.equal(harness.getPane("left").navHistory?.index, 1);
+
+    // Back returns to /home/alice cleanly.
+    assert.equal(await harness.actions.navigateBack("left"), "reached");
+    assert.equal(harness.getPane("left").connection?.currentPath, "/home/alice");
+    assert.equal(harness.getPane("left").navHistory?.index, 0);
+
+    // If a mid-flight refresh fails, currentPath reverts and history/forward stack stay intact.
+    pendingLoads.length = 0;
+    const failNavPromise = harness.actions.navigateTo("left", "/slow-fail");
+    const failRefreshPromise = harness.actions.refresh("left");
+    assert.equal(pendingLoads.length, 2);
+
+    pendingLoads[0].deferred.resolve([]);
+    assert.equal(await failNavPromise, "superseded");
+    pendingLoads[1].deferred.reject(new Error("I/O error"));
+    await failRefreshPromise;
+
+    assert.equal(harness.getPane("left").connection?.currentPath, "/home/alice");
+    assert.deepEqual(harness.getPane("left").navHistory?.entries, ["/home/alice", "/slow"]);
+    assert.equal(harness.getPane("left").navHistory?.index, 0);
+    assert.equal(canGoForward(harness.getPane("left").navHistory!), true);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("mid-flight refresh during Forward or Back advances history index consistently", async () => {
+  const pendingLoads: Array<{ path: string; deferred: ReturnType<typeof createDeferred<SftpFileEntry[]>> }> = [];
+  let interceptTarget: string | null = null;
+  const harness = mountHarness({
+    dirCacheTtlMs: 0,
+    listDir: (dirPath) => {
+      if (interceptTarget && dirPath === interceptTarget) {
+        const deferred = createDeferred<SftpFileEntry[]>();
+        pendingLoads.push({ path: dirPath, deferred });
+        return deferred.promise;
+      }
+      return Promise.resolve([]);
+    },
+  });
+
+  try {
+    await harness.render();
+
+    // Build history: [/home/alice, /var, /var/log], then step Back to /var (index 1).
+    assert.equal(await harness.actions.navigateTo("left", "/var"), "reached");
+    assert.equal(await harness.actions.navigateTo("left", "/var/log"), "reached");
+    assert.equal(await harness.actions.navigateBack("left"), "reached");
+    assert.equal(harness.getPane("left").connection?.currentPath, "/var");
+    assert.equal(harness.getPane("left").navHistory?.index, 1);
+
+    // Start Forward -> /var/log, then trigger Refresh before it finishes.
+    interceptTarget = "/var/log";
+    const forwardPromise = harness.actions.navigateForward("left");
+    assert.equal(harness.getPane("left").connection?.currentPath, "/var/log");
+    assert.equal(harness.getPane("left").navHistory?.index, 1);
+
+    const refreshPromise = harness.actions.refresh("left");
+    assert.equal(pendingLoads.length, 2);
+
+    pendingLoads[0].deferred.resolve([]);
+    assert.equal(await forwardPromise, "superseded");
+    pendingLoads[1].deferred.resolve([]);
+    await refreshPromise;
+
+    // Displayed directory and history index must stay synchronized at /var/log (index 2).
+    assert.equal(harness.getPane("left").connection?.currentPath, "/var/log");
+    assert.deepEqual(harness.getPane("left").navHistory?.entries, ["/home/alice", "/var", "/var/log"]);
+    assert.equal(harness.getPane("left").navHistory?.index, 2);
+
+    // Next Back must go to /var (NOT skip /var and jump to /home/alice).
+    interceptTarget = "/var";
+    pendingLoads.length = 0;
+    const backPromise = harness.actions.navigateBack("left");
+    const backRefreshPromise = harness.actions.refresh("left");
+    assert.equal(pendingLoads.length, 2);
+
+    pendingLoads[0].deferred.resolve([]);
+    assert.equal(await backPromise, "superseded");
+    pendingLoads[1].deferred.resolve([]);
+    await backRefreshPromise;
+
+    assert.equal(harness.getPane("left").connection?.currentPath, "/var");
+    assert.equal(harness.getPane("left").navHistory?.index, 1);
+    assert.equal(canGoBack(harness.getPane("left").navHistory!), true);
+    assert.equal(canGoForward(harness.getPane("left").navHistory!), true);
   } finally {
     await harness.unmount();
   }

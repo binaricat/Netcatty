@@ -15,6 +15,7 @@ import {
   pushNavHistory,
   resetNavHistory,
   resolveSftpConnectNavHistory,
+  resolveSftpEffectiveNavHistoryMode,
 } from "./sftpNavHistory.ts";
 
 test("createNavHistory initializes empty or with an initial path", () => {
@@ -241,4 +242,49 @@ test("resolveSftpConnectNavHistory resets on host switch and preserves on same-e
   });
   assert.deepEqual(reconnectedFallbackPath.entries, ["/home/alice", "/var/log", "/home/alice"]);
   assert.equal(reconnectedFallbackPath.index, 2);
+});
+
+test("resolveSftpEffectiveNavHistoryMode inherits pending transitions on matching mid-flight refresh", () => {
+  const pending = { connectionId: "conn-1", path: "/var/log", mode: "forward" as const };
+
+  assert.equal(
+    resolveSftpEffectiveNavHistoryMode({
+      requestedMode: "none",
+      pending,
+      connectionId: "conn-1",
+      targetPath: "/var/log",
+    }),
+    "forward",
+  );
+
+  // Different path or connection does not inherit
+  assert.equal(
+    resolveSftpEffectiveNavHistoryMode({
+      requestedMode: "none",
+      pending,
+      connectionId: "conn-1",
+      targetPath: "/var",
+    }),
+    "none",
+  );
+  assert.equal(
+    resolveSftpEffectiveNavHistoryMode({
+      requestedMode: "none",
+      pending,
+      connectionId: "conn-2",
+      targetPath: "/var/log",
+    }),
+    "none",
+  );
+
+  // Explicit non-"none" mode always wins
+  assert.equal(
+    resolveSftpEffectiveNavHistoryMode({
+      requestedMode: "back",
+      pending,
+      connectionId: "conn-1",
+      targetPath: "/var/log",
+    }),
+    "back",
+  );
 });

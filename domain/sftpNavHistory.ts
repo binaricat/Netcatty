@@ -14,6 +14,12 @@ export interface SftpNavHistoryStep {
 
 export type SftpNavHistoryTransitionMode = "push" | "back" | "forward" | "none";
 
+export interface PendingSftpNavHistoryTransition {
+  readonly connectionId: string;
+  readonly path: string;
+  readonly mode: SftpNavHistoryTransitionMode;
+}
+
 export type SftpNavPathComparator = (a: string, b: string) => boolean;
 
 const defaultIsSamePath: SftpNavPathComparator = (a, b) => a === b;
@@ -180,6 +186,27 @@ export function applySftpNavHistoryTransition(params: {
   }
 
   return pushNavHistory(base, params.targetPath, compare);
+}
+
+export function resolveSftpEffectiveNavHistoryMode(params: {
+  requestedMode: SftpNavHistoryTransitionMode;
+  pending?: PendingSftpNavHistoryTransition;
+  connectionId: string;
+  targetPath: string;
+  isSamePath?: SftpNavPathComparator;
+}): SftpNavHistoryTransitionMode {
+  if (params.requestedMode !== "none") {
+    return params.requestedMode;
+  }
+  const compare = params.isSamePath ?? defaultIsSamePath;
+  if (
+    params.pending
+    && params.pending.connectionId === params.connectionId
+    && compare(params.pending.path, params.targetPath)
+  ) {
+    return params.pending.mode;
+  }
+  return "none";
 }
 
 export function resolveSftpConnectNavHistory(params: {

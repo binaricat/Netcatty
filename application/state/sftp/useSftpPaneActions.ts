@@ -29,6 +29,8 @@ import {
   createNavHistory,
   goBack,
   goForward,
+  resolveSftpEffectiveNavHistoryMode,
+  type PendingSftpNavHistoryTransition,
   type SftpNavHistoryTransitionMode,
 } from "../../../domain/sftpNavHistory";
 
@@ -162,6 +164,12 @@ export const useSftpPaneActions = ({
     new Map<string, { connectionId: string; path: string; files: SftpFileEntry[]; selectedFiles: Set<string>; filter: string }>(),
   );
 
+  // Track the in-flight navigation history transition per tab so a mid-flight
+  // refresh (historyMode: "none") targeting the same unconfirmed destination
+  // inherits the pending transition instead of leaving currentPath and
+  // navHistory out of sync.
+  const pendingNavHistoryRef = useRef(new Map<string, PendingSftpNavHistoryTransition>());
+
   const navigateTo = useCallback(
     async (
       side: "left" | "right",
@@ -194,7 +202,14 @@ export const useSftpPaneActions = ({
       );
 
       const connectionId = pane.connection.id;
-      const historyMode: SftpNavHistoryTransitionMode = options?.historyMode ?? "push";
+      const requestedHistoryMode: SftpNavHistoryTransitionMode = options?.historyMode ?? "push";
+      const historyMode = resolveSftpEffectiveNavHistoryMode({
+        requestedMode: requestedHistoryMode,
+        pending: pendingNavHistoryRef.current.get(targetTabId),
+        connectionId,
+        targetPath: normalizedPath,
+        isSamePath: isSameSftpPath,
+      });
       const requestId = ++navSeqRef.current[side];
       const cacheKey = makeCacheKey(connectionId, normalizedPath, pane.filenameEncoding);
       const clearFilterForPathChange = shouldClearSftpFilterForPathChange(pane.connection.currentPath, normalizedPath);
@@ -209,6 +224,7 @@ export const useSftpPaneActions = ({
         cached.files
       ) {
         tabNavSeqRef.current.set(targetTabId, requestId);
+        pendingNavHistoryRef.current.delete(targetTabId);
         lastConfirmedRef.current.set(targetTabId, {
           connectionId,
           path: normalizedPath,
@@ -271,6 +287,11 @@ export const useSftpPaneActions = ({
       const previousFilter = confirmed.filter;
       const previousError = pane.error;
       const isTargetRequestCurrent = () => tabNavSeqRef.current.get(targetTabId) === requestId;
+      const clearPendingNavHistoryIfCurrent = () => {
+        if (isTargetRequestCurrent()) {
+          pendingNavHistoryRef.current.delete(targetTabId);
+        }
+      };
       const getTargetPane = () => {
         const currentSideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
         return currentSideTabs.tabs.find((t) => t.id === targetTabId) ?? null;
@@ -281,6 +302,7 @@ export const useSftpPaneActions = ({
       );
       const restoreConfirmedStateIfCurrent = () => {
         if (!isTargetRequestCurrent()) return;
+        pendingNavHistoryRef.current.delete(targetTabId);
         updateTab(side, targetTabId, (prev) => {
           if (prev.connection?.id !== connectionId || !isTargetRequestCurrent()) return prev;
           return {
@@ -295,6 +317,15 @@ export const useSftpPaneActions = ({
         });
       };
       tabNavSeqRef.current.set(targetTabId, requestId);
+      if (historyMode !== "none") {
+        pendingNavHistoryRef.current.set(targetTabId, {
+          connectionId,
+          path: normalizedPath,
+          mode: historyMode,
+        });
+      } else {
+        pendingNavHistoryRef.current.delete(targetTabId);
+      }
       // Keep existing files visible during loading — the loading overlay
       // (pointer-events-none) prevents interaction. This avoids blanking a tab
       // that gets superseded by another tab navigating on the same side.
@@ -324,6 +355,7 @@ export const useSftpPaneActions = ({
               restoreConfirmedStateIfCurrent();
               return "aborted";
             }
+            clearPendingNavHistoryIfCurrent();
             clearCacheForConnection(pane.connection.id);
             // For background tabs (explicit tabId), update that tab directly
             // instead of handleSessionError which targets the active tab.
@@ -350,6 +382,7 @@ export const useSftpPaneActions = ({
                 restoreConfirmedStateIfCurrent();
                 return "aborted";
               }
+              clearPendingNavHistoryIfCurrent();
               await releaseConnection(pane.connection.id);
               if (options?.tabId) {
                 updateTab(side, targetTabId, (prev) => ({
@@ -386,6 +419,8 @@ export const useSftpPaneActions = ({
           files,
           timestamp: Date.now(),
         }, { ttlMs: dirCacheTtlMs });
+
+        clearPendingNavHistoryIfCurrent();
 
         lastConfirmedRef.current.set(targetTabId, {
           connectionId,
@@ -433,6 +468,7 @@ export const useSftpPaneActions = ({
           restoreConfirmedStateIfCurrent();
           return "aborted";
         }
+        clearPendingNavHistoryIfCurrent();
         let navigationFailed = false;
         updateTab(side, targetTabId, (prev) => {
           if (prev.connection?.id !== connectionId) {
