@@ -278,7 +278,7 @@ function AppViewInner({ domains }: AppViewProps) {
     passphraseQueue, fidoPromptQueue, protocolSelectHost, proxyProfiles, portForwardingRules, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions,
     resolveEmptyVaultConflict, resolveSessionAppearance, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
     sessions, setActiveTabId, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap,
-    setNavigateToSection, setTerminalFontFamilyId, setTerminalFontSize, setVaultFocusRequest, updateSessionFontSize, updateSessionRestoreCwd, updateSessionDynamicTitle, updateSessionCodingCliProvider, clearSessionFontSizeOverride,
+    setNavigateToSection, setTerminalFontFamilyId, setTerminalFontSize, setVaultFocusRequest, updateSessionFontSize, updateSessionRestoreCwd, updateSessionDynamicTitle, updateSessionPromptHost, updateSessionCodingCliProvider, clearSessionFontSizeOverride,
     setWorkspaceFocusedSession, setWorkspaceAnchorChat, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior,
     sftpShowHiddenFiles, sftpUseCompressedUpload, snippetPackages, snippets, splitSessionWithCurrentShell, startSessionRename,
     startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById,
@@ -760,6 +760,7 @@ function AppViewInner({ domains }: AppViewProps) {
           onUpdateSessionFontSize={updateSessionFontSize}
           onUpdateSessionRestoreCwd={updateSessionRestoreCwd}
           onUpdateSessionDynamicTitle={updateSessionDynamicTitle}
+          onUpdateSessionPromptHost={updateSessionPromptHost}
           onUpdateSessionCodingCliProvider={updateSessionCodingCliProvider}
           onClearSessionFontSizeOverride={clearSessionFontSizeOverride}
           onUpdateTerminalFontWeight={handleUpdateTerminalFontWeight}

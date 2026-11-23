@@ -10,7 +10,7 @@ const OSC_CONTROL_PATTERN = new RegExp(
 const MAX_PROMPT_SECURITY_TAIL_CHARS = 2_048;
 const PROMPT_MARKER_LINE_PATTERN = /^[#$]$/u;
 const BRACKETED_PROMPT_IDENTITY_PATTERN =
-  /\[([^\s@\[\]]+)@([^\s\]:]+)(?:\s+[^\n\r\]]*)?\]/u;
+  /\[([^\s@\]]+)@([^\s\]:]+)(?:\s+[^\n\r\]]*)?\]/u;
 const SPACED_PROMPT_IDENTITY_PATTERN =
   /^#\s+([^\s@]+)\s+@\s+([^\s\]]+)/u;
 const POSIX_PROMPT_IDENTITY_PATTERN =
