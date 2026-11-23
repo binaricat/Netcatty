@@ -31,7 +31,7 @@ export const MessageContent = ({ children, className, from, ...props }: MessageC
   <div
     className={cn(
       'ai-chat-message-content flex w-fit min-w-0 max-w-full flex-col gap-1.5 text-[13px] leading-relaxed',
-      'group-[.is-user]:ml-auto group-[.is-user]:overflow-hidden group-[.is-user]:rounded-lg group-[.is-user]:border group-[.is-user]:border-border/50 group-[.is-user]:bg-muted/50 group-[.is-user]:px-2.5 group-[.is-user]:py-[7px]',
+      'group-[.is-user]:ml-auto group-[.is-user]:overflow-hidden group-[.is-user]:rounded-lg group-[.is-user]:border group-[.is-user]:border-primary/25 group-[.is-user]:bg-primary/12 group-[.is-user]:text-foreground [.dark_&]:group-[.is-user]:border-primary/30 [.dark_&]:group-[.is-user]:bg-primary/18 group-[.is-user]:px-2.5 group-[.is-user]:py-[7px]',
       'group-[.is-assistant]:w-full group-[.is-assistant]:text-foreground/90',
       className,
     )}
