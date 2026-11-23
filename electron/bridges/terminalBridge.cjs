@@ -168,6 +168,7 @@ const {
   releaseAttachedSessionState,
   setRestoreAttachedSessionOutput,
   clearAttachPopupAttached,
+  failAttachPopupAuthorization,
   markAttachPopupAttached,
   setAttachHomeLookup,
   setFanoutSessionExit,
@@ -2491,6 +2492,13 @@ function registerHandlers(ipcMain, options = {}) {
     requestTerminalSessionSnapshot(event, payload, terminalWorkerManager));
   ipcMain.handle("netcatty:terminal:applySnapshot", (event, payload) =>
     applyTerminalSessionSnapshot(event, payload, terminalWorkerManager));
+  ipcMain.handle("netcatty:terminal:reportAttachFailed", (event, payload) => {
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+    const authorization = typeof payload?.authorization === "string" ? payload.authorization : "";
+    const error = typeof payload?.error === "string" ? payload.error : "";
+    const ok = failAttachPopupAuthorization(authorization, sessionId, event?.sender?.id, error);
+    return ok ? { success: true } : { success: false, error: "Unauthorized attach request" };
+  });
   ipcMain.handle("netcatty:terminal:setFlowPausedAndWait", async (event, payload) => {
     const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
     if (!sessionId) return { success: false, error: "Missing terminal session" };

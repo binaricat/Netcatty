@@ -480,6 +480,7 @@ declare global {
       error?: string;
     }>;
     markAttachPopupClosePrepared?(sessionId: string, authorization: string): Promise<{ success: boolean; error?: string }>;
+    reportTerminalAttachFailed?(sessionId: string, authorization: string, error?: string): Promise<{ success: boolean; error?: string }>;
     onTerminalPopupPrepareClose?(cb: (payload: { sessionId: string; authorization: string }) => void): () => void;
     /** Fired in the home window after an attach popup for sessionId has closed. */
     onTerminalPopupAttachClosed?(cb: (payload: { sessionId: string }) => void): () => void;

@@ -216,12 +216,27 @@ test("moveSessionToNewWindowImpl hides the tab and attaches a popup to the same 
   assert.deepEqual(errors, []);
 });
 
-test("moveSessionToNewWindowImpl restores the tab when the popup fails to open", async () => {
+test("moveSessionToNewWindowImpl leaves the tab untouched when the popup fails to attach", async () => {
   const { calls, errors, getCtx } = moveCtx(async () => ({ success: false, error: "boom" }));
 
   assert.equal(await moveSessionToNewWindowImpl(getCtx, "session-1"), false);
-  assert.deepEqual(calls.slice(-2), [["poppedOut", "session-1", false], ["active", "session-1"]]);
+  assert.deepEqual(calls, []);
   assert.deepEqual(errors, ["boom"]);
+});
+
+test("moveSessionToNewWindowImpl waits for popup attachment before hiding the tab", async () => {
+  let resolveOpen: ((value: unknown) => void) | null = null;
+  const { calls, getCtx } = moveCtx(
+    () => new Promise((resolve) => { resolveOpen = resolve; }),
+  );
+
+  const pending = moveSessionToNewWindowImpl(getCtx, "session-1");
+  await Promise.resolve();
+  assert.deepEqual(calls, []);
+
+  resolveOpen?.({ success: true });
+  assert.equal(await pending, true);
+  assert.deepEqual(calls, [["poppedOut", "session-1", true], ["active", "other"]]);
 });
 
 test("moveSessionToNewWindowImpl ignores tabs without a live backend", async () => {
@@ -229,6 +244,17 @@ test("moveSessionToNewWindowImpl ignores tabs without a live backend", async () 
   const ctx = getCtx();
   const result = await moveSessionToNewWindowImpl(
     () => ({ ...ctx, sessions: [sourceSession({ status: "disconnected" })] }),
+    "session-1",
+  );
+  assert.equal(result, false);
+  assert.deepEqual(calls, []);
+});
+
+test("moveSessionToNewWindowImpl ignores plugin-backed sessions", async () => {
+  const { calls, getCtx } = moveCtx(async () => ({ success: true }));
+  const ctx = getCtx();
+  const result = await moveSessionToNewWindowImpl(
+    () => ({ ...ctx, sessions: [sourceSession({ protocol: "plugin:com.acme.db" })] }),
     "session-1",
   );
   assert.equal(result, false);
@@ -274,7 +300,7 @@ test("moveSessionToNewWindowImpl does not steal focus when moving an inactive ta
     "session-1",
   );
   assert.equal(result, false);
-  assert.deepEqual(calls, [["poppedOut", "session-1", true], ["poppedOut", "session-1", false]]);
+  assert.deepEqual(calls, []);
   assert.deepEqual(errors, ["nope"]);
 });
 

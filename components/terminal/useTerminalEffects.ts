@@ -790,8 +790,14 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               return;
             }
             if (!rebind?.success) {
+              const attachError = rebind?.error || "Failed to attach to session";
               outputPauseLease.release();
-              setError(rebind?.error || "Failed to attach to session");
+              void terminalBackend.reportAttachFailed?.(
+                sessionId,
+                attachAuthorization || "",
+                attachError,
+              );
+              setError(attachError);
               updateStatus("disconnected");
               isBootActiveRef.current = false;
               return;
@@ -840,8 +846,14 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               outputPauseLease.release();
             }
             if (disposed) return;
+            const attachError = attachErr instanceof Error ? attachErr.message : String(attachErr);
             logger.error("Failed to attach existing session", attachErr);
-            setError(attachErr instanceof Error ? attachErr.message : String(attachErr));
+            void terminalBackend.reportAttachFailed?.(
+              sessionId,
+              attachAuthorization || "",
+              attachError,
+            );
+            setError(attachError);
             updateStatus("disconnected");
           }
           isBootActiveRef.current = false;

@@ -12,8 +12,22 @@ let fanoutExitImpl = null;
 const attachPopupAuthorizations = new Map();
 const pendingAttachRestores = new Set();
 
+function settleAttachPopupOutcome(grant, outcome) {
+  if (!grant || grant.outcomeSettled) return;
+  grant.outcomeSettled = true;
+  try {
+    grant.resolveOutcome?.(outcome);
+  } catch {
+    // ignore
+  }
+}
+
 function registerAttachPopupAuthorization(token, sessionId, webContentsId, options = {}) {
   if (!token || !sessionId || typeof webContentsId !== "number") return false;
+  let resolveOutcome = null;
+  const outcomePromise = new Promise((resolve) => {
+    resolveOutcome = resolve;
+  });
   attachPopupAuthorizations.set(token, {
     sessionId,
     webContentsId,
@@ -23,14 +37,55 @@ function registerAttachPopupAuthorization(token, sessionId, webContentsId, optio
     // does not leave a live PTY stranded behind a failed attachment.
     ownsLifetime: options?.ownsLifetime === true,
     attached: false,
+    outcomeSettled: false,
+    outcomePromise,
+    resolveOutcome,
   });
   return true;
 }
 
 function markAttachPopupAttached(token, sessionId, webContentsId) {
   if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
-  attachPopupAuthorizations.get(token).attached = true;
+  const grant = attachPopupAuthorizations.get(token);
+  grant.attached = true;
+  settleAttachPopupOutcome(grant, { success: true });
   return true;
+}
+
+function failAttachPopupAuthorization(token, sessionId, webContentsId, error) {
+  if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
+  const grant = attachPopupAuthorizations.get(token);
+  settleAttachPopupOutcome(grant, {
+    success: false,
+    error: typeof error === "string" && error.trim() ? error.trim() : "Failed to attach terminal popup",
+  });
+  return true;
+}
+
+function isAttachPopupAttached(token) {
+  return attachPopupAuthorizations.get(token)?.attached === true;
+}
+
+function waitForAttachPopupOutcome(token, timeoutMs = 10000) {
+  const grant = token ? attachPopupAuthorizations.get(token) : null;
+  if (!grant) {
+    return Promise.resolve({ success: false, error: "Attach popup closed before attaching" });
+  }
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (outcome) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(outcome);
+    };
+    const timer = setTimeout(() => {
+      const failure = { success: false, error: "Timed out waiting for terminal popup to attach" };
+      settleAttachPopupOutcome(grant, failure);
+      finish(failure);
+    }, timeoutMs);
+    void grant.outcomePromise.then(finish);
+  });
 }
 
 function clearAttachPopupAttached(token, sessionId, webContentsId) {
@@ -69,14 +124,22 @@ function isAttachPopupClosePrepared(token) {
 }
 
 function releaseAttachPopupAuthorization(token) {
-  if (token) attachPopupAuthorizations.delete(token);
+  if (!token) return;
+  const grant = attachPopupAuthorizations.get(token);
+  if (grant) {
+    settleAttachPopupOutcome(grant, { success: false, error: "Attach popup closed before attaching" });
+  }
+  attachPopupAuthorizations.delete(token);
 }
 
 function releaseAttachedSessionState(sessionId) {
   if (!sessionId) return;
   pendingAttachRestores.delete(sessionId);
   for (const [token, grant] of attachPopupAuthorizations) {
-    if (grant?.sessionId === sessionId) attachPopupAuthorizations.delete(token);
+    if (grant?.sessionId === sessionId) {
+      settleAttachPopupOutcome(grant, { success: false, error: "Session closed before popup attached" });
+      attachPopupAuthorizations.delete(token);
+    }
   }
 }
 
@@ -155,6 +218,9 @@ module.exports = {
   registerAttachPopupAuthorization,
   validateAttachPopupAuthorization,
   markAttachPopupAttached,
+  failAttachPopupAuthorization,
+  isAttachPopupAttached,
+  waitForAttachPopupOutcome,
   clearAttachPopupAttached,
   markAttachPopupClosePrepared,
   isAttachPopupClosePrepared,

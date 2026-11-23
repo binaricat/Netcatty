@@ -16,6 +16,7 @@ import { useShortcutModifierHeldValue } from '../../application/state/useShortcu
 import { terminalReconnectRegistry } from '../../application/state/terminalReconnectRegistry';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { getEffectiveHostDistro } from '../../domain/host';
+import { isPluginHostProtocol } from '../../domain/pluginConnection';
 import { resolveHostIconAppearance, resolveHostIconColorAppearance } from '../../domain/hostIcon';
 import { resolveSessionCodingCliProvider } from '../../domain/codingCliProviderMatch';
 import type { CodingCliProvider } from '../../domain/codingCliProviders';
@@ -964,7 +965,11 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
         onCopySession={onCopySession}
         onDuplicateSession={onDuplicateSession}
         onCopySessionToNewWindow={onCopySessionToNewWindow}
-        onMoveSessionToNewWindow={onMoveSessionToNewWindow}
+        onMoveSessionToNewWindow={
+          (isPluginHostProtocol(session.protocol) || session.protocol?.startsWith('plugin:'))
+            ? undefined
+            : onMoveSessionToNewWindow
+        }
         onReconnectSession={terminalReconnectRegistry.request}
         sessionStatus={session.status}
         reconnectActive={reconnectActive}

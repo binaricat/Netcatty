@@ -8,6 +8,7 @@ const {
   registerAttachPopupAuthorization,
   releaseAttachPopupAuthorization,
   restoreAttachedSessionOutput,
+  waitForAttachPopupOutcome,
 } = require("../terminalAttachRestore.cjs");
 const {
   windowsFramelessContentChromeOptions,
@@ -346,6 +347,24 @@ function createTerminalPopupWindowApi(ctx) {
           popupId,
           title,
         });
+        if (ownsSessionLifetime) {
+          // Wait for the popup to actually attach (snapshot + output rebind)
+          // before showing it or telling the source window to hide the tab.
+          const attachOutcome = await waitForAttachPopupOutcome(attachAuthorization);
+          if (!attachOutcome?.success || lifecycleReleased || !isLiveWindow(win)) {
+            const errorMessage = attachOutcome?.error || "Failed to attach terminal popup";
+            try {
+              if (isLiveWindow(win)) {
+                if (typeof win.destroy === "function") win.destroy();
+                else win.close();
+              }
+            } catch {
+              // Lifecycle cleanup below remains fail-safe if Electron cleanup throws.
+            }
+            releaseLifecycle();
+            return { success: false, error: errorMessage };
+          }
+        }
         showAndFocusWindow(win);
         crashLogBridge.captureDiagnostic("terminal-popup", "popup window shown", {
           popupId,

@@ -6,6 +6,8 @@ const test = require("node:test");
 const { createAppContentWindowClosedHandler } = require("../../appWindowLifecycle.cjs");
 const { createTerminalPopupWindowApi } = require("./terminalPopupWindow.cjs");
 const {
+  failAttachPopupAuthorization,
+  markAttachPopupAttached,
   markAttachPopupClosePrepared,
   setRestoreAttachedSessionOutput,
 } = require("../terminalAttachRestore.cjs");
@@ -374,6 +376,8 @@ test("moved-tab popup skips crash restoration and close handoff after its source
     };
 
     const popupWindows = [];
+    let attachOutcomeMode = "succeed";
+    let shownCount = 0;
     class MovePopupWindowStub {
       constructor() {
         popupWindows.push(this);
@@ -381,10 +385,22 @@ test("moved-tab popup skips crash restoration and close handoff after its source
         this.handlers = new Map();
         this.webContentsHandlers = new Map();
         this.sent = [];
+        const wcId = 90 + popupWindows.length;
         this.webContents = {
-          id: 90 + popupWindows.length,
+          id: wcId,
           on: (channel, handler) => { this.webContentsHandlers.set(channel, handler); },
-          send: (channel, payload) => { this.sent.push({ channel, payload }); },
+          send: (channel, payload) => {
+            this.sent.push({ channel, payload });
+            if (channel === "netcatty:window:terminalPopupConfig" && payload?.attachAuthorization) {
+              queueMicrotask(() => {
+                if (attachOutcomeMode === "fail") {
+                  failAttachPopupAuthorization(payload.attachAuthorization, payload.attachSessionId, wcId, "Session exited");
+                } else {
+                  markAttachPopupAttached(payload.attachAuthorization, payload.attachSessionId, wcId);
+                }
+              });
+            }
+          },
           setWindowOpenHandler() {},
         };
       }
@@ -416,7 +432,7 @@ test("moved-tab popup skips crash restoration and close handoff after its source
       createExternalOnlyWindowOpenHandler() { return {}; },
       applyWindowOpacityToWindow() {},
       getDevRendererBaseUrl(url) { return url; },
-      showAndFocusWindow() {},
+      showAndFocusWindow() { shownCount += 1; },
       registerAppContentWindow() {},
       unregisterAppContentWindow() {},
       notifyAppContentWindowClosed() {},
@@ -447,6 +463,19 @@ test("moved-tab popup skips crash restoration and close handoff after its source
       false,
     );
     assert.deepEqual(restored, []);
+
+    // 3) Attachment failure during startup destroys the popup without showing it and returns failure.
+    sourceDestroyed = false;
+    attachOutcomeMode = "fail";
+    const shownBeforeFail = shownCount;
+    const failedResult = await api.openTerminalPopupWindow(
+      { BrowserWindow: MovePopupWindowStub, nativeTheme: {}, shell: {} },
+      { preload: "/tmp/preload.cjs", isDev: false, appIcon: null, isMac: false, electronDir: __dirname, sourceWindow },
+      { popupId: "move-fail", title: "Moved 3", attachSessionId: "s-fail", moveSession: true, sourceSession: { id: "s-fail" } },
+    );
+    assert.deepEqual(failedResult, { success: false, error: "Session exited" });
+    assert.equal(popupWindows[2].destroyed, true);
+    assert.equal(shownCount, shownBeforeFail);
   } finally {
     setRestoreAttachedSessionOutput(null);
   }

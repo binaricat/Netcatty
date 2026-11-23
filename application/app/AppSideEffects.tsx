@@ -1033,13 +1033,13 @@ export function AppSideEffects() {
       getActiveTabId: () => activeTabStore.getActiveTabId(),
       getOrderedTabs: () => orderedTabsRef.current,
       netcattyBridge,
-      sessions,
+      sessions: Array.from(sessionByIdRef.current.values()),
       setActiveTabId,
       setSessionPoppedOut,
       t,
       toast,
     }), sessionId);
-  }, [sessions, setActiveTabId, setSessionPoppedOut, t]);
+  }, [setActiveTabId, setSessionPoppedOut, t]);
 
   // A tab moved to its own window returns to the tab bar when that window closes.
   useEffect(() => netcattyBridge.get()?.onTerminalPopupAttachClosed?.(({ sessionId }) => {

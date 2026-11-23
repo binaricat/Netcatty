@@ -8,6 +8,7 @@ import { resolveHostDefaultLocalShell } from '../../domain/localShellHost';
 import { getAvailablePaneMagnificationController } from '../../domain/paneMagnification';
 import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
+import { isPluginHostProtocol } from '../../domain/pluginConnection';
 import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
 import { getSettingsChromeSnapshot } from '../state/settingsChromeStore';
 import { isHostTreeWorkTabSurface } from './workTabSurface';
@@ -698,13 +699,16 @@ export async function copySessionToNewWindowWithCurrentShellImpl(getCtx: AppCont
   }
 }
 
+const inFlightMoveSessions = new Set<string>();
+
 /**
- * Move a solo tab into its own window without reconnecting: the tab is hidden
- * from this window's tab bar and an attach popup takes over the same live PTY
- * (no second login, e.g. on a bastion with seat limits). Closing the popup
- * brings the tab back via onTerminalPopupAttachClosed.
+ * Move a solo tab into its own window without reconnecting: an attach popup
+ * takes over the same live PTY (no second login, e.g. on a bastion with seat
+ * limits). The tab is hidden only after the popup actually attaches, and
+ * closing the popup brings it back via onTerminalPopupAttachClosed.
  */
 export async function moveSessionToNewWindowImpl(getCtx: AppContextGetter, sessionId: string) {
+  if (inFlightMoveSessions.has(sessionId)) return false;
   const {
     getActiveTabId,
     getOrderedTabs,
@@ -716,44 +720,67 @@ export async function moveSessionToNewWindowImpl(getCtx: AppContextGetter, sessi
     toast,
   } = getCtx();
   const session = sessions.find((item: TerminalSession) => item.id === sessionId);
-  // Attach mode only takes over a live backend; it cannot connect or reconnect.
-  if (!session || session.workspaceId || session.hiddenFromTabs || session.status !== 'connected') return false;
+  // Attach mode only takes over a live non-plugin backend; plugin connections
+  // remain owned by their source renderer until plugin lifetime transfer exists.
+  if (
+    !session
+    || session.workspaceId
+    || session.hiddenFromTabs
+    || session.status !== 'connected'
+    || isPluginHostProtocol(session.protocol)
+    || (typeof session.protocol === 'string' && session.protocol.startsWith('plugin:'))
+  ) {
+    return false;
+  }
 
-  const wasActive = typeof getActiveTabId === 'function' ? getActiveTabId() === sessionId : true;
   const fail = (error?: string) => {
-    setSessionPoppedOut(sessionId, false);
-    if (wasActive) setActiveTabId(sessionId);
     toast?.error?.(error || (t?.('tabs.moveTabToNewWindowFailed') ?? 'Failed to move tab to a new window'));
     return false;
   };
   const bridge = netcattyBridge?.get?.();
   if (!bridge?.openTerminalPopup) return fail();
 
-  setSessionPoppedOut(sessionId, true);
-  if (wasActive) {
-    const orderedTabs = typeof getOrderedTabs === 'function' ? getOrderedTabs() : null;
-    let fallbackTab: string | undefined;
-    if (Array.isArray(orderedTabs) && orderedTabs.length > 0) {
-      const index = orderedTabs.indexOf(sessionId);
-      const candidate = index >= 0
-        ? (orderedTabs[index - 1] ?? orderedTabs[index + 1])
-        : orderedTabs.filter((id: string) => id !== sessionId).slice(-1)[0];
-      if (candidate && candidate !== sessionId) {
-        fallbackTab = candidate;
-      }
-    }
-    if (!fallbackTab) {
-      fallbackTab = sessions
-        .filter((item: TerminalSession) => item.id !== sessionId && !item.workspaceId && !item.hiddenFromTabs)
-        .slice(-1)[0]?.id ?? 'vault';
-    }
-    setActiveTabId(fallbackTab);
-  }
+  inFlightMoveSessions.add(sessionId);
   try {
     const result = await bridge.openTerminalPopup({ ...buildAiSilentSessionPopupPayload(session), moveSession: true });
-    return result?.success ? true : fail(result?.error);
+    if (!result?.success) return fail(result?.error);
+
+    const latestCtx = getCtx();
+    const latestSessions: TerminalSession[] = latestCtx.sessions ?? sessions;
+    const stillPresent = latestSessions.find((item: TerminalSession) => item.id === sessionId);
+    if (!stillPresent || stillPresent.workspaceId || stillPresent.hiddenFromTabs) return true;
+
+    const latestGetActiveTabId = latestCtx.getActiveTabId ?? getActiveTabId;
+    const latestGetOrderedTabs = latestCtx.getOrderedTabs ?? getOrderedTabs;
+    const latestSetActiveTabId = latestCtx.setActiveTabId ?? setActiveTabId;
+    const latestSetSessionPoppedOut = latestCtx.setSessionPoppedOut ?? setSessionPoppedOut;
+    const isActive = typeof latestGetActiveTabId === 'function' ? latestGetActiveTabId() === sessionId : true;
+
+    latestSetSessionPoppedOut(sessionId, true);
+    if (isActive) {
+      const orderedTabs = typeof latestGetOrderedTabs === 'function' ? latestGetOrderedTabs() : null;
+      let fallbackTab: string | undefined;
+      if (Array.isArray(orderedTabs) && orderedTabs.length > 0) {
+        const index = orderedTabs.indexOf(sessionId);
+        const candidate = index >= 0
+          ? (orderedTabs[index - 1] ?? orderedTabs[index + 1])
+          : orderedTabs.filter((id: string) => id !== sessionId).slice(-1)[0];
+        if (candidate && candidate !== sessionId) {
+          fallbackTab = candidate;
+        }
+      }
+      if (!fallbackTab) {
+        fallbackTab = latestSessions
+          .filter((item: TerminalSession) => item.id !== sessionId && !item.workspaceId && !item.hiddenFromTabs)
+          .slice(-1)[0]?.id ?? 'vault';
+      }
+      latestSetActiveTabId(fallbackTab);
+    }
+    return true;
   } catch (err) {
     return fail(err instanceof Error ? err.message : undefined);
+  } finally {
+    inFlightMoveSessions.delete(sessionId);
   }
 }
 
