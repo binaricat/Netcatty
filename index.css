@@ -478,11 +478,14 @@ html.platform-win32 {
   color-scheme: light;
 }
 
-/* Global default border color - ensures 'border' class always uses theme color */
-*,
-*::before,
-*::after {
-  border-color: hsl(var(--border));
+@layer base {
+  /* Global default border color - ensures 'border' class always uses theme color
+     without overriding Tailwind @layer utilities border-* color classes. */
+  *,
+  *::before,
+  *::after {
+    border-color: hsl(var(--border));
+  }
 }
 
 body {
