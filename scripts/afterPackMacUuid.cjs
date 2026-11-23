@@ -348,19 +348,26 @@ async function afterPack(context) {
   }
 
   if (context.electronPlatformName === "win32") {
-    if (process.env.NETCATTY_SKIP_WINDOWS_PTY_PATCH === "1" || shouldNormalizeCrossWindowsPayload(context)) {
+    if (shouldNormalizeCrossWindowsPayload(context)) {
       const { normalizeCrossWindowsApp } = require("./crossWinNative.cjs");
       const projectDir = context.packager.appDir || context.packager.projectDir;
       const normalized = normalizeCrossWindowsApp({
         appOutDir: context.appOutDir,
         projectDir,
+        arch: archNameFromContext(context),
       });
       pruneAsarHeaderEntries(
         path.join(appResourcesDir(context), "app.asar"),
         normalized.asarEntriesToRemove,
       );
       console.warn(
-        `[afterPack] Cross-built Windows payload normalized: removed ${normalized.removed.length} host-native path(s), installed Windows sqlite3`,
+        `[afterPack] Cross-built Windows payload normalized: removed ${normalized.removed.length} host-native path(s), installed Windows sqlite3 and ${normalized.installedNodePty.length} node-pty runtime file(s)`,
+      );
+      return;
+    }
+    if (process.env.NETCATTY_SKIP_WINDOWS_PTY_PATCH === "1") {
+      console.warn(
+        "[afterPack] Skipping patched node-pty ConPTY rebuild (NETCATTY_SKIP_WINDOWS_PTY_PATCH=1)",
       );
       return;
     }

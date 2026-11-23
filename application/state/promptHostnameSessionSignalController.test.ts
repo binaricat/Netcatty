@@ -84,3 +84,43 @@ test('prompt host controller publishes common zsh, Alpine, and macOS root prompt
     assert.deepEqual(changes, [['ssh-1', hostname]]);
   }
 });
+
+test('prompt host controller clears live target host when JumpServer returns to its menu', () => {
+  for (const menuPrompt of ['Opt> ', '[Host]> ', '\x1b[32mOpt> \x1b[0m']) {
+    const { changes, controller } = createHarness();
+    // Initial menu before jumping emits nothing.
+    controller.handleTerminalOutput('ssh-1', `Welcome to JumpServer\r\n${menuPrompt}`);
+    // Jump into target host (including repeated CR+EL redraws).
+    controller.handleTerminalOutput(
+      'ssh-1',
+      '11\r\nLast login: Mon Nov 23 16:01:46 2026\r\n[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\r\n# \r\x1b[K# ',
+    );
+    // Exiting back to JumpServer menu clears the published target hostname.
+    controller.handleTerminalOutput('ssh-1', `exit\r\nlogout\r\nConnection closed.\r\n${menuPrompt}`);
+    // Repeating menu prompt does not emit duplicate null updates.
+    controller.handleTerminalOutput('ssh-1', `\r\n${menuPrompt}`);
+    // Jumping to a second target publishes the new host.
+    controller.handleTerminalOutput('ssh-1', '12\r\n[root@app-prod-02 ~]# ');
+
+    assert.deepEqual(
+      changes,
+      [
+        ['ssh-1', 'k8s-10-1-64-1'],
+        ['ssh-1', null],
+        ['ssh-1', 'app-prod-02'],
+      ],
+      JSON.stringify(menuPrompt),
+    );
+  }
+});
+
+test('prompt host controller forgets closed sessions when pruned', () => {
+  const { changes, controller } = createHarness();
+  controller.handleTerminalOutput('ssh-1', '[root@app-prod-01 ~]# ');
+  controller.forgetSession('ssh-1');
+  controller.handleTerminalOutput('ssh-1', '[root@app-prod-01 ~]# ');
+  assert.deepEqual(changes, [
+    ['ssh-1', 'app-prod-01'],
+    ['ssh-1', 'app-prod-01'],
+  ]);
+});

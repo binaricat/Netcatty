@@ -16,11 +16,12 @@ const SPACED_PROMPT_IDENTITY_PATTERN =
 const POSIX_PROMPT_IDENTITY_PATTERN =
   /^(?:\([^()\r\n]+\)\s+)?([^\s@():\]]+)@([^\s\]:#$%]+)(?::[^\r\n#$%]*)?[$#%]?$/u;
 const ZSH_PROMPT_IDENTITY_PATTERN =
-  /^([^\s@]+)@([^\s%]+)\s+[^%\r\n]+[%#]$/u;
+  /^(?:\([^()\r\n]+\)\s+)?([^\s@]+)@([^\s:%#$]+)\s+[^\s%#$][^%#$\r\n]*\s+[#$%]$/u;
 const ALPINE_PROMPT_IDENTITY_PATTERN =
-  /^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?:~|\/[^#$>\\\s]*)[#$]?$/u;
+  /^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?:~(?:\/[^#$>\\\r\n]*)?|\/[^#$>\\\r\n]*)[#$]?$/u;
 const MACOS_ROOT_PROMPT_IDENTITY_PATTERN =
   /^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?:~|\/[^#$>\\\s]*)\s+[A-Za-z0-9_.-]+[#$]?$/u;
+const JUMP_SERVER_MENU_PROMPT_PATTERN = /^(?:Opt|\[Host\])>$/u;
 const PROMPT_HOST_PATTERN =
   /^(?:\[[A-Fa-f0-9:.]+\]|[A-Za-z0-9_][A-Za-z0-9_.-]*)$/u;
 
@@ -174,31 +175,46 @@ function promptHostnameFromLine(line) {
   return null;
 }
 
+function isJumpServerMenuPrompt(value) {
+  const line = lastLogicalLine(value).trim();
+  if (!line) return false;
+  return JUMP_SERVER_MENU_PROMPT_PATTERN.test(line);
+}
+
 function extractTerminalPromptHostname(value) {
   const plain = stripTerminalControlSequences(value);
   if (!plain) return null;
   if (isSensitiveTerminalChallenge(plain)) return null;
 
   const lines = splitTerminalLogicalLines(plain);
-  let markerIndex = lines.length - 1;
+  const lastLineIndex = lines.length - 1;
+  let markerIndex = lastLineIndex;
   while (markerIndex >= 0 && lines[markerIndex].trim().length === 0) {
     markerIndex -= 1;
   }
   if (markerIndex < 0) return null;
 
+  const hasTrailingLineBreaks = markerIndex < lastLineIndex;
   const markerLine = lines[markerIndex].trim();
   if (!PROMPT_MARKER_LINE_PATTERN.test(markerLine)) {
+    if (hasTrailingLineBreaks) return null;
     return /[#$%]$/u.test(markerLine)
       ? promptHostnameFromLine(markerLine)
       : null;
   }
 
   let identityIndex = markerIndex - 1;
-  while (identityIndex >= 0 && lines[identityIndex].trim().length === 0) {
+  while (
+    identityIndex >= 0
+    && (
+      lines[identityIndex].trim().length === 0
+      || lines[identityIndex].trim() === markerLine
+    )
+  ) {
     identityIndex -= 1;
   }
   if (identityIndex < 0) return null;
-  const identityLine = lines[identityIndex];
+  const identityLine = lines[identityIndex].trim();
   if (isSensitiveTerminalChallenge(identityLine)) return null;
   return promptHostnameFromLine(identityLine);
 }
@@ -240,5 +256,6 @@ module.exports = {
   splitTerminalLogicalLines,
   isBashPs2ContinuationLine,
   isUntrustedTerminalInputPrompt,
+  isJumpServerMenuPrompt,
   extractTerminalPromptHostname,
 };

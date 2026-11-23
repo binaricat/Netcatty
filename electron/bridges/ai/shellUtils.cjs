@@ -157,7 +157,6 @@ const POWERLEVEL10K_PROMPT_PATTERN =
 // Do not broaden to arbitrary starship themes.
 const OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN =
   /^➜(?:\s{2,}[^\s➜][^\s➜]*|\s~)(?:\s+git:\([^)\r\n]+\))?(?:\s+[✗✓])?$/;
-const JUMP_SERVER_MENU_PROMPT_PATTERN = /^(?:Opt|\[Host\])>$/;
 
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
@@ -181,8 +180,7 @@ function isDefaultPosixPromptLine(line) {
     MACOS_ROOT_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ZSH_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     POWERLEVEL10K_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    JUMP_SERVER_MENU_PROMPT_PATTERN.test(withoutEnvPrefix)
+    OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN.test(withoutEnvPrefix)
   );
 }
 
@@ -234,7 +232,7 @@ function extractTrailingIdlePrompt(output) {
       const candidate = lines[hostIndex].replace(/\s+$/, "");
       // Some Prompts redraw the same bare marker multiple times with CR + EL.
       // Those intermediate marker lines are still part of the idle prompt.
-      if (candidate === "" || candidate === "$" || candidate === "#") {
+      if (candidate === "" || candidate === rightTrimmed) {
         hostIndex -= 1;
       } else {
         break;

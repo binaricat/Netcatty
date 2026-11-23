@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { startPtyJob } = require('./ptyExec.cjs');
 const { getFreshIdlePrompt, getVisibleIdlePrompt, trackSessionIdlePrompt } = require('./shellUtils.cjs');
+const { classifyShellReadiness } = require('./shellReadinessState.cjs');
 const { terminalCursorLine } = require('../terminalLogSanitizer.cjs');
 
 function readyPrompt(session) {
@@ -115,18 +116,23 @@ test('decorated two-line prompt redrawn with CR and erase-line is ready for comm
   assert.equal(pty.writes.length, 1);
 });
 
-test('JumpServer menu prompt is ready for command execution', async () => {
+test('JumpServer menu prompt stays non-shell-ready and writes zero PTY bytes', async () => {
   for (const prompt of ['Opt> ', '[Host]> ']) {
     const pty = new TestPty();
-    const session = { _promptTrackTail: prompt, lastIdlePrompt: prompt };
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, `Welcome to JumpServer\r\n${prompt}`);
+    assert.equal(readyPrompt(session), '', prompt);
+    assert.equal(classifyShellReadiness(session), 'busy', prompt);
     const result = await startPtyJob(pty, '11', {
       shellKind: 'posix',
       getReadyPrompt: () => readyPrompt(session),
-      promptWaitTimeoutMs: 200,
+      classifyReadiness: () => classifyShellReadiness(session),
+      promptWaitTimeoutMs: 25,
       timeoutMs: 1000,
     }).resultPromise;
-    assert.equal(result.ok, true, prompt);
-    assert.equal(pty.writes.length, 1, prompt);
+    assert.equal(result.ok, false, prompt);
+    assert.equal(result.code, 'SHELL_NOT_READY', prompt);
+    assert.deepEqual(pty.writes, [], prompt);
   }
 });
 

@@ -1,5 +1,8 @@
 import type { TerminalSession } from '../../domain/models';
-import { extractTerminalPromptHostname } from '../../domain/terminalPromptSecurity';
+import {
+  extractTerminalPromptHostname,
+  isJumpServerMenuPrompt,
+} from '../../domain/terminalPromptSecurity';
 
 type PromptHostnameSessionSignalOptions = {
   getSession: (sessionId: string) => Pick<TerminalSession, 'protocol' | 'hostname'> | undefined;
@@ -23,22 +26,41 @@ export function createPromptHostnameSessionSignalController({
   const published = new Map<string, string>();
   const tailLimit = Math.max(256, maxTailChars);
 
+  const forgetSession = (sessionId: string): void => {
+    tails.delete(sessionId);
+    baselines.delete(sessionId);
+    published.delete(sessionId);
+  };
+
   return {
+    forgetSession,
+    pruneSessions(validSessionIds: ReadonlySet<string>): void {
+      for (const sessionId of [...tails.keys(), ...baselines.keys(), ...published.keys()]) {
+        if (!validSessionIds.has(sessionId)) {
+          forgetSession(sessionId);
+        }
+      }
+    },
     handleTerminalOutput(sessionId: string, chunk: string): void {
       const session = getSession(sessionId);
       if (!session) {
-        tails.delete(sessionId);
-        baselines.delete(sessionId);
-        published.delete(sessionId);
+        forgetSession(sessionId);
         return;
       }
       if ((session.protocol ?? 'ssh') !== 'ssh') return;
 
       const combined = `${tails.get(sessionId) ?? ''}${chunk}`;
-      tails.set(sessionId, combined.slice(-tailLimit));
+      const tail = combined.slice(-tailLimit);
+      tails.set(sessionId, tail);
 
-      const detected = extractTerminalPromptHostname(tails.get(sessionId) ?? '');
-      if (!detected) return;
+      const detected = extractTerminalPromptHostname(tail);
+      if (!detected) {
+        if (isJumpServerMenuPrompt(tail) && published.has(sessionId)) {
+          published.delete(sessionId);
+          onChange(sessionId, null);
+        }
+        return;
+      }
 
       const detectedKey = normalizedHostname(detected);
       if (!detectedKey) return;

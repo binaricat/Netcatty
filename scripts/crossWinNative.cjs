@@ -9,7 +9,21 @@ const asar = require("@electron/asar");
 const HOST_NATIVE_FILES = [
   "node_modules/@serialport/bindings-cpp/build/Release/bindings.node",
   "node_modules/node-pty/build/Release/pty.node",
+  "node_modules/node-pty/build/Release/spawn-helper",
   "node_modules/@vscode/windows-process-tree/build/Release/windows_process_tree.node",
+];
+
+const REQUIRED_WINDOWS_NODE_PTY_FILES = [
+  "conpty.node",
+  "conpty/conpty.dll",
+  "conpty/OpenConsole.exe",
+];
+
+const OPTIONAL_WINDOWS_NODE_PTY_FILES = [
+  "pty.node",
+  "conpty_console_list.node",
+  "winpty.dll",
+  "winpty-agent.exe",
 ];
 
 function readPeMachine(fileOrBuffer) {
@@ -59,7 +73,50 @@ function assertWindowsNativePayload(root, { asarPath } = {}) {
   }
 }
 
-function normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile }) {
+function assertSupportedCrossWindowsArch(arch = "x64") {
+  if (arch !== "x64") {
+    throw new Error(`[crossWinNative] Unsupported cross-packaging Windows architecture: ${String(arch)}`);
+  }
+}
+
+function installWindowsNodePtyPrebuild(unpackedDir, arch = "x64") {
+  assertSupportedCrossWindowsArch(arch);
+  const prebuildDir = path.join(unpackedDir, "node_modules/node-pty/prebuilds", `win32-${arch}`);
+  const releaseDir = path.join(unpackedDir, "node_modules/node-pty/build/Release");
+  const installed = [];
+
+  for (const relativeFile of REQUIRED_WINDOWS_NODE_PTY_FILES) {
+    const source = path.join(prebuildDir, relativeFile);
+    if (!fs.existsSync(source) || !isPortableExecutableFile(source)) {
+      throw new Error(
+        `[crossWinNative] Missing or invalid Windows x64 node-pty prebuild artifact: ${relativeFile}`,
+      );
+    }
+    const target = path.join(releaseDir, relativeFile);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(source, target);
+    installed.push(`node_modules/node-pty/build/Release/${relativeFile}`);
+  }
+
+  for (const relativeFile of OPTIONAL_WINDOWS_NODE_PTY_FILES) {
+    const source = path.join(prebuildDir, relativeFile);
+    if (!fs.existsSync(source)) continue;
+    if (!isPortableExecutableFile(source)) {
+      throw new Error(
+        `[crossWinNative] Invalid Windows x64 node-pty prebuild artifact: ${relativeFile}`,
+      );
+    }
+    const target = path.join(releaseDir, relativeFile);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(source, target);
+    installed.push(`node_modules/node-pty/build/Release/${relativeFile}`);
+  }
+
+  return installed;
+}
+
+function normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile, arch = "x64" }) {
+  assertSupportedCrossWindowsArch(arch);
   if (!fs.existsSync(unpackedDir)) {
     throw new Error(`[crossWinNative] Missing unpacked app directory: ${unpackedDir}`);
   }
@@ -86,6 +143,8 @@ function normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile }) {
     removed.push("node_modules/node-pty/bin");
   }
 
+  const installedNodePty = installWindowsNodePtyPrebuild(unpackedDir, arch);
+
   const sqlite3Target = path.join(
     unpackedDir,
     "node_modules/sqlite3/build/Release/node_sqlite3.node",
@@ -93,8 +152,16 @@ function normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile }) {
   fs.mkdirSync(path.dirname(sqlite3Target), { recursive: true });
   fs.writeFileSync(sqlite3Target, sqlite3Bytes);
 
+  const installedSet = new Set(installedNodePty);
+  const asarEntriesToRemove = removed.filter((entry) => !installedSet.has(entry));
+
   assertWindowsNativePayload(unpackedDir);
-  return { removed, sqlite3Target };
+  return {
+    removed,
+    installedNodePty,
+    asarEntriesToRemove,
+    sqlite3Target,
+  };
 }
 
 function downloadWindowsSqlite3Prebuild(projectDir) {
@@ -135,23 +202,24 @@ function downloadWindowsSqlite3Prebuild(projectDir) {
   }
 }
 
-function normalizeCrossWindowsApp({ appOutDir, projectDir }) {
+function normalizeCrossWindowsApp({ appOutDir, projectDir, arch = "x64" }) {
+  assertSupportedCrossWindowsArch(arch);
   const resourcesDir = path.join(appOutDir, "resources");
   const unpackedDir = path.join(resourcesDir, "app.asar.unpacked");
   const asarPath = path.join(resourcesDir, "app.asar");
   const sqlite3WindowsFile = downloadWindowsSqlite3Prebuild(projectDir);
-  const result = normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile });
+  const result = normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile, arch });
   assertWindowsNativePayload(resourcesDir, { asarPath });
-  return {
-    ...result,
-    asarEntriesToRemove: result.removed,
-  };
+  return result;
 }
 
 module.exports = {
   HOST_NATIVE_FILES,
+  REQUIRED_WINDOWS_NODE_PTY_FILES,
+  OPTIONAL_WINDOWS_NODE_PTY_FILES,
   assertWindowsNativePayload,
   downloadWindowsSqlite3Prebuild,
+  installWindowsNodePtyPrebuild,
   isPortableExecutableFile,
   normalizeBundledWindowsNatives,
   normalizeCrossWindowsApp,

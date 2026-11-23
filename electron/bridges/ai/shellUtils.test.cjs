@@ -593,14 +593,15 @@ test("recognizes a decorated two-line host prompt redrawn across multiple bare m
   assert.equal(getFreshIdlePrompt(session), expected);
 });
 
-test("recognizes JumpServer menu prompts as idle", () => {
+test("keeps JumpServer menu prompts out of POSIX shell readiness", () => {
   for (const prompt of ["Opt> ", "[Host]> "]) {
-    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
-    assert.equal(extractTrailingIdlePrompt(`menu output\r\n${prompt}`), prompt);
+    assert.equal(isDefaultPosixPromptLine(prompt), false, prompt);
+    assert.equal(extractTrailingIdlePrompt(`menu output\r\n${prompt}`), "", prompt);
 
     const session = {};
     trackSessionIdlePrompt(session, `menu output\r\n${prompt}`);
-    assert.equal(getFreshIdlePrompt(session), prompt);
+    assert.equal(getFreshIdlePrompt(session), "", prompt);
+    assert.equal(getVisibleIdlePrompt(session), "", prompt);
   }
 });
 

@@ -438,6 +438,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }),
     [onUpdateSessionPromptHost],
   );
+  useEffect(() => {
+    promptHostnameSignalController.pruneSessions(new Set(codingCliSessionIds));
+  }, [codingCliSessionIds, promptHostnameSignalController]);
   const handleTerminalOutput = useCallback((sessionId: string, chunk: string) => {
     codingCliSignalController.handleTerminalOutput(sessionId, chunk);
     promptHostnameSignalController.handleTerminalOutput(sessionId, chunk);
@@ -469,9 +472,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       cwdProbeCancelersRef,
     }, sessionId);
     codingCliSignalController.forgetSession(sessionId);
+    promptHostnameSignalController.forgetSession(sessionId);
     sessionCapabilitiesStore.delete(sessionId);
     onCloseSession(sessionId);
-  }, [codingCliSignalController, onCloseSession]);
+  }, [codingCliSignalController, promptHostnameSignalController, onCloseSession]);
 
   const sftpAutoOpenSidebarRef = useRef(sftpAutoOpenSidebar);
   sftpAutoOpenSidebarRef.current = sftpAutoOpenSidebar;
