@@ -167,6 +167,8 @@ const {
   retryPendingAttachedSessionOutput,
   releaseAttachedSessionState,
   setRestoreAttachedSessionOutput,
+  clearAttachPopupAttached,
+  markAttachPopupAttached,
   setAttachHomeLookup,
   setFanoutSessionExit,
   validateAttachPopupAuthorization,
@@ -437,6 +439,9 @@ async function rebindTerminalSessionOutput(event, payload, terminalWorkerManager
         await restoreAttachedSessionOutput(sessionId, terminalWorkerManager);
         return { success: false, error: "Attach window closed during rebind" };
       }
+      if (result?.success) {
+        markAttachPopupAttached(payload?.authorization, sessionId, sender.id);
+      }
       return result;
     } catch (err) {
       return { success: false, error: err?.message || String(err) };
@@ -463,6 +468,7 @@ async function rebindTerminalSessionOutput(event, payload, terminalWorkerManager
       await restoreAttachedSessionOutput(sessionId, terminalWorkerManager);
       return { success: false, error: "Attach window closed during rebind" };
     }
+    markAttachPopupAttached(payload?.authorization, sessionId, sender.id);
     return {
       success: true,
       previousWebContentsId,
@@ -641,6 +647,7 @@ async function restoreTerminalSessionOutput(event, payload, terminalWorkerManage
         return { success: false, error: result?.error || "Failed to restore session output" };
       }
       terminalWorkerManager.clearAttachHome?.(sessionId, target.id);
+      clearAttachPopupAttached(payload?.authorization, sessionId, event?.sender?.id);
       return { success: true, restored: true, webContentsId: target.id };
     } catch (err) {
       return { success: false, error: err?.message || String(err) };
@@ -659,6 +666,7 @@ async function restoreTerminalSessionOutput(event, payload, terminalWorkerManage
       sessions, sessionId, target, closeSession, true,
     );
     attachHomeWebContentsIds.delete(sessionId);
+    clearAttachPopupAttached(payload?.authorization, sessionId, event?.sender?.id);
     return { success: true, restored: true, webContentsId: target.id };
   } catch (err) {
     return { success: false, error: err?.message || String(err) };

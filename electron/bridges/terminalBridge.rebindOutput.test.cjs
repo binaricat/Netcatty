@@ -731,3 +731,47 @@ test("active input policy roundtrips through preload and authorized snapshot IPC
     registry.releaseAttachPopupAuthorization(authorization);
   }
 });
+
+test("rebindOutput activates lifetime heir for moved-tab popups and restoreOutput clears it", async () => {
+  const { bridge } = loadTerminalBridgeWithMocks();
+  const registry = require("./terminalAttachRestore.cjs");
+  const sessionId = "session-move-heir";
+  const authorization = "grant-move-heir";
+  const popup = { id: 81, isDestroyed: () => false };
+  const home = { id: 80, isDestroyed: () => false };
+  const handles = new Map();
+  const worker = {
+    rebindOutputSession: async () => ({ success: true, previousWebContentsId: home.id, webContentsId: popup.id }),
+    hasOpenSession: () => true,
+    clearAttachHome: () => {},
+  };
+  bridge.registerHandlers(
+    { handle: (channel, fn) => handles.set(channel, fn), on: () => {} },
+    { terminalWorkerManager: worker },
+  );
+  registry.registerAttachPopupAuthorization(authorization, sessionId, popup.id, { ownsLifetime: true });
+  const originalRequire = Module.prototype.require;
+  Module.prototype.require = function (request, ...rest) {
+    if (request === "./windowManager.cjs") return { getMainWindows: () => [{ webContents: home }] };
+    return originalRequire.call(this, request, ...rest);
+  };
+  try {
+    assert.equal(registry.getLifetimeHeirWebContentsId(sessionId), null);
+    const rebound = await handles.get("netcatty:terminal:rebindOutput")(
+      { sender: popup },
+      { sessionId, authorization },
+    );
+    assert.equal(rebound.success, true);
+    assert.equal(registry.getLifetimeHeirWebContentsId(sessionId), popup.id);
+
+    const restored = await handles.get("netcatty:terminal:restoreOutput")(
+      { sender: popup },
+      { sessionId, webContentsId: home.id, authorization },
+    );
+    assert.equal(restored.success, true);
+    assert.equal(registry.getLifetimeHeirWebContentsId(sessionId), null);
+  } finally {
+    Module.prototype.require = originalRequire;
+    registry.releaseAttachPopupAuthorization(authorization);
+  }
+});

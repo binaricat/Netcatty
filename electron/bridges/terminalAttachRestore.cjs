@@ -18,18 +18,32 @@ function registerAttachPopupAuthorization(token, sessionId, webContentsId, optio
     sessionId,
     webContentsId,
     closePrepared: false,
-    // A user tab moved into the popup: the popup, not the hidden home tab,
-    // keeps the backend alive while it is open.
+    // A user tab moved into the popup: becomes the lifetime heir only once
+    // output has been rebound to the popup so closing the source mid-startup
+    // does not leave a live PTY stranded behind a failed attachment.
     ownsLifetime: options?.ownsLifetime === true,
+    attached: false,
   });
   return true;
 }
 
-/** webContentsId of a moved-tab popup that should inherit sessionId if its home dies. */
+function markAttachPopupAttached(token, sessionId, webContentsId) {
+  if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
+  attachPopupAuthorizations.get(token).attached = true;
+  return true;
+}
+
+function clearAttachPopupAttached(token, sessionId, webContentsId) {
+  if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
+  attachPopupAuthorizations.get(token).attached = false;
+  return true;
+}
+
+/** webContentsId of an attached moved-tab popup that should inherit sessionId if its home dies. */
 function getLifetimeHeirWebContentsId(sessionId) {
   if (!sessionId) return null;
   for (const grant of attachPopupAuthorizations.values()) {
-    if (grant.ownsLifetime && grant.sessionId === sessionId) return grant.webContentsId;
+    if (grant.ownsLifetime && grant.attached && grant.sessionId === sessionId) return grant.webContentsId;
   }
   return null;
 }
@@ -140,6 +154,8 @@ function fanoutSessionExit(sessionId, primaryContents, payload) {
 module.exports = {
   registerAttachPopupAuthorization,
   validateAttachPopupAuthorization,
+  markAttachPopupAttached,
+  clearAttachPopupAttached,
   markAttachPopupClosePrepared,
   isAttachPopupClosePrepared,
   getLifetimeHeirWebContentsId,

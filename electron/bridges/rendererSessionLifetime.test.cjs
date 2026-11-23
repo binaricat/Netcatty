@@ -77,7 +77,7 @@ test("fallback late start into a destroyed renderer closes after setup, not a re
   assert.equal(f.sessions.has("replacement"), true);
 });
 
-test("a moved-tab popup inherits the session when its home renderer is destroyed", () => {
+test("a moved-tab popup inherits the session only after attaching", () => {
   const electronPath = require.resolve("electron");
   const previous = require.cache[electronPath];
   const popup = renderer(9);
@@ -87,16 +87,30 @@ test("a moved-tab popup inherits the session when its home renderer is destroyed
   };
   const attach = require("./terminalAttachRestore.cjs");
   try {
+    // Before output is rebound, destroying home closes the session instead of stranding it.
+    const unattached = fixture();
+    const earlyHome = renderer(6);
+    unattached.own("early", earlyHome);
+    attach.registerAttachPopupAuthorization("grant-early", "early", popup.id, { ownsLifetime: true });
+    assert.equal(attach.getLifetimeHeirWebContentsId("early"), null);
+    earlyHome.destroy();
+    assert.deepEqual(unattached.closed, [{ sessionId: "early", bootEpoch: 1 }]);
+    attach.releaseAttachPopupAuthorization("grant-early");
+
+    // Once output is rebound (attached), destroying home transfers lifetime to the popup.
     const f = fixture();
     const home = renderer(7);
     f.own("a", home);
     attach.registerAttachPopupAuthorization("grant", "a", popup.id, { ownsLifetime: true });
+    assert.equal(attach.markAttachPopupAttached("grant", "a", popup.id), true);
+    assert.equal(attach.getLifetimeHeirWebContentsId("a"), popup.id);
     home.destroy();
     assert.equal(f.closed.length, 0);
     attach.releaseAttachPopupAuthorization("grant");
     popup.destroy();
     assert.deepEqual(f.closed, [{ sessionId: "a", bootEpoch: 1 }]);
   } finally {
+    attach.releaseAttachPopupAuthorization("grant-early");
     attach.releaseAttachPopupAuthorization("grant");
     if (previous) require.cache[electronPath] = previous;
     else delete require.cache[electronPath];
@@ -106,6 +120,7 @@ test("a moved-tab popup inherits the session when its home renderer is destroyed
 test("an AI observe popup does not inherit the session", () => {
   const attach = require("./terminalAttachRestore.cjs");
   attach.registerAttachPopupAuthorization("observe", "b", 9);
+  attach.markAttachPopupAttached("observe", "b", 9);
   try {
     assert.equal(attach.getLifetimeHeirWebContentsId("b"), null);
   } finally {
