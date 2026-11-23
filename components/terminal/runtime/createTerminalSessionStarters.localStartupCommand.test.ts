@@ -5,8 +5,9 @@ import path from "node:path";
 import test from "node:test";
 import * as pty from "node-pty";
 
-import type { Host } from "../../../domain/models";
+import type { Host, TerminalSession } from "../../../domain/models";
 import { createLocalShellHost } from "../../../domain/localShellHost";
+import { resolveTerminalSessionHost } from "../../../domain/terminalHostResolution";
 import { shouldSuppressHostStartupCommandOnReconnect } from "../restoredSessionGate";
 import { createTerminalSessionStarters } from "./createTerminalSessionStarters";
 import { createMockTerminalBackend, createStarterContext, createTermStub } from "./testSupport/starterHarness";
@@ -241,6 +242,96 @@ test("restored local attach runs hydrated live host startup command only when la
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     assert.deepEqual(sessionWrites, [], label);
+  }
+});
+
+test("restored local attach through resolveTerminalSessionHost rejects hydrated startup command when saved host changed shell or dir", async () => {
+  const restoredSession: TerminalSession = {
+    id: "sess-restored-local",
+    hostId: "local-restored-prod",
+    hostLabel: "Project Shell",
+    hostname: "localhost",
+    username: "local",
+    status: "connecting",
+    protocol: "local",
+    localShell: "/bin/zsh",
+    localShellArgs: [],
+    localStartDir: "/tmp/original-project",
+  };
+  const baseSavedHost: Host = createLocalShellHost({
+    id: "local-restored-prod",
+    label: "Project Shell",
+    os: "macos",
+    shell: "/bin/zsh",
+    startDir: "/tmp/original-project",
+    startupCommand: "echo hydrated-ok",
+  });
+
+  const runHydratedRestore = async (hydratedHost: Host) => {
+    const sessionWrites: Array<{ id: string; data: string; automated?: boolean }> = [];
+    // Before vault hydration, resolveTerminalSessionHost builds the fallback host from the session.
+    const preHydrationHost = resolveTerminalSessionHost({
+      session: restoredSession,
+      hosts: [],
+      groupConfigs: [],
+      proxyProfiles: [],
+      localOs: "macos",
+    });
+    const hostRef: { current: Host } = { current: preHydrationHost };
+    let releaseStart: (() => void) | undefined;
+    const startGate = new Promise<void>((resolve) => { releaseStart = resolve; });
+    const terminalBackend = createMockTerminalBackend({
+      startLocalSession: async () => {
+        await startGate;
+        return "local-session";
+      },
+      writeToSession: (id: string, data: string, options?: { automated?: boolean }) => {
+        sessionWrites.push({ id, data, automated: options?.automated });
+      },
+    });
+    const ctx = createStarterContext({
+      host: preHydrationHost,
+      hostRef,
+      terminalSettings: { startupCommandDelayMs: 0 },
+      terminalBackend,
+      startupCommand: undefined,
+      suppressHostStartupCommandRef: {
+        current: shouldSuppressHostStartupCommandOnReconnect("restored"),
+      },
+      promptLineBreakStateRef: undefined,
+    });
+
+    const started = createTerminalSessionStarters(ctx as never).startLocal(createTermStub() as never);
+    // Vault hydration resolves the saved host through production resolveTerminalSessionHost (with overlaySessionLocalShell).
+    hostRef.current = resolveTerminalSessionHost({
+      session: restoredSession,
+      hosts: [hydratedHost],
+      groupConfigs: [],
+      proxyProfiles: [],
+      localOs: "macos",
+    });
+    releaseStart?.();
+    await started;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return sessionWrites;
+  };
+
+  assert.deepEqual(await runHydratedRestore(baseSavedHost), [
+    { id: "local-session", data: "echo hydrated-ok\r", automated: true },
+  ]);
+
+  const editedTargets: Array<[string, Host]> = [
+    ["edited shell", { ...baseSavedHost, localShell: "/bin/bash", startupCommand: "echo wrong-shell" }],
+    ["edited startDir", { ...baseSavedHost, localStartDir: "/tmp/edited-project", startupCommand: "echo wrong-dir" }],
+    ["edited shellArgs", { ...baseSavedHost, localShellArgs: ["-l"], startupCommand: "echo wrong-args" }],
+    ["edited protocol", { ...baseSavedHost, protocol: "ssh", hostname: "prod.example.test", username: "ops", startupCommand: "echo wrong-proto" }],
+  ];
+  for (const [label, editedHost] of editedTargets) {
+    assert.deepEqual(
+      await runHydratedRestore(editedHost),
+      [],
+      `${label}: startup command from an edited host must not run in the old session`,
+    );
   }
 });
 

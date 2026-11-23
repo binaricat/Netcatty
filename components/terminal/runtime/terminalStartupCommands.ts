@@ -56,7 +56,7 @@ const sameLocalLaunchTarget = (
   if (live.protocol !== "local") return false;
   if ((live.localShell ?? "") !== (dial.localShell ?? "")) return false;
   if (!sameLocalShellArgs(dial.localShellArgs, live.localShellArgs)) return false;
-  if ((live.localStartDir ?? "") !== (dial.localStartDir ?? "")) return false;
+  if ((live.localStartDir || "~") !== (dial.localStartDir || "~")) return false;
   return true;
 };
 

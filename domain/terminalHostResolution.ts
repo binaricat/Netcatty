@@ -96,20 +96,61 @@ function buildFallbackHostFromSession(
   };
 }
 
+const sameLocalShellArgs = (
+  left: string[] | undefined,
+  right: string[] | undefined,
+): boolean => {
+  const normalizedLeft = left?.length ? left : undefined;
+  const normalizedRight = right?.length ? right : undefined;
+  if (!normalizedLeft && !normalizedRight) return true;
+  if (!normalizedLeft || !normalizedRight || normalizedLeft.length !== normalizedRight.length) {
+    return false;
+  }
+  return normalizedLeft.every((arg, index) => arg === normalizedRight[index]);
+};
+
+const matchesSavedLocalLaunchTarget = (
+  savedHost: Host,
+  overlaid: Pick<Host, "localShell" | "localShellArgs" | "localStartDir">,
+): boolean => (
+  savedHost.protocol === "local"
+  && (overlaid.localShell ?? "") === (savedHost.localShell ?? "")
+  && sameLocalShellArgs(overlaid.localShellArgs, savedHost.localShellArgs)
+  && (overlaid.localStartDir || "~") === (savedHost.localStartDir || "~")
+);
+
 // A local session carries a shell snapshot (shell path, args, name, icon,
 // start dir) captured at launch time; the saved host may have been edited
 // since. Popup/clone flows must relaunch the session's shell, not the host's
-// current one, so overlay the snapshot onto the resolved host.
-const overlaySessionLocalShell = (session: TerminalSession, host: Host): Host => {
+// current one, so overlay the snapshot onto the resolved host. When the saved
+// host now targets a different protocol, shell, args, or start directory, drop
+// its startup command so a command authored for the edited target cannot run
+// inside the old session.
+const overlaySessionLocalShell = (
+  session: TerminalSession,
+  host: Host,
+  savedHost: Host,
+): Host => {
   if (session.protocol !== "local") return host;
+  const localShell = session.localShell ?? host.localShell;
+  const localShellArgs = session.localShellArgs ?? host.localShellArgs;
+  const localStartDir = session.localStartDir ?? host.localStartDir;
+  const keepsSavedStartupCommand = matchesSavedLocalLaunchTarget(savedHost, {
+    localShell,
+    localShellArgs,
+    localStartDir,
+  });
   return {
     ...host,
     username: session.username,
-    localShell: session.localShell ?? host.localShell,
-    localShellArgs: session.localShellArgs ?? host.localShellArgs,
+    localShell,
+    localShellArgs,
     localShellName: session.localShellName ?? host.localShellName,
     localShellIcon: session.localShellIcon ?? host.localShellIcon,
-    localStartDir: session.localStartDir ?? host.localStartDir,
+    localStartDir,
+    ...(keepsSavedStartupCommand
+      ? {}
+      : { startupCommand: undefined, startupCommandRunMode: undefined }),
   };
 };
 
@@ -156,7 +197,7 @@ export function resolveTerminalSessionHost({
     backspaceBehavior === existingHost.backspaceBehavior
   ) {
     return suppressDeviceTypeForShellTransport(
-      overlaySessionLocalShell(session, existingHost),
+      overlaySessionLocalShell(session, existingHost, existingHost),
     );
   }
 
@@ -168,7 +209,7 @@ export function resolveTerminalSessionHost({
     etEnabled,
     pluginConnection,
     backspaceBehavior,
-  }));
+  }, existingHost));
 }
 
 export function resolveTerminalChainHosts({
