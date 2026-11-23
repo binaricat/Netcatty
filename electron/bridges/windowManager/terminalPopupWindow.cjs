@@ -173,8 +173,16 @@ function createTerminalPopupWindowApi(ctx) {
       let lifecycleReleased = false;
       let closePreparationRequested = false;
       let closePreparationTimer = null;
+      let restoreRetryTimer = null;
       let attachClosedNotified = false;
+      const clearRestoreRetryTimer = () => {
+        if (restoreRetryTimer) {
+          clearTimeout(restoreRetryTimer);
+          restoreRetryTimer = null;
+        }
+      };
       const notifyAttachClosed = () => {
+        clearRestoreRetryTimer();
         if (!attachSessionId || attachClosedNotified) return;
         attachClosedNotified = true;
         // Lets a tab moved into this popup reappear in the window it came from.
@@ -185,6 +193,31 @@ function createTerminalPopupWindowApi(ctx) {
         } catch {
           // ignore destroyed home window
         }
+      };
+      const scheduleAttachRestoreRetry = (attempt = 0) => {
+        if (attachClosedNotified || !attachSessionId || !isLiveWindow(homeWindow)) {
+          clearRestoreRetryTimer();
+          return;
+        }
+        onAttachOutputRestored(attachSessionId, notifyAttachClosed);
+        if (attempt >= 4) return;
+        clearRestoreRetryTimer();
+        restoreRetryTimer = setTimeout(() => {
+          restoreRetryTimer = null;
+          if (attachClosedNotified || !isLiveWindow(homeWindow)) return;
+          void Promise.resolve(restoreAttachedSessionOutput(attachSessionId))
+            .then((res) => {
+              if (!res || res.success || res.unavailable) {
+                notifyAttachClosed();
+              } else {
+                scheduleAttachRestoreRetry(attempt + 1);
+              }
+            })
+            .catch(() => {
+              scheduleAttachRestoreRetry(attempt + 1);
+            });
+        }, 150 * (2 ** attempt));
+        restoreRetryTimer.unref?.();
       };
       const releaseLifecycle = () => {
         if (lifecycleReleased) return;
@@ -215,11 +248,11 @@ function createTerminalPopupWindowApi(ctx) {
               if (!res || res.success || res.unavailable) {
                 notifyAttachClosed();
               } else {
-                // Keep the home tab hidden until pending output recovery finishes.
-                onAttachOutputRestored(attachSessionId, notifyAttachClosed);
+                // Keep the home tab hidden and actively retry output recovery.
+                scheduleAttachRestoreRetry(0);
               }
             }).catch(() => {
-              onAttachOutputRestored(attachSessionId, notifyAttachClosed);
+              scheduleAttachRestoreRetry(0);
             });
           } else {
             notifyAttachClosed();

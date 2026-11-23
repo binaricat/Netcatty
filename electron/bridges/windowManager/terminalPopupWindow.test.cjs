@@ -10,7 +10,6 @@ const {
   markAttachPopupAttached,
   markAttachPopupClosePrepared,
   markAttachPopupReady,
-  retryPendingAttachedSessionOutputs,
   setRestoreAttachedSessionOutput,
 } = require("../terminalAttachRestore.cjs");
 
@@ -572,10 +571,12 @@ test("attach-closed notification waits until async output restoration succeeds",
     assert.deepEqual(sourceMessages, [], "must not unhide tab while restore is in flight");
 
     resolveFirstRestore();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 20));
     assert.deepEqual(sourceMessages, [], "must not unhide tab after failed restore");
 
-    await retryPendingAttachedSessionOutputs();
+    // Scheduled automatic retry recovers without requiring another display-ready signal.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(restoreAttempt, 2);
     assert.deepEqual(sourceMessages, [{
       channel: "netcatty:terminal-popup:attach-closed",
       payload: { sessionId: "s-async" },
