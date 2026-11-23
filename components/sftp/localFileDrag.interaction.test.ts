@@ -75,6 +75,9 @@ test('list hook preserves local copy/move routing, remote HTML drag, selection a
     await act(async () => root.render(React.createElement(Harness, { local: false })));
     await act(async () => right.handlePaneDrop(event()));
     assert.equal(actions.at(-1)?.kind, 'copy');
+    actions.length = 0;
+    await act(async () => left.handleEntryDrop(entries[2], event()));
+    assert.deepEqual(actions, [{ kind: 'move', args: [['/files/b.txt'], '/files/folder'] }], 'same-pane remote drag stays a move');
   } finally {
     await act(async () => root.unmount());
     clearLocalFileDrag();

@@ -820,3 +820,253 @@ test("job diagnostics log a worker-side miss while the main-process route still 
     ["stop", "worker-job-missing"],
   ]);
 });
+
+test("completed worker job routes stay retained for idempotent stop and poll", async () => {
+  const requests = [];
+  const bridge = loadFreshBridge();
+  const terminalState = {
+    ok: true,
+    jobId: "worker-job-timeout",
+    sessionId: "ssh-1",
+    command: "sleep 30",
+    status: "failed",
+    completed: true,
+    error: "Command startup timed out",
+    output: "",
+    nextOffset: 0,
+  };
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload) {
+        requests.push({ channel, payload });
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({
+            ok: true,
+            jobId: "worker-job-timeout",
+            sessionId: payload.sessionId,
+            command: payload.command,
+            status: "running",
+          });
+        }
+        if (channel === "netcatty:ai:jobPoll" || channel === "netcatty:ai:jobStop") {
+          return Promise.resolve({ ...terminalState });
+        }
+        return Promise.reject(new Error(`unexpected worker request: ${channel}`));
+      },
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    { sessionId: "ssh-1", hostname: "host.example", protocol: "ssh", shellType: "bash", connected: true },
+  ], "chat-1");
+
+  const started = await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-1",
+    command: "sleep 30",
+    chatSessionId: "chat-1",
+  });
+  assert.equal(started.ok, true);
+
+  const firstPoll = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-timeout",
+    offset: 0,
+    chatSessionId: "chat-1",
+  });
+  assert.equal(firstPoll.ok, true);
+  assert.equal(firstPoll.completed, true);
+  assert.equal(firstPoll.status, "failed");
+
+  const stopAfterComplete = await bridge.dispatchBuiltinRpc("netcatty/jobStop", {
+    jobId: "worker-job-timeout",
+    chatSessionId: "chat-1",
+  });
+  assert.equal(stopAfterComplete.ok, true);
+  assert.equal(stopAfterComplete.completed, true);
+  assert.equal(stopAfterComplete.status, "failed");
+
+  const secondPoll = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-timeout",
+    offset: 0,
+    chatSessionId: "chat-1",
+  });
+  assert.equal(secondPoll.ok, true);
+  assert.equal(secondPoll.completed, true);
+  assert.equal(secondPoll.status, "failed");
+
+  assert.deepEqual(requests.map((entry) => entry.channel), [
+    "netcatty:ai:jobStart",
+    "netcatty:ai:jobPoll",
+    "netcatty:ai:jobStop",
+    "netcatty:ai:jobPoll",
+  ]);
+});
+
+test("retained completed worker route does not block idle checks and still cleans up on terminal close", async () => {
+  const requests = [];
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload) {
+        requests.push({ channel, payload });
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({
+            ok: true,
+            jobId: "worker-job-done",
+            sessionId: payload.sessionId,
+            status: "running",
+          });
+        }
+        if (channel === "netcatty:ai:jobPoll" || channel === "netcatty:ai:jobStop") {
+          return Promise.resolve({
+            ok: true,
+            jobId: payload.jobId,
+            sessionId: "ssh-idle",
+            status: "completed",
+            completed: true,
+            exitCode: 0,
+          });
+        }
+        return Promise.reject(new Error(`unexpected worker request: ${channel}`));
+      },
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    { sessionId: "ssh-idle", protocol: "ssh", connected: true },
+  ], "chat-idle");
+
+  await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-idle",
+    command: "echo ok",
+    chatSessionId: "chat-idle",
+  });
+  const polled = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-done",
+    chatSessionId: "chat-idle",
+  });
+  assert.equal(polled.ok, true);
+  assert.equal(polled.completed, true);
+
+  // Completed route must not report the session as busy or issue another worker poll.
+  assert.equal(await bridge.hasActiveWorkerJobForTerminalSession("ssh-idle"), false);
+  assert.deepEqual(requests.map((entry) => entry.channel), [
+    "netcatty:ai:jobStart",
+    "netcatty:ai:jobPoll",
+  ]);
+
+  // Retained route remains usable for idempotent stop before terminal close.
+  const stopped = await bridge.dispatchBuiltinRpc("netcatty/jobStop", {
+    jobId: "worker-job-done",
+    chatSessionId: "chat-idle",
+  });
+  assert.equal(stopped.ok, true);
+  assert.equal(stopped.completed, true);
+
+  // Explicit terminal close still removes the retained route without sending another stop.
+  await bridge.cancelWorkerBackgroundJobsForTerminalSession("ssh-idle");
+  assert.deepEqual(requests.map((entry) => entry.channel), [
+    "netcatty:ai:jobStart",
+    "netcatty:ai:jobPoll",
+    "netcatty:ai:jobStop",
+  ]);
+  const pollAfterClose = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-done",
+    chatSessionId: "chat-idle",
+  });
+  assert.deepEqual(pollAfterClose, { ok: false, error: "Background job not found" });
+});
+
+test("retained completed worker route is pruned after BACKGROUND_JOB_RETENTION_MS expires", async (t) => {
+  process.env.NETCATTY_JOB_DIAG = "1";
+  const lines = [];
+  t.mock.method(console, "info", (...args) => { lines.push(args.join(" ")); });
+  t.after(() => { delete process.env.NETCATTY_JOB_DIAG; });
+
+  let now = 1_700_000_000_000;
+  t.mock.method(Date, "now", () => now);
+
+  const requests = [];
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload) {
+        requests.push({ channel, payload });
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({
+            ok: true,
+            jobId: "worker-job-expire",
+            sessionId: payload.sessionId,
+            status: "running",
+          });
+        }
+        if (channel === "netcatty:ai:jobPoll" || channel === "netcatty:ai:jobStop") {
+          return Promise.resolve({
+            ok: true,
+            jobId: payload.jobId,
+            sessionId: "ssh-expire",
+            status: "completed",
+            completed: true,
+            exitCode: 0,
+          });
+        }
+        return Promise.reject(new Error(`unexpected worker request: ${channel}`));
+      },
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    { sessionId: "ssh-expire", protocol: "ssh", connected: true },
+  ], "chat-expire");
+
+  await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-expire",
+    command: "echo ok",
+    chatSessionId: "chat-expire",
+  });
+  const firstPoll = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-expire",
+    chatSessionId: "chat-expire",
+  });
+  assert.equal(firstPoll.ok, true);
+  assert.equal(firstPoll.completed, true);
+
+  // Still retained right at the 10-minute boundary; repeated polls must not extend completedAt.
+  now += 10 * 60 * 1000;
+  const boundaryStop = await bridge.dispatchBuiltinRpc("netcatty/jobStop", {
+    jobId: "worker-job-expire",
+    chatSessionId: "chat-expire",
+  });
+  assert.equal(boundaryStop.ok, true);
+  assert.equal(boundaryStop.completed, true);
+
+  // One millisecond past the 10-minute retention window, the route is pruned before worker dispatch.
+  now += 1;
+  const expiredPoll = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-expire",
+    chatSessionId: "chat-expire",
+  });
+  assert.deepEqual(expiredPoll, { ok: false, error: "Background job not found" });
+  assert.deepEqual(requests.map((entry) => entry.channel), [
+    "netcatty:ai:jobStart",
+    "netcatty:ai:jobPoll",
+    "netcatty:ai:jobStop",
+  ]);
+
+  const removedEvents = lines
+    .filter((line) => line.startsWith("[Netcatty JobDiag] "))
+    .map((line) => JSON.parse(line.slice("[Netcatty JobDiag] ".length)))
+    .filter((event) => event.event === "route-removed");
+  assert.deepEqual(
+    removedEvents.map((event) => [event.jobId, event.via]),
+    [["worker-job-expire", "retention-expired"]],
+  );
+});

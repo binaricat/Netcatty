@@ -614,3 +614,140 @@ test("regular follow waits for trusted live cwd instead of polling after command
   assert.equal(probeCalls, probesAfterOpen, "trusted live cwd must navigate without another poll");
   await act(async () => renderer?.unmount());
 });
+
+const wslHost = {
+  ...host,
+  id: "wsl-ubuntu-22-04",
+  protocol: "local",
+  localShell: "wsl.exe",
+  localShellArgs: ["-d", "Ubuntu-22.04"],
+} as Host;
+const wslRoot = "\\\\wsl.localhost\\Ubuntu-22.04";
+
+async function mountLocalFollow(options: {
+  wslLocalHost?: Host;
+  followEnabled?: boolean;
+  freshCwd?: string | null;
+}) {
+  const connection = {
+    id: "local-conn",
+    currentPath: options.wslLocalHost ? wslRoot : "C:\\Users\\trum",
+    homeDir: "C:\\Users\\trum",
+    status: "connected",
+    isLocal: true,
+  };
+  const navigatedPaths: string[] = [];
+  const requestedOptions: unknown[] = [];
+  const sftpRef = {
+    current: {
+      leftPane: { connection, loading: false },
+      navigateTo: async (_side: "left", path: string, navigation?: { shouldApply?: () => boolean }) => {
+        if (navigation?.shouldApply && !navigation.shouldApply()) return "aborted" as const;
+        navigatedPaths.push(path);
+        connection.currentPath = path;
+        return "reached" as const;
+      },
+    },
+  };
+  let activeTerminalCwd: string | null = null;
+  let freshCwd = options.freshCwd ?? null;
+  let actions: ReturnType<typeof useSftpFollowTerminalCwd>;
+  const onGetTerminalCwd = async (request: unknown) => {
+    requestedOptions.push(request);
+    return freshCwd;
+  };
+  function Probe() {
+    actions = useSftpFollowTerminalCwd({
+      wslLocalHost: options.wslLocalHost,
+      focusedSessionId: "local-terminal",
+      activeTerminalCwd,
+      activeTerminalCwdTrusted: !!activeTerminalCwd,
+      canFollowTerminalCwd: true,
+      connectionId: connection.id,
+      connectionIsLocal: true,
+      connectionLoading: false,
+      connectionPath: connection.currentPath,
+      connectionStatus: connection.status,
+      effectiveFollowTerminalCwd: options.followEnabled ?? true,
+      followTerminalCwdHost: options.wslLocalHost ?? null,
+      hasActiveWork: false,
+      isVisible: true,
+      ownerPanelOpen: true,
+      onGetTerminalCwd,
+      onPendingFollowOverride: () => {},
+      sftpRef,
+    });
+    return null;
+  }
+  let renderer: ReactTestRenderer;
+  await act(async () => { renderer = create(React.createElement(Probe)); });
+  return {
+    connection,
+    navigatedPaths,
+    requestedOptions,
+    async updateCwd(cwd: string | null) {
+      activeTerminalCwd = cwd;
+      await act(async () => { renderer.update(React.createElement(Probe)); });
+    },
+    async goTo(cwd: string | null) {
+      freshCwd = cwd;
+      await act(async () => { await actions.handleGoToTerminalCwd(); });
+    },
+    async unmount() { await act(async () => renderer.unmount()); },
+  };
+}
+
+test("WSL local first-open and auto-follow map cwd and preserve manually browsed paths", async () => {
+  const pane = await mountLocalFollow({ wslLocalHost: wslHost, freshCwd: "/home/vastbase" });
+  try {
+    assert.deepEqual(pane.navigatedPaths, [`${wslRoot}\\home\\vastbase`]);
+    assert.deepEqual(pane.requestedOptions, [{
+      preferFreshBackend: true, allowRendererFallback: false, requireActiveShellCwd: true,
+    }]);
+    await pane.updateCwd("/etc");
+    assert.deepEqual(pane.navigatedPaths, [`${wslRoot}\\home\\vastbase`, `${wslRoot}\\etc`]);
+    pane.connection.currentPath = "D:\\manual";
+    await pane.updateCwd("/etc");
+    assert.equal(pane.navigatedPaths.length, 2, "mapped handled cwd must not recapture manual browsing");
+    await pane.updateCwd("/mnt/c/Users/trum");
+    assert.equal(pane.connection.currentPath, "C:\\Users\\trum");
+  } finally { await pane.unmount(); }
+});
+
+test("manual WSL go-to maps Linux and drive mounts even with follow disabled", async () => {
+  const pane = await mountLocalFollow({ wslLocalHost: wslHost, followEnabled: false });
+  try {
+    assert.deepEqual(pane.requestedOptions, []);
+    await pane.goTo("/home/vastbase/project");
+    assert.equal(pane.connection.currentPath, `${wslRoot}\\home\\vastbase\\project`);
+    await pane.goTo("~/src");
+    assert.equal(pane.connection.currentPath, `${wslRoot}\\home\\vastbase\\src`);
+    await pane.goTo("/mnt/d/work");
+    assert.equal(pane.connection.currentPath, "D:\\work");
+    await pane.goTo(null);
+    assert.equal(pane.navigatedPaths.length, 3, "no live cwd leaves the pane in place");
+  } finally { await pane.unmount(); }
+});
+
+test("WSL without a real distro name skips Linux go-to instead of using the slug", async () => {
+  const pane = await mountLocalFollow({
+    wslLocalHost: { ...wslHost, localShellArgs: undefined }, followEnabled: false,
+  });
+  try {
+    await pane.goTo("/home/vastbase");
+    assert.deepEqual(pane.navigatedPaths, []);
+    await pane.goTo("/mnt/c/Users/trum");
+    assert.equal(pane.connection.currentPath, "C:\\Users\\trum");
+  } finally { await pane.unmount(); }
+});
+
+test("ordinary local panes cannot first-open or auto-follow; manual Windows cwd still works", async () => {
+  const pane = await mountLocalFollow({ freshCwd: "/home/vastbase" });
+  try {
+    assert.deepEqual(pane.requestedOptions, []);
+    await pane.updateCwd("C:\\work");
+    assert.deepEqual(pane.navigatedPaths, []);
+    await pane.goTo("C:\\work");
+    assert.deepEqual(pane.navigatedPaths, ["C:\\work"]);
+  } finally { await pane.unmount(); }
+});

@@ -65,8 +65,9 @@ Total adopted: 177 unique English keys.
 - **awk**: the local macOS `awk` is BSD awk, while the spec also exposes
   gawk-specific options. The gawk manual confirms that `-c` is traditional
   compatibility mode (not POSIX), `-n` is `--non-decimal-data`, and `-t` is
-  `--lint-old` (not type checking). The zh-CN text follows the gawk manual;
-  `electron/specs/awk.js` itself is left unchanged.
+  `--lint-old` (not type checking). The zh-CN text follows the gawk manual, and
+  `electron/specs/awk.js` now carries matching English for `-n`, `-c` and `-t`
+  instead of the earlier Fig wording; the dictionary keys moved with the spec.
 - **sed**: the local macOS sed is BSD sed. Fig mixes BSD/Apple options
   (`-a`, `-I`, `-i`, `-l`) with GNU extensions (`e`, `F`, `v`, `z`) and shared
   options. In particular, BSD `-i` requires an extension while GNU `-i` treats
@@ -104,11 +105,11 @@ unique English strings.
 | --- | --- | --- |
 | awk | Assign a variable (var=value) | 赋值一个变量（var=value） |
 | awk | AWK program text (e.g. '{print $1}') | AWK 程序文本（例如 '{print $1}'） |
-| awk | Disable automatic input record splitting (gawk) | 识别输入数据中的八进制和十六进制值，请谨慎使用（gawk） |
+| awk | Recognize octal and hexadecimal values in input data (gawk) | 识别输入数据中的八进制和十六进制值，请谨慎使用（gawk） |
 | awk | Dump variables to file (gawk) | 将变量转储到文件（gawk） |
 | awk | e.g. ',' or '\t' | 例如 ',' 或 '\t' |
 | awk | Enable pretty-printed output | 启用美化（pretty-print）输出 |
-| awk | Enable type checking (gawk) | 对无法移植到原始 UNIX awk 的构造发出警告（gawk） |
+| awk | Warn about constructs not portable to the original Unix awk (gawk) | 对无法移植到原始 UNIX awk 的构造发出警告（gawk） |
 | awk | Include AWK source library | 包含 AWK 源库 |
 | awk | Input file(s) | 输入文件 |
 | awk | Load dynamic extension (gawk) | 加载动态扩展（gawk） |
@@ -119,7 +120,7 @@ unique English strings.
 | awk | Profile execution and write to file (gawk) | 分析执行情况并写入文件（gawk） |
 | awk | Read AWK program from file | 从文件读取 AWK 程序 |
 | awk | Read AWK program from file (like -f but disables command-line variable assignments) | 从文件读取 AWK 程序（类似 -f，但禁用命令行变量赋值） |
-| awk | Run in POSIX compatibility mode (gawk) | 以传统兼容模式运行，行为等同 Brian Kernighan 的 awk（gawk） |
+| awk | Run in traditional compatibility mode (gawk) | 以传统兼容模式运行，行为等同 Brian Kernighan 的 awk（gawk） |
 | awk | Sandbox mode — disable system(), I/O redirection (gawk) | 沙箱模式——禁用 system() 和 I/O 重定向（gawk） |
 | awk | Set field separator | 设置字段分隔符 |
 | awk | Specify AWK program text | 指定 AWK 程序文本 |
@@ -142,7 +143,12 @@ unique English strings.
 | python, python3 | Disable the import of the module site and the site-dependent manipulations of sys.path that it entails | 禁用 site 模块的导入，以及随之进行的 sys.path 站点相关调整 |
 | python, python3 | Do -O and also discard docstrings | 执行 -O 的操作，并丢弃文档字符串 |
 | python, python3 | Don’t add the user site-packages directory to sys.path | 不将用户 site-packages 目录加入 sys.path |
-| python, python3 | Don’t display the copyright and version messages even in interactive mode | 上游选项疑似错误：交互模式下不显示版权和版本信息请用 -q |
+| python, python3 | Don’t display the copyright and version messages even in interactive mode | 即使在交互模式下也不显示版权和版本消息 |
+
+> Note: the Fig spec's `-g` option is not a real CPython flag (use `-q`). The
+> zh-CN value translates the English key faithfully instead of showing an
+> editorial note in the completion popup; fix the option name in a local spec
+> override if the upstream entry is confirmed wrong.
 | python, python3 | Execute the Python code in command. command can be one or more statements separated by newlines, with significant leading whitespace as in normal module code | 执行 command 中的 Python 代码。command 可以是用换行分隔的一条或多条语句，并像普通模块代码一样保留有意义的行首空白 |
 | python, python3 | Force the stdout and stderr streams to be unbuffered. This option has no effect on the stdin stream | 强制 stdout 和 stderr 不缓冲；此选项对 stdin 无效 |
 | python, python3 | If given, Python won’t try to write .pyc files on the import of source modules | 指定后，Python 在导入源模块时不会写入 .pyc 文件 |

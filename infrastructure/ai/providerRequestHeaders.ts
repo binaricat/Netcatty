@@ -8,7 +8,14 @@ import type { ProviderConfig } from "./types";
  */
 export const OPENCODE_SESSION_HEADER = "x-opencode-session";
 
-/** Match the opencode.ai API hosts (Zen `.../zen/v1`, Go `.../zen/go/v1`). */
+/**
+ * OpenCode asks clients to identify themselves instead of sending a generic
+ * SDK/HTTP-library user agent. Keep it aligned with the UA used by other
+ * Netcatty AI tool calls.
+ */
+export const OPENCODE_CLIENT_USER_AGENT = "Netcatty-AI/1.0";
+
+/** Match the opencode.ai API hosts (Console `.../inference/go/...`, legacy `.../zen/go/...`). */
 export function isOpencodeEndpoint(baseURL: string | undefined): boolean {
   if (!baseURL) return false;
   try {
@@ -25,19 +32,29 @@ export function isOpencodeEndpoint(baseURL: string | undefined): boolean {
  * - User-configured `customHeaders` take precedence. Stored encrypted values are
  *   resolved by the main process before sending.
  * - OpenCode endpoints get an automatic `x-opencode-session` header carrying
- *   the chat session id, so OpenCode Go can route the conversation. A
- *   user-supplied session header takes precedence over the automatic one.
+ *   the chat session id, so OpenCode Go can route the conversation and reuse
+ *   its prompt cache. A user-supplied session header takes precedence.
+ * - OpenCode also gets a Netcatty user agent so traffic is not attributed to a
+ *   generic SDK. A user-supplied User-Agent takes precedence.
  */
 export function buildSdkRequestHeaders(
   config: Pick<ProviderConfig, "baseURL" | "customHeaders">,
   chatSessionId?: string,
 ): Record<string, string> {
   const headers: Record<string, string> = { ...(config.customHeaders ?? {}) };
-  const hasSessionHeader = Object.keys(headers).some(
-    (key) => key.toLowerCase() === OPENCODE_SESSION_HEADER,
-  );
-  if (!hasSessionHeader && chatSessionId && isOpencodeEndpoint(config.baseURL)) {
-    headers[OPENCODE_SESSION_HEADER] = chatSessionId;
+  if (isOpencodeEndpoint(config.baseURL)) {
+    const hasSessionHeader = Object.keys(headers).some(
+      (key) => key.toLowerCase() === OPENCODE_SESSION_HEADER,
+    );
+    if (!hasSessionHeader && chatSessionId) {
+      headers[OPENCODE_SESSION_HEADER] = chatSessionId;
+    }
+    const hasUserAgent = Object.keys(headers).some(
+      (key) => key.toLowerCase() === "user-agent",
+    );
+    if (!hasUserAgent) {
+      headers["User-Agent"] = OPENCODE_CLIENT_USER_AGENT;
+    }
   }
   return headers;
 }

@@ -26,7 +26,10 @@ export function VaultPageHeader({
     >
       <div
         className={cn(
-          "h-14 px-4 py-2 flex items-center gap-3 app-no-drag",
+          // Wrap instead of clipping when the window is tiled to a narrow
+          // half-screen cell: the search row keeps its controls and the
+          // fixed-width action buttons move to a second row.
+          "min-h-14 px-4 py-2 flex flex-wrap items-center gap-x-3 gap-y-2 app-no-drag",
           contentClassName,
         )}
       >

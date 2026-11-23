@@ -6,6 +6,7 @@ import {
   buildExternalMcpHttpUrl,
   buildGenericHttpMcpJson,
   DEFAULT_EXTERNAL_MCP_HTTP_PORT,
+  isExternalMcpHttpIpAddress,
 } from "../../../../domain/externalMcpHttp";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
@@ -56,15 +57,6 @@ type ExternalMcpHttpSectionProps = {
 function isWildcardAddress(value: string): boolean {
   const address = value.trim();
   return address === "0.0.0.0" || address === "::";
-}
-
-function isIpAddress(value: string): boolean {
-  const address = value.trim();
-  const ipv4 = address.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4) {
-    return ipv4.slice(1).every((part) => Number(part) <= 255 && String(Number(part)) === part);
-  }
-  return address.includes(":") && /^[0-9a-fA-F:]+$/.test(address);
 }
 
 function parsePort(value: string): number | null {
@@ -157,7 +149,7 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
 
   const commitClientHost = () => {
     const clientHost = clientHostDraft.trim();
-    if (clientHost && (!isIpAddress(clientHost) || isWildcardAddress(clientHost))) {
+    if (clientHost && (!isExternalMcpHttpIpAddress(clientHost) || isWildcardAddress(clientHost))) {
       setClientHostError(true);
       return;
     }
@@ -168,7 +160,7 @@ export const ExternalMcpHttpSection: React.FC<ExternalMcpHttpSectionProps> = ({
 
   const commitAddress = () => {
     const address = addressDraft.trim();
-    if (!isIpAddress(address)) {
+    if (!isExternalMcpHttpIpAddress(address)) {
       setAddressError(true);
       return;
     }

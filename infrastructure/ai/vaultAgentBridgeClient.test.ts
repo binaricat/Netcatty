@@ -442,6 +442,100 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.equal('password' in (hosts?.[0] ?? {}), false);
   });
 
+  describe('host.list filters', () => {
+    const hosts: Host[] = [
+      { id: 'h1', label: 'web-1', hostname: '10.0.0.1', username: 'deploy', port: 22, group: 'prod/web', tags: ['nginx'], os: 'linux' },
+      { id: 'h2', label: 'db-1', hostname: '10.0.0.2', username: 'root', port: 22, group: 'prod/db', tags: ['postgres'], os: 'linux' },
+      { id: 'h3', label: 'old-box', hostname: '10.0.0.3', username: 'root', port: 22, group: 'production-old', tags: [], os: 'linux' },
+      { id: 'h4', label: 'prod', hostname: '10.0.0.4', username: 'root', port: 22, tags: [], os: 'linux' },
+      { id: 'h5', label: 'root-host', hostname: '10.0.0.5', username: 'ops', port: 22, group: 'prod', tags: [], os: 'linux' },
+    ];
+
+    async function listIds(params: Record<string, unknown>): Promise<string[]> {
+      const result = await handleVaultAgentOp('host.list', params, createDeps({ hosts }));
+      assert.equal(result.ok, true);
+      return ((result as { hosts: Array<{ id: string }> }).hosts).map((host) => host.id);
+    }
+
+    it('returns every host when no filter is given', async () => {
+      assert.deepEqual(await listIds({}), ['h1', 'h2', 'h3', 'h4', 'h5']);
+      assert.deepEqual(await listIds({ query: '   ', group: '  ' }), ['h1', 'h2', 'h3', 'h4', 'h5']);
+    });
+
+    it('query matches label, hostname, username, and tags case-insensitively', async () => {
+      assert.deepEqual(await listIds({ query: 'WEB-1' }), ['h1']);
+      assert.deepEqual(await listIds({ query: '10.0.0.2' }), ['h2']);
+      assert.deepEqual(await listIds({ query: 'deploy' }), ['h1']);
+      assert.deepEqual(await listIds({ query: 'Postgres' }), ['h2']);
+    });
+
+    it('query requires every whitespace-separated word to match', async () => {
+      assert.deepEqual(await listIds({ query: 'root db' }), ['h2']);
+      assert.deepEqual(await listIds({ query: 'root nomatch' }), []);
+    });
+
+    it('query does not match group', async () => {
+      assert.deepEqual(await listIds({ query: 'production' }), []);
+      assert.deepEqual(await listIds({ query: 'prod/web' }), []);
+    });
+
+    it('group matches the group and its subgroups on a path boundary', async () => {
+      assert.deepEqual(await listIds({ group: 'prod' }), ['h1', 'h2', 'h5']);
+      assert.deepEqual(await listIds({ group: 'prod/db' }), ['h2']);
+      assert.deepEqual(await listIds({ group: 'production-old' }), ['h3']);
+    });
+
+    it('group tolerates surrounding whitespace and trailing slashes', async () => {
+      assert.deepEqual(await listIds({ group: ' prod/ ' }), ['h1', 'h2', 'h5']);
+      assert.deepEqual(await listIds({ group: 'prod/db//' }), ['h2']);
+    });
+
+    it('group is case-sensitive and ignores ungrouped hosts', async () => {
+      assert.deepEqual(await listIds({ group: 'PROD' }), []);
+      assert.equal((await listIds({ group: 'prod' })).includes('h4'), false);
+    });
+
+    it('treats missing, null and non-string filters as no filter', async () => {
+      const all = ['h1', 'h2', 'h3', 'h4', 'h5'];
+      assert.deepEqual(await listIds(undefined as unknown as Record<string, unknown>), all);
+      assert.deepEqual(await listIds(null as unknown as Record<string, unknown>), all);
+      assert.deepEqual(await listIds({ query: null, group: null }), all);
+      assert.deepEqual(await listIds({ query: undefined, group: undefined }), all);
+      assert.deepEqual(await listIds({ query: 123, group: { a: 1 } }), all);
+      assert.deepEqual(await listIds({ query: ['web'], group: ['prod'] }), all);
+      assert.deepEqual(await listIds({ group: '/' }), all);
+    });
+
+    it('treats query characters literally, not as a pattern', async () => {
+      assert.deepEqual(await listIds({ query: '10.0.0.1' }), ['h1']);
+      assert.deepEqual(await listIds({ query: '.*' }), []);
+      assert.deepEqual(await listIds({ query: '(' }), []);
+    });
+
+    it('does not crash on hosts with missing or malformed fields', async () => {
+      const messy = [
+        { id: 'm1', label: 'solo', hostname: 'solo.example.com', port: 22, tags: 'oops', os: 'linux' },
+        { id: 'm2', hostname: 'bare.example.com', port: 22, tags: null, os: 'linux' },
+        { id: 'm3', label: 'tagged', hostname: 'tagged.example.com', port: 22, tags: 5, os: 'linux' },
+      ] as unknown as Host[];
+      const result = await handleVaultAgentOp('host.list', { query: 'example' }, createDeps({ hosts: messy }));
+      assert.deepEqual((result as { hosts: Array<{ id: string }> }).hosts.map((h) => h.id), ['m1', 'm2', 'm3']);
+      const grouped = await handleVaultAgentOp('host.list', { group: 'prod' }, createDeps({ hosts: messy }));
+      assert.deepEqual((grouped as { hosts: unknown[] }).hosts, []);
+    });
+
+    it('returns an empty list, not an error, when nothing matches', async () => {
+      const result = await handleVaultAgentOp('host.list', { query: 'zzz' }, createDeps({ hosts }));
+      assert.deepEqual(result, { ok: true, hosts: [] });
+    });
+
+    it('combines query and group', async () => {
+      // h2 matches via username, h5 via its label; h3/h4 match the query but sit outside the group.
+      assert.deepEqual(await listIds({ group: 'prod', query: 'root' }), ['h2', 'h5']);
+      assert.deepEqual(await listIds({ group: 'prod/db', query: 'root' }), ['h2']);
+    });
+  });
+
   it('sanitizeHostForAgent omits TOTP secrets', () => {
     const sanitized = sanitizeHostForAgent({
       id: 'host-1',

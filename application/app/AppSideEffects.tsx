@@ -47,7 +47,7 @@ import { materializeHostProxyProfile } from '../../domain/proxyProfiles';
 import { useVaultHostDeletion } from '../state/useVaultHostDeletion';
 import { buildSshDeepLinkConnectionHost, buildSshDeepLinkEphemeralHost, buildSshDeepLinkEphemeralHostFromSaved, buildSshDeepLinkHostDraft, findSshDeepLinkHost, parseSshDeepLink } from '../../domain/sshDeepLink';
 import { buildTelnetDeepLinkConnectionHost, buildTelnetDeepLinkEphemeralHostFromSaved, buildTelnetDeepLinkOpenHost, findTelnetDeepLinkHost, materializeTelnetDeepLinkMatchHost, parseTelnetDeepLink } from '../../domain/telnetDeepLink';
-import { buildJmsDeepLinkEphemeralHost, isSupportedJmsProtocol, parseJmsDeepLink } from '../../domain/jmsDeepLink';
+import { buildJmsDeepLinkEphemeralHost, parseJmsDeepLinkResult } from '../../domain/jmsDeepLink';
 import { applyEphemeralHostDistroUpdate, applyEphemeralHostsUpdate, splitHostsUpdateByEphemeral } from '../../domain/ephemeralHosts';
 import { prepareConnectionHost, temporaryConnectionPrepareOptions } from '../../domain/legacyAlgorithms';
 import { resolveHostAuth } from '../../domain/sshAuth';
@@ -104,7 +104,7 @@ import { collectSnippetDeleteIds } from '../../domain/snippetSelection.ts';
 import { shouldOpenLocalTerminalOnStartup, resolveStartupLandingSetting } from '../../domain/startupLanding';
 import { createOpenTerminalQueue } from './openTerminalQueue';
 import { useAppStartupEffects } from './useAppStartupEffects';
-import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, handleFidoPromptSubmitImpl, handleFidoPromptCancelImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
+import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, handleFidoPromptSubmitImpl, handleFidoPromptCancelImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, startRestoredSessionConnectionLogImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
 
 type OpenSessionInNewWindowPayload = {
   title?: string;
@@ -1734,16 +1734,16 @@ export function AppSideEffects() {
   const _processJmsDeepLink = useEffectEvent((payload: { url?: string }) => {
     startupLaunchIntentReceivedRef.current = true;
     const rawUrl = payload?.url || '';
-    const target = parseJmsDeepLink(rawUrl);
-    if (!target) {
-      toast.warning(t('deepLink.jms.invalid'));
+    const result = parseJmsDeepLinkResult(rawUrl);
+    if (result.ok === false) {
+      if (result.reason === 'unsupported_protocol') {
+        toast.warning(t('deepLink.jms.unsupported', { protocol: result.protocol }));
+      } else {
+        toast.warning(t('deepLink.jms.invalid'));
+      }
       return;
     }
-    if (!isSupportedJmsProtocol(target.protocol)) {
-      toast.warning(t('deepLink.jms.unsupported', { protocol: target.protocol }));
-      return;
-    }
-    const ephemeralHost = buildJmsDeepLinkEphemeralHost(target, {
+    const ephemeralHost = buildJmsDeepLinkEphemeralHost(result.target, {
       id: crypto.randomUUID(),
       now: Date.now(),
     });
@@ -1895,8 +1895,18 @@ export function AppSideEffects() {
     setActiveTabId('vault');
   }, [setActiveTabId]);
 
+  const restoredSessionLogsStartedRef = useRef(new Set<string>());
+  // A restored tab retains its session ID, but its previous ConnectionLog is closed.
+  // Start the new incarnation's log before updateSessionStatus clears restoreState.
   // Wrap updateSessionStatus to track lastConnectedAt on successful connection
   const handleSessionStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
+    const session = sessionByIdRef.current.get(sessionId);
+    if (session?.restoreState === 'restored-disconnected'
+      && (status === 'connecting' || status === 'connected')
+      && !restoredSessionLogsStartedRef.current.has(sessionId)) {
+      restoredSessionLogsStartedRef.current.add(sessionId);
+      startRestoredSessionConnectionLogImpl(() => ({ addConnectionLog, systemInfoRef }), session);
+    }
     updateSessionStatus(sessionId, status);
     if (status === 'connected') {
       const session = sessionByIdRef.current.get(sessionId);
@@ -1904,7 +1914,7 @@ export function AppSideEffects() {
         updateHostLastConnected(session.hostId);
       }
     }
-  }, [updateSessionStatus, updateHostLastConnected]);
+  }, [addConnectionLog, updateSessionStatus, updateHostLastConnected]);
 
   const handleUpdateHostFromTerminal = useCallback((host: TerminalHostUpdate) => {
     // Functional update + identity-preserving updateHosts: only the patched

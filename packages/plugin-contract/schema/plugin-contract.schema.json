@@ -552,6 +552,33 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "target",
+            "expectedRevision",
+            "endpoint"
+          ],
+          "properties": {
+            "target": {
+              "$ref": "#/$defs/VaultHostRef"
+            },
+            "expectedRevision": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+              "minLength": 1
+            },
+            "endpoint": {
+              "$ref": "#/$defs/ByteStreamEndpoint"
+            },
+            "kind": {
+              "const": "network.stream.connectViaHost"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },
@@ -1005,6 +1032,9 @@
         },
         {
           "$ref": "#/$defs/VaultHostActionAccepted"
+        },
+        {
+          "$ref": "#/$defs/ByteStreamConnectionDescriptor"
         }
       ]
     },
@@ -1808,7 +1838,8 @@
         "provider.sync",
         "provider.importer",
         "terminal.selection.read",
-        "terminal.input.propose"
+        "terminal.input.propose",
+        "network.hostStream"
       ]
     },
     "NonResourceScopedPermission": {
@@ -1849,7 +1880,8 @@
         "provider.sync",
         "provider.importer",
         "terminal.selection.read",
-        "terminal.input.propose"
+        "terminal.input.propose",
+        "network.hostStream"
       ]
     },
     "ResourceScopedPermission": {
@@ -8626,6 +8658,44 @@
           }
         }
       }
+    },
+    "HostByteStreamFeature": {
+      "const": "network.host-byte-streams"
+    },
+    "HostByteStreamLimits": {
+      "const": {
+        "connectionsPerRuntime": 4,
+        "connectionsTotal": 64,
+        "chunkBytes": 65536,
+        "bufferBytes": 65536,
+        "connectionBytes": 67108864,
+        "connectMs": 120000,
+        "idleMs": 300000,
+        "lifetimeMs": 1800000
+      }
+    },
+    "HostByteStreamConnectRequest": {
+      "type": "object",
+      "required": [
+        "target",
+        "expectedRevision",
+        "endpoint"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/VaultHostRef"
+        },
+        "expectedRevision": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+          "minLength": 1
+        },
+        "endpoint": {
+          "$ref": "#/$defs/ByteStreamEndpoint"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

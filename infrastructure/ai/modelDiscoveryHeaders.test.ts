@@ -1,13 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildModelDiscoveryHeaders, resolveModelsDiscoveryEndpoint } from "./modelDiscoveryHeaders";
+import {
+  buildModelDiscoveryHeaders,
+  isCustomAnthropicBaseURL,
+  resolveModelsDiscoveryEndpoint,
+} from "./modelDiscoveryHeaders";
 
-test("buildModelDiscoveryHeaders uses x-api-key+anthropic-version for the anthropic family", () => {
-  assert.deepEqual(buildModelDiscoveryHeaders("anthropic", "sk-test"), {
-    "x-api-key": "sk-test",
-    "anthropic-version": "2023-06-01",
-  });
+test("buildModelDiscoveryHeaders uses x-api-key+anthropic-version only on official anthropic host", () => {
+  for (const baseURL of [undefined, "", "https://api.anthropic.com", "https://api.anthropic.com/v1"]) {
+    assert.deepEqual(buildModelDiscoveryHeaders("anthropic", "sk-test", {}, baseURL), {
+      "x-api-key": "sk-test",
+      "anthropic-version": "2023-06-01",
+    });
+    assert.equal(isCustomAnthropicBaseURL(baseURL), false);
+  }
+});
+
+test("buildModelDiscoveryHeaders sends both x-api-key and Bearer auth on custom anthropic bases", () => {
+  for (const baseURL of [
+    "https://ark.cn-beijing.volces.com/api/plan",
+    "https://gateway.example/v1",
+  ]) {
+    assert.equal(isCustomAnthropicBaseURL(baseURL), true);
+    assert.deepEqual(buildModelDiscoveryHeaders("anthropic", "sk-test", {}, baseURL), {
+      "x-api-key": "sk-test",
+      Authorization: "Bearer sk-test",
+      "anthropic-version": "2023-06-01",
+    });
+  }
 });
 
 test("buildModelDiscoveryHeaders uses Bearer auth for the openai-compatible family", () => {
@@ -65,4 +86,16 @@ test('custom discovery headers override default auth regardless of case', () => 
     assert.equal(Object.keys(headers).filter(key => key.toLowerCase() === name.toLowerCase()).length, 1);
     assert.equal(headers['X-Tenant'], 'tenant');
   }
+
+  const customAnthropicAuth = buildModelDiscoveryHeaders(
+    'anthropic',
+    'default-key',
+    { authorization: 'Bearer custom-token' },
+    'https://ark.cn-beijing.volces.com/api/plan',
+  );
+  assert.deepEqual(customAnthropicAuth, {
+    'x-api-key': 'default-key',
+    'anthropic-version': '2023-06-01',
+    authorization: 'Bearer custom-token',
+  });
 });

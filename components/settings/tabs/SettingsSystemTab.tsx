@@ -693,6 +693,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
               {httpNetworkProxy.mode === "custom" && (
                 <>
                   <SettingRow
+                    anchorId="system-network-proxy-url"
                     label={t("settings.system.networkProxy.url")}
                     description={t("settings.system.networkProxy.url.desc")}
                   >
@@ -710,6 +711,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                     />
                   </SettingRow>
                   <SettingRow
+                    anchorId="system-network-proxy-bypass"
                     label={t("settings.system.networkProxy.bypass")}
                     description={t("settings.system.networkProxy.bypass.desc")}
                   >
@@ -1088,7 +1090,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
               </SettingRow>
 
               {/* Directory Selection */}
-              <div className="space-y-2">
+              <SettingsAnchor anchorId="system-session-logs-directory" className="space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">{t("settings.sessionLogs.directory")}</span>
                 </div>
@@ -1125,10 +1127,11 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                 <p className="text-xs text-muted-foreground">
                   {t("settings.sessionLogs.directoryHint")}
                 </p>
-              </div>
+              </SettingsAnchor>
 
               {/* Format Selection */}
               <SettingRow
+                anchorId="system-session-logs-format"
                 label={t("settings.sessionLogs.format")}
                 description={t("settings.sessionLogs.formatDesc")}
               >
@@ -1141,6 +1144,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
               </SettingRow>
 
               <SettingRow
+                anchorId="system-session-logs-timestamps"
                 label={t("settings.sessionLogs.timestamps")}
                 description={t("settings.sessionLogs.timestampsDesc")}
               >

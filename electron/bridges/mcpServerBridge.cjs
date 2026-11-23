@@ -170,7 +170,7 @@ const activePtyExecs = new Map(); // marker → { ptyStream, cleanup }
 const cancelledChatSessions = new Set();
 const activeExecChatSessions = new Map(); // chatSessionId -> { sessionId, command, startedAt }
 const backgroundJobs = new Map(); // jobId -> job metadata
-const workerBackgroundJobs = new Map(); // jobId -> { chatSessionId, sessionId }
+const workerBackgroundJobs = new Map(); // jobId -> { chatSessionId, sessionId, completedAt }
 const pendingWorkerJobStarts = new Map(); // sessionId -> Set<{ chatSessionId, cancelled }>
 const activeSessionExecutions = new Map(); // sessionId -> { kind, startedAt, token }
 const activeSessionSftpOps = new Map(); // opId -> { chatSessionId, sessionId, cancel }
@@ -1999,9 +1999,11 @@ async function handleWorkerJobStart(params = {}, beforeExecute) {
         }, {}));
         return { ok: false, error: "Session is closing.", jobId: result.jobId, status: "cancelled" };
       }
+      pruneCompletedWorkerRoutes();
       workerBackgroundJobs.set(result.jobId, {
         chatSessionId: chatSessionId || null,
         sessionId,
+        completedAt: null,
       });
     }
     return result;
@@ -2028,6 +2030,18 @@ function deleteWorkerRoute(jobId, job, via) {
   workerBackgroundJobs.delete(jobId);
 }
 
+// Retain completed worker job routes for BACKGROUND_JOB_RETENTION_MS (matching
+// aiExec.cjs and backgroundJobs.cjs) so subsequent jobPoll/jobStop calls remain
+// idempotent and return the terminal job state rather than "not found".
+function pruneCompletedWorkerRoutes(now = Date.now()) {
+  for (const [jobId, job] of workerBackgroundJobs) {
+    const completedAt = Number(job?.completedAt) || 0;
+    if (completedAt > 0 && now - completedAt > BACKGROUND_JOB_RETENTION_MS) {
+      deleteWorkerRoute(jobId, job, "retention-expired");
+    }
+  }
+}
+
 // Why getWorkerJob/terminalWorkerManager could not serve a poll or stop:
 // the route is gone, the caller's chat scope does not own it, or the worker
 // manager is unavailable. These are different failures and must not share a label.
@@ -2051,6 +2065,7 @@ const WORKER_JOB_NOT_FOUND_ERROR = "Background job not found";
 async function handleWorkerJobPoll(params = {}, beforeExecute) {
   const { jobId, chatSessionId, scopedSessionIds } = params || {};
   if (!jobId) throw new Error("jobId is required");
+  pruneCompletedWorkerRoutes();
   const job = getWorkerJob(jobId, chatSessionId || null);
   if (!job || !terminalWorkerManager?.request) {
     emitJobDiag("job-stop-miss", { jobId, chatSessionId: chatSessionId || null, op: "poll", reason: describeWorkerRouteMiss(jobId) });
@@ -2065,8 +2080,8 @@ async function handleWorkerJobPoll(params = {}, beforeExecute) {
     // The route is still here but the worker no longer knows the job (pruned or restarted).
     emitJobDiag("job-stop-miss", { jobId, chatSessionId: chatSessionId || null, op: "poll", reason: "worker-job-missing" });
   }
-  if (result?.completed) {
-    deleteWorkerRoute(jobId, job, "poll-completed");
+  if (result?.completed && !job.completedAt) {
+    job.completedAt = Date.now();
   }
   return result;
 }
@@ -2074,6 +2089,7 @@ async function handleWorkerJobPoll(params = {}, beforeExecute) {
 async function handleWorkerJobStop(params = {}, beforeExecute) {
   const { jobId, chatSessionId, scopedSessionIds } = params || {};
   if (!jobId) throw new Error("jobId is required");
+  pruneCompletedWorkerRoutes();
   const job = getWorkerJob(jobId, chatSessionId || null);
   if (!job || !terminalWorkerManager?.request) {
     emitJobDiag("job-stop-miss", { jobId, chatSessionId: chatSessionId || null, op: "stop", reason: describeWorkerRouteMiss(jobId) });
@@ -2087,16 +2103,18 @@ async function handleWorkerJobStop(params = {}, beforeExecute) {
     // The route is still here but the worker no longer knows the job (pruned or restarted).
     emitJobDiag("job-stop-miss", { jobId, chatSessionId: chatSessionId || null, op: "stop", reason: "worker-job-missing" });
   }
-  if (result?.completed) {
-    deleteWorkerRoute(jobId, job, "stop-completed");
+  if (result?.completed && !job.completedAt) {
+    job.completedAt = Date.now();
   }
   return result;
 }
 
 async function hasActiveWorkerJobForTerminalSession(sessionId) {
+  pruneCompletedWorkerRoutes();
   const matchingJobs = Array.from(workerBackgroundJobs.entries())
     .filter(([, job]) => job?.sessionId === sessionId);
   for (const [jobId, job] of matchingJobs) {
+    if (job.completedAt) continue;
     if (!terminalWorkerManager?.request) return true;
     try {
       const result = await terminalWorkerManager.request("netcatty:ai:jobPoll", {
@@ -2158,7 +2176,7 @@ async function cancelWorkerBackgroundJobsForTerminalSession(sessionId) {
   for (const [jobId, job] of workerBackgroundJobs) {
     if (job.sessionId !== sessionId) continue;
     matchingJobs.push([jobId, job]);
-    if (terminalWorkerManager?.request) {
+    if (!job.completedAt && terminalWorkerManager?.request) {
       pending.push(waitForWorkerCleanup(terminalWorkerManager.request("netcatty:ai:jobStop", {
         jobId,
         sessionId,
@@ -2253,6 +2271,7 @@ async function dispatchCore(method, params, approvalContext = {}) {
     ? params?.sessionId
     : null;
   pruneCompletedBackgroundJobs();
+  pruneCompletedWorkerRoutes();
 
   const approvalTarget = getApprovalTarget(params);
   const permission = delegated ? { allowed: !isChatSessionCancelled(params?.chatSessionId), requiresApproval: false }

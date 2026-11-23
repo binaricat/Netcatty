@@ -144,6 +144,7 @@ export const WebSearchSettings: React.FC<{
         {/* API Key (hidden for SearXNG) */}
         {preset.requiresApiKey && (
           <SettingRow
+            anchorId="ai-web-search-api-key"
             label={t("ai.webSearch.apiKey")}
             description={t("ai.webSearch.apiKey.description")}
           >
@@ -170,6 +171,7 @@ export const WebSearchSettings: React.FC<{
 
         {/* API Host */}
         <SettingRow
+          anchorId="ai-web-search-api-host"
           label={t("ai.webSearch.apiHost")}
           description={
             config.providerId === "searxng"
@@ -188,6 +190,7 @@ export const WebSearchSettings: React.FC<{
 
         {/* Max Results */}
         <SettingRow
+          anchorId="ai-web-search-max-results"
           label={t("ai.webSearch.maxResults")}
           description={t("ai.webSearch.maxResults.description")}
         >

@@ -157,7 +157,7 @@ test("continuedCompositionPrefix returns the hypothesis already on the PTY", () 
 type Harness = ImeCompositionCommitTarget & {
   compositionstart: () => void;
   compositionend: () => void;
-  keydown: (event: { keyCode: number }) => boolean;
+  keydown: (event: { key?: string; keyCode: number }) => boolean;
   sent: string[];
 };
 
@@ -494,6 +494,183 @@ test("filtered formatting characters do not break final composition deduplicatio
   helper.compositionend();
   await flushTimers();
   assert.deepEqual(helper.sent, ["ab", "X"]);
+});
+
+const VOICE_RAW = "\u6d4b\u8bd5\u7248\u672c\u4e00\u70b9\u4e00\u70b9\u4e5d\u96f6\u4e86";
+const VOICE_POLISHED = "\u6d4b\u8bd5\u7248\u672c1.1.90\u4e86";
+const VOICE_POLISHED_TAIL = "1.1.90\u4e86";
+const VOICE_UTTERANCE = "\u6d4b\u8bd5\u8bed\u97f3\u8f93\u5165\u6587\u672c";
+const HELLO = "\u4f60\u597d";
+const WORLD = "\u4e16\u754c";
+
+test("mid-composition Unidentified keydown does not prematurely flush before polish", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = VOICE_RAW;
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  assert.equal(helper.keydown({ key: "Unidentified", keyCode: 0 }), false);
+  assert.deepEqual(helper.sent, []);
+
+  helper._textarea.value = VOICE_POLISHED;
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, [VOICE_POLISHED]);
+});
+
+test("mid-composition iOS UIKeyInput arrow with keyCode 0 is not swallowed as a sentinel", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = HELLO;
+  helper._compositionPosition = { start: 0, end: HELLO.length };
+  assert.equal(helper.keydown({ key: "UIKeyInputLeftArrow", keyCode: 0 }), true);
+  assert.deepEqual(helper.sent, [HELLO]);
+
+  helper._textarea.value = WORLD;
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, [HELLO]);
+});
+
+test("trailing compositionend after non-terminal early flush emits only the diff", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = VOICE_RAW;
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  // Non-terminal IME mode key that triggers _finalizeComposition(false) without moving PTY cursor
+  helper.keydown({ key: "Convert", keyCode: 28 });
+  assert.deepEqual(helper.sent, [VOICE_RAW]);
+
+  helper._textarea.value = VOICE_POLISHED;
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, [
+    VOICE_RAW,
+    BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE,
+    VOICE_POLISHED_TAIL,
+  ]);
+});
+
+test("trailing compositionend after non-terminal early flush ignores identical text", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = VOICE_UTTERANCE;
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  helper.keydown({ key: "Convert", keyCode: 28 });
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, [VOICE_UTTERANCE]);
+});
+
+test("trailing compositionend after ArrowLeft or Home does not emit backspaces against moved cursor", async () => {
+  for (const keyEvent of [
+    { key: "ArrowLeft", keyCode: 37 },
+    { key: "Home", keyCode: 36 },
+  ]) {
+    const helper = createHarness();
+    install(helper);
+
+    helper.compositionstart();
+    helper._textarea.value = VOICE_RAW;
+    helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+    assert.equal(helper.keydown(keyEvent), true);
+    assert.deepEqual(helper.sent, [VOICE_RAW]);
+
+    // Final IME text differs after cursor-moving key was handled by xterm
+    helper._textarea.value = VOICE_POLISHED;
+    helper.compositionend();
+    await flushTimers();
+
+    assert.deepEqual(helper.sent, [VOICE_RAW]);
+  }
+});
+
+test("new composition after ArrowLeft early flush does not rewrite the prior utterance", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = HELLO;
+  helper._compositionPosition = { start: 0, end: HELLO.length };
+  assert.equal(helper.keydown({ key: "ArrowLeft", keyCode: 37 }), true);
+  assert.deepEqual(helper.sent, [HELLO]);
+
+  // Next composition starts at 0 without a trailing compositionend
+  helper.compositionstart();
+  helper._compositionPosition = { start: 0, end: WORLD.length };
+  helper._textarea.value = WORLD;
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, [HELLO, WORLD]);
+});
+
+test("trailing empty compositionend after Enter cleared textarea sends no backspace", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = HELLO;
+  helper._compositionPosition = { start: 0, end: HELLO.length };
+  helper.keydown({ key: "Enter", keyCode: 13 });
+  helper._textarea.value = "";
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, [HELLO]);
+});
+
+test("consecutive rewrite composition replaces prior committed utterance in place", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = VOICE_RAW;
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  helper.compositionend();
+  await flushTimers();
+
+  helper.compositionstart();
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  helper._textarea.value = VOICE_POLISHED;
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, [
+    VOICE_RAW,
+    BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE, BACKSPACE,
+    VOICE_POLISHED_TAIL,
+  ]);
+});
+
+test("consecutive normal compositions starting after committed text still send both words", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.compositionstart();
+  helper._textarea.value = HELLO;
+  helper._compositionPosition = { start: 0, end: HELLO.length };
+  helper.compositionend();
+  await flushTimers();
+
+  helper.compositionstart();
+  helper._compositionPosition = { start: HELLO.length, end: HELLO.length };
+  helper._textarea.value = `${HELLO}${HELLO}`;
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, [HELLO, HELLO]);
 });
 
 test("keepLiveImeTranscriptionSingle is a no-op without a composition helper", () => {

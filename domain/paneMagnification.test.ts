@@ -7,7 +7,9 @@ import {
   isPaneMagnificationSelectionValid,
   resolvePaneMagnificationCandidate,
   resolvePaneMagnificationStyle,
+  resolveMagnifiedChromeBorderWidth,
   resolveTwoPaneMagnificationStyle,
+  snapCssRectToDevicePixels,
   type PaneMagnificationController,
 } from './paneMagnification.ts';
 
@@ -88,6 +90,53 @@ test('magnification overlays the original layout without changing its rect', () 
     height: '876px',
     zIndex: 50,
   });
+});
+
+test('magnified chrome uses a 2px accent stroke only below 1.5 device pixels', () => {
+  assert.equal(resolveMagnifiedChromeBorderWidth(1), 2);
+  assert.equal(resolveMagnifiedChromeBorderWidth(1.2), 2);
+  assert.equal(resolveMagnifiedChromeBorderWidth(1.49), 2);
+  assert.equal(resolveMagnifiedChromeBorderWidth(1.5), 1);
+  assert.equal(resolveMagnifiedChromeBorderWidth(2), 1);
+  assert.equal(resolveMagnifiedChromeBorderWidth(0), 1);
+});
+
+test('magnified surface bounds snap to the device-pixel grid after the 12px inset', () => {
+  const original = { left: '0px', top: '0px', width: '100px', height: '100px' };
+  // Integer CSS pixels at 1x stay unchanged (existing contract).
+  assert.deepEqual(resolvePaneMagnificationStyle(original, true, {
+    left: 120,
+    top: 80,
+    width: 1400,
+    height: 900,
+  }, 1), {
+    position: 'fixed',
+    left: '132px',
+    top: '92px',
+    width: '1376px',
+    height: '876px',
+    zIndex: 50,
+  });
+
+  // 120.4+12=132.4 at 2x -> 264.8 rounds to 265 -> 132.5
+  // right: 120.4+1400-12=1508.4 at 2x -> 3016.8 rounds to 3017 -> 1508.5
+  const snapped = resolvePaneMagnificationStyle(original, true, {
+    left: 120.4,
+    top: 80.4,
+    width: 1400,
+    height: 900,
+  }, 2);
+  assert.deepEqual(snapped, {
+    position: 'fixed',
+    left: '132.5px',
+    top: '92.5px',
+    width: '1376px',
+    height: '876px',
+    zIndex: 50,
+  });
+
+  const rect = snapCssRectToDevicePixels(10.2, 20.2, 110.2, 80.2, 2);
+  assert.deepEqual(rect, { left: 10, top: 20, width: 100, height: 60 });
 });
 
 test('two-pane magnification keeps the dormant pane geometry unchanged', () => {

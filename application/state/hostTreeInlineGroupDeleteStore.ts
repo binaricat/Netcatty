@@ -1,36 +1,17 @@
-import { useSyncExternalStore } from 'react';
+import { createExternalStore } from './createExternalStore';
 
-type Listener = () => void;
+const store = createExternalStore<string | null>(null, {
+  isEqual: () => false,
+});
 
-class HostTreeInlineGroupDeleteStore {
-  private targetPath: string | null = null;
-  private listeners = new Set<Listener>();
-
-  getTargetPath = () => this.targetPath;
-
-  open = (groupPath: string) => {
-    this.targetPath = groupPath;
-    this.listeners.forEach((listener) => listener());
-  };
-
-  close = () => {
-    if (!this.targetPath) return;
-    this.targetPath = null;
-    this.listeners.forEach((listener) => listener());
-  };
-
-  subscribe = (listener: Listener) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  };
-}
-
-export const hostTreeInlineGroupDeleteStore = new HostTreeInlineGroupDeleteStore();
-
-export const useHostTreeInlineGroupDeleteTarget = () => {
-  return useSyncExternalStore(
-    hostTreeInlineGroupDeleteStore.subscribe,
-    hostTreeInlineGroupDeleteStore.getTargetPath,
-    hostTreeInlineGroupDeleteStore.getTargetPath,
-  );
+export const hostTreeInlineGroupDeleteStore = {
+  getTargetPath: store.getSnapshot,
+  open: (groupPath: string) => store.setSnapshot(groupPath),
+  close: () => {
+    if (!store.getSnapshot()) return;
+    store.setSnapshot(null);
+  },
+  subscribe: store.subscribe,
 };
+
+export const useHostTreeInlineGroupDeleteTarget = () => store.useStore();

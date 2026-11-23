@@ -19,12 +19,12 @@
  * `createOpencodeClient` to the URL it reports.
  */
 const fs = require("node:fs");
-const net = require("node:net");
 const path = require("node:path");
 const { randomBytes } = require("node:crypto");
 const { spawn, spawnSync } = require("node:child_process");
 const { prepareCommandForSpawn, resolveCliFromPath } = require("../../ai/shellUtils.cjs");
 const { buildSdkAgentEnv } = require("./env.cjs");
+const { getAvailablePort: getSharedAvailablePort } = require("./sdkDriverUtils.cjs");
 const { filterMimoTrustedSkillPaths } = require("./netcattySkillsOpenCodePermissions.cjs");
 const {
   buildOpenCodeConfig,
@@ -150,19 +150,7 @@ function stopMimoProcess(child, {
 }
 
 function getAvailablePort(host = "127.0.0.1") {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.on("error", reject);
-    server.listen(0, host, () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close((error) => {
-        if (error) reject(error);
-        else resolve(port === DEFAULT_MIMO_PORT ? getAvailablePort(host) : port);
-      });
-    });
-  });
+  return getSharedAvailablePort(host, DEFAULT_MIMO_PORT);
 }
 
 // Ask the same CLI that starts the server to resolve its configuration. This

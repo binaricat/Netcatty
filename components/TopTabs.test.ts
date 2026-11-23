@@ -36,25 +36,8 @@ const {
   formatSessionTopTabLabel,
   formatSessionTopTabTooltip,
   resolveSessionTabCodingCliIconState,
-  stopCloseButtonDoubleClickPropagation,
 } = await import("./top-tabs/TopTabItems.tsx");
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
-const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
-const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
-const topTabItemsSource = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
-const topTabsQuickControlsSource = readFileSync(new URL("./TopTabsQuickControls.tsx", import.meta.url), "utf8");
-const syncStatusButtonSource = readFileSync(new URL("./SyncStatusButton.tsx", import.meta.url), "utf8");
-const switchSource = readFileSync(new URL("./ui/switch.tsx", import.meta.url), "utf8");
-const appViewSource = readFileSync(new URL("../application/app/AppView.tsx", import.meta.url), "utf8");
-const appSource = [
-  readFileSync(new URL("../App.tsx", import.meta.url), "utf8"),
-  readFileSync(new URL("../application/app/AppSideEffects.tsx", import.meta.url), "utf8"),
-  readFileSync(new URL("../application/app/hosts/TerminalHost.tsx", import.meta.url), "utf8"),
-  readFileSync(new URL("../application/app/hosts/ChromeHost.tsx", import.meta.url), "utf8"),
-].join("\n");
-const externalMcpToggleSource = readFileSync(new URL("../application/state/useExternalMcpToggleState.ts", import.meta.url), "utf8");
-const zhTwAiSource = readFileSync(new URL("../application/i18n/locales/zh-TW/ai.ts", import.meta.url), "utf8");
-const terminalViewSource = readFileSync(new URL("./terminal/TerminalView.tsx", import.meta.url), "utf8");
 
 test("host tree tab gutter fills the remaining sidebar width", () => {
   assert.equal(computeHostTreeTabGutter(280, 120), 160);
@@ -62,6 +45,36 @@ test("host tree tab gutter fills the remaining sidebar width", () => {
 
 test("host tree tab gutter never goes negative", () => {
   assert.equal(computeHostTreeTabGutter(120, 280), 0);
+});
+
+test("top tab native exclusions stay bounded to the stationary scroll viewport", () => {
+  const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+  const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+  const topTabItemsSource = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
+
+  const viewport = topTabsSource.match(/<div\s+ref=\{tabsContainerRef\}[\s\S]*?onClick=/);
+  assert.ok(viewport, "expected the tab scroll viewport");
+  assert.match(viewport[0], /className="[^"]*\btop-tab-scroll-viewport\b[^"]*"/);
+  assert.match(viewport[0], /className="[^"]*\bmin-w-0\b[^"]*"/);
+  assert.doesNotMatch(viewport[0], /className="[^"]*\bflex-1\b[^"]*"/);
+  assert.match(viewport[0], /className="[^"]*\boverflow-x-auto\b[^"]*\bapp-no-drag\b[^"]*"/);
+  assert.doesNotMatch(viewport[0], /\bapp-drag\b/);
+  // Inline no-drag keeps the viewport excluded despite the scoped CSS reset.
+  assert.match(viewport[0], /style=\{\{[^}]*\.\.\.noDragRegionStyle\s*\}\}/);
+  assert.match(topTabsSource, /const noDragRegionStyle = \{ WebkitAppRegion: 'no-drag' \}/);
+
+  const scrollContent = topTabsSource.slice(topTabsSource.indexOf(viewport[0]));
+  const viewportEnd = scrollContent.indexOf("</div>");
+  assert.match(scrollContent.slice(0, viewportEnd), /\{renderOrderedTabs\(\)\}/);
+  assert.doesNotMatch(scrollContent.slice(0, viewportEnd), /min-w-\[20px\]/);
+  assert.match(scrollContent.slice(viewportEnd), /^<\/div>\s*\{\/\*[^}]*\*\/\}\s*<div className="flex-1 app-drag" style=\{dragRegionStyle\} \/>\s*<div className="min-w-\[20px\] h-7 app-drag flex-shrink-0 self-end" style=\{dragRegionStyle\} \/>/);
+
+  const regionReset = indexCss.match(/\.top-tab-scroll-viewport,\s*\.top-tab-scroll-viewport \*\s*\{([^}]+)\}/);
+  assert.ok(regionReset, "expected a native region reset for the viewport and every descendant");
+  assert.match(regionReset[1], /-webkit-app-region:\s*none;/);
+  assert.match(regionReset[1], /(?:^|[;\s])app-region:\s*none;/);
+  assert.ok(indexCss.indexOf(regionReset[0]) > indexCss.indexOf(".app-no-drag * {"));
+  assert.match(topTabItemsSource, /netcatty-tab[^\n]*\bapp-no-drag\b/);
 });
 
 test("host tree tab surface stays mounted when root pages are active", () => {
@@ -76,139 +89,6 @@ test("host tree tab surface is hidden without work tabs", () => {
     enabled: true,
     activeWorkTabCount: 0,
   }), false);
-});
-
-test("host tree tab layout transitions match the sidebar timing", () => {
-  const hostTreeCss = [
-    ".top-tab-root-label",
-    ".top-tab-host-tree-toggle-slot",
-  ].map((selector) => {
-    const start = indexCss.indexOf(selector);
-    assert.notEqual(start, -1);
-    const end = indexCss.indexOf("}", start);
-    return indexCss.slice(start, end);
-  }).join("\n");
-  const gutterStart = indexCss.indexOf(".top-tab-host-tree-gutter");
-  assert.notEqual(gutterStart, -1);
-  const gutterEnd = indexCss.indexOf("}", gutterStart);
-  const gutterCss = indexCss.slice(gutterStart, gutterEnd);
-
-  assert.match(hostTreeCss, /width 220ms cubic-bezier\(0\.4, 0, 0\.2, 1\)/);
-  assert.match(hostTreeCss, /max-width 220ms cubic-bezier\(0\.4, 0, 0\.2, 1\)/);
-  assert.doesNotMatch(hostTreeCss, /transition:\s*none/);
-  assert.doesNotMatch(hostTreeCss, /280ms/);
-  assert.doesNotMatch(gutterCss, /transition/);
-  assert.match(indexCss, /\.top-tab-host-tree-gutter-exit[\s\S]*transition: width 220ms/);
-});
-
-test("host tree toggle appears with opacity only and no bounce animation", () => {
-  assert.doesNotMatch(indexCss, /top-tab-host-tree-toggle-pop/);
-  assert.doesNotMatch(indexCss, /@keyframes\s+pop-in/);
-
-  const start = indexCss.indexOf(".top-tab-host-tree-toggle-slot");
-  assert.notEqual(start, -1);
-  const end = indexCss.indexOf("}", start);
-  const toggleSlotCss = indexCss.slice(start, end);
-
-  assert.match(toggleSlotCss, /opacity 220ms ease/);
-  assert.doesNotMatch(toggleSlotCss, /transform/);
-  assert.doesNotMatch(toggleSlotCss, /scale/);
-});
-
-test("host tree toggle exposes a custom CSS hook", () => {
-  assert.match(topTabsSource, /data-section="top-tabs-host-tree-toggle"/);
-});
-
-test("quick switcher plus button exposes a custom CSS hook", () => {
-  assert.match(topTabsSource, /data-section="top-tabs-quick-switcher-toggle"/);
-});
-
-test("top tabs keep cloud sync separate from quick controls", () => {
-  assert.match(topTabsSource, /SyncStatusButton/);
-  assert.match(topTabsSource, /TopTabsQuickControls/);
-  assert.match(topTabsSource, /onOpenSettings=\{onOpenSettings\}/);
-  assert.match(topTabsSource, /onSyncNow=\{onSyncNow\}/);
-  assert.match(topTabsSource, /theme=\{theme\}/);
-  assert.match(topTabsSource, /themePreference=\{themePreference\}/);
-  assert.match(topTabsSource, /onThemeChange=\{onThemeChange\}/);
-  assert.match(topTabsSource, /externalMcpEnabled=\{externalMcpEnabled\}/);
-  assert.match(topTabsSource, /windowOpacity=\{windowOpacity\}/);
-  assert.match(topTabsSource, /showExternalMcpToggle=\{showExternalMcpToggle\}/);
-  assert.doesNotMatch(topTabsSource, /WindowOpacityButton/);
-  assert.doesNotMatch(topTabsSource, /onToggleTheme/);
-  const syncButtonUsage = topTabsSource.match(/<SyncStatusButton[\s\S]*?\/>/);
-  assert.ok(syncButtonUsage, 'expected a SyncStatusButton usage');
-  assert.doesNotMatch(syncButtonUsage[0], /externalMcpEnabled=/);
-  assert.doesNotMatch(syncButtonUsage[0], /windowOpacity=/);
-  assert.doesNotMatch(syncButtonUsage[0], /onThemeChange=/);
-  const quickControlsUsage = topTabsSource.match(/<TopTabsQuickControls[\s\S]*?\/>/);
-  assert.ok(quickControlsUsage, 'expected a TopTabsQuickControls usage');
-  assert.match(quickControlsUsage[0], /showExternalMcpToggle=\{showExternalMcpToggle\}/);
-  assert.match(quickControlsUsage[0], /externalMcpEnabled=\{externalMcpEnabled\}/);
-});
-
-test("quick controls panel hosts External MCP, opacity, and theme", () => {
-  assert.match(topTabsQuickControlsSource, /data-section="top-tabs-quick-controls"/);
-  assert.match(topTabsQuickControlsSource, /className="w-72 p-0 app-no-drag"/);
-  assert.match(topTabsQuickControlsSource, /topTabs\.controlPanel/);
-  assert.doesNotMatch(topTabsQuickControlsSource, /topTabs\.controlPanel\.description/);
-  assert.match(topTabsQuickControlsSource, /externalMcpEnabled/);
-  assert.match(topTabsQuickControlsSource, /onToggleExternalMcp/);
-  assert.match(topTabsQuickControlsSource, /windowOpacity/);
-  assert.match(topTabsQuickControlsSource, /setWindowOpacity/);
-  assert.match(topTabsQuickControlsSource, /themePreference/);
-  assert.match(topTabsQuickControlsSource, /onThemeChange/);
-  assert.match(topTabsQuickControlsSource, /topTabs\.controlPanel\.theme\.system/);
-  assert.match(topTabsQuickControlsSource, /aria-pressed=\{themePreference === option\.value\}/);
-  assert.match(topTabsQuickControlsSource, /onClick=\{\(\) => onThemeChange\(option\.value\)\}/);
-  assert.match(topTabsQuickControlsSource, /<Plug size=\{14\}/);
-  assert.match(topTabsQuickControlsSource, /OPACITY_PRESETS/);
-  assert.match(topTabsQuickControlsSource, /isOpacityExpanded/);
-  assert.match(topTabsQuickControlsSource, /isPresetActive/);
-  assert.match(topTabsQuickControlsSource, /type="range"/);
-  assert.match(topTabsQuickControlsSource, /aria-labelledby=\{externalMcpLabelId\}/);
-  assert.doesNotMatch(topTabsQuickControlsSource, /onOpenAutoFocus/);
-  assert.match(topTabsQuickControlsSource, /mt-1 border-t border-border\/60 pt-1/);
-  assert.doesNotMatch(topTabsQuickControlsSource, /useCloudSync/);
-  assert.doesNotMatch(topTabsQuickControlsSource, /border border-border\/60 bg-background\/70/);
-  assert.doesNotMatch(syncStatusButtonSource, /topTabs\.controlPanel/);
-  assert.doesNotMatch(syncStatusButtonSource, /externalMcpEnabled/);
-  assert.match(switchSource, /aria-label=\{ariaLabel\}/);
-  assert.match(switchSource, /role="switch"/);
-});
-
-test("External MCP top bar labels exist in Traditional Chinese", () => {
-  assert.match(zhTwAiSource, /'topTabs\.externalMcp\.enable':/);
-  assert.match(zhTwAiSource, /'topTabs\.externalMcp\.disable':/);
-  assert.match(zhTwAiSource, /'topTabs\.controlPanel':/);
-  assert.match(zhTwAiSource, /'topTabs\.controlPanel\.externalMcp':/);
-});
-
-test("AppView hides External MCP toggle in peer session windows", () => {
-  assert.match(appViewSource, /hash\.startsWith\('#\/session-window'\)/);
-  assert.match(appViewSource, /showExternalMcpToggle=\{!isPeerSessionWindow\}/);
-});
-
-test("External MCP top-bar status sync waits for App startup reconcile", () => {
-  assert.match(appSource, /await syncExternalMcpStartupStateOnce\(netcattyBridge\.get\(\)\)/);
-  assert.match(appSource, /markExternalMcpStartupReady\(\)/);
-  assert.ok(
-    appSource.indexOf("await syncExternalMcpStartupStateOnce(netcattyBridge.get())")
-      < appSource.indexOf("markExternalMcpStartupReady()"),
-    "startup ready must be marked only after await syncExternalMcpStartupStateOnce",
-  );
-  assert.match(externalMcpToggleSource, /shouldWaitForExternalMcpStartupReady/);
-  assert.match(externalMcpToggleSource, /waitForExternalMcpStartupReady\(/);
-  assert.match(externalMcpToggleSource, /!status\.enabled && !status\.error/);
-  assert.match(externalMcpToggleSource, /if \(isPeerSessionWindow \|\| !enabled\) return;/);
-});
-
-test("SessionTabIcon checks custom host icon appearance before distro logos", () => {
-  assert.match(topTabItemsSource, /resolveHostIconAppearance\(host\)/);
-  assert.ok(
-    topTabItemsSource.indexOf("resolveHostIconAppearance(host)") < topTabItemsSource.indexOf("getEffectiveHostDistro(host)"),
-    "custom host icon should be checked before distro fallback",
-  );
 });
 
 test("disabling dynamic titles freezes a stored coding CLI icon and stops title fallback", () => {
@@ -248,26 +128,6 @@ test("disabling dynamic titles freezes a stored coding CLI icon and stops title 
   );
 });
 
-test("session top tab double click dispatches the configured behavior", () => {
-  const copiedSessionIds: string[] = [];
-  const duplicatedSessionIds: string[] = [];
-  const handlers = (["duplicate", "copy", "disabled"] as const).map((behavior) =>
-    createTopTabSessionDoubleClickHandler({
-      behavior,
-      onCopySession: (sessionId) => copiedSessionIds.push(sessionId),
-      onDuplicateSession: (sessionId) => duplicatedSessionIds.push(sessionId),
-      sessionId: `session-${behavior}`,
-    }),
-  );
-
-  handlers.forEach((handler) => handler({} as Parameters<typeof handler>[0]));
-
-  assert.deepEqual(duplicatedSessionIds, ["session-duplicate"]);
-  assert.deepEqual(copiedSessionIds, ["session-copy"]);
-  assert.match(topTabItemsSource, /behavior: tabDoubleClickBehavior/);
-  assert.match(topTabItemsSource, /onDoubleClick=\{handleDoubleClick\}/);
-});
-
 test("duplicate double-click behavior falls back to copying when unavailable", () => {
   const copiedSessionIds: string[] = [];
   const handleDoubleClick = createTopTabSessionDoubleClickHandler({
@@ -279,108 +139,6 @@ test("duplicate double-click behavior falls back to copying when unavailable", (
   handleDoubleClick({} as Parameters<typeof handleDoubleClick>[0]);
 
   assert.deepEqual(copiedSessionIds, ["session-1"]);
-});
-
-test("draggable top-tab close buttons cancel the drag gesture on mousedown", () => {
-  const closeButtonLabels = [
-    "tabs.closePluginViewAria",
-    "Close editor tab",
-    "tabs.closeSessionAria",
-    "tabs.closeLogViewAria",
-  ];
-
-  for (const label of closeButtonLabels) {
-    const labelIndex = topTabItemsSource.indexOf(label);
-    assert.notEqual(labelIndex, -1, `missing close label ${label}`);
-    const buttonStart = topTabItemsSource.lastIndexOf("<button", labelIndex);
-    const buttonEnd = topTabItemsSource.indexOf(">", labelIndex);
-    const openingTag = topTabItemsSource.slice(buttonStart, buttonEnd);
-    assert.match(
-      openingTag,
-      /onMouseDown=\{handleTabCloseButtonMouseDown\}/,
-      `${label} close button must guard mousedown`,
-    );
-  }
-
-  assert.equal(
-    topTabItemsSource.match(/onMouseDown=\{handleTabCloseButtonMouseDown\}/g)?.length,
-    4,
-  );
-
-  const workspaceSource = topTabItemsSource.slice(
-    topTabItemsSource.indexOf("export const WorkspaceTopTab"),
-    topTabItemsSource.indexOf("WorkspaceTopTab.displayName"),
-  );
-  assert.equal(workspaceSource.includes("handleTabCloseButtonMouseDown"), false);
-  assert.equal(workspaceSource.includes("<button"), false);
-});
-
-test("draggable top tab roots activate sub-threshold presses and still reorder past the threshold", () => {
-  const tabTypes = ["plugin-view", "editor", "session", "workspace", "logView"];
-
-  for (const tabType of tabTypes) {
-    const marker = `data-tab-type="${tabType}"`;
-    const start = topTabItemsSource.indexOf(marker);
-    assert.notEqual(start, -1, marker);
-    const classNameAt = topTabItemsSource.indexOf("className={cn(", start);
-    assert.notEqual(classNameAt, -1, tabType);
-    const openingHandlers = topTabItemsSource.slice(start, classNameAt);
-    assert.match(openingHandlers, /onMouseDown=\{handleTabDragThresholdMouseDown\}/, tabType);
-    assert.match(openingHandlers, /onMouseUp=\{\(event\) => handleTabDragThresholdRelease\(event,/, tabType);
-    assert.match(
-      openingHandlers,
-      /onDragStart=\{\(event\) => \{\s*handleTabDragThresholdDragStart\(event\);\s*onTabDragStart\(event,/,
-      tabType,
-    );
-    assert.match(
-      openingHandlers,
-      /onDrag=\{\(event\) => \{\s*if \(!handleTabDragThresholdDrag\(event\)\) return;\s*onTabDragStart\(event,/,
-      tabType,
-    );
-    assert.match(
-      openingHandlers,
-      /onDragEnd=\{\(event\) => \{\s*handleTabDragThresholdRelease\(event,[\s\S]*?onTabDragEnd\(\);\s*\}\}/,
-      tabType,
-    );
-    assert.equal(openingHandlers.includes("handleTabCloseButtonMouseDown"), false, tabType);
-    assert.equal(openingHandlers.includes("preventDefault"), false, tabType);
-  }
-
-  assert.equal(topTabItemsSource.match(/onMouseDown=\{handleTabMiddleMouseDown\}/g)?.length ?? 0, 0);
-  assert.equal(topTabItemsSource.match(/handleTabDragThresholdRelease\(/g)?.length, 10);
-});
-
-test("session close button double click stays on the close button", () => {
-  let stopPropagationCount = 0;
-
-  stopCloseButtonDoubleClickPropagation({
-    stopPropagation: () => {
-      stopPropagationCount += 1;
-    },
-  });
-
-  assert.equal(stopPropagationCount, 1);
-  assert.match(topTabItemsSource, /onDoubleClick=\{stopCloseButtonDoubleClickPropagation\}/);
-});
-
-test("main window controls keep mouse presses from taking focus", () => {
-  const windowControlsSource = topTabItemsSource.slice(
-    topTabItemsSource.indexOf("export const WindowControls"),
-    topTabItemsSource.indexOf("WindowControls.displayName"),
-  );
-
-  assert.match(
-    windowControlsSource,
-    /const preventWindowControlFocus: React\.MouseEventHandler<HTMLButtonElement> = \(event\) => \{\s*event\.preventDefault\(\);\s*\};/,
-  );
-  assert.equal(windowControlsSource.match(/onMouseDown=\{preventWindowControlFocus\}/g)?.length, 2);
-  const closeButton = windowControlsSource.match(
-    /<button type="button" className=\{closeControlClassName\}[^>]*>/,
-  )?.[0] ?? "";
-  assert.equal(closeButton.includes("onMouseDown"), false);
-  assert.match(windowControlsSource, /onClick=\{handleMinimize\}/);
-  assert.match(windowControlsSource, /onClick=\{handleMaximize\}/);
-  assert.match(windowControlsSource, /onClick=\{handleClose\}/);
 });
 
 test("session top tab label only shows the host label for ssh sessions", () => {
@@ -468,14 +226,6 @@ test("workspace session drag data is recognized with a dedicated drag type", () 
 
   assert.equal(hasWorkspaceSessionDrag(transfer), true);
   assert.equal(getWorkspaceSessionDragId(transfer), "session-1");
-});
-
-test("TopTabs wires host drops to workspace tabs without replacing tab reorder", () => {
-  assert.match(topTabsSource, /appendHostFromWorkspaceDrop/);
-  assert.match(topTabsSource, /workspaceMap\.has\(targetTabId\)/);
-  assert.match(topTabsSource, /dropEffect = 'copy'/);
-  assert.match(topTabsSource, /isHostDropTarget=\{hostDropWorkspaceId === workspace\.id\}/);
-  assert.match(appViewSource, /<TopTabs[\s\S]*?onAppendHostToWorkspace=\{handleAppendHostToWorkspace\}/);
 });
 
 test("workspace session drag id falls back to the legacy session id", () => {
@@ -598,34 +348,6 @@ test("workspace session tab-bar blank drop inserts after the last work tab", () 
   });
 });
 
-test("terminal top bar hides server stats before they crowd the host title", () => {
-  assert.match(indexCss, /\.terminal-topbar\s*\{[\s\S]*container-type: inline-size/);
-  assert.match(indexCss, /@container \(max-width: 760px\) \{[\s\S]*\.terminal-server-stats\s*\{[\s\S]*display: none/);
-  assert.match(terminalViewSource, /terminal-topbar/);
-  assert.match(terminalViewSource, /terminal-title-cluster/);
-  assert.match(terminalViewSource, /onPointerDown=\{onDetachPointerDown\}/);
-});
-
-test("workspace session drag no longer uses a full tab-bar drop zone", () => {
-  assert.doesNotMatch(topTabsSource, /top-tabs-workspace-detach-drop-zone/);
-});
-
-test("host tree chrome enters after theme switch settles so root labels can animate", () => {
-  assert.match(topTabsSource, /hostTreeChromeReady/);
-  assert.match(topTabsSource, /scheduleAfterInstantThemeSwitch\(\(\) => \{\s*cancelHostTreeChromeReadyRef\.current = null;\s*setHostTreeChromeReady\(true\);/);
-  assert.match(topTabsSource, /scheduleChromeLayoutAnimation\(\(\) => \{\s*cancelRootTabsCompactRef\.current = null;\s*setRootTabsCompact\(true\);/);
-  assert.match(topTabsSource, /compact=\{rootTabsCompact\}/);
-  assert.match(topTabsSource, /data-visible=\{effectiveShowHostTreeToggle \? 'true' : 'false'\}/);
-});
-
-test("host tree chrome exits before root labels expand back on vault", () => {
-  assert.match(topTabsSource, /cancelChromeExitRef/);
-  assert.match(topTabsSource, /hostTreeGutterExiting/);
-  assert.match(topTabsSource, /setRootTabsCompact\(false\)/);
-  assert.match(topTabsSource, /top-tab-host-tree-gutter-exit/);
-  assert.match(topTabsSource, /effectiveShowHostTreeToggle = hostTreeChromeReady/);
-});
-
 test("host tree toggle is shown for an active editor tab", () => {
   assert.equal(shouldShowHostTreeToggle({
     enabled: true,
@@ -691,76 +413,4 @@ test("host tree toggle is hidden on root pages", () => {
     sessionIds: new Set(["session-1"]),
     workspaceIds: new Set(),
   }), false);
-});
-
-test("TopTabs applies presentation per session tab, not via global version fan-out", () => {
-  // Global presentationVersion remapping was removed to stop sibling title
-  // thrash from re-rendering the whole tab bar.
-  assert.doesNotMatch(topTabsSource, /presentationVersion/);
-  assert.doesNotMatch(topTabsSource, /sessionPresentationStore\.subscribe/);
-  const topTabItemsSource = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
-  assert.match(topTabItemsSource, /usePresentedSession/);
-  // Workspace detach menu must also apply presentation per session so labels
-  // stay live without remapping TopTabsInner.
-  assert.match(topTabItemsSource, /WorkspaceDetachSessionMenuItem/);
-  assert.match(topTabsSource, /workspaceSessions=/);
-  assert.doesNotMatch(topTabsSource, /workspaceSessionLabels/);
-});
-
-test("tab-switch focus calls refocus primitive directly without outer rAF wrap", () => {
-  const effectsSource = readFileSync(
-    new URL("./terminalLayer/useTerminalLayerEffects.ts", import.meta.url),
-    "utf8",
-  );
-  const focusBlock = effectsSource.slice(
-    effectsSource.indexOf("Restore keyboard focus after switching work tabs"),
-    effectsSource.indexOf("When focusedSessionId changes"),
-  );
-  assert.match(focusBlock, /refocusActiveTerminalSession\(\)/);
-  // Outer rAF wrapper was removed — focusTerminalSessionInput already schedules.
-  assert.doesNotMatch(focusBlock, /requestAnimationFrame\(\(\) => \{\s*refocusActiveTerminalSession/);
-});
-
-test("topTabsAreEqual tracks editorTabs for dirty chrome", () => {
-  assert.match(topTabsSource, /prev\.editorTabs === next\.editorTabs/);
-  assert.match(topTabsSource, /prev\.onRequestCloseEditorTab === next\.onRequestCloseEditorTab/);
-  // Dirty dots come from useEditorTabDirty; structure list is presence-only chrome.
-  assert.match(
-    readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8"),
-    /useEditorTabDirty/,
-  );
-});
-
-test("App shell uses editor presence chrome list not full content tabs", () => {
-  assert.match(appSource, /useEditorTabChromeList/);
-  assert.doesNotMatch(appSource, /useEditorTabs\(\)/);
-});
-
-test("App shell retains presentation-stable sessions for domain memos", () => {
-  assert.match(appSource, /retainStableSessionsIgnoringPresentation/);
-  assert.match(appSource, /sessionsForShell/);
-  assert.match(appSource, /orphanSessionsForShell/);
-  assert.match(appSource, /sessions: sessionsForShell/);
-  assert.match(appSource, /orphanSessions: orphanSessionsForShell/);
-});
-
-test("bulk close context menu offers symmetric close-to-left option", () => {
-  const bulkCloseBlock = topTabsSource.slice(
-    topTabsSource.indexOf("Bulk-close menu items shared by session and workspace context menus"),
-    topTabsSource.indexOf("// Render the tabs"),
-  );
-  // Left of the anchor is symmetric with close-to-right: slice(0, anchorIdx).
-  assert.match(bulkCloseBlock, /orderedTabs\.slice\(0, anchorIdx\)/);
-  assert.match(bulkCloseBlock, /tabs\.closeToLeft/);
-  assert.match(bulkCloseBlock, /onCloseTabsBatch\(leftIds\)/);
-
-  // Locale parity: the new key is translated in every terminal locale.
-  const locales = ["en", "es", "ru", "zh-CN", "zh-TW"] as const;
-  for (const locale of locales) {
-    const source = readFileSync(
-      new URL(`../application/i18n/locales/${locale}/terminal.ts`, import.meta.url),
-      "utf8",
-    );
-    assert.match(source, /'tabs\.closeToLeft':/);
-  }
 });

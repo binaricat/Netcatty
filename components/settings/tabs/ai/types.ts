@@ -286,6 +286,7 @@ export const SETTINGS_ICON_PATHS: Record<SettingsIconId, string> = {
   google: "/ai/providers/google.svg",
   ollama: "/ai/providers/ollama.svg",
   openrouter: "/ai/providers/openrouter.svg",
+  "opencode-go": "/ai/providers/opencode-go.svg",
   qwen: "/ai/providers/qwen.svg",
   deepseek: "/ai/providers/deepseek.svg",
   kimi: "/ai/providers/kimi.svg",
@@ -305,6 +306,7 @@ export const SETTINGS_ICON_COLORS: Record<SettingsIconId, string> = {
   google: "bg-blue-600",
   ollama: "bg-purple-600",
   openrouter: "bg-pink-600",
+  "opencode-go": "bg-[#131010]",
   qwen: "bg-[#615CED]",
   deepseek: "bg-[#4D6BFE]",
   kimi: "bg-zinc-800",
@@ -313,6 +315,12 @@ export const SETTINGS_ICON_COLORS: Record<SettingsIconId, string> = {
   mimo: "bg-[#FF6900]",
   custom: "bg-zinc-600",
 };
+
+/**
+ * Built-in icons that already carry their own full-color brand background.
+ * They render without the monochrome invert filter and fill the badge.
+ */
+export const FULL_COLOR_PROVIDER_ICONS: ReadonlySet<SettingsIconId> = new Set(["opencode-go"]);
 
 // ---------------------------------------------------------------------------
 // Extra brand icons (lobe-icons subset, MIT) for ProviderConfig.iconId

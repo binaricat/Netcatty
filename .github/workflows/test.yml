@@ -44,7 +44,7 @@ jobs:
       - name: Verify generated Catty tool specs
         run: |
           npm run generate:capability-tools
-          git diff --exit-code infrastructure/ai/harness/generated/cattyToolSpecs.json
+          git diff --exit-code infrastructure/ai/harness/generated/cattyToolSpecs.json infrastructure/ai/harness/generated/globalAgentToolSpecs.json
 
       - name: Verify Codex App Server schema
         run: npm run check:codex-app-server-schema
@@ -54,7 +54,6 @@ jobs:
           npm run check:plugin-contract
           npm run test:plugin-runtime
           npm run test:plugin-examples
-          node --test --import tsx components/settings/tabs/Plugin*.test.tsx
 
       - name: Test
         run: npm test

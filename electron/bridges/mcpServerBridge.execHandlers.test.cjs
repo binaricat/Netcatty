@@ -384,7 +384,9 @@ test("MCP background readiness timeout survives job polling without PTY writes",
   const polled = api.handleJobPoll({ jobId: started.jobId, chatSessionId: "readiness-chat" });
   assert.equal(polled.status, "failed");
   assert.equal(polled.completed, true);
-  assert.equal(polled.code, "SHELL_NOT_READY");
+  // #4195: a live shell whose prompt was never recognized is an actionable
+  // unknown, not a terminal SHELL_NOT_READY. The command is still never sent.
+  assert.equal(polled.code, "SHELL_READINESS_UNKNOWN");
   assert.equal(ctx.activeSessionExecutions.size, 0);
   assert.deepEqual(pty.writes, []);
   ctx.getFreshIdlePrompt = () => "user@host:~$ ";

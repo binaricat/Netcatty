@@ -1,6 +1,4 @@
-import { useSyncExternalStore } from 'react';
-
-type Listener = () => void;
+import { createExternalStore, type StoreListener } from './createExternalStore';
 
 export type AppearanceChromeSnapshot = {
   accentMode: 'theme' | 'custom';
@@ -16,53 +14,31 @@ const DEFAULT_SNAPSHOT: AppearanceChromeSnapshot = Object.freeze({
  * External store for app accent chrome so Terminal leaves can apply custom
  * accent without TerminalLayer rebuilding on every color-picker drag tick.
  */
-class AppearanceChromeStore {
-  private snapshot: AppearanceChromeSnapshot = DEFAULT_SNAPSHOT;
-  private listeners = new Set<Listener>();
+const store = createExternalStore<AppearanceChromeSnapshot>(DEFAULT_SNAPSHOT, {
+  isEqual: (prev, next) =>
+    prev.accentMode === next.accentMode && prev.customAccent === next.customAccent,
+});
 
-  getSnapshot = (): AppearanceChromeSnapshot => this.snapshot;
-
-  subscribe = (listener: Listener): (() => void) => {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  };
-
-  setSnapshot(next: AppearanceChromeSnapshot): void {
-    if (
-      this.snapshot.accentMode === next.accentMode
-      && this.snapshot.customAccent === next.customAccent
-    ) {
-      return;
-    }
-    this.snapshot = next;
-    for (const listener of this.listeners) {
-      listener();
-    }
-  }
-}
-
-export const appearanceChromeStore = new AppearanceChromeStore();
+export const appearanceChromeStore = {
+  getSnapshot: store.getSnapshot,
+  subscribe: store.subscribe,
+  setSnapshot: store.setSnapshot,
+};
 
 export function publishAppearanceChromeSnapshot(
   snapshot: AppearanceChromeSnapshot,
 ): void {
-  appearanceChromeStore.setSnapshot(snapshot);
+  store.setSnapshot(snapshot);
 }
 
 export function getAppearanceChromeSnapshot(): AppearanceChromeSnapshot {
-  return appearanceChromeStore.getSnapshot();
+  return store.getSnapshot();
 }
 
-export function subscribeAppearanceChrome(listener: Listener): () => void {
-  return appearanceChromeStore.subscribe(listener);
+export function subscribeAppearanceChrome(listener: StoreListener): () => void {
+  return store.subscribe(listener);
 }
 
 export function useAppearanceChromeStore(): AppearanceChromeSnapshot {
-  return useSyncExternalStore(
-    subscribeAppearanceChrome,
-    getAppearanceChromeSnapshot,
-    getAppearanceChromeSnapshot,
-  );
+  return store.useStore();
 }

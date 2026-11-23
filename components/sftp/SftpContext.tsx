@@ -134,9 +134,6 @@ export interface SftpPaneCallbacksContextValue {
     rightCallbacks: SftpPaneCallbacks;
 }
 
-/** @deprecated Prefer useSftpHosts / useSftpPaneCallbacks to avoid cross-churn. */
-export type SftpContextValue = SftpHostsContextValue & SftpPaneCallbacksContextValue;
-
 export interface SftpDragContextValue {
     draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
     dragCallbacks: SftpDragCallbacks;
@@ -145,19 +142,6 @@ export interface SftpDragContextValue {
 const SftpHostsContext = createContext<SftpHostsContextValue | null>(null);
 const SftpPaneCallbacksContext = createContext<SftpPaneCallbacksContextValue | null>(null);
 const SftpDragContext = createContext<SftpDragContextValue | null>(null);
-
-/** @deprecated Prefer selective hooks; this re-renders on hosts OR callbacks churn. */
-export const useSftpContext = (): SftpContextValue => {
-    const hosts = useContext(SftpHostsContext);
-    const callbacks = useContext(SftpPaneCallbacksContext);
-    if (!hosts || !callbacks) {
-        throw new Error("useSftpContext must be used within SftpContextProvider");
-    }
-    return useMemo(
-        () => ({ ...hosts, ...callbacks }),
-        [hosts, callbacks],
-    );
-};
 
 // Hook to get callbacks for a specific side
 export const useSftpPaneCallbacks = (side: "left" | "right"): SftpPaneCallbacks => {
