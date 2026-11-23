@@ -2105,6 +2105,74 @@ test("list-models cacheOnly returns empty without invoking the driver on a cold 
   }
 });
 
+test("list-models skips Cursor CLI probes during cacheOnly hydration and warm/fresh picker rechecks", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  let probeCalls = 0;
+  let pathResolveCalls = 0;
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/cursor-probe-skip-bin" }),
+    probeCursorCliAuth: async () => {
+      probeCalls += 1;
+      return { authenticated: true, authSource: "cli-login", email: "a@b.c", binPath: "/test/cursor-probe-skip-bin/cursor-agent" };
+    },
+    resolveCliFromPathAsync: async () => {
+      pathResolveCalls += 1;
+      return "/test/cursor-probe-skip-bin/cursor-agent";
+    },
+  });
+  ctx.cursorCliBinCache.clear();
+  try {
+    const driver = getDriver("cursor");
+    t.mock.method(driver, "listModels", async () => [
+      { id: "auto", name: "Auto" },
+      { id: "claude-4.5-sonnet", name: "Claude 4.5 Sonnet" },
+    ]);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const request = {
+      sdkBackend: "cursor",
+      agentCommand: "cursor",
+      agentEnv: { NETCATTY_CURSOR_AUTH_MODE: "cli-login", NETCATTY_CURSOR_CLI_BIN: "cursor" },
+    };
+
+    // 1. Cold cacheOnly hydration must not spawn Cursor probes or listModels.
+    const coldHydration = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.deepEqual(coldHydration, { ok: true, currentModelId: null, models: [] });
+    assert.equal(probeCalls, 0);
+    assert.equal(pathResolveCalls, 0);
+    assert.equal(driver.listModels.mock.callCount(), 0);
+
+    // 2. First live refresh probes once and caches both the resolved binary and catalog.
+    const live = await listModels({ sender: {} }, request);
+    assert.equal(live.source, "live");
+    assert.equal(live.models.length, 2);
+    assert.equal(probeCalls, 1);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+
+    // 3. Repeated picker-open rechecks (warm memory cache, then fresh disk LKG)
+    // and cacheOnly hydration must not re-probe Cursor.
+    const warmRecheck = await listModels({ sender: {} }, request);
+    assert.equal(warmRecheck.source, "live");
+    assert.equal(probeCalls, 1);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+
+    ctx.sdkModelCache.clear();
+    const freshLkgRecheck = await listModels({ sender: {} }, request);
+    assert.equal(freshLkgRecheck.source, "last-known-good");
+    assert.equal(freshLkgRecheck.models.length, 2);
+    assert.equal(probeCalls, 1);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+
+    const warmCacheOnly = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(warmCacheOnly.source, "last-known-good");
+    assert.equal(warmCacheOnly.models.length, 2);
+    assert.equal(probeCalls, 1);
+    assert.equal(pathResolveCalls, 0);
+  } finally {
+    ctx.cursorCliBinCache.clear();
+    cleanup();
+  }
+});
+
 test("list-models force refresh bypasses warm memory and last-known-good and updates both caches", async (t) => {
   const { getDriver } = require("./index.cjs");
   const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx();

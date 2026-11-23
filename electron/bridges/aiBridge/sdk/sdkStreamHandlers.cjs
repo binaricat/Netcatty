@@ -42,6 +42,7 @@ const MODEL_LIST_TIMEOUT_OVERRIDES_MS = { mimo: 30_000 };
 const sdkModelCache = new Map();
 const sdkModelInFlight = new Map();
 const sdkModelRefreshFailures = new Map();
+const cursorCliBinCache = new Map();
 const {
   parseSdkSessionIdentity: parseSdkSessionIdentityPayload,
   normalizeSdkRuntime,
@@ -1134,6 +1135,7 @@ function registerSdkStreamHandlers(ctx) {
       // Manual refresh (retry banner / picker refresh button) must always go
       // live; automatic loads follow the LKG-first policy below.
       const force = payload?.force === true;
+      const cacheOnly = payload?.cacheOnly === true;
       const backendKey = resolveBackendKey(sdkBackend);
       if (!backendKey) return { ok: false, error: `Unknown SDK backend: ${sdkBackend}` };
 
@@ -1143,7 +1145,7 @@ function registerSdkStreamHandlers(ctx) {
           return { ok: true, currentModelId: null, models: [] };
         }
         const shellEnv = await getShellEnv();
-        const normalizedAgentEnv = normalizeAgentEnv(requestedAgentEnv);
+        const normalizedAgentEnv = { ...(normalizeAgentEnv(requestedAgentEnv) || {}) };
         const cursorAuthMode = normalizedAgentEnv.NETCATTY_CURSOR_AUTH_MODE === "cli-login"
           ? "cli-login"
           : "api-key";
@@ -1174,79 +1176,127 @@ function registerSdkStreamHandlers(ctx) {
           resolveCodexExecutableForSdk,
           resolveCodebuddyExecutableForSdk,
         });
-        if (backendKey === "cursor" && cursorAuthMode === "cli-login") {
-          const looksLikeSentinel = !cursorCliBinPath
-            || cursorCliBinPath === "cursor"
-            || /(?:^|[/\\])cursor$/i.test(cursorCliBinPath);
-          if (looksLikeSentinel && typeof probeCursorCliAuth === "function") {
-            try {
-              const cliAuth = probeCursorCliAuth({ env: shellEnv });
-              if (cliAuth?.binPath) cursorCliBinPath = cliAuth.binPath;
-            } catch { /* best effort */ }
-          }
-          if (!cursorCliBinPath) {
-            // Only `cursor-agent` — bare `agent` collides with other CLIs (e.g. Grok).
-            cursorCliBinPath = await resolveCliFromPathAsync?.("cursor-agent", shellEnv)
-              || null;
-          }
-        }
         const codexRuntime = backendKey === "codex" && requestedCodexRuntime === "app-server"
           ? "app-server"
           : "sdk";
+        const shouldCacheModels = shouldCacheSdkRuntimeModels(backendKey);
+        const lastKnownPath = resolveLastKnownCatalogPath(electronModule);
+        const isCursorCliLoginSentinel = backendKey === "cursor"
+          && cursorAuthMode === "cli-login"
+          && (!cursorCliBinPath
+            || cursorCliBinPath === "cursor"
+            || /(?:^|[/\\])cursor$/i.test(cursorCliBinPath));
+        const cursorBinCacheKey = isCursorCliLoginSentinel
+          ? createHash("sha256").update([
+            String(shellEnv?.PATH || ""),
+            String(shellEnv?.HOME || ""),
+            String(shellEnv?.USERPROFILE || ""),
+            String(cursorCliBinPath || ""),
+          ].join("\u0000")).digest("hex")
+          : null;
+        if (isCursorCliLoginSentinel && !force) {
+          const cachedCursorBin = getSdkModelCacheEntry(cursorCliBinCache, cursorBinCacheKey, {
+            ttlMs: MODEL_CATALOG_MAX_AGE_MS,
+          });
+          if (cachedCursorBin?.binPath) {
+            cursorCliBinPath = cachedCursorBin.binPath;
+          }
+        }
         // claude/copilot/opencode enumerate models via the SDK; codex's sdk
         // driver returns [] and falls back to the App Server catalog (see
         // fetchSdkModelCatalog). Cache + in-flight coalescing avoid spawn
         // storms (#2184).
-        const cacheKey = buildSdkModelCacheKey(
+        const buildCacheKey = () => buildSdkModelCacheKey(
           backendKey,
           cursorAuthMode === "cli-login" ? (cursorCliBinPath || binPath) : binPath,
           env,
           `${codexRuntime}:${cursorAuthMode}`,
         );
-        const shouldCacheModels = shouldCacheSdkRuntimeModels(backendKey);
-        const cached = !force && shouldCacheModels ? getSdkModelCacheEntry(sdkModelCache, cacheKey) : null;
-        if (cached) {
-          // A cache hit replays the live fetch that populated the entry, so it
-          // keeps the live provenance (and the original fetchedAt).
-          return {
-            ok: true,
-            currentModelId: cached.currentModelId || null,
-            models: cached.models,
-            ...(cached.fetchedAt ? { source: "live", fetchedAt: cached.fetchedAt } : {}),
-          };
-        }
-
-        // In-flight entries are live fetches, so forced refreshes can share
-        // them without replaying either memory or persisted cache results.
-        const cacheOnly = payload?.cacheOnly === true;
-        const existing = sdkModelInFlight.get(cacheKey);
-        if (existing && !cacheOnly) return await existing;
-
-        const lastKnownPath = resolveLastKnownCatalogPath(electronModule);
-        // Normal loads reuse a fresh catalog and revalidate stale ones on use.
-        // A failed revalidation is briefly cached to avoid repeat queries when
-        // switching panels; manual refresh bypasses the retry interval.
-        if (!force || cacheOnly) {
-          const failedRefresh = getSdkModelCacheEntry(sdkModelRefreshFailures, cacheKey, {
-            ttlMs: MODEL_CATALOG_RETRY_MS,
-          });
-          if (failedRefresh) return failedRefresh.result;
-
-          const lastKnown = readLastKnownCatalogEntry(lastKnownPath, cacheKey);
-          if (lastKnown && (cacheOnly || isFreshModelCatalog(lastKnown))) {
-            console.debug(
-              `[sdk] list-models(${backendKey}) serving last-known-good catalog from ${lastKnown.fetchedAt} without a live fetch`,
-            );
+        const tryServeCachedCatalog = (key) => {
+          const cached = !force && shouldCacheModels ? getSdkModelCacheEntry(sdkModelCache, key) : null;
+          if (cached) {
+            // A cache hit replays the live fetch that populated the entry, so it
+            // keeps the live provenance (and the original fetchedAt).
             return {
-              ok: true,
-              currentModelId: remapLastKnownCurrentModelId(lastKnown),
-              models: lastKnown.models,
-              source: "last-known-good",
-              fetchedAt: lastKnown.fetchedAt,
+              value: {
+                ok: true,
+                currentModelId: cached.currentModelId || null,
+                models: cached.models,
+                ...(cached.fetchedAt ? { source: "live", fetchedAt: cached.fetchedAt } : {}),
+              },
             };
           }
-        }
+
+          // In-flight entries are live fetches, so forced refreshes can share
+          // them without replaying either memory or persisted cache results.
+          const existing = sdkModelInFlight.get(key);
+          if (existing && !cacheOnly) return { promise: existing };
+
+          // Normal loads reuse a fresh catalog and revalidate stale ones on use.
+          // A failed revalidation is briefly cached to avoid repeat queries when
+          // switching panels; manual refresh bypasses the retry interval.
+          if (!force || cacheOnly) {
+            const failedRefresh = getSdkModelCacheEntry(sdkModelRefreshFailures, key, {
+              ttlMs: MODEL_CATALOG_RETRY_MS,
+            });
+            if (failedRefresh) return { value: failedRefresh.result };
+
+            const lastKnown = readLastKnownCatalogEntry(lastKnownPath, key);
+            if (lastKnown && (cacheOnly || isFreshModelCatalog(lastKnown))) {
+              console.debug(
+                `[sdk] list-models(${backendKey}) serving last-known-good catalog from ${lastKnown.fetchedAt} without a live fetch`,
+              );
+              return {
+                value: {
+                  ok: true,
+                  currentModelId: remapLastKnownCurrentModelId(lastKnown),
+                  models: lastKnown.models,
+                  source: "last-known-good",
+                  fetchedAt: lastKnown.fetchedAt,
+                },
+              };
+            }
+          }
+          return null;
+        };
+
+        let cacheKey = buildCacheKey();
+        const immediate = tryServeCachedCatalog(cacheKey);
+        if (immediate) return immediate.promise ? await immediate.promise : immediate.value;
         if (cacheOnly) return { ok: true, currentModelId: null, models: [] };
+
+        if (isCursorCliLoginSentinel) {
+          const stillSentinel = !cursorCliBinPath
+            || cursorCliBinPath === "cursor"
+            || /(?:^|[/\\])cursor$/i.test(cursorCliBinPath);
+          if (stillSentinel || force) {
+            let resolvedCursorBin = null;
+            if (typeof probeCursorCliAuth === "function") {
+              try {
+                const cliAuth = await probeCursorCliAuth({ env: shellEnv });
+                if (cliAuth?.binPath) resolvedCursorBin = cliAuth.binPath;
+              } catch { /* best effort */ }
+            }
+            if (!resolvedCursorBin && !cursorCliBinPath) {
+              // Only `cursor-agent` — bare `agent` collides with other CLIs (e.g. Grok).
+              resolvedCursorBin = await resolveCliFromPathAsync?.("cursor-agent", shellEnv)
+                || null;
+            }
+            if (resolvedCursorBin) {
+              cursorCliBinPath = resolvedCursorBin;
+              setSdkModelCacheEntry(cursorCliBinCache, cursorBinCacheKey, {
+                at: Date.now(),
+                binPath: resolvedCursorBin,
+              }, { ttlMs: MODEL_CATALOG_MAX_AGE_MS });
+            }
+          }
+          const resolvedCacheKey = buildCacheKey();
+          if (resolvedCacheKey !== cacheKey) {
+            cacheKey = resolvedCacheKey;
+            const resolvedImmediate = tryServeCachedCatalog(cacheKey);
+            if (resolvedImmediate) return resolvedImmediate.promise ? await resolvedImmediate.promise : resolvedImmediate.value;
+          }
+        }
         const loadPromise = (async () => {
           const abortController = new AbortController();
           try {
@@ -1708,6 +1758,7 @@ function registerSdkStreamHandlers(ctx) {
     ctx.sdkRequestRuntimes = sdkRequestRuntimes;
     ctx.sdkModelCache = sdkModelCache; // exposed for catalog tests
     ctx.sdkModelRefreshFailures = sdkModelRefreshFailures; // exposed for catalog tests
+    ctx.cursorCliBinCache = cursorCliBinCache; // exposed for catalog tests
     ctx.codexAppServerRuntime = codexAppServerRuntime;
     ctx.codebuddySessionManager = codebuddySessionManager;
   }
