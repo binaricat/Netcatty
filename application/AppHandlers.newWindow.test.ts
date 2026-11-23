@@ -245,3 +245,51 @@ test("moveSessionToNewWindowImpl ignores workspace panes", async () => {
   assert.equal(result, false);
   assert.deepEqual(calls, []);
 });
+
+test("moveSessionToNewWindowImpl preserves active tab focus when moving an inactive tab", async () => {
+  const { calls, errors, getCtx } = moveCtx(async () => ({ success: true }));
+  const ctx = getCtx();
+  const result = await moveSessionToNewWindowImpl(
+    () => ({
+      ...ctx,
+      getActiveTabId: () => "ws-1",
+      getOrderedTabs: () => ["ws-1", "session-1"],
+    }),
+    "session-1",
+  );
+  assert.equal(result, true);
+  assert.deepEqual(calls, [["poppedOut", "session-1", true]]);
+  assert.deepEqual(errors, []);
+});
+
+test("moveSessionToNewWindowImpl does not steal focus when moving an inactive tab fails", async () => {
+  const { calls, errors, getCtx } = moveCtx(async () => ({ success: false, error: "nope" }));
+  const ctx = getCtx();
+  const result = await moveSessionToNewWindowImpl(
+    () => ({
+      ...ctx,
+      getActiveTabId: () => "editor:1",
+      getOrderedTabs: () => ["editor:1", "session-1"],
+    }),
+    "session-1",
+  );
+  assert.equal(result, false);
+  assert.deepEqual(calls, [["poppedOut", "session-1", true], ["poppedOut", "session-1", false]]);
+  assert.deepEqual(errors, ["nope"]);
+});
+
+test("moveSessionToNewWindowImpl selects the adjacent ordered visible tab when moving the active tab", async () => {
+  const { calls, getCtx } = moveCtx(async () => ({ success: true }));
+  const ctx = getCtx();
+  const result = await moveSessionToNewWindowImpl(
+    () => ({
+      ...ctx,
+      sessions: [sourceSession()],
+      getActiveTabId: () => "session-1",
+      getOrderedTabs: () => ["ws-1", "session-1", "editor:1"],
+    }),
+    "session-1",
+  );
+  assert.equal(result, true);
+  assert.deepEqual(calls, [["poppedOut", "session-1", true], ["active", "ws-1"]]);
+});

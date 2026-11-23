@@ -1028,7 +1028,18 @@ export function AppSideEffects() {
 
   const copySessionToNewWindowWithCurrentShell = useCallback((sessionId: string) => { return copySessionToNewWindowWithCurrentShellImpl(() => ({ classifyLocalShellType, discoveredShells, netcattyBridge, resolveShellSetting, sessions, terminalSettings, t, toast }), sessionId); }, [sessions, terminalSettings, discoveredShells, t]);
 
-  const moveSessionToNewWindow = useCallback((sessionId: string) => { return moveSessionToNewWindowImpl(() => ({ netcattyBridge, sessions, setActiveTabId, setSessionPoppedOut, t, toast }), sessionId); }, [sessions, setActiveTabId, setSessionPoppedOut, t]);
+  const moveSessionToNewWindow = useCallback((sessionId: string) => {
+    return moveSessionToNewWindowImpl(() => ({
+      getActiveTabId: () => activeTabStore.getActiveTabId(),
+      getOrderedTabs: () => orderedTabsRef.current,
+      netcattyBridge,
+      sessions,
+      setActiveTabId,
+      setSessionPoppedOut,
+      t,
+      toast,
+    }), sessionId);
+  }, [sessions, setActiveTabId, setSessionPoppedOut, t]);
 
   // A tab moved to its own window returns to the tab bar when that window closes.
   useEffect(() => netcattyBridge.get()?.onTerminalPopupAttachClosed?.(({ sessionId }) => {

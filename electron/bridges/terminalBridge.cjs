@@ -332,6 +332,9 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
     : undefined;
   const cwd = payload?.cwd === null ? null : typeof payload?.cwd === "string" ? payload.cwd : undefined;
   const title = payload?.title === null ? null : typeof payload?.title === "string" ? payload.title : undefined;
+  const connectionLogDelta = typeof payload?.connectionLogDelta === "string"
+    ? payload.connectionLogDelta
+    : undefined;
   if (
     !sessionId
     || !hasSnapshot
@@ -381,6 +384,7 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
           passwordPromptActive,
           cwd,
           title,
+          connectionLogDelta,
           requestId,
         });
       } catch (err) {

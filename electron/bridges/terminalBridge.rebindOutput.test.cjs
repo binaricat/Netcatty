@@ -717,9 +717,11 @@ test("active input policy roundtrips through preload and authorized snapshot IPC
       const applied = await popupApi.applyTerminalSessionSnapshot(sessionId, "screen", {
         contextSnapshot: "", contextViewportSnapshot: "", contextScrollbackSnapshot: "", alternateScreen: false,
         perCharacterInput: mode,
+        connectionLogDelta: "popup-output\r\n",
       }, authorization);
       assert.equal(applied.success, true);
       assert.equal(received.perCharacterInput, expected, "return snapshot carries the same active choice");
+      assert.equal(received.connectionLogDelta, "popup-output\r\n", "return snapshot carries popup log delta");
     }
     assert.equal((await popupApi.requestTerminalSessionSnapshot(sessionId, "wrong-grant")).success, false);
     assert.equal((await popupApi.applyTerminalSessionSnapshot(sessionId, "", { perCharacterInput: false }, "wrong-grant")).success, false);

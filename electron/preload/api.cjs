@@ -734,6 +734,7 @@ function createPreloadApi(ctx) {
         : undefined,
       cwd: context?.cwd === null ? null : typeof context?.cwd === "string" ? context.cwd : undefined,
       title: context?.title === null ? null : typeof context?.title === "string" ? context.title : undefined,
+      connectionLogDelta: typeof context?.connectionLogDelta === "string" ? context.connectionLogDelta : undefined,
       authorization,
     }),
   markAttachPopupClosePrepared: (sessionId, authorization) =>

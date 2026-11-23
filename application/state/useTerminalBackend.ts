@@ -338,6 +338,10 @@ export const useTerminalBackend = () => {
       perCharacterInput?: boolean;
       kittyKeyboardModeState?: NetcattyKittyKeyboardModeState;
       kittyKeyboardProtocolEnabled?: boolean;
+      passwordPromptActive?: boolean;
+      cwd?: string | null;
+      title?: string | null;
+      connectionLogDelta?: string;
     },
     authorization: string,
   ) => {

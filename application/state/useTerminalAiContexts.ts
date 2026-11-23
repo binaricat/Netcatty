@@ -158,6 +158,10 @@ export function useTerminalAiContexts({
       ? latestWorkspaces.find((w) => w.id === scope.targetId)?.title ?? scope.label
       : undefined;
 
+    const detachedSessionIds = new Set(
+      sessionIds.filter((sid) => latestSessions.find((s) => s.id === sid)?.hiddenFromTabs === true),
+    );
+
     return {
       sessions: sessionIds.map((sid) => {
         const session = latestSessions.find((s) => s.id === sid);
@@ -169,6 +173,7 @@ export function useTerminalAiContexts({
       }),
       workspaceId: scope.type === 'workspace' ? scope.targetId : undefined,
       workspaceName,
+      ...(detachedSessionIds.size > 0 ? { detachedSessionIds } : {}),
       readTerminalContext: (request: Parameters<TerminalContextReader>[0]) => {
         const reader = terminalContextReadersRef.current.get(request.sessionId);
         if (!reader) {

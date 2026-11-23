@@ -653,7 +653,7 @@ function AppViewInner({ domains }: AppViewProps) {
             customGroups={customGroups}
             knownHosts={effectiveKnownHosts}
             managedSources={managedSources}
-            sessionCount={sessions.filter((s) => !s.hiddenFromTabs).length}
+            sessionCount={sessions.filter((s) => !s.hiddenFromTabs || s.poppedOut).length}
             hotkeyScheme={hotkeyScheme}
             keyBindings={keyBindings}
             terminalThemeId={terminalThemeId}

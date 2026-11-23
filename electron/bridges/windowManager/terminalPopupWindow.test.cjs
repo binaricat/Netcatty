@@ -5,7 +5,10 @@ const test = require("node:test");
 
 const { createAppContentWindowClosedHandler } = require("../../appWindowLifecycle.cjs");
 const { createTerminalPopupWindowApi } = require("./terminalPopupWindow.cjs");
-const { markAttachPopupClosePrepared } = require("../terminalAttachRestore.cjs");
+const {
+  markAttachPopupClosePrepared,
+  setRestoreAttachedSessionOutput,
+} = require("../terminalAttachRestore.cjs");
 
 test("terminal popups participate in the last app-content-window lifecycle", async () => {
   const appContentWindows = new Set();
@@ -348,4 +351,103 @@ test("a system-manager shell popup is placed beside the panel instead of over it
   assert.ok(created.x + created.width <= 1000);
   assert.equal(created.width, 920);
   assert.notEqual(created.x, 260);
+});
+
+test("moved-tab popup skips crash restoration and close handoff after its source window closes", async () => {
+  const restored = [];
+  setRestoreAttachedSessionOutput(async (sessionId) => {
+    restored.push(sessionId);
+    return { success: true, restored: true };
+  });
+  try {
+    let sourceDestroyed = false;
+    const sourceMessages = [];
+    const sourceWindow = {
+      isDestroyed() { return sourceDestroyed; },
+      webContents: {
+        send(channel, payload) { sourceMessages.push({ channel, payload }); },
+      },
+    };
+    const otherMainWindow = {
+      isDestroyed() { return false; },
+      webContents: { send() {} },
+    };
+
+    const popupWindows = [];
+    class MovePopupWindowStub {
+      constructor() {
+        popupWindows.push(this);
+        this.destroyed = false;
+        this.handlers = new Map();
+        this.webContentsHandlers = new Map();
+        this.sent = [];
+        this.webContents = {
+          id: 90 + popupWindows.length,
+          on: (channel, handler) => { this.webContentsHandlers.set(channel, handler); },
+          send: (channel, payload) => { this.sent.push({ channel, payload }); },
+          setWindowOpenHandler() {},
+        };
+      }
+      on(channel, handler) { this.handlers.set(channel, handler); }
+      isDestroyed() { return this.destroyed; }
+      isVisible() { return true; }
+      loadURL() { return Promise.resolve(); }
+      setBackgroundColor() {}
+      close() {
+        let prevented = false;
+        this.handlers.get("close")?.({ preventDefault() { prevented = true; } });
+        if (!prevented) {
+          this.destroyed = true;
+          this.handlers.get("closed")?.();
+        }
+      }
+      destroy() {
+        this.destroyed = true;
+        this.handlers.get("closed")?.();
+      }
+    }
+
+    const api = createTerminalPopupWindowApi({
+      mainWindow: otherMainWindow,
+      currentTheme: "light",
+      V8_CACHE_OPTIONS: "bypassHeatCheck",
+      resolveFrontendBackgroundColor() { return "#fff"; },
+      resolveSettingsWindowBounds() { return {}; },
+      createExternalOnlyWindowOpenHandler() { return {}; },
+      applyWindowOpacityToWindow() {},
+      getDevRendererBaseUrl(url) { return url; },
+      showAndFocusWindow() {},
+      registerAppContentWindow() {},
+      unregisterAppContentWindow() {},
+      notifyAppContentWindowClosed() {},
+    });
+
+    // 1) Renderer crash after sourceWindow is destroyed must NOT restore to another main window.
+    await api.openTerminalPopupWindow(
+      { BrowserWindow: MovePopupWindowStub, nativeTheme: {}, shell: {} },
+      { preload: "/tmp/preload.cjs", isDev: false, appIcon: null, isMac: false, electronDir: __dirname, sourceWindow },
+      { popupId: "move-crash", title: "Moved", attachSessionId: "s-crash", moveSession: true, sourceSession: { id: "s-crash" } },
+    );
+    sourceDestroyed = true;
+    popupWindows[0].webContentsHandlers.get("render-process-gone")?.({}, { reason: "crashed" });
+    assert.equal(popupWindows[0].destroyed, true);
+    assert.deepEqual(restored, []);
+    assert.deepEqual(sourceMessages, []);
+
+    // 2) Normal close after sourceWindow is destroyed must NOT stall waiting on prepare-close.
+    await api.openTerminalPopupWindow(
+      { BrowserWindow: MovePopupWindowStub, nativeTheme: {}, shell: {} },
+      { preload: "/tmp/preload.cjs", isDev: false, appIcon: null, isMac: false, electronDir: __dirname, sourceWindow },
+      { popupId: "move-close", title: "Moved 2", attachSessionId: "s-close", moveSession: true, sourceSession: { id: "s-close" } },
+    );
+    api.closeTerminalPopupWindow("move-close");
+    assert.equal(popupWindows[1].destroyed, true);
+    assert.equal(
+      popupWindows[1].sent.some((entry) => entry.channel === "netcatty:terminal-popup:prepare-close"),
+      false,
+    );
+    assert.deepEqual(restored, []);
+  } finally {
+    setRestoreAttachedSessionOutput(null);
+  }
 });

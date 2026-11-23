@@ -85,6 +85,9 @@ function createTerminalPopupWindowApi(ctx) {
     async function openTerminalPopupWindow(electronModule, options, payload) {
       const { BrowserWindow, shell } = electronModule;
       const { preload, devServerUrl, isDev, appIcon, isMac, electronDir, sourceWindow } = options;
+      // Pin the home window at open time so a later mainWindow reassignment
+      // cannot redirect a moved tab's restore or close notification elsewhere.
+      const homeWindow = sourceWindow || mainWindow;
 
       const attachSessionId = typeof payload?.attachSessionId === "string" && payload.attachSessionId
         ? payload.attachSessionId
@@ -92,6 +95,7 @@ function createTerminalPopupWindowApi(ctx) {
       const attachAuthorization = attachSessionId ? randomUUID() : null;
       // "Move Tab to New Window": the popup owns the session until it hands it back.
       const ownsSessionLifetime = Boolean(attachSessionId && payload?.moveSession === true);
+      const isHomeGone = () => ownsSessionLifetime && !isLiveWindow(homeWindow);
       if (attachSessionId) {
         const existingPopupId = attachSessionPopups.get(attachSessionId);
         const existing = existingPopupId ? terminalPopupWindows.get(existingPopupId) : null;
@@ -172,10 +176,7 @@ function createTerminalPopupWindowApi(ctx) {
         lifecycleReleased = true;
         if (closePreparationTimer) clearTimeout(closePreparationTimer);
         terminalPopupWindows.delete(popupId);
-        const home = sourceWindow || mainWindow;
-        // A moved tab whose source window is gone has nowhere to return to; skip
-        // the restore so the popup's lifetime ownership closes the session.
-        const homeGone = ownsSessionLifetime && !isLiveWindow(home);
+        const homeGone = isHomeGone();
         if (attachSessionId && attachSessionPopups.get(attachSessionId) === popupId && !homeGone) {
           attachSessionPopups.delete(attachSessionId);
           // Window may be destroyed before React cleanup runs; always restore
@@ -195,8 +196,8 @@ function createTerminalPopupWindowApi(ctx) {
         if (attachSessionId) {
           // Lets a tab moved into this popup reappear in the window it came from.
           try {
-            if (isLiveWindow(home)) {
-              home.webContents.send("netcatty:terminal-popup:attach-closed", { sessionId: attachSessionId });
+            if (isLiveWindow(homeWindow)) {
+              homeWindow.webContents.send("netcatty:terminal-popup:attach-closed", { sessionId: attachSessionId });
             }
           } catch {
             // ignore destroyed home window
@@ -231,7 +232,7 @@ function createTerminalPopupWindowApi(ctx) {
       }
 
       win.on("close", (event) => {
-        if (!attachSessionId || isAttachPopupClosePrepared(attachAuthorization)) return;
+        if (!attachSessionId || isAttachPopupClosePrepared(attachAuthorization) || isHomeGone()) return;
         event?.preventDefault?.();
         if (closePreparationRequested) return;
         closePreparationRequested = true;
@@ -265,7 +266,7 @@ function createTerminalPopupWindowApi(ctx) {
         });
         win.webContents?.on?.("render-process-gone", (_event, details) => {
           console.warn("[TerminalPopup] Renderer process gone", { popupId, details });
-          if (attachSessionId) {
+          if (attachSessionId && !isHomeGone()) {
             restoreAttachedSessionOutput(attachSessionId);
           }
           try {

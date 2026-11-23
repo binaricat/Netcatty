@@ -472,6 +472,7 @@ declare global {
         passwordPromptActive?: boolean;
         cwd?: string | null;
         title?: string | null;
+        connectionLogDelta?: string;
       },
       authorization: string,
     ): Promise<{
@@ -497,6 +498,7 @@ declare global {
         passwordPromptActive?: boolean;
         cwd?: string | null;
         title?: string | null;
+        connectionLogDelta?: string;
         requestId: string;
       }) => boolean | Promise<boolean>,
     ): () => void;
