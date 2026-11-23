@@ -33,18 +33,21 @@ export function withOpencodeGoAutoConfiguredModel(
 }
 
 /**
- * Activate a freshly configured OpenCode Go provider only when nothing else is
- * already active. Adding a provider should not silently steal the switch from
- * an existing OpenAI/Anthropic setup, but a first-run user who just pasted a
- * key should not have to hunt for the toggle either.
+ * Activate a freshly configured OpenCode Go provider only on first-time
+ * credential setup when nothing else is already active. Adding a provider
+ * should not silently steal the switch from an existing OpenAI/Anthropic
+ * setup, and editing an already-configured disabled provider must preserve
+ * its disabled state, while a first-run user who just pasted a key should not
+ * have to hunt for the toggle.
  */
 export function shouldAutoActivateOpencodeGo(
-  provider: Pick<ProviderConfig, 'providerId' | 'enabled'>,
+  provider: Pick<ProviderConfig, 'providerId' | 'enabled' | 'apiKey'>,
   otherProvidersEnabled: boolean,
   apiKeyPresent: boolean,
 ): boolean {
   if (!isOpencodeGoProvider(provider)) return false;
   if (provider.enabled || otherProvidersEnabled) return false;
+  if (provider.apiKey?.trim()) return false;
   return apiKeyPresent;
 }
 

@@ -80,17 +80,30 @@ test('auto-config leaves other providers untouched', () => {
   );
 });
 
-test('auto-activation only kicks in for an inactive OpenCode Go with no active sibling', () => {
-  const provider = { providerId: 'opencode-go' as const, enabled: false };
-  assert.equal(shouldAutoActivateOpencodeGo(provider, false, true), true);
-  assert.equal(shouldAutoActivateOpencodeGo(provider, true, true), false);
-  assert.equal(shouldAutoActivateOpencodeGo(provider, false, false), false);
+test('auto-activation only kicks in for first-time OpenCode Go key setup with no active sibling', () => {
+  const unconfigured = { providerId: 'opencode-go' as const, enabled: false, apiKey: undefined };
+  assert.equal(shouldAutoActivateOpencodeGo(unconfigured, false, true), true);
+  assert.equal(shouldAutoActivateOpencodeGo(unconfigured, true, true), false);
+  assert.equal(shouldAutoActivateOpencodeGo(unconfigured, false, false), false);
   assert.equal(
-    shouldAutoActivateOpencodeGo({ providerId: 'opencode-go', enabled: true }, false, true),
+    shouldAutoActivateOpencodeGo({ providerId: 'opencode-go', enabled: true, apiKey: undefined }, false, true),
     false,
   );
   assert.equal(
-    shouldAutoActivateOpencodeGo({ providerId: 'openrouter', enabled: false }, false, true),
+    shouldAutoActivateOpencodeGo({ providerId: 'openrouter', enabled: false, apiKey: undefined }, false, true),
     false,
   );
+});
+
+test('editing a disabled already-configured OpenCode Go provider preserves enabled=false', () => {
+  const disabledConfigured = {
+    providerId: 'opencode-go' as const,
+    enabled: false,
+    apiKey: 'enc:v1:existing-key',
+  };
+  // ProviderConfigForm.handleSave re-encrypts the existing API key on every save
+  // (e.g. when renaming or changing the icon), so apiKeyPresent is true even on
+  // unrelated edits; auto-activation must not silently re-enable the provider.
+  assert.equal(shouldAutoActivateOpencodeGo(disabledConfigured, false, true), false);
+  assert.equal(shouldAutoActivateOpencodeGo(disabledConfigured, true, true), false);
 });

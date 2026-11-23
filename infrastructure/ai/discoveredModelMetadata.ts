@@ -4,7 +4,7 @@ import { sanitizeContextWindow } from './contextCompaction';
  * Read a context window from one entry of a provider `/models` payload.
  *
  * Vendors disagree on where the window lives: OpenAI-compatible lists that
- * carry it at all usually flatten it (`context_length`, `context_window`, …),
+ * carry it at all usually flatten it (`context_length`, `context_window`, ...),
  * while OpenCode Go nests it under `limit.context` alongside `limit.output`.
  * Keep both shapes working so discovery can show real limits for either.
  */
