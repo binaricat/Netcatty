@@ -295,37 +295,3 @@ export function setActivePermissionGrants(rules: PermissionGrantRule[]): void {
 export function getActivePermissionGrants(): readonly PermissionGrantRule[] {
   return activeRules;
 }
-
-export class PermissionGrantStore {
-  private rules: PermissionGrantRule[];
-
-  constructor(rules: PermissionGrantRule[] = []) {
-    this.rules = [...rules];
-  }
-
-  getRules(): readonly PermissionGrantRule[] {
-    return this.rules;
-  }
-
-  setRules(rules: PermissionGrantRule[]): void {
-    this.rules = [...rules];
-  }
-
-  addRule(rule: PermissionGrantRule): void {
-    this.rules = [...this.rules, rule];
-  }
-
-  updateRule(id: string, updates: Partial<Omit<PermissionGrantRule, 'id' | 'createdAt'>>): void {
-    this.rules = this.rules.map((rule) => (
-      rule.id === id ? { ...rule, ...updates } : rule
-    ));
-  }
-
-  removeRule(id: string): void {
-    this.rules = this.rules.filter((rule) => rule.id !== id);
-  }
-
-  match(ctx: PermissionGrantMatchContext): PermissionGrantRule | null {
-    return matchPermissionGrant(this.rules, ctx);
-  }
-}

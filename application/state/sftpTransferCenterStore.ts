@@ -353,7 +353,22 @@ export function mergeOwnerPublishedTask(
     // Only a strictly newer lifecycle epoch may re-open transferring (resume).
     const incomingPaused = incoming.status === "paused" || incoming.status === "pausing";
     const existingPaused = existing.status === "paused" || existing.status === "pausing";
-    if (incomingPaused && incomingLifecycleEpoch >= existingLifecycleEpoch) {
+    // The panel can publish a snapshot from before the child acknowledgements
+    // arrived. Only a newer control decision may clear the folder's failure.
+    const rejectedFolderPause = existing.isDirectory && !existing.parentTaskId
+      && existing.status === "pausing" && !!existing.pauseUnavailableReason
+      && incomingLifecycleEpoch <= existingLifecycleEpoch
+      && isTransferPauseLatched(existing.id);
+    const rejectedChildPause = parentStatus === "pausing"
+      && !!existing.parentTaskId && existing.status === "transferring" && !!existing.pauseUnavailableReason;
+    if (rejectedFolderPause) {
+      merged.status = "pausing";
+      merged.speed = 0;
+      merged.pauseUnavailableReason = existing.pauseUnavailableReason;
+    } else if (rejectedChildPause && incomingLifecycleEpoch <= existingLifecycleEpoch) {
+      merged.status = "transferring";
+      merged.pauseUnavailableReason = existing.pauseUnavailableReason;
+    } else if (incomingPaused && incomingLifecycleEpoch >= existingLifecycleEpoch) {
       merged.status = incoming.status;
       merged.speed = 0;
       // Pin the visible bar while paused/latched. Soft-drain must not keep
@@ -392,6 +407,7 @@ export function mergeOwnerPublishedTask(
     const parentHoldsPause = parentStatus === "paused" || parentStatus === "pausing";
     if (
       parentHoldsPause
+      && !rejectedChildPause
       && !["completed", "cancelled", "failed"].includes(merged.status)
       && (merged.status === "transferring" || merged.status === "pending" || merged.status === "queued")
     ) {
@@ -1722,17 +1738,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         // Soft-drain / walk progress must not move the visible bar after Pause.
         // Latch or paused/pausing freezes transferredBytes/speed unless this patch
         // is an explicit resume (transferring + epoch, or dedicated-resume).
-        const pauseHeld = isTransferOrRootPauseLatched(task.parentTaskId ?? task.id, task.id)
+        const parent = task.parentTaskId ? tasks.find((candidate) => candidate.id === task.parentTaskId) : undefined;
+        const rejectedChildPause = parent?.status === "pausing" && !!parent.pauseUnavailableReason
+          && task.status === "transferring" && !!task.pauseUnavailableReason;
+        const pauseHeld = !rejectedChildPause && (isTransferOrRootPauseLatched(task.parentTaskId ?? task.id, task.id)
           || isTransferPauseLatched(task.id)
           || task.status === "paused"
           || task.status === "pausing"
-          || (!!task.parentTaskId && (
-            isTransferPauseLatched(task.parentTaskId)
-            || (() => {
-              const parent = tasks.find((candidate) => candidate.id === task.parentTaskId);
-              return parent?.status === "paused" || parent?.status === "pausing";
-            })()
-          ));
+          || parent?.status === "paused"
+          || parent?.status === "pausing");
         if (pauseHeld && !explicitResume) {
           // Keep lifecycle at paused/pausing; allow checkpoint metadata only.
           if (task.status === "pausing" || task.status === "paused") {
@@ -2451,10 +2465,12 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
             task.parentTaskId ?? task.id,
             task.id,
           ) || isTransferPauseLatched(task.id);
-          const uiPauseLatched = task.status === "paused"
+          const rejectedChildPause = parentRow?.status === "pausing" && !!parentRow.pauseUnavailableReason
+            && task.status === "transferring" && !!task.pauseUnavailableReason;
+          const uiPauseLatched = !rejectedChildPause && (task.status === "paused"
             || task.status === "pausing"
             || parentHoldsPause
-            || selfLatched;
+            || selfLatched);
           const explicitResume = lifecycleStatus === "transferring"
             && event.lifecycleEpoch !== undefined
             && incomingEpoch > currentEpoch;
@@ -2671,14 +2687,6 @@ const browserPersistence: StorePersistence | undefined = typeof globalThis.local
     };
 
 export const sftpTransferCenterStore = createSftpTransferCenterStore(browserPersistence);
-
-export function useSftpTransferCenter(): SftpTransferCenterSnapshot {
-  return useSyncExternalStore(
-    sftpTransferCenterStore.subscribe,
-    sftpTransferCenterStore.getSnapshot,
-    sftpTransferCenterStore.getSnapshot,
-  );
-}
 
 /** Badge only — stable when counts are unchanged so TopTabs does not re-render every progress byte. */
 export function useSftpTransferCenterBadge(): { count: number; hasAttention: boolean } {

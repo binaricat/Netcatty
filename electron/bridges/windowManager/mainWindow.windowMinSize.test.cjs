@@ -6,10 +6,19 @@ const { resolveWindowMinimumSize, attachDisplayMinimumSync } = require("./mainWi
 test("caps the minimum at half the work area so tiling cells fit", () => {
   const size = resolveWindowMinimumSize(
     { getPrimaryDisplay: () => ({ workArea: { width: 1920, height: 1080 } }) },
-    1100,
-    640,
+    960,
+    540,
   );
   assert.deepEqual(size, { width: 944, height: 524 });
+});
+
+test("uses the nominal 960x540 layout minimum when half the work area exceeds it", () => {
+  const size = resolveWindowMinimumSize(
+    { getPrimaryDisplay: () => ({ workArea: { width: 2560, height: 1440 } }) },
+    960,
+    540,
+  );
+  assert.deepEqual(size, { width: 960, height: 540 });
 });
 
 test("caps the minimum for the display containing the target bounds", () => {
@@ -147,7 +156,7 @@ test("createWindow clamps saved bounds and BrowserWindow minima to the fitted si
   const api = createMainWindowApi({
     mainWindow: null, electronApp: null, currentTheme: "light", isQuitting: false,
     pendingWindowStateWrite: null, queuedWindowState: null, windowStateCloseRequested: false,
-    DEFAULT_WINDOW_WIDTH: 1400, DEFAULT_WINDOW_HEIGHT: 900, MIN_WINDOW_WIDTH: 1100, MIN_WINDOW_HEIGHT: 640,
+    DEFAULT_WINDOW_WIDTH: 1400, DEFAULT_WINDOW_HEIGHT: 900, MIN_WINDOW_WIDTH: 960, MIN_WINDOW_HEIGHT: 540,
     V8_CACHE_OPTIONS: "code", THEME_COLORS: { light: {} },
     unhealthyWebContentsIds: new Set(), rendererReadySeenByWebContentsId: new Set(),
     __dirname, URL, require, console, setTimeout, clearTimeout,

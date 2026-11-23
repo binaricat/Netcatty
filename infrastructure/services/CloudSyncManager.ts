@@ -176,6 +176,7 @@ export type SyncEventCallback = (event: SyncEvent) => void;
 
 export interface ProviderSyncAnchor {
   signature: string | null;
+  webdavEtag?: string;
   version: number;
   updatedAt: number;
   deviceId?: string;
@@ -624,12 +625,13 @@ export class CloudSyncManager {
   private async inspectProviderRemoteState(
     provider: CloudProvider,
     adapter: CloudAdapter,
+    allowNotModified = false,
   ): Promise<{
     remoteChanged: boolean;
     remoteFile: SyncedFile | null;
     error?: string;
   }> {
-    return inspectProviderRemoteStateImpl.call(this, provider, adapter);
+    return inspectProviderRemoteStateImpl.call(this, provider, adapter, allowNotModified);
   }
 
   /**
@@ -1070,13 +1072,6 @@ export const getCloudSyncManager = (): CloudSyncManager => {
     syncManagerInstance = new CloudSyncManager();
   }
   return syncManagerInstance;
-};
-
-export const resetCloudSyncManager = (): void => {
-  if (syncManagerInstance) {
-    syncManagerInstance.destroy();
-    syncManagerInstance = null;
-  }
 };
 
 export default CloudSyncManager;

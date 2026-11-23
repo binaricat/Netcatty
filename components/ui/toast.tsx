@@ -27,25 +27,6 @@ interface ToastStateValue {
 const ToastActionsContext = createContext<ToastActionsValue | null>(null);
 const ToastStateContext = createContext<ToastStateValue | null>(null);
 
-/** Actions-only subscription — does not re-render when the toast list changes. */
-export const useToastActions = () => {
-    const context = useContext(ToastActionsContext);
-    if (!context) {
-        throw new Error('useToastActions must be used within a ToastProvider');
-    }
-    return context;
-};
-
-/** Full toast API. Prefer useToastActions when you do not need the list. */
-export const useToast = () => {
-    const actions = useContext(ToastActionsContext);
-    const state = useContext(ToastStateContext);
-    if (!actions || !state) {
-        throw new Error('useToast must be used within a ToastProvider');
-    }
-    return { ...state, ...actions };
-};
-
 // Simple hook for components that may not be inside ToastProvider
 let globalShowToast: ((toast: Omit<Toast, 'id'>) => void) | null = null;
 

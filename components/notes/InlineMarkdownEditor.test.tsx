@@ -276,7 +276,7 @@ test("small note image width threshold matches README badge sizes", () => {
 });
 
 test("note image actions use a bordered toolbar shown only on hover or focus", () => {
-  const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("./mdxEditor.css", import.meta.url), "utf8");
 
   assert.match(
     styles,
@@ -392,10 +392,9 @@ test("note editor exposes its modes from a borderless title-row dropdown", () =>
   // The app-owned NoteToolbar (not MDXEditor's toolbarPlugin) hosts the
   // formatting controls; MDXEditor must not render its own toolbar.
   assert.doesNotMatch(source, /toolbarPlugin\(/);
-  assert.match(toolbarSource, /onAction\?\.\("undo"\)/);
-  assert.match(toolbarSource, /onAction\?\.\("redo"\)/);
-  assert.match(toolbarSource, /<Undo2 size=\{14\} \/>/);
-  assert.match(toolbarSource, /<Redo2 size=\{14\} \/>/);
+  assert.match(toolbarSource, /id: "undo", icon: Undo2/);
+  assert.match(toolbarSource, /id: "redo", icon: Redo2/);
+  assert.match(toolbarSource, /onAction\?\.\(item\.id\)/);
   // Preview and edit both use MDXEditor (readOnly in preview).
   assert.match(source, /readOnly=\{editorMode === "preview"\}/);
   assert.match(source, /key=\{editorMode\}/);
@@ -423,7 +422,7 @@ test("note editor exposes its modes from a borderless title-row dropdown", () =>
 });
 
 test("note markdown toolbar remains usable in narrow panes", () => {
-  const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("./mdxEditor.css", import.meta.url), "utf8");
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
   const toolbarSource = readFileSync(new URL("./NoteToolbar.tsx", import.meta.url), "utf8");
 
@@ -439,24 +438,21 @@ test("note markdown toolbar remains usable in narrow panes", () => {
     styles,
     /\.netcatty-mdx-editor\s*\{[^}]*transform:\s*translateZ\(0\);/s,
   );
-  // The app-owned NoteToolbar scrolls horizontally when the pane is narrow so
-  // formatting buttons are never clipped; the scrollbar stays visible.
-  assert.match(
-    toolbarSource,
-    /overflow-x-auto [^"]*\[scrollbar-width:thin\]/,
-  );
-  assert.match(
-    toolbarSource,
-    /\[&::-webkit-scrollbar\]:h-1\.5/,
-  );
-  assert.match(
-    toolbarSource,
-    /\[&::-webkit-scrollbar-thumb\]:bg-border\/70/,
-  );
-  assert.match(
-    toolbarSource,
-    /flex flex-1 items-center gap-0\.5 min-w-0 overflow-x-auto/,
-  );
+  // The app-owned NoteToolbar collapses excess controls into the shared menu.
+  assert.match(toolbarSource, /<ToolbarOverflowMenu/);
+  assert.match(toolbarSource, /data-note-format-toolbar/);
+  assert.doesNotMatch(toolbarSource, /overflow-x-auto|scrollbar-width:thin|webkit-scrollbar/);
+});
+
+test("MDX link dialog overlay stays inside the retained notes editor container", () => {
+  const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+
+  // Default MDXEditor popup target is document.body. Keep the overlay in the
+  // editor container so section `hidden` and vault visibility:hidden hide it (#4257).
+  assert.match(source, /const \[overlayContainer, setOverlayContainer\] = useState<HTMLElement \| null>\(null\);/);
+  assert.match(source, /setOverlayContainer\(\(current\) => \(current === node \? current : node\)\);/);
+  assert.match(source, /ref=\{setEditorContainer\}/);
+  assert.match(source, /overlayContainer=\{overlayContainer \?\? undefined\}/);
 });
 
 test("preview mode opens links directly without showing the edit hover action", () => {
@@ -498,7 +494,7 @@ test("pasting inside code blocks keeps CodeMirror in control", () => {
 });
 
 test("note code block editor colors follow the app theme", () => {
-  const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("./mdxEditor.css", import.meta.url), "utf8");
 
   assert.match(styles, /\.netcatty-mdx-editor\s+\.cm-editor/);
   assert.match(styles, /\.netcatty-mdx-editor\s+\.cm-gutters/);
@@ -512,7 +508,7 @@ test("note code block editor colors follow the app theme", () => {
 });
 
 test("note code block active line is highlighted only while focused", () => {
-  const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("./mdxEditor.css", import.meta.url), "utf8");
 
   assert.match(
     styles,
@@ -525,7 +521,7 @@ test("note code block active line is highlighted only while focused", () => {
 });
 
 test("note code block frame is borderless and language picker is compact", () => {
-  const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("./mdxEditor.css", import.meta.url), "utf8");
 
   assert.match(
     styles,
@@ -598,7 +594,7 @@ test("note code block frame is borderless and language picker is compact", () =>
 });
 
 test("note formulas render without framed surfaces", () => {
-  const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("./mdxEditor.css", import.meta.url), "utf8");
 
   assert.doesNotMatch(styles, /data-language="math"/);
   assert.match(
@@ -695,7 +691,7 @@ test("annotateNoteCodeBlockDeleteButtons swaps the delete icon only once", () =>
 
 test("note preview uses MDX readOnly with code-copy chrome", () => {
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
-  const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("./mdxEditor.css", import.meta.url), "utf8");
 
   assert.match(source, /removeNoteCodeBlockCopyButtons/);
   assert.match(source, /readOnly=\{editorMode === "preview"\}/);

@@ -55,10 +55,6 @@ function applyTerminalAppearanceVarsToTargets(targets: HTMLElement[], theme: Ter
   }
 }
 
-export function injectTerminalChromeSurfaceVars(theme: TerminalTheme): void {
-  applyTerminalAppearanceVarsToTargets(collectTerminalChromeSurfaceElements(), theme);
-}
-
 export function injectTerminalLayerChromeSurfaceVars(theme: TerminalTheme): void {
   applyTerminalAppearanceVarsToTargets(collectTerminalLayerChromeSurfaceElements(), theme);
 }
@@ -70,11 +66,6 @@ function clearTerminalAppearanceVarsOnTargets(targets: HTMLElement[]): void {
     }
     delete target.dataset.terminalAppearanceId;
   }
-}
-
-export function clearTerminalChromeSurfaceVars(): void {
-  if (typeof document === 'undefined') return;
-  clearTerminalAppearanceVarsOnTargets(collectTerminalChromeSurfaceElements());
 }
 
 export function clearTerminalLayerChromeSurfaceVars(): void {
@@ -109,21 +100,6 @@ export function injectTerminalAppearanceVars(
   applyTerminalAppearanceVarsToTargets(targets, theme);
 }
 
-export function clearTerminalAppearanceVars(root?: HTMLElement | null): void {
-  if (typeof document === 'undefined') return;
-  const targets: HTMLElement[] = [];
-  const appearanceRoot = root ?? findTerminalAppearanceRoot();
-  if (appearanceRoot) targets.push(appearanceRoot);
-  const tabsRoot = document.querySelector<HTMLElement>('[data-top-tabs-root]');
-  if (tabsRoot && tabsRoot !== appearanceRoot) targets.push(tabsRoot);
-  for (const hostTreeRoot of document.querySelectorAll<HTMLElement>(
-    '[data-section="app-host-tree-layer"], [data-section="terminal-host-tree-sidebar"], [data-section="terminal-side-panel"]',
-  )) {
-    if (!targets.includes(hostTreeRoot)) targets.push(hostTreeRoot);
-  }
-  clearTerminalAppearanceVarsOnTargets(targets);
-}
-
 export function injectTerminalPaneAppearanceVars(sessionId: string, theme: TerminalTheme): void {
   if (typeof document === 'undefined') return;
   const pane = document.querySelector<HTMLElement>(`[data-session-id="${sessionId}"]`);
@@ -142,19 +118,4 @@ export function injectTerminalPaneAppearanceVars(sessionId: string, theme: Termi
   setStylePropertyIfChanged(pane, '--terminal-preview-toolbar-btn', vars['--nc-term-toolbar-btn']);
   setStylePropertyIfChanged(pane, '--terminal-preview-toolbar-btn-hover', vars['--nc-term-toolbar-btn-hover']);
   setStylePropertyIfChanged(pane, '--terminal-preview-toolbar-btn-active', vars['--nc-term-toolbar-btn-active']);
-}
-
-export function clearTerminalPaneAppearanceVars(sessionId: string): void {
-  if (typeof document === 'undefined') return;
-  const pane = document.querySelector<HTMLElement>(`[data-session-id="${sessionId}"]`);
-  if (!pane) return;
-  const keys = [
-    '--nc-term-bg', '--nc-term-fg', '--nc-term-border',
-    '--nc-term-toolbar-btn', '--nc-term-toolbar-btn-hover', '--nc-term-toolbar-btn-active',
-    '--terminal-preview-bg', '--terminal-preview-fg', '--terminal-preview-border',
-    '--terminal-preview-toolbar-btn', '--terminal-preview-toolbar-btn-hover', '--terminal-preview-toolbar-btn-active',
-  ];
-  for (const key of keys) {
-    removeStylePropertyIfSet(pane, key);
-  }
 }

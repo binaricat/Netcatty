@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { remoteSoftwareRequiresSingleChannel } from "./singleChannelSshBanner.shared.mjs";
+import { remoteSoftwareRequiresSingleChannel } from "./singleChannelSshBanner.shared.cjs";
 import { sftpRequiresDedicatedLogin } from "./sftpDedicatedLogin";
 
 test("network-device mode forces a dedicated SFTP login before any banner", () => {

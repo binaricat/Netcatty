@@ -8,6 +8,7 @@ const {
 } = require("./contractValidator.cjs");
 const { assertPluginJsonValue } = require("./jsonBoundary.cjs");
 const { PluginRpcError, RPC_ERRORS, raceWithAbort } = require("./rpcRouter.cjs");
+const { invalidArgument, freezeJson } = require("./validationUtils.cjs");
 
 const MAX_PROVIDER_JSON_BYTES = 128 * 1024;
 const MAX_TERMINAL_PROVIDERS_PER_REQUEST = 32;
@@ -69,20 +70,6 @@ const TERMINAL_EVENT_TYPES = new Set([
 ]);
 const TERMINAL_STATUSES = new Set(["connecting", "connected", "disconnected"]);
 const TERMINAL_SHELL_TYPES = new Set(["posix", "fish", "powershell", "cmd", "unknown"]);
-
-function invalidArgument(message) {
-  return new PluginRpcError(RPC_ERRORS.invalidArgument, message);
-}
-
-function freezeJson(value) {
-  const clone = structuredClone(value);
-  const freeze = (item) => {
-    if (!item || typeof item !== "object" || Object.isFrozen(item)) return item;
-    for (const child of Array.isArray(item) ? item : Object.values(item)) freeze(child);
-    return Object.freeze(item);
-  };
-  return freeze(clone);
-}
 
 function assertBoundedJson(value, label) {
   try {

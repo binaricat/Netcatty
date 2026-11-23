@@ -1417,8 +1417,8 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:cloudSync:webdav:initialize", { config }),
   cloudSyncWebdavUpload: (config, syncedFile) =>
     ipcRenderer.invoke("netcatty:cloudSync:webdav:upload", { config, syncedFile }),
-  cloudSyncWebdavDownload: (config) =>
-    ipcRenderer.invoke("netcatty:cloudSync:webdav:download", { config }),
+  cloudSyncWebdavDownload: (config, etag) =>
+    ipcRenderer.invoke("netcatty:cloudSync:webdav:download", { config, etag }),
   cloudSyncWebdavDelete: (config) =>
     ipcRenderer.invoke("netcatty:cloudSync:webdav:delete", { config }),
 
@@ -2319,27 +2319,6 @@ function createPreloadApi(ctx) {
     };
     ipcRenderer.on("netcatty:ai:stream:error", handler);
     return () => ipcRenderer.removeListener("netcatty:ai:stream:error", handler);
-  },
-  onAiAgentStdout: (agentId, cb) => {
-    const handler = (_event, payload) => {
-      if (payload.agentId === agentId) cb(payload.data);
-    };
-    ipcRenderer.on("netcatty:ai:agent:stdout", handler);
-    return () => ipcRenderer.removeListener("netcatty:ai:agent:stdout", handler);
-  },
-  onAiAgentStderr: (agentId, cb) => {
-    const handler = (_event, payload) => {
-      if (payload.agentId === agentId) cb(payload.data);
-    };
-    ipcRenderer.on("netcatty:ai:agent:stderr", handler);
-    return () => ipcRenderer.removeListener("netcatty:ai:agent:stderr", handler);
-  },
-  onAiAgentExit: (agentId, cb) => {
-    const handler = (_event, payload) => {
-      if (payload.agentId === agentId) cb(payload.code);
-    };
-    ipcRenderer.on("netcatty:ai:agent:exit", handler);
-    return () => ipcRenderer.removeListener("netcatty:ai:agent:exit", handler);
   },
   scriptRun: async (params) => ipcRenderer.invoke("netcatty:script:run", params),
   scriptStop: async (runId) => ipcRenderer.invoke("netcatty:script:stop", { runId }),

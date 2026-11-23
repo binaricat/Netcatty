@@ -58,7 +58,6 @@ export const ruCoreMessages: Messages = {
   'common.edit': 'Редактировать',
   'common.clear': 'Очистить',
   'common.optional': 'Необязательно',
-  'common.selectPlaceholder': 'Выбрать...',
   'common.add': 'Добавить',
   'common.rename': 'Переименовать',
   'common.refresh': 'Обновить',
@@ -97,11 +96,9 @@ export const ruCoreMessages: Messages = {
   'field.label': 'Метка',
   'field.type': 'Тип',
   'auth.keyType': 'Тип {type}',
-  'auth.showAllKeys': 'Показать все ключи',
 
   // Dialogs / prompts
   'confirm.deleteHost': 'Удалить хост "{name}"?',
-  'confirm.deleteIdentity': 'Удалить идентификатор "{name}"?',
   'confirm.removeProvider': 'Удалить провайдера "{name}"?',
   'confirm.closeBusyTerminal.title': 'Подтвердите закрытие',
   'confirm.closeBusyTerminal.message': 'Процесс "{command}" всё ещё выполняется и будет завершён.',
@@ -359,7 +356,6 @@ export const ruCoreMessages: Messages = {
   'tray.status.inactive': 'Неактивно',
   'tray.status.error': 'Ошибка',
   'tray.status.unknown': 'Неизвестно',
-  'tray.recentHosts': 'Недавние хосты',
   'tray.empty.title': 'Пока здесь ничего нет',
   'tray.empty.subtitle': 'Подключитесь к серверу, они по вам скучают 🚀',
   'tray.quit': 'Выйти из Netcatty',
@@ -418,9 +414,6 @@ export const ruCoreMessages: Messages = {
   'update.downloadFailed.message': 'Не удалось скачать обновление. Вы можете скачать его вручную.',
   'update.needsSave.title': 'Несохранённые изменения',
   'update.needsSave.message': 'Сначала сохраните открытые редакторы, затем снова нажмите «Перезапустить сейчас», чтобы установить обновление.',
-  'update.openReleases': 'Открыть релизы',
-  'update.remindLater': 'Напомнить позже',
-  'update.skipVersion': 'Пропустить эту версию',
 
   // Settings > Appearance
   'settings.appearance.uiTheme': 'Тема интерфейса',
@@ -997,8 +990,6 @@ export const ruCoreMessages: Messages = {
   'settings.shortcuts.binding.sftp-navigate-to': 'Перейти в выбранную директорию',
 
   // Context menus / common actions
-  'action.newHost': 'Новый хост',
-  'action.newSubfolder': 'Новая подпапка',
   'action.copyPublicKey': 'Копировать публичный ключ',
   'action.keyExport': 'Экспорт ключа',
   'action.edit': 'Редактировать',
@@ -1188,12 +1179,9 @@ export const ruCoreMessages: Messages = {
   "settings.plugins.manager.remove": "Удалить",
   "settings.plugins.manager.removeNote": "Удаление очищает код пакета и локальные данные KV. Настройки пользователя, секреты и данные синхронизации сохраняются.",
   "settings.plugins.permissions.statusUnknown": "Состояние неизвестно",
-  "plugins.sidebar.extensions": "Страницы расширений",
   "plugins.sidebar.selectTerminal": "Сначала выберите открытый терминал.",
   "plugins.sidebar.loading": "Загрузка страницы расширения…",
   "plugins.vault.loading": "Загрузка страницы плагина…",
-  "plugins.vault.extensions": "Расширения",
-  "plugins.vault.back": "К хостам",
   "plugins.interaction.title": "Запрос плагина",
   "plugins.interaction.sharing": "Переданный текст доступен плагину и его разрешённым возможностям, включая сеть. Чтение не разрешает новый сетевой адрес.",
   "plugins.interaction.input": "Ввести текст",

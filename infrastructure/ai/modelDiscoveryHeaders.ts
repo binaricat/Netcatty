@@ -28,10 +28,26 @@ export function resolveModelsDiscoveryEndpoint(
 }
 
 /**
+ * True when `baseURL` is a valid URL whose host is not the official
+ * `api.anthropic.com` endpoint. Omitted or blank values default to the
+ * official host and return `false`.
+ */
+export function isCustomAnthropicBaseURL(baseURL?: string): boolean {
+  const trimmed = baseURL?.trim();
+  if (!trimmed) return false;
+  try {
+    return new URL(trimmed).hostname.toLowerCase() !== "api.anthropic.com";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Pick auth headers for a provider's `/models` discovery endpoint.
  *
  * Each wire-protocol family uses its own auth dialect:
- * - `anthropic`: `x-api-key` + `anthropic-version`
+ * - `anthropic`: `x-api-key` + `anthropic-version` on official `api.anthropic.com`;
+ *   custom Anthropic-compatible gateways also receive `Authorization: Bearer ...`
  * - `google`:    `x-goog-api-key` (Google Generative AI rejects Bearer)
  * - `openai`:    `Authorization: Bearer …` (also the OpenAI-compat default)
  *
@@ -41,12 +57,16 @@ export function resolveModelsDiscoveryEndpoint(
 function buildDefaultModelDiscoveryHeaders(
   style: ProviderStyle,
   apiKey: string | undefined,
+  baseURL?: string,
 ): Record<string, string> {
   if (!apiKey) return {};
   switch (style) {
     case "anthropic":
       return {
         "x-api-key": apiKey,
+        ...(isCustomAnthropicBaseURL(baseURL)
+          ? { Authorization: `Bearer ${apiKey}` }
+          : {}),
         "anthropic-version": "2023-06-01",
       };
     case "google":
@@ -61,8 +81,9 @@ export function buildModelDiscoveryHeaders(
   style: ProviderStyle,
   apiKey: string | undefined,
   customHeaders: Record<string, string> = {},
+  baseURL?: string,
 ): Record<string, string> {
-  const headers = buildDefaultModelDiscoveryHeaders(style, apiKey);
+  const headers = buildDefaultModelDiscoveryHeaders(style, apiKey, baseURL);
   const overridden = new Set(Object.keys(customHeaders).map((name) => name.toLowerCase()));
   return Object.fromEntries([
     ...Object.entries(headers).filter(([name]) => !overridden.has(name.toLowerCase())),

@@ -291,5 +291,3 @@ export class SessionStateStore {
     return lines.join('\n');
   }
 }
-
-export const globalSessionStateStore = new SessionStateStore();

@@ -12,13 +12,14 @@ const {
   formatDiscoveryEnvCliFlags,
 } = require("../../cli/externalMcpDiscoveryPath.cjs");
 
-function loadShellUtils() {
-  return require("../ai/shellUtils.cjs");
-}
-
-function loadDesktopCliResolver() {
-  return require("./desktopCliResolver.cjs");
-}
+const {
+  loadShellUtils,
+  loadDesktopCliResolver,
+  formatCliCommandText,
+  pathsMatch,
+  hasRequiredDiscoveryEnv,
+  summarizeFailure: summarizeCliFailure,
+} = require("./cliSetupBase.cjs");
 
 function parseCodexMcpList(rawOutput) {
   const parsed = JSON.parse(String(rawOutput || "[]"));
@@ -38,18 +39,7 @@ function parseCodexMcpList(rawOutput) {
 }
 
 function formatCodexCommandText(args, cliPath = "codex") {
-  const executable = typeof cliPath === "string" && cliPath.trim()
-    ? cliPath.trim()
-    : "codex";
-  return [quoteCommandArg(executable), ...args.map(quoteCommandArg)].join(" ");
-}
-
-function quoteCommandArg(value) {
-  if (typeof value !== "string" || value.length === 0) return '""';
-  // Match ExternalMcpCard quoteShellArg so copyable commands stay shell-safe
-  // for paths with spaces, quotes, apostrophes, or backslashes.
-  if (!/[\s"'\\]/u.test(value)) return value;
-  return `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
+  return formatCliCommandText(args, cliPath, "codex");
 }
 
 function formatExistingCommand(transport) {
@@ -65,19 +55,6 @@ function formatExistingCommand(transport) {
     return transport.url.trim();
   }
   return null;
-}
-
-function normalizePathForCompare(value) {
-  if (typeof value !== "string") return "";
-  let normalized = value.trim().replace(/^["']|["']$/gu, "");
-  if (process.platform === "win32") {
-    normalized = normalized.replace(/\.cmd$/iu, "");
-  }
-  return normalized;
-}
-
-function pathsMatch(left, right) {
-  return normalizePathForCompare(left) === normalizePathForCompare(right);
 }
 
 function buildCodexAddArgs(launcherPath, discoveryEnv) {
@@ -96,14 +73,6 @@ function getCodexEntryEnv(entry) {
   if (transportEnv && typeof transportEnv === "object") return transportEnv;
   if (entry?.env && typeof entry.env === "object") return entry.env;
   return null;
-}
-
-function hasRequiredDiscoveryEnv(entryEnv, discoveryEnv) {
-  const required = discoveryEnv && typeof discoveryEnv === "object" ? discoveryEnv : {};
-  const keys = Object.keys(required).filter((key) => typeof required[key] === "string" && required[key]);
-  if (keys.length === 0) return true;
-  if (!entryEnv || typeof entryEnv !== "object") return false;
-  return keys.every((key) => String(entryEnv[key] || "") === String(required[key]));
 }
 
 function classifyCodexExternalMcpStatus({
@@ -219,7 +188,7 @@ function createExternalMcpCodexSetup(options = {}) {
   }
 
   function summarizeFailure(result, fallback) {
-    return String(result?.stderr || result?.stdout || fallback || "Codex command failed").trim();
+    return summarizeCliFailure(result, fallback, "Codex command failed");
   }
 
   async function getStatus() {

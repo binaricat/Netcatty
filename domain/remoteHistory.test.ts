@@ -10,7 +10,6 @@ import {
   isNetcattyAiHistoryCommand,
   isNetcattyManagedStartupHistoryCommand,
 } from './remoteHistory.ts';
-import { buildDockerExecShellCommand, buildDockerLogsCommand } from './systemManager/dockerShell.ts';
 import {
   buildContainerExecShellCommand,
   buildContainerLogsCommand,
@@ -204,8 +203,8 @@ test('isNetcattyAiHistoryCommand: detects AI PTY marker lines', () => {
 });
 
 test('isNetcattyManagedStartupHistoryCommand: detects Docker and tmux terminal launch commands', () => {
-  assert.equal(isNetcattyManagedStartupHistoryCommand(buildDockerExecShellCommand('587abcdef123')), true);
-  assert.equal(isNetcattyManagedStartupHistoryCommand(buildDockerLogsCommand('587abcdef123')), true);
+  assert.equal(isNetcattyManagedStartupHistoryCommand(buildContainerExecShellCommand('docker', '587abcdef123')), true);
+  assert.equal(isNetcattyManagedStartupHistoryCommand(buildContainerLogsCommand('docker', '587abcdef123')), true);
   assert.equal(isNetcattyManagedStartupHistoryCommand(buildContainerLogsCommand('podman', '587abcdef123')), true);
   assert.equal(
     isNetcattyManagedStartupHistoryCommand(buildKubectlLogsCommand('kind-dev', 'default', 'api-0')),
@@ -268,7 +267,7 @@ test('mergeRemoteHistory: drops Netcatty managed Docker and tmux startup lines',
     parseBashHistory(
       [
         'docker ps -a',
-        buildDockerLogsCommand('587abcdef123'),
+        buildContainerLogsCommand('docker', '587abcdef123'),
         buildTmuxAttachCommand('my-session'),
         'history',
       ].join('\n'),
@@ -285,7 +284,7 @@ test('mergeRemoteHistory: drops Netcatty managed startup lines from zsh and fish
   const zsh = parseZshHistory(
     [
       ': 1700000000:0;git status',
-      `: 1700000100:0;${buildDockerExecShellCommand('587abcdef123')}`,
+      `: 1700000100:0;${buildContainerExecShellCommand('docker', '587abcdef123')}`,
     ].join('\n'),
   );
   const fish = parseFishHistory(

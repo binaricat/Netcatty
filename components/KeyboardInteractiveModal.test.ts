@@ -31,12 +31,10 @@ test("keyboard-interactive dialog shows a field label and an inline TOTP action"
   assert.match(modalSource, /data-totp-fill=\{fillPlacement\}/);
   assert.match(modalSource, /variant="secondary"/);
   assert.doesNotMatch(modalSource, /variant=\{fillPlacement/);
-  assert.match(modalSource, /totpPrompt\.shared\.mjs/);
+  assert.match(modalSource, /totpPrompt\.shared\.cjs/);
   const shared = require("../domain/totpPrompt.shared.cjs") as { NON_TOTP_PROMPT: RegExp };
   const runtime = require("../domain/totp.shared.cjs") as { NON_TOTP_PROMPT: RegExp };
-  const esm = await import("../domain/totpPrompt.shared.mjs");
   assert.equal(shared.NON_TOTP_PROMPT, runtime.NON_TOTP_PROMPT);
-  assert.equal(esm.NON_TOTP_PROMPT.source, shared.NON_TOTP_PROMPT.source);
   assert.doesNotMatch(modalSource, /ring-primary/);
   assert.doesNotMatch(modalSource, /className="w-full"/);
   assert.doesNotMatch(modalSource, /onTypeTotp/);

@@ -157,3 +157,35 @@ export function retainStableAiPanelContexts<T extends AIPanelContextLike>(
   }
   return next;
 }
+
+/**
+ * Structural equality for flattened app-wide terminal AI info lists.
+ */
+export function aiTerminalSessionInfosEqual(
+  prev: ReadonlyArray<AIPanelTerminalSessionLike> | null | undefined,
+  next: ReadonlyArray<AIPanelTerminalSessionLike> | null | undefined,
+): boolean {
+  if (prev === next) return true;
+  if (!prev || !next) return false;
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i += 1) {
+    if (!aiTerminalSessionInfoEqual(prev[i], next[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Return `next` unless it is structurally equal to `previous`, in which case
+ * keep the previous array identity for React memo consumers.
+ */
+export function retainStableAiTerminalSessionInfos<T extends AIPanelTerminalSessionLike>(
+  previous: T[] | null | undefined,
+  next: T[],
+): T[] {
+  if (previous && aiTerminalSessionInfosEqual(previous, next)) {
+    return previous;
+  }
+  return next;
+}

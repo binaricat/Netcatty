@@ -75,8 +75,6 @@ type TimestampStore = {
   lastSeenBufferLength: number | null;
   /** Last seen cols; when cols change, reflow may have shifted bare line numbers. */
   lastSeenCols: number | null;
-  /** @deprecated materialize path removed; always false. */
-  ledgerMaterialized: boolean;
   /**
    * Markers dropped from `entries` but not yet disposed. Drained with a per-pass
    * budget so rewrite storms do not O(n²)-freeze on xterm marker list splices.
@@ -494,7 +492,6 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
       lastSeenBaseY: null,
       lastSeenBufferLength: null,
       lastSeenCols: null,
-      ledgerMaterialized: false,
       orphanedMarkers: [],
       listeners: new Set(),
       timestampOnlyPrefix: "",
@@ -793,26 +790,6 @@ export const restoreTerminalLineTimestampAnchors = (term: XTerm): void => {
   store.lastSeenBufferLength = term.buffer.normal.length;
   store.lastSeenCols = _getTerminalColumnCount(term);
   notifyTimestampStore(store);
-};
-
-export const snapshotTerminalLineTimestampLedger = (term: XTerm): Array<{
-  label: string;
-  secondKey: number;
-  line: number;
-}> => getTimestampStore(term).ledger.map((entry) => ({
-  label: entry.label,
-  secondKey: entry.secondKey,
-  line: entry.marker && !entry.marker.isDisposed ? entry.marker.line : entry.line,
-}));
-
-export const restoreTerminalLineTimestampLedger = (
-  term: XTerm,
-  snapshot: readonly { label: string; secondKey: number; line: number }[],
-): void => {
-  const store = getTimestampStore(term);
-  store.ledger = snapshot.map((entry) => ({ ...entry }));
-  store.lastStampSecondKey = store.ledger.at(-1)?.secondKey ?? null;
-  restoreTerminalLineTimestampAnchors(term);
 };
 
 /**
@@ -1142,7 +1119,6 @@ const resetTimestampStore = (store: TimestampStore) => {
   store.lastSeenBaseY = null;
   store.lastSeenBufferLength = null;
   store.lastSeenCols = null;
-  store.ledgerMaterialized = false;
   store.orphanedMarkers = [];
   store.segmenter.reset();
   store.timestampOnlyPrefix = "";
@@ -1176,7 +1152,6 @@ const _recordTerminalLineTimestamp = (
     entry.disposeListener = undefined;
   });
   store.entries.push(entry);
-  store.ledgerMaterialized = true;
   if (!options.skipPrune) {
     maybePruneTimestampEntries(term, store);
   }
@@ -1184,18 +1159,6 @@ const _recordTerminalLineTimestamp = (
     notifyTimestampStore(store);
   }
   return true;
-};
-
-/** Test/diagnostics helper: live entry count after optional prune. */
-export const getTerminalLineTimestampEntryCount = (
-  term: XTerm,
-  options: { prune?: boolean } = {},
-): number => {
-  const store = getTimestampStore(term);
-  if (options.prune !== false) {
-    pruneDisposedEntries(store, resolveTerminalLineTimestampCapacity(term));
-  }
-  return store.entries.length;
 };
 
 const _countLineFeeds = (data: string): number => {
@@ -1223,29 +1186,6 @@ const _getTerminalCursorColumn = (term: XTerm): number => {
 const _getTerminalWraparoundMode = (term: XTerm): boolean => (
   ((term as XTerm & { modes?: { wraparoundMode?: boolean } }).modes?.wraparoundMode) !== false
 );
-
-/**
- * True when DECSTBM (or equivalent) leaves a partial scrolling region.
- * Bulk row-offset measurement assumes full-buffer advancement; inside a
- * region, newlines recycle rows and measured offsets would invent fake
- * history and evict still-valid scrollback timestamps.
- */
-export const hasPartialScrollingRegion = (term: XTerm): boolean => {
-  const core = (term as XTerm & {
-    _core?: { buffer?: { scrollTop?: number; scrollBottom?: number } };
-  })._core;
-  const scrollTop = core?.buffer?.scrollTop;
-  const scrollBottom = core?.buffer?.scrollBottom;
-  const rows = Number.isFinite(term.rows) && term.rows > 0 ? term.rows : 0;
-  if (
-    !Number.isFinite(scrollTop)
-    || !Number.isFinite(scrollBottom)
-    || rows <= 0
-  ) {
-    return false;
-  }
-  return Number(scrollTop) > 0 || Number(scrollBottom) < rows - 1;
-};
 
 const isUnsafeGraphemeSequenceCodePoint = (codePoint: number): boolean => (
   codePoint === 0x200d
@@ -1404,9 +1344,6 @@ const measureSimpleAsciiRows = (
 /** Test-only: counts tryMeasureVisualRows invocations on the shipped path. */
 let visualRowMeasureCountForTests = 0;
 export const getVisualRowMeasureCountForTests = (): number => visualRowMeasureCountForTests;
-export const resetVisualRowMeasureCountForTests = (): void => {
-  visualRowMeasureCountForTests = 0;
-};
 
 export const tryMeasureVisualRows = (
   term: XTerm,

@@ -9,6 +9,7 @@
  * Stopping a stalled SDK startup cannot block another chat or leak its tenant.
  */
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const { closeReasoning } = require("./sdkDriverUtils.cjs");
 const {
   applyTemporaryProcessEnv,
   withExclusiveProcessEnv,
@@ -163,13 +164,6 @@ async function logCursorApiKeyValidation(resolvedModule, apiKey) {
     });
   } catch (error) {
     console.warn("[Cursor SDK] API key validation failed", cursorErrorDiagnostics(error));
-  }
-}
-
-function closeReasoning(state, emitter) {
-  if (state?.reasoningOpen) {
-    emitter.reasoningEnd();
-    state.reasoningOpen = false;
   }
 }
 

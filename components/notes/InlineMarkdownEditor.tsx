@@ -60,7 +60,7 @@ import {
   resolveNoteClipboardPaste,
   shouldInsertClipboardTextAsMarkdown,
   shouldInterceptResolvedNotePaste,
-} from "./noteClipboardPaste";
+} from "../../domain/notes/clipboardPaste";
 import { annotateNoteImageSizes } from "./noteImageLayout";
 import { renderNoteMathFormula } from "./noteMathRenderer";
 import { createNoteCodeTooltipExtensions } from "./noteCodeTooltips";
@@ -82,7 +82,7 @@ export {
   resolveNoteClipboardPaste,
   shouldInterceptResolvedNotePaste,
   convertClipboardHtmlToMarkdown,
-} from "./noteClipboardPaste";
+} from "../../domain/notes/clipboardPaste";
 
 import { NoteSourceEditor, type NoteSourceEditorHandle } from "./NoteSourceEditor";
 import {
@@ -946,6 +946,14 @@ export const InlineMarkdownEditor = React.memo(
     });
 
     const containerRef = useRef<HTMLDivElement>(null);
+    // MDXEditor portals .mdxeditor-popup-container to document.body unless
+    // overlayContainer is set. Notes stays mounted and is only CSS-hidden, so a
+    // body portal would leave the link preview toolbar over other pages (#4257).
+    const [overlayContainer, setOverlayContainer] = useState<HTMLElement | null>(null);
+    const setEditorContainer = useCallback((node: HTMLDivElement | null) => {
+      containerRef.current = node;
+      setOverlayContainer((current) => (current === node ? current : node));
+    }, []);
 
     const getSelectedText = useCallback((): string => {
       const container = containerRef.current;
@@ -2063,7 +2071,7 @@ export const InlineMarkdownEditor = React.memo(
 
   return (
     <div
-      ref={containerRef}
+      ref={setEditorContainer}
       className="relative flex h-full flex-col"
       style={{
         ["--note-font-family" as string]: noteFontFamily || undefined,
@@ -2223,6 +2231,7 @@ export const InlineMarkdownEditor = React.memo(
         <MDXEditor
           key={editorMode}
           ref={editorRef}
+          overlayContainer={overlayContainer ?? undefined}
           markdown={
             mdxRetry !== null && value === mdxRetry.staleValue
               ? normalizeNotePublicAssetPaths(mdxRetry.markdown)

@@ -22,7 +22,12 @@ import {
   type PKCEChallenge,
 } from '../../../domain/sync';
 import { netcattyBridge } from '../netcattyBridge';
-import { arrayBufferToBase64, generateRandomBytes } from '../EncryptionService';
+import {
+  OAuthPKCEAdapterBase,
+  generatePKCEChallenge,
+} from './OAuthPKCEAdapterBase';
+
+export { generatePKCEChallenge };
 
 // ============================================================================
 // Types
@@ -87,54 +92,6 @@ const isUnauthorizedError = (error: unknown): boolean => {
     message.includes('401 -') ||
     lower.includes('unauthenticated') ||
     lower.includes('invalidauthenticationtoken');
-};
-
-// ============================================================================
-// PKCE Utilities
-// ============================================================================
-
-/**
- * Base64 URL encoding (no padding, URL-safe chars)
- */
-const base64UrlEncode = (bytes: Uint8Array): string => {
-  const base64 = arrayBufferToBase64(bytes);
-  return base64
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-};
-
-/**
- * Generate a cryptographically random code verifier
- */
-const generateCodeVerifier = (): string => {
-  const bytes = generateRandomBytes(32);
-  return base64UrlEncode(bytes);
-};
-
-/**
- * Generate code challenge from verifier (S256)
- */
-const generateCodeChallenge = async (verifier: string): Promise<string> => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(verifier);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return base64UrlEncode(new Uint8Array(digest));
-};
-
-/**
- * Generate PKCE challenge
- */
-export const generatePKCEChallenge = async (): Promise<PKCEChallenge> => {
-  const codeVerifier = generateCodeVerifier();
-  const codeChallenge = await generateCodeChallenge(codeVerifier);
-  const state = base64UrlEncode(generateRandomBytes(16));
-
-  return {
-    codeVerifier,
-    codeChallenge,
-    state,
-  };
 };
 
 // ============================================================================
@@ -523,156 +480,46 @@ export const deleteSyncFile = async (
 // OneDrive Adapter Class
 // ============================================================================
 
-export class OneDriveAdapter {
-  private tokens: OAuthTokens | null = null;
-  private fileId: string | null = null;
-  private account: ProviderAccount | null = null;
-  private pkceChallenge: PKCEChallenge | null = null;
-  /**
-   * Invoked whenever the access token is silently refreshed. Lets the owner
-   * (CloudSyncManager) persist the rotated tokens — Microsoft consumer refresh
-   * tokens rotate on every refresh and invalidate the previous one, so without
-   * persisting the new refresh token the stored one eventually goes stale and
-   * forces the user to reconnect (#1189).
-   */
-  private onTokensRefreshed: ((tokens: OAuthTokens) => void) | null = null;
+export class OneDriveAdapter extends OAuthPKCEAdapterBase {
+  protected buildProviderAuthUrl(redirectUri: string): Promise<{ url: string; pkce: PKCEChallenge }> {
+    return buildAuthUrl(redirectUri);
+  }
 
-  constructor(tokens?: OAuthTokens, fileId?: string) {
-    if (tokens) {
-      this.tokens = tokens;
+  protected exchangeProviderCode(
+    code: string,
+    codeVerifier: string,
+    redirectUri: string
+  ): Promise<OAuthTokens> {
+    return exchangeCodeForTokens(code, codeVerifier, redirectUri);
+  }
+
+  protected refreshProviderToken(refreshToken: string): Promise<OAuthTokens> {
+    return refreshAccessToken(refreshToken);
+  }
+
+  protected fetchProviderUserInfo(accessToken: string): Promise<ProviderAccount> {
+    return getUserInfo(accessToken);
+  }
+
+  protected validateProviderToken(accessToken: string): Promise<boolean> {
+    return validateToken(accessToken);
+  }
+
+  protected override normalizeRefreshError(error: unknown): unknown {
+    if (isOneDriveReauthRequiredError(error)) {
+      // Preserve the message (it carries the marker the bridge added) so
+      // downstream layers can still detect this after any re-wrapping.
+      return new OneDriveReauthRequiredError(
+        error instanceof Error ? error.message : String(error)
+      );
     }
-    this.fileId = fileId || null;
+    return error;
   }
 
-  /**
-   * Register a callback that receives refreshed tokens so the caller can
-   * persist them. Passing null removes the callback.
-   */
-  setOnTokensRefreshed(callback: ((tokens: OAuthTokens) => void) | null): void {
-    this.onTokensRefreshed = callback;
-  }
-
-  /**
-   * Refresh the access token using the supplied refresh token, store the
-   * rotated tokens in-memory, and notify the persistence callback. Refresh
-   * failures caused by a dead refresh token are normalized to
-   * OneDriveReauthRequiredError so callers can prompt for reconnect.
-   */
-  private async refreshTokens(refreshToken: string): Promise<OAuthTokens> {
-    let refreshed: OAuthTokens;
-    try {
-      refreshed = await refreshAccessToken(refreshToken);
-    } catch (error) {
-      if (isOneDriveReauthRequiredError(error)) {
-        // Preserve the message (it carries the marker the bridge added) so
-        // downstream layers can still detect this after any re-wrapping.
-        throw new OneDriveReauthRequiredError(
-          error instanceof Error ? error.message : String(error)
-        );
-      }
-      throw error;
-    }
-    this.tokens = refreshed;
-    try {
-      this.onTokensRefreshed?.(refreshed);
-    } catch {
-      // Persistence is best-effort; a failed save must not abort the sync that
-      // triggered the refresh — the fresh tokens still work for this session.
-    }
-    return refreshed;
-  }
-
-  get isAuthenticated(): boolean {
-    return !!this.tokens?.accessToken;
-  }
-
-  get accountInfo(): ProviderAccount | null {
-    return this.account;
-  }
-
-  get resourceId(): string | null {
-    return this.fileId;
-  }
-
-  /**
-   * Start OAuth flow - returns URL to open in browser
-   */
-  async startAuth(redirectUri: string): Promise<string> {
-    const { url, pkce } = await buildAuthUrl(redirectUri);
-    this.pkceChallenge = pkce;
-    return url;
-  }
-
-  /**
-   * Get PKCE state for verification
-   */
-  getPKCEState(): string | null {
-    return this.pkceChallenge?.state || null;
-  }
-
-  /**
-   * Complete authentication with authorization code
-   */
-  async completeAuth(code: string, redirectUri: string): Promise<OAuthTokens> {
-    if (!this.pkceChallenge) {
-      throw new Error('No PKCE challenge - start auth first');
-    }
-
-    this.tokens = await exchangeCodeForTokens(
-      code,
-      this.pkceChallenge.codeVerifier,
-      redirectUri
+  protected override createExpiredTokenError(): Error {
+    return new OneDriveReauthRequiredError(
+      'OneDrive session expired and no refresh token is available, please reconnect.'
     );
-    this.pkceChallenge = null;
-
-    this.account = await getUserInfo(this.tokens.accessToken);
-
-    return this.tokens;
-  }
-
-  /**
-   * Set tokens from storage
-   */
-  async setTokens(tokens: OAuthTokens): Promise<void> {
-    this.tokens = tokens;
-
-    // Refresh if expired
-    if (tokens.expiresAt && Date.now() > tokens.expiresAt - 60000) {
-      if (tokens.refreshToken) {
-        this.tokens = await this.refreshTokens(tokens.refreshToken);
-      } else {
-        throw new OneDriveReauthRequiredError(
-          'OneDrive session expired and no refresh token is available, please reconnect.'
-        );
-      }
-    }
-
-    if (await validateToken(this.tokens.accessToken)) {
-      this.account = await getUserInfo(this.tokens.accessToken);
-    } else {
-      throw new Error('Token is invalid');
-    }
-  }
-
-  /**
-   * Ensure token is fresh
-   */
-  private async ensureValidToken(): Promise<string> {
-    if (!this.tokens) {
-      throw new Error('Not authenticated');
-    }
-
-    if (this.tokens.expiresAt && Date.now() > this.tokens.expiresAt - 60000) {
-      if (this.tokens.refreshToken) {
-        this.tokens = await this.refreshTokens(this.tokens.refreshToken);
-      } else {
-        throw new OneDriveReauthRequiredError(
-          'OneDrive session expired and no refresh token is available, please reconnect.'
-        );
-      }
-    }
-
-    return this.tokens.accessToken;
   }
 
   private async runWithAuthRetry<T>(
@@ -689,17 +536,6 @@ export class OneDriveAdapter {
       }
       throw error;
     }
-  }
-
-  /**
-   * Sign out
-   */
-  signOut(): void {
-    this.tokens = null;
-    this.fileId = null;
-    this.account = null;
-    this.pkceChallenge = null;
-    this.onTokensRefreshed = null;
   }
 
   /**
@@ -746,13 +582,6 @@ export class OneDriveAdapter {
       await deleteSyncFile(accessToken, this.fileId as string);
       this.fileId = null;
     });
-  }
-
-  /**
-   * Get tokens for storage
-   */
-  getTokens(): OAuthTokens | null {
-    return this.tokens;
   }
 }
 

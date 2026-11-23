@@ -13,6 +13,7 @@ const path = require("node:path");
 const { resolveCursorCliSpawnSpec } = require("../cursorCliSpawn.cjs");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
 const { encodeCursorCliModel } = require("./cursorDriver.cjs");
+const { closeReasoning } = require("./sdkDriverUtils.cjs");
 
 const DEFAULT_CURSOR_CLI_MODEL = "auto";
 const NETCATTY_MCP_NAME = "netcatty-remote-hosts";
@@ -297,13 +298,6 @@ function extractCliToolCall(event) {
     args: toolCall.args || {},
     result: toolCall.result,
   };
-}
-
-function closeReasoning(state, emitter) {
-  if (state?.reasoningOpen) {
-    emitter.reasoningEnd();
-    state.reasoningOpen = false;
-  }
 }
 
 function translateCursorCliEvent(event, emitter, state = {}) {

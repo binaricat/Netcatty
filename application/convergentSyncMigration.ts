@@ -7,7 +7,6 @@ import type {
 import {
   cloudSyncPayloadsEqual,
   convergentConflictAddressKey,
-  materializeSyncPayloadFromConvergentState,
   planConvergentSyncMigration,
   refreshConvergentSyncMigrationPlan,
   resolveConvergentFieldConflict,
@@ -237,13 +236,4 @@ export async function initializePreparedConvergentMigration(options: {
     }
   });
   return prepared.plan.preview;
-}
-
-export async function prepareConvergentSyncDowngrade(
-  manager: CloudSyncManager = getCloudSyncManager(),
-  now = Date.now(),
-): Promise<SyncPayload> {
-  const replica = await manager.loadConvergentReplica();
-  if (!replica) throw new Error('No convergent sync replica is available to downgrade');
-  return materializeSyncPayloadFromConvergentState(replica.state, { syncedAt: now });
 }

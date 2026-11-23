@@ -13,6 +13,7 @@ const { promisify } = require("node:util");
 const { StringDecoder } = require("node:string_decoder");
 const { ensureNodePtySpawnHelperExecutable } = require("./nodePtySpawnHelperPermissions.cjs");
 const { createTerminalFlowPauseArbiter } = require("./terminalFlowPauseArbiter.cjs");
+const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
 
 ensureNodePtySpawnHelperExecutable();
 
@@ -2458,14 +2459,6 @@ function getTelnetEchoMode(_event, { sessionId }) {
 /**
  * Register IPC handlers for terminal operations
  */
-function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
-  ipcMain.handle(channel, (event, payload) => {
-    return terminalWorkerManager.request(channel, payload, {
-      webContentsId: event?.sender?.id,
-    });
-  });
-}
-
 function registerWorkerSend(ipcMain, terminalWorkerManager, channel) {
   ipcMain.on(channel, (event, payload) => {
     terminalWorkerManager.send(channel, payload, {

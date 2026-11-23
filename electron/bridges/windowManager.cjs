@@ -85,8 +85,8 @@ const DEFAULT_WINDOW_HEIGHT = 900;
 // standard half/quarter-screen tiling cells can fit the window; it tracks the
 // display the window currently occupies (see resolveWindowMinimumSize in
 // windowManager/mainWindow.cjs, #3647).
-const MIN_WINDOW_WIDTH = 1100;
-const MIN_WINDOW_HEIGHT = 640;
+const MIN_WINDOW_WIDTH = 960;
+const MIN_WINDOW_HEIGHT = 540;
 
 function debugLog(...args) {
   if (!DEBUG_WINDOWS) return;

@@ -88,6 +88,10 @@ const path = require("node:path");
 const os = require("node:os");
 const fs = require("node:fs");
 const { execFile } = require("node:child_process");
+// Separate profile selection from renderer loading. In particular, source
+// builds serving dist/ still need a non-production profile.
+const { configureAppProfile } = require("./appProfile.cjs");
+const { isDev, effectiveDevServerUrl } = configureAppProfile(app, process.env.VITE_DEV_SERVER_URL);
 const { getCliDiscoveryFilePath } = require("./cli/discoveryPath.cjs");
 const {
   SSH_DEEP_LINK_CHANNEL,
@@ -291,15 +295,6 @@ app.on("web-contents-created", (_event, contents) => {
   });
 });
 
-// Application configuration
-const devServerUrl = process.env.VITE_DEV_SERVER_URL;
-// Never treat a packaged app as "dev" even if the user has VITE_DEV_SERVER_URL set globally.
-const isDev = !app.isPackaged && !!devServerUrl;
-const effectiveDevServerUrl = isDev ? devServerUrl : undefined;
-if (isDev) {
-  app.setName("Netcatty Dev");
-  app.setPath("userData", path.join(app.getPath("userData"), "dev"));
-}
 const { applyPortableDataDirectory } = require("./portableData.cjs");
 const portableData = applyPortableDataDirectory({ app });
 if (portableData) {
@@ -503,9 +498,7 @@ function getAppLockReopenWindows() {
 // Shared state
 const sessions = new Map();
 const sftpClients = new Map();
-const keyRoot = path.join(os.homedir(), ".netcatty", "keys");
 const APP_LOCK_SETTINGS_FILE = "app-lock-settings.json";
-let cloudSyncSessionPassword = null;
 const CLOUD_SYNC_PASSWORD_FILE = "netcatty_cloud_sync_master_password_v1";
 let appLockSettingsStore = null;
 const appLockRuntimeBridge = createAppLockRuntimeBridge();
@@ -531,31 +524,6 @@ function getAppLockNativeWindowHandle() {
   const win = getLiveAppLockWindows()[0] || null;
   return win ? win.getNativeWindowHandle() : null;
 }
-
-// Key management helpers
-const ensureKeyDir = async () => {
-  try {
-    await fs.promises.mkdir(keyRoot, { recursive: true, mode: 0o700 });
-  } catch (err) {
-    console.warn("Unable to ensure key cache dir", err);
-  }
-};
-
-const writeKeyToDisk = async (keyId, privateKey) => {
-  if (!privateKey) return null;
-  await ensureKeyDir();
-  const safeId = String(keyId || "temp").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120);
-  const filename = `${safeId}.pem`;
-  const target = path.join(keyRoot, filename);
-  const normalized = privateKey.endsWith("\n") ? privateKey : `${privateKey}\n`;
-  try {
-    await fs.promises.writeFile(target, normalized, { mode: 0o600 });
-    return target;
-  } catch (err) {
-    console.error("Failed to persist private key", err);
-    return null;
-  }
-};
 
 const { createBridgeRegistrar } = require("./main/registerBridges.cjs");
 
@@ -1780,6 +1748,4 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
 module.exports = {
   sessions,
   sftpClients,
-  ensureKeyDir,
-  writeKeyToDisk,
 };
