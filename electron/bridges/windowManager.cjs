@@ -84,8 +84,8 @@ const DEFAULT_WINDOW_HEIGHT = 900;
 // Small displays shrink this fit to their work area at window-creation time
 // (see resolveWindowMinimumSize in windowManager/mainWindow.cjs, #3647);
 // the minimum tracks the display the window currently occupies.
-const MIN_WINDOW_WIDTH = 1100;
-const MIN_WINDOW_HEIGHT = 640;
+const MIN_WINDOW_WIDTH = 960;
+const MIN_WINDOW_HEIGHT = 540;
 
 function debugLog(...args) {
   if (!DEBUG_WINDOWS) return;
