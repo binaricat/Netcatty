@@ -300,6 +300,36 @@ const portableData = applyPortableDataDirectory({ app });
 if (portableData) {
   console.info(`[Main] Portable data directory: ${portableData.dataDirectory}`);
 }
+const { guardLocalStorageLevelDb } = require("./leveldbStorageGuard.cjs");
+const levelDbGuardResult = guardLocalStorageLevelDb({
+  userDataDir: app.getPath("userData"),
+});
+if (levelDbGuardResult.status === "recovered") {
+  console.warn(
+    `[Main] Recovered missing Local Storage LevelDB CURRENT -> ${levelDbGuardResult.manifest} (backup: ${levelDbGuardResult.backupDir})`,
+  );
+} else if (
+  levelDbGuardResult.status === "blocked" ||
+  levelDbGuardResult.status === "backup_failed"
+) {
+  const backupNote = levelDbGuardResult.status === "backup_failed"
+    ? `Automatic backup failed before startup (${levelDbGuardResult.error?.message || "unknown error"}). No files were modified.`
+    : `A forensic backup of your LevelDB folder was saved to:\n${levelDbGuardResult.backupDir}`;
+  const errorMessage = [
+    "Netcatty detected that your Local Storage LevelDB CURRENT index file is missing or empty while existing database files are still present.",
+    "Startup was stopped to prevent Chromium from wiping your saved hosts, workspaces, and sessions.",
+    backupNote,
+  ].join("\n\n");
+  console.error(
+    `[Main] Local Storage LevelDB guard blocked startup (${levelDbGuardResult.status}): ${errorMessage}`,
+  );
+  try {
+    electronModule.dialog?.showErrorBox?.("Netcatty Storage Protection", errorMessage);
+  } catch {
+    // ignore
+  }
+  app.exit(1);
+}
 const preload = path.join(__dirname, "preload.cjs");
 const isMac = process.platform === "darwin";
 const appIconManager = require("./bridges/appIconManager.cjs");
