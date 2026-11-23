@@ -832,10 +832,10 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
             <TooltipContent>{t("pf.action.stopAll")}</TooltipContent>
           </Tooltip>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center gap-2 min-w-0 flex-shrink">
             <VaultHeaderSearch
               placeholder={t("common.searchPlaceholder")}
-              className="w-64"
+              className="flex-shrink w-64"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />

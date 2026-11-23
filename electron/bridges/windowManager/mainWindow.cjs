@@ -11,10 +11,23 @@ const TERMINAL_KEYBOARD_FOCUS = Symbol("netcattyTerminalKeyboardFocus");
 // #3647: the layout minimum can be larger than the usable workspace on
 // small laptops (e.g. 1366×768 at 125% Windows scaling leaves only ~1093×574
 // logical px), which made those windows impossible to fit — let alone shrink.
-// Keep the layout minimum on capable screens, but shrink it to the work area
-// of the display the window targets so the window can always fit with a small
-// margin.
-const MIN_SIZE_FIT_FACTOR = 0.9;
+// Keep the layout minimum on capable screens, but cap it so the window can
+// always fit the display the window targets.
+//
+// The cap is half the work area, not the whole work area: macOS/Windows window
+// tiling asks the app for a half-screen (or corner quarter-screen) cell, and
+// the OS keeps the app's minimum size when that minimum is larger than the
+// requested cell. The window then spills past the screen edge instead of
+// stopping at the tile. Half the work area is the largest minimum that still
+// lets every standard tiling cell fit.
+//
+// macOS keeps a margin around and between tiled windows by default (Settings →
+// Desktop & Dock → Windows → "Tiled windows have margins", about 8px per side),
+// so reserve a little more than that: the OS stretches the window to the cell
+// when the minimum is smaller, and a minimum that is even a few pixels too wide
+// would still hang past the screen edge.
+const MIN_SIZE_TILE_FACTOR = 0.5;
+const MIN_SIZE_TILE_MARGIN = 16;
 const MIN_WINDOW_FLOOR_WIDTH = 320;
 const MIN_WINDOW_FLOOR_HEIGHT = 240;
 
@@ -33,26 +46,22 @@ function pickTargetDisplay(screenModule, bounds) {
   }
 }
 
-function resolveWindowMinimumSize(screenModule, minWidth, minHeight, bounds) {
-  let display;
-  try {
-    display = bounds ? pickTargetDisplay(screenModule, bounds) : screenModule?.getPrimaryDisplay?.();
-  } catch {
-    // screen unavailable (e.g. before app ready): keep the static minimums
-  }
-  return minimumSizeForDisplay(display, minWidth, minHeight);
-}
-
 function minimumSizeForDisplay(display, minWidth, minHeight) {
   let effectiveWidth = minWidth;
   let effectiveHeight = minHeight;
   try {
     const workArea = display?.workArea;
     if (Number.isFinite(workArea?.width) && workArea.width > 0) {
-      effectiveWidth = Math.min(effectiveWidth, Math.floor(workArea.width * MIN_SIZE_FIT_FACTOR));
+      effectiveWidth = Math.min(
+        effectiveWidth,
+        Math.floor(workArea.width * MIN_SIZE_TILE_FACTOR) - MIN_SIZE_TILE_MARGIN,
+      );
     }
     if (Number.isFinite(workArea?.height) && workArea.height > 0) {
-      effectiveHeight = Math.min(effectiveHeight, Math.floor(workArea.height * MIN_SIZE_FIT_FACTOR));
+      effectiveHeight = Math.min(
+        effectiveHeight,
+        Math.floor(workArea.height * MIN_SIZE_TILE_FACTOR) - MIN_SIZE_TILE_MARGIN,
+      );
     }
   } catch {
     // screen unavailable (e.g. before app ready): keep the static minimums
@@ -63,50 +72,252 @@ function minimumSizeForDisplay(display, minWidth, minHeight) {
   };
 }
 
-function intersectsBounds(a, b) {
-  return b && a.x < b.x + b.width && a.x + a.width > b.x
-    && a.y < b.y + b.height && a.y + a.height > b.y;
+function resolveWindowMinimumSize(screenModule, minWidth, minHeight, bounds) {
+  let display = null;
+  try {
+    // Size for the display the window actually lives on (saved position or
+    // current placement), falling back to the primary display.
+    display = bounds
+      ? pickTargetDisplay(screenModule, bounds)
+      : screenModule?.getPrimaryDisplay?.();
+  } catch {
+    // screen unavailable (e.g. before app ready): keep the static minimums
+  }
+  return minimumSizeForDisplay(display, minWidth, minHeight);
 }
 
-// Initial normal bounds only: live display recovery and manual placement keep
-// their existing lifecycle. Electron screen coordinates are already DIPs.
-function resolveStartupBounds(screenModule, savedState, defaults, minWidth, minHeight) {
-  const savedPosition = savedState && Number.isFinite(savedState.x) && Number.isFinite(savedState.y)
-    ? savedState : null;
-  let display;
+function isFiniteBounds(bounds) {
+  return Boolean(
+    bounds &&
+    Number.isFinite(bounds.x) &&
+    Number.isFinite(bounds.y) &&
+    Number.isFinite(bounds.width) &&
+    Number.isFinite(bounds.height) &&
+    bounds.width > 0 &&
+    bounds.height > 0
+  );
+}
+
+function rectsIntersect(a, b) {
+  return Boolean(
+    isFiniteBounds(a) &&
+    isFiniteBounds(b) &&
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
+}
+
+function intersectionArea(a, b) {
+  if (!isFiniteBounds(a) || !isFiniteBounds(b)) return 0;
+  const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return width > 0 && height > 0 ? width * height : 0;
+}
+
+// The area a window may occupy on one display: the work area when Electron
+// reports one (menu bar / dock / taskbar excluded), else the full display.
+function displayPlacementArea(display) {
+  if (isFiniteBounds(display?.workArea)) return display.workArea;
+  if (isFiniteBounds(display?.bounds)) return display.bounds;
+  return null;
+}
+
+function displayPlacementAreas(screenModule) {
   try {
-    display = screenModule?.getPrimaryDisplay?.();
-    if (savedPosition) {
-      const matched = pickTargetDisplay(screenModule, savedPosition);
-      // getDisplayMatching returns the nearest screen even for removed displays.
-      // Only select it when the saved rectangle actually intersects that screen.
-      if (intersectsBounds(savedPosition, matched?.bounds)) display = matched;
+    const areas = [];
+    for (const display of screenModule?.getAllDisplays?.() || []) {
+      const area = displayPlacementArea(display);
+      if (area) areas.push(area);
     }
+    return areas;
+  } catch {
+    return [];
+  }
+}
+
+function pickDisplayForBounds(screenModule, bounds) {
+  try {
+    const displays = screenModule?.getAllDisplays?.() || [];
+    if (displays.length > 0) {
+      let best = null;
+      let bestArea = 0;
+      for (const display of displays) {
+        const area = displayPlacementArea(display);
+        if (!area) continue;
+        const overlap = intersectionArea(bounds, area);
+        if (overlap > bestArea) {
+          best = display;
+          bestArea = overlap;
+        }
+      }
+      if (best) return best;
+      // Fall back to full display bounds (e.g. a window overlapping only the
+      // menu bar/taskbar region) before treating the screen as removed.
+      for (const display of displays) {
+        if (!isFiniteBounds(display?.bounds)) continue;
+        const overlap = intersectionArea(bounds, display.bounds);
+        if (overlap > bestArea) {
+          best = display;
+          bestArea = overlap;
+        }
+      }
+      if (best) return best;
+      // Saved bounds do not intersect any connected display (removed monitor):
+      // fall back to primary instead of getDisplayMatching()'s nearest secondary.
+      return screenModule?.getPrimaryDisplay?.() || null;
+    }
+    if (typeof screenModule?.getDisplayMatching === "function") {
+      const matched = screenModule.getDisplayMatching(bounds);
+      if (matched) {
+        const matchedBounds = isFiniteBounds(matched?.bounds)
+          ? matched.bounds
+          : displayPlacementArea(matched);
+        if (!matchedBounds || rectsIntersect(bounds, matchedBounds)) {
+          return matched;
+        }
+      }
+    }
+    return screenModule?.getPrimaryDisplay?.() || null;
+  } catch {
+    try {
+      return screenModule?.getPrimaryDisplay?.() || null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+// Subtract `cut` from `rect`, returning the rectangles that remain.
+function subtractRect(rect, cut) {
+  if (!rectsIntersect(rect, cut)) return [rect];
+  const overlapTop = Math.max(rect.y, cut.y);
+  const overlapBottom = Math.min(rect.y + rect.height, cut.y + cut.height);
+  const pieces = [];
+  if (rect.y < cut.y) {
+    pieces.push({ x: rect.x, y: rect.y, width: rect.width, height: cut.y - rect.y });
+  }
+  if (rect.y + rect.height > cut.y + cut.height) {
+    pieces.push({
+      x: rect.x,
+      y: cut.y + cut.height,
+      width: rect.width,
+      height: rect.y + rect.height - (cut.y + cut.height),
+    });
+  }
+  if (rect.x < cut.x) {
+    pieces.push({
+      x: rect.x,
+      y: overlapTop,
+      width: cut.x - rect.x,
+      height: overlapBottom - overlapTop,
+    });
+  }
+  if (rect.x + rect.width > cut.x + cut.width) {
+    pieces.push({
+      x: cut.x + cut.width,
+      y: overlapTop,
+      width: rect.x + rect.width - (cut.x + cut.width),
+      height: overlapBottom - overlapTop,
+    });
+  }
+  return pieces;
+}
+
+// True when every pixel of `bounds` sits on the work area of some display.
+// A window spanning two adjacent monitors passes; a window hanging past the
+// outer edge (or into the gap between offset monitors) does not.
+function isBoundsCoveredByAreas(bounds, areas) {
+  let uncovered = [bounds];
+  for (const area of areas) {
+    const next = [];
+    for (const rect of uncovered) next.push(...subtractRect(rect, area));
+    uncovered = next;
+    if (!uncovered.length) return true;
+  }
+  return uncovered.length === 0;
+}
+
+/**
+ * Resolve the bounds the main window starts with.
+ *
+ * Initial normal bounds only: live display recovery and manual placement keep
+ * their existing lifecycle. Electron screen coordinates are already DIPs.
+ *
+ * Saved bounds are honored when they are fully on screen (including windows
+ * that intentionally span adjacent displays). When the saved rectangle hangs
+ * past a screen edge — a larger display was unplugged, the display layout
+ * changed, or a tiled placement was persisted — it is capped to the display's
+ * work area and moved back inside, so no part of the window starts off screen.
+ */
+function resolveStartupBounds(screenModule, savedState, defaults, minWidth, minHeight) {
+  const hasSavedPosition = Boolean(
+    savedState &&
+    Number.isFinite(savedState.x) &&
+    Number.isFinite(savedState.y)
+  );
+  const savedPosition = hasSavedPosition
+    ? { x: savedState.x, y: savedState.y }
+    : null;
+  const intendedWidth = Number.isFinite(savedState?.width) && savedState.width > 0
+    ? savedState.width
+    : defaults.width;
+  const intendedHeight = Number.isFinite(savedState?.height) && savedState.height > 0
+    ? savedState.height
+    : defaults.height;
+  const savedRect = hasSavedPosition
+    ? { x: savedState.x, y: savedState.y, width: intendedWidth, height: intendedHeight }
+    : null;
+
+  let display = null;
+  try {
+    display = savedRect
+      ? pickDisplayForBounds(screenModule, savedRect)
+      : screenModule?.getPrimaryDisplay?.() || null;
   } catch {
     // Keep static sizes when Electron cannot supply a display.
   }
+
   const minimum = minimumSizeForDisplay(display, minWidth, minHeight);
-  const workArea = display?.workArea;
-  const bounds = {};
-  for (const axis of ["width", "height"]) {
-    const intended = savedState?.[axis] ?? defaults[axis];
-    const available = workArea?.[axis];
-    bounds[axis] = Math.max(minimum[axis], Number.isFinite(available) && available > 0 && intended > available
-      ? Math.floor(available * MIN_SIZE_FIT_FACTOR)
-      : intended);
-  }
-  if (savedPosition && workArea) {
-    bounds.x = savedPosition.x;
-    bounds.y = savedPosition.y;
-    // Preserve all usable placements, including negative monitor origins and
-    // partial overlap. Resizing can make a previously visible position unusable.
-    if (!intersectsBounds(bounds, workArea)) {
-      for (const [axis, size] of [["x", "width"], ["y", "height"]]) {
-        bounds[axis] = Math.max(workArea[axis], Math.min(bounds[axis], workArea[axis] + workArea[size] - bounds[size]));
-      }
+  let width = Math.max(minimum.width, intendedWidth);
+  let height = Math.max(minimum.height, intendedHeight);
+  const areas = displayPlacementAreas(screenModule);
+
+  if (!savedPosition) {
+    // No usable position: let Electron center the window, but never start
+    // larger than the display it targets.
+    const area = displayPlacementArea(display);
+    const maxWidth = area?.width ?? (Number.isFinite(display?.workArea?.width) && display.workArea.width > 0 ? display.workArea.width : null);
+    const maxHeight = area?.height ?? (Number.isFinite(display?.workArea?.height) && display.workArea.height > 0 ? display.workArea.height : null);
+    if (maxWidth) {
+      width = Math.max(minimum.width, Math.min(width, maxWidth));
     }
+    if (maxHeight) {
+      height = Math.max(minimum.height, Math.min(height, maxHeight));
+    }
+    return { bounds: { width, height }, minimum };
   }
-  return { bounds, minimum };
+
+  const candidate = { x: savedPosition.x, y: savedPosition.y, width, height };
+  if (!areas.length || isBoundsCoveredByAreas(candidate, areas)) {
+    return { bounds: candidate, minimum };
+  }
+
+  // Part of the saved rectangle is off screen. Fit it into the display it
+  // overlaps most (or primary when the previous display was removed),
+  // preserving the size when the work area can hold it.
+  const target = pickDisplayForBounds(screenModule, candidate) || display;
+  const targetMinimum = target && target !== display
+    ? minimumSizeForDisplay(target, minWidth, minHeight)
+    : minimum;
+  const area = displayPlacementArea(target);
+  if (!area) return { bounds: { width, height }, minimum: targetMinimum };
+  width = Math.max(targetMinimum.width, Math.min(Math.max(targetMinimum.width, intendedWidth), area.width));
+  height = Math.max(targetMinimum.height, Math.min(Math.max(targetMinimum.height, intendedHeight), area.height));
+  const x = Math.max(area.x, Math.min(savedPosition.x, area.x + area.width - width));
+  const y = Math.max(area.y, Math.min(savedPosition.y, area.y + area.height - height));
+  return { bounds: { x, y, width, height }, minimum: targetMinimum };
 }
 
 // Keep the BrowserWindow minimum in sync with the display it currently lives
@@ -257,7 +468,10 @@ function createMainWindowApi(ctx) {
       const backgroundColor = frontendBackground || "#1a1a1a";
       const themeConfig = THEME_COLORS[effectiveTheme] || THEME_COLORS.light;
     
-      // Load saved window state
+      // Load saved window state and fit it to the display it will open on.
+      // Saved bounds that hang past a screen edge are pulled back inside;
+      // bounds that are fully on screen (including a window spanning adjacent
+      // displays) are restored as the user left them.
       const savedState = persistWindowState ? loadWindowState() : null;
       const { bounds: windowBounds, minimum: windowMinimumSize } = resolveStartupBounds(
         screen,
@@ -748,6 +962,7 @@ function createMainWindowApi(ctx) {
 module.exports = {
   attachDisplayMinimumSync,
   createMainWindowApi,
+  resolveStartupBounds,
   resolveWindowMinimumSize,
   setTerminalKeyboardFocusForWindow,
 };
