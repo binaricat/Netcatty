@@ -161,6 +161,17 @@ export const shouldAllowSuppressedTerminalContextMenuContent = ({
     forceMenuInAlternateScreen,
   }));
 
+export const isComposeBarContextMenuTarget = (target: EventTarget | null): boolean => {
+  if (!target) return false;
+  if (typeof Element !== 'undefined' && target instanceof Element) {
+    return Boolean(target.closest('[data-section="terminal-compose-bar"]'));
+  }
+  if (typeof Node !== 'undefined' && target instanceof Node) {
+    return Boolean(target.parentElement?.closest('[data-section="terminal-compose-bar"]'));
+  }
+  return false;
+};
+
 export const shouldOpenTerminalContextMenu = ({
   event,
   rightClickBehavior = 'context-menu',
@@ -169,6 +180,7 @@ export const shouldOpenTerminalContextMenu = ({
   showReconnectAction,
   forceMenuInAlternateScreen,
   isHistoryPreviewTarget,
+  isComposeBarTarget,
 }: {
   event: { shiftKey?: boolean; nativeEvent: MouseEvent };
   rightClickBehavior?: RightClickBehavior;
@@ -177,7 +189,12 @@ export const shouldOpenTerminalContextMenu = ({
   showReconnectAction?: boolean;
   forceMenuInAlternateScreen?: boolean;
   isHistoryPreviewTarget?: boolean;
+  isComposeBarTarget?: boolean;
 }): boolean => {
+  if (isComposeBarTarget) {
+    return false;
+  }
+
   if (isMiddleClickContextMenuEvent(event.nativeEvent)) {
     return true;
   }
@@ -307,6 +324,13 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   // enabled so Shift+Right-Click opens the menu on the first click.
   const handleRightClick = useCallback(
     (e: React.MouseEvent) => {
+      // Right-clicks inside the compose bar belong to the composer (native
+      // text menu or compose broadcast menu) and must never paste into the PTY
+      // or open the terminal context menu.
+      if (isComposeBarContextMenuTarget(e.target)) {
+        return;
+      }
+
       // In alternate screen (tmux, vim, etc.), let the terminal application
       // handle right-click natively to avoid conflicting menus. Reconnect is
       // still available after disconnect, even if mouse tracking was left on.
@@ -320,6 +344,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         showReconnectAction,
         forceMenuInAlternateScreen: showContextMenuOverFullscreenApps,
         isHistoryPreviewTarget,
+        isComposeBarTarget: false,
       });
 
       if (!shouldOpenMenu && shouldSuppressMouseTrackingContextMenu({
