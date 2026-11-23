@@ -77,6 +77,11 @@ import {
   resolveLocateSftpPathInTerminalAction,
   resolveLocateSftpPathSessionId,
 } from "../domain/sftpLocatePathInTerminal";
+import {
+  canSendSftpPathToTerminal,
+  resolveCdSftpPathInTerminalAction,
+  resolveInsertSftpPathInTerminalAction,
+} from "../domain/sftpTerminalPath";
 import { sftpRequiresDedicatedLogin } from "../domain/sftpDedicatedLogin";
 import { classifyDistroId } from "../domain/host";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
@@ -1815,6 +1820,35 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   ]);
 
   const canLocatePathInTerminal = canLocateSftpPathInTerminal(locatePathInTerminalContext);
+  const canSendPathToTerminal = canSendSftpPathToTerminal(locatePathInTerminalContext);
+
+  const buildLiveTerminalPathContext = useCallback(() => {
+    const connection = sftpRef.current.leftPane.connection;
+    const locateSessionId = resolveLocateSftpPathSessionId({
+      activeSessionId,
+      focusedSessionId,
+    });
+    const session = sessions.find((candidate) => candidate.id === locateSessionId) ?? null;
+    const host = displayHost ?? activeHost;
+    const isNetworkDevice = host?.deviceType === "network"
+      || classifyDistroId(host?.distro) === "network-device";
+    return {
+      sessionId: locateSessionId,
+      sessionStatus: session?.status,
+      sessionHostId: session?.hostId,
+      sftpHostId: connection?.hostId,
+      sftpIsLocal: Boolean(connection?.isLocal),
+      protocol: session?.protocol ?? host?.protocol,
+      shellType: session?.shellType,
+      isNetworkDevice,
+      sessionHostname: session?.hostname,
+      sessionUsername: session?.username,
+      sessionPort: session?.port,
+      sftpHostname: host?.hostname,
+      sftpUsername: host?.username,
+      sftpPort: host?.port,
+    };
+  }, [activeHost, activeSessionId, displayHost, focusedSessionId, sessions, sftpRef]);
 
   const handleLocatePathInTerminal = useCallback(() => {
     const connection = sftpRef.current.leftPane.connection;
@@ -1863,6 +1897,35 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     sftpRef,
     terminalBackend,
   ]);
+
+  const handleInsertPathToTerminal = useCallback((targetPath: string) => {
+    const action = resolveInsertSftpPathInTerminalAction({
+      ...buildLiveTerminalPathContext(),
+      path: targetPath,
+    });
+    if (!action) return;
+    // Never insert paths into a password/sudo prompt.
+    if (isTerminalSensitiveInputActive(action.sessionId)) return;
+    // Allow inserting at a prompt that already has a typed command draft (e.g. `vim `),
+    // while still blocking alternate-screen TUIs and non-prompt states.
+    if (!isTerminalReadyForCommandInjection(action.sessionId, { allowDraft: true })) return;
+    terminalBackend.writeToSession(action.sessionId, action.data, { automated: true });
+    scheduleDeferredTerminalFocus(onRequestTerminalFocus);
+  }, [buildLiveTerminalPathContext, onRequestTerminalFocus, terminalBackend]);
+
+  const handleCdInTerminal = useCallback((targetPath: string) => {
+    const action = resolveCdSftpPathInTerminalAction({
+      ...buildLiveTerminalPathContext(),
+      path: targetPath,
+    });
+    if (!action) return;
+    // Never inject cd into a password/sudo prompt.
+    if (isTerminalSensitiveInputActive(action.sessionId)) return;
+    // Only submit cd at an idle shell prompt -- never append into typed input or a TUI.
+    if (!isTerminalReadyForCommandInjection(action.sessionId)) return;
+    terminalBackend.writeToSession(action.sessionId, action.data, { automated: true });
+    scheduleDeferredTerminalFocus(onRequestTerminalFocus);
+  }, [buildLiveTerminalPathContext, onRequestTerminalFocus, terminalBackend]);
 
   const MAX_VISIBLE_TRANSFERS = 5;
   const visibleTransfers = useMemo(() => {
@@ -2023,6 +2086,8 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
                   onToggleShowHiddenFiles={() => handleToggleHiddenFiles(pane.id)}
                   onGoToTerminalCwd={onGetTerminalCwd ? handleGoToTerminalCwd : undefined}
                   onLocatePathInTerminal={canLocatePathInTerminal ? handleLocatePathInTerminal : undefined}
+                  onInsertPathToTerminal={canSendPathToTerminal ? handleInsertPathToTerminal : undefined}
+                  onCdInTerminal={canSendPathToTerminal ? handleCdInTerminal : undefined}
                   followTerminalCwd={canFollowTerminalCwd ? effectiveFollowTerminalCwd : undefined}
                   onToggleFollowTerminalCwd={canFollowTerminalCwd ? handleToggleFollowTerminalCwd : undefined}
                 />

@@ -65,6 +65,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onUploadExternalFiles,
   onUploadExternalFileList,
   onUploadExternalFolder,
+  onInsertPathToTerminal,
+  onCdInTerminal,
   sorting,
   reloadRequest,
 }) => {
@@ -933,6 +935,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     executeMoveAction,
     triggerUploadPicker,
     onUploadExternalFolder,
+    onInsertPathToTerminal,
+    onCdInTerminal,
     uploadEnabled,
     folderUploadEnabled,
     setMoveTargetPaths,

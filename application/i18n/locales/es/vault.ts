@@ -485,6 +485,8 @@ export const esVaultMessages: Messages = {
 
   // SFTP File Opener
   'sftp.context.copyPath': 'Copiar ruta del archivo',
+  'sftp.context.insertPathToTerminal': 'Insertar ruta en la terminal',
+  'sftp.context.cdInTerminal': 'Abrir en la terminal (cd)',
   'sftp.context.openWithDefault': 'Abrir con la aplicación predeterminada del sistema',
   'sftp.context.openWith': 'Abrir con...',
   'sftp.context.edit': 'Editar',
