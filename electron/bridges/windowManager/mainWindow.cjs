@@ -681,7 +681,8 @@ function createMainWindowApi(ctx) {
         }
 
         if (input.alt && !input.control && !input.meta) {
-          if (input.key === "ArrowLeft" || input.key === "ArrowRight") {
+          // Keep Alt+M pane zoom and shortcut recording clear of the Minimize menu mnemonic.
+          if (input.key === "ArrowLeft" || input.key === "ArrowRight" || input.key === "m" || input.key === "M") {
             win.webContents.setIgnoreMenuShortcuts(true);
             return;
           }
