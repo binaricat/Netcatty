@@ -80,7 +80,7 @@ export const RuleCard: React.FC<RuleCardProps> = ({
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                                 <span className="text-sm font-semibold truncate">{rule.label}</span>
-                                {rule.status === 'error' && rule.error ? (
+                                {(rule.status === 'error' || rule.status === 'connecting') && rule.error ? (
                                     <Tooltip>
                                         <TooltipTrigger asChild>
                                             <span

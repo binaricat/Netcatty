@@ -12,7 +12,12 @@ import {
   selectStoppablePortForwardingRules,
 } from '../../domain/portForwardingBulkActions';
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from '../../domain/credentials';
-import { isPortForwardingAutoReconnectEnabled } from '../../domain/portForwardingReconnect';
+import {
+  computePortForwardReconnectDelayMs,
+  formatPortForwardReconnectMessage,
+  isPortForwardingAutoReconnectEnabled,
+  isPortForwardingNonRetryableError,
+} from '../../domain/portForwardingReconnect';
 import { resolveBridgeKeyAuth, resolveBridgeSshAgentAuth, resolveHostAuth } from '../../domain/sshAuth';
 import { resolveHostKeepalive } from '../../domain/host';
 import { connectionTotpFields } from '../../domain/totpConfig';
@@ -48,6 +53,7 @@ export interface PortForwardingConnection {
   locallyInitiated?: boolean;
   // Reconnect state
   reconnectAttempts?: number;
+  reconnectDelayMs?: number;
   reconnectTimeoutId?: ReturnType<typeof setTimeout>;
   reconnectDueAt?: number;
   reconnectTimerCallback?: () => void;
@@ -62,10 +68,11 @@ export interface PortForwardingConnection {
 
 // Map to track active connections
 const activeConnections = new Map<string, PortForwardingConnection>();
-// Rules are added only when their bounded automatic reconnect cycle is
-// exhausted. This distinguishes a local-outage failure from a tunnel that the
-// user intentionally stopped while leaving auto-start enabled for next launch.
-const exhaustedReconnectRules = new Set<string>();
+// Rules that stopped due to a non-retryable error (bad auth, rejected host key,
+// local port conflict, invalid config). Preserved across duplicate failure
+// events for the same failed dial (#3679) until an explicit start or confirmed
+// active backend adoption clears it.
+const nonRetryableReconnectRules = new Set<string>();
 const rulesPendingCleanup = new Set<string>();
 const manualStopsInProgress = new Set<string>();
 const stopAllInProgress = new Set<string>();
@@ -73,11 +80,8 @@ const ruleCleanupPromises = new Map<string, Promise<{ success: boolean; error?: 
 const deferredReconnects = new Map<string, {
   enableReconnect: boolean;
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void;
+  error?: string | null;
 }>();
-
-// Reconnect configuration
-const MAX_RECONNECT_ATTEMPTS = 5;
-const RECONNECT_DELAY_MS = 3000; // 3 seconds between reconnection attempts
 
 // Callbacks for auto-reconnect - will be set by the state hook
 let reconnectCallback: ((
@@ -108,26 +112,68 @@ export const clearReconnectTimer = (ruleId: string): void => {
   if (conn) {
     conn.reconnectTimeoutId = undefined;
     conn.reconnectDueAt = undefined;
+    conn.reconnectDelayMs = undefined;
     conn.reconnectTimerCallback = undefined;
   }
 };
 
 /**
- * Give a failed/retrying auto-start rule a fresh bounded retry cycle after
- * local network recovery. Returns false for inactive rules that were stopped
- * manually and therefore must stay stopped until the next app launch.
+ * Reset backoff attempts for a retrying rule after local network recovery.
+ * Returns false for manually stopped rules, healthy active tunnels, and rules
+ * that failed with a non-retryable error.
  */
 export const resetReconnectAttempts = (ruleId: string): boolean => {
+  if (
+    nonRetryableReconnectRules.has(ruleId)
+    || manualStopsInProgress.has(ruleId)
+    || rulesPendingCleanup.has(ruleId)
+  ) {
+    return false;
+  }
   const connection = activeConnections.get(ruleId);
-  const shouldRecover = exhaustedReconnectRules.has(ruleId) ||
-    (connection?.reconnectAttempts ?? 0) > 0;
-  if (connection) connection.reconnectAttempts = 0;
+  if (!connection || connection.reconnectSuppressed) return false;
+  const shouldRecover = (connection.reconnectAttempts ?? 0) > 0
+    || Boolean(connection.reconnectTimerCallback);
+  if (shouldRecover) {
+    connection.reconnectAttempts = 0;
+    connection.reconnectDelayMs = undefined;
+  }
   return shouldRecover;
 };
 
 /** Re-check recovery eligibility after asynchronous backend reconciliation. */
 export const isReconnectRecoveryEligible = (ruleId: string): boolean => {
-  return exhaustedReconnectRules.has(ruleId);
+  if (
+    nonRetryableReconnectRules.has(ruleId)
+    || manualStopsInProgress.has(ruleId)
+    || rulesPendingCleanup.has(ruleId)
+  ) {
+    return false;
+  }
+  const connection = activeConnections.get(ruleId);
+  return Boolean(
+    connection?.reconnectTimerCallback
+    && !connection.reconnectSuppressed,
+  );
+};
+
+/**
+ * Immediately trigger a pending backoff timer (e.g. when the OS reports the
+ * network is back online) instead of waiting out a long backoff delay.
+ */
+export const nudgePendingReconnect = (ruleId: string): boolean => {
+  if (!isReconnectRecoveryEligible(ruleId)) return false;
+  const connection = activeConnections.get(ruleId);
+  if (!connection?.reconnectTimerCallback) return false;
+  if (connection.reconnectTimeoutId) {
+    clearTimeout(connection.reconnectTimeoutId);
+  }
+  connection.reconnectTimeoutId = undefined;
+  connection.reconnectDueAt = undefined;
+  connection.reconnectDelayMs = undefined;
+  const callback = connection.reconnectTimerCallback;
+  callback();
+  return true;
 };
 
 interface PausedReconnectTimer {
@@ -185,7 +231,7 @@ export const initReconnectCancelListener = (): (() => void) => {
   const handler = (e: StorageEvent) => {
     if (e.key !== STORAGE_KEY_PF_RECONNECT_CANCEL || !e.newValue) return;
     const ruleId = e.newValue;
-    exhaustedReconnectRules.delete(ruleId);
+    nonRetryableReconnectRules.delete(ruleId);
     clearReconnectTimer(ruleId);
 
     const conn = activeConnections.get(ruleId);
@@ -209,13 +255,15 @@ export const initReconnectCancelListener = (): (() => void) => {
 };
 
 /**
- * Helper function to schedule a reconnection attempt
- * Returns true if a reconnect was scheduled, false otherwise
+ * Helper function to schedule a reconnection attempt using capped exponential
+ * backoff for transient errors. Stops immediately on non-retryable errors.
+ * Returns true if a reconnect was scheduled (or already pending), false otherwise.
  */
 const scheduleReconnectIfNeeded = (
   ruleId: string,
   enableReconnect: boolean,
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void,
+  error?: string | null,
 ): boolean => {
   // The rule's autoReconnect setting may change while the tunnel is running
   // (e.g. toggled in the edit panel).  The start-time flag alone would keep
@@ -230,72 +278,95 @@ const scheduleReconnectIfNeeded = (
   ) {
     return false;
   }
+
+  // Stop immediately on permanent errors (auth failure, rejected host key,
+  // local port conflict, invalid config) so we never hammer servers or loop.
+  if (isPortForwardingNonRetryableError(error)) {
+    logger.warn(
+      `[PortForwardingService] Stopping auto-reconnect for rule ${ruleId} due to non-retryable error: ${error}`,
+    );
+    clearReconnectTimer(ruleId);
+    deferredReconnects.delete(ruleId);
+    nonRetryableReconnectRules.add(ruleId);
+    const conn = activeConnections.get(ruleId);
+    if (conn) {
+      conn.reconnectAttempts = 0;
+      conn.reconnectDelayMs = undefined;
+      conn.reconnectSuppressed = true;
+    }
+    return false;
+  }
+
   if (rulesPendingCleanup.has(ruleId)) {
-    deferredReconnects.set(ruleId, { enableReconnect: effectiveEnableReconnect, onStatusChange });
+    deferredReconnects.set(ruleId, {
+      enableReconnect: effectiveEnableReconnect,
+      onStatusChange,
+      error,
+    });
     return true;
   }
 
-  // One failed dial can report both a status event and a rejected start.
-  // Once exhausted, neither notification may begin another retry cycle.
-  if (exhaustedReconnectRules.has(ruleId)) return false;
+  // One failed dial can report both a status event and a rejected start (or a
+  // follow-up inactive close). Once a non-retryable failure stops retries,
+  // neither follow-up notification may start another retry cycle (#3679).
+  if (nonRetryableReconnectRules.has(ruleId)) return false;
 
   const currentConn = activeConnections.get(ruleId);
   if (currentConn?.reconnectSuppressed) return false;
   if (currentConn?.reconnectTimerCallback) {
+    const pendingAttempt = currentConn.reconnectAttempts ?? 1;
+    const pendingDelayMs =
+      currentConn.reconnectDelayMs ?? computePortForwardReconnectDelayMs(pendingAttempt);
     currentConn.status = 'connecting';
-    currentConn.error = `Reconnecting (${currentConn.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`;
+    currentConn.error = formatPortForwardReconnectMessage(pendingAttempt, pendingDelayMs);
     return true;
   }
-  const attempts = (currentConn?.reconnectAttempts ?? 0) + 1;
 
-  if (attempts <= MAX_RECONNECT_ATTEMPTS) {
-    // If the activeConnections entry was already deleted (e.g. by
-    // stopAndCleanupRule while the handshake was in-flight), we
-    // can't actually schedule a reconnect.  Return false so the
-    // caller transitions to 'inactive' instead of stuck 'connecting'.
-    if (!currentConn) {
-      return false;
+  // If the activeConnections entry was already deleted (e.g. by
+  // stopAndCleanupRule while the handshake was in-flight), we
+  // can't actually schedule a reconnect. Return false so the
+  // caller transitions to 'inactive' instead of stuck 'connecting'.
+  if (!currentConn) {
+    return false;
+  }
+
+  const attempts = (currentConn.reconnectAttempts ?? 0) + 1;
+  const delayMs = computePortForwardReconnectDelayMs(attempts);
+
+  logger.info(
+    `[PortForwardingService] Scheduling reconnect attempt #${attempts} in ${Math.round(delayMs / 1000)}s for rule ${ruleId}`,
+  );
+
+  currentConn.reconnectAttempts = attempts;
+  currentConn.reconnectDelayMs = delayMs;
+  nonRetryableReconnectRules.delete(ruleId);
+  const runReconnect = () => {
+    if (currentConn.reconnectTimerCallback !== runReconnect) return;
+    currentConn.reconnectTimeoutId = undefined;
+    currentConn.reconnectDueAt = undefined;
+    currentConn.reconnectDelayMs = undefined;
+    currentConn.reconnectTimerCallback = undefined;
+    if (activeConnections.get(ruleId) !== currentConn) return;
+    if (shouldReconnectRule?.(ruleId) === false) {
+      currentConn.unsubscribe?.();
+      activeConnections.delete(ruleId);
+      onStatusChange('inactive');
+      return;
     }
+    if (reconnectCallback) {
+      currentConn.reconnectStartAuthorized = true;
+      reconnectCallback(ruleId, onStatusChange);
+    }
+  };
+  currentConn.reconnectDueAt = Date.now() + delayMs;
+  currentConn.reconnectTimerCallback = runReconnect;
+  currentConn.reconnectTimeoutId = setTimeout(runReconnect, delayMs);
 
-    logger.info(`[PortForwardingService] Scheduling reconnect ${attempts}/${MAX_RECONNECT_ATTEMPTS}`);
-
-    currentConn.reconnectAttempts = attempts;
-    exhaustedReconnectRules.delete(ruleId);
-    const runReconnect = () => {
-      if (currentConn.reconnectTimerCallback !== runReconnect) return;
-      currentConn.reconnectTimeoutId = undefined;
-      currentConn.reconnectDueAt = undefined;
-      currentConn.reconnectTimerCallback = undefined;
-      if (activeConnections.get(ruleId) !== currentConn) return;
-      if (shouldReconnectRule?.(ruleId) === false) {
-        currentConn.unsubscribe?.();
-        activeConnections.delete(ruleId);
-        onStatusChange('inactive');
-        return;
-      }
-      if (reconnectCallback) {
-        currentConn.reconnectStartAuthorized = true;
-        reconnectCallback(ruleId, onStatusChange);
-      }
-    };
-    currentConn.reconnectDueAt = Date.now() + RECONNECT_DELAY_MS;
-    currentConn.reconnectTimerCallback = runReconnect;
-    currentConn.reconnectTimeoutId = setTimeout(runReconnect, RECONNECT_DELAY_MS);
-
-    const reconnectMessage = `Reconnecting (${attempts}/${MAX_RECONNECT_ATTEMPTS})...`;
-    currentConn.status = 'connecting';
-    currentConn.error = reconnectMessage;
-    onStatusChange('connecting', reconnectMessage);
-    return true;
-  }
-
-  logger.warn(`[PortForwardingService] Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached for rule ${ruleId}`);
-  exhaustedReconnectRules.add(ruleId);
-  // Reset reconnect attempts
-  if (currentConn) {
-    currentConn.reconnectAttempts = 0;
-  }
-  return false;
+  const reconnectMessage = formatPortForwardReconnectMessage(attempts, delayMs);
+  currentConn.status = 'connecting';
+  currentConn.error = reconnectMessage;
+  onStatusChange('connecting', reconnectMessage);
+  return true;
 };
 
 /**
@@ -321,7 +392,7 @@ export const hasActivePortForwardRuntime = (): boolean =>
   );
 
 const finishRuleCleanup = (ruleId: string): void => {
-  exhaustedReconnectRules.delete(ruleId);
+  nonRetryableReconnectRules.delete(ruleId);
   rulesPendingCleanup.delete(ruleId);
   deferredReconnects.delete(ruleId);
   clearReconnectTimer(ruleId);
@@ -364,6 +435,7 @@ const resumeReconnectAfterFailedCleanup = (
       ruleId,
       deferredReconnect.enableReconnect,
       deferredReconnect.onStatusChange,
+      deferredReconnect.error,
     );
   }
 };
@@ -631,6 +703,7 @@ const subscribeSyncedConnection = async (
           if (
             !manualStopsInProgress.has(ruleId)
             && !rulesPendingCleanup.has(ruleId)
+            && !nonRetryableReconnectRules.has(ruleId)
           ) {
             const reconnectScheduled = scheduleReconnectIfNeeded(
               ruleId,
@@ -652,6 +725,11 @@ const subscribeSyncedConnection = async (
 
         current.status = status;
         current.error = error ?? undefined;
+        if (status === 'active') {
+          nonRetryableReconnectRules.delete(ruleId);
+          current.reconnectAttempts = 0;
+          current.reconnectDelayMs = undefined;
+        }
         if (status === 'error') {
           if (stopAllInProgress.has(ruleId)) {
             onStatusChange(status, error ?? undefined);
@@ -661,6 +739,7 @@ const subscribeSyncedConnection = async (
             ruleId,
             connection.syncedShouldReconnect?.() ?? false,
             onStatusChange,
+            error,
           );
           if (reconnectScheduled) return;
         }
@@ -687,8 +766,9 @@ const subscribeSyncedConnection = async (
     connection.error = snapshot.error;
   }
   if (connection.status === 'active') {
-    exhaustedReconnectRules.delete(ruleId);
+    nonRetryableReconnectRules.delete(ruleId);
     connection.reconnectAttempts = 0;
+    connection.reconnectDelayMs = undefined;
   }
   return true;
 };
@@ -717,7 +797,10 @@ export const syncWithBackend = async (
       const ruleId = resolveBackendRuleId(tunnel);
       if (ruleId) {
         const existing = activeConnections.get(ruleId);
-        if (existing?.tunnelId !== tunnel.tunnelId) existing?.unsubscribe?.();
+        if (existing?.tunnelId !== tunnel.tunnelId) {
+          existing?.unsubscribe?.();
+          clearReconnectTimer(ruleId);
+        }
 
         // Update local connection tracking
         const connection: PortForwardingConnection = existing?.tunnelId === tunnel.tunnelId
@@ -810,6 +893,7 @@ export const reconcileWithBackend = async (): Promise<{
           const backendStatus = resolveBackendStatus(tunnel.status);
           if (existing.tunnelId !== tunnel.tunnelId) {
             existing.unsubscribe?.();
+            clearReconnectTimer(ruleId);
             const replacement: PortForwardingConnection = {
               ruleId,
               tunnelId: tunnel.tunnelId,
@@ -830,8 +914,9 @@ export const reconcileWithBackend = async (): Promise<{
             existing.status = backendStatus;
             existing.error = tunnel.error;
             if (backendStatus === 'active') {
-              exhaustedReconnectRules.delete(ruleId);
+              nonRetryableReconnectRules.delete(ruleId);
               existing.reconnectAttempts = 0;
+              existing.reconnectDelayMs = undefined;
             }
             result.appeared.push(ruleId);
           }
@@ -907,8 +992,8 @@ export const startPortForward = async (
   
   // Clear any existing reconnect timer
   clearReconnectTimer(rule.id);
-  // Explicit starts (including network recovery) authorize a fresh cycle.
-  exhaustedReconnectRules.delete(rule.id);
+  // Explicit starts authorize a fresh retry cycle (e.g. after fixing auth or freeing a port).
+  nonRetryableReconnectRules.delete(rule.id);
 
   if (!bridge?.startPortForward) {
     // Fallback for browser/dev mode - simulate the connection
@@ -1052,8 +1137,10 @@ export const startPortForward = async (
     }
 
     // Subscribe to status updates first
+    let expectedTunnelId = tunnelId;
     const handleTunnelStatus = (status: PortForwardingRule['status'], error?: string | null) => {
       const conn = activeConnections.get(rule.id);
+      if (conn && conn.tunnelId !== expectedTunnelId) return;
       if (status === 'inactive') {
         if (conn?.reconnectTimerCallback) {
           conn.unsubscribe?.();
@@ -1064,7 +1151,7 @@ export const startPortForward = async (
         if (
           !manualStopsInProgress.has(rule.id)
           && !rulesPendingCleanup.has(rule.id)
-          && !exhaustedReconnectRules.has(rule.id)
+          && !nonRetryableReconnectRules.has(rule.id)
         ) {
           const reconnectScheduled = scheduleReconnectIfNeeded(
             rule.id,
@@ -1087,6 +1174,11 @@ export const startPortForward = async (
         conn.status = status;
         conn.error = error ?? undefined;
         if (status !== 'connecting') conn.locallyInitiated = false;
+        if (status === 'active') {
+          nonRetryableReconnectRules.delete(rule.id);
+          conn.reconnectAttempts = 0;
+          conn.reconnectDelayMs = undefined;
+        }
       }
       
       // Handle auto-reconnect on error/disconnect
@@ -1095,7 +1187,12 @@ export const startPortForward = async (
           onStatusChange(status, error ?? undefined);
           return;
         }
-        const reconnectScheduled = scheduleReconnectIfNeeded(rule.id, enableReconnect, onStatusChange);
+        const reconnectScheduled = scheduleReconnectIfNeeded(
+          rule.id,
+          enableReconnect,
+          onStatusChange,
+          error,
+        );
         if (reconnectScheduled) {
           return;
         }
@@ -1186,7 +1283,12 @@ export const startPortForward = async (
       }
 
       // Check if we should attempt reconnect
-      const reconnectScheduled = scheduleReconnectIfNeeded(rule.id, enableReconnect, onStatusChange);
+      const reconnectScheduled = scheduleReconnectIfNeeded(
+        rule.id,
+        enableReconnect,
+        onStatusChange,
+        result.error,
+      );
       if (reconnectScheduled) {
         return { success: false, error: result.error };
       }
@@ -1201,6 +1303,7 @@ export const startPortForward = async (
       // A different window won the start race. Adopt the backend's durable
       // tunnel instead of keeping this renderer's unused attempt id.
       unsubscribe?.();
+      expectedTunnelId = result.tunnelId;
       const adoptedStatus = result.status === 'active' ? 'active' : 'connecting';
       const adoptedUnsubscribe = bridge.onPortForwardStatus?.(
         result.tunnelId,
@@ -1237,16 +1340,22 @@ export const startPortForward = async (
           error: 'Port forwarding tunnel stopped before adoption completed',
         };
       }
+      if (current.status === 'active') {
+        nonRetryableReconnectRules.delete(rule.id);
+        current.reconnectAttempts = 0;
+        current.reconnectDelayMs = undefined;
+      }
       onStatusChange(current.status, current.error);
       return { success: true };
     }
     
     // Reset reconnect attempts on successful connection
     const conn = activeConnections.get(rule.id);
-    if (conn) {
+    if (conn && !conn.reconnectTimerCallback) {
       conn.reconnectAttempts = 0;
+      conn.reconnectDelayMs = undefined;
     }
-    exhaustedReconnectRules.delete(rule.id);
+    nonRetryableReconnectRules.delete(rule.id);
     
     return { success: true, localPort: result.localPort, tunnelId: result.tunnelId };
     
@@ -1254,13 +1363,21 @@ export const startPortForward = async (
     const error = err instanceof Error ? err.message : 'Unknown error';
     
     // Check if we should attempt reconnect
-    const reconnectScheduled = scheduleReconnectIfNeeded(rule.id, enableReconnect, onStatusChange);
+    const reconnectScheduled = scheduleReconnectIfNeeded(
+      rule.id,
+      enableReconnect,
+      onStatusChange,
+      error,
+    );
     if (reconnectScheduled) {
       return { success: false, error };
     }
     
-    onStatusChange('error', error);
+    const conn = activeConnections.get(rule.id);
+    conn?.unsubscribe?.();
+    clearReconnectTimer(rule.id);
     activeConnections.delete(rule.id);
+    onStatusChange('error', error);
     return { success: false, error };
   }
 };
@@ -1277,7 +1394,7 @@ export const stopPortForward = async (
 
   // User intent takes effect immediately. Do not let an already queued network
   // recovery restart this rule while the backend stop request is still pending.
-  exhaustedReconnectRules.delete(ruleId);
+  nonRetryableReconnectRules.delete(ruleId);
   
   // Clear any pending reconnect timer
   clearReconnectTimer(ruleId);
