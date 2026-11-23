@@ -15,21 +15,24 @@ function writeFixture(file, bytes) {
   fs.writeFileSync(file, bytes);
 }
 
-function peBuffer(machine = 0x8664) {
+function peBuffer(machine = 0x8664, tag = 0) {
   const bytes = Buffer.alloc(0xa0);
   bytes.write("MZ", 0, "ascii");
   bytes.writeUInt32LE(0x80, 0x3c);
   bytes.write("PE\0\0", 0x80, "binary");
   bytes.writeUInt16LE(machine, 0x84);
+  bytes[0x9f] = tag;
   return bytes;
 }
 
-test("cross-built Windows payload removes host-native modules and installs Windows sqlite3 and node-pty", () => {
+test("cross-built Windows payload removes host-native modules and installs Windows sqlite3 and patched node-pty", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-win-native-"));
   const sqliteSource = path.join(root, "sqlite3-win32-x64.node");
+  const patchedConptySource = path.join(root, "patched-conpty-win32-x64.node");
   const unpackedDir = path.join(root, "app.asar.unpacked");
 
-  writeFixture(sqliteSource, peBuffer());
+  writeFixture(sqliteSource, peBuffer(0x8664, 1));
+  writeFixture(patchedConptySource, peBuffer(0x8664, 9));
   writeFixture(
     path.join(unpackedDir, "node_modules/@serialport/bindings-cpp/build/Release/bindings.node"),
     Buffer.from([0xcf, 0xfa, 0xed, 0xfe]),
@@ -57,11 +60,15 @@ test("cross-built Windows payload removes host-native modules and installs Windo
   ]) {
     writeFixture(
       path.join(unpackedDir, "node_modules/node-pty/prebuilds/win32-x64", relativeFile),
-      peBuffer(),
+      peBuffer(0x8664, 2),
     );
   }
 
-  const result = normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile: sqliteSource });
+  const result = normalizeBundledWindowsNatives({
+    unpackedDir,
+    sqlite3WindowsFile: sqliteSource,
+    patchedConptyNodeFile: patchedConptySource,
+  });
 
   assert.equal(
     fs.existsSync(path.join(unpackedDir, "node_modules/@serialport/bindings-cpp/build/Release/bindings.node")),
@@ -88,6 +95,15 @@ test("cross-built Windows payload removes host-native modules and installs Windo
     assert.equal(fs.existsSync(installed), true, relativeFile);
     assert.equal(fs.readFileSync(installed).subarray(0, 2).toString(), "MZ", relativeFile);
   }
+  const patchedBytes = fs.readFileSync(patchedConptySource);
+  assert.deepEqual(
+    fs.readFileSync(path.join(unpackedDir, "node_modules/node-pty/build/Release/conpty.node")),
+    patchedBytes,
+  );
+  assert.deepEqual(
+    fs.readFileSync(path.join(unpackedDir, "node_modules/node-pty/prebuilds/win32-x64/conpty.node")),
+    patchedBytes,
+  );
   assert.equal(
     result.asarEntriesToRemove.includes("node_modules/node-pty/build/Release/pty.node"),
     false,
@@ -102,23 +118,51 @@ test("cross-built Windows payload removes host-native modules and installs Windo
   );
 });
 
-test("cross-built Windows payload fails closed when required node-pty prebuild files are missing or unsupported arch", () => {
+test("cross-built Windows payload refuses unpatched/missing conpty.node, missing prebuild files, or unsupported arch", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-win-native-missing-pty-"));
   const sqliteSource = path.join(root, "sqlite3-win32-x64.node");
+  const patchedConptySource = path.join(root, "patched-conpty.node");
   const unpackedDir = path.join(root, "app.asar.unpacked");
-  writeFixture(sqliteSource, peBuffer());
+  writeFixture(sqliteSource, peBuffer(0x8664, 1));
+  writeFixture(patchedConptySource, peBuffer(0x8664, 9));
   writeFixture(
     path.join(unpackedDir, "node_modules/node-pty/prebuilds/win32-x64/conpty.node"),
-    peBuffer(),
+    peBuffer(0x8664, 2),
   );
 
+  // Missing patched conpty.node must fail closed.
   assert.throws(
     () => normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile: sqliteSource }),
+    /NETCATTY_PATCHED_WIN_CONPTY_NODE/,
+  );
+
+  // Passing the unpatched upstream conpty.node must also fail closed.
+  assert.throws(
+    () => normalizeBundledWindowsNatives({
+      unpackedDir,
+      sqlite3WindowsFile: sqliteSource,
+      patchedConptyNodeFile: path.join(unpackedDir, "node_modules/node-pty/prebuilds/win32-x64/conpty.node"),
+    }),
+    /byte-identical to the unpatched upstream/,
+  );
+
+  // Missing companion ConPTY runtime files must fail closed.
+  assert.throws(
+    () => normalizeBundledWindowsNatives({
+      unpackedDir,
+      sqlite3WindowsFile: sqliteSource,
+      patchedConptyNodeFile: patchedConptySource,
+    }),
     /Missing or invalid Windows x64 node-pty prebuild artifact: conpty\/conpty\.dll/,
   );
 
   assert.throws(
-    () => normalizeBundledWindowsNatives({ unpackedDir, sqlite3WindowsFile: sqliteSource, arch: "arm64" }),
+    () => normalizeBundledWindowsNatives({
+      unpackedDir,
+      sqlite3WindowsFile: sqliteSource,
+      patchedConptyNodeFile: patchedConptySource,
+      arch: "arm64",
+    }),
     /Unsupported cross-packaging Windows architecture: arm64/,
   );
 });
@@ -126,11 +170,13 @@ test("cross-built Windows payload fails closed when required node-pty prebuild f
 test("cross-built Windows payload installs optional Windows process-tree addon when provided", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-win-native-wpt-"));
   const sqliteSource = path.join(root, "sqlite3-win32-x64.node");
+  const patchedConptySource = path.join(root, "patched-conpty-win32-x64.node");
   const wptSource = path.join(root, "windows_process_tree-win32-x64.node");
   const unpackedDir = path.join(root, "app.asar.unpacked");
 
-  writeFixture(sqliteSource, peBuffer());
-  writeFixture(wptSource, peBuffer());
+  writeFixture(sqliteSource, peBuffer(0x8664, 1));
+  writeFixture(patchedConptySource, peBuffer(0x8664, 9));
+  writeFixture(wptSource, peBuffer(0x8664, 3));
   writeFixture(
     path.join(unpackedDir, "node_modules/@vscode/windows-process-tree/build/Release/windows_process_tree.node"),
     Buffer.from([0xcf, 0xfa, 0xed, 0xfe]),
@@ -142,13 +188,14 @@ test("cross-built Windows payload installs optional Windows process-tree addon w
   ]) {
     writeFixture(
       path.join(unpackedDir, "node_modules/node-pty/prebuilds/win32-x64", relativeFile),
-      peBuffer(),
+      peBuffer(0x8664, 2),
     );
   }
 
   const result = normalizeBundledWindowsNatives({
     unpackedDir,
     sqlite3WindowsFile: sqliteSource,
+    patchedConptyNodeFile: patchedConptySource,
     windowsProcessTreeFile: wptSource,
   });
 
@@ -168,6 +215,7 @@ test("cross-built Windows payload installs optional Windows process-tree addon w
     () => normalizeBundledWindowsNatives({
       unpackedDir,
       sqlite3WindowsFile: sqliteSource,
+      patchedConptyNodeFile: patchedConptySource,
       windowsProcessTreeFile: Buffer.from([0xcf, 0xfa, 0xed, 0xfe]),
     }),
     /not a Windows x64 PE/,

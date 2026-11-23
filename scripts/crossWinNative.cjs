@@ -13,8 +13,7 @@ const HOST_NATIVE_FILES = [
   "node_modules/@vscode/windows-process-tree/build/Release/windows_process_tree.node",
 ];
 
-const REQUIRED_WINDOWS_NODE_PTY_FILES = [
-  "conpty.node",
+const REQUIRED_WINDOWS_NODE_PTY_PREBUILD_FILES = [
   "conpty/conpty.dll",
   "conpty/OpenConsole.exe",
 ];
@@ -79,13 +78,36 @@ function assertSupportedCrossWindowsArch(arch = "x64") {
   }
 }
 
-function installWindowsNodePtyPrebuild(unpackedDir, arch = "x64") {
+function installWindowsNodePtyPrebuild(unpackedDir, { arch = "x64", patchedConptyNodeFile = null } = {}) {
   assertSupportedCrossWindowsArch(arch);
   const prebuildDir = path.join(unpackedDir, "node_modules/node-pty/prebuilds", `win32-${arch}`);
   const releaseDir = path.join(unpackedDir, "node_modules/node-pty/build/Release");
   const installed = [];
 
-  for (const relativeFile of REQUIRED_WINDOWS_NODE_PTY_FILES) {
+  const patchedConptyBytes = Buffer.isBuffer(patchedConptyNodeFile)
+    ? patchedConptyNodeFile
+    : patchedConptyNodeFile && fs.existsSync(patchedConptyNodeFile)
+      ? fs.readFileSync(patchedConptyNodeFile)
+      : null;
+  if (!patchedConptyBytes || !isPortableExecutableFile(patchedConptyBytes)) {
+    throw new Error(
+      "[crossWinNative] A Windows x64 patched conpty.node binary (built with patches/node-pty+1.1.0.patch) is required via NETCATTY_PATCHED_WIN_CONPTY_NODE; refusing to ship the unpatched upstream node-pty prebuild",
+    );
+  }
+
+  // Reject accidentally pointing NETCATTY_PATCHED_WIN_CONPTY_NODE back at the
+  // unpatched upstream prebuild, which regresses ConPTY clear (#2465).
+  const upstreamPrebuildConpty = path.join(prebuildDir, "conpty.node");
+  if (fs.existsSync(upstreamPrebuildConpty)) {
+    const upstreamBytes = fs.readFileSync(upstreamPrebuildConpty);
+    if (upstreamBytes.equals(patchedConptyBytes)) {
+      throw new Error(
+        "[crossWinNative] Patched conpty.node is byte-identical to the unpatched upstream node-pty prebuild; supply a binary built with patches/node-pty+1.1.0.patch",
+      );
+    }
+  }
+
+  for (const relativeFile of REQUIRED_WINDOWS_NODE_PTY_PREBUILD_FILES) {
     const source = path.join(prebuildDir, relativeFile);
     if (!fs.existsSync(source) || !isPortableExecutableFile(source)) {
       throw new Error(
@@ -97,6 +119,18 @@ function installWindowsNodePtyPrebuild(unpackedDir, arch = "x64") {
     fs.copyFileSync(source, target);
     installed.push(`node_modules/node-pty/build/Release/${relativeFile}`);
   }
+
+  // Install the patched conpty.node into both build/Release (matching
+  // nodePtyArtifacts) and prebuilds/win32-x64 (the ASAR-indexed unpacked path
+  // that node-pty's loadNativeModule resolves in cross-builds).
+  const releaseConptyTarget = path.join(releaseDir, "conpty.node");
+  fs.mkdirSync(path.dirname(releaseConptyTarget), { recursive: true });
+  fs.writeFileSync(releaseConptyTarget, patchedConptyBytes);
+  installed.push("node_modules/node-pty/build/Release/conpty.node");
+
+  fs.mkdirSync(path.dirname(upstreamPrebuildConpty), { recursive: true });
+  fs.writeFileSync(upstreamPrebuildConpty, patchedConptyBytes);
+  installed.push(`node_modules/node-pty/prebuilds/win32-${arch}/conpty.node`);
 
   for (const relativeFile of OPTIONAL_WINDOWS_NODE_PTY_FILES) {
     const source = path.join(prebuildDir, relativeFile);
@@ -118,6 +152,7 @@ function installWindowsNodePtyPrebuild(unpackedDir, arch = "x64") {
 function normalizeBundledWindowsNatives({
   unpackedDir,
   sqlite3WindowsFile,
+  patchedConptyNodeFile = null,
   windowsProcessTreeFile = null,
   arch = "x64",
 }) {
@@ -156,7 +191,10 @@ function normalizeBundledWindowsNatives({
     removed.push("node_modules/node-pty/bin");
   }
 
-  const installedNodePty = installWindowsNodePtyPrebuild(unpackedDir, arch);
+  const installedNodePty = installWindowsNodePtyPrebuild(unpackedDir, {
+    arch,
+    patchedConptyNodeFile,
+  });
   const replacedSet = new Set(installedNodePty);
 
   const windowsProcessTreeRelative =
@@ -230,6 +268,7 @@ function normalizeCrossWindowsApp({
   appOutDir,
   projectDir,
   arch = "x64",
+  patchedConptyNodeFile = process.env.NETCATTY_PATCHED_WIN_CONPTY_NODE || null,
   windowsProcessTreeFile = process.env.NETCATTY_WIN_PROCESS_TREE_NODE || null,
 }) {
   assertSupportedCrossWindowsArch(arch);
@@ -240,6 +279,7 @@ function normalizeCrossWindowsApp({
   const result = normalizeBundledWindowsNatives({
     unpackedDir,
     sqlite3WindowsFile,
+    patchedConptyNodeFile,
     windowsProcessTreeFile,
     arch,
   });
@@ -249,7 +289,7 @@ function normalizeCrossWindowsApp({
 
 module.exports = {
   HOST_NATIVE_FILES,
-  REQUIRED_WINDOWS_NODE_PTY_FILES,
+  REQUIRED_WINDOWS_NODE_PTY_PREBUILD_FILES,
   OPTIONAL_WINDOWS_NODE_PTY_FILES,
   assertWindowsNativePayload,
   downloadWindowsSqlite3Prebuild,
