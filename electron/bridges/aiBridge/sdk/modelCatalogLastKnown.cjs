@@ -23,17 +23,21 @@ function buildLastKnownCatalogPath(userDataDir) {
   return path.join(userDataDir, LAST_KNOWN_CATALOG_FILE);
 }
 
-/** Read the full store object ({ entries, aliases }); any corruption degrades to empty maps. */
+/** Read the full store object ({ entries, aliases, hasAliases }); any corruption degrades to empty maps. */
 function readLastKnownCatalogFile(filePath) {
   try {
     const parsed = JSON.parse(readFileSync(filePath, "utf8"));
-    if (!parsed || parsed.version !== LAST_KNOWN_STORE_VERSION) return { entries: {}, aliases: {} };
+    if (!parsed || parsed.version !== LAST_KNOWN_STORE_VERSION) {
+      return { entries: {}, aliases: {}, hasAliases: false };
+    }
+    const hasAliases = Boolean(parsed.aliases && typeof parsed.aliases === "object" && !Array.isArray(parsed.aliases));
     return {
       entries: parsed.entries && typeof parsed.entries === "object" ? parsed.entries : {},
-      aliases: parsed.aliases && typeof parsed.aliases === "object" ? parsed.aliases : {},
+      aliases: hasAliases ? parsed.aliases : {},
+      hasAliases,
     };
   } catch {
-    return { entries: {}, aliases: {} };
+    return { entries: {}, aliases: {}, hasAliases: false };
   }
 }
 
@@ -70,15 +74,36 @@ function readLastKnownCatalogEntry(filePath, cacheKey) {
 /**
  * Resolve a persisted alias (for a bare command or Cursor sentinel) back to
  * its exact persisted catalog cache key, or null if absent/evicted.
+ * For backward compatibility with pre-alias version-1 stores (no `aliases`
+ * map persisted yet), falls back only when there is a single unambiguous
+ * entry matching (backendKey, runtime, envHash).
  */
-function readLastKnownCatalogAlias(filePath, aliasKey) {
+function readLastKnownCatalogAlias(filePath, aliasKey, legacyScope = null) {
   if (!filePath || !aliasKey) return null;
-  const { entries, aliases } = readLastKnownCatalogFile(filePath);
+  const { entries, aliases, hasAliases } = readLastKnownCatalogFile(filePath);
   const targetKey = aliases[aliasKey];
-  if (typeof targetKey !== "string" || !Object.prototype.hasOwnProperty.call(entries, targetKey)) {
+  if (typeof targetKey === "string" && Object.prototype.hasOwnProperty.call(entries, targetKey)) {
+    return targetKey;
+  }
+  if (hasAliases || !legacyScope?.backendKey || !legacyScope?.runtime || !legacyScope?.envHash) {
     return null;
   }
-  return targetKey;
+  let matchedKey = null;
+  for (const [key, entry] of Object.entries(entries)) {
+    if (!entry || !Array.isArray(entry.models) || entry.models.length === 0) continue;
+    const parts = key.split("\u0000");
+    if (
+      parts.length !== 4
+      || parts[0] !== legacyScope.backendKey
+      || parts[2] !== legacyScope.runtime
+      || parts[3] !== legacyScope.envHash
+    ) {
+      continue;
+    }
+    if (matchedKey !== null) return null; // ambiguous legacy store
+    matchedKey = key;
+  }
+  return matchedKey;
 }
 
 /**
@@ -139,10 +164,10 @@ function refreshLastKnownCatalogCurrentId(filePath, cacheKey, currentModelId) {
     }
     entries[cacheKey] = { ...entry, models, currentModelId };
     const nextAliases = pruneAliasesForEntries(aliases, entries);
-    const payload = Object.keys(nextAliases).length > 0
-      ? { version: LAST_KNOWN_STORE_VERSION, entries, aliases: nextAliases }
-      : { version: LAST_KNOWN_STORE_VERSION, entries };
-    writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({ version: LAST_KNOWN_STORE_VERSION, entries, aliases: nextAliases }, null, 2)}\n`,
+    );
     return true;
   } catch {
     return false;
@@ -190,11 +215,11 @@ function writeLastKnownCatalogEntry(filePath, cacheKey, { backend, models, curre
       delete entries[orderedKeys.shift()];
     }
     const nextAliases = pruneAliasesForEntries(aliases, entries);
-    const payload = Object.keys(nextAliases).length > 0
-      ? { version: LAST_KNOWN_STORE_VERSION, entries, aliases: nextAliases }
-      : { version: LAST_KNOWN_STORE_VERSION, entries };
     mkdirSync(path.dirname(filePath), { recursive: true });
-    writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({ version: LAST_KNOWN_STORE_VERSION, entries, aliases: nextAliases }, null, 2)}\n`,
+    );
     return true;
   } catch {
     return false;

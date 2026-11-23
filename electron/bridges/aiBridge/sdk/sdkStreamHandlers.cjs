@@ -1309,7 +1309,11 @@ function registerSdkStreamHandlers(ctx) {
           if (aliasKey) {
             const aliasedKey = getSdkModelCacheEntry(sdkModelKeyAliases, aliasKey, {
               ttlMs: MODEL_CATALOG_MAX_AGE_MS,
-            })?.targetKey || readLastKnownCatalogAlias(lastKnownPath, aliasKey);
+            })?.targetKey || readLastKnownCatalogAlias(lastKnownPath, aliasKey, {
+              backendKey,
+              runtime: runtimeKey,
+              envHash: buildSdkModelEnvHash(env),
+            });
             if (aliasedKey) {
               const aliasedImmediate = tryServeCachedCatalog(aliasedKey);
               if (aliasedImmediate) return aliasedImmediate.value;
