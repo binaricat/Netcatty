@@ -1229,7 +1229,7 @@ function registerSdkStreamHandlers(ctx) {
           allowPathProbe: false,
           validateConfiguredPath: false,
         });
-        const binPath = cacheOnly || explicitBinPath
+        const binPath = cacheOnly || configuredPathError
           ? explicitBinPath
           : resolveSdkBackendBinPath({
             backendKey,
@@ -1243,6 +1243,7 @@ function registerSdkStreamHandlers(ctx) {
             resolveCodexExecutableForSdk,
             resolveCodebuddyExecutableForSdk,
             allowPathProbe: true,
+            validateConfiguredPath: true,
           });
         const codexRuntime = backendKey === "codex" && requestedCodexRuntime === "app-server"
           ? "app-server"
@@ -1270,11 +1271,6 @@ function registerSdkStreamHandlers(ctx) {
                 ? String(env?.MIMOCODE_BIN || env?.MIMOCODE_BIN_PATH || "").trim()
                 : "")
           : "";
-        const envBinMissing = Boolean(
-          rawEnvBinPath
-          && typeof normalizeCliPathForPlatform === "function"
-          && !normalizeCliPathForPlatform(rawEnvBinPath),
-        );
         const needsResolvedKeyAlias = isCursorCliLoginSentinel
           || !explicitBinPath
           || hasConfiguredPathLikeCommand
@@ -1441,7 +1437,7 @@ function registerSdkStreamHandlers(ctx) {
           return { ok: true, currentModelId: null, models: [] };
         }
 
-        let cacheKey = ((!binPath || envBinMissing) && !isCursorCliLoginSentinel)
+        let cacheKey = (!binPath && !isCursorCliLoginSentinel)
           ? (resolveAliasedKey() || buildCacheKey())
           : buildCacheKey();
         if (configuredPathError) {

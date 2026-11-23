@@ -2649,6 +2649,36 @@ test("list-models preserves saved models when an environment-configured OPENCODE
   }
 });
 
+test("list-models preserves PATH fallback when CODEBUDDY_CODE_PATH points to a missing file", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const seenBinPaths = [];
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/codebuddy-path" }),
+    normalizeCliPathForPlatform: (value) => (value === "/test/codebuddy-path/codebuddy" ? value : null),
+    resolveCliFromPath: (cmd) => (cmd === "codebuddy" ? "/test/codebuddy-path/codebuddy" : null),
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("codebuddy");
+    t.mock.method(driver, "listModels", async ({ binPath }) => {
+      seenBinPaths.push(binPath);
+      return [{ id: "codebuddy-live", name: "CodeBuddy Live" }];
+    });
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const result = await listModels({ sender: {} }, {
+      sdkBackend: "codebuddy",
+      agentCommand: "codebuddy",
+      agentEnv: { CODEBUDDY_CODE_PATH: "/missing/codebuddy" },
+    });
+    assert.equal(result.source, "live");
+    assert.deepEqual(result.models.map(({ id }) => id), ["codebuddy-live"]);
+    assert.deepEqual(seenBinPaths, ["/test/codebuddy-path/codebuddy"]);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+  }
+});
+
 test("list-models force refresh bypasses warm memory and last-known-good and updates both caches", async (t) => {
   const { getDriver } = require("./index.cjs");
   const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx();
