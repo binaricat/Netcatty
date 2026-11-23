@@ -37,12 +37,21 @@ async function mountSessionState(t: test.TestContext) {
 
   t.after(async () => {
     await act(async () => root.unmount());
+    // Reset activeTabStore while DOM globals are still live and flush any
+    // queued notification before closing JSDOM so notifyRafId is cleared.
+    activeTabStore.setActiveTabId('vault', { recordPrevious: false });
+    await new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => resolve());
+      } else {
+        dom.window.setTimeout(resolve, 0);
+      }
+    });
     dom.window.close();
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);
     }
-    activeTabStore.setActiveTabId('vault', { recordPrevious: false });
   });
 
   return () => latestState;
