@@ -60,7 +60,7 @@ import {
   resolveNoteClipboardPaste,
   shouldInsertClipboardTextAsMarkdown,
   shouldInterceptResolvedNotePaste,
-} from "./noteClipboardPaste";
+} from "../../domain/notes/clipboardPaste";
 import { annotateNoteImageSizes } from "./noteImageLayout";
 import { renderNoteMathFormula } from "./noteMathRenderer";
 import { createNoteCodeTooltipExtensions } from "./noteCodeTooltips";
@@ -82,7 +82,7 @@ export {
   resolveNoteClipboardPaste,
   shouldInterceptResolvedNotePaste,
   convertClipboardHtmlToMarkdown,
-} from "./noteClipboardPaste";
+} from "../../domain/notes/clipboardPaste";
 
 import { NoteSourceEditor, type NoteSourceEditorHandle } from "./NoteSourceEditor";
 import {

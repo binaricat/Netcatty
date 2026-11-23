@@ -86,7 +86,10 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "vault.host.get": {
     hostId: { type: "string", description: "Vault host ID." },
   },
-  "vault.host.list": {},
+  "vault.host.list": {
+    query: { type: "string", optional: true, description: "Optional case-insensitive search text. Every space-separated word must match the label, hostname, username, or tags. Does not search group." },
+    group: { type: "string", optional: true, description: "Optional group path (e.g. prod). Includes subgroups: prod matches prod/web but not production. Case-sensitive." },
+  },
   "vault.host.open": {
     hostId: { type: "string", description: "Vault host ID to open. Use vault_hosts_list / host_get to resolve id from label or hostname." },
     workspaceId: { type: "string", optional: true, description: "Target workspace ID. Omit to open into the invoking chat's bound workspace (workspace chat → that workspace; terminal chat → that terminal's workspace); unbound chats get a standalone tab. 'current' means the chat's bound workspace, or the active workspace when unbound. Applies to newly opened sessions; reused sessions retain their placement." },
@@ -430,7 +433,7 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "vault.host.open":
     "Reuse-first: if this hostId already has a connected or connecting session with matching connection settings (including one auto-reconnecting after a drop, which keeps the same sessionId), that sessionId is returned and no new tab is opened — retry terminal_execute against it rather than reopening the host. Open a new tab only when get_environment shows no session for the host, when the task truly needs a parallel connection, or with newTab true. Call session_close when finished only for a newly opened session (reused is not true). A reused session keeps its original owner; do not close it as task cleanup. Disconnected or restored tabs needing user action are not reused. Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
   "vault.host.list":
-    "Use when the user names a saved Netcatty host but get_environment has no matching live session. Resolve the hostId here, call host_open, then call get_environment to obtain the new sessionId.",
+    "Use when the user names a saved Netcatty host but get_environment has no matching live session. Resolve the hostId here, call host_open, then call get_environment to obtain the new sessionId. Use query with the host name the user gave, or group, to narrow the list instead of returning every host.",
   "vault.host.import":
     "Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, FinalShell JSON, ssh_config). If attached host text is unknown or auto-detection fails, use read_attachment content, extract fields yourself, and call vault_hosts_create.",
   "vault.hosts.create":

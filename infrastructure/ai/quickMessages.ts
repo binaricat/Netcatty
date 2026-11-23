@@ -196,11 +196,6 @@ export function createQuickMessageId(): string {
   return `qm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function isSystemStopSlashCommand(input: string): boolean {
-  const trimmed = input.trim();
-  return /^\/stop(?:\s|$)/i.test(trimmed) || trimmed.toLowerCase() === '/stop';
-}
-
 export function getSystemSlashCommand(input: string): SystemSlashCommandSlug | null {
   const trimmed = input.trim().toLowerCase();
   if (/^\/stop(?:\s|$)/.test(trimmed)) return 'stop';

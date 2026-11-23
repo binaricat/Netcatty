@@ -16,6 +16,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { prepareCommandForSpawn } = require("../../ai/shellUtils.cjs");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const { closeReasoning } = require("./sdkDriverUtils.cjs");
 
 const NETCATTY_MCP_NAME = "netcatty-remote-hosts";
 const GROK_ABORT_GRACE_MS = 1_500;
@@ -373,13 +374,6 @@ function resultToText(result) {
     try { return JSON.stringify(result); } catch { return String(result); }
   }
   return String(result);
-}
-
-function closeReasoning(state, emitter) {
-  if (state?.reasoningOpen) {
-    emitter.reasoningEnd();
-    state.reasoningOpen = false;
-  }
 }
 
 /**

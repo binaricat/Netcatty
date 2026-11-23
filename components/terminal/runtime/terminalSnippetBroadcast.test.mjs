@@ -15,7 +15,7 @@ const load = file => import(pathToFileURL(path.join(root, file)).href);
 const { normalizeLineEndings } = await load('lib/utils.ts');
 const { shouldDelayAutoRunSnippetInput, AUTO_RUN_SNIPPET_LINE_DELAY_MS } = await load('components/terminal/terminalHelpers.ts');
 const pacedHelpers = await load('components/terminal/runtime/terminalPacedBroadcast.ts');
-const { resolveTerminalBroadcastTargetIds } = await load('domain/terminalBroadcast.ts');
+const { resolveTerminalBroadcastTargetIds, shouldBroadcastDuringSensitivePrompt } = await load('domain/terminalBroadcast.ts');
 const { canUseDirectSessionWriteFallback } = await load('components/terminalLayer/terminalLayerSessionRouting.ts');
 const sourceAt = file => readFileSync(path.join(root, file), 'utf8');
 const compile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -80,7 +80,9 @@ for (const mode of ['paste', 'lineDelay']) {
         useCallback: callback => callback, terminalBackend,
         resolveTerminalBroadcastTargetIds, canUseDirectSessionWriteFallback,
         sessionsRef: { current: ['source', 'peer'].map(id => ({ id, protocol: 'telnet', status: 'connected' })) },
-        isGlobalBroadcastEnabled: true, isTerminalSensitiveInputActive: () => false,
+        isGlobalBroadcastEnabled: true,
+        broadcastPasswordBypassRef: { current: false },
+        isTerminalSensitiveInputActive: () => false,
       };
       vm.runInNewContext(compile(extract(layerSource,
         '  const handleBroadcastInput = useCallback(', '  const handleCommandSubmitted')
@@ -93,7 +95,11 @@ for (const mode of ['paste', 'lineDelay']) {
         passwordPromptActiveRef: { current: false }, isBroadcastEnabledRef: { current: true },
         onBroadcastInputRef: { current: layerEnv.broadcast },
         normalizeLineEndings, shouldDelayAutoRunSnippetInput, AUTO_RUN_SNIPPET_LINE_DELAY_MS,
-        disableBracketedPasteRef: { current: false }, prepareProgrammaticSudoInput: data => data,
+        disableBracketedPasteRef: { current: false },
+        broadcastPasswordBypassRef: { current: false },
+        isPromptSecurityAlternateScreenActive: () => false,
+        shouldBroadcastDuringSensitivePrompt,
+        prepareProgrammaticSudoInput: data => data,
         scrollToBottomAfterProgrammaticInput() {}, terminalBackend,
         host: { protocol: 'telnet' }, serialConfig: { lineMode: false },
       };

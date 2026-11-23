@@ -1,6 +1,6 @@
 import { detectVendorFromSshVersion, hostRestrictsExtraSshChannels } from "./host";
 import type { Host } from "./models";
-import { remoteSoftwareRequiresSingleChannel } from "./singleChannelSshBanner.shared.mjs";
+import { remoteSoftwareRequiresSingleChannel } from "@/domain/singleChannelSshBanner.shared.cjs";
 
 export type SftpDedicatedLoginInput = {
   host?: Pick<Host, "deviceType"> | null;

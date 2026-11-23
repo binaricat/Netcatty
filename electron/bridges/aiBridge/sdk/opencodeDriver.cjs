@@ -1,11 +1,11 @@
 "use strict";
 
-const net = require("node:net");
 const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
 const { withExclusiveProcessEnv } = require("./processEnvGate.cjs");
+const { getAvailablePort: getSharedAvailablePort } = require("./sdkDriverUtils.cjs");
 const {
   buildOpenCodeNativeSkillsPermissionRules,
   buildOpenCodeSkillsPermissionRules,
@@ -451,19 +451,7 @@ function withOpenCodeProcessEnv(env, binPath, fn) {
 }
 
 function getAvailablePort(host = "127.0.0.1") {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.on("error", reject);
-    server.listen(0, host, () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close((error) => {
-        if (error) reject(error);
-        else resolve(port === DEFAULT_OPENCODE_PORT ? getAvailablePort(host) : port);
-      });
-    });
-  });
+  return getSharedAvailablePort(host, DEFAULT_OPENCODE_PORT);
 }
 
 async function withOpenCodeServerPort(options = {}) {

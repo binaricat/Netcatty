@@ -148,6 +148,7 @@ export const useSftpExternalOperations = (
     connectionCacheKeyMapRef,
     ensureRemoteSftpId,
     resolveConnectedHost,
+    resolveConnectedChain,
     acquireTransferSession,
     clearDirCacheEntry,
     useCompressedUpload = false,
@@ -163,6 +164,15 @@ export const useSftpExternalOperations = (
       return host;
     },
     [resolveConnectedHost],
+  );
+
+  /** Jump-host chain the tab dialed at connect time, when still meaningful. */
+  const resolveUploadConnectChain = useCallback(
+    (tabId: string, isLocal: boolean): Host[] | undefined => {
+      if (isLocal || !resolveConnectedChain) return undefined;
+      return resolveConnectedChain(tabId) ?? undefined;
+    },
+    [resolveConnectedChain],
   );
 
   /**
@@ -843,6 +853,7 @@ export const useSftpExternalOperations = (
   // (session hostname/port/user overrides), not the vault entry by hostId alone.
   const createUploadBridge = useCallback((
     connectHost?: Host,
+    connectChain?: Host[],
     readTransferConcurrency = () => localStorageAdapter.readNumber(STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY),
   ): UploadBridge => {
     const bridge = netcattyBridge.get();
@@ -920,6 +931,7 @@ export const useSftpExternalOperations = (
                         options.targetHostId,
                         options.transferId,
                         connectHost,
+                        connectChain,
                       );
                     }
 
@@ -1042,8 +1054,10 @@ export const useSftpExternalOperations = (
           const uploadPaneId = livePane.id;
           const liveTargetPath = targetPath || livePane.connection.currentPath;
           const connectHost = resolveUploadConnectHost(uploadPaneId, livePane.connection.isLocal);
+          const connectChain = resolveUploadConnectChain(uploadPaneId, livePane.connection.isLocal);
           const uploadBridge = createUploadBridge(
             connectHost,
+            connectChain,
             readSftpFileTransferConcurrency,
           );
           const liveCallbacks = livePane.connection.id === pane.connection.id
@@ -1209,7 +1223,8 @@ export const useSftpExternalOperations = (
         const uploadPaneId = livePane.id;
         const liveTargetPath = targetPath || livePane.connection.currentPath;
         const connectHost = resolveUploadConnectHost(uploadPaneId, livePane.connection.isLocal);
-        const uploadBridge = createUploadBridge(connectHost);
+        const connectChain = resolveUploadConnectChain(uploadPaneId, livePane.connection.isLocal);
+        const uploadBridge = createUploadBridge(connectHost, connectChain);
 
         // Retarget callbacks if the pane path/id changed after reconnect.
         const liveCallbacks = livePane.connection.id === pane.connection.id
@@ -1252,7 +1267,7 @@ export const useSftpExternalOperations = (
             jobId: `compressed-upload-${crypto.randomUUID()}`,
             prepSftpId: sftpId,
             acquire: acquireTransferSession
-              ? (hostId, jobId) => acquireTransferSession(hostId, jobId, connectHost)
+              ? (hostId, jobId) => acquireTransferSession(hostId, jobId, connectHost, connectChain)
               : undefined,
             shouldDiscard: isSessionError,
             run: async (uploadSftpId) => uploadEntriesDirect(
@@ -1331,6 +1346,7 @@ export const useSftpExternalOperations = (
       refresh,
       resolveRemoteSftpId,
       resolveUploadConnectHost,
+      resolveUploadConnectChain,
       useCompressedUpload,
     ],
   );
@@ -1367,7 +1383,8 @@ export const useSftpExternalOperations = (
           ),
         );
         const connectHost = resolveUploadConnectHost(uploadPaneId, livePane.connection.isLocal);
-        const uploadBridge = createUploadBridge(connectHost);
+        const connectChain = resolveUploadConnectChain(uploadPaneId, livePane.connection.isLocal);
+        const uploadBridge = createUploadBridge(connectHost, connectChain);
 
         try {
           const files = Array.from(fileList);
@@ -1382,7 +1399,7 @@ export const useSftpExternalOperations = (
             jobId: `compressed-upload-${crypto.randomUUID()}`,
             prepSftpId: sftpId,
             acquire: acquireTransferSession
-              ? (hostId, jobId) => acquireTransferSession(hostId, jobId, connectHost)
+              ? (hostId, jobId) => acquireTransferSession(hostId, jobId, connectHost, connectChain)
               : undefined,
             shouldDiscard: isSessionError,
             run: async (uploadSftpId) => uploadFromFileList(
@@ -1441,6 +1458,7 @@ export const useSftpExternalOperations = (
       refresh,
       resolveRemoteSftpId,
       resolveUploadConnectHost,
+      resolveUploadConnectChain,
       useCompressedUpload,
     ],
   );
@@ -1557,7 +1575,11 @@ export const useSftpExternalOperations = (
             uploadPaneId,
             livePane.connection.isLocal,
           );
-          const uploadBridge = createUploadBridge(uploadConnectHost);
+          const uploadConnectChain = resolveUploadConnectChain(
+            uploadPaneId,
+            livePane.connection.isLocal,
+          );
+          const uploadBridge = createUploadBridge(uploadConnectHost, uploadConnectChain);
           const liveCallbacks = bindUploadControllerCallbacks(
             controller,
             createUploadCallbacks(
@@ -1603,7 +1625,7 @@ export const useSftpExternalOperations = (
             jobId: `compressed-upload-${crypto.randomUUID()}`,
             prepSftpId: sftpId,
             acquire: acquireTransferSession
-              ? (hostId, jobId) => acquireTransferSession(hostId, jobId, uploadConnectHost)
+              ? (hostId, jobId) => acquireTransferSession(hostId, jobId, uploadConnectHost, uploadConnectChain)
               : undefined,
             shouldDiscard: isSessionError,
             run: async (uploadSftpId) => uploadEntriesDirect(
@@ -1687,6 +1709,7 @@ export const useSftpExternalOperations = (
       refresh,
       resolveRemoteSftpId,
       resolveUploadConnectHost,
+      resolveUploadConnectChain,
       useCompressedUpload,
     ],
   );
@@ -1775,7 +1798,8 @@ export const useSftpExternalOperations = (
           ),
         );
         const connectHost = resolveUploadConnectHost(uploadPaneId, livePane.connection.isLocal);
-        const directUploadBridge = createUploadBridge(connectHost);
+        const connectChain = resolveUploadConnectChain(uploadPaneId, livePane.connection.isLocal);
+        const directUploadBridge = createUploadBridge(connectHost, connectChain);
 
         try {
           const hasDirectory = entries.some((entry) => (
@@ -1789,7 +1813,7 @@ export const useSftpExternalOperations = (
             jobId: `compressed-upload-${crypto.randomUUID()}`,
             prepSftpId: sftpId,
             acquire: acquireTransferSession
-              ? (hostId, jobId) => acquireTransferSession(hostId, jobId, connectHost)
+              ? (hostId, jobId) => acquireTransferSession(hostId, jobId, connectHost, connectChain)
               : undefined,
             shouldDiscard: isSessionError,
             run: async (uploadSftpId) => uploadEntriesDirect(
@@ -1856,6 +1880,7 @@ export const useSftpExternalOperations = (
       refresh,
       resolveRemoteSftpId,
       resolveUploadConnectHost,
+      resolveUploadConnectChain,
       useCompressedUpload,
     ],
   );

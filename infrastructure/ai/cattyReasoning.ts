@@ -114,9 +114,10 @@ const REASONING_ENCRYPTED_CONTENT_INCLUDE = 'reasoning.encrypted_content';
 export function applyResponsesApiStatelessStoreOption(
   provider: Pick<ProviderConfig, 'openaiApi' | 'providerId' | 'style'> | null | undefined,
   options: CattyReasoningProviderOptions | undefined,
+  modelId?: string,
 ): CattyReasoningProviderOptions | undefined {
-  if (!provider || resolveProviderStyle(provider) !== 'openai') return options;
-  if (resolveOpenAIApi(provider) !== 'responses') return options;
+  if (!provider || resolveProviderStyle(provider, modelId) !== 'openai') return options;
+  if (resolveOpenAIApi(provider, modelId) !== 'responses') return options;
   const openaiOptions: Record<string, unknown> = {
     ...options?.openai,
     store: false,
@@ -139,7 +140,7 @@ export function buildCattyReasoningProviderOptions(
   if (!provider) return undefined;
   const rawEffort = typeof effort === 'string' ? effort.trim() : '';
   if (!rawEffort) return undefined;
-  const style: ProviderStyle = resolveProviderStyle(provider);
+  const style: ProviderStyle = resolveProviderStyle(provider, modelId);
   const advertised = cattyReasoningLevelsForSelection(provider, modelId);
   const resolved = advertised.length
     ? resolveVisibleCattyThinkingLevel(advertised, rawEffort)
@@ -160,7 +161,7 @@ export function buildCattyReasoningProviderOptions(
     return {
       openai: {
         reasoningEffort: resolved,
-        ...(explicitDefault && resolveOpenAIApi(provider) === 'responses' ? { forceReasoning: true } : {}),
+        ...(explicitDefault && resolveOpenAIApi(provider, modelId) === 'responses' ? { forceReasoning: true } : {}),
       },
     };
   }
@@ -347,7 +348,7 @@ export function cattyReasoningLevelsForSelection(
   modelId?: string,
 ): readonly string[] {
   if (!provider) return [];
-  const style = resolveProviderStyle(provider);
+  const style = resolveProviderStyle(provider, modelId);
   if (style === 'anthropic') {
     if (!modelId || !anthropicModelLikelySupportsThinking(modelId)) return [];
     return anthropicAdvertisedLevels(modelId);

@@ -26,9 +26,7 @@ import type {
   CompactionTrace,
   ContextPrepareResult,
   ContextPrepareTrigger,
-  ExternalBridgeHistoryMessage,
 } from './types';
-import { buildExternalBridgeContextMessages } from './externalBridgeContext';
 import { repairToolMessageIntegrity } from './toolMessageIntegrity';
 import { pruneFirstModelMessage } from './compactionPruner';
 
@@ -317,12 +315,6 @@ export async function prepareTurnContext(
   }
 
   return { messages: working, didAdjust: false };
-}
-
-export function buildExternalBridgeContext(
-  messages: ChatMessage[],
-): ExternalBridgeHistoryMessage[] {
-  return buildExternalBridgeContextMessages(messages);
 }
 
 export function extractLatestUserGoal(messages: ModelMessage[] | ChatMessage[]): string | undefined {

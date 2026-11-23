@@ -1,7 +1,6 @@
 export const STORAGE_KEY_HOSTS = 'netcatty_hosts_v1';
 export const STORAGE_KEY_KEYS = 'netcatty_keys_v1';
 export const STORAGE_KEY_GROUPS = 'netcatty_groups_v1';
-export const STORAGE_KEY_CUSTOM_GROUPS = STORAGE_KEY_GROUPS;
 export const STORAGE_KEY_SNIPPETS = 'netcatty_snippets_v1';
 export const STORAGE_KEY_SNIPPET_PACKAGES = 'netcatty_snippet_packages_v1';
 export const STORAGE_KEY_NOTES = 'netcatty_notes_v1';
@@ -70,9 +69,7 @@ export const STORAGE_KEY_VAULT_SIDEBAR_WIDTH = 'netcatty_vault_sidebar_width_v1'
 export const STORAGE_KEY_VAULT_KEYS_VIEW_MODE = 'netcatty_vault_keys_view_mode_v1';
 export const STORAGE_KEY_VAULT_PROXY_PROFILES_VIEW_MODE = 'netcatty_vault_proxy_profiles_view_mode_v1';
 export const STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE = 'netcatty_vault_snippets_view_mode_v1';
-export const STORAGE_KEY_VAULT_NOTES_VIEW_MODE = 'netcatty_vault_notes_view_mode_v1';
 export const STORAGE_KEY_VAULT_NOTES_EDITOR_MODE = 'netcatty_vault_notes_editor_mode_v1';
-export const STORAGE_KEY_VAULT_NOTES_SELECTED_GROUP = 'netcatty_vault_notes_selected_group_v1';
 export const STORAGE_KEY_VAULT_NOTES_TREE_WIDTH = 'netcatty_vault_notes_tree_width_v1';
 export const STORAGE_KEY_VAULT_NOTES_FONT_FAMILY = 'netcatty_vault_notes_font_family_v1';
 export const STORAGE_KEY_VAULT_NOTES_FONT_SIZE = 'netcatty_vault_notes_font_size_v1';
@@ -270,11 +267,6 @@ export const STORAGE_KEY_AI_PANEL_DIAGNOSTIC_PROFILE = 'netcatty.aiDebug.profile
 
 // SFTP Transfer Concurrency
 export const STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY = 'netcatty_sftp_transfer_concurrency_v1';
-/**
- * Legacy key only. Folder full-tree pre-scan was removed; values are ignored
- * so old localStorage / sync payloads do not resurrect a live setting.
- */
-export const STORAGE_KEY_SFTP_FOLDER_PRESCAN = 'netcatty_sftp_folder_prescan_v1';
 /** Skip files when target size + mtime already match the source (rsync-like). */
 export const STORAGE_KEY_SFTP_SKIP_UNCHANGED = 'netcatty_sftp_skip_unchanged_v1';
 /**

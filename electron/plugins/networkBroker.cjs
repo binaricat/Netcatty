@@ -5,6 +5,7 @@ const validateLease = createDefinitionValidator("SecretLeaseRef");
 const validateAuthorization = createDefinitionValidator("PluginNetworkAuthorization");
 
 const { PluginRpcError, RPC_ERRORS } = require("./rpcRouter.cjs");
+const { invalidArgument } = require("./validationUtils.cjs");
 const { PLUGIN_RPC_MAX_RAW_BYTES } = require("./constants.cjs");
 const { canonicalizeNetworkOrigin } = require("./permissionResources.cjs");
 
@@ -22,10 +23,6 @@ const FORBIDDEN_REQUEST_HEADERS = new Set([
 ]);
 const SENSITIVE_REDIRECT_HEADERS = new Set(["authorization", "cookie", "proxy-authorization"]);
 const ENTITY_REDIRECT_HEADERS = new Set(["content-encoding", "content-language", "content-type"]);
-
-function invalidArgument(message) {
-  return new PluginRpcError(RPC_ERRORS.invalidArgument, message);
-}
 
 async function cancelResponseBody(response, reason) {
   try { await response.body?.cancel?.(reason); }

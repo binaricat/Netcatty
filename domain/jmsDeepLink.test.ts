@@ -4,11 +4,15 @@ import {
   buildJmsDeepLinkEphemeralHost,
   isSupportedJmsProtocol,
   parseJmsDeepLink,
+  parseJmsDeepLinkResult,
 } from "./jmsDeepLink";
 import { resolveHostAutofillPassword } from "./sshAuth";
 
+const encodeRawJson = (value: unknown): string =>
+  `jms://${Buffer.from(JSON.stringify(value), "utf8").toString("base64")}`;
+
 const encodePayload = (payload: Record<string, unknown>): string =>
-  `jms://${Buffer.from(JSON.stringify(payload), "utf8").toString("base64")}`;
+  encodeRawJson(payload);
 
 const validPayload = {
   version: 2,
@@ -177,4 +181,95 @@ test("buildJmsDeepLinkEphemeralHost keeps telnet payloads on the JumpServer ssh 
   assert.equal(host.telnetPassword, undefined);
   assert.equal(host.autoOpenSftpPanel, undefined);
   assert.equal(host.ephemeral, true);
+});
+
+test("parseJmsDeepLinkResult reports unsupported_protocol for JumpServer v4 RDP payload without endpoint or token", () => {
+  assert.deepEqual(
+    parseJmsDeepLinkResult(encodePayload({
+      version: 2,
+      protocol: "rdp",
+      name: "admin@windows-host",
+      file: { name: "admin@windows-host.rdp", content: "full address:s:10.0.0.10:3389" },
+    })),
+    { ok: false, reason: "unsupported_protocol", protocol: "rdp" },
+  );
+
+  assert.deepEqual(
+    parseJmsDeepLinkResult(encodePayload({
+      protocol: "  RDP  ",
+    })),
+    { ok: false, reason: "unsupported_protocol", protocol: "rdp" },
+  );
+});
+
+test("parseJmsDeepLinkResult reports unsupported_protocol for vnc, database, and k8s payloads without endpoint or token", () => {
+  for (const protocol of ["vnc", "mysql", "postgresql", "k8s"]) {
+    assert.deepEqual(
+      parseJmsDeepLinkResult(encodePayload({ protocol })),
+      { ok: false, reason: "unsupported_protocol", protocol },
+    );
+  }
+});
+
+test("parseJmsDeepLinkResult returns invalid for malformed links, missing protocol, or non-object JSON", () => {
+  assert.deepEqual(parseJmsDeepLinkResult(""), { ok: false, reason: "invalid" });
+  assert.deepEqual(parseJmsDeepLinkResult("ssh://example.com"), { ok: false, reason: "invalid" });
+  assert.deepEqual(parseJmsDeepLinkResult("jms://"), { ok: false, reason: "invalid" });
+  assert.deepEqual(parseJmsDeepLinkResult("jms://%%%"), { ok: false, reason: "invalid" });
+  assert.deepEqual(parseJmsDeepLinkResult("jms://eyJub3QtanNvbiI6"), { ok: false, reason: "invalid" });
+
+  for (const nonObject of [null, [], "rdp", 123, true]) {
+    assert.deepEqual(parseJmsDeepLinkResult(encodeRawJson(nonObject)), { ok: false, reason: "invalid" });
+    assert.equal(parseJmsDeepLink(encodeRawJson(nonObject)), null);
+  }
+
+  assert.deepEqual(parseJmsDeepLinkResult(encodePayload({})), { ok: false, reason: "invalid" });
+  assert.deepEqual(parseJmsDeepLinkResult(encodePayload({ protocol: "   " })), { ok: false, reason: "invalid" });
+  assert.deepEqual(parseJmsDeepLinkResult(encodePayload({ protocol: 123 })), { ok: false, reason: "invalid" });
+});
+
+test("parseJmsDeepLinkResult returns invalid when supported ssh payload is missing endpoint or token", () => {
+  assert.deepEqual(
+    parseJmsDeepLinkResult(encodePayload({
+      protocol: "ssh",
+      token: { id: "token-id", value: "token-secret" },
+    })),
+    { ok: false, reason: "invalid" },
+  );
+  assert.deepEqual(
+    parseJmsDeepLinkResult(encodePayload({
+      protocol: "ssh",
+      endpoint: { host: "gw.example.com", port: 2222 },
+    })),
+    { ok: false, reason: "invalid" },
+  );
+  assert.deepEqual(
+    parseJmsDeepLinkResult(encodePayload({
+      ...validPayload,
+      endpoint: { host: "gw.example.com", port: 70000 },
+    })),
+    { ok: false, reason: "invalid" },
+  );
+});
+
+test("parseJmsDeepLinkResult returns ok with target for valid ssh, sftp, and telnet payloads", () => {
+  for (const protocol of ["ssh", "sftp", "telnet"]) {
+    assert.deepEqual(
+      parseJmsDeepLinkResult(encodePayload({
+        ...validPayload,
+        protocol,
+      })),
+      {
+        ok: true,
+        target: {
+          protocol,
+          hostname: "gw.example.com",
+          port: 2222,
+          username: "JMS-token-id",
+          password: "token-secret",
+          label: "Production Server",
+        },
+      },
+    );
+  }
 });

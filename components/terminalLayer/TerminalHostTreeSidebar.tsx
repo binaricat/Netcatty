@@ -39,7 +39,7 @@ import {
 import { themeFingerprint } from '../../application/state/useActiveChromeTheme';
 import { buildHostTreeThemeFromTerminalTheme } from '../../infrastructure/theme/terminalAppearanceTokens';
 import { cn } from '../../lib/utils';
-import { matchesHostSearchQuery, matchesSearchQuery } from '../../lib/searchMatcher';
+import { matchesHostSearchQuery, matchesSearchQuery } from '../../domain/searchMatcher';
 import type { GroupConfig, GroupNode, Host, TerminalTheme } from '../../types';
 import { HostTreeGroupContextMenuContent, HostTreeHostContextMenuContent } from '../host/HostTreeContextMenus';
 import { HostTreeGroupInlineRenameInput } from '../host/HostTreeGroupInlineRenameInput';

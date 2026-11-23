@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useMemo, useState } from 'react';
 
 import type { QuickSwitcherProps } from '../../components/QuickSwitcher';
 import { LazyLoadBoundary } from '../../components/ui/lazy-load-boundary';
-import { getHostSearchMatch } from '../../lib/searchMatcher';
+import { getHostSearchMatch } from '../../domain/searchMatcher';
 import type { Host } from '../../types';
 
 const LazyQuickSwitcher = lazy(() =>

@@ -71,6 +71,30 @@ test('buildManagedAgentState keeps unrelated defaults when removing stale manage
   assert.equal(state.defaultAgentId, 'custom-agent');
 });
 
+test('a failed saved-path probe keeps the override, preferences, and default until recovery', () => {
+  const agent: ExternalAgentConfig = {
+    id: 'discovered_copilot',
+    name: 'GitHub Copilot CLI',
+    command: 'C:/npm/copilot.cmd',
+    commandSource: 'manual',
+    sdkBackend: 'copilot',
+    enabled: false,
+    available: true,
+  };
+  const unavailable = buildManagedAgentState([agent], agent.id, 'copilot', null, 'manual');
+  assert.deepEqual(unavailable.agents, [{ ...agent, available: false }]);
+  assert.equal(unavailable.defaultAgentId, agent.id);
+  assert.equal(getInitialManagedAgentPaths(unavailable.agents).copilot, agent.command);
+
+  const recovered = buildManagedAgentState(unavailable.agents, agent.id, 'copilot', {
+    path: agent.command, version: '1.0.106', available: true,
+  }, 'manual');
+  assert.equal(recovered.agents[0].available, true);
+  assert.equal(recovered.agents[0].enabled, false);
+  assert.equal(recovered.defaultAgentId, agent.id);
+  assert.deepEqual(buildManagedAgentState(recovered.agents, agent.id, 'copilot', null, 'auto').agents, []);
+});
+
 test('buildManagedAgentState stores the system Claude executable for SDK runs', () => {
   const state = buildManagedAgentState(
     [],

@@ -9,6 +9,11 @@ export interface JmsDeepLinkTarget {
   label: string;
 }
 
+export type JmsDeepLinkParseResult =
+  | { ok: true; target: JmsDeepLinkTarget }
+  | { ok: false; reason: "unsupported_protocol"; protocol: string }
+  | { ok: false; reason: "invalid" };
+
 export interface JmsDeepLinkDraftOptions {
   id: string;
   now: number;
@@ -34,7 +39,10 @@ const decodeBase64Payload = (encoded: string): string | null => {
 };
 
 const parsePort = (value: unknown): number | null => {
-  const port = typeof value === "string" ? Number(value.trim()) : Number(value);
+  if (typeof value !== "number" && typeof value !== "string") {
+    return null;
+  }
+  const port = typeof value === "string" ? Number(value.trim()) : value;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return null;
   }
@@ -47,12 +55,15 @@ const nonEmptyString = (value: unknown): string | null => {
   return trimmed ? trimmed : null;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 export const isSupportedJmsProtocol = (protocol: string): boolean => {
   const normalized = protocol.toLowerCase();
   return normalized === "ssh" || normalized === "sftp" || normalized === "telnet";
 };
 
-export const parseJmsDeepLink = (rawUrl: string): JmsDeepLinkTarget | null => {
+const parseJmsPayload = (rawUrl: string): Record<string, unknown> | null => {
   if (typeof rawUrl !== "string") return null;
   const trimmed = rawUrl.trim();
   if (!trimmed.toLowerCase().startsWith(JMS_PROTOCOL_PREFIX)) return null;
@@ -63,30 +74,32 @@ export const parseJmsDeepLink = (rawUrl: string): JmsDeepLinkTarget | null => {
   const jsonText = decodeBase64Payload(encoded);
   if (!jsonText) return null;
 
-  let payload: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    payload = JSON.parse(jsonText) as Record<string, unknown>;
+    parsed = JSON.parse(jsonText);
   } catch {
     return null;
   }
 
-  const protocol = String(payload.protocol || "").toLowerCase();
-  if (!protocol) return null;
+  if (!isRecord(parsed)) return null;
+  return parsed;
+};
 
-  const tokenId = nonEmptyString(
-    (payload.token as Record<string, unknown> | undefined)?.id ?? payload.id,
-  );
-  const tokenValue = nonEmptyString(
-    (payload.token as Record<string, unknown> | undefined)?.value ?? payload.value,
-  );
+const extractJmsTarget = (
+  payload: Record<string, unknown>,
+  protocol: string,
+): JmsDeepLinkTarget | null => {
+  const token = isRecord(payload.token) ? payload.token : undefined;
+  const tokenId = nonEmptyString(token?.id ?? payload.id);
+  const tokenValue = nonEmptyString(token?.value ?? payload.value);
   if (!tokenId || !tokenValue) return null;
 
-  const endpoint = payload.endpoint as Record<string, unknown> | undefined;
+  const endpoint = isRecord(payload.endpoint) ? payload.endpoint : undefined;
   const hostname = nonEmptyString(endpoint?.host);
   const port = parsePort(endpoint?.port);
   if (!hostname || port === null) return null;
 
-  const asset = payload.asset as Record<string, unknown> | undefined;
+  const asset = isRecord(payload.asset) ? payload.asset : undefined;
   const label = nonEmptyString(asset?.name) || nonEmptyString(payload.name) || hostname;
 
   return {
@@ -97,6 +110,33 @@ export const parseJmsDeepLink = (rawUrl: string): JmsDeepLinkTarget | null => {
     password: tokenValue,
     label,
   };
+};
+
+export const parseJmsDeepLinkResult = (rawUrl: string): JmsDeepLinkParseResult => {
+  const payload = parseJmsPayload(rawUrl);
+  if (!payload) return { ok: false, reason: "invalid" };
+
+  const protocol = nonEmptyString(payload.protocol)?.toLowerCase();
+  if (!protocol) return { ok: false, reason: "invalid" };
+
+  if (!isSupportedJmsProtocol(protocol)) {
+    return { ok: false, reason: "unsupported_protocol", protocol };
+  }
+
+  const target = extractJmsTarget(payload, protocol);
+  if (!target) return { ok: false, reason: "invalid" };
+
+  return { ok: true, target };
+};
+
+export const parseJmsDeepLink = (rawUrl: string): JmsDeepLinkTarget | null => {
+  const payload = parseJmsPayload(rawUrl);
+  if (!payload) return null;
+
+  const protocol = nonEmptyString(payload.protocol)?.toLowerCase();
+  if (!protocol) return null;
+
+  return extractJmsTarget(payload, protocol);
 };
 
 export const buildJmsDeepLinkEphemeralHost = (

@@ -614,8 +614,10 @@ export async function saveSyncAnchorImpl(this: any,
 ): Promise<void> {
     const signature = await this.createSyncedFileSignature(syncedFile);
     assertCanPersist?.();
+    const validator = provider === 'webdav' ? this.adapters?.get(provider)?.remoteValidator : undefined;
     this.saveToStorage(this.syncAnchorKey(provider), {
       signature,
+      ...(validator?.signature === signature ? { webdavEtag: validator.etag } : {}),
       version: syncedFile?.meta.version ?? 0,
       updatedAt: syncedFile?.meta.updatedAt ?? 0,
       deviceId: syncedFile?.meta.deviceId,
@@ -648,15 +650,24 @@ export function clearSyncAnchorImpl(this: any,provider?: CloudProvider): void {
 export async function inspectProviderRemoteStateImpl(this: any,
   provider: CloudProvider,
   adapter: CloudAdapter,
+  allowNotModified = false,
 ): Promise<{
   remoteChanged: boolean;
   remoteFile: SyncedFile | null;
   error?: string;
 }> {
     try {
-      const remoteFile = await adapter.download();
-      const currentSignature = await this.createSyncedFileSignature(remoteFile);
       const anchor = this.loadSyncAnchor(provider);
+      // Only runtime inspections may omit the body. Upload preflight also uses
+      // unchanged remote payloads to preserve remote-only data and check schema.
+      const conditional = allowNotModified && provider === 'webdav'
+        && anchor?.signature && anchor.webdavEtag
+        && anchor.resourceId === (adapter.resourceId || this.state.providers[provider].resourceId || null)
+        && adapter.inspectRemote;
+      const result = conditional ? await adapter.inspectRemote!(anchor.webdavEtag) : null;
+      if (result?.notModified) return { remoteChanged: false, remoteFile: null };
+      const remoteFile = result ? result.remoteFile : await adapter.download();
+      const currentSignature = await this.createSyncedFileSignature(remoteFile);
       const currentResourceId = adapter.resourceId || this.state.providers[provider].resourceId || null;
 
       const decision = decideRemoteChanged({
@@ -665,6 +676,12 @@ export async function inspectProviderRemoteStateImpl(this: any,
         anchor,
         hasRemoteFile: Boolean(remoteFile),
       });
+      // Seed/refresh the ETag for existing anchors too, including upgrades from
+      // anchors without validators. This does not record a download or lastSync.
+      if (!decision.remoteChanged && provider === 'webdav'
+        && adapter.remoteValidator?.etag !== anchor?.webdavEtag) {
+        await this.saveSyncAnchor(provider, remoteFile, currentResourceId);
+      }
 
       return {
         remoteChanged: decision.remoteChanged,
@@ -712,7 +729,7 @@ export async function inspectProviderRemoteImpl(this: any,provider: CloudProvide
     }
 
     const adapter = await this.getConnectedAdapter(provider);
-    const inspection = await this.inspectProviderRemoteState(provider, adapter);
+    const inspection = await this.inspectProviderRemoteState(provider, adapter, true);
     if (inspection.error) {
       throw new Error(inspection.error);
     }

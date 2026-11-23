@@ -98,7 +98,8 @@ function countModelsInPayload(data: string | undefined): number | undefined {
 
 /**
  * Map a lightweight `/models` (or equivalent) probe response to green / yellow / red.
- * Yellow covers slow-but-successful replies and empty model catalogs.
+ * Yellow covers slow-but-successful replies, empty model catalogs, and HTTP 404
+ * (gateways that work for chat without exposing a models listing route).
  */
 export function classifyProviderProbeResponse(input: {
   ok: boolean;
@@ -114,6 +115,14 @@ export function classifyProviderProbeResponse(input: {
     statusCode: input.status,
     ...(input.error ? { error: input.error } : {}),
   };
+
+  if (input.status === 404) {
+    return {
+      ...base,
+      health: "warn",
+      error: input.error || "Model list not available (HTTP 404)",
+    };
+  }
 
   if (!input.ok || input.status < 200 || input.status >= 300) {
     return {
@@ -182,7 +191,12 @@ export async function probeProviderConnection(input: {
     await bridge.aiAllowlistAddHost(baseURL);
   }
   const url = buildProviderProbeUrl(baseURL, endpoint);
-  const headers = buildModelDiscoveryHeaders(input.style, input.apiKey, input.customHeaders);
+  const headers = buildModelDiscoveryHeaders(
+    input.style,
+    input.apiKey,
+    input.customHeaders,
+    baseURL,
+  );
   const result = await bridge.aiFetch(
     url,
     "GET",

@@ -70,6 +70,10 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 //     the final `]` before `$`/`#` is the delimiter.
 const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\n\r]+)?\])[#$]$/;
 
+// Bracket PS1 without @host, with bash `\t` time: `[\u \t \w]$` -> `[root 12:04:23 ~]$` (#4276).
+// Require HH:MM:SS so loose `[word]$` output cannot count as idle.
+const BRACKET_TIME_POSIX_PROMPT_PATTERN = /^\[[^\s@\]]+\s+\d{2}:\d{2}:\d{2}(?:\s+[^\n\r\]]+)?\][#$]$/;
+
 // Space-separated bash PS1 `\u@\h \w $ ` renders as `user@host ~ $`.
 // macOS ships zsh with `%n@%m %1~ %#`, which renders as
 // `user@host ~ %` / `user@host My Project %`; privileged shells end in `#`.
@@ -100,6 +104,36 @@ const OH_MY_ZSH_YS_HOST_LINE_PATTERN = /^#\s+[^\s@]+\s+@\s+[^\s]+(?:\s+[^\n\r]+)
 // Require a hostname and a home/absolute path, excluding prompt delimiters
 // within the path so partially entered commands do not count as idle prompts.
 const ALPINE_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~(?:\/[^#$\n\r]*)?|\/[^#$\n\r]*)[#$]$/;
+
+// macOS / bash root prompt after `sudo -i`: PS1 `\h:\W \u\$` renders as
+// `host:dir user#` (e.g. `ChrisdeMacBook-Air:~ root#`, `host:/var/root root#`).
+// It has NO `@`, so POSIX / ZSH / PAREN (all `user@host`-shaped) miss it, and
+// ALPINE only covers `host:~#` with NO ` user` segment. Pure-shape only:
+// `host:` + path + whitespace + username + trailing `[#$]`, no `@`; the path
+// segment excludes whitespace (incl. CR/LF), `:`, `#`, `$` so partially typed
+// commands cannot match. See issue #4195.
+// The path segment ALSO excludes `\` and `>` (Windows path / cmd prompt
+// markers). Without this, a cmd.exe line with pending input such as
+// `C:\Users\alice>echo hello#` or `C:\> dir#` is misread as host `C` + `:` +
+// path `\Users\alice>echo` / `\>`, then ` hello` / ` dir` as the username and
+// the trailing `#` as the prompt marker — opening the readiness gate on a
+// prompt that still has unfinished input. That is exactly the #4048 objection
+// (treating prompt-with-input as idle-ready risks typing into unfinished
+// input), so drive-letter / `>` forms are rejected outright. The username
+// whitelist `[A-Za-z0-9_.-]+` already cannot contain `\`, `>` or `:`.
+// `PS C:\>` stays owned by POWERSHELL_PROMPT_PATTERN (checked before this
+// whitelist) and `C:\>` by CMD_PROMPT_PATTERN; no collision.
+// Deliberately NO shellKind gate: `sudo -i` does not refresh shellKind tracking
+// (`detectShellKind` runs at connect time in terminalBridge.cjs; `_loginShellKind`
+// comes from sessionShellKind.cjs), so the live root sh/bash is still tracked as
+// `zsh`. A `shellKind ∈ {posix, bash}` gate would reject exactly this session;
+// every whitelist entry here is pure-shape for the same reason, and a shellKind
+// gate cannot be the sole fix for this bug for the same staleness reason.
+// Residual false-ready risk: any program printing `host:dir user#` as its last
+// line could be mistaken for an idle prompt. That is the same risk class shared
+// by every whitelist pattern (POSIX / ZSH / ALPINE / ...); this adds no new
+// mitigation and does not change existing recognition semantics.
+const MACOS_ROOT_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~|\/|[^\s:#$>\\]+)\s+[A-Za-z0-9_.-]+[#$]$/;
 
 // Powerlevel10k / similar Unicode prompt-ending ❯ (U+276F). Common idle forms:
 // `~ ❯`, `~/path ❯`, `/tmp ❯`, short-dir `proj ❯`, optional `user@host `
@@ -137,8 +171,10 @@ function isDefaultPosixPromptLine(line) {
   const withoutEnvPrefix = normalized.replace(/^\([^()\n\r]+\)\s+/, "");
   return (
     POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    BRACKET_TIME_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     PAREN_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ALPINE_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    MACOS_ROOT_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ZSH_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     POWERLEVEL10K_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN.test(withoutEnvPrefix)

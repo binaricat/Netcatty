@@ -154,7 +154,7 @@ export const ModelSelector: React.FC<{
         await bridge.aiAllowlistAddHost(baseURL);
       }
       const url = buildProviderProbeUrl(baseURL, effectiveModelsEndpoint);
-      const headers = buildModelDiscoveryHeaders(resolvedStyle, apiKey, customHeaders);
+      const headers = buildModelDiscoveryHeaders(resolvedStyle, apiKey, customHeaders, baseURL);
       const result = await bridge.aiFetch(url, "GET", headers, undefined, undefined, undefined, undefined, skipTLSVerify);
       if (!result.ok) {
         if (discoveryKeyRef.current !== requestKey) return;

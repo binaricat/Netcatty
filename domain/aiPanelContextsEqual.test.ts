@@ -3,7 +3,9 @@ import test from 'node:test';
 
 import {
   aiPanelContextsEqual,
+  aiTerminalSessionInfosEqual,
   retainStableAiPanelContexts,
+  retainStableAiTerminalSessionInfos,
   type AIPanelContextLike,
   type AIPanelTerminalSessionLike,
 } from './aiPanelContextsEqual.ts';
@@ -56,4 +58,15 @@ test('aiPanelContextsEqual is false when port-forward status changes', () => {
     })],
   })]]);
   assert.equal(aiPanelContextsEqual(a, b), false);
+});
+
+test('retainStableAiTerminalSessionInfos preserves identity for structurally equal lists', () => {
+  const a = [sessionInfo({ sessionId: 's1' }), sessionInfo({ sessionId: 's2', label: 'core' })];
+  const b = [sessionInfo({ sessionId: 's1' }), sessionInfo({ sessionId: 's2', label: 'core' })];
+  assert.equal(aiTerminalSessionInfosEqual(a, b), true);
+  assert.equal(retainStableAiTerminalSessionInfos(a, b), a);
+
+  const c = [sessionInfo({ sessionId: 's1' }), sessionInfo({ sessionId: 's2', label: 'renamed' })];
+  assert.equal(aiTerminalSessionInfosEqual(a, c), false);
+  assert.equal(retainStableAiTerminalSessionInfos(a, c), c);
 });

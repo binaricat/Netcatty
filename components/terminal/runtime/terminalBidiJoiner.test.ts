@@ -1,0 +1,128 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { createPaneBidiJoiner, findRightToLeftRuns, mightContainRightToLeft } from "./terminalBidiJoiner";
+
+const slice = (text: string, ranges: [number, number][]) =>
+  ranges.map(([start, end]) => text.slice(start, end));
+
+test("pure left-to-right text is left alone", () => {
+  assert.deepEqual(findRightToLeftRuns("ls -la /var/log 2>&1 | grep error"), []);
+  assert.deepEqual(findRightToLeftRuns("10.0.0.138 (eth0) 100%"), []);
+  assert.deepEqual(findRightToLeftRuns(""), []);
+});
+
+test("the cheap detection gate rejects the ASCII and unrelated astral characters", () => {
+  assert.equal(mightContainRightToLeft(String.raw`update DEPLOY 0 2 3 \uD802`), false);
+  assert.equal(mightContainRightToLeft("shell 🛠️ 👍"), false);
+  assert.equal(mightContainRightToLeft("𞤀𞤤"), true);
+});
+
+test("supplementary RTL stays whole and returns xterm UTF-16 offsets", () => {
+  const adlam = "𞤀𞤤";
+  const text = `🛠 ${adlam} x`;
+  assert.deepEqual(findRightToLeftRuns(text), [[3, 7]]);
+  assert.deepEqual(findRightToLeftRuns(`${adlam} 123`), [[0, 8]]);
+});
+
+test("Persian prose is one run so the browser can order and join it", () => {
+  const text = "سلام دنیا";
+  assert.deepEqual(findRightToLeftRuns(text), [[0, text.length]]);
+});
+
+test("Arabic prose keeps its interior spaces and drops trailing ones", () => {
+  const text = "مرحبا بالعالم   ";
+  assert.deepEqual(slice(text, findRightToLeftRuns(text)), ["مرحبا بالعالم"]);
+});
+
+test("a Persian word typed after a shell command is its own run", () => {
+  const text = 'echo "سلام"';
+  assert.deepEqual(slice(text, findRightToLeftRuns(text)), ["سلام"]);
+});
+
+test("numbers inside Persian text stay in the run", () => {
+  const text = "قیمت 100 تومان";
+  assert.deepEqual(findRightToLeftRuns(text), [[0, text.length]]);
+});
+
+test("an IP address after Arabic text belongs to the Arabic run", () => {
+  const text = "العنوان 10.0.0.138";
+  assert.deepEqual(findRightToLeftRuns(text), [[0, text.length]]);
+});
+
+test("Persian digits inside Persian text stay in the run", () => {
+  const text = "تعداد ۵۰ فایل";
+  assert.deepEqual(findRightToLeftRuns(text), [[0, text.length]]);
+});
+
+test("mixed Persian and English splits at the English words", () => {
+  const text = "فایل config.yaml پیدا نشد";
+  assert.deepEqual(slice(text, findRightToLeftRuns(text)), ["فایل", "پیدا نشد"]);
+});
+
+test("English with a Persian phrase in the middle only joins the phrase", () => {
+  const text = "Error: فایل پیدا نشد (code 2)";
+  assert.deepEqual(slice(text, findRightToLeftRuns(text)), ["فایل پیدا نشد"]);
+});
+
+test("brackets around RTL text inside an RTL run are kept with it", () => {
+  const text = "مثال (نص) هنا";
+  assert.deepEqual(findRightToLeftRuns(text), [[0, text.length]]);
+});
+
+test("Hebrew is handled like Arabic", () => {
+  const text = "ls שלום עולם";
+  assert.deepEqual(slice(text, findRightToLeftRuns(text)), ["שלום עולם"]);
+});
+
+test("a single right-to-left character is not worth joining", () => {
+  assert.deepEqual(findRightToLeftRuns("a ب c"), []);
+});
+
+test("ranges are sorted and do not overlap", () => {
+  const text = "الف abc باء def جيم";
+  const ranges = findRightToLeftRuns(text);
+  assert.deepEqual(slice(text, ranges), ["الف", "باء", "جيم"]);
+  for (let i = 1; i < ranges.length; i++) {
+    assert.ok(ranges[i][0] >= ranges[i - 1][1]);
+  }
+});
+
+test("ASCII output never requests a DOM-only renderer", async () => {
+  let switches = 0;
+  const join = createPaneBidiJoiner(() => true, () => { switches++; });
+  assert.deepEqual(join("192.0.2.1: ready"), []);
+  assert.deepEqual(join("100 lines of output"), []);
+  await Promise.resolve();
+  assert.equal(switches, 0);
+});
+
+test("RTL joins are withheld from WebGL until the pane switches once to DOM", async () => {
+  let webgl = true;
+  let switches = 0;
+  const join = createPaneBidiJoiner(() => webgl, () => {
+    switches++;
+    webgl = false;
+  });
+  const short = "سلام دنیا";
+  const long = "این یک جمله فارسی معمولی برای بررسی خوانایی متن در یک پنجره عریض است";
+  assert.deepEqual(join(short), []);
+  assert.deepEqual(join(long), []);
+  assert.equal(switches, 0);
+
+  await Promise.resolve();
+  assert.equal(switches, 1);
+  assert.deepEqual(join(short), [[0, short.length]]);
+  assert.deepEqual(join(long), [[0, long.length]]);
+  await Promise.resolve();
+  assert.equal(switches, 1);
+});
+
+test("RTL received before deferred WebGL activation keeps the pane on DOM", async () => {
+  let switches = 0;
+  const text = "سلام";
+  const join = createPaneBidiJoiner(() => false, () => { switches++; });
+  assert.deepEqual(join(text), [[0, text.length]]);
+  await Promise.resolve();
+  assert.equal(switches, 1);
+});

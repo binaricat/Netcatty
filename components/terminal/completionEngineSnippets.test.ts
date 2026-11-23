@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { getCompletions } from "./autocomplete/completionEngine";
 import { DEFAULT_AUTOCOMPLETE_SETTINGS } from "./autocomplete/useTerminalAutocomplete";
-import { getPinyinCacheStatsForTests, resetPinyinCacheForTests } from "../../lib/searchMatcher";
+import { getPinyinCacheStatsForTests, resetPinyinCacheForTests } from "../../domain/searchMatcher";
 import type { Snippet } from "../../domain/models";
 
 const deploySnippet: Snippet = { id: "d", label: "deploy", command: "kubectl apply -f ." };

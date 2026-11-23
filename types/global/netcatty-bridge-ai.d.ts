@@ -262,9 +262,6 @@ declare global {
     onAiStreamData?(requestId: string, cb: (data: string) => void): () => void;
     onAiStreamEnd?(requestId: string, cb: () => void): () => void;
     onAiStreamError?(requestId: string, cb: (error: string) => void): () => void;
-    onAiAgentStdout?(agentId: string, cb: (data: string) => void): () => void;
-    onAiAgentStderr?(agentId: string, cb: (data: string) => void): () => void;
-    onAiAgentExit?(agentId: string, cb: (code: number | null) => void): () => void;
   }
 }
 

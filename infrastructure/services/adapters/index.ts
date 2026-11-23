@@ -25,6 +25,9 @@ export interface CloudAdapter {
   readonly isAuthenticated: boolean;
   readonly accountInfo: ProviderAccount | null;
   readonly resourceId: string | null;
+  /** Validator tied to the exact snapshot read or successfully written. */
+  readonly remoteValidator?: { signature: string; etag: string };
+  inspectRemote?(etag: string): Promise<{ remoteFile: SyncedFile | null; notModified?: boolean }>;
   
   signOut(): void;
   initializeSync(): Promise<string | null>;
@@ -82,6 +85,7 @@ export const createAdapter = async (
         // WebDAVAdapter.upload already performs pad + strict body verify; skip the
         // shared bridge's second full re-read to avoid write amplification.
         assumeVerifiedWrites: true,
+        remoteInspection: raw,
       });
     }
     case 's3': {

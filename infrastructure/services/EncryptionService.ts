@@ -332,22 +332,6 @@ export const decryptPayload = async (
   return parsed;
 };
 
-/**
- * Verify a SyncedFile can be decrypted with given password
- * Does not return the payload, just validates the password
- */
-export const verifySyncedFile = async (
-  syncedFile: SyncedFile,
-  password: string
-): Promise<boolean> => {
-  try {
-    await decryptPayload(syncedFile, password);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 // ============================================================================
 // Master Key Management
 // ============================================================================

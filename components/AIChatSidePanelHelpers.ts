@@ -533,3 +533,51 @@ export function retainStoredModelPresetForCatalog(
 export function generateId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/**
+ * A scope rebind must not race an in-flight agent turn: the stream keeps
+ * targeting the chat's OLD scope while the active map and panel pointer move
+ * underneath it, corrupting streaming state. Chosen over rejecting the rebind
+ * because `stopStreamingForSession` awaits `stopAgentTurn` +
+ * `waitForActiveTurn` — termination is cleanly observable, so awaiting the
+ * stop preserves the user's rebind intent instead of bouncing them with a
+ * "stop first" notice.
+ */
+export async function stopActiveTurnBeforeScopeRebind(
+  sessionId: string,
+  deps: {
+    abortControllersRef: { current: Map<string, unknown> };
+    streamingSessionIds: ReadonlySet<string>;
+    stopStreamingForSession: (id: string) => Promise<void>;
+  },
+): Promise<void> {
+  if (deps.abortControllersRef.current.has(sessionId) || deps.streamingSessionIds.has(sessionId)) {
+    await deps.stopStreamingForSession(sessionId);
+  }
+}
+
+/**
+ * Keep persisted workspace `anchorChatId` pointers in sync when a chat is
+ * rebound to another scope: clear every OTHER workspace whose anchor still
+ * points at `sessionId` (so a relaunch cannot reopen the moved chat inside its
+ * former workspace), and pin the destination workspace when rebinding to one.
+ */
+export function syncWorkspaceAnchorsForScopeRebind(
+  sessionId: string,
+  target: { type: 'terminal' | 'workspace'; targetId: string },
+  workspaces: ReadonlyArray<{ id: string; anchorChatId?: string }>,
+  onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void,
+): void {
+  if (!onSetWorkspaceAnchorChat) return;
+  for (const workspace of workspaces) {
+    if (workspace.anchorChatId !== sessionId) continue;
+    if (target.type === 'workspace' && workspace.id === target.targetId) continue;
+    onSetWorkspaceAnchorChat(workspace.id, null);
+  }
+  if (target.type === 'workspace') {
+    const dest = workspaces.find((workspace) => workspace.id === target.targetId);
+    if (!dest || dest.anchorChatId !== sessionId) {
+      onSetWorkspaceAnchorChat(target.targetId, sessionId);
+    }
+  }
+}

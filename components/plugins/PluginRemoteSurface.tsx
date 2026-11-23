@@ -13,6 +13,10 @@ const ATTRIBUTE_NAMES: Record<string, string> = { class: 'className', for: 'html
 const BOOLEAN_ATTRIBUTES = new Set(['checked', 'disabled', 'readonly', 'required', 'multiple', 'selected', 'open']);
 
 const SurfaceContext = createContext<{ css: string; onEvent(event: PluginSurfaceEvent): void; depth: number }>({ css: '', onEvent: () => {}, depth: 0 });
+function remoteText(nodes: RemoteNode[]): string {
+  return nodes.map((node) => (node.type === 3 ? node.data : node.type === 1 ? remoteText(node.children) : '')).join('');
+}
+
 const ResourceLoader = createContext<((path: string) => Promise<string>) | undefined>(undefined);
 
 function RemoteElement({ node, settled }: { node: RemoteNode; settled: boolean }): React.ReactNode {
@@ -27,10 +31,10 @@ function RemoteElement({ node, settled }: { node: RemoteNode; settled: boolean }
     return () => { cancelled = true; };
   }, [imagePath, loadImage]);
   const remoteSelection = JSON.stringify(node.type === 1 && node.element === 'select'
-    ? node.children.filter((child) => child.type === 1 && child.element === 'option' && Object.hasOwn(child.attributes, 'selected')).map((child) => child.type === 1 ? child.attributes.value ?? '' : '') : []);
+    ? node.children.filter((child) => child.type === 1 && child.element === 'option' && Object.hasOwn(child.attributes, 'selected')).map((child) => child.type === 1 ? child.attributes.value ?? remoteText(child.children).replace(/[\t\n\f\r ]+/g, ' ').trim() : '') : []);
   const [localSelection, setLocalSelection] = useState<string[]>(() => JSON.parse(remoteSelection));
   useEffect(() => { if (settled) setLocalSelection(JSON.parse(remoteSelection)); }, [remoteSelection, settled]);
-  const remoteValue = attrs.value;
+  const remoteValue = attrs.value ?? (node.type === 1 && node.element === 'textarea' ? remoteText(node.children) : undefined);
   const remoteChecked = Object.hasOwn(attrs, 'checked');
   const [localValue, setLocalValue] = useState(remoteValue ?? '');
   const [localChecked, setLocalChecked] = useState(remoteChecked);
@@ -62,7 +66,10 @@ function RemoteElement({ node, settled }: { node: RemoteNode; settled: boolean }
       if (event.currentTarget instanceof event.currentTarget.ownerDocument.defaultView!.HTMLInputElement) setLocalChecked(event.currentTarget.checked);
     };
   }
-  return React.createElement(node.element, props, ...(node.element === 'textarea' && remoteValue !== undefined ? [] : node.children).map((child) => <RemoteElement key={child.id} node={child} settled={settled} />));
+  // React treats textarea/option text specially; do not wrap it in components.
+  if (node.element === 'textarea') return React.createElement(node.element, props);
+  if (node.element === 'option') return React.createElement(node.element, props, remoteText(node.children));
+  return React.createElement(node.element, props, ...node.children.map((child) => <RemoteElement key={child.id} node={child} settled={settled} />));
 }
 
 /** Host-owned DOM, kept inside a closed shadow root and a clipped stacking context. */

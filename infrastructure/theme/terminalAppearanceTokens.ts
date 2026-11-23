@@ -338,12 +338,6 @@ export function buildHostTreeThemeFromTerminalTheme(theme: TerminalTheme): HostT
   };
 }
 
-export const terminalAppearancePanelStyle = {
-  backgroundColor: 'var(--nc-term-panel-bg, var(--background))',
-  color: 'var(--nc-term-panel-fg, var(--foreground))',
-  borderColor: 'var(--nc-term-panel-border, var(--border))',
-} as const;
-
 export const terminalAppearanceSidePanelStyle = {
   ['--terminal-sidepanel-bg' as const]: 'var(--nc-term-panel-bg, var(--background))',
   ['--terminal-sidepanel-fg' as const]: 'var(--nc-term-panel-fg, var(--foreground))',
@@ -362,15 +356,4 @@ export const terminalAppearanceThemePanelVars = {
   ['--terminal-panel-border' as const]: 'var(--nc-term-panel-border, var(--border))',
   ['--terminal-panel-hover' as const]: 'var(--nc-term-panel-hover, var(--accent))',
   ['--terminal-panel-active' as const]: 'var(--nc-term-panel-active, var(--accent))',
-} as const;
-
-export const terminalAppearanceHostTreeTheme = {
-  termBg: 'var(--nc-term-host-tree-bg, var(--nc-term-bg, var(--background)))',
-  termFg: 'var(--nc-term-host-tree-fg, var(--nc-term-fg, var(--foreground)))',
-  mutedFg: 'var(--nc-term-host-tree-muted, var(--nc-term-muted, var(--muted-foreground)))',
-  separator: 'var(--nc-term-host-tree-separator, var(--nc-term-border, var(--border)))',
-  rowHoverBg: 'var(--nc-term-host-tree-hover-bg, var(--nc-term-hover, transparent))',
-  rowActiveBg: 'var(--nc-term-host-tree-active-bg, var(--nc-term-active, transparent))',
-  rowDropBg: 'var(--nc-term-host-tree-drop-bg, var(--nc-term-active, transparent))',
-  folderFg: 'var(--nc-term-host-tree-folder-fg, var(--nc-term-fg, var(--foreground)))',
 } as const;

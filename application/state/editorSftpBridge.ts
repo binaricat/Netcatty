@@ -25,19 +25,6 @@ const writers = new Set<EditorSftpWrite>();
 
 const NOT_MY_CONNECTION_RE = /SFTP connection is no longer available/i;
 
-export const registerEditorSftpWriter = (fn: EditorSftpWrite | null) => {
-  // Pass `null` on cleanup — but cleanup also needs to know WHICH writer to
-  // remove. Callers who register once per mount should instead use
-  // `registerEditorSftpWriterScoped` below, which returns an unregister fn.
-  // This legacy signature is preserved for callers that prefer the
-  // register/unregister-with-null pattern: we clear ALL writers on null.
-  if (fn === null) {
-    writers.clear();
-    return;
-  }
-  writers.add(fn);
-};
-
 export const registerEditorSftpWriterScoped = (fn: EditorSftpWrite): (() => void) => {
   writers.add(fn);
   return () => {

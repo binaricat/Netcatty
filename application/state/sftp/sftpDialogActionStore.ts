@@ -1,11 +1,12 @@
 /**
  * SFTP Dialog Action Store
- * 
+ *
  * Manages dialog action triggers for SFTP operations.
  * This store allows keyboard shortcuts to trigger dialogs in the appropriate pane.
  */
 
-import { useSyncExternalStore, useEffect } from "react";
+import { useEffect } from "react";
+import { createExternalStore } from "../createExternalStore";
 import { sftpFocusStore, SftpFocusedSide } from "./sftpFocusStore";
 
 type SftpDialogActionType = "rename" | "delete" | "newFolder" | "newFile" | null;
@@ -18,65 +19,48 @@ interface SftpDialogAction {
   timestamp: number; // To distinguish different triggers of the same action
 }
 
-type ActionListener = () => void;
-
-let dialogAction: SftpDialogAction | null = null;
-const actionListeners = new Set<ActionListener>();
-
-const notifyListeners = () => {
-  actionListeners.forEach((listener) => listener());
-};
+const store = createExternalStore<SftpDialogAction | null>(null, {
+  isEqual: () => false,
+});
 
 export const sftpDialogActionStore = {
-  getSnapshot: (): SftpDialogAction | null => dialogAction,
-
-  subscribe: (listener: ActionListener) => {
-    actionListeners.add(listener);
-    return () => actionListeners.delete(listener);
-  },
+  getSnapshot: store.getSnapshot,
+  subscribe: store.subscribe,
 
   /**
    * Trigger a dialog action
    */
   trigger: (type: SftpDialogActionType, targetScopeId: string, targetFiles?: string[]) => {
     if (!type) {
-      dialogAction = null;
+      store.setSnapshot(null);
     } else {
-      dialogAction = {
+      store.setSnapshot({
         type,
         targetSide: sftpFocusStore.getFocusedSide(),
         targetScopeId,
         targetFiles,
         timestamp: Date.now(),
-      };
+      });
     }
-    notifyListeners();
   },
 
   /**
    * Clear the current action (called after a pane handles it)
    */
   clear: () => {
-    dialogAction = null;
-    notifyListeners();
+    store.setSnapshot(null);
   },
 
   /**
    * Get the current action
    */
-  get: (): SftpDialogAction | null => dialogAction,
+  get: store.getSnapshot,
 };
 
 /**
  * React hook to subscribe to dialog action changes
  */
-export const useSftpDialogAction = (): SftpDialogAction | null => {
-  return useSyncExternalStore(
-    sftpDialogActionStore.subscribe,
-    sftpDialogActionStore.getSnapshot,
-    sftpDialogActionStore.getSnapshot
-  );
-};
+export const useSftpDialogAction = (): SftpDialogAction | null => store.useStore();
 
 /**
  * React hook for a pane to respond to dialog actions
