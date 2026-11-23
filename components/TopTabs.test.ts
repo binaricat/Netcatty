@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const storage = new Map<string, string>();
@@ -47,6 +48,10 @@ test("host tree tab gutter never goes negative", () => {
 });
 
 test("top tab native exclusions stay bounded to the stationary scroll viewport", () => {
+  const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+  const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+  const topTabItemsSource = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
+
   const viewport = topTabsSource.match(/<div\s+ref=\{tabsContainerRef\}[\s\S]*?onClick=/);
   assert.ok(viewport, "expected the tab scroll viewport");
   assert.match(viewport[0], /className="[^"]*\btop-tab-scroll-viewport\b[^"]*"/);
