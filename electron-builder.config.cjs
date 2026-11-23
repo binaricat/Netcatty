@@ -1,6 +1,7 @@
 const { moshExtraResources } = require('./scripts/mosh-extra-resources.cjs');
 const { etExtraResources } = require('./scripts/et-extra-resources.cjs');
-const processEnv = require('node:process').env;
+const nodeProcess = require('node:process');
+const processEnv = nodeProcess.env;
 
 /**
  * @type {import('electron-builder').Configuration}
