@@ -114,6 +114,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@electron/asar": "4.2.0",
     "@ai-sdk/anthropic": "^4.0.0",
     "@ai-sdk/google": "^4.0.0",
     "@ai-sdk/openai": "4.0.11",

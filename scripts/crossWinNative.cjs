@@ -45,6 +45,7 @@ function assertWindowsNativePayload(root, { asarPath } = {}) {
     for (const entry of asar.listPackage(asarPath)) {
       if (!entry.endsWith(".node")) continue;
       const relativePath = entry.replace(/^\//, "");
+      if (asar.statFile(asarPath, relativePath).unpacked) continue;
       const bytes = asar.extractFile(asarPath, relativePath);
       if (!isPortableExecutableFile(bytes)) {
         incompatible.push(`${asarPath}:${relativePath}`);

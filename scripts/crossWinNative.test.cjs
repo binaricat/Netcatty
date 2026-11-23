@@ -94,3 +94,24 @@ test("cross-built Windows validation scans native modules packed inside app.asar
     /not a Windows x64[\s\S]*app\.asar/,
   );
 });
+
+test("cross-built Windows validation ignores removed unpacked entries until ASAR pruning", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-win-native-unpacked-"));
+  const sourceDir = path.join(root, "source");
+  const resourcesDir = path.join(root, "resources");
+  const unpackedDir = path.join(resourcesDir, "app.asar.unpacked");
+  const asarPath = path.join(resourcesDir, "app.asar");
+  const hostNativePath = path.join(
+    sourceDir,
+    "node_modules/node-pty/build/Release/pty.node",
+  );
+  writeFixture(hostNativePath, Buffer.from([0xcf, 0xfa, 0xed, 0xfe]));
+  fs.mkdirSync(resourcesDir, { recursive: true });
+  await asar.createPackageWithOptions(sourceDir, asarPath, { unpack: "**/*.node" });
+  fs.rmSync(path.join(
+    unpackedDir,
+    "node_modules/node-pty/build/Release/pty.node",
+  ));
+
+  assert.doesNotThrow(() => assertWindowsNativePayload(resourcesDir, { asarPath }));
+});
