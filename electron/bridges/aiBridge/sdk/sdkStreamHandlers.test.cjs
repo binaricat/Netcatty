@@ -2521,6 +2521,64 @@ test("list-models preserves saved models when a previously discovered bare CLI d
   }
 });
 
+test("list-models preserves saved models when an environment-configured OPENCODE_BIN symlink target disappears", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "netcatty-env-symlink-"));
+  const targetBin = nodePath.join(tmpDir, "opencode-real");
+  const symlinkBin = nodePath.join(tmpDir, "opencode-link");
+  fs.writeFileSync(targetBin, "#!/bin/sh\n");
+  fs.symlinkSync(targetBin, symlinkBin);
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    normalizeCliPathForPlatform: (value) => (fs.existsSync(value) ? value : null),
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("opencode");
+    t.mock.method(driver, "listModels", async () => [
+      { id: "openai/gpt-6", name: "GPT-6" },
+      { id: "anthropic/claude-6", name: "Claude 6" },
+    ]);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const request = {
+      sdkBackend: "opencode",
+      agentCommand: "opencode",
+      agentEnv: { OPENCODE_BIN: symlinkBin },
+    };
+
+    // 1. Seed catalog while OPENCODE_BIN symlink resolves to targetBin.
+    const seeded = await listModels({ sender: {} }, request);
+    assert.equal(seeded.source, "live");
+    assert.equal(seeded.models.length, 2);
+
+    // 2. Remove the symlink target and simulate restart: cacheOnly, normal load,
+    // and forced refresh must still recover the saved models via the env-bin alias.
+    fs.unlinkSync(targetBin);
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    driver.listModels.mock.mockImplementation(async () => {
+      throw new Error("spawn opencode ENOENT");
+    });
+
+    const cached = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(cached.source, "last-known-good");
+    assert.deepEqual(cached.models.map(({ id }) => id), ["openai/gpt-6", "anthropic/claude-6"]);
+
+    const normal = await listModels({ sender: {} }, request);
+    assert.equal(normal.source, "last-known-good");
+    assert.deepEqual(normal.models.map(({ id }) => id), ["openai/gpt-6", "anthropic/claude-6"]);
+    assert.equal(normal.warning, undefined);
+
+    const forced = await listModels({ sender: {} }, { ...request, force: true });
+    assert.equal(forced.source, "last-known-good");
+    assert.deepEqual(forced.models.map(({ id }) => id), ["openai/gpt-6", "anthropic/claude-6"]);
+    assert.match(forced.warning, /ENOENT/);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("list-models force refresh bypasses warm memory and last-known-good and updates both caches", async (t) => {
   const { getDriver } = require("./index.cjs");
   const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx();

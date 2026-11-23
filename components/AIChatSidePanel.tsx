@@ -1593,7 +1593,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     // Check freshness in the main process even if the renderer cache is warm.
     // Keep the existing choices usable while a stale catalog revalidates.
     void loadSdkRuntimeModelCatalog(target, { recheck: true }).then((catalog) => {
-      if (catalog) applySdkRuntimeModelCatalog(target, catalog);
+      if (catalog) applySdkRuntimeModelCatalog(target, catalog, { adoptCurrentModel: true });
     });
   }, [hasCodexCustomConfig, currentAgentConfig, buildExternalAgentRuntimeModelTarget,
     loadSdkRuntimeModelCatalog, applySdkRuntimeModelCatalog]);

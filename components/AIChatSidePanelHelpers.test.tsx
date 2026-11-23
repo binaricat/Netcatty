@@ -691,6 +691,10 @@ test('cacheOnly hydration in AIChatSidePanel reconciles cached refresh warnings 
     source,
     /target\.codexRuntime, false, true,\s*\)\.then\(\(result\) => \{[\s\S]*?reconcileRuntimeModelWarning\([\s\S]*?Boolean\(result\.warning\)[\s\S]*?applySdkRuntimeModelCatalog\(/,
   );
+  assert.match(
+    source,
+    /loadSdkRuntimeModelCatalog\(target, \{ recheck: true \}\)\.then\(\(catalog\) => \{\s*if \(catalog\) applySdkRuntimeModelCatalog\(target, catalog, \{ adoptCurrentModel: true \}\);/,
+  );
 });
 
 test('renderer model cache env hints cover every key the main-process catalog cache fingerprints', () => {

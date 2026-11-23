@@ -1261,7 +1261,24 @@ function registerSdkStreamHandlers(ctx) {
           rawConfiguredCommand
           && (rawConfiguredCommand.includes("/") || rawConfiguredCommand.includes("\\") || /^[a-z]:/i.test(rawConfiguredCommand)),
         );
-        const needsResolvedKeyAlias = isCursorCliLoginSentinel || !explicitBinPath || hasConfiguredPathLikeCommand;
+        const rawEnvBinPath = !hasConfiguredPathLikeCommand
+          ? (backendKey === "codebuddy"
+            ? String(env?.CODEBUDDY_CODE_PATH || "").trim()
+            : backendKey === "opencode"
+              ? String(env?.OPENCODE_BIN || "").trim()
+              : backendKey === "mimo"
+                ? String(env?.MIMOCODE_BIN || env?.MIMOCODE_BIN_PATH || "").trim()
+                : "")
+          : "";
+        const envBinMissing = Boolean(
+          rawEnvBinPath
+          && typeof normalizeCliPathForPlatform === "function"
+          && !normalizeCliPathForPlatform(rawEnvBinPath),
+        );
+        const needsResolvedKeyAlias = isCursorCliLoginSentinel
+          || !explicitBinPath
+          || hasConfiguredPathLikeCommand
+          || Boolean(rawEnvBinPath);
         const pathHash = needsResolvedKeyAlias
           ? createHash("sha256").update(String(shellEnv?.PATH || "")).digest("hex")
           : null;
@@ -1270,7 +1287,9 @@ function registerSdkStreamHandlers(ctx) {
             backendKey,
             hasConfiguredPathLikeCommand && !isCursorCliLoginSentinel
               ? `alias:configured:${rawConfiguredCommand}`
-              : `alias:${rawConfiguredCommand}:${String(initialCursorCliBinPath || "")}:${pathHash}`,
+              : rawEnvBinPath && !isCursorCliLoginSentinel
+                ? `alias:env-bin:${rawEnvBinPath}`
+                : `alias:${rawConfiguredCommand}:${String(initialCursorCliBinPath || "")}:${pathHash}`,
             env,
             runtimeKey,
           )
@@ -1418,7 +1437,7 @@ function registerSdkStreamHandlers(ctx) {
           return { ok: true, currentModelId: null, models: [] };
         }
 
-        let cacheKey = (!binPath && !isCursorCliLoginSentinel)
+        let cacheKey = ((!binPath || envBinMissing) && !isCursorCliLoginSentinel)
           ? (resolveAliasedKey() || buildCacheKey())
           : buildCacheKey();
         if (configuredPathError) {
