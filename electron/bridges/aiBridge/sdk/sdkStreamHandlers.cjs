@@ -1207,6 +1207,14 @@ function registerSdkStreamHandlers(ctx) {
         if (cursorAuthMode === "cli-login") {
           delete env.CURSOR_API_KEY;
         }
+        let configuredPathError = null;
+        if (!cacheOnly) {
+          try {
+            normalizeConfiguredCommandPath(agentCommand, normalizeCliPathForPlatform, { validate: true });
+          } catch (err) {
+            configuredPathError = err;
+          }
+        }
         const explicitBinPath = resolveSdkBackendBinPath({
           backendKey,
           configuredCommand: agentCommand,
@@ -1219,7 +1227,7 @@ function registerSdkStreamHandlers(ctx) {
           resolveCodexExecutableForSdk,
           resolveCodebuddyExecutableForSdk,
           allowPathProbe: false,
-          validateConfiguredPath: !cacheOnly,
+          validateConfiguredPath: false,
         });
         const binPath = cacheOnly || explicitBinPath
           ? explicitBinPath
@@ -1411,10 +1419,42 @@ function registerSdkStreamHandlers(ctx) {
         }
 
         let cacheKey = buildCacheKey();
+        if (configuredPathError) {
+          const fallbackKey = resolveAliasedKey() || cacheKey;
+          const fallbackImmediate = tryServeCachedCatalog(fallbackKey);
+          if (fallbackImmediate) {
+            const result = fallbackImmediate.promise ? await fallbackImmediate.promise : fallbackImmediate.value;
+            recordResolvedKeyAlias(fallbackKey);
+            return result;
+          }
+          const lastKnown = readLastKnownCatalogEntry(lastKnownPath, fallbackKey);
+          if (lastKnown) {
+            console.debug(
+              `[sdk] list-models(${backendKey}) unavailable, serving last-known-good catalog from ${lastKnown.fetchedAt}`,
+            );
+            const result = {
+              ok: true,
+              currentModelId: remapLastKnownCurrentModelId(lastKnown),
+              models: lastKnown.models,
+              warning: `${configuredPathError?.message || String(configuredPathError)} — serving the last-known-good catalog fetched at ${lastKnown.fetchedAt}`,
+              source: "last-known-good",
+              fetchedAt: lastKnown.fetchedAt,
+            };
+            if (!isFreshModelCatalog(lastKnown)) {
+              setSdkModelCacheEntry(sdkModelRefreshFailures, fallbackKey, { at: Date.now(), result }, {
+                ttlMs: MODEL_CATALOG_RETRY_MS,
+              });
+            }
+            recordResolvedKeyAlias(fallbackKey);
+            return result;
+          }
+          throw configuredPathError;
+        }
         const immediate = tryServeCachedCatalog(cacheKey);
         if (immediate) {
+          const result = immediate.promise ? await immediate.promise : immediate.value;
           recordResolvedKeyAlias(cacheKey);
-          return immediate.promise ? await immediate.promise : immediate.value;
+          return result;
         }
 
         if (isCursorCliLoginSentinel) {
@@ -1426,9 +1466,10 @@ function registerSdkStreamHandlers(ctx) {
             if (aliasedKey && aliasedKey !== cacheKey) {
               const aliasedImmediate = tryServeCachedCatalog(aliasedKey);
               if (aliasedImmediate) {
+                const result = aliasedImmediate.promise ? await aliasedImmediate.promise : aliasedImmediate.value;
                 cacheCursorBinFromKey(aliasedKey);
                 recordResolvedKeyAlias(aliasedKey);
-                return aliasedImmediate.promise ? await aliasedImmediate.promise : aliasedImmediate.value;
+                return result;
               }
             }
           }
@@ -1458,8 +1499,9 @@ function registerSdkStreamHandlers(ctx) {
             cacheKey = resolvedCacheKey;
             const resolvedImmediate = tryServeCachedCatalog(cacheKey);
             if (resolvedImmediate) {
+              const result = resolvedImmediate.promise ? await resolvedImmediate.promise : resolvedImmediate.value;
               recordResolvedKeyAlias(cacheKey);
-              return resolvedImmediate.promise ? await resolvedImmediate.promise : resolvedImmediate.value;
+              return result;
             }
           }
         }

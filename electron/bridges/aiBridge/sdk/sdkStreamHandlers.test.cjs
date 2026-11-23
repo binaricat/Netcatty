@@ -2410,8 +2410,9 @@ test("list-models cacheOnly recovers persisted models when a manually configured
     assert.equal(seeded.source, "live");
     assert.equal(seeded.models.length, 2);
 
-    // 2. Delete/move the configured CLI and clear in-memory caches: cacheOnly
-    // must still return the saved models instead of throwing CLI path not found.
+    // 2. Delete/move the configured CLI and clear in-memory caches: BOTH
+    // cacheOnly AND the subsequent automatic / forced refresh must preserve
+    // the saved models instead of replacing them with an empty warned catalog.
     cliExists = false;
     ctx.sdkModelCache.clear();
     ctx.sdkModelKeyAliases.clear();
@@ -2419,6 +2420,52 @@ test("list-models cacheOnly recovers persisted models when a manually configured
     assert.equal(cached.source, "last-known-good");
     assert.deepEqual(cached.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
     assert.equal(cached.warning, undefined);
+
+    const normal = await listModels({ sender: {} }, request);
+    assert.equal(normal.source, "last-known-good");
+    assert.deepEqual(normal.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+    assert.equal(normal.warning, undefined);
+
+    const forced = await listModels({ sender: {} }, { ...request, force: true });
+    assert.equal(forced.source, "last-known-good");
+    assert.deepEqual(forced.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+    assert.match(forced.warning, /Agent CLI path not found: \/opt\/moved\/claude/);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+  }
+});
+
+test("list-models persists aliases for callers that join an in-flight load", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/join-bin" }),
+    resolveSdkBinPath: () => "/test/join-bin/claude",
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("claude");
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    t.mock.method(driver, "listModels", async () => {
+      await gate;
+      return [{ id: "claude-opus-6-2", name: "Opus 6.2" }];
+    });
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+
+    // Start two concurrent requests with different aliases resolving to the same binary.
+    const first = listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude" });
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "/test/join-bin/claude" });
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    assert.deepEqual(secondResult, firstResult);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+
+    // Both aliases must be persisted on disk once the shared load completes.
+    const stored = JSON.parse(fs.readFileSync(catalogFile, "utf8"));
+    assert.equal(Object.keys(stored.aliases || {}).length, 2);
   } finally {
     ctx.sdkModelKeyAliases.clear();
     cleanup();
