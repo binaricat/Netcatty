@@ -30,6 +30,7 @@ import { PluginContributionHost } from "./plugins/PluginContributionHost";
 import { PluginPermissionHost } from "./plugins/PluginPermissionHost";
 import { matchesKeyBinding } from "../domain/models";
 import { isPrimaryModifierWBinding } from "../application/state/windowCommandClose";
+import { getSettingsWindowClassName } from "./settings/settingsWindowChrome";
 
 const LazySettingsApplicationTab = lazy(() => import("./SettingsApplicationTab"));
 const LazySettingsAppearanceTab = lazy(() => import("./settings/tabs/SettingsAppearanceTab"));
@@ -436,7 +437,7 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
 
     return (
         <>
-        <div className="settings-window h-screen flex flex-col bg-background text-foreground font-sans">
+        <div className={getSettingsWindowClassName(isMac)}>
             <div className="shrink-0 border-b border-border app-drag">
                 <div className="flex items-center justify-between px-4 pt-3">
                     {isMac && <div className="h-6" />}
