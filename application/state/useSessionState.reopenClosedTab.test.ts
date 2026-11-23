@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 
 import type { Host } from "../../domain/models";
+import { buildSshDeepLinkEphemeralHostFromSaved } from "../../domain/sshDeepLink";
 import { collectSessionIds } from "../../domain/workspace";
 import { activeTabStore } from "./activeTabStore";
 import { useSessionState } from "./useSessionState";
@@ -274,4 +275,60 @@ test("useSessionState prunes deleted hosts from a closed split workspace on reop
   assert.deepEqual(state.sessions.map((s) => s.hostId), [hostA.id, hostC.id]);
   assert.ok(Math.abs((restored.root.sizes?.[0] ?? 0) - 2 / 7) < 1e-9);
   assert.ok(Math.abs((restored.root.sizes?.[1] ?? 0) - 5 / 7) < 1e-9);
+});
+
+test("useSessionState excludes ephemeral deep-link hosts with bastion/proxy/legacy settings from reopen history", async (t) => {
+  const { root } = setupDom(t);
+  let state!: ReturnType<typeof useSessionState>;
+  function Probe() {
+    state = useSessionState({ persistSessionRestore: false });
+    return null;
+  }
+  await act(async () => {
+    root.render(React.createElement(React.StrictMode, null, React.createElement(Probe)));
+  });
+
+  const savedHost: Host = {
+    ...makeHost("h-bastion-target", "Bastion Target"),
+    hostChain: { hostIds: ["h-jump"] },
+    proxyConfig: { type: "socks5", host: "127.0.0.1", port: 1080 },
+    legacyAlgorithms: true,
+  };
+  const ephemeralHost = buildSshDeepLinkEphemeralHostFromSaved(
+    savedHost,
+    { rawUrl: `ssh://${savedHost.username}:otp@${savedHost.hostname}`, hostname: savedHost.hostname, username: savedHost.username, password: "otp" },
+    { id: "ephemeral-1", now: 1000 },
+  );
+
+  let savedSessionId = "";
+  let ephSessionId = "";
+  await act(async () => {
+    savedSessionId = state.connectToHost(savedHost);
+    ephSessionId = state.connectToHost(ephemeralHost);
+  });
+
+  await act(async () => {
+    state.closeSession(savedSessionId);
+  });
+  await act(async () => {
+    state.closeSession(ephSessionId);
+  });
+
+  // Only the saved vault host was recorded; the ephemeral host was skipped.
+  assert.equal(state.getClosedTabHistoryCount(), 1);
+
+  const hostsById = new Map<string, Host>([[savedHost.id, savedHost]]);
+  await act(async () => {
+    const reopened = state.reopenLastClosedTab({
+      availableHostIds: new Set(hostsById.keys()),
+      hostsById,
+    });
+    assert.ok(reopened && reopened.kind === "session");
+    assert.equal(reopened.session.hostId, savedHost.id);
+    assert.equal(reopened.session.ephemeralHost, undefined);
+  });
+
+  assert.equal(state.sessions.length, 1);
+  assert.equal(state.sessions[0].hostId, savedHost.id);
+  assert.equal(state.getClosedTabHistoryCount(), 0);
 });

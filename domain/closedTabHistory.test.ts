@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Host, TerminalSession, Workspace } from "./models";
+import { buildSshDeepLinkEphemeralHostFromSaved } from "./sshDeepLink";
 import { collectSessionIds } from "./workspace";
+import { createHostTerminalSession } from "../application/state/sessionFactories";
 import {
   DEFAULT_CLOSED_TAB_HISTORY_LIMIT,
   createClosedSessionEntry,
@@ -113,7 +115,7 @@ test("pushClosedTabEntry enforces bounded LIFO limit and deduplicates by sourceI
   assert.equal(secondPop.entry?.sourceId, "s-24");
 });
 
-test("isClosedSessionSnapshotRestorable handles vault hosts, local terminals, quick serial, and ephemeral hosts", () => {
+test("isClosedSessionSnapshotRestorable handles vault hosts, local terminals, quick serial, and rejects ephemeral hosts", () => {
   const availableHostIds = new Set(["host-live"]);
 
   assert.equal(
@@ -157,15 +159,120 @@ test("isClosedSessionSnapshotRestorable handles vault hosts, local terminals, qu
   );
   assert.equal(
     isClosedSessionSnapshotRestorable(
-      createClosedSessionSnapshot(makeSession("eph-1", {
+      {
+        sourceSessionId: "eph-1",
         hostId: "ephemeral-1",
-        ephemeralHost: true,
+        hostLabel: "Deep Link",
         hostname: "jump.example.test",
-      }))!,
+        username: "ops",
+        protocol: "ssh",
+        ephemeralHost: true,
+      },
       availableHostIds,
     ),
-    true,
+    false,
   );
+  assert.equal(
+    isClosedSessionSnapshotRestorable({
+      sourceSessionId: "eph-1",
+      hostId: "ephemeral-1",
+      hostLabel: "Deep Link",
+      hostname: "jump.example.test",
+      username: "ops",
+      protocol: "ssh",
+      ephemeralHost: true,
+    }),
+    false,
+  );
+});
+
+test("ephemeral hosts with bastion hostChain, proxyConfig, and legacyAlgorithms are excluded from closed tab history", () => {
+  const savedBastionTarget = makeHost("h-prod-internal", {
+    label: "Internal Prod",
+    hostname: "10.0.0.42",
+    username: "ops",
+    hostChain: { hostIds: ["h-bastion-1"] },
+    proxyConfig: { type: "socks5", host: "127.0.0.1", port: 1080 },
+    legacyAlgorithms: true,
+  });
+
+  const ephemeralHost = buildSshDeepLinkEphemeralHostFromSaved(
+    savedBastionTarget,
+    { rawUrl: "ssh://ops:one-time-password@10.0.0.42", hostname: "10.0.0.42", username: "ops", password: "one-time-password" },
+    { id: "ephemeral-deeplink-1", now: 1234 },
+  );
+  assert.equal(ephemeralHost.ephemeral, true);
+  assert.deepEqual(ephemeralHost.hostChain, { hostIds: ["h-bastion-1"] });
+  assert.deepEqual(ephemeralHost.proxyConfig, { type: "socks5", host: "127.0.0.1", port: 1080 });
+  assert.equal(ephemeralHost.legacyAlgorithms, true);
+
+  const ephemeralSession = createHostTerminalSession("sess-eph-1", ephemeralHost);
+  assert.equal(ephemeralSession.ephemeralHost, true);
+
+  // Ephemeral standalone tabs are never captured because their Host record
+  // (including hostChain, proxyConfig, legacyAlgorithms, and one-time auth) is
+  // purged on close and cannot be faithfully reconstructed via fallback host.
+  assert.equal(createClosedSessionSnapshot(ephemeralSession), null);
+  assert.equal(createClosedSessionEntry(ephemeralSession), null);
+
+  // An all-ephemeral workspace is excluded.
+  const ephOnlyWs: Workspace = {
+    id: "ws-eph-only",
+    title: "Ephemeral Only",
+    root: { id: "p-eph", type: "pane", sessionId: ephemeralSession.id },
+  };
+  assert.equal(
+    createClosedWorkspaceEntry(ephOnlyWs, [{ ...ephemeralSession, workspaceId: ephOnlyWs.id }]),
+    null,
+  );
+
+  // A mixed workspace drops the ephemeral pane and preserves the restorable saved host pane.
+  const savedSession = makeSession("sess-saved-1", {
+    workspaceId: "ws-mixed",
+    hostId: savedBastionTarget.id,
+  });
+  const mixedWs: Workspace = {
+    id: "ws-mixed",
+    title: "Mixed",
+    focusedSessionId: ephemeralSession.id,
+    root: {
+      id: "split-mixed",
+      type: "split",
+      direction: "vertical",
+      sizes: [0.6, 0.4],
+      children: [
+        { id: "p-saved", type: "pane", sessionId: savedSession.id },
+        { id: "p-eph", type: "pane", sessionId: ephemeralSession.id },
+      ],
+    },
+  };
+  const mixedEntry = createClosedWorkspaceEntry(mixedWs, [
+    savedSession,
+    { ...ephemeralSession, workspaceId: mixedWs.id },
+  ]);
+  assert.ok(mixedEntry);
+  assert.deepEqual(collectSessionIds(mixedEntry.root), [savedSession.id]);
+  assert.equal(mixedEntry.focusedSessionId, savedSession.id);
+
+  // Even a pre-built ephemeral entry is rejected by pruneClosedTabEntries,
+  // popClosedTabEntry, and materializeClosedTabEntry.
+  const craftedEphemeralEntry: ClosedTabEntry = {
+    kind: "session",
+    sourceId: "sess-eph-crafted",
+    closedAt: 1,
+    session: {
+      sourceSessionId: "sess-eph-crafted",
+      hostId: ephemeralHost.id,
+      hostLabel: ephemeralHost.label,
+      hostname: ephemeralHost.hostname,
+      username: ephemeralHost.username,
+      protocol: "ssh",
+      ephemeralHost: true,
+    },
+  };
+  assert.deepEqual(pruneClosedTabEntries([craftedEphemeralEntry]), []);
+  assert.equal(popClosedTabEntry([craftedEphemeralEntry]).entry, null);
+  assert.equal(materializeClosedTabEntry(craftedEphemeralEntry), null);
 });
 
 test("createClosedWorkspaceEntry captures nested layout ratios, focus, and view mode, and skips empty workspaces", () => {

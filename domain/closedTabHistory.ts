@@ -160,7 +160,14 @@ export function createClosedSessionSnapshot(
   session: TerminalSession,
   options?: { lastCwd?: string },
 ): ClosedTerminalSessionSnapshot | null {
-  if (session.hiddenFromTabs) return null;
+  // Hidden MCP sessions were never tabs. Ephemeral hosts (password deep links,
+  // unsaved quick-connects, and saved-host overrides built by
+  // buildSshDeepLinkEphemeralHostFromSaved) have their in-memory Host record
+  // purged on close, so host-level routing/settings (hostChain, proxyConfig,
+  // legacyAlgorithms, deviceType, one-time auth) cannot be faithfully
+  // reconstructed from a TerminalSession snapshot alone. Mirror
+  // domain/sessionRestore.ts and exclude them.
+  if (session.hiddenFromTabs || session.ephemeralHost) return null;
 
   const protocol = sanitizeProtocol(session.protocol);
   const pluginConnection = sanitizePluginConnection(session.pluginConnection, protocol);
@@ -272,14 +279,19 @@ export function createClosedWorkspaceEntry(
  * Determine whether a closed session snapshot can still be reopened given the
  * current set of vault host ids.
  *
- * Self-contained sessions (local terminals, quick-connect serial ports, and
- * ephemeral connections with non-secret host metadata) do not depend on a vault
- * host record and remain restorable even when `availableHostIds` is empty.
+ * Self-contained sessions (local terminals and quick-connect serial ports) do
+ * not depend on a vault host record and remain restorable even when
+ * `availableHostIds` is empty. Ephemeral host sessions are rejected because
+ * their in-memory Host record (routing, proxy/jump chain, legacy algorithms,
+ * and one-time credentials) is purged when the tab closes.
  */
 export function isClosedSessionSnapshotRestorable(
   snapshot: ClosedTerminalSessionSnapshot,
   availableHostIds?: ReadonlySet<string>,
 ): boolean {
+  if (snapshot.ephemeralHost === true) {
+    return false;
+  }
   if (!availableHostIds) return true;
   if (snapshot.protocol === "local" && snapshot.hostId === LOCAL_TERMINAL_HOST_ID) {
     return true;
@@ -290,9 +302,6 @@ export function isClosedSessionSnapshotRestorable(
     && snapshot.hostId.startsWith("serial-")
   ) {
     return true;
-  }
-  if (snapshot.ephemeralHost === true) {
-    return Boolean(snapshot.hostname);
   }
   return Boolean(snapshot.hostId) && availableHostIds.has(snapshot.hostId);
 }
@@ -450,8 +459,9 @@ export function materializeClosedTabEntry(
   const createId = options?.createId ?? (() => crypto.randomUUID());
 
   if (entry.kind === "session") {
+    if (entry.session.ephemeralHost === true) return null;
     const newSessionId = createId();
-    const liveHost = entry.session.ephemeralHost ? undefined : options?.hostsById?.get(entry.session.hostId);
+    const liveHost = options?.hostsById?.get(entry.session.hostId);
     const session = materializeSessionSnapshot(entry.session, {
       id: newSessionId,
       liveHost,
@@ -465,7 +475,9 @@ export function materializeClosedTabEntry(
 
   const rootSessionIds = collectSessionIds(entry.root);
   const snapshotBySourceId = new Map(
-    entry.sessions.map((snapshot) => [snapshot.sourceSessionId, snapshot] as const),
+    entry.sessions
+      .filter((snapshot) => snapshot.ephemeralHost !== true)
+      .map((snapshot) => [snapshot.sourceSessionId, snapshot] as const),
   );
   const validSourceIds = rootSessionIds.filter((id) => snapshotBySourceId.has(id));
   if (validSourceIds.length === 0) return null;
