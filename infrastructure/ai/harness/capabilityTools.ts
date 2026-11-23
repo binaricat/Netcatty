@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { SHELL_READINESS_UNKNOWN_CODE } from '../aiChatStreamingSupport';
 import type { ExecutorContext, NetcattyBridge } from '../cattyAgent/executor';
 import type { TerminalContextReadRange } from '../../../domain/terminalContextRead';
+import { normalizeAiToolOutputMaxChars } from '../../../domain/aiToolOutputLimit';
 import type { AIPermissionMode } from '../types';
 import type { WebSearchConfig } from '../types';
 import { isWebSearchReady } from '../types';
@@ -134,6 +135,8 @@ function applyToolDedup(
   return result;
 }
 
+const MAX_LIVE_SFTP_READ_CHARS = 24_000;
+
 function fitCapabilityResultForModel(
   result: unknown,
   spec: CattyToolSpec,
@@ -141,6 +144,7 @@ function fitCapabilityResultForModel(
   toolOutputStore?: ToolOutputStore,
   args?: Record<string, unknown>,
   toolResultDedup?: ToolResultDedup,
+  maxStringChars?: number,
 ): unknown {
   if (spec.capabilityId === 'harness.tool_output.read') {
     return result;
@@ -164,6 +168,7 @@ function fitCapabilityResultForModel(
     chatSessionId,
     toolOutputStore,
     terminalSessionId,
+    maxStringChars,
     normalizeStrings: spec.capabilityId.startsWith('terminal.')
       || spec.capabilityId === 'harness.terminal.read_context',
   });
@@ -398,7 +403,10 @@ function createCatalogTool(spec: CattyToolSpec) {
     execute: async (args, { toolCallId: _toolCallId, abortSignal, context }) => {
       const toolContext = context as CattyToolContext;
       const deps = toolDepsFromContext(toolContext);
-      const { toolOutputStore, toolResultDedup } = toolContext;
+      const { toolOutputStore, toolResultDedup, toolOutputMaxChars } = toolContext;
+      const effectiveToolOutputMaxChars = toolOutputMaxChars != null
+        ? normalizeAiToolOutputMaxChars(toolOutputMaxChars)
+        : undefined;
 
       const queueKey = resolveSessionQueueKey(
         spec,
@@ -479,6 +487,7 @@ function createCatalogTool(spec: CattyToolSpec) {
                   chatSessionId: deps.chatSessionId,
                   toolOutputStore,
                   terminalSessionId: sid,
+                  maxStringChars: effectiveToolOutputMaxChars,
                   normalizeStrings: true,
                 }),
                 ...fitTerminalExecuteResultForModel({
@@ -488,6 +497,7 @@ function createCatalogTool(spec: CattyToolSpec) {
                 }, {
                   chatSessionId: deps.chatSessionId,
                   toolOutputStore,
+                  maxOutputChars: effectiveToolOutputMaxChars,
                 }),
               };
               if (writeFingerprint) toolResultDedup?.rememberCompletedWrite(writeFingerprint, fittedFailure);
@@ -500,6 +510,7 @@ function createCatalogTool(spec: CattyToolSpec) {
             }, {
               chatSessionId: deps.chatSessionId,
               toolOutputStore,
+              maxOutputChars: effectiveToolOutputMaxChars,
             });
             if (writeFingerprint) toolResultDedup?.rememberCompletedWrite(writeFingerprint, fitted);
             return fitted;
@@ -524,6 +535,7 @@ function createCatalogTool(spec: CattyToolSpec) {
             toolOutputStore,
             args as Record<string, unknown>,
             toolResultDedup,
+            effectiveToolOutputMaxChars,
           );
         }
 
@@ -638,6 +650,7 @@ function createCatalogTool(spec: CattyToolSpec) {
               toolOutputStore,
               args as Record<string, unknown>,
               toolResultDedup,
+              effectiveToolOutputMaxChars,
             );
           }
         }
@@ -656,12 +669,14 @@ function createCatalogTool(spec: CattyToolSpec) {
               toolOutputStore,
               args as Record<string, unknown>,
               toolResultDedup,
+              effectiveToolOutputMaxChars,
             );
           }
         }
 
         if (spec.capabilityId.includes('sftp') && spec.capabilityId.includes('read')) {
           const { sessionId: sid, path } = args as { sessionId?: string; path?: string };
+          const sftpMaxChars = effectiveToolOutputMaxChars ?? MAX_LIVE_SFTP_READ_CHARS;
           const fingerprint = toolResultDedup?.fingerprintFor(
             spec.toolName,
             hashScopeKey([sid, path]),
@@ -674,6 +689,7 @@ function createCatalogTool(spec: CattyToolSpec) {
               toolOutputStore,
               args as Record<string, unknown>,
               toolResultDedup,
+              sftpMaxChars,
             );
           }
 
@@ -685,8 +701,7 @@ function createCatalogTool(spec: CattyToolSpec) {
             && deps.chatSessionId
           ) {
             const content = String((raw as { content?: string }).content ?? '');
-            const MAX_LIVE_SFTP_READ_CHARS = 24_000;
-            if (content.length > MAX_LIVE_SFTP_READ_CHARS) {
+            if (content.length > sftpMaxChars) {
               const handle = toolOutputStore.store({
                 chatSessionId: deps.chatSessionId,
                 capabilityId: spec.capabilityId,
@@ -703,6 +718,16 @@ function createCatalogTool(spec: CattyToolSpec) {
               };
             }
           }
+
+          return fitCapabilityResultForModel(
+            raw,
+            spec,
+            deps.chatSessionId,
+            toolOutputStore,
+            args as Record<string, unknown>,
+            toolResultDedup,
+            sftpMaxChars,
+          );
         }
 
         const fittedRaw = fitCapabilityResultForModel(
@@ -712,6 +737,7 @@ function createCatalogTool(spec: CattyToolSpec) {
           toolOutputStore,
           args as Record<string, unknown>,
           toolResultDedup,
+          effectiveToolOutputMaxChars,
         );
         if (
           terminalStartFingerprint
@@ -744,6 +770,7 @@ export function buildCattyToolContext(input: {
   chatSessionId?: string;
   toolOutputStore?: ToolOutputStore;
   toolResultDedup?: ToolResultDedup;
+  toolOutputMaxChars?: number;
 }): CattyToolContext {
   return {
     bridge: input.bridge,
@@ -756,6 +783,7 @@ export function buildCattyToolContext(input: {
       : () => input.context as ExecutorContext,
     toolOutputStore: input.toolOutputStore,
     toolResultDedup: input.toolResultDedup,
+    toolOutputMaxChars: input.toolOutputMaxChars,
   };
 }
 
@@ -768,7 +796,11 @@ export function createCattyToolsFromCatalog(
   chatSessionId?: string,
   toolOutputStore?: ToolOutputStore,
   toolResultDedup?: ToolResultDedup,
-  selection?: { agentKind?: import('../agentKinds').AgentKind; allowedCapabilityIds?: readonly string[] },
+  selection?: {
+    agentKind?: import('../agentKinds').AgentKind;
+    allowedCapabilityIds?: readonly string[];
+    toolOutputMaxChars?: number;
+  },
 ): CattyToolsBundle {
   const sharedContext = buildCattyToolContext({
     bridge,
@@ -779,6 +811,7 @@ export function createCattyToolsFromCatalog(
     chatSessionId,
     toolOutputStore,
     toolResultDedup,
+    toolOutputMaxChars: selection?.toolOutputMaxChars,
   });
 
   const catalogTools: Record<string, ReturnType<typeof tool>> = {};

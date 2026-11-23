@@ -69,6 +69,7 @@ export interface CattyTurnContext {
   commandBlocklist?: string[];
   commandTimeout?: number;
   responseIdleTimeout?: number;
+  toolOutputMaxChars?: number;
   terminalSessions: TerminalSessionInfo[];
   webSearchConfig?: WebSearchConfig | null;
   getExecutorContext?: () => ExecutorContext;
@@ -191,6 +192,7 @@ export interface PrepareStepContextInput {
   maxOutputTokens?: number;
   protectRecentMessages?: number;
   toolOutputStore?: ToolOutputStore;
+  toolOutputMaxChars?: number;
   runtimeContext: import('../cattyRuntimeContext').CattyRuntimeContext;
   onEvent?: AgentEventListener;
 }

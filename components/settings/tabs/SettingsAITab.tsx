@@ -165,6 +165,8 @@ interface SettingsAITabProps {
   setResponseIdleTimeout: (value: number) => void;
   maxIterations: number;
   setMaxIterations: (value: number) => void;
+  toolOutputMaxChars: number;
+  setToolOutputMaxChars: (value: number) => void;
   aiSessionMessageCap: number;
   setAiSessionMessageCap: (value: number) => void;
   webSearchConfig: WebSearchConfig | null;
@@ -204,6 +206,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   setResponseIdleTimeout,
   maxIterations,
   setMaxIterations,
+  toolOutputMaxChars,
+  setToolOutputMaxChars,
   aiSessionMessageCap,
   setAiSessionMessageCap,
   webSearchConfig,
@@ -1489,6 +1493,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             setResponseIdleTimeout={setResponseIdleTimeout}
             maxIterations={maxIterations}
             setMaxIterations={setMaxIterations}
+            toolOutputMaxChars={toolOutputMaxChars}
+            setToolOutputMaxChars={setToolOutputMaxChars}
           />
           <PermissionGrantsSettings
             grants={permissionGrants}

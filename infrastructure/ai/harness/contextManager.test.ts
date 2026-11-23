@@ -416,3 +416,60 @@ test('413 retry still trades attachments for a text placeholder', async () => {
 
   assert.match(JSON.stringify(prepared.messages), /attachment omitted to keep the AI request small/);
 });
+
+test('prepareStepContext and prepareTurnContext preserve live tool results up to configured toolOutputMaxChars', async () => {
+  const payload = Array.from({ length: 1_000 }, (_, i) => `item_${i}=${'k'.repeat(30)}`).join('\n');
+  assert.ok(payload.length > 35_000 && payload.length < 60_000);
+  const messages: ModelMessage[] = [
+    { role: 'user', content: 'read /etc/app.conf' },
+    {
+      role: 'assistant',
+      content: [{ type: 'tool-call', toolCallId: 'call-1', toolName: 'sftp_read_file', input: { sessionId: 's1', path: '/etc/app.conf' } }],
+    },
+    {
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'call-1',
+        toolName: 'sftp_read_file',
+        output: { type: 'json', value: { ok: true, path: '/etc/app.conf', content: payload } },
+      }],
+    },
+  ];
+  const runtimeContext = createInitialCattyRuntimeContext({
+    chatSessionId: 'chat-limit',
+    turnId: 'turn-1',
+    permissionMode: 'auto',
+    scopeType: 'terminal',
+    toolOutputMaxChars: 60_000,
+  });
+
+  const step = await prepareStepContext({
+    messages,
+    stepNumber: 1,
+    sessionId: 'chat-limit',
+    chatSessionId: 'chat-limit',
+    contextWindow: 1_000_000,
+    toolOutputMaxChars: 60_000,
+    runtimeContext,
+  });
+  assert.deepEqual(step.messages, messages);
+
+  const turn = await prepareTurnContext({
+    messages,
+    backend: 'catty',
+    contextWindow: 1_000_000,
+    trigger: 'pre-turn',
+    maxToolResultChars: 60_000,
+  });
+  assert.deepEqual(turn.messages, messages);
+
+  const retry = await prepareTurnContext({
+    messages,
+    backend: 'catty',
+    contextWindow: 1_000_000,
+    trigger: '413-retry',
+    compressForRequestTooLargeRetry: true,
+  });
+  assert.ok(JSON.stringify(retry.messages).length < 6_000);
+});

@@ -13,6 +13,7 @@ import {
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
+  STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS,
   STORAGE_KEY_AI_SESSIONS,
   STORAGE_KEY_AI_SESSIONS_OVERFLOW,
   STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW,
@@ -45,6 +46,10 @@ import {
   normalizeCommandTimeoutSeconds,
   normalizeResponseIdleTimeoutSeconds,
 } from '../../infrastructure/ai/types';
+import {
+  DEFAULT_AI_TOOL_OUTPUT_MAX_CHARS,
+  normalizeAiToolOutputMaxChars,
+} from '../../domain/aiToolOutputLimit';
 import {
   activateDraftView,
   clearScopeDraftState,
@@ -199,6 +204,12 @@ export function useAIState() {
   );
   const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
     localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20
+  );
+  const [toolOutputMaxChars, setToolOutputMaxCharsRaw] = useState<number>(() =>
+    normalizeAiToolOutputMaxChars(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS)
+        ?? DEFAULT_AI_TOOL_OUTPUT_MAX_CHARS,
+    )
   );
 
   // ── Sessions ──
@@ -695,6 +706,12 @@ export function useAIState() {
     bridge?.aiMcpSetMaxIterations?.(value);
   }, []);
 
+  const setToolOutputMaxChars = useCallback((value: number) => {
+    const normalizedValue = normalizeAiToolOutputMaxChars(value);
+    setToolOutputMaxCharsRaw(normalizedValue);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS, normalizedValue);
+  }, []);
+
   // ── Cross-window sync via storage events ──
   // When the settings window updates localStorage, the main window picks up changes.
   useEffect(() => {
@@ -781,6 +798,16 @@ export function useAIState() {
             }
             setMaxIterationsRaw(iters);
             getAIBridge()?.aiMcpSetMaxIterations?.(iters);
+            break;
+          }
+          case STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS: {
+            const limit = localStorageAdapter.readNumber(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS)
+              ?? DEFAULT_AI_TOOL_OUTPUT_MAX_CHARS;
+            if (!Number.isFinite(limit)) {
+              console.warn('[useAIState] Cross-window sync: AI_TOOL_OUTPUT_MAX_CHARS is not a finite number, skipping');
+              break;
+            }
+            setToolOutputMaxCharsRaw(normalizeAiToolOutputMaxChars(limit));
             break;
           }
           case STORAGE_KEY_AI_HOST_PERMISSIONS: {
@@ -1749,6 +1776,8 @@ export function useAIState() {
     setResponseIdleTimeout,
     maxIterations,
     setMaxIterations,
+    toolOutputMaxChars,
+    setToolOutputMaxChars,
     agentModelMap,
     setAgentModel,
     agentProviderMap,
@@ -1816,6 +1845,8 @@ export function useAIState() {
     setResponseIdleTimeout,
     maxIterations,
     setMaxIterations,
+    toolOutputMaxChars,
+    setToolOutputMaxChars,
     agentModelMap,
     setAgentModel,
     agentProviderMap,

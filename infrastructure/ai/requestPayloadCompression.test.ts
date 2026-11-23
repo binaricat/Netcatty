@@ -164,3 +164,40 @@ test("compressMessagesForRequestTooLargeRetry still placeholders text/plain file
     text: `[file attachment omitted to keep the AI request small: filename=note.txt, mediaType=text/plain, ${text.length} chars]`,
   });
 });
+
+test("truncateTextWithHeadAndTail scales head and tail to use larger maxChars budgets", () => {
+  const value = `${"H".repeat(20_000)}${"M".repeat(40_000)}${"T".repeat(20_000)}`;
+  const truncated = truncateTextWithHeadAndTail(value, 50_000);
+  assert.ok(truncated.startsWith("HHH"));
+  assert.ok(truncated.endsWith("TTT"));
+  assert.ok(truncated.includes("[... output truncated for request size ...]"));
+  assert.ok(truncated.length <= 50_000);
+  assert.ok(truncated.length >= 49_000);
+});
+
+test("compressMessagesForRequestTooLargeRetry honors custom maxToolResultChars for live and replayed results", () => {
+  const mediumPayload = Array.from({ length: 800 }, (_, i) => `row-${i}-${"x".repeat(30)}`).join("\n");
+  const jsonPart = {
+    type: "tool-result" as const,
+    toolCallId: "call-1",
+    toolName: "sftp_read_file",
+    output: { type: "json" as const, value: { ok: true, content: mediumPayload } },
+  };
+  const replayedPart = {
+    type: "tool-result" as const,
+    toolCallId: "call-1",
+    toolName: "sftp_read_file",
+    output: { type: "text" as const, value: JSON.stringify({ ok: true, content: mediumPayload }) },
+  };
+  const messages: ModelMessage[] = [
+    { role: "tool", content: [jsonPart] },
+    { role: "tool", content: [replayedPart] },
+  ];
+
+  const preserved = compressMessagesForRequestTooLargeRetry(messages, {
+    preserveAttachments: true,
+    maxToolResultChars: 50_000,
+  });
+  assert.equal(preserved.didAdjust, false);
+  assert.deepEqual(preserved.messages, messages);
+});

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Plus, X } from "lucide-react";
 import type { AIPermissionMode } from "../../../../infrastructure/ai/types";
 import {
@@ -6,6 +6,11 @@ import {
   MAX_COMMAND_TIMEOUT_SECONDS,
   MAX_RESPONSE_IDLE_TIMEOUT_SECONDS,
 } from "../../../../infrastructure/ai/types";
+import {
+  MAX_AI_TOOL_OUTPUT_MAX_CHARS,
+  MIN_AI_TOOL_OUTPUT_MAX_CHARS,
+  normalizeAiToolOutputMaxChars,
+} from "../../../../domain/aiToolOutputLimit";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { Select, SettingCard, SettingRow, SettingsAnchor, SettingsSection } from "../../settings-ui";
@@ -21,6 +26,8 @@ export const SafetySettings: React.FC<{
   setResponseIdleTimeout: (value: number) => void;
   maxIterations: number;
   setMaxIterations: (value: number) => void;
+  toolOutputMaxChars: number;
+  setToolOutputMaxChars: (value: number) => void;
 }> = ({
   globalPermissionMode,
   setGlobalPermissionMode,
@@ -32,9 +39,32 @@ export const SafetySettings: React.FC<{
   setResponseIdleTimeout,
   maxIterations,
   setMaxIterations,
+  toolOutputMaxChars,
+  setToolOutputMaxChars,
 }) => {
   const { t } = useI18n();
   const [regexErrors, setRegexErrors] = useState<Record<number, string>>({});
+  const [toolOutputDraft, setToolOutputDraft] = useState<string>(() => String(toolOutputMaxChars));
+
+  useEffect(() => {
+    setToolOutputDraft(String(toolOutputMaxChars));
+  }, [toolOutputMaxChars]);
+
+  const commitToolOutputDraft = useCallback(() => {
+    const trimmed = toolOutputDraft.trim();
+    if (!trimmed) {
+      setToolOutputDraft(String(toolOutputMaxChars));
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      setToolOutputDraft(String(toolOutputMaxChars));
+      return;
+    }
+    const normalized = normalizeAiToolOutputMaxChars(parsed);
+    setToolOutputMaxChars(normalized);
+    setToolOutputDraft(String(normalized));
+  }, [setToolOutputMaxChars, toolOutputDraft, toolOutputMaxChars]);
 
   const validatePattern = useCallback((pattern: string, idx: number): boolean => {
     if (!pattern) {
@@ -151,6 +181,43 @@ export const SafetySettings: React.FC<{
             max={100}
             className="w-20 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
+        </SettingRow>
+
+        <SettingRow
+          anchorId="ai-safety-tool-output-max-chars"
+          label={t('ai.safety.toolOutputMaxChars')}
+          description={t('ai.safety.toolOutputMaxChars.description')}
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              aria-label={t('ai.safety.toolOutputMaxChars')}
+              value={toolOutputDraft}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setToolOutputDraft(raw);
+                const val = parseInt(raw, 10);
+                if (
+                  !isNaN(val)
+                  && val >= MIN_AI_TOOL_OUTPUT_MAX_CHARS
+                  && val <= MAX_AI_TOOL_OUTPUT_MAX_CHARS
+                ) {
+                  setToolOutputMaxChars(val);
+                }
+              }}
+              onBlur={commitToolOutputDraft}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  commitToolOutputDraft();
+                }
+              }}
+              min={MIN_AI_TOOL_OUTPUT_MAX_CHARS}
+              max={MAX_AI_TOOL_OUTPUT_MAX_CHARS}
+              step={1000}
+              className="w-24 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <span className="text-xs text-muted-foreground">{t('ai.safety.toolOutputMaxChars.unit')}</span>
+          </div>
         </SettingRow>
         </SettingCard>
 

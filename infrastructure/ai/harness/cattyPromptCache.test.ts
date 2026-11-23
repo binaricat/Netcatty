@@ -21,7 +21,13 @@ interface WireRequest {
 
 type Reply = { tool: 'terminal_execute' | 'sftp_read_file' } | { text: string };
 
-function fixture(t: test.TestContext, replies: Reply[], style: 'openai' | 'anthropic' = 'openai', terminalOutput = 'small output') {
+function fixture(
+  t: test.TestContext,
+  replies: Reply[],
+  style: 'openai' | 'anthropic' = 'openai',
+  terminalOutput = 'small output',
+  toolOutputMaxChars?: number,
+) {
   const originalWindow = globalThis.window;
   const originalRaf = globalThis.requestAnimationFrame;
   const originalCancelRaf = globalThis.cancelAnimationFrame;
@@ -129,6 +135,7 @@ function fixture(t: test.TestContext, replies: Reply[], style: 'openai' | 'anthr
         context: {
           activeProvider: provider, activeModelId: provider.defaultModel!, scopeType: 'terminal', scopeLabel: 'Fixture',
           globalPermissionMode: 'auto', commandBlocklist: [], autoTitleSession: () => undefined,
+          toolOutputMaxChars,
           terminalSessions: [{ sessionId: 'terminal-1', hostname: 'fixture.example.test', label: 'Fixture', connected: true }],
         },
         ui: {
@@ -249,3 +256,23 @@ for (const providerId of ['openrouter', 'ollama'] as const) {
     assert.equal(f.messages.at(-1)?.content, 'OK');
   });
 }
+
+test('Catty delivers larger terminal output inline end-to-end when toolOutputMaxChars is raised', async t => {
+  const mediumOutput = `${Array.from({ length: 1_200 }, (_, i) => `record-${String(i).padStart(4, '0')}-${'z'.repeat(24)}`).join('\n')}\nEND_MARKER_4147`;
+  assert.ok(mediumOutput.length > 40_000 && mediumOutput.length < 60_000);
+  const f = fixture(
+    t,
+    [{ tool: 'terminal_execute' }, { text: 'OK' }, { text: 'Follow-up OK' }],
+    'openai',
+    mediumOutput,
+    80_000,
+  );
+  await f.turn(2);
+  await f.turn(1);
+  assert.equal(f.requests.length, 3);
+  const wireAfterTool = JSON.stringify(f.requests[1]);
+  assert.match(wireAfterTool, /END_MARKER_4147/);
+  assert.doesNotMatch(wireAfterTool, /output handle:/);
+  assert.doesNotMatch(wireAfterTool, /output truncated for request size/);
+  assertRequestPrefix(f.requests[1], f.requests[2]);
+});

@@ -116,6 +116,7 @@ export interface SendToCattyContext {
   commandBlocklist?: string[];
   commandTimeout?: number;
   responseIdleTimeout?: number;
+  toolOutputMaxChars?: number;
   terminalSessions: TerminalSessionInfo[];
   webSearchConfig?: WebSearchConfig | null;
   getExecutorContext?: () => ExecutorContext;

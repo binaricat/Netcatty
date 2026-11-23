@@ -641,3 +641,109 @@ describe('capabilityTools terminal polling', () => {
     assert.equal(result.output, 'first new line');
   });
 });
+
+describe('capabilityTools configurable toolOutputMaxChars', () => {
+  it('keeps larger terminal_execute stdout inline up to custom limit and spills above it', async () => {
+    const store = new ToolOutputStore();
+    const mediumStdout = Array.from({ length: 1_000 }, (_, i) => `line-${String(i).padStart(4, '0')}-${'a'.repeat(28)}`).join('\n');
+    const hugeStdout = `${Array.from({ length: 1_800 }, (_, i) => `row-${String(i).padStart(4, '0')}-${'b'.repeat(32)}`).join('\n')}\nUNIQUE_END_MARKER_4147`;
+    assert.ok(mediumStdout.length > 35_000 && mediumStdout.length < 60_000);
+    assert.ok(hugeStdout.length > 70_000);
+
+    let nextOutput = mediumStdout;
+    const { tools, toolsContext } = createCattyToolsFromCatalog(
+      {
+        aiExec: async () => ({
+          ok: true,
+          stdout: nextOutput,
+          stderr: '',
+          exitCode: 0,
+        }),
+      },
+      {
+        sessions: [{
+          sessionId: 'session-1',
+          hostId: 'host-1',
+          hostname: 'prod.internal',
+          label: 'prod',
+          protocol: 'ssh',
+          connected: true,
+        }],
+      },
+      [],
+      'auto',
+      undefined,
+      'chat-custom-limit',
+      store,
+      undefined,
+      { toolOutputMaxChars: 60_000 },
+    );
+
+    const exec = withCattyToolContext(tools.terminal_execute, toolsContext.terminal_execute);
+    const mediumResult = await exec.execute({ sessionId: 'session-1', command: 'cat medium.log' }) as { stdout: string };
+    assert.equal(mediumResult.stdout, mediumStdout);
+    assert.doesNotMatch(mediumResult.stdout, /output handle/);
+
+    nextOutput = hugeStdout;
+    const hugeResult = await exec.execute({ sessionId: 'session-1', command: 'cat huge.log' }) as { stdout: string };
+    assert.notEqual(hugeResult.stdout, hugeStdout);
+    assert.ok(hugeResult.stdout.length > 50_000, 'truncated output should utilize the configured limit rather than collapsing to 4.8k');
+    assert.match(hugeResult.stdout, /output handle/);
+    const handleId = hugeResult.stdout.match(/handleId=(tool-output-[^\]\s]+)/)?.[1];
+    assert.ok(handleId);
+    assert.match(
+      store.read({ handleId, mode: 'tail', maxChars: 1_000 }, 'chat-custom-limit') ?? '',
+      /UNIQUE_END_MARKER_4147/,
+    );
+  });
+
+  it('honors custom toolOutputMaxChars for sftp_read_file with and without dedup', async () => {
+    const mediumFile = Array.from({ length: 1_000 }, (_, i) => `config_${i}=${'v'.repeat(30)}`).join('\n');
+    const hugeFile = `${Array.from({ length: 1_800 }, (_, i) => `entry_${i}=${'w'.repeat(34)}`).join('\n')}\nSFTP_TAIL_4147`;
+    assert.ok(mediumFile.length > 35_000 && mediumFile.length < 60_000);
+    assert.ok(hugeFile.length > 70_000);
+
+    for (const withDedup of [true, false]) {
+      const store = new ToolOutputStore();
+      const dedup = withDedup ? new ToolResultDedup() : undefined;
+      dedup?.beginTurn();
+      const { tools, toolsContext } = createCattyToolsFromCatalog(
+        {
+          aiCapability: async (_method: string, params: Record<string, unknown>) => ({
+            ok: true,
+            path: params.path,
+            content: params.path === '/etc/medium.conf' ? mediumFile : hugeFile,
+          }),
+        },
+        { sessions: [] },
+        [],
+        'auto',
+        undefined,
+        `chat-sftp-${withDedup ? 'dedup' : 'plain'}`,
+        store,
+        dedup,
+        { toolOutputMaxChars: 60_000 },
+      );
+
+      const readFile = withCattyToolContext(tools.sftp_read_file, toolsContext.sftp_read_file);
+      const mediumResult = await readFile.execute({ sessionId: 'session-1', path: '/etc/medium.conf' }) as {
+        content?: string;
+        handleId?: string;
+      };
+      assert.equal(mediumResult.content, mediumFile);
+      assert.equal(mediumResult.handleId, undefined);
+
+      const hugeResult = await readFile.execute({ sessionId: 'session-1', path: '/etc/huge.conf' }) as {
+        content?: string;
+        handleId?: string;
+      };
+      const handleId = hugeResult.handleId ?? hugeResult.content?.match(/handleId=(tool-output-[^\]\s]+)/)?.[1];
+      assert.ok(handleId, `expected handleId for oversized SFTP file (withDedup=${withDedup})`);
+      const recovered = store.readChunk(
+        { handleId, mode: 'search', query: 'SFTP_TAIL_4147' },
+        `chat-sftp-${withDedup ? 'dedup' : 'plain'}`,
+      );
+      assert.match(recovered?.content ?? '', /SFTP_TAIL_4147/);
+    }
+  });
+});

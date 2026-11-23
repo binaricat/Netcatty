@@ -12,6 +12,7 @@ import {
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
+  STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS,
   STORAGE_KEY_AI_SESSION_MESSAGE_CAP,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
@@ -39,6 +40,10 @@ import {
   DEFAULT_AI_SESSION_MESSAGE_CAP,
   normalizeAiSessionMessageCap,
 } from '../../domain/aiSessionMessageCap';
+import {
+  DEFAULT_AI_TOOL_OUTPUT_MAX_CHARS,
+  normalizeAiToolOutputMaxChars,
+} from '../../domain/aiToolOutputLimit';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
 import { getAIBridge } from './aiStateSnapshots';
 import { useStoredBoolean } from './useStoredBoolean';
@@ -91,6 +96,12 @@ export function useAISettingsState() {
   );
   const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
     localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20
+  );
+  const [toolOutputMaxChars, setToolOutputMaxCharsRaw] = useState<number>(() =>
+    normalizeAiToolOutputMaxChars(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS)
+        ?? DEFAULT_AI_TOOL_OUTPUT_MAX_CHARS,
+    )
   );
   const [aiSessionMessageCap, setAiSessionMessageCapRaw] = useState<number>(() =>
     normalizeAiSessionMessageCap(
@@ -208,6 +219,12 @@ export function useAISettingsState() {
     getAIBridge()?.aiMcpSetMaxIterations?.(value);
   }, []);
 
+  const setToolOutputMaxChars = useCallback((value: number) => {
+    const normalizedValue = normalizeAiToolOutputMaxChars(value);
+    setToolOutputMaxCharsRaw(normalizedValue);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS, normalizedValue);
+  }, []);
+
   const setAiSessionMessageCap = useCallback((value: number) => {
     const normalizedValue = normalizeAiSessionMessageCap(value);
     setAiSessionMessageCapRaw(normalizedValue);
@@ -294,6 +311,13 @@ export function useAISettingsState() {
             getAIBridge()?.aiMcpSetMaxIterations?.(iters);
             break;
           }
+          case STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS: {
+            const limit = localStorageAdapter.readNumber(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS)
+              ?? DEFAULT_AI_TOOL_OUTPUT_MAX_CHARS;
+            if (!Number.isFinite(limit)) break;
+            setToolOutputMaxCharsRaw(normalizeAiToolOutputMaxChars(limit));
+            break;
+          }
           case STORAGE_KEY_AI_SESSION_MESSAGE_CAP:
             setAiSessionMessageCapRaw(
               normalizeAiSessionMessageCap(
@@ -365,6 +389,8 @@ export function useAISettingsState() {
     setResponseIdleTimeout,
     maxIterations,
     setMaxIterations,
+    toolOutputMaxChars,
+    setToolOutputMaxChars,
     aiSessionMessageCap,
     setAiSessionMessageCap,
     webSearchConfig,
@@ -400,6 +426,8 @@ export function useAISettingsState() {
     setResponseIdleTimeout,
     maxIterations,
     setMaxIterations,
+    toolOutputMaxChars,
+    setToolOutputMaxChars,
     aiSessionMessageCap,
     setAiSessionMessageCap,
     webSearchConfig,

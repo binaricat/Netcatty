@@ -305,6 +305,18 @@ test('AI side panel re-renders when response wait time changes', () => {
   ), false);
 });
 
+test('AI side panel re-renders when tool output limit changes', () => {
+  const props = baseProps({
+    isVisible: true,
+    toolOutputMaxChars: 24_000,
+  });
+
+  assert.equal(aiChatSidePanelPropsAreEqual(
+    props,
+    { ...props, toolOutputMaxChars: 64_000 },
+  ), false);
+});
+
 test('AI side panel skips re-render when only a sibling scope session object changes', () => {
   const own = session({ id: 'session-1', scope: { type: 'terminal', targetId: 'terminal-1' } });
   const siblingA = session({ id: 'session-2', scope: { type: 'terminal', targetId: 'terminal-2' } });

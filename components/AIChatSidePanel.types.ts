@@ -95,6 +95,7 @@ export interface AIChatSidePanelProps {
   commandTimeout?: number;
   responseIdleTimeout?: number;
   maxIterations?: number;
+  toolOutputMaxChars?: number;
 
   // Web search
   webSearchConfig?: WebSearchConfig | null;

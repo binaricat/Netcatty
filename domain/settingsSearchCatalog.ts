@@ -1266,6 +1266,15 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "ai.safety.title",
   },
   {
+    id: "ai-safety-tool-output-max-chars",
+    tab: "ai",
+    aiSubTab: "safety",
+    labelKey: "ai.safety.toolOutputMaxChars",
+    descriptionKey: "ai.safety.toolOutputMaxChars.description",
+    sectionKey: "ai.safety.title",
+    keywords: ["tool", "output", "truncate", "limit", "chars", "工具", "返回", "输出", "截断", "限制", "傳回", "輸出"],
+  },
+  {
     id: "ai-safety-blocklist",
     tab: "ai",
     aiSubTab: "safety",

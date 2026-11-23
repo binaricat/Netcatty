@@ -437,6 +437,7 @@ export interface AISettings {
   commandTimeout: number;        // seconds, default 60
   responseIdleTimeout: number;   // seconds without response data, default 120
   maxIterations: number;         // doom loop prevention, default 20
+  toolOutputMaxChars?: number;   // inline tool result character cap for built-in AI, default 24000
   webSearchConfig?: WebSearchConfig;
 }
 
