@@ -10,8 +10,9 @@
  *
  * The budget stays below the browser limit by releasing the renderers of panes
  * that have been hidden for a while, least recently seen first. Visible panes
- * are never released and always get a context. A released pane builds a new
- * renderer when it is shown again. Below the cap nothing changes.
+ * are never released, but new ones stay on DOM when visible holders fill the
+ * cap. Recently hidden holders may temporarily exceed the cap during tab flips.
+ * A released pane can rebuild when shown if the budget permits.
  */
 
 export const MAX_ACTIVE_WEBGL_CONTEXTS = 12;
@@ -31,8 +32,8 @@ export interface WebglContextBudgetMember {
 
 export interface WebglContextBudget {
   /**
-   * Reserve a context for a member about to create its renderer. Visible
-   * members always get one; hidden members only while the budget has room.
+   * Reserve a context if the budget has room. Visible members may replace
+   * hidden holders, allowing a temporary overshoot until their grace expires.
    */
   tryAcquire(member: WebglContextBudgetMember): boolean;
   /** Give the slot back once the member's renderer is gone. Idempotent. */
@@ -102,7 +103,11 @@ export function createWebglContextBudget(
   return {
     tryAcquire(member) {
       if (active.has(member)) return true;
-      if (member.getHiddenSince() !== null && active.size >= maxActive) return false;
+      if (active.size >= maxActive) {
+        if (member.getHiddenSince() !== null) return false;
+        const visibleCount = [...active].filter((holder) => holder.getHiddenSince() === null).length;
+        if (visibleCount >= maxActive) return false;
+      }
       active.add(member);
       releaseOverflow();
       return true;

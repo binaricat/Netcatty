@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { describeHostKey } = require("../electron/bridges/hostKeyVerifier.cjs");
+const { mintHostCertificates, legacyCertificate, sshString, sshKeygenSkip } = require("../electron/bridges/fixtures/hostCertificates.test.fixture.cjs");
 
 import type { KnownHost } from "./models";
 import {
@@ -138,6 +143,55 @@ test("fingerprintFromPublicKey returns empty string on missing input", () => {
 });
 
 // --- Migration --------------------------------------------------------------
+
+for (const options of [
+  { type: "ed25519" },
+  { type: "rsa", bits: 2048 },
+  ...[256, 384, 521].map((bits) => ({ type: "ecdsa", bits })),
+  { type: "ed25519", sk: true },
+  { type: "ecdsa", bits: 256, sk: true },
+]) {
+  test(`renderer certificate fingerprint and migration agree with verifier: ${JSON.stringify(options)}`, { skip: sshKeygenSkip }, (t) => {
+    const { first, renewed, different } = mintHostCertificates(t, options);
+    const expected = describeHostKey(first.blob).fingerprint;
+    assert.equal(fingerprintFromPublicKey(first.line), expected);
+    assert.equal(expected, first.publicKeyFingerprint);
+    assert.equal(fingerprintFromPublicKey(renewed.line), expected);
+    assert.notEqual(fingerprintFromPublicKey(different.line), expected);
+    assert.equal(fingerprintFromPublicKey(first.plain.line), expected);
+
+    const legacy = knownHost({
+      keyType: first.keyType,
+      publicKey: first.line,
+      fingerprint: crypto.createHash("sha256").update(first.blob).digest("base64").replace(/=+$/g, ""),
+    });
+    const migrated = normalizeKnownHost(legacy);
+    assert.equal(migrated.fingerprint, expected);
+    assert.equal(migrated.keyType, first.keyType);
+    assert.equal(migrated.publicKey, first.line);
+    assert.equal(normalizeKnownHost(migrated), migrated, "migration is idempotent");
+    assert.equal(normalizeKnownHost({ ...legacy, fingerprint: undefined }).fingerprint, expected);
+    assert.equal(normalizeKnownHost({ ...legacy, keyType: "" }).keyType, first.keyType);
+    const unrelated = { ...legacy, fingerprint: "unrelated-explicit-fingerprint" };
+    assert.equal(normalizeKnownHost(unrelated), unrelated);
+    const opaque = { ...legacy, publicKey: `SHA256:${legacy.fingerprint}` };
+    assert.equal(normalizeKnownHost(opaque), opaque);
+    const fingerprintOnly = { ...legacy, publicKey: undefined };
+    assert.equal(normalizeKnownHost(fingerprintOnly), fingerprintOnly);
+  });
+}
+
+test("renderer fingerprints v00 certificates and falls back for unparseable certificates", () => {
+  const cert = legacyCertificate("ssh-rsa", ["exponent", "modulus"]);
+  assert.equal(fingerprintFromPublicKey(cert.line), describeHostKey(cert.plain).fingerprint);
+  const malformed = Buffer.concat([
+    sshString("ssh-ed25519-cert-v01@openssh.com"), sshString("nonce"), sshString(Buffer.alloc(32)),
+  ]);
+  const line = `ssh-ed25519-cert-v01@openssh.com ${malformed.toString("base64")}`;
+  const fullHash = crypto.createHash("sha256").update(malformed).digest("base64").replace(/=+$/g, "");
+  assert.equal(fingerprintFromPublicKey(line), fullHash);
+  assert.equal(fingerprintFromPublicKey(line), describeHostKey(malformed).fingerprint);
+});
 
 test("normalizeKnownHost backfills fingerprint when only publicKey is stored", () => {
   const rawKey = makeRawPublicKey("ssh-ed25519");

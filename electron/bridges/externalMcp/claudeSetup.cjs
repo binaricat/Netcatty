@@ -12,27 +12,18 @@ const {
   formatDiscoveryEnvCliFlags,
 } = require("../../cli/externalMcpDiscoveryPath.cjs");
 
-function loadShellUtils() {
-  return require("../ai/shellUtils.cjs");
-}
-
-function loadDesktopCliResolver() {
-  return require("./desktopCliResolver.cjs");
-}
+const {
+  loadShellUtils,
+  loadDesktopCliResolver,
+  formatCliCommandText,
+  pathsMatch,
+  extractCommandExecutable,
+  hasRequiredDiscoveryEnv,
+  summarizeFailure: summarizeCliFailure,
+} = require("./cliSetupBase.cjs");
 
 function formatClaudeCommandText(args, cliPath = "claude") {
-  const executable = typeof cliPath === "string" && cliPath.trim()
-    ? cliPath.trim()
-    : "claude";
-  return [quoteCommandArg(executable), ...args.map(quoteCommandArg)].join(" ");
-}
-
-function quoteCommandArg(value) {
-  if (typeof value !== "string" || value.length === 0) return '""';
-  // Match ExternalMcpCard quoteShellArg so copyable commands stay shell-safe
-  // for paths with spaces, quotes, apostrophes, or backslashes.
-  if (!/[\s"'\\]/u.test(value)) return value;
-  return `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
+  return formatCliCommandText(args, cliPath, "claude");
 }
 
 function getCombinedOutput(result) {
@@ -42,19 +33,6 @@ function getCombinedOutput(result) {
 function isMissingClaudeServer(result) {
   const output = getCombinedOutput(result);
   return /No MCP server (?:found with name:|named)\s*["']?netcatty-external["']?/i.test(output);
-}
-
-function normalizePathForCompare(value) {
-  if (typeof value !== "string") return "";
-  let normalized = value.trim().replace(/^["']|["']$/gu, "");
-  if (process.platform === "win32") {
-    normalized = normalized.replace(/\.cmd$/iu, "");
-  }
-  return normalized;
-}
-
-function pathsMatch(left, right) {
-  return normalizePathForCompare(left) === normalizePathForCompare(right);
 }
 
 function extractExistingCommand(result) {
@@ -128,23 +106,6 @@ function buildClaudeAddArgs(launcherPath, discoveryEnv) {
   ];
 }
 
-function extractCommandExecutable(commandText) {
-  if (typeof commandText !== "string") return "";
-  const trimmed = commandText.trim();
-  if (!trimmed) return "";
-  // Prefer the last path-like token so env flags before `--` do not confuse matching.
-  const dashDashIndex = trimmed.lastIndexOf(" -- ");
-  const candidate = dashDashIndex >= 0
-    ? trimmed.slice(dashDashIndex + 4).trim()
-    : trimmed;
-  const match = candidate.match(/("(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s]+)/u);
-  if (!match) return candidate;
-  // Extra args after the executable mean a different launch command.
-  const remainder = candidate.slice(match[0].length).trim();
-  if (remainder) return "";
-  return match[1];
-}
-
 function extractExistingEnv(result) {
   const output = getCombinedOutput(result);
   if (!output) return null;
@@ -181,14 +142,6 @@ function extractExistingEnv(result) {
     env[match[1]] = match[2].replace(/^["']|["']$/gu, "");
   }
   return Object.keys(env).length > 0 ? env : null;
-}
-
-function hasRequiredDiscoveryEnv(entryEnv, discoveryEnv) {
-  const required = discoveryEnv && typeof discoveryEnv === "object" ? discoveryEnv : {};
-  const keys = Object.keys(required).filter((key) => typeof required[key] === "string" && required[key]);
-  if (keys.length === 0) return true;
-  if (!entryEnv || typeof entryEnv !== "object") return false;
-  return keys.every((key) => String(entryEnv[key] || "") === String(required[key]));
 }
 
 function classifyClaudeExternalMcpStatus({
@@ -269,7 +222,7 @@ function classifyClaudeExternalMcpStatus({
 }
 
 function summarizeFailure(result, fallback) {
-  return String(result?.stderr || result?.stdout || fallback || "Claude command failed").trim();
+  return summarizeCliFailure(result, fallback, "Claude command failed");
 }
 
 function createExternalMcpClaudeSetup(options = {}) {

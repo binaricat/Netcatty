@@ -6,7 +6,7 @@
  */
 import { Check, Search, Terminal } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { matchesWorkspaceHostPickerQuery } from '../../lib/searchMatcher';
+import { matchesWorkspaceHostPickerQuery } from '../../domain/searchMatcher';
 import { Host } from '../../types';
 import { DistroAvatar } from '../DistroAvatar';
 import { Button } from '../ui/button';

@@ -7,6 +7,19 @@ const fs = require("node:fs");
 const { stageRendererFileToTemp } = require("./stageUploadFile.cjs");
 
 function createPreloadApi(ctx) {
+  const sessionLogFinalizers = new Set();
+  let pendingSessionLogFinalization = null;
+  ctx.ipcRenderer?.on?.("app:finalize-session-logs", async (_event, { requestId }) => {
+    const pending = pendingSessionLogFinalization ??= Promise.allSettled(
+      [...sessionLogFinalizers].map((finalize) => Promise.resolve().then(finalize)),
+    );
+    const results = await pending;
+    if (pendingSessionLogFinalization === pending) pendingSessionLogFinalization = null;
+    ctx.ipcRenderer.send("app:session-logs-finalized", {
+      requestId,
+      success: results.every((result) => result.status === "fulfilled"),
+    });
+  });
   const terminalDataBacklog = ctx.terminalDataBacklog || null;
   const displayDataListeners = ctx.displayDataListeners || new Map();
   const closedTerminalDataSessions = ctx.closedTerminalDataSessions || null;
@@ -130,6 +143,7 @@ function createPreloadApi(ctx) {
     return () => ipcRenderer.removeListener("netcatty:plugins:ai-host-request", listener);
   },
   setPluginInteractionReady: (ready) => ipcRenderer.invoke("netcatty:plugins:interaction-ready", { ready }),
+  openPluginHostStream: (payload) => ipcRenderer.invoke("netcatty:plugins:host-stream-open", payload),
   respondPluginInteraction: (response) => ipcRenderer.invoke("netcatty:plugins:interaction-response", response),
   onPluginInteraction: (callback) => {
     const listener = (_event, payload) => callback(payload);
@@ -1409,8 +1423,8 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:cloudSync:webdav:initialize", { config }),
   cloudSyncWebdavUpload: (config, syncedFile) =>
     ipcRenderer.invoke("netcatty:cloudSync:webdav:upload", { config, syncedFile }),
-  cloudSyncWebdavDownload: (config) =>
-    ipcRenderer.invoke("netcatty:cloudSync:webdav:download", { config }),
+  cloudSyncWebdavDownload: (config, etag) =>
+    ipcRenderer.invoke("netcatty:cloudSync:webdav:download", { config, etag }),
   cloudSyncWebdavDelete: (config) =>
     ipcRenderer.invoke("netcatty:cloudSync:webdav:delete", { config }),
 
@@ -1549,6 +1563,10 @@ function createPreloadApi(ctx) {
   reportDirtyEditorsResult: (hasDirty, reason, options) => ipcRenderer.send("app:dirty-editors-result", {
     hasDirty, reason, requestId: options?.requestId, pending: options?.pending === true,
   }),
+  onFinalizeSessionLogs: (finalize) => {
+    sessionLogFinalizers.add(finalize);
+    return () => sessionLogFinalizers.delete(finalize);
+  },
   
   // Port Forwarding API
   startPortForward: async (options) => {
@@ -2307,27 +2325,6 @@ function createPreloadApi(ctx) {
     };
     ipcRenderer.on("netcatty:ai:stream:error", handler);
     return () => ipcRenderer.removeListener("netcatty:ai:stream:error", handler);
-  },
-  onAiAgentStdout: (agentId, cb) => {
-    const handler = (_event, payload) => {
-      if (payload.agentId === agentId) cb(payload.data);
-    };
-    ipcRenderer.on("netcatty:ai:agent:stdout", handler);
-    return () => ipcRenderer.removeListener("netcatty:ai:agent:stdout", handler);
-  },
-  onAiAgentStderr: (agentId, cb) => {
-    const handler = (_event, payload) => {
-      if (payload.agentId === agentId) cb(payload.data);
-    };
-    ipcRenderer.on("netcatty:ai:agent:stderr", handler);
-    return () => ipcRenderer.removeListener("netcatty:ai:agent:stderr", handler);
-  },
-  onAiAgentExit: (agentId, cb) => {
-    const handler = (_event, payload) => {
-      if (payload.agentId === agentId) cb(payload.code);
-    };
-    ipcRenderer.on("netcatty:ai:agent:exit", handler);
-    return () => ipcRenderer.removeListener("netcatty:ai:agent:exit", handler);
   },
   scriptRun: async (params) => ipcRenderer.invoke("netcatty:script:run", params),
   scriptStop: async (runId) => ipcRenderer.invoke("netcatty:script:stop", { runId }),

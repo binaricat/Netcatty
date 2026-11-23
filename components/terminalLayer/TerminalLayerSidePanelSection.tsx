@@ -64,7 +64,7 @@ import { PersistentSidePanelPortal, SidePanelMountedContent } from './terminalLa
 import { usePluginTerminalSidebar } from '../../application/state/usePluginTerminalSidebar';
 import { PluginTerminalSidebarPageHost } from '../plugins/PluginTerminalSidebar';
 import { PluginContributionIcon } from '../plugins/PluginContributionIcon';
-import { getPaneMagnificationShortcutLabel } from '../../domain/paneMagnification';
+import { getPaneMagnificationShortcutLabel, resolveMagnifiedChromeBorderWidth } from '../../domain/paneMagnification';
 
 const MemoizedSidePanelMountedContent = memo(
   SidePanelMountedContent,
@@ -1545,6 +1545,9 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
           className="absolute inset-3 flex flex-col overflow-hidden rounded-md border bg-background shadow-2xl animate-in fade-in zoom-in-95 duration-150"
           style={{
             borderColor: sidePanelTheme.accent,
+            borderWidth: resolveMagnifiedChromeBorderWidth(
+              typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1),
+            ),
             backgroundColor: sidePanelTheme.termBg,
             color: sidePanelTheme.termFg,
           }}

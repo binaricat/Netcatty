@@ -106,6 +106,14 @@ test("core MCP descriptions strongly route live terminal work through Netcatty",
   assert.match(vaultHosts?.description || "", /host_open/i);
 });
 
+test("vault_hosts_list exposes optional query and group filters", () => {
+  const vaultHosts = listMcpTools().find((tool) => tool.mcpTool === "vault_hosts_list");
+  assert.ok(vaultHosts);
+  assert.deepEqual(Object.keys(vaultHosts.inputShape).sort(), ["group", "query"]);
+  assert.equal(vaultHosts.inputShape.query.optional, true);
+  assert.equal(vaultHosts.inputShape.group.optional, true);
+});
+
 test("session_close is exposed to agents and external MCP clients", () => {
   const mcpTool = listMcpTools().find((tool) => tool.mcpTool === "session_close");
   assert.ok(mcpTool);

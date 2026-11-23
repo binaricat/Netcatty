@@ -78,25 +78,7 @@ class PluginByteStreamService {
     // Runtime authentication and quota middleware still apply to every call.
     registry.registerRequest("network.stream.connect", async ({ endpoint }, caller) => {
       const context = await this.authenticate(caller);
-      const handle = await this.broker.connect(endpoint, context);
-      try {
-        context.assertCommit();
-        this.broker.get(handle.handleId, context);
-        const record = {
-          ...handle, context,
-          inputStreamId: `byte-in-${randomUUID()}`, outputStreamId: `byte-out-${randomUUID()}`,
-          attached: false, closing: false, input: null, output: null,
-        };
-        this.records.set(handle.handleId, record);
-        record.abort = () => this.closeRecord(record);
-        context.signal?.addEventListener("abort", record.abort, { once: true });
-        return { ...handle, inputStreamId: record.inputStreamId,
-          outputStreamId: record.outputStreamId, windowBytes: LIMITS.bufferBytes };
-      } catch (error) {
-        const state = this.broker.connections.get(handle.handleId);
-        if (state) this.broker.finish(state, error);
-        throw error;
-      }
+      return this.connect(endpoint, context);
     }, { validateParams: validator("ByteStreamConnectRequest"), metadata: { capability: "network.stream", mutating: true, public: true } });
     registry.registerRequest("network.stream.attach", async ({ handleId }, caller) => {
       const context = await this.authenticate(caller);
@@ -106,7 +88,7 @@ class PluginByteStreamService {
       try {
         record.output = await this.runtimeSupervisor.openStream(context.pluginId, record.outputStreamId, LIMITS.bufferBytes, {
           expectedIdentity: context,
-          onClose: (reason) => { if (reason !== "end") this.closeRecord(record); },
+          onClose: (reason) => { if (reason !== "end") this.closeRecord(record, reason instanceof Error ? reason : undefined); },
         });
         context.assertCommit();
         if (record.closing) throw new PluginRpcError(RPC_ERRORS.cancelled, "Byte stream attachment cancelled");
@@ -146,6 +128,28 @@ class PluginByteStreamService {
       });
       return true;
     });
+  }
+
+  async connect(endpoint, context, hostTransport) {
+    const handle = await this.broker.connect(endpoint, context, hostTransport);
+    try {
+      context.assertCommit();
+      this.broker.get(handle.handleId, context);
+      const record = {
+        ...handle, context,
+        inputStreamId: `byte-in-${randomUUID()}`, outputStreamId: `byte-out-${randomUUID()}`,
+        attached: false, closing: false, input: null, output: null,
+      };
+      this.records.set(handle.handleId, record);
+      record.abort = () => this.closeRecord(record);
+      context.signal?.addEventListener("abort", record.abort, { once: true });
+      return { ...handle, inputStreamId: record.inputStreamId,
+        outputStreamId: record.outputStreamId, windowBytes: LIMITS.bufferBytes };
+    } catch (error) {
+      const state = this.broker.connections.get(handle.handleId);
+      if (state) this.broker.finish(state, error);
+      throw error;
+    }
   }
 
   get(handleId, context) {

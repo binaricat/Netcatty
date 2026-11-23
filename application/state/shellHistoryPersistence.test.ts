@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildDockerLogsCommand } from '../../domain/systemManager/dockerShell.ts';
+import { buildContainerLogsCommand } from '../../domain/systemManager/containerRuntime.ts';
 import { loadSanitizedShellHistory } from './shellHistoryPersistence.ts';
 import type { ShellHistoryEntry } from '../../domain/models.ts';
 
@@ -16,7 +16,7 @@ const entry = (id: string, command: string): ShellHistoryEntry => ({
 
 test('loadSanitizedShellHistory removes persisted managed startup commands and writes back cleaned history', () => {
   const stored = [
-    entry('managed', buildDockerLogsCommand('587abcdef123')),
+    entry('managed', buildContainerLogsCommand('docker', '587abcdef123')),
     entry('user', 'docker ps -a'),
   ];
   let written: ShellHistoryEntry[] | null = null;

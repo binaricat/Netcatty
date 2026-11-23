@@ -4,7 +4,8 @@ import { generateText, streamText } from "ai";
 import { buildCattySdkMessages, createContinuationContext } from "./harness/turnDrivers/cattyMessageBuilder";
 import { ToolOutputStore } from "./harness/toolOutputStore";
 
-import { createModelFromConfig, resolveProviderEndpoint } from "./sdk/providers";
+import { createModelFromConfig, isStreamingRequest, resolveProviderEndpoint } from "./sdk/providers";
+import { OPENCODE_CLIENT_USER_AGENT } from "./providerRequestHeaders";
 import type { ProviderConfig } from "./types";
 
 function makeConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
@@ -94,6 +95,55 @@ test("resolveProviderEndpoint keeps an explicit openrouter baseURL untouched", (
     "sk-test",
   );
   assert.equal(result.baseURL, "https://proxy.example/v1");
+});
+
+test("resolveProviderEndpoint routes OpenCode Go models to their native gateway prefix", () => {
+  const base = {
+    id: "ocg",
+    providerId: "opencode-go" as const,
+    name: "OpenCode Go",
+    enabled: true,
+    baseURL: "https://opencode.ai/inference/go/openai/v1",
+  };
+  assert.equal(
+    resolveProviderEndpoint({ ...base, defaultModel: "kimi-k3" }, "openai", "key").baseURL,
+    "https://opencode.ai/inference/go/openai/v1",
+  );
+  assert.equal(
+    resolveProviderEndpoint({ ...base, defaultModel: "grok-4.7" }, "openai", "key").baseURL,
+    "https://opencode.ai/inference/go/openai/v1",
+  );
+  assert.equal(
+    resolveProviderEndpoint({ ...base, defaultModel: "qwen3.8-max" }, "anthropic", "key").baseURL,
+    "https://opencode.ai/inference/go/anthropic/v1",
+  );
+  assert.equal(
+    resolveProviderEndpoint({ ...base, defaultModel: "gemini-4-argon" }, "google", "key").baseURL,
+    "https://opencode.ai/inference/go/google/v1beta",
+  );
+});
+
+test("createModelFromConfig uses each OpenCode Go model's native SDK", () => {
+  const base = {
+    providerId: "opencode-go" as const,
+    baseURL: "https://opencode.ai/inference/go/openai/v1",
+  };
+  assert.equal(
+    (createModelFromConfig(makeConfig({ ...base, defaultModel: "kimi-k3" })) as { provider?: string }).provider,
+    "openai.chat",
+  );
+  assert.equal(
+    (createModelFromConfig(makeConfig({ ...base, defaultModel: "grok-4.7" })) as { provider?: string }).provider,
+    "openai.responses",
+  );
+  assert.match(
+    String((createModelFromConfig(makeConfig({ ...base, defaultModel: "qwen3.8-max" })) as { provider?: string }).provider ?? ""),
+    /^anthropic/,
+  );
+  assert.match(
+    String((createModelFromConfig(makeConfig({ ...base, defaultModel: "gemini-4-argon" })) as { provider?: string }).provider ?? ""),
+    /^google/,
+  );
 });
 
 test("resolveProviderEndpoint normalizes Anthropic-compat Base URL for @ai-sdk/anthropic", () => {
@@ -269,6 +319,7 @@ test("SDK requests forward custom headers and scope OpenCode sessions", async (t
         await assert.rejects(model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] }));
         const request = requests.at(-1)!;
         assert.equal(request.headers.get("x-opencode-session"), sessionId);
+        assert.ok((request.headers.get("user-agent") ?? "").startsWith(OPENCODE_CLIENT_USER_AGENT));
         assert.equal(request.headers.get("x-test-header"), "configured");
       }
     }
@@ -322,4 +373,226 @@ test("OpenAI Chat sends inline image attachments as data URLs through the bridge
     }
   }
   assert.equal(requests.length, 4);
+});
+
+test("Anthropic SDK sends x-api-key only on official host and adds Bearer on custom bases", async (t) => {
+  const browserGlobal = globalThis as typeof globalThis & { window?: unknown };
+  const originalWindow = browserGlobal.window;
+  t.after(() => { browserGlobal.window = originalWindow; });
+  const requests: Array<{ url: string; headers: Headers }> = [];
+  Reflect.set(globalThis, "window", {
+    netcatty: {
+      aiFetch: async (url: string, _method: string, headers: Record<string, string>) => {
+        requests.push({ url, headers: new Headers(headers) });
+        return { ok: false, status: 400, data: '{"error":{"message":"captured anthropic request"}}' };
+      },
+    },
+  });
+
+  const prompt = [{ role: "user" as const, content: [{ type: "text" as const, text: "hello" }] }];
+
+  for (const baseURL of [undefined, "https://api.anthropic.com", "https://api.anthropic.com/v1"]) {
+    const model = createModelFromConfig(makeConfig({
+      providerId: "anthropic",
+      style: "anthropic",
+      apiKey: "test-key",
+      baseURL,
+    }));
+    await assert.rejects(async () => await model.doGenerate({ prompt }));
+    const request = requests.at(-1)!;
+    assert.equal(request.headers.get("x-api-key"), "__IPC_SECURED__");
+    assert.equal(request.headers.get("authorization"), null);
+    assert.equal(request.headers.get("anthropic-version"), "2023-06-01");
+  }
+
+  for (const baseURL of [
+    "https://ark.cn-beijing.volces.com/api/plan",
+    "https://gateway.example/v1",
+  ]) {
+    const model = createModelFromConfig(makeConfig({
+      style: "anthropic",
+      apiKey: "test-key",
+      baseURL,
+    }));
+    await assert.rejects(async () => await model.doGenerate({ prompt }));
+    const request = requests.at(-1)!;
+    assert.equal(request.url, baseURL.endsWith("/api/plan")
+      ? baseURL + "/v1/messages"
+      : baseURL + "/messages");
+    assert.equal(request.headers.get("x-api-key"), "__IPC_SECURED__");
+    assert.equal(request.headers.get("authorization"), "Bearer __IPC_SECURED__");
+    assert.equal(request.headers.get("anthropic-version"), "2023-06-01");
+  }
+
+  const overridden = createModelFromConfig(makeConfig({
+    style: "anthropic",
+    apiKey: "test-key",
+    baseURL: "https://ark.cn-beijing.volces.com/api/plan",
+    customHeaders: { Authorization: "Bearer custom-override" },
+  }));
+  await assert.rejects(async () => await overridden.doGenerate({ prompt }));
+  const overriddenReq = requests.at(-1)!;
+  assert.equal(overriddenReq.headers.get("x-api-key"), "__IPC_SECURED__");
+  assert.equal(overriddenReq.headers.get("authorization"), "Bearer custom-override");
+
+  const overriddenApiKey = createModelFromConfig(makeConfig({
+    style: "anthropic",
+    apiKey: "test-key",
+    baseURL: "https://ark.cn-beijing.volces.com/api/plan",
+    customHeaders: { "X-API-Key": "custom-x-api-key" },
+  }));
+  await assert.rejects(async () => await overriddenApiKey.doGenerate({ prompt }));
+  const overriddenApiKeyReq = requests.at(-1)!;
+  assert.equal(overriddenApiKeyReq.headers.get("x-api-key"), "custom-x-api-key");
+  assert.equal(overriddenApiKeyReq.headers.get("authorization"), "Bearer __IPC_SECURED__");
+});
+
+test("isStreamingRequest recognizes Google SSE endpoints without body stream flag", () => {
+  assert.equal(
+    isStreamingRequest(
+      "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse",
+      { method: "POST", body: JSON.stringify({ contents: [] }) },
+    ),
+    true,
+  );
+  assert.equal(
+    isStreamingRequest(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse&key=__IPC_SECURED__",
+      { method: "POST", body: JSON.stringify({ contents: [] }) },
+    ),
+    true,
+  );
+  assert.equal(
+    isStreamingRequest(
+      "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:generateContent",
+      { method: "POST", body: JSON.stringify({ contents: [] }) },
+    ),
+    false,
+  );
+  assert.equal(
+    isStreamingRequest(
+      "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent",
+      { method: "POST", body: JSON.stringify({ contents: [] }) },
+    ),
+    false,
+  );
+  assert.equal(
+    isStreamingRequest(
+      "https://opencode.ai/inference/go/openai/v1/chat/completions",
+      { method: "POST", body: JSON.stringify({ stream: true }) },
+    ),
+    true,
+  );
+});
+
+test("Google SSE requests route through aiChatStream while generateContent stays on aiFetch", async (t) => {
+  const browserGlobal = globalThis as typeof globalThis & { window?: unknown };
+  const originalWindow = browserGlobal.window;
+  t.after(() => { browserGlobal.window = originalWindow; });
+
+  const streamCalls: Array<{ requestId: string; url: string; headers: Headers; body: Record<string, unknown> }> = [];
+  const fetchCalls: Array<{ url: string; headers: Headers; body: Record<string, unknown> }> = [];
+  const cancelledRequestIds: string[] = [];
+  const dataListeners = new Map<string, (data: string) => void>();
+  const endListeners = new Map<string, () => void>();
+  let holdStreamOpen = false;
+
+  Reflect.set(globalThis, "window", {
+    netcatty: {
+      aiFetch: async (url: string, _method: string, headers: Record<string, string>, body: string) => {
+        fetchCalls.push({ url, headers: new Headers(headers), body: JSON.parse(body) });
+        return {
+          ok: true,
+          status: 200,
+          data: JSON.stringify({
+            candidates: [{
+              content: { role: "model", parts: [{ text: "non-stream reply" }] },
+              finishReason: "STOP",
+            }],
+          }),
+        };
+      },
+      aiChatStream: async (requestId: string, url: string, headers: Record<string, string>, body: string) => {
+        streamCalls.push({ requestId, url, headers: new Headers(headers), body: JSON.parse(body) });
+        if (!holdStreamOpen) {
+          queueMicrotask(() => {
+            dataListeners.get(requestId)?.(JSON.stringify({
+              candidates: [{
+                content: { role: "model", parts: [{ text: "streamed " }] },
+              }],
+            }));
+            dataListeners.get(requestId)?.(JSON.stringify({
+              candidates: [{
+                content: { role: "model", parts: [{ text: "reply" }] },
+                finishReason: "STOP",
+              }],
+            }));
+            endListeners.get(requestId)?.();
+          });
+        }
+        return { ok: true, statusCode: 200, statusText: "OK" };
+      },
+      onAiStreamData: (requestId: string, cb: (data: string) => void) => {
+        dataListeners.set(requestId, cb);
+        return () => { dataListeners.delete(requestId); };
+      },
+      onAiStreamEnd: (requestId: string, cb: () => void) => {
+        endListeners.set(requestId, cb);
+        return () => { endListeners.delete(requestId); };
+      },
+      onAiStreamError: () => () => {},
+      aiChatCancel: async (requestId: string) => {
+        cancelledRequestIds.push(requestId);
+        return true;
+      },
+    },
+  });
+
+  const model = createModelFromConfig(makeConfig({
+    providerId: "opencode-go",
+    baseURL: "https://opencode.ai/inference/go/openai/v1",
+    defaultModel: "gemini-4-argon",
+    apiKey: "test-key",
+  }), { chatSessionId: "ocg-google-session" });
+
+  // Streaming path -> aiChatStream
+  const streamResult = streamText({ model, prompt: "hello", maxRetries: 0 });
+  const streamedText = await streamResult.text;
+  assert.equal(streamedText, "streamed reply");
+  assert.equal(streamCalls.length, 1);
+  assert.equal(fetchCalls.length, 0);
+  assert.equal(
+    streamCalls[0].url,
+    "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse",
+  );
+  assert.equal(streamCalls[0].body.stream, undefined);
+  assert.equal(streamCalls[0].headers.get("x-goog-api-key"), "__IPC_SECURED__");
+  assert.equal(streamCalls[0].headers.get("x-opencode-session"), "ocg-google-session");
+
+  // Cancellation on Google SSE stream -> aiChatCancel
+  holdStreamOpen = true;
+  const abortController = new AbortController();
+  const cancelledStream = streamText({
+    model,
+    prompt: "stop me",
+    maxRetries: 0,
+    abortSignal: abortController.signal,
+    onError: () => {},
+  });
+  const textPromise = cancelledStream.text;
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  abortController.abort();
+  await assert.rejects(textPromise);
+  assert.equal(streamCalls.length, 2);
+  assert.deepEqual(cancelledRequestIds, [streamCalls[1].requestId]);
+
+  // Non-streaming path -> aiFetch
+  const generated = await generateText({ model, prompt: "hello once", maxRetries: 0 });
+  assert.equal(generated.text, "non-stream reply");
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(streamCalls.length, 2);
+  assert.equal(
+    fetchCalls[0].url,
+    "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:generateContent",
+  );
 });

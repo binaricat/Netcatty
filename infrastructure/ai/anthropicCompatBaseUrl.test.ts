@@ -71,3 +71,19 @@ test("normalizeAnthropicSdkBaseURL preserves custom non-/v1 path prefixes", () =
     "https://gateway.example/api/v1",
   );
 });
+
+test("normalizes the official Ark Agent Plan Anthropic prefix only", () => {
+  const base = "https://ark.cn-beijing.volces.com/api/plan";
+  for (const input of [base, base + "/", " " + base + " ", base + "/v1", base + "/v1/"]) {
+    assert.equal(normalizeAnthropicSdkBaseURL(input), base + "/v1");
+  }
+  for (const input of [
+    base.replace("https:", "http:"),
+    base.replace(".com", ".com.example"),
+    base.replace(".com", ".com:8443"),
+    base + "/custom",
+    "https://gateway.example/api/plan",
+  ]) {
+    assert.equal(normalizeAnthropicSdkBaseURL(input), input);
+  }
+});

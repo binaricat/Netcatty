@@ -107,6 +107,44 @@ test('fetchProviderModelCatalog merges discovered models and caches them', async
   assert.ok(cached.models.some((model) => model.id === 'deepseek-reasoner'));
 });
 
+test('fetchProviderModelCatalog discovers OpenCode Go models and nested context limits', async () => {
+  clearProviderModelCatalogCache();
+  const requested: string[] = [];
+  const catalog = await fetchProviderModelCatalog(
+    {
+      id: 'opencode-go-1',
+      providerId: 'opencode-go',
+      name: 'OpenCode Go',
+      apiKey: 'oc_sk_test',
+      enabled: true,
+    },
+    {
+      aiFetch: async (url) => {
+        requested.push(url);
+        return {
+          ok: true,
+          data: JSON.stringify({
+            object: 'list',
+            data: [
+              {
+                id: 'deepseek-v4.1-flash',
+                name: 'DeepSeek V4.1 Flash 1017',
+                limit: { context: 1000000, output: 384000 },
+              },
+            ],
+          }),
+        };
+      },
+    },
+  );
+  assert.deepEqual(requested, ['https://opencode.ai/inference/go/openai/v1/models']);
+  assert.equal(catalog.fetched, true);
+  assert.equal(
+    catalog.models.find((model) => model.id === 'deepseek-v4.1-flash')?.contextWindow,
+    1000000,
+  );
+});
+
 test('fetchProviderModelCatalog appends /v1 when listing Ollama Cloud from a bare origin', async () => {
   clearProviderModelCatalogCache();
   const requested: string[] = [];

@@ -8,6 +8,7 @@ const { parseRuntimeProbe } = require("../../domain/systemManager/containerRunti
 const { createGpuOpsApi } = require("./systemManager/gpuOps.cjs");
 const { createPortOpsApi } = require("./systemManager/portOps.cjs");
 const { createServiceOpsApi } = require("./systemManager/serviceOps.cjs");
+const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
 
 function nerdctlUsableClause(markCommand) {
   // Offer nerdctl only when `nerdctl info` works. A socket permission error
@@ -529,12 +530,6 @@ function createSystemManagerBridge(deps) {
 
   async function systemServiceAction(event, payload) {
     return serviceOps.serviceAction(event, payload);
-  }
-
-  function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
-    ipcMain.handle(channel, (event, payload) => terminalWorkerManager.request(channel, payload, {
-      webContentsId: event?.sender?.id,
-    }));
   }
 
   function registerHandlers(ipcMain, options = {}) {

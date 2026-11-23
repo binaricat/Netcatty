@@ -10,7 +10,7 @@ import {
   buildHistoricalToolReplayMaps,
   buildHistoricalToolResultReplayText,
   buildHistoricalUserReplayContent,
-} from '../../../../components/ai/cattyHistoryReplay';
+} from '../cattyHistoryReplay';
 import {
   buildPromptWithTerminalSelectionAttachments,
   isInlineTextAttachment,

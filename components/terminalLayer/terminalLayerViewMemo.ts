@@ -304,6 +304,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'handleFontWeightChangeForFocusedSession',
   'handleFontWeightResetForFocusedSession',
   'aiContextsByTabId',
+  'appTerminalInfos',
   'resolveAIExecutorContext',
   'pendingTerminalSelectionForAI',
   'handlePendingTerminalSelectionConsumed',

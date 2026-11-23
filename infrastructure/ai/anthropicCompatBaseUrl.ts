@@ -39,6 +39,7 @@ export function isBareOriginBaseURL(baseURL: string): boolean {
  * Normalize a stored Anthropic-compat Base URL for @ai-sdk/anthropic.
  * - Bare hosts gain a /v1 suffix (Claude Code style → SDK style).
  * - Bases that already end in /v1 are left unchanged.
+ * - The official Ark Agent Plan /api/plan prefix gains a /v1 suffix.
  * - Other path prefixes (custom proxies) are left unchanged so chat keeps
  *   requesting `{prefix}/messages` rather than `{prefix}/v1/messages`.
  */
@@ -46,6 +47,9 @@ export function normalizeAnthropicSdkBaseURL(baseURL: string): string {
   const trimmed = stripTrailingSlashes(baseURL);
   if (!trimmed) return trimmed;
   if (anthropicBaseIncludesV1(trimmed)) return trimmed;
+  // Claude Code appends /v1/messages to the documented Ark Agent Plan base.
+  // The Anthropic SDK appends only /messages, so supply the missing /v1.
+  if (trimmed === "https://ark.cn-beijing.volces.com/api/plan") return `${trimmed}/v1`;
   if (!isBareOriginBaseURL(trimmed)) return trimmed;
   return `${trimmed}/v1`;
 }

@@ -12,7 +12,7 @@ import {
   subscribeCopyOnSelectUserCommand,
   subscribeCopyOnSelectUserGesture,
 } from './copyOnSelect';
-import { getTerminalSelectionForClipboard } from './normalizeTerminalSelection';
+import { getTerminalSelectionForClipboard } from '../../domain/terminalSelection';
 import { resolveSelectionOverlayPosition } from './useTerminalEffects';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { shouldShowSelectionAIOverlay } from './TerminalView';

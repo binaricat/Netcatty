@@ -1,0 +1,18 @@
+<main class="database-page">
+  <h1>数据库连接示例</h1>
+  <p>通过已有 SSH 服务器连接 MariaDB。数据库账号决定可以读取和修改哪些数据。</p>
+  <form id="connect-form">
+    <label>服务器能访问的地址和端口<input id="endpoint" value="tcp://127.0.0.1:3306" required /></label>
+    <label>数据库<input id="database" value="plugin_demo" required /></label>
+    <label>数据库用户名<input id="username" value="plugin_demo" required /></label>
+    <label>数据库密码（仅本次连接）<input id="password" type="password" autocomplete="off" /></label>
+    <button id="connect" type="submit">选择服务器并连接</button>
+  </form>
+  <p id="status" role="status">尚未连接</p>
+  <form id="query-form">
+    <label>SQL<textarea id="sql" rows="5" maxlength="8192">SELECT 1 AS value</textarea></label>
+    <button id="execute" type="submit" disabled>确认并执行 SQL</button>
+    <button id="disconnect" type="button">断开 / 取消连接</button>
+  </form>
+  <pre id="result" aria-live="polite"></pre>
+</main>

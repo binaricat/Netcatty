@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { JSDOM } from 'jsdom';
+import { createRoot } from 'react-dom/client';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { I18nProvider } from '../../application/i18n/I18nProvider';
 import { TerminalComposeBar } from './TerminalComposeBar';
+import { TerminalContextMenu } from './TerminalContextMenu';
 import { TooltipProvider } from '../ui/tooltip';
 import { getComposeBarHistory, pruneComposeBarHistory, recordComposeBarHistory } from '../../application/state/composeBarHistoryStore';
 import { terminalReconnectRegistry } from '../../application/state/terminalReconnectRegistry';
@@ -302,4 +304,55 @@ test('compose send target toggle shows all vs active without looking like broadc
   const stillPulsing = root.root.findAll((node) => typeof node.props?.className === 'string' && node.props.className.includes('animate-pulse'));
   assert.equal(stillPulsing.length, 0);
   await act(async () => { root.unmount(); });
+});
+
+
+test('compose right-click never pastes into the terminal behind it', async (t) => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://localhost' });
+  const globals = ['window', 'document', 'localStorage', 'Element', 'HTMLElement', 'Node'] as const;
+  const originals = globals.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+  for (const name of globals) {
+    Object.defineProperty(globalThis, name, { configurable: true, value: dom.window[name] });
+  }
+  const rootElement = dom.window.document.querySelector('#root')!;
+  const root = createRoot(rootElement);
+  t.after(async () => {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  });
+  let pasteCount = 0;
+  const render = (broadcast: boolean) => (
+    <I18nProvider locale="en"><TooltipProvider>
+      <TerminalContextMenu sessionId="right-click-test" status="connected" rightClickBehavior="paste" onPaste={() => { pasteCount++; }}>
+        <div>
+          <div data-terminal-cell />
+          <TerminalComposeBar sessionId="right-click-test" isBroadcastEnabled={broadcast} onSend={() => true} onClose={() => {}} />
+        </div>
+      </TerminalContextMenu>
+    </TooltipProvider></I18nProvider>
+  );
+  const rightClick = async (target: string) => {
+    const element = rootElement.querySelector(target);
+    assert.ok(element, target);
+    await act(async () => {
+      element.dispatchEvent(new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+    });
+  };
+
+  await act(async () => root.render(render(false)));
+  await rightClick('textarea');
+  assert.equal(pasteCount, 0, 'the solo composer must not paste into the PTY');
+  await rightClick('[data-terminal-cell]');
+  assert.equal(pasteCount, 1, 'ordinary terminal right-click paste still works');
+
+  await act(async () => root.render(render(true)));
+  await rightClick('textarea');
+  assert.equal(pasteCount, 1, 'broadcast compose opens only its own menu');
+  assert.ok(rootElement.querySelector('[data-compose-broadcast-menu]'));
+  await rightClick('[data-compose-broadcast-menu]');
+  assert.equal(pasteCount, 1, 'right-click on the compose menu must not paste into the PTY');
 });

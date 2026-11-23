@@ -16,6 +16,7 @@ import {
   type ProviderProbeHealth,
 } from "../../../../infrastructure/ai/providerConnectionProbe";
 import { encryptField, decryptField } from "../../../../infrastructure/persistence/secureFieldAdapter";
+import { OPENCODE_GO_PROVIDER_ID } from "../../../../infrastructure/ai/opencodeGo";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
@@ -134,7 +135,10 @@ export const ProviderConfigForm: React.FC<{
   const probeRequestIdRef = useRef(0);
 
   const preset = PROVIDER_PRESETS[provider.providerId];
-  const resolvedStyle: ProviderStyle = form.style || resolveProviderStyle({ providerId: provider.providerId });
+  const fixedProtocol = preset?.fixedProtocol === true;
+  const resolvedStyle: ProviderStyle = fixedProtocol
+    ? "openai"
+    : (form.style || resolveProviderStyle({ providerId: provider.providerId }));
   const resolvedBaseURL = provider.providerId === "ollama"
     ? normalizeOllamaSdkBaseURL(form.baseURL || preset?.defaultBaseURL || "")
     : (form.baseURL || preset?.defaultBaseURL || "");
@@ -368,7 +372,7 @@ export const ProviderConfigForm: React.FC<{
   }, [form.apiKey, customHeaders, form.skipTLSVerify, preset?.modelsEndpoint, provider.providerId, resolvedBaseURL, resolvedStyle, t]);
 
   const handleSave = useCallback(async () => {
-    if (isSaving || headersLoading || headersLoadError || !parsedHeaders.valid) return;
+    if (isSaving || (!fixedProtocol && (headersLoading || headersLoadError || !parsedHeaders.valid))) return;
     const cleanedParams: ProviderAdvancedParams = {};
     const ap = form.advancedParams;
     if (ap.maxTokens != null && Number.isFinite(ap.maxTokens) && ap.maxTokens > 0) cleanedParams.maxTokens = Math.max(1, Math.round(ap.maxTokens));
@@ -405,8 +409,8 @@ export const ProviderConfigForm: React.FC<{
       modelContextWindows: Object.keys(form.modelContextWindows).length > 0 ? form.modelContextWindows : undefined,
       skipTLSVerify: form.skipTLSVerify || undefined,
       advancedParams: Object.keys(cleanedParams).length > 0 ? cleanedParams : undefined,
-      style: form.style || undefined,
-      openaiApi: resolvedStyle === "openai" && form.openaiApi === "responses" ? "responses" : undefined,
+      style: fixedProtocol ? undefined : (form.style || undefined),
+      openaiApi: !fixedProtocol && resolvedStyle === "openai" && form.openaiApi === "responses" ? "responses" : undefined,
       iconId: form.iconId || undefined,
       iconDataUrl: form.iconDataUrl || undefined,
     };
@@ -414,7 +418,11 @@ export const ProviderConfigForm: React.FC<{
     setIsSaving(true);
     setSaveError(false);
     try {
-      updates.customHeaders = await encryptProviderHeaders(customHeaders);
+      // Fixed-protocol providers hide the header editor; leave any stored
+      // headers untouched instead of overwriting them with the hidden rows.
+      if (!fixedProtocol) {
+        updates.customHeaders = await encryptProviderHeaders(customHeaders);
+      }
       // Encrypt API key before saving
       if (form.apiKey) {
         updates.apiKey = await encryptField(form.apiKey);
@@ -428,7 +436,7 @@ export const ProviderConfigForm: React.FC<{
     } finally {
       setIsSaving(false);
     }
-  }, [form, customHeaders, isSaving, headersLoading, headersLoadError, parsedHeaders.valid, onSave, provider.providerId, resolvedBaseURL, resolvedStyle, t]);
+  }, [form, customHeaders, fixedProtocol, isSaving, headersLoading, headersLoadError, parsedHeaders.valid, onSave, provider.providerId, resolvedBaseURL, resolvedStyle, t]);
 
   return (
     <div className="mt-3 space-y-3 border-t border-border/40 pt-3">
@@ -525,37 +533,39 @@ export const ProviderConfigForm: React.FC<{
       </div>
 
       {/* Provider style */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.style')}</label>
-        <div className="flex items-center gap-1.5">
-          {STYLE_OPTIONS.map((style) => {
-            const isSelected = resolvedStyle === style;
-            const isInherited = !form.style && isSelected;
-            return (
-              <button
-                key={style}
-                type="button"
-                onClick={() => setForm((prev) => ({ ...prev, style: prev.style === style ? "" : style }))}
-                className={cn(
-                  "h-7 px-2.5 rounded-md text-xs border transition-colors",
-                  isSelected
-                    ? "border-primary/70 bg-primary/15 text-foreground"
-                    : "border-border/50 bg-background text-muted-foreground hover:text-foreground hover:bg-muted/40",
-                )}
-                aria-pressed={isSelected}
-              >
-                {t(`ai.providers.style.${style}`)}
-                {isInherited && (
-                  <span className="ml-1 text-[9px] text-muted-foreground/70">({t('ai.providers.style.inherited')})</span>
-                )}
-              </button>
-            );
-          })}
+      {!fixedProtocol && (
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.style')}</label>
+          <div className="flex items-center gap-1.5">
+            {STYLE_OPTIONS.map((style) => {
+              const isSelected = resolvedStyle === style;
+              const isInherited = !form.style && isSelected;
+              return (
+                <button
+                  key={style}
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, style: prev.style === style ? "" : style }))}
+                  className={cn(
+                    "h-7 px-2.5 rounded-md text-xs border transition-colors",
+                    isSelected
+                      ? "border-primary/70 bg-primary/15 text-foreground"
+                      : "border-border/50 bg-background text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                  )}
+                  aria-pressed={isSelected}
+                >
+                  {t(`ai.providers.style.${style}`)}
+                  {isInherited && (
+                    <span className="ml-1 text-[9px] text-muted-foreground/70">({t('ai.providers.style.inherited')})</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.style.help')}</p>
         </div>
-        <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.style.help')}</p>
-      </div>
+      )}
 
-      {resolvedStyle === "openai" && (
+      {!fixedProtocol && resolvedStyle === "openai" && (
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.openaiApi')}</label>
           <div className="flex items-center gap-1.5">
@@ -605,17 +615,33 @@ export const ProviderConfigForm: React.FC<{
             </button>
           </div>
         </div>
+        {provider.providerId === OPENCODE_GO_PROVIDER_ID && (
+          <p className="text-[11px] text-muted-foreground/70">
+            {t('ai.providers.opencodeGo.help')}{' '}
+            <a
+              href="https://opencode.ai/console"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              {t('ai.providers.opencodeGo.getKey')}
+            </a>
+          </p>
+        )}
       </div>
 
-      <ProviderHeadersEditor
-        rows={headerRows}
-        onChange={(rows) => { setHeaderRows(rows); setHeadersSourceVersion((version) => version + 1); }}
-        disabled={headersLoading || headersLoadError || isSaving}
-      />
-      {(!parsedHeaders.valid || headersLoadError || saveError) && (
-        <p role="alert" className="text-xs text-destructive">{t(!parsedHeaders.valid
-          ? 'ai.providers.headers.invalid' : headersLoadError
-            ? 'ai.providers.headers.loadError' : 'ai.providers.headers.saveError')}</p>
+      {!fixedProtocol && (
+        <ProviderHeadersEditor
+          rows={headerRows}
+          onChange={(rows) => { setHeaderRows(rows); setHeadersSourceVersion((version) => version + 1); }}
+          disabled={headersLoading || headersLoadError || isSaving}
+        />
+      )}
+      {((!fixedProtocol && (!parsedHeaders.valid || headersLoadError)) || saveError) && (
+        <p role="alert" className="text-xs text-destructive">{t(saveError
+          ? 'ai.providers.headers.saveError'
+          : !parsedHeaders.valid
+            ? 'ai.providers.headers.invalid' : 'ai.providers.headers.loadError')}</p>
       )}
 
       {/* Base URL */}
@@ -625,9 +651,16 @@ export const ProviderConfigForm: React.FC<{
           type="text"
           value={form.baseURL}
           onChange={(e) => setForm((prev) => ({ ...prev, baseURL: e.target.value }))}
+          readOnly={fixedProtocol}
           placeholder={preset?.defaultBaseURL || "https://"}
-          className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className={cn(
+            "w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            fixedProtocol && "cursor-default bg-muted/40 text-muted-foreground",
+          )}
         />
+        {fixedProtocol ? (
+          <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.fixedBaseUrl.help')}</p>
+        ) : null}
         {resolvedStyle === "anthropic" ? (
           <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.baseUrl.anthropicHelp')}</p>
         ) : null}

@@ -72,3 +72,5 @@ export const PLUGIN_TERMINAL_SELECTION_SHARING_FEATURE = "terminal.selection-sha
 
 export const PLUGIN_TERMINAL_INPUT_DRAFT_FEATURE = "terminal.input-drafts" as const satisfies import("./generated/plugin-contract.js").TerminalInputDraftFeature;
 export const PLUGIN_FILESYSTEM_DIRECTORY_ENUMERATION_FEATURE = "filesystem.directory-enumeration" as const satisfies import("./generated/plugin-contract.js").FilesystemDirectoryEnumerationFeature;
+
+export const PLUGIN_HOST_BYTE_STREAM_FEATURE = "network.host-byte-streams" as const satisfies import("./generated/plugin-contract.js").HostByteStreamFeature;

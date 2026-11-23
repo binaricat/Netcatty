@@ -1,0 +1,84 @@
+{
+  "manifestVersion": 1,
+  "id": "com.netcatty.database-host",
+  "name": "database-host",
+  "displayName": "数据库连接示例",
+  "description": "通过已有 SSH 服务器连接 MariaDB，执行查询和数据修改。",
+  "version": "0.1.0",
+  "publisher": "netcatty",
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "features": {
+    "required": [
+      "network.byte-streams",
+      "network.host-byte-streams",
+      "vault.host-actions",
+      "host.interactions",
+      "commands.interactive",
+      "views.host-drawn",
+      "views.vault-pages",
+      "views.terminal-sidebar"
+    ]
+  },
+  "main": {
+    "browser": "dist/host.js"
+  },
+  "activationEvents": [
+    "onView:com.netcatty.database-host.vault",
+    "onView:com.netcatty.database-host.sidebar",
+    "onCommand:com.netcatty.database-host.connect"
+  ],
+  "permissions": {
+    "required": [
+      "commands",
+      "views"
+    ],
+    "optional": [
+      "vault.metadata",
+      "network.hostStream",
+      "ui.interact"
+    ]
+  },
+  "contributes": {
+    "commands": [
+      {
+        "id": "com.netcatty.database-host.connect",
+        "title": "选择服务器并连接数据库",
+        "interactive": true
+      },
+      {
+        "id": "com.netcatty.database-host.query",
+        "title": "确认并执行 SQL",
+        "interactive": true
+      },
+      {
+        "id": "com.netcatty.database-host.disconnect",
+        "title": "断开数据库",
+        "interactive": true
+      }
+    ],
+    "views": [
+      {
+        "id": "com.netcatty.database-host.vault",
+        "title": "数据库",
+        "location": "vault-page",
+        "icon": {
+          "kind": "theme",
+          "name": "database"
+        }
+      },
+      {
+        "id": "com.netcatty.database-host.sidebar",
+        "title": "数据库",
+        "location": "terminal-sidebar",
+        "icon": {
+          "kind": "theme",
+          "name": "database"
+        }
+      }
+    ]
+  }
+}

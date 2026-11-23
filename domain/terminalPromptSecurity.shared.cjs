@@ -170,4 +170,12 @@ function isUntrustedTerminalInputPrompt(value, options = {}) {
   return !isConfirmedTerminalShellPrompt(value, options);
 }
 
-module.exports = { isUntrustedTerminalInputPrompt };
+module.exports = {
+  MAX_PROMPT_SECURITY_TAIL_CHARS,
+  stripTerminalControlSequences,
+  isSensitiveTerminalChallenge,
+  isConfirmedTerminalShellPrompt,
+  splitTerminalLogicalLines,
+  isBashPs2ContinuationLine,
+  isUntrustedTerminalInputPrompt,
+};

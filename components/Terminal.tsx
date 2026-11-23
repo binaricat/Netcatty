@@ -82,6 +82,7 @@ import { useStoredBoolean } from "../application/state/useStoredBoolean";
 import { readOptionalStoredStringValue, useStoredString } from "../application/state/useStoredString";
 import { performSessionLogAction, type SessionLogAction } from "../application/state/sessionLogActions";
 import { useSessionLogBackend } from "../application/state/useSessionLogBackend";
+import { useTerminalSessionCloseCapture } from "../application/state/terminalSessionCloseCapture";
 import { useTerminalLayoutSuppressActive } from "../application/state/terminalLayoutSuppressStore";
 import { useAppearanceChromeStore } from "../application/state/appearanceChromeStore";
 import {
@@ -154,7 +155,7 @@ import { createReplaySafeTerminalLogSanitizer } from "./terminal/replaySafeTermi
 import { createConnectionLogBuffer } from "./terminal/connectionLogBuffer";
 import { createProgrammaticCommandLogRewriter, type ProgrammaticCommandLogRewrite } from "./terminal/programmaticCommandLog";
 import { getSessionLogInitialLine } from "./terminal/sessionLogInitialLine";
-import { getTerminalSelectionForClipboard } from "./terminal/normalizeTerminalSelection";
+import { getTerminalSelectionForClipboard } from "../domain/terminalSelection";
 import { getHistoryPreviewSelectionFromRoot } from "./terminal/runtime/terminalHistoryScrollOverride";
 import { createTerminalOutputHistoryPreview } from "./terminal/runtime/terminalOutputHistory";
 import { useZmodemTransfer } from "./terminal/hooks/useZmodemTransfer";
@@ -1675,6 +1676,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       : (finalizeTerminalLogData() || data);
     return captureHandler(capturedSessionId, capturedData);
   }, [finalizeTerminalLogData]);
+
+  useTerminalSessionCloseCapture({
+    sessionId,
+    enabled: !attachExistingSession && restoreState !== "restored-disconnected",
+    hasConnectedRef,
+    terminalDataCapturedRef,
+    finalizeTerminalLogData,
+    onTerminalDataCapture: handleTerminalDataCaptureOnce,
+  });
+
+  useEffect(() => {
+    // Attached popups do not own the ConnectionLog; the home terminal captures it.
+    if (attachExistingSession) return;
+    return netcattyBridge.get()?.onFinalizeSessionLogs?.(async () => {
+      if (terminalDataCapturedRef.current || (restoreState === "restored-disconnected" && statusRef.current === "disconnected")) return;
+      const term = termRef.current;
+      if (term && !await flushPendingTerminalWritesBeforeHibernate(term)) {
+        throw new Error("Terminal output did not drain before quit capture");
+      }
+      await handleTerminalDataCaptureOnce(sessionId, finalizeTerminalLogData(), { finalized: true });
+    });
+  }, [attachExistingSession, restoreState, sessionId, finalizeTerminalLogData, handleTerminalDataCaptureOnce]);
 
   const attachHomeWebContentsIdRef = useRef<number | null | undefined>(undefined);
 

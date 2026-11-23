@@ -11,6 +11,7 @@ const { spawn } = require("node:child_process");
 const { StringDecoder } = require("node:string_decoder");
 const { getTempFilePath } = require("./tempDirBridge.cjs");
 const { invalidateSshTransport } = require("./sshTransportInvalidation.cjs");
+const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
 
 /**
  * Escape shell arguments to prevent injection attacks
@@ -1074,12 +1075,6 @@ async function checkCompressedUploadSupport(event, payload) {
       error: err.message
     };
   }
-}
-
-function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
-  ipcMain.handle(channel, (event, payload) => terminalWorkerManager.request(channel, payload, {
-    webContentsId: event?.sender?.id,
-  }));
 }
 
 /**

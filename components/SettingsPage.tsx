@@ -409,6 +409,7 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
         const nestedDelayMs = (request.aiSubTab || request.syncSubTab) ? 80 : 40;
         const focusHandle = window.setTimeout(() => {
             void focusSettingsAnchor(request.anchorId, {
+                fallbackAnchorId: request.fallbackAnchorId,
                 attempts: 48,
                 delayMs: 50,
             }).finally(() => {
@@ -549,6 +550,7 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                     {mountedTabs.has("appearance") && (
                         <SettingsLazyTab value="appearance">
                             <LazySettingsAppearanceTab
+                                pluginRuntimeAvailable={pluginRuntimeAvailable}
                                 theme={settings.theme}
                                 resolvedTheme={settings.resolvedTheme}
                                 setTheme={settings.setTheme}

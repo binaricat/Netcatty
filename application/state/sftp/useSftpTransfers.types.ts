@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-import type { FileConflict, FileConflictAction, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
+import type { Host, FileConflict, FileConflictAction, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
 import type { SftpPane } from "./types";
 import type { AcquireTransferSessionFn } from "./transferDirectoryOps";
 
@@ -21,6 +21,14 @@ export interface UseSftpTransfersParams {
   handleSessionError: (side: "left" | "right", error: Error) => void;
   /** FileZilla-style dedicated transfer sessions (1–2 per host). */
   acquireTransferSession?: AcquireTransferSessionFn;
+  resolveConnectedHost?: (tabId: string) => Host | "local" | null;
+  /**
+   * Jump-host chain snapshots captured when the tab connected. Lets retained
+   * transfers keep dialing the connect-time bastion chain after a chain host
+   * is edited (private hostnames can resolve differently per bastion);
+   * undefined = chain must be re-resolved from the live vault.
+   */
+  resolveConnectedChain?: (tabId: string) => Host[] | null;
 }
 
 export interface UseSftpTransfersResult {

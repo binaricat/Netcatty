@@ -592,7 +592,7 @@ echo $3 >> "$FILE"`);
       >
         <VaultPageHeader>
           {/* Action buttons: New Key (split) | Import Certificate | New Identity */}
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             {/* New Key split button — same secondary style as sibling header actions */}
             <Dropdown>
               <div className="flex items-center rounded-md shrink-0 bg-foreground/5 text-foreground">

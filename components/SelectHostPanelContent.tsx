@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { cn } from '../lib/utils';
-import { matchesHostSearchQuery, matchesSearchQuery } from '../lib/searchMatcher';
+import { matchesHostSearchQuery, matchesSearchQuery } from '../domain/searchMatcher';
 import { useI18n } from '../application/i18n/I18nProvider';
 import {
   collectSelectableHostIdsInGroup,

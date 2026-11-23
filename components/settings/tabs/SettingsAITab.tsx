@@ -20,6 +20,7 @@ import type {
 } from "../../../infrastructure/ai/types";
 import type { ManagedAgentKey } from "../../../infrastructure/ai/managedAgents";
 import { PROVIDER_PRESETS } from "../../../infrastructure/ai/types";
+import { withOpencodeGoAutoConfiguredModel, shouldAutoActivateOpencodeGo } from "../../../infrastructure/ai/opencodeGo";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { Button } from "../../ui/button";
 import { ConfirmDialog } from "../../ui/confirm-dialog";
@@ -68,6 +69,7 @@ import {
   areExternalAgentListsEqual,
   buildManagedAgentState,
   getInitialManagedAgentPaths,
+  getUnavailablePreferredHarness,
   updateCodebuddyManagedEnv,
   updateCodebuddyManagedOptions,
 } from "./ai/managedAgentState";
@@ -392,6 +394,10 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
                   : setMimoPathInfo;
 
     setInfo(result);
+    const savedPaths = initialManagedPathsRef.current;
+    if (savedPaths && (commandSource === "auto" || (result?.available && result.path))) {
+      savedPaths[agentKey] = commandSource === "manual" ? result?.path ?? "" : "";
+    }
 
     let nextDefaultId: string | null = null;
     setExternalAgents((prev) => {
@@ -414,7 +420,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       apiKeyPresent?: boolean;
       refreshShellEnv?: boolean;
       commandSource?: "manual" | "auto";
-      removeUnavailableManualPath?: boolean;
+      recheckSavedPath?: boolean;
     },
   ) => {
     const bridge = getBridge();
@@ -461,7 +467,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         options?.commandSource === "manual"
         && customPath.trim()
         && !result?.available
-        && !options.removeUnavailableManualPath
+        && !options.recheckSavedPath
       ) {
         const setInfo = agentKey === "codex"
           ? setCodexPathInfo
@@ -525,9 +531,14 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         void resolveAgentPath(task.key, task.path, {
           ...task.options,
           commandSource: task.path ? "manual" : "auto",
-          removeUnavailableManualPath: Boolean(task.path),
-        }).finally(() => {
-          autoResolvedAgentStateRef.current[task.key] = "done";
+          recheckSavedPath: Boolean(task.path),
+        }).then((result) => {
+          if (result?.available) {
+            autoResolvedAgentStateRef.current[task.key] = "done";
+          } else {
+            // Retry a failed check on the next visit to the Agents tab.
+            delete autoResolvedAgentStateRef.current[task.key];
+          }
         });
       }, task.delayMs));
     return () => {
@@ -646,13 +657,22 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     [removeProvider, editingProviderId, removeProviderConfirm],
   );
 
-  // Agent options for default agent
-  const agentOptions = useMemo(() => [
-    { value: "catty", label: t('ai.defaultAgent.catty'), icon: <AgentIconBadge agent={{ id: "catty", type: "builtin" }} size="xs" variant="plain" /> },
-    ...externalAgents
-      .filter((a) => canSendWithAgent(a.id, externalAgents))
-      .map((a) => ({ value: a.id, label: a.name, icon: <AgentIconBadge agent={a} size="xs" variant="plain" /> })),
-  ], [externalAgents, t]);
+  // Agent options for default agent. Include a saved default that is temporarily offline as a disabled option.
+  // This preserves the setting without offering that harness for new selections.
+  const agentOptions = useMemo(() => {
+    const unavailable = getUnavailablePreferredHarness(externalAgents, defaultAgentId);
+    return [
+      { value: "catty", label: t('ai.defaultAgent.catty'), icon: <AgentIconBadge agent={{ id: "catty", type: "builtin" }} size="xs" variant="plain" /> },
+      ...externalAgents
+        .filter((a) => a === unavailable || canSendWithAgent(a.id, externalAgents))
+        .map((a) => ({
+          value: a.id,
+          label: a === unavailable ? `${a.name} (${t('ai.defaultAgent.unavailable')})` : a.name,
+          icon: <AgentIconBadge agent={a} size="xs" variant="plain" />,
+          disabled: a === unavailable ? true : undefined,
+        })),
+    ];
+  }, [externalAgents, defaultAgentId, t]);
 
   useEffect(() => {
     if (!agentOptions.some((option) => option.value === defaultAgentId)) {
@@ -1082,9 +1102,16 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
                     }
                     onRemove={() => handleRemoveProvider(provider.id)}
                     onUpdate={(updates) => {
-                      updateProvider(provider.id, updates);
-                      if (provider.id === activeProviderId && updates.defaultModel !== undefined) {
-                        setActiveModelId(updates.defaultModel || "");
+                      const nextUpdates = withOpencodeGoAutoConfiguredModel(provider, updates);
+                      updateProvider(provider.id, nextUpdates);
+                      if (provider.id === activeProviderId && nextUpdates.defaultModel !== undefined) {
+                        setActiveModelId(nextUpdates.defaultModel || "");
+                      }
+                      const otherProvidersEnabled = providers.some((p) => p.id !== provider.id && p.enabled);
+                      if (shouldAutoActivateOpencodeGo(provider, otherProvidersEnabled, !!nextUpdates.apiKey)) {
+                        updateProvider(provider.id, { enabled: true });
+                        setActiveProviderId(provider.id);
+                        setActiveModelId(nextUpdates.defaultModel || provider.defaultModel || "");
                       }
                     }}
                     isEditing={editingProviderId === provider.id}

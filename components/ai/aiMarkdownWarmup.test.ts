@@ -32,10 +32,10 @@ test('recognizes the chat composer as a busy warmup target', () => {
   assert.equal(isAiComposerTarget(null), false);
 });
 
-test('composer-idle IPC waits the same expand grace as history markdown', () => {
+test('composer-idle IPC waits the expand grace unless overridden', () => {
   const warmup = readFileSync(new URL('./aiMarkdownWarmup.ts', import.meta.url), 'utf8');
   assert.match(warmup, /initialDelayMs:\s*options\?\.initialDelayMs \?\? AI_MARKDOWN_WARMUP_INITIAL_DELAY_MS/);
-  assert.match(warmup, /isBusy: isAiComposerBusy/);
+  assert.match(warmup, /isBusy:\s*options\?\.isBusy \?\? isAiComposerBusy/);
   assert.match(warmup, /markAiComposerActivity\(\);\n\s*arm\(\);/);
   assert.match(warmup, /if \(isAiComposerTyping\(\)\) \{\s*hydrateScheduled = true;/s);
 });
@@ -64,13 +64,11 @@ test('AI panel no longer starts Streamdown just because it became visible', () =
   assert.doesNotMatch(panel, /@streamdown\/code/);
 });
 
-test('chat history defers Streamdown until warmup is already done', () => {
+test('chat history renders markdown immediately once assistant content is shown', () => {
   const list = readFileSync(new URL('./ChatMessageList.tsx', import.meta.url), 'utf8');
-  assert.match(list, /deferUntilWarm/);
-  assert.match(list, /scheduleAiMarkdownWarmup/);
-  assert.match(list, /isAiComposerTyping/);
-  assert.match(list, /AI_MARKDOWN_WARMUP_INITIAL_DELAY_MS/);
-  assert.match(list, /AI_MARKDOWN_WARMUP_RESUME_DELAY_MS/);
+  assert.match(list, /warmAiMarkdownRenderer/);
+  assert.doesNotMatch(list, /deferUntilWarm/);
+  assert.doesNotMatch(list, /scheduleAiMarkdownWarmup/);
 });
 
 test('composer focus alone does not count as typing', () => {
@@ -79,9 +77,11 @@ test('composer focus alone does not count as typing', () => {
   assert.equal(shouldDeferAiMarkdownWarmup({ isComposing: false, recentlyActive: false }), false);
 });
 
-test('LazyMessageResponse keeps plaintext while chat asks to defer', () => {
+test('LazyMessageResponse warms immediately by default and still supports opt-in deferUntilWarm', () => {
   const source = readFileSync(new URL('../ai-elements/LazyMessageResponse.tsx', import.meta.url), 'utf8');
   assert.match(source, /deferUntilWarm/);
+  assert.match(source, /warmAiMarkdownRenderer/);
   assert.match(source, /enqueueChatMarkdownHydrate/);
   assert.match(source, /isAiMarkdownRendererReady/);
+  assert.doesNotMatch(source, /scheduleWhenAiComposerIdle/);
 });

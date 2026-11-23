@@ -3,7 +3,7 @@ import React, { useCallback, useMemo } from "react";
 import { compareHostAddresses } from "../../domain/hostAddressSort";
 import { upsertKnownHost } from "../../domain/knownHosts";
 import { sortByVaultOrder, sortVaultStringsByOrder } from "../../domain/vaultOrder";
-import { matchesHostSearchQuery, matchesSearchQuery } from "../../lib/searchMatcher";
+import { matchesHostSearchQuery, matchesSearchQuery } from "../../domain/searchMatcher";
 import type { GroupConfig, GroupNode, Host, KnownHost } from "../../types";
 import KnownHostsManager from "../KnownHostsManager";
 import type { SortMode } from "../ui/sort-dropdown";

@@ -136,6 +136,7 @@ export const SafetySettings: React.FC<{
         </SettingRow>
 
         <SettingRow
+          anchorId="ai-safety-max-iterations"
           label={t('ai.safety.maxIterations')}
           description={t('ai.safety.maxIterations.description')}
         >

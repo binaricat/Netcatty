@@ -103,7 +103,7 @@ function createPluginHostService(options) {
   const paths = createPluginPaths(options.app.getPath("userData"));
   const appRoot = options.appRoot ?? options.app.getAppPath();
   const runtimeDirectory = options.runtimeDirectory ?? path.join(__dirname, "runtime");
-  const supportedFeatures = [...new Set(["terminal.input-drafts", "terminal.selection-sharing", "appearance.theme-packs", "metadata.brand-icon", BYTE_STREAM_FEATURE, ...PLUGIN_AI_CONTEXT_FEATURES, PLUGIN_AGENT_FEATURE, NETWORK_CREDENTIAL_LEASE_FEATURE, HOST_INTERACTION_FEATURE, HOST_VAULT_FEATURE, VAULT_PAGES_FEATURE, TERMINAL_SIDEBAR_FEATURE, INTERACTIVE_COMMAND_FEATURE, ...(options.supportedFeatures ?? [])])]
+  const supportedFeatures = [...new Set(["network.host-byte-streams", "terminal.input-drafts", "terminal.selection-sharing", "appearance.theme-packs", "metadata.brand-icon", BYTE_STREAM_FEATURE, ...PLUGIN_AI_CONTEXT_FEATURES, PLUGIN_AGENT_FEATURE, NETWORK_CREDENTIAL_LEASE_FEATURE, HOST_INTERACTION_FEATURE, HOST_VAULT_FEATURE, VAULT_PAGES_FEATURE, TERMINAL_SIDEBAR_FEATURE, INTERACTIVE_COMMAND_FEATURE, ...(options.supportedFeatures ?? [])])]
     .filter((feature) => feature !== DIRECTORY_ENUMERATION_FEATURE);
   if (!supportedFeatures.includes("views.host-drawn")) supportedFeatures.push("views.host-drawn");
   if (typeof options.openPluginDirectoryHandle === "function") supportedFeatures.push(DIRECTORY_ENUMERATION_FEATURE);
@@ -230,6 +230,22 @@ function createPluginHostService(options) {
     interactionService.registerRpcCapabilities(rpcRegistry);
     const hostVaultService = new PluginHostVaultService({
       interactionService,
+      openStream: async (endpoint, caller, sender, connectionOptions) => {
+        const context = await byteStreamService.authenticate(caller);
+        const descriptor = await byteStreamService.connect(endpoint, context, {
+          open: (signal) => require("./hostByteStreamTransport.cjs").openHostByteStream({
+            sender, connectionOptions, endpoint, signal, assertActive: context.assertActive,
+          }),
+        });
+        return { descriptor, close: () => byteStreamService.closeRecord(byteStreamService.records.get(descriptor.handleId)),
+          onClose: (callback) => {
+            const subscription = byteStreamService.broker.onDidClose((state) => {
+              if (state.id === descriptor.handleId) { subscription.dispose(); callback(); }
+            });
+            if (!byteStreamService.records.has(descriptor.handleId)) { subscription.dispose(); callback(); }
+          },
+        };
+      },
       sourceBinding: new PluginAISourceBinding({ database, getRuntimeIdentity: (pluginId) => runtimeSupervisor.getRuntimeIdentity(pluginId) }),
     });
     hostVaultService.registerRpcCapabilities(rpcRegistry);

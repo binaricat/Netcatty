@@ -153,13 +153,14 @@ export function enqueueChatMarkdownHydrate(onReady: () => void): () => void {
 export function scheduleWhenAiComposerIdle(
   task: () => void,
   options?: {
+    isBusy?: () => boolean;
     initialDelayMs?: number;
     resumeDelayMs?: number;
   },
 ): () => void {
   return scheduleAiMarkdownWarmup({
     load: task,
-    isBusy: isAiComposerBusy,
+    isBusy: options?.isBusy ?? isAiComposerBusy,
     initialDelayMs: options?.initialDelayMs ?? AI_MARKDOWN_WARMUP_INITIAL_DELAY_MS,
     resumeDelayMs: options?.resumeDelayMs ?? AI_COMPOSER_IDLE_MS,
   });
