@@ -1418,7 +1418,9 @@ function registerSdkStreamHandlers(ctx) {
           return { ok: true, currentModelId: null, models: [] };
         }
 
-        let cacheKey = buildCacheKey();
+        let cacheKey = (!binPath && !isCursorCliLoginSentinel)
+          ? (resolveAliasedKey() || buildCacheKey())
+          : buildCacheKey();
         if (configuredPathError) {
           const fallbackKey = resolveAliasedKey() || cacheKey;
           const fallbackImmediate = tryServeCachedCatalog(fallbackKey);
@@ -1502,6 +1504,17 @@ function registerSdkStreamHandlers(ctx) {
               const result = resolvedImmediate.promise ? await resolvedImmediate.promise : resolvedImmediate.value;
               recordResolvedKeyAlias(cacheKey);
               return result;
+            }
+          } else {
+            const fallbackAliasedKey = resolveAliasedKey();
+            if (fallbackAliasedKey && fallbackAliasedKey !== cacheKey) {
+              cacheKey = fallbackAliasedKey;
+              const fallbackImmediate = tryServeCachedCatalog(cacheKey);
+              if (fallbackImmediate) {
+                const result = fallbackImmediate.promise ? await fallbackImmediate.promise : fallbackImmediate.value;
+                recordResolvedKeyAlias(cacheKey);
+                return result;
+              }
             }
           }
         }

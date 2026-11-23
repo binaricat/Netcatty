@@ -2472,6 +2472,55 @@ test("list-models persists aliases for callers that join an in-flight load", asy
   }
 });
 
+test("list-models preserves saved models when a previously discovered bare CLI disappears", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  let cliAvailable = true;
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/disappear-bin" }),
+    resolveSdkBinPath: () => (cliAvailable ? "/test/disappear-bin/claude" : undefined),
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("claude");
+    t.mock.method(driver, "listModels", async () => [
+      { id: "claude-opus-6-2", name: "Opus 6.2" },
+      { id: "claude-sonnet-6-0", name: "Sonnet 6.0" },
+    ]);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const request = { sdkBackend: "claude", agentCommand: "claude" };
+
+    const seeded = await listModels({ sender: {} }, request);
+    assert.equal(seeded.source, "live");
+    assert.equal(seeded.models.length, 2);
+
+    // Bare CLI disappears from PATH after restart: cacheOnly, normal load, and
+    // forced refresh must all preserve the saved catalog via its alias.
+    cliAvailable = false;
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    driver.listModels.mock.mockImplementation(async () => {
+      throw new Error("spawn claude ENOENT");
+    });
+
+    const cached = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(cached.source, "last-known-good");
+    assert.deepEqual(cached.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+
+    const normal = await listModels({ sender: {} }, request);
+    assert.equal(normal.source, "last-known-good");
+    assert.deepEqual(normal.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+    assert.equal(normal.warning, undefined);
+
+    const forced = await listModels({ sender: {} }, { ...request, force: true });
+    assert.equal(forced.source, "last-known-good");
+    assert.deepEqual(forced.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+    assert.match(forced.warning, /ENOENT/);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+  }
+});
+
 test("list-models force refresh bypasses warm memory and last-known-good and updates both caches", async (t) => {
   const { getDriver } = require("./index.cjs");
   const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx();
