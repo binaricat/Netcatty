@@ -2275,18 +2275,28 @@ test("list-models cacheOnly avoids synchronous PATH discovery and never hydrates
   }
 });
 
-test("list-models cacheOnly hydrates unambiguous pre-alias version-1 stores and skips ambiguous ones", async (t) => {
+test("list-models cacheOnly resolves pre-alias version-1 stores asynchronously by exact binary and ignores unrelated binaries", async (t) => {
   const { getDriver } = require("./index.cjs");
-  let sdkBinCalls = 0;
+  let syncSdkBinCalls = 0;
   let syncPathCalls = 0;
+  let asyncSdkBinCalls = 0;
+  let asyncPathCalls = 0;
   const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx({
     getShellEnv: async () => ({ PATH: "/test/upgrade-bin" }),
     resolveSdkBinPath: () => {
-      sdkBinCalls += 1;
+      syncSdkBinCalls += 1;
+      return "/test/upgrade-bin/claude";
+    },
+    resolveSdkBinPathAsync: async () => {
+      asyncSdkBinCalls += 1;
       return "/test/upgrade-bin/claude";
     },
     resolveCliFromPath: () => {
       syncPathCalls += 1;
+      return "/test/upgrade-bin/opencode";
+    },
+    resolveCliFromPathAsync: async () => {
+      asyncPathCalls += 1;
       return "/test/upgrade-bin/opencode";
     },
   });
@@ -2298,10 +2308,32 @@ test("list-models cacheOnly hydrates unambiguous pre-alias version-1 stores and 
     });
     const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
     const exactKey = buildSdkModelCacheKey("claude", "/test/upgrade-bin/claude", {}, "sdk:api-key");
+    const customLegacyKey = buildSdkModelCacheKey("claude", "/custom/only/claude", {}, "sdk:api-key");
     const opencodeLegacyKey = buildSdkModelCacheKey("opencode", "/test/upgrade-bin/opencode", {}, "sdk:api-key");
     const fetchedAt = new Date().toISOString();
 
-    // 1. Pre-alias v1 store (no `aliases` field) with multiple legacy backends.
+    // 1. Pre-alias v1 store containing ONLY an unrelated explicit binary:
+    // bare `claude` resolves to `/test/upgrade-bin/claude`, so it must NOT
+    // hydrate `/custom/only/claude` even though backend/runtime/env match.
+    fs.writeFileSync(catalogFile, JSON.stringify({
+      version: 1,
+      entries: {
+        [customLegacyKey]: {
+          backend: "claude",
+          models: [{ id: "custom-only-model", name: "Custom Only" }],
+          currentModelId: "custom-only-model",
+          fetchedAt,
+        },
+      },
+    }));
+
+    const unrelated = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude", cacheOnly: true });
+    assert.deepEqual(unrelated, { ok: true, currentModelId: null, models: [] });
+    assert.equal(syncSdkBinCalls, 0);
+    assert.equal(asyncSdkBinCalls, 1);
+
+    // 2. Pre-alias v1 store containing both matching and unrelated entries:
+    // async resolution matches ONLY the exact binary and persists its alias.
     fs.writeFileSync(catalogFile, JSON.stringify({
       version: 1,
       entries: {
@@ -2309,6 +2341,12 @@ test("list-models cacheOnly hydrates unambiguous pre-alias version-1 stores and 
           backend: "claude",
           models: [{ id: "claude-opus-5-5", name: "Opus 5.5" }],
           currentModelId: "claude-opus-5-5",
+          fetchedAt,
+        },
+        [customLegacyKey]: {
+          backend: "claude",
+          models: [{ id: "custom-only-model", name: "Custom Only" }],
+          currentModelId: "custom-only-model",
           fetchedAt,
         },
         [opencodeLegacyKey]: {
@@ -2324,15 +2362,18 @@ test("list-models cacheOnly hydrates unambiguous pre-alias version-1 stores and 
     assert.equal(hydrated.source, "last-known-good");
     assert.equal(hydrated.fetchedAt, fetchedAt);
     assert.deepEqual(hydrated.models.map(({ id }) => id), ["claude-opus-5-5"]);
-    assert.equal(sdkBinCalls, 0);
+    assert.equal(syncSdkBinCalls, 0);
+    assert.equal(asyncSdkBinCalls, 2);
 
-    // Migrating one backend (writing `aliases` for claude) must not break
-    // legacy cacheOnly hydration for other unmigrated backends in the store.
-    const normal = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude" });
-    assert.equal(normal.source, "last-known-good");
-    assert.deepEqual(normal.models.map(({ id }) => id), ["claude-opus-5-5"]);
-    assert.equal(sdkBinCalls, 1);
+    // After restart, the persisted alias resolves claude in O(1) without re-running async PATH resolution.
+    ctx.sdkModelKeyAliases.clear();
+    const afterRestart = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude", cacheOnly: true });
+    assert.equal(afterRestart.source, "last-known-good");
+    assert.deepEqual(afterRestart.models.map(({ id }) => id), ["claude-opus-5-5"]);
+    assert.equal(syncSdkBinCalls, 0);
+    assert.equal(asyncSdkBinCalls, 2);
 
+    // Unmigrated opencode entry in the same partially migrated store still hydrates asynchronously.
     const opencodeHydrated = await listModels({ sender: {} }, {
       sdkBackend: "opencode",
       agentCommand: "opencode",
@@ -2341,38 +2382,43 @@ test("list-models cacheOnly hydrates unambiguous pre-alias version-1 stores and 
     assert.equal(opencodeHydrated.source, "last-known-good");
     assert.deepEqual(opencodeHydrated.models.map(({ id }) => id), ["openai/gpt-6"]);
     assert.equal(syncPathCalls, 0);
-
+    assert.equal(asyncPathCalls, 1);
+  } finally {
     ctx.sdkModelKeyAliases.clear();
-    const migrated = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude", cacheOnly: true });
-    assert.equal(migrated.source, "last-known-good");
-    assert.deepEqual(migrated.models.map(({ id }) => id), ["claude-opus-5-5"]);
-    assert.equal(sdkBinCalls, 1);
+    cleanup();
+  }
+});
 
-    // 2. Ambiguous pre-alias v1 store (two binaries sharing backend/runtime/env):
-    // cacheOnly must not guess which binary a bare command resolves to.
-    const otherKey = buildSdkModelCacheKey("claude", "/other/bin/claude", {}, "sdk:api-key");
+test("list-models cacheOnly recovers persisted models when a manually configured executable is missing", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  let cliExists = true;
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    normalizeCliPathForPlatform: (value) => (cliExists ? value : null),
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("claude");
+    t.mock.method(driver, "listModels", async () => [
+      { id: "claude-opus-6-2", name: "Opus 6.2" },
+      { id: "claude-sonnet-6-0", name: "Sonnet 6.0" },
+    ]);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const request = { sdkBackend: "claude", agentCommand: "/opt/moved/claude" };
+
+    // 1. Seed persisted catalog while the configured CLI exists.
+    const seeded = await listModels({ sender: {} }, request);
+    assert.equal(seeded.source, "live");
+    assert.equal(seeded.models.length, 2);
+
+    // 2. Delete/move the configured CLI and clear in-memory caches: cacheOnly
+    // must still return the saved models instead of throwing CLI path not found.
+    cliExists = false;
+    ctx.sdkModelCache.clear();
     ctx.sdkModelKeyAliases.clear();
-    fs.writeFileSync(catalogFile, JSON.stringify({
-      version: 1,
-      entries: {
-        [exactKey]: {
-          backend: "claude",
-          models: [{ id: "claude-opus-5-5", name: "Opus 5.5" }],
-          currentModelId: "claude-opus-5-5",
-          fetchedAt,
-        },
-        [otherKey]: {
-          backend: "claude",
-          models: [{ id: "claude-other", name: "Other" }],
-          currentModelId: "claude-other",
-          fetchedAt,
-        },
-      },
-    }));
-
-    const ambiguous = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude", cacheOnly: true });
-    assert.deepEqual(ambiguous, { ok: true, currentModelId: null, models: [] });
-    assert.equal(sdkBinCalls, 1);
+    const cached = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(cached.source, "last-known-good");
+    assert.deepEqual(cached.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+    assert.equal(cached.warning, undefined);
   } finally {
     ctx.sdkModelKeyAliases.clear();
     cleanup();

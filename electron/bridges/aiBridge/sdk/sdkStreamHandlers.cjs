@@ -18,6 +18,7 @@ const {
   buildLastKnownCatalogPath,
   readLastKnownCatalogAlias,
   readLastKnownCatalogEntry,
+  readLastKnownCatalogStore,
   refreshLastKnownCatalogCurrentId,
   writeLastKnownCatalogAlias,
   writeLastKnownCatalogEntry,
@@ -463,7 +464,7 @@ function resolveRealCliPath(cliPath, realpath = realpathSync) {
   try { return realpath(cliPath); } catch { return cliPath; }
 }
 
-function normalizeConfiguredCommandPath(command, normalizeCliPathForPlatform) {
+function normalizeConfiguredCommandPath(command, normalizeCliPathForPlatform, { validate = true } = {}) {
   const raw = String(command || "").trim();
   const pathLike = raw.includes("/") || raw.includes("\\") || /^[a-z]:/i.test(raw);
   if (!raw || !pathLike) {
@@ -473,6 +474,7 @@ function normalizeConfiguredCommandPath(command, normalizeCliPathForPlatform) {
     ? normalizeCliPathForPlatform(raw)
     : raw;
   if (!normalized) {
+    if (!validate) return raw;
     throw new Error(`Agent CLI path not found: ${raw}`);
   }
   return normalized;
@@ -501,8 +503,13 @@ function resolveSdkBackendBinPath({
   backendKey, configuredCommand, shellEnv, env, resolveCliFromPath, normalizeCliPathForPlatform,
   resolveSdkBinPath, resolveClaudeCodeExecutableForSdk, resolveCodexExecutableForSdk,
   resolveCodebuddyExecutableForSdk, realpath = realpathSync, allowPathProbe = true,
+  validateConfiguredPath = true,
 }) {
-  const configuredPath = normalizeConfiguredCommandPath(configuredCommand, normalizeCliPathForPlatform);
+  const configuredPath = normalizeConfiguredCommandPath(
+    configuredCommand,
+    normalizeCliPathForPlatform,
+    { validate: validateConfiguredPath },
+  );
   if (configuredPath) {
     return resolveConfiguredSdkPath({
       backendKey,
@@ -514,8 +521,17 @@ function resolveSdkBackendBinPath({
     });
   }
 
+  const normalizeOptionalEnvPath = (rawValue) => {
+    const raw = String(rawValue || "").trim();
+    if (!raw) return null;
+    const normalized = typeof normalizeCliPathForPlatform === "function"
+      ? normalizeCliPathForPlatform(raw)
+      : raw;
+    return normalized || (!validateConfiguredPath ? raw : null);
+  };
+
   if (backendKey === "codebuddy") {
-    const configuredEnvPath = normalizeCliPathForPlatform?.(env?.CODEBUDDY_CODE_PATH);
+    const configuredEnvPath = normalizeOptionalEnvPath(env?.CODEBUDDY_CODE_PATH);
     const rawPath = configuredEnvPath || (allowPathProbe ? resolveCliFromPath(backendKey, shellEnv) : null) || undefined;
     if (!rawPath) return undefined;
     const realPath = resolveRealCliPath(rawPath, realpath);
@@ -529,16 +545,36 @@ function resolveSdkBackendBinPath({
     return sdkPath || undefined;
   }
   if (backendKey === "opencode") {
-    const configuredEnvPath = normalizeCliPathForPlatform?.(env?.OPENCODE_BIN);
+    const configuredEnvPath = normalizeOptionalEnvPath(env?.OPENCODE_BIN);
     const rawPath = configuredEnvPath || (allowPathProbe ? resolveCliFromPath(backendKey, shellEnv) : null) || undefined;
     return rawPath ? resolveRealCliPath(rawPath, realpath) : undefined;
   }
   if (backendKey === "mimo") {
-    const configuredEnvPath = normalizeCliPathForPlatform?.(env?.MIMOCODE_BIN || env?.MIMOCODE_BIN_PATH);
+    const configuredEnvPath = normalizeOptionalEnvPath(env?.MIMOCODE_BIN || env?.MIMOCODE_BIN_PATH);
     const rawPath = configuredEnvPath || (allowPathProbe ? resolveCliFromPath(backendKey, shellEnv) : null) || undefined;
     return rawPath ? resolveRealCliPath(rawPath, realpath) : undefined;
   }
   return allowPathProbe ? (resolveSdkBinPath?.(backendKey, shellEnv) || undefined) : undefined;
+}
+
+async function resolveSdkBackendBinPathAsync({
+  backendKey, shellEnv, resolveCliFromPathAsync, resolveSdkBinPathAsync,
+  resolveCodebuddyExecutableForSdk, realpath = realpathSync,
+}) {
+  if (backendKey === "codebuddy") {
+    const rawPath = await resolveCliFromPathAsync?.(backendKey, shellEnv) || undefined;
+    if (!rawPath) return undefined;
+    const realPath = resolveRealCliPath(rawPath, realpath);
+    const sdkPath = typeof resolveCodebuddyExecutableForSdk === "function"
+      ? resolveCodebuddyExecutableForSdk(realPath)
+      : realPath;
+    return sdkPath || undefined;
+  }
+  if (backendKey === "opencode" || backendKey === "mimo") {
+    const rawPath = await resolveCliFromPathAsync?.(backendKey, shellEnv) || undefined;
+    return rawPath ? resolveRealCliPath(rawPath, realpath) : undefined;
+  }
+  return await resolveSdkBinPathAsync?.(backendKey, shellEnv) || undefined;
 }
 
 function defaultWriteAttachmentToTemp(attachment) {
@@ -1183,6 +1219,7 @@ function registerSdkStreamHandlers(ctx) {
           resolveCodexExecutableForSdk,
           resolveCodebuddyExecutableForSdk,
           allowPathProbe: false,
+          validateConfiguredPath: !cacheOnly,
         });
         const binPath = cacheOnly || explicitBinPath
           ? explicitBinPath
@@ -1211,14 +1248,21 @@ function registerSdkStreamHandlers(ctx) {
           && (!cursorCliBinPath
             || cursorCliBinPath === "cursor"
             || /(?:^|[/\\])cursor$/i.test(cursorCliBinPath));
-        const needsResolvedKeyAlias = isCursorCliLoginSentinel || !explicitBinPath;
+        const rawConfiguredCommand = String(agentCommand || "").trim();
+        const hasConfiguredPathLikeCommand = Boolean(
+          rawConfiguredCommand
+          && (rawConfiguredCommand.includes("/") || rawConfiguredCommand.includes("\\") || /^[a-z]:/i.test(rawConfiguredCommand)),
+        );
+        const needsResolvedKeyAlias = isCursorCliLoginSentinel || !explicitBinPath || hasConfiguredPathLikeCommand;
         const pathHash = needsResolvedKeyAlias
           ? createHash("sha256").update(String(shellEnv?.PATH || "")).digest("hex")
           : null;
         const aliasKey = needsResolvedKeyAlias
           ? buildSdkModelCacheKey(
             backendKey,
-            `alias:${String(agentCommand || "").trim()}:${String(initialCursorCliBinPath || "")}:${pathHash}`,
+            hasConfiguredPathLikeCommand && !isCursorCliLoginSentinel
+              ? `alias:configured:${rawConfiguredCommand}`
+              : `alias:${rawConfiguredCommand}:${String(initialCursorCliBinPath || "")}:${pathHash}`,
             env,
             runtimeKey,
           )
@@ -1305,14 +1349,11 @@ function registerSdkStreamHandlers(ctx) {
           return null;
         };
 
-        const legacyScope = aliasKey
-          ? { backendKey, runtime: runtimeKey, envHash: buildSdkModelEnvHash(env) }
-          : null;
         const resolveAliasedKey = () => {
           if (!aliasKey) return null;
           return getSdkModelCacheEntry(sdkModelKeyAliases, aliasKey, {
             ttlMs: MODEL_CATALOG_MAX_AGE_MS,
-          })?.targetKey || readLastKnownCatalogAlias(lastKnownPath, aliasKey, legacyScope);
+          })?.targetKey || readLastKnownCatalogAlias(lastKnownPath, aliasKey);
         };
         const cacheCursorBinFromKey = (targetKey) => {
           if (!isCursorCliLoginSentinel || !cursorBinCacheKey || !targetKey) return;
@@ -1333,8 +1374,39 @@ function registerSdkStreamHandlers(ctx) {
               return aliasedImmediate.value;
             }
           }
-          const exactImmediate = tryServeCachedCatalog(buildCacheKey());
+          const exactKey = buildCacheKey();
+          const exactImmediate = tryServeCachedCatalog(exactKey);
           if (exactImmediate) return exactImmediate.value;
+          // Backward-compatible exact lookup for pre-alias v1 stores: only when
+          // persisted entries exist for this backend+runtime, resolve the
+          // executable asynchronously (never blocking on sync PATH lookup and
+          // never spawning Cursor status probes) and match only its exact key.
+          if (isCursorCliLoginSentinel || !explicitBinPath) {
+            const hasStoredEntriesForBackend = Object.keys(readLastKnownCatalogStore(lastKnownPath)).some((key) => {
+              const parts = key.split("\u0000");
+              return parts.length === 4 && parts[0] === backendKey && parts[2] === runtimeKey;
+            });
+            if (hasStoredEntriesForBackend) {
+              const asyncBinPath = isCursorCliLoginSentinel
+                ? await resolveCliFromPathAsync?.("cursor-agent", shellEnv) || null
+                : await resolveSdkBackendBinPathAsync({
+                  backendKey,
+                  shellEnv,
+                  resolveCliFromPathAsync: typeof resolveCliFromPathAsync === "function" ? resolveCliFromPathAsync : undefined,
+                  resolveSdkBinPathAsync: typeof resolveSdkBinPathAsync === "function" ? resolveSdkBinPathAsync : undefined,
+                  resolveCodebuddyExecutableForSdk,
+                });
+              if (asyncBinPath) {
+                const asyncKey = buildSdkModelCacheKey(backendKey, asyncBinPath, env, runtimeKey);
+                const asyncImmediate = tryServeCachedCatalog(asyncKey);
+                if (asyncImmediate) {
+                  cacheCursorBinFromKey(asyncKey);
+                  recordResolvedKeyAlias(asyncKey);
+                  return asyncImmediate.value;
+                }
+              }
+            }
+          }
           return { ok: true, currentModelId: null, models: [] };
         }
 

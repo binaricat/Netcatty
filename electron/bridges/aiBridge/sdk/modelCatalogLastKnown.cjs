@@ -73,40 +73,18 @@ function readLastKnownCatalogEntry(filePath, cacheKey) {
 }
 
 /**
- * Resolve a persisted alias (for a bare command or Cursor sentinel) back to
- * its exact persisted catalog cache key, or null if absent/evicted.
- * For backward compatibility with pre-alias version-1 entries (even in a
- * partially migrated store where other backends already wrote aliases),
- * falls back only when there is a single unambiguous unmigrated entry
- * matching (backendKey, runtime, envHash).
+ * Resolve a persisted alias (for a bare command, Cursor sentinel, or
+ * previously normalized configured path) back to its exact persisted catalog
+ * cache key, or null if absent/evicted.
  */
-function readLastKnownCatalogAlias(filePath, aliasKey, legacyScope = null) {
+function readLastKnownCatalogAlias(filePath, aliasKey) {
   if (!filePath || !aliasKey) return null;
   const { entries, aliases } = readLastKnownCatalogFile(filePath);
   const targetKey = aliases[aliasKey];
   if (typeof targetKey === "string" && Object.prototype.hasOwnProperty.call(entries, targetKey)) {
     return targetKey;
   }
-  if (!legacyScope?.backendKey || !legacyScope?.runtime || !legacyScope?.envHash) {
-    return null;
-  }
-  let matchedKey = null;
-  for (const [key, entry] of Object.entries(entries)) {
-    if (!entry || !Array.isArray(entry.models) || entry.models.length === 0) continue;
-    if (entry.aliasMigrated === true) continue;
-    const parts = key.split("\u0000");
-    if (
-      parts.length !== 4
-      || parts[0] !== legacyScope.backendKey
-      || parts[2] !== legacyScope.runtime
-      || parts[3] !== legacyScope.envHash
-    ) {
-      continue;
-    }
-    if (matchedKey !== null) return null; // ambiguous legacy entries
-    matchedKey = key;
-  }
-  return matchedKey;
+  return null;
 }
 
 /**
@@ -208,7 +186,6 @@ function writeLastKnownCatalogEntry(filePath, cacheKey, { backend, models, curre
       models: trimmedModels,
       currentModelId: currentModelId || null,
       fetchedAt: new Date(now).toISOString(),
-      aliasMigrated: true,
     };
     const orderedKeys = Object.keys(entries).sort((a, b) => {
       const timeA = Date.parse(entries[a]?.fetchedAt || "") || 0;
