@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const TEST_FILE_RE = /\.test\.(?:ts|tsx|cjs|mjs|js)$/;
 const EXCLUDED_FILE_RE = /\.(?:live|docker)\.test\.(?:ts|tsx|cjs|mjs|js)$/;
@@ -95,28 +96,89 @@ function discoverFiles(suite) {
   return Array.from(new Set(files)).sort();
 }
 
-const { suite, listOnly, filters, extraNodeTestArgs } = parseArgs(process.argv.slice(2));
-let files = discoverFiles(suite);
+const WINDOWS_MAX_CMD_CHARS = 20_000;
+const POSIX_MAX_CMD_CHARS = 120_000;
+// Conservative per-argument quoting + separator overhead for CreateProcessW.
+const ARG_OVERHEAD_CHARS = 3;
 
-if (filters.length > 0) {
-  files = files.filter((file) => filters.some((f) => file.includes(f)));
+export function batchTestFiles(
+  files,
+  baseArgsLength = 0,
+  maxCmdChars = process.platform === "win32" ? WINDOWS_MAX_CMD_CHARS : POSIX_MAX_CMD_CHARS,
+) {
+  const batches = [];
+  let current = [];
+  let currentLen = baseArgsLength;
+
+  for (const file of files) {
+    const addition = file.length + ARG_OVERHEAD_CHARS;
+    if (current.length > 0 && currentLen + addition > maxCmdChars) {
+      batches.push(current);
+      current = [file];
+      currentLen = baseArgsLength + addition;
+    } else {
+      current.push(file);
+      currentLen += addition;
+    }
+  }
+
+  if (current.length > 0) {
+    batches.push(current);
+  }
+  return batches;
 }
 
-if (listOnly) {
-  for (const file of files) console.log(file);
-  process.exit(0);
+function main() {
+  const { suite, listOnly, filters, extraNodeTestArgs } = parseArgs(process.argv.slice(2));
+  let files = discoverFiles(suite);
+
+  if (filters.length > 0) {
+    files = files.filter((file) => filters.some((f) => file.includes(f)));
+  }
+
+  if (listOnly) {
+    for (const file of files) console.log(file);
+    process.exit(0);
+  }
+
+  if (files.length === 0) {
+    console.error(`[run-tests] No test files matched suite="${suite}"`);
+    process.exit(1);
+  }
+
+  const baseArgs = ["--test"];
+  if (suite === "unit") {
+    baseArgs.push("--import", "tsx");
+  }
+  baseArgs.push(...extraNodeTestArgs);
+
+  const baseLength =
+    process.execPath.length +
+    ARG_OVERHEAD_CHARS +
+    baseArgs.reduce((sum, arg) => sum + arg.length + ARG_OVERHEAD_CHARS, 0);
+
+  const batches = batchTestFiles(files, baseLength);
+  let exitCode = 0;
+
+  for (const batch of batches) {
+    const result = spawnSync(process.execPath, [...baseArgs, ...batch], { stdio: "inherit" });
+    if (result.error) {
+      console.error(`[run-tests] Failed to spawn test process: ${result.error.message}`);
+      process.exit(1);
+    }
+    if (result.signal) {
+      process.kill(process.pid, result.signal);
+    }
+    if ((result.status ?? 1) !== 0 && exitCode === 0) {
+      exitCode = result.status ?? 1;
+    }
+  }
+
+  process.exit(exitCode);
 }
 
-if (files.length === 0) {
-  console.error(`[run-tests] No test files matched suite="${suite}"`);
-  process.exit(1);
+const isMain =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  main();
 }
-
-const nodeArgs = ["--test"];
-if (suite === "unit") {
-  nodeArgs.push("--import", "tsx");
-}
-nodeArgs.push(...extraNodeTestArgs, ...files);
-
-const result = spawnSync(process.execPath, nodeArgs, { stdio: "inherit" });
-process.exit(result.status ?? 1);
