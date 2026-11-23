@@ -273,12 +273,12 @@ async function extractArchive(file, stage, gzip, selectedNames, signal) {
               || !names.has(path.posix.join(parent, link).split("/")[0])) {
             throw new Error("Unsafe symbolic link in packed download: " + relative);
           }
-          if (link.split("/").includes("..") || /[\\\x01-\x1f\ufffd]/u.test(link)) {
-            // A relative parent link or POSIX-only special character can be
-            // valid in a normal directory tree, but resolving it safely is
-            // outside this extractor. Validate the REST of the archive before
-            // allowing ordinary SFTP fallback; corrupt/truncated archives must
-            // still be hard errors.
+          if (parent === "." || link.split("/").includes("..") || /[\\\x01-\x1f\ufffd]/u.test(link)) {
+            // Selected symbolic links must use ordinary SFTP transfer (which
+            // follows selected roots), and relative parent links or POSIX-only
+            // special characters are outside this extractor. Validate the REST
+            // of the archive before allowing ordinary SFTP fallback;
+            // corrupt/truncated archives must still be hard errors.
             requiresRegularDownload = true;
             entries.set(relative, "symlink");
             entry.resume();

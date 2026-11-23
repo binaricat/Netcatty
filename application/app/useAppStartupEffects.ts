@@ -455,16 +455,33 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
 
   useEffect(() => {
     let active = true;
+    let pendingActivePackedSync = true;
+    // Any global event observed while the initial active-packed snapshot is in
+    // flight is strictly newer than (or equal to) the snapshot; skip replaying
+    // those IDs so a settled transfer cannot be recreated as stuck "transferring".
+    const observedPackedEventIds = new Set<string>();
     const bridge = netcattyBridge.get();
     const unsubscribeEvents = bridge?.onGlobalSftpTransferEvent?.((event) => {
+      if (pendingActivePackedSync && event?.transferId) {
+        observedPackedEventIds.add(event.transferId);
+      }
       sftpTransferCenterStore.ingestBackgroundEvent(event);
     });
     void bridge?.listActivePackedDownloads?.().then((activePacked) => {
-      if (!active || !Array.isArray(activePacked)) return;
+      pendingActivePackedSync = false;
+      if (!active || !Array.isArray(activePacked)) {
+        observedPackedEventIds.clear();
+        return;
+      }
       for (const event of activePacked) {
+        if (observedPackedEventIds.has(event.transferId)) continue;
         sftpTransferCenterStore.ingestBackgroundEvent(event);
       }
-    }).catch(() => {});
+      observedPackedEventIds.clear();
+    }).catch(() => {
+      pendingActivePackedSync = false;
+      observedPackedEventIds.clear();
+    });
     const restartBackgroundTransfer = async (taskId: string, fromBeginning: boolean) => {
       const task = sftpTransferCenterStore.getSnapshot().tasks.find((candidate) => candidate.id === taskId);
       if (!task || !bridge?.openSftpForSession || !bridge.startStreamTransfer) return;
@@ -602,6 +619,8 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
     });
     return () => {
       active = false;
+      pendingActivePackedSync = false;
+      observedPackedEventIds.clear();
       unsubscribeEvents?.();
       unregisterOwner();
     };
