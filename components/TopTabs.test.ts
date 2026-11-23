@@ -36,11 +36,56 @@ const {
   formatSessionTopTabLabel,
   formatSessionTopTabTooltip,
   resolveSessionTabCodingCliIconState,
+  resolveWorkspaceTopTabLabel,
 } = await import("./top-tabs/TopTabItems.tsx");
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
+const {
+  publishSessionPromptHost,
+  sessionPresentationStore,
+} = await import("../application/state/sessionPresentationStore.ts");
 
 test("host tree tab gutter fills the remaining sidebar width", () => {
   assert.equal(computeHostTreeTabGutter(280, 120), 160);
+});
+
+test("workspace tabs resolve generated labels from live prompt hosts", () => {
+  const sessions = [
+    { id: "s1", customName: "", hostLabel: "jump", hostId: "h1", promptHostname: "" },
+    { id: "s2", customName: "", hostLabel: "jump", hostId: "h2", promptHostname: "" },
+  ];
+  const workspace = {
+    title: "jump/jump",
+    autoTitle: false,
+    generatedTitle: true,
+    focusedSessionId: "s1",
+  };
+
+  publishSessionPromptHost("s1", "target-a");
+  publishSessionPromptHost("s2", "target-b");
+  assert.equal(
+    resolveWorkspaceTopTabLabel(workspace, sessions),
+    "target-a/target-b",
+  );
+
+  sessionPresentationStore.clearSession("s1");
+  sessionPresentationStore.clearSession("s2");
+});
+
+test("workspace tabs keep explicit names ahead of live prompt hosts", () => {
+  const sessions = [
+    { id: "s1", customName: "", hostLabel: "jump", hostId: "h1", promptHostname: "" },
+  ];
+  publishSessionPromptHost("s1", "target-a");
+  assert.equal(
+    resolveWorkspaceTopTabLabel({
+      title: "My Workspace",
+      autoTitle: false,
+      generatedTitle: false,
+      focusedSessionId: "s1",
+    }, sessions),
+    "My Workspace",
+  );
+  sessionPresentationStore.clearSession("s1");
 });
 
 test("host tree tab gutter never goes negative", () => {
