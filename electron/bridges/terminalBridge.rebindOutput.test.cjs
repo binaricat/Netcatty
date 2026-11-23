@@ -839,3 +839,97 @@ test("detached output is replayed to home on ungraceful restore and cleared afte
     registry.clearDetachedReplayCapture(sessionId);
   }
 });
+
+test("moved tab from a peer session window receives applySnapshot and restoreOutput directly", async () => {
+  const { EventEmitter } = require("node:events");
+  const { createPreloadApi } = require("../preload/api.cjs");
+  const { bridge, fakeChannel } = loadTerminalBridgeWithMocks();
+  const registry = require("./terminalAttachRestore.cjs");
+  const sessionId = "peer-window-session";
+  const authorization = "grant-peer-window";
+  const mainReceived = [];
+  const peerIpc = new EventEmitter();
+  const mainWin = {
+    id: 101,
+    isDestroyed: () => false,
+    send: (channel, payload) => mainReceived.push({ channel, payload }),
+  };
+  const peerWin = {
+    id: 102,
+    isDestroyed: () => false,
+    send: (channel, payload) => peerIpc.emit(channel, {}, payload),
+  };
+  const popup = { id: 103, isDestroyed: () => false };
+  const handles = new Map();
+  const listeners = new Map();
+  const reboundTargets = [];
+  const worker = {
+    getAttachHomeWebContentsId: () => peerWin.id,
+    hasOpenSession: () => true,
+    rebindOutputSession: async (_sid, targetId) => {
+      reboundTargets.push(targetId);
+      return { success: true, previousWebContentsId: popup.id, webContentsId: targetId };
+    },
+    clearAttachHome: () => {},
+  };
+  bridge.init({
+    sessions: new Map(),
+    electronModule: { webContents: { fromId: (id) => (id === peerWin.id ? peerWin : id === mainWin.id ? mainWin : popup) } },
+    terminalOutputChannel: fakeChannel,
+  });
+  bridge.registerHandlers({
+    handle: (channel, fn) => handles.set(channel, fn),
+    on: (channel, fn) => listeners.set(channel, fn),
+  }, { terminalWorkerManager: worker });
+  registry.registerAttachPopupAuthorization(authorization, sessionId, popup.id, { ownsLifetime: true });
+
+  peerIpc.send = (channel, payload) => listeners.get(channel)({ sender: peerWin }, payload);
+  const peerApi = createPreloadApi({ ipcRenderer: peerIpc, webUtils: {} });
+  let peerApplied = null;
+  const unsub = peerApi.onTerminalSessionApplySnapshot((payload) => {
+    peerApplied = payload;
+    return true;
+  });
+
+  const originalRequire = Module.prototype.require;
+  Module.prototype.require = function (request, ...rest) {
+    if (request === "./windowManager.cjs") {
+      return {
+        getMainWindows: () => [{ webContents: mainWin }],
+        getAppContentWindows: () => [{ webContents: mainWin }, { webContents: peerWin }],
+      };
+    }
+    return originalRequire.call(this, request, ...rest);
+  };
+  try {
+    const applied = await handles.get("netcatty:terminal:applySnapshot")(
+      { sender: popup },
+      {
+        sessionId,
+        snapshot: "peer-snapshot",
+        contextSnapshot: "",
+        contextViewportSnapshot: "",
+        contextScrollbackSnapshot: "",
+        alternateScreen: false,
+        connectionLogDelta: "peer-delta\r\n",
+        authorization,
+      },
+    );
+    assert.equal(applied.success, true);
+    assert.equal(peerApplied?.snapshot, "peer-snapshot");
+    assert.equal(peerApplied?.connectionLogDelta, "peer-delta\r\n");
+    assert.deepEqual(mainReceived, []);
+
+    const restored = await handles.get("netcatty:terminal:restoreOutput")(
+      { sender: popup },
+      { sessionId, webContentsId: peerWin.id, authorization },
+    );
+    assert.equal(restored.success, true);
+    assert.equal(restored.webContentsId, peerWin.id);
+    assert.deepEqual(reboundTargets, [peerWin.id]);
+  } finally {
+    unsub();
+    Module.prototype.require = originalRequire;
+    registry.releaseAttachPopupAuthorization(authorization);
+  }
+});

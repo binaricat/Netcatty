@@ -365,7 +365,7 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
     return Promise.resolve({ success: false, error: "Home renderer not found" });
   }
   try {
-    const home = findRegisteredMainWebContents(homeId);
+    const home = findLiveAttachHomeWebContents(homeId);
     if (!home) {
       return Promise.resolve({ success: false, error: "Home renderer unavailable" });
     }
@@ -510,6 +510,34 @@ function fanoutSessionLifecycleEvent(
   attachHomeWebContentsIds.delete(sessionId);
 }
 
+function findLiveAttachHomeWebContents(homeId) {
+  if (typeof homeId !== "number") return null;
+  try {
+    const wm = require("./windowManager.cjs");
+    const candidates = [
+      ...(typeof wm.getMainWindows === "function"
+        ? wm.getMainWindows()
+        : (typeof wm.getMainWindow === "function" ? [wm.getMainWindow()].filter(Boolean) : [])),
+      ...(typeof wm.getAppContentWindows === "function" ? wm.getAppContentWindows() : []),
+    ];
+    for (const win of candidates) {
+      const contents = win?.webContents;
+      if (contents && contents.id === homeId && !contents.isDestroyed?.()) {
+        return contents;
+      }
+    }
+  } catch {
+    // ignore unavailable window manager during isolated tests/startup
+  }
+  try {
+    const direct = electronModule?.webContents?.fromId?.(homeId);
+    if (direct && !direct.isDestroyed?.()) return direct;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 function findRegisteredMainWebContents(preferredId) {
   try {
     const wm = require("./windowManager.cjs");
@@ -524,6 +552,17 @@ function findRegisteredMainWebContents(preferredId) {
     if (typeof preferredId === "number") {
       const preferred = liveContents.find((contents) => contents.id === preferredId);
       if (preferred) return preferred;
+      // Peer session windows (#/session-window) are registered as app-content
+      // windows rather than main windows; honor an exact live match when
+      // returning a moved tab to the peer window it came from.
+      if (typeof wm.getAppContentWindows === "function") {
+        for (const win of wm.getAppContentWindows()) {
+          const contents = win?.webContents;
+          if (contents && contents.id === preferredId && !contents.isDestroyed?.()) {
+            return contents;
+          }
+        }
+      }
     }
     return liveContents[0] || null;
   } catch {
