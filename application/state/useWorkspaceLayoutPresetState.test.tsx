@@ -86,13 +86,67 @@ test('saved default resolves per session with fresh ids and protocol-aware pruni
     const again = state.resolveDefaultLayoutForSession({ protocol: 'ssh' });
     assert.ok(again);
     assert.notEqual(again.layout.root.id, sshResolved.layout.root.id);
+    assert.equal(state.hasDefaultLayoutSftpPane(), true);
+
+    // Network devices prune SFTP from a saved split preset while keeping non-SFTP panes.
+    const networkDeviceResolved = state.resolveDefaultLayoutForSession(
+      { protocol: 'ssh' },
+      { host: { deviceType: 'network' } },
+    );
+    assert.ok(networkDeviceResolved);
+    assert.deepEqual(
+      collectSidePanelPanes(networkDeviceResolved.layout.root).map((pane) => pane.tool),
+      ['scripts'],
+    );
+    assert.equal(networkDeviceResolved.focusedTool, 'scripts');
+
+    const ciscoBannerResolved = state.resolveDefaultLayoutForSession(
+      { protocol: 'ssh' },
+      { host: { distro: '' }, remoteSshVersion: 'SSH-2.0-Cisco-1.25' },
+    );
+    assert.ok(ciscoBannerResolved);
+    assert.deepEqual(
+      collectSidePanelPanes(ciscoBannerResolved.layout.root).map((pane) => pane.tool),
+      ['scripts'],
+    );
+
+    // Explicit per-host opt-in keeps SFTP in the saved layout for network devices.
+    const explicitNetworkResolved = state.resolveDefaultLayoutForSession(
+      { protocol: 'ssh' },
+      { host: { deviceType: 'network', autoOpenSftpPanel: true } },
+    );
+    assert.ok(explicitNetworkResolved);
+    assert.deepEqual(
+      collectSidePanelPanes(explicitNetworkResolved.layout.root).map((pane) => pane.tool),
+      ['scripts', 'sftp'],
+    );
+
+    // SFTP-only preset resolves to null for network devices.
+    await act(async () => {
+      state?.saveWorkspaceLayoutAsDefault(createSidePanelLayout('sftp', 'sftp-only-pane'));
+    });
+    assert.equal(state.hasDefaultLayoutSftpPane(), true);
+    assert.equal(
+      state.resolveDefaultLayoutForSession({ protocol: 'ssh' }, { host: { distro: 'huawei' } }),
+      null,
+    );
+    assert.equal(
+      state.resolveDefaultLayoutForSession({ protocol: 'ssh' }, { host: { distro: 'ubuntu' } })?.focusedTool,
+      'sftp',
+    );
+
     await act(async () => {
       state?.saveWorkspaceLayoutAsDefault(createSidePanelLayout('browser', 'browser-pane'));
     });
+    assert.equal(state.hasDefaultLayoutSftpPane(), false);
     assert.equal(state.resolveDefaultLayoutForSession({ protocol: 'telnet' }), null);
     for (const protocol of ['ssh', 'mosh', 'local']) {
       assert.equal(state.resolveDefaultLayoutForSession({ protocol })?.focusedTool, 'browser');
     }
+    assert.equal(
+      state.resolveDefaultLayoutForSession({ protocol: 'ssh' }, { host: { deviceType: 'network' } })?.focusedTool,
+      'browser',
+    );
   } finally {
     if (previousLocalStorage) {
       Object.defineProperty(globalThis, 'localStorage', previousLocalStorage);
