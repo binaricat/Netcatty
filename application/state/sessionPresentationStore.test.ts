@@ -5,6 +5,7 @@ import {
   retainStableSessionsIgnoringPresentation,
   terminalPaneSessionsEqual,
 } from '../../domain/terminalPaneSessionsEqual.ts';
+import type { TerminalSession } from '../../domain/models.ts';
 import { topTabsSessionsEqual } from '../../domain/topTabsSessionsEqual.ts';
 import {
   applySessionPresentation,
@@ -14,7 +15,7 @@ import {
   sessionPresentationStore,
 } from './sessionPresentationStore.ts';
 
-const session = (overrides: Record<string, unknown> = {}) => ({
+const session = (overrides: Partial<TerminalSession> = {}): TerminalSession => ({
   id: 's1',
   hostId: 'h1',
   hostLabel: 'host',
