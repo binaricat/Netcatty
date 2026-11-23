@@ -16,6 +16,7 @@ const codebuddyDriver = require("./codebuddyDriver.cjs");
 const { OPENCODE_SERVER_START_TIMEOUT_MS } = require("./opencodeDriver.cjs");
 const {
   buildLastKnownCatalogPath,
+  findLatestLastKnownCatalogEntry,
   readLastKnownCatalogEntry,
   refreshLastKnownCatalogCurrentId,
   writeLastKnownCatalogEntry,
@@ -145,12 +146,35 @@ const SDK_MODEL_CACHE_ENV_KEYS = [
 // catalog + server teardown) instead of aborting mid-IPC.
 const MODEL_LIST_DEADLINE_HEADROOM_MS = 1_000;
 
-function buildSdkModelCacheKey(backendKey, binPath, env, runtime = "sdk") {
+function buildSdkModelEnvHash(env) {
   const envFingerprint = SDK_MODEL_CACHE_ENV_KEYS
     .map((key) => `${key}=${env?.[key] == null ? "" : String(env[key])}`)
     .join("\u0000");
-  const envHash = createHash("sha256").update(envFingerprint).digest("hex");
+  return createHash("sha256").update(envFingerprint).digest("hex");
+}
+
+function buildSdkModelCacheKey(backendKey, binPath, env, runtime = "sdk") {
+  const envHash = buildSdkModelEnvHash(env);
   return [String(backendKey || ""), String(binPath || ""), String(runtime || "sdk"), envHash].join("\u0000");
+}
+
+function findLatestSdkModelCacheEntryByScope(cache, { backendKey, runtime, envHash }, options) {
+  pruneSdkModelCache(cache, options);
+  let best = null;
+  let bestAt = -Infinity;
+  for (const [key, entry] of cache) {
+    if (!entry) continue;
+    const parts = key.split("\u0000");
+    if (parts.length !== 4 || parts[0] !== backendKey || parts[2] !== runtime || parts[3] !== envHash) {
+      continue;
+    }
+    const at = Number(entry.at || 0);
+    if (!best || at > bestAt) {
+      best = entry;
+      bestAt = at;
+    }
+  }
+  return best;
 }
 
 function pruneSdkModelCache(cache, {
@@ -493,7 +517,7 @@ function resolveConfiguredSdkPath({
 function resolveSdkBackendBinPath({
   backendKey, configuredCommand, shellEnv, env, resolveCliFromPath, normalizeCliPathForPlatform,
   resolveSdkBinPath, resolveClaudeCodeExecutableForSdk, resolveCodexExecutableForSdk,
-  resolveCodebuddyExecutableForSdk, realpath = realpathSync,
+  resolveCodebuddyExecutableForSdk, realpath = realpathSync, allowPathProbe = true,
 }) {
   const configuredPath = normalizeConfiguredCommandPath(configuredCommand, normalizeCliPathForPlatform);
   if (configuredPath) {
@@ -509,7 +533,7 @@ function resolveSdkBackendBinPath({
 
   if (backendKey === "codebuddy") {
     const configuredEnvPath = normalizeCliPathForPlatform?.(env?.CODEBUDDY_CODE_PATH);
-    const rawPath = configuredEnvPath || resolveCliFromPath(backendKey, shellEnv) || undefined;
+    const rawPath = configuredEnvPath || (allowPathProbe ? resolveCliFromPath(backendKey, shellEnv) : null) || undefined;
     if (!rawPath) return undefined;
     const realPath = resolveRealCliPath(rawPath, realpath);
     // On Windows the discovered path is an npm shim (codebuddy.cmd/.ps1) that the
@@ -523,15 +547,15 @@ function resolveSdkBackendBinPath({
   }
   if (backendKey === "opencode") {
     const configuredEnvPath = normalizeCliPathForPlatform?.(env?.OPENCODE_BIN);
-    const rawPath = configuredEnvPath || resolveCliFromPath(backendKey, shellEnv) || undefined;
+    const rawPath = configuredEnvPath || (allowPathProbe ? resolveCliFromPath(backendKey, shellEnv) : null) || undefined;
     return rawPath ? resolveRealCliPath(rawPath, realpath) : undefined;
   }
   if (backendKey === "mimo") {
     const configuredEnvPath = normalizeCliPathForPlatform?.(env?.MIMOCODE_BIN || env?.MIMOCODE_BIN_PATH);
-    const rawPath = configuredEnvPath || resolveCliFromPath(backendKey, shellEnv) || undefined;
+    const rawPath = configuredEnvPath || (allowPathProbe ? resolveCliFromPath(backendKey, shellEnv) : null) || undefined;
     return rawPath ? resolveRealCliPath(rawPath, realpath) : undefined;
   }
-  return resolveSdkBinPath?.(backendKey, shellEnv) || undefined;
+  return allowPathProbe ? (resolveSdkBinPath?.(backendKey, shellEnv) || undefined) : undefined;
 }
 
 function defaultWriteAttachmentToTemp(attachment) {
@@ -1175,10 +1199,15 @@ function registerSdkStreamHandlers(ctx) {
           resolveClaudeCodeExecutableForSdk,
           resolveCodexExecutableForSdk,
           resolveCodebuddyExecutableForSdk,
+          // Keep cacheOnly hydration non-blocking: never invoke synchronous
+          // PATH discovery (`which`/`where`) while the panel is opening.
+          allowPathProbe: !cacheOnly,
         });
         const codexRuntime = backendKey === "codex" && requestedCodexRuntime === "app-server"
           ? "app-server"
           : "sdk";
+        const runtimeKey = `${codexRuntime}:${cursorAuthMode}`;
+        const envHash = buildSdkModelEnvHash(env);
         const shouldCacheModels = shouldCacheSdkRuntimeModels(backendKey);
         const lastKnownPath = resolveLastKnownCatalogPath(electronModule);
         const isCursorCliLoginSentinel = backendKey === "cursor"
@@ -1210,7 +1239,7 @@ function registerSdkStreamHandlers(ctx) {
           backendKey,
           cursorAuthMode === "cli-login" ? (cursorCliBinPath || binPath) : binPath,
           env,
-          `${codexRuntime}:${cursorAuthMode}`,
+          runtimeKey,
         );
         const tryServeCachedCatalog = (key) => {
           const cached = !force && shouldCacheModels ? getSdkModelCacheEntry(sdkModelCache, key) : null;
@@ -1263,7 +1292,46 @@ function registerSdkStreamHandlers(ctx) {
         let cacheKey = buildCacheKey();
         const immediate = tryServeCachedCatalog(cacheKey);
         if (immediate) return immediate.promise ? await immediate.promise : immediate.value;
-        if (cacheOnly) return { ok: true, currentModelId: null, models: [] };
+        if (cacheOnly) {
+          // For bare commands or Cursor CLI-login sentinels, recover the latest
+          // catalog matching (backend, runtime, envHash) without blocking on
+          // PATH lookup or auth probes (including across app restarts).
+          const hasExplicitBinPath = backendKey === "cursor" && cursorAuthMode === "cli-login"
+            ? !isCursorCliLoginSentinel
+            : Boolean(binPath);
+          if (!hasExplicitBinPath) {
+            const scope = { backendKey, runtime: runtimeKey, envHash };
+            const scopedLive = !force && shouldCacheModels
+              ? findLatestSdkModelCacheEntryByScope(sdkModelCache, scope)
+              : null;
+            if (scopedLive) {
+              return {
+                ok: true,
+                currentModelId: scopedLive.currentModelId || null,
+                models: scopedLive.models,
+                ...(scopedLive.fetchedAt ? { source: "live", fetchedAt: scopedLive.fetchedAt } : {}),
+              };
+            }
+            const scopedFailed = findLatestSdkModelCacheEntryByScope(sdkModelRefreshFailures, scope, {
+              ttlMs: MODEL_CATALOG_RETRY_MS,
+            });
+            if (scopedFailed) return scopedFailed.result;
+            const scopedLastKnown = findLatestLastKnownCatalogEntry(lastKnownPath, scope);
+            if (scopedLastKnown) {
+              console.debug(
+                `[sdk] list-models(${backendKey}) serving last-known-good catalog from ${scopedLastKnown.fetchedAt} without a live fetch`,
+              );
+              return {
+                ok: true,
+                currentModelId: remapLastKnownCurrentModelId(scopedLastKnown),
+                models: scopedLastKnown.models,
+                source: "last-known-good",
+                fetchedAt: scopedLastKnown.fetchedAt,
+              };
+            }
+          }
+          return { ok: true, currentModelId: null, models: [] };
+        }
 
         if (isCursorCliLoginSentinel) {
           const stillSentinel = !cursorCliBinPath

@@ -2167,8 +2167,73 @@ test("list-models skips Cursor CLI probes during cacheOnly hydration and warm/fr
     assert.equal(warmCacheOnly.models.length, 2);
     assert.equal(probeCalls, 1);
     assert.equal(pathResolveCalls, 0);
+
+    // 4. Simulate an app restart (both memory caches empty): cacheOnly still
+    // recovers the persisted Cursor catalog keyed by the resolved cursor-agent
+    // path without invoking any probe or PATH lookup.
+    ctx.sdkModelCache.clear();
+    ctx.cursorCliBinCache.clear();
+    const afterRestartCacheOnly = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(afterRestartCacheOnly.source, "last-known-good");
+    assert.deepEqual(afterRestartCacheOnly.models.map(({ id }) => id), ["auto", "claude-4.5-sonnet"]);
+    assert.equal(probeCalls, 1);
+    assert.equal(pathResolveCalls, 0);
   } finally {
     ctx.cursorCliBinCache.clear();
+    cleanup();
+  }
+});
+
+test("list-models cacheOnly avoids synchronous PATH discovery while hydrating bare commands", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  let syncPathCalls = 0;
+  let sdkBinCalls = 0;
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/bare-bin" }),
+    resolveCliFromPath: () => {
+      syncPathCalls += 1;
+      return "/test/bare-bin/opencode";
+    },
+    resolveSdkBinPath: () => {
+      sdkBinCalls += 1;
+      return "/test/bare-bin/claude";
+    },
+  });
+  try {
+    const claudeDriver = getDriver("claude");
+    const opencodeDriver = getDriver("opencode");
+    t.mock.method(claudeDriver, "listModels", async () => [{ id: "claude-opus-6-2", name: "Opus 6.2" }]);
+    t.mock.method(opencodeDriver, "listModels", async () => [{ id: "openai/gpt-6", name: "GPT-6" }]);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+
+    // Seed persisted catalogs for bare commands (resolved via PATH on live load).
+    await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude" });
+    await listModels({ sender: {} }, { sdkBackend: "opencode", agentCommand: "opencode" });
+    assert.equal(sdkBinCalls, 1);
+    assert.equal(syncPathCalls, 1);
+
+    // Simulate app restart (in-memory cache cleared): cacheOnly must hydrate
+    // both persisted catalogs without running synchronous PATH discovery.
+    ctx.sdkModelCache.clear();
+    const claudeCached = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude", cacheOnly: true });
+    const opencodeCached = await listModels({ sender: {} }, { sdkBackend: "opencode", agentCommand: "opencode", cacheOnly: true });
+    assert.equal(claudeCached.source, "last-known-good");
+    assert.deepEqual(claudeCached.models.map(({ id }) => id), ["claude-opus-6-2"]);
+    assert.equal(opencodeCached.source, "last-known-good");
+    assert.deepEqual(opencodeCached.models.map(({ id }) => id), ["openai/gpt-6"]);
+    assert.equal(sdkBinCalls, 1);
+    assert.equal(syncPathCalls, 1);
+
+    // Explicit custom binary paths must remain isolated and not inherit bare-command entries.
+    const customPathCached = await listModels({ sender: {} }, {
+      sdkBackend: "claude",
+      agentCommand: "/custom/isolated/claude",
+      cacheOnly: true,
+    });
+    assert.deepEqual(customPathCached, { ok: true, currentModelId: null, models: [] });
+    assert.equal(sdkBinCalls, 1);
+    assert.equal(syncPathCalls, 1);
+  } finally {
     cleanup();
   }
 });

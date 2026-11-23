@@ -46,6 +46,32 @@ function readLastKnownCatalogEntry(filePath, cacheKey) {
 }
 
 /**
+ * Find the most recently fetched persisted catalog matching a backend, runtime,
+ * and environment hash without probing PATH for a binary path (used by
+ * side-effect-free cacheOnly hydration for bare commands and Cursor sentinels).
+ */
+function findLatestLastKnownCatalogEntry(filePath, { backendKey, runtime, envHash } = {}) {
+  if (!filePath || !backendKey || !runtime || !envHash) return null;
+  const entries = readLastKnownCatalogStore(filePath);
+  let best = null;
+  let bestTime = -Infinity;
+  for (const [key, entry] of Object.entries(entries)) {
+    if (!entry || !Array.isArray(entry.models) || entry.models.length === 0) continue;
+    const parts = key.split("\u0000");
+    if (parts.length !== 4 || parts[0] !== backendKey || parts[2] !== runtime || parts[3] !== envHash) {
+      continue;
+    }
+    const fetchedAtMs = Date.parse(entry.fetchedAt || "");
+    const sortTime = Number.isFinite(fetchedAtMs) ? fetchedAtMs : 0;
+    if (!best || sortTime > bestTime) {
+      best = entry;
+      bestTime = sortTime;
+    }
+  }
+  return best;
+}
+
+/**
  * Refresh the persisted current id for one cache key without replacing the
  * persisted models list. Current-only catalogs (models: [] with a valid
  * currentModelId) still carry the user's selection, but a models-less entry
@@ -138,6 +164,7 @@ module.exports = {
   LAST_KNOWN_MAX_ENTRIES,
   LAST_KNOWN_MAX_MODELS,
   buildLastKnownCatalogPath,
+  findLatestLastKnownCatalogEntry,
   readLastKnownCatalogEntry,
   readLastKnownCatalogStore,
   refreshLastKnownCatalogCurrentId,
