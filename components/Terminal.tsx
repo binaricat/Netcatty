@@ -1561,16 +1561,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // Observe popups display an existing backend; the hidden owner remains the
     // sole authority for reconnecting or replacing that session.
     if (attachExistingSession) return false;
+    const latestTerminalSettings = terminalSettingsRef.current;
     const shouldSchedule = trigger?.evt
       ? shouldAutoReconnectAfterExit({
         evt: trigger.evt,
         host,
-        terminalSettings,
+        terminalSettings: latestTerminalSettings,
         hasEverConnected: hasEverConnectedRef.current,
       })
       : shouldContinueAutoReconnectAfterFailure({
         host,
-        terminalSettings,
+        terminalSettings: latestTerminalSettings,
         loopActive: autoReconnectLoopActiveRef.current,
       });
 
@@ -1588,7 +1589,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     autoReconnectAttemptRef.current += 1;
     const attempt = autoReconnectAttemptRef.current;
-    const delayMs = getTerminalAutoReconnectDelayMs(terminalSettings);
+    const delayMs = getTerminalAutoReconnectDelayMs(latestTerminalSettings);
     const seconds = delayMs / 1000;
     const scheduledMessage = t("terminal.progress.autoReconnectScheduled", { seconds, attempt });
     setReconnectNoticeMessage(scheduledMessage);
@@ -1606,6 +1607,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
     return true;
   }, [attachExistingSession, host, setProgressLogs, t, terminalSettings, updateStatus]);
+  const scheduleAutoReconnectRef = useRef(scheduleAutoReconnect);
+  scheduleAutoReconnectRef.current = scheduleAutoReconnect;
 
   const prepareRestoredReconnect = useCallback(() => {
     suppressHostStartupCommandRef.current = shouldSuppressHostStartupCommandOnReconnect(
@@ -2230,9 +2233,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           exitMessage,
         );
       onSessionExitRef.current?.(sessionId, evt);
-      scheduleAutoReconnect({ evt });
+      scheduleAutoReconnectRef.current({ evt });
     });
-  }, [host.hostname, host.label, observeTerminalInputPrompt, onTerminalBell, scheduleAutoReconnect, sessionId, terminalBackend]);
+  }, [host.hostname, host.label, observeTerminalInputPrompt, onTerminalBell, sessionId, terminalBackend]);
 
   const clearHibernateRetry = useCallback(() => {
     if (hibernateRetryTimerRef.current === null) return;
@@ -2804,7 +2807,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       clearTerminalCwd();
       pluginTerminalLifecycle.onSessionExited(evt.exitCode);
       onSessionExitRef.current?.(closedSessionId, evt);
-      scheduleAutoReconnect({ evt });
+      scheduleAutoReconnectRef.current({ evt });
     },
     onTerminalDataCapture: handleTerminalDataCaptureOnce,
     onTerminalOutput: (chunk: string, meta?: TerminalSessionDataMeta) => {

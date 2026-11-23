@@ -10,6 +10,12 @@ import { probeAltScreenScheduling } from './runtime/terminalWriteCoalescer.ts';
 import type { SensitiveInputActiveRef } from './autocomplete/terminalAutocompletePrompt.ts';
 
 import { applyTerminalKeywordHighlightRules } from './terminalKeywordHighlightRules.ts';
+import {
+  canAttemptTerminalAutoReconnect,
+  getTerminalAutoReconnectDelayMs,
+  shouldAutoReconnectAfterExit,
+  shouldContinueAutoReconnectAfterFailure,
+} from '../../application/state/terminalAutoReconnect.ts';
 
 const effectsSource = readFileSync(new URL('./useTerminalEffects.ts', import.meta.url), 'utf8');
 const terminalSource = readFileSync(new URL('../Terminal.tsx', import.meta.url), 'utf8');
@@ -531,4 +537,87 @@ test('explicit plugin sensitivity survives vim ex, redraws and shell prompts', (
   observe(':');
   assert.equal(latch.current, true);
   assert.equal(latch.source, 'heuristic');
+});
+
+test('scheduleAutoReconnect reads latest terminalSettingsRef after settings change mid-session', () => {
+  const start = terminalSource.indexOf('const scheduleAutoReconnect = useCallback(');
+  assert.notEqual(start, -1, 'scheduleAutoReconnect should exist in Terminal.tsx');
+  const end = terminalSource.indexOf('const scheduleAutoReconnectRef = useRef(scheduleAutoReconnect);', start);
+  assert.notEqual(end, -1, 'scheduleAutoReconnectRef should follow scheduleAutoReconnect');
+
+  const callbackSource = terminalSource
+    .slice(start + 'const scheduleAutoReconnect = useCallback('.length, end)
+    .replace(/,\s*\[attachExistingSession,\s*host,\s*setProgressLogs,\s*t,\s*terminalSettings,\s*updateStatus\]\);\s*$/, '');
+  const transpiled = ts.transpileModule(`(${callbackSource})`, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+
+  const scheduledTimers: Array<{ delay: number; fn: () => void }> = [];
+  const notices: string[] = [];
+  const progressLogs: string[] = [];
+  const statuses: string[] = [];
+  const initialSettings = { sshAutoReconnectEnabled: true, sshAutoReconnectInterval: 5 };
+  const terminalSettingsRef = { current: initialSettings };
+  const autoReconnectTimerRef: { current: number | null } = { current: null };
+  const autoReconnectLoopActiveRef = { current: false };
+  const autoReconnectAttemptRef = { current: 0 };
+
+  const scheduleAutoReconnect = runInNewContext(transpiled, {
+    attachExistingSession: false,
+    host: { protocol: 'ssh', hostname: 'prod.example.com' },
+    terminalSettings: initialSettings,
+    terminalSettingsRef,
+    hasEverConnectedRef: { current: true },
+    termRef: { current: {} },
+    hibernatedRef: { current: false },
+    autoReconnectLoopActiveRef,
+    autoReconnectTimerRef,
+    autoReconnectAttemptRef,
+    startReconnectRef: { current: () => {} },
+    shouldAutoReconnectAfterExit,
+    shouldContinueAutoReconnectAfterFailure,
+    canAttemptTerminalAutoReconnect,
+    getTerminalAutoReconnectDelayMs,
+    t: (key: string, params?: Record<string, unknown>) => `${key}:${JSON.stringify(params)}`,
+    setReconnectNoticeMessage: (msg: string | null) => {
+      if (msg) notices.push(msg);
+    },
+    setError: () => {},
+    setShowLogs: () => {},
+    setIsDisconnectedDialogDismissed: () => {},
+    setProgressLogs: (updater: (prev: string[]) => string[]) => {
+      progressLogs.splice(0, progressLogs.length, ...updater(progressLogs));
+    },
+    updateStatus: (next: string) => {
+      statuses.push(next);
+    },
+    setTimeout: (fn: () => void, delay: number) => {
+      scheduledTimers.push({ delay, fn });
+      return scheduledTimers.length;
+    },
+  }) as (trigger?: { evt?: { reason?: 'closed' | 'exited' | 'error' | 'timeout' | 'signaled' } }) => boolean;
+
+  // Simulate user changing reconnect interval from 5s to 300s while SSH is already connected
+  terminalSettingsRef.current = { sshAutoReconnectEnabled: true, sshAutoReconnectInterval: 300 };
+
+  assert.equal(scheduleAutoReconnect({ evt: { reason: 'error' } }), true);
+  assert.equal(scheduledTimers.length, 1);
+  assert.equal(scheduledTimers[0].delay, 300_000);
+  assert.deepEqual(notices, ['terminal.progress.autoReconnectScheduled:{"seconds":300,"attempt":1}']);
+  assert.deepEqual(statuses, ['connecting']);
+
+  // Simulate disabling auto-reconnect while connected on a fresh exit
+  autoReconnectTimerRef.current = null;
+  autoReconnectLoopActiveRef.current = false;
+  terminalSettingsRef.current = { sshAutoReconnectEnabled: false, sshAutoReconnectInterval: 300 };
+  assert.equal(scheduleAutoReconnect({ evt: { reason: 'error' } }), false);
+  assert.equal(scheduledTimers.length, 1);
+
+  // Verify exit listeners dispatch through scheduleAutoReconnectRef.current
+  assert.equal(terminalSource.includes('scheduleAutoReconnect({ evt })'), false);
+  const refCallMatches = terminalSource.match(/scheduleAutoReconnectRef\.current\(\{ evt \}\)/g) ?? [];
+  assert.equal(refCallMatches.length, 2);
 });
