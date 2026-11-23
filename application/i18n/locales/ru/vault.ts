@@ -530,6 +530,7 @@ export const ruVaultMessages: Messages = {
   'sftp.context.copyPath': 'Копировать путь к файлу',
   'sftp.context.insertPathToTerminal': 'Вставить путь в терминал',
   'sftp.context.cdInTerminal': 'Открыть в терминале (cd)',
+  'sftp.terminal.insertBlockedUnsafeQuote': 'Невозможно вставить путь, пока курсор терминала находится внутри незакрытых кавычек или экранирования',
   'sftp.context.openWithDefault': 'Открыть в системном приложении',
   'sftp.context.openWith': 'Открыть с помощью...',
   'sftp.context.edit': 'Редактировать',

@@ -632,22 +632,36 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const onTerminalDataCaptureRef = useRef(onTerminalDataCapture);
   const onSessionExitRef = useRef(onSessionExit);
   const commandBufferRef = useRef<string>("");
-  useEffect(() => registerTerminalCommandInjectionReadyReader(sessionId, (options) => {
-    const term = termRef.current;
-    if (!term) return false;
-    const prompt = detectPrompt(term);
-    const readiness = {
-      sensitiveInputActive: passwordPromptActiveRef.current,
-      hasLiveTerminal: true,
-      alternateScreenActive: isTerminalAlternateScreenActive(term),
-      isAtPrompt: prompt.isAtPrompt,
-      userInputLength: prompt.userInput.length,
-      pendingTypedInputLength: commandBufferRef.current.length,
-    };
-    return options?.allowDraft
-      ? isShellPromptReadyForInsertion(readiness)
-      : isIdleShellReadyForCommandInjection(readiness);
-  }), [sessionId]);
+  useEffect(() => registerTerminalCommandInjectionReadyReader(
+    sessionId,
+    (options) => {
+      const term = termRef.current;
+      if (!term) return false;
+      const prompt = detectPrompt(term);
+      const readiness = {
+        sensitiveInputActive: passwordPromptActiveRef.current,
+        hasLiveTerminal: true,
+        alternateScreenActive: isTerminalAlternateScreenActive(term),
+        isAtPrompt: prompt.isAtPrompt,
+        userInputLength: prompt.userInput.length,
+        pendingTypedInputLength: commandBufferRef.current.length,
+      };
+      return options?.allowDraft
+        ? isShellPromptReadyForInsertion(readiness)
+        : isIdleShellReadyForCommandInjection(readiness);
+    },
+    () => {
+      const term = termRef.current;
+      if (!term) return null;
+      const prompt = detectPrompt(term);
+      if (!prompt.isAtPrompt) return null;
+      return {
+        promptText: prompt.promptText,
+        userInput: prompt.userInput,
+        pendingTypedInput: commandBufferRef.current,
+      };
+    },
+  ), [sessionId]);
   const promptLineBreakStateRef = useRef<PromptLineBreakState>(createPromptLineBreakState());
   const [hasMouseTracking, setHasMouseTracking] = useState(false);
   const mouseTrackingRef = useRef(false);

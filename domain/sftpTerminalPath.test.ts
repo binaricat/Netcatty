@@ -6,6 +6,9 @@ import {
   formatSftpCdCommand,
   formatSftpPathForTerminalInsert,
   hasUnsafeTerminalControlChars,
+  isShellDraftSafeForPathInsertion,
+  isTerminalContinuationPrompt,
+  isTerminalDraftContextSafeForPathInsertion,
   quoteSftpPathForShell,
   resolveCdSftpPathInTerminalAction,
   resolveInsertSftpPathInTerminalAction,
@@ -237,6 +240,7 @@ test("resolveInsertSftpPathInTerminalAction and resolveCdSftpPathInTerminalActio
     {
       sessionId: "sess-1",
       data: "'/srv/app/my file.yml' ",
+      shellKind: "posix",
     },
   );
   assert.deepEqual(
@@ -261,6 +265,7 @@ test("resolveInsertSftpPathInTerminalAction and resolveCdSftpPathInTerminalActio
     {
       sessionId: "win-1",
       data: "'C:\\Program Files\\app.exe' ",
+      shellKind: "powershell",
     },
   );
   assert.deepEqual(
@@ -290,5 +295,118 @@ test("resolveInsertSftpPathInTerminalAction and resolveCdSftpPathInTerminalActio
       path: "/srv/evil\nid",
     }),
     null,
+  );
+});
+
+test("isShellDraftSafeForPathInsertion blocks unclosed quotes, backticks, and trailing escapes in POSIX", () => {
+  // Normal safe drafts
+  assert.equal(isShellDraftSafeForPathInsertion("", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("cat ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("vim -R ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("cat \"hello\" ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("cat 'hello' ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("cat \"a \\\" b\" ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("cat \"a \\\\\"", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("cat \\\" ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("cat \\\\", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo 'a\\' ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $(cat ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo \"$(cat \"a\")\" ", "posix"), true);
+
+  // Unsafe quoting contexts (e.g. cat " + /tmp/$(id) would execute id inside double quotes)
+  assert.equal(isShellDraftSafeForPathInsertion("cat \"", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("cat \"/tmp/", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("cat \"a \\\"", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("cat '", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("cat '/tmp/", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("printf $'hello\\'", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo `cat ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo \"$(cat \"", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo \"$(cat \"a\")", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("cat \\", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("cat \\\\\\", "posix"), false);
+});
+
+test("isShellDraftSafeForPathInsertion handles fish, PowerShell, and CMD quoting rules", () => {
+  // Fish escapes \' inside single quotes
+  assert.equal(isShellDraftSafeForPathInsertion("cat ", "fish"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo 'a\\'b' ", "fish"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo 'a\\'", "fish"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo \"a", "fish"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("cat \\", "fish"), false);
+
+  // PowerShell single/double quotes, doubled quotes, curly quotes, backtick escapes
+  assert.equal(isShellDraftSafeForPathInsertion("Get-Content ", "powershell"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo 'O''Brien' ", "powershell"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo \"a`\"b\" ", "powershell"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo ``", "powershell"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("Get-Content \"", "powershell"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("Get-Content '", "powershell"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("Get-Content 'O''Brien", "powershell"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("Get-Content \u2019", "powershell"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("Get-Content \u201C", "powershell"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("Get-Content `", "powershell"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo \"$(cat \"", "powershell"), false);
+
+  // CMD double quotes and caret escapes
+  assert.equal(isShellDraftSafeForPathInsertion("type ", "cmd"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("type \"a\" ", "cmd"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("type ^^", "cmd"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("type \"", "cmd"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("type ^", "cmd"), false);
+});
+
+test("isTerminalDraftContextSafeForPathInsertion rejects continuation prompts and un-echoed open quotes", () => {
+  assert.equal(isTerminalContinuationPrompt("> "), true);
+  assert.equal(isTerminalContinuationPrompt(">> "), true);
+  assert.equal(isTerminalContinuationPrompt("dquote> "), true);
+  assert.equal(isTerminalContinuationPrompt("quote> "), true);
+  assert.equal(isTerminalContinuationPrompt("heredoc> "), true);
+  assert.equal(isTerminalContinuationPrompt("user@host:~$ "), false);
+  assert.equal(isTerminalContinuationPrompt("C:\\Users\\alice>"), false);
+  assert.equal(isTerminalContinuationPrompt("PS C:\\Users\\alice> "), false);
+
+  // Continuation prompt blocks even when current line draft is empty
+  assert.equal(
+    isTerminalDraftContextSafeForPathInsertion({
+      promptText: "dquote> ",
+      userInput: "",
+      pendingTypedInput: "",
+      shellKind: "posix",
+    }),
+    false,
+  );
+
+  // Typed-ahead open double quote over high-latency SSH (not yet echoed on screen)
+  assert.equal(
+    isTerminalDraftContextSafeForPathInsertion({
+      promptText: "user@host:~$ ",
+      userInput: "cat ",
+      pendingTypedInput: "cat \"",
+      shellKind: "posix",
+    }),
+    false,
+  );
+
+  // Recalled history with closing quote already echoed on screen stays safe
+  assert.equal(
+    isTerminalDraftContextSafeForPathInsertion({
+      promptText: "user@host:~$ ",
+      userInput: "echo \"hi\" ",
+      pendingTypedInput: "\" ",
+      shellKind: "posix",
+    }),
+    true,
+  );
+
+  // Normal echoed draft is safe
+  assert.equal(
+    isTerminalDraftContextSafeForPathInsertion({
+      promptText: "user@host:~$ ",
+      userInput: "cat ",
+      pendingTypedInput: "cat ",
+      shellKind: "posix",
+    }),
+    true,
   );
 });

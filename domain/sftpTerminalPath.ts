@@ -23,6 +23,10 @@ const WINDOWS_DRIVE_PATH_RE = /^[A-Za-z]:[\\/]/;
 const WINDOWS_UNC_PATH_RE = /^\\\\[^\\]+\\[^\\]+/;
 // PowerShell treats curly single quotes (U+2018..U+201B) as string delimiters.
 const POWERSHELL_SINGLE_QUOTE_RE = /['\u2018\u2019\u201A\u201B]/g;
+const POWERSHELL_SINGLE_QUOTE_CHARS = new Set(["'", "\u2018", "\u2019", "\u201A", "\u201B"]);
+const POWERSHELL_DOUBLE_QUOTE_CHARS = new Set(['"', "\u201C", "\u201D", "\u201E"]);
+const CONTINUATION_PROMPT_RE =
+  /^(?:(?:[a-z]*quote|heredoc|cmdsubst|pipe|for|if|while|until|case|select|then|else|elif|cursh|subsh|brace|math|array|param)?>|>>?)\s*$/i;
 
 /**
  * True when a string contains control bytes (C0, DEL, C1) or Unicode line
@@ -200,15 +204,268 @@ export function canSendSftpPathToTerminal(
     || protocol === "local";
 }
 
+function isPosixDraftSafeForPathInsertion(draft: string): boolean {
+  type Context = "single" | "ansiSingle" | "double" | "backtick" | "cmdsubst";
+  const stack: Context[] = [];
+
+  for (let i = 0; i < draft.length; i += 1) {
+    const ch = draft[i];
+    const top = stack[stack.length - 1];
+
+    if (top === "single") {
+      if (ch === "'") stack.pop();
+      continue;
+    }
+
+    if (top === "ansiSingle") {
+      if (ch === "\\") {
+        if (i + 1 >= draft.length) return false;
+        i += 1;
+        continue;
+      }
+      if (ch === "'") stack.pop();
+      continue;
+    }
+
+    if (top === "double") {
+      if (ch === "\\") {
+        if (i + 1 >= draft.length) return false;
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "(") {
+        stack.push("cmdsubst");
+        i += 1;
+        continue;
+      }
+      if (ch === "`") {
+        stack.push("backtick");
+        continue;
+      }
+      if (ch === '"') stack.pop();
+      continue;
+    }
+
+    if (top === "backtick") {
+      if (ch === "\\") {
+        if (i + 1 >= draft.length) return false;
+        i += 1;
+        continue;
+      }
+      if (ch === "`") stack.pop();
+      continue;
+    }
+
+    // Outside quotes (top === undefined or top === "cmdsubst")
+    if (ch === "\\") {
+      if (i + 1 >= draft.length) return false;
+      i += 1;
+      continue;
+    }
+    if (ch === "$" && draft[i + 1] === "'") {
+      stack.push("ansiSingle");
+      i += 1;
+      continue;
+    }
+    if (ch === "$" && draft[i + 1] === "(") {
+      stack.push("cmdsubst");
+      i += 1;
+      continue;
+    }
+    if (ch === "'") {
+      stack.push("single");
+      continue;
+    }
+    if (ch === '"') {
+      stack.push("double");
+      continue;
+    }
+    if (ch === "`") {
+      stack.push("backtick");
+      continue;
+    }
+    if (ch === ")" && top === "cmdsubst") {
+      stack.pop();
+    }
+  }
+
+  const top = stack[stack.length - 1];
+  return top === undefined || top === "cmdsubst";
+}
+
+function isFishDraftSafeForPathInsertion(draft: string): boolean {
+  let mode: "none" | "single" | "double" = "none";
+
+  for (let i = 0; i < draft.length; i += 1) {
+    const ch = draft[i];
+    if (ch === "\\") {
+      if (i + 1 >= draft.length) return false;
+      i += 1;
+      continue;
+    }
+    if (mode === "none") {
+      if (ch === "'") mode = "single";
+      else if (ch === '"') mode = "double";
+    } else if (mode === "single") {
+      if (ch === "'") mode = "none";
+    } else if (ch === '"') {
+      mode = "none";
+    }
+  }
+
+  return mode === "none";
+}
+
+function isPowerShellDraftSafeForPathInsertion(draft: string): boolean {
+  type Context = "single" | "double" | "cmdsubst";
+  const stack: Context[] = [];
+
+  for (let i = 0; i < draft.length; i += 1) {
+    const ch = draft[i];
+    const top = stack[stack.length - 1];
+
+    if (top === "single") {
+      if (POWERSHELL_SINGLE_QUOTE_CHARS.has(ch)) {
+        if (i + 1 < draft.length && POWERSHELL_SINGLE_QUOTE_CHARS.has(draft[i + 1])) {
+          i += 1;
+        } else {
+          stack.pop();
+        }
+      }
+      continue;
+    }
+
+    if (top === "double") {
+      if (ch === "`") {
+        if (i + 1 >= draft.length) return false;
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "(") {
+        stack.push("cmdsubst");
+        i += 1;
+        continue;
+      }
+      if (POWERSHELL_DOUBLE_QUOTE_CHARS.has(ch)) {
+        if (i + 1 < draft.length && POWERSHELL_DOUBLE_QUOTE_CHARS.has(draft[i + 1])) {
+          i += 1;
+        } else {
+          stack.pop();
+        }
+      }
+      continue;
+    }
+
+    // Outside quotes (top === undefined or top === "cmdsubst")
+    if (ch === "`") {
+      if (i + 1 >= draft.length) return false;
+      i += 1;
+      continue;
+    }
+    if (ch === "$" && draft[i + 1] === "(") {
+      stack.push("cmdsubst");
+      i += 1;
+      continue;
+    }
+    if (POWERSHELL_SINGLE_QUOTE_CHARS.has(ch)) {
+      stack.push("single");
+      continue;
+    }
+    if (POWERSHELL_DOUBLE_QUOTE_CHARS.has(ch)) {
+      stack.push("double");
+      continue;
+    }
+    if (ch === ")" && top === "cmdsubst") {
+      stack.pop();
+    }
+  }
+
+  const top = stack[stack.length - 1];
+  return top === undefined || top === "cmdsubst";
+}
+
+function isCmdDraftSafeForPathInsertion(draft: string): boolean {
+  let inDouble = false;
+
+  for (let i = 0; i < draft.length; i += 1) {
+    const ch = draft[i];
+    if (!inDouble) {
+      if (ch === "^") {
+        if (i + 1 >= draft.length) return false;
+        i += 1;
+        continue;
+      }
+      if (ch === '"') inDouble = true;
+    } else if (ch === '"') {
+      inDouble = false;
+    }
+  }
+
+  return !inDouble;
+}
+
+/**
+ * True when the command draft before the cursor is outside any open quote,
+ * backtick substitution, or trailing escape character, so inserting a
+ * standalone shell-quoted path cannot break out of or interpolate inside quotes.
+ */
+export function isShellDraftSafeForPathInsertion(
+  draft: string,
+  shellKind: SftpTerminalShellKind = "posix",
+): boolean {
+  if (!draft) return true;
+  if (shellKind === "fish") return isFishDraftSafeForPathInsertion(draft);
+  if (shellKind === "powershell") return isPowerShellDraftSafeForPathInsertion(draft);
+  if (shellKind === "cmd") return isCmdDraftSafeForPathInsertion(draft);
+  return isPosixDraftSafeForPathInsertion(draft);
+}
+
+/** True when a shell prompt is a secondary/continuation prompt (e.g. PS2 `>`, `dquote>`). */
+export function isTerminalContinuationPrompt(promptText: string): boolean {
+  return CONTINUATION_PROMPT_RE.test(promptText.trim());
+}
+
+/**
+ * Validate the live terminal prompt + draft text (combining screen prefix up to
+ * the cursor and any un-echoed typed buffer) before inserting a quoted path.
+ */
+export function isTerminalDraftContextSafeForPathInsertion(options: {
+  promptText?: string;
+  userInput: string;
+  pendingTypedInput?: string;
+  shellKind?: SftpTerminalShellKind;
+}): boolean {
+  if (options.promptText && isTerminalContinuationPrompt(options.promptText)) {
+    return false;
+  }
+  const shellKind = options.shellKind ?? "posix";
+  const userInput = options.userInput;
+  const pending = options.pendingTypedInput ?? "";
+
+  if (!pending) {
+    return isShellDraftSafeForPathInsertion(userInput, shellKind);
+  }
+  if (userInput.endsWith(pending)) {
+    return isShellDraftSafeForPathInsertion(userInput, shellKind);
+  }
+  if (pending.startsWith(userInput)) {
+    return isShellDraftSafeForPathInsertion(pending, shellKind);
+  }
+  return (
+    isShellDraftSafeForPathInsertion(userInput, shellKind)
+    && isShellDraftSafeForPathInsertion(pending, shellKind)
+  );
+}
+
 /** Build the PTY write payload for inserting a quoted path into the paired terminal. */
 export function resolveInsertSftpPathInTerminalAction(
   options: SftpTerminalPathContext & { path?: string | null },
-): { sessionId: string; data: string } | null {
+): { sessionId: string; data: string; shellKind: SftpTerminalShellKind } | null {
   if (!canSendSftpPathToTerminal(options) || !options.sessionId) return null;
   const shellKind = resolveSftpTerminalShellKind(options.shellType);
   const data = formatSftpPathForTerminalInsert(options.path, shellKind);
   if (!data) return null;
-  return { sessionId: options.sessionId, data };
+  return { sessionId: options.sessionId, data, shellKind };
 }
 
 /** Build the PTY write payload for changing directory in the paired terminal. */

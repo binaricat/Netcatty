@@ -487,6 +487,7 @@ export const esVaultMessages: Messages = {
   'sftp.context.copyPath': 'Copiar ruta del archivo',
   'sftp.context.insertPathToTerminal': 'Insertar ruta en la terminal',
   'sftp.context.cdInTerminal': 'Abrir en la terminal (cd)',
+  'sftp.terminal.insertBlockedUnsafeQuote': 'No se puede insertar la ruta mientras el cursor de la terminal esté dentro de una comilla o secuencia de escape sin cerrar',
   'sftp.context.openWithDefault': 'Abrir con la aplicación predeterminada del sistema',
   'sftp.context.openWith': 'Abrir con...',
   'sftp.context.edit': 'Editar',

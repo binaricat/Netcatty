@@ -10,6 +10,12 @@ import { TooltipProvider } from "../ui/tooltip";
 import { installDomEnvironment } from "../test-support/renderReactDom";
 import { SftpPaneFileList } from "./SftpPaneFileList";
 import { useSftpPaneTreeContextMenu } from "./useSftpPaneTreeContextMenu";
+import {
+  getTerminalPromptDraftContext,
+  isTerminalReadyForCommandInjection,
+  registerTerminalCommandInjectionReadyReader,
+} from "../terminal/runtime/terminalCommandInjectionReadyRegistry";
+import { isTerminalDraftContextSafeForPathInsertion } from "../../domain/sftpTerminalPath";
 import en from "../../application/i18n/locales/en";
 import es from "../../application/i18n/locales/es";
 import ru from "../../application/i18n/locales/ru";
@@ -237,10 +243,11 @@ test("tree context menu shows insert-path on files/folders, cd on folders only, 
 test("SftpSidePanel guards terminal path insertion and cd writes and SftpPaneView compares handlers in memo", () => {
   const sidePanelSource = readFileSync(new URL("../SftpSidePanel.tsx", import.meta.url), "utf8");
   const paneViewSource = readFileSync(new URL("./SftpPaneView.tsx", import.meta.url), "utf8");
+  const terminalSource = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
 
   assert.match(
     sidePanelSource,
-    /const handleInsertPathToTerminal = useCallback\([\s\S]*?isTerminalSensitiveInputActive\(action\.sessionId\)[\s\S]*?isTerminalReadyForCommandInjection\(action\.sessionId, \{ allowDraft: true \}\)[\s\S]*?terminalBackend\.writeToSession\(action\.sessionId, action\.data, \{ automated: true \}\)[\s\S]*?scheduleDeferredTerminalFocus\(onRequestTerminalFocus\)/,
+    /const handleInsertPathToTerminal = useCallback\([\s\S]*?isTerminalSensitiveInputActive\(action\.sessionId\)[\s\S]*?isTerminalReadyForCommandInjection\(action\.sessionId, \{ allowDraft: true \}\)[\s\S]*?getTerminalPromptDraftContext\(action\.sessionId\)[\s\S]*?isTerminalDraftContextSafeForPathInsertion\(\{[\s\S]*?shellKind: action\.shellKind[\s\S]*?toast\.warning\(t\("sftp\.terminal\.insertBlockedUnsafeQuote"\), "SFTP"\)[\s\S]*?terminalBackend\.writeToSession\(action\.sessionId, action\.data, \{ automated: true \}\)[\s\S]*?scheduleDeferredTerminalFocus\(onRequestTerminalFocus\)/,
   );
   assert.match(
     sidePanelSource,
@@ -254,12 +261,52 @@ test("SftpSidePanel guards terminal path insertion and cd writes and SftpPaneVie
     sidePanelSource,
     /onCdInTerminal=\{canSendPathToTerminal \? handleCdInTerminal : undefined\}/,
   );
+  assert.match(
+    terminalSource,
+    /registerTerminalCommandInjectionReadyReader\(\s*sessionId,[\s\S]*?promptText: prompt\.promptText,\s*userInput: prompt\.userInput,\s*pendingTypedInput: commandBufferRef\.current,/,
+  );
   assert.match(paneViewSource, /if \(prev\.onInsertPathToTerminal !== next\.onInsertPathToTerminal\) return false;/);
   assert.match(paneViewSource, /if \(prev\.onCdInTerminal !== next\.onCdInTerminal\) return false;/);
 });
 
-test("all 5 locales define translated labels for SFTP terminal path context menu items", () => {
-  const keys = ["sftp.context.insertPathToTerminal", "sftp.context.cdInTerminal"] as const;
+test("prompt draft reader blocks insertion when cursor is inside an open double quote and cleans up on unregister", () => {
+  const sessionId = "sftp-insert-draft-test";
+  let draft = { promptText: "user@host:~$ ", userInput: "cat \"", pendingTypedInput: "cat \"" };
+  const unregister = registerTerminalCommandInjectionReadyReader(
+    sessionId,
+    (options) => Boolean(options?.allowDraft),
+    () => draft,
+  );
+
+  try {
+    assert.equal(isTerminalReadyForCommandInjection(sessionId, { allowDraft: true }), true);
+    const unsafeContext = getTerminalPromptDraftContext(sessionId);
+    assert.ok(unsafeContext);
+    assert.equal(
+      isTerminalDraftContextSafeForPathInsertion({ ...unsafeContext!, shellKind: "posix" }),
+      false,
+    );
+
+    draft = { promptText: "user@host:~$ ", userInput: "cat ", pendingTypedInput: "cat " };
+    const safeContext = getTerminalPromptDraftContext(sessionId);
+    assert.ok(safeContext);
+    assert.equal(
+      isTerminalDraftContextSafeForPathInsertion({ ...safeContext!, shellKind: "posix" }),
+      true,
+    );
+  } finally {
+    unregister();
+  }
+
+  assert.equal(getTerminalPromptDraftContext(sessionId), null);
+});
+
+test("all 5 locales define translated labels for SFTP terminal path context menu items and unsafe-quote feedback", () => {
+  const keys = [
+    "sftp.context.insertPathToTerminal",
+    "sftp.context.cdInTerminal",
+    "sftp.terminal.insertBlockedUnsafeQuote",
+  ] as const;
   const locales = { en, es, ru, "zh-CN": zhCN, "zh-TW": zhTW };
 
   for (const [locale, messages] of Object.entries(locales)) {

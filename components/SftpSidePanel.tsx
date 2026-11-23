@@ -79,6 +79,7 @@ import {
 } from "../domain/sftpLocatePathInTerminal";
 import {
   canSendSftpPathToTerminal,
+  isTerminalDraftContextSafeForPathInsertion,
   resolveCdSftpPathInTerminalAction,
   resolveInsertSftpPathInTerminalAction,
 } from "../domain/sftpTerminalPath";
@@ -86,7 +87,10 @@ import { sftpRequiresDedicatedLogin } from "../domain/sftpDedicatedLogin";
 import { classifyDistroId } from "../domain/host";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import { isTerminalSensitiveInputActive } from "./terminal/runtime/terminalSensitiveInputRegistry";
-import { isTerminalReadyForCommandInjection } from "./terminal/runtime/terminalCommandInjectionReadyRegistry";
+import {
+  getTerminalPromptDraftContext,
+  isTerminalReadyForCommandInjection,
+} from "./terminal/runtime/terminalCommandInjectionReadyRegistry";
 import { getNextSftpToolbarDisplayPath } from "./sftp/SftpPaneToolbar";
 import { scheduleDeferredTerminalFocus } from "./systemManager/tmuxActionFocus";
 import {
@@ -1909,9 +1913,22 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     // Allow inserting at a prompt that already has a typed command draft (e.g. `vim `),
     // while still blocking alternate-screen TUIs and non-prompt states.
     if (!isTerminalReadyForCommandInjection(action.sessionId, { allowDraft: true })) return;
+    // Refuse insertion if the cursor is inside an unclosed quote, backtick,
+    // trailing escape, or continuation prompt where standalone quoting is unsafe.
+    const draftContext = getTerminalPromptDraftContext(action.sessionId);
+    if (
+      !draftContext
+      || !isTerminalDraftContextSafeForPathInsertion({
+        ...draftContext,
+        shellKind: action.shellKind,
+      })
+    ) {
+      toast.warning(t("sftp.terminal.insertBlockedUnsafeQuote"), "SFTP");
+      return;
+    }
     terminalBackend.writeToSession(action.sessionId, action.data, { automated: true });
     scheduleDeferredTerminalFocus(onRequestTerminalFocus);
-  }, [buildLiveTerminalPathContext, onRequestTerminalFocus, terminalBackend]);
+  }, [buildLiveTerminalPathContext, onRequestTerminalFocus, t, terminalBackend]);
 
   const handleCdInTerminal = useCallback((targetPath: string) => {
     const action = resolveCdSftpPathInTerminalAction({
