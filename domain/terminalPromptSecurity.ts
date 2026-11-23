@@ -1,5 +1,6 @@
 import {
   MAX_PROMPT_SECURITY_TAIL_CHARS,
+  extractTerminalPromptHostname,
   isBashPs2ContinuationLine,
   isConfirmedTerminalShellPrompt,
   isSensitiveTerminalChallenge,
@@ -76,6 +77,7 @@ export function shouldUsePluginTerminalCompletionProvider(input: {
 
 export {
   MAX_PROMPT_SECURITY_TAIL_CHARS,
+  extractTerminalPromptHostname,
   isConfirmedTerminalShellPrompt,
   isSensitiveTerminalChallenge,
   isUntrustedTerminalInputPrompt,
