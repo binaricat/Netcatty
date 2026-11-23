@@ -547,7 +547,7 @@ test('scheduleAutoReconnect reads latest terminalSettingsRef after settings chan
 
   const callbackSource = terminalSource
     .slice(start + 'const scheduleAutoReconnect = useCallback('.length, end)
-    .replace(/,\s*\[attachExistingSession,\s*host,\s*setProgressLogs,\s*t,\s*terminalSettings,\s*updateStatus\]\);\s*$/, '');
+    .replace(/,\s*\[attachExistingSession,\s*host,\s*setProgressLogs,\s*t,\s*updateStatus\]\);\s*$/, '');
   const transpiled = ts.transpileModule(`(${callbackSource})`, {
     compilerOptions: {
       module: ts.ModuleKind.ESNext,
@@ -559,6 +559,8 @@ test('scheduleAutoReconnect reads latest terminalSettingsRef after settings chan
   const notices: string[] = [];
   const progressLogs: string[] = [];
   const statuses: string[] = [];
+  const waitingStates: boolean[] = [];
+  const reconnectModes: string[] = [];
   const initialSettings = { sshAutoReconnectEnabled: true, sshAutoReconnectInterval: 5 };
   const terminalSettingsRef = { current: initialSettings };
   const autoReconnectTimerRef: { current: number | null } = { current: null };
@@ -576,7 +578,11 @@ test('scheduleAutoReconnect reads latest terminalSettingsRef after settings chan
     autoReconnectLoopActiveRef,
     autoReconnectTimerRef,
     autoReconnectAttemptRef,
-    startReconnectRef: { current: () => {} },
+    startReconnectRef: {
+      current: (mode: string) => {
+        reconnectModes.push(mode);
+      },
+    },
     shouldAutoReconnectAfterExit,
     shouldContinueAutoReconnectAfterFailure,
     canAttemptTerminalAutoReconnect,
@@ -588,6 +594,9 @@ test('scheduleAutoReconnect reads latest terminalSettingsRef after settings chan
     setError: () => {},
     setShowLogs: () => {},
     setIsDisconnectedDialogDismissed: () => {},
+    setIsWaitingForAutoReconnect: (waiting: boolean) => {
+      waitingStates.push(waiting);
+    },
     setProgressLogs: (updater: (prev: string[]) => string[]) => {
       progressLogs.splice(0, progressLogs.length, ...updater(progressLogs));
     },
@@ -608,6 +617,12 @@ test('scheduleAutoReconnect reads latest terminalSettingsRef after settings chan
   assert.equal(scheduledTimers[0].delay, 300_000);
   assert.deepEqual(notices, ['terminal.progress.autoReconnectScheduled:{"seconds":300,"attempt":1}']);
   assert.deepEqual(statuses, ['connecting']);
+  assert.deepEqual(waitingStates, [true]);
+
+  // Firing the scheduled reconnect timer clears the waiting flag before starting reconnect
+  scheduledTimers[0].fn();
+  assert.deepEqual(waitingStates, [true, false]);
+  assert.deepEqual(reconnectModes, ['auto']);
 
   // Simulate disabling auto-reconnect while connected on a fresh exit
   autoReconnectTimerRef.current = null;
@@ -620,4 +635,8 @@ test('scheduleAutoReconnect reads latest terminalSettingsRef after settings chan
   assert.equal(terminalSource.includes('scheduleAutoReconnect({ evt })'), false);
   const refCallMatches = terminalSource.match(/scheduleAutoReconnectRef\.current\(\{ evt \}\)/g) ?? [];
   assert.equal(refCallMatches.length, 2);
+
+  // Verify connection timeout effect suppresses premature timeout while waiting for auto-reconnect
+  assert.match(effectsSource, /isWaitingForAutoReconnect:\s*Boolean\(isWaitingForAutoReconnect\)/);
+  assert.match(effectsSource, /isConnectionPastTcpDial,\s*isWaitingForAutoReconnect\]/);
 });
