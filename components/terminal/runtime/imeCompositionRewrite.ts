@@ -16,7 +16,20 @@ import { sanitizeTerminalInput } from "./terminalInputSanitize";
 const BACKSPACE = "\x7f";
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const NON_COMMIT_IME_KEYS = new Set(["Unidentified", "Process", "Dead", "Compose"]);
-const MODIFIER_KEY_CODES = new Set([16, 17, 18, 20, 91, 92, 93, 224]);
+const NON_TERMINAL_KEY_CODES = new Set([
+  16, 17, 18, 20, // Shift, Control, Alt, CapsLock
+  21, 23, 24, 25, 28, 29, 30, 31, // IME mode keys (Kana/Hangul/Kanji/Convert/ModeChange)
+  91, 92, 93, 224, // Meta / ContextMenu
+  144, 145, // NumLock, ScrollLock
+]);
+const NON_TERMINAL_KEYS = new Set([
+  "Shift", "Control", "Alt", "AltGraph", "CapsLock", "Meta", "OS",
+  "ContextMenu", "NumLock", "ScrollLock",
+  "KanaMode", "HangulMode", "JunjaMode", "FinalMode", "HanjaMode", "KanjiMode",
+  "Convert", "NonConvert", "Accept", "ModeChange",
+  "Alphanumeric", "Hiragana", "Katakana", "HiraganaKatakana",
+  "Zenkaku", "Hankaku", "ZenkakuHankaku", "Romaji", "Eisu",
+]);
 
 function graphemes(value: string): string[] {
   return Array.from(graphemeSegmenter.segment(value), (part) => part.segment);
@@ -36,13 +49,31 @@ export function isMidCompositionNonCommitKeyDown(event: {
   key?: string;
   keyCode?: number;
 }): boolean {
-  if (event.keyCode === 0) return true;
-  return typeof event.key === "string" && NON_COMMIT_IME_KEYS.has(event.key);
+  if (typeof event.key === "string" && NON_COMMIT_IME_KEYS.has(event.key)) {
+    return true;
+  }
+  return event.keyCode === 0 && !event.key;
+}
+
+/**
+ * Keys that xterm.js never turns into terminal input or cursor movement
+ * (modifiers, lock keys, and IME mode-switch keys).
+ */
+function isNonTerminalKeyDown(event: {
+  key?: string;
+  keyCode?: number;
+}): boolean {
+  if (typeof event.key === "string") {
+    if (event.key.length === 1) return false;
+    if (NON_TERMINAL_KEYS.has(event.key)) return true;
+  }
+  return typeof event.keyCode === "number" && NON_TERMINAL_KEY_CODES.has(event.keyCode);
 }
 
 export type ImeEarlySyncCommit = {
   rangeStart: number;
   sentText: string;
+  allowDiff: boolean;
 };
 
 export type ImeCompositionCommitTarget = {
@@ -309,16 +340,28 @@ export function keepLiveImeTranscriptionSingle(term: object): void {
       if (wasComposing && isMidCompositionNonCommitKeyDown(event)) {
         return false;
       }
-      if (
-        !wasComposing
-        && event.keyCode !== 229
+      const mayMutateTerminal = event.keyCode !== 229
         && !isMidCompositionNonCommitKeyDown(event)
-        && !MODIFIER_KEY_CODES.has(event.keyCode)
-      ) {
+        && !isNonTerminalKeyDown(event);
+      if (!wasComposing && mayMutateTerminal) {
         helper.__ncLastCommittedText = undefined;
         helper.__ncEarlySyncCommit = undefined;
       }
-      return originalKeyDown(event);
+      const shouldProcessKey = originalKeyDown(event);
+      if (wasComposing && shouldProcessKey && mayMutateTerminal) {
+        // xterm is about to dispatch a terminal-mutating key (e.g. ArrowLeft,
+        // Home, Enter, Backspace) after synchronously flushing the composition.
+        // The PTY cursor may move before the trailing compositionend arrives,
+        // so suppress backspacing diffs and follow-up in-place rewrites.
+        helper.__ncLastCommittedText = undefined;
+        if (helper.__ncEarlySyncCommit) {
+          helper.__ncEarlySyncCommit = {
+            ...helper.__ncEarlySyncCommit,
+            allowDiff: false,
+          };
+        }
+      }
+      return shouldProcessKey;
     };
   }
 
@@ -343,6 +386,9 @@ export function keepLiveImeTranscriptionSingle(term: object): void {
   };
 
   helper._handleAnyTextareaChanges = () => {
+    if (helper.__ncEarlySyncCommit && !helper.__ncEarlySyncCommit.allowDiff) {
+      helper.__ncEarlySyncCommit = undefined;
+    }
     if (helper._textareaChangeTimer !== undefined) return;
     const previous = helper._textarea.value;
     helper.__ncPendingPrevious = previous;
@@ -377,7 +423,7 @@ export function keepLiveImeTranscriptionSingle(term: object): void {
       deliverComposition(helper, compositionText, marker, rangeStart);
       const sent = sanitizeTerminalInput(compositionText);
       helper.__ncEarlySyncCommit = sent.length > 0
-        ? { rangeStart, sentText: sent }
+        ? { rangeStart, sentText: sent, allowDiff: true }
         : undefined;
       return;
     }
@@ -399,14 +445,19 @@ export function keepLiveImeTranscriptionSingle(term: object): void {
         helper._compositionPosition.start,
       );
       if (earlySync && earlySync.rangeStart === rangeStart) {
-        const cleanText = sanitizeTerminalInput(compositionText);
-        if (cleanText.length > 0) {
-          const diff = commitTextareaChange(earlySync.sentText, cleanText);
-          if (diff.length > 0) emitPtyData(helper, diff);
-        }
-        if (!helper._isComposing) {
+        if (earlySync.allowDiff) {
+          const cleanText = sanitizeTerminalInput(compositionText);
+          if (cleanText.length > 0) {
+            const diff = commitTextareaChange(earlySync.sentText, cleanText);
+            if (diff.length > 0) emitPtyData(helper, diff);
+          }
+          if (!helper._isComposing) {
+            helper._dataAlreadySent = "";
+            helper.__ncLastCommittedText = cleanText || undefined;
+          }
+        } else if (!helper._isComposing) {
           helper._dataAlreadySent = "";
-          helper.__ncLastCommittedText = cleanText || undefined;
+          helper.__ncLastCommittedText = undefined;
         }
         return;
       }
