@@ -1072,11 +1072,4 @@ export const getCloudSyncManager = (): CloudSyncManager => {
   return syncManagerInstance;
 };
 
-export const resetCloudSyncManager = (): void => {
-  if (syncManagerInstance) {
-    syncManagerInstance.destroy();
-    syncManagerInstance = null;
-  }
-};
-
 export default CloudSyncManager;

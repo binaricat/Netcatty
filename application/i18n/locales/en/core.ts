@@ -84,7 +84,6 @@ export const enCoreMessages: Messages = {
   'common.edit': 'Edit',
   'common.clear': 'Clear',
   'common.optional': 'Optional',
-  'common.selectPlaceholder': 'Select...',
   'common.add': 'Add',
   'common.rename': 'Rename',
   'common.refresh': 'Refresh',
@@ -124,11 +123,9 @@ export const enCoreMessages: Messages = {
   'field.label': 'Label',
   'field.type': 'Type',
   'auth.keyType': 'Type {type}',
-  'auth.showAllKeys': 'Show all keys',
 
   // Dialogs / prompts
   'confirm.deleteHost': 'Delete Host "{name}"?',
-  'confirm.deleteIdentity': 'Delete Identity "{name}"?',
   'confirm.removeProvider': 'Remove provider "{name}"?',
   'confirm.closeBusyTerminal.title': 'Confirm close',
   'confirm.closeBusyTerminal.message': 'Process "{command}" is still running and will be terminated.',
@@ -401,7 +398,6 @@ export const enCoreMessages: Messages = {
   'tray.status.inactive': 'Inactive',
   'tray.status.error': 'Error',
   'tray.status.unknown': 'Unknown',
-  'tray.recentHosts': 'Recent Hosts',
   'tray.empty.title': 'Nothing here yet',
   'tray.empty.subtitle': 'Go connect to a server, they miss you 🚀',
   'tray.quit': 'Quit Netcatty',
@@ -460,9 +456,6 @@ export const enCoreMessages: Messages = {
   'update.downloadFailed.message': 'Failed to download update. You can download it manually.',
   'update.needsSave.title': 'Unsaved Changes',
   'update.needsSave.message': 'Save your open editors first, then click Restart Now again to install the update.',
-  'update.openReleases': 'Open Releases',
-  'update.remindLater': 'Remind Later',
-  'update.skipVersion': 'Skip This Version',
 
   // Settings > Appearance
   'settings.appearance.uiTheme': 'UI Theme',
@@ -1083,8 +1076,6 @@ Highlight the focused split pane:
   'settings.shortcuts.binding.sftp-navigate-to': 'Navigate to Selected Directory',
 
   // Context menus / common actions
-  'action.newHost': 'New Host',
-  'action.newSubfolder': 'New Subfolder',
   'action.copyPublicKey': 'Copy Public Key',
   'action.keyExport': 'Key Export',
   'action.edit': 'Edit',
@@ -1319,12 +1310,9 @@ Highlight the focused split pane:
   "settings.plugins.manager.remove": "Uninstall",
   "settings.plugins.manager.removeNote": "Uninstall removes package code and local KV data. User-owned settings, secrets and sync sidecars are retained.",
   "settings.plugins.permissions.statusUnknown": "Status unknown",
-  "plugins.sidebar.extensions": "Extension pages",
   "plugins.sidebar.selectTerminal": "Select an open terminal first.",
   "plugins.sidebar.loading": "Loading extension page…",
   "plugins.vault.loading": "Loading plugin page…",
-  "plugins.vault.extensions": "Extensions",
-  "plugins.vault.back": "Back to hosts",
   "plugins.interaction.title": "Plugin request",
   "plugins.interaction.sharing": "Text you share becomes available to this plugin and its granted capabilities, including network access. Reading does not approve a new network destination.",
   "plugins.interaction.input": "Input text",

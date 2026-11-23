@@ -122,8 +122,11 @@ test("runtime soft-resumes live walk after owner teardown simulation (no dedicat
   resetGlobals();
   const resumeCalls: string[] = [];
   let dedicatedHandlerCalls = 0;
+  let acknowledgePause!: () => void;
   installBridge(t, {
-    pauseTransfer: async () => ({ success: true, checkpointBytes: 5 }),
+    pauseTransfer: () => new Promise((resolve) => {
+      acknowledgePause = () => resolve({ success: true, checkpointBytes: 5 });
+    }),
     resumeTransfer: async (id) => {
       resumeCalls.push(id);
       return { success: true };
@@ -151,6 +154,9 @@ test("runtime soft-resumes live walk after owner teardown simulation (no dedicat
   ]);
 
   await runtime.pause("folder");
+  assert.equal(runtime.getTask("folder")?.status, "pausing");
+  acknowledgePause();
+  await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(runtime.getTask("folder")?.status, "paused");
   assert.equal(isTransferPauseLatched("folder"), true);
   assert.equal(isTransferWalkInFlight("folder"), true);

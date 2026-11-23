@@ -1040,7 +1040,7 @@ test("Linux basic_text and unknown backends are not treated as secure storage", 
 });
 
 test("reapplying the same custom temp root does not rebind it", () => {
-  const fixture = fs.mkdtempSync(tempDirBridge.getTempFilePath("pref-noop-"));
+  const fixture = fs.realpathSync(fs.mkdtempSync(tempDirBridge.getTempFilePath("pref-noop-")));
   const userData = path.join(fixture, "prefs");
   fs.mkdirSync(userData);
   try {
@@ -1059,7 +1059,7 @@ test("reapplying the same custom temp root does not rebind it", () => {
 
 test("custom temp preference validates, creates, persists, and resets roots", async () => {
   const bridge = require("./tempDirBridge.cjs");
-  const fixture = fs.mkdtempSync(tempDirBridge.getTempFilePath("pref-test-"));
+  const fixture = fs.realpathSync(fs.mkdtempSync(tempDirBridge.getTempFilePath("pref-test-")));
   const userData = path.join(fixture, "prefs");
   fs.mkdirSync(userData);
   try {

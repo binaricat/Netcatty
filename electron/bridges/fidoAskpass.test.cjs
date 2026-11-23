@@ -32,6 +32,20 @@ test("getTempBase uses Netcatty managed temp dir (no os.tmpdir fallback)", () =>
   assert.match(managed, /Netcatty/i);
 });
 
+test("askpass socket path stays within the Unix sun_path limit", () => {
+  const artifacts = ensureFidoAskpass();
+  try {
+    if (process.platform !== "win32") {
+      assert.ok(
+        Buffer.byteLength(artifacts.socketPath) <= 103,
+        `socket path must fit sun_path: ${artifacts.socketPath}`,
+      );
+    }
+  } finally {
+    shutdownFidoAskpass();
+  }
+});
+
 test("classifyAskpassPrompt re-export works", () => {
   assert.equal(classifyAskpassPrompt("Enter PIN for authenticator"), "pin");
   assert.equal(classifyAskpassPrompt("Confirm user presence"), "touch");

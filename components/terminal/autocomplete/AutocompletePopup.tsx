@@ -142,6 +142,31 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   const selectedRef = useRef<HTMLDivElement>(null);
   const [hoveredIndex, setHoveredIndex] = useState(-1);
   const [measuredSize, setMeasuredSize] = useState<{ width: number; height: number } | null>(null);
+  const hoverClearTimerRef = useRef<number | null>(null);
+
+  const cancelHoverClear = () => {
+    if (hoverClearTimerRef.current === null) return;
+    window.clearTimeout(hoverClearTimerRef.current);
+    hoverClearTimerRef.current = null;
+  };
+
+  // Rows and the detail panel are separate boxes with a small gap. Keep the
+  // hovered row alive briefly so moving the pointer into the detail panel does
+  // not unmount the panel before it can be read, selected, or scrolled.
+  const scheduleHoverClear = () => {
+    cancelHoverClear();
+    hoverClearTimerRef.current = window.setTimeout(() => {
+      hoverClearTimerRef.current = null;
+      setHoveredIndex(-1);
+    }, 400);
+  };
+
+  useEffect(() => () => {
+    if (hoverClearTimerRef.current !== null) {
+      window.clearTimeout(hoverClearTimerRef.current);
+      hoverClearTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (selectedRef.current && listRef.current) {
@@ -154,6 +179,10 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
 
   // Reset hover when suggestions change
   useEffect(() => {
+    if (hoverClearTimerRef.current !== null) {
+      window.clearTimeout(hoverClearTimerRef.current);
+      hoverClearTimerRef.current = null;
+    }
     setHoveredIndex(-1);
   }, [suggestions]);
 
@@ -368,7 +397,39 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
     fontFamily: "inherit",
     fontSize: "13px",
     color: textColor,
+    overscrollBehavior: "contain" as const,
   };
+
+  // Keep terminal focus when clicking a panel's padding, but leave the native
+  // scrollbar alone so its thumb can still be dragged. `preventDefault()` on
+  // the scrollbar mousedown made the right-side detail panel impossible to
+  // scroll by dragging.
+  const handlePanelMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    const element = event.currentTarget;
+    const rect = element.getBoundingClientRect();
+    const scrollbarWidth = Math.max(16, element.offsetWidth - element.clientWidth);
+    const overVerticalScrollbar = event.clientX >= rect.right - scrollbarWidth;
+    if (!overVerticalScrollbar) event.preventDefault();
+  };
+
+  const handlePanelWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    // Keep wheel scrolling inside the popup instead of letting it reach the
+    // terminal's history/font-size handlers.
+    event.stopPropagation();
+  };
+
+  // Keep every inline description starting at the same x. The option column is
+  // sized from the longest suggestion in this popup, capped so descriptions
+  // still get useful width in a narrow terminal pane.
+  const longestCommandLength = suggestions.reduce(
+    (max, suggestion) => Math.max(max, suggestion.displayText.length),
+    0,
+  );
+  const commandColumnWidth = Math.max(
+    52,
+    Math.min(150, longestCommandLength * 7 + 12, availableWidth * 0.42),
+  );
 
   return (
     <div
@@ -407,16 +468,16 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
           pointerEvents: "auto",
         }}
         // Keep the terminal focused when clicking the list's padding or
-        // scrollbar (row clicks handle this themselves).
-        onMouseDown={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
+        // scrollbar; scrollbar dragging is left to the browser.
+        onMouseDown={handlePanelMouseDown}
+        onWheel={handlePanelWheel}
       >
         {suggestions.map((suggestion, index) => {
           const isSelected = index === selectedIndex;
           const isHovered = index === hoveredIndex;
           const sourceInfo = SOURCE_LABELS[suggestion.source];
+          const hasInlineDescription = suggestion.source !== "snippet"
+            && Boolean(suggestion.description);
 
           return (
             <div
@@ -434,8 +495,11 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
                 gap: "8px",
                 lineHeight: "1.4",
               }}
-              onMouseEnter={() => setHoveredIndex(index)}
-              onMouseLeave={() => setHoveredIndex(-1)}
+              onMouseEnter={() => {
+                cancelHoverClear();
+                setHoveredIndex(index);
+              }}
+              onMouseLeave={scheduleHoverClear}
               onMouseDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -468,10 +532,15 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
                 </span>
               )}
 
-              {/* Command text */}
+              {/* Command text. A shared fixed column keeps every description
+                  aligned on the same left edge instead of following each
+                  variable-width option label. */}
               <span
+                title={hasInlineDescription ? suggestion.displayText : undefined}
                 style={{
-                  flex: 1,
+                  flex: hasInlineDescription ? "0 0 auto" : "1 1 auto",
+                  width: hasInlineDescription ? `${commandColumnWidth}px` : undefined,
+                  minWidth: 0,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
@@ -484,16 +553,16 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
 
               {/* Inline description (truncated). Snippets show only their label
                   in the row — the full command lives in the detail preview. */}
-              {suggestion.source !== "snippet" && suggestion.description && (
+              {hasInlineDescription && (
                 <span
                   style={{
+                    flex: "1 1 auto",
+                    minWidth: 0,
                     fontSize: "11px",
                     color: dimTextColor,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
-                    maxWidth: "160px",
-                    flexShrink: 0,
                   }}
                 >
                   {suggestion.description}
@@ -549,11 +618,9 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
             pointerEvents: "auto",
           }}
           // Keep the terminal focused when clicking the panel's padding or
-          // scrollbar (row clicks handle this themselves).
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
+          // scrollbar; scrollbar dragging is left to the browser.
+          onMouseDown={handlePanelMouseDown}
+          onWheel={handlePanelWheel}
         >
           {panel.entries.map((entry, idx) => {
             const isFocused = level === subDirFocusLevel;
@@ -615,15 +682,23 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
             overflowY: "auto",
             alignSelf: renderUpward ? "flex-end" : "flex-start",
             visibility: detailVisible ? "visible" : "hidden",
+            // The detail text can be selected and copied; use text cursor and
+            // native selection instead of forcing terminal focus.
+            userSelect: "text",
+            cursor: "text",
             // visibility:hidden already skips hit testing, but keep the
             // hidden reserve explicitly non-interactive so the mounted
             // panel can never swallow clicks meant for the terminal.
             pointerEvents: detailVisible ? "auto" : "none",
           }}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
+          onMouseDown={(event) => {
+            // Do not preventDefault: that would block selecting the long
+            // description or dragging the panel's scrollbar.
+            event.stopPropagation();
           }}
+          onMouseEnter={cancelHoverClear}
+          onMouseLeave={scheduleHoverClear}
+          onWheel={handlePanelWheel}
         >
           {detailVisible && detailItem && (
             <>

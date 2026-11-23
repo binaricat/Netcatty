@@ -1,4 +1,5 @@
 import type { PluginConnectionConfig, SerialConfig, TerminalSession, Workspace, WorkspaceNode } from "./models";
+import { createEmptyWorkspaceRoot } from "./workspace";
 import { isPluginHostProtocol, sanitizePluginConnection } from "./pluginConnection";
 
 export const SESSION_RESTORE_VERSION = 1 as const;
@@ -389,10 +390,18 @@ const restoreWorkspace = (workspace: Workspace, root: WorkspaceNode, sessionIds:
     title: workspace.title,
     root,
     ...(workspace.viewMode === "focus" || workspace.viewMode === "split" ? { viewMode: workspace.viewMode } : {}),
-    focusedSessionId: workspace.focusedSessionId && sessionIdSet.has(workspace.focusedSessionId)
-      ? workspace.focusedSessionId
-      : sessionIds[0],
+    ...(workspace.focusedSessionId && sessionIdSet.has(workspace.focusedSessionId)
+      ? { focusedSessionId: workspace.focusedSessionId }
+      : sessionIds.length > 0
+        ? { focusedSessionId: sessionIds[0] }
+        : {}),
     focusSessionOrder: uniqueStrings(workspace.focusSessionOrder ?? []).filter((id) => sessionIdSet.has(id)),
+    // Issue #4098 phase 2: the anchor chat id survives restart so the restored
+    // workspace re-links its AI chats by id. It cannot be validated here (AI
+    // sessions live in a separate store); consumers re-check liveness.
+    ...(typeof workspace.anchorChatId === "string" && workspace.anchorChatId.length > 0
+      ? { anchorChatId: workspace.anchorChatId }
+      : {}),
     ...(workspace.snippetId ? { snippetId: workspace.snippetId } : {}),
     // Preserve explicit-title state across restore; the boolean guard keeps a
     // deliberate `autoTitle: false` (a user-named workspace) from being dropped.
@@ -421,6 +430,18 @@ const isWorkspaceRecord = (value: unknown): value is Workspace & Record<string, 
   isRecord(value) && typeof value.id === "string" && Boolean(value.id) && "root" in value
 );
 
+/**
+ * A genuinely empty workspace root: issue #4098 phase 2 persists workspaces
+ * whose members all closed with this placeholder so the workspace id (and its
+ * anchored AI chats) survive restart.
+ */
+const isEmptyWorkspaceRoot = (value: unknown): boolean => (
+  isRecord(value)
+  && value.type === "split"
+  && Array.isArray(value.children)
+  && value.children.length === 0
+);
+
 export function sanitizeSessionRestorePayload(payload: unknown): SessionRestorePayload {
   const record = isRecord(payload) ? payload : {};
   const rawSessions = Array.isArray(record.sessions) ? record.sessions : [];
@@ -442,7 +463,17 @@ export function sanitizeSessionRestorePayload(payload: unknown): SessionRestoreP
         .map((session) => session.id),
     );
     const root = pruneNode(workspace.root, workspaceSessionIds);
-    if (!root) continue;
+    if (!root) {
+      // Issue #4098 phase 2: a workspace closed down to zero members persists
+      // an empty root and must restore with the same id so its dangling AI
+      // chats re-link. A root that pruned to null because its member sessions
+      // are gone/unrestorable is still dropped — that workspace was not
+      // empty at save time, its members just cannot come back.
+      if (!isEmptyWorkspaceRoot(workspace.root)) continue;
+      workspaces.push(restoreWorkspace(workspace, createEmptyWorkspaceRoot(), []));
+      workspaceRootSessionIds.set(workspace.id, new Set());
+      continue;
+    }
     const sessionIds = collectNodeSessionIds(root);
     workspaceRootSessionIds.set(workspace.id, new Set(sessionIds));
     workspaces.push(restoreWorkspace(workspace, root, sessionIds));

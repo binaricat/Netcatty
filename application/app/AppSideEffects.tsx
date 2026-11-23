@@ -58,7 +58,9 @@ import {
 } from '../../domain/terminalAppearance';
 import { selectConnectionLogForTerminalDataCapture } from '../../domain/connectionLog';
 import { collectSessionIds } from '../../domain/workspace';
-import { resolveAgentHostWorkspace } from '../../domain/agentHostWorkspace';
+import { resolveAgentHostOpenWorkspace } from '../../domain/agentHostWorkspace';
+import { getAISessionsSnapshot } from '../state/aiSessionsStore';
+import { peekAgentRuntimeCleanup } from '../../infrastructure/ai/harness/agentRuntimeHandle';
 import { useHostOpenSessionReuse } from '../state/useHostOpenSessionReuse';
 import type { PaneMagnificationController } from '../../domain/paneMagnification';
 import { isPluginViewEditingTarget } from '../state/pluginKeybindings';
@@ -102,7 +104,7 @@ import { collectSnippetDeleteIds } from '../../domain/snippetSelection.ts';
 import { shouldOpenLocalTerminalOnStartup, resolveStartupLandingSetting } from '../../domain/startupLanding';
 import { createOpenTerminalQueue } from './openTerminalQueue';
 import { useAppStartupEffects } from './useAppStartupEffects';
-import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, handleFidoPromptSubmitImpl, handleFidoPromptCancelImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
+import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, handleFidoPromptSubmitImpl, handleFidoPromptCancelImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, startRestoredSessionConnectionLogImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
 
 type OpenSessionInNewWindowPayload = {
   title?: string;
@@ -1497,8 +1499,21 @@ export function AppSideEffects() {
     return sessionId;
   }, [handleConnectToHost, renameSessionInline]);
 
-  const openHostForVaultAgent = useCallback((host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string }) => {
-    const target = resolveAgentHostWorkspace(options?.workspaceId, activeTabStore.getActiveTabId(), workspaces.map(workspace => workspace.id));
+  const openHostForVaultAgent = useCallback((host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string; chatSessionId?: string }) => {
+    // A resumed history chat can run in a panel other than its saved binding.
+    // Prefer that turn's captured scope, never the window's current focus.
+    // Outside a running turn, retain the saved chat binding as the fallback.
+    const chat = options?.chatSessionId
+      ? getAISessionsSnapshot().sessions.find((session) => session.id === options.chatSessionId)
+      : undefined;
+    const turnScope = options?.chatSessionId
+      ? peekAgentRuntimeCleanup()?.getActiveScope?.(options.chatSessionId)
+      : undefined;
+    const target = resolveAgentHostOpenWorkspace(options?.workspaceId, turnScope ? { scope: turnScope } : chat, {
+      activeTabId: activeTabStore.getActiveTabId(),
+      workspaceIds: workspaces.map(workspace => workspace.id),
+      terminalSessions: sessionsRef.current,
+    });
     if (target.error) return { ok: false as const, error: target.error };
     // Silent sessions only apply to actual external MCP clients (chatSessionId
     // equals the reserved external-MCP scope). The in-app Catty AI chat's
@@ -1880,8 +1895,18 @@ export function AppSideEffects() {
     setActiveTabId('vault');
   }, [setActiveTabId]);
 
+  const restoredSessionLogsStartedRef = useRef(new Set<string>());
+  // A restored tab retains its session ID, but its previous ConnectionLog is closed.
+  // Start the new incarnation's log before updateSessionStatus clears restoreState.
   // Wrap updateSessionStatus to track lastConnectedAt on successful connection
   const handleSessionStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
+    const session = sessionByIdRef.current.get(sessionId);
+    if (session?.restoreState === 'restored-disconnected'
+      && (status === 'connecting' || status === 'connected')
+      && !restoredSessionLogsStartedRef.current.has(sessionId)) {
+      restoredSessionLogsStartedRef.current.add(sessionId);
+      startRestoredSessionConnectionLogImpl(() => ({ addConnectionLog, systemInfoRef }), session);
+    }
     updateSessionStatus(sessionId, status);
     if (status === 'connected') {
       const session = sessionByIdRef.current.get(sessionId);
@@ -1889,7 +1914,7 @@ export function AppSideEffects() {
         updateHostLastConnected(session.hostId);
       }
     }
-  }, [updateSessionStatus, updateHostLastConnected]);
+  }, [addConnectionLog, updateSessionStatus, updateHostLastConnected]);
 
   const handleUpdateHostFromTerminal = useCallback((host: TerminalHostUpdate) => {
     // Functional update + identity-preserving updateHosts: only the patched

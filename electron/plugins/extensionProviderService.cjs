@@ -11,6 +11,7 @@ const {
 } = require("./contractValidator.cjs");
 const { assertPluginJsonValue } = require("./jsonBoundary.cjs");
 const { PluginRpcError, RPC_ERRORS, raceWithAbort } = require("./rpcRouter.cjs");
+const { invalidArgument, freezeJson } = require("./validationUtils.cjs");
 const { compileRestrictedJsonSchema } = require("./restrictedJsonSchema.cjs");
 const pluginContractSchema = require("./generated/plugin-contract.schema.json");
 
@@ -86,20 +87,6 @@ const definitionValidators = Object.freeze({
   SyncWriteObjectResult: createDefinitionValidator("SyncWriteObjectResult"),
   SyncDeleteObjectResult: createDefinitionValidator("SyncDeleteObjectResult"),
 });
-
-function invalidArgument(message) {
-  return new PluginRpcError(RPC_ERRORS.invalidArgument, message);
-}
-
-function freezeJson(value) {
-  const clone = structuredClone(value);
-  const freeze = (item) => {
-    if (!item || typeof item !== "object" || Object.isFrozen(item)) return item;
-    for (const child of Array.isArray(item) ? item : Object.values(item)) freeze(child);
-    return Object.freeze(item);
-  };
-  return freeze(clone);
-}
 
 function assertBoundedJson(value, label, maxBytes = MAX_PROVIDER_JSON_BYTES) {
   try { assertPluginJsonValue(value, { maxBytes }); }

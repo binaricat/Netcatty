@@ -79,6 +79,8 @@ export interface CattyTurnContext {
 }
 
 export interface ExternalTurnContext {
+  scopeType?: 'terminal' | 'workspace' | 'global';
+  scopeTargetId?: string;
   delegationTag?: string;
   existingSessionId?: string;
   updateExternalSessionId?: (sessionId: string, externalSessionId: string | undefined) => void;

@@ -1,4 +1,5 @@
 import type { KnownHost } from "./models";
+import { extractCertificatePublicKey } from "@/domain/sshPublicKey.shared.cjs";
 
 const normalizeHost = (value: string) => value.trim().toLowerCase();
 
@@ -132,7 +133,7 @@ export const fingerprintFromPublicKey = (publicKey: string | undefined | null): 
   const parts = trimmed.split(/\s+/);
   if (parts.length >= 2 && SSH_KEY_TYPE_PREFIX.test(parts[0])) {
     const bytes = base64Decode(parts[1]);
-    if (bytes) return stripPadding(base64Encode(sha256Bytes(bytes)));
+    if (bytes) return stripPadding(base64Encode(sha256Bytes(extractCertificatePublicKey(bytes) || bytes)));
   }
 
   return stripPadding(trimmed);
@@ -145,9 +146,9 @@ const extractKeyTypeFromPublicKey = (publicKey: string | undefined | null): stri
 };
 
 /**
- * Backfill missing `fingerprint` / `keyType` on a stored record so the host
- * verifier can match it without falling back to the brittle re-derivation
- * path. Returns the same reference when nothing changes so callers can skip
+ * Backfill missing `fingerprint` / `keyType` and migrate full-certificate
+ * fingerprints to the underlying key when the certificate body is available.
+ * Returns the same reference when nothing changes so callers can skip
  * persistence writes and React re-renders.
  */
 export const normalizeKnownHost = (knownHost: KnownHost): KnownHost => {
@@ -156,9 +157,17 @@ export const normalizeKnownHost = (knownHost: KnownHost): KnownHost => {
     && knownHost.keyType.length > 0
     && knownHost.keyType !== "unknown";
 
-  if (hasFingerprint && hasKeyType) return knownHost;
+  const parts = knownHost.publicKey?.trim().split(/\s+/) ?? [];
+  const certBytes = /-cert-v0[01]@openssh\.com$/.test(parts[0]) && parts[1]
+    ? base64Decode(parts[1]) : null;
+  const legacyCertFingerprint = certBytes && extractCertificatePublicKey(certBytes)
+    ? stripPadding(base64Encode(sha256Bytes(certBytes))) : "";
+  const migrateCertificate = legacyCertFingerprint
+    && stripPadding((knownHost.fingerprint ?? "").replace(/^SHA256:/i, "")) === legacyCertFingerprint;
 
-  const derivedFingerprint = hasFingerprint
+  if (hasFingerprint && hasKeyType && !migrateCertificate) return knownHost;
+
+  const derivedFingerprint = hasFingerprint && !migrateCertificate
     ? knownHost.fingerprint!
     : fingerprintFromPublicKey(knownHost.publicKey);
   const derivedKeyType = hasKeyType

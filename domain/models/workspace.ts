@@ -44,4 +44,9 @@ export interface Workspace {
   // synchronized with the workspace's membership and pane renames until the
   // user renames the workspace (which clears this flag).
   generatedTitle?: boolean;
+  // Issue #4098 phase 2: the AI chat this workspace anchors to, by id. Set
+  // whenever a chat becomes active in the workspace scope. Because it is an id
+  // (not a positional member index) it survives membership changes and restart
+  // so scope resolution never falls back to "first member".
+  anchorChatId?: string;
 }

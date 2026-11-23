@@ -3,7 +3,7 @@ import { Download, Pencil, Search, Trash2, Upload, X } from 'lucide-react';
 import type { AISession } from '../infrastructure/ai/types';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { cn } from '../lib/utils';
-import { MAX_SEARCH_QUERY_LENGTH, truncateQueryForMatch } from '../lib/searchMatcher';
+import { MAX_SEARCH_QUERY_LENGTH, truncateQueryForMatch } from '../domain/searchMatcher';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -25,6 +25,12 @@ interface SessionHistoryDrawerProps {
   onExportSessions?: () => void;
   /** Import sessions from a JSON export; merges by id, newer wins. */
   onImportSessions?: () => void;
+  /**
+   * Global AI session manager slot (issue #4098 phases 4-5). When provided,
+   * the drawer offers a scoped ⇄ global toggle and renders this node in
+   * global mode. The parent owns the node so all actions stay panel-scoped.
+   */
+  globalManager?: React.ReactNode;
   onClose: () => void;
 }
 
@@ -39,9 +45,11 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   onRename,
   onExportSessions,
   onImportSessions,
+  globalManager,
   onClose,
 }) => {
   const { t } = useI18n();
+  const [view, setView] = useState<'scoped' | 'global'>('scoped');
   const [renderCount, setRenderCount] = useState(SESSION_RENDER_BATCH);
   const [searchQuery, setSearchQuery] = useState('');
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
@@ -84,7 +92,44 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="px-4 py-2.5 flex items-center justify-between shrink-0 border-b border-border/30">
-        <span className="text-[13px] font-medium text-foreground/80">{t('ai.chat.allSessions')}</span>
+        <div className="flex items-center gap-2 min-w-0">
+          {globalManager ? (
+            <div className="flex items-center rounded-md border border-border/40 p-0.5 shrink-0" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === 'scoped'}
+                onClick={() => setView('scoped')}
+                className={cn(
+                  'px-1.5 py-0.5 rounded text-[11px] transition-colors cursor-pointer',
+                  view === 'scoped'
+                    ? 'bg-muted text-foreground'
+                    : 'text-muted-foreground/60 hover:text-muted-foreground',
+                )}
+              >
+                {t('ai.chat.managerScopeTab')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === 'global'}
+                onClick={() => setView('global')}
+                className={cn(
+                  'px-1.5 py-0.5 rounded text-[11px] transition-colors cursor-pointer',
+                  view === 'global'
+                    ? 'bg-muted text-foreground'
+                    : 'text-muted-foreground/60 hover:text-muted-foreground',
+                )}
+              >
+                {t('ai.chat.managerAllChatsTab')}
+              </button>
+            </div>
+          ) : (
+            <span className="text-[13px] font-medium text-foreground/80 truncate">
+              {t('ai.chat.allSessions')}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {onImportSessions && (
             <Tooltip>
@@ -128,6 +173,10 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
           </button>
         </div>
       </div>
+      {view === 'global' && globalManager ? (
+        globalManager
+      ) : (
+      <>
       <div className="px-3 py-2 shrink-0 border-b border-border/30">
         <div className="relative">
           <Search
@@ -276,6 +325,8 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
           )}
         </div>
       </ScrollArea>
+      </>
+      )}
     </div>
   );
 };

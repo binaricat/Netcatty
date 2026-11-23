@@ -1220,6 +1220,23 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host, hi
   }
 }
 
+export function startRestoredSessionConnectionLogImpl(getCtx: AppContextGetter, session: TerminalSession) {
+  const { addConnectionLog, systemInfoRef } = getCtx();
+  const { username, hostname } = systemInfoRef.current;
+  addConnectionLog({
+    sessionId: session.id,
+    hostId: session.hostId,
+    hostLabel: session.hostLabel,
+    hostname: session.hostname,
+    username: session.username,
+    protocol: session.protocol || 'ssh',
+    startTime: Date.now(),
+    localUsername: username,
+    localHostname: hostname,
+    saved: false,
+  });
+}
+
 export async function handleTerminalDataCaptureImpl(getCtx: AppContextGetter, sessionId: string, data: string) {
   const { IS_DEV, connectionLogs, selectConnectionLogForTerminalDataCapture, sessions, updateConnectionLog } = getCtx();
 {

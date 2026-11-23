@@ -4,7 +4,7 @@ import {
   prepareSearchFields,
   type PreparedSearchFields,
   type PreparedSearchQuery,
-} from '../lib/searchMatcher';
+} from './searchMatcher';
 
 /**
  * Minimal structural shapes for session history search. Declared here (not

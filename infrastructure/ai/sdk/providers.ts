@@ -5,6 +5,7 @@ import { wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
 import type { ProviderConfig, ProviderStyle } from '../types';
 import { resolveOpenAIApi, resolveProviderStyle } from '../types';
 import { normalizeAnthropicSdkBaseURL } from '../anthropicCompatBaseUrl';
+import { isCustomAnthropicBaseURL } from '../modelDiscoveryHeaders';
 import { buildSdkRequestHeaders } from '../providerRequestHeaders';
 import { normalizeOllamaSdkBaseURL } from '../ollamaCompatBaseUrl';
 import { normalizeOpenAIChatCacheUsage } from '../openAIChatCacheUsage';
@@ -774,13 +775,25 @@ function createProviderModel(
         : openai.chat(modelId);
     }
 
-    case 'anthropic':
+    case 'anthropic': {
+      // Official api.anthropic.com keeps x-api-key only. Custom Anthropic-compat
+      // gateways (e.g. Volcengine Ark Agent Plan, Claude Code proxies) may require
+      // Authorization: Bearer (ANTHROPIC_AUTH_TOKEN) or x-api-key, so send both.
+      // @ai-sdk/anthropic rejects passing apiKey and authToken together, so pass
+      // authToken for Bearer and retain x-api-key in headers unless overridden.
+      const useCustomBearer = Boolean(apiKey && isCustomAnthropicBaseURL(baseURL));
+      const hasCustomXApiKey = Object.keys(sdkHeaders).some(
+        (key) => key.toLowerCase() === 'x-api-key',
+      );
       return createAnthropic({
-        apiKey,
+        ...(useCustomBearer ? { authToken: apiKey } : { apiKey }),
         baseURL,
         fetch: customFetch,
-        headers: sdkHeaders,
+        headers: useCustomBearer && !hasCustomXApiKey
+          ? { 'x-api-key': apiKey!, ...sdkHeaders }
+          : sdkHeaders,
       })(modelId);
+    }
 
     case 'google':
       return createGoogle({

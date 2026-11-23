@@ -15,6 +15,8 @@ import { globalTwoPassCompactionCache } from './twoPassCompaction';
 import { redactSecretsForModel, redactSecretsInValueForModel, setReversibleModelPrivacy } from './modelSecretRedaction';
 import { globalTerminalMonitorGuard } from './terminalMonitorGuard';
 import { netcattyBridge } from '../../services/netcattyBridge';
+import type { AISessionScope } from '../types';
+import { SHELL_READINESS_UNKNOWN_CODE } from '../aiChatStreamingSupport';
 
 let turnCounter = 0;
 
@@ -26,6 +28,11 @@ function nextTurnId(): string {
 function isFailedToolResult(result: string): boolean {
   try {
     const parsed = JSON.parse(result) as Record<string, unknown>;
+    // #4198 (round 2): an unrecognized prompt on a live shell is an actionable,
+    // non-terminal state. Honour the preserved `code` so it is never stored as
+    // an open-session blocker, even if an `error` field is present. All other
+    // error codes keep the exact existing classification.
+    if (parsed?.code === SHELL_READINESS_UNKNOWN_CODE) return false;
     return parsed?.ok === false || typeof parsed?.error === 'string';
   } catch {
     return false;
@@ -36,6 +43,7 @@ interface ActiveTurn {
   turnId: string;
   backend: AgentBackend;
   driver: TurnDriver;
+  scope?: AISessionScope;
 }
 
 export interface AgentRuntimeOptions {
@@ -68,6 +76,11 @@ export class AgentRuntime {
 
   getSessionStateStore(): SessionStateStore {
     return this.sessionStateStore;
+  }
+
+  getActiveScope(chatSessionId: string): AISessionScope | undefined {
+    const scope = this.activeTurns.get(chatSessionId)?.scope;
+    return scope ? { ...scope } : undefined;
   }
 
   clearChatSession(chatSessionId: string): void {
@@ -135,6 +148,12 @@ export class AgentRuntime {
       turnId,
       backend: input.backend,
       driver,
+      // History may be resumed in a different panel without changing its
+      // saved binding. Keep the invoking scope stable for this entire turn.
+      scope: input.context.scopeType ? {
+        type: input.context.scopeType,
+        targetId: input.context.scopeTargetId,
+      } : undefined,
     });
 
     const toolCallMeta = new Map<string, { toolName: string; args: Record<string, unknown> }>();

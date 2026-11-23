@@ -848,5 +848,3 @@ function buildReadResult(
       hasMore: endOffset < content.length,
     };
 }
-
-export const globalToolOutputStore = new ToolOutputStore();

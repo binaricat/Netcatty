@@ -1,7 +1,7 @@
 import type { ChatMessage } from '../types';
 import type { ExternalBridgeHistoryMessage } from './types';
 import { sliceHead } from '../textBoundaries';
-import { buildHistoricalToolResultReplayText, buildHistoricalUserReplayContent } from '../../../components/ai/cattyHistoryReplay';
+import { buildHistoricalToolResultReplayText, buildHistoricalUserReplayContent } from './cattyHistoryReplay';
 import { formatVaultNoteReferences, isVaultNoteAttachment } from '../../../application/state/vaultNoteAttachment';
 
 type ExternalAgentHistoryMessage = ExternalBridgeHistoryMessage;

@@ -1037,7 +1037,14 @@ test("PTY builders chunk the exact shared script into lines below the canonical 
   }
 });
 
-test("exit-4 transport installs through a real canonical Bash PTY without exceeding its line limit", { timeout: 30000 }, async () => {
+test("exit-4 transport installs through a real canonical Bash PTY without exceeding its line limit", {
+  timeout: 30000,
+  // macOS MAX_CANON is 1024 bytes while Linux is 4096. --noediting forces the
+  // kernel canonical path; real interactive shells use readline/zle and are not
+  // subject to this limit, so this Linux canonical-buffer regression test is
+  // not applicable on macOS.
+  skip: process.platform === "darwin" ? "macOS canonical input limit is 1024 bytes" : false,
+}, async () => {
   const home = mkdtempSync(join(tmpdir(), "netcatty-osc7-canonical-"));
   const prompt = "__NETCATTY_TEST_PROMPT__> ";
   const terminal = pty.spawn("/bin/bash", ["--noprofile", "--norc", "--noediting", "-i"], {

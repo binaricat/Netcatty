@@ -48,7 +48,7 @@ const VAULT_CAPABILITIES = [
     domain: "vault",
     status: CAPABILITY_STATUS.IMPLEMENTED,
     description:
-      "Open a vault host by reusing its existing session when its connection settings still match (connected or connecting, including auto-reconnecting — same sessionId, no duplicate tab). Only opens a new terminal tab when no usable session for this host exists, or when newTab is true. Inactive disconnected and restored tabs are not reused. Returns the sessionId so you can run terminal/SFTP tools against it. Use vault_hosts_list first when you only know the label or hostname.",
+      "Open a vault host by reusing its existing session when its connection settings still match (connected or connecting, including auto-reconnecting — same sessionId, no duplicate tab). Only opens a new terminal tab when no usable session for this host exists, or when newTab is true. A newly opened tab is placed in the invoking chat's bound workspace (workspace chat → that workspace; terminal chat → that terminal's workspace; unbound chats get a standalone tab). Returns the sessionId so you can run terminal/SFTP tools against it. Use vault_hosts_list first when you only know the label or hostname.",
     // Sidebar Catty is scoped to already-open terminals/workspaces and must not
     // expand that scope mid-turn. Keep host_open for MCP / CLI / global agent.
     agentKinds: [AGENT_KINDS.GLOBAL],

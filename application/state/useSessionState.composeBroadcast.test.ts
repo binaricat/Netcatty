@@ -4,6 +4,9 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import { useSessionState } from "./useSessionState.ts";
+import { installTestLocalStorage } from "./testSupport/localStorage.ts";
+
+test.beforeEach((t) => { t.after(installTestLocalStorage()); });
 
 type SessionState = ReturnType<typeof useSessionState>;
 

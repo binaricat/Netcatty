@@ -13,6 +13,7 @@ const { promisify } = require("node:util");
 const { StringDecoder } = require("node:string_decoder");
 const { ensureNodePtySpawnHelperExecutable } = require("./nodePtySpawnHelperPermissions.cjs");
 const { createTerminalFlowPauseArbiter } = require("./terminalFlowPauseArbiter.cjs");
+const { registerWorkerHandle } = require("./workerIpcProxy.cjs");
 
 ensureNodePtySpawnHelperExecutable();
 
@@ -960,6 +961,9 @@ async function buildLocalSessionEnv(
 ) {
   const { buildTerminalProcessEnv } = require("./httpNetworkProxyBridge.cjs");
   const env = { ...buildTerminalProcessEnv(baseEnv), ...(payload?.env || {}) };
+  // AppImage's ARGV0 makes zsh rename external commands, including ssh. Xorg
+  // then mistakes ssh's X11 connection for a local client and sends unusable fds.
+  delete env.ARGV0;
   if (platform !== "win32") return env;
 
   const { getPathEnvKey, resolveWindowsLivePath } = require("./ai/shellUtils.cjs");
@@ -2478,14 +2482,6 @@ function getTelnetEchoMode(_event, { sessionId }) {
 /**
  * Register IPC handlers for terminal operations
  */
-function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
-  ipcMain.handle(channel, (event, payload) => {
-    return terminalWorkerManager.request(channel, payload, {
-      webContentsId: event?.sender?.id,
-    });
-  });
-}
-
 function registerWorkerSend(ipcMain, terminalWorkerManager, channel) {
   ipcMain.on(channel, (event, payload) => {
     terminalWorkerManager.send(channel, payload, {

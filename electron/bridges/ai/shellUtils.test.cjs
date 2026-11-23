@@ -112,6 +112,46 @@ test("isDefaultPowerShellPromptLine matches default shapes and rejects look-alik
   assert.equal(isDefaultPowerShellPromptLine(null), false);
 });
 
+test("PowerShell prompt helpers recognize remoting and debug prefixes", () => {
+  for (const prompt of [
+    "[192.168.1.10]: PS C:\\Users\\Administrator\\Documents>",
+    "[SERVER01]: PS C:\\>",
+    "[host.example.com]: PS C:\\Windows\\System32>",
+    "[fe80::1]: PS C:\\>",
+    "[DBG]: PS C:\\Users\\alice>",
+    "[SERVER01]: [DBG]: PS C:\\>",
+  ]) {
+    assert.equal(isDefaultPowerShellPromptLine(prompt), true, prompt);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt, prompt);
+  }
+});
+
+test("PowerShell prompt helpers reject malformed remoting prefixes and look-alikes", () => {
+  for (const line of [
+    "[host] PS C:\\>",
+    "prefix [host]: PS C:\\>",
+    "[]: PS C:\\>",
+    "[ho]st]: PS C:\\>",
+    "[ho\rst]: PS C:\\>",
+    "[ho\nst]: PS C:\\>",
+    "[host]:PS C:\\>",
+    "[host]: PS >",
+    "PS >",
+    "PSO>",
+    "ZIPS>",
+    "",
+    null,
+  ]) {
+    assert.equal(isDefaultPowerShellPromptLine(line), false, String(line));
+    assert.equal(extractTrailingIdlePrompt(line), "", String(line));
+  }
+});
+
+test("extractTrailingIdlePrompt preserves trailing space on a remoting prompt", () => {
+  const prompt = "[192.168.1.10]: PS C:\\Users\\Administrator\\Documents> ";
+  assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt);
+});
+
 test("extracts a trailing cmd.exe idle prompt", () => {
   // Windows OpenSSH default shell is cmd.exe; without capturing `C:\...>`
   // AI exec cannot select the cmd wrapper when shellKind is still unset.
@@ -150,6 +190,66 @@ test("isDefaultPosixPromptLine matches classic user@host prompts", () => {
   assert.equal(isDefaultPosixPromptLine("PS C:\\Users\\alice>"), false);
   assert.equal(isDefaultPosixPromptLine("C:\\Users\\alice>"), false);
   assert.equal(isDefaultPosixPromptLine(""), false);
+});
+
+test("recognizes bracketed time prompts without a hostname and preserves trailing space", () => {
+  for (const prompt of [
+    "[root 12:04:23 ~]$",
+    "[root 12:04:23 ~]$ ",
+    "[alice 00:00:00 /var/log]# ",
+    "[alice-admin 23:59:59 ~/src]$ ",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt, prompt);
+  }
+});
+
+test("bracketed time prompt recognition rejects pending input and prompts without time", () => {
+  for (const line of [
+    "[root 12:04:23 ~]$ hostname",
+    "[root 12:04:23 ~]$ echo $",
+    "[root ~]$",
+    "[word]$",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
+test("recognizes space-separated Bash idle prompts and preserves trailing whitespace", () => {
+  for (const prompt of [
+    "root@VM-Q7L4M8P2 ~ $",
+    "user@host ~ $",
+    "alice@box ~/proj $",
+  ]) {
+    for (const suffix of ["", " ", "  "]) {
+      const line = prompt + suffix;
+      assert.equal(isDefaultPosixPromptLine(line), true, line);
+      assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), line, line);
+    }
+  }
+});
+
+test("space-separated Bash prompt recognition rejects pending input and non-shell screens", () => {
+  for (const line of [
+    "user@host ~ $ echo hi",
+    "user@host ~ $ whoami",
+    "user@host ~ $ echo $",
+    "user@host ~ $ echo #",
+    "user@host ~ $ echo %",
+    "root@host ~#",
+    "user@host ~/cash$dir $",
+    "user@host ~/issue#1 $",
+    "user@host ~/100% $",
+    "user@host   $",
+    "progress 50 $",
+    "$",
+    "Password:",
+    "(END)",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
 });
 
 test("isDefaultPosixPromptLine matches the macOS zsh default prompt", () => {
@@ -410,6 +510,13 @@ test("extracts a trailing RHEL-family bracketed idle prompt", () => {
   );
   // Unbracketed space form is still not a recognized default prompt.
   assert.equal(extractTrailingIdlePrompt("welcome\r\nroot@host ~#"), "");
+});
+
+test("extractTrailingIdlePrompt recognizes an ANSI-colored bracketed time prompt", () => {
+  assert.equal(
+    extractTrailingIdlePrompt("welcome\r\n[\x1b[1;34mroot \x1b[1;36m12:04:23 \x1b[1;32m~\x1b[0m]$ "),
+    "[root 12:04:23 ~]$ ",
+  );
 });
 
 test("extractTrailingIdlePrompt recognizes a two-line user@host then bare $/# PS1", () => {
@@ -1155,6 +1262,14 @@ test("trackSessionIdlePrompt and getFreshIdlePrompt accept an Oracle/RHEL bracke
   trackSessionIdlePrompt(bracketedPath, "Last login...\r\n[user@host My [Project]]$ ");
   assert.equal(bracketedPath.lastIdlePrompt, "[user@host My [Project]]$ ");
   assert.equal(getFreshIdlePrompt(bracketedPath), "[user@host My [Project]]$ ");
+});
+
+test("trackSessionIdlePrompt and getFreshIdlePrompt accept a bracketed time prompt", () => {
+  const session = {};
+  const prompt = "[root 12:04:23 ~]$ ";
+  assert.equal(trackSessionIdlePrompt(session, `Last login...\r\n${prompt}`), prompt);
+  assert.equal(session.lastIdlePrompt, prompt);
+  assert.equal(getFreshIdlePrompt(session), prompt);
 });
 
 test("visible idle prompt survives a PSReadLine erase that leaves the raw tail dirty", () => {

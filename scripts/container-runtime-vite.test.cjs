@@ -21,7 +21,7 @@ async function checkDevImport() {
     server = await createServer({
       cacheDir,
       logLevel: "error",
-      server: { port: 0, strictPort: false, open: false },
+      server: { host: "127.0.0.1", port: 0, strictPort: false, open: false },
       optimizeDeps: { entries: [], noDiscovery: true },
     });
     await server.listen();

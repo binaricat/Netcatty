@@ -69,7 +69,7 @@ import {
   installEraseInDisplayHandlers,
 } from "../clearTerminalViewport";
 import { pulseCopyOnSelectUserCommand } from "../copyOnSelect";
-import { getTerminalSelectionForClipboard } from "../normalizeTerminalSelection";
+import { getTerminalSelectionForClipboard } from "../../../domain/terminalSelection";
 import {
   createKittyKeyboardSessionStateStore,
   encodeKittyCompositionText,
@@ -110,6 +110,7 @@ import {
   createTerminalLigatureController,
   terminalFontLigaturesEnabled,
 } from "./terminalFontLigatures";
+import { createPaneBidiJoiner, findRightToLeftRuns } from "./terminalBidiJoiner";
 import { createWebglRendererController } from "./webglRendererController";
 import { getSharedWebglContextBudget } from "./webglContextBudget";
 import {
@@ -1073,6 +1074,22 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const unicodeGraphemes = new UnicodeGraphemesAddon();
   term.loadAddon(unicodeGraphemes);
   term.unicode.activeVersion = '15-graphemes';
+
+  // Draw Arabic, Persian and Hebrew runs in display order with joined letters.
+  // Display only: the buffer, selection and copy keep the logical text.
+  term.registerCharacterJoiner(performanceConfig.useWebGLAddon
+    ? createPaneBidiJoiner(
+      () => webglController.getAddon() !== null,
+      () => {
+        if (runtimeDisposed) return;
+        // The pinned WebGL addon allocates a maximum-size atlas page for a
+        // wide joined glyph. Prevent attach/recovery again for just this pane.
+        webglController.dispose();
+        logger.info("[XTerm] Using DOM renderer for right-to-left text in this pane");
+        repaintTerminal();
+      },
+    )
+    : findRightToLeftRuns);
 
   trackRenderer();
 
@@ -2601,6 +2618,18 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       }
     }
 
+    // Claim Shift+Insert as clipboard paste before Kitty/Win32 or xterm can
+    // encode it as an Insert key, while preserving user shortcut precedence.
+    if (
+      e.key === "Insert" && e.shiftKey
+      && !e.ctrlKey && !e.altKey && !e.metaKey
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      void ctx.terminalContextActionsRef?.current?.onPaste?.();
+      return false;
+    }
+
     // Sogou/macOS CJK punctuation: keydown still reports ASCII "," while the
     // full-width "，" arrives on insertText. Returning false (without
     // preventDefault) stops xterm/Kitty from sending the half-width key so the
@@ -2774,15 +2803,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           term.modes.applicationCursorKeysMode,
         ),
       };
-      return true;
-    }
-    // xterm leaves Shift+Insert to the browser's native paste handler. Fan out
-    // the clipboard data from onData instead of encoding an Insert key for
-    // peers or treating the paste as that key's pending legacy data (#4142).
-    if (
-      e.key === "Insert" && e.shiftKey
-      && !e.ctrlKey && !e.altKey && !e.metaKey
-    ) {
       return true;
     }
     if (!shouldDeferKittyKeyEvent(normalizedKittyEvent)) {

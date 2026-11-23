@@ -281,6 +281,26 @@ test('wall deadline during authorization reports authorization failure rather th
   assert.deepEqual(pty.writes, []);
 });
 
+test('idle Enter-PSSession remoting prompt allows the command to be sent', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const prompt = '[192.168.1.10]: PS C:\\Users\\Administrator\\Documents> ';
+  trackSessionIdlePrompt(session, `PowerShell 7\r\n${prompt}`);
+  assert.equal(readyPrompt(session), prompt);
+
+  const result = await startPtyJob(pty, 'Write-Output ok', {
+    shellKind: 'powershell',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+    typedInput: true,
+  }).resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout, 'OK');
+  assert.equal(pty.writes.length, 1);
+  assert.match(pty.writes[0], /\$__NCMCP_/);
+});
+
 test('idle PowerShell whose raw tail was CSI-erased still receives the command', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
   const pty = new TestPty();

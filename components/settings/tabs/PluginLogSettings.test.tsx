@@ -65,13 +65,16 @@ test('local logging controls default off, disclose verbose risk, and call host-o
     assert.equal(switches()[1].getAttribute('aria-checked'), 'false');
     assert.match(document.querySelector('[role=alert]')!.textContent!, /synthetic preferences write failed/);
     await act(async () => button('Close').click());
-    // Radix restores the opener in its unmount autofocus timer.
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
     assert.equal(document.querySelector('[role=dialog]'), null);
-    assert.equal(document.activeElement === configure, true, 'Configure button regains focus');
+    // Radix restores focus in a setTimeout(0) after the dialog unmounts.
+    // act() can finish before that timer, so drain it before checking focus.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Comparing DOM objects directly makes Node inspect the entire JSDOM graph
+    // on failure, which can stall the test process while formatting the diff.
+    assert.ok(document.activeElement === configure, `expected focus on Configure, got ${document.activeElement?.tagName}`);
   } finally {
     await act(async () => root.unmount());
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
     dom.window.close();
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

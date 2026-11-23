@@ -24,7 +24,7 @@ function collectSourceFiles(root: string): string[] {
   return out;
 }
 
-test("every settings search catalog id is wired as an anchor in components", () => {
+test("every settings search catalog id and fallback is wired as an anchor in components", () => {
   const roots = [
     join(process.cwd(), "components"),
   ];
@@ -32,7 +32,7 @@ test("every settings search catalog id is wired as an anchor in components", () 
   const haystack = sources.map((file) => readFileSync(file, "utf8")).join("\n");
 
   const missing = SETTINGS_SEARCH_CATALOG
-    .map((entry) => entry.id)
+    .flatMap((entry) => [entry.id, ...(entry.fallbackAnchorId ? [entry.fallbackAnchorId] : [])])
     .filter((id) => {
       const asProp = `anchorId="${id}"`;
       const asPropSingle = `anchorId='${id}'`;

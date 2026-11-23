@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import React from "react";
+import { act, create } from "react-test-renderer";
+import { sidePanelLiveStore, SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT } from "../../application/state/sidePanelLiveStore.ts";
+import { createEmptyWorkspaceRoot } from "../../domain/workspace.ts";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { TerminalLayerWorkspaceSection } from "./TerminalLayerWorkspaceSection.tsx";
@@ -12,6 +15,14 @@ test("magnified terminal panes use the resolved terminal accent for border chrom
 
   assert.match(paneSource, /isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl /);
   assert.match(paneSource, /borderColor: isMagnified && magnifiedSurfaceBounds \? sessionAppearanceTheme\.colors\.cursor : undefined/);
+  assert.match(paneSource, /borderWidth: isMagnified && magnifiedSurfaceBounds/);
+  assert.match(paneSource, /resolveMagnifiedChromeBorderWidth\(magnifiedDevicePixelRatio\)/);
+});
+
+test("magnified terminal panes snap overlay bounds to the device-pixel grid", () => {
+  const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
+  assert.match(source, /resolvePaneMagnificationStyle\(\s*layoutStyle,\s*isMagnified && !!magnifiedSurfaceBounds,\s*magnifiedSurfaceBounds,\s*magnifiedDevicePixelRatio,\s*\)/);
+  assert.match(source, /const magnifiedDevicePixelRatio = typeof window === 'undefined' \? 1 : \(window\.devicePixelRatio \|\| 1\)/);
 });
 
 test("terminal keyboard focus updates the pane selected for magnification", () => {
@@ -166,4 +177,38 @@ test("workspace section passes resolved session host ids to terminal panes", () 
   renderToStaticMarkup(React.createElement(TerminalLayerWorkspaceSection, { ctx }));
 
   assert.equal(sawResolvedIds, true);
+});
+
+
+test("empty workspace offers adding to the current workspace and hides the prompt once populated", async () => {
+  const requested: string[] = [];
+  const ctx = {
+    TerminalPanesHost: () => null,
+    activeResizers: [], keyBindings: [], hotkeyScheme: "mac", Array,
+    cn: (...values: unknown[]) => values.filter(Boolean).join(" "),
+    t: (key: string) => key,
+    onRequestAddToWorkspace: (id: string) => requested.push(id),
+  };
+  const workspace = { id: "empty-one", title: "Empty", viewMode: "split" as const, root: createEmptyWorkspaceRoot() };
+  const previous = sidePanelLiveStore.getSnapshot();
+  let renderer: ReturnType<typeof create> | undefined;
+  try {
+    sidePanelLiveStore.update({ ...SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, activeWorkspace: workspace });
+    await act(async () => { renderer = create(React.createElement(TerminalLayerWorkspaceSection, { ctx })); });
+    assert.equal(renderer!.root.findAllByProps({ "data-section": "empty-workspace" }).length, 1);
+    await act(async () => renderer!.root.findByType("button").props.onClick());
+    assert.deepEqual(requested, ["empty-one"]);
+    await act(async () => {
+      sidePanelLiveStore.update({ ...SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, activeWorkspace: { ...workspace, id: "empty-two" } });
+    });
+    await act(async () => renderer!.root.findByType("button").props.onClick());
+    assert.deepEqual(requested, ["empty-one", "empty-two"]);
+    await act(async () => {
+      sidePanelLiveStore.update({ ...SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, activeWorkspace: { ...workspace, root: { id: "pane", type: "pane", sessionId: "terminal" } } });
+    });
+    assert.equal(renderer!.root.findAllByProps({ "data-section": "empty-workspace" }).length, 0);
+  } finally {
+    await act(async () => renderer?.unmount());
+    sidePanelLiveStore.update(previous);
+  }
 });
