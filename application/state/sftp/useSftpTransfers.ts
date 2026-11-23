@@ -1476,9 +1476,15 @@ export const useSftpTransfers = ({
       // Select the existing non-resumable cp route only for newly created copies.
       // Resume/recovery keeps its saved strategy and checkpoints. If cp fails,
       // recursive/download+upload fallback also remains non-resumable.
+      // Match processTransferBody's pinned route guard so panes on the same
+      // cache key with differing pinned jump chains or proxies stay resumable
+      // cross-host transfers instead of being marked non-pausable same-host cp.
+      const sameHostPinnedChains = chainIdentity(connectHosts.sourceChain) === chainIdentity(connectHosts.targetChain);
+      const sameHostPinnedProxies = proxyIdentity(connectHosts.source?.proxyConfig) === proxyIdentity(connectHosts.target?.proxyConfig);
       const useSameHostCopy = !usesLegacyScp
         && !sourcePane.connection.isLocal && !targetPane.connection.isLocal
         && !!sourceCacheKey && sourceCacheKey === targetCacheKey
+        && sameHostPinnedChains && sameHostPinnedProxies
         && encodingSafeForExec;
 
       const newTasks: TransferTask[] = [];
@@ -1749,7 +1755,7 @@ export const useSftpTransfers = ({
     // Saved host edits replace acquisition; new transfers must not retain the old endpoint.
     // Already-running attempts keep the leases they acquired.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [getActivePane, getPaneByConnectionId, getTabByConnectionId, sftpSessionsRef, updateTab, acquireTransferSession, resolveConnectedHost],
+    [getActivePane, getPaneByConnectionId, getTabByConnectionId, sftpSessionsRef, updateTab, acquireTransferSession, resolveConnectedHost, resolveConnectedChain],
   );
 
   const cancelTransfer = useCallback(
