@@ -9,6 +9,8 @@ const {
   failAttachPopupAuthorization,
   markAttachPopupAttached,
   markAttachPopupClosePrepared,
+  markAttachPopupReady,
+  retryPendingAttachedSessionOutputs,
   setRestoreAttachedSessionOutput,
 } = require("../terminalAttachRestore.cjs");
 
@@ -395,8 +397,12 @@ test("moved-tab popup skips crash restoration and close handoff after its source
               queueMicrotask(() => {
                 if (attachOutcomeMode === "fail") {
                   failAttachPopupAuthorization(payload.attachAuthorization, payload.attachSessionId, wcId, "Session exited");
+                } else if (attachOutcomeMode === "rebind-then-fail") {
+                  markAttachPopupAttached(payload.attachAuthorization, payload.attachSessionId, wcId);
+                  failAttachPopupAuthorization(payload.attachAuthorization, payload.attachSessionId, wcId, "Reattach failed");
                 } else {
                   markAttachPopupAttached(payload.attachAuthorization, payload.attachSessionId, wcId);
+                  markAttachPopupReady(payload.attachAuthorization, payload.attachSessionId, wcId);
                 }
               });
             }
@@ -476,6 +482,104 @@ test("moved-tab popup skips crash restoration and close handoff after its source
     assert.deepEqual(failedResult, { success: false, error: "Session exited" });
     assert.equal(popupWindows[2].destroyed, true);
     assert.equal(shownCount, shownBeforeFail);
+
+    // 4) Failure after rebindOutput (before renderer confirms reattach) still fails the move.
+    attachOutcomeMode = "rebind-then-fail";
+    const rebindFailResult = await api.openTerminalPopupWindow(
+      { BrowserWindow: MovePopupWindowStub, nativeTheme: {}, shell: {} },
+      { preload: "/tmp/preload.cjs", isDev: false, appIcon: null, isMac: false, electronDir: __dirname, sourceWindow },
+      { popupId: "move-rebind-fail", title: "Moved 4", attachSessionId: "s-rebind-fail", moveSession: true, sourceSession: { id: "s-rebind-fail" } },
+    );
+    assert.deepEqual(rebindFailResult, { success: false, error: "Reattach failed" });
+    assert.equal(popupWindows[3].destroyed, true);
+    assert.equal(shownCount, shownBeforeFail);
+  } finally {
+    setRestoreAttachedSessionOutput(null);
+  }
+});
+
+test("attach-closed notification waits until async output restoration succeeds", async () => {
+  let restoreAttempt = 0;
+  let resolveFirstRestore = null;
+  setRestoreAttachedSessionOutput((sessionId) => {
+    restoreAttempt += 1;
+    if (restoreAttempt === 1) {
+      return new Promise((resolve) => {
+        resolveFirstRestore = () => resolve({ success: false, restored: false, error: "temporary" });
+      });
+    }
+    return Promise.resolve({ success: true, restored: true, sessionId });
+  });
+  try {
+    const sourceMessages = [];
+    const sourceWindow = {
+      isDestroyed() { return false; },
+      webContents: { send(channel, payload) { sourceMessages.push({ channel, payload }); } },
+    };
+    let popupWin;
+    class AsyncRestoreStub {
+      constructor() {
+        popupWin = this;
+        this.destroyed = false;
+        this.handlers = new Map();
+        this.webContents = {
+          id: 120,
+          on() {},
+          send(channel, payload) {
+            if (channel === "netcatty:window:terminalPopupConfig" && payload?.attachAuthorization) {
+              queueMicrotask(() => {
+                markAttachPopupAttached(payload.attachAuthorization, payload.attachSessionId, 120);
+                markAttachPopupReady(payload.attachAuthorization, payload.attachSessionId, 120);
+              });
+            }
+          },
+          setWindowOpenHandler() {},
+        };
+      }
+      on(channel, handler) { this.handlers.set(channel, handler); }
+      isDestroyed() { return this.destroyed; }
+      isVisible() { return true; }
+      loadURL() { return Promise.resolve(); }
+      setBackgroundColor() {}
+      destroy() {
+        this.destroyed = true;
+        this.handlers.get("closed")?.();
+      }
+    }
+
+    const api = createTerminalPopupWindowApi({
+      mainWindow: sourceWindow,
+      currentTheme: "light",
+      V8_CACHE_OPTIONS: "bypassHeatCheck",
+      resolveFrontendBackgroundColor() { return "#fff"; },
+      resolveSettingsWindowBounds() { return {}; },
+      createExternalOnlyWindowOpenHandler() { return {}; },
+      applyWindowOpacityToWindow() {},
+      getDevRendererBaseUrl(url) { return url; },
+      showAndFocusWindow() {},
+      registerAppContentWindow() {},
+      unregisterAppContentWindow() {},
+      notifyAppContentWindowClosed() {},
+    });
+
+    await api.openTerminalPopupWindow(
+      { BrowserWindow: AsyncRestoreStub, nativeTheme: {}, shell: {} },
+      { preload: "/tmp/preload.cjs", isDev: false, appIcon: null, isMac: false, electronDir: __dirname, sourceWindow },
+      { popupId: "move-async-restore", title: "Moved", attachSessionId: "s-async", moveSession: true, sourceSession: { id: "s-async" } },
+    );
+    popupWin.destroy();
+    await Promise.resolve();
+    assert.deepEqual(sourceMessages, [], "must not unhide tab while restore is in flight");
+
+    resolveFirstRestore();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(sourceMessages, [], "must not unhide tab after failed restore");
+
+    await retryPendingAttachedSessionOutputs();
+    assert.deepEqual(sourceMessages, [{
+      channel: "netcatty:terminal-popup:attach-closed",
+      payload: { sessionId: "s-async" },
+    }]);
   } finally {
     setRestoreAttachedSessionOutput(null);
   }

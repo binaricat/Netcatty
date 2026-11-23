@@ -739,6 +739,8 @@ function createPreloadApi(ctx) {
     }),
   markAttachPopupClosePrepared: (sessionId, authorization) =>
     ipcRenderer.invoke("netcatty:terminal:markAttachClosePrepared", { sessionId, authorization }),
+  reportTerminalAttachReady: (sessionId, authorization) =>
+    ipcRenderer.invoke("netcatty:terminal:reportAttachReady", { sessionId, authorization }),
   reportTerminalAttachFailed: (sessionId, authorization, error) =>
     ipcRenderer.invoke("netcatty:terminal:reportAttachFailed", { sessionId, authorization, error }),
   onTerminalPopupPrepareClose: (cb) => {

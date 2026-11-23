@@ -11,6 +11,36 @@ let attachHomeLookup = null;
 let fanoutExitImpl = null;
 const attachPopupAuthorizations = new Map();
 const pendingAttachRestores = new Set();
+const pendingAttachRestoreListeners = new Map();
+
+function notifyAttachRestoreListeners(sessionId) {
+  const listeners = pendingAttachRestoreListeners.get(sessionId);
+  if (!listeners) return;
+  pendingAttachRestoreListeners.delete(sessionId);
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function onAttachOutputRestored(sessionId, listener) {
+  if (!sessionId || typeof listener !== "function") return () => {};
+  let listeners = pendingAttachRestoreListeners.get(sessionId);
+  if (!listeners) {
+    listeners = new Set();
+    pendingAttachRestoreListeners.set(sessionId, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = pendingAttachRestoreListeners.get(sessionId);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) pendingAttachRestoreListeners.delete(sessionId);
+  };
+}
 
 function settleAttachPopupOutcome(grant, outcome) {
   if (!grant || grant.outcomeSettled) return;
@@ -48,6 +78,13 @@ function markAttachPopupAttached(token, sessionId, webContentsId) {
   if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
   const grant = attachPopupAuthorizations.get(token);
   grant.attached = true;
+  return true;
+}
+
+function markAttachPopupReady(token, sessionId, webContentsId) {
+  if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
+  const grant = attachPopupAuthorizations.get(token);
+  if (!grant.attached) return false;
   settleAttachPopupOutcome(grant, { success: true });
   return true;
 }
@@ -135,6 +172,7 @@ function releaseAttachPopupAuthorization(token) {
 function releaseAttachedSessionState(sessionId) {
   if (!sessionId) return;
   pendingAttachRestores.delete(sessionId);
+  notifyAttachRestoreListeners(sessionId);
   for (const [token, grant] of attachPopupAuthorizations) {
     if (grant?.sessionId === sessionId) {
       settleAttachPopupOutcome(grant, { success: false, error: "Session closed before popup attached" });
@@ -149,13 +187,17 @@ function setRestoreAttachedSessionOutput(fn) {
 
 async function restoreAttachedSessionOutput(sessionId, preferredHomeWebContentsId = null) {
   if (!sessionId || typeof restoreImpl !== "function") {
-    return { success: false, restored: false };
+    return { success: false, restored: false, unavailable: true };
   }
   try {
     const result = await restoreImpl(sessionId, preferredHomeWebContentsId)
       || { success: true, restored: false };
-    if (result.success) pendingAttachRestores.delete(sessionId);
-    else pendingAttachRestores.add(sessionId);
+    if (result.success) {
+      pendingAttachRestores.delete(sessionId);
+      notifyAttachRestoreListeners(sessionId);
+    } else {
+      pendingAttachRestores.add(sessionId);
+    }
     return result;
   } catch (err) {
     pendingAttachRestores.add(sessionId);
@@ -218,10 +260,12 @@ module.exports = {
   registerAttachPopupAuthorization,
   validateAttachPopupAuthorization,
   markAttachPopupAttached,
+  markAttachPopupReady,
   failAttachPopupAuthorization,
   isAttachPopupAttached,
   waitForAttachPopupOutcome,
   clearAttachPopupAttached,
+  onAttachOutputRestored,
   markAttachPopupClosePrepared,
   isAttachPopupClosePrepared,
   getLifetimeHeirWebContentsId,

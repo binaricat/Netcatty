@@ -170,6 +170,7 @@ const {
   clearAttachPopupAttached,
   failAttachPopupAuthorization,
   markAttachPopupAttached,
+  markAttachPopupReady,
   setAttachHomeLookup,
   setFanoutSessionExit,
   validateAttachPopupAuthorization,
@@ -2492,6 +2493,12 @@ function registerHandlers(ipcMain, options = {}) {
     requestTerminalSessionSnapshot(event, payload, terminalWorkerManager));
   ipcMain.handle("netcatty:terminal:applySnapshot", (event, payload) =>
     applyTerminalSessionSnapshot(event, payload, terminalWorkerManager));
+  ipcMain.handle("netcatty:terminal:reportAttachReady", (event, payload) => {
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+    const authorization = typeof payload?.authorization === "string" ? payload.authorization : "";
+    const ok = markAttachPopupReady(authorization, sessionId, event?.sender?.id);
+    return ok ? { success: true } : { success: false, error: "Unauthorized attach request" };
+  });
   ipcMain.handle("netcatty:terminal:reportAttachFailed", (event, payload) => {
     const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
     const authorization = typeof payload?.authorization === "string" ? payload.authorization : "";

@@ -5,6 +5,7 @@ const { randomUUID } = require("node:crypto");
 const crashLogBridge = require("../crashLogBridge.cjs");
 const {
   isAttachPopupClosePrepared,
+  onAttachOutputRestored,
   registerAttachPopupAuthorization,
   releaseAttachPopupAuthorization,
   restoreAttachedSessionOutput,
@@ -172,18 +173,32 @@ function createTerminalPopupWindowApi(ctx) {
       let lifecycleReleased = false;
       let closePreparationRequested = false;
       let closePreparationTimer = null;
+      let attachClosedNotified = false;
+      const notifyAttachClosed = () => {
+        if (!attachSessionId || attachClosedNotified) return;
+        attachClosedNotified = true;
+        // Lets a tab moved into this popup reappear in the window it came from.
+        try {
+          if (isLiveWindow(homeWindow)) {
+            homeWindow.webContents.send("netcatty:terminal-popup:attach-closed", { sessionId: attachSessionId });
+          }
+        } catch {
+          // ignore destroyed home window
+        }
+      };
       const releaseLifecycle = () => {
         if (lifecycleReleased) return;
         lifecycleReleased = true;
         if (closePreparationTimer) clearTimeout(closePreparationTimer);
         terminalPopupWindows.delete(popupId);
         const homeGone = isHomeGone();
+        let restorePromise = null;
         if (attachSessionId && attachSessionPopups.get(attachSessionId) === popupId && !homeGone) {
           attachSessionPopups.delete(attachSessionId);
           // Window may be destroyed before React cleanup runs; always restore
           // the display route from the main-process lifecycle.
           try {
-            restoreAttachedSessionOutput(attachSessionId);
+            restorePromise = Promise.resolve(restoreAttachedSessionOutput(attachSessionId));
           } catch (err) {
             crashLogBridge.captureError?.("terminal-popup", err, {
               popupId,
@@ -194,14 +209,20 @@ function createTerminalPopupWindowApi(ctx) {
         }
         releaseAttachPopupAuthorization(attachAuthorization);
         if (attachSessionPopups.get(attachSessionId) === popupId) attachSessionPopups.delete(attachSessionId);
-        if (attachSessionId) {
-          // Lets a tab moved into this popup reappear in the window it came from.
-          try {
-            if (isLiveWindow(homeWindow)) {
-              homeWindow.webContents.send("netcatty:terminal-popup:attach-closed", { sessionId: attachSessionId });
-            }
-          } catch {
-            // ignore destroyed home window
+        if (attachSessionId && !homeGone) {
+          if (restorePromise) {
+            void restorePromise.then((res) => {
+              if (!res || res.success || res.unavailable) {
+                notifyAttachClosed();
+              } else {
+                // Keep the home tab hidden until pending output recovery finishes.
+                onAttachOutputRestored(attachSessionId, notifyAttachClosed);
+              }
+            }).catch(() => {
+              onAttachOutputRestored(attachSessionId, notifyAttachClosed);
+            });
+          } else {
+            notifyAttachClosed();
           }
         }
         unregisterAppContentWindow(win);

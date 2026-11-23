@@ -814,6 +814,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             }
             // Resume only after the popup has subscribed to the live session.
             outputPauseLease.release();
+            void terminalBackend.reportAttachReady?.(sessionId, attachAuthorization || "");
             hasConnectedRef.current = true;
             updateStatus("connected");
             setTimeout(() => {

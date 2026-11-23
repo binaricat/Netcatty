@@ -352,6 +352,15 @@ export const useTerminalBackend = () => {
     return bridge.applyTerminalSessionSnapshot(sessionId, snapshot, context, authorization);
   }, []);
 
+  const reportAttachReady = useCallback(async (
+    sessionId: string,
+    authorization: string,
+  ) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.reportTerminalAttachReady) return { success: false as const };
+    return bridge.reportTerminalAttachReady(sessionId, authorization);
+  }, []);
+
   const reportAttachFailed = useCallback(async (
     sessionId: string,
     authorization: string,
@@ -642,6 +651,7 @@ export const useTerminalBackend = () => {
         restoreSessionOutput,
         requestSessionSnapshot,
         applySessionSnapshot,
+        reportAttachReady,
         reportAttachFailed,
         setSessionEncoding,
         onSessionData,
@@ -728,6 +738,7 @@ export const useTerminalBackend = () => {
       restoreSessionOutput,
       requestSessionSnapshot,
       applySessionSnapshot,
+      reportAttachReady,
       reportAttachFailed,
       setSessionEncoding,
       onSessionData,
