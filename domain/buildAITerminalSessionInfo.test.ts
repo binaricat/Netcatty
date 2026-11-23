@@ -113,3 +113,60 @@ test("only saved remote hosts can receive persistent server approvals", () => {
     allHosts: [saved],
   }).savedHostId, undefined);
 });
+
+test("exposes every live mapping of a multi-mapping port forward rule", () => {
+  const rule = {
+    id: "r1",
+    label: "db tunnels",
+    hostId: "h1",
+    type: "local",
+    localPort: 18080,
+    remoteHost: "127.0.0.1",
+    remotePort: 8080,
+    bindAddress: "127.0.0.1",
+    status: "partial",
+    createdAt: 1,
+    mappings: [
+      { localPort: 18080, remotePort: 8080 },
+      { localPort: 19090, remotePort: 9090 },
+    ],
+  } as unknown as import("./models.ts").PortForwardingRule;
+
+  const info = buildAITerminalSessionInfo(
+    baseSession(),
+    baseHost(),
+    "linux",
+    { portForwardingRules: [rule] },
+  );
+
+  assert.deepEqual(
+    info.activePortForwards?.map((forward) => forward.localPort).sort(),
+    [18080, 19090],
+  );
+  assert.ok(info.activePortForwards?.every((forward) => forward.ruleId === "r1"));
+});
+
+test("dynamic and single-mapping rules keep their scalar context entry", () => {
+  const dynamicRule = {
+    id: "r2",
+    label: "socks",
+    hostId: "h1",
+    type: "dynamic",
+    localPort: 1080,
+    bindAddress: "127.0.0.1",
+    status: "active",
+    createdAt: 1,
+  } as unknown as import("./models.ts").PortForwardingRule;
+
+  const info = buildAITerminalSessionInfo(
+    baseSession(),
+    baseHost(),
+    "linux",
+    { portForwardingRules: [dynamicRule] },
+  );
+
+  assert.deepEqual(
+    info.activePortForwards?.map((forward) => ({ ruleId: forward.ruleId, localPort: forward.localPort })),
+    [{ ruleId: "r2", localPort: 1080 }],
+  );
+});

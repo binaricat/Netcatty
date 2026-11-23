@@ -57,3 +57,24 @@ test('migratePortForwardingRulesFromStorage drops legacy active/connecting', () 
   assert.equal(migrated[2]?.error, 'auth failed');
   assert.equal(migrated[3]?.status, 'inactive');
 });
+
+test('mappings survive persistence and tolerate older stored rules without them', () => {
+  const multiRule: PortForwardingRule = {
+    ...baseRule,
+    mappings: [
+      { localPort: 8080, remotePort: 80 },
+      { localPort: 9090, remotePort: 90 },
+    ],
+  };
+  const persisted = toPersistedPortForwardingRule(multiRule);
+  assert.deepEqual(persisted.mappings, multiRule.mappings);
+
+  // Simulate a localStorage round-trip: JSON serialization keeps unknown
+  // optional fields, and migration must not drop them.
+  const revived = migratePortForwardingRulesFromStorage(
+    JSON.parse(JSON.stringify([persisted])),
+  );
+  assert.deepEqual(revived[0]?.mappings, multiRule.mappings);
+  assert.equal(revived[0]?.localPort, 8080);
+  assert.equal(revived[0]?.remotePort, 80);
+});
