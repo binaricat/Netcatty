@@ -7,7 +7,7 @@ import {
   splitTerminalLogicalLines,
   stripTerminalControlSequences,
   type ConfirmedPromptOptions,
-} from './terminalPromptSecurity.shared.cjs';
+} from '@/domain/terminalPromptSecurity.shared.cjs';
 
 const ESCAPE_SEQUENCE = "\\x" + "1b";
 const CURSOR_POSITION_PATTERN = new RegExp(`${ESCAPE_SEQUENCE}\\[\\d*(?:;(\\d*))?[Hf]`, 'gu');

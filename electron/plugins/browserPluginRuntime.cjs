@@ -179,7 +179,12 @@ class BrowserPluginRuntime {
     this.port = port1;
     this.router = new PluginRpcRouter({
       pluginId: this.plugin.id,
-      send: (message, transfer = []) => port1.postMessage(message, transfer),
+      send: (message, transfer = []) => {
+        // Electron MessagePortMain transfers ports only. ArrayBuffers remain
+        // in the envelope and are structured-cloned; passing them in this
+        // transfer list throws before the first database greeting is sent.
+        port1.postMessage(message, transfer.filter((item) => !(item instanceof ArrayBuffer)));
+      },
       requestHandlers: this.requestHandlers,
       notificationHandlers: this.notificationHandlers,
       onBeforeMessage: this.onBeforeMessage,

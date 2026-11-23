@@ -11,6 +11,7 @@ export type AIProviderId =
   | 'google'
   | 'ollama'
   | 'openrouter'
+  | 'opencode-go'
   | 'qwen'
   | 'deepseek'
   | 'kimi'
@@ -73,8 +74,29 @@ export interface ProviderConfig {
   advancedParams?: ProviderAdvancedParams;
 }
 
+/**
+ * Native protocol for a fixed-protocol provider's model, or undefined when the
+ * provider lets the user choose. Unknown model ids fall back to Chat
+ * Completions, which every OpenCode Go text model also serves.
+ */
+export function resolveProviderModelProtocol(
+  providerId: AIProviderId,
+  modelId: string | undefined,
+): FixedModelProtocol | undefined {
+  const preset = PROVIDER_PRESETS[providerId];
+  if (!preset?.fixedProtocol) return undefined;
+  return (modelId && preset.modelProtocols?.[modelId]) || 'chat';
+}
+
 /** Pick the protocol family for a provider config, falling back from providerId when style is unset. */
-export function resolveProviderStyle(config: Pick<ProviderConfig, 'providerId' | 'style'>): ProviderStyle {
+export function resolveProviderStyle(
+  config: Pick<ProviderConfig, 'providerId' | 'style'> & { defaultModel?: string },
+  modelId?: string,
+): ProviderStyle {
+  const fixedProtocol = resolveProviderModelProtocol(config.providerId, modelId ?? config.defaultModel);
+  if (fixedProtocol === 'messages') return 'anthropic';
+  if (fixedProtocol === 'google') return 'google';
+  if (fixedProtocol) return 'openai';
   if (config.style) return config.style;
   switch (config.providerId) {
     case 'anthropic':
@@ -86,8 +108,32 @@ export function resolveProviderStyle(config: Pick<ProviderConfig, 'providerId' |
   }
 }
 
-/** Pick the OpenAI request format. Missing or unknown values stay on Chat Completions. */
-export function resolveOpenAIApi(config: Pick<ProviderConfig, 'openaiApi'>): OpenAIApiFormat {
+/**
+ * Model discovery always runs on the OpenAI-compatible prefix for
+ * fixed-protocol providers, even when the selected model's native API is
+ * Messages or Google.
+ */
+export function resolveProviderDiscoveryStyle(
+  provider: Pick<ProviderConfig, 'providerId' | 'style'> & { defaultModel?: string },
+): ProviderStyle {
+  return PROVIDER_PRESETS[provider.providerId]?.fixedProtocol
+    ? 'openai'
+    : resolveProviderStyle(provider);
+}
+
+/**
+ * Pick the OpenAI request format. Missing or unknown values stay on Chat
+ * Completions. Fixed-protocol providers route each model to its native
+ * format, ignoring any stale saved override.
+ */
+export function resolveOpenAIApi(
+  config: Pick<ProviderConfig, 'openaiApi'> & { providerId?: AIProviderId; defaultModel?: string },
+  modelId?: string,
+): OpenAIApiFormat {
+  if (config.providerId) {
+    const fixedProtocol = resolveProviderModelProtocol(config.providerId, modelId ?? config.defaultModel);
+    if (fixedProtocol) return fixedProtocol === 'responses' ? 'responses' : 'chat';
+  }
   return config.openaiApi === 'responses' ? 'responses' : 'chat';
 }
 
@@ -421,7 +467,23 @@ export interface ProviderPreset {
   defaultBaseURL: string;
   modelsEndpoint?: string;
   defaultModels?: readonly string[];
+  /**
+   * The service fixes the wire protocol instead of exposing it as a user
+   * choice. Hide those controls and ignore stored overrides so a stale config
+   * cannot route requests the wrong way.
+   */
+  fixedProtocol?: boolean;
+  /**
+   * Native protocol per model for fixed-protocol services. Unknown ids fall
+   * back to Chat Completions, which every OpenCode Go text model serves.
+   */
+  modelProtocols?: Readonly<Record<string, FixedModelProtocol>>;
+  /** Endpoint prefix per native protocol for fixed-protocol services. */
+  protocolBaseURLs?: Partial<Record<FixedModelProtocol, string>>;
 }
+
+/** Wire protocol a fixed-protocol provider uses for one model. */
+export type FixedModelProtocol = 'chat' | 'responses' | 'messages' | 'google';
 
 // Provider presets for quick setup
 export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
@@ -430,6 +492,65 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
   google: { name: 'Google AI', defaultBaseURL: 'https://generativelanguage.googleapis.com/v1beta' },
   ollama: { name: 'Ollama', defaultBaseURL: 'http://localhost:11434/v1', modelsEndpoint: '/models' },
   openrouter: { name: 'OpenRouter', defaultBaseURL: 'https://openrouter.ai/api/v1', modelsEndpoint: '/models' },
+  'opencode-go': {
+    name: 'OpenCode Go',
+    defaultBaseURL: 'https://opencode.ai/inference/go/openai/v1',
+    modelsEndpoint: '/models',
+    fixedProtocol: true,
+    // OpenCode Go serves every text model through all four gateways, but each
+    // model has a native API that preserves its own reasoning/tool features.
+    modelProtocols: {
+      'grok-4.7': 'responses',
+      'gpt-5.6-luna': 'responses',
+      'gpt-6-luna': 'responses',
+      'muse-spark-1.2-contributor': 'responses',
+      'muse-spark-1.3-contributor': 'responses',
+      'claude-haiku-5-5': 'messages',
+      'minimax-m3': 'messages',
+      'qwen3.8-max': 'messages',
+      'qwen3.8-flash': 'messages',
+      'qwen3.7-plus': 'messages',
+      'qwen4-max': 'messages',
+      'gemini-4-argon': 'google',
+    },
+    protocolBaseURLs: {
+      chat: 'https://opencode.ai/inference/go/openai/v1',
+      responses: 'https://opencode.ai/inference/go/openai/v1',
+      messages: 'https://opencode.ai/inference/go/anthropic/v1',
+      google: 'https://opencode.ai/inference/go/google/v1beta',
+    },
+    defaultModels: [
+      'deepseek-v4.1-flash',
+      'deepseek-v4-pro',
+      'glm-5.3',
+      'glm-5.3-flash',
+      'glm-5.2',
+      'kimi-k3',
+      'kimi-k3.1-pro',
+      'kimi-k2.7-code',
+      'qwen4-max',
+      'qwen3.8-max',
+      'qwen3.8-flash',
+      'qwen3.7-plus',
+      'minimax-m3',
+      'minimax-m3.1-flash',
+      'mimo-v2.6-pro',
+      'mimo-v2.6-flash',
+      'grok-4.7',
+      'gpt-5.6-luna',
+      'gpt-6-luna',
+      'claude-haiku-5-5',
+      'gemini-4-argon',
+      'longcat-2.0',
+      'step-5-preview',
+      'hy4',
+      'hy3',
+      'beam-free',
+      'iceman-contributor-free',
+      'longcat-2.5-free',
+      'hy4-flash-free',
+    ],
+  },
   qwen: {
     name: 'Qwen',
     defaultBaseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',

@@ -19,12 +19,7 @@ import {
 } from '../ai-elements/conversation';
 import { LazyMessageResponse } from '../ai-elements/LazyMessageResponse';
 import { Message, MessageContent } from '../ai-elements/messageShell';
-import {
-  AI_MARKDOWN_WARMUP_INITIAL_DELAY_MS,
-  AI_MARKDOWN_WARMUP_RESUME_DELAY_MS,
-  isAiComposerTyping,
-  scheduleAiMarkdownWarmup,
-} from './aiMarkdownWarmup';
+import { warmAiMarkdownRenderer } from './aiMarkdownWarmup';
 import { ToolCall } from '../ai-elements/tool-call';
 import ThinkingBlock from './ThinkingBlock';
 import AgentActivityGroup from './AgentActivityGroup';
@@ -393,16 +388,11 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
     [messages],
   );
 
-  // Do not start Streamdown on expand. Import cannot be cancelled, and idle
-  // right after open collides with the first few keystrokes. History stays
-  // plaintext until send, composer blur, or a long unfocused delay.
+  // Warm Streamdown immediately once assistant markdown is on screen so opening
+  // any chat renders formatted markdown right away instead of sitting as raw text.
   useEffect(() => {
-    if (!hasAssistantMarkdown) return undefined;
-    return scheduleAiMarkdownWarmup({
-      isBusy: isAiComposerTyping,
-      initialDelayMs: AI_MARKDOWN_WARMUP_INITIAL_DELAY_MS,
-      resumeDelayMs: AI_MARKDOWN_WARMUP_RESUME_DELAY_MS,
-    });
+    if (!hasAssistantMarkdown) return;
+    void warmAiMarkdownRenderer();
   }, [hasAssistantMarkdown]);
 
   const visibleMessages = useMemo(
@@ -776,7 +766,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                       : (
                           <React.Profiler {...getAIPanelProfilerProps('AIChatPanel.Markdown')}>
                             <div data-ai-content="markdown">
-                              <LazyMessageResponse deferUntilWarm isAnimating={!!isThisStreaming}>
+                              <LazyMessageResponse isAnimating={!!isThisStreaming}>
                                 {message.content}
                               </LazyMessageResponse>
                             </div>

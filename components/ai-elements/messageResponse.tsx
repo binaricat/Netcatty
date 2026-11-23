@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Streamdown } from 'streamdown';
 
-import { scheduleWhenAiComposerIdle } from '../ai/aiMarkdownWarmup';
+import { isAiComposerTyping, scheduleWhenAiComposerIdle } from '../ai/aiMarkdownWarmup';
 import { cn } from '../../lib/utils';
 import { hasMarkdownCodeFence } from './hasMarkdownCodeFence';
 import {
@@ -38,11 +38,20 @@ function MessageResponseView({ className, children, ...props }: MessageResponseP
   useEffect(() => {
     if (!wantsCode || codePlugin) return undefined;
     let cancelled = false;
-    const cancelIdle = scheduleWhenAiComposerIdle(() => {
-      void warmAiCodeHighlighter().then((plugin) => {
-        if (!cancelled) setCodePlugin(plugin);
-      });
-    });
+    // Load Shiki on the next idle frame instead of waiting 4s or blocking while
+    // the composer merely has focus; only pause while the user is actively typing.
+    const cancelIdle = scheduleWhenAiComposerIdle(
+      () => {
+        void warmAiCodeHighlighter().then((plugin) => {
+          if (!cancelled) setCodePlugin(plugin);
+        });
+      },
+      {
+        isBusy: isAiComposerTyping,
+        initialDelayMs: 0,
+        resumeDelayMs: 300,
+      },
+    );
     return () => {
       cancelled = true;
       cancelIdle();

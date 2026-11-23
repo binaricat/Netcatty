@@ -10,6 +10,7 @@ import {
   type OAuthTokens,
 } from '../../../domain/sync';
 import { netcattyBridge } from '../netcattyBridge';
+import { createSyncedFileSignature } from '../syncSignature.js';
 
 const normalizeEndpoint = (endpoint: string): string => {
   const trimmed = endpoint.trim();
@@ -26,6 +27,7 @@ export class WebDAVAdapter {
   private config: WebDAVConfig | null;
   private resource: string | null;
   private account: ProviderAccount | null;
+  remoteValidator?: { signature: string; etag: string };
 
   constructor(config?: WebDAVConfig, resourceId?: string) {
     this.config = config
@@ -51,6 +53,7 @@ export class WebDAVAdapter {
     this.config = null;
     this.resource = null;
     this.account = null;
+    this.remoteValidator = undefined;
   }
 
   async initializeSync(): Promise<string | null> {
@@ -78,12 +81,21 @@ export class WebDAVAdapter {
         throw new Error('WebDAV sync requires the Netcatty desktop sync bridge');
       }
       const result = await bridge.cloudSyncWebdavUpload(this.config, syncedFile);
+      await this.recordValidator(syncedFile, result?.etag);
       this.resource = result?.resourceId || this.getSyncPath();
       return this.resource;
     });
   }
 
   async download(): Promise<SyncedFile | null> {
+    return (await this.readRemote()).remoteFile;
+  }
+
+  async inspectRemote(etag: string): Promise<{ remoteFile: SyncedFile | null; notModified?: boolean }> {
+    return this.readRemote(etag);
+  }
+
+  private async readRemote(etag?: string): Promise<{ remoteFile: SyncedFile | null; notModified?: boolean }> {
     return this.withWebdavErrorContext('download', async () => {
       if (!this.config) {
         throw new Error('Missing WebDAV config');
@@ -92,9 +104,18 @@ export class WebDAVAdapter {
       if (!bridge?.cloudSyncWebdavDownload) {
         throw new Error('WebDAV sync requires the Netcatty desktop sync bridge');
       }
-      const result = await bridge.cloudSyncWebdavDownload(this.config);
-      return (result?.syncedFile ?? null) as SyncedFile | null;
+      const result = await bridge.cloudSyncWebdavDownload(this.config, etag);
+      if (result?.notModified) return { remoteFile: null, notModified: true };
+      const remoteFile = result?.syncedFile ?? null;
+      await this.recordValidator(remoteFile, result?.etag);
+      return { remoteFile };
     });
+  }
+
+  private async recordValidator(file: SyncedFile | null, etag?: string): Promise<void> {
+    this.remoteValidator = undefined;
+    const signature = file && etag ? await createSyncedFileSignature(file) : null;
+    if (signature && etag) this.remoteValidator = { signature, etag };
   }
 
   async deleteSync(): Promise<void> {

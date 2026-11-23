@@ -47,7 +47,7 @@ import { materializeHostProxyProfile } from '../../domain/proxyProfiles';
 import { useVaultHostDeletion } from '../state/useVaultHostDeletion';
 import { buildSshDeepLinkConnectionHost, buildSshDeepLinkEphemeralHost, buildSshDeepLinkEphemeralHostFromSaved, buildSshDeepLinkHostDraft, findSshDeepLinkHost, parseSshDeepLink } from '../../domain/sshDeepLink';
 import { buildTelnetDeepLinkConnectionHost, buildTelnetDeepLinkEphemeralHostFromSaved, buildTelnetDeepLinkOpenHost, findTelnetDeepLinkHost, materializeTelnetDeepLinkMatchHost, parseTelnetDeepLink } from '../../domain/telnetDeepLink';
-import { buildJmsDeepLinkEphemeralHost, isSupportedJmsProtocol, parseJmsDeepLink } from '../../domain/jmsDeepLink';
+import { buildJmsDeepLinkEphemeralHost, parseJmsDeepLinkResult } from '../../domain/jmsDeepLink';
 import { applyEphemeralHostDistroUpdate, applyEphemeralHostsUpdate, splitHostsUpdateByEphemeral } from '../../domain/ephemeralHosts';
 import { prepareConnectionHost, temporaryConnectionPrepareOptions } from '../../domain/legacyAlgorithms';
 import { resolveHostAuth } from '../../domain/sshAuth';
@@ -1734,16 +1734,16 @@ export function AppSideEffects() {
   const _processJmsDeepLink = useEffectEvent((payload: { url?: string }) => {
     startupLaunchIntentReceivedRef.current = true;
     const rawUrl = payload?.url || '';
-    const target = parseJmsDeepLink(rawUrl);
-    if (!target) {
-      toast.warning(t('deepLink.jms.invalid'));
+    const result = parseJmsDeepLinkResult(rawUrl);
+    if (result.ok === false) {
+      if (result.reason === 'unsupported_protocol') {
+        toast.warning(t('deepLink.jms.unsupported', { protocol: result.protocol }));
+      } else {
+        toast.warning(t('deepLink.jms.invalid'));
+      }
       return;
     }
-    if (!isSupportedJmsProtocol(target.protocol)) {
-      toast.warning(t('deepLink.jms.unsupported', { protocol: target.protocol }));
-      return;
-    }
-    const ephemeralHost = buildJmsDeepLinkEphemeralHost(target, {
+    const ephemeralHost = buildJmsDeepLinkEphemeralHost(result.target, {
       id: crypto.randomUUID(),
       now: Date.now(),
     });

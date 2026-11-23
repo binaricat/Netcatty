@@ -2225,14 +2225,61 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     [managerTerminalInfos, workspaces],
   );
 
-  // "Open/switch" from the manager: exact-scope chats are rank-3 entries of
-  // this panel's scoped history, so the ordinary selection path (pointer,
-  // panel view, drawer close) resolves them. Cross-scope activation is
-  // deliberately deferred (issue #4098 phase 5) — other-scope rows offer
-  // rebind instead of faking activation.
-  const handleManagerActivate = useCallback((sessionId: string) => {
-    handleSelectSession(sessionId);
-  }, [handleSelectSession]);
+  // Clicking any chat in the All Chats tab opens it directly in this panel.
+  // Chats already belonging to this scope switch immediately; past/closed or
+  // other-scope chats attach to this panel transparently before closing the
+  // drawer so users never have to perform a manual two-step rebind.
+  const handleManagerActivate = useCallback(async (sessionId: string) => {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session) return;
+    const isAlreadyInScope = Boolean(
+      scopeTargetId
+      && !session.scopeDangling
+      && session.scope.type === scopeType
+      && session.scope.targetId === scopeTargetId,
+    );
+    if (isAlreadyInScope || !scopeTargetId || !rebindSessionScope) {
+      handleSelectSession(sessionId);
+      return;
+    }
+    await stopActiveTurnBeforeScopeRebind(sessionId, {
+      abortControllersRef,
+      streamingSessionIds,
+      stopStreamingForSession,
+    });
+    const destinationHostIds = scopeHostIds && scopeHostIds.length > 0
+      ? [...scopeHostIds]
+      : undefined;
+    rebindSessionScope(sessionId, {
+      type: scopeType,
+      targetId: scopeTargetId,
+      hostIds: destinationHostIds,
+    });
+    syncWorkspaceAnchorsForScopeRebind(
+      sessionId,
+      {
+        type: scopeType,
+        targetId: scopeTargetId,
+        label: '',
+        hostIds: destinationHostIds,
+      },
+      workspaces,
+      onSetWorkspaceAnchorChat,
+    );
+    setShowHistory(false);
+  }, [
+    abortControllersRef,
+    handleSelectSession,
+    onSetWorkspaceAnchorChat,
+    rebindSessionScope,
+    scopeHostIds,
+    scopeTargetId,
+    scopeType,
+    sessions,
+    stopStreamingForSession,
+    streamingSessionIds,
+    workspaces,
+  ]);
 
   const handleManagerRebind = useCallback(async (sessionId: string, target: GlobalManagerScopeTarget) => {
     if (!rebindSessionScope) return;
@@ -2305,10 +2352,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       currentScopeHostIds={scopeHostIds}
       workspaces={workspaces}
       terminalInfos={managerTerminalInfos}
+      hosts={hosts}
       externalAgents={externalAgents}
       rebindTargets={managerRebindTargets}
-      onSelect={handleManagerActivate}
+      onSelect={(sessionId) => { void handleManagerActivate(sessionId); }}
       onRebind={handleManagerRebind}
+      onRename={handleRenameSession}
       onDelete={(sessionId) => { void handleManagerDelete(sessionId); }}
       onExport={handleManagerExport}
     />
@@ -2320,10 +2369,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     scopeHostIds,
     workspaces,
     managerTerminalInfos,
+    hosts,
     externalAgents,
     managerRebindTargets,
     handleManagerActivate,
     handleManagerRebind,
+    handleRenameSession,
     handleManagerDelete,
     handleManagerExport,
   ]);

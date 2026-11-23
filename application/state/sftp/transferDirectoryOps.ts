@@ -157,11 +157,26 @@ async function tryStatTransferTarget(
   return tryStatTransferPath(targetPath, targetIsLocal, targetSftpId, targetEncoding);
 }
 
+export interface TransferConnectHosts {
+  source?: Host;
+  target?: Host;
+  /**
+   * Connect-time jump-host chain snapshots. Pinned together with the top-level
+   * host so leases opened after a bastion edit still dial through the chain the
+   * pane's session connected with (private hostnames can resolve differently
+   * per bastion). Present only when the matching endpoint is pinned.
+   */
+  sourceChain?: Host[];
+  targetChain?: Host[];
+}
+
 export type AcquireTransferSessionFn = (
   hostId: string,
   transferId: string,
   /** Connect-time host (session hostname/port/user overrides). Prefer over vault. */
   connectHost?: Host,
+  /** Connect-time jump-host snapshots; undefined re-resolves the live chain. */
+  jumpHosts?: Host[],
 ) => Promise<TransferConnectionLease>;
 
 interface UseSftpDirectoryTransferOpsParams {
@@ -288,6 +303,7 @@ export function useSftpDirectoryTransferOps({
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
     sameHost?: boolean,
+    connectHosts?: TransferConnectHosts,
   ): Promise<void> => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
@@ -335,10 +351,14 @@ export function useSftpDirectoryTransferOps({
           // Dedicated pool only for remote ends — panel/browse sessions die when
           // the SFTP tab is closed, which freezes global transfer center rows.
           if (acquireTransferSession && !sourceIsLocal && task.sourceHostId) {
-            sourceLease = await acquireTransferSession(task.sourceHostId, task.id);
+            sourceLease = await acquireTransferSession(
+              task.sourceHostId, task.id, connectHosts?.source, connectHosts?.sourceChain,
+            );
           }
           if (acquireTransferSession && !targetIsLocal && task.targetHostId) {
-            targetLease = await acquireTransferSession(task.targetHostId, task.id);
+            targetLease = await acquireTransferSession(
+              task.targetHostId, task.id, connectHosts?.target, connectHosts?.targetChain,
+            );
           }
         };
 
@@ -561,6 +581,7 @@ export function useSftpDirectoryTransferOps({
     followSymlinks = false, // Only true for downloadToLocal — uploads/copies treat symlinks as files
     discoveryProgress?: DirectoryDiscoveryProgress,
     traversalBudget?: SftpDirectoryTraversalBudget,
+    connectHosts?: TransferConnectHosts,
     rootProgress?: DirectoryDiscoveryProgress,
   ): Promise<number> => {
     // Check if task or root task was cancelled before starting
@@ -720,6 +741,7 @@ export function useSftpDirectoryTransferOps({
           followSymlinks,
           progress,
           traversal,
+          connectHosts,
         );
       }
     } finally {
@@ -957,6 +979,7 @@ export function useSftpDirectoryTransferOps({
               targetEncoding,
               rootTaskId,
               sameHost,
+              connectHosts,
             );
 
             activeChildIdsRef.current.get(rootTaskId)?.delete(fileId);
@@ -1086,7 +1109,7 @@ export function useSftpDirectoryTransferOps({
   const transferDirectory = async (
     ...args: Parameters<typeof walkDirectory>
   ): Promise<number> => {
-    const [, , , , , , , , , , , discoveryProgress, traversalBudget] = args;
+    const [, , , , , , , , , , , discoveryProgress, traversalBudget, connectHosts] = args;
     if (discoveryProgress) return walkDirectory(...args);
     // Root of a folder task: own the tree-wide progress so we can drain every
     // directory's file batch, even when the walk itself throws, before the
@@ -1105,7 +1128,7 @@ export function useSftpDirectoryTransferOps({
       walkErrors = await walkDirectory(
         task, sourceSftpId, targetSftpId, sourceIsLocal, targetIsLocal, sourceEncoding,
         targetEncoding, rootTaskId, sameHost, symlinkDepth, followSymlinks,
-        undefined, traversalBudget, rootProgress,
+        undefined, traversalBudget, connectHosts, rootProgress,
       );
     } catch (error) {
       walkError = error;

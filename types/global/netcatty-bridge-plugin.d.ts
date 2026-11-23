@@ -183,6 +183,7 @@ declare global {
     respondPluginAIHost?(response: import("@netcatty/plugin-contract").PluginAIHostResponse): Promise<boolean>;
     onPluginAIHostRequest?(callback: (request: import("@netcatty/plugin-contract").PluginAIHostRequest) => void): () => void;
     setPluginInteractionReady?(ready: boolean): Promise<boolean>;
+    openPluginHostStream?(payload: { response: import("@netcatty/plugin-contract").HostInteractionResponse; connectionOptions: PortForwardOptions }): Promise<import("@netcatty/plugin-contract").HostInteractionReceipt>;
     respondPluginInteraction?(response: import("@netcatty/plugin-contract").HostInteractionResponse): Promise<import("@netcatty/plugin-contract").HostInteractionReceipt>;
     onPluginInteraction?(callback: (event: import("@netcatty/plugin-contract").HostInteractionEvent) => void): () => void;
     listPlugins?(): Promise<NetcattyInstalledPlugin[]>;

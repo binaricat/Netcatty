@@ -1,9 +1,10 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { Download, Pencil, Search, Trash2, Upload, X } from 'lucide-react';
+import { Download, MoreHorizontal, Pencil, Search, Trash2, Upload, X } from 'lucide-react';
 import type { AISession } from '../infrastructure/ai/types';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { cn } from '../lib/utils';
 import { MAX_SEARCH_QUERY_LENGTH, truncateQueryForMatch } from '../domain/searchMatcher';
+import { Dropdown, DropdownContent, DropdownTrigger } from './ui/dropdown';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -50,6 +51,7 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
 }) => {
   const { t } = useI18n();
   const [view, setView] = useState<'scoped' | 'global'>('scoped');
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [renderCount, setRenderCount] = useState(SESSION_RENDER_BATCH);
   const [searchQuery, setSearchQuery] = useState('');
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
@@ -131,39 +133,48 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {onImportSessions && (
-            <Tooltip>
-              <TooltipTrigger asChild>
+          {(onImportSessions || onExportSessions) && (
+            <Dropdown open={headerMenuOpen} onOpenChange={setHeaderMenuOpen}>
+              <DropdownTrigger asChild>
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onImportSessions();
-                  }}
+                  type="button"
                   className="text-[12px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer"
-                  aria-label={t('ai.chat.importSessions')}
+                  aria-label={t('ai.chat.managerMoreActions')}
                 >
-                  <Upload size={14} />
+                  <MoreHorizontal size={14} />
                 </button>
-              </TooltipTrigger>
-              <TooltipContent>{t('ai.chat.importSessions')}</TooltipContent>
-            </Tooltip>
-          )}
-          {onExportSessions && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onExportSessions();
-                  }}
-                  className="text-[12px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-pointer"
-                  aria-label={t('ai.chat.exportSessions')}
-                >
-                  <Download size={14} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t('ai.chat.exportSessions')}</TooltipContent>
-            </Tooltip>
+              </DropdownTrigger>
+              <DropdownContent align="end" className="min-w-[152px] p-1" keyboardNavigation>
+                {onImportSessions && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setHeaderMenuOpen(false);
+                      onImportSessions();
+                    }}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-foreground/85 hover:bg-muted cursor-pointer"
+                  >
+                    <Upload size={12} className="shrink-0 text-muted-foreground" />
+                    <span>{t('ai.chat.importSessions')}</span>
+                  </button>
+                )}
+                {onExportSessions && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setHeaderMenuOpen(false);
+                      onExportSessions();
+                    }}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-foreground/85 hover:bg-muted cursor-pointer"
+                  >
+                    <Download size={12} className="shrink-0 text-muted-foreground" />
+                    <span>{t('ai.chat.exportSessions')}</span>
+                  </button>
+                )}
+              </DropdownContent>
+            </Dropdown>
           )}
           <button
             onClick={onClose}

@@ -43,4 +43,6 @@ test("void children are rejected in snapshots and mutation insertions", () => {
     assert.throws(() => validatePluginRemoteTree({ children: [node] }), /Void view elements/);
     assert.throws(() => validatePluginMutationBatch([[0, "~", node, 0]]), /Void view elements/);
   }
+  assert.throws(() => validatePluginRemoteTree({ children: [element("a", "textarea", {}, [element("b", "div")])] }), /Textarea/);
+  assert.equal(validatePluginRemoteTree({ children: [element("a", "textarea", {}, [text("b", "Hello"), text("c", " world")])] }), true);
 });
