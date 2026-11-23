@@ -36,9 +36,30 @@ test('plugin surface forwards its own input and contains malformed updates and r
     assert.equal(events.length, 2);
     await act(async () => { root.render(<PluginRemoteSurface tree={tree} css="@import 'https://bad.example/x';" onEvent={() => {}} />); });
     assert.equal(document.querySelector('[role=alert]')?.textContent, 'Unable to display plugin view.');
+    const optionA = { id: 'a', type: 1, element: 'option', attributes: { selected: '' }, children: [{ id: 'at', type: 3, data: '  First\n option  ' }] };
+    const optionB = { id: 'b', type: 1, element: 'option', attributes: {}, children: [{ id: 'bt', type: 3, data: 'Second' }] };
+    const controls = { children: [
+      { id: 'select', type: 1, element: 'select', attributes: { multiple: '' }, children: [optionA, optionB] },
+      { id: 'textarea', type: 1, element: 'textarea', attributes: {}, children: [{ id: 'ta', type: 3, data: 'Hello' }, { id: 'tb', type: 3, data: ' world' }] },
+    ] };
+    const renderControls = async () => act(async () => root.render(<PluginRemoteSurface tree={{ ...controls }} css="" onEvent={(event) => events.push(event)} />));
+    await renderControls();
+    const select = captured!.querySelector('select')!;
+    assert.deepEqual([...select.selectedOptions].map((option) => option.value), ['First option']);
+    assert.equal(captured!.querySelector('textarea')!.value, 'Hello world');
+    await act(async () => {
+      select.options[0].selected = false; select.options[1].selected = true;
+      select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    });
+    assert.deepEqual(events.at(-1), { nodeId: 'select', type: 'change', value: 'Second', values: ['Second'] });
+    optionA.attributes = {} as typeof optionA.attributes;
+    optionB.attributes = { selected: '' };
+    await renderControls();
+    assert.deepEqual([...select.selectedOptions].map((option) => option.value), ['Second'], 'acknowledgement keeps native option text values selected');
+
     let clicks = 0;
-    const renderView = async (nextTree: unknown) => act(async () => root.render(<>
-      <PluginRemoteSurface key="view" tree={nextTree} css="" onEvent={() => {}} />
+    const renderView = async (nextTree: unknown, viewKey = 'view') => act(async () => root.render(<>
+      <PluginRemoteSurface key={viewKey} tree={nextTree} css="" onEvent={() => {}} />
       <button id="canary" onClick={() => clicks++}>Host canary</button>
       <PluginRemoteSurface key="sibling" tree={tree} css="" onEvent={() => {}} />
     </>));
@@ -48,15 +69,17 @@ test('plugin surface forwards its own input and contains malformed updates and r
     assert.ok(document.querySelector('[role=alert]'));
     await act(async () => document.getElementById('canary')!.click());
     assert.equal(clicks, 1);
-    // Validated data can still hit a React rendering constraint. Contain that
-    // descendant throw too, independently of the policy rejection above.
+    // Unexpected rendering failures stay within this plugin, including layout effects.
     const originalError = console.error;
+    const prevAttach = dom.window.Element.prototype.attachShadow;
     try {
       console.error = () => {};
-      await renderView({ children: [{ id: 'bad', type: 1, element: 'textarea', attributes: {}, children: [
-        { id: 'a', type: 3, data: 'one' }, { id: 'b', type: 3, data: 'two' },
-      ] }] });
-    } finally { console.error = originalError; }
+      dom.window.Element.prototype.attachShadow = () => { throw new Error('Synthetic surface failure'); };
+      await renderView(tree, 'broken-surface');
+    } finally {
+      dom.window.Element.prototype.attachShadow = prevAttach;
+      console.error = originalError;
+    }
     assert.equal(document.querySelectorAll('[data-plugin-remote-surface]').length, 1);
     assert.ok(document.querySelector('[role=alert]'));
     await act(async () => document.getElementById('canary')!.click());
