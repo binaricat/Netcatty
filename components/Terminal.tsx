@@ -179,7 +179,7 @@ import {
   isIdleShellReadyForCommandInjection,
   isShellPromptReadyForInsertion,
 } from "../domain/terminalCommandInjectionReady";
-import { detectPrompt } from "./terminal/autocomplete/promptDetector";
+import { detectPrompt, getPromptLineTextAfterCursor } from "./terminal/autocomplete/promptDetector";
 import type { SensitiveInputActiveRef } from "./terminal/autocomplete/terminalAutocompletePrompt";
 import {
   applyUserCursorPreference,
@@ -645,6 +645,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         isAtPrompt: prompt.isAtPrompt,
         userInputLength: prompt.userInput.length,
         pendingTypedInputLength: commandBufferRef.current.length,
+        afterCursorInputLength: getPromptLineTextAfterCursor(term).trim().length,
       };
       return options?.allowDraft
         ? isShellPromptReadyForInsertion(readiness)

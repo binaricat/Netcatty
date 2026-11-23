@@ -681,6 +681,27 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
 }
 
 /**
+ * Extract the text on the active logical line to the right of the cursor,
+ * including any wrapped continuation rows belonging to the same line.
+ */
+export function getPromptLineTextAfterCursor(term: XTerm): string {
+  const buffer = term.buffer.active;
+  const cursorY = buffer.cursorY + buffer.baseY;
+  const cursorX = Math.max(0, buffer.cursorX);
+  const line = buffer.getLine(cursorY);
+  if (!line) return "";
+
+  let after = sliceStringByCellColumns(line.translateToString(false), cursorX, undefined, term);
+  const maxRow = typeof buffer.length === "number" ? buffer.length : Number.POSITIVE_INFINITY;
+  for (let row = cursorY + 1; row < maxRow; row += 1) {
+    const nextLine = buffer.getLine(row);
+    if (!nextLine || !nextLine.isWrapped) break;
+    after += nextLine.translateToString(false);
+  }
+  return after;
+}
+
+/**
  * Whether a character lives in the Unicode Private Use Area (U+E000–U+F8FF).
  * Powerline separators (U+E0B0..) and Nerd Font icons (U+E200.., U+F000..) all
  * fall here. A PUA char followed by a space is common in themed prompt

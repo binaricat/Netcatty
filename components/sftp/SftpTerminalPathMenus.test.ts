@@ -15,6 +15,8 @@ import {
   isTerminalReadyForCommandInjection,
   registerTerminalCommandInjectionReadyReader,
 } from "../terminal/runtime/terminalCommandInjectionReadyRegistry";
+import { detectPrompt, getPromptLineTextAfterCursor } from "../terminal/autocomplete/promptDetector";
+import { isIdleShellReadyForCommandInjection } from "../../domain/terminalCommandInjectionReady";
 import { isTerminalDraftContextSafeForPathInsertion } from "../../domain/sftpTerminalPath";
 import en from "../../application/i18n/locales/en";
 import es from "../../application/i18n/locales/es";
@@ -263,10 +265,101 @@ test("SftpSidePanel guards terminal path insertion and cd writes and SftpPaneVie
   );
   assert.match(
     terminalSource,
-    /registerTerminalCommandInjectionReadyReader\(\s*sessionId,[\s\S]*?promptText: prompt\.promptText,\s*userInput: prompt\.userInput,\s*pendingTypedInput: commandBufferRef\.current,/,
+    /registerTerminalCommandInjectionReadyReader\(\s*sessionId,[\s\S]*?afterCursorInputLength: getPromptLineTextAfterCursor\(term\)\.trim\(\)\.length,[\s\S]*?promptText: prompt\.promptText,\s*userInput: prompt\.userInput,\s*pendingTypedInput: commandBufferRef\.current,/,
   );
   assert.match(paneViewSource, /if \(prev\.onInsertPathToTerminal !== next\.onInsertPathToTerminal\) return false;/);
   assert.match(paneViewSource, /if \(prev\.onCdInTerminal !== next\.onCdInTerminal\) return false;/);
+});
+
+test("after-cursor text after Ctrl+A on recalled history blocks idle cd injection (including wrapped lines)", () => {
+  const makeTerm = (rows: Array<{ text: string; isWrapped?: boolean }>, cursorY: number, cursorX: number) => ({
+    cols: 80,
+    buffer: {
+      active: {
+        baseY: 0,
+        cursorY,
+        cursorX,
+        length: rows.length,
+        getLine: (row: number) => {
+          const entry = rows[row];
+          if (!entry) return undefined;
+          return {
+            isWrapped: Boolean(entry.isWrapped),
+            translateToString: () => entry.text,
+          };
+        },
+      },
+    },
+  });
+
+  // Recalled `$ rm -rf /tmp/foo` then pressed Ctrl+A (cursor right after `$ `).
+  const recalledTerm = makeTerm([{ text: "$ rm -rf /tmp/foo   " }], 0, 2);
+  const recalledPrompt = detectPrompt(recalledTerm as never);
+  assert.equal(recalledPrompt.isAtPrompt, true);
+  assert.equal(recalledPrompt.userInput, "");
+  const recalledAfter = getPromptLineTextAfterCursor(recalledTerm as never).trim();
+  assert.equal(recalledAfter, "rm -rf /tmp/foo");
+  assert.equal(
+    isIdleShellReadyForCommandInjection({
+      sensitiveInputActive: false,
+      hasLiveTerminal: true,
+      alternateScreenActive: false,
+      isAtPrompt: recalledPrompt.isAtPrompt,
+      userInputLength: recalledPrompt.userInput.length,
+      pendingTypedInputLength: 0,
+      afterCursorInputLength: recalledAfter.length,
+    }),
+    false,
+  );
+
+  // Wrapped command where remainder sits on the wrapped continuation row.
+  const wrappedTerm = makeTerm(
+    [
+      { text: "$ " },
+      { text: "rm -rf /tmp/foo", isWrapped: true },
+    ],
+    0,
+    2,
+  );
+  const wrappedAfter = getPromptLineTextAfterCursor(wrappedTerm as never).trim();
+  assert.equal(wrappedAfter, "rm -rf /tmp/foo");
+  assert.equal(
+    isIdleShellReadyForCommandInjection({
+      sensitiveInputActive: false,
+      hasLiveTerminal: true,
+      alternateScreenActive: false,
+      isAtPrompt: true,
+      userInputLength: 0,
+      pendingTypedInputLength: 0,
+      afterCursorInputLength: wrappedAfter.length,
+    }),
+    false,
+  );
+
+  // Clean idle prompt with only padding spaces after cursor stays ready.
+  const idleTerm = makeTerm(
+    [
+      { text: "$        " },
+      { text: "unrelated next line", isWrapped: false },
+    ],
+    0,
+    2,
+  );
+  const idlePrompt = detectPrompt(idleTerm as never);
+  const idleAfter = getPromptLineTextAfterCursor(idleTerm as never).trim();
+  assert.equal(idleAfter, "");
+  assert.equal(
+    isIdleShellReadyForCommandInjection({
+      sensitiveInputActive: false,
+      hasLiveTerminal: true,
+      alternateScreenActive: false,
+      isAtPrompt: idlePrompt.isAtPrompt,
+      userInputLength: idlePrompt.userInput.length,
+      pendingTypedInputLength: 0,
+      afterCursorInputLength: idleAfter.length,
+    }),
+    true,
+  );
 });
 
 test("prompt draft reader blocks insertion when cursor is inside an open double quote and cleans up on unregister", () => {

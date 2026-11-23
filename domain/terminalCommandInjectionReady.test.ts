@@ -46,6 +46,10 @@ test("rejects sensitive prompts, alt-screen TUIs, partial input, and missing ter
     false,
   );
   assert.equal(
+    isIdleShellReadyForCommandInjection({ ...ready, afterCursorInputLength: 14 }),
+    false,
+  );
+  assert.equal(
     isIdleShellReadyForCommandInjection({ ...ready, hasLiveTerminal: false }),
     false,
   );

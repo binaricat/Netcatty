@@ -325,6 +325,25 @@ test("isShellDraftSafeForPathInsertion blocks unclosed quotes, backticks, and tr
   assert.equal(isShellDraftSafeForPathInsertion("echo \"$(cat \"a\")", "posix"), false);
   assert.equal(isShellDraftSafeForPathInsertion("cat \\", "posix"), false);
   assert.equal(isShellDraftSafeForPathInsertion("cat \\\\\\", "posix"), false);
+
+  // Trailing unescaped `$` would fuse with an inserted `'...'` into ANSI-C `$'...'`,
+  // turning `/tmp/\'; printf INJECTED; #` into an unquoted breakout.
+  assert.equal(isShellDraftSafeForPathInsertion("echo $", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $$", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $(echo $", "posix"), false);
+  assert.equal(
+    isTerminalDraftContextSafeForPathInsertion({
+      promptText: "user@host:~$ ",
+      userInput: "echo $",
+      pendingTypedInput: "echo $",
+      shellKind: "posix",
+    }),
+    false,
+  );
+  // Escaped `$` or `$VAR` (not immediately preceding the inserted quote) stays safe.
+  assert.equal(isShellDraftSafeForPathInsertion("echo \\$", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $HOME", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $HOME ", "posix"), true);
 });
 
 test("isShellDraftSafeForPathInsertion handles fish, PowerShell, and CMD quoting rules", () => {
@@ -334,6 +353,7 @@ test("isShellDraftSafeForPathInsertion handles fish, PowerShell, and CMD quoting
   assert.equal(isShellDraftSafeForPathInsertion("echo 'a\\'", "fish"), false);
   assert.equal(isShellDraftSafeForPathInsertion("echo \"a", "fish"), false);
   assert.equal(isShellDraftSafeForPathInsertion("cat \\", "fish"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $", "fish"), false);
 
   // PowerShell single/double quotes, doubled quotes, curly quotes, backtick escapes
   assert.equal(isShellDraftSafeForPathInsertion("Get-Content ", "powershell"), true);
@@ -346,6 +366,7 @@ test("isShellDraftSafeForPathInsertion handles fish, PowerShell, and CMD quoting
   assert.equal(isShellDraftSafeForPathInsertion("Get-Content \u2019", "powershell"), false);
   assert.equal(isShellDraftSafeForPathInsertion("Get-Content \u201C", "powershell"), false);
   assert.equal(isShellDraftSafeForPathInsertion("Get-Content `", "powershell"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo @", "powershell"), false);
   assert.equal(isShellDraftSafeForPathInsertion("echo \"$(cat \"", "powershell"), false);
 
   // CMD double quotes and caret escapes

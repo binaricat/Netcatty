@@ -262,6 +262,11 @@ function isPosixDraftSafeForPathInsertion(draft: string): boolean {
       i += 1;
       continue;
     }
+    if (ch === "$" && i === draft.length - 1) {
+      // A trailing unescaped `$` would fuse with an inserted `'...'` into
+      // POSIX/Bash/Zsh ANSI-C `$'...'`, where `\'` escapes quotes.
+      return false;
+    }
     if (ch === "$" && draft[i + 1] === "'") {
       stack.push("ansiSingle");
       i += 1;
@@ -304,6 +309,7 @@ function isFishDraftSafeForPathInsertion(draft: string): boolean {
       continue;
     }
     if (mode === "none") {
+      if (ch === "$" && i === draft.length - 1) return false;
       if (ch === "'") mode = "single";
       else if (ch === '"') mode = "double";
     } else if (mode === "single") {
@@ -361,6 +367,10 @@ function isPowerShellDraftSafeForPathInsertion(draft: string): boolean {
       if (i + 1 >= draft.length) return false;
       i += 1;
       continue;
+    }
+    if (ch === "@" && i === draft.length - 1) {
+      // A trailing `@` would fuse with an inserted `'...'` into a PowerShell here-string (`@'`).
+      return false;
     }
     if (ch === "$" && draft[i + 1] === "(") {
       stack.push("cmdsubst");
