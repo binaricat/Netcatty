@@ -605,6 +605,7 @@ export function AppSideEffects() {
       sessionId,
       sessions,
       setActiveTabId,
+      setSessionPoppedOut,
       setWorkspaceFocusedSession,
       getActiveTabId: () => activeTabStore.getActiveTabId(),
       netcattyBridge,

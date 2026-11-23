@@ -90,6 +90,7 @@ export async function handleTrayJumpToSessionImpl(getCtx: AppContextGetter, sess
   const {
     sessions,
     setActiveTabId,
+    setSessionPoppedOut,
     setWorkspaceFocusedSession,
     netcattyBridge,
     toast,
@@ -122,6 +123,10 @@ export async function handleTrayJumpToSessionImpl(getCtx: AppContextGetter, sess
             || t?.('tabs.copyTabToNewWindowFailed')
             || 'Failed to open tab in a new window',
         );
+      } else if (session.poppedOut) {
+        // Reassert popped-out state in case a stale attach-closed event from a
+        // prior crashed popup arrived while the replacement popup was attaching.
+        setSessionPoppedOut?.(sessionId, true);
       }
     } catch (err) {
       toast?.error?.(
