@@ -1,21 +1,13 @@
-/* global window, document */
-"use strict";
-const username = document.getElementById("username");
-const password = document.getElementById("password");
-const query = document.getElementById("query");
-const cancel = document.getElementById("cancel");
-const result = document.getElementById("result");
-const command = (suffix, args) => window.netcattyView.executeCommand(`com.netcatty.database-minimal.${suffix}`, args);
-window.netcattyView.onDidChangeEnvironment((environment) => {
-  document.documentElement.style.colorScheme = environment.theme === "light" ? "light" : "dark";
-  for (const name of ["--background", "--foreground", "--muted", "--muted-foreground", "--border", "--primary", "--primary-foreground"]) {
-    const value = environment.themeTokens?.[name];
-    if (typeof value === "string" && value.length <= 96) document.documentElement.style.setProperty(name, value);
-    else document.documentElement.style.removeProperty(name);
-  }
-});
-void command("endpoint").then((value) => { document.getElementById("endpoint").textContent = value.endpoint; });
-document.getElementById("form").addEventListener("submit", async (event) => {
+export function mount(root, context) {
+  const cleanup = [];
+const username = root.querySelector("#" + "username");
+const password = root.querySelector("#" + "password");
+const query = root.querySelector("#" + "query");
+const cancel = root.querySelector("#" + "cancel");
+const result = root.querySelector("#" + "result");
+const command = (suffix, args) => context.commands.executeCommand(`com.netcatty.database-minimal.${suffix}`, args);
+void command("endpoint").then((value) => { root.querySelector("#" + "endpoint").textContent = value.endpoint; });
+root.querySelector("#" + "form").addEventListener("submit", async (event) => {
   event.preventDefault();
   query.disabled = true;
   cancel.disabled = false;
@@ -33,3 +25,6 @@ cancel.addEventListener("click", async () => {
   try { await command("cancel"); result.textContent = "Example connection cancelled."; }
   catch { result.textContent = "Could not cancel the example connection."; }
 });
+
+  return () => { for (const stop of cleanup) stop(); };
+}

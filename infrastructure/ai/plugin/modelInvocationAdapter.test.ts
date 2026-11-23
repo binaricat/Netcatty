@@ -120,7 +120,7 @@ test('broker -> existing model factory -> existing host HTTP transport -> loopba
   assert.doesNotMatch(JSON.stringify({ chat, turn, text, usage, sentBodies }), /synthetic-not-a-paid-api-key/);
   // Exercise the actual page handlers through its existing command-only view
   // surface. This is DOM QA, not installed-plugin or native Electron evidence.
-  const dom = new JSDOM(fs.readFileSync(new URL('../../../examples/plugins/assistant/panel.html', import.meta.url), 'utf8'), { runScripts: 'outside-only' });
+  const dom = new JSDOM(fs.readFileSync(new URL('../../../examples/plugins/assistant/view.html', import.meta.url), 'utf8'), { runScripts: 'outside-only' });
   t.after(() => dom.window.close());
   const commandHandlers: Record<string, (params: Record<string, unknown>) => unknown> = {
     open: () => broker.open(context), contexts: () => contexts.summaries(context),
@@ -129,15 +129,16 @@ test('broker -> existing model factory -> existing host HTTP transport -> loopba
     stop: (params) => broker.stop(params.turnHandle, context),
     close: (params) => broker.close(params.chatHandle, context),
   };
-  Object.defineProperty(dom.window, 'netcattyView', { value: {
+  const commands = {
     executeCommand: async (id: string, params: Record<string, unknown>) => {
       const operation = id.replace('com.netcatty.assistant.', '');
       assert.ok(Object.hasOwn(commandHandlers, operation));
       return structuredClone(await commandHandlers[operation](structuredClone(params)));
     },
-    onDidReceiveMessage: () => () => {},
-  } });
-  dom.window.eval(fs.readFileSync(new URL('../../../examples/plugins/assistant/panel.js', import.meta.url), 'utf8'));
+  };
+  const mount = dom.window.eval('(' + fs.readFileSync(new URL('../../../examples/plugins/assistant/panel.js', import.meta.url), 'utf8').replace('export function mount', 'function mount') + ')');
+  const dispose = mount(dom.window.document.body, { commands, views: { onDidReceiveMessage: () => ({ dispose() {} }) } }, 'com.netcatty.assistant.panel');
+  t.after(dispose);
   const waitFor = async (condition: () => boolean) => {
     const deadline = Date.now() + 3000;
     while (!condition()) {

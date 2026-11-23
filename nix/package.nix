@@ -2,8 +2,10 @@
   appimageTools,
   fetchurl,
   lib,
+  openssh,
   release ? import ./release.nix,
   stdenv,
+  writeShellScriptBin,
 }:
 
 let
@@ -22,9 +24,41 @@ let
   appimageContents = appimageTools.extractType2 {
     inherit pname version src;
   };
+
+  # home-manager's ~/.ssh/config is a root-owned symlink into the nix store.
+  # Unprivileged bwrap (wrapType2 / buildFHSEnv) maps only the caller uid, so
+  # that file appears as overflowuid 65534 and OpenSSH refuses the default
+  # user config with "Bad owner or permissions". A -F path skips that check.
+  # The wrapper is injected via extraPkgs so it lands on the FHS /usr/bin,
+  # which buildFHSEnv prepends ahead of any bind-mounted host profile PATH.
+  sshWrapped = writeShellScriptBin "ssh" ''
+    real_ssh="${openssh}/bin/ssh"
+    config="''${HOME}/.ssh/config"
+    if [ -e "$config" ]; then
+      owner="$(stat -c %u -L "$config" 2>/dev/null || true)"
+      me="$(id -u)"
+      if [ -n "$owner" ] && [ "$owner" != "$me" ] && [ "$owner" != 0 ]; then
+        cache="''${XDG_CACHE_HOME:-$HOME/.cache}/netcatty"
+        snap="$cache/ssh_config"
+        mkdir -p "$cache"
+        # Always refresh: nix store files have frozen old mtimes, so -nt
+        # never sees a newer home-manager generation after the first copy.
+        # Publish via a unique staging file + mv so a concurrent ssh -F
+        # reader never sees a truncated snapshot (cp truncates first).
+        snap_tmp="$snap.tmp.$$"
+        cp -L "$config" "$snap_tmp"
+        chmod 600 "$snap_tmp"
+        mv -f "$snap_tmp" "$snap"
+        exec "$real_ssh" -F "$snap" "$@"
+      fi
+    fi
+    exec "$real_ssh" "$@"
+  '';
 in
 appimageTools.wrapType2 {
   inherit pname version src;
+
+  extraPkgs = pkgs: [ sshWrapped ];
 
   extraInstallCommands = ''
     desktopSource="$(find ${appimageContents} -maxdepth 3 -name '*.desktop' -print -quit)"

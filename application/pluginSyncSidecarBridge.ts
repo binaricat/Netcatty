@@ -165,7 +165,7 @@ function isSuccessfulApplyResult(result: unknown): boolean {
  * the DB before collection. Ordinary last-known collect snapshots are never
  * re-applied, so local settings edits made after the last collect are kept.
  */
-export async function collectPluginSyncSidecarsFromHost(options?: {
+export async function collectPluginSyncSidecarsFromHost(options: {
   /**
    * When true, never fall back to last-known cache. Returns null if the host is
    * gated off / non-authoritative so callers can omit `pluginSidecars` instead

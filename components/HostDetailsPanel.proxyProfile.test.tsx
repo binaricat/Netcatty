@@ -6,12 +6,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nProvider } from "../application/i18n/I18nProvider.tsx";
 import type { Host, Identity } from "../types.ts";
 import HostDetailsPanel, { parseOptionalPortInput } from "./HostDetailsPanel.tsx";
+import { applyGroupDefaults } from "../domain/groupConfig.ts";
 import {
   prepareProxyConfigForSave,
   prepareTelnetCredentialsForSave,
   resolvePrimaryProtocolSavePort,
   resolvePrimaryProtocolSwitchPort,
   validateProxyConfigForSave,
+  nextFormAfterSelectProxyProfile,
+  nextFormAfterClearHostChain,
+  nextFormAfterRemoveHostFromChain,
+  resolveDisplayProxyProfileId,
 } from "./HostDetailsPanel.helpers.ts";
 import { TooltipProvider } from "./ui/tooltip.tsx";
 
@@ -548,4 +553,199 @@ test("HostDetailsPanel expands notes when the host already has notes", () => {
     markup.indexOf("IP or Hostname") < markup.indexOf("Notes"),
     "expected notes to render after connection settings",
   );
+});
+
+const networkSshHost: Host = {
+  ...hostWithMissingProxyProfile,
+  proxyProfileId: undefined,
+  group: "network",
+};
+
+const jumpHost: Host = {
+  id: "jump-1",
+  label: "Bastion",
+  hostname: "bastion.example.com",
+  username: "root",
+  tags: [],
+  os: "linux",
+  port: 22,
+  protocol: "ssh",
+  authMethod: "password",
+  createdAt: 1,
+};
+
+const hostOwnedJump: Host = {
+  ...jumpHost,
+  id: "jump-host",
+  label: "Edge",
+  hostname: "edge.example.com",
+};
+
+const renderHostDetailsWithGroup = (
+  initialData: Host,
+  groupConfig: Record<string, unknown>,
+  extraHosts: Host[] = [],
+) =>
+  renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      { locale: "en" },
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(HostDetailsPanel, {
+          initialData,
+          availableKeys: [],
+          identities: [],
+          proxyProfiles: [],
+          groups: ["network"],
+          managedSources: [],
+          allTags: [],
+          allHosts: extraHosts,
+          terminalThemeId: "default",
+          terminalFontSize: 14,
+          groupConfigs: [{ path: "network", ...groupConfig }],
+          onSave: () => {},
+          onCancel: () => {},
+        }),
+      ),
+    ),
+  );
+
+test("HostDetailsPanel displays inherited group HTTP proxy", () => {
+  const markup = renderHostDetailsWithGroup(networkSshHost, {
+    proxyConfig: { type: "http", host: "group-proxy.example.com", port: 8080 },
+  });
+
+  assert.match(markup, /group-proxy\.example\.com/);
+  assert.match(markup, /Inherited from group/);
+});
+
+test("HostDetailsPanel host proxy override wins over the group proxy", () => {
+  const markup = renderHostDetailsWithGroup({
+    ...networkSshHost,
+    proxyConfig: { type: "http", host: "host-proxy.example.com", port: 9090 },
+  }, {
+    proxyConfig: { type: "http", host: "group-proxy.example.com", port: 8080 },
+  });
+
+  assert.match(markup, /host-proxy\.example\.com/);
+  assert.doesNotMatch(markup, /group-proxy\.example\.com/);
+  assert.doesNotMatch(markup, /Inherited from group/);
+});
+
+test("HostDetailsPanel direct proxy hides inherited group proxy", () => {
+  const markup = renderHostDetailsWithGroup({
+    ...networkSshHost,
+    directProxy: true,
+  }, {
+    proxyConfig: { type: "http", host: "group-proxy.example.com", port: 8080 },
+  });
+
+  assert.match(markup, /Direct \(no proxy\)/);
+  assert.doesNotMatch(markup, /group-proxy\.example\.com/);
+});
+
+test("HostDetailsPanel displays inherited group jump hosts", () => {
+  const markup = renderHostDetailsWithGroup(networkSshHost, {
+    hostChain: { hostIds: ["jump-1"] },
+  }, [jumpHost]);
+
+  assert.match(markup, /bastion\.example\.com/);
+  assert.match(markup, /Inherited from group/);
+});
+
+test("HostDetailsPanel host jump-host override wins over the group chain", () => {
+  const markup = renderHostDetailsWithGroup({
+    ...networkSshHost,
+    hostChain: { hostIds: ["jump-host"] },
+  }, {
+    hostChain: { hostIds: ["jump-1"] },
+  }, [jumpHost, hostOwnedJump]);
+
+  assert.match(markup, /edge\.example\.com/);
+  assert.doesNotMatch(markup, /bastion\.example\.com/);
+  assert.doesNotMatch(markup, /Inherited from group/);
+});
+
+
+test("selecting Custom while inheriting a saved proxy keeps a custom draft instead of the profile", () => {
+  const group = { proxyProfileId: "office-proxy" };
+  const next = nextFormAfterSelectProxyProfile(networkSshHost, undefined, group);
+
+  assert.equal(next.proxyProfileId, undefined);
+  assert.equal(next.directProxy, undefined);
+  assert.deepEqual(next.proxyConfig, { type: "http", host: "", port: 8080 });
+  assert.equal(resolveDisplayProxyProfileId(next, "office-proxy"), undefined);
+  assert.equal(applyGroupDefaults(next, group).proxyProfileId, undefined);
+});
+
+test("removing the last hop of a multi-hop inherited chain keeps an empty override", () => {
+  const group = { hostChain: { hostIds: ["jump-1", "jump-host"] } };
+  const afterFirst = nextFormAfterRemoveHostFromChain(networkSshHost, 0, group);
+  assert.deepEqual(afterFirst.hostChain, { hostIds: ["jump-host"] });
+
+  const afterLast = nextFormAfterRemoveHostFromChain(afterFirst, 0, group);
+  assert.deepEqual(afterLast.hostChain, { hostIds: [] });
+  assert.deepEqual(applyGroupDefaults(afterLast, group).hostChain, { hostIds: [] });
+});
+
+test("clearing an inherited-only chain keeps an empty override instead of restoring group hops", () => {
+  const group = { hostChain: { hostIds: ["jump-1", "jump-host"] } };
+  const cleared = nextFormAfterClearHostChain(networkSshHost, group);
+  assert.deepEqual(cleared.hostChain, { hostIds: [] });
+  assert.deepEqual(applyGroupDefaults(cleared, group).hostChain, { hostIds: [] });
+});
+
+test("HostDetailsPanel custom proxy draft hides the inherited saved proxy", () => {
+  const markup = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      { locale: "en" },
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(HostDetailsPanel, {
+          initialData: {
+            ...networkSshHost,
+            proxyConfig: { type: "http", host: "", port: 8080 },
+          },
+          availableKeys: [],
+          identities: [],
+          proxyProfiles: [{
+            id: "office-proxy",
+            label: "Office Proxy",
+            config: { type: "http", host: "office-proxy.example.com", port: 8080 },
+            createdAt: 1,
+          }],
+          groups: ["network"],
+          managedSources: [],
+          allTags: [],
+          allHosts: [],
+          terminalThemeId: "default",
+          terminalFontSize: 14,
+          groupConfigs: [{ path: "network", proxyProfileId: "office-proxy" }],
+          onSave: () => {},
+          onCancel: () => {},
+        }),
+      ),
+    ),
+  );
+
+  assert.doesNotMatch(markup, /Office Proxy/);
+  assert.doesNotMatch(markup, /office-proxy\.example\.com/);
+  assert.doesNotMatch(markup, /Inherited from group/);
+});
+
+test("HostDetailsPanel empty jump-host override hides the inherited group chain", () => {
+  const markup = renderHostDetailsWithGroup({
+    ...networkSshHost,
+    hostChain: { hostIds: [] },
+  }, {
+    hostChain: { hostIds: ["jump-1", "jump-host"] },
+  }, [jumpHost, hostOwnedJump]);
+
+  assert.doesNotMatch(markup, /bastion\.example\.com/);
+  assert.doesNotMatch(markup, /edge\.example\.com/);
+  assert.doesNotMatch(markup, /Inherited from group/);
 });

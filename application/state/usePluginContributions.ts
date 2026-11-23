@@ -86,14 +86,8 @@ export interface UsePluginContributionsResult {
   updateSetting(pluginId: string, settingId: string, value: unknown, scopeId?: string): Promise<{ restartRequired: boolean }>;
   resetSetting(pluginId: string, settingId: string, scopeId?: string): Promise<{ restartRequired: boolean }>;
   selectSettingPath(kind: 'file' | 'directory', title: string, defaultPath?: string): Promise<string | null>;
-  openView(payload: NetcattyPluginViewOpenRequest): Promise<{ instanceId: string }>;
-  closeView(instanceId: string): Promise<void>;
-  focusView(instanceId: string): Promise<void>;
-  setViewBounds(instanceId: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
-  setViewVisibility(instanceId: string, visible: boolean): Promise<void>;
   setEnvironment(environment: NetcattyPluginEnvironment): Promise<void>;
   onViewClosed(callback: (event: NetcattyPluginViewClosedEvent) => void): () => void;
-  onViewFocused(callback: (event: import('@netcatty/plugin-contract').PluginViewFocusEvent) => void): () => void;
 }
 
 export function usePluginContributions(
@@ -189,32 +183,6 @@ export function usePluginContributions(
     return picker(title, defaultPath);
   }, [bridge]);
 
-  const openView = useCallback(async (payload: NetcattyPluginViewOpenRequest) => {
-    if (!bridge?.openPluginView) throw new Error('Plugin views are unavailable');
-    return bridge.openPluginView(payload);
-  }, [bridge]);
-
-  const closeView = useCallback(async (instanceId: string) => {
-    if (!bridge?.closePluginView) return;
-    await bridge.closePluginView(instanceId);
-  }, [bridge]);
-  const focusView = useCallback(async (instanceId: string) => {
-    await bridge?.focusPluginView?.({ instanceId });
-  }, [bridge]);
-
-  const setViewBounds = useCallback(async (
-    instanceId: string,
-    bounds: { x: number; y: number; width: number; height: number },
-  ) => {
-    if (!bridge?.setPluginViewBounds) return;
-    await bridge.setPluginViewBounds(instanceId, bounds);
-  }, [bridge]);
-
-  const setViewVisibility = useCallback(async (instanceId: string, visible: boolean) => {
-    if (!bridge?.setPluginViewVisibility) return;
-    await bridge.setPluginViewVisibility(instanceId, visible);
-  }, [bridge]);
-
   const setEnvironment = useCallback(async (environment: NetcattyPluginEnvironment) => {
     if (!bridge?.setPluginEnvironment) return;
     await bridge.setPluginEnvironment(environment);
@@ -223,10 +191,6 @@ export function usePluginContributions(
   const onViewClosed = useCallback((callback: (event: NetcattyPluginViewClosedEvent) => void) => (
     bridge?.onPluginViewClosed?.(callback) ?? (() => {})
   ), [bridge]);
-  const onViewFocused = useCallback((callback: (event: import('@netcatty/plugin-contract').PluginViewFocusEvent) => void) => (
-    bridge?.onPluginViewFocused?.(callback) ?? (() => {})
-  ), [bridge]);
-
   const currentLoadState = resolvePluginContributionLoadState({
     currentQueryKey: queryKey,
     loadedQueryKey: loadedSnapshot.queryKey,
@@ -245,13 +209,7 @@ export function usePluginContributions(
     updateSetting,
     resetSetting,
     selectSettingPath,
-    openView,
-    closeView,
-    focusView,
-    setViewBounds,
-    setViewVisibility,
     setEnvironment,
     onViewClosed,
-    onViewFocused,
   };
 }

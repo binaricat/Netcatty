@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppWindow, Archive, ArrowDown, ArrowRight, ArrowUp, ChevronDown, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2, Unplug, Upload } from "lucide-react";
+import { AppWindow, Archive, ArrowDown, ArrowRight, ArrowUp, ChevronDown, ClipboardCopy, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderPlus, Loader2, Pencil, RefreshCw, Shield, Trash2, Unplug, Upload } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   ContextMenu,
@@ -61,6 +61,7 @@ interface SftpPaneFileListProps {
   handleRowDragLeave: () => void;
   handleEntryDrop: (entry: SftpFileEntry, e: React.DragEvent) => void;
   onCopyToOtherPane: (files: SftpTransferSource[]) => void;
+  onDuplicateEntries?: (files: SftpTransferSource[]) => void;
   onMoveEntriesToPath: (sourcePaths: string[], targetPath: string) => Promise<void>;
   onOpenFileWithSystemDefault?: (entry: SftpFileEntry) => void;
   onOpenFileWith?: (entry: SftpFileEntry) => void;
@@ -68,6 +69,7 @@ interface SftpPaneFileListProps {
   onDownloadFile?: (entry: SftpFileEntry) => void;
   onDownloadFiles?: (entries: SftpFileEntry[]) => void;
   onExtractArchive?: (entry: SftpFileEntry) => void;
+  onCreateArchive?: (sourcePaths: string[]) => void;
   onEditPermissions?: (entry: SftpFileEntry) => void;
   onUploadExternalFileList?: (fileList: FileList, targetPath?: string) => Promise<void> | void;
   onUploadExternalFolder?: (targetPath?: string) => Promise<void> | void;
@@ -151,6 +153,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   handleRowDragLeave,
   handleEntryDrop,
   onCopyToOtherPane,
+  onDuplicateEntries,
   onMoveEntriesToPath,
   onOpenFileWithSystemDefault,
   onOpenFileWith,
@@ -158,6 +161,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   onDownloadFile,
   onDownloadFiles,
   onExtractArchive,
+  onCreateArchive,
   onEditPermissions,
   onUploadExternalFileList,
   onUploadExternalFolder,
@@ -288,6 +292,23 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
     void onUploadExternalFileList(files, targetPath);
   }, [onUploadExternalFileList]);
 
+  const getSelectedTransferSources = useCallback((entry: SftpFileEntry): SftpTransferSource[] => {
+    const currentSelected = selectedFilesRef.current;
+    const names = currentSelected.has(entry.name)
+      ? Array.from(currentSelected)
+      : [entry.name];
+    return names.map((name) => {
+      const fileName = String(name);
+      const file = filesByName.get(fileName);
+      return {
+        name: fileName,
+        isDirectory: file ? isNavigableDirectory(file) : false,
+        sourceConnectionId: pane.connection?.id,
+        sourcePath: pane.connection?.currentPath,
+      };
+    });
+  }, [filesByName, pane.connection?.id, pane.connection?.currentPath]);
+
   const renderRow = useCallback(
     (entry: SftpFileEntry, index: number) => (
       <ContextMenu>
@@ -376,29 +397,32 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
                 {t("sftp.context.extract")}
               </ContextMenuItem>
             )}
+            {!isLocal && onCreateArchive && (
+              <ContextMenuItem onClick={() => {
+                const selected = selectedFilesRef.current;
+                const names = selected.has(entry.name) ? Array.from(selected) : [entry.name];
+                onCreateArchive(names.filter((name) => name !== "..").map((name) =>
+                  joinPath(pane.connection.currentPath, name),
+                ));
+              }}>
+                <Archive size={14} className="mr-2" />{t("sftp.archive.action")}
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator />
             <ContextMenuItem
-              onClick={() => {
-                const currentSelected = selectedFilesRef.current;
-                const files = currentSelected.has(entry.name)
-                  ? Array.from(currentSelected)
-                  : [entry.name];
-                const fileData = files.map((name) => {
-                  const fileName = String(name);
-                  const file = filesByName.get(fileName);
-                  return {
-                    name: fileName,
-                    isDirectory: file ? isNavigableDirectory(file) : false,
-                    sourceConnectionId: pane.connection?.id,
-                    sourcePath: pane.connection?.currentPath,
-                  };
-                });
-                onCopyToOtherPane(fileData);
-              }}
+              onClick={() => onCopyToOtherPane(getSelectedTransferSources(entry))}
             >
               <Copy size={14} className="mr-2" />{" "}
               {t("sftp.context.copyToOtherPane")}
             </ContextMenuItem>
+            {onDuplicateEntries && (
+              <ContextMenuItem
+                onClick={() => onDuplicateEntries(getSelectedTransferSources(entry))}
+              >
+                <CopyPlus size={14} className="mr-2" />{" "}
+                {t("sftp.context.duplicate")}
+              </ContextMenuItem>
+            )}
             <ContextMenuItem
               onClick={() => {
                 navigator.clipboard.writeText(joinPath(pane.connection.currentPath, entry.name));
@@ -497,11 +521,15 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       handleRowSelect,
       dragOverEntry,
       isPaneFocused,
+      isLocal,
       onCopyToOtherPane,
+      onDuplicateEntries,
+      getSelectedTransferSources,
       onMoveEntriesToPath,
       onDownloadFile,
       onDownloadFiles,
       onExtractArchive,
+      onCreateArchive,
       onDragEnd,
       onEditFile,
       onEditPermissions,

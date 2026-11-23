@@ -4,6 +4,7 @@ import type { ProviderConfig } from "../../../../infrastructure/ai/types";
 import type { SettingsIconId } from "./types";
 import {
   BUILTIN_PROVIDER_ICON_BY_ID,
+  FULL_COLOR_PROVIDER_ICONS,
   SETTINGS_ICON_PATHS,
   SETTINGS_ICON_COLORS,
 } from "./types";
@@ -39,6 +40,12 @@ const UPLOAD_IMG_DIMENSIONS = {
   xs: "w-4 h-4",
   sm: "w-5 h-5",
   md: "w-8 h-8",
+} as const;
+
+const FULL_COLOR_RADIUS = {
+  xs: "rounded-[3px]",
+  sm: "rounded-[4px]",
+  md: "rounded-md",
 } as const;
 
 export const ProviderIconBadge: React.FC<Props> = (props) => {
@@ -83,8 +90,14 @@ export const ProviderIconBadge: React.FC<Props> = (props) => {
   const fallbackId: SettingsIconId | undefined =
     props.providerId ?? (props.provider ? (props.provider.providerId as SettingsIconId) : undefined);
   if (fallbackId && fallbackId in SETTINGS_ICON_PATHS) {
+    const fullColor = FULL_COLOR_PROVIDER_ICONS.has(fallbackId);
     return (
-      <div className={cn("rounded-md flex items-center justify-center shrink-0 overflow-hidden", dim, SETTINGS_ICON_COLORS[fallbackId])}>
+      <div className={cn(
+        "flex items-center justify-center shrink-0 overflow-hidden",
+        dim,
+        fullColor ? FULL_COLOR_RADIUS[size] : "rounded-md",
+        SETTINGS_ICON_COLORS[fallbackId],
+      )}>
         <img
           src={SETTINGS_ICON_PATHS[fallbackId]}
           alt=""
@@ -92,8 +105,10 @@ export const ProviderIconBadge: React.FC<Props> = (props) => {
           draggable={false}
           className={cn(
             "object-contain",
-            fallbackId === "copilot" ? "brightness-0" : "brightness-0 invert",
-            IMG_DIMENSIONS[size],
+            fullColor
+              ? "w-full h-full"
+              : (fallbackId === "copilot" ? "brightness-0" : "brightness-0 invert"),
+            !fullColor && IMG_DIMENSIONS[size],
           )}
         />
       </div>

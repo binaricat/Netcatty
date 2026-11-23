@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { JSDOM } from 'jsdom';
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { I18nProvider } from '../../../application/i18n/I18nProvider';
@@ -7,6 +8,12 @@ import { PluginPackageManager } from './PluginPackageManager';
 import type { usePluginManager } from '../../../application/state/usePluginManager';
 
 test('installed grid filters, opens one detail and restores search, scroll and card focus without pill navigation', async () => {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
+  const previousDom = new Map<string, PropertyDescriptor | undefined>();
+  for (const [key, value] of Object.entries({ window: dom.window, document: dom.window.document })) {
+    previousDom.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  }
   const globals = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
   const previous = globals.IS_REACT_ACT_ENVIRONMENT; globals.IS_REACT_ACT_ENVIRONMENT = true;
   const raf = globalThis.requestAnimationFrame;
@@ -34,10 +41,13 @@ test('installed grid filters, opens one detail and restores search, scroll and c
     assert.match(JSON.stringify(renderer.toJSON()), /Alpha safely formats synthetic greetings/);
     const authorRow = alphaCard.findByProps({ 'data-plugin-author-row': true });
     assert.ok(authorRow.findAllByType('span').some((node) => node.children.includes('Example')), 'author has its own compact row');
-    assert.ok(authorRow.findByProps({ 'data-plugin-author-placeholder': true }), 'an unverified installed publisher has a default avatar');
+    assert.equal(authorRow.findAllByType('img').length, 0, 'a publisher without a real avatar uses text only');
+    assert.equal(authorRow.findAllByProps({ 'data-plugin-author-placeholder': true }).length, 0);
+    assert.ok(authorRow.props.className.includes('gap-3'), 'author and source groups have 12px separation');
     assert.ok(alphaCard.findAllByType('p').some((node) => node.props.className?.includes('line-clamp-3')), 'card description is bounded');
     assert.match(JSON.stringify(renderer.toJSON()), /MIT/);
-    assert.match(JSON.stringify(renderer.toJSON()), /Incompatible version/);
+    assert.doesNotMatch(JSON.stringify(renderer.toJSON()), /Incompatible version/, 'error details stay hidden until requested');
+    assert.ok(renderer.root.findAllByType('button').some((node) => node.props['aria-label']?.includes('Beta') && node.props['aria-haspopup'] === 'dialog'), 'error icon opens details without navigating the card');
     assert.ok(renderer.root.findAllByType('div').some((node) => node.props.className?.includes('repeat(auto-fill')));
     const pill = renderer.root.findAllByType('button').find((node) => node.props['aria-pressed'] !== undefined)!;
     await act(async () => pill.props.onClick());
@@ -61,5 +71,11 @@ test('installed grid filters, opens one detail and restores search, scroll and c
     assert.equal(unknown.length, 2);
     assert.ok(unknown.every((node) => node.props.disabled === true && node.props['aria-pressed'] === undefined));
     await act(async () => renderer.unmount());
-  } finally { globals.IS_REACT_ACT_ENVIRONMENT = previous; globalThis.requestAnimationFrame = raf; }
+  } finally {
+    globals.IS_REACT_ACT_ENVIRONMENT = previous; globalThis.requestAnimationFrame = raf;
+    dom.window.close();
+    for (const [key, descriptor] of previousDom) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);
+    }
+  }
 });

@@ -75,6 +75,62 @@ function classifyProcessError(err, options = {}) {
   };
 }
 
+/**
+ * Wrap the console sink used for diagnostics so a broken sink cannot feed
+ * itself.
+ *
+ * The only lines these guards cannot safely write are the ones about the sink
+ * they write through: a torn-down stdio pipe reports EPIPE asynchronously and a
+ * closed writer throws EIO synchronously, and both are delivered straight back
+ * to the process-level handlers, which log again — an unbounded feedback loop
+ * that pins a core, buffers every failed write in memory, and leaves the
+ * process unable to answer anything else. Once the sink reports a failure its
+ * diagnostics are dropped; because this listener also consumes the stream
+ * `error` event before the process guards see it, the first failure is handed
+ * to `options.onError` so the caller (`captureError` in the main process,
+ * `report` in the terminal worker) can still persist it.
+ */
+function createDiagnosticLogger(log, options = {}) {
+  const streams = (options.streams || []).filter(
+    (stream) => typeof stream?.on === "function"
+      && typeof stream?.removeListener === "function",
+  );
+  const onError = typeof options.onError === "function" ? options.onError : null;
+  let sinkFailed = false;
+  let sinkErrorReported = false;
+  const onSinkError = (err) => {
+    // Latch before reporting: anything the reporter logs is already unwritable.
+    sinkFailed = true;
+    if (sinkErrorReported) return;
+    sinkErrorReported = true;
+    if (!onError) return;
+    try {
+      onError(err);
+    } catch {
+      // A failing reporter must not escape the stream's error listener.
+    }
+  };
+  for (const stream of streams) {
+    // Holding an `error` listener also keeps a failed write on the diagnostics
+    // stream from being rethrown as an uncaught exception, which is how the
+    // loop used to restart.
+    stream.on("error", onSinkError);
+  }
+
+  const guarded = (...args) => {
+    if (sinkFailed) return;
+    try {
+      log(...args);
+    } catch {
+      sinkFailed = true;
+    }
+  };
+  guarded.dispose = () => {
+    for (const stream of streams) stream.removeListener("error", onSinkError);
+  };
+  return guarded;
+}
+
 function createProcessErrorController(options = {}) {
   const captureError = typeof options.captureError === "function" ? options.captureError : () => {};
   const onFatalError = typeof options.onFatalError === "function"
@@ -186,6 +242,7 @@ function installProcessErrorHandlers(processObject, controller) {
 
 module.exports = {
   classifyProcessError,
+  createDiagnosticLogger,
   createProcessErrorController,
   installProcessErrorHandlers,
   isBenignStreamError,

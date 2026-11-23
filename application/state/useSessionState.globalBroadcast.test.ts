@@ -4,6 +4,9 @@ import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import { useSessionState } from "./useSessionState.ts";
+import { installTestLocalStorage } from "./testSupport/localStorage.ts";
+
+test.beforeEach((t) => { t.after(installTestLocalStorage()); });
 
 type SessionState = ReturnType<typeof useSessionState>;
 
@@ -86,6 +89,15 @@ test("global broadcast availability follows visible orphan session count", async
     await act(async () => {
       current().removeSessionFromWorkspace(second.id);
     });
+    // The one-member workspace stays intact; only the detached terminal is
+    // an orphan, so global broadcast remains unavailable until another opens.
+    assert.equal(current().workspaces.length, 1);
+    assert.equal(current().sessions.find(session => session.id === first.id)?.workspaceId, current().workspaces[0].id);
+    assert.deepEqual(current().orphanSessions.map(session => session.id), [second.id]);
+    assert.equal(current().canUseGlobalBroadcast, false);
+    assert.equal(current().isGlobalBroadcastEnabled, false);
+    await act(async () => { current().createLocalTerminal({ shellName: "04" }); });
+    assert.equal(current().orphanSessions.length, 2);
     assert.equal(current().canUseGlobalBroadcast, true);
     assert.equal(current().isGlobalBroadcastEnabled, false);
   } finally {

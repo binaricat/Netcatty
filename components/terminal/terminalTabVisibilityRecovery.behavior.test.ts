@@ -107,8 +107,12 @@ for (const hiddenMs of [2000, 4000]) {
     h.advance(hiddenMs);
     h.reveal();
     assert.equal(h.calls.clear, hiddenMs >= 3000 ? 1 : 0);
+    // Every reveal asks for the WebGL renderer once: a no-op while it is live,
+    // a rebuild when Chromium or the context budget took it while hidden.
+    assert.equal(h.calls.ensure, 1);
     h.advance(600);
     assert.equal(h.calls.clear, hiddenMs >= 3000 ? 1 : 0);
+    assert.equal(h.calls.ensure, 1);
     assert.equal(h.calls.fit, 0);
   });
 }

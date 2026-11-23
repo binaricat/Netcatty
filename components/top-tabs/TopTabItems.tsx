@@ -12,6 +12,7 @@ import {
 } from '../../application/state/editorTabStore';
 import type { LogView } from '../../application/state/logViewState';
 import { useWindowControls } from '../../application/state/useWindowControls';
+import { useShortcutModifierHeldValue } from '../../application/state/useShortcutModifierHeld';
 import { terminalReconnectRegistry } from '../../application/state/terminalReconnectRegistry';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { getEffectiveHostDistro } from '../../domain/host';
@@ -358,6 +359,19 @@ export const TabShortcutNumberBadge: React.FC<{ number: number }> = memo(({ numb
 ));
 TabShortcutNumberBadge.displayName = 'TabShortcutNumberBadge';
 
+/**
+ * A tab's icon, swapped for its [1...9] shortcut number while the switch
+ * modifier is held. Only this slot subscribes to the modifier store.
+ */
+export const TabIconSlot: React.FC<{ shortcutNumber?: number; children: React.ReactNode }> = ({
+  shortcutNumber,
+  children,
+}) => {
+  const held = useShortcutModifierHeldValue();
+  if (shortcutNumber != null && held) return <TabShortcutNumberBadge number={shortcutNumber} />;
+  return <>{children}</>;
+};
+
 const TOP_TAB_COMFORT_EDGE_RATIO = 0.22;
 const TOP_TAB_COMFORT_EDGE_MIN = 72;
 const TOP_TAB_COMFORT_EDGE_MAX = 160;
@@ -469,7 +483,7 @@ export const RootTopTab: React.FC<RootTopTabProps> = memo(({ tabId, label, icon,
         if (!isActive) clearInactiveTopTabHover(e.currentTarget);
       }}
     >
-      {shortcutNumber != null ? <TabShortcutNumberBadge number={shortcutNumber} /> : icon}
+      <TabIconSlot shortcutNumber={shortcutNumber}>{icon}</TabIconSlot>
       <span className={cn('top-tab-root-label', compact && 'top-tab-root-label-compact')}>
         {label}
       </span>
@@ -564,9 +578,7 @@ export const PluginViewTopTab: React.FC<PluginViewTopTabProps> = memo(({
           {showDropIndicatorBefore && isDraggingForReorder && <div className="absolute -left-0.5 bottom-1 top-1 w-0.5 rounded-full bg-primary" />}
           {showDropIndicatorAfter && isDraggingForReorder && <div className="absolute -right-0.5 bottom-1 top-1 w-0.5 rounded-full bg-primary" />}
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            {shortcutNumber != null
-              ? <TabShortcutNumberBadge number={shortcutNumber} />
-              : <PluginContributionIcon pluginId={tab.pluginId} icon={tab.icon} className="shrink-0" />}
+            <TabIconSlot shortcutNumber={shortcutNumber}><PluginContributionIcon pluginId={tab.pluginId} icon={tab.icon} className="shrink-0" /></TabIconSlot>
             <span className="truncate leading-5">{tab.title}</span>
           </div>
           <button onMouseDown={handleTabCloseButtonMouseDown} onClick={close} className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-muted" aria-label={t('tabs.closePluginViewAria', { title: tab.title })}><X size={12} /></button>
@@ -712,15 +724,13 @@ export const EditorTopTab: React.FC<EditorTopTabProps> = memo(({
             />
           )}
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            {shortcutNumber != null ? (
-              <TabShortcutNumberBadge number={shortcutNumber} />
-            ) : (
+            <TabIconSlot shortcutNumber={shortcutNumber}>
               <FileIcon
                 size={14}
                 className="shrink-0"
                 style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
               />
-            )}
+            </TabIconSlot>
             <span className="flex items-center gap-0.5 truncate leading-5">
               {dirty && <span className="mr-0.5 text-primary">●</span>}
               {editorTab.fileName}
@@ -900,9 +910,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
         />
       )}
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        {shortcutNumber != null ? (
-          <TabShortcutNumberBadge number={shortcutNumber} />
-        ) : (
+        <TabIconSlot shortcutNumber={shortcutNumber}>
           <SessionTabIcon
             host={host}
             session={session}
@@ -911,7 +919,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
             shellIcon={session.localShellIcon}
             dynamicTabTitleMode={dynamicTabTitleMode}
           />
-        )}
+        </TabIconSlot>
         <span className="truncate leading-5">{tabTitle}</span>
         <div className="flex-shrink-0">{sessionStatusDot(session.status, hasActivity)}</div>
       </div>
@@ -1117,15 +1125,13 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
             />
           )}
           <div className="flex items-center gap-2 truncate">
-            {shortcutNumber != null ? (
-              <TabShortcutNumberBadge number={shortcutNumber} />
-            ) : (
+            <TabIconSlot shortcutNumber={shortcutNumber}>
               <LayoutGrid
                 size={14}
                 className="shrink-0"
                 style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
               />
-            )}
+            </TabIconSlot>
             <span className="truncate leading-5" title={tabLabel}>{tabLabel}</span>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -1274,15 +1280,13 @@ export const LogViewTopTab: React.FC<LogViewTopTabProps> = memo(({
         />
       )}
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        {shortcutNumber != null ? (
-          <TabShortcutNumberBadge number={shortcutNumber} />
-        ) : (
+        <TabIconSlot shortcutNumber={shortcutNumber}>
           <FileText
             size={14}
             className="shrink-0"
             style={{ color: isActive ? 'var(--top-tabs-accent, hsl(var(--accent)))' : 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
           />
-        )}
+        </TabIconSlot>
         <span className="truncate leading-5">
           {t('tabs.logPrefix')} {isLocal ? t('tabs.logLocal') : logView.log.hostname}
         </span>

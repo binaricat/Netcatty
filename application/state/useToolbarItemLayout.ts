@@ -63,6 +63,9 @@ export function useToolbarItemLayout(
   const [layout, setLayout] = useState<ToolbarItemLayout>(() => readLayout(storageKey, defaults));
 
   useEffect(() => {
+    // Defaults can include dynamically discovered items; re-read without writing
+    // so temporary catalog changes never erase stored toolbar preferences.
+    setLayout(readLayout(storageKey, defaults));
     const sync = (event: Event) => {
       if (event instanceof StorageEvent && event.key !== storageKey) return;
       if (event instanceof CustomEvent && event.detail?.key !== storageKey) return;

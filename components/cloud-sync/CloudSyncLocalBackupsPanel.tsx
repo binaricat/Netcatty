@@ -173,7 +173,9 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
             toast.success(t('cloudSync.localBackups.restoreSuccess'));
         } catch (error) {
             toast.error(
-                error instanceof Error ? error.message : t('common.unknownError'),
+                error instanceof Error && error.message.includes('VAULT_BACKUP_DECRYPT_FAILED')
+                    ? t('cloudSync.localBackups.decryptFailed')
+                    : error instanceof Error ? error.message : t('common.unknownError'),
                 t('cloudSync.localBackups.restoreFailedTitle'),
             );
         } finally {
@@ -293,6 +295,10 @@ export const LocalBackupsPanel: React.FC<LocalBackupsPanelProps> = ({
                         </Button>
                     </div>
                 </div>
+
+                <p className="text-xs text-muted-foreground">
+                    {t('cloudSync.localBackups.folderWarning')}
+                </p>
 
                 {backups.length === 0 ? (
                     <div className="rounded-lg border border-dashed border-border/60 p-4 text-sm text-muted-foreground">

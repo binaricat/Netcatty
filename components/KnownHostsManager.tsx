@@ -625,7 +625,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
           />
         </div>
         <div className="w-px h-5 bg-border/50" />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"
             className={vaultHeaderSecondaryButtonClass}

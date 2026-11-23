@@ -23,7 +23,6 @@
 !CODE_OF_CONDUCT.md
 !CODE_SIGNING_POLICY.md
 !CONTRIBUTING.md
-!ET_INTEGRATION_CHECKLIST.md
 !LICENSE
 !PRIVACY.md
 !README.ja-JP.md
@@ -38,7 +37,6 @@
 !index.css
 !index.html
 !index.tsx
-!metadata.json
 !package-lock.json
 !package.json
 !tsconfig.json
@@ -48,6 +46,9 @@
 # --- Layer 2: allowlist root directories ---
 # Un-ignore the directory entry, then everything under it. Git does not
 # traverse ignored directories, so both steps are required.
+!.agents/
+/.agents/*
+!/.agents/environment.json
 !.github/
 !.github/**
 !application/
@@ -170,3 +171,6 @@ build_with_vs2022.bat
 /resources/et/*/et.exe
 /resources/et/*/et-*-dlls/
 /resources/et/*/*.dll
+
+# Local plugin example staging and bundles
+/examples/plugins/*/.package/

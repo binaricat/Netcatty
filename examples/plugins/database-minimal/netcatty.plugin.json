@@ -7,20 +7,58 @@
   "version": "0.1.0",
   "publisher": "netcatty",
   "license": "GPL-3.0-or-later",
-  "engines": { "netcatty": ">=0.0.0", "api": ">=0.1.0-internal.1 <0.2.0" },
-  "features": { "required": ["network.byte-streams"] },
-  "main": { "browser": "browser.js" },
-  "activationEvents": ["onCommand:com.netcatty.database-minimal.query", "onView:com.netcatty.database-minimal.panel"],
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "features": {
+    "required": [
+      "network.byte-streams"
+    ]
+  },
+  "main": {
+    "browser": "browser.js"
+  },
+  "activationEvents": [
+    "onCommand:com.netcatty.database-minimal.query",
+    "onView:com.netcatty.database-minimal.panel"
+  ],
   "permissions": {
-    "required": ["commands", "views"],
-    "optional": [{ "permission": "network.stream", "resources": ["tcp://database-fixture.invalid:3306"], "reason": "Connect only to the prepared disposable fixture." }]
+    "required": [
+      "commands",
+      "views"
+    ],
+    "optional": [
+      {
+        "permission": "network.stream",
+        "resources": [
+          "tcp://database-fixture.invalid:3306"
+        ],
+        "reason": "Connect only to the prepared disposable fixture."
+      }
+    ]
   },
   "contributes": {
     "commands": [
-      { "id": "com.netcatty.database-minimal.query", "title": "Read one synthetic database row" },
-      { "id": "com.netcatty.database-minimal.cancel", "title": "Cancel example connection" },
-      { "id": "com.netcatty.database-minimal.endpoint", "title": "Show example endpoint" }
+      {
+        "id": "com.netcatty.database-minimal.query",
+        "title": "Read one synthetic database row"
+      },
+      {
+        "id": "com.netcatty.database-minimal.cancel",
+        "title": "Cancel example connection"
+      },
+      {
+        "id": "com.netcatty.database-minimal.endpoint",
+        "title": "Show example endpoint"
+      }
     ],
-    "views": [{ "id": "com.netcatty.database-minimal.panel", "title": "Disposable database example", "location": "modal", "entry": "panel.html" }]
+    "views": [
+      {
+        "id": "com.netcatty.database-minimal.panel",
+        "title": "Disposable database example",
+        "location": "modal"
+      }
+    ]
   }
 }

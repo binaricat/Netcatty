@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { RefreshCw, Settings2 } from 'lucide-react';
+import { RefreshCw, Settings } from 'lucide-react';
 import { useI18n } from '../../../application/i18n/I18nProvider';
 import type { usePluginUpdateCheck } from '../../../application/state/usePluginUpdateCheck';
 import type { usePluginManager } from '../../../application/state/usePluginManager';
@@ -31,15 +31,9 @@ export function PluginSettingsLanding({ manager, settingsAvailable, settingsErro
   const statusOf = (plugin: NetcattyInstalledPlugin) => {
     if (!manager.statusKnown) return t('settings.plugins.permissions.statusUnknown');
     const state = plugin.runtime.status;
-    if (['running', 'starting', 'stopping', 'error', 'quarantined'].includes(state)) return t(`settings.plugins.landing.status.${state}`);
-    if (state !== 'stopped') return t('settings.plugins.landing.status.unknown');
-    return t(plugin.enabled ? 'settings.plugins.landing.status.idle' : 'settings.plugins.manager.disabled');
-  };
-  const sourceOf = (plugin: NetcattyInstalledPlugin) => {
-    const source = plugin.source;
-    if (!source) return t('settings.plugins.landing.sourceUnknown');
-    const kind = t(source.kind === 'official' ? 'settings.plugins.sources.official' : source.kind === 'third-party' ? 'settings.plugins.sources.thirdparty' : 'settings.plugins.sources.local');
-    return `${t('settings.plugins.sources.source')}: ${kind}${source.kind === 'third-party' ? ` · ${source.name}` : ''}`;
+    if (['starting', 'stopping', 'error', 'quarantined'].includes(state)) return t(`settings.plugins.landing.status.${state}`);
+    if (state !== 'stopped' && state !== 'running') return t('settings.plugins.landing.status.unknown');
+    return null;
   };
   return <>
     <SettingsSection title={t('settings.plugins.landing.options')}>
@@ -67,19 +61,22 @@ export function PluginSettingsLanding({ manager, settingsAvailable, settingsErro
           {visible.map((plugin) => {
             const name = nameOf(plugin);
             const description = localized(plugin.manifest?.description);
+            const status = statusOf(plugin);
+            const hasError = manager.statusKnown && ['error', 'quarantined'].includes(plugin.runtime.status);
             const availableUpdate = updates?.result?.updates.find((item) => item.pluginId === plugin.id && item.sourceId === plugin.source?.id);
-            const declaredSettings = Boolean(plugin.manifest?.contributes?.settings?.length || plugin.manifest?.contributes?.views?.some((view) => view.location === 'settings'));
-            return <SettingRow key={plugin.id} leading={<PluginBrandIcon plugin={plugin} size={24} />} label={<span className="flex min-w-0 items-baseline gap-2">
-              <span className="truncate" title={name}>{name}</span>
-              {plugin.activeVersion && <span className="shrink-0 text-xs font-normal text-muted-foreground">{plugin.activeVersion}</span>}
-            </span>} description={<>
-              {plugin.manifest?.publisher && <PluginAuthorRow plugin={plugin} />}
-              <span className="block break-words">{[sourceOf(plugin), statusOf(plugin)].filter(Boolean).join(' · ')}</span>
+            const declaredSettings = Boolean(plugin.manifest?.contributes?.settings?.length);
+            return <SettingRow key={plugin.id} leading={<PluginBrandIcon plugin={plugin} size={40} />} description={<div className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
+              <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
+                <span className="truncate" title={name}>{name}</span>
+                {status && <span role="status" className={`inline-flex h-5 shrink-0 items-center justify-center rounded-full px-2 text-[10px] font-medium leading-4 ${hasError ? 'bg-red-500/15 text-red-600 dark:text-red-400' : 'bg-muted text-muted-foreground'}`}>{status}</span>}
+                {plugin.activeVersion && <span className="shrink-0 text-xs font-normal text-muted-foreground">{plugin.activeVersion}</span>}
+              </span>
+              <PluginAuthorRow plugin={plugin} showSource />
               {availableUpdate && <span className="block text-primary">{t('settings.plugins.landing.updateAvailable').replace('{version}', availableUpdate.availableVersion)}</span>}
               {description && <span className="line-clamp-2 break-words">{description}</span>}
-            </>}>
-              <div className="flex items-center gap-3">
-                {declaredSettings && <Button className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" variant="ghost" size="icon" disabled={manager.busy || !manager.statusKnown || !settingsAvailable.has(plugin.id)} aria-label={t('settings.plugins.landing.settingsFor').replace('{name}', name)} title={t(settingsAvailable.has(plugin.id) ? 'common.settings' : !plugin.enabled ? 'settings.plugins.landing.enableSettings' : 'settings.plugins.landing.settingsUnavailable')} onClick={(event) => onManage(plugin.id, event.currentTarget)}><Settings2 size={16} /></Button>}
+            </div>}>
+              <div className="flex shrink-0 items-center gap-2">
+                {declaredSettings && <Button className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" variant="ghost" size="icon" disabled={manager.busy || !manager.statusKnown || !settingsAvailable.has(plugin.id)} aria-label={t('settings.plugins.landing.settingsFor').replace('{name}', name)} title={t(settingsAvailable.has(plugin.id) ? 'common.settings' : !plugin.enabled ? 'settings.plugins.landing.enableSettings' : 'settings.plugins.landing.settingsUnavailable')} onClick={(event) => onManage(plugin.id, event.currentTarget)}><Settings size={15} /></Button>}
                 <Toggle checked={plugin.enabled} disabled={manager.busy || !manager.available || !manager.statusKnown} ariaLabel={`${t(plugin.enabled ? 'settings.plugins.manager.disable' : 'settings.plugins.manager.enable')} ${name}`} onChange={(enabled) => void manager.setEnabled(plugin.id, enabled)} />
               </div>
             </SettingRow>;

@@ -302,7 +302,7 @@ export const useSftpPaneDialogs = ({
     } finally {
       setIsDeleting(false);
     }
-  }, [isDeleting, onClearSelection, onDeleteFilesAtPath, onMutateSuccess, t]);
+  }, [isDeleting, onClearSelection, onDeleteFilesAtPath, onMutateSuccess, setShowDeleteConfirm, t]);
 
   // entryPath is the full path; renameName is initialized to the basename
   const openRenameDialog = useCallback((entryPath: string) => {
@@ -342,7 +342,7 @@ export const useSftpPaneDialogs = ({
     setDeleteError(null);
     setDeleteTargets(names);
     setShowDeleteConfirm(true);
-  }, []);
+  }, [setShowDeleteConfirm]);
 
   return {
     showHostPicker,

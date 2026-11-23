@@ -218,7 +218,7 @@ test('an attached observe popup never owns automatic reconnect', () => {
   const reconnectEnd = terminalSource.indexOf('const prepareRestoredReconnect', reconnectStart);
   const reconnectSource = terminalSource.slice(reconnectStart, reconnectEnd);
   assert.match(reconnectSource, /if \(attachExistingSession\) return false;/);
-  assert.match(reconnectSource, /\[attachExistingSession, host, t, terminalSettings, updateStatus\]/);
+  assert.match(reconnectSource, /\[attachExistingSession, host, setProgressLogs, t, terminalSettings, updateStatus\]/);
   assert.match(terminalSource, /const startReconnect = async[\s\S]*?if \(attachExistingSession\) return;/);
   assert.match(
     terminalSource,

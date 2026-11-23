@@ -1,5 +1,6 @@
 import { tool } from 'ai';
 import { z } from 'zod';
+import { SHELL_READINESS_UNKNOWN_CODE } from '../aiChatStreamingSupport';
 import type { ExecutorContext, NetcattyBridge } from '../cattyAgent/executor';
 import type { TerminalContextReadRange } from '../../../domain/terminalContextRead';
 import type { AIPermissionMode } from '../types';
@@ -443,6 +444,33 @@ function createCatalogTool(spec: CattyToolSpec) {
           try {
             const result = await executeTerminalExecute(deps, { sessionId: sid, command });
             if (result.ok === false) {
+              // #4195/#4198 (round 2): this is the ACTIVE Catty SDK path.
+              // cattyTurnDriver builds its tools with createCattyToolsFromCatalog,
+              // NOT the createToolExecutor path (which has no production callers).
+              // Falling through to the generic `fittedFailure` below re-wraps the
+              // result as `{ error: ... }` and DROPS its `code`, so every
+              // downstream error-shape classifier mis-handles it:
+              //   - agentEventAdapter.ts:220 isToolResultError -> isError: true
+              //   - agentRuntime.ts isFailedToolResult -> open session blocker
+              //   - the shared isToolResultError (UI / external-sdk), staleContextPruner
+              // Instead surface the SAME honest + viable-path hint used by the
+              // MCP path (mcpToolRegistry.cjs) as a NORMAL tool result: preserve
+              // `code`, carry the hint as text, and use NO `error` / `ok:false`
+              // shape. All of the heuristics above then classify it as non-error
+              // without a wider refactor, while every OTHER error code (e.g.
+              // SHELL_NOT_READY) keeps the exact hard-error path below.
+              // No command ran, so skip completed-write dedup: a retry after the
+              // prompt becomes recognized must re-evaluate, not replay a stale
+              // "command not sent" result.
+              if (result.code === SHELL_READINESS_UNKNOWN_CODE) {
+                return {
+                  content: [{
+                    type: 'text',
+                    text: result.error || 'Shell readiness unknown; no command was sent.',
+                  }],
+                  code: result.code,
+                };
+              }
               if (!result.data) return unwrap(result);
               const fittedFailure = {
                 error: fitLargeToolResultForModel({

@@ -8,7 +8,7 @@ import type { AISession } from '../../infrastructure/ai/types.ts';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime.ts';
 import { useAIState } from './useAIState.ts';
 import { useAISessionsStore } from './aiSessionsStore.ts';
-import { setLatestAISessionsSnapshot } from './aiStateSnapshots.ts';
+import { getPersistedAiSessionsSnapshot, setLatestAISessionsSnapshot } from './aiStateSnapshots.ts';
 
 const SOURCE_SESSION: AISession = {
   id: 'chat-source',
@@ -121,11 +121,18 @@ for (const newerCount of [49, 50]) {
     let branch: AISession | null = null;
     await act(async () => { branch = await capture.ai!.forkSessionFromMessage(SOURCE_SESSION.id, 'assistant-1'); });
     assert.ok(branch);
-    const saved: AISession[] = JSON.parse(dom.window.localStorage.getItem('netcatty_ai_sessions_v1')!);
-    assert.equal(saved.length, 50);
+    // Issue #4123: the persisted set lives in IndexedDB (count cap 1000, so
+    // nothing is evicted at these sizes) — not in a 50-capped localStorage
+    // blob.
+    const saved: AISession[] = getPersistedAiSessionsSnapshot();
+    assert.equal(saved.length, newerCount + 2);
     assert.deepEqual(saved.find(item => item.id === SOURCE_SESSION.id)?.messages, SOURCE_SESSION.messages);
     assert.deepEqual(saved.find(item => item.id === branch!.id)?.messages, SOURCE_SESSION.messages.slice(0, 2));
-    await act(async () => root.unmount()); container.remove(); dom.window.close();
+    await act(async () => root.unmount()); container.remove();
+    // Reload from the read-only legacy store (the stand-in for what the
+    // migration persists on a profile without IndexedDB).
+    dom.window.localStorage.setItem('netcatty_ai_sessions_v1', JSON.stringify(saved));
+    dom.window.close();
     const reloaded = await setupAiState(saved);
     assert.equal(reloaded.capture.sessions.find(item => item.id === SOURCE_SESSION.id)?.messages.length, 4);
     assert.equal(reloaded.capture.sessions.find(item => item.id === branch!.id)?.messages.length, 2);

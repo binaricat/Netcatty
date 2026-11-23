@@ -595,6 +595,7 @@ function SidePanelAiSlotInner({
     AISidePanelStateRoot,
     mountedAiTabIds,
     aiContextsByTabId,
+    appTerminalInfos,
     resolveAIExecutorContext,
     pendingTerminalSelectionForAI,
     handlePendingTerminalSelectionConsumed,
@@ -604,6 +605,7 @@ function SidePanelAiSlotInner({
     onOpenVaultHostFromChat,
     onOpenVaultSectionFromChat,
     onOpenVaultSnippetFromChat,
+    onSetWorkspaceAnchorChat,
     validAIScopeTargetIds,
   } = ctx;
   const workspaces = ctx.workspaces as Workspace[];
@@ -656,6 +658,7 @@ function SidePanelAiSlotInner({
         activeSidePanelTab={isVisible ? 'ai' : null}
         liveScopeTargetIds={validAIScopeTargetIds}
         contextsByTabId={aiContextsByTabId}
+        appTerminalSessions={appTerminalInfos}
         resolveExecutorContext={resolveAIExecutorContext}
         pendingTerminalSelection={pendingTerminalSelectionForAI}
         onPendingTerminalSelectionConsumed={handlePendingTerminalSelectionConsumed}
@@ -666,6 +669,7 @@ function SidePanelAiSlotInner({
         onOpenVaultHostFromChat={onOpenVaultHostFromChat}
         onOpenVaultSectionFromChat={onOpenVaultSectionFromChat}
         onOpenVaultSnippetFromChat={onOpenVaultSnippetFromChat}
+        onSetWorkspaceAnchorChat={onSetWorkspaceAnchorChat as ((workspaceId: string, chatId: string | null) => void) | undefined}
         workspaces={workspaces}
       />
     </AISidePanelStateRoot>

@@ -84,10 +84,6 @@ class AppShellPropsStore {
 
 export const appShellPropsStore = new AppShellPropsStore();
 
-export function publishAppShellDomains(domains: AppViewDomains): void {
-  appShellPropsStore.setDomains(domains);
-}
-
 export function publishAppShellDomainSlice<K extends keyof AppViewDomains>(
   key: K,
   slice: AppViewDomains[K],

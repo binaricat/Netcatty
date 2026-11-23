@@ -38,18 +38,20 @@ export function usePluginManager() {
     const refreshGeneration = generation;
     return () => { refreshGeneration.current++; unsubscribe?.(); window.removeEventListener('netcatty:plugin-packages-changed', update); };
   }, [refresh]);
-  const run = useCallback(async (action: (bridge: NetcattyBridge) => Promise<unknown>) => {
+  const run = useCallback(async (action: (bridge: NetcattyBridge) => Promise<unknown>, throwOnError = false) => {
     if (mutation.current) return;
     mutation.current = true;
     setBusy(true);
     setError(null);
+    let failure: Error | null = null;
     try { await action(netcattyBridge.require()); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    catch (cause) { failure = cause instanceof Error ? cause : new Error(String(cause)); setError(failure.message); }
     finally {
-      try { await refresh(); } catch (cause) { setError(String(cause)); }
+      try { await refresh(); } catch (cause) { failure ??= cause instanceof Error ? cause : new Error(String(cause)); setError(failure.message); }
       mutation.current = false;
       setBusy(false);
     }
+    if (throwOnError && failure) throw failure;
   }, [refresh]);
   return {
     plugins, available, statusKnown, busy, error, credentialStorageAvailable, refresh,
@@ -70,6 +72,6 @@ export function usePluginManager() {
         if (!bridge.resetPluginSource) throw new Error('Private source reset unavailable');
         await bridge.resetPluginSource(id, source.id);
       }
-    }),
+    }, true),
   };
 }

@@ -6,7 +6,7 @@ Let an agent continue an authorized task across multiple sessions in its workspa
 
 The workspace is the collaboration and permission boundary. The host grants access to particular sessions and management operations; the main process enforces those grants across RPC, IPC, and CLI paths. Being displayed in a workspace does not itself grant access, transfer ownership, or authorize closing another chat's session. Existing task authorization should be reusable for permitted recovery without repeated permission questions.
 
-## Current delivery: PR 3885
+## Merged foundation: PR 3885
 
 - Open a new host session in an explicitly selected workspace and bind it to the requesting chat scope, or return an explicit binding failure.
 - Preserve upstream reuse-first behavior and original ownership, including visibility of sessions already auto-reconnecting.
@@ -40,15 +40,21 @@ The Skill is operator guidance, not a backend retry controller or a grant of per
 | --- | --- | --- |
 | Open a new connection for parallel work | Requested workspace, usable chat scope, explicit reuse/create result, no duplicate retry tabs | Placement/scope delivered; existing reuse preserved |
 | Slow local shell or SSH shell startup | No command bytes before readiness; bounded cancellation and explicit not-sent failure | Delivered for tracked shell PTYs |
-| Brief network loss or sleep/wake disconnect | Reconnect original tab within its grant, preserve scope, resume after observed readiness | Planned explicit reconnect |
+| Brief network loss or sleep/wake disconnect | Reconnect original tab within its grant, preserve scope, resume after observed readiness | Explicit reconnect implemented in the follow-up; live fault injection pending |
 | Old terminal is unresponsive | Inspect/cancel appropriately, then use one permitted independent connection in the same workspace | Creation is available where exposed; automated recovery orchestration planned |
 | A command may have executed before disconnect | Diagnose outcome; no automatic replay of a possibly mutating command | Skill guidance; richer delivery state planned |
 | Permission revoked or user stops the task | No reconnect/reopen/resume that bypasses that decision | Existing enforcement retained; lifecycle regressions required for new tools |
 | Same failure persists | Bounded retries/backoff, no tab storm, clear blocked-dependency report | Skill guidance; controller enforcement required with lifecycle tools |
 
+## Follow-up: explicit reconnect (2026-10-26)
+
+Implementation and validation are tracked in [scoped-session-reconnect-20261026.md](scoped-session-reconnect-20261026.md). The follow-up adds `session_reconnect` / CLI `session-reconnect` for existing scoped disconnected sessions, using the existing terminal lifecycle with no new tab or command replay. Main-process attempt limits and scope checks supplement the operator policy. Restart/move and independent recovery-tab orchestration remain later work.
+
+The same open PR is being extended with `session_recover` / CLI `session-recover`: short bounded recovery calls inspect authentication, existing reconnects and tracked job activity, retry with the shared reconnect budget, and observe prompt readiness. Continuations retain the incident deadline. This orchestration does not create recovery tabs, move sessions, restart connected transports or replay task commands. Actual sleep/wake/network-fault acceptance remains outstanding.
+
 ## Status
 
-Planning and Skill guidance for the continuity objective. PR 3885 remains the first implementation increment. No disconnected-session reconnect/restart/move tool is claimed by this document. Apply Skill updates through the application's normal distribution/synchronization path; do not rely on overwriting a user's separately maintained interruption skill.
+PR 3885 is merged. The follow-up implements explicit scoped reconnect and bounded same-session recovery; restart/move remain planned. Apply Skill updates through the application's normal distribution/synchronization path; do not rely on overwriting a user's separately maintained interruption skill.
 
 ## Guidance validation
 

@@ -269,7 +269,7 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
   );
   assert.match(
     source,
-    /const canBroadcastInput = \(!sensitive\s*\|\|\s*\(ctx\.broadcastPasswordBypassRef\?\.current === true && options\?\.sensitive !== true\)\) &&[\s\S]*?const willBroadcastInput = canBroadcastInput && options\?\.skipBroadcast !== true;[\s\S]*?if \(!canBroadcastInput && !handlingKittyBroadcast\) \{\s*prepareSudoAutofillInput/s,
+    /const canBroadcastInput = shouldBroadcastDuringSensitivePrompt\(\{[\s\S]*?broadcastPasswordBypass: ctx\.broadcastPasswordBypassRef\?\.current === true && options\?\.sensitive !== true,[\s\S]*?\}\) &&[\s\S]*?const willBroadcastInput = canBroadcastInput && options\?\.skipBroadcast !== true;[\s\S]*?if \(!canBroadcastInput && !handlingKittyBroadcast\) \{\s*prepareSudoAutofillInput/s,
   );
   assert.match(
     source,

@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { TerminalAuthDialog, TerminalAuthDialogProps } from './TerminalAuthDialog';
 import { TerminalConnectionProgress, TerminalConnectionProgressProps } from './TerminalConnectionProgress';
 import { HostKeyInfo, TerminalHostKeyVerification } from './TerminalHostKeyVerification';
+import { useAnimatedConnectionProgress } from './connectionTicker';
 import {
     resolveDisconnectedDialogTerminalRoot,
     restoreTerminalFocusFromDisconnectedDialog,
@@ -35,6 +36,8 @@ export interface TerminalConnectionDialogProps {
     restoreState?: 'restored-disconnected';
     error: string | null;
     progressValue: number;
+    /** Animate indeterminate progress locally from `progressValue` (terminal connects). */
+    progressAnimating?: boolean;
     chainProgress: ChainProgress | null;
     needsAuth: boolean;
     showLogs: boolean;
@@ -95,7 +98,8 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
     status,
     restoreState,
     error,
-    progressValue,
+    progressValue: progressBaseValue,
+    progressAnimating = false,
     chainProgress,
     needsAuth,
     showLogs,
@@ -109,6 +113,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
     progressProps,
 }) => {
     const { t } = useI18n();
+    const progressValue = useAnimatedConnectionProgress(progressBaseValue, progressAnimating);
     const hasError = Boolean(error);
     const isRestoredDisconnected = status === 'disconnected' && restoreState === 'restored-disconnected';
     const isConnecting = status === 'connecting';

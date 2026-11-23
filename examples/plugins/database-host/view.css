@@ -1,0 +1,6 @@
+.database-page { max-width: 900px; margin: auto; padding: 20px; color: hsl(var(--foreground)); font: 14px/1.6 system-ui, sans-serif; }
+h1 { font-size: 22px; } p { color: hsl(var(--muted-foreground)); }
+form { display: grid; gap: 12px; margin: 20px 0; } label { display: grid; gap: 5px; }
+input, textarea { width: 100%; box-sizing: border-box; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--background)); color: inherit; padding: 9px; }
+button { border: 1px solid hsl(var(--border)); border-radius: 6px; padding: 9px; cursor: pointer; color: inherit; background: hsl(var(--muted)); }
+button:disabled { opacity: .45; cursor: default; } pre { overflow: auto; max-height: 500px; white-space: pre-wrap; overflow-wrap: anywhere; }

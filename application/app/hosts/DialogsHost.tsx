@@ -1,9 +1,6 @@
 import { useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 
-import { getHostSearchMatch } from '../../../lib/searchMatcher';
-import type { Host } from '../../../types';
 import { useEditorTabChromeList } from '../../state/editorTabStore';
-import { useVaultSnapshot } from '../../state/vaultSnapshotStore';
 import { getAppHandlers, subscribeAppHandlers } from '../appHandlersBridge';
 import {
   publishAppShellDomainSlice,
@@ -11,38 +8,20 @@ import {
 } from '../appShellPropsStore';
 import { useAppLocalUiStore } from '../appLocalUiStore';
 
-const EMPTY_HOST_RESULTS: Host[] = [];
-
 /**
- * Dialogs island: local dialog/queue state from `appLocalUiStore`, plus a
- * selective vault hosts subscription for quick-search results when open.
+ * Dialogs island: local dialog/queue state from `appLocalUiStore`. The quick
+ * switcher owns its query and host results (QuickSwitcherOverlay), so typing
+ * there no longer republishes this bag.
  * Assembles dialogs + overlays field-by-field — never spreads a prepared bag.
  */
 export function DialogsHost() {
   const local = useAppLocalUiStore();
-  const vault = useVaultSnapshot();
   const editorTabs = useEditorTabChromeList();
   const handlers = useSyncExternalStore(
     subscribeAppHandlers,
     getAppHandlers,
     getAppHandlers,
   );
-
-  const quickResults = useMemo(() => {
-    if (!local.isQuickSwitcherOpen) return EMPTY_HOST_RESULTS;
-    const term = local.quickSearch.trim();
-    if (!term) return vault.hosts as Host[];
-    return (vault.hosts as Host[])
-      .map((host) => ({ host, match: getHostSearchMatch(term, host) }))
-      .filter((entry) => entry.match.matched)
-      .sort((left, right) => {
-        if (left.match.score !== right.match.score) {
-          return right.match.score - left.match.score;
-        }
-        return left.host.label.localeCompare(right.host.label);
-      })
-      .map((entry) => entry.host);
-  }, [local.isQuickSwitcherOpen, local.quickSearch, vault.hosts]);
 
   const dialogsDomain = useMemo(() => {
     if (!handlers) return null;
@@ -68,14 +47,11 @@ export function DialogsHost() {
       passphraseQueue: local.passphraseQueue,
       fidoPromptQueue: local.fidoPromptQueue,
       protocolSelectHost: local.protocolSelectHost,
-      quickResults,
-      quickSearch: local.quickSearch,
       resolveEmptyVaultConflict: handlers.resolveEmptyVaultConflict,
       setAddToWorkspaceDialog: handlers.setAddToWorkspaceDialog,
       setIsCreateWorkspaceOpen: handlers.setIsCreateWorkspaceOpen,
       setIsQuickSwitcherOpen: handlers.setIsQuickSwitcherOpen,
       setProtocolSelectHost: handlers.setProtocolSelectHost,
-      setQuickSearch: handlers.setQuickSearch,
     };
   }, [
     editorTabs,
@@ -88,8 +64,6 @@ export function DialogsHost() {
     local.passphraseQueue,
     local.fidoPromptQueue,
     local.protocolSelectHost,
-    local.quickSearch,
-    quickResults,
   ]);
 
   const overlays = useMemo(() => {

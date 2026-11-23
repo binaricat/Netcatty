@@ -756,7 +756,7 @@ export const ExternalMcpCard: React.FC = () => {
       </div>
 
       <SettingsAnchor anchorId="ai-external-mcp-approval-alert">
-        <SettingRow className="flex-col items-start md:flex-row md:items-center" label={t("ai.toolSettings.behavior")} description={t(mode === "persistent" ? "ai.externalMcp.mode.persistent" : "ai.externalMcp.mode.temporary")}>
+        <SettingRow anchorId="ai-external-mcp-behavior" className="flex-col items-start md:flex-row md:items-center" label={t("ai.toolSettings.behavior")} description={t(mode === "persistent" ? "ai.externalMcp.mode.persistent" : "ai.externalMcp.mode.temporary")}>
           <ToolSettingsDialog title={t("ai.toolSettings.behavior")} triggerLabel={t("ai.toolSettings.configureBehavior")} immediate open={behaviorOpen} onOpenChange={setBehaviorOpen}>
       <SettingCard divided className="border-0 bg-transparent p-0">
         <SettingRow
@@ -879,7 +879,7 @@ export const ExternalMcpCard: React.FC = () => {
       />
 
       <SettingCard>
-        <SettingRow className="flex-col items-start md:flex-row md:items-center" label={t("ai.externalMcp.clientConfiguration")} description={t("ai.externalMcp.clientConfiguration.description")}>
+        <SettingRow anchorId="ai-external-mcp-client-configuration" className="flex-col items-start md:flex-row md:items-center" label={t("ai.externalMcp.clientConfiguration")} description={t("ai.externalMcp.clientConfiguration.description")}>
           <ToolSettingsDialog title={t("ai.externalMcp.clientConfiguration")} triggerLabel={t("ai.toolSettings.configureClients")}>
 
       <div className="space-y-2">

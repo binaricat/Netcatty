@@ -16,3 +16,9 @@ export const resolveHopConnectionProgress = (hop: number, total: number): number
 
 export const advanceMonotonicConnectionProgress = (prev: number, next: number): number =>
   Math.max(prev, next);
+
+/** Connection progress lines kept per terminal (newest win). */
+export const MAX_CONNECTION_PROGRESS_LOGS = 300;
+
+export const capConnectionProgressLogs = (logs: string[]): string[] =>
+  logs.length > MAX_CONNECTION_PROGRESS_LOGS ? logs.slice(-MAX_CONNECTION_PROGRESS_LOGS) : logs;

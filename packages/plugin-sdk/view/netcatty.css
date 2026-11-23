@@ -1,0 +1,15 @@
+/* Optional class-based foundation for host-rendered Netcatty plugin pages. */
+* { box-sizing: border-box; }
+.nc-page { font: 14px/1.5 system-ui, sans-serif; background: hsl(var(--background)); color: hsl(var(--foreground)); min-width: 0; padding: 24px; overflow-wrap: anywhere; }
+.nc-page h1 { margin: 0 0 8px; font-size: 20px; line-height: 1.3; font-weight: 600; }
+.nc-muted { color: hsl(var(--muted-foreground, 215 20% 35%)); }
+.nc-button, .nc-input { font: inherit; color: inherit; border: 1px solid hsl(var(--border, 215 20% 75%)); border-radius: 6px; background: hsl(var(--background, 0 0% 100%)); }
+.nc-button { padding: 7px 12px; cursor: pointer; }
+.nc-button:hover:not(:disabled) { background: hsl(var(--muted, 210 20% 96%)); }
+.nc-button:disabled { opacity: .5; cursor: default; }
+.nc-button-primary { background: hsl(var(--primary, 221 83% 45%)); color: hsl(var(--primary-foreground, 0 0% 100%)); border-color: transparent; }
+.nc-button-primary:hover:not(:disabled) { background: hsl(var(--primary, 221 83% 45%) / .9); }
+.nc-input { padding: 7px 10px; max-width: 100%; }
+.nc-button:focus-visible, .nc-input:focus-visible { outline: 2px solid hsl(var(--primary, 221 83% 45%)); outline-offset: 2px; }
+@media (max-width: 360px) { .nc-page { font: 14px/1.5 system-ui, sans-serif; background: hsl(var(--background)); color: hsl(var(--foreground)); padding: 16px; } }
+@media (forced-colors: active) { .nc-button, .nc-input { border: 1px solid ButtonText; } }

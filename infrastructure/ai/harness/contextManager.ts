@@ -1,5 +1,6 @@
 import type { ModelMessage } from 'ai';
 import type { ChatMessage, AIPermissionMode } from '../types';
+import { sliceHead } from '../textBoundaries';
 import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   DEFAULT_PROTECT_RECENT_MESSAGES,
@@ -25,9 +26,7 @@ import type {
   CompactionTrace,
   ContextPrepareResult,
   ContextPrepareTrigger,
-  ExternalBridgeHistoryMessage,
 } from './types';
-import { buildExternalBridgeContextMessages } from './externalBridgeContext';
 import { repairToolMessageIntegrity } from './toolMessageIntegrity';
 import { pruneFirstModelMessage } from './compactionPruner';
 
@@ -318,12 +317,6 @@ export async function prepareTurnContext(
   return { messages: working, didAdjust: false };
 }
 
-export function buildExternalBridgeContext(
-  messages: ChatMessage[],
-): ExternalBridgeHistoryMessage[] {
-  return buildExternalBridgeContextMessages(messages);
-}
-
 export function extractLatestUserGoal(messages: ModelMessage[] | ChatMessage[]): string | undefined {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
@@ -331,7 +324,7 @@ export function extractLatestUserGoal(messages: ModelMessage[] | ChatMessage[]):
     const content = typeof message.content === 'string'
       ? message.content.trim()
       : '';
-    if (content && !content.startsWith('[Netcatty session context')) return content.slice(0, 500);
+    if (content && !content.startsWith('[Netcatty session context')) return sliceHead(content, 500);
   }
   return undefined;
 }

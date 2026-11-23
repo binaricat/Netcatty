@@ -21,6 +21,7 @@ class RegistryCatalogService extends PluginCatalogService {
     this.error = null;
     this.refreshing = null;
     this.resolveAvatar = options.resolveAvatar;
+    this.resolveReadmeImage = options.resolveReadmeImage;
   }
   async refresh() {
     if (this.refreshing) return this.refreshing;
@@ -81,6 +82,21 @@ class RegistryCatalogService extends PluginCatalogService {
     const resource = this.resources.get(tuple(entry))?.readme;
     if (!resource) throw new Error("No published README snapshot is available. Refresh the catalog or open its source link.");
     return (await fetchVerified(resource, this.fetch, this.origin)).toString("utf8");
+  }
+  async readmeImages(id, token) {
+    this.sourceGuard();
+    const entry = this.selected(id, token);
+    const images = this.resources.get(tuple(entry))?.readmeImages ?? [];
+    const values = await Promise.all(images.map(async (reference) => {
+      try {
+        if (!this.resolveReadmeImage) return null;
+        const value = await this.resolveReadmeImage({ reference, read: () => fetchVerified(reference, this.fetch, this.origin) });
+        return [reference.path, value];
+      } catch { return null; }
+    }));
+    this.sourceGuard();
+    this.selected(id, token);
+    return Object.fromEntries(values.filter(Boolean));
   }
   async install(id, token) {
     this.selected(id, token);

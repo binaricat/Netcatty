@@ -73,7 +73,7 @@ export async function executePluginHostAction(action: PluginHostAction, options:
     assertSelected();
     // The existing host connection handler owns authentication, saved scripts,
     // and sessions. Its return value never reaches the sandboxed plugin.
-    options.connect(selected!);
+    await options.connect(selected!);
     return 'requested';
   }
   const nextHost = action.kind === 'create'

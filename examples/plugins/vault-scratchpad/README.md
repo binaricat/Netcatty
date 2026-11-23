@@ -7,7 +7,7 @@ Text explicitly typed here is stored in this plugin's own bounded view state;
 it is not a Netcatty Note and is not automatically cloud-synced.
 
 ```sh
-node packages/plugin-cli/dist/cli.js pack examples/plugins/vault-scratchpad --out /tmp/vault-scratchpad.ncpkg
+node packages/plugin-cli/dist/cli.js pack examples/plugins/vault-scratchpad/.package --out /tmp/vault-scratchpad.ncpkg
 ```
 
 Import disabled through normal Settings, inspect and enable it. Under Vault's
@@ -26,4 +26,11 @@ modal or overlapping menu must hide the native view while it is present.
 This source example is not independent/native acceptance evidence. Parent QA
 records the precise tested commit and package hash separately.
 
-The page subscribes to `window.netcattyView.onDidChangeEnvironment()` in `theme.js`. It follows the seven public HSL theme variables, including accent changes, without reading host settings or DOM. The subscription is disposed on page hide.
+
+## Current UI build
+
+The page now uses the host-rendered contract. Run `node build.mjs` in this
+example directory, then package `.package/` with the plugin CLI. `host.js`
+registers ordinary DOM views; `view.html` and `view.css` are bundled source
+templates. Theme values are inherited from Netcatty. There is no separate page
+preload or `window.netcattyView` API. See `docs/plugin-platform/host-rendered-ui.md`.

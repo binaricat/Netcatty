@@ -52,7 +52,7 @@ test('information previews on hover/focus, pins on click and Escape returns focu
     const entry = { id: 'com.example.guide', name: 'Guide', author: 'Example', version: '1.0.0', license: 'MIT', repository: 'example/plugin', commit: 'a'.repeat(40), description: 'Synthetic metadata',
       manifest: { id: 'com.example.guide', name: 'Guide', publisher: 'Example', main: { browser: 'index.js' }, engines: { netcatty: '*', api: '0.1.0-internal' } },
     } as NetcattyPluginCatalogEntry;
-    const catalog = { entries: [entry], source: 'registry', sourceBinding: null, listStatus: 'ready', listError: null, readme: '# Guide', readmeStatus: 'ready', readmeError: null, error: null, busy: false, retryList() {}, retryReadme() {}, async install() {} } as ReturnType<typeof import('../../../application/state/usePluginCatalog').usePluginCatalog>;
+    const catalog = { entries: [entry], source: 'registry', sourceBinding: null, listStatus: 'ready', listError: null, readmeImages: {}, readme: '# Guide', readmeStatus: 'ready', readmeError: null, error: null, busy: false, retryList() {}, retryReadme() {}, async install() {} } as ReturnType<typeof import('../../../application/state/usePluginCatalog').usePluginCatalog>;
     function Browser() {
       const [selected, setSelected] = useState<string | null>(null);
       const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);

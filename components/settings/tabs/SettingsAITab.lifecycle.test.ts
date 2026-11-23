@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import ts from "typescript";
+import { canSendWithAgent } from "../../ai/agentSendEligibility";
+import { buildManagedAgentState, getUnavailablePreferredHarness } from "./ai/managedAgentState";
+import type { ExternalAgentConfig } from "../../../infrastructure/ai/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -93,4 +96,62 @@ test("an older AI detection result cannot replace or finish the newer request", 
     assert.deepEqual(h.applied, [result]);
     assert.equal(h.state.busy, false);
   } finally { await act(async () => h.root.unmount()); }
+});
+
+
+// Mount the same option computation and normalization effect that the
+// Settings tab runs after a probe has updated the actual saved agent state.
+const pickerStart = source.indexOf("  // Agent options for default agent");
+const pickerEnd = source.indexOf("\n  useEffect(() => {\n    const bridge", pickerStart);
+assert.ok(pickerStart >= 0 && pickerEnd > pickerStart);
+const runDefaultPicker = vm.runInNewContext(ts.transpile(`(function(ctx) {
+  const { useMemo, useEffect, externalAgents, defaultAgentId, setDefaultAgentId, t,
+    canSendWithAgent, getUnavailablePreferredHarness, React, AgentIconBadge } = ctx;
+  ${source.slice(pickerStart, pickerEnd)}
+  return agentOptions;
+})`, { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React }), { console }) as
+  (ctx: Record<string, unknown>) => { value: string; disabled?: boolean }[];
+
+test("Settings retains the unavailable saved default, blocks sends and restores the same choice", async () => {
+  const agent: ExternalAgentConfig = {
+    id: "discovered_copilot",
+    name: "GitHub Copilot CLI",
+    command: "/fixture/copilot",
+    commandSource: "manual",
+    sdkBackend: "copilot",
+    enabled: true,
+    available: true,
+  };
+  let options: ReturnType<typeof runDefaultPicker> = [];
+  let choice = "";
+  function Harness({ agents }: { agents: ExternalAgentConfig[] }) {
+    const [defaultAgentId, setDefaultAgentId] = useState(agent.id);
+    options = runDefaultPicker({
+      useMemo, useEffect, externalAgents: agents, defaultAgentId, setDefaultAgentId,
+      t: (key: string) => key, canSendWithAgent, getUnavailablePreferredHarness, React,
+      AgentIconBadge: () => null,
+    });
+    choice = defaultAgentId;
+    return null;
+  }
+  const failed = buildManagedAgentState([agent], agent.id, "copilot", null, "manual");
+  const recovered = buildManagedAgentState(failed.agents, agent.id, "copilot", {
+    path: agent.command, available: true, version: "1.0.106",
+  }, "manual");
+  let root!: TestRenderer.ReactTestRenderer;
+  const render = (agents: ExternalAgentConfig[]) => React.createElement(Harness, { agents });
+  try {
+    await act(async () => { root = TestRenderer.create(render([agent])); });
+    await act(async () => { root.update(render(failed.agents)); });
+    assert.equal(choice, agent.id);
+    assert.equal(options.find(option => option.value === agent.id)?.disabled, true);
+    assert.equal(canSendWithAgent(choice, failed.agents), false);
+    await act(async () => { root.update(render(recovered.agents)); });
+    assert.equal(choice, agent.id);
+    assert.equal(options.find(option => option.value === agent.id)?.disabled, undefined);
+    assert.equal(canSendWithAgent(choice, recovered.agents), true);
+    const reset = buildManagedAgentState(recovered.agents, agent.id, "copilot", null, "auto");
+    await act(async () => { root.update(render(reset.agents)); });
+    assert.equal(choice, "catty");
+  } finally { await act(async () => root.unmount()); }
 });

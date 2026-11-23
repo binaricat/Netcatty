@@ -5,7 +5,7 @@ explicitly selected reference. It provides Send, streamed text, Stop, and usage.
 It has no tools, terminal commands, direct network access, Node runtime, or storage.
 
 The page follows light/dark mode and accent updates through the existing
-`netcattyView.onDidChangeEnvironment()` API and seven public HSL theme tokens.
+host-inherited public HSL theme tokens.
 Missing tokens fall back to the standard sample palettes. Its theme subscription
 is disposed on page hide and restored on page show.
 
@@ -36,3 +36,11 @@ For isolated QA, use the deterministic loopback provider and synthetic Note reci
 in `docs/plugin-platform/assistant-native-qa.md` in the Netcatty repository. Fixture
 QA performs no model inference or paid API call. Native acceptance and the remaining
 independent review are separate requirements.
+
+## Current UI build
+
+The page now uses the host-rendered contract. Run `node build.mjs` in this
+example directory, then package `.package/` with the plugin CLI. `host.js`
+registers ordinary DOM views; `view.html` and `view.css` are bundled source
+templates. Theme values are inherited from Netcatty. There is no separate page
+preload or `window.netcattyView` API. See `docs/plugin-platform/host-rendered-ui.md`.

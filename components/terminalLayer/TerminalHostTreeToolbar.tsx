@@ -277,7 +277,7 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
                 className={localShellButtonClass}
                 style={{ color: theme.mutedFg }}
                 disabled={!canCreateLocalTerminal}
-                onClick={onCreateLocalTerminal}
+                onClick={() => onCreateLocalTerminal()}
                 aria-label={itemLabels.localShell}
                 data-section="terminal-host-tree-local-shell"
               >
@@ -395,7 +395,7 @@ export const TerminalHostTreeToolbar: React.FC<TerminalHostTreeToolbarProps> = (
             type="button"
             className={overflowMenuItemClass}
             disabled={!canCreateLocalTerminal}
-            onClick={onCreateLocalTerminal}
+            onClick={() => onCreateLocalTerminal()}
           >
             <Terminal size={14} />
             {itemLabels.localShell}

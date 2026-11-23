@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { ALL_CAPABILITIES } = require("../index.cjs");
+const { ALL_CAPABILITIES } = require("./index.cjs");
 const { CAPABILITY_STATUS, CAPABILITY_SURFACES } = require("../constants.cjs");
 const { getCliRpcMethod } = require("../adapters/cliAdapter.cjs");
 

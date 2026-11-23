@@ -2,20 +2,51 @@
   "manifestVersion": 1,
   "id": "com.netcatty.settings-view-fixture",
   "name": "settings-view-fixture",
-  "displayName": { "en": "Settings View QA", "zh-CN": "设置视图验收" },
+  "displayName": {
+    "en": "Settings View QA",
+    "zh-CN": "设置视图验收"
+  },
   "version": "0.1.1",
   "publisher": "netcatty",
   "license": "GPL-3.0-or-later",
-  "engines": { "netcatty": ">=0.0.0", "api": ">=0.1.0-internal <0.2.0" },
-  "main": { "browser": "index.js" },
-  "activationEvents": ["onView:com.netcatty.settings-view-fixture.panel"],
-  "permissions": { "required": ["views"] },
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal <0.2.0"
+  },
+  "main": {
+    "browser": "dist/host.js"
+  },
+  "activationEvents": [
+    "onView:com.netcatty.settings-view-fixture.panel"
+  ],
+  "permissions": {
+    "required": [
+      "views",
+      "settings.read"
+    ]
+  },
   "contributes": {
-    "views": [{
-      "id": "com.netcatty.settings-view-fixture.panel",
-      "title": { "en": "Static Settings View", "zh-CN": "静态设置视图" },
-      "location": "settings",
-      "entry": "view.html"
-    }]
+    "views": [
+      {
+        "id": "com.netcatty.settings-view-fixture.panel",
+        "title": {
+          "en": "Example preview",
+          "zh-CN": "示例预览"
+        },
+        "location": "modal"
+      }
+    ],
+    "settings": [
+      {
+        "id": "com.netcatty.settings-view-fixture.greeting",
+        "label": {
+          "en": "Greeting",
+          "zh-CN": "问候语"
+        },
+        "control": "text",
+        "scope": "application",
+        "default": "Hello"
+      }
+    ]
   }
 }

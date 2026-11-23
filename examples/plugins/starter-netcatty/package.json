@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "node build.mjs"
   },
   "dependencies": {
     "@netcatty/plugin-sdk": "0.1.0-internal.1"

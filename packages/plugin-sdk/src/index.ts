@@ -669,6 +669,8 @@ export interface PluginCredentialBroker {
 export type { PluginNetworkAuthorization, PluginNetworkRequest, PluginNetworkResponse } from "@netcatty/plugin-contract";
 
 export interface PluginNetworkClient {
+  /** Opens a destination through a user-selected saved SSH server after host review. */
+  connectViaHost(request: import("@netcatty/plugin-contract").HostByteStreamConnectRequest, cancellationToken?: CancellationToken): Promise<PluginByteConnection>;
   request(request: PluginNetworkRequest): Promise<PluginNetworkResponse>;
   connect(request: import("@netcatty/plugin-contract").ByteStreamConnectRequest, cancellationToken?: CancellationToken): Promise<PluginByteConnection>;
 }

@@ -1294,7 +1294,9 @@ test("server-to-server resume cancellation settles while source identity verific
   t.after(async () => fs.promises.rm(tempPath, { force: true }));
   let markPrefixStarted;
   const prefixStarted = new Promise((resolve) => { markPrefixStarted = resolve; });
+  let execCalls = 0;
   const sourceClient = {
+    client: { exec() { execCalls += 1; throw new Error("checkpointed copies must not exec cp"); } },
     sftp: createFastSftp({
       createReadStream() {
         markPrefixStarted();
@@ -1317,7 +1319,7 @@ test("server-to-server resume cancellation settles while source identity verific
     targetSftpId: "target",
     totalBytes: 8,
     resumable: true,
-    sameHost: false,
+    sameHost: true,
     resumeStage: "download",
     checkpointBytes: 4,
     downloadCheckpointBytes: 4,
@@ -1332,6 +1334,7 @@ test("server-to-server resume cancellation settles while source identity verific
   ]);
 
   assert.match(result.error || "", /cancel/i);
+  assert.equal(execCalls, 0, "same-host resume must verify its saved prefix instead of running cp");
   assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:cancelled"), true);
   assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:complete"), false);
 });
@@ -5381,6 +5384,147 @@ test("small shared upload cancel leaves the browse session usable", async (t) =>
   assert.deepEqual(await browse("readdir", "/tmp"), [{ filename: "keep" }]);
 });
 
+test("large isolated upload cancel does not end the shared SSH client (#4134)", async (t) => {
+  // Large uploads open an isolated SFTP subsystem on the same SSH client as
+  // the browse/terminal transport. Cancel used to call sftp.end() mid-WRITE,
+  // which can make Windows OpenSSH drop the whole connection. Abort must drain
+  // without ending the subsystem while WRITEs are in flight, and must not call
+  // client.end() on the shared SSH client.
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-4134-isolated-cancel-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const payload = Buffer.alloc(SMALL_UPLOAD_SHARED_MAX_BYTES + TRANSFER_CHUNK_SIZE, 41);
+  const localPath = path.join(tempDir, "upload.bin");
+  await fs.promises.writeFile(localPath, payload);
+  const targetPath = "/tmp/isolated-cancel-4134.bin";
+
+  let sshClientEndCalls = 0;
+  let isolatedEndWhileHeld = 0;
+  let isolatedEndCalls = 0;
+  let browseEndCalls = 0;
+  let holdWrites = true;
+  const pendingWrites = [];
+
+  const isolatedSftp = createFastSftp({
+    open(_remotePath, flags, callback) {
+      callback(null, Buffer.from("isolated-handle"));
+    },
+    write(_handle, _buffer, _offset, _length, _position, callback) {
+      if (holdWrites) {
+        pendingWrites.push(callback);
+        return;
+      }
+      setImmediate(() => callback(null));
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    end() {
+      isolatedEndCalls += 1;
+      if (holdWrites && pendingWrites.length > 0) {
+        isolatedEndWhileHeld += 1;
+      }
+    },
+  });
+
+  const browseSftp = createFastSftp({
+    open(_remotePath, _flags, callback) {
+      callback(null, Buffer.from("browse-handle"));
+    },
+    write(_handle, _buffer, _offset, _length, _position, callback) {
+      setImmediate(() => callback(null));
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+    readdir(_remotePath, callback) {
+      if (browseEndCalls > 0 || sshClientEndCalls > 0) {
+        callback(new Error("browse session ended"));
+        return;
+      }
+      callback(null, [{ filename: "keep" }]);
+    },
+    end() {
+      browseEndCalls += 1;
+    },
+  });
+
+  const sshClient = {
+    end() {
+      sshClientEndCalls += 1;
+    },
+    sftp(callback) {
+      callback(null, isolatedSftp);
+    },
+  };
+
+  const client = {
+    sftp: browseSftp,
+    client: sshClient,
+    stat() {
+      return Promise.resolve({ size: 0 });
+    },
+    rename() {
+      return Promise.resolve();
+    },
+    delete() {
+      return Promise.resolve();
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const sender = createSender();
+  const transferId = "isolated-upload-cancel-4134";
+  const running = transferBridge.startTransfer({ sender }, {
+    transferId,
+    sourcePath: localPath,
+    targetPath,
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "target",
+    totalBytes: payload.length,
+    resumable: true,
+    skipAdmission: true,
+  });
+
+  const ready = await waitUntil(
+    () => pendingWrites.length >= UPLOAD_TRANSFER_CONCURRENCY,
+    2000,
+  );
+  assert.equal(ready, true, "expected isolated WRITE fanout to be in flight");
+  assert.equal(isolatedEndWhileHeld, 0);
+  assert.equal(sshClientEndCalls, 0);
+
+  await transferBridge.cancelTransfer(null, { transferId });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    isolatedEndWhileHeld,
+    0,
+    "cancel must not sftp.end() the isolated channel while WRITEs are held",
+  );
+  assert.equal(sshClientEndCalls, 0, "cancel must not end the shared SSH client");
+  assert.equal(browseEndCalls, 0, "cancel must not end the browse SFTP channel");
+
+  // Browse on the shared transport must still work while WRITEs are draining.
+  await new Promise((resolve, reject) => {
+    browseSftp.readdir("/tmp", (error, value) => {
+      if (error) reject(error);
+      else resolve(value);
+    });
+  }).then((entries) => {
+    assert.deepEqual(entries, [{ filename: "keep" }]);
+  });
+
+  holdWrites = false;
+  for (const callback of pendingWrites.splice(0)) callback(null);
+  const result = await running;
+  assert.equal(result.cancelled, true, result);
+  assert.equal(result.error, "Transfer cancelled");
+  assert.equal(sshClientEndCalls, 0, "SSH client must stay alive after cancel settle");
+  assert.equal(browseEndCalls, 0);
+  assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:cancelled"), true);
+  assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:error"), false);
+});
+
 test("small shared upload pause leaves the browse session usable", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-small-upload-shared-pause-"));
   t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
@@ -6248,7 +6392,6 @@ test("fastPut fallback cancel settles while prior isolated write OPEN gate is un
   let firstOpenStarted = false;
   let firstIsolated = null;
   let fastPutCalls = 0;
-  let reopenedEnded = 0;
   const sharedSftp = createFastSftp({
     lstat(remotePath, callback) {
       const key = String(remotePath);
@@ -6314,9 +6457,7 @@ test("fastPut fallback cancel settles while prior isolated write OPEN gate is un
             fastPutCalls += 1;
             cb(null);
           },
-          end() {
-            reopenedEnded += 1;
-          },
+          end() {},
         }));
       },
     },
@@ -6362,7 +6503,9 @@ test("fastPut fallback cancel settles while prior isolated write OPEN gate is un
 
   assert.match(result.error || "", /cancel/i);
   assert.equal(fastPutCalls, 0, "cancel must settle before fastPut runs on unresolved gate");
-  assert.equal(reopenedEnded, 1, "cancel during gate wait must end the reopened isolated channel");
+  // #4134: cancel must settle without requiring sftp.end() on the reopened
+  // channel — ending mid-flight on the shared SSH transport can drop the
+  // whole session. Hang-freedom + cancelled event are the contract.
   assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:cancelled"), true);
 });
 
@@ -13103,6 +13246,119 @@ test("same-host directory copy rejected by a committed close leaves no lease or 
   assert.equal(sftpTransferSessionLeaseStore.getLeaseCount(sftpId), 0);
 });
 
+test("same-host directory copy skips cp when auto encoding resolves to non-UTF-8", async (t) => {
+  const {
+    sftpTransferSessionLeaseStore,
+  } = require("./sftpTransferSessionLease.cjs");
+  sftpTransferSessionLeaseStore.resetForTests();
+  t.after(() => sftpTransferSessionLeaseStore.resetForTests());
+
+  const sftpId = "same-host-directory-auto-gb18030";
+  // Seed the session's resolved encoding before the copy requests auto.
+  sftpBridge.resolveEncodingForRequest(sftpId, "gb18030");
+  let execCalls = 0;
+  transferBridge.init({
+    sftpClients: new Map([[sftpId, {
+      client: {
+        exec(_command, callback) {
+          execCalls += 1;
+          const stream = new EventEmitter();
+          stream.stderr = new EventEmitter();
+          callback(null, stream);
+          setImmediate(() => stream.emit("close", 0));
+        },
+      },
+    }]]),
+  });
+  const sender = createSender();
+
+  const result = await transferBridge.sameHostCopyDirectory(
+    { sender },
+    {
+      transferId: "same-host-directory-auto-gb18030-copy",
+      sftpId,
+      sourcePath: "/source",
+      targetPath: "/\u76ee\u6807",
+      encoding: "auto",
+    },
+  );
+
+  assert.equal(execCalls, 0);
+  assert.equal(result.success, false);
+  assert.deepEqual(sender.sent, []);
+  assert.equal(transferBridge._getActiveTransferCountForTests(), 0);
+  assert.equal(sftpTransferSessionLeaseStore.getLeaseCount(sftpId), 0);
+});
+
+for (const targetState of ["existing", "missing", "stat-error"]) {
+  test(`same-host directory copy ${targetState} target uses cp only for a fresh destination`, async (t) => {
+    const { sftpTransferSessionLeaseStore } = require("./sftpTransferSessionLease.cjs");
+    sftpTransferSessionLeaseStore.resetForTests();
+    t.after(() => sftpTransferSessionLeaseStore.resetForTests());
+    const sftpId = `same-host-directory-${targetState}`;
+    const commands = [];
+    const mkdirs = [];
+    let targetExists = targetState === "existing";
+    const client = {
+      async lstat(remotePath) {
+        assert.equal(String(remotePath), "/target");
+        assert.deepEqual(mkdirs, [], "check the destination before ensuring it");
+        if (targetState === "stat-error") {
+          throw Object.assign(new Error("Permission denied"), { code: 3 });
+        }
+        if (!targetExists) throw Object.assign(new Error("ENOENT"), { code: 2 });
+        return { isDirectory: true };
+      },
+      sftp: createFastSftp({
+        stat(_remotePath, callback) {
+          if (!targetExists) {
+            callback(Object.assign(new Error("ENOENT"), { code: 2 }));
+            return;
+          }
+          callback(null, { isDirectory: () => true });
+        },
+        mkdir(remotePath, callback) {
+          mkdirs.push(String(remotePath));
+          targetExists = true;
+          callback(null);
+        },
+      }),
+      client: {
+        exec(command, callback) {
+          commands.push(command);
+          assert.equal(targetExists, true, "create the fresh destination before cp");
+          const stream = new PassThrough();
+          stream.stderr = new PassThrough();
+          callback(null, stream);
+          setImmediate(() => stream.emit("close", 0));
+        },
+      },
+    };
+    const sftpClients = new Map([[sftpId, client]]);
+    transferBridge.init({ sftpClients });
+    sftpBridge.init({ sftpClients });
+    const sender = createSender();
+    const result = await transferBridge.sameHostCopyDirectory({ sender }, {
+      transferId: `${sftpId}-copy`, sftpId,
+      sourcePath: "/source", targetPath: "/target", encoding: "utf-8",
+    });
+
+    if (targetState === "missing") {
+      assert.deepEqual(result, { success: true });
+      assert.deepEqual(commands, ["cp -ra '/source/.' '/target/'"]);
+      assert.deepEqual(mkdirs, ["/target"]);
+      assert.equal(sender.sent.some(entry => entry.channel === "netcatty:transfer:complete"), true);
+    } else {
+      assert.deepEqual(result, { success: false });
+      assert.deepEqual(commands, []);
+      assert.deepEqual(mkdirs, []);
+      assert.deepEqual(sender.sent, []);
+    }
+    assert.equal(transferBridge._getActiveTransferCountForTests(), 0);
+    assert.equal(sftpTransferSessionLeaseStore.getLeaseCount(sftpId), 0);
+  });
+}
+
 test("same-host directory copy cancellation aborts cp and releases its lease", async (t) => {
   const {
     sftpTransferSessionLeaseStore,
@@ -13119,6 +13375,7 @@ test("same-host directory copy cancellation aborts cp and releases its lease", a
   stream.end = () => {};
   stream.destroy = () => {};
   const client = {
+    async lstat() { throw Object.assign(new Error("ENOENT"), { code: 2 }); },
     client: {
       exec(_command, callback) {
         callback(null, stream);
@@ -13202,6 +13459,7 @@ test("same-host file cp cancellation releases the shared session lease", async (
   stream.end = () => {};
   stream.destroy = () => {};
   const client = {
+    lstat: async () => ({ isSymbolicLink: false }),
     client: {
       exec(_command, callback) {
         callback(null, stream);
@@ -14999,3 +15257,209 @@ test("pending channel-open skips the fastPut reopen and uses the shared channel"
   assert.ok(sharedWrites >= 1);
   assert.deepEqual(remoteFiles.get(targetPath), payload);
 });
+
+test("same-host file cp restores existing destination mode", async () => {
+  const commands = [];
+  const chmods = [];
+  let targetMode = 0o100600;
+  let downloads = 0;
+  let uploads = 0;
+  const sourceSftp = createFastSftp({
+    open() { downloads++; throw new Error("unexpected download"); },
+  });
+  const sourceClient = {
+    sftp: sourceSftp,
+    lstat: async () => ({ isSymbolicLink: false }),
+    stat: async () => ({ size: 64, mode: 0o100644 }),
+    client: {
+      sftp: (callback) => callback(null, sourceSftp),
+      exec(command, callback) {
+        commands.push(command);
+        targetMode = 0o100644;
+        const stream = new PassThrough();
+        stream.stderr = new PassThrough();
+        callback(null, stream);
+        setImmediate(() => stream.emit("close", 0));
+      },
+    },
+  };
+  const targetClient = {
+    sftp: createFastSftp({
+      open() { uploads++; throw new Error("unexpected upload"); },
+    }),
+    stat: async () => ({ size: 64, mode: targetMode }),
+    chmod: async (remotePath, mode) => {
+      chmods.push([String(remotePath), mode]);
+      targetMode = mode;
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["source", sourceClient], ["target", targetClient]]) });
+  const result = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId: `same-host-cp-mode-${crypto.randomUUID()}`,
+    sourcePath: "/source/payload.bin", targetPath: "/target/payload.bin",
+    sourceType: "sftp", targetType: "sftp",
+    sourceSftpId: "source", targetSftpId: "target",
+    sourceEncoding: "utf-8", targetEncoding: "utf-8",
+    totalBytes: 64,
+    sameHost: true, resumable: false,
+  });
+  assert.equal(result.error, undefined, result.error);
+  assert.deepEqual(commands, ["cp -a '/source/payload.bin' '/target/payload.bin'"]);
+  assert.deepEqual(chmods, [["/target/payload.bin", 0o600]]);
+  assert.equal(targetMode, 0o600);
+  assert.equal(downloads, 0);
+  assert.equal(uploads, 0);
+});
+
+for (const sourceState of ["symlink", "lstat-error"]) {
+  test(`same-host file cp skips a source ${sourceState} and downloads/uploads target bytes`, async (t) => {
+    const transferId = `same-host-cp-fallback-${crypto.randomUUID()}`;
+    const sourcePath = "/opt/app/config";
+    const targetPath = "/tmp/app/config";
+    const payload = Buffer.from("contents of ../shared/config");
+    const commands = [];
+    let reads = 0;
+    let remote = Buffer.alloc(0);
+    let promoted = false;
+    const { sftp: sourceSftp } = createPipelinedDownloadSftp(payload);
+    const originalRead = sourceSftp.read;
+    sourceSftp.read = (...args) => { reads++; originalRead(...args); };
+    const sourceClient = {
+      sftp: sourceSftp,
+      async lstat(remotePath) {
+        assert.equal(String(remotePath), sourcePath);
+        if (sourceState === "lstat-error") throw new Error("lstat unsupported");
+        return { isSymbolicLink: true, size: "../shared/config".length };
+      },
+      stat: async () => ({ size: payload.length }),
+      client: {
+        sftp: (callback) => callback(null, sourceSftp),
+        exec(command, callback) {
+          commands.push(command);
+          callback(new Error("unexpected exec"));
+        },
+      },
+    };
+    const targetSftp = createFastSftp({
+      open(_path, _flags, callback) { callback(null, Buffer.from("target-handle")); },
+      write(_handle, buffer, offset, length, position, callback) {
+        if (remote.length < position + length) {
+          remote = Buffer.concat([remote, Buffer.alloc(position + length - remote.length)]);
+        }
+        buffer.copy(remote, position, offset, offset + length);
+        callback(null);
+      },
+      close(_handle, callback) { callback(null); },
+    });
+    const targetClient = {
+      sftp: targetSftp,
+      client: { sftp: (callback) => callback(null, targetSftp) },
+      async stat(remotePath) {
+        if (String(remotePath) === targetPath && remote.length === 0) {
+          throw Object.assign(new Error("ENOENT"), { code: 2 });
+        }
+        return { size: remote.length };
+      },
+      rename: async () => { promoted = true; },
+      delete: async () => {},
+    };
+    transferBridge.init({ sftpClients: new Map([["source", sourceClient], ["target", targetClient]]) });
+    const localStage = tempDirBridge.getTransferTempFilePath(transferId, "config");
+    t.after(async () => fs.promises.rm(localStage, { force: true }));
+    const result = await transferBridge.startTransfer({ sender: createSender() }, {
+      transferId, sourcePath, targetPath,
+      sourceType: "sftp", targetType: "sftp",
+      sourceSftpId: "source", targetSftpId: "target",
+      sourceEncoding: "utf-8", targetEncoding: "utf-8",
+      totalBytes: payload.length, sameHost: true, resumable: false,
+    });
+
+    assert.equal(result.error, undefined, result.error);
+    assert.deepEqual(commands, [], "source symlinks and lstat failures must bypass cp -a");
+    assert.ok(reads > 0, "fallback must download the followed source contents");
+    assert.deepEqual(remote, payload, "fallback must upload target bytes rather than the link node");
+    assert.equal(promoted, true);
+  });
+}
+
+for (const cpResult of [0, 127, 1, "exec-error"]) {
+  test(`fresh same-host file cp result ${cpResult} preserves copy/fallback behavior (#4207)`, async (t) => {
+    const transferId = `same-host-cp-${crypto.randomUUID()}`;
+    const payload = Buffer.from("same-host ordinary SFTP copy");
+    const commands = [];
+    const chmods = [];
+    let reads = 0;
+    let remote = Buffer.alloc(0);
+    let promoted = false;
+    const { sftp: sourceSftp } = createPipelinedDownloadSftp(payload);
+    const originalRead = sourceSftp.read;
+    sourceSftp.read = (...args) => { reads++; originalRead(...args); };
+    const sourceClient = {
+      sftp: sourceSftp,
+      lstat: async () => ({ isSymbolicLink: false }),
+      stat: async () => ({ size: payload.length }),
+      client: {
+        sftp: (callback) => callback(null, sourceSftp),
+        exec(command, callback) {
+          commands.push(command);
+          if (cpResult === "exec-error") { callback(new Error("exec denied")); return; }
+          const stream = new PassThrough();
+          stream.stderr = new PassThrough();
+          callback(null, stream);
+          setImmediate(() => stream.emit("close", cpResult));
+        },
+      },
+    };
+    const targetSftp = createFastSftp({
+      open(_path, _flags, callback) { callback(null, Buffer.from("target-handle")); },
+      write(_handle, buffer, offset, length, position, callback) {
+        if (remote.length < position + length) {
+          remote = Buffer.concat([remote, Buffer.alloc(position + length - remote.length)]);
+        }
+        buffer.copy(remote, position, offset, offset + length);
+        callback(null);
+      },
+      close(_handle, callback) { callback(null); },
+    });
+    const targetClient = {
+      sftp: targetSftp,
+      client: { sftp: (callback) => callback(null, targetSftp) },
+      stat: async (remotePath) => {
+        if (String(remotePath) === "/target/payload.bin" && remote.length === 0) {
+          throw Object.assign(new Error("ENOENT"), { code: 2 });
+        }
+        return { size: remote.length };
+      },
+      chmod: async (...args) => { chmods.push(args); },
+      rename: async () => { promoted = true; },
+      delete: async () => {},
+    };
+    transferBridge.init({ sftpClients: new Map([["source", sourceClient], ["target", targetClient]]) });
+    const localStage = tempDirBridge.getTransferTempFilePath(transferId, "payload.bin");
+    t.after(async () => fs.promises.rm(localStage, { force: true }));
+    const sender = createSender();
+    const result = await transferBridge.startTransfer({ sender }, {
+      transferId,
+      sourcePath: "/source/payload.bin",
+      targetPath: "/target/payload.bin",
+      sourceType: "sftp", targetType: "sftp",
+      sourceSftpId: "source", targetSftpId: "target",
+      sourceEncoding: "utf-8", targetEncoding: "utf-8",
+      totalBytes: payload.length,
+      sameHost: true, resumable: false,
+    });
+    assert.equal(result.error, undefined, result.error);
+    assert.deepEqual(commands, ["cp -a '/source/payload.bin' '/target/payload.bin'"]);
+    assert.equal(sender.sent.some(entry => entry.channel === "netcatty:transfer:complete"), true);
+    if (cpResult === 0) {
+      assert.deepEqual(chmods, [], "fresh cp must not restore destination permissions");
+      assert.equal(reads, 0, "successful cp must not download the source");
+      assert.equal(remote.length, 0, "successful cp must not upload through SFTP");
+      assert.equal(fs.existsSync(localStage), false);
+    } else {
+      assert.ok(reads > 0, "cp failure must fall back to SFTP download");
+      assert.deepEqual(remote, payload, "fallback must upload the downloaded contents");
+      assert.equal(promoted, true);
+    }
+  });
+}

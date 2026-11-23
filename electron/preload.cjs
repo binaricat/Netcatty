@@ -945,8 +945,8 @@ const api = createPreloadApi({
 
 // Fig autocomplete spec loading via main process
 const figSpecApi = {
-  listFigSpecs: () => ipcRenderer.invoke("netcatty:figspec:list"),
-  loadFigSpec: (commandName) => ipcRenderer.invoke("netcatty:figspec:load", commandName),
+  listFigSpecs: (hostOs) => ipcRenderer.invoke("netcatty:figspec:list", hostOs),
+  loadFigSpec: (commandName, hostOs) => ipcRenderer.invoke("netcatty:figspec:load", commandName, hostOs),
   listAutocompleteRemoteDir: (sessionId, dirPath, foldersOnly, filterPrefix, limit) => ipcRenderer.invoke("netcatty:ssh:listdir", {
     sessionId,
     path: dirPath,
@@ -1001,7 +1001,9 @@ function isTrustedRendererLocation(allowedOrigins) {
 }
 
 const allowedOrigins = getAllowedRendererOrigins();
-if (isTrustedRendererLocation(allowedOrigins)) {
+// Only the application main frame receives the privileged bridge. Embedded
+// plugin frames remain unprivileged even if they navigate to an app URL.
+if (process.isMainFrame !== false && isTrustedRendererLocation(allowedOrigins)) {
   contextBridge.exposeInMainWorld("netcatty", { ...existing, ...api, ...figSpecApi });
 } else {
   // If a window navigates to an untrusted origin, do NOT expose the bridge.

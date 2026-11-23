@@ -181,6 +181,7 @@ test("attachX11Forwarding pipes accepted X11 channels to the local display socke
   attachX11Forwarding(conn, {
     display: ":0",
     createSocket: () => localSocket,
+    readLocalAuthCookie: () => null,
     sendMessage: (message) => messages.push(message),
     platform: "linux",
   });
@@ -202,6 +203,79 @@ test("attachX11Forwarding pipes accepted X11 channels to the local display socke
   assert.equal(acceptedChannel.written.toString(), "local");
   assert.deepEqual(messages, []);
 });
+
+for (const rewriteCookie of [false, true]) {
+  test(`attachX11Forwarding hides fd extensions with cookie rewriting ${rewriteCookie ? "enabled" : "disabled"}`, async (t) => {
+    const conn = new EventEmitter();
+    const capturedLocal = [];
+    const capturedRemote = [];
+    const warnings = [];
+    const makeDuplex = (captured) => new Duplex({
+      read() {},
+      write(chunk, _encoding, callback) {
+        captured.push(Buffer.from(chunk));
+        callback();
+      },
+    });
+    const localSocket = makeDuplex(capturedLocal);
+    const acceptedChannel = makeDuplex(capturedRemote);
+    t.after(() => {
+      localSocket.destroy();
+      acceptedChannel.destroy();
+    });
+    localSocket.connect = () => {
+      queueMicrotask(() => localSocket.emit("connect"));
+      return localSocket;
+    };
+    const fakeCookie = "11111111111111111111111111111111";
+    const realCookie = "22222222222222222222222222222222";
+    attachX11Forwarding(conn, {
+      display: ":0",
+      platform: "linux",
+      createSocket: () => localSocket,
+      fakeCookie: rewriteCookie ? fakeCookie : undefined,
+      readLocalAuthCookie: () => rewriteCookie ? Buffer.from(realCookie, "hex") : null,
+      logger: { warn: (message) => warnings.push(message) },
+    });
+    conn.emit("x11", {}, () => acceptedChannel, () => assert.fail("unexpected reject"));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const setup = buildX11SetupPacket({ cookie: fakeCookie });
+    const queries = ["DRI3", "MIT-SHM", "GLX"].map((name) => {
+      const packet = Buffer.alloc(8 + Math.ceil(name.length / 4) * 4);
+      packet[0] = 98;
+      packet.writeUInt16LE(packet.length / 4, 2);
+      packet.writeUInt16LE(name.length, 4);
+      packet.write(name, 8, "ascii");
+      return packet;
+    });
+    // Fragment the auth packet, coalescing its tail with the first requests.
+    acceptedChannel.push(setup.subarray(0, 7));
+    acceptedChannel.push(Buffer.concat([setup.subarray(7), ...queries]));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(Buffer.concat(capturedLocal), Buffer.concat([
+      buildX11SetupPacket({ cookie: rewriteCookie ? realCookie : fakeCookie }), ...queries,
+    ]));
+
+    const setupReply = Buffer.from([1, 0, 11, 0, 0, 0, 0, 0]);
+    const replies = queries.map((_, index) => {
+      const packet = Buffer.alloc(32);
+      packet[0] = 1;
+      packet.writeUInt16LE(index + 1, 2);
+      packet[8] = 1;
+      return packet;
+    });
+    const response = Buffer.concat([setupReply, ...replies]);
+    for (const byte of response) localSocket.push(Buffer.from([byte]));
+    await new Promise((resolve) => setImmediate(resolve));
+    const expected = Buffer.from(response);
+    expected[8 + 8] = 0;
+    expected[8 + 32 + 8] = 0;
+    assert.deepEqual(Buffer.concat(capturedRemote), expected);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /^\[X11\] hiding DRI3/);
+  });
+}
 
 test("attachX11Forwarding rejects the remote channel and explains local display failures", async () => {
   const conn = new EventEmitter();

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { Terminal } from '@xterm/xterm';
-import { getTerminalSelectionForClipboard } from '../../components/terminal/normalizeTerminalSelection';
+import { getTerminalSelectionForClipboard } from '../../domain/terminalSelection';
 import { publishTerminalSelectionTarget, registerTerminalSelectionSource } from '../../infrastructure/plugins/terminalSelectionRegistry';
 
 type SelectionState = {

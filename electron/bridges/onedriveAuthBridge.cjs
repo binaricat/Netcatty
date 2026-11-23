@@ -28,23 +28,13 @@ const REFRESH_REAUTH_ERROR_CODES = new Set([
   "login_required",
 ]);
 
-const isNonEmptyString = (v) => typeof v === "string" && v.trim().length > 0;
-
-const safeJsonParse = (text) => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
-
-const describeNetworkError = (err) => {
-  const msg = err?.message || String(err);
-  const cause = err?.cause;
-  const causeCode = cause?.code ? ` (${cause.code})` : "";
-  const causeMsg = cause?.message ? `: ${cause.message}` : "";
-  return `${msg}${causeCode}${causeMsg}`.trim();
-};
+const {
+  isNonEmptyString,
+  safeJsonParse,
+  describeNetworkError,
+  resolveFetch,
+  postOAuthForm,
+} = require("./oauthHttpHelper.cjs");
 
 const base64FromArrayBuffer = (buffer) => {
   return Buffer.from(buffer).toString("base64");
@@ -55,8 +45,7 @@ const base64FromArrayBuffer = (buffer) => {
  * @param {import('electron')=} electronModule
  */
 function registerHandlers(ipcMain, electronModule) {
-  const fetchImpl =
-    electronModule?.net?.fetch ? electronModule.net.fetch.bind(electronModule.net) : fetch;
+  const fetchImpl = resolveFetch(electronModule);
 
   ipcMain.handle("netcatty:onedrive:oauth:exchange", async (_event, payload) => {
     const clientId = payload?.clientId;
@@ -79,34 +68,10 @@ function registerHandlers(ipcMain, electronModule) {
       scope,
     });
 
-    let res;
-    try {
-      res = await fetchImpl(ONEDRIVE_TOKEN_URL, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: body.toString(),
-      });
-    } catch (err) {
-      throw new Error(
-        `OneDrive token exchange network error. Check your network/VPN and whether Microsoft services are reachable. (${describeNetworkError(err)})`
-      );
-    }
-
-    const text = await res.text();
-    if (!res.ok) {
-      const data = safeJsonParse(text) || { error: text };
-      throw new Error(
-        `OneDrive token exchange failed: ${data.error_description || data.error || res.status}`
-      );
-    }
-
-    const data = safeJsonParse(text);
-    if (!data) {
-      throw new Error(`OneDrive token exchange invalid JSON: ${text.slice(0, 200)}`);
-    }
+    const data = await postOAuthForm(fetchImpl, ONEDRIVE_TOKEN_URL, body, {
+      label: "OneDrive token exchange",
+      serviceLabel: "Microsoft services",
+    });
 
     return {
       accessToken: data.access_token,
@@ -132,38 +97,18 @@ function registerHandlers(ipcMain, electronModule) {
       scope,
     });
 
-    let res;
-    try {
-      res = await fetchImpl(ONEDRIVE_TOKEN_URL, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: body.toString(),
-      });
-    } catch (err) {
-      throw new Error(
-        `OneDrive token refresh network error. Check your network/VPN and whether Microsoft services are reachable. (${describeNetworkError(err)})`
-      );
-    }
-
-    const text = await res.text();
-    if (!res.ok) {
-      const data = safeJsonParse(text) || { error: text };
-      const reauthRequired = REFRESH_REAUTH_ERROR_CODES.has(data.error);
-      const description = data.error_description || data.error || res.status;
-      throw new Error(
-        reauthRequired
+    const data = await postOAuthForm(fetchImpl, ONEDRIVE_TOKEN_URL, body, {
+      label: "OneDrive token refresh",
+      serviceLabel: "Microsoft services",
+      formatHttpError: (status, text) => {
+        const parsed = safeJsonParse(text) || { error: text };
+        const reauthRequired = REFRESH_REAUTH_ERROR_CODES.has(parsed.error);
+        const description = parsed.error_description || parsed.error || status;
+        return reauthRequired
           ? `${ONEDRIVE_REAUTH_REQUIRED_MARKER}: OneDrive session expired, please reconnect. (${description})`
-          : `OneDrive token refresh failed: ${description}`
-      );
-    }
-
-    const data = safeJsonParse(text);
-    if (!data) {
-      throw new Error(`OneDrive token refresh invalid JSON: ${text.slice(0, 200)}`);
-    }
+          : `OneDrive token refresh failed: ${description}`;
+      },
+    });
 
     return {
       accessToken: data.access_token,

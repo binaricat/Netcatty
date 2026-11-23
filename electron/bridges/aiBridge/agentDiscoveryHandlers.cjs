@@ -15,15 +15,32 @@ function computeCursorInstallState({ sdkInstalled, cliBinPath, cliLoginOk } = {}
   };
 }
 
+/**
+ * Locate the ESM entry that `import("@cursor/sdk")` loads, without evaluating
+ * the ~4 MB SDK (it used to be imported here just to detect it, which also
+ * kept it resident in the main process for good). The package does not export
+ * package.json and its CommonJS build is stripped from release builds, so walk
+ * the resolution paths for the ESM entry instead of using require.resolve.
+ */
+function isCursorSdkInstalled() {
+  const nodePath = require("node:path");
+  const nodeFs = require("node:fs");
+  for (const base of require.resolve.paths("@cursor/sdk") || []) {
+    try {
+      if (nodeFs.existsSync(nodePath.join(base, "@cursor", "sdk", "dist", "esm", "index.js"))) return true;
+    } catch { /* keep looking */ }
+  }
+  return false;
+}
+
 async function probeCursorSdkAvailability(shellEnv, options = {}) {
   const platformPackageName = getCursorPlatformPackageName();
 
   let sdkInstalled = false;
   if (platformPackageName) {
     try {
-      await import("@cursor/sdk");
       require.resolve(`${platformPackageName}/package.json`);
-      sdkInstalled = true;
+      sdkInstalled = isCursorSdkInstalled();
     } catch {
       sdkInstalled = false;
     }
@@ -38,7 +55,7 @@ async function probeCursorSdkAvailability(shellEnv, options = {}) {
   let cliAuth = { authenticated: false, authSource: null, email: null, binPath: null };
   try {
     if (probeCli) {
-      cliAuth = probeCli({ env: shellEnv }) || cliAuth;
+      cliAuth = (await probeCli({ env: shellEnv })) || cliAuth;
     }
   } catch {
     cliAuth = { authenticated: false, authSource: null, email: null, binPath: null };
@@ -143,9 +160,9 @@ function registerAgentDiscoveryHandlers(ctx) {
       let auth = { authenticated: false, authSource: null };
       try {
         if (agent.command === "claude") {
-          auth = probeClaudeAuth({ env: shellEnv });
+          auth = await probeClaudeAuth({ env: shellEnv });
         } else if (agent.command === "copilot") {
-          auth = probeCopilotAuth({});
+          auth = await probeCopilotAuth({});
         } else if (agent.command === "codex") {
           auth = { authenticated: false, authSource: null };
         } else if (agent.command === "cursor") {

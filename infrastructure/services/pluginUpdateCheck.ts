@@ -30,7 +30,7 @@ export async function checkPluginUpdates(bridge: UpdateBridge): Promise<PluginUp
   for (const plugin of installed) {
     const source = sources.find((item) => sameSource(plugin.source, item));
     // Local/unknown/removed/disabled bindings never fall back to another market.
-    if (!plugin.activeVersion || !valid(plugin.activeVersion) || !source || source.kind === 'local' || source.enabled === false) continue;
+    if (!plugin.activeVersion || !valid(plugin.activeVersion) || !source || source.kind === 'local' || source.kind === 'github' || source.enabled === false) continue;
     groups.set(source.id, [...(groups.get(source.id) ?? []), plugin]);
   }
   const checked = new Set<string>();

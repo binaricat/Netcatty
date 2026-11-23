@@ -16,9 +16,28 @@ const {
   startStream,
   startStreamToFile,
   stopStream,
+  cleanupAll,
 } = require("./sessionLogStreamManager.cjs");
 
 const TEMP_ROOT = path.join(__dirname, ".tmp-session-log-stream-tests");
+
+test("quit cleanup finishes all pending file captures before resolving", async () => {
+  const directory = path.join(TEMP_ROOT, `quit-${Date.now()}`);
+  try {
+    for (const sessionId of ["quit-one", "quit-two"]) {
+      startStreamToFile(sessionId, { filePath: path.join(directory, `${sessionId}.log`), format: "raw" });
+      appendData(sessionId, `output before quit: ${sessionId}\r\n`);
+    }
+    await cleanupAll();
+    for (const sessionId of ["quit-one", "quit-two"]) {
+      assert.equal(hasStream(sessionId), false);
+      assert.equal(fs.readFileSync(path.join(directory, `${sessionId}.log`), "utf8"), `output before quit: ${sessionId}\r\n`);
+    }
+  } finally {
+    await cleanupAll();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("txt stream live snapshots include pending ED2 cleared screens", async () => {
   const directory = path.join(TEMP_ROOT, `stream-${Date.now()}-${Math.random().toString(16).slice(2)}`);

@@ -9,6 +9,29 @@ interface SourceHistorySnapshot {
   selectionEnd: number;
 }
 
+/** Undo steps kept per note; the oldest steps are dropped first. */
+export const MAX_SOURCE_HISTORY_STEPS = 200;
+/**
+ * Every step holds a full copy of the note, so long sessions on a large note
+ * grew without bound. Also cap the text the steps hold (~16 MB as UTF-16).
+ */
+export const MAX_SOURCE_HISTORY_CHARS = 8_000_000;
+
+export const pushSourceHistory = <T extends { value: string }>(stack: T[], snapshot: T): void => {
+  stack.push(snapshot);
+  let chars = 0;
+  for (const entry of stack) chars += entry.value.length;
+  let drop = 0;
+  while (
+    stack.length - drop > 1
+    && (stack.length - drop > MAX_SOURCE_HISTORY_STEPS || chars > MAX_SOURCE_HISTORY_CHARS)
+  ) {
+    chars -= stack[drop].value.length;
+    drop += 1;
+  }
+  if (drop > 0) stack.splice(0, drop);
+};
+
 export const shouldCoalesceSourceUndoStep = (
   previous: { inputType: string; at: number; caret: number } | null,
   inputType: string,
@@ -173,7 +196,7 @@ export const NoteSourceEditor = React.forwardRef<NoteSourceEditorHandle, NoteSou
             edit.start + edit.removedLength,
           );
           compositionBaselineRef.current = baseline;
-          undoStackRef.current.push(baseline);
+          pushSourceHistory(undoStackRef.current, baseline);
           redoStackRef.current = [];
         }
         if (inputType === "insertFromComposition") compositionBaselineRef.current = null;
@@ -189,7 +212,7 @@ export const NoteSourceEditor = React.forwardRef<NoteSourceEditorHandle, NoteSou
         const previousSelectionStart = inputType === "deleteContentBackward"
           ? edit.start + edit.removedLength
           : edit.start;
-        undoStackRef.current.push(createSnapshot(
+        pushSourceHistory(undoStackRef.current, createSnapshot(
           localValue,
           previousSelectionStart,
           edit.start + edit.removedLength,
@@ -214,9 +237,9 @@ export const NoteSourceEditor = React.forwardRef<NoteSourceEditorHandle, NoteSou
       compositionBaselineRef.current = null;
       const current = createSnapshot();
       if (action === "undo") {
-        redoStackRef.current.push(current);
+        pushSourceHistory(redoStackRef.current, current);
       } else {
-        undoStackRef.current.push(current);
+        pushSourceHistory(undoStackRef.current, current);
       }
       setLocalValue(target.value);
       onChange(target.value);
@@ -260,7 +283,7 @@ export const NoteSourceEditor = React.forwardRef<NoteSourceEditorHandle, NoteSou
         const start = textarea.selectionStart;
         const end = textarea.selectionEnd;
         const nextValue = `${localValue.substring(0, start)}  ${localValue.substring(end)}`;
-        undoStackRef.current.push(createSnapshot(localValue, start, end));
+        pushSourceHistory(undoStackRef.current, createSnapshot(localValue, start, end));
         redoStackRef.current = [];
         compositionBaselineRef.current = null;
         resetUserEditCoalescing();
@@ -287,7 +310,7 @@ export const NoteSourceEditor = React.forwardRef<NoteSourceEditorHandle, NoteSou
         const end = textarea.selectionEnd;
         const result = wrapMarkdownSyntax(localValue, start, end, action);
         if (result.text !== localValue) {
-          undoStackRef.current.push(createSnapshot(localValue, start, end));
+          pushSourceHistory(undoStackRef.current, createSnapshot(localValue, start, end));
           redoStackRef.current = [];
           compositionBaselineRef.current = null;
           resetUserEditCoalescing();
@@ -350,7 +373,7 @@ export const NoteSourceEditor = React.forwardRef<NoteSourceEditorHandle, NoteSou
               if (compositionBaselineRef.current === null) {
                 const baseline = createSnapshot();
                 compositionBaselineRef.current = baseline;
-                undoStackRef.current.push(baseline);
+                pushSourceHistory(undoStackRef.current, baseline);
                 redoStackRef.current = [];
               }
               resetUserEditCoalescing();

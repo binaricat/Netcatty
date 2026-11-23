@@ -4,6 +4,7 @@
 // (based in electron/bridges/). Requiring here keeps the path unambiguous.
 const { emitTerminalSessionData } = require("../emitTerminalSessionData.cjs");
 const { formatSyntheticEcho, getVisibleIdlePrompt } = require("../ai/shellUtils.cjs");
+const { classifyShellReadiness } = require("../ai/shellReadinessState.cjs");
 const { clearSessionFlowState } = require("../terminalFlowAck.cjs");
 const { remoteDisallowsExecChannelProbe, sessionDisallowsExtraSshChannel, ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
 const defaultAiPrivacyService = require("../../shared/aiPrivacyService.cjs");
@@ -227,6 +228,7 @@ function registerCattyExecHandlers(ctx) {
             expectedPrompt: getFreshIdlePrompt(session),
             getReadyPrompt: typeof session._promptTrackTail === "string"
               ? () => getFreshIdlePrompt(session) || getVisibleIdlePrompt(session) : undefined,
+            classifyReadiness: () => classifyShellReadiness(session),
             typedInput: true,
             echoCommand: (rawCommand) => {
               const contents = electronModule?.webContents?.fromId?.(session.webContentsId);

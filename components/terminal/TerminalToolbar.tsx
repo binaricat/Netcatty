@@ -1159,7 +1159,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
         )}
         </ToolbarCustomizeContextMenu>
 
-        {!compactToolbar && <PluginTerminalSidebarLauncher sessionId={sessionId} />}
+        <PluginTerminalSidebarLauncher sessionId={sessionId} buttonClassName={buttonBase} />
         {pluginToolbarMenus.map((menu) => (
         <Tooltip key={menu.id}>
           <TooltipTrigger asChild>

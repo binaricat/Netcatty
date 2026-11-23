@@ -38,6 +38,12 @@ test('plugin manager is single-instance, closes with Escape, restores focus and 
     trigger.focus();
     await click(trigger);
     assert.equal(document.querySelectorAll('[role="dialog"]').length, 1);
+    // JSDOM cannot emulate Electron's native drag hit testing. Protect the
+    // no-drag boundary that keeps the portaled manager above the titlebar clickable.
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    assert.equal(dialog.classList.contains('app-no-drag'), true, 'plugin manager must exclude its content from native window dragging');
+    const visibleClose = dialog.querySelector<HTMLButtonElement>('button[data-dialog-close]:not([aria-hidden])')!;
+    assert.equal(visibleClose.closest('.app-no-drag'), dialog, 'the visible X must be inside the no-drag boundary');
     assert.equal(mounts, 1);
     assert.equal(document.activeElement?.getAttribute('aria-label'), 'Plugin search');
     assert.equal(document.querySelector('[role="dialog"]')?.contains(document.querySelector('[data-settings-scroll-pane]')), true);
@@ -60,20 +66,6 @@ test('plugin manager is single-instance, closes with Escape, restores focus and 
     assert.equal(document.querySelector('[role="dialog"]'), null);
     assert.equal(document.activeElement, trigger);
     assert.equal(unmounts, 2);
-    let handedOff = false;
-    await act(async () => root.render(<I18nProvider locale="en"><PluginManagementDialog>{(handoff) => <button onClick={() => handoff(() => {
-      handedOff = true;
-      assert.equal(document.querySelector('[role="dialog"]'), null);
-      assert.notEqual(document.body.style.pointerEvents, 'none');
-    })}>Open contributed settings view</button>}</PluginManagementDialog></I18nProvider>));
-    await click(trigger);
-    await click(document.querySelector<HTMLButtonElement>('[role="dialog"] button:not([data-dialog-close])')!);
-    // Radix schedules close-focus cleanup after the React close commit. The
-    // settle inside click's act() can precede that commit; observe the actual
-    // handoff instead of assuming the cleanup timer already ran.
-    const handoffDeadline = Date.now() + 2_000;
-    while (!handedOff && Date.now() < handoffDeadline) await act(async () => { await settle(); });
-    assert.equal(handedOff, true, 'external view opens only after modal ownership is released');
     function ControlledEntry() {
       const [open, setOpen] = useState(false);
       const browse = useRef<HTMLButtonElement | null>(null);
@@ -98,6 +90,8 @@ test('plugin manager is single-instance, closes with Escape, restores focus and 
 
   } finally {
     await act(async () => root.unmount());
+    // Let Radix finish deferred focus cleanup before restoring the DOM globals.
+    await settle();
     dom.window.close();
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

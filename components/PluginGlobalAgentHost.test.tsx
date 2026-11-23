@@ -90,8 +90,8 @@ test('installed global Chat UI reuses actual Catty runtime, configured HTTP tran
       electron: { ipcMain }, getInteractionWindow: () => mainWindow, isAppLocked: () => false, getTerminalWorkerManager: () => worker });
     service.runtimeSupervisor.runtimeFactories.browser = inProcessBrowserRuntime; await service.manager.initialize();
     const sample = path.join(rootPath, 'examples/plugins/global-agent'); const staging = path.join(directory, 'package'); fs.mkdirSync(path.join(staging, 'dist'), { recursive: true });
-    for (const file of ['netcatty.plugin.json', 'panel.html', 'panel.css', 'panel.js', 'README.md']) fs.copyFileSync(path.join(sample, file), path.join(staging, file));
-    fs.copyFileSync(path.join(sample, 'src/index.js'), path.join(staging, 'dist/index.js'));
+    for (const file of ['netcatty.plugin.json', 'README.md']) fs.copyFileSync(path.join(sample, file), path.join(staging, file));
+    fs.copyFileSync(path.join(sample, 'dist/host.js'), path.join(staging, 'dist/host.js'));
     const { buildPluginPackage } = await import('@netcatty/plugin-cli'); const archive = path.join(directory, 'global-agent.ncpkg'); await buildPluginPackage(staging, archive);
     await service.manager.install(archive, { enable: true });
     await act(async () => root.render(<I18nProvider locale="en"><PluginAgentHost sessions={[
@@ -104,14 +104,14 @@ test('installed global Chat UI reuses actual Catty runtime, configured HTTP tran
     } };
     let viewOpen = true;
     const mountPanel = async () => {
-      panel = new JSDOM(fs.readFileSync(path.join(sample, 'panel.html'), 'utf8'), { runScripts: 'outside-only' });
-      Object.defineProperty(panel.window, 'netcattyView', { value: { executeCommand: async (name: string, params: unknown) => {
+      panel = new JSDOM(fs.readFileSync(path.join(sample, 'view.html'), 'utf8'), { runScripts: 'outside-only' });
+      Object.defineProperty(panel.window, 'pluginContext', { value: { commands: { executeCommand: async (name: string, params: unknown) => {
         // PluginViewHost.close removes sender authority before WebContents
         // closes. A pagehide RPC cannot be relied on to reach this relay.
         if (!viewOpen) throw Error('Untrusted plugin view sender');
         const result = structuredClone(await service!.contributionService.executeCommand(name, structuredClone(params))); pluginReplies.push(result); return result;
-      }, onDidReceiveMessage: () => ({ dispose() {} }), onDidChangeEnvironment: () => ({ dispose() {} }) } });
-      await act(async () => panel!.window.eval(fs.readFileSync(path.join(sample, 'panel.js'), 'utf8')));
+      } }, views: { onDidReceiveMessage: () => ({ dispose() {} }) } } });
+      await act(async () => panel!.window.eval(fs.readFileSync(path.join(sample, 'panel.js'), 'utf8').replace('export function mount', 'function mount') + '\nwindow.disposePanel = mount(document.body, window.pluginContext, "test", "test");'));
     };
     await mountPanel();
     const element = (id: string) => panel!.window.document.getElementById(id)!;
@@ -135,7 +135,7 @@ test('installed global Chat UI reuses actual Catty runtime, configured HTTP tran
     const reference = pluginReplies.find((value) => value && typeof value === 'object' && 'conversationRef' in value && 'chatHandle' in value) as { conversationRef: string };
     const beforeReopen = counts.requests;
     viewOpen = false;
-    panel!.window.dispatchEvent(new panel!.window.Event('pagehide')); panel!.window.close();
+    panel!.window.disposePanel(); panel!.window.close();
     viewOpen = true; await mountPanel();
     await waitFor(() => element('status').textContent!.startsWith('Choose terminals'));
     (element('conversation') as HTMLSelectElement).value = reference.conversationRef;
@@ -182,7 +182,7 @@ test('installed global Chat UI reuses actual Catty runtime, configured HTTP tran
     assert.deepEqual(errors, []);
   } finally {
     console.error = originalError;
-    if (panel) { panel.window.dispatchEvent(new panel.window.Event('pagehide')); panel.window.close(); }
+    if (panel) { panel.window.disposePanel(); panel.window.close(); }
     await act(async () => root.unmount()); await service?.manager.shutdown();
     mcp.setPermissionMode('confirm'); mcp.cleanup(); aiBridge.cleanup(); privacy.configure({ enabled: false }); registerAppAppLockRuntime(oldLock);
     server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); dom.window.close();

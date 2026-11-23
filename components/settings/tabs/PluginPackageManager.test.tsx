@@ -3,7 +3,29 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { I18nProvider } from '../../../application/i18n/I18nProvider';
-import { PluginPackageDetails } from './PluginPackageManager';
+import { PluginPackageDetails, PluginPackageManager } from './PluginPackageManager';
+import { JSDOM } from 'jsdom';
+import type { usePluginManager } from '../../../application/state/usePluginManager';
+
+test('installed cards and selected details keep author before compact source metadata', () => {
+  const plugin = { id: 'com.example.synthetic', enabled: false, activeVersion: '1.0.0',
+    source: { id: 'local', kind: 'local', name: 'Imported package', origin: null },
+    manifest: { manifestVersion: 1, id: 'com.example.synthetic', name: 'Synthetic', publisher: 'Publisher', version: '1.0.0', engines: { netcatty: '*', api: '*' }, main: { browser: 'index.js' } },
+    runtime: { status: 'stopped', kind: null, lastError: 'Diagnostic remains visible', quarantinedAt: null },
+  } as NetcattyInstalledPlugin;
+  const manager = { plugins: [plugin], available: true, statusKnown: true, busy: false } as ReturnType<typeof usePluginManager>;
+  for (const initialSelectedId of [null, plugin.id]) {
+    const dom = new JSDOM(renderToStaticMarkup(<I18nProvider locale="en"><PluginPackageManager manager={manager} initialSelectedId={initialSelectedId} /></I18nProvider>));
+    const article = dom.window.document.querySelector('article')!;
+    const row = article.querySelector('[data-plugin-author-row]')!;
+    assert.equal(row.querySelector('[data-plugin-source]')?.textContent, 'Local');
+    assert.match(row.textContent!, /PublisherLocal/);
+    assert.doesNotMatch(article.textContent!, /Source:/);
+    assert.doesNotMatch(article.textContent!, /Diagnostic remains visible/);
+    assert.ok(article.querySelector('button[aria-haspopup="dialog"][aria-label$="Synthetic"]'), 'recorded errors are available from the name-adjacent icon');
+    dom.window.close();
+  }
+});
 
 test('package detail renders manifest resources as text and explains advanced authority', () => {
   const plugin = {

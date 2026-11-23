@@ -117,6 +117,35 @@ test("vault backups round-trip and dedupe identical payloads", async () => {
   }
 });
 
+test("readBackup tags decrypt failures without misclassifying invalid JSON", async () => {
+  const rootDir = createTempRoot();
+  const service = createService(rootDir);
+
+  try {
+    const { backup } = await service.createBackup({
+      payload: samplePayload(),
+      reason: "before_restore",
+    });
+    const backupDir = path.join(rootDir, BACKUP_DIR_NAME);
+    const filePath = path.join(backupDir, fs.readdirSync(backupDir).find((name) => name.endsWith(".json")));
+    const record = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    record.payloadData = Buffer.from("unreadable ciphertext").toString("base64");
+    fs.writeFileSync(filePath, JSON.stringify(record));
+
+    await assert.rejects(() => service.readBackup({ id: backup.id }), (error) => {
+      assert.equal(error.message, "VAULT_BACKUP_DECRYPT_FAILED");
+      assert.equal(error.cause.message, "Bad payload");
+      return true;
+    });
+
+    record.payloadData = Buffer.from("enc:invalid JSON").toString("base64");
+    fs.writeFileSync(filePath, JSON.stringify(record));
+    await assert.rejects(() => service.readBackup({ id: backup.id }), SyntaxError);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("createBackup preview includes notes", async () => {
   const rootDir = createTempRoot();
   const service = createService(rootDir);

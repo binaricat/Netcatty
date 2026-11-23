@@ -42,9 +42,23 @@ test('landing rows expose real sources/status/settings and quick toggles preserv
     assert.equal(document.querySelector('[role=dialog]'), null);
     assert.equal(document.querySelector('input[type=checkbox]'), null);
     assert.equal(document.querySelectorAll('[role=switch]').length, 2, 'only real plugin toggles appear on landing');
-    assert.match(document.body.textContent!, /Running/);
-    assert.match(document.body.textContent!, /Source: Official/);
-    assert.match(document.body.textContent!, /Synthetic source/);
+    const installedSection = () => document.querySelectorAll('section')[1];
+    assert.doesNotMatch(installedSection().textContent!, /Running|Disabled|Source:/);
+    const sourceRows = [...document.querySelectorAll('[data-plugin-author-row]')];
+    assert.equal(sourceRows[0].querySelector('[data-plugin-source]')?.textContent, 'Official');
+    const content = sourceRows[0].parentElement!;
+    assert.ok(content.classList.contains('gap-1'), 'title, metadata and description have 4px vertical gaps');
+    assert.ok(content.classList.contains('flex-col'));
+    assert.ok(content.classList.contains('min-w-0'));
+    assert.equal(content.firstElementChild?.querySelector('[title="Alpha"]')?.textContent, 'Alpha');
+    assert.ok(content.firstElementChild?.classList.contains('text-sm'), 'title remains 14px');
+    assert.equal(content.lastElementChild?.textContent, 'Synthetic description');
+    assert.ok(content.classList.contains('text-xs'), 'metadata and description remain 12px');
+    assert.ok(!content.parentElement?.classList.contains('mt-0.5'), 'shared SettingRow margin does not compress the local stack');
+    const thirdParty = sourceRows[1].querySelector<HTMLElement>('[data-plugin-source]')!;
+    assert.equal(thirdParty.textContent, 'Third-party');
+    assert.match(thirdParty.title, /Synthetic source.*synthetic\.example\.com/);
+    assert.equal(thirdParty.getAttribute('aria-label'), thirdParty.title);
     assert.doesNotMatch(document.body.textContent!, /Save host audit logs locally|trust all|safe mode|telemetry/i);
     await act(async () => button('Browse').click());
     await act(async () => byLabel('Settings for Alpha').click());
@@ -63,6 +77,15 @@ test('landing rows expose real sources/status/settings and quick toggles preserv
     assert.equal(changes.length, 1);
     await render(manager, new Set());
     assert.equal(byLabel('Settings for Alpha').disabled, true, 'unavailable settings cannot open an empty destination');
+    for (const [status, label] of [['starting', 'Starting'], ['stopping', 'Stopping'], ['error', 'Error'], ['quarantined', 'Quarantined'], ['unexpected', 'Status unknown']]) {
+      await render({ ...manager, plugins: [{ ...plugins[0], runtime: { ...plugins[0].runtime, status } }] });
+      assert.ok([...document.querySelectorAll('[role=status]')].some((item) => item.textContent === label), `${status} remains visible`);
+    }
+    for (const enabled of [true, false]) {
+      await render({ ...manager, plugins: [{ ...plugins[0], enabled, runtime: { ...plugins[0].runtime, status: 'stopped' } }] });
+      assert.equal(installedSection().querySelectorAll('[role=status]').length, 0, 'normal stopped/idle state is conveyed by the toggle');
+      assert.doesNotMatch(installedSection().textContent!, /Enabled, idle|Disabled|Stopped/);
+    }
     await render({ ...manager, plugins: [] });
     assert.match(document.body.textContent!, /No plugins installed/);
     await render({ ...manager, plugins: [], statusKnown: false });

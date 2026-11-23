@@ -1,12 +1,15 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogle } from '@ai-sdk/google';
+import { wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
 import type { ProviderConfig, ProviderStyle } from '../types';
-import { resolveOpenAIApi, resolveProviderStyle } from '../types';
+import { PROVIDER_PRESETS, resolveOpenAIApi, resolveProviderModelProtocol, resolveProviderStyle } from '../types';
 import { normalizeAnthropicSdkBaseURL } from '../anthropicCompatBaseUrl';
+import { isCustomAnthropicBaseURL } from '../modelDiscoveryHeaders';
 import { buildSdkRequestHeaders } from '../providerRequestHeaders';
 import { normalizeOllamaSdkBaseURL } from '../ollamaCompatBaseUrl';
 import { normalizeOpenAIChatCacheUsage } from '../openAIChatCacheUsage';
+import { toWellFormedValue } from '../textBoundaries';
 
 export { normalizeOllamaSdkBaseURL };
 import {
@@ -74,10 +77,22 @@ function getBridge(): BridgeAPI | null {
 }
 
 /**
- * Detect whether a request is likely a streaming request.
- * AI SDK streaming requests use POST with `"stream": true` in the body.
+ * Detect whether a request expects an SSE stream from the provider.
+ * OpenAI/Anthropic SDKs send `"stream": true` in the JSON body; Google
+ * Generative AI uses `:streamGenerateContent?alt=sse` on the URL instead.
  */
-function isStreamingRequest(init?: RequestInit): boolean {
+export function isStreamingRequest(url: string, init?: RequestInit): boolean {
+  try {
+    const parsedUrl = new URL(url);
+    if (
+      parsedUrl.pathname.endsWith(':streamGenerateContent')
+      && parsedUrl.searchParams.get('alt')?.toLowerCase() === 'sse'
+    ) {
+      return true;
+    }
+  } catch {
+    // Fall through to body inspection for relative or malformed URLs.
+  }
   if (!init?.body) return false;
   try {
     const bodyStr = typeof init.body === 'string' ? init.body : null;
@@ -502,7 +517,7 @@ export function createBridgeFetchForSDK(
     if (delegatedId && (!/^agent-model_[0-9a-f-]{36}_[0-9a-f-]{36}_$/.test(requestContext?.requestIdPrefix ?? '')
       || !requestContext?.requestIdPrefix?.startsWith(`agent-model_${delegatedId}_`))) throw Error('Delegated model request identity required');
     // Streaming path
-    if (isStreamingRequest(resolvedInit)) {
+    if (isStreamingRequest(url, resolvedInit)) {
       const prefix = requestContext?.requestIdPrefix ?? '';
       const requestId = `${prefix}sdk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const captureOpenAIChatFields = createOpenAIChatStreamFieldCapture(requestContext);
@@ -703,6 +718,13 @@ export function resolveProviderEndpoint(
 ): { baseURL: string | undefined; apiKey: string | undefined } {
   let baseURL = config.baseURL;
   let apiKey = safeApiKey;
+  // Fixed-protocol services expose one path prefix per native API: OpenCode Go
+  // serves Messages models under /anthropic/v1 and Google models under
+  // /google/v1beta while the stored base URL is the OpenAI discovery prefix.
+  const fixedProtocol = resolveProviderModelProtocol(config.providerId, config.defaultModel);
+  if (fixedProtocol) {
+    baseURL = PROVIDER_PRESETS[config.providerId]?.protocolBaseURLs?.[fixedProtocol] ?? baseURL;
+  }
   if (config.providerId === 'ollama') {
     baseURL = normalizeOllamaSdkBaseURL(baseURL || 'http://localhost:11434/v1');
     if (style === 'openai' && !apiKey) {
@@ -721,7 +743,31 @@ export function resolveProviderEndpoint(
   return { baseURL, apiKey };
 }
 
+/**
+ * Last line of defence before serialization: a lone UTF-16 surrogate left by
+ * any upstream cut becomes `\udXXX` in the JSON body, which strict providers
+ * reject as an unparseable request. Replace it so one bad character cannot
+ * wedge every later turn of the conversation.
+ */
+const wellFormedPromptMiddleware: LanguageModelMiddleware = {
+  specificationVersion: 'v4',
+  transformParams: async ({ params }) => {
+    const prompt = toWellFormedValue(params.prompt);
+    return prompt === params.prompt ? params : { ...params, prompt };
+  },
+};
+
 export function createModelFromConfig(
+  config: ProviderConfig,
+  requestContext?: ProviderRequestContext,
+) {
+  return wrapLanguageModel({
+    model: createProviderModel(config, requestContext),
+    middleware: wellFormedPromptMiddleware,
+  });
+}
+
+function createProviderModel(
   config: ProviderConfig,
   requestContext?: ProviderRequestContext,
 ) {
@@ -748,13 +794,25 @@ export function createModelFromConfig(
         : openai.chat(modelId);
     }
 
-    case 'anthropic':
+    case 'anthropic': {
+      // Official api.anthropic.com keeps x-api-key only. Custom Anthropic-compat
+      // gateways (e.g. Volcengine Ark Agent Plan, Claude Code proxies) may require
+      // Authorization: Bearer (ANTHROPIC_AUTH_TOKEN) or x-api-key, so send both.
+      // @ai-sdk/anthropic rejects passing apiKey and authToken together, so pass
+      // authToken for Bearer and retain x-api-key in headers unless overridden.
+      const useCustomBearer = Boolean(apiKey && isCustomAnthropicBaseURL(baseURL));
+      const hasCustomXApiKey = Object.keys(sdkHeaders).some(
+        (key) => key.toLowerCase() === 'x-api-key',
+      );
       return createAnthropic({
-        apiKey,
+        ...(useCustomBearer ? { authToken: apiKey } : { apiKey }),
         baseURL,
         fetch: customFetch,
-        headers: sdkHeaders,
+        headers: useCustomBearer && !hasCustomXApiKey
+          ? { 'x-api-key': apiKey!, ...sdkHeaders }
+          : sdkHeaders,
       })(modelId);
+    }
 
     case 'google':
       return createGoogle({

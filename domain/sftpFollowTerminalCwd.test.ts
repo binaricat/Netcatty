@@ -13,7 +13,6 @@ import {
   shouldReleaseInitialFollowSyncAttempt,
   shouldResetInitialFollowTerminalCwdSync,
   resolveTerminalCwdForSftp,
-  guessUnixHomeDirFromPath,
   fallbackFollowPathForUntrackedSession,
 } from "./sftpFollowTerminalCwd";
 

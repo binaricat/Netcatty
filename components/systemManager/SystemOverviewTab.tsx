@@ -358,8 +358,8 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
               </span>
             </div>
             {stats.cpuPerCore.length > 0 ? (
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-                {stats.cpuPerCore.slice(0, 12).map((core, index) => (
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 max-h-[260px] overflow-y-auto pr-1 overscroll-contain">
+                {stats.cpuPerCore.map((core, index) => (
                   <ResourceBar key={`core-${index}`} label={`C${index + 1}`} value={core} />
                 ))}
               </div>

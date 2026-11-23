@@ -53,6 +53,12 @@ test("disabled plugin runtime keeps passive host integration channels quiet", as
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.terminalProviders)({}, {}), []);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.terminalSessionEvent)({}, {}), []);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.extensionProviders)({}, {}), []);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.themeCatalog)({}), null);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.interactionReady)({}, { ready: true }), false);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.permissionReady)({}, { ready: true }), false);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.terminalTarget)({}, { sessionId: "s1" }), null);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.aiHostReady)({}, true), false);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.agentHostReady)({}, true), false);
   assert.equal(await ipcMain.handlers.get(CHANNELS.credentialCatalogUpdate)({}, { entries: [] }), 0);
   assert.equal(await ipcMain.handlers.get(CHANNELS.setScopeCatalog)({}, {}), null);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.getScopeCatalog)({}, {}), {
@@ -61,6 +67,23 @@ test("disabled plugin runtime keeps passive host integration channels quiet", as
     session: [],
     device: [{ id: "device", label: "This device" }],
   });
+
+  // Untrusted frame on permissionReady is still rejected even when disabled.
+  await assert.rejects(
+    ipcMain.handlers.get(CHANNELS.permissionReady)({ sender: { mainFrame: {} }, senderFrame: {} }, { ready: true }),
+    /Untrusted permission UI frame/,
+  );
+
+  // Untrusted senders on disabled fallback channels are still rejected.
+  const untrustedIpc = createIpcMain();
+  registerPluginBridge(untrustedIpc, {
+    manager: null,
+    env: {},
+    isTrustedSender: () => false,
+  });
+  for (const ch of [CHANNELS.interactionReady, CHANNELS.permissionReady, CHANNELS.terminalTarget, CHANNELS.aiHostReady, CHANNELS.agentHostReady]) {
+    await assert.rejects(untrustedIpc.handlers.get(ch)({}, {}), /Untrusted plugin management sender/);
+  }
 });
 
 test("plugin management bridge fails closed when the host manager is unavailable", async () => {
@@ -99,6 +122,15 @@ test("plugin management bridge checks sender ownership before invoking manager",
     ipcMain.handlers.get(CHANNELS.list)({ senderFrame: { url: "https://attacker.invalid/" } }),
     /Untrusted/,
   );
+});
+
+test("plugin bridge refuses embedded frames even at an app URL", () => {
+  const trusted = createTrustedPluginBridgeSender({ devServerUrl: "http://localhost:5173" });
+  const mainFrame = { url: "http://localhost:5173/" };
+  const sender = { mainFrame };
+  assert.equal(trusted({ sender, senderFrame: mainFrame }), true);
+  assert.equal(trusted({ sender, senderFrame: { url: mainFrame.url } }), false);
+  assert.equal(trusted({ sender, senderFrame: null }), false);
 });
 
 test("author presentation is a trusted-app-only route and forwards no invented authority", async () => {
@@ -160,28 +192,16 @@ test("plugin management availability follows asynchronous host initialization", 
   assert.equal(listCalls, 0);
 });
 
-test("plugin view host closures are broadcast to renderer windows", async () => {
-  const ipcMain = createIpcMain();
-  const broadcasts = [];
-  let closeListener;
+test("plugin view events are routed with their owning sender and never globally broadcast", async () => {
+  const ipcMain = createIpcMain(); const calls = []; const broadcasts = []; const sender = {};
   registerPluginBridge(ipcMain, {
-    manager: { initialize: async () => {} },
-    contributionService: {},
-    viewHost: {
-      onDidClose(listener) { closeListener = listener; return { dispose() {} }; },
-    },
-    env: { NETCATTY_PLUGIN_DEV: "1" },
-    isTrustedSender: () => true,
-    broadcast: (...args) => broadcasts.push(args),
+    manager: { initialize: async () => {} }, contributionService: {},
+    hostDrawnViewHost: { event: async (...args) => calls.push(args) },
+    isTrustedSender: () => true, broadcast: (...args) => broadcasts.push(args),
   });
-  const event = {
-    instanceId: "view-1",
-    pluginId: "com.example.view",
-    viewId: "com.example.view.panel",
-    reason: "runtime-error",
-  };
-  closeListener(event);
-  assert.deepEqual(broadcasts, [[CHANNELS.viewClosed, event]]);
+  const event = { nodeId: "button", type: "click" };
+  await ipcMain.handlers.get(CHANNELS.hostDrawnEvent)({ sender }, { instanceId: "view-1", event });
+  assert.deepEqual(calls, [["view-1", event, sender]]); assert.deepEqual(broadcasts, []);
 });
 
 test("plugin contribution icon requests use the host-owned resolver", async () => {
@@ -1771,4 +1791,18 @@ test("policy edits require trusted UI and the exact source/version/policy revisi
   assert.equal(await edit({ trusted: true }, { ...payload, policyRevision: engine.getPolicyRevision(plugin) }), true);
   assert.equal(mode, "allow");
   engine.shutdown();
+});
+
+test("GitHub management IPC rejects untrusted senders before initialization or retrieval", async () => {
+  let initialized = 0;
+  const ipcMain = createIpcMain();
+  registerPluginBridge(ipcMain, {
+    manager: { initialize: async () => { initialized++; } },
+    isTrustedSender: () => false,
+  });
+  for (const channel of [CHANNELS.githubPrepare, CHANNELS.githubInstall, CHANNELS.githubDiscard]) {
+    assert.equal(typeof ipcMain.handlers.get(channel), 'function');
+    await assert.rejects(ipcMain.handlers.get(channel)({ sender: {} }, { repository: 'owner/repo', token: 'unknown' }), /Untrusted plugin management sender/);
+  }
+  assert.equal(initialized, 0);
 });

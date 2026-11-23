@@ -254,19 +254,25 @@ function buildCodebuddyQueryOptions({
   elicitation, canUseTool,
 }) {
   const builtinTools = codebuddyBuiltinTools(toolIntegrationMode);
+  const mcpMode = builtinTools.length === 0;
+  const mcpServers = toSdkMcpServers(injectedMcpServers);
+  if (mcpMode) {
+    // These are only the app-managed servers. Show their tools directly without
+    // enabling the CLI’s general-purpose discovery tools.
+    for (const server of Object.values(mcpServers)) {
+      if (server.type !== "sdk") server.defer_loading = false;
+    }
+  }
   const options = {
     cwd,
     includePartialMessages: true,
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     extraArgs: { "dangerously-skip-permissions": null },
-    mcpServers: toSdkMcpServers(injectedMcpServers),
+    mcpServers,
+    ...(mcpMode ? { strictMcpConfig: true } : {}),
+    // Keep unrelated CLI built-ins disabled by default, including future tools.
     tools: builtinTools,
-    // `tools` is the built-in tool whitelist. In mcp mode it is [], so CodeBuddy
-    // built-ins stay disabled while injected Netcatty MCP tools remain visible.
-    // Do not mirror that empty list into allowedTools: the SDK treats
-    // allowedTools as an auto-approval list, and allowedTools: [] prevents MCP
-    // tool calls from running under bypassPermissions.
     disallowedTools: [...UI_DISALLOWED_TOOLS],
     // Keep the SDK isolated from user/project settings so local hooks, plugins,
     // or extra MCP servers cannot expand Netcatty's controlled tool boundary.

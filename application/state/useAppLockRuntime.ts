@@ -43,7 +43,20 @@ export function selectPreferredRuntimeAppLockState(
   if (incoming.version < current.version) return current;
   if (incoming.initialized && !current.initialized) return incoming;
   if (!incoming.initialized && current.initialized) return current;
-  return incoming;
+  // Every window focus/visibility change resyncs; keep the current object when
+  // nothing changed so the gate (and the provider tree under it) does not
+  // re-render.
+  return isSameRuntimeAppLockState(current, incoming) ? current : incoming;
+}
+
+function isSameRuntimeAppLockState(left: RuntimeAppLockState, right: RuntimeAppLockState): boolean {
+  return left.initialized === right.initialized
+    && left.locked === right.locked
+    && left.reason === right.reason
+    && left.version === right.version
+    && left.lastLockedAt === right.lastLockedAt
+    && left.lastUnlockedAt === right.lastUnlockedAt
+    && left.lastActivityAt === right.lastActivityAt;
 }
 
 export function useAppLockRuntime(

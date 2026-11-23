@@ -14,8 +14,30 @@ const empty: MonitorSnapshot = {
 };
 let snapshot = empty;
 const listeners = new Set<() => void>();
+export function isIdleMonitorSnapshot(value: MonitorSnapshot): boolean {
+  return value.running.length === 0
+    && value.count === 0
+    && value.hostCount === 0
+    && value.activeSessions.length === 0
+    && Object.keys(value.hosts).length === 0
+    && Object.keys(value.startedAt).length === 0;
+}
+
+/** An idle runtime polled again: only `takenAt` moved, nothing to render. */
+function isUnchangedIdleSnapshot(previous: MonitorSnapshot, next: MonitorSnapshot): boolean {
+  return isIdleMonitorSnapshot(previous)
+    && isIdleMonitorSnapshot(next)
+    && previous.epoch === next.epoch
+    && previous.runtimeId === next.runtimeId
+    && Boolean(previous.unavailable) === Boolean(next.unavailable);
+}
+
 export function publishMonitorSnapshot(next: MonitorSnapshot) {
-  snapshot = mergeMonitorSnapshotHistory(snapshot, next);
+  const merged = mergeMonitorSnapshotHistory(snapshot, next);
+  // The runtime is polled even when nothing is monitored; do not wake every
+  // subscriber (host-key dialog, monitor panels) for an unchanged idle reply.
+  if (merged === snapshot || isUnchangedIdleSnapshot(snapshot, merged)) return;
+  snapshot = merged;
   for (const l of listeners) l();
 }
 export function getMonitorHistoryCursor(): MonitorHistoryCursor {

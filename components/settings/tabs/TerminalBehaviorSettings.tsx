@@ -49,6 +49,14 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
       <SectionHeader title={t("settings.terminal.section.behavior")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
+          anchorId="terminal-context-chips"
+          label={t("settings.terminal.behavior.contextChips")}
+          description={t("settings.terminal.behavior.contextChips.desc")}
+        >
+          <Toggle checked={terminalSettings.contextChipsEnabled !== false} onChange={(v) => updateTerminalSetting("contextChipsEnabled", v)} />
+        </SettingRow>
+
+        <SettingRow
           anchorId="terminal-auto-close-on-exit"
           label={t("settings.terminal.behavior.autoCloseOnExit")}
           description={t("settings.terminal.behavior.autoCloseOnExit.desc")}
@@ -93,6 +101,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-right-click-long-press-menu"
           label={t("settings.terminal.behavior.rightClick.longPressMenu")}
           description={t("settings.terminal.behavior.rightClick.longPressMenu.desc")}
         >
@@ -103,6 +112,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-right-click-fullscreen-menu"
           label={t("settings.terminal.behavior.rightClick.fullscreenMenu")}
           description={t("settings.terminal.behavior.rightClick.fullscreenMenu.desc")}
         >
@@ -220,6 +230,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-shift-enter-newline-text"
           label={t("settings.terminal.behavior.shiftEnterNewlineText")}
           description={t("settings.terminal.behavior.shiftEnterNewlineText.desc")}
         >
@@ -252,6 +263,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-preserve-selection-on-input"
           label={t("settings.terminal.behavior.preserveSelectionOnInput")}
           description={t("settings.terminal.behavior.preserveSelectionOnInput.desc")}
         >
@@ -259,6 +271,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-force-prompt-new-line"
           label={t("settings.terminal.behavior.forcePromptNewLine")}
           description={t("settings.terminal.behavior.forcePromptNewLine.desc")}
         >
@@ -333,6 +346,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-scroll-on-input"
           label={t("settings.terminal.behavior.scrollOnInput")}
           description={t("settings.terminal.behavior.scrollOnInput.desc")}
         >
@@ -340,6 +354,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-scroll-on-output"
           label={t("settings.terminal.behavior.scrollOnOutput")}
           description={t("settings.terminal.behavior.scrollOnOutput.desc")}
         >
@@ -347,6 +362,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-scroll-on-key-press"
           label={t("settings.terminal.behavior.scrollOnKeyPress")}
           description={t("settings.terminal.behavior.scrollOnKeyPress.desc")}
         >
@@ -354,6 +370,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-scroll-on-paste"
           label={t("settings.terminal.behavior.scrollOnPaste")}
           description={t("settings.terminal.behavior.scrollOnPaste.desc")}
         >
@@ -361,6 +378,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-smooth-scrolling"
           label={t("settings.terminal.behavior.smoothScrolling")}
           description={t("settings.terminal.behavior.smoothScrolling.desc")}
         >
@@ -384,6 +402,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-link-modifier"
           label={t("settings.terminal.behavior.linkModifier")}
           description={t("settings.terminal.behavior.linkModifier.desc")}
         >

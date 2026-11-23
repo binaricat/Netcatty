@@ -1,0 +1,21 @@
+ .plugin-page { min-height:100%; color:hsl(var(--foreground)); background:hsl(var(--background)); font:14px/1.5 system-ui,sans-serif; }
+.plugin-page { color-scheme: light dark; font: 14px/1.6 system-ui, sans-serif; }
+* { box-sizing: border-box; }
+.plugin-page { margin: 0; padding: 24px; background: hsl(var(--background, 0 0% 100%)); color: hsl(var(--foreground, 222 47% 12%)); }
+main { min-width: 0; overflow-wrap: anywhere; max-width: 720px; margin: auto; }
+h1 { margin: 0 0 8px; font-size: 22px; line-height: 1.3; letter-spacing: -.02em; }
+p { color: hsl(var(--muted-foreground, 215 20% 35%)); }
+label { display: block; font-weight: 600; }
+textarea { display: block; width: 100%; min-width: 0; resize: vertical; min-height: 140px; margin: 10px 0 16px; padding: 12px; border: 1px solid hsl(var(--border, 215 20% 75%)); border-radius: 10px; background: hsl(var(--muted, 210 20% 96%)); color: inherit; font: inherit; }
+button { padding: 8px 14px; margin: 0 8px 8px 0; border: 1px solid hsl(var(--border, 215 20% 75%)); border-radius: 8px; background: hsl(var(--background, 0 0% 100%)); color: inherit; font: inherit; font-weight: 500; cursor: pointer; }
+#save, #greet { border-color: transparent; background: hsl(var(--primary, 221 83% 45%)); color: hsl(var(--primary-foreground, 0 0% 100%)); }
+button:hover:not(:disabled) { filter: brightness(.96); }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, textarea:focus-visible { outline: 2px solid hsl(var(--primary, 221 83% 45%)); outline-offset: 3px; }
+#status { min-height: 1.5em; font-size: 12px; }
+#result { white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; border-radius: 10px; background: hsl(var(--muted, 210 20% 96%)); min-height: 48px; }
+.eyebrow { color: hsl(var(--muted-foreground, 215 20% 35%)); font-size: 11px; letter-spacing: .1em; }
+@media (max-width: 360px) { .plugin-page { padding: 16px; } }
+@media (forced-colors: active) { button, textarea { border: 1px solid ButtonText; } }
+
+@media (prefers-color-scheme: dark) { .plugin-page {        } }

@@ -6,6 +6,72 @@ const { readFileSync } = require("node:fs");
 const vm = require("node:vm");
 const { normalizeBrowserUrl, pdfDownloadHeaders } = require("./hostBrowserManager.cjs");
 
+test("page tabs accept invalid TLS certificates and suppress only accepted navigation errors", async () => {
+  const { EventEmitter } = require("node:events");
+  const source = readFileSync(require.resolve("./hostBrowserManager.cjs"), "utf8");
+  const start = source.indexOf("const addTab =");
+  const end = source.indexOf("const stopTunnel =", start);
+  assert.ok(start > 0 && end > start);
+  const chromeContents = new EventEmitter();
+  const record = { tabs: new Map(), navigations: new Map(), pageSession: {}, chromeContents, route: "connected" };
+  const loads = [];
+  const addTab = vm.runInNewContext(`${source.slice(start, end)};addTab;`, {
+    MAX_TABS: 32, randomUUID: require("node:crypto").randomUUID,
+    displayTab() {},
+    WebContentsView: class {
+      constructor({ webPreferences }) {
+        assert.equal(webPreferences.session, record.pageSession);
+        assert.equal(webPreferences.webSecurity, true);
+        const contents = this.webContents = new EventEmitter();
+        contents.id = record.tabs.size + 1;
+        contents.setWebRTCIPHandlingPolicy = () => {};
+        contents.setWindowOpenHandler = () => {};
+        contents.loadURL = async (url) => {
+          for (const error of ["net::ERR_CERT_AUTHORITY_INVALID", "net::ERR_CERT_DATE_INVALID"]) {
+            const calls = [];
+            contents.emit("certificate-error", { preventDefault: () => calls.push("preventDefault") },
+              url, error, {}, (allowed) => calls.push(allowed));
+            assert.deepEqual(calls, ["preventDefault", true]);
+          }
+        };
+        const loadURL = contents.loadURL;
+        contents.loadURL = (url) => { const load = loadURL(url); loads.push(load); return load; };
+      }
+    },
+  });
+  addTab(record, "https://172.16.0.235/");
+  addTab(record, "https://device.test/");
+  await Promise.all(loads);
+  assert.equal(loads.length, 2);
+  assert.equal(chromeContents.listenerCount("certificate-error"), 0);
+
+  const commandStart = source.indexOf("const runCommand =");
+  const commandEnd = source.indexOf('ipcMain.handle("netcatty:host-browser:command"', commandStart);
+  assert.ok(commandStart > 0 && commandEnd > commandStart);
+  const runCommand = vm.runInNewContext(`${source.slice(commandStart, commandEnd)};runCommand;`, {
+    getOwned: () => record, snapshot: () => record, displayTab() {}, normalizeBrowserUrl,
+  });
+  const contents = record.tabs.get(record.activeTabId).view.webContents;
+  const certError = Object.assign(new Error("ERR_CERT_AUTHORITY_INVALID"), { code: "ERR_CERT_AUTHORITY_INVALID" });
+  contents.loadURL = async (url) => {
+    contents.emit("certificate-error", { preventDefault() {} }, url, "net::ERR_CERT_AUTHORITY_INVALID", {}, () => {});
+    throw certError;
+  };
+  const command = { type: "navigate", url: "https://172.16.0.235/" };
+  await assert.doesNotReject(runCommand({}, command));
+  assert.equal(record.navigations.size, 0);
+  // Acceptance belongs to one navigation; it must not hide a later failure.
+  contents.loadURL = async () => { throw certError; };
+  await assert.rejects(runCommand({}, command), (error) => error === certError);
+  const networkError = Object.assign(new Error("ERR_CONNECTION_REFUSED"), { code: "ERR_CONNECTION_REFUSED" });
+  contents.loadURL = async (url) => {
+    contents.emit("certificate-error", { preventDefault() {} }, url, "net::ERR_CERT_AUTHORITY_INVALID", {}, () => {});
+    throw networkError;
+  };
+  await assert.rejects(runCommand({}, command), (error) => error === networkError);
+  assert.equal(record.navigations.size, 0);
+});
+
 test("PDF navigations download before the preview can buffer the response", () => {
   const headers = { "Content-Type": ["Application/PDF;charset=UTF-8"], "Content-Length": ["8933895"] };
   for (const resourceType of ["mainFrame", "subFrame"]) {

@@ -3,11 +3,69 @@ const assert = require("node:assert/strict");
 const {
   createTerminalTextRenderer,
   terminalDataToPlainText,
+  terminalCursorLine,
+  terminalCursorState,
 } = require("./terminalLogSanitizer.cjs");
 const { terminalDataToHtml } = require("./sessionLogsBridge.cjs");
 
 test("plain text rendering applies backspace edits", () => {
   assert.equal(terminalDataToPlainText("hellp\bo\n"), "hello");
+});
+
+test("cursor state preserves ambiguous blank replacement output", () => {
+  const prompt = "prompt> ";
+  for (const width of [1, 2, 5, 11]) {
+    const output = prompt + "x".repeat(width) + "\b".repeat(width)
+      + " ".repeat(width) + "\b".repeat(width);
+    const expected = { line: prompt + " ".repeat(width), column: prompt.length };
+    assert.deepEqual(terminalCursorState(output), expected);
+    const renderer = createTerminalTextRenderer();
+    for (const ch of output) renderer.feed(ch);
+    assert.equal(renderer.getCursorLine(), expected.line);
+  }
+  assert.deepEqual(terminalCursorState(`${prompt}\x1b[?1049halt`), { line: "", column: 0 });
+});
+
+test("cursor columns use display widths without inserting padding into log text", () => {
+  const text = "\u754c\u{1f600}e\u0301";
+  assert.deepEqual(terminalCursorState(text), { line: text, column: 5 });
+  assert.equal(terminalDataToPlainText(text), text);
+  const renderer = createTerminalTextRenderer();
+  for (const ch of text) renderer.feed(ch);
+  assert.equal(renderer.getCursorLine(), text);
+  assert.equal(renderer.toHtmlContent().replace(/<[^>]*>/g, ""), text);
+});
+
+test("wide-cell overwrites, erases and preserved screens render complete glyphs", () => {
+  assert.equal(terminalDataToPlainText("\u754cA\rX"), "X A");
+  assert.equal(terminalDataToPlainText("\u754cA\r\x1b[CX"), " XA");
+  assert.equal(terminalDataToPlainText("A\u754cB\r\x1b[2CX"), "A XB");
+  assert.equal(terminalDataToPlainText("\u754cA\r\x1b[C\x1b[K"), "");
+  assert.equal(terminalDataToPlainText("\u754c\x1b[2J\x1b[H\u65b0"), "\u754c\n\u65b0");
+});
+
+test("wide and combining erasures preserve displayed blanks", () => {
+  const prompt = "\u754c> ";
+  for (const text of ["\u754c", "\u{1f600}"]) {
+    const erased = prompt + text + "\b\b  \b\b";
+    assert.deepEqual(terminalCursorState(erased), {
+      line: prompt + "  ", column: 4,
+    });
+  }
+  assert.equal(terminalCursorState(prompt + "e\u0301\b \b").line, prompt + " ");
+  const partial = terminalCursorState(prompt + "\u{1f44d}\u{1f3fd}\b\b  \b\b");
+  assert.equal(partial.column, 6);
+  assert.equal(partial.line, prompt + "\u{1f44d}  ");
+});
+
+test("spacing marks and soft hyphens remain separate input cells", () => {
+  for (const suffix of ["\u093e", "\u00ad"]) {
+    assert.equal(terminalCursorState("x" + suffix).column, 2);
+    const afterDelete = terminalCursorState("x" + suffix + "\b \b");
+    assert.equal(afterDelete.column, 1);
+    assert.equal(afterDelete.line, "x ");
+  }
+  assert.equal(terminalCursorState("\u1100\u1161\u11a8").column, 2);
 });
 
 test("plain text rendering applies carriage-return overwrites", () => {

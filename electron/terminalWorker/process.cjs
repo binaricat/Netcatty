@@ -5,6 +5,9 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { createTerminalWorkerRuntime } = require("./runtime.cjs");
 const tempDirBridge = require("../bridges/tempDirBridge.cjs");
+if (process.env.NETCATTY_CUSTOM_TEMP_DIR) {
+  tempDirBridge.applyCustomTempDir(process.env.NETCATTY_CUSTOM_TEMP_DIR);
+}
 
 // The worker owns SSH sessions in the default runtime path. Install the same
 // DH compatibility shim as the main process before loading ssh2-backed bridges.
@@ -339,6 +342,7 @@ function main() {
       // Expose worker-owned active log paths so main-process clear-all can
       // skip live auto-save streams (separate module instance from main).
       require("../bridges/sessionLogsBridge.cjs").registerWorkerHandlers(ipcMain);
+      require("../bridges/ptyProcessTree.cjs").registerWorkerHandlers(ipcMain);
       const { createSystemManagerBridge } = require("../bridges/systemManagerBridge.cjs");
       createSystemManagerBridge({
         getSessions: () => sessions,

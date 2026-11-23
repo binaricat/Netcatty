@@ -29,7 +29,9 @@ function createFakePort() {
   };
 }
 
-function loadPreloadWithFakeElectron() {
+function loadPreloadWithFakeElectron({ isMainFrame } = {}) {
+  const previousMainFrame = Object.getOwnPropertyDescriptor(process, "isMainFrame");
+  if (isMainFrame !== undefined) Object.defineProperty(process, "isMainFrame", { configurable: true, value: isMainFrame });
   const handlers = new Map();
   const listenerCounts = new Map();
   const sent = [];
@@ -87,6 +89,8 @@ function loadPreloadWithFakeElectron() {
     listenerCounts,
     sent,
     cleanup() {
+      if (previousMainFrame) Object.defineProperty(process, "isMainFrame", previousMainFrame);
+      else delete process.isMainFrame;
       delete require.cache[preloadPath];
       if (previousElectron) {
         require.cache[electronPath] = previousElectron;
@@ -101,6 +105,12 @@ function loadPreloadWithFakeElectron() {
     },
   };
 }
+
+test("subframes never receive the privileged preload API even with the application origin", () => {
+  const preload = loadPreloadWithFakeElectron({ isMainFrame: false });
+  try { assert.equal(preload.api, null); }
+  finally { preload.cleanup(); }
+});
 
 test("setTerminalKeyboardFocus sends renderer focus state to the window manager", () => {
   const preload = loadPreloadWithFakeElectron();

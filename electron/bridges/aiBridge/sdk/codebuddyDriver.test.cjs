@@ -60,12 +60,36 @@ test("buildCodebuddyQueryOptions wires SDK options in isolated mode", () => {
   assert.equal(opts.abortController, ac);
   assert.equal(opts.resume, "sess-1");
   assert.deepEqual(opts.tools, []);
-  // allowedTools must stay unset in mcp mode: tools:[] disables built-ins, while
   // allowedTools:[] would prevent injected Netcatty MCP tools from running.
   assert.ok(!("allowedTools" in opts));
+  assert.equal(opts.strictMcpConfig, true);
+  assert.equal(opts.mcpServers["netcatty-remote-hosts"].defer_loading, false);
   assert.ok(opts.disallowedTools.includes("AskUserQuestion"));
   assert.equal(opts.mcpServers["netcatty-remote-hosts"].type, "stdio");
   assert.deepEqual(opts.mcpServers["netcatty-remote-hosts"].env, { NETCATTY_MCP_PORT: "1" });
+});
+
+test("mcp and default mode allow only the app-managed MCP configuration", () => {
+  for (const toolIntegrationMode of ["mcp", undefined]) {
+    const opts = buildCodebuddyQueryOptions({
+      toolIntegrationMode,
+      injectedMcpServers: [{ name: "netcatty", command: "/abs/electron" }],
+    });
+    assert.deepEqual(opts.tools, []);
+    assert.ok(!("allowedTools" in opts));
+    assert.deepEqual(opts.settingSources, []);
+    assert.equal(opts.strictMcpConfig, true);
+    assert.equal(opts.mcpServers.netcatty.command, "/abs/electron");
+    assert.equal(opts.mcpServers.netcatty.defer_loading, false);
+  }
+});
+
+test("skills mode keeps the Bash whitelist and UI exclusions", () => {
+  const opts = buildCodebuddyQueryOptions({ toolIntegrationMode: "skills" });
+  assert.deepEqual(opts.tools, ["Bash"]);
+  assert.deepEqual(opts.disallowedTools, ["AskUserQuestion"]);
+  assert.ok(!opts.disallowedTools.includes("Bash"));
+  assert.ok(!("allowedTools" in opts));
 });
 
 test("built-in tools are mode-aware", () => {

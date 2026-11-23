@@ -1,6 +1,6 @@
+import React from 'react';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { PluginReadme } from './PluginReadme';
 
@@ -11,4 +11,13 @@ test('README never creates active HTML, remote media or script links', () => {
   assert.match(html, /href="https:\/\/example.com"/);
   assert.match(html, /rel="noopener noreferrer"/);
   assert.match(html, /&lt;script&gt;/);
+});
+
+test('README only renders registered local rasterized images and placeholders otherwise', () => {
+  const path = `/assets/${'a'.repeat(64)}.png`;
+  const html = renderToStaticMarkup(<PluginReadme markdown={`![ok](${path}) ![tracker](https://evil.test/x) ![bad](/unknown)`} images={{ [path]: 'data:image/png;base64,YQ==' }} />);
+  assert.match(html, /src="data:image\/png;base64,YQ=="/);
+  assert.match(html, /\[tracker\]/);
+  assert.match(html, /\[bad\]/);
+  assert.doesNotMatch(html, /evil\.test/);
 });

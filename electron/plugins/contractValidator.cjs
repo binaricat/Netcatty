@@ -11,12 +11,49 @@ const {
   PLUGIN_STREAM_MAX_FRAME_JSON_BYTES,
 } = require("./constants.cjs");
 
+let contractAjv = null;
+const compiledDefinitions = new Map();
+
+/**
+ * One Ajv instance per process with the generated plugin contract registered
+ * once. Compiling the 200 KB contract used to happen in a fresh Ajv for every
+ * validator (~17 ms each, ~90 validators across the plugin host at startup).
+ */
+function getContractAjv() {
+  if (!contractAjv) {
+    contractAjv = new Ajv2020({ allErrors: true, strict: false, validateFormats: true });
+    addFormats(contractAjv);
+    contractAjv.addSchema(schema);
+  }
+  return contractAjv;
+}
+
+function compileDefinition(definitionName) {
+  let compiled = compiledDefinitions.get(definitionName);
+  if (!compiled) {
+    compiled = getContractAjv().getSchema(`${schema.$id}#/$defs/${definitionName}`);
+    if (typeof compiled !== "function") throw new Error(`Unable to compile plugin contract definition: ${definitionName}`);
+    compiledDefinitions.set(definitionName, compiled);
+  }
+  return compiled;
+}
+
+/**
+ * Returns a validator for one contract definition. Compilation is deferred to
+ * the first call and shared by every validator of the same definition; each
+ * returned function still exposes its own `.errors` from its latest call.
+ */
 function createDefinitionValidator(definitionName) {
   if (!schema.$defs?.[definitionName]) throw new Error(`Unknown plugin contract definition: ${definitionName}`);
-  const ajv = new Ajv2020({ allErrors: true, strict: false, validateFormats: true });
-  addFormats(ajv);
-  ajv.addSchema(schema);
-  return ajv.compile({ $ref: `${schema.$id}#/$defs/${definitionName}` });
+  let compiled = null;
+  const validate = (value) => {
+    compiled ??= compileDefinition(definitionName);
+    const valid = compiled(value);
+    validate.errors = compiled.errors ?? null;
+    return valid;
+  };
+  validate.errors = null;
+  return validate;
 }
 
 function formatValidationErrors(errors) {
@@ -108,5 +145,6 @@ module.exports = {
   assertStreamFrameSchema,
   createDefinitionValidator,
   formatValidationErrors,
+  getContractAjv,
   resolveContractRuntimePath,
 };

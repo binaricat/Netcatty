@@ -2,12 +2,59 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { JSDOM } from 'jsdom';
+import { createRoot } from 'react-dom/client';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { I18nProvider } from '../../application/i18n/I18nProvider';
 import { TerminalComposeBar } from './TerminalComposeBar';
+import { TerminalContextMenu } from './TerminalContextMenu';
 import { TooltipProvider } from '../ui/tooltip';
 import { getComposeBarHistory, pruneComposeBarHistory, recordComposeBarHistory } from '../../application/state/composeBarHistoryStore';
 import { terminalReconnectRegistry } from '../../application/state/terminalReconnectRegistry';
+import { createTerminalDirectoryController } from '../../application/state/terminalDirectoryController';
+import { registerTerminalDirectory, refreshObservedTerminalDirectory } from '../../application/state/terminalDirectoryRegistry';
+import { terminalCwdStore } from '../../application/state/terminalCwdStore';
+
+test('disabling Context Chips preserves the compose draft and stops extra cwd refreshes', async (t) => {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const name of ['window', 'document', 'localStorage']) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, value: dom.window[name as keyof Window] });
+  }
+  t.after(() => {
+    dom.window.close();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  });
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  let probes = 0;
+  const cleanup = registerTerminalDirectory('toggle-test', createTerminalDirectoryController({
+    sessionId: 'toggle-test', isCurrent: () => true, isReady: () => true,
+    io: { cwd: async () => { probes++; return '/project'; }, list: async () => ({ entries: [], home: null }),
+      realpath: async path => path, write() {} },
+    publish: cwd => { terminalCwdStore.setCwd('toggle-test', cwd, 'backend-strict'); },
+  }));
+  const textarea = { value: '', selectionStart: 0, selectionEnd: 0, focus() {},
+    setSelectionRange(start: number, end: number) { this.selectionStart = start; this.selectionEnd = end; } };
+  const render = (enabled: boolean) => <TooltipProvider><TerminalComposeBar sessionId="toggle-test"
+    contextChipsEnabled={enabled} onSend={() => true} onClose={() => {}} /></TooltipProvider>;
+  let root!: ReactTestRenderer;
+  await act(async () => { root = create(render(true), { createNodeMock: el => el.type === 'textarea' ? textarea : null }); });
+  assert.equal(probes, 1);
+  textarea.value = 'keep this draft'; textarea.selectionStart = 2; textarea.selectionEnd = 8;
+  await act(async () => { root.update(render(false)); });
+  assert.equal(root.root.findAllByProps({ 'aria-label': 'Context Chips' }).length, 0);
+  const before = probes;
+  refreshObservedTerminalDirectory('toggle-test');
+  await Promise.resolve();
+  assert.equal(probes, before);
+  assert.equal(textarea.value, 'keep this draft');
+  assert.deepEqual([textarea.selectionStart, textarea.selectionEnd], [2, 8]);
+  await act(async () => { root.unmount(); });
+  cleanup();
+});
 
 test('compose bar preserves a draft on pane focus and records only successful async sends', async (t) => {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
@@ -257,4 +304,55 @@ test('compose send target toggle shows all vs active without looking like broadc
   const stillPulsing = root.root.findAll((node) => typeof node.props?.className === 'string' && node.props.className.includes('animate-pulse'));
   assert.equal(stillPulsing.length, 0);
   await act(async () => { root.unmount(); });
+});
+
+
+test('compose right-click never pastes into the terminal behind it', async (t) => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://localhost' });
+  const globals = ['window', 'document', 'localStorage', 'Element', 'HTMLElement', 'Node'] as const;
+  const originals = globals.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+  for (const name of globals) {
+    Object.defineProperty(globalThis, name, { configurable: true, value: dom.window[name] });
+  }
+  const rootElement = dom.window.document.querySelector('#root')!;
+  const root = createRoot(rootElement);
+  t.after(async () => {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  });
+  let pasteCount = 0;
+  const render = (broadcast: boolean) => (
+    <I18nProvider locale="en"><TooltipProvider>
+      <TerminalContextMenu sessionId="right-click-test" status="connected" rightClickBehavior="paste" onPaste={() => { pasteCount++; }}>
+        <div>
+          <div data-terminal-cell />
+          <TerminalComposeBar sessionId="right-click-test" isBroadcastEnabled={broadcast} onSend={() => true} onClose={() => {}} />
+        </div>
+      </TerminalContextMenu>
+    </TooltipProvider></I18nProvider>
+  );
+  const rightClick = async (target: string) => {
+    const element = rootElement.querySelector(target);
+    assert.ok(element, target);
+    await act(async () => {
+      element.dispatchEvent(new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+    });
+  };
+
+  await act(async () => root.render(render(false)));
+  await rightClick('textarea');
+  assert.equal(pasteCount, 0, 'the solo composer must not paste into the PTY');
+  await rightClick('[data-terminal-cell]');
+  assert.equal(pasteCount, 1, 'ordinary terminal right-click paste still works');
+
+  await act(async () => root.render(render(true)));
+  await rightClick('textarea');
+  assert.equal(pasteCount, 1, 'broadcast compose opens only its own menu');
+  assert.ok(rootElement.querySelector('[data-compose-broadcast-menu]'));
+  await rightClick('[data-compose-broadcast-menu]');
+  assert.equal(pasteCount, 1, 'right-click on the compose menu must not paste into the PTY');
 });

@@ -10,6 +10,7 @@ export function usePluginCatalog(selectedId: string | null, sourceId = 'official
   const [listAttempt, setListAttempt] = useState(0);
   const [readmeState, setReadmeState] = useState<ReadmeState | null>(null);
   const [readmeAttempt, setReadmeAttempt] = useState(0);
+  const [imageState, setImageState] = useState<{ id: string; token?: string; sourceId: string; images: Record<string, string> } | null>(null);
   const [installError, setInstallError] = useState<{ id: string; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [sourceBinding, setSourceBinding] = useState<NetcattyPluginSource | null>(null);
@@ -51,9 +52,19 @@ export function usePluginCatalog(selectedId: string | null, sourceId = 'official
     })();
     return () => { active = false; };
   }, [selectedId, selectionToken, readmeAttempt, sourceId]);
+  useEffect(() => {
+    let active = true;
+    if (selectedId && selectionToken) {
+      void netcattyBridge.get()?.getPluginCatalogReadmeImages?.(selectedId, selectionToken, sourceId)
+        .then((images) => { if (active) setImageState({ id: selectedId, token: selectionToken, sourceId, images }); })
+        .catch(() => { if (active) setImageState(null); });
+    }
+    return () => { active = false; };
+  }, [selectedId, selectionToken, sourceId, readmeAttempt]);
   const currentReadme = readmeState?.id === selectedId && readmeState.token === selectionToken && readmeState.attempt === readmeAttempt ? readmeState : null;
   return {
     entries, listStatus, listError, source, sourceBinding,
+    readmeImages: imageState?.id === selectedId && imageState.token === selectionToken && imageState.sourceId === sourceId ? imageState.images : {},
     readme: currentReadme?.status === 'ready' ? currentReadme.text : null,
     readmeStatus: currentReadme?.status ?? (selectedId ? 'loading' : 'idle'),
     readmeError: currentReadme?.error ?? null,

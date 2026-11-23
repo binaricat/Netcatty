@@ -1,16 +1,17 @@
-const { createClient, AuthType } = require("webdav");
 const https = require("https");
-const { NodeHttpHandler } = require("@smithy/node-http-handler");
-const {
-  S3Client,
-  HeadObjectCommand,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-} = require("@aws-sdk/client-s3");
 const {
   resolveOutboundHttpAgent,
 } = require("./httpNetworkProxyAgent.cjs");
+
+// webdav and the AWS SDK pull in ~140 modules (~110 ms) that are only needed
+// once a WebDAV/S3 sync actually runs, so load them on first use instead of at
+// startup (this bridge is registered before the main window loads).
+let webdavModule = null;
+const loadWebdav = () => (webdavModule ??= require("webdav"));
+let s3Module = null;
+const loadS3 = () => (s3Module ??= require("@aws-sdk/client-s3"));
+let nodeHttpHandlerModule = null;
+const loadNodeHttpHandler = () => (nodeHttpHandlerModule ??= require("@smithy/node-http-handler"));
 
 const SYNC_FILE_NAME = "netcatty-vault.json";
 
@@ -83,8 +84,8 @@ const readExistingByteLengthStrict = async (client, path) => {
 };
 
 const readRemoteText = async (client, path) => {
-  const remote = await client.getFileContents(path, { format: "text" });
-  return String(remote ?? "");
+  const remote = await client.getFileContents(path, { format: "text", details: true });
+  return { text: String(remote.data ?? ""), etag: remote.headers.etag || undefined };
 };
 
 const putWebdavFileReplacing = async (client, path, bodyBuffer) => {
@@ -104,9 +105,9 @@ const putWebdavFileReplacing = async (client, path, bodyBuffer) => {
       overwrite: true,
     });
     await client.moveFile(tmpPath, path, { overwrite: true });
-    const movedText = await readRemoteText(client, path);
-    if (remoteMatchesUploadedBody(movedText, bodyBuffer)) {
-      return;
+    const moved = await readRemoteText(client, path);
+    if (remoteMatchesUploadedBody(moved.text, bodyBuffer)) {
+      return moved.etag;
     }
   } catch {
     // fall through to padded in-place PUT
@@ -119,9 +120,9 @@ const putWebdavFileReplacing = async (client, path, bodyBuffer) => {
   for (let attempt = 0; attempt < 3; attempt++) {
     const payload = padBodyToAtLeast(bodyBuffer, minLen);
     await client.putFileContents(path, payload, { overwrite: true });
-    let remoteText = "";
+    let remote;
     try {
-      remoteText = await readRemoteText(client, path);
+      remote = await readRemoteText(client, path);
     } catch (error) {
       throw new Error(
         `WebDAV upload verification failed: could not re-read file (${
@@ -129,10 +130,10 @@ const putWebdavFileReplacing = async (client, path, bodyBuffer) => {
         })`
       );
     }
-    if (remoteMatchesUploadedBody(remoteText, bodyBuffer)) {
-      return;
+    if (remoteMatchesUploadedBody(remote.text, bodyBuffer)) {
+      return remote.etag;
     }
-    minLen = Math.max(minLen, Buffer.byteLength(remoteText, "utf8"), bodyBuffer.length);
+    minLen = Math.max(minLen, Buffer.byteLength(remote.text, "utf8"), bodyBuffer.length);
   }
   throw new Error(
     "WebDAV upload verification failed: remote file still does not match uploaded body after padded PUT"
@@ -244,6 +245,7 @@ const buildBasicAuthHeader = (username, password) =>
 
 const buildWebdavClient = async (config) => {
   if (!config) throw new Error("Missing WebDAV config");
+  const { createClient, AuthType } = loadWebdav();
   const endpoint = normalizeEndpoint(config.endpoint);
   const extraOpts = {};
   const agent = await resolveCloudSyncTransportAgent(endpoint, Boolean(config.allowInsecure));
@@ -297,9 +299,11 @@ const buildS3Client = async (config) => {
     const handlerOpts = isHttpsEndpoint(endpoint)
       ? { httpsAgent: agent }
       : { httpAgent: agent };
+    const { NodeHttpHandler } = loadNodeHttpHandler();
     clientOptions.requestHandler = new NodeHttpHandler(handlerOpts);
   }
 
+  const { S3Client } = loadS3();
   return new S3Client(clientOptions);
 };
 
@@ -358,23 +362,29 @@ const handleWebdavUpload = async (config, syncedFile) => {
     const client = await buildWebdavClient(config);
     const path = getWebdavPath();
     const body = serializeSyncedFileBody(syncedFile);
-    await putWebdavFileReplacing(client, path, body);
-    return { resourceId: path };
+    const etag = await putWebdavFileReplacing(client, path, body);
+    return { resourceId: path, etag };
   } catch (error) {
     throw wrapWebdavError("upload", error, config);
   }
 };
 
-const handleWebdavDownload = async (config) => {
+const handleWebdavDownload = async (config, etag) => {
   try {
     const client = await buildWebdavClient(config);
     const path = getWebdavPath();
-    const exists = await client.exists(path);
-    if (!exists) return { syncedFile: null };
-    const data = await client.getFileContents(path, { format: "text" });
-    if (!data) return { syncedFile: null };
-    return { syncedFile: parseSyncedFileJson(data) };
+    const result = await client.getFileContents(path, {
+      format: "text",
+      details: true,
+      ...(etag ? { headers: { "If-None-Match": etag } } : {}),
+    });
+    if (etag && result.status === 304) return { syncedFile: null, notModified: true };
+    return {
+      syncedFile: parseSyncedFileJson(result.data),
+      etag: result.headers.etag || undefined,
+    };
   } catch (error) {
+    if (error?.status === 404) return { syncedFile: null };
     throw wrapWebdavError("download", error, config);
   }
 };
@@ -393,6 +403,7 @@ const handleWebdavDelete = async (config) => {
 };
 
 const handleS3Initialize = async (config) => {
+  const { HeadObjectCommand } = loadS3();
   if (!config) throw new Error("Missing S3 config");
   const client = await buildS3Client(config);
   const key = getS3ObjectKey(config);
@@ -419,6 +430,7 @@ const handleS3Initialize = async (config) => {
 };
 
 const handleS3Upload = async (config, syncedFile) => {
+  const { PutObjectCommand } = loadS3();
   if (!config) throw new Error("Missing S3 config");
   const client = await buildS3Client(config);
   const key = getS3ObjectKey(config);
@@ -438,6 +450,7 @@ const handleS3Upload = async (config, syncedFile) => {
 };
 
 const handleS3Download = async (config) => {
+  const { GetObjectCommand } = loadS3();
   if (!config) throw new Error("Missing S3 config");
   const client = await buildS3Client(config);
   const key = getS3ObjectKey(config);
@@ -455,6 +468,7 @@ const handleS3Download = async (config) => {
 };
 
 const handleS3Delete = async (config) => {
+  const { DeleteObjectCommand } = loadS3();
   if (!config) throw new Error("Missing S3 config");
   const client = await buildS3Client(config);
   const key = getS3ObjectKey(config);
@@ -476,7 +490,7 @@ const registerHandlers = (ipcMain, electronModule) => {
     return handleWebdavUpload(payload?.config, payload?.syncedFile);
   });
   ipcMain.handle("netcatty:cloudSync:webdav:download", async (_event, payload) => {
-    return handleWebdavDownload(payload?.config);
+    return handleWebdavDownload(payload?.config, payload?.etag);
   });
   ipcMain.handle("netcatty:cloudSync:webdav:delete", async (_event, payload) => {
     return handleWebdavDelete(payload?.config);

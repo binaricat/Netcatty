@@ -15,6 +15,8 @@ const { PluginCompanionSupervisor } = require("./companionSupervisor.cjs");
 const { PluginCredentialBroker, assertLeaseParams } = require("./credentialBroker.cjs");
 const { PluginCredentialCatalog } = require("./credentialCatalog.cjs");
 const { PluginContributionService } = require("./contributionService.cjs");
+const { PluginViewResources } = require("./viewResourceService.cjs");
+const { HostDrawnViewHost } = require("./hostDrawnViewHost.cjs");
 const { PluginContributionIconService } = require("./contributionIconService.cjs");
 const { PluginFilesystemBroker } = require("./filesystemBroker.cjs");
 const { createDefaultPluginHostRpcRegistry } = require("./hostRpcRegistry.cjs");
@@ -41,7 +43,6 @@ const HOST_VAULT_FEATURE = require("./generated/plugin-contract.schema.json").$d
 const DIRECTORY_ENUMERATION_FEATURE = require("./generated/plugin-contract.schema.json").$defs.FilesystemDirectoryEnumerationFeature.const;
 const { PluginPermissionEngine } = require("./permissionEngine.cjs");
 const { PluginProtocol } = require("./pluginProtocol.cjs");
-const { PluginViewHost } = require("./pluginViewHost.cjs");
 const {
   RuntimeSupervisor,
   assertStorageParams,
@@ -102,8 +103,9 @@ function createPluginHostService(options) {
   const paths = createPluginPaths(options.app.getPath("userData"));
   const appRoot = options.appRoot ?? options.app.getAppPath();
   const runtimeDirectory = options.runtimeDirectory ?? path.join(__dirname, "runtime");
-  const supportedFeatures = [...new Set(["terminal.input-drafts", "terminal.selection-sharing", "appearance.theme-packs", "metadata.brand-icon", BYTE_STREAM_FEATURE, ...PLUGIN_AI_CONTEXT_FEATURES, PLUGIN_AGENT_FEATURE, NETWORK_CREDENTIAL_LEASE_FEATURE, HOST_INTERACTION_FEATURE, HOST_VAULT_FEATURE, VAULT_PAGES_FEATURE, TERMINAL_SIDEBAR_FEATURE, INTERACTIVE_COMMAND_FEATURE, ...(options.supportedFeatures ?? [])])]
+  const supportedFeatures = [...new Set(["network.host-byte-streams", "terminal.input-drafts", "terminal.selection-sharing", "appearance.theme-packs", "metadata.brand-icon", BYTE_STREAM_FEATURE, ...PLUGIN_AI_CONTEXT_FEATURES, PLUGIN_AGENT_FEATURE, NETWORK_CREDENTIAL_LEASE_FEATURE, HOST_INTERACTION_FEATURE, HOST_VAULT_FEATURE, VAULT_PAGES_FEATURE, TERMINAL_SIDEBAR_FEATURE, INTERACTIVE_COMMAND_FEATURE, ...(options.supportedFeatures ?? [])])]
     .filter((feature) => feature !== DIRECTORY_ENUMERATION_FEATURE);
+  if (!supportedFeatures.includes("views.host-drawn")) supportedFeatures.push("views.host-drawn");
   if (typeof options.openPluginDirectoryHandle === "function") supportedFeatures.push(DIRECTORY_ENUMERATION_FEATURE);
   const database = new PluginDatabase(paths.database);
   let interactionService;
@@ -228,6 +230,22 @@ function createPluginHostService(options) {
     interactionService.registerRpcCapabilities(rpcRegistry);
     const hostVaultService = new PluginHostVaultService({
       interactionService,
+      openStream: async (endpoint, caller, sender, connectionOptions) => {
+        const context = await byteStreamService.authenticate(caller);
+        const descriptor = await byteStreamService.connect(endpoint, context, {
+          open: (signal) => require("./hostByteStreamTransport.cjs").openHostByteStream({
+            sender, connectionOptions, endpoint, signal, assertActive: context.assertActive,
+          }),
+        });
+        return { descriptor, close: () => byteStreamService.closeRecord(byteStreamService.records.get(descriptor.handleId)),
+          onClose: (callback) => {
+            const subscription = byteStreamService.broker.onDidClose((state) => {
+              if (state.id === descriptor.handleId) { subscription.dispose(); callback(); }
+            });
+            if (!byteStreamService.records.has(descriptor.handleId)) { subscription.dispose(); callback(); }
+          },
+        };
+      },
       sourceBinding: new PluginAISourceBinding({ database, getRuntimeIdentity: (pluginId) => runtimeSupervisor.getRuntimeIdentity(pluginId) }),
     });
     hostVaultService.registerRpcCapabilities(rpcRegistry);
@@ -474,17 +492,7 @@ function createPluginHostService(options) {
     quotaManager.setViolationHandler((identity, error) => (
       runtimeSupervisor.enforcePolicyViolation(identity, error)
     ));
-    const viewHost = options.electron.WebContentsView && options.electron.ipcMain
-      ? new PluginViewHost({
-          electron: options.electron,
-          protocol,
-          packageStore,
-          database,
-          contributionService,
-          isLocked: options.isAppLocked,
-          subscribeLock: options.subscribeAppLock,
-        })
-      : null;
+    const hostDrawnViewHost = options.electron.ipcMain ? new HostDrawnViewHost({ electron: options.electron, contributionService, resources: new PluginViewResources({ electron: options.electron, packageStore }), isLocked: options.isAppLocked, subscribeLock: options.subscribeAppLock }) : null;
     const themeService = new PluginThemeService({database,packageStore,contributionService});
     manager = new PluginManager({
       secretStore,
@@ -503,7 +511,7 @@ function createPluginHostService(options) {
           terminalDataPipelineService?.shutdown();
           extensionProviderService.shutdown();
           credentialResolver.shutdown?.();
-          await viewHost?.shutdown();
+          await hostDrawnViewHost?.shutdown();
           await companionSupervisor.shutdown();
           leaseStore.shutdown();
           permissionDecisionHost.shutdown();
@@ -520,7 +528,8 @@ function createPluginHostService(options) {
       interactionService,
       hostVaultService,
       catalogService: new MarketSourcesService({ database, manager, fetch: options.electron.net?.fetch?.bind(options.electron.net),
-        resolveAvatar: (request) => contributionIconService.resolveCatalogAvatar(request) }),
+        resolveAvatar: (request) => contributionIconService.resolveCatalogAvatar(request),
+        resolveReadmeImage: require("./readmeImageService.cjs").createReadmeImageResolver({ BrowserWindow: options.electron.BrowserWindow }) }),
       companionSupervisor,
       contributionIconService,
       contributionService,
@@ -548,7 +557,7 @@ function createPluginHostService(options) {
       secretStore,
       terminalProviderService,
       terminalDataPipelineService,
-      viewHost,
+      hostDrawnViewHost,
     };
   } catch (error) {
     try { permissionDecisionHost?.shutdown(); } catch {}

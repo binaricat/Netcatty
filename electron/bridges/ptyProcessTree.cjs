@@ -88,11 +88,20 @@ function createDefaultProcessTree() {
 
 const defaultTree = createDefaultProcessTree();
 
+function registerWorkerHandlers(ipcMain) {
+  ipcMain.handle("netcatty:pty:childProcesses", async (_event, payload) => {
+    const sessionId = typeof payload === "string" ? payload : payload?.sessionId;
+    if (typeof sessionId !== "string") return [];
+    return defaultTree.getChildProcesses(sessionId);
+  });
+}
+
 module.exports = {
   POSIX_PROCESS_LIST_TIMEOUT_MS,
   POSIX_PROCESS_LIST_MAX_BUFFER_BYTES,
   createProcessTree,
   defaultListPosix,
+  registerWorkerHandlers,
   processTree: defaultTree,
   registerPid: (id, pid) => defaultTree.registerPid(id, pid),
   unregisterPid: (id) => defaultTree.unregisterPid(id),

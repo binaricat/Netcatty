@@ -14,7 +14,7 @@ const { PluginAgentMcpDelegations } = require("../plugins/agent/mcpDelegation.cj
 const pluginAgentDelegations = new PluginAgentMcpDelegations();
 const { existsSync } = require("node:fs");
 
-const { toUnpackedAsarPath, getFreshIdlePrompt, formatSyntheticEcho } = require("./ai/shellUtils.cjs");
+const { toUnpackedAsarPath, getFreshIdlePrompt, getVisibleIdlePrompt, formatSyntheticEcho } = require("./ai/shellUtils.cjs");
 const { appendVaultAgentGuidance } = require("../shared/vaultAgentGuidance.cjs");
 const {
   checkBlocklistForShell,
@@ -170,7 +170,7 @@ const activePtyExecs = new Map(); // marker → { ptyStream, cleanup }
 const cancelledChatSessions = new Set();
 const activeExecChatSessions = new Map(); // chatSessionId -> { sessionId, command, startedAt }
 const backgroundJobs = new Map(); // jobId -> job metadata
-const workerBackgroundJobs = new Map(); // jobId -> { chatSessionId, sessionId }
+const workerBackgroundJobs = new Map(); // jobId -> { chatSessionId, sessionId, completedAt }
 const pendingWorkerJobStarts = new Map(); // sessionId -> Set<{ chatSessionId, cancelled }>
 const activeSessionExecutions = new Map(); // sessionId -> { kind, startedAt, token }
 const activeSessionSftpOps = new Map(); // opId -> { chatSessionId, sessionId, cancel }
@@ -804,6 +804,7 @@ function updateLiveSessionMetadata(sessionList) {
   const next = new Map();
   for (const entry of incoming) {
     if (!entry || typeof entry !== "object" || !entry.sessionId) continue;
+    if (entry.connected === true) sessionService?.forgetReconnect(entry.sessionId);
     next.set(entry.sessionId, {
       hostname: entry.hostname || "",
       label: entry.label || "",
@@ -1271,6 +1272,8 @@ function ensureOpenedSessionMetadata(chatSessionId, sessionId, result) {
  */
 function forgetClosedTerminalSession(sessionId) {
   if (!sessionId) return;
+  sessionService?.forgetReconnect(sessionId);
+  sessionService?.forgetRecovery(sessionId);
   terminalSessionCloseRevision += 1;
   closedTerminalSessionRevisions.delete(sessionId);
   closedTerminalSessionRevisions.set(sessionId, terminalSessionCloseRevision);
@@ -1614,7 +1617,74 @@ function reportOpenedSessionActivity(event = {}) {
   return sessionIdleManager.touch(null, sessionId);
 }
 
+// In the default terminal worker path the SSH runtime (and its prompt
+// tracking state) lives in the worker, so the main-process `sessions` map is
+// empty for it. Ask the owning worker for read-only prompt readiness. A miss
+// or a worker failure yields null: an unknown state must never report ready.
+// The probe is bounded well below the 20s recovery budget so a live-but-
+// unresponsive worker cannot hang inspectRecovery past the recovery loop's
+// deadline/cancel machinery.
+const WORKER_SHELL_READINESS_TIMEOUT_MS = 2000;
+
+async function queryWorkerShellReadiness(sessionId, status) {
+  if (status !== "connected" || !terminalWorkerManager?.request) return null;
+  // terminalWorkerManager.request has no cancellation support, so the probe
+  // cannot be aborted once posted. Race it against a timeout instead: a late
+  // worker response settles into an abandoned promise (fire-and-forget) and
+  // never mutates state after the timeout decision.
+  let timeoutId;
+  try {
+    const result = await Promise.race([
+      terminalWorkerManager.request("netcatty:ai:shellReadiness", { sessionId }, {}),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(
+          () => resolve(null),
+          WORKER_SHELL_READINESS_TIMEOUT_MS,
+        );
+      }),
+    ]);
+    if (result?.ok !== true || result.found !== true) return null;
+    return {
+      trackedShell: result.trackedShell === true,
+      ready: Boolean(result.freshIdlePrompt || result.visibleIdlePrompt),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 sessionService = createSessionService({
+  validateReconnect: (params = {}) => {
+    const scopeErr = validateSessionScope(params.sessionId, params.chatSessionId, params.scopedSessionIds);
+    if (scopeErr) return { ok: false, error: scopeErr };
+    if (isChatSessionCancelled(params.chatSessionId)) return { ok: false, error: "Chat session is cancelled." };
+    if (permissionMode === "observer") return { ok: false, error: "Recovery is unavailable in observer mode." };
+    if (sessionIdleManager.isClosing(params.sessionId)) return { ok: false, error: "Session is closing." };
+    return { ok: true };
+  },
+  inspectRecovery: async (params, timeoutMs) => {
+    if (typeof invokeVaultAgentFn !== "function") return { ok: false, error: "Session recovery bridge is unavailable." };
+    sessionIdleManager.touch(null, params.sessionId);
+    const state = await invokeVaultAgentFn("session.inspectRecovery", { sessionId: params.sessionId }, { timeoutMs });
+    if (state?.ok !== true) return state;
+    const runtime = sessions?.get(params.sessionId);
+    const meta = getSessionMeta(params.sessionId, params.chatSessionId);
+    const probe = runtime ? {
+      trackedShell: typeof runtime._promptTrackTail === "string",
+      ready: Boolean(getFreshIdlePrompt(runtime) || getVisibleIdlePrompt(runtime)),
+    } : await queryWorkerShellReadiness(params.sessionId, state.status);
+    const trackedShell = Boolean(probe?.trackedShell) && !isNetworkDeviceLikeMeta(meta);
+    // shellReady semantics: transport not connected → false; connected but
+    // the shell is untracked or the probe missed/timed out → null (unknown);
+    // a tracked shell reports its observed readiness. It is advisory for
+    // callers: recovery never writes to the PTY, so an unknown or false
+    // readiness only asks for an inspect_shell step, never blocks.
+    const shellReady = state.status !== "connected" ? false : !probe ? null : trackedShell
+      ? Boolean(probe.ready) : null;
+    return { ...state, shellReady, busy: Boolean(getSessionBusyError(params.sessionId)) };
+  },
   invokeSessionAgent: (...args) => {
     if (typeof invokeVaultAgentFn !== "function") {
       return Promise.resolve({ ok: false, error: "Vault agent bridge is unavailable." });
@@ -1929,9 +1999,11 @@ async function handleWorkerJobStart(params = {}, beforeExecute) {
         }, {}));
         return { ok: false, error: "Session is closing.", jobId: result.jobId, status: "cancelled" };
       }
+      pruneCompletedWorkerRoutes();
       workerBackgroundJobs.set(result.jobId, {
         chatSessionId: chatSessionId || null,
         sessionId,
+        completedAt: null,
       });
     }
     return result;
@@ -1958,6 +2030,18 @@ function deleteWorkerRoute(jobId, job, via) {
   workerBackgroundJobs.delete(jobId);
 }
 
+// Retain completed worker job routes for BACKGROUND_JOB_RETENTION_MS (matching
+// aiExec.cjs and backgroundJobs.cjs) so subsequent jobPoll/jobStop calls remain
+// idempotent and return the terminal job state rather than "not found".
+function pruneCompletedWorkerRoutes(now = Date.now()) {
+  for (const [jobId, job] of workerBackgroundJobs) {
+    const completedAt = Number(job?.completedAt) || 0;
+    if (completedAt > 0 && now - completedAt > BACKGROUND_JOB_RETENTION_MS) {
+      deleteWorkerRoute(jobId, job, "retention-expired");
+    }
+  }
+}
+
 // Why getWorkerJob/terminalWorkerManager could not serve a poll or stop:
 // the route is gone, the caller's chat scope does not own it, or the worker
 // manager is unavailable. These are different failures and must not share a label.
@@ -1981,6 +2065,7 @@ const WORKER_JOB_NOT_FOUND_ERROR = "Background job not found";
 async function handleWorkerJobPoll(params = {}, beforeExecute) {
   const { jobId, chatSessionId, scopedSessionIds } = params || {};
   if (!jobId) throw new Error("jobId is required");
+  pruneCompletedWorkerRoutes();
   const job = getWorkerJob(jobId, chatSessionId || null);
   if (!job || !terminalWorkerManager?.request) {
     emitJobDiag("job-stop-miss", { jobId, chatSessionId: chatSessionId || null, op: "poll", reason: describeWorkerRouteMiss(jobId) });
@@ -1995,8 +2080,8 @@ async function handleWorkerJobPoll(params = {}, beforeExecute) {
     // The route is still here but the worker no longer knows the job (pruned or restarted).
     emitJobDiag("job-stop-miss", { jobId, chatSessionId: chatSessionId || null, op: "poll", reason: "worker-job-missing" });
   }
-  if (result?.completed) {
-    deleteWorkerRoute(jobId, job, "poll-completed");
+  if (result?.completed && !job.completedAt) {
+    job.completedAt = Date.now();
   }
   return result;
 }
@@ -2004,6 +2089,7 @@ async function handleWorkerJobPoll(params = {}, beforeExecute) {
 async function handleWorkerJobStop(params = {}, beforeExecute) {
   const { jobId, chatSessionId, scopedSessionIds } = params || {};
   if (!jobId) throw new Error("jobId is required");
+  pruneCompletedWorkerRoutes();
   const job = getWorkerJob(jobId, chatSessionId || null);
   if (!job || !terminalWorkerManager?.request) {
     emitJobDiag("job-stop-miss", { jobId, chatSessionId: chatSessionId || null, op: "stop", reason: describeWorkerRouteMiss(jobId) });
@@ -2017,16 +2103,18 @@ async function handleWorkerJobStop(params = {}, beforeExecute) {
     // The route is still here but the worker no longer knows the job (pruned or restarted).
     emitJobDiag("job-stop-miss", { jobId, chatSessionId: chatSessionId || null, op: "stop", reason: "worker-job-missing" });
   }
-  if (result?.completed) {
-    deleteWorkerRoute(jobId, job, "stop-completed");
+  if (result?.completed && !job.completedAt) {
+    job.completedAt = Date.now();
   }
   return result;
 }
 
 async function hasActiveWorkerJobForTerminalSession(sessionId) {
+  pruneCompletedWorkerRoutes();
   const matchingJobs = Array.from(workerBackgroundJobs.entries())
     .filter(([, job]) => job?.sessionId === sessionId);
   for (const [jobId, job] of matchingJobs) {
+    if (job.completedAt) continue;
     if (!terminalWorkerManager?.request) return true;
     try {
       const result = await terminalWorkerManager.request("netcatty:ai:jobPoll", {
@@ -2088,7 +2176,7 @@ async function cancelWorkerBackgroundJobsForTerminalSession(sessionId) {
   for (const [jobId, job] of workerBackgroundJobs) {
     if (job.sessionId !== sessionId) continue;
     matchingJobs.push([jobId, job]);
-    if (terminalWorkerManager?.request) {
+    if (!job.completedAt && terminalWorkerManager?.request) {
       pending.push(waitForWorkerCleanup(terminalWorkerManager.request("netcatty:ai:jobStop", {
         jobId,
         sessionId,
@@ -2183,6 +2271,7 @@ async function dispatchCore(method, params, approvalContext = {}) {
     ? params?.sessionId
     : null;
   pruneCompletedBackgroundJobs();
+  pruneCompletedWorkerRoutes();
 
   const approvalTarget = getApprovalTarget(params);
   const permission = delegated ? { allowed: !isChatSessionCancelled(params?.chatSessionId), requiresApproval: false }

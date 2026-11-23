@@ -92,3 +92,21 @@ test("selectPreferredRuntimeAppLockState prefers initialized state when versions
     current,
   );
 });
+
+test("selectPreferredRuntimeAppLockState keeps the current object when a resync changes nothing", () => {
+  const current = normalizeRuntimeAppLockState({
+    initialized: true,
+    locked: false,
+    reason: null,
+    version: 4,
+    lastUnlockedAt: 1000,
+    lastActivityAt: 2000,
+  });
+  const resynced = normalizeRuntimeAppLockState({ ...current });
+  assert.notEqual(resynced, current);
+  // Window focus resyncs must not hand React a new state object.
+  assert.equal(selectPreferredRuntimeAppLockState(current, resynced), current);
+
+  const changed = normalizeRuntimeAppLockState({ ...current, locked: true, reason: "idle" });
+  assert.equal(selectPreferredRuntimeAppLockState(current, changed), changed);
+});

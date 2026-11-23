@@ -1346,3 +1346,82 @@ test('non-streaming DeepSeek usage reaches the SDK as cached input', async t => 
   assert.equal(result.usage.inputTokenDetails.cacheReadTokens, 900);
   assert.equal(result.usage.inputTokenDetails.noCacheTokens, 100);
 });
+
+test('replaces lone surrogates before the provider request body is serialized', async (t) => {
+  const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+  t.after(() => {
+    (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow;
+  });
+
+  const dataHandlers = new Map<string, (data: string) => void>();
+  const endHandlers = new Map<string, () => void>();
+  const rawBodies: string[] = [];
+
+  (globalThis as typeof globalThis & { window?: unknown }).window = {
+    netcatty: {
+      aiFetch: async () => ({ ok: true, status: 200, data: '{}' }),
+      aiChatCancel: async () => true,
+      onAiStreamData: (requestId: string, cb: (data: string) => void) => {
+        dataHandlers.set(requestId, cb);
+        return () => dataHandlers.delete(requestId);
+      },
+      onAiStreamEnd: (requestId: string, cb: () => void) => {
+        endHandlers.set(requestId, cb);
+        return () => endHandlers.delete(requestId);
+      },
+      onAiStreamError: () => () => undefined,
+      aiChatStream: async (requestId: string, _url: string, _headers: Record<string, string>, body: string) => {
+        rawBodies.push(body);
+        setTimeout(() => {
+          dataHandlers.get(requestId)?.(JSON.stringify({
+            id: 'chatcmpl-test',
+            object: 'chat.completion.chunk',
+            created: 1777600000,
+            model: 'deepseek-v4-flash',
+            choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop' }],
+          }));
+          endHandlers.get(requestId)?.();
+        }, 0);
+        return { ok: true, statusCode: 200, statusText: 'OK' };
+      },
+    },
+  };
+
+  const model = createModelFromConfig({
+    id: 'deepseek-custom',
+    providerId: 'custom',
+    name: 'DeepSeek',
+    apiKey: 'test-key',
+    baseURL: 'https://api.deepseek.com',
+    defaultModel: 'deepseek-v4-flash',
+    enabled: true,
+  });
+
+  const result = streamText({
+    model,
+    messages: [
+      { role: 'user', content: 'read the log' },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool-call', toolCallId: 'call_1', toolName: 'terminal_exec', input: {} }],
+      },
+      {
+        role: 'tool',
+        content: [{
+          type: 'tool-result',
+          toolCallId: 'call_1',
+          toolName: 'terminal_exec',
+          // A head/tail cut that split 🏆 leaves its low half behind.
+          output: { type: 'text', value: '[... long line shortened ...]\udfc6[SOCKS-5006]' },
+        }],
+      },
+    ],
+  });
+  for await (const _chunk of result.stream) {
+    // Drain the stream so the request is sent.
+  }
+
+  assert.equal(rawBodies.length, 1);
+  assert.doesNotMatch(rawBodies[0], /\\ud[89a-f][0-9a-f]{2}/i);
+  assert.match(JSON.parse(rawBodies[0]).messages.at(-1).content, /\]�\[SOCKS-5006\]/);
+});

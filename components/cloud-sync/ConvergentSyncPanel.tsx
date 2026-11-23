@@ -79,7 +79,9 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
   onCancelMigration,
   onResolveConflict,
   onDowngrade,
-}) => (
+}) => {
+  const conflictsToShow = config.initialized ? conflicts : (preview?.conflicts ?? []);
+  return (
   <div className="space-y-4 rounded-lg border bg-card p-4">
     <div className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-start gap-3">
@@ -176,13 +178,13 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
       </div>
     )}
 
-    {config.initialized && conflicts.length > 0 && (
+    {conflictsToShow.length > 0 && (
       <div className="space-y-2">
         <div className="text-sm font-medium">
-          {t('cloudSync.convergent.conflicts.title', { count: conflicts.length })}
+          {t('cloudSync.convergent.conflicts.title', { count: conflictsToShow.length })}
         </div>
         <div className="space-y-2">
-          {conflicts.map((conflict) => {
+          {conflictsToShow.map((conflict) => {
             const addressKey = convergentConflictAddressKey(conflict.address);
             return (
               <div key={addressKey} className="space-y-2 rounded-md bg-muted/40 p-3">
@@ -230,4 +232,5 @@ export const ConvergentSyncPanel: React.FC<ConvergentSyncPanelProps> = ({
       </div>
     )}
   </div>
-);
+  );
+};

@@ -26,7 +26,7 @@ const code = ts.transpileModule(
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 const helpers = await Promise.all([
-  "../../../domain/serialCharMetrics.ts", "./terminalReportSequence.ts", "./terminalInputSanitize.ts",
+  "../../../domain/terminalBroadcast.ts", "../../../domain/serialCharMetrics.ts", "./terminalReportSequence.ts", "./terminalInputSanitize.ts",
   "./terminalBackspaceInput.ts", "./terminalPerCharacterInput.ts",
   "./terminalSudoAutofill.ts", "./terminalCommandExecution.ts",
   "./terminalPacedBroadcast.ts", "./terminalInterruptInputState.ts", "./serialLocalEcho.ts", "../autocomplete/terminalStringCellWidth.ts",

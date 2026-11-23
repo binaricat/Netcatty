@@ -1,8 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const {
   classifyProcessError,
+  createDiagnosticLogger,
   createProcessErrorController,
   installProcessErrorHandlers,
   isNonFatalNetworkError,
@@ -250,4 +252,138 @@ test("controller suppresses ssh-style errors with a level property", () => {
 
   assert.equal(isNonFatalNetworkError(err), true);
   assert.equal(result.action, "suppress");
+});
+
+test("diagnostic logger drops lines once the sink reports an error", () => {
+  const sink = new EventEmitter();
+  const written = [];
+  const log = createDiagnosticLogger(
+    (...args) => written.push(args),
+    { streams: [sink] },
+  );
+
+  log("first");
+  sink.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+  log("second");
+
+  assert.deepEqual(written, [["first"]]);
+});
+
+test("diagnostic logger forwards only the first sink error to onError", () => {
+  const sink = new EventEmitter();
+  const reports = [];
+  createDiagnosticLogger(
+    () => {},
+    { streams: [sink], onError: (err) => reports.push(err) },
+  );
+
+  const first = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+  sink.emit("error", first);
+  sink.emit("error", Object.assign(new Error("write EPIPE again"), { code: "EPIPE" }));
+
+  assert.deepEqual(reports, [first]);
+});
+
+test("diagnostic logger latches before forwarding the sink error", () => {
+  const sink = new EventEmitter();
+  let attempts = 0;
+  let log = null;
+  log = createDiagnosticLogger(
+    () => {
+      attempts += 1;
+    },
+    { streams: [sink], onError: () => log("logged from the reporter") },
+  );
+
+  sink.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+
+  assert.equal(attempts, 0, "the reporter must not write through the failed sink");
+});
+
+test("diagnostic logger keeps a throwing onError from escaping", () => {
+  const sink = new EventEmitter();
+  const written = [];
+  const log = createDiagnosticLogger(
+    (...args) => written.push(args),
+    {
+      streams: [sink],
+      onError() {
+        throw new Error("reporter is dead");
+      },
+    },
+  );
+
+  assert.doesNotThrow(() => sink.emit("error", new Error("write EPIPE")));
+  log("after failure");
+  assert.deepEqual(written, []);
+});
+
+test("a closed stdout pipe is reported once so the failure reaches the crash log", async () => {
+  const child = spawn(process.execPath, ["-e", `
+    const { createDiagnosticLogger } = require(${JSON.stringify(require.resolve("./processErrorGuards.cjs"))});
+    let reports = 0;
+    const log = createDiagnosticLogger(
+      (...args) => console.error(...args),
+      {
+        streams: [process.stdout, process.stderr],
+        onError() { reports += 1; },
+      },
+    );
+    setTimeout(() => {
+      log("diagnostic after the pipe closed");
+      log("second diagnostic after the pipe closed");
+      setTimeout(() => process.exit(reports), 200);
+    }, 200);
+    setTimeout(() => process.exit(reports), 3000);
+  `], { stdio: ["ignore", "pipe", "pipe"] });
+
+  child.stdout.destroy();
+  child.stderr.destroy();
+  const exitCode = await new Promise((resolve) => child.once("exit", resolve));
+
+  assert.equal(exitCode, 1, "exactly one report for the first sink failure");
+});
+
+test("diagnostic logger latches closed when the sink throws synchronously", () => {
+  let attempts = 0;
+  const log = createDiagnosticLogger(() => {
+    attempts += 1;
+    throw Object.assign(new Error("write EIO"), { code: "EIO" });
+  });
+
+  assert.doesNotThrow(() => log("boom"));
+  assert.doesNotThrow(() => log("boom again"));
+  assert.equal(attempts, 1);
+});
+
+test("diagnostic logger dispose releases the sink listeners", () => {
+  const sink = new EventEmitter();
+  const log = createDiagnosticLogger(() => {}, { streams: [sink] });
+
+  assert.equal(sink.listenerCount("error"), 1);
+  log.dispose();
+  assert.equal(sink.listenerCount("error"), 0);
+});
+
+test("a broken diagnostic sink still lets runtime errors be captured", () => {
+  const captured = [];
+  const controller = createProcessErrorController({
+    captureError(source, err) {
+      captured.push([source, err.message]);
+    },
+    onFatalError(err) {
+      throw err;
+    },
+    logError: createDiagnosticLogger(() => {
+      throw Object.assign(new Error("write EIO"), { code: "EIO" });
+    }),
+    logWarn: createDiagnosticLogger(() => {
+      throw Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+    }),
+  });
+  controller.beginMainWindowStartup();
+  controller.completeMainWindowStartup({ windowShown: true });
+
+  assert.doesNotThrow(() => controller.handleUncaughtException(new Error("runtime boom")));
+  assert.deepEqual(captured, [["uncaughtException", "runtime boom"]]);
 });

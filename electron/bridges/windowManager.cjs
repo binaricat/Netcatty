@@ -7,6 +7,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 const { safeSend } = require("./ipcUtils.cjs");
+const perfTrace = require("../perfTrace.cjs");
 
 const V8_CACHE_OPTIONS = "bypassHeatCheck";
 
@@ -80,11 +81,12 @@ const DEFAULT_WINDOW_WIDTH = 1400;
 const DEFAULT_WINDOW_HEIGHT = 900;
 // Minimum window size: enough to render the expanded sidebar + a usable
 // host list + the 420px host details / new-host aside panel without overflow.
-// Small displays shrink this fit to their work area at window-creation time
-// (see resolveWindowMinimumSize in windowManager/mainWindow.cjs, #3647);
-// the minimum tracks the display the window currently occupies.
-const MIN_WINDOW_WIDTH = 1100;
-const MIN_WINDOW_HEIGHT = 640;
+// The effective minimum is capped at half the current display's work area so
+// standard half/quarter-screen tiling cells can fit the window; it tracks the
+// display the window currently occupies (see resolveWindowMinimumSize in
+// windowManager/mainWindow.cjs, #3647).
+const MIN_WINDOW_WIDTH = 960;
+const MIN_WINDOW_HEIGHT = 540;
 
 function debugLog(...args) {
   if (!DEBUG_WINDOWS) return;
@@ -763,7 +765,10 @@ function setupDeferredShow(win, { timeoutMs = 3000, waitForRendererReady = true,
       return;
     }
     try {
-      if (!win.isDestroyed()) win.show();
+      if (!win.isDestroyed()) {
+        win.show();
+        perfTrace.mark("main:window-shown");
+      }
     } catch {
       // ignore
     }
@@ -1398,6 +1403,9 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
   ipcMain.on("netcatty:renderer:ready", (event) => {
     const wcId = event?.sender?.id;
     if (!wcId) return;
+    if (perfTrace.isEnabled()) {
+      perfTrace.noteRendererReady({ app: require("electron").app, webContents: event.sender });
+    }
     resolveRendererReady(wcId);
   });
 }

@@ -7,9 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { SettingRow } from '../settings-ui';
 
 /** Host UI only. Plugin views cannot query or mutate this security state. */
-export function PluginPermissionPanel({ pluginId, onChanged }: {
+export function PluginPermissionPanel({ pluginId, onChanged, actions }: {
   pluginId: string;
   onChanged: () => Promise<void>;
+  actions?: React.ReactNode;
 }) {
   const { t, resolvedLocale } = useI18n();
   const [snapshot, setSnapshot] = useState<NetcattyPluginPermissionSnapshot | null>(null);
@@ -102,7 +103,10 @@ export function PluginPermissionPanel({ pluginId, onChanged }: {
         </li>)}</ol>
       </details>
       <p className="text-xs text-muted-foreground">{t('settings.plugins.permissions.revokeNote')}</p>
-      <Button variant="destructive" size="sm" disabled={busy} onClick={() => void revoke()}>{t('settings.plugins.permissions.revoke')}</Button>
     </>}
+    <div className="flex flex-wrap items-center gap-2">
+      {snapshot && <Button variant="secondary" size="sm" className="bg-amber-500 text-amber-950 hover:bg-amber-400" disabled={busy} onClick={() => void revoke()}>{t('settings.plugins.permissions.revoke')}</Button>}
+      {actions}
+    </div>
   </section>;
 }

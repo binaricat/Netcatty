@@ -2,8 +2,13 @@ import { localStorageAdapter } from '../../infrastructure/persistence/localStora
 import {
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_SESSIONS,
+  STORAGE_KEY_AI_SESSION_MESSAGE_CAP,
   STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS,
 } from '../../infrastructure/config/storageKeys';
+import {
+  DEFAULT_AI_SESSION_MESSAGE_CAP,
+  normalizeAiSessionMessageCap,
+} from '../../domain/aiSessionMessageCap';
 import type {
   AIDraft,
   AIPanelView,
@@ -11,7 +16,6 @@ import type {
   AIPermissionMode,
   AIToolIntegrationMode,
 } from '../../infrastructure/ai/types';
-import type { ProviderContinuationOptions } from '../../infrastructure/ai/providerContinuation';
 import { findSafeChatMessageCompactionSplitIndex } from '../../infrastructure/ai/contextCompaction';
 import {
   bumpDraftMutationVersionState,
@@ -23,12 +27,23 @@ import {
   pruneInactiveScopedState,
 } from './aiScopeCleanup';
 import { emitAIStateChanged } from './aiStateEvents';
-import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
+import { peekAgentRuntimeCleanup } from '../../infrastructure/ai/harness/agentRuntimeHandle';
+import { setReversibleModelPrivacy } from '../../infrastructure/ai/harness/modelSecretRedaction';
 import { DebouncedBackupMirror, readLiveSessionsArray } from './aiSessionsBackup';
+import {
+  idbDeleteSessionIds,
+  idbPutMeta,
+  idbPutSessions,
+  isIndexedDbAvailable,
+  openAiSessionsIdb,
+  publishAiSessionsIdbChange,
+  resetAiSessionsIdbForTests,
+} from './aiSessionIdbStorage';
 
 /** Typed accessor for the Electron IPC bridge exposed on `window.netcatty`. */
 export interface AIBridge {
   aiSdkAgentCleanup?: (chatSessionId: string) => Promise<{ ok: boolean }>;
+  aiPrivacyClearSession?: (chatSessionId: string) => Promise<{ ok: boolean; error?: string }>;
   deleteChatToolOutputsTemp?: (chatSessionId: string) => Promise<{ deletedCount: number }>;
   deleteTerminalToolOutputsEverywhereTemp?: (terminalSessionId: string) => Promise<{ deletedCount: number }>;
   aiMcpSetPermissionMode?: (mode: AIPermissionMode) => Promise<unknown> | unknown;
@@ -60,11 +75,29 @@ export async function cleanupSdkAgentSessions(sessionIds: string[]): Promise<voi
   await Promise.all(sessionIds.map((sessionId) => bridge?.aiSdkAgentCleanup?.(sessionId).catch(() => {})));
 }
 
+/**
+ * Session ids explicitly deleted by the user (or by an authoritative cloud
+ * merge). Their disappearance from the persisted set must not trigger the
+ * pre-eviction backup generation — only cap-driven drops should.
+ */
+const intentionallyDeletedSessionIds = new Set<string>();
+
 export function cleanupDeletedAIChatSessions(sessionIds: string[]) {
   const bridge = getAIBridge();
   if (sessionIds.length === 0) return;
+  // Only the startup-light handle is imported here; the runtime registers it
+  // when created. Without a runtime there is no in-memory runtime state, but
+  // the reversible-privacy flag (set outside the runtime) and the
+  // main-process privacy mapping may still exist, so always clear those.
+  const runtime = peekAgentRuntimeCleanup();
   for (const sessionId of sessionIds) {
-    getAgentRuntime().clearChatSession(sessionId);
+    intentionallyDeletedSessionIds.add(sessionId);
+    if (runtime) {
+      runtime.clearChatSession(sessionId);
+    } else {
+      setReversibleModelPrivacy(sessionId, false);
+      void bridge?.aiPrivacyClearSession?.(sessionId).catch(() => {});
+    }
     void bridge?.aiSdkAgentCleanup?.(sessionId).catch(() => {});
     void bridge?.deleteChatToolOutputsTemp?.(sessionId).catch(() => {});
   }
@@ -72,8 +105,9 @@ export function cleanupDeletedAIChatSessions(sessionIds: string[]) {
 
 export function cleanupClosedTerminalSessions(terminalSessionIds: string[]) {
   const bridge = getAIBridge();
+  const runtime = peekAgentRuntimeCleanup();
   for (const terminalSessionId of new Set(terminalSessionIds)) {
-    getAgentRuntime().clearTerminalSession(terminalSessionId);
+    runtime?.clearTerminalSession(terminalSessionId);
     void bridge?.deleteTerminalToolOutputsEverywhereTemp?.(terminalSessionId).catch(() => {});
   }
 }
@@ -93,8 +127,11 @@ export let latestAIActiveTargetIdsSnapshot: Set<string> = new Set();
 
 export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
   latestAIActiveTargetIdsSnapshot = activeTargetIds;
-  const currentSessions = latestAISessionsSnapshot
-    ?? readLiveSessionsArray(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS));
+  // Child maintenance effects run before the provider's boot effects. Keep
+  // the live targets for post-hydration cleanup without adopting stale legacy
+  // history as authoritative state while IndexedDB is still loading.
+  if (!isAiSessionsHydrationComplete()) return;
+  const currentSessions = latestAISessionsSnapshot ?? getPersistedAiSessionsSnapshot();
 
   // Sessions shown by a still-live scope must be protected from cleanup
   // even when their own `scope.targetId` points at a closed terminal —
@@ -181,160 +218,53 @@ export function cleanupOrphanedAISessions(activeTargetIds: Set<string>) {
 }
 
 
-/** Maximum number of sessions to keep in localStorage. */
-const MAX_STORED_SESSIONS = 50;
-/** Maximum number of messages per session when persisting to localStorage. */
-const MAX_SESSION_MESSAGES = 200;
 /**
- * Byte budget for the serialized sessions JSON. The localStorage quota is
- * ~5-10 MB across all keys, and Responses reasoning ciphertext can add tens
- * of KB per turn, so keep the sessions blob well under the quota with
- * headroom for the rest of the app's storage keys.
+ * Maximum number of sessions kept in the persisted store. IndexedDB has no
+ * shared byte quota, so retention is a plain count cap; the cap only exists
+ * to keep history from growing without bound.
  */
-const MAX_SESSIONS_JSON_BYTES = 2 * 1024 * 1024;
-/** Retry budgets used when the primary budget still fails to persist. */
-const RETRY_SESSIONS_JSON_BYTES = [
-  1024 * 1024,
-  512 * 1024,
-  256 * 1024,
-  128 * 1024,
-] as const;
+const MAX_STORED_SESSIONS = 1000;
 
 /**
- * Maximum persisted length of a single tool result payload. Terminal tool
- * output can reach hundreds of KB per command, and AI-driven terminal work
- * accumulates many of them. When storage pressure forces degradation, shedding
- * this replay bulk keeps every visible conversation persisted instead of
- * evicting whole chats that happen to carry it.
+ * Per-session message cap, read from user settings (clamped to 50–2000,
+ * default 200). Read on every write so a lowered cap trims the oldest
+ * messages on the next write; a raised cap stops further trimming.
+ * Best-effort: an unavailable storage layer keeps the default cap.
  */
-const MAX_PERSISTED_TOOL_RESULT_CHARS = 8 * 1024;
-
-function truncatePersistedToolResultContent(content: string): string {
-  if (content.length <= MAX_PERSISTED_TOOL_RESULT_CHARS) return content;
-  // The marker consumes budget and must stay single-line: JSON-escaped
-  // newlines would cost 2 characters each, letting a slightly-over-cap
-  // result serialize at the same (or larger) size than the original — the
-  // ladder assumes the degraded form is the smallest. Shrink the retained
-  // head+tail until the whole persisted copy fits the cap.
-  let half = Math.floor(MAX_PERSISTED_TOOL_RESULT_CHARS / 2);
-  let omitted = content.length - 2 * half;
-  let marker = `[Netcatty] persisted copy truncated; ${omitted} characters of tool output omitted`;
-  while (2 * half + marker.length > MAX_PERSISTED_TOOL_RESULT_CHARS) {
-    half -= Math.ceil((2 * half + marker.length - MAX_PERSISTED_TOOL_RESULT_CHARS) / 2);
-    omitted = content.length - 2 * half;
-    marker = `[Netcatty] persisted copy truncated; ${omitted} characters of tool output omitted`;
+export function readAiSessionMessageCap(): number {
+  try {
+    return normalizeAiSessionMessageCap(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_SESSION_MESSAGE_CAP)
+        ?? DEFAULT_AI_SESSION_MESSAGE_CAP,
+    );
+  } catch {
+    return DEFAULT_AI_SESSION_MESSAGE_CAP;
   }
-  return `${content.slice(0, half)}${marker}${content.slice(content.length - half)}`;
 }
 
 /**
- * Remove `reasoningEncryptedContent` ciphertext from a message's persisted
- * continuation and shed bulk tool output. The ciphertext exists so stateless
- * Responses turns can replay prior reasoning items; tool output dominates
- * persisted size in AI-driven terminal chats. When storage pressure forces
- * it, shedding this bulk keeps the visible conversation intact at the cost of
- * reasoning replay and full tool output for affected messages.
- */
-function stripReasoningEncryptedContent(
-  options: ProviderContinuationOptions,
-): ProviderContinuationOptions | undefined {
-  const hasCiphertext = Object.values(options).some(
-    providerOptions => typeof providerOptions?.reasoningEncryptedContent === 'string',
-  );
-  if (!hasCiphertext) return options;
-  const stripped: ProviderContinuationOptions = {};
-  for (const [provider, providerOptions] of Object.entries(options)) {
-    const rest = { ...providerOptions };
-    delete rest.reasoningEncryptedContent;
-    if (Object.keys(rest).length) stripped[provider] = rest;
-  }
-  return Object.keys(stripped).length ? stripped : undefined;
-}
-
-function stripReasoningCiphertextFromMessage(message: AISession['messages'][number]) {
-  const continuation = message.providerContinuation;
-  if (!continuation?.reasoningParts) return message;
-  let changed = false;
-  const parts = continuation.reasoningParts.map(part => {
-    if (!part.providerOptions) return part;
-    const providerOptions = stripReasoningEncryptedContent(part.providerOptions);
-    if (providerOptions === part.providerOptions) return part;
-    changed = true;
-    return providerOptions ? { text: part.text, providerOptions } : { text: part.text };
-  });
-  if (!changed) return message;
-  return {
-    ...message,
-    providerContinuation: {
-      ...continuation,
-      reasoningParts: parts,
-    },
-  };
-}
-
-function stripEncryptedReasoningFromMessage(message: AISession['messages'][number]) {
-  const strippedContinuationMessage = stripReasoningCiphertextFromMessage(message);
-  const toolResults = strippedContinuationMessage.toolResults;
-  if (!toolResults?.length) return strippedContinuationMessage;
-  let toolResultsChanged = false;
-  const nextToolResults = toolResults.map((result) => {
-    const content = truncatePersistedToolResultContent(result.content);
-    if (content === result.content) return result;
-    toolResultsChanged = true;
-    return { ...result, content };
-  });
-  return toolResultsChanged
-    ? { ...strippedContinuationMessage, toolResults: nextToolResults }
-    : strippedContinuationMessage;
-}
-
-function stripEncryptedReasoningFromSession(session: AISession): AISession {
-  let changed = false;
-  const messages = session.messages.map(message => {
-    const stripped = stripEncryptedReasoningFromMessage(message);
-    if (stripped !== message) changed = true;
-    return stripped;
-  });
-  return changed ? { ...session, messages } : session;
-}
-
-function stripCompactedEncryptedReasoningFromSession(session: AISession): AISession {
-  const compactedMessageCount = Math.min(
-    session.messages.length,
-    Math.max(0, session.contextCompaction?.compactedMessageCount ?? 0),
-  );
-  if (compactedMessageCount === 0) return session;
-
-  let changed = false;
-  const messages = session.messages.map((message, index) => {
-    if (index >= compactedMessageCount) return message;
-    const stripped = stripReasoningCiphertextFromMessage(message);
-    if (stripped !== message) changed = true;
-    return stripped;
-  });
-  return changed ? { ...session, messages } : session;
-}
-
-/**
- * Prune sessions before writing to localStorage to prevent hitting the
- * ~5-10 MB storage quota. Only affects what is persisted — the in-memory
- * state retains all messages until the session is reloaded.
+ * Prune sessions before writing to the persisted store to bound retention.
+ * Only affects what is persisted — the in-memory state retains all messages
+ * until the session is reloaded.
  *
  * - Keeps only the MAX_STORED_SESSIONS most-recently-updated sessions.
- * - Trims each session's messages to the last MAX_SESSION_MESSAGES.
+ * - Trims each session's messages to the last `messageCap` messages.
  */
-export function pruneSessionsForStorage(sessions: AISession[]): AISession[] {
+export function pruneSessionsForStorage(
+  sessions: AISession[],
+  messageCap: number = readAiSessionMessageCap(),
+): AISession[] {
   // Sort by updatedAt descending so we keep the newest
   const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
   const limited = sorted.slice(0, MAX_STORED_SESSIONS);
   return limited.map(s => {
-    if (s.messages.length > MAX_SESSION_MESSAGES) {
+    if (s.messages.length > messageCap) {
       // Do not start the retained tail with a tool result whose assistant call
       // was just trimmed. Reuse the same tool-safe boundary logic as context
       // compaction, even if that retains a few more than the nominal cap.
       const removedMessageCount = findSafeChatMessageCompactionSplitIndex(
         s.messages,
-        MAX_SESSION_MESSAGES,
+        messageCap,
       );
       const contextCompaction = s.contextCompaction
         ? {
@@ -359,149 +289,119 @@ export function prepareRestoredSessions(sessions: AISession[], syncEnabled: bool
   return syncEnabled ? sessions : pruneSessionsForStorage(sessions);
 }
 
-/**
- * Serialize sessions for localStorage under a byte budget, escalating pruning
- * as needed. Returns the JSON to persist plus the (possibly) further-pruned
- * sessions that JSON represents.
- *
- * Degradation ladder, cheapest loss first: strip replay ciphertext, shed bulk
- * tool output (kept at a bounded head+tail per result), and only then drop
- * oldest whole sessions. Evicting visible chats to preserve tool bulk is what
- * emptied history for users under storage pressure.
- */
-export function serializeSessionsForStorage(
-  sessions: AISession[],
-  budgetBytes: number = MAX_SESSIONS_JSON_BYTES,
-): { json: string; sessions: AISession[] } {
-  const prepared = pruneSessionsForStorage(sessions).map(rawSession => {
-    // These messages are replaced by the durable summary before every later
-    // request, so their replay ciphertext can never be used again. Remove it
-    // before deciding whether the newest session deserves full protection;
-    // otherwise dead metadata can evict other visible conversations.
-    const session = stripCompactedEncryptedReasoningFromSession(rawSession);
-    return { session, json: JSON.stringify(session) };
-  });
+// ── IndexedDB persistence (issue #4123) ──
+//
+// Sessions are persisted one record per session. There is no global byte
+// budget and no re-serialization ladder: the 2 MB localStorage budget existed
+// to defend a shared quota against the cost of serializing the whole store on
+// every write, and both are gone with per-record writes. Only a count cap
+// (MAX_STORED_SESSIONS) and the per-session message cap remain.
 
-  // Check whether retained history fits before preparing degradation. Use
-  // the existing JSON string-length budget including array delimiters, and
-  // avoid preparing unused stripped messages and serializing payloads again.
-  const fullLength = 2 + prepared.reduce((total, entry) => total + entry.json.length, 0)
-    + Math.max(0, prepared.length - 1);
-  if (fullLength <= budgetBytes) {
-    return {
-      json: `[${prepared.map(entry => entry.json).join(',')}]`,
-      sessions: prepared.map(entry => entry.session),
-    };
-  }
+/** Last set of sessions known to be persisted, for per-record diffing. */
+let lastPersistedSessionsById: Map<string, AISession> = new Map();
+/** Serialized write queue: IDB operations never interleave. */
+let idbWriteQueue: Promise<void> = Promise.resolve();
 
-  // Reuse the full representation when the unchanged degradation ladder is
-  // needed, including on quota retries with a smaller budget.
-  const serialized = prepared.map(({ session, json }) => {
-    const degradableMessages = session.messages.flatMap((message, index) => {
-      const degradedMessage = stripEncryptedReasoningFromMessage(message);
-      if (degradedMessage === message) return [];
-      return [{
-        index,
-        degradedMessage,
-        jsonLengthDelta: JSON.stringify(degradedMessage).length - JSON.stringify(message).length,
-      }];
-    });
-    const strippedSession = stripEncryptedReasoningFromSession(session);
-    return {
-      session,
-      json,
-      strippedSession,
-      strippedJson: strippedSession === session
-        ? json
-        : JSON.stringify(strippedSession),
-      degradableMessages,
-    };
-  });
+/** Test hook: reset diff state between tests. */
+export function __resetIdbPersistenceForTests() {
+  lastPersistedSessionsById = new Map();
+  idbWriteQueue = Promise.resolve();
+  // Tests swap the fake indexedDB factory between cases; the cached open
+  // handle must not survive the swap.
+  resetAiSessionsIdbForTests();
+  // Tests simulate the post-boot state by default; the boot-gating cases
+  // call __resetAiSessionsHydrationForTests() to go back to pending.
+  markAiSessionsHydrationComplete();
+}
 
-  // Preserve the newest session's full continuation whenever it can fit by
-  // itself. That session is the one the user is most likely continuing now;
-  // older visible history must not make its next tool turn unreplayable.
-  const protectNewestContinuation = serialized.length > 0
-    && serialized[0].json.length + 2 <= budgetBytes;
+/** Test hook: resolve once every queued IndexedDB sync has settled. */
+export function __flushIdbWritesForTests(): Promise<void> {
+  return idbWriteQueue.then(() => undefined, () => undefined);
+}
 
-  // Determine how many sessions can fit using the smallest representation for
-  // older sessions while reserving the newest session's full representation
-  // when possible. This also prevents an old, oversized visible chat that must
-  // be dropped anyway from causing newer replay ciphertext to be stripped.
-  let minimalLength = 2
-    + serialized.reduce((total, entry, index) => (
-      total + (protectNewestContinuation && index === 0 ? entry.json.length : entry.strippedJson.length)
-    ), 0)
-    + Math.max(0, serialized.length - 1);
-  while (minimalLength > budgetBytes && serialized.length > 1) {
-    const removed = serialized.pop();
-    if (!removed) break;
-    minimalLength -= removed.strippedJson.length + 1;
-  }
+// ── Boot hydration signal (issue #4125 review) ──
+//
+// Settles once useAIState's boot load has finished (IndexedDB read, legacy
+// migration, disk-backup restore). Sync collection and the active-pointer
+// validation must not run before it: a pre-hydration collect reads the
+// stale legacy localStorage store and would overwrite newer IndexedDB
+// records, and pointer validation against the initially-empty in-memory
+// array would null every pointer before the real sessions arrive.
 
-  // Then keep full continuation data for the retained sessions and shed
-  // replay-only bulk (ciphertext, oversized tool output) from the oldest
-  // retained sessions only as needed, never touching the protected newest
-  // session. Within one session, shed it one message at a time from oldest to
-  // newest so a long active chat can retain its most recent replayable tool
-  // exchange when that still fits.
-  let jsonLength = 2 + serialized.reduce((total, entry) => total + entry.json.length, 0)
-    + Math.max(0, serialized.length - 1);
-  const firstStrippableIndex = protectNewestContinuation ? 1 : 0;
-  for (
-    let index = serialized.length - 1;
-    index >= firstStrippableIndex && jsonLength > budgetBytes;
-    index -= 1
-  ) {
-    const current = serialized[index];
-    let degradedMessageCount = 0;
-    while (jsonLength > budgetBytes && degradedMessageCount < current.degradableMessages.length) {
-      jsonLength += current.degradableMessages[degradedMessageCount].jsonLengthDelta;
-      degradedMessageCount += 1;
-    }
-    if (degradedMessageCount > 0) {
-      const degradedMessagesByIndex = new Map(
-        current.degradableMessages
-          .slice(0, degradedMessageCount)
-          .map(entry => [entry.index, entry.degradedMessage] as const),
-      );
-      const nextSession = {
-        ...current.session,
-        messages: current.session.messages.map((message, messageIndex) => (
-          degradedMessagesByIndex.get(messageIndex) ?? message
-        )),
-      };
-      const nextJson = JSON.stringify(nextSession);
-      const projectedJsonLength = current.json.length
-        + current.degradableMessages
-          .slice(0, degradedMessageCount)
-          .reduce((total, entry) => total + entry.jsonLengthDelta, 0);
-      jsonLength += nextJson.length - projectedJsonLength;
-      serialized[index] = {
-        ...current,
-        session: nextSession,
-        json: nextJson,
-      };
-    }
-  }
+let aiSessionsHydrationComplete = false;
 
-  return {
-    json: `[${serialized.map(entry => entry.json).join(',')}]`,
-    sessions: serialized.map(entry => entry.session),
-  };
+export function isAiSessionsHydrationComplete(): boolean {
+  return aiSessionsHydrationComplete;
+}
+
+/** Called by useAIState's boot effect when the boot load settles. */
+export function markAiSessionsHydrationComplete(): void {
+  aiSessionsHydrationComplete = true;
+}
+
+/** Test hook: return the hydration signal to the pre-boot (pending) state. */
+export function __resetAiSessionsHydrationForTests(): void {
+  aiSessionsHydrationComplete = false;
+}
+
+/** Seed the diff baseline after a boot load or migration. */
+export function seedLastPersistedSessions(sessions: AISession[]) {
+  lastPersistedSessionsById = new Map(sessions.map(session => [session.id, session]));
 }
 
 /**
- * Persist sessions to localStorage with byte-budgeted pruning and retries.
- * Returns true when the write succeeded; a false result means the payload
- * could not be persisted even after escalation (it stays memory-only).
+ * Read the persisted session set synchronously. Source of truth is the
+ * in-memory snapshot held by useAIState; this accessor returns the last set
+ * handed to `writeSessionsForStorage`, falling back to the read-only legacy
+ * localStorage store (kept untouched for one release).
  */
+export function getPersistedAiSessionsSnapshot(): AISession[] {
+  if (lastPersistedSessionsById.size > 0) {
+    return Array.from(lastPersistedSessionsById.values())
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  }
+  return readLiveSessionsArray(localStorageAdapter.readString(STORAGE_KEY_AI_SESSIONS));
+}
 
-// Durability mirror (issue #4015 follow-up): every successful store write
-// also schedules a debounced disk backup so a wiped/recreated profile does
-// not take the chat history with it. The exact JSON that landed in
-// localStorage is mirrored (already byte-budgeted), throttled to at most one
-// write per mutation batch.
+function queueIdbSessionSync(
+  changed: AISession[],
+  removedIds: string[],
+  prevById: Map<string, AISession>,
+  persisted: AISession[],
+) {
+  if (changed.length === 0 && removedIds.length === 0) return;
+  idbWriteQueue = idbWriteQueue
+    .then(async () => {
+      if (!isIndexedDbAvailable()) return;
+      const db = await openAiSessionsIdb();
+      // Per-record write: only the changed sessions are put, only removed
+      // ids are deleted.
+      if (changed.length > 0) await idbPutSessions(db, changed);
+      if (removedIds.length > 0) await idbDeleteSessionIds(db, removedIds);
+      await idbPutMeta(db, 'schemaVersion', 1);
+      await idbPutMeta(db, 'lastWriteAt', Date.now());
+      publishAiSessionsIdbChange();
+    })
+    .catch((error) => {
+      // IndexedDB failures must never break the in-memory session state.
+      // Reset the diff baseline so the next write retries every record, and
+      // fall back to the legacy localStorage key so a corrupt/unavailable
+      // IndexedDB still leaves a restorable trace (via the disk mirror).
+      console.warn('[AIState] IndexedDB session sync failed:', error);
+      lastPersistedSessionsById = new Map(prevById);
+      try {
+        localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, JSON.stringify(persisted));
+      } catch {
+        // Legacy fallback is best-effort too.
+      }
+    });
+}
+
+// Durability mirror (issue #4015 follow-up): every write also schedules a
+// debounced disk backup so a wiped/recreated profile does not take the chat
+// history with it. The persisted JSON is mirrored; when the count cap evicts
+// sessions, a PRE-eviction generation is written first so evicted chats stay
+// recoverable from disk (the blind spot found in issue #4123).
 const backupMirror = new DebouncedBackupMirror((json) => {
   try {
     void getAIBridge()?.aiSessionsBackupWrite?.({ json })?.catch(() => {});
@@ -509,6 +409,14 @@ const backupMirror = new DebouncedBackupMirror((json) => {
     // Backup failures must never break chat persistence.
   }
 });
+
+let aiSessionsBackupRecoveryPending = false;
+
+/** Partial migration must not rotate away generations holding disk-only chats. */
+export function setAiSessionsBackupRecoveryPending(pending: boolean) {
+  aiSessionsBackupRecoveryPending = pending;
+  if (pending) backupMirror.reset();
+}
 
 export function flushBackupMirror() {
   try {
@@ -520,9 +428,11 @@ export function flushBackupMirror() {
 
 export function __resetBackupMirrorForTests() {
   backupMirror.reset();
+  aiSessionsBackupRecoveryPending = false;
 }
 
 export function scheduleBackupMirror(json: string) {
+  if (aiSessionsBackupRecoveryPending) return;
   try {
     backupMirror.schedule(json);
   } catch {
@@ -530,48 +440,79 @@ export function scheduleBackupMirror(json: string) {
   }
 }
 
-export function writeSessionsForStorage(sessions: AISession[]): boolean {
-  // Synced records are authoritative after restart: silently evicting a
-  // session or turn here would turn local retention into cloud deletion.
-  if (localStorageAdapter.read<{ enabled?: boolean }>(STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS)?.enabled) {
-    const syncedOk = localStorageAdapter.write(STORAGE_KEY_AI_SESSIONS, sessions);
-    if (syncedOk) scheduleBackupMirror(JSON.stringify(sessions));
-    return syncedOk;
+/** Write one immediate backup generation (bypasses the debounce window). */
+function writeImmediateBackupGeneration(json: string) {
+  if (aiSessionsBackupRecoveryPending) return;
+  try {
+    backupMirror.schedule(json);
+    backupMirror.flushNow();
+  } catch {
+    // Backup failures must never break chat persistence.
   }
-  let previousLength = Number.POSITIVE_INFINITY;
-  for (const configuredBudget of [MAX_SESSIONS_JSON_BYTES, ...RETRY_SESSIONS_JSON_BYTES]) {
-    // A real quota failure means the next attempt must be smaller even when
-    // the failed payload was already below the nominal retry budget. Reduce
-    // materially on each bounded retry so several small sessions can be
-    // removed before the retry sequence is exhausted.
-    const reducedBudget = Number.isFinite(previousLength)
-      ? Math.floor(previousLength * 0.75)
-      : configuredBudget;
-    const budget = Math.min(configuredBudget, reducedBudget);
-    if (budget < 2) break;
-    const candidate = serializeSessionsForStorage(sessions, budget);
-    if (candidate.json.length >= previousLength) continue;
-    if (localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, candidate.json)) {
-      scheduleBackupMirror(candidate.json);
-      return true;
+}
+
+/**
+ * Perf (#4121): the exact same immutable sessions array is often written
+ * again by the debounced save path and by cloud-sync collection; skipping
+ * the re-stringify for a reference-identical set keeps that cheap. The
+ * per-record IDB diff below already makes the store write itself cheap.
+ */
+let lastMirroredSessions: AISession[] | null = null;
+
+/**
+ * Persist sessions. Writes go to IndexedDB, one record per session, through a
+ * serialized queue; errors are logged, never thrown. Returns true when the
+ * persisted set was computed (in-memory state remains authoritative either
+ * way).
+ */
+export function writeSessionsForStorage(
+  sessions: AISession[],
+  options?: { deletedSessionIds?: readonly string[] },
+): boolean {
+  try {
+    // Explicitly deleted ids never count as cap eviction (they also must not
+    // trigger a pre-eviction backup generation).
+    for (const id of options?.deletedSessionIds ?? []) intentionallyDeletedSessionIds.add(id);
+    // Synced records are authoritative after restart: never prune them, or
+    // local retention would turn into cloud deletion on the next sync.
+    const syncEnabled = !!localStorageAdapter.read<{ enabled?: boolean }>(
+      STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS,
+    )?.enabled;
+    const persisted = syncEnabled ? sessions : pruneSessionsForStorage(sessions);
+
+    const prevById = lastPersistedSessionsById;
+    const persistedIds = new Set(persisted.map(session => session.id));
+
+    // Count-cap eviction: sessions that drop out of the persisted set without
+    // being explicitly deleted get a pre-eviction disk generation containing
+    // the full pre-eviction store, so they remain recoverable.
+    const evicted = Array.from(prevById.entries())
+      .filter(([id]) => !persistedIds.has(id) && !intentionallyDeletedSessionIds.has(id))
+      .map(([, session]) => session);
+    intentionallyDeletedSessionIds.clear();
+    if (evicted.length > 0) {
+      writeImmediateBackupGeneration(JSON.stringify(sessions));
+      console.warn(
+        `[AIState] Retention cap evicted ${evicted.length} session(s); a pre-eviction backup generation was written to disk.`,
+      );
     }
-    previousLength = candidate.json.length;
-  }
-  // Last resort: attempt the smallest representation this serializer can
-  // produce (the newest session with replay-only ciphertext removed). A very
-  // small amount of shared quota may still be enough to preserve that chat.
-  const minimalCandidate = serializeSessionsForStorage(sessions, 0);
-  if (
-    minimalCandidate.json.length < previousLength
-    && localStorageAdapter.writeString(STORAGE_KEY_AI_SESSIONS, minimalCandidate.json)
-  ) {
-    scheduleBackupMirror(minimalCandidate.json);
+
+    // Per-record diff (synchronous: the baseline must advance even when
+    // IndexedDB is unavailable, and callers read the snapshot right after).
+    const changed = persisted.filter(session => prevById.get(session.id) !== session);
+    const removedIds = Array.from(prevById.keys()).filter(id => !persistedIds.has(id));
+    lastPersistedSessionsById = new Map(persisted.map(session => [session.id, session]));
+
+    if (changed.length > 0 || removedIds.length > 0 || lastMirroredSessions !== persisted) {
+      scheduleBackupMirror(JSON.stringify(persisted));
+      lastMirroredSessions = persisted;
+    }
+    queueIdbSessionSync(changed, removedIds, prevById, persisted);
     return true;
+  } catch (error) {
+    console.warn('[AIState] Failed to persist AI sessions:', error);
+    return false;
   }
-  console.warn(
-    '[AIState] Failed to persist AI sessions within the storage quota; recent chat history may not survive a restart.',
-  );
-  return false;
 }
 
 export let latestAISessionsSnapshot: AISession[] | null = null;
@@ -613,10 +554,10 @@ export function setLatestAIActiveSessionMapSnapshot(activeSessionIdMap: Record<s
 
 export function prewarmAIStateStorageSnapshots() {
   try {
-    if (latestAISessionsSnapshot === null) {
-      latestAISessionsSnapshot =
-        localStorageAdapter.read<AISession[]>(STORAGE_KEY_AI_SESSIONS) ?? [];
-    }
+    // Sessions are no longer prewarmed from localStorage: the primary store is
+    // IndexedDB and loads asynchronously in useAIState. Prewarming the stale
+    // read-only legacy key would make the boot loader skip the IndexedDB
+    // contents ("never restore over non-empty live state").
     if (latestAIActiveSessionMapSnapshot === null) {
       latestAIActiveSessionMapSnapshot =
         localStorageAdapter.read<Record<string, string | null>>(STORAGE_KEY_AI_ACTIVE_SESSION_MAP) ?? {};

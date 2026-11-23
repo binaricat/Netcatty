@@ -156,6 +156,26 @@ function summarizeHostForList(host: Host) {
   };
 }
 
+type HostListSummary = ReturnType<typeof summarizeHostForList>;
+
+/** Empty filter matches everything. Matches the group itself or any subgroup, on a path boundary. */
+function hostMatchesGroupFilter(host: HostListSummary, group: string): boolean {
+  if (!group) return true;
+  const hostGroup = host.group ?? '';
+  return hostGroup === group || hostGroup.startsWith(`${group}/`);
+}
+
+/** Every term must appear (case-insensitive) in label, hostname, username, or tags. Group is deliberately excluded. */
+function hostMatchesQueryTerms(host: HostListSummary, terms: string[]): boolean {
+  if (terms.length === 0) return true;
+  const tags = Array.isArray(host.tags) ? host.tags : [];
+  const haystack = [host.label, host.hostname, host.username, ...tags]
+    .filter((value): value is string => typeof value === 'string')
+    .join('\n')
+    .toLowerCase();
+  return terms.every((term) => haystack.includes(term));
+}
+
 function parseOptionalBoolean(value: unknown): boolean | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value === 'boolean') return value;
@@ -550,7 +570,7 @@ export interface VaultAgentApiDeps {
    * external MCP client rather than the in-app Catty AI chat — and gates the "silent
    * sessions" setting so the in-app chat's host_open still opens a visible tab.
    */
-  openHost?: (host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string }) => {
+  openHost?: (host: Host, isExternalMcpCall: boolean, options?: { workspaceId?: string; chatSessionId?: string }) => {
     ok: true;
     sessionId: string;
     host: Host;
@@ -574,6 +594,8 @@ export interface VaultAgentApiDeps {
     ok: false;
     error: string;
   };
+  reconnectSession?: (sessionId: string) => Record<string, unknown>;
+  inspectSessionRecovery?: (sessionId: string) => Record<string, unknown>;
   getScriptSessionMeta?: (sessionId: string) => {
     connected?: boolean;
     name?: string;
@@ -657,6 +679,20 @@ export async function handleVaultAgentOp(
 ): Promise<Record<string, unknown>> {
   switch (op) {
     case 'terminal.readContext': return handleTerminalContextRead(params);
+    case 'session.inspectRecovery': {
+      const sessionId = String(params.sessionId || '').trim();
+      if (!sessionId || !deps.inspectSessionRecovery) return { ok: false, error: 'Session recovery inspection is unavailable.' };
+      return deps.inspectSessionRecovery(sessionId);
+    }
+    case 'session.reconnect': {
+      const sessionId = String(params.sessionId || '').trim();
+      if (!sessionId) return { ok: false, started: false, error: 'sessionId is required.' };
+      if (typeof params.expiresAt === 'number' && Date.now() >= params.expiresAt) {
+        return { ok: false, started: false, code: 'RECONNECT_EXPIRED', error: 'Reconnect request expired before renderer dispatch. Inspect the session before continuing.' };
+      }
+      if (!deps.reconnectSession) return { ok: false, started: false, error: 'Session reconnect is not available in this window.' };
+      return deps.reconnectSession(sessionId);
+    }
     case 'session.close': {
       const sessionId = String(params.sessionId || '').trim();
       if (!sessionId) return { ok: false, error: 'sessionId is required.' };
@@ -674,10 +710,18 @@ export async function handleVaultAgentOp(
       return { ok: true, host: sanitizeHostForAgent(deps.resolveEffectiveHost(host)) };
     }
     case 'host.list': {
-      return {
-        ok: true,
-        hosts: deps.getHosts().map((host) => summarizeHostForList(deps.resolveEffectiveHost(host))),
-      };
+      // Filters are optional: anything missing or not a string means "no filter".
+      const rawQuery = params?.query;
+      const rawGroup = params?.group;
+      const queryTerms = typeof rawQuery === 'string'
+        ? rawQuery.toLowerCase().split(/\s+/).filter(Boolean)
+        : [];
+      const group = typeof rawGroup === 'string' ? rawGroup.trim().replace(/\/+$/, '') : '';
+      const hosts = deps
+        .getHosts()
+        .map((host) => summarizeHostForList(deps.resolveEffectiveHost(host)))
+        .filter((host) => hostMatchesGroupFilter(host, group) && hostMatchesQueryTerms(host, queryTerms));
+      return { ok: true, hosts };
     }
     case 'host.open': {
       if (params.workspaceId !== undefined && (typeof params.workspaceId !== 'string' || !params.workspaceId.trim())) {
@@ -741,6 +785,9 @@ export async function handleVaultAgentOp(
 
       const opened = deps.openHost(effectiveHost, isExternalMcpCall, {
         workspaceId: typeof params.workspaceId === 'string' ? params.workspaceId : undefined,
+        // The openHost implementation resolves placement from the invoking
+        // chat's bound workspace (see resolveAgentHostOpenWorkspace).
+        ...(chatSessionId ? { chatSessionId } : {}),
       });
       if (opened.ok === false) {
         return { ok: false, error: opened.error };
@@ -1576,6 +1623,9 @@ export function shouldBypassVaultAgentSerialization(
   op: string,
   params: Record<string, unknown>,
 ): boolean {
+  // Reconnect changes terminal runtime, not vault records. Never leave a
+  // recovery request queued behind an unrelated long-running vault operation.
+  if (op === 'session.reconnect' || op === 'session.inspectRecovery') return true;
   if (op !== 'scripts.run' && op !== 'snippets.run') return false;
   return parseOptionalBoolean(params.wait) ?? false;
 }

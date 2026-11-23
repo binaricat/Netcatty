@@ -25,6 +25,7 @@ const {
   readWindowsRegistryPath,
   createWindowsLivePathResolver,
   trackSessionIdlePrompt,
+  computeOsc133ReadyState,
 } = require("./shellUtils.cjs");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -111,6 +112,46 @@ test("isDefaultPowerShellPromptLine matches default shapes and rejects look-alik
   assert.equal(isDefaultPowerShellPromptLine(null), false);
 });
 
+test("PowerShell prompt helpers recognize remoting and debug prefixes", () => {
+  for (const prompt of [
+    "[192.168.1.10]: PS C:\\Users\\Administrator\\Documents>",
+    "[SERVER01]: PS C:\\>",
+    "[host.example.com]: PS C:\\Windows\\System32>",
+    "[fe80::1]: PS C:\\>",
+    "[DBG]: PS C:\\Users\\alice>",
+    "[SERVER01]: [DBG]: PS C:\\>",
+  ]) {
+    assert.equal(isDefaultPowerShellPromptLine(prompt), true, prompt);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt, prompt);
+  }
+});
+
+test("PowerShell prompt helpers reject malformed remoting prefixes and look-alikes", () => {
+  for (const line of [
+    "[host] PS C:\\>",
+    "prefix [host]: PS C:\\>",
+    "[]: PS C:\\>",
+    "[ho]st]: PS C:\\>",
+    "[ho\rst]: PS C:\\>",
+    "[ho\nst]: PS C:\\>",
+    "[host]:PS C:\\>",
+    "[host]: PS >",
+    "PS >",
+    "PSO>",
+    "ZIPS>",
+    "",
+    null,
+  ]) {
+    assert.equal(isDefaultPowerShellPromptLine(line), false, String(line));
+    assert.equal(extractTrailingIdlePrompt(line), "", String(line));
+  }
+});
+
+test("extractTrailingIdlePrompt preserves trailing space on a remoting prompt", () => {
+  const prompt = "[192.168.1.10]: PS C:\\Users\\Administrator\\Documents> ";
+  assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt);
+});
+
 test("extracts a trailing cmd.exe idle prompt", () => {
   // Windows OpenSSH default shell is cmd.exe; without capturing `C:\...>`
   // AI exec cannot select the cmd wrapper when shellKind is still unset.
@@ -149,6 +190,66 @@ test("isDefaultPosixPromptLine matches classic user@host prompts", () => {
   assert.equal(isDefaultPosixPromptLine("PS C:\\Users\\alice>"), false);
   assert.equal(isDefaultPosixPromptLine("C:\\Users\\alice>"), false);
   assert.equal(isDefaultPosixPromptLine(""), false);
+});
+
+test("recognizes bracketed time prompts without a hostname and preserves trailing space", () => {
+  for (const prompt of [
+    "[root 12:04:23 ~]$",
+    "[root 12:04:23 ~]$ ",
+    "[alice 00:00:00 /var/log]# ",
+    "[alice-admin 23:59:59 ~/src]$ ",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt, prompt);
+  }
+});
+
+test("bracketed time prompt recognition rejects pending input and prompts without time", () => {
+  for (const line of [
+    "[root 12:04:23 ~]$ hostname",
+    "[root 12:04:23 ~]$ echo $",
+    "[root ~]$",
+    "[word]$",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
+test("recognizes space-separated Bash idle prompts and preserves trailing whitespace", () => {
+  for (const prompt of [
+    "root@VM-Q7L4M8P2 ~ $",
+    "user@host ~ $",
+    "alice@box ~/proj $",
+  ]) {
+    for (const suffix of ["", " ", "  "]) {
+      const line = prompt + suffix;
+      assert.equal(isDefaultPosixPromptLine(line), true, line);
+      assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), line, line);
+    }
+  }
+});
+
+test("space-separated Bash prompt recognition rejects pending input and non-shell screens", () => {
+  for (const line of [
+    "user@host ~ $ echo hi",
+    "user@host ~ $ whoami",
+    "user@host ~ $ echo $",
+    "user@host ~ $ echo #",
+    "user@host ~ $ echo %",
+    "root@host ~#",
+    "user@host ~/cash$dir $",
+    "user@host ~/issue#1 $",
+    "user@host ~/100% $",
+    "user@host   $",
+    "progress 50 $",
+    "$",
+    "Password:",
+    "(END)",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
 });
 
 test("isDefaultPosixPromptLine matches the macOS zsh default prompt", () => {
@@ -261,6 +362,129 @@ test("extracts an Alpine idle prompt while preserving its trailing whitespace", 
   assert.equal(extractTrailingIdlePrompt("localhost:~# \r\n"), "");
 });
 
+test("isDefaultPosixPromptLine matches Powerlevel10k ❯ idle prompts", () => {
+  for (const prompt of [
+    "~ ❯",
+    "~ ❯ ",
+    "~/proj ❯",
+    "~/git/Netcatty ❯ ",
+    "/tmp ❯",
+    "proj ❯",
+    "alice@host ~ ❯",
+    "alice@host ~/src ❯ ",
+    "(venv) ~ ❯ ",
+    "(venv) alice@host ~ ❯",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+  }
+});
+
+test("Powerlevel10k ❯ recognition rejects pending input and bare ❯", () => {
+  for (const line of [
+    "❯",
+    "❯ ",
+    "❯ vim",
+    "~ ❯ echo READY",
+    "~ ❯echo",
+    "alice@host ~ ❯ ls",
+    "proj ❯ vim",
+    "(venv) ~ ❯ echo hi",
+    // Must not treat a lone marker as idle (same rationale as bare $/).
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
+test("extractTrailingIdlePrompt recognizes Powerlevel10k ❯ and preserves trailing space", () => {
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n~ ❯"), "~ ❯");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n~ ❯ "), "~ ❯ ");
+  assert.equal(
+    extractTrailingIdlePrompt("Last login...\r\nalice@host ~/src ❯ "),
+    "alice@host ~/src ❯ ",
+  );
+  assert.equal(extractTrailingIdlePrompt("welcome\r\nproj ❯"), "proj ❯");
+  assert.equal(extractTrailingIdlePrompt("(venv) ~ ❯ "), "(venv) ~ ❯ ");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n~ ❯ echo READY"), "");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n❯ "), "");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n~ ❯\r\n"), "");
+});
+
+test("trackSessionIdlePrompt and getFreshIdlePrompt accept a Powerlevel10k ❯ prompt", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "Last login...\r\n~ ❯ ");
+  assert.equal(session.lastIdlePrompt, "~ ❯ ");
+  assert.equal(getFreshIdlePrompt(session), "~ ❯ ");
+  assert.equal(getVisibleIdlePrompt(session), "~ ❯ ");
+
+  trackSessionIdlePrompt(session, "printf busy");
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getVisibleIdlePrompt(session), "");
+
+  trackSessionIdlePrompt(session, "\r\nbusy\r\nalice@host ~/src ❯ ");
+  assert.equal(getFreshIdlePrompt(session), "alice@host ~/src ❯ ");
+  assert.equal(getVisibleIdlePrompt(session), "alice@host ~/src ❯ ");
+});
+
+test("isDefaultPosixPromptLine matches Oh My Zsh robbyrussell ➜ idle prompts", () => {
+  for (const line of [
+    "➜  ~",
+    "➜  ~ ",
+    "➜ ~",
+    "➜  netcatty",
+    "➜  ~/proj",
+    "➜  ~ git:(main)",
+    "➜  ~ git:(main) ",
+    "➜  ~ git:(main) ✗",
+    "➜  netcatty git:(main) ✓",
+    "(venv) ➜  ~ ",
+    "(venv) ➜  ~ git:(main) ✗",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), true, JSON.stringify(line));
+  }
+});
+
+test("Oh My Zsh ➜ recognition rejects pending input and bare ➜", () => {
+  for (const line of [
+    "➜",
+    "➜ ",
+    "➜  ~ ls",
+    "➜  ~ echo hi",
+    "➜  netcatty vim",
+    "➜ ls",
+    "➜  ~ git status",
+    "(venv) ➜  ~ echo hi",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, JSON.stringify(line));
+  }
+});
+
+test("extractTrailingIdlePrompt recognizes Oh My Zsh ➜ and preserves trailing space", () => {
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n➜  ~"), "➜  ~");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n➜  ~ "), "➜  ~ ");
+  assert.equal(
+    extractTrailingIdlePrompt("Last login...\r\n➜  ~ git:(main) ✗"),
+    "➜  ~ git:(main) ✗",
+  );
+  assert.equal(extractTrailingIdlePrompt("(venv) ➜  ~ "), "(venv) ➜  ~ ");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n➜  ~ ls"), "");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n➜ "), "");
+  assert.equal(extractTrailingIdlePrompt("welcome\r\n➜  ~\r\n"), "");
+});
+
+test("trackSessionIdlePrompt and getFreshIdlePrompt accept an Oh My Zsh ➜ prompt", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "Last login...\r\n➜  ~ ");
+  assert.equal(session.lastIdlePrompt, "➜  ~ ");
+  assert.equal(getFreshIdlePrompt(session), "➜  ~ ");
+  assert.equal(getVisibleIdlePrompt(session), "➜  ~ ");
+
+  trackSessionIdlePrompt(session, "\r\nbusy\r\n➜  ~ git:(main) ✗");
+  assert.equal(getFreshIdlePrompt(session), "➜  ~ git:(main) ✗");
+  assert.equal(getVisibleIdlePrompt(session), "➜  ~ git:(main) ✗");
+});
+
+
 test("extracts a trailing RHEL-family bracketed idle prompt", () => {
   // Oracle Linux / RHEL / CentOS / Fedora default PS1 is `[\u@\h \W]\$ `.
   // Trailing space must round-trip, same as the PowerShell prompt capture.
@@ -286,6 +510,13 @@ test("extracts a trailing RHEL-family bracketed idle prompt", () => {
   );
   // Unbracketed space form is still not a recognized default prompt.
   assert.equal(extractTrailingIdlePrompt("welcome\r\nroot@host ~#"), "");
+});
+
+test("extractTrailingIdlePrompt recognizes an ANSI-colored bracketed time prompt", () => {
+  assert.equal(
+    extractTrailingIdlePrompt("welcome\r\n[\x1b[1;34mroot \x1b[1;36m12:04:23 \x1b[1;32m~\x1b[0m]$ "),
+    "[root 12:04:23 ~]$ ",
+  );
 });
 
 test("extractTrailingIdlePrompt recognizes a two-line user@host then bare $/# PS1", () => {
@@ -1033,6 +1264,14 @@ test("trackSessionIdlePrompt and getFreshIdlePrompt accept an Oracle/RHEL bracke
   assert.equal(getFreshIdlePrompt(bracketedPath), "[user@host My [Project]]$ ");
 });
 
+test("trackSessionIdlePrompt and getFreshIdlePrompt accept a bracketed time prompt", () => {
+  const session = {};
+  const prompt = "[root 12:04:23 ~]$ ";
+  assert.equal(trackSessionIdlePrompt(session, `Last login...\r\n${prompt}`), prompt);
+  assert.equal(session.lastIdlePrompt, prompt);
+  assert.equal(getFreshIdlePrompt(session), prompt);
+});
+
 test("visible idle prompt survives a PSReadLine erase that leaves the raw tail dirty", () => {
   // PSReadLine echoes the pending-input clear prefix (`ggd2147483647d` / `i`),
   // then homes the cursor and erases those keys with CSI. stripAnsi drops the
@@ -1254,4 +1493,239 @@ test("a failed machine hive does not promote user directories ahead of inherited
   assert.equal(await resolve({
     platform: "win32", basePath: "C:\\Windows\\System32", env: {}, knownCliDirs: () => [],
   }), "C:\\Windows\\System32;C:\\user-tools");
+});
+
+// ── OSC 133 shell-integration readiness ──
+
+test("computeOsc133ReadyState derives readiness from the last marker in the raw tail", () => {
+  assert.equal(computeOsc133ReadyState(""), null);
+  assert.equal(computeOsc133ReadyState("plain output with no markers"), null);
+  // BEL terminator, A last → ready.
+  assert.equal(computeOsc133ReadyState("\x1b]133;A\x07user@host ~ % "), true);
+  // ST terminator on D; full cycle A→B→C→D ends not-at-prompt.
+  assert.equal(
+    computeOsc133ReadyState("\x1b]133;A\x07\x1b]133;B\x07ls\x07\x1b]133;C\x07files\x1b]133;D\x1b\\"),
+    false,
+  );
+  // Parameterized D form (e.g. `133;D;0`) still matches the marker prefix.
+  assert.equal(computeOsc133ReadyState("\x1b]133;A\x07\x1b]133;D;0\x07"), false);
+  // Output start (C) after the last prompt start means a command is running.
+  assert.equal(computeOsc133ReadyState("\x1b]133;A\x07\x1b]133;C\x07build output..."), false);
+  // A fresh prompt start after a finished command is ready again.
+  assert.equal(computeOsc133ReadyState("\x1b]133;D\x07\x1b]133;A\x07~ ❯ "), true);
+});
+
+test("trackSessionIdlePrompt stores OSC 133 state alongside the whitelist prompt", () => {
+  // No markers → null (non-integrated shell, whitelist fallback unchanged).
+  const plain = {};
+  trackSessionIdlePrompt(plain, "Last login...\r\nuser@host ~ % ");
+  assert.equal(plain.osc133Ready, null);
+  assert.equal(getFreshIdlePrompt(plain), "user@host ~ % ");
+});
+
+test("OSC 133 keeps whitelisted prompts and readies custom prompts after B", () => {
+  // Colored Powerlevel10k-style prompt: theme SGR codes + ❯, after an A marker.
+  const p10k = {};
+  trackSessionIdlePrompt(
+    p10k,
+    "\x1b]133;A\x07\x1b]0;title\x07\x1b[38;5;39m~/src\x1b[0m \x1b[38;5;213m❯\x1b[0m ",
+  );
+  assert.equal(p10k.osc133Ready, true);
+  assert.equal(getFreshIdlePrompt(p10k), "~/src ❯ ");
+  assert.equal(getVisibleIdlePrompt(p10k), "~/src ❯ ");
+
+  // B marks the custom prompt boundary; A alone cannot prove empty input.
+  const custom = {};
+  trackSessionIdlePrompt(custom, "\x1b]133;A\x07myprompt λ ");
+  assert.equal(custom.osc133Ready, true);
+  assert.equal(getFreshIdlePrompt(custom), "");
+  assert.equal(getVisibleIdlePrompt(custom), "");
+  trackSessionIdlePrompt(custom, "\x1b]133;B\x07");
+  assert.equal(getVisibleIdlePrompt(custom), "myprompt λ ");
+});
+
+test("OSC 133 C/D markers override whitelisted-looking prompt text (not ready)", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "\x1b]133;A\x07PS C:\\Users\\alice> ");
+  assert.equal(session.osc133Ready, true);
+  assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice> ");
+
+  // Command in flight; a running program then echoes prompt-shaped text —
+  // the exact case where the whitelist lies (#4048 false-ready).
+  trackSessionIdlePrompt(session, "\x1b]133;B\x07dir\x07\x1b]133;C\x07running...\r\nPS C:\\Users\\alice> ");
+  assert.equal(session.osc133Ready, false);
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getVisibleIdlePrompt(session), "");
+
+  // D (finished) without a new A marker stays not-ready even with
+  // prompt-shaped text after it.
+  trackSessionIdlePrompt(session, "done\x1b]133;D;0\x1b\\\r\nuser@host ~ % ");
+  assert.equal(session.osc133Ready, false);
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getVisibleIdlePrompt(session), "");
+
+  // A new prompt start restores readiness.
+  trackSessionIdlePrompt(session, "\x1b]133;A\x07user@host ~ % ");
+  assert.equal(session.osc133Ready, true);
+  assert.equal(getFreshIdlePrompt(session), "user@host ~ % ");
+});
+
+test("OSC 133 state survives markers split across PTY chunks via the rolling tail", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "welcome\r\n\x1b]133;");
+  assert.equal(session.osc133Ready, null);
+  trackSessionIdlePrompt(session, "A\x07user@host ~ % ");
+  assert.equal(session.osc133Ready, true);
+  assert.equal(getVisibleIdlePrompt(session), "user@host ~ % ");
+});
+
+test("OSC 133 lifecycle state survives rolling-tail eviction without reviving old prompts", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "\x1b]133;A\x07");
+  assert.equal(session.osc133Ready, true);
+  // Retain lifecycle state, but fail closed when the prompt itself was evicted.
+  trackSessionIdlePrompt(session, "x".repeat(4200));
+  assert.equal(session.osc133Ready, true);
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getVisibleIdlePrompt(session), "");
+});
+
+
+// ── macOS `sudo -i` root prompt (`host:dir user#`) — issue #4195 ──
+
+test("isDefaultPosixPromptLine matches macOS sudo -i root prompts (host:dir user#)", () => {
+  for (const prompt of [
+    "ChrisdeMacBook-Air:~ root#",
+    "host:/var/root root#",
+    "MacBook-Pro:/var/root root#",
+    "ChrisdeMacBook-Air:~ admin$",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+  }
+});
+
+test("extractTrailingIdlePrompt recognizes a macOS root prompt (incl. ANSI) and preserves trailing whitespace", () => {
+  assert.equal(
+    extractTrailingIdlePrompt("Password:\r\nSorry, try again.\r\nChrisdeMacBook-Air:~ root#"),
+    "ChrisdeMacBook-Air:~ root#",
+  );
+  assert.equal(
+    extractTrailingIdlePrompt("Last login...\r\nChrisdeMacBook-Air:~ root# "),
+    "ChrisdeMacBook-Air:~ root# ",
+  );
+  // ANSI colour wrappers are removed by stripAnsi before shape matching.
+  assert.equal(
+    extractTrailingIdlePrompt(
+      "Password:\r\n\x1b[01;32mChrisdeMacBook-Air\x1b[00m:\x1b[01;34m~\x1b[00m root#",
+    ),
+    "ChrisdeMacBook-Air:~ root#",
+  );
+  // A prompt followed by input, or followed by a newline, is not idle.
+  assert.equal(extractTrailingIdlePrompt("ChrisdeMacBook-Air:~ root# echo hi"), "");
+  assert.equal(extractTrailingIdlePrompt("ChrisdeMacBook-Air:~ root#\r\n"), "");
+});
+
+test("trackSessionIdlePrompt and getFreshIdlePrompt accept a macOS root prompt, then expire on new output", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "Password:\r\nSorry, try again.\r\nChrisdeMacBook-Air:~ root# ");
+  assert.equal(session.lastIdlePrompt, "ChrisdeMacBook-Air:~ root# ");
+  assert.equal(getFreshIdlePrompt(session), "ChrisdeMacBook-Air:~ root# ");
+  assert.equal(getVisibleIdlePrompt(session), "ChrisdeMacBook-Air:~ root# ");
+
+  // A command being echoed breaks the endsWith chain -> no longer fresh.
+  trackSessionIdlePrompt(session, "uname -a");
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getVisibleIdlePrompt(session), "");
+
+  trackSessionIdlePrompt(session, "\r\nDarwin ... arm64\r\nChrisdeMacBook-Air:~ root# ");
+  assert.equal(getFreshIdlePrompt(session), "ChrisdeMacBook-Air:~ root# ");
+  assert.equal(getVisibleIdlePrompt(session), "ChrisdeMacBook-Air:~ root# ");
+});
+
+test("macOS root prompt recognition preserves prior classifications and rejects look-alikes", () => {
+  // No regression: the user's zsh prompt is still idle-ready.
+  assert.equal(isDefaultPosixPromptLine("zhangdanting@ChrisdeMacBook-Air ~ %"), true);
+  assert.equal(
+    extractTrailingIdlePrompt("welcome\r\nzhangdanting@ChrisdeMacBook-Air ~ %"),
+    "zhangdanting@ChrisdeMacBook-Air ~ %",
+  );
+  // `Password:` / `Sorry, try again.` must stay NOT ready: the shell is blocked
+  // on secret input, so the bridge must never type into it.
+  for (const line of ["Password:", "Sorry, try again."]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+  // Shapes owned by existing patterns are unchanged.
+  assert.equal(isDefaultPosixPromptLine("host:~#"), true);        // ALPINE (no user segment)
+  assert.equal(isDefaultPosixPromptLine("user@host:~#"), true);   // POSIX
+  assert.equal(isDefaultPowerShellPromptLine("PS C:\\>"), true);  // PowerShell
+  assert.equal(isDefaultPosixPromptLine("PS C:\\>"), false);      // untouched
+  // Program-output look-alikes: trailing `%` / extra text / pending input.
+  for (const line of [
+    "ChrisdeMacBook-Air:~ root# 47%",
+    "ChrisdeMacBook-Air:~ root# building 47%",
+    "ChrisdeMacBook-Air:~ root# echo hi",
+    "deploy: release 100% root#",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
+test("the macOS root pattern is pure-shape and disjoint from existing whitelist shapes (no double-count)", () => {
+  // Same shape as MACOS_ROOT_PROMPT_PATTERN; kept local to assert that the new
+  // pattern does not also claim shapes already owned by ALPINE / POSIX / ZSH /
+  // CMD / PowerShell / P10K / OMZ (the whitelist is a boolean OR, so overlap
+  // would be a latent double-count even though readiness is unchanged).
+  const root = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~|\/|[^\s:#$>\\]+)\s+[A-Za-z0-9_.-]+[#$]$/;
+  for (const line of [
+    "host:~#",                                  // ALPINE, no ` user` segment
+    "host:/tmp#",                               // ALPINE
+    "user@host:~#",                             // POSIX
+    "zhangdanting@ChrisdeMacBook-Air ~ %",      // ZSH
+    "PS C:\\>",                                 // PowerShell
+    "C:\\>",                                    // CMD
+    "~ ❯",                                      // P10K
+    "➜  ~",                                     // OMZ
+    "C:\\Users\\alice>echo hello#",             // #4048: cmd prompt-with-input
+    "C:\\> dir#",                               // #4048: cmd prompt-with-input
+  ]) {
+    assert.equal(root.test(line), false, line);
+  }
+  for (const line of ["ChrisdeMacBook-Air:~ root#", "host:/var/root root#", "host:~ root$"]) {
+    assert.equal(root.test(line), true, line);
+  }
+});
+
+test("macOS root pattern rejects cmd drive-letter prompts with pending input (#4048)", () => {
+  // A `C:` drive prefix is NOT a hostname. These lines carry `\` / `>` and a
+  // trailing command, i.e. a prompt with unfinished input. They must NEVER be
+  // judged idle-ready: typing into them would corrupt the pending input.
+  for (const line of [
+    "C:\\Users\\alice>echo hello#",
+    "C:\\> dir#",
+    "D:\\data>type notes.txt#",
+    "host:foo>bar root#",       // `>` in the path segment
+    "host:foo\\bar root#",      // `\` in the path segment
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+  // Valid macOS root prompts remain ready (no false-negative regression).
+  for (const prompt of [
+    "ChrisdeMacBook-Air:~ root#",
+    "host:/var/root root#",
+    "host:~ root$",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+  }
+  // Plain Windows prompts keep their own owners: POWERSHELL for `PS C:\>`,
+  // CMD for `C:\>`. Neither is claimed by the POSIX whitelist (no collision).
+  assert.equal(isDefaultPowerShellPromptLine("PS C:\\>"), true);
+  assert.equal(isDefaultPosixPromptLine("PS C:\\>"), false);
+  assert.equal(isDefaultCmdPromptLine("C:\\>"), true);
+  assert.equal(isDefaultPosixPromptLine("C:\\>"), false);
+  // Credential prompts stay not-ready.
+  assert.equal(isDefaultPosixPromptLine("Password:"), false);
+  assert.equal(extractTrailingIdlePrompt("welcome\r\nPassword:"), "");
 });

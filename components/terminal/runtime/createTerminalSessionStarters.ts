@@ -155,7 +155,7 @@ const formatPluginConnectionExitMessage = (event: TerminalSessionExitEvent): str
   return `\r\n${lines.join("\r\n")}`;
 };
 
-const isAuthFailureMessage = (message: string): boolean => {
+export const isAuthFailureMessage = (message: string): boolean => {
   const normalized = message.toLowerCase();
   return normalized.includes("all configured authentication methods failed") ||
     normalized.includes("authentication failed") ||

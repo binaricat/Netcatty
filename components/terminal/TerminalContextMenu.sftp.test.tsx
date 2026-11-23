@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
+import { loadLocaleMessages } from '../../application/i18n/messages.ts';
 
 test('SFTP menu opens the clicked pane without a selection and is absent without a handler', async () => {
+  await loadLocaleMessages('zh-CN');
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
     pretendToBeVisual: true,
     url: 'http://localhost',

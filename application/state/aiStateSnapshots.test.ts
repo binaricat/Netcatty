@@ -7,6 +7,7 @@ import {
 } from '../../infrastructure/ai/harness/modelSecretRedaction';
 import type { AISession } from '../../infrastructure/ai/types';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
+import { installFakeIndexedDb } from './testSupport/fakeIndexedDb';
 import {
   cleanupClosedTerminalSessions,
   cleanupDeletedAIChatSessions,
@@ -14,10 +15,15 @@ import {
   cleanupSdkAgentSessions,
   latestAIActiveSessionMapSnapshot,
   latestAISessionsSnapshot,
+  markAiSessionsHydrationComplete,
+  pruneSessionsForStorage,
   setLatestAIActiveSessionMapSnapshot,
   setLatestAISessionsSnapshot,
   rebindActiveSessionMap,
 } from './aiStateSnapshots';
+
+// These unit tests exercise maintenance after boot hydration.
+test.beforeEach(() => { markAiSessionsHydrationComplete(); });
 
 test('orphan cleanup keeps durable Catty output while explicit deletion removes it', async () => {
   const sdkCleanups: string[] = [];
@@ -92,6 +98,7 @@ test('orphan cleanup preserves resumable privacy maps until explicit chat deleti
   const previousSessions = latestAISessionsSnapshot;
   const previousActiveSessionMap = latestAIActiveSessionMapSnapshot;
   t.mock.method(localStorageAdapter, 'read', () => null);
+  t.mock.method(localStorageAdapter, 'readString', () => null);
   t.mock.method(localStorageAdapter, 'write', () => true);
   t.mock.method(localStorageAdapter, 'writeString', () => true);
   Object.defineProperty(globalThis, 'window', {
@@ -177,12 +184,16 @@ test('orphan cleanup preserves resumable privacy maps until explicit chat deleti
   }
 });
 
-test('orphan cleanup marks dangling chats instead of stripping them, and clears the flag when the target returns', (t) => {
+test('orphan cleanup marks dangling chats instead of stripping them, and clears the flag when the target returns', async (t) => {
+  const { __resetIdbPersistenceForTests, __flushIdbWritesForTests, getPersistedAiSessionsSnapshot } =
+    await import('./aiStateSnapshots');
+  __resetIdbPersistenceForTests();
   const previousSessions = latestAISessionsSnapshot;
   const previousActiveSessionMap = latestAIActiveSessionMapSnapshot;
   const read = t.mock.method(localStorageAdapter, 'read', () => null);
+  t.mock.method(localStorageAdapter, 'readString', () => null);
   t.mock.method(localStorageAdapter, 'write', () => true);
-  const writeString = t.mock.method(localStorageAdapter, 'writeString', () => true);
+  t.mock.method(localStorageAdapter, 'writeString', () => true);
   const previousWindow = globalThis.window;
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
@@ -214,7 +225,13 @@ test('orphan cleanup marks dangling chats instead of stripping them, and clears 
       'terminal:closed-ws': 'dangling-chat',
       'terminal:open': 'live-chat',
     });
-    assert.ok(writeString.mock.callCount() > 0);
+    // Issue #4123: the marked state is persisted (to IndexedDB when
+    // available), not to the legacy localStorage key.
+    await __flushIdbWritesForTests();
+    assert.equal(
+      getPersistedAiSessionsSnapshot().find((s) => s.id === 'dangling-chat')?.scopeDangling,
+      true,
+    );
 
     // The scope target becomes live again → the dangling flag clears.
     read.mock.mockImplementation(() => null);
@@ -222,7 +239,13 @@ test('orphan cleanup marks dangling chats instead of stripping them, and clears 
     persisted = latestAISessionsSnapshot;
     assert.ok(persisted);
     assert.equal(persisted.find((s) => s.id === 'dangling-chat')?.scopeDangling, undefined);
+    await __flushIdbWritesForTests();
+    assert.equal(
+      getPersistedAiSessionsSnapshot().find((s) => s.id === 'dangling-chat')?.scopeDangling,
+      undefined,
+    );
   } finally {
+    __resetIdbPersistenceForTests();
     setLatestAISessionsSnapshot(previousSessions ?? []);
     setLatestAIActiveSessionMapSnapshot(previousActiveSessionMap ?? {});
     Object.defineProperty(globalThis, 'window', {
@@ -236,6 +259,7 @@ test('orphan cleanup with an empty live-target set marks all scoped chats dangli
   const previousSessions = latestAISessionsSnapshot;
   const previousActiveSessionMap = latestAIActiveSessionMapSnapshot;
   t.mock.method(localStorageAdapter, 'read', () => null);
+  t.mock.method(localStorageAdapter, 'readString', () => null);
   t.mock.method(localStorageAdapter, 'write', () => true);
   t.mock.method(localStorageAdapter, 'writeString', () => true);
   const previousWindow = globalThis.window;
@@ -266,241 +290,7 @@ test('orphan cleanup with an empty live-target set marks all scoped chats dangli
   }
 });
 
-test('serializeSessionsForStorage strips oldest ciphertext before dropping visible sessions', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-  const ciphertext = 'gAAAA'.repeat(50000); // ~250 KB of ciphertext per message
-  const messages = () => [{
-    id: 'm',
-    role: 'assistant' as const,
-    content: 'hello',
-    timestamp: 0,
-    providerContinuation: {
-      reasoningParts: [{ text: '', providerOptions: { openai: { reasoningEncryptedContent: ciphertext } } }],
-    },
-  }];
-  const sessions = [
-    makeSession('newest', 3, messages()),
-    makeSession('older', 2, messages()),
-    makeSession('oldest', 1, messages()),
-  ];
-
-  const hasCiphertext = (result: { sessions: AISession[] }) =>
-    result.sessions.some(s => s.messages.some(m =>
-      m.providerContinuation?.reasoningParts?.some(p => typeof p.providerOptions?.openai?.reasoningEncryptedContent === 'string')));
-
-  // Removing replay-only ciphertext from the oldest session fits the budget,
-  // so every visible chat remains available after restart.
-  const withOldestCiphertextStripped = serializeSessionsForStorage(sessions, 600 * 1024);
-  assert.deepEqual(
-    withOldestCiphertextStripped.sessions.map(s => s.id),
-    ['newest', 'older', 'oldest'],
-  );
-  assert.equal(hasCiphertext(withOldestCiphertextStripped), true);
-  assert.ok(withOldestCiphertextStripped.json.length <= 600 * 1024);
-
-  // Tight budget that even a single session exceeds: ciphertext stripped but
-  // the visible conversation content survives.
-  const withCiphertextStripped = serializeSessionsForStorage(sessions, 220 * 1024);
-  assert.ok(withCiphertextStripped.json.length <= 220 * 1024);
-  assert.equal(hasCiphertext(withCiphertextStripped), false);
-  assert.deepEqual(withCiphertextStripped.sessions.map(s => s.id), ['newest', 'older', 'oldest']);
-  assert.equal(withCiphertextStripped.sessions[0].messages[0].content, 'hello');
-});
-
-test('serializeSessionsForStorage keeps new ciphertext when an oversized old chat must be dropped', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-  const ciphertext = 'gAAAA'.repeat(20 * 1024); // ~100 KB
-  const newest = makeSession('newest', 2, [{
-    id: 'new-message',
-    role: 'assistant',
-    content: 'new visible chat',
-    timestamp: 2,
-    providerContinuation: {
-      source: { providerConfigId: 'p', providerType: 'openai', modelId: 'm' },
-      reasoningParts: [{ text: '', providerOptions: { openai: { reasoningEncryptedContent: ciphertext } } }],
-    },
-  }]);
-  const oversizedOld = makeSession('oldest', 1, [{
-    id: 'old-message',
-    role: 'user',
-    content: 'x'.repeat(300 * 1024),
-    timestamp: 1,
-  }]);
-
-  const result = serializeSessionsForStorage([oversizedOld, newest], 200 * 1024);
-
-  assert.deepEqual(result.sessions.map(session => session.id), ['newest']);
-  assert.equal(
-    result.sessions[0].messages[0].providerContinuation
-      ?.reasoningParts?.[0].providerOptions?.openai?.reasoningEncryptedContent,
-    ciphertext,
-  );
-  assert.ok(result.json.length <= 200 * 1024);
-});
-
-test('serializeSessionsForStorage prioritizes a usable newest chat over older visible history', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-  const ciphertext = 'gAAAA'.repeat(20 * 1024); // ~100 KB
-  const newest = makeSession('newest', 2, [{
-    id: 'new-message',
-    role: 'assistant',
-    content: 'new visible chat',
-    timestamp: 2,
-    providerContinuation: {
-      source: { providerConfigId: 'p', providerType: 'openai', modelId: 'm' },
-      reasoningParts: [{ text: '', providerOptions: { openai: { reasoningEncryptedContent: ciphertext } } }],
-    },
-  }]);
-  const olderVisible = makeSession('oldest', 1, [{
-    id: 'old-message',
-    role: 'user',
-    content: 'x'.repeat(100 * 1024),
-    timestamp: 1,
-  }]);
-
-  const result = serializeSessionsForStorage([olderVisible, newest], 150 * 1024);
-
-  assert.deepEqual(result.sessions.map(session => session.id), ['newest']);
-  assert.equal(
-    result.sessions[0].messages[0].providerContinuation
-      ?.reasoningParts?.[0].providerOptions?.openai?.reasoningEncryptedContent,
-    ciphertext,
-  );
-  assert.ok(result.json.length <= 150 * 1024);
-});
-
-test('serializeSessionsForStorage keeps the newest replayable turn in one oversized chat', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-  const ciphertext = 'gAAAA'.repeat(20 * 1024); // ~100 KB per reasoning turn
-  const reasoning = (itemId: string) => ({
-    source: { providerConfigId: 'p', providerType: 'openai', modelId: 'm' },
-    reasoningParts: [{
-      text: '',
-      providerOptions: { openai: { itemId, reasoningEncryptedContent: ciphertext } },
-    }],
-  });
-  const session = makeSession('active', 1, [
-    {
-      id: 'assistant-old',
-      role: 'assistant',
-      content: 'old turn',
-      timestamp: 1,
-      providerContinuation: reasoning('rs_old'),
-      toolCalls: [{ id: 'call-old', name: 'terminal_execute', arguments: { command: 'pwd' } }],
-    },
-    {
-      id: 'tool-old',
-      role: 'tool',
-      content: '',
-      timestamp: 2,
-      toolResults: [{ toolCallId: 'call-old', content: '/tmp' }],
-    },
-    {
-      id: 'assistant-new',
-      role: 'assistant',
-      content: 'new turn',
-      timestamp: 3,
-      providerContinuation: reasoning('rs_new'),
-      toolCalls: [{ id: 'call-new', name: 'terminal_execute', arguments: { command: 'ls' } }],
-    },
-    {
-      id: 'tool-new',
-      role: 'tool',
-      content: '',
-      timestamp: 4,
-      toolResults: [{ toolCallId: 'call-new', content: 'file.txt' }],
-    },
-  ]);
-
-  const result = serializeSessionsForStorage([session], 150 * 1024);
-
-  assert.ok(result.json.length <= 150 * 1024);
-  assert.deepEqual(result.sessions[0].messages.map(message => message.id), [
-    'assistant-old',
-    'tool-old',
-    'assistant-new',
-    'tool-new',
-  ]);
-  assert.equal(
-    result.sessions[0].messages[0].providerContinuation
-      ?.reasoningParts?.[0].providerOptions?.openai?.reasoningEncryptedContent,
-    undefined,
-  );
-  assert.equal(
-    result.sessions[0].messages[2].providerContinuation
-      ?.reasoningParts?.[0].providerOptions?.openai?.reasoningEncryptedContent,
-    ciphertext,
-  );
-});
-
-test('serializeSessionsForStorage drops compacted ciphertext before protecting the newest chat', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-  const ciphertext = 'gAAAA'.repeat(20 * 1024); // ~100 KB per reasoning turn
-  const compactedMessages = Array.from({ length: 17 }, (_, index) => ({
-    id: `compacted-${index}`,
-    role: 'assistant' as const,
-    content: `compacted turn ${index}`,
-    timestamp: index,
-    providerContinuation: {
-      reasoningParts: [{
-        text: '',
-        providerOptions: {
-          openai: { itemId: `rs_${index}`, reasoningEncryptedContent: ciphertext },
-        },
-      }],
-    },
-  }));
-  const newest = {
-    ...makeSession('newest', 2, [
-      ...compactedMessages,
-      {
-        id: 'recent',
-        role: 'assistant',
-        content: 'recent turn',
-        timestamp: 18,
-        providerContinuation: {
-          reasoningParts: [{
-            text: '',
-            providerOptions: {
-              openai: { itemId: 'rs_recent', reasoningEncryptedContent: ciphertext },
-            },
-          }],
-        },
-      },
-    ]),
-    contextCompaction: {
-      summary: 'The first 17 turns were summarized.',
-      compactedMessageCount: 17,
-    },
-  };
-  const olderVisible = makeSession('older', 1, [{
-    id: 'older-visible',
-    role: 'user',
-    content: 'x'.repeat(600 * 1024),
-    timestamp: 1,
-  }]);
-
-  const result = serializeSessionsForStorage([olderVisible, newest]);
-
-  assert.deepEqual(result.sessions.map(session => session.id), ['newest', 'older']);
-  assert.ok(result.json.length <= 2 * 1024 * 1024);
-  const persistedNewest = result.sessions[0];
-  for (const message of persistedNewest.messages.slice(0, 17)) {
-    assert.equal(
-      message.providerContinuation
-        ?.reasoningParts?.[0].providerOptions?.openai?.reasoningEncryptedContent,
-      undefined,
-    );
-  }
-  assert.equal(
-    persistedNewest.messages[17].providerContinuation
-      ?.reasoningParts?.[0].providerOptions?.openai?.reasoningEncryptedContent,
-    ciphertext,
-  );
-});
-
-test('serializeSessionsForStorage shifts the compaction boundary when trimming old messages', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
+test('pruneSessionsForStorage shifts the compaction boundary when trimming old messages', () => {
   const ciphertext = 'enc'.repeat(100);
   const messages = Array.from({ length: 250 }, (_, index) => ({
     id: `message-${index}`,
@@ -524,26 +314,14 @@ test('serializeSessionsForStorage shifts the compaction boundary when trimming o
     },
   };
 
-  const result = serializeSessionsForStorage([session]);
-  const persisted = result.sessions[0];
+  const persisted = pruneSessionsForStorage([session])[0];
 
   assert.equal(persisted.messages.length, 200);
   assert.equal(persisted.messages[0].id, 'message-50');
   assert.equal(persisted.contextCompaction?.compactedMessageCount, 50);
-  assert.equal(
-    persisted.messages[49].providerContinuation
-      ?.reasoningParts?.[0].providerOptions?.openai?.reasoningEncryptedContent,
-    undefined,
-  );
-  assert.equal(
-    persisted.messages[50].providerContinuation
-      ?.reasoningParts?.[0].providerOptions?.openai?.reasoningEncryptedContent,
-    ciphertext,
-  );
 });
 
-test('serializeSessionsForStorage does not trim between a tool call and its result', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
+test('pruneSessionsForStorage does not trim between a tool call and its result', () => {
   const messages = Array.from({ length: 250 }, (_, index) => ({
     id: `message-${index}`,
     role: 'user' as const,
@@ -572,8 +350,7 @@ test('serializeSessionsForStorage does not trim between a tool call and its resu
     },
   };
 
-  const result = serializeSessionsForStorage([session]);
-  const persisted = result.sessions[0];
+  const persisted = pruneSessionsForStorage([session])[0];
 
   assert.equal(persisted.messages.length, 201);
   assert.equal(persisted.messages[0].id, 'assistant-call');
@@ -581,249 +358,431 @@ test('serializeSessionsForStorage does not trim between a tool call and its resu
   assert.equal(persisted.contextCompaction?.compactedMessageCount, 0);
 });
 
-test('writeSessionsForStorage retries below nominal budgets after a quota failure', async () => {
-  const { writeSessionsForStorage } = await import('./aiStateSnapshots');
-  const writes: string[] = [];
-  let stored: string | undefined;
-  const previousLocalStorage = globalThis.localStorage;
-  Object.defineProperty(globalThis, 'localStorage', {
+test('pruneSessionsForStorage keeps only the newest 1000 sessions', () => {
+  const sessions = Array.from({ length: 1001 }, (_, index) =>
+    makeSession(`session-${index}`, index + 1, []));
+  const persisted = pruneSessionsForStorage(sessions);
+  assert.equal(persisted.length, 1000);
+  // Oldest (lowest updatedAt) is dropped.
+  assert.equal(persisted.some((session) => session.id === 'session-0'), false);
+  assert.equal(persisted.some((session) => session.id === 'session-1000'), true);
+});
+
+test('pruneSessionsForStorage honors a lowered explicit message cap', () => {
+  const messages = Array.from({ length: 250 }, (_, index) => ({
+    id: `message-${index}`,
+    role: 'user' as const,
+    content: `turn ${index}`,
+    timestamp: index,
+  }));
+  const persisted = pruneSessionsForStorage(
+    [makeSession('capped-low', 1, messages)],
+    50,
+  );
+  assert.equal(persisted[0].messages.length, 50);
+  assert.equal(persisted[0].messages[0].id, 'message-200');
+});
+
+test('pruneSessionsForStorage honors a raised explicit message cap', () => {
+  const messages = Array.from({ length: 1200 }, (_, index) => ({
+    id: `message-${index}`,
+    role: 'user' as const,
+    content: `turn ${index}`,
+    timestamp: index,
+  }));
+  const persisted = pruneSessionsForStorage(
+    [makeSession('capped-high', 1, messages)],
+    1000,
+  );
+  assert.equal(persisted[0].messages.length, 1000);
+  assert.equal(persisted[0].messages[0].id, 'message-200');
+});
+
+test('pruneSessionsForStorage defaults to the stored aiSessionMessageCap setting', (t) => {
+  const messages = Array.from({ length: 250 }, (_, index) => ({
+    id: `message-${index}`,
+    role: 'user' as const,
+    content: `turn ${index}`,
+    timestamp: index,
+  }));
+  let storedCap: number | null = null;
+  t.mock.method(localStorageAdapter, 'readNumber', () => storedCap);
+
+  // Unset → legacy default of 200.
+  const defaultTrimmed = pruneSessionsForStorage([makeSession('cap-default', 1, messages)]);
+  assert.equal(defaultTrimmed[0].messages.length, 200);
+
+  // Stored setting drives the trim on the next write.
+  storedCap = 60;
+  const lowered = pruneSessionsForStorage([makeSession('cap-lowered', 1, messages)]);
+  assert.equal(lowered[0].messages.length, 60);
+  assert.equal(lowered[0].messages[0].id, 'message-190');
+
+  // Values outside the allowed range clamp to it.
+  storedCap = 10;
+  const clampedLow = pruneSessionsForStorage([makeSession('cap-clamp-low', 1, messages)]);
+  assert.equal(clampedLow[0].messages.length, 50);
+
+  storedCap = 5000;
+  const clampedHigh = pruneSessionsForStorage([makeSession('cap-clamp-high', 1, messages)]);
+  assert.equal(clampedHigh[0].messages.length, 250);
+});
+
+test('writeSessionsForStorage persists per record to IndexedDB and never touches the legacy localStorage key', async (t) => {
+  const { writeSessionsForStorage, __flushIdbWritesForTests, __resetIdbPersistenceForTests, getPersistedAiSessionsSnapshot } =
+    await import('./aiStateSnapshots');
+  __resetIdbPersistenceForTests();
+  const idb = installFakeIndexedDb();
+  const writeStringKeys: string[] = [];
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, 'window', {
     configurable: true,
-    value: {
-      getItem: () => null,
-      setItem: (_key: string, value: string) => {
-        writes.push(value);
-        if (value.length > 350 * 1024) {
-          throw new DOMException('quota exceeded', 'QuotaExceededError');
-        }
-        stored = value;
-      },
-      removeItem: () => {},
-    },
+    value: { dispatchEvent: () => true, netcatty: {} },
   });
-  try {
-    // The retry loop must attempt progressively smaller payloads (here the
-    // ciphertext stripping at the tighter budget) before reporting failure.
-    const huge = 'x'.repeat(260 * 1024);
-    const ciphertext = 'gAAAA'.repeat(30 * 1024); // ~150 KB
-    const sessions = [makeSession('s', 1, [{
-      id: 'm',
-      role: 'user' as const,
-      content: huge,
-      timestamp: 0,
-      providerContinuation: {
-        reasoningParts: [{ text: '', providerOptions: { openai: { reasoningEncryptedContent: ciphertext } } }],
-      },
-    }])];
-    assert.equal(writeSessionsForStorage(sessions), true);
-    assert.equal(writes.length, 2);
-    assert.equal(stored, writes[1]);
-    assert.ok(writes[writes.length - 1].length < writes[0].length);
-  } finally {
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: previousLocalStorage,
-    });
-  }
-});
-
-test('writeSessionsForStorage reduces several small sessions to fit a sub-512 KB quota', async () => {
-  const { writeSessionsForStorage } = await import('./aiStateSnapshots');
-  const writes: string[] = [];
-  let stored: string | undefined;
-  const previousLocalStorage = globalThis.localStorage;
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: () => null,
-      setItem: (_key: string, value: string) => {
-        writes.push(value);
-        if (value.length > 300 * 1024) {
-          throw new DOMException('quota exceeded', 'QuotaExceededError');
-        }
-        stored = value;
-      },
-      removeItem: () => {},
-    },
+  const writeString = t.mock.method(localStorageAdapter, 'writeString', (key: string) => {
+    writeStringKeys.push(key);
+    return true;
   });
-
+  t.mock.method(localStorageAdapter, 'read', () => null);
   try {
-    const sessions = Array.from({ length: 10 }, (_, index) => makeSession(
-      `session-${index}`,
-      10 - index,
-      [{
-        id: `message-${index}`,
-        role: 'user' as const,
-        content: 'x'.repeat(40 * 1024),
-        timestamp: index,
-      }],
-    ));
-
-    assert.equal(writeSessionsForStorage(sessions), true);
-    assert.ok(writes[0].length > 300 * 1024);
-    assert.ok(stored);
-    assert.ok(stored.length <= 300 * 1024);
-    assert.ok((JSON.parse(stored) as AISession[]).length < sessions.length);
-  } finally {
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: previousLocalStorage,
-    });
-  }
-});
-
-test('serializeSessionsForStorage truncates slightly-over-cap tool results to strictly smaller sizes', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-  // Just over the 8 KiB cap: the truncation marker must not make the degraded
-  // copy larger than the original, or the ladder could evict a session whose
-  // unmodified JSON would have fit the budget.
-  for (const oversize of [8193, 8266, 20000]) {
-    const session = makeSession('near-cap', 1, [{
-      id: 'tool-message',
-      role: 'tool',
-      content: '',
-      timestamp: 1,
-      toolResults: [{ toolCallId: 'call-1', content: 'z'.repeat(oversize) }],
-    }]);
-    const fullJson = JSON.stringify([session]);
-    const result = serializeSessionsForStorage([session], fullJson.length - 10);
-    const content = result.sessions[0].messages[0].toolResults?.[0].content ?? '';
-    assert.ok(content.length <= 8 * 1024, `cap respected for ${oversize}`);
-    assert.ok(
-      JSON.stringify(result.sessions).length < fullJson.length,
-      `degraded copy smaller than original for ${oversize}`,
-    );
-    assert.ok(content.includes('truncated'));
-  }
-});
-
-test('serializeSessionsForStorage sheds oversized tool output before dropping visible sessions', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-  const newest = makeSession('newest', 2, [{
-    id: 'new-message',
-    role: 'assistant',
-    content: 'still-open chat',
-    timestamp: 2,
-  }]);
-  const toolBulk = makeSession('tool-bulk', 1, [{
-    id: 'tool-message',
-    role: 'tool',
-    content: '',
-    timestamp: 1,
-    toolResults: [{ toolCallId: 'call-1', content: 'z'.repeat(400 * 1024) }],
-  }]);
-
-  const result = serializeSessionsForStorage([toolBulk, newest], 100 * 1024);
-
-  // The bloated tool result must not evict the other visible chat.
-  assert.deepEqual(result.sessions.map(session => session.id), ['newest', 'tool-bulk']);
-  assert.ok(result.json.length <= 100 * 1024);
-  const persistedToolContent = result.sessions[1].messages[0].toolResults?.[0].content;
-  assert.ok(persistedToolContent);
-  assert.ok(persistedToolContent.length <= 9 * 1024);
-  assert.ok(persistedToolContent.includes('truncated'));
-  assert.ok(persistedToolContent.startsWith('zzz'));
-  assert.equal(result.sessions[0].messages[0].content, 'still-open chat');
-});
-
-test('writeSessionsForStorage keeps every chat by shedding tool output under quota pressure', async () => {
-  const { writeSessionsForStorage } = await import('./aiStateSnapshots');
-  let stored: string | undefined;
-  const previousLocalStorage = globalThis.localStorage;
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: {
-      getItem: () => null,
-      setItem: (_key: string, value: string) => {
-        if (value.length > 300 * 1024) {
-          throw new DOMException('quota exceeded', 'QuotaExceededError');
-        }
-        stored = value;
-      },
-      removeItem: () => {},
-    },
-  });
-
-  try {
-    const sessions = Array.from({ length: 10 }, (_, index) => makeSession(
-      `session-${index}`,
-      10 - index,
-      [{
-        id: `message-${index}`,
-        role: 'tool' as const,
-        content: '',
-        timestamp: index,
-        toolResults: [{ toolCallId: `call-${index}`, content: 'z'.repeat(40 * 1024) }],
-      }],
-    ));
-
-    assert.equal(writeSessionsForStorage(sessions), true);
-    assert.ok(stored);
-    assert.ok(stored.length <= 300 * 1024);
-    const persisted = JSON.parse(stored) as AISession[];
+    const a = makeSession('chat-a', 2, []);
+    const b = makeSession('chat-b', 1, []);
+    assert.equal(writeSessionsForStorage([a, b]), true);
+    await __flushIdbWritesForTests();
+    // Legacy key untouched (read-only fallback for one release).
+    assert.deepEqual(writeStringKeys, []);
     assert.deepEqual(
-      persisted.map(session => session.id),
-      sessions.map(session => session.id),
+      idb.db.dumpStore('sessions').map((s) => (s as AISession).id).sort(),
+      ['chat-a', 'chat-b'],
     );
-    // Degradation sheds only as many messages as the budget demands, so at
-    // least one chat keeps its full tool output while the persisted set stays
-    // complete. Assert completion first; truncation second.
-    const shedContents = persisted.map(
-      session => session.messages[0].toolResults?.[0].content ?? '',
+
+    // Second write changes only one record: exactly one put, no full rewrite.
+    const a2 = { ...a, title: 'renamed' };
+    assert.equal(writeSessionsForStorage([a2, b]), true);
+    await __flushIdbWritesForTests();
+    const sessionOps = idb.db.opCounts.get('sessions')!;
+    // 2 puts from the first write + 1 put for the changed record.
+    assert.equal(sessionOps.put, 3);
+    assert.deepEqual(
+      idb.db.dumpStore('sessions').map((s) => (s as AISession).id).sort(),
+      ['chat-a', 'chat-b'],
     );
-    assert.ok(shedContents.some(content => content.includes('truncated')));
-    assert.ok(shedContents.some(content => content.startsWith('zzz') && !content.includes('truncated')));
+    assert.equal(getPersistedAiSessionsSnapshot().length, 2);
+    assert.equal(writeString.mock.callCount(), 0);
   } finally {
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: previousLocalStorage,
-    });
+    idb.restore();
+    __resetIdbPersistenceForTests();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
   }
 });
 
-test('writeSessionsForStorage makes a final attempt with only the newest session', async () => {
-  const { writeSessionsForStorage } = await import('./aiStateSnapshots');
-  const writes: string[] = [];
-  let stored: string | undefined;
-  const previousLocalStorage = globalThis.localStorage;
-  Object.defineProperty(globalThis, 'localStorage', {
+test('count-cap eviction writes a pre-eviction backup generation and removes evicted records', async (t) => {
+  const { writeSessionsForStorage, __flushIdbWritesForTests, __resetIdbPersistenceForTests, __resetBackupMirrorForTests, flushBackupMirror } =
+    await import('./aiStateSnapshots');
+  __resetIdbPersistenceForTests();
+  __resetBackupMirrorForTests();
+  const idb = installFakeIndexedDb();
+  const backupWrites: string[] = [];
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
-      getItem: () => null,
-      setItem: (_key: string, value: string) => {
-        writes.push(value);
-        if (value.length > 50 * 1024) {
-          throw new DOMException('quota exceeded', 'QuotaExceededError');
-        }
-        stored = value;
+      netcatty: {
+        aiSessionsBackupWrite: async (payload: { json: string }) => {
+          backupWrites.push(payload.json);
+          return { ok: true };
+        },
       },
-      removeItem: () => {},
     },
   });
-
+  t.mock.method(localStorageAdapter, 'read', () => null);
+  t.mock.method(localStorageAdapter, 'writeString', () => true);
   try {
-    const sessions = Array.from({ length: 10 }, (_, index) => makeSession(
-      `session-${index}`,
-      10 - index,
-      [{
-        id: `message-${index}`,
-        role: 'user' as const,
-        content: 'x'.repeat(40 * 1024),
-        timestamp: index,
-      }],
-    ));
+    // Round 1: 1000 sessions fit the cap and are all persisted.
+    const round1 = Array.from({ length: 1000 }, (_, index) =>
+      makeSession(`session-${index}`, index + 1, []));
+    assert.equal(writeSessionsForStorage(round1), true);
+    await __flushIdbWritesForTests();
+    const postRound1 = backupWrites.length;
+    flushBackupMirror();
+    assert.equal(backupWrites.length, postRound1 + 1);
 
-    assert.equal(writeSessionsForStorage(sessions), true);
-    assert.equal(writes.length, 6);
-    assert.ok(stored);
-    const persisted = JSON.parse(stored) as AISession[];
-    assert.deepEqual(persisted.map(session => session.id), ['session-0']);
-    assert.ok(stored.length <= 50 * 1024);
+    // Round 2: one newer session pushes the oldest past the cap.
+    const round2 = [makeSession('session-newest', 10_000, []), ...round1];
+    assert.equal(writeSessionsForStorage(round2), true);
+    await __flushIdbWritesForTests();
+    flushBackupMirror();
+
+    // A pre-eviction generation was written immediately, before the
+    // debounced post-write mirror, and contains the evicted chat.
+    const preEviction = backupWrites[backupWrites.length - 2];
+    assert.ok(preEviction.includes('"session-0"'));
+    // The post-write mirror no longer carries the evicted chat.
+    const postWrite = backupWrites[backupWrites.length - 1];
+    assert.equal(postWrite.includes('"session-0"'), false);
+    assert.ok(postWrite.includes('"session-newest"'));
+
+    // The evicted record is gone from IndexedDB; the newcomer is present.
+    const persistedIds = idb.db.dumpStore('sessions').map((s) => (s as AISession).id);
+    assert.equal(persistedIds.includes('session-0'), false);
+    assert.equal(persistedIds.includes('session-newest'), true);
+    assert.equal(persistedIds.length, 1000);
   } finally {
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: previousLocalStorage,
-    });
+    idb.restore();
+    __resetIdbPersistenceForTests();
+    __resetBackupMirrorForTests();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
   }
+});
+
+test('pending disk recovery suppresses queued, ordinary and pre-eviction backup generations', async (t) => {
+  const { writeSessionsForStorage, __flushIdbWritesForTests, __resetIdbPersistenceForTests, __resetBackupMirrorForTests,
+    flushBackupMirror, scheduleBackupMirror, setAiSessionsBackupRecoveryPending } = await import('./aiStateSnapshots');
+  __resetIdbPersistenceForTests();
+  __resetBackupMirrorForTests();
+  const idb = installFakeIndexedDb();
+  const backupWrites: string[] = [];
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      netcatty: {
+        aiSessionsBackupWrite: async ({ json }: { json: string }) => {
+          backupWrites.push(json);
+          return { ok: true };
+        },
+      },
+    },
+  });
+  t.mock.method(localStorageAdapter, 'read', () => null);
+  try {
+    scheduleBackupMirror('queued partial backup');
+    setAiSessionsBackupRecoveryPending(true);
+    flushBackupMirror();
+    assert.deepEqual(backupWrites, []);
+
+    const sessions = Array.from({ length: 1000 }, (_, index) => makeSession(`session-${index}`, index + 1, []));
+    writeSessionsForStorage(sessions);
+    await __flushIdbWritesForTests();
+    flushBackupMirror();
+    const overCap = [makeSession('newest', 10_000, []), ...sessions];
+    writeSessionsForStorage(overCap);
+    await __flushIdbWritesForTests();
+    flushBackupMirror();
+    assert.deepEqual(backupWrites, [], 'neither debounced nor immediate writes may rotate recovery generations');
+    assert.equal(idb.db.dumpStore('sessions').length, 1000, 'IndexedDB writes continue during recovery');
+
+    setAiSessionsBackupRecoveryPending(false);
+    scheduleBackupMirror(JSON.stringify(overCap));
+    flushBackupMirror();
+    assert.deepEqual(backupWrites, [JSON.stringify(overCap)]);
+  } finally {
+    idb.restore();
+    __resetIdbPersistenceForTests();
+    __resetBackupMirrorForTests();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+  }
+});
+
+test('explicitly deleted sessions do not trigger the pre-eviction generation', async (t) => {
+  const { writeSessionsForStorage, __flushIdbWritesForTests, __resetIdbPersistenceForTests, __resetBackupMirrorForTests, flushBackupMirror, cleanupDeletedAIChatSessions } =
+    await import('./aiStateSnapshots');
+  __resetIdbPersistenceForTests();
+  __resetBackupMirrorForTests();
+  const idb = installFakeIndexedDb();
+  const backupWrites: string[] = [];
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      netcatty: {
+        aiSessionsBackupWrite: async (payload: { json: string }) => {
+          backupWrites.push(payload.json);
+          return { ok: true };
+        },
+        aiSdkAgentCleanup: async () => ({ ok: true }),
+        deleteChatToolOutputsTemp: async () => ({ deletedCount: 1 }),
+      },
+    },
+  });
+  t.mock.method(localStorageAdapter, 'read', () => null);
+  t.mock.method(localStorageAdapter, 'writeString', () => true);
+  try {
+    const a = makeSession('chat-a', 2, []);
+    const b = makeSession('chat-b', 1, []);
+    assert.equal(writeSessionsForStorage([a, b]), true);
+    await __flushIdbWritesForTests();
+    flushBackupMirror();
+    const writesAfterFirst = backupWrites.length;
+
+    // User deletes chat-b: the drop is intentional, so no extra (immediate)
+    // generation is written — only the regular debounced post-write mirror.
+    cleanupDeletedAIChatSessions(['chat-b']);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(writeSessionsForStorage([a]), true);
+    await __flushIdbWritesForTests();
+    flushBackupMirror();
+    assert.equal(backupWrites.length, writesAfterFirst + 1);
+    const persistedIds = idb.db.dumpStore('sessions').map((s) => (s as AISession).id);
+    assert.deepEqual(persistedIds, ['chat-a']);
+  } finally {
+    idb.restore();
+    __resetIdbPersistenceForTests();
+    __resetBackupMirrorForTests();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+  }
+});
+
+test('synced history persists without pruning and without legacy localStorage writes', async (t) => {
+  const { writeSessionsForStorage, __flushIdbWritesForTests, __resetIdbPersistenceForTests, getPersistedAiSessionsSnapshot } =
+    await import('./aiStateSnapshots');
+  __resetIdbPersistenceForTests();
+  const idb = installFakeIndexedDb();
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dispatchEvent: () => true, netcatty: {} },
+  });
+  t.mock.method(localStorageAdapter, 'read', () => ({ enabled: true }));
+  const writeString = t.mock.method(localStorageAdapter, 'writeString', () => true);
+  try {
+    const many = Array.from({ length: 51 }, (_, index) => ({
+      ...makeSession(`chat-${index}`, index, []),
+      messages: Array.from({ length: 201 }, (_, turn) => ({
+        id: `m-${turn}`,
+        role: 'user' as const,
+        content: 'History',
+        timestamp: turn,
+      })),
+    })) as AISession[];
+    assert.equal(writeSessionsForStorage(many), true);
+    await __flushIdbWritesForTests();
+    // Synced records are authoritative: no pruning, no legacy writes.
+    const persisted = getPersistedAiSessionsSnapshot();
+    assert.equal(persisted.length, 51);
+    assert.equal(persisted[0].messages.length, 201);
+    assert.equal(writeString.mock.callCount(), 0);
+    assert.equal(idb.db.dumpStore('sessions').length, 51);
+  } finally {
+    idb.restore();
+    __resetIdbPersistenceForTests();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+  }
+});
+
+test('getPersistedAiSessionsSnapshot falls back to the read-only legacy store when nothing was persisted', async (t) => {
+  const { __resetIdbPersistenceForTests, getPersistedAiSessionsSnapshot } = await import('./aiStateSnapshots');
+  __resetIdbPersistenceForTests();
+  const legacy = [makeSession('legacy-chat', 1, [])];
+  t.mock.method(localStorageAdapter, 'readString', () => JSON.stringify(legacy));
+  assert.deepEqual(getPersistedAiSessionsSnapshot(), legacy);
+  __resetIdbPersistenceForTests();
+});
+
+test('IndexedDB sync failures fall back to a legacy localStorage write and never throw', async (t) => {
+  const { writeSessionsForStorage, __flushIdbWritesForTests, __resetIdbPersistenceForTests } = await import('./aiStateSnapshots');
+  __resetIdbPersistenceForTests();
+  const idb = installFakeIndexedDb({ failOpen: true });
+  const previousWindow = globalThis.window;
+  const legacyWrites: Array<{ key: string; value: string }> = [];
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dispatchEvent: () => true, netcatty: {} },
+  });
+  t.mock.method(localStorageAdapter, 'read', () => null);
+  t.mock.method(localStorageAdapter, 'writeString', (key: string, value: string) => {
+    legacyWrites.push({ key, value });
+    return true;
+  });
+  try {
+    const a = makeSession('chat-a', 1, []);
+    assert.equal(writeSessionsForStorage([a]), true);
+    await __flushIdbWritesForTests();
+    assert.equal(legacyWrites.length, 1);
+    assert.equal(legacyWrites[0].key, 'netcatty_ai_sessions_v1');
+    assert.deepEqual(
+      (JSON.parse(legacyWrites[0].value) as AISession[]).map((s) => s.id),
+      ['chat-a'],
+    );
+  } finally {
+    idb.restore();
+    __resetIdbPersistenceForTests();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+  }
+});
+
+test('a thrown sync flag read reports failure without throwing', async (t) => {
+  const { writeSessionsForStorage, __resetIdbPersistenceForTests } = await import('./aiStateSnapshots');
+  __resetIdbPersistenceForTests();
+  t.mock.method(localStorageAdapter, 'read', () => {
+    throw new Error('storage probe failed');
+  });
+  assert.equal(writeSessionsForStorage([makeSession('chat-a', 1, [])]), false);
+  __resetIdbPersistenceForTests();
+});
+
+test('store writes schedule a throttled disk backup mirror of the persisted set', async (t) => {
+  const { writeSessionsForStorage, flushBackupMirror, __resetBackupMirrorForTests, __resetIdbPersistenceForTests } =
+    await import('./aiStateSnapshots');
+  __resetBackupMirrorForTests();
+  __resetIdbPersistenceForTests();
+  const idb = installFakeIndexedDb();
+  const backupWrites: string[] = [];
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      netcatty: {
+        aiSessionsBackupWrite: async (payload: { json: string }) => {
+          backupWrites.push(payload.json);
+          return { ok: true };
+        },
+      },
+    },
+  });
+  const writeString = t.mock.method(localStorageAdapter, 'writeString', () => true);
+  t.mock.method(localStorageAdapter, 'read', () => null);
+  try {
+    const sessions = [makeSession('chat-a', 2, []), makeSession('chat-b', 1, [])];
+    assert.equal(writeSessionsForStorage(sessions), true);
+    // Throttled: nothing has been written to disk yet.
+    assert.equal(backupWrites.length, 0);
+    flushBackupMirror();
+    assert.equal(backupWrites.length, 1);
+    // The mirror carries the persisted set (no byte-budget degradation any
+    // more) and no legacy localStorage write happened.
+    assert.deepEqual(
+      (JSON.parse(backupWrites[0]) as AISession[]).map((s) => s.id),
+      ['chat-a', 'chat-b'],
+    );
+    assert.equal(writeString.mock.callCount(), 0);
+  } finally {
+    idb.restore();
+    __resetBackupMirrorForTests();
+    __resetIdbPersistenceForTests();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+  }
+});
+
+test('rebindActiveSessionMap drops stale pointers and sets the new scope', () => {
+  const cleaned = rebindActiveSessionMap(
+    {
+      'terminal:old-ws': 'chat-1',
+      'terminal:other': 'chat-2',
+      'workspace:keep': 'chat-1',
+    },
+    'chat-1',
+    'terminal:new-ws',
+  );
+  assert.deepEqual(cleaned, {
+    'terminal:other': 'chat-2',
+    'terminal:new-ws': 'chat-1',
+  });
+  // Idempotent when already bound to the target scope with no other pointers.
+  assert.deepEqual(
+    rebindActiveSessionMap({ 'terminal:new-ws': 'chat-1' }, 'chat-1', 'terminal:new-ws'),
+    { 'terminal:new-ws': 'chat-1' },
+  );
 });
 
 function freezeHistory<T>(value: T): T {
@@ -856,134 +815,35 @@ function makePersistenceHistory(count: number, activeMessages = 6): AISession[] 
   ));
 }
 
-for (const [count, activeMessages] of [[20, 6], [200, 6], [20, 200]]) {
-  test(`fitting history serializes only retained full sessions (${count} chats, ${activeMessages} active messages)`, async (t) => {
-    const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-    const sessions = freezeHistory(makePersistenceHistory(count, activeMessages));
-    const expected = sessions.slice(0, 50);
-    const expectedJson = JSON.stringify(expected);
-    const stringify = t.mock.method(JSON, 'stringify');
-
-    const result = serializeSessionsForStorage(sessions);
-
-    assert.equal(stringify.mock.callCount(), expected.length);
-    assert.equal(result.json, expectedJson);
-    assert.deepEqual(result.sessions, expected);
-    assert.equal(result.sessions[0], sessions[0]);
-  });
-}
-
-test('fit-first budget keeps string-length units and exact-fit replay data without mutating input', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-  const sessions = makePersistenceHistory(1);
-  sessions[0].messages[0].content = '\u4e2d\u6587\ud83d\ude00'.repeat(100);
-  freezeHistory(sessions);
-  const fullJson = JSON.stringify(sessions);
-  assert.ok(Buffer.byteLength(fullJson) > fullJson.length);
-  for (const budget of [fullJson.length, fullJson.length + 1]) {
-    assert.equal(serializeSessionsForStorage(sessions, budget).json, fullJson);
-  }
-  const overflow = serializeSessionsForStorage(sessions, fullJson.length - 1);
-  assert.ok(overflow.json.length < fullJson.length);
-  assert.equal(JSON.stringify(sessions), fullJson);
-});
-
-test('fit-first empty history preserves output even below the minimum array budget', async () => {
-  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-  for (const budget of [0, 1, 2, 3]) {
-    assert.deepEqual(serializeSessionsForStorage([], budget), { json: '[]', sessions: [] });
-  }
-});
-
-test('synced storage bypasses fit-first pruning and non-quota failures still propagate', async (t) => {
-  const { writeSessionsForStorage } = await import('./aiStateSnapshots');
-  const sessions = freezeHistory(makePersistenceHistory(51, 201));
-  const read = t.mock.method(localStorageAdapter, 'read', () => ({ enabled: true }));
-  const write = t.mock.method(localStorageAdapter, 'write', () => false);
-  const writeString = t.mock.method(localStorageAdapter, 'writeString', () => true);
-  assert.equal(writeSessionsForStorage(sessions), false);
-  assert.equal(write.mock.callCount(), 1);
-  assert.equal(write.mock.calls[0].arguments[1], sessions);
-  assert.equal(writeString.mock.callCount(), 0);
-
-  read.mock.mockImplementation(() => ({ enabled: false }));
-  const error = new Error('non-quota storage failure');
-  writeString.mock.mockImplementation(() => { throw error; });
-  assert.throws(() => writeSessionsForStorage(sessions), candidate => candidate === error);
-  assert.equal(writeString.mock.callCount(), 1);
-});
-
-for (const [budget, expectedCalls] of [[128 * 1024, 160], [0, 161]]) {
-  test(`overflow reuses prepared full JSON at budget ${budget}`, async (t) => {
-    const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
-    const sessions = freezeHistory(makePersistenceHistory(20));
-    const stringify = t.mock.method(JSON, 'stringify');
-    const result = serializeSessionsForStorage(sessions, budget);
-    // Same work as the original ladder: no second full-session serialization
-    // after the fit check, even when a last-resort degraded chat is needed.
-    assert.equal(stringify.mock.callCount(), expectedCalls);
-    assert.equal(result.sessions.length, budget === 0 ? 1 : 4);
-  });
-}
-test('successful store writes schedule a throttled disk backup mirror', async (t) => {
-  const { writeSessionsForStorage, flushBackupMirror, __resetBackupMirrorForTests } =
+test('rewriting the same sessions array skips re-serialization and store writes', async (t) => {
+  const { writeSessionsForStorage, seedLastPersistedSessions, __flushIdbWritesForTests, __resetIdbPersistenceForTests } =
     await import('./aiStateSnapshots');
-  __resetBackupMirrorForTests();
-  const backupWrites: string[] = [];
-  const previousWindow = globalThis.window;
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: {
-      netcatty: {
-        aiSessionsBackupWrite: async (payload: { json: string }) => {
-          backupWrites.push(payload.json);
-          return { ok: true };
-        },
-      },
-    },
-  });
-  const sessions = freezeHistory(makePersistenceHistory(3, 10));
-  const writeString = t.mock.method(localStorageAdapter, 'writeString', () => true);
-  t.mock.method(localStorageAdapter, 'read', () => null);
+  __resetIdbPersistenceForTests();
+  const idb = installFakeIndexedDb();
   try {
+    const sessions = freezeHistory(makePersistenceHistory(3, 10));
+    t.mock.method(localStorageAdapter, 'read', () => ({ enabled: true }));
+    const writeString = t.mock.method(localStorageAdapter, 'writeString', () => true);
     assert.equal(writeSessionsForStorage(sessions), true);
-    // Throttled: nothing has been written to disk yet.
-    assert.equal(backupWrites.length, 0);
-    flushBackupMirror();
-    assert.equal(backupWrites.length, 1);
-    // The mirror carries exactly the JSON that landed in localStorage.
-    assert.equal(backupWrites[0], writeString.mock.calls[0].arguments[1]);
-    // Failed store writes never schedule a mirror.
-    writeString.mock.mockImplementation(() => false);
-    assert.equal(writeSessionsForStorage(sessions), false);
-    flushBackupMirror();
-    assert.equal(backupWrites.length, 1);
+    await __flushIdbWritesForTests();
+    const putsAfterFirst = idb.db.opCounts.get('sessions')!.put;
+    const stringify = t.mock.method(JSON, 'stringify');
+    // Cloud-sync collection writes the same immutable array again: no
+    // re-serialization and no additional record writes (issue #4123 keeps
+    // the #4121 skip, now backed by the per-record diff).
+    assert.equal(writeSessionsForStorage(sessions), true);
+    await __flushIdbWritesForTests();
+    assert.equal(stringify.mock.callCount(), 0);
+    assert.equal(idb.db.opCounts.get('sessions')!.put, putsAfterFirst);
+    assert.equal(writeString.mock.callCount(), 0);
+    // A cross-window write replaced the diff baseline (different record
+    // instances): the next write persists the changed records again.
+    seedLastPersistedSessions(sessions.map(session => ({ ...session })));
+    assert.equal(writeSessionsForStorage(sessions), true);
+    await __flushIdbWritesForTests();
+    assert.ok(idb.db.opCounts.get('sessions')!.put > putsAfterFirst);
   } finally {
-    __resetBackupMirrorForTests();
-    Object.defineProperty(globalThis, 'window', {
-      configurable: true,
-      value: previousWindow,
-    });
+    idb.restore();
+    __resetIdbPersistenceForTests();
   }
-});
-
-test('rebindActiveSessionMap drops stale pointers and sets the new scope', () => {
-  const cleaned = rebindActiveSessionMap(
-    {
-      'terminal:old-ws': 'chat-1',
-      'terminal:other': 'chat-2',
-      'workspace:keep': 'chat-1',
-    },
-    'chat-1',
-    'terminal:new-ws',
-  );
-  assert.deepEqual(cleaned, {
-    'terminal:other': 'chat-2',
-    'terminal:new-ws': 'chat-1',
-  });
-  // Idempotent when already bound to the target scope with no other pointers.
-  assert.deepEqual(
-    rebindActiveSessionMap({ 'terminal:new-ws': 'chat-1' }, 'chat-1', 'terminal:new-ws'),
-    { 'terminal:new-ws': 'chat-1' },
-  );
 });

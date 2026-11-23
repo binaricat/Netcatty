@@ -220,6 +220,19 @@ test("openSftpForSession keeps the SSH source session id when options include an
   assert.equal(invoked[0].payload.expectedEndpoint.sessionId, "sftp-left-browse-session");
 });
 
+test('exact-session-only browse does not fabricate a credential profile', async () => {
+  const calls = [];
+  const api = createPreloadApi({ webUtils: {}, ipcRenderer: {
+    on() {}, removeListener() {},
+    async invoke(channel, payload) { calls.push({ channel, payload }); return { sftpId: 'channel', sourceSessionId: 'terminal' }; },
+  } });
+  assert.equal(await api.openSftpForSession('terminal', {
+    hostname: 'host', username: 'me', reuseExactSessionOnly: true, fileProtocol: 'sftp',
+  }), 'channel');
+  assert.equal(calls[0].payload.expectedEndpoint, undefined);
+  assert.equal(calls[0].payload.reuseExactSessionOnly, true);
+});
+
 test("strict openSftpForSession closes and rejects a mismatched source result", async () => {
   const invoked = [];
   const api = createPreloadApi({

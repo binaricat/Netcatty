@@ -24,7 +24,6 @@ export type AppLocalUiSnapshot = {
     | { mode: 'append'; workspaceId: string }
     | { mode: 'create' }
     | null;
-  quickSearch: string;
   protocolSelectHost: Host | null;
   navigateToSection: VaultSection | null;
   deepLinkHostDraft: Host | null;
@@ -43,7 +42,6 @@ export const EMPTY_APP_LOCAL_UI: AppLocalUiSnapshot = Object.freeze({
   isQuickSwitcherOpen: false,
   isCreateWorkspaceOpen: false,
   addToWorkspaceDialog: null,
-  quickSearch: '',
   protocolSelectHost: null,
   navigateToSection: null,
   deepLinkHostDraft: null,
@@ -76,7 +74,6 @@ class AppLocalUiStore {
       prev.isQuickSwitcherOpen === next.isQuickSwitcherOpen
       && prev.isCreateWorkspaceOpen === next.isCreateWorkspaceOpen
       && prev.addToWorkspaceDialog === next.addToWorkspaceDialog
-      && prev.quickSearch === next.quickSearch
       && prev.protocolSelectHost === next.protocolSelectHost
       && prev.navigateToSection === next.navigateToSection
       && prev.deepLinkHostDraft === next.deepLinkHostDraft

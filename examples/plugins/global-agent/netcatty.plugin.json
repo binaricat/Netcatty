@@ -7,23 +7,76 @@
   "version": "0.1.0",
   "publisher": "netcatty",
   "license": "GPL-3.0-or-later",
-  "engines": { "netcatty": ">=0.0.0", "api": ">=0.1.0-internal.1 <0.2.0" },
-  "main": { "browser": "dist/index.js" },
-  "activationEvents": ["onView:com.netcatty.globalagent.panel"],
-  "permissions": { "required": ["commands", "views", "ai.agent.use"], "optional": ["ai.agent.actions"] },
-  "features": { "required": ["ai.agent-sessions"] },
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "main": {
+    "browser": "dist/host.js"
+  },
+  "activationEvents": [
+    "onView:com.netcatty.globalagent.panel"
+  ],
+  "permissions": {
+    "required": [
+      "commands",
+      "views",
+      "ai.agent.use"
+    ],
+    "optional": [
+      "ai.agent.actions"
+    ]
+  },
+  "features": {
+    "required": [
+      "ai.agent-sessions"
+    ]
+  },
   "contributes": {
     "commands": [
-      { "id": "com.netcatty.globalagent.backends", "title": "Global Agent: List Backends" },
-      { "id": "com.netcatty.globalagent.targets", "title": "Global Agent: Select Targets" },
-      { "id": "com.netcatty.globalagent.chats", "title": "Global Agent: List Conversations" },
-      { "id": "com.netcatty.globalagent.open", "title": "Global Agent: Open Conversation" },
-      { "id": "com.netcatty.globalagent.send", "title": "Global Agent: Send" },
-      { "id": "com.netcatty.globalagent.read", "title": "Global Agent: Read Events" },
-      { "id": "com.netcatty.globalagent.history", "title": "Global Agent: Read Conversation" },
-      { "id": "com.netcatty.globalagent.stop", "title": "Global Agent: Stop" },
-      { "id": "com.netcatty.globalagent.close", "title": "Global Agent: Close Conversation" }
+      {
+        "id": "com.netcatty.globalagent.backends",
+        "title": "Global Agent: List Backends"
+      },
+      {
+        "id": "com.netcatty.globalagent.targets",
+        "title": "Global Agent: Select Targets"
+      },
+      {
+        "id": "com.netcatty.globalagent.chats",
+        "title": "Global Agent: List Conversations"
+      },
+      {
+        "id": "com.netcatty.globalagent.open",
+        "title": "Global Agent: Open Conversation"
+      },
+      {
+        "id": "com.netcatty.globalagent.send",
+        "title": "Global Agent: Send"
+      },
+      {
+        "id": "com.netcatty.globalagent.read",
+        "title": "Global Agent: Read Events"
+      },
+      {
+        "id": "com.netcatty.globalagent.history",
+        "title": "Global Agent: Read Conversation"
+      },
+      {
+        "id": "com.netcatty.globalagent.stop",
+        "title": "Global Agent: Stop"
+      },
+      {
+        "id": "com.netcatty.globalagent.close",
+        "title": "Global Agent: Close Conversation"
+      }
     ],
-    "views": [{ "id": "com.netcatty.globalagent.panel", "title": "Global Agent Chat", "location": "modal", "entry": "panel.html" }]
+    "views": [
+      {
+        "id": "com.netcatty.globalagent.panel",
+        "title": "Global Agent Chat",
+        "location": "modal"
+      }
+    ]
   }
 }

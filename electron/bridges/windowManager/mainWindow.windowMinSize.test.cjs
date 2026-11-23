@@ -3,16 +3,25 @@ const assert = require("node:assert/strict");
 
 const { resolveWindowMinimumSize, attachDisplayMinimumSync } = require("./mainWindow.cjs");
 
-test("uses the static layout minimums when they fit the display", () => {
+test("caps the minimum at half the work area so tiling cells fit", () => {
   const size = resolveWindowMinimumSize(
     { getPrimaryDisplay: () => ({ workArea: { width: 1920, height: 1080 } }) },
-    1100,
-    640,
+    960,
+    540,
   );
-  assert.deepEqual(size, { width: 1100, height: 640 });
+  assert.deepEqual(size, { width: 944, height: 524 });
 });
 
-test("sizes the minimum for the display containing the target bounds", () => {
+test("uses the nominal 960x540 layout minimum when half the work area exceeds it", () => {
+  const size = resolveWindowMinimumSize(
+    { getPrimaryDisplay: () => ({ workArea: { width: 2560, height: 1440 } }) },
+    960,
+    540,
+  );
+  assert.deepEqual(size, { width: 960, height: 540 });
+});
+
+test("caps the minimum for the display containing the target bounds", () => {
   const primary = { workArea: { width: 1920, height: 1080 } };
   const secondary = { workArea: { width: 1093, height: 585 } };
   const size = resolveWindowMinimumSize(
@@ -24,7 +33,7 @@ test("sizes the minimum for the display containing the target bounds", () => {
     640,
     { x: 2000, y: 0, width: 1000, height: 700 },
   );
-  assert.deepEqual(size, { width: Math.floor(1093 * 0.9), height: Math.floor(585 * 0.9) });
+  assert.deepEqual(size, { width: Math.floor(1093 / 2) - 16, height: Math.floor(585 / 2) - 16 });
 });
 
 test("falls back to the primary display when the target cannot be matched", () => {
@@ -37,7 +46,7 @@ test("falls back to the primary display when the target cannot be matched", () =
     640,
     { x: 0, y: 0, width: 1000, height: 700 },
   );
-  assert.deepEqual(size, { width: Math.floor(1093 * 0.9), height: Math.floor(585 * 0.9) });
+  assert.deepEqual(size, { width: Math.floor(1093 / 2) - 16, height: Math.floor(585 / 2) - 16 });
 });
 
 test("refreshes the window minimum when display metrics change", () => {
@@ -56,11 +65,11 @@ test("refreshes the window minimum when display metrics change", () => {
     // Docking change shrinks the primary work area under the window.
     screenModule.getPrimaryDisplay = () => ({ workArea: { width: 1093, height: 585 } });
     screenModule.emit("display-metrics-changed");
-    assert.deepEqual(minimum, { width: Math.floor(1093 * 0.9), height: Math.floor(585 * 0.9) });
+    assert.deepEqual(minimum, { width: Math.floor(1093 / 2) - 16, height: Math.floor(585 / 2) - 16 });
 
     // No-op emission keeps the same minimum.
     screenModule.emit("display-metrics-changed");
-    assert.deepEqual(minimum, { width: Math.floor(1093 * 0.9), height: Math.floor(585 * 0.9) });
+    assert.deepEqual(minimum, { width: Math.floor(1093 / 2) - 16, height: Math.floor(585 / 2) - 16 });
   } finally {
     detach();
   }
@@ -90,8 +99,8 @@ test("shrinks the minimum to fit a small primary work area (#3647)", () => {
     1100,
     640,
   );
-  assert.equal(size.width, Math.floor(1093 * 0.9));
-  assert.equal(size.height, Math.floor(585 * 0.9));
+  assert.equal(size.width, Math.floor(1093 / 2) - 16);
+  assert.equal(size.height, Math.floor(585 / 2) - 16);
   assert.ok(size.width < 1100 && size.height < 640);
 });
 
@@ -147,7 +156,7 @@ test("createWindow clamps saved bounds and BrowserWindow minima to the fitted si
   const api = createMainWindowApi({
     mainWindow: null, electronApp: null, currentTheme: "light", isQuitting: false,
     pendingWindowStateWrite: null, queuedWindowState: null, windowStateCloseRequested: false,
-    DEFAULT_WINDOW_WIDTH: 1400, DEFAULT_WINDOW_HEIGHT: 900, MIN_WINDOW_WIDTH: 1100, MIN_WINDOW_HEIGHT: 640,
+    DEFAULT_WINDOW_WIDTH: 1400, DEFAULT_WINDOW_HEIGHT: 900, MIN_WINDOW_WIDTH: 960, MIN_WINDOW_HEIGHT: 540,
     V8_CACHE_OPTIONS: "code", THEME_COLORS: { light: {} },
     unhealthyWebContentsIds: new Set(), rendererReadySeenByWebContentsId: new Set(),
     __dirname, URL, require, console, setTimeout, clearTimeout,
@@ -187,8 +196,8 @@ test("createWindow clamps saved bounds and BrowserWindow minima to the fitted si
   );
 
   assert.ok(constructedOptions);
-  assert.equal(constructedOptions.minWidth, Math.floor(1093 * 0.9));
-  assert.equal(constructedOptions.minHeight, Math.floor(585 * 0.9));
-  assert.equal(constructedOptions.width, Math.max(980, Math.floor(1093 * 0.9)));
-  assert.equal(constructedOptions.height, Math.max(560, Math.floor(585 * 0.9)));
+  assert.equal(constructedOptions.minWidth, Math.floor(1093 / 2) - 16);
+  assert.equal(constructedOptions.minHeight, Math.floor(585 / 2) - 16);
+  assert.equal(constructedOptions.width, Math.max(980, Math.floor(1093 / 2) - 16));
+  assert.equal(constructedOptions.height, Math.max(560, Math.floor(585 / 2) - 16));
 });

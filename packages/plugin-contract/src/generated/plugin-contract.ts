@@ -196,6 +196,16 @@ export type FeatureId = string;
 
 export type FilesystemDirectoryEnumerationFeature = "filesystem.directory-enumeration";
 
+export type HostByteStreamConnectRequest = {
+  target: VaultHostRef;
+  expectedRevision: string;
+  endpoint: ByteStreamEndpoint;
+};
+
+export type HostByteStreamFeature = "network.host-byte-streams";
+
+export type HostByteStreamLimits = {"connectionsPerRuntime":4,"connectionsTotal":64,"chunkBytes":65536,"bufferBytes":65536,"connectionBytes":67108864,"connectMs":120000,"idleMs":300000,"lifetimeMs":1800000};
+
 export type HostClipboardReadRequest = {
   kind: "clipboard.read";
   title: string;
@@ -206,6 +216,50 @@ export type HostClipboardWriteRequest = {
   title: string;
   text: string;
 };
+
+export type HostDrawnViewEvent = {
+  nodeId: string;
+  type: "click" | "input" | "change" | "keydown" | "keyup" | "focusin" | "focusout" | "compositionstart" | "compositionupdate" | "compositionend" | "dismiss" | "submit" | "reset";
+  value?: string;
+  checked?: boolean;
+  eventId?: number;
+  data?: string;
+  key?: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  values?: Array<string>;
+};
+
+export type HostDrawnViewMessage = ({
+  kind: "host-ui.open";
+  instanceId: string;
+  stateScope?: string;
+}) | ({
+  kind: "host-ui.close";
+  instanceId: string;
+}) | ({
+  kind: "host-ui.update";
+  instanceId: string;
+  sequence: number;
+  acknowledgedEvent?: number;
+  mutations: Array<JsonValue>;
+  css: string;
+}) | ({
+  kind: "host-ui.event";
+  instanceId: string;
+  event: HostDrawnViewEvent;
+});
+
+export type HostDrawnViewOpenRequest = {
+  viewId: string;
+  instanceId: string;
+  scopeId: string;
+  context?: { [key: string]: string | number | boolean | null };
+};
+
+export type HostDrawnViewsFeature = "views.host-drawn";
 
 export type HostInputRequest = {
   kind: "input";
@@ -262,7 +316,7 @@ export type HostInteractionResult = ({
 }) | ({
   cancelled: false;
   value: (string) | (true) | (SharedTerminalSelection);
-}) | (VaultHostSelectedResult) | (VaultHostActionAccepted);
+}) | (VaultHostSelectedResult) | (VaultHostActionAccepted) | (ByteStreamConnectionDescriptor);
 
 export type HostQuickPickItem = {
   id: string;
@@ -488,7 +542,7 @@ export type MenuLocation = "commandPalette" | "application" | "host/context" | "
 
 export type NetworkCredentialLeaseFeature = "network.credential-lease";
 
-export type NonResourceScopedPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "secrets" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose";
+export type NonResourceScopedPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "secrets" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose" | "network.hostStream";
 
 export type NullableRpcId = (RpcId) | (null);
 
@@ -1088,7 +1142,7 @@ export type PluginNetworkResponse = {
   };
 };
 
-export type PluginPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "network" | "network.stream" | "filesystem.read" | "filesystem.write" | "secrets" | "companion.execute" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose";
+export type PluginPermission = "storage" | "ai.invoke" | "ai.agent.use" | "ai.agent.actions" | "context.selected.list" | "context.selected.read" | "runtime.advanced" | "settings.read" | "settings.write" | "commands" | "menus" | "views" | "ui.interact" | "clipboard.read" | "clipboard.write" | "terminal.metadata" | "terminal.output" | "terminal.input" | "terminal.decorate" | "terminal.complete" | "terminal.intercept.input" | "terminal.intercept.output" | "vault.metadata" | "vault.write" | "vault.credentials" | "sftp.read" | "sftp.write" | "network" | "network.stream" | "filesystem.read" | "filesystem.write" | "secrets" | "companion.execute" | "provider.terminal" | "provider.connection" | "provider.authentication" | "provider.sync" | "provider.importer" | "terminal.selection.read" | "terminal.input.propose" | "network.hostStream";
 
 export type PluginSelectedContextContent = {
   handle: string;
@@ -1123,6 +1177,15 @@ export type PluginViewFocusEvent = {
 };
 
 export type PluginViewFocusRequest = PluginViewFocusEvent;
+
+export type PluginViewResourceRequest = {
+  instanceId: string;
+  path: RelativePackagePath;
+};
+
+export type PluginViewResourceResult = {
+  url: string;
+};
 
 export type PluginWireErrorCode = -32001 | -32002 | -32003 | -32004 | -32005 | -32006 | -32007 | -32008 | -32009 | -32010 | -32011 | -32012 | -32013 | -32014 | -32015 | -32016;
 
@@ -1328,6 +1391,7 @@ export type SettingContribution = {
   sync?: boolean;
   sortable?: boolean;
   valueSchema?: JsonValue;
+  group?: LocalizedText;
 };
 
 export type SettingControl = "switch" | "radio" | "select" | "multiselect" | "text" | "textarea" | "number" | "slider" | "password" | "color" | "font" | "file" | "directory" | "keybinding" | "list" | "table";
@@ -1691,6 +1755,11 @@ export type VaultHostActionRequest = ({
   kind: "vault.requestConnect";
   target: VaultHostRef;
   expectedRevision: string;
+}) | ({
+  target: VaultHostRef;
+  expectedRevision: string;
+  endpoint: ByteStreamEndpoint;
+  kind: "network.stream.connectViaHost";
 });
 
 export type VaultHostActionResult = ({
@@ -1786,13 +1855,11 @@ export type ViewContribution = {
   id: ContributionId;
   title: LocalizedText;
   location: ViewLocation;
-  entry: RelativePackagePath;
   icon?: IconReference;
   order?: number;
   when?: ContextKeyExpression;
-  retainContextWhenHidden?: boolean;
 };
 
-export type ViewLocation = "aside" | "panel" | "tab" | "modal" | "settings" | "vault-page" | "terminal-sidebar";
+export type ViewLocation = "aside" | "panel" | "tab" | "modal" | "vault-page" | "terminal-sidebar";
 
 export type WireIntegerLimits = {"maxSafeInteger":9007199254740991};

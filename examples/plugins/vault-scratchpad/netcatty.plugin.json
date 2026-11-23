@@ -2,22 +2,44 @@
   "manifestVersion": 1,
   "id": "com.netcatty.vault-scratchpad",
   "name": "vault-scratchpad",
-  "displayName": { "en": "Vault Scratchpad", "zh-CN": "Vault 草稿板" },
+  "displayName": {
+    "en": "Vault Scratchpad",
+    "zh-CN": "Vault 草稿板"
+  },
   "version": "0.1.1",
   "publisher": "netcatty",
   "license": "GPL-3.0-or-later",
-  "engines": { "netcatty": ">=0.0.0", "api": ">=0.1.0-internal.1 <0.2.0" },
-  "features": { "required": ["views.vault-pages"] },
-  "main": { "browser": "browser.js" },
-  "activationEvents": ["onView:com.netcatty.vault-scratchpad.page"],
-  "permissions": { "required": ["views"] },
+  "engines": {
+    "netcatty": ">=0.0.0",
+    "api": ">=0.1.0-internal.1 <0.2.0"
+  },
+  "features": {
+    "required": [
+      "views.vault-pages"
+    ]
+  },
+  "main": {
+    "browser": "dist/host.js"
+  },
+  "activationEvents": [
+    "onView:com.netcatty.vault-scratchpad.page"
+  ],
+  "permissions": {
+    "required": [
+      "views"
+    ]
+  },
   "contributes": {
-    "views": [{
-      "id": "com.netcatty.vault-scratchpad.page",
-      "title": { "en": "Scratchpad", "zh-CN": "草稿板" },
-      "location": "vault-page",
-      "entry": "page.html",
-      "order": 10
-    }]
+    "views": [
+      {
+        "id": "com.netcatty.vault-scratchpad.page",
+        "title": {
+          "en": "Scratchpad",
+          "zh-CN": "草稿板"
+        },
+        "location": "vault-page",
+        "order": 10
+      }
+    ]
   }
 }

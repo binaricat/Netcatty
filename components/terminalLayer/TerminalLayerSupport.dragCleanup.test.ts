@@ -91,7 +91,6 @@ test("pointer drag cleanup runs when the pane unmounts without pointerup", async
     pointerDown = useWorkspaceDetachPointerDrag({
       inActiveWorkspace: true,
       session: { id: "session-1", workspaceId: "workspace-1" } as never,
-      workspaceById: new Map(),
       onStartSessionDrag: () => { dragStartCount += 1; },
       onEndSessionDrag: () => { dragEndCount += 1; },
     });
@@ -144,7 +143,6 @@ test("unmount removes an active drag overlay and ends drag state", async () => {
     pointerDown = useWorkspaceDetachPointerDrag({
       inActiveWorkspace: true,
       session: { id: "session-1", workspaceId: "workspace-1" } as never,
-      workspaceById: new Map(),
       onStartSessionDrag: () => { dragStartCount += 1; },
       onEndSessionDrag: () => { dragEndCount += 1; },
     });
@@ -192,7 +190,6 @@ test("all pointer drag exit paths share one idempotent cleanup", async () => {
     pointerDown = useWorkspaceDetachPointerDrag({
       inActiveWorkspace: true,
       session: { id: "session-1", workspaceId: "workspace-1" } as never,
-      workspaceById: new Map(),
       onStartSessionDrag: () => { dragStartCount += 1; },
       onEndSessionDrag: () => { dragEndCount += 1; },
     });

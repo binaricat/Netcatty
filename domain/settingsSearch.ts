@@ -1,4 +1,4 @@
-import { matchesSearchQuery } from "../lib/searchMatcher";
+import { matchesSearchQuery } from "./searchMatcher";
 import {
   SETTINGS_SEARCH_CATALOG,
   isSettingsEntryAvailableOn,

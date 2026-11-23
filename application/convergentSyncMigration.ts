@@ -6,8 +6,10 @@ import type {
 } from '../domain/sync';
 import {
   cloudSyncPayloadsEqual,
-  materializeSyncPayloadFromConvergentState,
+  convergentConflictAddressKey,
   planConvergentSyncMigration,
+  refreshConvergentSyncMigrationPlan,
+  resolveConvergentFieldConflict,
   stripConvergentSyncEnvelope,
   validateConvergentSyncPayload,
   type ConvergentMigrationPlan,
@@ -23,6 +25,25 @@ export interface PreparedConvergentMigration {
   plan: ConvergentMigrationPlan;
   providerBaselines: ConvergentProviderBaselineV2[];
   localSnapshot: SyncPayload;
+}
+
+export function resolvePreparedConvergentMigrationConflict(
+  prepared: PreparedConvergentMigration,
+  addressKey: string,
+  candidateDot: string,
+  manager: CloudSyncManager = getCloudSyncManager(),
+  now = Date.now(),
+): PreparedConvergentMigration {
+  const conflict = prepared.plan.preview.conflicts.find(
+    (entry) => convergentConflictAddressKey(entry.address) === addressKey,
+  );
+  if (!prepared.plan.state || !conflict) {
+    throw new Error('The convergent migration conflict no longer exists');
+  }
+  const state = resolveConvergentFieldConflict(
+    prepared.plan.state, conflict, candidateDot, manager.getState().deviceId, now,
+  );
+  return { ...prepared, plan: refreshConvergentSyncMigrationPlan(prepared.plan, state) };
 }
 
 interface LegacyProviderBaselineSeed {
@@ -215,13 +236,4 @@ export async function initializePreparedConvergentMigration(options: {
     }
   });
   return prepared.plan.preview;
-}
-
-export async function prepareConvergentSyncDowngrade(
-  manager: CloudSyncManager = getCloudSyncManager(),
-  now = Date.now(),
-): Promise<SyncPayload> {
-  const replica = await manager.loadConvergentReplica();
-  if (!replica) throw new Error('No convergent sync replica is available to downgrade');
-  return materializeSyncPayloadFromConvergentState(replica.state, { syncedAt: now });
 }

@@ -16,7 +16,7 @@ import { Host, TerminalSession, TerminalSettings, Workspace } from "../types";
 import { KeyBinding } from "../domain/models";
 import type { PaneMagnificationState } from "../domain/paneMagnification";
 import { isSwitcherQuickConnectInput } from "../domain/quickConnect";
-import { matchesSearchQuery } from "../lib/searchMatcher";
+import { matchesSearchQuery } from "../domain/searchMatcher";
 import { buildQuickSwitcherShells, useDiscoveredShells, getShellIconPath, isMonochromeShellIcon } from "../lib/useDiscoveredShells";
 import { usePluginContributions } from "../application/state/usePluginContributions";
 import { requestOpenPluginView } from "./plugins/PluginContributionHost";
@@ -150,7 +150,7 @@ export function getQuickSwitcherVisualRowHeight(row: QuickSwitcherVisualRow): nu
   return QS_ROW_HEIGHT;
 }
 
-interface QuickSwitcherProps {
+export interface QuickSwitcherProps {
   isOpen: boolean;
   query: string;
   results: Host[];

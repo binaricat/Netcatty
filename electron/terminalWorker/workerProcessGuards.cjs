@@ -2,6 +2,7 @@
 
 const {
   classifyProcessError,
+  createDiagnosticLogger,
 } = require("../bridges/processErrorGuards.cjs");
 
 /**
@@ -21,6 +22,13 @@ const {
  * An IPC-retained utilityProcess that swallowed a startup failure
  * would otherwise stay alive without a message listener, leaving every
  * manager request pending forever instead of rejecting/replacing it.
+ *
+ * Benign stream teardown (EPIPE / ERR_STREAM_DESTROYED) is classified as
+ * `ignore` and must NOT call `logError`/`console.error`: writing diagnostics
+ * through an already-broken console pipe re-enters this handler and busy-
+ * loops (see #4136). A shared diagnostic logger also latches the default
+ * console.error path closed after stdout/stderr emit `error`, forwarding the
+ * first failure to `report` so it still reaches the crash log.
  */
 function installTerminalWorkerErrorGuards(options = {}) {
   const processObject = options.processObject || process;
@@ -28,9 +36,29 @@ function installTerminalWorkerErrorGuards(options = {}) {
     throw new Error("A process-like EventEmitter is required");
   }
   const report = typeof options.report === "function" ? options.report : () => {};
+  // Holding an `error` listener keeps a failed write on stdout/stderr from
+  // being rethrown as an uncaught exception, which is how the loop used to
+  // restart. The first failure is forwarded to `report` because this listener
+  // consumes the event before the process guards see it.
+  const consoleLogger = createDiagnosticLogger(
+    (...args) => console.error(...args),
+    {
+      streams: [processObject.stdout, processObject.stderr],
+      onError(err) {
+        try {
+          report("stdio", err, {
+            action: "ignore",
+            reason: "diagnostics sink failure",
+          });
+        } catch {
+          // Error reporting must never be able to escalate into a worker crash.
+        }
+      },
+    },
+  );
   const logError = typeof options.logError === "function"
     ? options.logError
-    : (...args) => console.error(...args);
+    : consoleLogger;
   // Default to runtime semantics only when a caller provides no startup
   // signal; process.cjs always passes one.
   const isRuntimeStarted = typeof options.isRuntimeStarted === "function"
@@ -69,6 +97,16 @@ function installTerminalWorkerErrorGuards(options = {}) {
       fatal.__terminalWorkerFatalStartupError = true;
       throw fatal;
     }
+    // Never log through a stream that just failed: ignore-classified EPIPE
+    // would otherwise call console.error → EPIPE → uncaughtException → loop.
+    if (decision.action === "ignore") {
+      try {
+        report(origin, err, decision);
+      } catch {
+        // Error reporting must never be able to escalate into a worker crash.
+      }
+      return;
+    }
     logError(
       `Suppressed terminal worker ${labelFor(origin)} (${decision.reason}):`,
       err,
@@ -89,6 +127,7 @@ function installTerminalWorkerErrorGuards(options = {}) {
   return () => {
     processObject.removeListener("uncaughtException", handleUncaughtException);
     processObject.removeListener("unhandledRejection", handleUnhandledRejection);
+    consoleLogger.dispose();
   };
 }
 

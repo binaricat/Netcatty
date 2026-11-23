@@ -40,6 +40,11 @@ test("clean-checkout test entrypoints build plugin runtime workspaces first", ()
     packageJson.scripts.pretest,
     /^npm run build:plugin-runtime-deps(?: && npm run check:codebuddy-sdk-contract)?$/,
   );
-  assert.equal(packageJson.scripts["pretest:plugin-runtime"], "npm run build:plugin-runtime-deps && npm run build --workspace @netcatty/example-starter-plugin");
+  assert.equal(packageJson.scripts["pretest:plugin-runtime"], "npm run build:plugin-runtime-deps && npm run build:plugin-view-examples");
   assert.equal(packageJson.scripts["pretest:plugin-runtime:electron"], "npm run build:plugin-runtime-deps");
+});
+
+test("host rendering validators ship beside the main process", () => {
+  const config = require('../../electron-builder.config.cjs');
+  for (const file of ['domain/pluginRemoteTreePolicy.cjs', 'domain/pluginViewStylePolicy.cjs']) assert.ok(config.files.includes(file));
 });

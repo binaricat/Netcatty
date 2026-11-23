@@ -112,6 +112,7 @@ export function createAppLockGate(deps: AppLockGateDeps): React.FC<AppLockGatePr
           setTimeout(() => splash.remove(), 200);
         }
         if (shouldNotifyRendererReady) {
+          performance.mark('netcatty:renderer:ready');
           notifyAppLockRendererReady();
         }
       } catch {

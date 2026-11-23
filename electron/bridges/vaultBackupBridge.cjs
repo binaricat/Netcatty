@@ -202,7 +202,13 @@ function decodePayload(record, safeStorage) {
     if (!safeStorage?.decryptString || !isSafeStorageAvailable(safeStorage)) {
       throw new VaultBackupEncryptionUnavailableError();
     }
-    const decrypted = safeStorage.decryptString(Buffer.from(record.payloadData, "base64"));
+    let decrypted;
+    try {
+      decrypted = safeStorage.decryptString(Buffer.from(record.payloadData, "base64"));
+    } catch (cause) {
+      // IPC preserves the message, but not custom error properties.
+      throw new Error("VAULT_BACKUP_DECRYPT_FAILED", { cause });
+    }
     return JSON.parse(decrypted);
   }
 

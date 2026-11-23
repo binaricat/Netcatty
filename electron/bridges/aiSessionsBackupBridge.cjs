@@ -90,11 +90,22 @@ function timestampToken(now = new Date()) {
   return `${now.toISOString().replace(/[-:]/g, "").replace(".", "-")}`;
 }
 
+let writeQueue = Promise.resolve();
+
 /**
  * Write one generation atomically (temp + rename) and prune older ones.
- * Returns { ok, file } and never throws.
+ * Resolves { ok, file } and never rejects. Writes are serialized and use
+ * fs.promises: the history can be several MB and is written on every
+ * debounced chat change, which used to block the main thread (all windows).
  */
 function writeGeneration(json) {
+  const run = () => writeGenerationNow(json);
+  const result = writeQueue.then(run, run);
+  writeQueue = result.catch(() => {});
+  return result;
+}
+
+async function writeGenerationNow(json) {
   const dir = ensureBackupDir();
   if (!dir) return { ok: false, error: "no-backup-dir" };
   if (typeof json !== "string" || json.length === 0) {
@@ -108,25 +119,17 @@ function writeGeneration(json) {
   const filePath = path.join(dir, file);
   const tmpPath = `${filePath}.tmp`;
   try {
-    fs.writeFileSync(tmpPath, json, "utf-8");
-    fs.renameSync(tmpPath, filePath);
+    await fs.promises.writeFile(tmpPath, json, "utf-8");
+    await fs.promises.rename(tmpPath, filePath);
   } catch (error) {
-    try {
-      fs.unlinkSync(tmpPath);
-    } catch {
-      // ignore
-    }
+    await fs.promises.unlink(tmpPath).catch(() => {});
     return { ok: false, error: String(error) };
   }
 
   // Keep only the newest MAX_GENERATIONS generations.
   const generations = listGenerationFiles(dir);
   for (const stale of generations.slice(MAX_GENERATIONS)) {
-    try {
-      fs.unlinkSync(path.join(dir, stale));
-    } catch {
-      // skip
-    }
+    await fs.promises.unlink(path.join(dir, stale)).catch(() => {});
   }
   return { ok: true, file };
 }

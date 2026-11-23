@@ -50,11 +50,12 @@ function formatSyntheticEcho(command) {
 }
 
 // Default PowerShell prompt (e.g. `PS C:\Users\alice>`, `PS>`,
-// `PS /home/alice>`). Anchored so command output that merely starts with
-// `PS` (e.g. `PSO>`) doesn't match. The `\S` after `\s+` rejects literal
+// `PS /home/alice>`), with optional Enter-PSSession / remoting `[host]: `
+// and debug `[DBG]: ` prefixes. Anchored so command output that merely
+// starts with `PS` (e.g. `PSO>`) doesn't match. The `\S` after `\s+` rejects literal
 // `"PS >"` (which the default prompt never emits) so a script that prints
 // such a line can't trick prompt-driven shell-kind selection.
-const POWERSHELL_PROMPT_PATTERN = /^PS(?:\s+\S.*)?>$/;
+const POWERSHELL_PROMPT_PATTERN = /^(?:\[[^\]\r\n]+\]: )*PS(?:\s+\S.*)?>$/;
 
 // Default cmd.exe prompt (e.g. `C:\>`, `C:\Users\alice>`, `D:\data>`).
 // Drive letter + optional path + `>`. Rejects `C: >` (space before `>`) and
@@ -69,12 +70,17 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 //     the final `]` before `$`/`#` is the delimiter.
 const POSIX_PROMPT_PATTERN = /^(?:[^\s@]+@[^\s:]+(?::[^\n\r]*)?|\[[^\s@\]]+@[^\s\]:]+(?:\s+[^\n\r]+)?\])[#$]$/;
 
+// Bracket PS1 without @host, with bash `\t` time: `[\u \t \w]$` -> `[root 12:04:23 ~]$` (#4276).
+// Require HH:MM:SS so loose `[word]$` output cannot count as idle.
+const BRACKET_TIME_POSIX_PROMPT_PATTERN = /^\[[^\s@\]]+\s+\d{2}:\d{2}:\d{2}(?:\s+[^\n\r\]]+)?\][#$]$/;
+
+// Space-separated bash PS1 `\u@\h \w $ ` renders as `user@host ~ $`.
 // macOS ships zsh with `%n@%m %1~ %#`, which renders as
 // `user@host ~ %` / `user@host My Project %`; privileged shells end in `#`.
 // Allow spaces in the path, but keep prompt delimiters excluded so a prompt
 // followed by input (`user@host ~ % echo %`) cannot count as idle. Requiring
 // whitespace before the marker also rejects output such as `user@host 100%`.
-const ZSH_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+ [^\s%#$][^%#$\r\n]* [%#]$/;
+const ZSH_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+ [^\s%#$][^%#$\r\n]* [#$%]$/;
 
 // SteamOS/Deck-style prompt: `(user@host path)$`. Allow markers and balanced
 // single-level parentheses in the path, but not an early closing delimiter:
@@ -99,6 +105,56 @@ const OH_MY_ZSH_YS_HOST_LINE_PATTERN = /^#\s+[^\s@]+\s+@\s+[^\s]+(?:\s+[^\n\r]+)
 // within the path so partially entered commands do not count as idle prompts.
 const ALPINE_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~(?:\/[^#$\n\r]*)?|\/[^#$\n\r]*)[#$]$/;
 
+// macOS / bash root prompt after `sudo -i`: PS1 `\h:\W \u\$` renders as
+// `host:dir user#` (e.g. `ChrisdeMacBook-Air:~ root#`, `host:/var/root root#`).
+// It has NO `@`, so POSIX / ZSH / PAREN (all `user@host`-shaped) miss it, and
+// ALPINE only covers `host:~#` with NO ` user` segment. Pure-shape only:
+// `host:` + path + whitespace + username + trailing `[#$]`, no `@`; the path
+// segment excludes whitespace (incl. CR/LF), `:`, `#`, `$` so partially typed
+// commands cannot match. See issue #4195.
+// The path segment ALSO excludes `\` and `>` (Windows path / cmd prompt
+// markers). Without this, a cmd.exe line with pending input such as
+// `C:\Users\alice>echo hello#` or `C:\> dir#` is misread as host `C` + `:` +
+// path `\Users\alice>echo` / `\>`, then ` hello` / ` dir` as the username and
+// the trailing `#` as the prompt marker — opening the readiness gate on a
+// prompt that still has unfinished input. That is exactly the #4048 objection
+// (treating prompt-with-input as idle-ready risks typing into unfinished
+// input), so drive-letter / `>` forms are rejected outright. The username
+// whitelist `[A-Za-z0-9_.-]+` already cannot contain `\`, `>` or `:`.
+// `PS C:\>` stays owned by POWERSHELL_PROMPT_PATTERN (checked before this
+// whitelist) and `C:\>` by CMD_PROMPT_PATTERN; no collision.
+// Deliberately NO shellKind gate: `sudo -i` does not refresh shellKind tracking
+// (`detectShellKind` runs at connect time in terminalBridge.cjs; `_loginShellKind`
+// comes from sessionShellKind.cjs), so the live root sh/bash is still tracked as
+// `zsh`. A `shellKind ∈ {posix, bash}` gate would reject exactly this session;
+// every whitelist entry here is pure-shape for the same reason, and a shellKind
+// gate cannot be the sole fix for this bug for the same staleness reason.
+// Residual false-ready risk: any program printing `host:dir user#` as its last
+// line could be mistaken for an idle prompt. That is the same risk class shared
+// by every whitelist pattern (POSIX / ZSH / ALPINE / ...); this adds no new
+// mitigation and does not change existing recognition semantics.
+const MACOS_ROOT_PROMPT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*:(?:~|\/|[^\s:#$>\\]+)\s+[A-Za-z0-9_.-]+[#$]$/;
+
+// Powerlevel10k / similar Unicode prompt-ending ❯ (U+276F). Common idle forms:
+// `~ ❯`, `~/path ❯`, `/tmp ❯`, short-dir `proj ❯`, optional `user@host `
+// prefix (`alice@host ~ ❯`). Require a non-empty prefix and whitespace before
+// ❯ so pending input (`~ ❯ echo READY`, `❯ vim`) cannot match. Bare `❯` alone
+// is intentionally rejected — too ambiguous without a path/host prefix
+// (same rationale as bare `$`/`#`). Do not attempt two-line bare-❯ here.
+const POWERLEVEL10K_PROMPT_PATTERN =
+  /^(?:[^\s@]+@[^\s:]+\s+)?[^\s❯][^❯\r\n]*\s+❯$/;
+
+// Oh My Zsh default theme (robbyrussell): leading ➜ (U+279C) then cwd (%c),
+// optionally ` git:(branch)` and a dirty/clean marker. Idle forms look like
+// `➜  ~`, `➜  netcatty`, `➜  ~ git:(main)`, `➜  ~ git:(main) ✗`.
+// The theme emits two spaces between ➜ and %c (`➜ ` + ` %c`); require that
+// so one-space pending input like `➜ ls` cannot match. Also accept the common
+// single-space home form `➜ ~` (+ optional git). Only the optional git
+// decoration may follow the cwd — `➜  ~ ls` / `➜  ~ echo hi` fail.
+// Do not broaden to arbitrary starship themes.
+const OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN =
+  /^➜(?:\s{2,}[^\s➜][^\s➜]*|\s~)(?:\s+git:\([^)\r\n]+\))?(?:\s+[✗✓])?$/;
+
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
 }
@@ -115,9 +171,13 @@ function isDefaultPosixPromptLine(line) {
   const withoutEnvPrefix = normalized.replace(/^\([^()\n\r]+\)\s+/, "");
   return (
     POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    BRACKET_TIME_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     PAREN_POSIX_PROMPT_PATTERN.test(withoutEnvPrefix) ||
     ALPINE_PROMPT_PATTERN.test(withoutEnvPrefix) ||
-    ZSH_PROMPT_PATTERN.test(withoutEnvPrefix)
+    MACOS_ROOT_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    ZSH_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    POWERLEVEL10K_PROMPT_PATTERN.test(withoutEnvPrefix) ||
+    OH_MY_ZSH_ROBBYRUSSELL_PROMPT_PATTERN.test(withoutEnvPrefix)
   );
 }
 
@@ -202,11 +262,109 @@ function looksLikeIdleAutoLogout(outputTail) {
   return false;
 }
 
+// ── OSC 133 (shell-integration) readiness ──
+//
+// A starts a prompt; B ends its rendering and starts command input; C starts
+// execution/output; D finishes execution. A alone does not prove empty input.
+// Keep lifecycle state beyond rolling-tail eviction, and accept custom prompts
+// only while the B-marked cursor line is unchanged and no continuation arrived.
+// A-only integrations retain the existing whitelist checks.
+const OSC133_MARKER_PATTERN = /\u001B\]133;([ABCD])(?:;([^\u0007\u001B]*))?(?:\u0007|\u001B\\)/g;
+
+function isOsc133PrimaryPrompt(marker) {
+  // Kitty's k=s marks PS2, which is unfinished command input, not a fresh PS1.
+  return marker[1] === "A" && !marker[2]?.split(";").includes("k=s");
+}
+
+function computeOsc133ReadyState(tail) {
+  if (typeof tail !== "string" || !tail) return null;
+  let ready = null;
+  for (const marker of tail.matchAll(OSC133_MARKER_PATTERN)) {
+    if (marker[1] !== "B") ready = isOsc133PrimaryPrompt(marker);
+  }
+  return ready;
+}
+
+function promptTrackingView(session) {
+  const tail = session?._promptTrackTail;
+  if (typeof tail !== "string" || !tail) return { tail: "", alternateScreenActive: false };
+  if (session.osc133Ready === true) {
+    const start = session._osc133PromptStart;
+    return {
+      // Never revive text from before A, or a prompt whose start was evicted.
+      tail: typeof start === "number" && start >= 0 ? tail.slice(start) : "",
+      alternateScreenActive: session._osc133PromptAltScreenAtStart === true,
+    };
+  }
+  return { tail, alternateScreenActive: session._promptTrackAltScreenAtTailStart === true };
+}
+
+function matchesOsc133EmptyPrompt(session, view) {
+  if (session._osc133PromptRedrawPending) return false;
+  if (session._osc133PromptLine == null) return true;
+  if (session._osc133PromptContinued) return false;
+  const { terminalCursorState } = require("../terminalLogSanitizer.cjs");
+  const cursor = terminalCursorState(view.tail, view);
+  // Readline deletion and vi replacement can emit identical BS-space-BS
+  // bytes. Preserve every displayed blank; output cannot certify its removal.
+  return cursor.column === session._osc133PromptColumn
+    && cursor.line === session._osc133PromptLine;
+}
+
 function trackSessionIdlePrompt(session, chunk) {
   if (!session || typeof chunk !== "string" || !chunk) return "";
 
   const previousTail = session._promptTrackTail || "";
   const combined = `${previousTail}${chunk}`;
+  session.osc133Ready ??= null;
+  for (const marker of combined.matchAll(OSC133_MARKER_PATTERN)) {
+    const end = marker.index + marker[0].length;
+    // Replaying old markers would erase pending-input state on every chunk.
+    // A marker split across chunks is consumed when its terminator arrives.
+    if (end <= previousTail.length) continue;
+    if (isOsc133PrimaryPrompt(marker)) {
+      const { alternateScreenActiveAfter } = require("../terminalLogSanitizer.cjs");
+      const beforeMarker = combined.slice(0, marker.index);
+      const priorSession = { ...session, _promptTrackTail: beforeMarker };
+      // A/B also occur during redraw, including multiline PS1 and packets
+      // ending before pending input is re-echoed. Neither A nor a newline
+      // proves cancellation. Keep uncertain input gated until C/D establishes
+      // a new command lifecycle; a redraw cannot clear this latch.
+      session._osc133PromptRedrawPending ||= session.osc133Ready === true
+        && session._osc133PromptLine != null
+        && !matchesOsc133EmptyPrompt(priorSession, promptTrackingView(priorSession));
+      session.osc133Ready = true;
+      session._osc133PromptStart = end;
+      session._osc133PromptAltScreenAtStart = alternateScreenActiveAfter(
+        combined.slice(0, end), session._promptTrackAltScreenAtTailStart === true,
+      );
+      session._osc133PromptLine = null;
+      session._osc133PromptEnd = -1;
+      session._osc133PromptContinued = false;
+    } else if (marker[1] === "B") {
+      if (session.osc133Ready === true && session._osc133PromptStart >= 0) {
+        const { terminalCursorState } = require("../terminalLogSanitizer.cjs");
+        const cursor = terminalCursorState(
+          combined.slice(session._osc133PromptStart, end),
+          { alternateScreenActive: session._osc133PromptAltScreenAtStart === true },
+        );
+        session._osc133PromptLine = cursor.line;
+        session._osc133PromptColumn = cursor.column;
+        session._osc133PromptEnd = end;
+      }
+    } else {
+      // Secondary prompts continue input; only C/D establish a new lifecycle.
+      session._osc133PromptRedrawPending = marker[1] === "A";
+      session.osc133Ready = false;
+      session._osc133PromptLine = null;
+      session._osc133PromptStart = -1;
+      session._osc133PromptEnd = -1;
+    }
+  }
+  if (session._osc133PromptLine != null) {
+    const inputStart = Math.max(previousTail.length, session._osc133PromptEnd);
+    if (combined.slice(inputStart).includes("\n")) session._osc133PromptContinued = true;
+  }
   const overflow = combined.length - MAX_PROMPT_TRACK_TAIL;
   if (overflow > 0) {
     // The kept tail no longer starts where the previous tail started. Replay
@@ -217,11 +375,14 @@ function trackSessionIdlePrompt(session, chunk) {
       combined.slice(0, overflow),
       session._promptTrackAltScreenAtTailStart === true,
     );
+    for (const key of ["_osc133PromptStart", "_osc133PromptEnd"]) {
+      if (typeof session[key] === "number") session[key] = Math.max(-1, session[key] - overflow);
+    }
   }
   const nextTail = overflow > 0 ? combined.slice(overflow) : combined;
   session._promptTrackTail = nextTail;
 
-  const prompt = extractTrailingIdlePrompt(nextTail);
+  const prompt = extractTrailingIdlePrompt(promptTrackingView(session).tail);
   if (prompt) {
     session.lastIdlePrompt = prompt;
     session.lastIdlePromptAt = Date.now();
@@ -234,8 +395,9 @@ function trackSessionIdlePrompt(session, chunk) {
 // still ends with it. The cached prompt is updated only when
 // extractTrailingIdlePrompt recognizes a known shape (PowerShell, cmd.exe,
 // `user@host[:path][#$]`, two-line classic `user@host[:path]` or Oh My Zsh
-// `ys` (`# user @ host ...`) + `$`/`#`, RHEL `[user@host path][#$]`, or
-// Alpine `host:path[#$]`);
+// `ys` (`# user @ host ...`) + `$`/`#`, RHEL `[user@host path][#$]`,
+// Alpine `host:path[#$]`, Powerlevel10k-style `... ❯`, or Oh My Zsh
+// robbyrussell `➜  …`);
 // a remote shell switch into another shell, an oh-my-posh / starship / custom
 // PS1, or any unrecognized prompt would
 // otherwise leave a stale value behind, which `resolveEffectiveShellKind`
@@ -246,11 +408,18 @@ function trackSessionIdlePrompt(session, chunk) {
 // back to `shellKind` alone.
 function getFreshIdlePrompt(session) {
   if (!session) return "";
+
+  // C/D gate text-shaped output. A never bypasses cache freshness or input
+  // checks: an earlier prompt remains marked A while a user edits a command.
+  if (session.osc133Ready === false) return "";
+
   const cached = session.lastIdlePrompt;
   if (!cached) return "";
 
-  const tail = session._promptTrackTail;
+  const view = promptTrackingView(session);
+  const tail = view.tail;
   if (typeof tail !== "string" || !tail) return "";
+  if (!matchesOsc133EmptyPrompt(session, view)) return "";
 
   const normalizedTail = stripAnsi(tail).replace(/\r/g, "\n");
   const normalizedCached = stripAnsi(cached).replace(/\r/g, "\n");
@@ -266,15 +435,23 @@ function getFreshIdlePrompt(session) {
 // screen is still an idle default prompt (#3927). Collapse those cursor and
 // erase operations, then accept only the line the cursor is actually on.
 function getVisibleIdlePrompt(session) {
-  const tail = session?._promptTrackTail;
+  const view = promptTrackingView(session);
+  const tail = view.tail;
   if (typeof tail !== "string" || !tail) return "";
 
+  // Mirror getFreshIdlePrompt: C/D gate output, B confirms an empty input line.
+  if (session.osc133Ready === false) return "";
+  if (!matchesOsc133EmptyPrompt(session, view)) return "";
+
   const { terminalCursorLine } = require("../terminalLogSanitizer.cjs");
-  const cursorLine = terminalCursorLine(tail, {
-    alternateScreenActive: session._promptTrackAltScreenAtTailStart === true,
-  });
+  const cursorLine = terminalCursorLine(tail, view);
   const rightTrimmed = cursorLine.replace(/\s+$/, "");
   if (!rightTrimmed) return "";
+  if (session.osc133Ready === true && session._osc133PromptLine != null) {
+    // A complete B gives the custom prompt boundary; its unchanged cursor line
+    // and lack of continuation are checked above before bypassing shape checks.
+    return /\s$/.test(cursorLine) ? `${rightTrimmed} ` : rightTrimmed;
+  }
   if (
     !isDefaultPowerShellPromptLine(rightTrimmed)
     && !isDefaultPosixPromptLine(rightTrimmed)
@@ -1228,6 +1405,7 @@ module.exports = {
   extractTrailingIdlePrompt,
   getFreshIdlePrompt,
   getVisibleIdlePrompt,
+  computeOsc133ReadyState,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,

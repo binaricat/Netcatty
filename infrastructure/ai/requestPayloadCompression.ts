@@ -1,4 +1,5 @@
 import type { ModelMessage } from "ai";
+import { sliceHead, sliceTail } from "./textBoundaries";
 
 const RETRY_MAX_TOOL_RESULT_CHARS = 4_000;
 const RETRY_MAX_MESSAGE_TEXT_CHARS = 8_000;
@@ -81,7 +82,7 @@ function collapseCarriageReturnFrames(value: string): string {
 function shortenVerboseLine(line: string): string {
   if (line.length <= MAX_VERBOSE_LINE_CHARS) return line;
   const edge = Math.floor((MAX_VERBOSE_LINE_CHARS - 80) / 2);
-  return `${line.slice(0, edge)}[... long line shortened: ${line.length} chars ...]${line.slice(-edge)}`;
+  return `${sliceHead(line, edge)}[... long line shortened: ${line.length} chars ...]${sliceTail(line, edge)}`;
 }
 
 export function truncateTextWithHeadAndTail(
@@ -99,7 +100,7 @@ export function truncateTextWithHeadAndTail(
 ): string {
   if (value.length <= maxChars) return value;
   if (maxChars <= marker.length + 16) {
-    return value.slice(0, maxChars);
+    return sliceHead(value, maxChars);
   }
 
   const budget = maxChars - marker.length;
@@ -109,13 +110,13 @@ export function truncateTextWithHeadAndTail(
     tail = Math.max(0, budget - head);
   }
   if (head + tail >= value.length) {
-    return value.slice(0, maxChars);
+    return sliceHead(value, maxChars);
   }
   if (head + tail <= 0) {
-    return value.slice(0, maxChars);
+    return sliceHead(value, maxChars);
   }
 
-  return `${value.slice(0, head).trimEnd()}${marker}${value.slice(-tail).trimStart()}`;
+  return `${sliceHead(value, head).trimEnd()}${marker}${sliceTail(value, tail).trimStart()}`;
 }
 
 export function compressMessagesForRequestTooLargeRetry(

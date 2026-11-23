@@ -18,28 +18,34 @@ export interface AiSessionsBackupBridge {
   aiSessionsBackupImport?: () => Promise<{ success: boolean; json?: string }>;
 }
 
+/**
+ * Parse the live sessions store once, returning both whether it is usable and
+ * its sessions. The history is often several MB; the helpers below used to
+ * parse it twice per call, and mount ran them back to back (five parses).
+ */
+export function parseSessionsStore(raw: string | null | undefined): { valid: boolean; sessions: AISession[] } {
+  if (raw == null || raw === '') return { valid: false, sessions: [] };
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? { valid: true, sessions: parsed as AISession[] }
+      : { valid: false, sessions: [] };
+  } catch {
+    return { valid: false, sessions: [] };
+  }
+}
+
 /** Restore only when the live store is missing or malformed. A valid empty
  * array represents an intentional deletion and must remain authoritative. */
 export function isMissingOrCorruptSessionsStore(raw: string | null | undefined): boolean {
-  if (raw == null || raw === '') return true;
-  try {
-    return !Array.isArray(JSON.parse(raw));
-  } catch {
-    return true;
-  }
+  return !parseSessionsStore(raw).valid;
 }
 
 /** Read the live sessions array from a raw localStorage string. Returns [] when
  * missing/corrupt (including parseable non-arrays such as `{}`), so callers never
  * treat a non-array as AISession[]. */
 export function readLiveSessionsArray(raw: string | null | undefined): AISession[] {
-  if (isMissingOrCorruptSessionsStore(raw)) return [];
-  try {
-    const parsed = JSON.parse(raw as string);
-    return Array.isArray(parsed) ? parsed as AISession[] : [];
-  } catch {
-    return [];
-  }
+  return parseSessionsStore(raw).sessions;
 }
 
 /**

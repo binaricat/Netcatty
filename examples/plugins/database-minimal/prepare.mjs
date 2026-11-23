@@ -22,13 +22,12 @@ export async function prepareDatabaseExample(targetEndpoint, outputPath) {
     const manifest = JSON.parse(await fs.readFile(path.join(root, "netcatty.plugin.json"), "utf8"));
     manifest.permissions.optional[0].resources = [endpoint];
     await fs.writeFile(path.join(temporary, "netcatty.plugin.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-    for (const file of ["browser.js", "protocol.mjs", "panel.html", "panel.css", "panel.js"]) await fs.copyFile(path.join(root, file), path.join(temporary, file));
+    for (const file of ["browser.js", "protocol.mjs", "panel.js", "host.js", "view.html", "view.css"]) await fs.copyFile(path.join(root, file), path.join(temporary, file));
     await fs.writeFile(path.join(temporary, "fixture-config.mjs"), `export const endpoint = ${JSON.stringify(endpoint)};\n`);
-    const bundle = await build({ entryPoints: [path.join(temporary, "browser.js")], write: false,
-      bundle: true, minify: true, platform: "browser", format: "esm", nodePaths: [path.resolve(root, "../../../node_modules")] });
+    const bundle = await build({ entryPoints: [path.join(temporary, "host.js")], write: false,
+      loader: { ".html": "text", ".css": "text" }, bundle: true, minify: true, platform: "browser", format: "esm", nodePaths: [path.resolve(root, "../../../node_modules")] });
     await fs.writeFile(path.join(temporary, "browser.js"), bundle.outputFiles[0].contents);
-    await fs.rm(path.join(temporary, "protocol.mjs"));
-    await fs.rm(path.join(temporary, "fixture-config.mjs"));
+    for (const file of ["protocol.mjs", "fixture-config.mjs", "panel.js", "host.js", "view.html", "view.css"]) await fs.rm(path.join(temporary, file));
     return await buildPluginPackage(temporary, outputPath);
   } finally { await fs.rm(temporary, { recursive: true, force: true }); }
 }

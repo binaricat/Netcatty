@@ -11,6 +11,8 @@ type BroadcastSession = Pick<TerminalSession, 'id' | 'workspaceId' | 'hiddenFrom
 export function shouldBroadcastDuringSensitivePrompt(input: {
   sensitivePromptActive: boolean;
   broadcastPasswordBypass: boolean;
+  sensitivePromptSource?: 'heuristic' | 'explicit';
+  alternateScreen?: boolean;
 }): boolean {
   return !input.sensitivePromptActive || input.broadcastPasswordBypass;
 }

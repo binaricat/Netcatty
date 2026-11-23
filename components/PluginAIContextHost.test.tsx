@@ -147,8 +147,8 @@ test('cold plugin host reaches the local fixture through the actual main provide
     await service.manager.initialize();
     const staging = path.join(fixtureRoot, 'package'); fs.mkdirSync(path.join(staging, 'dist'), { recursive: true });
     const sample = path.join(rootPath, 'examples/plugins/assistant');
-    for (const file of ['netcatty.plugin.json', 'panel.html', 'panel.css', 'panel.js', 'README.md']) fs.copyFileSync(path.join(sample, file), path.join(staging, file));
-    fs.copyFileSync(path.join(sample, 'src/index.js'), path.join(staging, 'dist/index.js'));
+    for (const file of ['netcatty.plugin.json', 'README.md']) fs.copyFileSync(path.join(sample, file), path.join(staging, file));
+    fs.copyFileSync(path.join(sample, 'dist/host.js'), path.join(staging, 'dist/host.js'));
     const { buildPluginPackage } = await import('@netcatty/plugin-cli');
     const archive = path.join(fixtureRoot, 'assistant.ncpkg'); await buildPluginPackage(staging, archive);
     service.database.setPermissionMode('com.netcatty.assistant', 'context.selected.read', 'ask');
@@ -161,13 +161,13 @@ test('cold plugin host reaches the local fixture through the actual main provide
         await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
       }
     };
-    panel = new JSDOM(fs.readFileSync(path.join(sample, 'panel.html'), 'utf8'), { runScripts: 'outside-only' });
-    Object.defineProperty(panel.window, 'netcattyView', { value: {
+    panel = new JSDOM(fs.readFileSync(path.join(sample, 'view.html'), 'utf8'), { runScripts: 'outside-only' });
+    Object.defineProperty(panel.window, 'pluginContext', { value: { commands: {
       executeCommand: async (command: string, args: unknown) => structuredClone(await service!.contributionService.executeCommand(command, structuredClone(args))),
-      onDidReceiveMessage: () => ({ dispose() {} }),
+      }, views: { onDidReceiveMessage: () => ({ dispose() {} }) }
     } });
     diagnosticPhase = 'initial-selection';
-    await act(async () => panel!.window.eval(fs.readFileSync(path.join(sample, 'panel.js'), 'utf8')));
+    await act(async () => panel!.window.eval(fs.readFileSync(path.join(sample, 'panel.js'), 'utf8').replace('export function mount', 'function mount') + '\nwindow.disposePanel = mount(document.body, window.pluginContext, "test", "test");'));
     await waitFor(() => document.getElementById('plugin-ai-note') !== null);
     const noteChoice = document.getElementById('plugin-ai-note') as HTMLSelectElement;
     assert.equal(noteChoice.options.length, 2);
@@ -209,7 +209,7 @@ test('cold plugin host reaches the local fixture through the actual main provide
     console.error = originalConsoleError;
     // JSDOM.close does not deliver the browser pagehide lifecycle. Invalidate
     // the sample's pending callbacks before teardown closes its document.
-    if (panel) { panel.window.dispatchEvent(new panel.window.Event('pagehide')); panel.window.close(); }
+    if (panel) { panel.window.disposePanel(); panel.window.close(); }
     await act(async () => root.unmount());
     await service?.manager.shutdown(); aiBridge.cleanup();
     publishNotesSnapshot(oldNotes); registerAppAppLockRuntime(oldLock);

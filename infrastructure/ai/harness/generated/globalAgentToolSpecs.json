@@ -65,6 +65,54 @@
     "agentKind": "global"
   },
   {
+    "capabilityId": "session.reconnect",
+    "toolName": "session_reconnect",
+    "rpcMethod": "session/reconnect",
+    "localExecution": false,
+    "description": "Request reconnect of a disconnected session in the current scope, preserving its tab and workspace. Does not restart connected sessions or replay commands. Returns acknowledgement, not shell readiness. Recovery is limited to three attempts with 2/5 second backoff in a 120 second incident; inspect authentication or exhausted recovery instead of retrying indefinitely.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "An existing disconnected terminal session ID in the current granted scope."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
+    "capabilityId": "session.recover",
+    "toolName": "session_recover",
+    "rpcMethod": "session/recover",
+    "localExecution": false,
+    "description": "Inspect and recover a scoped disconnected session in place. Automatically applies bounded reconnect/backoff for up to 20 seconds per call and reports ready only once the transport is restored (still-offline budgets return pending); shellReady is advisory (true/false/null) and, when unconfirmed, nextAction \"inspect_shell\" asks you to verify the prompt before typing. Stops for authentication, busy jobs, cancellation or unavailable state. Never creates tabs or executes/replays commands.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": false,
+        "description": "The existing terminal session ID in the current granted scope. Recovery preserves this session and never replays commands."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    },
+    "agentKind": "global"
+  },
+  {
     "capabilityId": "session.close",
     "toolName": "session_close",
     "rpcMethod": "session/close",
@@ -93,7 +141,7 @@
     "toolName": "terminal_execute",
     "rpcMethod": "netcatty/exec",
     "localExecution": false,
-    "description": "Execute a short command in a terminal session and wait for completion. Use this instead of the local shell when the command is intended for a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd).",
+    "description": "Execute a short command in a terminal session and wait for completion. Use this instead of the local shell when the command is intended for a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd). If the shell prompt cannot be recognized while the connection is alive and no busy signal is present, the command is NOT sent and the tool returns SHELL_READINESS_UNKNOWN (a recoverable, non-terminal result, not a failed command): do not blind-type into a possible password prompt — inspect the terminal read-only with get_environment or terminal_read_context, re-check readiness after the user presses Enter, reuse another idle session, or ask the user to confirm the prompt before retrying.",
     "inputShape": {
       "sessionId": {
         "type": "string",
@@ -567,8 +615,19 @@
     "toolName": "vault_hosts_list",
     "rpcMethod": "vault/hosts/list",
     "localExecution": false,
-    "description": "List saved hosts in the vault (metadata only — no passwords or keys). Use when the user names a saved Netcatty host but get_environment has no matching live session. Resolve the hostId here, call host_open, then call get_environment to obtain the new sessionId.",
-    "inputShape": {},
+    "description": "List saved hosts in the vault (metadata only — no passwords or keys). Use when the user names a saved Netcatty host but get_environment has no matching live session. Resolve the hostId here, call host_open, then call get_environment to obtain the new sessionId. Use query with the host name the user gave, or group, to narrow the list instead of returning every host.",
+    "inputShape": {
+      "query": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional case-insensitive search text. Every space-separated word must match the label, hostname, username, or tags. Does not search group."
+      },
+      "group": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional group path (e.g. prod). Includes subgroups: prod matches prod/web but not production. Case-sensitive."
+      }
+    },
     "policy": {
       "write": false,
       "sensitiveRead": true,
@@ -585,7 +644,7 @@
     "toolName": "host_open",
     "rpcMethod": "vault/hosts/open",
     "localExecution": false,
-    "description": "Open a vault host by reusing its existing session when its connection settings still match (connected or connecting, including auto-reconnecting — same sessionId, no duplicate tab). Only opens a new terminal tab when no usable session for this host exists, or when newTab is true. Inactive disconnected and restored tabs are not reused. Returns the sessionId so you can run terminal/SFTP tools against it. Use vault_hosts_list first when you only know the label or hostname. Reuse-first: if this hostId already has a connected or connecting session with matching connection settings (including one auto-reconnecting after a drop, which keeps the same sessionId), that sessionId is returned and no new tab is opened — retry terminal_execute against it rather than reopening the host. Open a new tab only when get_environment shows no session for the host, when the task truly needs a parallel connection, or with newTab true. Call session_close when finished only for a newly opened session (reused is not true). A reused session keeps its original owner; do not close it as task cleanup. Disconnected or restored tabs needing user action are not reused. Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
+    "description": "Open a vault host by reusing its existing session when its connection settings still match (connected or connecting, including auto-reconnecting — same sessionId, no duplicate tab). Only opens a new terminal tab when no usable session for this host exists, or when newTab is true. A newly opened tab is placed in the invoking chat's bound workspace (workspace chat → that workspace; terminal chat → that terminal's workspace; unbound chats get a standalone tab). Returns the sessionId so you can run terminal/SFTP tools against it. Use vault_hosts_list first when you only know the label or hostname. Reuse-first: if this hostId already has a connected or connecting session with matching connection settings (including one auto-reconnecting after a drop, which keeps the same sessionId), that sessionId is returned and no new tab is opened — retry terminal_execute against it rather than reopening the host. Open a new tab only when get_environment shows no session for the host, when the task truly needs a parallel connection, or with newTab true. Call session_close when finished only for a newly opened session (reused is not true). A reused session keeps its original owner; do not close it as task cleanup. Disconnected or restored tabs needing user action are not reused. Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
     "inputShape": {
       "hostId": {
         "type": "string",
@@ -595,7 +654,7 @@
       "workspaceId": {
         "type": "string",
         "optional": true,
-        "description": "Target workspace ID or current (active workspace). Applies to newly opened sessions; reused sessions retain their placement. Omit for a standalone tab."
+        "description": "Target workspace ID. Omit to open into the invoking chat's bound workspace (workspace chat → that workspace; terminal chat → that terminal's workspace); unbound chats get a standalone tab. 'current' means the chat's bound workspace, or the active workspace when unbound. Applies to newly opened sessions; reused sessions retain their placement."
       },
       "newTab": {
         "type": "string",

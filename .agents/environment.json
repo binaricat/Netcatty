@@ -1,0 +1,3 @@
+{
+  "install": "if command -v apt-get >/dev/null 2>&1 && { ! command -v fish >/dev/null 2>&1 || ! command -v xvfb-run >/dev/null 2>&1; }; then sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fish xvfb; fi && npm ci && npm run build:plugin-runtime-deps"
+}

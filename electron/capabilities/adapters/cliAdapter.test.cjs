@@ -18,11 +18,23 @@ function fakeCreateError(code, message) {
 
 test("getCliRpcMethod resolves implemented cli commands to rpc methods", () => {
   assert.equal(getCliRpcMethod(["exec"]), "netcatty/exec");
+  assert.equal(getCliRpcMethod(["session-reconnect"]), "session/reconnect");
+  assert.equal(getCliRpcMethod(["session-recover"]), "session/recover");
   assert.equal(getCliRpcMethod(["attachment", "read"]), "netcatty/readAttachment");
   assert.equal(getCliRpcMethod(["sftp", "list"]), "netcatty/sftp/list");
   assert.equal(getCliRpcMethod(["vault", "host", "get"]), "vault/host/get");
   assert.equal(getCliRpcMethod(["portforward", "rules", "list"]), "portforward/rules/list");
   assert.equal(getCliRpcMethod(["capabilities"]), null);
+});
+
+test('reconnect CLI requires the explicit target session', () => {
+  assert.deepEqual(buildCatalogCliParams('session.reconnect', { sessionId: 's' }, fakeCreateError), { sessionId: 's' });
+  assert.throws(() => buildCatalogCliParams('session.reconnect', {}, fakeCreateError), /session/i);
+});
+
+test('recovery CLI requires an existing explicit session', () => {
+  assert.deepEqual(buildCatalogCliParams('session.recover', { sessionId: 's' }, fakeCreateError), { sessionId: 's' });
+  assert.throws(() => buildCatalogCliParams('session.recover', {}, fakeCreateError), /session/i);
 });
 
 test("listCliCapabilities returns implemented commands by default", () => {

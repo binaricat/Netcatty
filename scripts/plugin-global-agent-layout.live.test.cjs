@@ -28,10 +28,10 @@ if (!process.versions.electron) {
   void app.whenReady().then(async () => {
     // Inline the real stylesheet and omit panel.js: even a broken layout has no
     // path to execute plugin commands or initiate model/credential requests.
-    const html = fs.readFileSync(path.join(sample, "panel.html"), "utf8")
-      .replace('<link rel="stylesheet" href="panel.css">', `<style>${fs.readFileSync(path.join(sample, "panel.css"), "utf8")}</style>`)
-      .replace('<script src="panel.js"></script>', "")
-      .replace("<head>", '<head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">');
+    const html = `<!doctype html><html><head>
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+      <style>html,body{margin:0;height:100%}${fs.readFileSync(path.join(sample, "view.css"), "utf8")}</style>
+      </head><body>${fs.readFileSync(path.join(sample, "view.html"), "utf8")}</body></html>`;
     const isolatedSession = session.fromPartition("agent-layout-synthetic");
     isolatedSession.webRequest.onBeforeRequest({ urls: ["http://*/*", "https://*/*"] }, (_details, callback) => callback({ cancel: true }));
     win = new BrowserWindow({ show: false, useContentSize: true, width: 798, height: 548,

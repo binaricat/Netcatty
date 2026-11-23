@@ -14,11 +14,12 @@ test('terminal extension pages use actual split panes, focus and session ownersh
   install('PointerEvent', dom.window.MouseEvent);
   install('getComputedStyle', dom.window.getComputedStyle.bind(dom.window));
   install('requestAnimationFrame', dom.window.requestAnimationFrame.bind(dom.window)); install('cancelAnimationFrame', dom.window.cancelAnimationFrame.bind(dom.window)); install('IS_REACT_ACT_ENVIRONMENT', true);
-  let rectX = 200;
+  const rectX = 200;
   dom.window.HTMLElement.prototype.getBoundingClientRect = () => new dom.window.DOMRect(rectX, 100, 400, 300);
   const { default: React, act, useCallback, useRef, useState } = await import('react');
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('../application/i18n/I18nProvider');
+  const { TooltipProvider } = await import('./ui/tooltip');
   const { activeTabStore } = await import('../application/state/activeTabStore');
   const { sidePanelLiveStore, SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT } = await import('../application/state/sidePanelLiveStore');
   const { useTerminalSidePanelLayoutState } = await import('../application/state/useTerminalSidePanelLayoutState');
@@ -30,22 +31,17 @@ test('terminal extension pages use actual split panes, focus and session ownersh
   type Tool = import('../domain/sidePanelLayout').SidePanelTool;
   let selectedSession = 'synthetic-session-a';
   const getSession = () => selectedSession;
-  const a = { id: 'com.example.sidebar.first', title: 'First page', location: 'terminal-sidebar', entry: 'page.html', visible: true };
+  const a = { id: 'com.example.sidebar.first', title: 'First page', location: 'terminal-sidebar', visible: true };
   const b = { ...a, id: 'com.example.sidebar.second', title: 'Second page' };
   let snapshot = { locale: 'en', plugins: [{ id: 'com.example.sidebar', displayName: 'Synthetic plugin', version: '1.0.0', commands: [], keybindings: [], menus: [], settings: [], views: [a, b] }] };
-  const changed = new Set<() => void>(), focusListeners = new Set<(event: { instanceId: string }) => void>();
-  const opens: NetcattyPluginViewOpenRequest[] = [], closes: string[] = [], focus: string[] = [], bounds: Array<{ instanceId: string; x: number }> = [];
-  const visible = new Map<string, boolean>();
+  const changed = new Set<() => void>();
+  const opens: NetcattyPluginViewOpenRequest[] = [];
   Object.assign(dom.window, { netcatty: {
     async getPluginRuntimeStatus() { return { available: true }; }, async getPluginContributions() { return snapshot; },
     onPluginContributionsChanged(fn: () => void) { changed.add(fn); return () => { changed.delete(fn); }; },
-    onPluginViewClosed() { return () => {}; },
-    onPluginViewFocused(fn: (event: { instanceId: string }) => void) { focusListeners.add(fn); return () => { focusListeners.delete(fn); }; },
-    async openPluginView(payload: NetcattyPluginViewOpenRequest) { opens.push(payload); return { instanceId: payload.instanceId! }; },
-    async closePluginView(id: string) { closes.push(id); },
-    async setPluginViewBounds(id: string, rect: { x: number }) { bounds.push({ instanceId: id, x: rect.x }); },
-    async setPluginViewVisibility(id: string, value: boolean) { visible.set(id, value); },
-    async focusPluginView(event: { instanceId: string }) { focus.push(event.instanceId); for (const fn of focusListeners) fn(event); },
+    onPluginViewClosed() { return () => {}; }, onHostDrawnPluginViewUpdate() { return () => {}; },
+    async openHostDrawnPluginView(payload: NetcattyPluginViewOpenRequest) { opens.push(payload); return { instanceId: payload.instanceId! }; },
+    async closeHostDrawnPluginView() {},
   } });
   let split!: () => void;
   function Fixture() {
@@ -75,54 +71,44 @@ test('terminal extension pages use actual split panes, focus and session ownersh
         const page = model.pages.find((item) => item.tool === pane.tool); const target = hosts.get(pane.tool) ?? parking.current;
         if (!page || !target) return null;
         return <PersistentSidePanelPortal key={`${pane.id}:${model.sessionId}`} portalKey={`plugin-${pane.id}`} target={target}>
-          <PluginTerminalSidebarPageHost page={page} tabId={model.tabId!} sessionId={model.sessionId} getSession={getSession} adapter={model.contributions}
-            focusOnReveal={layout?.focusedPaneId === pane.id} focused={() => focusPane(pane.id)} unavailable={() => closePane(pane.id)} />
+          <PluginTerminalSidebarPageHost page={page} tabId={model.tabId!} sessionId={model.sessionId} getSession={getSession} showHeader={panes.length === 1} focused={() => focusPane(pane.id)} unavailable={() => closePane(pane.id)} />
         </PersistentSidePanelPortal>;
       })}</>;
   }
   const root = createRoot(document.getElementById('root')!); const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
   try {
     activeTabStore.setActiveTabId('workspace-synthetic'); sidePanelLiveStore.update({ ...SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, focusedSessionId: selectedSession });
-    await act(async () => { root.render(<I18nProvider locale="en"><Fixture /></I18nProvider>); await settle(); });
-    await act(async () => { document.querySelector<HTMLButtonElement>('button[aria-label="Extension pages"]')!.click(); await settle(); });
-    const firstButton = [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('First page'))!;
+    await act(async () => { root.render(<I18nProvider locale="en"><TooltipProvider><Fixture /></TooltipProvider></I18nProvider>); await settle(); });
+    assert.equal(document.querySelector('button[aria-label="Extension pages"]'), null, 'pages do not require opening a grouped menu');
+    assert.ok(document.querySelector('button[aria-label="Second page — Synthetic plugin"]'), 'each contributed page has a direct toolbar button');
+    const firstButton = document.querySelector<HTMLButtonElement>('button[aria-label="First page — Synthetic plugin"]')!;
     await act(async () => { firstButton.click(); await settle(); });
     assert.equal(document.querySelectorAll('[data-section="terminal-side-panel-pane"]').length, 1);
     assert.ok(document.querySelector('[data-pane-tool] [data-plugin-view-slot="terminal-sidebar"]'));
+    assert.equal(document.querySelectorAll('[data-plugin-terminal-sidebar] header').length, 1);
     assert.equal(opens.length, 1); assert.deepEqual(opens[0].context, { 'netcatty.surface': 'terminal-sidebar' });
     await act(async () => { split(); await settle(); });
     assert.equal(document.querySelectorAll('[data-section="terminal-side-panel-pane"]').length, 2);
+    assert.equal(document.querySelectorAll('[data-plugin-terminal-sidebar] header').length, 0, 'split pane headers already identify both pages');
     assert.equal(opens.length, 2);
-    const firstId = opens.find((item) => item.viewId === a.id)!.instanceId!;
-    await act(async () => { for (const fn of focusListeners) fn({ instanceId: firstId }); await settle(); });
+    await act(async () => { document.querySelector<HTMLElement>(`[data-pane-tool="plugin-view:${a.id}"] [data-plugin-view-slot]`)!.dispatchEvent(new dom.window.FocusEvent('focusin', { bubbles: true })); await settle(); });
     assert.equal(document.querySelector(`[data-pane-tool="plugin-view:${a.id}"]`)?.getAttribute('data-focused'), 'true');
-    const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true');
-    await act(async () => { document.body.append(dialog); await settle(); });
-    assert.ok(opens.every((item) => visible.get(item.instanceId!) === false));
-    focus.length = 0;
-    await act(async () => { dialog.remove(); await settle(); });
-    assert.ok(focus.length > 0); assert.ok(focus.every((id) => id === firstId), 'restoring panes focuses only the host-selected pane');
-    const old = opens.map((item) => item.instanceId!);
-    await act(async () => { selectedSession = 'synthetic-session-b'; sidePanelLiveStore.update({ ...SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, focusedSessionId: selectedSession });
-      assert.ok(old.every((id) => closes.includes(id)), 'workspace focus cancels old native owners synchronously'); await settle(); });
+    await act(async () => { selectedSession = 'synthetic-session-b'; sidePanelLiveStore.update({ ...SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT, focusedSessionId: selectedSession }); await settle(); });
     assert.equal(opens.length, 4);
     assert.notEqual(opens[0].scopeId, opens[2].scopeId);
     assert.ok(opens.every((item) => JSON.stringify(item.context) === JSON.stringify({ 'netcatty.surface': 'terminal-sidebar' })));
-    await act(async () => { rectX = 260; snapshot = { ...snapshot, plugins: [{ ...snapshot.plugins[0], views: [{ ...a, visible: false }, b] }] }; for (const fn of changed) fn(); await settle(); });
+    await act(async () => { snapshot = { ...snapshot, plugins: [{ ...snapshot.plugins[0], views: [{ ...a, visible: false }, b] }] }; for (const fn of changed) fn(); await settle(); });
     assert.equal(document.querySelectorAll('[data-section="terminal-side-panel-pane"]').length, 1);
     assert.equal(document.querySelector('[data-pane-tool]')?.getAttribute('data-pane-tool'), `plugin-view:${b.id}`);
-    assert.ok(bounds.some((item) => item.x === 260), 'portal relocation updates native geometry');
-    const last = opens.at(-1)!.instanceId!;
-    await act(async () => { activeTabStore.setActiveTabId('vault'); assert.ok(closes.includes(last)); await settle(); });
+    await act(async () => { activeTabStore.setActiveTabId('vault'); await settle(); });
     assert.equal(document.querySelector('[data-plugin-terminal-sidebar]'), null);
     await act(async () => { selectedSession = 'synthetic-local-terminal'; activeTabStore.setActiveTabId(selectedSession); await settle(); });
-    await act(async () => { document.querySelector<HTMLButtonElement>('button[aria-label="Extension pages"]')!.click(); await settle(); });
-    const localPage = [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('Second page'))!;
+    const localPage = document.querySelector<HTMLButtonElement>('button[aria-label="Second page — Synthetic plugin"]')!;
     await act(async () => { localPage.click(); await settle(); });
     assert.ok(document.querySelector('[data-plugin-view-slot="terminal-sidebar"]'), 'standalone Local Terminal is a valid navigation owner');
     assert.deepEqual(opens.at(-1)!.context, { 'netcatty.surface': 'terminal-sidebar' });
   } finally {
-    await act(async () => { root.unmount(); await settle(); }); dom.window.close();
+    await act(async () => { root.unmount(); (await import('../application/state/pluginViewSession')).pluginViewSessions.dispose(); await settle(); }); dom.window.close();
     for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
   }
 });

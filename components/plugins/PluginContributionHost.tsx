@@ -7,8 +7,11 @@ import {
 } from '../../application/state/usePluginViewLifecycle';
 import { Button } from '../ui/button';
 import { PluginContributionIcon } from './PluginContributionIcon';
+import { PluginHostDrawnPage } from './PluginHostDrawnPage';
 
 export { requestOpenPluginView };
+
+const subscribeNoop = () => () => {};
 
 const DEFAULT_KEYBINDING_CONTEXT = Object.freeze({ 'netcatty.surface': 'keybinding' });
 
@@ -28,7 +31,7 @@ export function PluginContributionHost({
     activeView,
     close,
     effectiveRequested,
-    mountRef,
+    viewQueryContext,
   } = usePluginViewLifecycle({
     locale,
     theme,
@@ -38,18 +41,24 @@ export function PluginContributionHost({
 
   if (!effectiveRequested || !activeView) return null;
   const location = activeView.view.location;
+  const content = <PluginHostDrawnPage pluginId={activeView.plugin.id} viewId={activeView.view.id} version={activeView.plugin.version} slot={`view:${activeView.view.id}`} active context={viewQueryContext}
+        subscribeHidden={subscribeNoop} unavailable={() => void close()} loadingLabel={t('plugins.vault.loading')} />;
   const containerClass = location === 'aside'
     ? 'absolute inset-y-0 right-0 z-40 w-[420px] border-l border-border bg-background shadow-2xl'
+    : location === 'tab'
+      ? 'absolute inset-0 z-40 flex p-2 pt-0'
     : location === 'panel'
       ? 'absolute inset-x-0 bottom-0 z-40 h-[42%] border-t border-border bg-background shadow-2xl'
       : location === 'modal'
-        ? 'fixed left-1/2 top-1/2 z-50 h-[70vh] w-[min(800px,85vw)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background shadow-2xl'
+        ? 'fixed left-1/2 top-1/2 z-40 h-[70vh] w-[min(800px,85vw)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-background shadow-2xl'
         : 'absolute inset-0 z-40 bg-background';
 
   if (location === 'tab') {
     return (
-      <section className={`${containerClass} flex flex-col`} role="region" aria-label={activeView.view.title}>
-        <div ref={mountRef} className="min-h-0 flex-1" />
+      <section className={containerClass} role="region" aria-label={activeView.view.title}>
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm">
+          {content}
+        </div>
       </section>
     );
   }
@@ -58,6 +67,7 @@ export function PluginContributionHost({
     <section
       className={`${containerClass} flex flex-col`}
       role={location === 'modal' ? 'dialog' : 'region'}
+      data-plugin-dialog={location === 'modal' ? 'true' : undefined}
       aria-modal={location === 'modal' ? true : undefined}
       aria-label={activeView.view.title}
     >
@@ -80,7 +90,9 @@ export function PluginContributionHost({
           <X size={14} />
         </Button>
       </header>
-      <div ref={mountRef} className="min-h-0 flex-1" />
+      <div className={location === 'modal' ? 'flex min-h-0 flex-1 p-3' : 'flex min-h-0 flex-1'}>
+        {content}
+      </div>
     </section>
   );
 }

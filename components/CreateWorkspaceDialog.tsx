@@ -1,7 +1,7 @@
 import { Search } from 'lucide-react';
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
-import { matchesWorkspaceHostPickerQuery } from '../lib/searchMatcher';
+import { matchesWorkspaceHostPickerQuery } from '../domain/searchMatcher';
 import { Host } from '../types';
 import { DistroAvatar } from './DistroAvatar';
 import { Button } from './ui/button';

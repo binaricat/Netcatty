@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { matchesSearchQuery } from "./searchMatcher";
+import { matchesSearchQuery } from "../domain/searchMatcher";
 import { buildQuickSwitcherShells, resolveShellSetting } from "./useDiscoveredShells";
 
 const DISCOVERED: DiscoveredShell[] = [

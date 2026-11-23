@@ -47,6 +47,36 @@ test('terminal prompt security combines split output chunks within a bounded log
   assert.ok(tail.length <= 2_048);
 });
 
+const vimChrome = '\x1b[?1049h~\x1b[2;1H~\x1b[24;1Hsmoke4107-broadcast\b';
+const vimColon = '\x1b[?25l\x1b[24;1H\x1b[K\x1b[24;1H:\x1b[?25h';
+
+test('prompt security folds real vim CUP/EL colon redraws without retaining chrome (#4107)', () => {
+  // Try every transport boundary, including inside CUP and EL sequences.
+  for (let split = 0; split <= vimColon.length; split++) {
+    let state = foldTerminalPromptSecurityOutput({ origin: '', current: '' }, vimChrome);
+    state = foldTerminalPromptSecurityOutput(state, vimColon.slice(0, split));
+    state = foldTerminalPromptSecurityOutput(state, vimColon.slice(split));
+    assert.equal(state.promptText, ':', `split at ${split}`);
+    assert.equal(isUntrustedTerminalInputPrompt(state.promptText, { alternateScreen: true }), false);
+    assert.equal(isUntrustedTerminalInputPrompt(state.promptText), true, 'primary colon stays protected');
+  }
+});
+
+test('prompt security recognizes CUP/HVP column-one defaults and EL across chunks', () => {
+  for (const position of ['H', 'f', '24H', '24f', '24;H', '24;f', '24;1H', '24;1f', ';1H', '24;0H']) {
+    for (const erase of ['K', '1K', '2K']) {
+      let state = foldTerminalPromptSecurityOutput({ origin: '', current: '' }, vimChrome);
+      for (const chunk of ['\x1b[', position, '\x1b[', erase, ':']) {
+        state = foldTerminalPromptSecurityOutput(state, chunk);
+      }
+      assert.equal(state.promptText, ':', `${position} + ${erase}`);
+    }
+  }
+  const state = foldTerminalPromptSecurityOutput({ origin: '', current: 'Challenge' }, '\x1b[24;2H:');
+  assert.equal(state.promptText, 'Challenge:', 'other columns must not discard a challenge label');
+  assert.equal(isUntrustedTerminalInputPrompt(state.promptText, { alternateScreen: true }), true);
+});
+
 test('terminal prompt security positively confirms shell prompts and fails closed on ambiguous prompts', () => {
   const confirmed = [
     '$ ',

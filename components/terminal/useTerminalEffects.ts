@@ -1,3 +1,4 @@
+import { refreshObservedTerminalDirectory } from '../../application/state/terminalDirectoryRegistry';
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import { useRef } from 'react';
 import { publishTerminalSelectionTarget } from '../../infrastructure/plugins/terminalSelectionRegistry';
@@ -67,10 +68,7 @@ import {
   scheduleTerminalCloseForGeneration,
   serializeTerminalCloseFallback,
 } from './runtime/terminalCloseCapture';
-import {
-  CONNECTION_PROGRESS_START,
-  advanceIndeterminateConnectionProgress,
-} from './connectionProgress';
+import { CONNECTION_PROGRESS_START } from './connectionProgress';
 import {
   getConnectionTimeoutMs,
   resolveActiveConnectionTimeoutHost,
@@ -215,7 +213,7 @@ export function resolveSelectionOverlayPosition(term: any, container: HTMLElemen
 }
 
 export function useTerminalEffects(ctx: TerminalEffectsContext) {
-  const { CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, applyUserCursorWidthPreference, shouldApplyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, captureTerminalLogData, chainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, bootEpochRef, isBroadcastEnabledRef, broadcastPasswordBypassRef, isComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, kittyKeyboardProtocolEnabledForSession, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOpenExternalError, onOutputTriggerUserInputRef, onPluginRuntimeCwdChange, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRules, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prepareInitialCwdIntent, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, onSnippetShortkeyRef, snippetsRef, splitResizeActive, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalOutputHistory, terminalSettings, terminalSettingsRef, terminalTitleRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState, vaultInitialized } = ctx;
+  const { CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, applyUserCursorWidthPreference, shouldApplyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, captureTerminalLogData, chainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, bootEpochRef, isBroadcastEnabledRef, broadcastPasswordBypassRef, isComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, kittyKeyboardProtocolEnabledForSession, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOpenExternalError, onOutputTriggerUserInputRef, onPluginRuntimeCwdChange, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRules, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prepareInitialCwdIntent, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setShowLogs, setStatus, setConnectionDeadlineAt, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, onSnippetShortkeyRef, snippetsRef, splitResizeActive, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalOutputHistory, terminalSettings, terminalSettingsRef, terminalTitleRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState, vaultInitialized } = ctx;
   const archiveHostRef = useRef(host);
   archiveHostRef.current = host;
   const effectiveTerminalProtocol = resolveEffectiveTerminalProtocol(host);
@@ -240,6 +238,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   onCommandSettledRef.current = ctx.onCommandSettled;
   const pluginAwareOnCommandCompleted = () => {
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandCompleted');
+    refreshObservedTerminalDirectory(sessionId);
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
     // Stock local shells update cwd when the command finishes, which can be
     // long after the 150ms post-submit probe. Prompt return (and OSC 133)
@@ -577,6 +576,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           promptLineBreakStateRef,
           scriptRecorderRef,
           passwordPromptActiveRef,
+          isPromptSecurityAlternateScreenActive: ctx.isPromptSecurityAlternateScreenActive,
           allowHostStyleGreaterThanPrompt: isNetworkDevice,
           onOutputTriggerUserInputRef,
           sudoAutofillRef,
@@ -624,6 +624,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           // Defer WebGL context creation for panes that mount hidden (e.g. the
           // background tabs of a batch connect) until they first become visible.
           initiallyVisible: isRendererActive,
+          isPaneVisibleRef: isVisibleRef,
         });
 
         if (disposed) {
@@ -937,9 +938,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         return;
       }
 
-      // A boot that never reached "connected" has nothing worth capturing, and
-      // the teardown below awaits terminal drain plus serialization before it
-      // closes anything. Cancel the pending backend boot after giving an immediate
+      // Never-connected logs are captured at explicit session close, including
+      // empty buffers. Runtime cleanup alone must not end an open log.
+      // Cancel the pending backend boot after giving an immediate
       // remount a chance to replace this generation, instead of letting it
       // finish against a pane that is already gone. Attached popups never own
       // the backend session (skip closeSession) but still sync-dispose xterm.
@@ -1114,10 +1115,11 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       tcpConnectTimeoutMs: hostConnectionTimeouts.tcpConnectTimeoutSeconds * 1000,
       authReadyTimeoutMs: hostConnectionTimeouts.authReadyTimeoutSeconds * 1000,
     }) || CONNECTION_TIMEOUT;
-    setTimeLeft(connectionTimeout / 1000);
-    const countdown = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
+    // Publish only the deadline: the connection dialog animates the
+    // indeterminate progress and counts down locally (connectionTicker.ts).
+    // Ticking 200 ms / 1 s intervals here re-rendered Terminal + TerminalView
+    // ~6 times a second per connecting session, hidden tabs included.
+    setConnectionDeadlineAt(Date.now() + connectionTimeout);
 
     const timeout = setTimeout(() => {
       setError("Connection timed out. Please try again.");
@@ -1125,14 +1127,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       setProgressLogs((prev) => [...prev, "Connection timed out."]);
     }, connectionTimeout);
 
-    const prog = setInterval(() => {
-      setProgressValue(advanceIndeterminateConnectionProgress);
-    }, 200);
-
     return () => {
-      clearInterval(countdown);
       clearTimeout(timeout);
-      clearInterval(prog);
+      setConnectionDeadlineAt(null);
     };
      
   }, [status, auth.needsAuth, host.protocol, host.hostname, host.moshEnabled, host.etEnabled, host.sshTcpConnectTimeoutSeconds, host.sshAuthReadyTimeoutSeconds, chainHosts, chainProgress?.currentHop, chainProgress?.connectionPhase, isLocalConnection, isSerialConnection, needsHostKeyVerification, isConnectionAwaitingUserInput, isConnectionPastTcpDial]);
@@ -1428,6 +1425,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       && currentContainerSizeAlreadyFit()
     ) {
       lastWebglRecoveryLayoutKeyRef.current = paneLayoutKey;
+      // Even a short hide can cost the renderer: Chromium reclaims a hidden
+      // pane's WebGL context when it runs short. No-op while it is still live.
+      xtermRuntimeRef.current?.ensureWebglRenderer();
       flushPendingOutputScroll();
       commitVisibleLayout();
       return;
@@ -1451,6 +1451,12 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     commitVisibleLayout();
     scheduleLayoutRecoveryRefit([100, 350]);
   };
+
+  // Lets the WebGL context budget note when this pane was hidden, so a pane
+  // that stays hidden can give its renderer up while the budget is over.
+  useLayoutEffect(() => {
+    xtermRuntimeRef.current?.syncPaneVisibility();
+  }, [isVisible]);
 
   // Refit synchronously when a split pane becomes visible or its bounds change.
   // Tab switches hide inactive panes without resizing xterm; becoming visible

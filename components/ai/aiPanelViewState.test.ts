@@ -14,14 +14,15 @@ import {
   resolveDisplayedSession,
   shouldForceDraftViewSync,
 } from "./aiPanelViewState.ts";
+import { getSessionScopeMatchRank } from "./sessionScopeMatch.ts";
 
-function createSession(id: string): AISession {
+function createSession(id: string, updatedAt = 1): AISession {
   return {
     id,
     title: `Session ${id}`,
     messages: [],
     createdAt: 1,
-    updatedAt: 1,
+    updatedAt,
     agentId: "catty",
     scope: {
       type: "terminal",
@@ -130,6 +131,33 @@ test("missing explicit panel view resumes the most recent matching history when 
   assert.deepEqual(
     resolveDisplayedPanelView(undefined, false, sessions, undefined, "workspace"),
     { mode: "session", sessionId: "session-2" },
+  );
+});
+
+test("auto-resume prefers the anchored chat over recency and position (#4098 phase 2)", () => {
+  const sessions = [createSession("session-2", 9), createSession("session-1", 4)];
+
+  assert.deepEqual(
+    resolveDisplayedPanelView(undefined, false, sessions, undefined, "workspace", "session-1"),
+    { mode: "session", sessionId: "session-1" },
+  );
+});
+
+test("auto-resume without an anchor picks the most recently updated chat, not sessions[0]", () => {
+  const sessions = [createSession("session-2", 4), createSession("session-1", 9)];
+
+  assert.deepEqual(
+    resolveDisplayedPanelView(undefined, false, sessions, undefined, "workspace"),
+    { mode: "session", sessionId: "session-1" },
+  );
+});
+
+test("a stale anchor that left the scope falls through to recency", () => {
+  const sessions = [createSession("session-2", 4), createSession("session-1", 9)];
+
+  assert.deepEqual(
+    resolveDisplayedPanelView(undefined, false, sessions, undefined, "workspace", "deleted-chat"),
+    { mode: "session", sessionId: "session-1" },
   );
 });
 
@@ -267,4 +295,73 @@ test("draft entry can preserve the current session view while ensuring draft sta
   assert.deepEqual(calls, [
     "ensure-draft",
   ]);
+});
+
+test("cleared source view resolves to draft even while the rebound chat stays rank-1 visible", () => {
+  // PR #4159 round 3: rebinding chat-x from workspace A to B demotes A's
+  // explicit view to draft (clearSessionViewsForSession). The moved chat stays
+  // visible in A's scoped history at rank 1 (same scope type, different
+  // targetId), so a surviving explicit session view would keep it as
+  // activeSession and the active-session effect would recreate A's pointer.
+  const moved: AISession = {
+    ...createSession("chat-x"),
+    scope: { type: "workspace", targetId: "workspace-B" },
+  };
+  const other: AISession = {
+    ...createSession("chat-keep"),
+    scope: { type: "workspace", targetId: "workspace-A" },
+  };
+
+  // Precondition: the cross-workspace chat is still rank-1 visible in A.
+  assert.equal(getSessionScopeMatchRank(moved, "workspace", "workspace-A"), 1);
+
+  const clearedView: AIPanelView = { mode: "draft" };
+  const historySessions = [other, moved];
+  const view = resolveDisplayedPanelView(clearedView, false, historySessions, null, "workspace");
+  assert.deepEqual(view, { mode: "draft" });
+  assert.equal(
+    resolveDisplayedSession(view, historySessions),
+    null,
+    "A's activeSession is null, so the active-session effect cannot recreate the moved chat pointer",
+  );
+});
+
+test("round 4 RESTORED: an explicit draft view blocks the rank-1 fallback for a restored chat with no source view", () => {
+  // PR #4159 round 4: after a restart panelViewByScope starts EMPTY (memory
+  // only) while the active map still names chat-x as A's session. If rebound
+  // to B demotes only explicit views (round 3), A has no panel view at all and
+  // resolveDisplayedPanelView falls through to sessions[0] — the rank-1
+  // cross-workspace chat — letting the active-session effect recreate A's
+  // pointer. The round-4 fix writes an explicit draft view for A so the
+  // fallback is short-circuited even though no source view ever existed.
+  const moved: AISession = {
+    ...createSession("chat-x"),
+    scope: { type: "workspace", targetId: "workspace-B" },
+    updatedAt: 999, // rebind touches updatedAt, so it becomes sessions[0]
+  };
+  const other: AISession = {
+    ...createSession("chat-keep"),
+    scope: { type: "workspace", targetId: "workspace-A" },
+    updatedAt: 1,
+  };
+  const historySessions = [moved, other];
+
+  assert.equal(getSessionScopeMatchRank(moved, "workspace", "workspace-A"), 1);
+
+  // Precondition: with NO explicit view (the restored, empty-map case) the
+  // fallback selects the moved chat — this is the bug the fix must prevent.
+  const fallback = resolveDisplayedPanelView(undefined, false, historySessions, null, "workspace");
+  assert.deepEqual(fallback, { mode: "session", sessionId: "chat-x" });
+
+  // The round-4 draft view (written by demoteImplicitSourceViewsForSession for
+  // A) short-circuits the fallback: no session is displayed, so A's active
+  // pointer is not recreated and follow-up turns cannot run in the old scope.
+  const demotedView: AIPanelView = { mode: "draft" };
+  const view = resolveDisplayedPanelView(demotedView, false, historySessions, null, "workspace");
+  assert.deepEqual(view, { mode: "draft" });
+  assert.equal(
+    resolveDisplayedSession(view, historySessions),
+    null,
+    "restored A shows a draft, so the active-session effect cannot recreate the moved chat pointer",
+  );
 });
