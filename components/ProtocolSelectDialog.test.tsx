@@ -5,7 +5,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nProvider } from "../application/i18n/I18nProvider";
 import type { Host } from "../types";
 import ProtocolSelectDialog from "./ProtocolSelectDialog";
-import { PROTOCOL_VISUAL_STYLES } from "./protocolVisuals";
+import {
+  PROTOCOL_OPTION_CARD_IDLE_CLASS,
+  PROTOCOL_OPTION_CARD_SELECTED_CLASS,
+  PROTOCOL_VISUAL_STYLES,
+} from "./protocolVisuals";
 
 const host = (overrides: Partial<Host> = {}): Host => ({
   id: "host-1",
@@ -65,10 +69,25 @@ test("plugin protocol hosts default to the plugin provider when optional built-i
   );
 
   assert.ok(markup.indexOf(providerId) < markup.indexOf(">Telnet<"));
-  assert.match(markup, new RegExp(`border-primary bg-primary/5[^>]*>[\\s\\S]*${providerId}`));
   const providerStart = markup.lastIndexOf("<button", markup.indexOf(providerId));
   const providerEnd = markup.indexOf("</button>", markup.indexOf(providerId));
-  assert.doesNotMatch(markup.slice(providerStart, providerEnd), /type="number"/);
+  const providerButton = markup.slice(providerStart, providerEnd);
+  assert.match(providerButton, /aria-pressed="true"/);
+  assert.match(providerButton, /data-state="active"/);
+  for (const token of PROTOCOL_OPTION_CARD_SELECTED_CLASS.split(/\s+/)) {
+    assert.ok(providerButton.includes(token), `expected active plugin protocol card to include ${token}`);
+  }
+  assert.doesNotMatch(providerButton, /type="number"/);
   assert.equal((markup.match(/type="number"/g) ?? []).length, 3);
   assert.doesNotMatch(markup, /10\.2\.0\.31:22/);
+
+  const telnetStart = markup.lastIndexOf("<button", markup.indexOf(">Telnet<"));
+  const telnetEnd = markup.indexOf("</button>", markup.indexOf(">Telnet<"));
+  const telnetButton = markup.slice(telnetStart, telnetEnd);
+  assert.match(telnetButton, /aria-pressed="false"/);
+  assert.match(telnetButton, /data-state="inactive"/);
+  for (const token of PROTOCOL_OPTION_CARD_IDLE_CLASS.split(/\s+/)) {
+    assert.ok(telnetButton.includes(token), `expected idle Telnet card to include ${token}`);
+  }
+  assert.ok(!telnetButton.includes("border-primary"));
 });
