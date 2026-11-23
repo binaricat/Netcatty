@@ -77,6 +77,7 @@ import {
 import { resolveHostSshConnectionTimeouts } from '../../domain/sshConnectionTimeouts';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
 import { isPluginHostProtocol } from '../../domain/pluginConnection';
+import { resolveDeviceConsoleKeywordHighlightRules } from './deviceKeywordHighlightRules';
 
 type TerminalEffectsContext = Record<string, any>;
 
@@ -284,20 +285,29 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       const effectiveGlobalEnabled = globalEnabled;
       const effectiveHostEnabled = hostEnabled ?? false;
 
+      const deviceRules = resolveDeviceConsoleKeywordHighlightRules(
+        host,
+        terminalSettings?.deviceConsoleHighlightEnabled !== false,
+      );
       const mergedRules = [
+        ...deviceRules,
         ...(effectiveGlobalEnabled ? globalRules : []),
         ...(effectiveHostEnabled ? hostRules : []),
         ...providerRules,
       ];
-      const isEnabled = effectiveGlobalEnabled || effectiveHostEnabled || providerRules.length > 0;
+      const isEnabled =
+        effectiveGlobalEnabled || effectiveHostEnabled || providerRules.length > 0 || deviceRules.length > 0;
 
       xtermRuntimeRef.current.keywordHighlighter.setRules(mergedRules, isEnabled);
     }
   }, [
     terminalSettings?.keywordHighlightEnabled,
     terminalSettings?.keywordHighlightRules,
+    terminalSettings?.deviceConsoleHighlightEnabled,
     host?.keywordHighlightEnabled,
     host?.keywordHighlightRules,
+    host?.protocol,
+    host?.deviceType,
     pluginDecorationRules,
   ]);
 
@@ -663,11 +673,16 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         const hostEnabled = host?.keywordHighlightEnabled;
         const effectiveGlobalEnabled = globalEnabled;
         const effectiveHostEnabled = hostEnabled ?? false;
+        const deviceRules = resolveDeviceConsoleKeywordHighlightRules(
+          host,
+          terminalSettingsRef.current?.deviceConsoleHighlightEnabled !== false,
+        );
         const mergedRules = [
+          ...deviceRules,
           ...(effectiveGlobalEnabled ? globalRules : []),
           ...(effectiveHostEnabled ? hostRules : [])
         ];
-        const isEnabled = effectiveGlobalEnabled || effectiveHostEnabled;
+        const isEnabled = effectiveGlobalEnabled || effectiveHostEnabled || deviceRules.length > 0;
         runtime.keywordHighlighter.setRules(mergedRules, isEnabled);
         runtime.cursorLineHighlighter.setBackgroundColor(
           resolveCursorLineHighlightBackground(effectiveTheme.colors),
@@ -863,6 +878,11 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           setBackendConnectingStatus();
           setProgressLogs(["Initializing serial connection..."]);
           await sessionStarters.startSerial(term, bootStartOptions);
+          if (!bootStillActive()) return;
+        } else if (effectiveTerminalProtocol === "ensp") {
+          setBackendConnectingStatus();
+          setProgressLogs(["Initializing eNSP Pro console..."]);
+          await sessionStarters.startEnsp(term, bootStartOptions);
           if (!bootStillActive()) return;
         } else if (effectiveTerminalProtocol === "local") {
           setBackendConnectingStatus();

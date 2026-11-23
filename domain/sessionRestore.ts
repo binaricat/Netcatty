@@ -1,4 +1,4 @@
-import type { PluginConnectionConfig, SerialConfig, TerminalSession, Workspace, WorkspaceNode } from "./models";
+import type { EnspConfig, PluginConnectionConfig, SerialConfig, TerminalSession, Workspace, WorkspaceNode } from "./models";
 import { createEmptyWorkspaceRoot } from "./workspace";
 import { isPluginHostProtocol, sanitizePluginConnection } from "./pluginConnection";
 
@@ -20,6 +20,7 @@ export type RestoredTerminalSession = {
   shellType?: TerminalSession["shellType"];
   charset?: string;
   serialConfig?: SerialConfig;
+  enspConfig?: EnspConfig;
   localShell?: string;
   localShellArgs?: string[];
   localShellName?: string;
@@ -95,8 +96,25 @@ const isOneOf = <T extends string | number>(
 ): value is T => allowed.includes(value as T);
 
 const sanitizeProtocol = (value: unknown): TerminalSession["protocol"] | undefined => {
-  if (isOneOf(value, ["ssh", "telnet", "mosh", "et", "local", "serial"] as const)) return value;
+  if (isOneOf(value, ["ssh", "telnet", "mosh", "et", "local", "serial", "ensp"] as const)) return value;
   return typeof value === "string" && isPluginHostProtocol(value) ? value : undefined;
+};
+
+const sanitizeEnspConfig = (value: unknown): EnspConfig | undefined => {
+  if (!isRecord(value)) return undefined;
+  const host = readString(value, "host");
+  const sandboxId = readNumber(value, "sandboxId");
+  const nodeId = readNumber(value, "nodeId");
+  if (!host || sandboxId === undefined || nodeId === undefined) return undefined;
+  const port = readNumber(value, "port");
+  return {
+    host,
+    port: port && port > 0 ? port : 8443,
+    sandboxId,
+    nodeId,
+    ...(readString(value, "sandboxName") ? { sandboxName: readString(value, "sandboxName") } : {}),
+    ...(readString(value, "deviceName") ? { deviceName: readString(value, "deviceName") } : {}),
+  };
 };
 
 const sanitizeShellType = (value: unknown): TerminalSession["shellType"] | undefined => (
@@ -135,6 +153,7 @@ const sanitizeSerialConfig = (value: unknown): SerialConfig | undefined => {
 
 const restoreSession = (session: TerminalSession): RestoredTerminalSession => {
   const serialConfig = sanitizeSerialConfig(session.serialConfig);
+  const enspConfig = sanitizeEnspConfig(session.enspConfig);
   const protocol = sanitizeProtocol(session.protocol);
   const pluginConnection = sanitizePluginConnection(session.pluginConnection, protocol);
   const shellType = sanitizeShellType(session.shellType);
@@ -153,6 +172,7 @@ const restoreSession = (session: TerminalSession): RestoredTerminalSession => {
     ...(shellType ? { shellType } : {}),
     ...(session.charset ? { charset: session.charset } : {}),
     ...(serialConfig ? { serialConfig } : {}),
+    ...(enspConfig ? { enspConfig } : {}),
     ...(session.localShell !== undefined ? { localShell: session.localShell } : {}),
     ...(session.localShellArgs ? { localShellArgs: [...session.localShellArgs] } : {}),
     ...(session.localShellName !== undefined ? { localShellName: session.localShellName } : {}),
@@ -178,6 +198,7 @@ const restoreSessionFromUnknown = (value: unknown): RestoredTerminalSession | nu
   if (!id || !hostId || !hostLabel || !hostname || username === undefined) return null;
 
   const serialConfig = sanitizeSerialConfig(value.serialConfig);
+  const enspConfig = sanitizeEnspConfig(value.enspConfig);
   const protocol = sanitizeProtocol(value.protocol);
   const pluginConnection = sanitizePluginConnection(value.pluginConnection, protocol);
   const shellType = sanitizeShellType(value.shellType);
@@ -196,6 +217,7 @@ const restoreSessionFromUnknown = (value: unknown): RestoredTerminalSession | nu
     ...(shellType ? { shellType } : {}),
     ...(readString(value, "charset") ? { charset: readString(value, "charset") } : {}),
     ...(serialConfig ? { serialConfig } : {}),
+    ...(enspConfig ? { enspConfig } : {}),
     ...(readStringAllowEmpty(value, "localShell") !== undefined ? { localShell: readStringAllowEmpty(value, "localShell") } : {}),
     ...(Array.isArray(value.localShellArgs) ? { localShellArgs: value.localShellArgs.filter((arg): arg is string => typeof arg === "string") } : {}),
     ...(readStringAllowEmpty(value, "localShellName") !== undefined ? { localShellName: readStringAllowEmpty(value, "localShellName") } : {}),

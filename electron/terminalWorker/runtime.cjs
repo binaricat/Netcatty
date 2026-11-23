@@ -18,6 +18,7 @@ const SESSION_START_CHANNELS = new Set([
   "netcatty:mosh:start",
   "netcatty:et:start",
   "netcatty:serial:start",
+  "netcatty:ensp:start",
   "netcatty:local:reconnect",
   "netcatty:external:start",
 ]);

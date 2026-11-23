@@ -1,4 +1,4 @@
-import type { Host, SerialConfig, TerminalSession } from "../../domain/models";
+import type { EnspConfig, Host, SerialConfig, TerminalSession } from "../../domain/models";
 import { classifyLocalShellType } from "../../lib/localShell";
 
 export interface LocalTerminalOptions {
@@ -89,10 +89,50 @@ export const createSerialTerminalSession = (
   };
 };
 
+const enspSessionLabel = (config: EnspConfig): string => {
+  const sandbox = config.sandboxName?.trim() || String(config.sandboxId);
+  const device = config.deviceName?.trim() || String(config.nodeId);
+  return `eNSP ${sandbox} / ${device}`;
+};
+
+export const createEnspTerminalSession = (
+  sessionId: string,
+  config: EnspConfig,
+): TerminalSession => ({
+  id: sessionId,
+  hostId: `ensp-${sessionId}`,
+  hostLabel: enspSessionLabel(config),
+  hostname: config.host,
+  username: "",
+  port: config.port,
+  status: "connecting",
+  protocol: "ensp",
+  enspConfig: { ...config },
+});
+
 export const createHostTerminalSession = (
   sessionId: string,
   host: Host,
 ): TerminalSession => {
+  if (host.protocol === "ensp") {
+    const enspConfig: EnspConfig = host.enspConfig || {
+      host: host.hostname,
+      port: host.port || 8443,
+      sandboxId: 0,
+      nodeId: 0,
+    };
+    return {
+      id: sessionId,
+      hostId: host.id,
+      hostLabel: host.label || enspSessionLabel(enspConfig),
+      hostname: enspConfig.host,
+      username: "",
+      status: "connecting",
+      protocol: "ensp",
+      enspConfig: { ...enspConfig },
+    };
+  }
+
   if (host.protocol === "serial") {
     const serialConfig = snapshotSerialConfig(
       host.serialConfig || {

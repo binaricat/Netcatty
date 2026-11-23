@@ -87,6 +87,8 @@ const getProtocolInfo = (host: Host): { i18nKey: string; showPort: boolean; port
             return { i18nKey: 'terminal.connection.protocol.mosh', showPort: true, port: host.port || 22 };
         case 'serial':
             return { i18nKey: 'terminal.connection.protocol.serial', showPort: false, port: 0 };
+        case 'ensp':
+            return { i18nKey: 'terminal.connection.protocol.ensp', showPort: true, port: host.enspConfig?.port || 8443 };
         case 'ssh':
         default:
             return { i18nKey: 'terminal.connection.protocol.ssh', showPort: true, port: host.port || 22 };

@@ -427,6 +427,18 @@ function createPreloadApi(ctx) {
   listSerialPorts: async () => {
     return ipcRenderer.invoke("netcatty:serial:list");
   },
+  startEnspSession: async (options) => {
+    markRequestedTerminalDataSessionOpen(options);
+    const result = await ipcRenderer.invoke("netcatty:ensp:start", options);
+    markTerminalDataSessionOpen(result?.sessionId);
+    return result.sessionId;
+  },
+  listEnspDevices: async (options) => {
+    return ipcRenderer.invoke("netcatty:ensp:list", options || {});
+  },
+  enspDeviceAction: async (options) => {
+    return ipcRenderer.invoke("netcatty:ensp:device-action", options || {});
+  },
   sendSerialYmodem: async (sessionId, filePath) => {
     return ipcRenderer.invoke("netcatty:serial:ymodem-send", { sessionId, filePath });
   },
@@ -2052,6 +2064,15 @@ function createPreloadApi(ctx) {
   },
   aiSetChatSessionCancelled: async (chatSessionId, cancelled = true, delegationTag) => {
     return ipcRenderer.invoke("netcatty:ai:chat-session:set-cancelled", { chatSessionId, cancelled, ...(delegationTag ? { delegationTag } : {}) });
+  },
+  aiVendorAssistantStatus: async () => {
+    return ipcRenderer.invoke("netcatty:ai:vendor:status", {});
+  },
+  aiVendorAssistantAsk: async (vendor, question, timeoutMs) => {
+    return ipcRenderer.invoke("netcatty:ai:vendor:ask", { vendor, question, ...(timeoutMs ? { timeoutMs } : {}) });
+  },
+  aiVendorAssistantLogin: async (vendor, timeoutMs) => {
+    return ipcRenderer.invoke("netcatty:ai:vendor:login", { vendor, ...(timeoutMs ? { timeoutMs } : {}) });
   },
   aiCapability: async (rpcMethod, params, chatSessionId, delegationTag) => {
     return ipcRenderer.invoke("netcatty:ai:capability", { rpcMethod, params, chatSessionId, ...(delegationTag ? { delegationTag } : {}) });

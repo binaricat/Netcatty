@@ -368,9 +368,10 @@ export function formatTerminalTitleConnectionAddress(host?: TerminalTitleAddress
     || host.id?.startsWith('local-') || !host.hostname || host.hostname === 'localhost') {
     return null;
   }
-  const isSerial = host.protocol === 'serial' || host.id?.startsWith('serial-');
-  const username = !isSerial && host.username ? `${host.username}@` : '';
-  const port = !isSerial && host.port ? `:${host.port}` : '';
+  const isDeviceConsole = host.protocol === 'serial' || host.id?.startsWith('serial-')
+    || host.protocol === 'ensp' || host.id?.startsWith('ensp-');
+  const username = !isDeviceConsole && host.username ? `${host.username}@` : '';
+  const port = !isDeviceConsole || host.protocol === 'ensp' ? (host.port ? `:${host.port}` : '') : '';
   return `${username}${host.hostname}${port}`;
 }
 

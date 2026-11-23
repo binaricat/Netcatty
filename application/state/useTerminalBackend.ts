@@ -175,6 +175,23 @@ export const useTerminalBackend = () => {
     return bridge.startSerialSession(options);
   }, []);
 
+  const startEnspSession = useCallback(async (options: Parameters<NonNullable<NetcattyBridge["startEnspSession"]>>[0]) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.startEnspSession) throw new Error("startEnspSession unavailable");
+    return bridge.startEnspSession(options);
+  }, []);
+
+  const enspAvailable = useCallback(() => {
+    const bridge = netcattyBridge.get();
+    return !!bridge?.startEnspSession;
+  }, []);
+
+  const listEnspDevices = useCallback(async (options: Parameters<NonNullable<NetcattyBridge["listEnspDevices"]>>[0]) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.listEnspDevices) throw new Error("listEnspDevices unavailable");
+    return bridge.listEnspDevices(options);
+  }, []);
+
   const startPluginConnection = useCallback(async (options: PluginConnectionStartOptions) => {
     const bridge = netcattyBridge.get();
     if (!bridge) throw new Error("startPluginConnection unavailable");
@@ -592,6 +609,9 @@ export const useTerminalBackend = () => {
         startEtSession,
         startLocalSession,
         startSerialSession,
+        startEnspSession,
+        enspAvailable,
+        listEnspDevices,
         startPluginConnection,
         cancelPluginExtensionRequest,
         signalPluginConnection,
@@ -677,6 +697,9 @@ export const useTerminalBackend = () => {
       startEtSession,
       startLocalSession,
       startSerialSession,
+      startEnspSession,
+      enspAvailable,
+      listEnspDevices,
       startPluginConnection,
       cancelPluginExtensionRequest,
       signalPluginConnection,

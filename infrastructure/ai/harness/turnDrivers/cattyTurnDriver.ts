@@ -182,6 +182,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     hosts: context.terminalSessions,
     permissionMode: context.globalPermissionMode,
     webSearchEnabled: isWebSearchReady(context.webSearchConfig),
+    vendorAssistantEnabled: 'vendor_assistant_ask' in tools,
     userSkillsContext,
   });
 

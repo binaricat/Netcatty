@@ -60,6 +60,7 @@ import {
   MIN_AI_SESSION_MESSAGE_CAP,
 } from "../../../domain/aiSessionMessageCap";
 import { WebSearchSettings } from "./ai/WebSearchSettings";
+import { VendorAssistantSettings } from "./ai/VendorAssistantSettings";
 import { QuickMessagesSettings } from "./ai/QuickMessagesSettings";
 import type { AIQuickMessage } from "../../../infrastructure/ai/quickMessages";
 import { encryptField } from "../../../infrastructure/persistence/secureFieldAdapter";
@@ -104,7 +105,7 @@ function scheduleAfterFirstPaint(callback: () => void, delayMs = 0): () => void 
   };
 }
 
-type AISettingsSubTab = "providers" | "agents" | "tools" | "search" | "safety";
+type AISettingsSubTab = "providers" | "agents" | "tools" | "search" | "vendor" | "safety";
 
 function getSavedManagedAgentPathInfo(
   agents: ExternalAgentConfig[],
@@ -1050,6 +1051,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           <TabsTrigger value="agents">{t('ai.agents')}</TabsTrigger>
           <TabsTrigger value="tools">{t('ai.toolAccess.title')}</TabsTrigger>
           <TabsTrigger value="search">{t("ai.webSearch.title")}</TabsTrigger>
+          <TabsTrigger value="vendor">{t("ai.vendor.tab")}</TabsTrigger>
           <TabsTrigger value="safety">{t('ai.safety.title')}</TabsTrigger>
         </TabsList>
 
@@ -1467,6 +1469,10 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             webSearchConfig={webSearchConfig}
             setWebSearchConfig={setWebSearchConfig}
           />
+        </TabsContent>
+
+        <TabsContent value="vendor" className="m-0 space-y-6">
+          <VendorAssistantSettings />
         </TabsContent>
 
         <TabsContent value="safety" className="m-0 space-y-6">

@@ -8,6 +8,8 @@ import {
   executeWorkspaceGetSessionInfo,
   executeWebSearch,
   executeUrlFetch,
+  executeVendorAssistantAsk,
+  executeVendorAssistantList,
   type ToolDeps,
   type ToolExecResult,
 } from '../shared/toolExecutors';
@@ -181,6 +183,20 @@ export function createToolExecutor(
             url: String(args.url || ''),
             maxLength: Number(args.maxLength) || 50000,
           });
+          return toToolResult(toolCall.id, r);
+        }
+
+        case 'vendor_assistant_ask': {
+          const r = await executeVendorAssistantAsk(deps, {
+            vendor: String(args.vendor || ''),
+            question: String(args.question || ''),
+            timeoutMs: Number(args.timeoutMs) || undefined,
+          });
+          return toToolResult(toolCall.id, r);
+        }
+
+        case 'vendor_assistant_list': {
+          const r = await executeVendorAssistantList(deps);
           return toToolResult(toolCall.id, r);
         }
 

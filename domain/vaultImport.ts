@@ -791,7 +791,7 @@ const importFromCsv = (
       password,
       keyPath,
       port,
-      protocol,
+      protocol: protocol === "ensp" || protocol === "serial" ? "ssh" : protocol,
       group,
       tags,
       notes,
@@ -1610,7 +1610,7 @@ const importFromMobaXterm = (
         hostname,
         username,
         port,
-        protocol: protocol ?? "ssh",
+        protocol: !protocol || protocol === "ensp" || protocol === "serial" ? "ssh" : protocol,
         group,
       }),
     );
@@ -1888,3 +1888,4 @@ export async function filterVaultImportKeyPassphrasesAgainstExisting(
   }
   return { keyPassphrases, issues };
 }
+

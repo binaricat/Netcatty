@@ -353,10 +353,51 @@ function createWorkerAiExecHandler({
       });
     }
 
+    // Serial ports expose their own transport instead of a PTY stream, so this
+    // branch has to run before the network-device PTY guard below.
+    if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
+      if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
+        return { ok: false, error: "Serial file transfer is already in progress" };
+      }
+      const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
+      if (blocked) return blocked;
+      return execViaRawPty(session.serialPort, command, {
+        timeoutMs,
+        trackForCancellation: activePtyExecs,
+        chatSessionId,
+        encoding: session.serialEncoding || "utf8",
+      });
+    }
+
+    // eNSP Pro consoles speak STOMP over a WebSocket rather than a PTY, so they
+    // follow the same raw-command path as serial sessions.
+    if (session.protocol === "ensp" && session.enspConsole && typeof session.enspConsole.write === "function") {
+      const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
+      if (blocked) return blocked;
+      return execViaRawPty(session.enspConsole, command, {
+        timeoutMs,
+        trackForCancellation: activePtyExecs,
+        chatSessionId,
+        encoding: "utf8",
+      });
+    }
+
+    // Telnet consoles expose a socket rather than a PTY stream, so they follow
+    // the same raw-command path as serial and eNSP consoles.
+    if ((session.protocol === "telnet" || session.type === "telnet-native") && session.socket && typeof session.socket.write === "function") {
+      const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
+      if (blocked) return blocked;
+      return execViaRawPty(session.socket, command, {
+        timeoutMs,
+        trackForCancellation: activePtyExecs,
+        chatSessionId,
+        encoding: "utf8",
+      });
+    }
+
     if (isNetworkDevice) {
       return { ok: false, error: "Network device session has no writable PTY stream for command execution" };
     }
-
     const sshClient = session.sshClient || session.conn;
     if (!session.singleChannelSsh && sshClient && typeof sshClient.exec === "function") {
       const probed = await ensureSessionShellKindForExec(session, {
@@ -378,20 +419,6 @@ function createWorkerAiExecHandler({
         timeoutMs,
         trackForCancellation: activePtyExecs,
         chatSessionId,
-      });
-    }
-
-    if (session.protocol === "serial" && session.serialPort && typeof session.serialPort.write === "function") {
-      if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
-        return { ok: false, error: "Serial file transfer is already in progress" };
-      }
-      const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
-      if (blocked) return blocked;
-      return execViaRawPty(session.serialPort, command, {
-        timeoutMs,
-        trackForCancellation: activePtyExecs,
-        chatSessionId,
-        encoding: session.serialEncoding || "utf8",
       });
     }
 

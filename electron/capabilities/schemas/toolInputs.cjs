@@ -414,6 +414,23 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     url: { type: "string", description: "The HTTPS URL to fetch." },
     maxLength: { type: "number", optional: true, description: "Maximum characters to return (default 50000)." },
   },
+  "harness.vendor_assistant.ask": {
+    vendor: { type: "string", description: "Vendor key: huawei, ruijie, h3c, juniper, aruba, or cisco." },
+    question: { type: "string", description: "The question to ask the vendor's official AI assistant." },
+    timeoutMs: { type: "number", optional: true, description: "How long to wait for an answer (default 120000, capped at 300000)." },
+  },
+  "harness.vendor_assistant.list": {},
+  "harness.ensp.list": {
+    host: { type: "string", description: "eNSP Pro platform address, e.g. https://192.168.31.211." },
+    port: { type: "number", optional: true, description: "Platform HTTPS port (default 8443)." },
+  },
+  "harness.ensp.open": {
+    host: { type: "string", description: "eNSP Pro platform address, e.g. https://192.168.31.211." },
+    sandbox: { type: "string", description: "Sandbox name or numeric id, e.g. \"11\"." },
+    device: { type: "string", description: "Device name or numeric node id, e.g. CE-1 or 2." },
+    port: { type: "number", optional: true, description: "Platform HTTPS port (default 8443)." },
+    password: { type: "string", optional: true, description: "Device console login password; also used to configure a fresh device." },
+  },
 });
 
 /** Long-form model guidance appended to terminal tool descriptions from catalog. */

@@ -667,6 +667,7 @@ export const zhCNVaultMessages: Messages = {
   'terminal.connection.protocol.telnet': 'Telnet',
   'terminal.connection.protocol.mosh': 'Mosh',
   'terminal.connection.protocol.serial': '串口',
+  'terminal.connection.protocol.ensp': 'eNSP',
   'terminal.connection.protocol.local': '本地终端',
   'terminal.hostKey.unknownTitle': '确认主机指纹',
   'terminal.hostKey.changedTitle': '主机指纹已变化',

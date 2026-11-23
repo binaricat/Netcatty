@@ -12,6 +12,8 @@ import {
   executeWorkspaceGetSessionInfo,
   executeWebSearch,
   executeUrlFetch,
+  executeVendorAssistantAsk,
+  executeVendorAssistantList,
   type ToolDeps,
   type ToolExecResult,
 } from '../shared/toolExecutors';
@@ -358,6 +360,106 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
         return applyToolDedup(spec.toolName, fingerprint, raw, toolResultDedup);
       }
       return raw;
+    }
+    case 'harness.vendor_assistant.ask': {
+      const { vendor, question, timeoutMs } = args as {
+        vendor: string;
+        question: string;
+        timeoutMs?: number;
+      };
+      const raw = unwrap(await executeVendorAssistantAsk(deps, { vendor, question, timeoutMs }));
+      const answerText = 'text' in raw ? raw.text : raw.error;
+      const fingerprint = toolResultDedup?.fingerprintFor(
+        spec.toolName,
+        hashScopeKey([vendor, hashToolResult(question), hashToolResult(answerText)]),
+      );
+      return fingerprint
+        ? applyToolDedup(spec.toolName, fingerprint, raw, toolResultDedup)
+        : raw;
+    }
+    case 'harness.vendor_assistant.list': {
+      return unwrap(await executeVendorAssistantList(deps));
+    }
+    case 'harness.ensp.list': {
+      const { host, port } = args as { host: string; port?: number };
+      const bridge = deps.bridge as {
+        listEnspDevices?: (options: { host: string; port?: number }) => Promise<{
+          ok?: boolean;
+          error?: string;
+          sandboxes?: unknown[];
+          devices?: unknown[];
+        }>;
+      };
+      if (typeof bridge.listEnspDevices !== 'function') {
+        return { error: 'eNSP Pro support is unavailable in this build.' };
+      }
+      const result = await bridge.listEnspDevices({ host, port });
+      if (result?.ok === false) {
+        return { error: result.error || 'eNSP Pro device listing failed.' };
+      }
+      return { ok: true, host, port, sandboxes: result?.sandboxes ?? [], devices: result?.devices ?? [] };
+    }
+    case 'harness.ensp.open': {
+      const { host, port, sandbox, device, password } = args as {
+        host: string;
+        port?: number;
+        sandbox: string;
+        device: string;
+        password?: string;
+      };
+      const bridge = deps.bridge as {
+        listEnspDevices?: (options: { host: string; port?: number }) => Promise<{
+          ok?: boolean;
+          error?: string;
+          devices?: Array<{ sandboxId: number; sandboxName: string; nodeId: number; name: string }>;
+        }>;
+        startEnspSession?: (options: Record<string, unknown>) => Promise<string>;
+      };
+      if (typeof bridge.startEnspSession !== 'function' || typeof bridge.listEnspDevices !== 'function') {
+        return { error: 'eNSP Pro support is unavailable in this build.' };
+      }
+      const listed = await bridge.listEnspDevices({ host, port });
+      if (listed?.ok === false) {
+        return { error: listed.error || 'eNSP Pro device listing failed.' };
+      }
+      const devices = listed?.devices ?? [];
+      const sandboxNeedle = String(sandbox ?? '').trim().toLowerCase();
+      const deviceNeedle = String(device ?? '').trim().toLowerCase();
+      const inSandbox = devices.filter(
+        (entry) =>
+          String(entry.sandboxName ?? '').toLowerCase() === sandboxNeedle ||
+          String(entry.sandboxId) === sandboxNeedle,
+      );
+      const matches = inSandbox.filter(
+        (entry) => String(entry.name ?? '').toLowerCase() === deviceNeedle || String(entry.nodeId) === deviceNeedle,
+      );
+      if (matches.length !== 1) {
+        return {
+          error:
+            matches.length === 0
+              ? `No eNSP Pro device "${device}" in sandbox "${sandbox}". Call ensp_list first.`
+              : `Multiple eNSP Pro devices matched "${device}"; pass the node id instead.`,
+        };
+      }
+      const target = matches[0];
+      const sessionId = await bridge.startEnspSession({
+        host,
+        port,
+        sandboxId: target.sandboxId,
+        nodeId: target.nodeId,
+        sandboxName: target.sandboxName,
+        deviceName: target.name,
+        password,
+      });
+      return {
+        ok: true,
+        sessionId,
+        protocol: 'ensp',
+        sandboxId: target.sandboxId,
+        sandboxName: target.sandboxName,
+        nodeId: target.nodeId,
+        deviceName: target.name,
+      };
     }
     default:
       return { error: `No local executor registered for "${spec.capabilityId}".` };

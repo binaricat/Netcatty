@@ -87,6 +87,7 @@ function buildFallbackHostFromSession(
     etEnabled: session.etEnabled,
     charset: session.charset,
     serialConfig: session.serialConfig,
+    enspConfig: session.enspConfig,
     backspaceBehavior: session.serialConfig?.backspaceBehavior === "ctrl-h" ? "ctrl-h" : undefined,
     localShell: session.localShell,
     localShellArgs: session.localShellArgs,

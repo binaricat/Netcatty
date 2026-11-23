@@ -17,6 +17,7 @@ export type AIProviderId =
   | 'zhipu'
   | 'doubao'
   | 'mimo'
+  | 'opencode'
   | 'custom';
 
 /**
@@ -541,6 +542,12 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
       'mimo-v2.5-pro',
       'mimo-v2.5',
     ],
+  },
+  opencode: {
+    name: 'OpenCode',
+    defaultBaseURL: 'https://opencode.ai/inference/go/v1',
+    modelsEndpoint: '/models',
+    defaultModels: ['deepseek-v4.1-flash'],
   },
   custom: { name: 'Custom', defaultBaseURL: '' },
 };

@@ -871,6 +871,8 @@ Highlight the focused split pane:
   'settings.terminal.startupCommandDelay.label': 'Startup command delay (ms)',
   'settings.terminal.startupCommandDelay.desc': 'How long to wait after connecting before sending the startup command. Also used between lines when the startup command has multiple lines. Increase for slow connections.',
   'settings.terminal.keywordHighlight.title': 'Keyword highlighting',
+  'settings.terminal.keywordHighlight.deviceConsole': 'Network device highlighting',
+  'settings.terminal.keywordHighlight.deviceConsole.desc': 'Color link state, CLI errors, the prompt and the command you type on serial, eNSP Pro, Telnet and network-device SSH consoles.',
   'settings.terminal.keywordHighlight.resetColors': 'Reset to default colors',
   'settings.terminal.keywordHighlight.resetDefaults': 'Reset built-ins to defaults',
   'settings.terminal.keywordHighlight.resetBuiltIn': 'Restore default label and patterns',
