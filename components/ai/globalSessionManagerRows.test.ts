@@ -46,40 +46,57 @@ const baseInput = () => ({
   t,
 });
 
-test("global rows cover every scope: live terminal, other terminal, workspace, dangling, global", () => {
-  const input = baseInput();
+test("global rows cover every scope: live terminal, other terminal, workspace, closed/dangling with host fallback, global", () => {
+  const input = {
+    ...baseInput(),
+    hosts: [
+      { id: "h-1", label: "edge", hostname: "edge.example" },
+      { id: "h-old", label: "prod-web-01", hostname: "10.0.0.5" },
+    ],
+  };
   input.sessions = [
     baseSession({ id: "s-term", title: "Terminal chat", scope: { type: "terminal", targetId: "t-1" } }),
     baseSession({ id: "s-other", title: "Other terminal chat", scope: { type: "terminal", targetId: "t-2" } }),
     baseSession({ id: "s-ws", title: "Workspace chat", scope: { type: "workspace", targetId: "w-1" } }),
+    baseSession({ id: "s-dangling-host", title: "Past host chat", scope: { type: "terminal", targetId: "t-gone", hostIds: ["h-old"] } }),
     baseSession({ id: "s-dangling", title: "Dangling chat", scope: { type: "terminal", targetId: "t-gone" } }),
     baseSession({ id: "s-ws-gone", title: "Dangling ws chat", scope: { type: "workspace", targetId: "w-gone" } }),
     baseSession({ id: "s-global", title: "Global chat", scope: { type: "global" } }),
   ];
   const rows = buildGlobalManagerRows(input);
-  assert.equal(rows.length, 6);
+  assert.equal(rows.length, 7);
   const byId = new Map(rows.map((row) => [row.session.id, row]));
 
   assert.equal(byId.get("s-term")!.scopeState, "idle");
-  assert.ok(byId.get("s-term")!.scopeLabel.includes("edge"));
+  assert.equal(byId.get("s-term")!.scopeLabel, "edge");
+  assert.equal(byId.get("s-term")!.isCurrentView, true);
   assert.equal(byId.get("s-term")!.canActivate, true);
 
   assert.equal(byId.get("s-other")!.scopeState, "idle");
-  assert.ok(byId.get("s-other")!.scopeLabel.includes("core"));
-  // Bound to another open terminal: live, but not activatable here.
-  assert.equal(byId.get("s-other")!.canActivate, false);
+  assert.equal(byId.get("s-other")!.scopeLabel, "core");
+  assert.equal(byId.get("s-other")!.isCurrentView, false);
+  // Every chat is directly openable when the viewing panel has a live scope target.
+  assert.equal(byId.get("s-other")!.canActivate, true);
 
   assert.equal(byId.get("s-ws")!.scopeState, "idle");
-  assert.ok(byId.get("s-ws")!.scopeLabel.includes("Prod"));
-  assert.equal(byId.get("s-ws")!.canActivate, false);
+  assert.equal(byId.get("s-ws")!.scopeLabel, "Prod");
+  assert.equal(byId.get("s-ws")!.canActivate, true);
 
+  // Past/closed terminal chats show their original host label instead of "Detached".
+  assert.equal(byId.get("s-dangling-host")!.scopeState, "dangling");
+  assert.equal(byId.get("s-dangling-host")!.scopeLabel, "prod-web-01");
+  assert.equal(byId.get("s-dangling-host")!.canActivate, true);
+
+  // Without a known host, leave scopeLabel empty rather than showing technical jargon.
   assert.equal(byId.get("s-dangling")!.scopeState, "dangling");
+  assert.equal(byId.get("s-dangling")!.scopeLabel, "");
   assert.equal(byId.get("s-ws-gone")!.scopeState, "dangling");
+  assert.equal(byId.get("s-ws-gone")!.scopeLabel, "");
   assert.equal(byId.get("s-global")!.scopeState, "idle");
   assert.equal(byId.get("s-global")!.scopeLabel, t("ai.chat.chatsScopeGlobal"));
 });
 
-test("active marker follows activeSessionIdMap across scopes", () => {
+test("active marker distinguishes current panel active chat vs active elsewhere", () => {
   const input = baseInput();
   input.sessions = [
     baseSession({ id: "s-active-here", scope: { type: "terminal", targetId: "t-1" } }),
@@ -90,8 +107,14 @@ test("active marker follows activeSessionIdMap across scopes", () => {
   const rows = buildGlobalManagerRows(input);
   const byId = new Map(rows.map((row) => [row.session.id, row]));
   assert.equal(byId.get("s-active-here")!.scopeState, "active");
+  assert.equal(byId.get("s-active-here")!.isCurrentActive, true);
+  assert.equal(byId.get("s-active-here")!.isActiveElsewhere, false);
   assert.equal(byId.get("s-active-elsewhere")!.scopeState, "active");
+  assert.equal(byId.get("s-active-elsewhere")!.isCurrentActive, false);
+  assert.equal(byId.get("s-active-elsewhere")!.isActiveElsewhere, true);
   assert.equal(byId.get("s-idle")!.scopeState, "idle");
+  assert.equal(byId.get("s-idle")!.isCurrentActive, false);
+  assert.equal(byId.get("s-idle")!.isActiveElsewhere, false);
 });
 
 test("rows sort by updatedAt descending and carry agent labels + counts", () => {

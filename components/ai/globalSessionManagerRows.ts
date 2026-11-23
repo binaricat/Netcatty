@@ -22,12 +22,18 @@ export interface GlobalManagerTerminalInfo {
   connected: boolean;
 }
 
-/** A currently-open scope a chat can be rebound to (explicit target picker). */
+export interface GlobalManagerHostInfo {
+  id: string;
+  label?: string;
+  hostname?: string;
+}
+
+/** A currently-open scope a chat can be moved to (explicit target picker). */
 export interface GlobalManagerScopeTarget {
   type: 'terminal' | 'workspace';
   targetId: string;
   label: string;
-  /** Host ids carried onto the rebound chat for terminal-scope reconnection. */
+  /** Host ids carried onto the moved chat for terminal-scope reconnection. */
   hostIds?: string[];
 }
 
@@ -38,12 +44,15 @@ export interface GlobalManagerRow {
   agentLabel: string;
   scopeLabel: string;
   scopeState: 'active' | 'dangling' | 'idle';
-  /** Active chat of the panel currently viewing the manager. */
+  /** True when the chat already lives in the viewing panel's scope. */
   isCurrentView: boolean;
+  /** True when the chat is the active chat of the viewing panel. */
+  isCurrentActive: boolean;
+  /** True when the chat is currently active in another open panel. */
+  isActiveElsewhere: boolean;
   /**
-   * The chat's own scope IS the viewing panel's scope, so "open" can switch
-   * this panel to it. Cross-scope activation is deliberately not faked
-   * (issue #4098 phase 5): out-of-scope rows offer rebind instead.
+   * Clicking the row opens the chat in the viewing panel: directly when it is
+   * already in scope, or by attaching it to the viewing panel automatically.
    */
   canActivate: boolean;
   messageCount: number;
@@ -56,8 +65,27 @@ export interface BuildGlobalManagerRowsInput {
   currentScopeTargetId?: string;
   workspaces: ReadonlyArray<{ id: string; title: string }>;
   terminalInfos: ReadonlyArray<GlobalManagerTerminalInfo>;
+  hosts?: ReadonlyArray<GlobalManagerHostInfo>;
   externalAgents: ExternalAgentConfig[];
   t: (key: string) => string;
+}
+
+function resolveHistoricalHostLabel(
+  hostIds: ReadonlyArray<string> | undefined,
+  hostNamesById: ReadonlyMap<string, string>,
+): string {
+  if (!hostIds || hostIds.length === 0) return '';
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const hostId of hostIds) {
+    const name = hostNamesById.get(hostId);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  if (names.length === 0) return '';
+  if (names.length <= 2) return names.join(', ');
+  return `${names[0]}, ${names[1]} +${names.length - 2}`;
 }
 
 export function buildGlobalManagerRows(input: BuildGlobalManagerRowsInput): GlobalManagerRow[] {
@@ -68,20 +96,39 @@ export function buildGlobalManagerRows(input: BuildGlobalManagerRowsInput): Glob
     currentScopeTargetId,
     workspaces,
     terminalInfos,
+    hosts = [],
     externalAgents,
     t,
   } = input;
 
   const workspaceTitles = new Map(workspaces.map((workspace) => [workspace.id, workspace.title]));
   const liveTerminals = new Map(terminalInfos.map((info) => [info.sessionId, info]));
+  const hostNamesById = new Map<string, string>();
+  for (const host of hosts) {
+    const name = (host.label || host.hostname || '').trim();
+    if (host.id && name) hostNamesById.set(host.id, name);
+  }
+  for (const info of terminalInfos) {
+    const name = (info.label || info.hostname || '').trim();
+    if (info.hostId && name && !hostNamesById.has(info.hostId)) {
+      hostNamesById.set(info.hostId, name);
+    }
+  }
   const activeSessionIds = new Set(
     Object.values(activeSessionIdMap).filter((id): id is string => Boolean(id)),
   );
+  const currentScopeKey = currentScopeTargetId
+    ? `${currentScopeType}:${currentScopeTargetId}`
+    : null;
+  const currentPanelActiveSessionId = currentScopeKey
+    ? activeSessionIdMap[currentScopeKey] ?? null
+    : null;
 
   return sessions
     .map((session) => {
       const isCurrentView = Boolean(
         currentScopeTargetId
+        && !session.scopeDangling
         && session.scope.type === currentScopeType
         && session.scope.targetId === currentScopeTargetId,
       );
@@ -89,29 +136,29 @@ export function buildGlobalManagerRows(input: BuildGlobalManagerRowsInput): Glob
       let isDangling: boolean;
       if (session.scope.type === 'workspace') {
         const title = workspaceTitles.get(session.scope.targetId ?? '');
-        if (title != null) {
-          scopeLabel = `${t('ai.chat.chatsScopeWorkspace')}: ${title}`;
+        if (title != null && !session.scopeDangling) {
+          scopeLabel = title;
           isDangling = false;
         } else {
-          scopeLabel = t('ai.chat.chatsScopeDangling');
+          scopeLabel = resolveHistoricalHostLabel(session.scope.hostIds, hostNamesById);
           isDangling = true;
         }
       } else if (session.scope.type === 'terminal') {
         const terminal = liveTerminals.get(session.scope.targetId ?? '');
-        if (terminal) {
-          const label = terminal.label || terminal.hostname;
-          scopeLabel = label
-            ? `${t('ai.chat.chatsScopeTerminal')}: ${label}`
-            : t('ai.chat.chatsScopeTerminal');
+        if (terminal && !session.scopeDangling) {
+          scopeLabel = terminal.label || terminal.hostname || t('ai.chat.chatsScopeTerminal');
           isDangling = false;
         } else {
-          scopeLabel = t('ai.chat.chatsScopeDangling');
+          scopeLabel = resolveHistoricalHostLabel(session.scope.hostIds, hostNamesById);
           isDangling = true;
         }
       } else {
         scopeLabel = t('ai.chat.chatsScopeGlobal');
         isDangling = false;
       }
+
+      const isCurrentActive = currentPanelActiveSessionId === session.id;
+      const isActiveElsewhere = !isCurrentActive && !isDangling && activeSessionIds.has(session.id);
 
       return {
         session,
@@ -125,7 +172,9 @@ export function buildGlobalManagerRows(input: BuildGlobalManagerRowsInput): Glob
             ? 'active'
             : 'idle',
         isCurrentView,
-        canActivate: isCurrentView,
+        isCurrentActive,
+        isActiveElsewhere,
+        canActivate: Boolean(isCurrentView || currentScopeTargetId),
         messageCount: session.messages.length,
       } satisfies GlobalManagerRow;
     })

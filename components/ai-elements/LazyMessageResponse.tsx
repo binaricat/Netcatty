@@ -4,7 +4,6 @@ import { cn } from '../../lib/utils';
 import {
   enqueueChatMarkdownHydrate,
   isAiMarkdownRendererReady,
-  scheduleWhenAiComposerIdle,
   subscribeAiMarkdownRendererReady,
   warmAiMarkdownRenderer,
 } from '../ai/aiMarkdownWarmup';
@@ -15,8 +14,8 @@ type LazyMessageResponseProps = {
   className?: string;
   isAnimating?: boolean;
   /**
-   * Keep plaintext until Streamdown is already warmed. Chat history uses this
-   * so expanding the panel cannot start the ~350KB parse during first typing.
+   * Optional opt-in to keep plaintext until Streamdown is already warmed.
+   * Defaults to false so visible markdown renders immediately.
    */
   deferUntilWarm?: boolean;
 };
@@ -33,21 +32,17 @@ const PlainTextFallback = ({ children, className }: LazyMessageResponseProps) =>
 
 export function LazyMessageResponse(props: LazyMessageResponseProps) {
   const { deferUntilWarm = false, ...rendererProps } = props;
-  const [ready, setReady] = useState(() => !deferUntilWarm && isAiMarkdownRendererReady());
+  const [ready, setReady] = useState(() => isAiMarkdownRendererReady());
   const resetKey = typeof rendererProps.children === 'string' ? rendererProps.children : undefined;
 
   useEffect(() => {
     if (ready) return undefined;
     if (!deferUntilWarm) {
       const unsubscribe = subscribeAiMarkdownRendererReady(() => setReady(true));
-      if (isAiMarkdownRendererReady()) return unsubscribe;
-      const cancelIdle = scheduleWhenAiComposerIdle(() => {
+      if (!isAiMarkdownRendererReady()) {
         void warmAiMarkdownRenderer();
-      });
-      return () => {
-        unsubscribe();
-        cancelIdle();
-      };
+      }
+      return unsubscribe;
     }
     return enqueueChatMarkdownHydrate(() => setReady(true));
   }, [deferUntilWarm, ready]);

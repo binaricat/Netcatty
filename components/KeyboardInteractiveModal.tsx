@@ -5,7 +5,7 @@
  */
 import { Eye, EyeOff, KeyRound, Loader2 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { NON_TOTP_PROMPT } from "../domain/totpPrompt.shared.cjs";
+import { NON_TOTP_PROMPT } from "@/domain/totpPrompt.shared.cjs";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { Button } from "./ui/button";
 import {
