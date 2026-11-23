@@ -1305,18 +1305,32 @@ function registerSdkStreamHandlers(ctx) {
           return null;
         };
 
+        const legacyScope = aliasKey
+          ? { backendKey, runtime: runtimeKey, envHash: buildSdkModelEnvHash(env) }
+          : null;
+        const resolveAliasedKey = () => {
+          if (!aliasKey) return null;
+          return getSdkModelCacheEntry(sdkModelKeyAliases, aliasKey, {
+            ttlMs: MODEL_CATALOG_MAX_AGE_MS,
+          })?.targetKey || readLastKnownCatalogAlias(lastKnownPath, aliasKey, legacyScope);
+        };
+        const cacheCursorBinFromKey = (targetKey) => {
+          if (!isCursorCliLoginSentinel || !cursorBinCacheKey || !targetKey) return;
+          const resolvedBin = targetKey.split("\u0000")[1] || "";
+          if (!resolvedBin || resolvedBin === "cursor" || /(?:^|[/\\])cursor$/i.test(resolvedBin)) return;
+          setSdkModelCacheEntry(cursorCliBinCache, cursorBinCacheKey, {
+            at: Date.now(),
+            binPath: resolvedBin,
+          }, { ttlMs: MODEL_CATALOG_MAX_AGE_MS });
+        };
+
         if (cacheOnly) {
-          if (aliasKey) {
-            const aliasedKey = getSdkModelCacheEntry(sdkModelKeyAliases, aliasKey, {
-              ttlMs: MODEL_CATALOG_MAX_AGE_MS,
-            })?.targetKey || readLastKnownCatalogAlias(lastKnownPath, aliasKey, {
-              backendKey,
-              runtime: runtimeKey,
-              envHash: buildSdkModelEnvHash(env),
-            });
-            if (aliasedKey) {
-              const aliasedImmediate = tryServeCachedCatalog(aliasedKey);
-              if (aliasedImmediate) return aliasedImmediate.value;
+          const aliasedKey = resolveAliasedKey();
+          if (aliasedKey) {
+            const aliasedImmediate = tryServeCachedCatalog(aliasedKey);
+            if (aliasedImmediate) {
+              cacheCursorBinFromKey(aliasedKey);
+              return aliasedImmediate.value;
             }
           }
           const exactImmediate = tryServeCachedCatalog(buildCacheKey());
@@ -1335,6 +1349,17 @@ function registerSdkStreamHandlers(ctx) {
           const stillSentinel = !cursorCliBinPath
             || cursorCliBinPath === "cursor"
             || /(?:^|[/\\])cursor$/i.test(cursorCliBinPath);
+          if (stillSentinel && !force) {
+            const aliasedKey = resolveAliasedKey();
+            if (aliasedKey && aliasedKey !== cacheKey) {
+              const aliasedImmediate = tryServeCachedCatalog(aliasedKey);
+              if (aliasedImmediate) {
+                cacheCursorBinFromKey(aliasedKey);
+                recordResolvedKeyAlias(aliasedKey);
+                return aliasedImmediate.promise ? await aliasedImmediate.promise : aliasedImmediate.value;
+              }
+            }
+          }
           if (stillSentinel || force) {
             let resolvedCursorBin = null;
             if (typeof probeCursorCliAuth === "function") {

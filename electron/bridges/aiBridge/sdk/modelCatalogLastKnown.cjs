@@ -23,21 +23,22 @@ function buildLastKnownCatalogPath(userDataDir) {
   return path.join(userDataDir, LAST_KNOWN_CATALOG_FILE);
 }
 
-/** Read the full store object ({ entries, aliases, hasAliases }); any corruption degrades to empty maps. */
+/** Read the full store object ({ entries, aliases }); any corruption degrades to empty maps. */
 function readLastKnownCatalogFile(filePath) {
   try {
     const parsed = JSON.parse(readFileSync(filePath, "utf8"));
     if (!parsed || parsed.version !== LAST_KNOWN_STORE_VERSION) {
-      return { entries: {}, aliases: {}, hasAliases: false };
+      return { entries: {}, aliases: {} };
     }
-    const hasAliases = Boolean(parsed.aliases && typeof parsed.aliases === "object" && !Array.isArray(parsed.aliases));
+    const aliases = parsed.aliases && typeof parsed.aliases === "object" && !Array.isArray(parsed.aliases)
+      ? parsed.aliases
+      : {};
     return {
       entries: parsed.entries && typeof parsed.entries === "object" ? parsed.entries : {},
-      aliases: hasAliases ? parsed.aliases : {},
-      hasAliases,
+      aliases,
     };
   } catch {
-    return { entries: {}, aliases: {}, hasAliases: false };
+    return { entries: {}, aliases: {} };
   }
 }
 
@@ -74,23 +75,25 @@ function readLastKnownCatalogEntry(filePath, cacheKey) {
 /**
  * Resolve a persisted alias (for a bare command or Cursor sentinel) back to
  * its exact persisted catalog cache key, or null if absent/evicted.
- * For backward compatibility with pre-alias version-1 stores (no `aliases`
- * map persisted yet), falls back only when there is a single unambiguous
- * entry matching (backendKey, runtime, envHash).
+ * For backward compatibility with pre-alias version-1 entries (even in a
+ * partially migrated store where other backends already wrote aliases),
+ * falls back only when there is a single unambiguous unmigrated entry
+ * matching (backendKey, runtime, envHash).
  */
 function readLastKnownCatalogAlias(filePath, aliasKey, legacyScope = null) {
   if (!filePath || !aliasKey) return null;
-  const { entries, aliases, hasAliases } = readLastKnownCatalogFile(filePath);
+  const { entries, aliases } = readLastKnownCatalogFile(filePath);
   const targetKey = aliases[aliasKey];
   if (typeof targetKey === "string" && Object.prototype.hasOwnProperty.call(entries, targetKey)) {
     return targetKey;
   }
-  if (hasAliases || !legacyScope?.backendKey || !legacyScope?.runtime || !legacyScope?.envHash) {
+  if (!legacyScope?.backendKey || !legacyScope?.runtime || !legacyScope?.envHash) {
     return null;
   }
   let matchedKey = null;
   for (const [key, entry] of Object.entries(entries)) {
     if (!entry || !Array.isArray(entry.models) || entry.models.length === 0) continue;
+    if (entry.aliasMigrated === true) continue;
     const parts = key.split("\u0000");
     if (
       parts.length !== 4
@@ -100,7 +103,7 @@ function readLastKnownCatalogAlias(filePath, aliasKey, legacyScope = null) {
     ) {
       continue;
     }
-    if (matchedKey !== null) return null; // ambiguous legacy store
+    if (matchedKey !== null) return null; // ambiguous legacy entries
     matchedKey = key;
   }
   return matchedKey;
@@ -205,6 +208,7 @@ function writeLastKnownCatalogEntry(filePath, cacheKey, { backend, models, curre
       models: trimmedModels,
       currentModelId: currentModelId || null,
       fetchedAt: new Date(now).toISOString(),
+      aliasMigrated: true,
     };
     const orderedKeys = Object.keys(entries).sort((a, b) => {
       const timeA = Date.parse(entries[a]?.fetchedAt || "") || 0;
