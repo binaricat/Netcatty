@@ -454,10 +454,17 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
   }, [enabled, t]);
 
   useEffect(() => {
+    let active = true;
     const bridge = netcattyBridge.get();
     const unsubscribeEvents = bridge?.onGlobalSftpTransferEvent?.((event) => {
       sftpTransferCenterStore.ingestBackgroundEvent(event);
     });
+    void bridge?.listActivePackedDownloads?.().then((activePacked) => {
+      if (!active || !Array.isArray(activePacked)) return;
+      for (const event of activePacked) {
+        sftpTransferCenterStore.ingestBackgroundEvent(event);
+      }
+    }).catch(() => {});
     const restartBackgroundTransfer = async (taskId: string, fromBeginning: boolean) => {
       const task = sftpTransferCenterStore.getSnapshot().tasks.find((candidate) => candidate.id === taskId);
       if (!task || !bridge?.openSftpForSession || !bridge.startStreamTransfer) return;
@@ -594,6 +601,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
       },
     });
     return () => {
+      active = false;
       unsubscribeEvents?.();
       unregisterOwner();
     };

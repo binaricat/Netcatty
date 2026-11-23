@@ -85,21 +85,31 @@ const PROBE = [
 ].join(" ");
 
 function validateName(name) {
-  if (typeof name !== "string" || !name || name === "." || name === ".." || /[\/\\\x00-\x1f\ufffd]/u.test(name)) {
+  if (typeof name !== "string" || !name || name === "." || name === ".." || /[\/\x00]/u.test(name)
+      || (process.platform === "win32" && name.includes("\\"))) {
     throw new Error("Invalid archive path component");
   }
   if (process.platform === "win32" && (/[<>:"|?*]|[ .]$/u.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name))) {
     throw new Error("Cannot represent archive path on this filesystem");
   }
+  // On POSIX, backslashes, control characters, and replacement characters can
+  // appear in valid child names inside a selected directory. Defer to ordinary
+  // per-file SFTP transfer after validating the rest of the archive rather than
+  // failing a clean download.
+  if (/[\\\x01-\x1f\ufffd]/u.test(name)) return "unsupported";
+  return "ok";
 }
 
 function archivePath(rawPath, names) {
   if (typeof rawPath !== "string" || rawPath.length > 16384) throw new Error("Invalid archive path");
   const relative = rawPath.replace(/^(?:\.\/)+/, "").replace(/\/$/, "");
   const parts = relative.split("/");
-  parts.forEach(validateName);
+  let unsupportedName = false;
+  for (const part of parts) {
+    if (validateName(part) === "unsupported") unsupportedName = true;
+  }
   if (!names.has(parts[0])) throw new Error("Unexpected path outside the downloaded selection");
-  return relative;
+  return { relative, unsupportedName };
 }
 
 async function statIfPresent(file) {
@@ -216,7 +226,7 @@ async function extractArchive(file, stage, gzip, selectedNames, signal) {
     for await (const entry of extractor) {
       signal.throwIfAborted();
       const header = entry.header;
-      const relative = archivePath(header.name, names);
+      const { relative, unsupportedName } = archivePath(header.name, names);
       const parent = path.posix.dirname(relative);
       if (entries.has(relative) || (parent !== "." && entries.get(parent) !== "directory")) {
         throw new Error("Duplicate archive entry or unsafe parent: " + relative);
@@ -224,44 +234,59 @@ async function extractArchive(file, stage, gzip, selectedNames, signal) {
       if (entries.size >= MAX_ENTRIES || !Number.isSafeInteger(header.size) || header.size < 0) {
         throw new Error("Packed download exceeds supported archive limits");
       }
+      if (unsupportedName) requiresRegularDownload = true;
       const dest = path.join(stage, relative);
       if (header.type === "file" || header.type === "contiguous-file") {
-        await pipeline(entry, fs.createWriteStream(dest, { flags: "wx", mode: 0o600 | (header.mode & 0o177) }), { signal });
-        if (header.mtime instanceof Date && Number.isFinite(+header.mtime)) {
-          // Some target filesystems reject valid but out-of-range remote dates.
-          await fsp.utimes(dest, header.mtime, header.mtime).catch(() => {});
+        if (requiresRegularDownload) {
+          let bytes = 0;
+          for await (const chunk of entry) {
+            signal.throwIfAborted();
+            bytes += chunk.length;
+          }
+          if (bytes !== header.size) throw new Error("Incomplete archived file: " + relative);
+        } else {
+          await pipeline(entry, fs.createWriteStream(dest, { flags: "wx", mode: 0o600 | (header.mode & 0o177) }), { signal });
+          if (header.mtime instanceof Date && Number.isFinite(+header.mtime)) {
+            // Some target filesystems reject valid but out-of-range remote dates.
+            await fsp.utimes(dest, header.mtime, header.mtime).catch(() => {});
+          }
+          const stat = await fsp.lstat(dest);
+          if (stat.size !== header.size) throw new Error("Incomplete archived file: " + relative);
+          manifest?.set(relative, stat);
         }
-        const stat = await fsp.lstat(dest);
-        if (stat.size !== header.size) throw new Error("Incomplete archived file: " + relative);
-        manifest?.set(relative, stat);
         entries.set(relative, "file");
       } else {
         if (header.size !== 0) throw new Error("Invalid non-file archive entry");
         if (header.type === "directory") {
-          await fsp.mkdir(dest, { mode: 0o700 }); // exclusive; catches case/Unicode aliases on this filesystem
+          if (!requiresRegularDownload) {
+            await fsp.mkdir(dest, { mode: 0o700 }); // exclusive; catches case/Unicode aliases on this filesystem
+          }
         } else if (header.type === "link") {
-          const target = archivePath(header.linkname, names);
+          const { relative: target, unsupportedName: unsupportedTarget } = archivePath(header.linkname, names);
           if (entries.get(target) !== "file") throw new Error("Unsafe hard link in packed download: " + relative);
-          await fsp.link(path.join(stage, target), dest);
+          if (unsupportedTarget) requiresRegularDownload = true;
+          if (!requiresRegularDownload) await fsp.link(path.join(stage, target), dest);
         } else if (header.type === "symlink") {
           const link = header.linkname;
-          if (typeof link !== "string" || !link || path.posix.isAbsolute(link) || /^[a-z]:/i.test(link) || /[\\\x00-\x1f]/u.test(link)
+          if (typeof link !== "string" || !link || path.posix.isAbsolute(link) || /^[a-z]:/i.test(link) || /\0/u.test(link)
+              || (process.platform === "win32" && /[\\\x01-\x1f]/u.test(link))
               || !names.has(path.posix.join(parent, link).split("/")[0])) {
             throw new Error("Unsafe symbolic link in packed download: " + relative);
           }
-          if (link.split("/").includes("..")) {
-            // A relative parent link can be valid in a normal directory tree,
-            // but resolving symlink chains safely is outside this extractor.
-            // Validate the REST of the archive before allowing ordinary SFTP
-            // fallback; corrupt/truncated archives must still be hard errors.
+          if (link.split("/").includes("..") || /[\\\x01-\x1f\ufffd]/u.test(link)) {
+            // A relative parent link or POSIX-only special character can be
+            // valid in a normal directory tree, but resolving it safely is
+            // outside this extractor. Validate the REST of the archive before
+            // allowing ordinary SFTP fallback; corrupt/truncated archives must
+            // still be hard errors.
             requiresRegularDownload = true;
             entries.set(relative, "symlink");
             entry.resume();
             continue;
           }
-          await fsp.symlink(link, dest);
+          if (!requiresRegularDownload) await fsp.symlink(link, dest);
         } else throw new Error("Unsupported special file in packed download: " + relative);
-        if (manifest) manifest.set(relative, await fsp.lstat(dest));
+        if (manifest && !requiresRegularDownload) manifest.set(relative, await fsp.lstat(dest));
         entries.set(relative, header.type === "link" ? "file" : header.type);
         entry.resume();
       }

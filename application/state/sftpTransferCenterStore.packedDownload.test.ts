@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import type { TransferTask } from "../../domain/models";
 import { findActivePathConflict } from "../../domain/sftpTransferConflicts";
+import { deserializeSftpTransferCenter, serializeSftpTransferCenter } from "../../domain/sftpTransferCenter";
 import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
 import { createSftpTransferCenterStore } from "./sftpTransferCenterStore";
 import { createTransferRuntime } from "./sftp/transferRuntime";
@@ -212,4 +213,96 @@ test("a mirrored transfer-center Cancel reaches the original window's packed str
     finish({ status: "cancelled" });
     await running;
   }
+});
+
+test("serialization preserves live packed state so a reloaded window tracks progress, cancels, and completes", async (t) => {
+  let persisted = "";
+  const ownerStore = createSftpTransferCenterStore({
+    read: () => persisted || null,
+    write: (value) => { persisted = value; },
+  });
+  const now = Date.now();
+  const liveTask: TransferTask = {
+    ...makePackedTask("packed-live-reload", "transferring"),
+    startTime: now - 1000,
+    ownerId: "detached-pane",
+    phase: "transferring",
+    transferredBytes: 64,
+  };
+  const alreadyCancelled: TransferTask = {
+    ...makePackedTask("packed-user-cancelled", "cancelled"),
+    startTime: now - 2000,
+    ownerId: "detached-pane",
+    endTime: now - 500,
+  };
+  ownerStore.upsertTasks([liveTask, alreadyCancelled]);
+  // Verify the serialized snapshot preserves live status, phase, and packedTargetPaths.
+  const serialized = serializeSftpTransferCenter(ownerStore.getSnapshot().tasks);
+  const parsed = JSON.parse(serialized) as { tasks: TransferTask[] };
+  const serializedLive = parsed.tasks.find((row) => row.id === liveTask.id);
+  assert.equal(serializedLive?.status, "transferring");
+  assert.equal(serializedLive?.phase, "transferring");
+  assert.deepEqual(serializedLive?.packedTargetPaths, liveTask.packedTargetPaths);
+
+  // Process restart (no live events) still restores unfinished packed tasks as cancelled.
+  const afterRestart = deserializeSftpTransferCenter(serialized);
+  assert.equal(afterRestart.tasks.find((row) => row.id === liveTask.id)?.status, "cancelled");
+  assert.deepEqual(afterRestart.tasks.find((row) => row.id === liveTask.id)?.packedTargetPaths, liveTask.packedTargetPaths);
+
+  // A new/reloaded non-owner window hydrates from the serialized snapshot while
+  // the owner transfer is still running, then receives live global events and cancels.
+  const reloadedWindow = createSftpTransferCenterStore({
+    read: () => serialized,
+    write: () => {},
+  });
+  assert.equal(reloadedWindow.getTask(liveTask.id)?.status, "cancelled");
+  reloadedWindow.ingestBackgroundEvent({
+    ...queuedEvent(liveTask.id),
+    type: "progress",
+    phase: "extracting",
+    transferred: 256,
+  });
+  const revived = reloadedWindow.getTask(liveTask.id)!;
+  assert.equal(revived.status, "transferring");
+  assert.equal(revived.phase, "extracting");
+  assert.equal(revived.transferredBytes, 256);
+  assert.equal(revived.ownerId, "background-transfer");
+  assert.deepEqual(revived.packedTargetPaths, liveTask.packedTargetPaths);
+  assert.equal(
+    findActivePathConflict(reloadedWindow.getSnapshot().tasks, {
+      id: "other", targetConnectionId: "local", targetPath: "/downloads/compose/sub",
+    })?.id,
+    liveTask.id,
+  );
+
+  // A genuinely cancelled packed task must never be revived by late events.
+  reloadedWindow.ingestBackgroundEvent({
+    ...queuedEvent(alreadyCancelled.id),
+    type: "progress",
+    phase: "transferring",
+    transferred: 128,
+  });
+  assert.equal(reloadedWindow.getTask(alreadyCancelled.id)?.status, "cancelled");
+
+  // Reloaded window can cancel the revived running transfer.
+  const cancelCalls: string[] = [];
+  t.mock.method(netcattyBridge, "get", () => ({
+    cancelTransfer: async (id: string) => { cancelCalls.push(id); return { success: true }; },
+  }));
+  await reloadedWindow.cancel(liveTask.id);
+  assert.deepEqual(cancelCalls, [liveTask.id]);
+
+  // Also verify direct completion without an intermediate progress event revives to completed.
+  const completingWindow = createSftpTransferCenterStore({
+    read: () => serialized,
+    write: () => {},
+  });
+  completingWindow.ingestBackgroundEvent({
+    ...queuedEvent(liveTask.id),
+    type: "completed",
+    transferred: 512,
+    totalBytes: 512,
+  });
+  assert.equal(completingWindow.getTask(liveTask.id)?.status, "completed");
+  assert.equal(completingWindow.getTask(liveTask.id)?.transferredBytes, 512);
 });

@@ -1034,6 +1034,7 @@ function createPreloadApi(ctx) {
   },
   registerPackedDownload: (metadata) => ipcRenderer.invoke("netcatty:sftp:registerPacked", metadata),
   finishPackedDownload: (transferId, outcome) => ipcRenderer.invoke("netcatty:sftp:finishPacked", { transferId, ...outcome }),
+  listActivePackedDownloads: () => ipcRenderer.invoke("netcatty:sftp:listActivePacked"),
   downloadPackedSftp: async (options, onProgress) => {
     const channel = "netcatty:sftp:packedProgress";
     const listener = (_event, update) => {

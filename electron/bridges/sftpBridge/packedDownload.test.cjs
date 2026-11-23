@@ -486,3 +486,45 @@ test("silent real SSH archive channels cancel promptly without closing the share
   assert.equal(await fsp.readFile(path.join(f.local, "compose", ".env"), "utf8"), "settings");
   assert.deepEqual(await fsp.readdir(tempDirBridge.getTempDir()), [".netcatty-managed-temp"]);
 });
+
+test("valid POSIX child names with backslashes or control characters fall back only after full archive validation", { skip: process.platform === "win32" }, async t => {
+  const { PassThrough } = require("node:stream");
+  for (const variant of ["backslash-fallback", "control-fallback", "backslash-truncated", "backslash-traversal"]) {
+    await t.test(variant, async tt => {
+      const f = await fixture(tt);
+      const items = variant.startsWith("backslash")
+        ? [
+            [{ name: "compose", type: "directory" }],
+            [{ name: "compose/sub\\dir", type: "directory" }],
+            [{ name: "compose/sub\\dir/item\\1.txt" }, "hello"],
+            [{ name: "compose/after.txt" }, "world"],
+          ]
+        : [
+            [{ name: "compose", type: "directory" }],
+            [{ name: "compose/weird\tname.txt" }, "tabbed"],
+          ];
+      if (variant === "backslash-traversal") items.push([{ name: "compose/../escape" }, "bad"]);
+      await f.archive(items);
+      let data = await fsp.readFile(f.file);
+      if (variant === "backslash-truncated") data = data.subarray(0, data.length - 512);
+      const client = { client: { exec(_command, callback) {
+        const channel = new PassThrough();
+        channel.stderr = new PassThrough();
+        channel.close = () => channel.destroy();
+        callback(null, channel);
+        setImmediate(() => { channel.emit("exit", 0); channel.end(data); });
+      } } };
+      const download = downloadPacked({ client,
+        payload: { sftpId: "s", names: ["compose"], remoteDirectory: "/srv", localDirectory: f.local, transferId: variant },
+        encoding: "utf-8", execProbe: async () => ({ stdout: "NC_PACK_TAR" }),
+      });
+      if (variant.endsWith("-fallback")) {
+        assert.deepEqual(await download, { status: "fallback", reason: "unsupported" });
+      } else {
+        await assert.rejects(download, /incomplete|unexpected end|archive path/i);
+      }
+      assert.deepEqual(await fsp.readdir(f.local), [], "no staged files or partial directory published");
+      assert.deepEqual(await fsp.readdir(tempDirBridge.getTempDir()), [".netcatty-managed-temp"], "managed staging is always cleaned");
+    });
+  }
+});

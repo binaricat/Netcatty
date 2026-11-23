@@ -457,9 +457,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     typeof persistedRaw === "string"
     && persistedRaw.length >= ASYNC_TRANSFER_HISTORY_RESTORE_THRESHOLD_BYTES
   );
+  // Track unfinished packed downloads that were only marked cancelled on
+  // hydration in case the app restarted. If a live global event arrives in the
+  // same process (new/reloaded non-owner window), that row can revive cleanly.
+  const restoredUnfinishedPackedIds = new Set<string>();
   const restored = shouldRestoreCooperatively
     ? { tasks: [] }
-    : deserializeSftpTransferCenter(persistedRaw);
+    : deserializeSftpTransferCenter(persistedRaw, {
+        onRestoredPackedTask: (id) => { restoredUnfinishedPackedIds.add(id); },
+      });
   let tasks = pruneSftpTransferHistory(restored.tasks);
   let restoreMigrationPending = shouldRestoreCooperatively;
   let replayingRestoreEvents = false;
@@ -2206,6 +2212,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       const removing = tasks.filter((candidate) => (
         candidate.id === taskId || candidate.parentTaskId === taskId
       ));
+      for (const removed of removing) restoredUnfinishedPackedIds.delete(removed.id);
       settleFinishedTransferControlState(removing, removing);
       tasks = tasks.filter((task) => task.id !== taskId && task.parentTaskId !== taskId);
       emit(true);
@@ -2222,6 +2229,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         && (status === undefined || task.status === status)
         && !(task.parentTaskId && unfinishedParents.has(task.parentTaskId)),
       );
+      for (const removed of removing) restoredUnfinishedPackedIds.delete(removed.id);
       const removingIds = new Set(removing.map((task) => task.id));
       settleFinishedTransferControlState(removing, removing);
       tasks = tasks.filter((task) => !removingIds.has(task.id) && !removingIds.has(task.parentTaskId ?? ""));
@@ -2255,6 +2263,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       if (event.type === "dismissed") {
         // Unsupported packed attempts release their reservations in every
         // window before the originating renderer starts ordinary downloads.
+        restoredUnfinishedPackedIds.delete(event.transferId);
         if (existing?.controlKind === "packed-download") {
           tasks = tasks.filter((task) => task.id !== event.transferId);
           emit(true);
@@ -2315,7 +2324,16 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           && (event.type === "completed" || event.type === "failed" || event.type === "cancelled")
         )
         || (event.sourceFingerprint !== undefined && event.sourceFingerprint !== existing?.sourceFingerprint);
+      const isRestoredProvisionalPacked = Boolean(
+        existing
+        && existing.controlKind === "packed-download"
+        && restoredUnfinishedPackedIds.has(existing.id),
+      );
+      if (isRestoredProvisionalPacked && existing) {
+        restoredUnfinishedPackedIds.delete(existing.id);
+      }
       const terminal = existing
+        && !isRestoredProvisionalPacked
         && (existing.status === "cancelled" || existing.status === "completed" || existing.status === "failed");
       // Never resurrect a finished/cancelled agent row with late queued/progress.
       if (terminal && event.type !== "cancelled") {
@@ -2437,6 +2455,9 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
             : event.lifecycleEpoch !== undefined && incomingEpoch >= currentEpoch;
           return {
             ...task,
+            ownerId: isRestoredProvisionalPacked && !controllers.has(task.ownerId ?? "")
+              ? "background-transfer"
+              : task.ownerId,
             status: acceptsLifecycle
               ? (event.type === "queued" ? "queued" : "transferring")
               : task.status,
@@ -2552,6 +2573,9 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           const keepPaused = nextStatus === "paused" || nextStatus === "pausing";
           return {
             ...task,
+            ownerId: isRestoredProvisionalPacked && !controllers.has(task.ownerId ?? "")
+              ? "background-transfer"
+              : task.ownerId,
             status: nextStatus,
             transferredBytes: keepPaused ? task.transferredBytes : nextTransferred,
             totalBytes: event.totalBytes === undefined
@@ -2565,8 +2589,11 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
             downloadCheckpointBytes: event.downloadCheckpointBytes ?? task.downloadCheckpointBytes,
             uploadCheckpointBytes: event.uploadCheckpointBytes ?? task.uploadCheckpointBytes,
             sourceFingerprint: event.sourceFingerprint ?? task.sourceFingerprint,
+            packedTargetPaths: event.packedTargetPaths ? [...event.packedTargetPaths] : task.packedTargetPaths,
             phase: event.phase ?? task.phase,
-            resumable: event.resumable ?? task.resumable,
+            resumable: (event.controlKind ?? task.controlKind) === "packed-download" ? false : event.resumable ?? task.resumable,
+            retryable: (event.controlKind ?? task.controlKind) === "packed-download" ? false : task.retryable,
+            progressMode: (event.controlKind ?? task.controlKind) === "packed-download" ? "bytes" : task.progressMode,
             pauseUnavailableReason: event.pauseUnavailableReason ?? task.pauseUnavailableReason,
             error: keepPaused ? task.error : undefined,
             endTime: undefined,
@@ -2686,6 +2713,9 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       // Keep the live row for an ID collision, then run the canonical bounded
       // prune once more over the now-small merged result.
       const liveIds = new Set(tasks.map((task) => task.id));
+      for (const id of migrated.restoredPackedTaskIds) {
+        if (!liveIds.has(id)) restoredUnfinishedPackedIds.add(id);
+      }
       tasks = pruneSftpTransferHistory([
         ...migrated.tasks.filter((task) => !liveIds.has(task.id)),
         ...tasks,

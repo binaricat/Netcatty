@@ -70,7 +70,7 @@ function createPackedDownloadLifecycle({ broadcast, cancel }) {
     const previous = entries.get(metadata.transferId);
     if (previous) throw new Error("Packed download task already registered");
     const entry = {
-      sender, bytes: 0, terminal: null, cancelled: false, operation: null,
+      sender, bytes: 0, phase: undefined, terminal: null, cancelled: false, operation: null,
       metadata: {
         transferId: metadata.transferId, fileName: metadata.fileName,
         sourcePath: metadata.sourcePath, targetPath: metadata.targetPath,
@@ -90,11 +90,33 @@ function createPackedDownloadLifecycle({ broadcast, cancel }) {
     const entry = entries.get(payload?.transferId);
     if (!entry?.operation || entry.terminal) return;
     entry.bytes = Math.max(entry.bytes, Number(payload.bytes) || 0);
-    emit(entry, "progress", { phase: payload.phase === "extracting" ? "extracting" : "transferring" });
+    entry.phase = payload.phase === "extracting" ? "extracting" : "transferring";
+    emit(entry, "progress", { phase: entry.phase });
+  };
+  const listActive = () => {
+    const active = [];
+    for (const entry of entries.values()) {
+      if (entry.terminal || entry.cancelled) continue;
+      active.push({
+        ...entry.metadata,
+        packedTargetPaths: [...entry.metadata.packedTargetPaths],
+        type: entry.operation ? "progress" : "queued",
+        direction: "download",
+        isDirectory: true,
+        controlKind: "packed-download",
+        origin: "manual",
+        retryable: false,
+        resumable: false,
+        transferred: entry.bytes,
+        ...(entry.operation ? { phase: entry.phase || "transferring" } : {}),
+      });
+    }
+    return active;
   };
   return {
     register,
     has: (transferId) => entries.has(transferId),
+    listActive,
     progress,
     async run(event, payload, work) {
       let entry = entries.get(payload.transferId);
@@ -119,6 +141,7 @@ function createPackedDownloadLifecycle({ broadcast, cancel }) {
           if (!entry.sender.isDestroyed?.()) entry.sender.send?.(channel, update);
         },
       };
+      entry.phase = "transferring";
       entry.operation = Promise.resolve().then(() => entry.cancelled
         ? { status: "cancelled" }
         : work({ ...event, sender }, payload));

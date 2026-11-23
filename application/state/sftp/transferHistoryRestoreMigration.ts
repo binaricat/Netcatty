@@ -19,6 +19,7 @@ const TERMINAL_STATUSES = new Set<TransferTask["status"]>(["completed", "failed"
 export interface CooperativeTransferHistoryRestoreResult {
   valid: boolean;
   tasks: TransferTask[];
+  restoredPackedTaskIds: string[];
 }
 
 function monotonicNow(): number {
@@ -65,16 +66,19 @@ export async function restoreSftpTransferHistoryCooperatively(
   try {
     parsed = JSON.parse(raw) as { version?: unknown; tasks?: unknown };
   } catch {
-    return { valid: false, tasks: [] };
+    return { valid: false, tasks: [], restoredPackedTaskIds: [] };
   }
   if (parsed.version !== SFTP_TRANSFER_CENTER_VERSION || !Array.isArray(parsed.tasks)) {
-    return { valid: false, tasks: [] };
+    return { valid: false, tasks: [], restoredPackedTaskIds: [] };
   }
 
   const maybeYield = createRestoreYieldController();
   const restored: TransferTask[] = [];
+  const restoredPackedTaskIds: string[] = [];
   for (let index = 0; index < parsed.tasks.length; index += 1) {
-    const task = sanitizeSftpTransferTask(parsed.tasks[index]);
+    const task = sanitizeSftpTransferTask(parsed.tasks[index], {
+      onRestoredPackedTask: (id) => restoredPackedTaskIds.push(id),
+    });
     if (task) restored.push(task);
     await maybeYield(index);
   }
@@ -201,5 +205,6 @@ export async function restoreSftpTransferHistoryCooperatively(
   return {
     valid: true,
     tasks: pruneSftpTransferHistory(compacted, now),
+    restoredPackedTaskIds,
   };
 }

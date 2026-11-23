@@ -62,6 +62,28 @@ declare global {
       status: "cancelled" | "failed" | "dismissed";
       error?: string;
     }): Promise<void>;
+    listActivePackedDownloads?(): Promise<Array<{
+      type: 'queued' | 'progress';
+      transferId: string;
+      direction: 'download';
+      fileName: string;
+      sourcePath: string;
+      targetPath: string;
+      startedAt?: number;
+      transferred?: number;
+      totalBytes?: number;
+      isDirectory?: boolean;
+      controlKind: 'packed-download';
+      packedTargetPaths?: string[];
+      sourceConnectionId?: string;
+      sourceHostId?: string;
+      sourceHostLabel?: string;
+      sessionId?: string;
+      origin?: 'manual';
+      retryable?: boolean;
+      resumable?: boolean;
+      phase?: 'transferring' | 'extracting';
+    }>>;
     downloadPackedSftp?(
       options: { sftpId: string; transferId: string; remoteDirectory: string; names: string[]; localDirectory: string; encoding?: SftpFilenameEncoding },
       onProgress?: (progress: { phase: "receiving" | "extracting"; bytes: number }) => void,

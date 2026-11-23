@@ -141,3 +141,32 @@ test("pre-start failures settle globally and worker exit cannot revive queued jo
   assert.equal(f.events(f.windows[0]).at(-1).type, "failed");
   assert.equal(f.lifecycle.has("pack"), false);
 });
+
+test("listActive returns current queued and running packed snapshots and omits settled entries", async () => {
+  let finish;
+  const f = fixture();
+  f.lifecycle.register(f.event, f.metadata);
+  f.lifecycle.register(f.event, { ...f.metadata, transferId: "queued-job" });
+  assert.deepEqual(
+    f.lifecycle.listActive().map(e => ({ id: e.transferId, type: e.type, transferred: e.transferred })),
+    [
+      { id: "pack", type: "queued", transferred: 0 },
+      { id: "queued-job", type: "queued", transferred: 0 },
+    ],
+  );
+  const running = f.lifecycle.run(f.event, f.request, () => new Promise(resolve => { finish = resolve; }));
+  await Promise.resolve();
+  f.lifecycle.progress({ transferId: "pack", phase: "extracting", bytes: 320 });
+  assert.deepEqual(
+    f.lifecycle.listActive().map(e => ({ id: e.transferId, type: e.type, phase: e.phase, transferred: e.transferred })),
+    [
+      { id: "pack", type: "progress", phase: "extracting", transferred: 320 },
+      { id: "queued-job", type: "queued", phase: undefined, transferred: 0 },
+    ],
+  );
+  finish({ status: "completed" });
+  await running;
+  assert.deepEqual(f.lifecycle.listActive().map(e => e.transferId), ["queued-job"]);
+  f.lifecycle.finish(f.event, { transferId: "queued-job", status: "cancelled" });
+  assert.deepEqual(f.lifecycle.listActive(), []);
+});

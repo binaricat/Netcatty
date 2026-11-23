@@ -2743,6 +2743,7 @@ function registerHandlers(ipcMain, options = {}) {
     lifecycleApi.setPackedDownloadLifecycle(packedLifecycle);
     ipcMain.handle("netcatty:sftp:registerPacked", packedLifecycle.register);
     ipcMain.handle("netcatty:sftp:finishPacked", packedLifecycle.finish);
+    ipcMain.handle("netcatty:sftp:listActivePacked", () => packedLifecycle.listActive());
     terminalWorkerManager?.onWorkerRendererEvent?.((message) => {
       if (message.channel === "netcatty:sftp:packedProgress") packedLifecycle.progress(message.payload);
     });

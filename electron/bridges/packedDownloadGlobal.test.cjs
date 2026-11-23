@@ -55,6 +55,12 @@ test("real preload and main worker handlers share packed jobs and route controls
   assert.equal(requests.length, 0, "cannot reach ordinary worker pause for packed work");
   const running = apis[1].downloadPackedSftp({ transferId: "shared", sftpId: "sftp-2", remoteDirectory: "/srv", names: ["compose"], localDirectory: "/tmp" });
   await Promise.resolve();
+  const activeSnapshot = await apis[0].listActivePackedDownloads();
+  assert.equal(activeSnapshot.length, 1);
+  assert.equal(activeSnapshot[0].transferId, "shared");
+  assert.equal(activeSnapshot[0].type, "progress");
+  assert.equal(activeSnapshot[0].transferred, 9);
+  assert.deepEqual(activeSnapshot[0].packedTargetPaths, ["/tmp/compose"]);
   await apis[0].cancelTransfer("shared");
   assert.deepEqual(await running, { status: "cancelled" });
   const control = requests.find(request => request.channel === "netcatty:sftp:cancelPacked");
