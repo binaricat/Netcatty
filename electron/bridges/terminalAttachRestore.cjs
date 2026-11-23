@@ -12,6 +12,50 @@ let fanoutExitImpl = null;
 const attachPopupAuthorizations = new Map();
 const pendingAttachRestores = new Set();
 const pendingAttachRestoreListeners = new Map();
+const detachedReplayBuffers = new Map();
+const MAX_DETACHED_REPLAY_CHARS = 512 * 1024;
+
+function startDetachedReplayCapture(sessionId) {
+  if (!sessionId) return;
+  detachedReplayBuffers.set(sessionId, { chunks: [], length: 0 });
+}
+
+function appendDetachedReplayData(sessionId, data) {
+  if (!sessionId || typeof data !== "string" || data.length === 0) return;
+  const entry = detachedReplayBuffers.get(sessionId);
+  if (!entry) return;
+  if (data.length >= MAX_DETACHED_REPLAY_CHARS) {
+    const tail = data.slice(-MAX_DETACHED_REPLAY_CHARS);
+    entry.chunks = [tail];
+    entry.length = tail.length;
+    return;
+  }
+  entry.chunks.push(data);
+  entry.length += data.length;
+  while (entry.length > MAX_DETACHED_REPLAY_CHARS && entry.chunks.length > 0) {
+    const overflow = entry.length - MAX_DETACHED_REPLAY_CHARS;
+    const head = entry.chunks[0];
+    if (head.length <= overflow) {
+      entry.chunks.shift();
+      entry.length -= head.length;
+    } else {
+      entry.chunks[0] = head.slice(overflow);
+      entry.length -= overflow;
+    }
+  }
+}
+
+function takeDetachedReplayData(sessionId) {
+  if (!sessionId) return "";
+  const entry = detachedReplayBuffers.get(sessionId);
+  if (!entry) return "";
+  detachedReplayBuffers.delete(sessionId);
+  return entry.chunks.join("");
+}
+
+function clearDetachedReplayCapture(sessionId) {
+  if (sessionId) detachedReplayBuffers.delete(sessionId);
+}
 
 function notifyAttachRestoreListeners(sessionId) {
   const listeners = pendingAttachRestoreListeners.get(sessionId);
@@ -78,6 +122,7 @@ function markAttachPopupAttached(token, sessionId, webContentsId) {
   if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
   const grant = attachPopupAuthorizations.get(token);
   grant.attached = true;
+  startDetachedReplayCapture(sessionId);
   return true;
 }
 
@@ -172,6 +217,7 @@ function releaseAttachPopupAuthorization(token) {
 function releaseAttachedSessionState(sessionId) {
   if (!sessionId) return;
   pendingAttachRestores.delete(sessionId);
+  clearDetachedReplayCapture(sessionId);
   notifyAttachRestoreListeners(sessionId);
   for (const [token, grant] of attachPopupAuthorizations) {
     if (grant?.sessionId === sessionId) {
@@ -266,6 +312,10 @@ module.exports = {
   waitForAttachPopupOutcome,
   clearAttachPopupAttached,
   onAttachOutputRestored,
+  startDetachedReplayCapture,
+  appendDetachedReplayData,
+  takeDetachedReplayData,
+  clearDetachedReplayCapture,
   markAttachPopupClosePrepared,
   isAttachPopupClosePrepared,
   getLifetimeHeirWebContentsId,

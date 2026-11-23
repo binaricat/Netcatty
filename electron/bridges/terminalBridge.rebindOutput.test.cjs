@@ -775,3 +775,67 @@ test("rebindOutput activates lifetime heir for moved-tab popups and restoreOutpu
     registry.releaseAttachPopupAuthorization(authorization);
   }
 });
+
+test("detached output is replayed to home on ungraceful restore and cleared after graceful snapshot apply", async () => {
+  const { bridge, fakeChannel } = loadTerminalBridgeWithMocks();
+  const registry = require("./terminalAttachRestore.cjs");
+  const { emitTerminalSessionData } = require("./emitTerminalSessionData.cjs");
+  const sessionId = "session-crash-replay";
+  const authorization = "grant-crash-replay";
+  const homeSent = [];
+  const home = {
+    id: 91,
+    isDestroyed: () => false,
+    send: (channel, payload) => homeSent.push({ channel, payload }),
+  };
+  const popup = { id: 92, isDestroyed: () => false, send: () => {} };
+  const channelSent = [];
+  fakeChannel.send = (sid, data) => {
+    channelSent.push({ sid, data });
+    return true;
+  };
+  const session = { webContentsId: home.id };
+  const handles = new Map();
+  bridge.init({
+    sessions: new Map([[sessionId, session]]),
+    electronModule: { webContents: { fromId: (id) => (id === home.id ? home : popup) } },
+    terminalOutputChannel: fakeChannel,
+  });
+  bridge.registerHandlers({ handle: (channel, fn) => handles.set(channel, fn), on: () => {} });
+  registry.registerAttachPopupAuthorization(authorization, sessionId, popup.id, { ownsLifetime: true });
+
+  const originalRequire = Module.prototype.require;
+  Module.prototype.require = function (request, ...rest) {
+    if (request === "./windowManager.cjs") return { getMainWindows: () => [{ webContents: home }] };
+    return originalRequire.call(this, request, ...rest);
+  };
+  try {
+    const rebound = await handles.get("netcatty:terminal:rebindOutput")(
+      { sender: popup },
+      { sessionId, authorization },
+    );
+    assert.equal(rebound.success, true);
+
+    // Emit detached output while popup is attached.
+    emitTerminalSessionData(popup, sessionId, "detached-line-1\r\n");
+    emitTerminalSessionData(popup, sessionId, "detached-line-2\r\n");
+    channelSent.length = 0;
+
+    // Simulate popup crash: main-process restore runs without applySnapshot.
+    const restored = await registry.restoreAttachedSessionOutput(sessionId);
+    assert.equal(restored.success, true);
+    assert.equal(restored.restored, true);
+    assert.deepEqual(channelSent, [{ sid: sessionId, data: "detached-line-1\r\ndetached-line-2\r\n" }]);
+    assert.equal(registry.takeDetachedReplayData(sessionId), "");
+
+    // Graceful path: clearDetachedReplayCapture prevents duplicate replay.
+    registry.startDetachedReplayCapture(sessionId);
+    registry.appendDetachedReplayData(sessionId, "graceful-line\r\n");
+    registry.clearDetachedReplayCapture(sessionId);
+    assert.equal(registry.takeDetachedReplayData(sessionId), "");
+  } finally {
+    Module.prototype.require = originalRequire;
+    registry.releaseAttachPopupAuthorization(authorization);
+    registry.clearDetachedReplayCapture(sessionId);
+  }
+});

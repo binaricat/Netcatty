@@ -168,11 +168,13 @@ const {
   releaseAttachedSessionState,
   setRestoreAttachedSessionOutput,
   clearAttachPopupAttached,
+  clearDetachedReplayCapture,
   failAttachPopupAuthorization,
   markAttachPopupAttached,
   markAttachPopupReady,
   setAttachHomeLookup,
   setFanoutSessionExit,
+  takeDetachedReplayData,
   validateAttachPopupAuthorization,
 } = require("./terminalAttachRestore.cjs");
 
@@ -373,7 +375,7 @@ function applyTerminalSessionSnapshot(event, payload, terminalWorkerManager = nu
         pendingTerminalSnapshotApplies.delete(requestId);
         resolve({ success: false, error: "timeout" });
       }, TERMINAL_SNAPSHOT_TIMEOUT_MS);
-      pendingTerminalSnapshotApplies.set(requestId, { resolve, timeout, webContentsId: home.id });
+      pendingTerminalSnapshotApplies.set(requestId, { resolve, timeout, webContentsId: home.id, sessionId });
       try {
         home.send("netcatty:terminal:apply-snapshot", {
           sessionId,
@@ -407,6 +409,9 @@ function handleTerminalSessionApplySnapshotResponse(event, payload) {
   if (!pending || pending.webContentsId !== event?.sender?.id) return;
   clearTimeout(pending.timeout);
   pendingTerminalSnapshotApplies.delete(payload.requestId);
+  if (payload?.success !== false) {
+    clearDetachedReplayCapture(pending.sessionId);
+  }
   pending.resolve(payload?.success === false
     ? { success: false, error: payload?.error || "Snapshot apply failed" }
     : { success: true });
@@ -568,6 +573,10 @@ async function restoreAttachedSessionOutputOnce(
               sessions, sessionId, home, closeSession, true,
             );
             attachHomeWebContentsIds.delete(sessionId);
+            const replay = takeDetachedReplayData(sessionId);
+            if (replay && !terminalOutputChannel?.send?.(sessionId, replay)) {
+              home.send("netcatty:data", { sessionId, data: replay });
+            }
             result = { success: true, restored: true, webContentsId: home.id };
           }
         } catch (err) {
@@ -650,6 +659,7 @@ async function restoreTerminalSessionOutput(event, payload, terminalWorkerManage
       }
       terminalWorkerManager.clearAttachHome?.(sessionId, target.id);
       clearAttachPopupAttached(payload?.authorization, sessionId, event?.sender?.id);
+      clearDetachedReplayCapture(sessionId);
       return { success: true, restored: true, webContentsId: target.id };
     } catch (err) {
       return { success: false, error: err?.message || String(err) };
@@ -669,6 +679,7 @@ async function restoreTerminalSessionOutput(event, payload, terminalWorkerManage
     );
     attachHomeWebContentsIds.delete(sessionId);
     clearAttachPopupAttached(payload?.authorization, sessionId, event?.sender?.id);
+    clearDetachedReplayCapture(sessionId);
     return { success: true, restored: true, webContentsId: target.id };
   } catch (err) {
     return { success: false, error: err?.message || String(err) };

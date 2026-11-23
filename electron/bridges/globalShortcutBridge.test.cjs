@@ -547,6 +547,41 @@ test("tray session menu reveal cancels a pending fullscreen hide before focusing
   });
 });
 
+test("tray menu click on a popped-out tab does not focus or show the hidden main window", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  const win = new FakeWindow({ visible: false });
+  electronModule.BrowserWindow.getAllWindows = () => [win];
+  bridge.init({ electronModule, getMainWindow: () => win });
+  const ipcMain = createIpcMainStub();
+  bridge.registerHandlers(ipcMain);
+
+  await withPlatform("linux", async () => {
+    await ipcMain.handlers.get("netcatty:tray:setCloseToTray")(null, { enabled: true });
+    await ipcMain.handlers.get("netcatty:tray:updateMenuData")(null, {
+      sessions: [{
+        id: "s-pop",
+        label: "prod",
+        hostLabel: "prod.example",
+        status: "connected",
+        aiHidden: false,
+        poppedOut: true,
+      }],
+    });
+
+    const sessionItem = bridge.getTray().contextMenu.template
+      .filter((item) => typeof item.click === "function")
+      .find((item) => String(item.label).includes("prod.example"));
+    assert.ok(sessionItem);
+    sessionItem.click();
+    await Promise.resolve();
+
+    assert.equal(win.showCalls, 0);
+    assert.deepEqual(win.sentMessages, [["netcatty:tray:focusSession", "s-pop"]]);
+    bridge.cleanup();
+  });
+});
+
 test("tray port-forward menu reveal cancels a pending fullscreen hide before toggling", async () => {
   await withPatchedTimers(async ({ flushNextTimer, getPendingTimerCount }) => {
     const bridge = loadBridge();

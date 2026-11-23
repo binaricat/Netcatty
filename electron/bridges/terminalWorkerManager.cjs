@@ -1,6 +1,11 @@
 "use strict";
 
-const { getLifetimeHeirWebContentsId, releaseAttachedSessionState } = require("./terminalAttachRestore.cjs");
+const {
+  appendDetachedReplayData,
+  getLifetimeHeirWebContentsId,
+  releaseAttachedSessionState,
+  takeDetachedReplayData,
+} = require("./terminalAttachRestore.cjs");
 
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
@@ -644,7 +649,9 @@ function createTerminalWorkerManager(options = {}) {
   }
 
   function notifyOutputTaps(sessionId, data) {
-    if (!sessionId || !data || outputTaps.size === 0) return;
+    if (!sessionId || !data) return;
+    appendDetachedReplayData(sessionId, data);
+    if (outputTaps.size === 0) return;
     for (const tap of outputTaps) {
       try {
         tap(sessionId, data);
@@ -899,6 +906,10 @@ function createTerminalWorkerManager(options = {}) {
     const ok = await openOutputSession(sessionId, homeId);
     if (ok) {
       clearAttachHome(sessionId, homeId);
+      const replay = takeDetachedReplayData(sessionId);
+      if (replay) {
+        deliverOutputToRenderer(sessionId, replay);
+      }
     }
     return {
       success: ok,
