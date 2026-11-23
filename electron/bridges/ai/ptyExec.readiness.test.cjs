@@ -73,6 +73,63 @@ test('decorated two-line host prompt is ready for command execution', async () =
   assert.equal(pty.writes.length, 1);
 });
 
+test('decorated two-line prompt with a newline suffix is ready for command execution', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const prompt = '[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#';
+  trackSessionIdlePrompt(session, `Last login\r\n${prompt}\r\n`);
+  assert.equal(readyPrompt(session), `${prompt}\n\n`);
+
+  const job = startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  });
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
+test('decorated two-line prompt redrawn with CR and erase-line is ready for command execution', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const output = [
+    'Last login: Mon Nov 23 16:01:46 2026 from 10.1.64.108\r\r\n',
+    '[\x1b[1;32mroot\x1b[m\x1b[1;33m@\x1b[m\x1b[1;35mk8s-10-1-64-1\x1b[m \x1b[4m~\x1b[m] \x1b[1;36mbr0 = 10.1.64.1\x1b[m\r\r\n',
+    '# \r\x1b[K# \r\x1b[K# \r\x1b[K# \r\x1b[K# ',
+  ].join('');
+  trackSessionIdlePrompt(session, output);
+  assert.equal(
+    readyPrompt(session),
+    '[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n\n\n# \n# \n# \n# \n# ',
+  );
+
+  const result = await startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  }).resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
+test('JumpServer menu prompt is ready for command execution', async () => {
+  for (const prompt of ['Opt> ', '[Host]> ']) {
+    const pty = new TestPty();
+    const session = { _promptTrackTail: prompt, lastIdlePrompt: prompt };
+    const result = await startPtyJob(pty, '11', {
+      shellKind: 'posix',
+      getReadyPrompt: () => readyPrompt(session),
+      promptWaitTimeoutMs: 200,
+      timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.ok, true, prompt);
+    assert.equal(pty.writes.length, 1, prompt);
+  }
+});
+
 test('zsh prompt with pending input does not become ready', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
   const pty = new TestPty();
