@@ -38,6 +38,7 @@
     "pack:dir": "npm run build && cross-env NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --dir --publish=never",
     "pack:win": "npm run build && cross-env npm_config_arch=x64 NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --win --x64 --publish=never && cross-env npm_config_arch=arm64 NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --win --arm64 --publish=never",
     "pack:win-x64": "npm run build && cross-env npm_config_arch=x64 NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --win --x64 --publish=never",
+    "pack:win-x64:cross": "npm run build && cross-env NETCATTY_SKIP_WINDOWS_HELLO_HELPER=1 npm_config_arch=x64 NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --win --x64 --publish=never -c.npmRebuild=false",
     "pack:mac": "npm run build && cross-env NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --mac --publish=never",
     "pack:linux": "npm run build && cross-env NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --linux --publish=never",
     "pack:linux-x64": "npm run build && cross-env npm_config_arch=x64 NODE_OPTIONS=--disable-warning=DEP0190 electron-builder --config electron-builder.config.cjs --linux --x64 --publish=never",
@@ -114,6 +115,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@electron/asar": "4.2.0",
     "@ai-sdk/anthropic": "^4.0.0",
     "@ai-sdk/google": "^4.0.0",
     "@ai-sdk/openai": "4.0.11",

@@ -72,6 +72,7 @@ test("beforePackCursorSdk builds Windows Hello helper only for Windows packages"
   beforePackCursorSdk({
     appDir: process.cwd(),
     electronPlatformName: "win32",
+    hostPlatform: "win32",
     arch: 3,
     ensureCursorSdkPlatformPackages: () => [],
     buildWindowsHelloHelper: (projectDir) => calls.push(projectDir),
@@ -82,6 +83,7 @@ test("beforePackCursorSdk builds Windows Hello helper only for Windows packages"
   beforePackCursorSdk({
     appDir: process.cwd(),
     electronPlatformName: "darwin",
+    hostPlatform: "win32",
     ensureCursorSdkPlatformPackages: () => [],
     buildWindowsHelloHelper: (projectDir) => calls.push(projectDir),
   });
@@ -97,6 +99,7 @@ test("beforePackCursorSdk falls back to npm_config_arch for Windows Hello helper
     beforePackCursorSdk({
       appDir: process.cwd(),
       electronPlatformName: "win32",
+      hostPlatform: "win32",
       ensureCursorSdkPlatformPackages: () => [],
       buildWindowsHelloHelper: (projectDir) => calls.push(projectDir),
     });
@@ -116,11 +119,26 @@ test("beforePackCursorSdk fails Windows packaging when Windows Hello helper buil
     () => beforePackCursorSdk({
       appDir: process.cwd(),
       electronPlatformName: "win32",
+      hostPlatform: "win32",
       ensureCursorSdkPlatformPackages: () => [],
       buildWindowsHelloHelper: () => ({ skipped: true, reason: "compiler-unavailable" }),
     }),
     /Windows Hello helper was not built: compiler-unavailable/,
   );
+});
+
+test("beforePackCursorSdk automatically skips host-only Windows helpers during cross-builds", () => {
+  let built = false;
+  beforePackCursorSdk({
+    appDir: process.cwd(),
+    electronPlatformName: "win32",
+    hostPlatform: "darwin",
+    ensureCursorSdkPlatformPackages: () => [],
+    buildWindowsHelloHelper: () => {
+      built = true;
+    },
+  });
+  assert.equal(built, false);
 });
 
 test("Windows packaging rebuilds patched node-pty from source for the target architecture", () => {

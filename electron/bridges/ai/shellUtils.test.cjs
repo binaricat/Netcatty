@@ -551,6 +551,76 @@ test("extractTrailingIdlePrompt recognizes a two-line user@host then bare $/# PS
   assert.equal(isDefaultPosixPromptLine("# "), false);
 });
 
+test("recognizes a decorated two-line host prompt as idle", () => {
+  const prompt = "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ";
+  assert.equal(
+    extractTrailingIdlePrompt(`command output\r\n${prompt}`),
+    prompt,
+  );
+
+  const session = {};
+  trackSessionIdlePrompt(session, `Last login...\r\n${prompt}`);
+  assert.equal(getFreshIdlePrompt(session), prompt);
+});
+
+test("recognizes a decorated two-line host prompt followed by a newline", () => {
+  const prompt = "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#";
+  for (const [lineEnding, normalizedLineEnding] of [["\n", "\n"], ["\r\n", "\n\n"]]) {
+    assert.equal(
+      extractTrailingIdlePrompt(`command output\r\n${prompt}${lineEnding}`),
+      `${prompt}${normalizedLineEnding}`,
+    );
+
+    const session = {};
+    trackSessionIdlePrompt(session, `Last login...\r\n${prompt}${lineEnding}`);
+    assert.equal(getFreshIdlePrompt(session), `${prompt}${normalizedLineEnding}`);
+  }
+});
+
+test("recognizes a decorated two-line host prompt redrawn across multiple bare markers", () => {
+  const output = [
+    "Last login: Mon Nov 23 16:01:46 2026 from 10.1.64.108\r\r\n",
+    "[\x1b[1;32mroot\x1b[m\x1b[1;33m@\x1b[m\x1b[1;35mk8s-10-1-64-1\x1b[m \x1b[4m~\x1b[m] \x1b[1;36mbr0 = 10.1.64.1\x1b[m\r\r\n",
+    "# \r\x1b[K# \r\x1b[K# \r\x1b[K# \r\x1b[K# ",
+  ].join("");
+  const expected =
+    "[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n\n\n# \n# \n# \n# \n# ";
+
+  assert.equal(extractTrailingIdlePrompt(output), expected);
+
+  const session = {};
+  trackSessionIdlePrompt(session, output);
+  assert.equal(getFreshIdlePrompt(session), expected);
+});
+
+test("keeps JumpServer menu prompts out of POSIX shell readiness", () => {
+  for (const prompt of ["Opt> ", "[Host]> "]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), false, prompt);
+    assert.equal(extractTrailingIdlePrompt(`menu output\r\n${prompt}`), "", prompt);
+
+    const session = {};
+    trackSessionIdlePrompt(session, `menu output\r\n${prompt}`);
+    assert.equal(getFreshIdlePrompt(session), "", prompt);
+    assert.equal(getVisibleIdlePrompt(session), "", prompt);
+  }
+});
+
+test("does not recognize arbitrary or sensitive text before a bare marker", () => {
+  assert.equal(extractTrailingIdlePrompt("copied output\n# "), "");
+  assert.equal(extractTrailingIdlePrompt("Password:\n# "), "");
+});
+
+test("does not recognize host-like text embedded in copied output before a bare marker", () => {
+  for (const output of [
+    "see [root@prod] logs\n# ",
+    "[root@prod] copied output\n# ",
+    "root@prod output\n# ",
+    "[root@prod] version = 1.2\n# ",
+  ]) {
+    assert.equal(extractTrailingIdlePrompt(output), "", output);
+  }
+});
+
 test("trackSessionIdlePrompt and getFreshIdlePrompt accept a two-line user@host PS1", () => {
   const session = {};
   const prompt = "user@host: /home/foo\n$ ";

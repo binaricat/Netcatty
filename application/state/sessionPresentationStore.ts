@@ -4,6 +4,7 @@ import type { CodingCliProviderId } from '../../domain/codingCliProviders';
 
 export type SessionPresentation = {
   dynamicTitle?: string | null;
+  promptHostname?: string | null;
   codingCliProviderId?: CodingCliProviderId | null;
 };
 
@@ -41,7 +42,7 @@ class SessionPresentationStore {
   getSessionSnapshot = (sessionId: string): string => {
     const presentation = this.bySession.get(sessionId);
     if (!presentation) return '';
-    return `${encodePresentationField(presentation.dynamicTitle)}\0${encodePresentationField(presentation.codingCliProviderId)}`;
+    return `${encodePresentationField(presentation.dynamicTitle)}\0${encodePresentationField(presentation.promptHostname)}\0${encodePresentationField(presentation.codingCliProviderId)}`;
   };
 
   subscribe = (listener: Listener): (() => void) => {
@@ -59,6 +60,7 @@ class SessionPresentationStore {
     // title/provider and the store had no prior entry.
     if (
       prev.dynamicTitle === next.dynamicTitle
+      && prev.promptHostname === next.promptHostname
       && prev.codingCliProviderId === next.codingCliProviderId
     ) {
       return;
@@ -102,9 +104,14 @@ export function publishSessionCodingCliProvider(
   sessionPresentationStore.setPresentation(sessionId, { codingCliProviderId: providerId });
 }
 
+export function publishSessionPromptHost(sessionId: string, hostname: string | null): void {
+  sessionPresentationStore.setPresentation(sessionId, { promptHostname: hostname });
+}
+
 type SessionWithPresentation = {
   id: string;
   dynamicTitle?: string;
+  promptHostname?: string;
   codingCliProviderId?: CodingCliProviderId;
 };
 
@@ -119,11 +126,15 @@ export function applySessionPresentation<T extends SessionWithPresentation>(sess
   const nextTitle = presentation.dynamicTitle === undefined
     ? session.dynamicTitle
     : (presentation.dynamicTitle ?? undefined);
+  const nextPromptHost = presentation.promptHostname === undefined
+    ? session.promptHostname
+    : (presentation.promptHostname ?? undefined);
   const nextProvider = presentation.codingCliProviderId === undefined
     ? session.codingCliProviderId
     : (presentation.codingCliProviderId ?? undefined);
   if (
     nextTitle === session.dynamicTitle
+    && nextPromptHost === session.promptHostname
     && nextProvider === session.codingCliProviderId
   ) {
     return session;
@@ -131,6 +142,7 @@ export function applySessionPresentation<T extends SessionWithPresentation>(sess
   return {
     ...session,
     dynamicTitle: nextTitle,
+    promptHostname: nextPromptHost,
     codingCliProviderId: nextProvider,
   };
 }

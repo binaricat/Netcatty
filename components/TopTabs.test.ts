@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import type { TerminalSession } from "../types";
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -36,11 +37,70 @@ const {
   formatSessionTopTabLabel,
   formatSessionTopTabTooltip,
   resolveSessionTabCodingCliIconState,
+  resolveWorkspaceTopTabLabel,
 } = await import("./top-tabs/TopTabItems.tsx");
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
+const {
+  publishSessionPromptHost,
+  sessionPresentationStore,
+} = await import("../application/state/sessionPresentationStore.ts");
+
+const topTabSession = (
+  id: string,
+  hostId: string,
+  overrides: Partial<TerminalSession> = {},
+): TerminalSession => ({
+  id,
+  hostId,
+  hostLabel: "jump",
+  username: "root",
+  hostname: "jump",
+  status: "connected",
+  ...overrides,
+});
 
 test("host tree tab gutter fills the remaining sidebar width", () => {
   assert.equal(computeHostTreeTabGutter(280, 120), 160);
+});
+
+test("workspace tabs resolve generated labels from live prompt hosts", () => {
+  const sessions = [
+    topTabSession("s1", "h1", { customName: "", promptHostname: "" }),
+    topTabSession("s2", "h2", { customName: "", promptHostname: "" }),
+  ];
+  const workspace = {
+    title: "jump/jump",
+    autoTitle: false,
+    generatedTitle: true,
+    focusedSessionId: "s1",
+  };
+
+  publishSessionPromptHost("s1", "target-a");
+  publishSessionPromptHost("s2", "target-b");
+  assert.equal(
+    resolveWorkspaceTopTabLabel(workspace, sessions),
+    "target-a/target-b",
+  );
+
+  sessionPresentationStore.clearSession("s1");
+  sessionPresentationStore.clearSession("s2");
+});
+
+test("workspace tabs keep explicit names ahead of live prompt hosts", () => {
+  const sessions = [
+    topTabSession("s1", "h1", { customName: "", promptHostname: "" }),
+  ];
+  publishSessionPromptHost("s1", "target-a");
+  assert.equal(
+    resolveWorkspaceTopTabLabel({
+      title: "My Workspace",
+      autoTitle: false,
+      generatedTitle: false,
+      focusedSessionId: "s1",
+    }, sessions),
+    "My Workspace",
+  );
+  sessionPresentationStore.clearSession("s1");
 });
 
 test("host tree tab gutter never goes negative", () => {

@@ -58,21 +58,66 @@ function defaultListPosix(ppid, { execFileFn = execFile } = {}) {
   });
 }
 
-function defaultListWindows(ppid) {
+function defaultListWindowsFallback(ppid, { execFileFn = execFile } = {}) {
+  if (!Number.isInteger(ppid) || ppid <= 0) return Promise.resolve([]);
   return new Promise((resolve) => {
-    let wpt;
-    try {
-      wpt = require("@vscode/windows-process-tree");
-    } catch {
-      return resolve([]);
-    }
+    execFileFn(
+      "powershell.exe",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Get-CimInstance Win32_Process -Filter "ParentProcessId = ${ppid}" | ForEach-Object { "$($_.ProcessId)\`t$($_.Name)" }`,
+      ],
+      {
+        timeout: POSIX_PROCESS_LIST_TIMEOUT_MS,
+        maxBuffer: POSIX_PROCESS_LIST_MAX_BUFFER_BYTES,
+        windowsHide: true,
+      },
+      (err, stdout) => {
+        if (err || typeof stdout !== "string") return resolve([]);
+        const out = [];
+        for (const rawLine of stdout.split(/\r?\n/)) {
+          const line = rawLine.trim();
+          if (!line) continue;
+          const tabIndex = line.indexOf("\t");
+          if (tabIndex <= 0) continue;
+          const pid = Number(line.slice(0, tabIndex).trim());
+          const command = line.slice(tabIndex + 1).trim();
+          if (!Number.isInteger(pid) || pid <= 0 || !command) continue;
+          out.push({ pid, command });
+        }
+        resolve(out);
+      },
+    );
+  });
+}
+
+function defaultListWindows(
+  ppid,
+  {
+    loadWindowsProcessTree = () => require("@vscode/windows-process-tree"),
+    execFileFn = execFile,
+  } = {},
+) {
+  let wpt;
+  try {
+    wpt = loadWindowsProcessTree();
+  } catch {
+    return defaultListWindowsFallback(ppid, { execFileFn });
+  }
+  if (!wpt || typeof wpt.getProcessTree !== "function") {
+    return defaultListWindowsFallback(ppid, { execFileFn });
+  }
+  return new Promise((resolve) => {
     try {
       wpt.getProcessTree(ppid, (tree) => {
         if (!tree || !Array.isArray(tree.children)) return resolve([]);
         resolve(tree.children.map((c) => ({ pid: c.pid, command: c.name })));
       });
     } catch {
-      resolve([]);
+      defaultListWindowsFallback(ppid, { execFileFn }).then(resolve);
     }
   });
 }
@@ -101,6 +146,8 @@ module.exports = {
   POSIX_PROCESS_LIST_MAX_BUFFER_BYTES,
   createProcessTree,
   defaultListPosix,
+  defaultListWindows,
+  defaultListWindowsFallback,
   registerWorkerHandlers,
   processTree: defaultTree,
   registerPid: (id, pid) => defaultTree.registerPid(id, pid),

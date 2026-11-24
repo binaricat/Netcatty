@@ -38,6 +38,7 @@ import { activeTabStore } from './activeTabStore';
 import {
   publishSessionCodingCliProvider,
   publishSessionDynamicTitle,
+  publishSessionPromptHost,
   sessionPresentationStore,
 } from './sessionPresentationStore';
 import {
@@ -550,6 +551,10 @@ export const useSessionState = ({
     // pane chrome refresh via applySessionPresentation without setSessions
     // thrashing appTerminalDomain / TerminalLayer parents.
     publishSessionDynamicTitle(sessionId, nextTitle);
+  }, []);
+
+  const updateSessionPromptHost = useCallback((sessionId: string, hostname: string | null) => {
+    publishSessionPromptHost(sessionId, hostname?.trim() || null);
   }, []);
 
   const updateSessionCodingCliProvider = useCallback((
@@ -1614,6 +1619,7 @@ export const useSessionState = ({
     updateSessionRestoreCwd,
     getSessionRestoreCwd,
     updateSessionDynamicTitle,
+    updateSessionPromptHost,
     updateSessionCodingCliProvider,
   };
 };
