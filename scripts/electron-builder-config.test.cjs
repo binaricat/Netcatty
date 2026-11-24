@@ -416,6 +416,14 @@ test("windows zip follows the requested build architecture", () => {
   );
 });
 
+test("cross Windows build script skips host native rebuilds", () => {
+  const packageJson = require("../package.json");
+  assert.match(
+    packageJson.scripts["pack:win-x64:cross"],
+    /electron-builder[\s\S]*--win[\s\S]*--x64[\s\S]*-c\.npmRebuild=false/,
+  );
+});
+
 test("linux FPM packages use the custom post-install template", () => {
   const fs = require("node:fs");
   const path = require("node:path");

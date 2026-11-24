@@ -9,6 +9,7 @@ const {
   pruneCursorSdkPlatformPackages,
   pruneNativePrebuilds,
   readAsarHeader,
+  shouldNormalizeCrossWindowsPayload,
 } = require("./afterPackMacUuid.cjs");
 
 const LC_UUID = 0x1b;
@@ -62,6 +63,21 @@ function buildThinMachO(uuidBytes) {
 
   return Buffer.concat([header, dummy, uuidCmd]);
 }
+
+test("cross Windows packaging normalizes when the host is not Windows", () => {
+  assert.equal(shouldNormalizeCrossWindowsPayload({
+    electronPlatformName: "win32",
+    hostPlatform: "darwin",
+  }), true);
+  assert.equal(shouldNormalizeCrossWindowsPayload({
+    electronPlatformName: "win32",
+    hostPlatform: "win32",
+  }), false);
+  assert.equal(shouldNormalizeCrossWindowsPayload({
+    electronPlatformName: "linux",
+    hostPlatform: "darwin",
+  }), false);
+});
 
 // Wrap one or more thin slices in a big-endian 32-bit fat binary.
 function buildFatMachO(slices) {

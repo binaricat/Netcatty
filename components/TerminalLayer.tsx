@@ -19,6 +19,7 @@ import { useTerminalBackend } from '../application/state/useTerminalBackend';
 import {
   useCodingCliSessionSignals,
 } from '../application/state/codingCliSessionSignalController';
+import { createPromptHostnameSessionSignalController } from '../application/state/promptHostnameSessionSignalController';
 import { collectSessionIds } from '../domain/workspace';
 import { isPluginHostProtocol } from '../domain/pluginConnection';
 import { isSameSftpHostSelection } from '../domain/sftpTerminalIdentity';
@@ -232,6 +233,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onUpdateSessionFontSize,
   onUpdateSessionRestoreCwd,
   onUpdateSessionDynamicTitle,
+  onUpdateSessionPromptHost,
   onUpdateSessionCodingCliProvider,
   onClearSessionFontSizeOverride,
   onCloseSession,
@@ -429,7 +431,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onUpdateSessionDynamicTitle,
   });
   const handleTerminalTitleChange = codingCliSignalController.handleTerminalTitleChange;
-  const handleTerminalOutput = codingCliSignalController.handleTerminalOutput;
+  const promptHostnameSignalController = useMemo(
+    () => createPromptHostnameSessionSignalController({
+      getSession: (sessionId) => sessionsRef.current.find((session) => session.id === sessionId),
+      onChange: (sessionId, hostname) => onUpdateSessionPromptHost?.(sessionId, hostname),
+    }),
+    [onUpdateSessionPromptHost],
+  );
+  useEffect(() => {
+    promptHostnameSignalController.pruneSessions(new Set(codingCliSessionIds));
+  }, [codingCliSessionIds, promptHostnameSignalController]);
+  const handleTerminalOutput = useCallback((sessionId: string, chunk: string) => {
+    codingCliSignalController.handleTerminalOutput(sessionId, chunk);
+    promptHostnameSignalController.handleTerminalOutput(sessionId, chunk);
+  }, [codingCliSignalController, promptHostnameSignalController]);
 
   const handleTerminalBell = useCallback((sessionId: string) => {
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
@@ -457,9 +472,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       cwdProbeCancelersRef,
     }, sessionId);
     codingCliSignalController.forgetSession(sessionId);
+    promptHostnameSignalController.forgetSession(sessionId);
     sessionCapabilitiesStore.delete(sessionId);
     onCloseSession(sessionId);
-  }, [codingCliSignalController, onCloseSession]);
+  }, [codingCliSignalController, promptHostnameSignalController, onCloseSession]);
 
   const sftpAutoOpenSidebarRef = useRef(sftpAutoOpenSidebar);
   sftpAutoOpenSidebarRef.current = sftpAutoOpenSidebar;

@@ -1,6 +1,7 @@
 "use strict";
 
 const { trackEmitted } = require("./terminalFlowAck.cjs");
+const { appendDetachedReplayData } = require("./terminalAttachRestore.cjs");
 const {
   attachTerminalOutputPerfMeta,
   createTerminalOutputPerfMeta,
@@ -105,6 +106,7 @@ function emitTerminalSessionData(contents, sessionId, data, options = {}) {
     trackEmitted(currentSession, typeof data === "string" ? data.length : 0, sessionId);
   }
   if (sessionId && data) {
+    appendDetachedReplayData(sessionId, data);
     for (const tap of dataTaps) {
       try {
         tap(sessionId, data);

@@ -113,6 +113,7 @@ test('session actions register and unregister', () => {
     updateSessionRestoreCwd: noop,
     getSessionRestoreCwd: noop,
     updateSessionDynamicTitle: noop,
+    updateSessionPromptHost: noop,
     updateSessionCodingCliProvider: noop,
   });
   getSessionSnapshotActions()?.setActiveTabId('vault');

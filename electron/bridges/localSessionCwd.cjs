@@ -102,6 +102,9 @@ function lsofBinaries(platform) {
  * because it has no procfs. Windows shells are not probed here.
  */
 async function readLocalSessionCwd(session, deps = {}) {
+  if ((deps.platform || process.platform) === 'win32' && session?.directoryIntegration) {
+    return session.directoryIntegration.read();
+  }
   const pid = localSessionPid(session);
   if (!pid) return { success: false, error: "Local session has no process" };
 

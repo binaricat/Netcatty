@@ -95,6 +95,7 @@ interface AIChatPanelContentProps {
   modelCatalogFetchedAt?: string;
   /** Retry a failed SDK model catalog load from the warning banner. */
   handleModelCatalogRetry?: () => void;
+  handleModelPickerOpen?: () => void;
   agentModelPresets: AgentModelPreset[];
   /** Suppress the composer picker's "use custom model" action (locked model). */
   allowCustomModelEntry?: boolean;
@@ -173,6 +174,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   handleSteer,
   handleStop,
   handleModelCatalogRetry,
+  handleModelPickerOpen,
   canSteer,
   isSteering,
   steerWarning,
@@ -462,6 +464,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   modelCatalogFetchedAt={modelCatalogFetchedAt}
                   modelCatalogWarning={modelCatalogWarning}
                   onRefreshModelCatalog={handleModelCatalogRetry}
+                  onModelPickerOpen={handleModelPickerOpen}
                   allowCustomModelEntry={allowCustomModelEntry}
                   selectedModelId={selectedAgentModel}
                   onModelSelect={handleAgentModelSelect}

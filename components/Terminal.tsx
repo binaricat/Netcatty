@@ -1703,9 +1703,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       if (term && !await flushPendingTerminalWritesBeforeHibernate(term)) {
         throw new Error("Terminal output did not drain before quit capture");
       }
+      try {
+        const detached = await netcattyBridge.get()?.getDetachedTerminalReplayData?.(sessionId);
+        if (detached?.success && typeof detached.data === "string" && detached.data.length > 0) {
+          captureTerminalLogData(detached.data);
+        }
+      } catch {
+        // Best-effort: still finalize local log data if replay query is unavailable.
+      }
       await handleTerminalDataCaptureOnce(sessionId, finalizeTerminalLogData(), { finalized: true });
     });
-  }, [attachExistingSession, restoreState, sessionId, finalizeTerminalLogData, handleTerminalDataCaptureOnce]);
+  }, [attachExistingSession, captureTerminalLogData, restoreState, sessionId, finalizeTerminalLogData, handleTerminalDataCaptureOnce]);
 
   const attachHomeWebContentsIdRef = useRef<number | null | undefined>(undefined);
 
@@ -1825,6 +1833,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             payload.kittyKeyboardModeState,
           );
         }
+        if (typeof payload.connectionLogDelta === "string" && payload.connectionLogDelta.length > 0) {
+          finalizeTerminalLogData?.();
+          connectionLogBufferRef?.current?.append(payload.connectionLogDelta);
+        }
+        if (typeof commandLogRewriterRef !== "undefined" && typeof createProgrammaticCommandLogRewriter === "function") {
+          commandLogRewriterRef.current = createProgrammaticCommandLogRewriter();
+        }
+        if (typeof terminalLogSanitizerRef !== "undefined" && typeof createReplaySafeTerminalLogSanitizer === "function") {
+          terminalLogSanitizerRef.current = createReplaySafeTerminalLogSanitizer({
+            alternateScreenActive: payload.alternateScreen,
+          });
+        }
         if (term) {
           term.reset();
           // The buffer was just wiped; drop ledger stamps anchored to the old
@@ -1860,6 +1880,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     };
   }, [
     attachExistingSession,
+    finalizeTerminalLogData,
     kittyKeyboardProtocolEnabledForSession,
     onTerminalCwdChange,
     onTerminalTitleChange,
@@ -1961,6 +1982,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const capture = resolveTerminalSnapshotCapture(serializedSnapshot, finalContext);
         const snap = capture.snapshot;
         finalContext = capture.context;
+        const connectionLogDelta = finalizeTerminalLogData();
         const applied = await terminalBackend.applySessionSnapshot?.(
           closingSessionId,
           snap,
@@ -1974,10 +1996,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             passwordPromptActive: passwordPromptActiveRef.current,
             cwd: knownCwdRef.current ?? null,
             title: terminalTitleRef.current ?? null,
+            ...(connectionLogDelta ? { connectionLogDelta } : {}),
           },
           attachAuthorization || "",
         );
         if (applied && !applied.success) throw new Error(applied.error || "Failed to apply terminal snapshot");
+        connectionLogBufferRef.current.reset();
         // Hand the route home while output is still paused, then detach the
         // popup listener and resume so subsequent bytes land on the home route.
         const restored = await terminalBackend.restoreSessionOutput?.(

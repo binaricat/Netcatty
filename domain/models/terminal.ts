@@ -744,6 +744,8 @@ export interface TerminalSession {
   customName?: string;
   /** Runtime shell-reported window title (OSC 0/2), shown on tabs when enabled */
   dynamicTitle?: string;
+  /** Runtime hostname detected from the current shell prompt (presentation only) */
+  promptHostname?: string;
   /** Sticky coding CLI provider detected from launch command or window title */
   codingCliProviderId?: CodingCliProviderId;
   /** Runtime marker for sessions reconstructed from startup restore. */
@@ -763,6 +765,12 @@ export interface TerminalSession {
    * external MCP session list.
    */
   hiddenFromTabs?: boolean;
+  /**
+   * Runtime marker for a user tab moved into its own window ("Move tab to new
+   * window"). Set together with hiddenFromTabs; unlike silent AI sessions it
+   * still restores on relaunch and returns to the tab bar when the window closes.
+   */
+  poppedOut?: boolean;
   /** Runtime hint to auto-open a side panel once the session connects. */
   autoOpenSidePanel?: 'sftp';
   /** Latest known working directory captured from terminal cwd tracking. */

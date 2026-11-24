@@ -86,6 +86,7 @@ export function SessionPublisher({ persistSessionRestore, children }: SessionPub
     updateSessionRestoreCwd,
     getSessionRestoreCwd,
     updateSessionDynamicTitle,
+    updateSessionPromptHost,
     updateSessionCodingCliProvider,
   } = session;
 
@@ -173,6 +174,7 @@ export function SessionPublisher({ persistSessionRestore, children }: SessionPub
     updateSessionRestoreCwd,
     getSessionRestoreCwd,
     updateSessionDynamicTitle,
+    updateSessionPromptHost,
     updateSessionCodingCliProvider,
   }), [
     addSessionToWorkspace,
@@ -226,6 +228,7 @@ export function SessionPublisher({ persistSessionRestore, children }: SessionPub
     toggleWorkspaceViewMode,
     updateSessionCodingCliProvider,
     updateSessionDynamicTitle,
+    updateSessionPromptHost,
     updateSessionFontSize,
     updateSessionRestoreCwd,
     updateSessionStatus,

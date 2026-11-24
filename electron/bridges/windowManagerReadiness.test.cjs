@@ -745,6 +745,137 @@ test("main window leaves primary-modifier reload-like shortcuts available to ren
   assert.deepEqual(ignoreMenuShortcutValues, [false]);
 });
 
+test("main window lets Alt+M reach the renderer without ignoring other Alt letters", async () => {
+  let beforeInputHandler = null;
+  const ignoreMenuShortcutValues = [];
+
+  class BrowserWindowStub {
+    constructor() {
+      this.webContents = {
+        id: 1,
+        on(channel, handler) {
+          if (channel === "before-input-event") beforeInputHandler = handler;
+        },
+        once() {},
+        isDestroyed() {
+          return false;
+        },
+        isCrashed() {
+          return false;
+        },
+        setIgnoreMenuShortcuts(value) {
+          ignoreMenuShortcutValues.push(value);
+        },
+        setWindowOpenHandler() {},
+        openDevTools() {},
+      };
+    }
+
+    on() {}
+    once() {}
+    isDestroyed() { return false; }
+    isMaximized() { return false; }
+    isFullScreen() { return false; }
+    getBounds() { return { x: 0, y: 0, width: 1400, height: 900 }; }
+    setBackgroundColor() {}
+    setOpacity() {}
+    async loadURL() {}
+    close() {}
+  }
+
+  const api = createMainWindowApi({
+    mainWindow: null,
+    electronApp: null,
+    currentTheme: "light",
+    isQuitting: false,
+    pendingWindowStateWrite: null,
+    queuedWindowState: null,
+    windowStateCloseRequested: false,
+    DEFAULT_WINDOW_WIDTH: 1400,
+    DEFAULT_WINDOW_HEIGHT: 900,
+    MIN_WINDOW_WIDTH: 1100,
+    MIN_WINDOW_HEIGHT: 640,
+    V8_CACHE_OPTIONS: "bypassHeatCheck",
+    THEME_COLORS: { light: { background: "#fff" } },
+    unhealthyWebContentsIds: new Set(),
+    rendererReadySeenByWebContentsId: new Set(),
+    __dirname,
+    URL,
+    require,
+    console,
+    setTimeout,
+    clearTimeout,
+    getGlobalShortcutBridge() {
+      return { handleWindowClose: () => false };
+    },
+    debugLog() {},
+    resolveFrontendBackgroundColor() { return null; },
+    loadWindowState() { return null; },
+    getDevRendererBaseUrl(url) { return url; },
+    getWindowBoundsState() { return null; },
+    queueWindowStateSave() {},
+    saveWindowStateSync() {},
+    setupDeferredShow() {},
+    createExternalOnlyWindowOpenHandler() { return {}; },
+    createAppWindowOpenHandler() { return {}; },
+    attachOAuthLoadingOverlay() {},
+    registerWindowHandlers() {},
+    requestWindowCommandClose() {
+      return true;
+    },
+    shouldCloseWindowFromInput,
+    applyWindowOpacityToWindow() {},
+    closeSettingsWindow() {},
+    hideSettingsWindow() {},
+  });
+
+  await api.createWindow(
+    {
+      BrowserWindow: BrowserWindowStub,
+      nativeTheme: {},
+      app: {},
+      screen: {},
+      shell: {},
+      ipcMain: {},
+    },
+    {
+      preload: "/tmp/preload.cjs",
+      devServerUrl: "http://localhost:5173",
+      isDev: true,
+      appIcon: null,
+      isMac: false,
+      electronDir: __dirname,
+    },
+  );
+
+  const cases = [
+    { key: "m", ignoreMenuShortcuts: true },
+    { key: "n", ignoreMenuShortcuts: false },
+    { key: "M", ignoreMenuShortcuts: true },
+    { key: "N", ignoreMenuShortcuts: false },
+    { key: "ArrowLeft", ignoreMenuShortcuts: true },
+    { key: "ArrowRight", ignoreMenuShortcuts: true },
+    { key: "m", control: true, ignoreMenuShortcuts: false },
+    { key: "m", meta: true, ignoreMenuShortcuts: false },
+  ];
+
+  for (const { key, control = false, meta = false, ignoreMenuShortcuts } of cases) {
+    let prevented = false;
+    beforeInputHandler({ preventDefault: () => { prevented = true; } }, {
+      type: "keyDown",
+      alt: true,
+      control,
+      meta,
+      key,
+    });
+
+    assert.equal(prevented, false, `Alt+${key} must reach the renderer`);
+    assert.equal(ignoreMenuShortcutValues.at(-1), ignoreMenuShortcuts, `Alt+${key}`);
+  }
+
+  assert.deepEqual(ignoreMenuShortcutValues, cases.map(({ ignoreMenuShortcuts }) => ignoreMenuShortcuts));
+});
+
 test("main window treats Ctrl+= as zoom-in even when Electron only reserves Ctrl++", async () => {
   let beforeInputHandler = null;
   const ignoreMenuShortcutValues = [];

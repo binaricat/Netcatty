@@ -5,15 +5,17 @@ import {
   retainStableSessionsIgnoringPresentation,
   terminalPaneSessionsEqual,
 } from '../../domain/terminalPaneSessionsEqual.ts';
+import type { TerminalSession } from '../../domain/models.ts';
 import { topTabsSessionsEqual } from '../../domain/topTabsSessionsEqual.ts';
 import {
   applySessionPresentation,
   publishSessionCodingCliProvider,
   publishSessionDynamicTitle,
+  publishSessionPromptHost,
   sessionPresentationStore,
 } from './sessionPresentationStore.ts';
 
-const session = (overrides: Record<string, unknown> = {}) => ({
+const session = (overrides: Partial<TerminalSession> = {}): TerminalSession => ({
   id: 's1',
   hostId: 'h1',
   hostLabel: 'host',
@@ -125,4 +127,17 @@ test('session snapshot distinguishes missing fields from null tombstones', () =>
   // Empty entry vs explicit dual null tombstone are distinct from missing.
   assert.notEqual(bothTombstoned, '');
   sessionPresentationStore.clearSession('snap-1');
+});
+
+test('prompt hostnames overlay as presentation without replacing configured hostname', () => {
+  sessionPresentationStore.clearSession('prompt-host');
+  publishSessionPromptHost('prompt-host', '10.1.64.1');
+  const merged = applySessionPresentation(session({
+    id: 'prompt-host',
+    hostLabel: 'jumpserver',
+    hostname: 'jumpserver.example.com',
+  }));
+  assert.equal(merged.promptHostname, '10.1.64.1');
+  assert.equal(merged.hostname, 'jumpserver.example.com');
+  sessionPresentationStore.clearSession('prompt-host');
 });

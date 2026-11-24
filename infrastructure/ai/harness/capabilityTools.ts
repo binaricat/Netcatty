@@ -317,20 +317,31 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
         };
       }
 
-      if (!scopeCtx.readTerminalContext) {
+      const readRequest = {
+        sessionId,
+        range: typeof args.range === 'string' ? args.range as TerminalContextReadRange : undefined,
+        startLine: typeof args.startLine === 'number' ? args.startLine : undefined,
+        maxLines: typeof args.maxLines === 'number' ? args.maxLines : undefined,
+      };
+      const useRemoteDisplayReader =
+        scopeCtx.detachedSessionIds?.has(sessionId) === true
+        && Boolean(deps.bridge.aiCapability)
+        && Boolean(deps.chatSessionId);
+      if (!useRemoteDisplayReader && !scopeCtx.readTerminalContext) {
         return {
           ok: false,
           error: 'Terminal context reader is unavailable for this AI scope.',
         };
       }
 
-      const result = await scopeCtx.readTerminalContext({
-        sessionId,
-        range: typeof args.range === 'string' ? args.range as TerminalContextReadRange : undefined,
-        startLine: typeof args.startLine === 'number' ? args.startLine : undefined,
-        maxLines: typeof args.maxLines === 'number' ? args.maxLines : undefined,
-      });
-      if (result.ok === false) return result;
+      const result = useRemoteDisplayReader
+        ? await deps.bridge.aiCapability!('netcatty/readContext', readRequest, deps.chatSessionId) as Awaited<ReturnType<NonNullable<typeof scopeCtx.readTerminalContext>>>
+        : await scopeCtx.readTerminalContext!(readRequest);
+      if (!result || typeof result !== 'object' || result.ok === false) {
+        return result && typeof result === 'object'
+          ? result
+          : { ok: false, error: 'Failed to read terminal context.' };
+      }
       const normalizedResult = result;
       const fingerprint = toolResultDedup?.fingerprintFor(
         spec.toolName,

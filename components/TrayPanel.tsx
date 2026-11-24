@@ -52,6 +52,8 @@ type TraySession = {
   workspaceTitle?: string;
   /** Mirrors TerminalSession.hiddenFromTabs; marks AI-opened silent sessions. */
   aiHidden?: boolean;
+  /** Marks a user tab currently moved into its own detached popup window. */
+  poppedOut?: boolean;
 };
 
 // Collapsible workspace group component

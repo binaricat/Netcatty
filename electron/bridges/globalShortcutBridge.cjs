@@ -1109,10 +1109,10 @@ function buildTrayMenuTemplate() {
       menuTemplate.push({
         label: `  ${session.hostLabel || session.label}  (${statusText})`,
         click: () => {
-          // AI silent sessions open a terminal popup from the renderer and must
-          // not be force-focused into a tab-less main-window surface.
+          // AI silent sessions and popped-out tabs open/focus a detached popup
+          // from the renderer and must not restore the main window behind it.
           void sendToMainWindow("netcatty:tray:focusSession", session.id, {
-            focus: session.aiHidden !== true,
+            focus: session.aiHidden !== true && session.poppedOut !== true,
           });
         },
       });

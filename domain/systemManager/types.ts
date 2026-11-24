@@ -238,6 +238,11 @@ export interface TerminalPopupPayload {
    * (same PTY) instead of starting a new shell. Used for AI silent sessions.
    */
   attachSessionId?: string;
+  /**
+   * With attachSessionId: a user tab moved into this popup. The popup inherits
+   * the session if its source window closes, instead of the session ending.
+   */
+  moveSession?: boolean;
   /** Ephemeral main-process grant bound to the attach popup window. */
   attachAuthorization?: string;
 }

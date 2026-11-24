@@ -568,6 +568,9 @@ function createPreloadApi(ctx) {
   openTerminalPopup: async (payload) => {
     return ipcRenderer.invoke("netcatty:window:openTerminalPopup", payload);
   },
+  closeTerminalPopup: async (popupId) => {
+    return ipcRenderer.invoke("netcatty:window:closeTerminalPopup", popupId);
+  },
   logDiagnostic: async (payload) => {
     return ipcRenderer.invoke("netcatty:diagnostics:log", payload);
   },
@@ -734,14 +737,26 @@ function createPreloadApi(ctx) {
         : undefined,
       cwd: context?.cwd === null ? null : typeof context?.cwd === "string" ? context.cwd : undefined,
       title: context?.title === null ? null : typeof context?.title === "string" ? context.title : undefined,
+      connectionLogDelta: typeof context?.connectionLogDelta === "string" ? context.connectionLogDelta : undefined,
       authorization,
     }),
   markAttachPopupClosePrepared: (sessionId, authorization) =>
     ipcRenderer.invoke("netcatty:terminal:markAttachClosePrepared", { sessionId, authorization }),
+  reportTerminalAttachReady: (sessionId, authorization) =>
+    ipcRenderer.invoke("netcatty:terminal:reportAttachReady", { sessionId, authorization }),
+  reportTerminalAttachFailed: (sessionId, authorization, error) =>
+    ipcRenderer.invoke("netcatty:terminal:reportAttachFailed", { sessionId, authorization, error }),
+  getDetachedTerminalReplayData: (sessionId) =>
+    ipcRenderer.invoke("netcatty:terminal:getDetachedReplayData", { sessionId }),
   onTerminalPopupPrepareClose: (cb) => {
     const handler = (_event, payload) => cb?.(payload);
     ipcRenderer.on("netcatty:terminal-popup:prepare-close", handler);
     return () => ipcRenderer.removeListener("netcatty:terminal-popup:prepare-close", handler);
+  },
+  onTerminalPopupAttachClosed: (cb) => {
+    const handler = (_event, payload) => cb?.(payload);
+    ipcRenderer.on("netcatty:terminal-popup:attach-closed", handler);
+    return () => ipcRenderer.removeListener("netcatty:terminal-popup:attach-closed", handler);
   },
   onTerminalSessionApplySnapshot: (cb) => {
     const handler = (_event, payload) => {
@@ -2227,8 +2242,8 @@ function createPreloadApi(ctx) {
       clientUserMessageId,
     });
   },
-  aiSdkAgentListModels: async (sdkBackend, cwd, providerId, chatSessionId, agentEnv, agentCommand, codexRuntime, force) => {
-    return ipcRenderer.invoke("netcatty:ai:sdk-agent:list-models", { sdkBackend, cwd, providerId, chatSessionId, agentEnv, agentCommand, codexRuntime, force });
+  aiSdkAgentListModels: async (sdkBackend, cwd, providerId, chatSessionId, agentEnv, agentCommand, codexRuntime, force, cacheOnly) => {
+    return ipcRenderer.invoke("netcatty:ai:sdk-agent:list-models", { sdkBackend, cwd, providerId, chatSessionId, agentEnv, agentCommand, codexRuntime, force, cacheOnly });
   },
   codexAppServerGetStatus: async (agentCommand, agentEnv) => {
     return ipcRenderer.invoke("netcatty:ai:codex-app-server:status", { agentCommand, agentEnv });

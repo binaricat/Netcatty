@@ -9,6 +9,9 @@
 const { execFile, execFileSync } = require("node:child_process");
 const { existsSync, readFileSync, statSync } = require("node:fs");
 const path = require("node:path");
+const {
+  extractTerminalPromptHostname,
+} = require("../../../domain/terminalPromptSecurity.shared.cjs");
 
 // ── ANSI / URL regexes ──
 
@@ -187,22 +190,30 @@ function extractTrailingIdlePrompt(output) {
   // want only the redrawn line to be considered, not the concatenation
   // of every overwritten frame.
   const normalized = stripAnsi(output).replace(/\r/g, "\n");
-  if (!normalized || normalized.endsWith("\n")) return "";
+  if (!normalized) return "";
+  // A shell may paint its PS1 with a newline suffix. Only the two-line
+  // host-plus-bare-marker branch below accepts that shape; single-line prompt
+  // text followed by output must remain unready.
+  const trailingLineBreaks = normalized.match(/\n+$/)?.[0] || "";
+  const promptOutput = trailingLineBreaks
+    ? normalized.slice(0, -trailingLineBreaks.length)
+    : normalized;
+  if (!promptOutput) return "";
 
-  const lines = normalized.split("\n");
+  const lines = promptOutput.split("\n");
   const lastLine = lines.pop() || "";
   const rightTrimmed = lastLine.replace(/\s+$/, "");
   if (!rightTrimmed) return "";
 
-  if (isDefaultPowerShellPromptLine(rightTrimmed)) {
+  if (!trailingLineBreaks && isDefaultPowerShellPromptLine(rightTrimmed)) {
     return lastLine;
   }
 
-  if (isDefaultPosixPromptLine(rightTrimmed)) {
+  if (!trailingLineBreaks && isDefaultPosixPromptLine(rightTrimmed)) {
     return lastLine;
   }
 
-  if (isDefaultCmdPromptLine(rightTrimmed)) {
+  if (!trailingLineBreaks && isDefaultCmdPromptLine(rightTrimmed)) {
     return lastLine;
   }
 
@@ -217,8 +228,15 @@ function extractTrailingIdlePrompt(output) {
   // host line (classic `user@host[:path]` or Oh My Zsh `ys`).
   if (rightTrimmed === "$" || rightTrimmed === "#") {
     let hostIndex = lines.length - 1;
-    while (hostIndex >= 0 && lines[hostIndex].replace(/\s+$/, "") === "") {
-      hostIndex -= 1;
+    while (hostIndex >= 0) {
+      const candidate = lines[hostIndex].replace(/\s+$/, "");
+      // Some Prompts redraw the same bare marker multiple times with CR + EL.
+      // Those intermediate marker lines are still part of the idle prompt.
+      if (candidate === "" || candidate === rightTrimmed) {
+        hostIndex -= 1;
+      } else {
+        break;
+      }
     }
     const previousLine = hostIndex >= 0 ? lines[hostIndex] : "";
     const previousRightTrimmed = previousLine.replace(/\s+$/, "");
@@ -228,8 +246,9 @@ function extractTrailingIdlePrompt(output) {
     if (
       POSIX_PROMPT_HOST_LINE_PATTERN.test(previousHostLine)
       || OH_MY_ZSH_YS_HOST_LINE_PATTERN.test(previousHostLine)
+      || extractTerminalPromptHostname(`${previousRightTrimmed}\n${rightTrimmed}`)
     ) {
-      return `${lines.slice(hostIndex).join("\n")}\n${lastLine}`;
+      return `${lines.slice(hostIndex).join("\n")}\n${lastLine}${trailingLineBreaks}`;
     }
   }
 

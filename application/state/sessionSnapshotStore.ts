@@ -84,6 +84,7 @@ export type SessionSnapshotActions = Pick<
   | 'updateSessionRestoreCwd'
   | 'getSessionRestoreCwd'
   | 'updateSessionDynamicTitle'
+  | 'updateSessionPromptHost'
   | 'updateSessionCodingCliProvider'
 >;
 

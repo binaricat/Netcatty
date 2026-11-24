@@ -243,7 +243,7 @@ declare global {
       skipEcdsaHostKey?: boolean;
       algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
     }): Promise<{ stdout: string; stderr: string; code: number | null }>;
-    /** Get current working directory from an active SSH session */
+    /** Get cwd from the exact SSH transport or local interactive shell. */
     getSessionPwd?(
       sessionId: string,
       options?: {
@@ -251,7 +251,14 @@ declare global {
         allowLoginShellFallback?: boolean;
         timeoutMs?: number;
       },
-    ): Promise<{ success: boolean; cwd?: string; error?: string }>;
+    ): Promise<{ success: boolean; cwd?: string; error?: string; directoryState?: {
+      revision: number;
+      shellKind: 'powershell';
+      pathFlavor: 'win32';
+      provider: string;
+      cwd: string | null;
+      home: string | null;
+    } }>;
     /**
      * Get metadata about an already-connected SSH session — currently the
      * SSH server identification string (the `software` part of the
@@ -440,6 +447,7 @@ declare global {
       passwordPromptActive?: boolean;
       cwd?: string | null;
       title?: string | null;
+      pendingReplay?: string;
       error?: string;
     }>;
     /** Home renderer: listen for snapshot requests. */
@@ -472,6 +480,7 @@ declare global {
         passwordPromptActive?: boolean;
         cwd?: string | null;
         title?: string | null;
+        connectionLogDelta?: string;
       },
       authorization: string,
     ): Promise<{
@@ -479,7 +488,12 @@ declare global {
       error?: string;
     }>;
     markAttachPopupClosePrepared?(sessionId: string, authorization: string): Promise<{ success: boolean; error?: string }>;
+    reportTerminalAttachReady?(sessionId: string, authorization: string): Promise<{ success: boolean; error?: string }>;
+    reportTerminalAttachFailed?(sessionId: string, authorization: string, error?: string): Promise<{ success: boolean; error?: string }>;
+    getDetachedTerminalReplayData?(sessionId: string): Promise<{ success: boolean; data?: string }>;
     onTerminalPopupPrepareClose?(cb: (payload: { sessionId: string; authorization: string }) => void): () => void;
+    /** Fired in the home window after an attach popup for sessionId has closed. */
+    onTerminalPopupAttachClosed?(cb: (payload: { sessionId: string }) => void): () => void;
     /** Home renderer: apply a pushed snapshot from an observe popup. */
     onTerminalSessionApplySnapshot?(
       cb: (payload: {
@@ -495,6 +509,7 @@ declare global {
         passwordPromptActive?: boolean;
         cwd?: string | null;
         title?: string | null;
+        connectionLogDelta?: string;
         requestId: string;
       }) => boolean | Promise<boolean>,
     ): () => void;

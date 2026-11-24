@@ -1,5 +1,5 @@
-import { DirectoryPickerError, isDirectoryPath } from '../../domain/directoryPicker';
-import { resolveInteractiveTerminalCdIntent } from '../../domain/sessionRestore';
+import { DirectoryPickerError, directoryChangeCommand, isDirectoryPath, COMPLETE_DIRECTORY_CAPABILITIES, type DirectoryCapabilities } from '../../domain/directoryPicker';
+import { sameDirectoryPath, type DirectoryTarget } from '../../domain/directoryPath';
 import type { TerminalDirectoryIO } from '../../infrastructure/services/terminalDirectory';
 import { terminalCwdStore } from './terminalCwdStore';
 
@@ -13,12 +13,20 @@ export function createTerminalDirectoryController(options: {
   isReady: () => boolean;
   publish: (cwd: string) => void;
   confirmationMs?: number;
+  target?: DirectoryTarget;
+  capabilities?: DirectoryCapabilities;
+  buildChangeCommand?: (path: string) => string | null;
 }) {
+  const target = Object.freeze({ ...options.target ?? { authority: `session:${options.sessionId}`, pathFlavor: 'posix' as const } });
+  const capabilities = Object.freeze({ ...options.capabilities ?? COMPLETE_DIRECTORY_CAPABILITIES });
+  const valid = (path: string | null | undefined): path is string => isDirectoryPath(path, target.pathFlavor);
+  const same = (a: string, b: string) => sameDirectoryPath(a, b, target.pathFlavor);
   let disposed = false;
   let changing = false;
   let confirmed = false;
   let refreshing: Promise<string> | null = null;
   let refreshAgain = false;
+  let cwdError: DirectoryPickerError | null = null;
   const lifetime = new AbortController();
   const current = () => !disposed && options.isCurrent();
   function check(signal?: AbortSignal) {
@@ -46,9 +54,10 @@ export function createTerminalDirectoryController(options: {
   }
   async function refresh(submittedRevision?: number): Promise<string> {
     check();
+    if (!capabilities.readCwd) throw new DirectoryPickerError('unavailable');
     const activeShellCwd = () => {
       const cwd = terminalCwdStore.getCwd(options.sessionId);
-      return cwd && terminalCwdStore.getSource(options.sessionId) === 'osc7'
+      return target.pathFlavor === 'posix' && valid(cwd) && terminalCwdStore.getSource(options.sessionId) === 'osc7'
         && (submittedRevision === undefined || terminalCwdStore.getSessionRevision(options.sessionId) !== submittedRevision)
         ? cwd : null;
     };
@@ -57,7 +66,7 @@ export function createTerminalDirectoryController(options: {
     // events and picker remounts. Only a cd submission may probe past its own
     // pre-write report while waiting for fresh confirmation.
     const reported = activeShellCwd();
-    if (reported) { confirmed = true; return reported; }
+    if (reported) { confirmed = true; cwdError = null; return reported; }
     if (refreshing) {
       // Output may settle while a pre-cd query is still in flight. Keep one
       // follow-up query so that its older result cannot be the last update.
@@ -65,11 +74,23 @@ export function createTerminalDirectoryController(options: {
       return refreshing;
     }
     const pending = (async () => {
-      const cwd = await bounded(options.io.cwd());
+      let cwd: string;
+      try {
+        cwd = await bounded(options.io.cwd());
+        if (!valid(cwd)) throw new DirectoryPickerError('unknown');
+      } catch (error) {
+        if (current() && target.pathFlavor === 'win32') {
+          confirmed = false;
+          cwdError = error instanceof DirectoryPickerError ? error : new DirectoryPickerError('unknown');
+          options.publish('');
+        }
+        throw error;
+      }
       check();
       const reported = activeShellCwd();
       const live = terminalCwdStore.getCwd(options.sessionId);
       confirmed = true;
+      cwdError = null;
       if (reported) return reported;
       if (live !== cwd || terminalCwdStore.getSource(options.sessionId) === 'stale') options.publish(cwd);
       return cwd;
@@ -83,27 +104,32 @@ export function createTerminalDirectoryController(options: {
       }
     }
   }
-  async function change(path: string, signal: AbortSignal, accepted: () => void, expectedCwd?: string) {
+  async function change(path: string, signal: AbortSignal, accepted: () => void, expectedCwd?: string, expectedRevision?: number) {
     ready();
+    check(signal);
+    if (!capabilities.changeDirectory || !capabilities.confirmChange) throw new DirectoryPickerError('unavailable');
     if (changing) throw new DirectoryPickerError('busy');
-    const intent = isDirectoryPath(path) ? resolveInteractiveTerminalCdIntent(path) : null;
-    if (!intent) throw new DirectoryPickerError('unsupportedPath');
+    const command = valid(path) ? (options.buildChangeCommand ?? (value => directoryChangeCommand(value, 'posix', target.pathFlavor)))(path) : null;
+    if (!command) throw new DirectoryPickerError('unsupportedPath');
     changing = true;
     let confirmationFinished = false;
     try {
       const canonical = await bounded(options.io.realpath(path, signal), signal);
+      if (options.io.validateChange) await bounded(options.io.validateChange(expectedCwd), signal);
       check(signal);
+      if (!valid(canonical)) throw new DirectoryPickerError('unsupportedPath');
       ready(); // The shell can become busy while resolving a remote symlink.
       if (expectedCwd && terminalCwdStore.getCwd(options.sessionId) !== expectedCwd) throw new DirectoryPickerError('unavailable');
+      if (expectedRevision !== undefined && terminalCwdStore.getSessionRevision(options.sessionId) !== expectedRevision) throw new DirectoryPickerError('unavailable');
       const submittedRevision = terminalCwdStore.getSessionRevision(options.sessionId);
-      options.io.write(intent.command + '\r');
+      options.io.write(command + '\r');
       accepted();
       const deadline = Date.now() + (options.confirmationMs ?? 8000);
       const hasFreshOsc7 = () => {
         const cwd = terminalCwdStore.getCwd(options.sessionId);
-        return terminalCwdStore.getSessionRevision(options.sessionId) !== submittedRevision
+        return target.pathFlavor === 'posix' && valid(cwd) && terminalCwdStore.getSessionRevision(options.sessionId) !== submittedRevision
           && terminalCwdStore.getSource(options.sessionId) === 'osc7'
-          && (cwd === path || cwd === canonical);
+          && (same(cwd, path) || same(cwd, canonical));
       };
       const pause = () => new Promise<void>(resolve => {
         const done = () => { clearTimeout(timer); lifetime.signal.removeEventListener('abort', done); resolve(); };
@@ -118,7 +144,7 @@ export function createTerminalDirectoryController(options: {
             try {
               const cwd = await refresh(submittedRevision);
               check(signal);
-              if (cwd === path || cwd === canonical || await bounded(options.io.realpath(cwd, signal), signal) === canonical) return;
+              if (same(cwd, path) || same(cwd, canonical) || same(await bounded(options.io.realpath(cwd, signal), signal), canonical)) return;
             } catch (error) {
               if (!current() || signal.aborted) throw error;
             }
@@ -143,15 +169,20 @@ export function createTerminalDirectoryController(options: {
     } finally { confirmationFinished = true; changing = false; }
   }
   return {
+    target,
+    capabilities,
+    getCwdError: () => cwdError?.code ?? null,
     refresh: () => refresh(),
     hasConfirmedCwd: () => confirmed,
     async home() {
       check();
       const result = await bounded(options.io.home?.() ?? Promise.resolve(null));
-      check(); return result;
+      check(); return valid(result) ? result : null;
     },
     async list(path: string, signal: AbortSignal) {
       check(signal);
+      if (!capabilities.listDirectories) throw new DirectoryPickerError('unavailable');
+      if (!valid(path)) throw new DirectoryPickerError('unsupportedPath');
       const result = await bounded(options.io.list(path, signal), signal);
       check(signal);
       return result;

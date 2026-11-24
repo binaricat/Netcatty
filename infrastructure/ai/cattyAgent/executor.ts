@@ -66,6 +66,8 @@ export interface ExecutorContext {
   // Workspace info
   workspaceId?: string;
   workspaceName?: string;
+  /** Sessions currently rendered in a detached/attach popup rather than the home renderer. */
+  detachedSessionIds?: ReadonlySet<string>;
   readTerminalContext?: TerminalContextReader;
 }
 

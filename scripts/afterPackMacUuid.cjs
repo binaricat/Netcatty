@@ -144,6 +144,11 @@ function archNameFromContext(context) {
   return process.arch;
 }
 
+function shouldNormalizeCrossWindowsPayload(context) {
+  const hostPlatform = context?.hostPlatform || process.platform;
+  return context?.electronPlatformName === "win32" && hostPlatform !== "win32";
+}
+
 function cursorPlatformPackageBases(platform) {
   if (platform === "darwin") return ["sdk-darwin-arm64", "sdk-darwin-x64"];
   if (platform === "linux") return ["sdk-linux-arm64", "sdk-linux-x64"];
@@ -343,6 +348,29 @@ async function afterPack(context) {
   }
 
   if (context.electronPlatformName === "win32") {
+    if (shouldNormalizeCrossWindowsPayload(context)) {
+      const { normalizeCrossWindowsApp } = require("./crossWinNative.cjs");
+      const projectDir = context.packager.appDir || context.packager.projectDir;
+      const normalized = normalizeCrossWindowsApp({
+        appOutDir: context.appOutDir,
+        projectDir,
+        arch: archNameFromContext(context),
+      });
+      pruneAsarHeaderEntries(
+        path.join(appResourcesDir(context), "app.asar"),
+        normalized.asarEntriesToRemove,
+      );
+      console.warn(
+        `[afterPack] Cross-built Windows payload normalized: removed ${normalized.removed.length} host-native path(s), installed Windows sqlite3 and ${normalized.installedNodePty.length} node-pty runtime file(s)`,
+      );
+      return;
+    }
+    if (process.env.NETCATTY_SKIP_WINDOWS_PTY_PATCH === "1") {
+      console.warn(
+        "[afterPack] Skipping patched node-pty ConPTY rebuild (NETCATTY_SKIP_WINDOWS_PTY_PATCH=1)",
+      );
+      return;
+    }
     const projectDir = context.packager.appDir || context.packager.projectDir;
     rebuildPatchedNodePty({ projectDir, platform: "win32", arch: context.arch });
     copyPatchedNodePtyToPackagedApp({
@@ -405,3 +433,4 @@ module.exports.readAsarHeader = readAsarHeader;
 module.exports.pruneAsarHeaderEntries = pruneAsarHeaderEntries;
 module.exports.pruneCursorSdkPlatformPackages = pruneCursorSdkPlatformPackages;
 module.exports.pruneNativePrebuilds = pruneNativePrebuilds;
+module.exports.shouldNormalizeCrossWindowsPayload = shouldNormalizeCrossWindowsPayload;
