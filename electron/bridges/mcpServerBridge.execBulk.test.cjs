@@ -288,10 +288,27 @@ test("session-wide approval never covers a fan-out, and never sweeps a pending o
   // 4. Even a session-scoped answer to the fan-out itself is treated as one-off.
   bridge.resolveApprovalFromRenderer(approvals[0].approvalId, true, "session");
   assert.equal((await bulk).ok, true);
+  // 5. A client whose ONLY session-scoped answer was to a fan-out is not session-approved
+  //    for other writes either.
+  const other = new EventEmitter();
+  other.destroyed = false;
+  bridge.attachExternalMcpClient(other);
+  const bulkOther = bridge.dispatchBuiltinRpc("netcatty/execBulk", bulkParams(chat), { externalSocket: other });
+  await tick();
+  assert.equal(approvals.length, 3);
+  bridge.resolveApprovalFromRenderer(approvals[2].approvalId, true, "session");
+  assert.equal((await bulkOther).ok, true);
+  const later = bridge.dispatchBuiltinRpc("netcatty/exec", { sessionId: "ssh-4", command: "pwd", chatSessionId: chat }, { externalSocket: other });
+  await tick();
+  assert.equal(approvals.length, 4, "a later single exec on that client still asks");
+  bridge.resolveApprovalFromRenderer(approvals[3].approvalId, false);
+  assert.equal((await later).ok, false);
+
+  // 6. The next fan-out on the first client asks again as well.
   const again = bridge.dispatchBuiltinRpc("netcatty/execBulk", bulkParams(chat), { externalSocket: socket });
   await tick();
-  assert.equal(approvals.length, 3, "the next fan-out asks again");
-  bridge.resolveApprovalFromRenderer(approvals[2].approvalId, false);
+  assert.equal(approvals.length, 5, "the next fan-out asks again");
+  bridge.resolveApprovalFromRenderer(approvals[4].approvalId, false);
   assert.equal((await again).ok, false);
 });
 
