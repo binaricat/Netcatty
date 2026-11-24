@@ -12,6 +12,8 @@ export const enAiMessages: Messages = {
   'ai.chat.compactionRetry': 'Request was too large. Compacting context and retrying…',
   'ai.chat.compactionBanner': 'Context compacted: {before}K → {after}K tokens',
   'ai.chat.contextCompacted': 'Context compacted',
+  'ai.chat.stepLimitPaused': 'Reached this round\'s step limit and paused mid-task. Send any message to continue, or raise "Max steps" in Settings → AI → Safety.',
+  'ai.chat.emptyTurn': 'The agent finished this turn without producing output. Send a message to continue.',
   'ai.chat.contextUsage': 'Context usage: {used} / {max} tokens',
   'ai.chat.activity.title': 'Agent activity',
   'ai.chat.activity.plan': 'Plan',

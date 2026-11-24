@@ -49,6 +49,25 @@ import { fitLargeUserInputForModel } from '../largeUserInput';
 import { buildPromptContextSnapshot } from '../promptContextSnapshot';
 import { initializeModelPrivacy, protectModel, redactOpenAIChatAssistantFields, type ModelPrivacyBridge } from '../modelPrivacy';
 
+/** How many extra step-budget rounds a single user turn may run unattended. */
+const MAX_STEP_LIMIT_RESUMES = 3;
+
+export type StepBudgetAction = 'done' | 'resume' | 'pause';
+
+/**
+ * Decide what a caller does when a stream round ends: a natural finish is done,
+ * a step-budget pause resumes until the resume budget is spent, then pauses with
+ * a visible notice instead of silently waiting for the user.
+ */
+export function nextStepBudgetAction(
+  stoppedByStepLimit: boolean | undefined,
+  resumesSoFar: number,
+  maxResumes = MAX_STEP_LIMIT_RESUMES,
+): StepBudgetAction {
+  if (!stoppedByStepLimit) return 'done';
+  return resumesSoFar >= maxResumes ? 'pause' : 'resume';
+}
+
 export class CattyTurnDriver implements TurnDriver {
   readonly backend = 'catty' as const;
 
@@ -475,7 +494,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         : undefined;
 
     const runStream = async (streamMessages: ModelMessage[], streamAssistantMsgId: string) => {
-      await processCattyStream({
+      return processCattyStream({
         streamSessionId: sessionId,
         model,
         providerConfig: context.activeProvider,
@@ -539,7 +558,47 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     };
 
     try {
-      await runStream(messagesForStream, assistantMsgId);
+      let streamMessages = messagesForStream;
+      let streamAssistantMsgId = assistantMsgId;
+      let outcome = await runStream(streamMessages, streamAssistantMsgId);
+      // Keep going while the step budget (not the model) ended the round: long
+      // multi-command tasks used to stop mid-task and wait for the user to type
+      // "continue" (#4241 follow-up).
+      for (let resumed = 0; outcome?.stoppedByStepLimit && !signal.aborted; resumed += 1) {
+        if (nextStepBudgetAction(outcome?.stoppedByStepLimit, resumed) === 'pause') {
+          const stepWord = maxIterations === 1 ? 'step' : 'steps';
+          const localizedPause = ui.translate?.('ai.chat.stepLimitPaused');
+          const pausedNote = localizedPause && localizedPause !== 'ai.chat.stepLimitPaused'
+            ? `${localizedPause} (${resumed + 1} × ${maxIterations} ${stepWord})`
+            : `Paused after ${resumed + 1} rounds of ${maxIterations} ${stepWord}. Send any message to continue, or raise "Max steps" in Settings → AI → Safety.`;
+          console.warn('[Catty] Step limit reached after auto-resume; pausing.', { rounds: resumed + 1, maxIterations });
+          ui.addMessageToSession(sessionId, {
+            id: generateId(),
+            role: 'assistant',
+            content: pausedNote,
+            timestamp: Date.now(),
+            model: activeModelId || context.activeProvider?.defaultModel || '',
+            providerId: context.activeProvider?.providerId,
+          });
+          break;
+        }
+        const resumeSession = ui.getLatestSession?.(sessionId);
+        if (!resumeSession) break;
+        streamMessages = prepareMessagesForStream(
+          buildSdkMessages(resumeSession.messages, true, resumeSession.contextCompaction),
+        );
+        streamAssistantMsgId = generateId();
+        ui.addMessageToSession(sessionId, {
+          id: streamAssistantMsgId,
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+          model: activeModelId || context.activeProvider?.defaultModel || '',
+          providerId: context.activeProvider?.providerId,
+        });
+        emitContextSnapshot(streamMessages);
+        outcome = await runStream(streamMessages, streamAssistantMsgId);
+      }
     } catch (streamErr) {
       if (signal.aborted) {
         throw streamErr;

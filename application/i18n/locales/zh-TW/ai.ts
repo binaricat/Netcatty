@@ -12,6 +12,8 @@ export const zhTWAiMessages: Messages = {
   'ai.chat.compactionRetry': '請求過大，正在壓縮上下文並重試…',
   'ai.chat.compactionBanner': '上下文已壓縮：{before}K → {after}K tokens',
   'ai.chat.contextCompacted': '上下文已壓縮',
+  'ai.chat.stepLimitPaused': '本輪已達步數上限並中途暫停。傳送任意訊息即可繼續，或在 設定 → AI → 安全 中調高「最大步數」。',
+  'ai.chat.emptyTurn': '本輪智慧體沒有回傳內容。傳送任意訊息即可繼續。',
   'ai.chat.contextUsage': '上下文使用：{used} / {max} tokens',
   'ai.chat.activity.title': 'Agent 活動',
   'ai.chat.activity.plan': '計畫',

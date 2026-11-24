@@ -12,6 +12,8 @@ export const esAiMessages: Messages = {
   'ai.chat.compactionRetry': 'La petición era demasiado grande. Compactando el contexto y reintentando…',
   'ai.chat.compactionBanner': 'Contexto compactado: {before}K → {after}K tokens',
   'ai.chat.contextCompacted': 'Contexto compactado',
+  'ai.chat.stepLimitPaused': 'Se alcanzó el límite de pasos de esta ronda y la tarea quedó en pausa. Envía cualquier mensaje para continuar o sube "Máximo de pasos" en Ajustes → IA → Seguridad.',
+  'ai.chat.emptyTurn': 'El agente terminó este turno sin producir salida. Envía un mensaje para continuar.',
   'ai.chat.contextUsage': 'Uso de contexto: {used} / {max} tokens',
   'ai.chat.activity.title': 'Actividad del agente',
   'ai.chat.activity.plan': 'Plan',

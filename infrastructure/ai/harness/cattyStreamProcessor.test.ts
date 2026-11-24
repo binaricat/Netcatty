@@ -1,9 +1,44 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
-import { processCattyStream, shouldEmitAgentEventsForStreamChunk } from './turnDrivers/cattyStreamProcessor';
+import { processCattyStream, shouldEmitAgentEventsForStreamChunk, exhaustedStepBudget } from './turnDrivers/cattyStreamProcessor';
 import { createInitialCattyRuntimeContext } from './cattyRuntimeContext';
+import { nextStepBudgetAction } from './turnDrivers/cattyTurnDriver';
 import type { ChatMessage } from '../types';
+
+describe('nextStepBudgetAction', () => {
+  it('finishes a round the model ended on its own', () => {
+    assert.equal(nextStepBudgetAction(false, 0), 'done');
+    assert.equal(nextStepBudgetAction(undefined, 2), 'done');
+  });
+
+  it('resumes a step-budget pause until the resume budget is spent', () => {
+    assert.equal(nextStepBudgetAction(true, 0, 3), 'resume');
+    assert.equal(nextStepBudgetAction(true, 2, 3), 'resume');
+  });
+
+  it('pauses with a notice once the resume budget is spent', () => {
+    assert.equal(nextStepBudgetAction(true, 3, 3), 'pause');
+    assert.equal(nextStepBudgetAction(true, 4, 3), 'pause');
+  });
+});
+
+describe('exhaustedStepBudget', () => {
+  it('treats a full step window that still wanted tools as a pause', () => {
+    assert.equal(exhaustedStepBudget(20, 20, 'tool-calls'), true);
+    assert.equal(exhaustedStepBudget(25, 20, 'tool-calls'), true);
+  });
+
+  it('does not resume when the model finished on its own', () => {
+    assert.equal(exhaustedStepBudget(20, 20, 'stop'), false);
+    assert.equal(exhaustedStepBudget(20, 20, 'length'), false);
+    assert.equal(exhaustedStepBudget(20, 20, undefined), false);
+  });
+
+  it('does not resume before the budget is spent', () => {
+    assert.equal(exhaustedStepBudget(19, 20, 'tool-calls'), false);
+  });
+});
 
 describe('shouldEmitAgentEventsForStreamChunk', () => {
   it('suppresses trace events for SDK internal stream-state errors', () => {

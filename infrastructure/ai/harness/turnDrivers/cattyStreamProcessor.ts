@@ -88,12 +88,29 @@ export interface ProcessCattyStreamResult {
     timeToFirstOutputMs?: number;
     outputTokensPerSecond?: number;
   };
+  /** Number of model steps this stream consumed. */
+  steps?: number;
+  /** True when the step budget ran out while the model still wanted tools. */
+  stoppedByStepLimit?: boolean;
 }
 
 /** Skip trace emission for SDK-internal stream bookkeeping errors we suppress in UI. */
 export function shouldEmitAgentEventsForStreamChunk(chunk: StreamChunk): boolean {
   if (chunk.type !== 'error') return true;
   return !isSdkStreamStateError((chunk as ErrorChunk).error);
+}
+
+/**
+ * The step budget ended the round while the model still wanted tools: the turn
+ * is paused mid-task, not finished, so the caller must resume it instead of
+ * silently waiting for the user to type "continue".
+ */
+export function exhaustedStepBudget(
+  steps: number,
+  maxIterations: number,
+  finishReason: string | undefined,
+): boolean {
+  return steps >= maxIterations && finishReason === 'tool-calls';
 }
 
 /**
@@ -579,7 +596,16 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
 
   const usage = await result.usage;
   const finalStep = await result.finalStep;
+  const completedSteps = await result.steps;
   const performance = finalStep?.performance;
+  // A step budget that runs out mid-task (last step asked for more tools) is a
+  // pause, not a finished turn: the caller resumes it so long multi-command
+  // tasks do not silently stop and wait for the user to type "continue".
+  const stoppedByStepLimit = exhaustedStepBudget(
+    completedSteps.length,
+    maxIterations,
+    finalStep?.finishReason,
+  );
   // onEnd can run before this consumer flushes its final text and creates the
   // post-tool assistant message. Attach turn totals only after that flush.
   if (usage) {
@@ -623,6 +649,8 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
       timeToFirstOutputMs: performance.timeToFirstOutputMs,
       outputTokensPerSecond: performance.outputTokensPerSecond,
     } : undefined,
+    steps: completedSteps.length,
+    stoppedByStepLimit,
   };
 }
 

@@ -505,3 +505,85 @@ test('failed steering keeps buffered output on the original assistant message', 
   onDone?.();
   await run;
 });
+
+test('an SDK turn that ends with no output appends a visible notice instead of a silent empty bubble', async () => {
+  let onDone: (() => void) | undefined;
+  const bridge: Record<string, (...args: unknown[]) => unknown> = {
+    onAiSdkAgentEvent: () => () => {},
+    onAiSdkAgentDone: (_requestId, callback) => {
+      onDone = callback as () => void;
+      return () => {};
+    },
+    onAiSdkAgentError: () => () => {},
+    aiSdkAgentCancel: async () => ({ ok: true }),
+    aiSdkAgentStream: async () => {
+      queueMicrotask(() => { onDone?.(); });
+      return { ok: true };
+    },
+  };
+  const session: AISession = {
+    id: 'chat-empty',
+    title: 'Empty',
+    agentId: 'codex',
+    scope: { type: 'global' },
+    messages: [{ id: 'assistant-empty', role: 'assistant', content: '', timestamp: 1 }],
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const ui: TurnUiCallbacks = {
+    addMessageToSession: (_sessionId, message) => { session.messages.push(message); },
+    updateLastMessage: (_sessionId, updater) => {
+      const lastIndex = session.messages.length - 1;
+      session.messages[lastIndex] = updater(session.messages[lastIndex]);
+    },
+    updateMessageById: (_sessionId, messageId, updater) => {
+      const index = session.messages.findIndex(message => message.id === messageId);
+      if (index >= 0) session.messages[index] = updater(session.messages[index]);
+    },
+    reportStreamError: () => {},
+    setStreamingForScope: () => {},
+    getLatestSession: () => session,
+    translate: (key) => key,
+  };
+  const agentConfig: ExternalAgentConfig = {
+    id: 'codex',
+    name: 'Codex',
+    command: 'codex',
+    enabled: true,
+    sdkBackend: 'codex',
+  };
+  const controller = new AbortController();
+
+  await externalSdkTurnDriver.run({
+    backend: 'external-sdk',
+    chatSessionId: session.id,
+    assistantMsgId: 'assistant-empty',
+    userText: 'Do nothing',
+    signal: controller.signal,
+    agentConfig,
+    attachedImages: [],
+    context: {
+      terminalSessions: [],
+      providers: [],
+      toolIntegrationMode: 'mcp',
+      selectedUserSkillSlugs: [],
+      permissionMode: 'confirm',
+    },
+    bridge,
+    ui,
+  }, {
+    turnId: 'turn-empty',
+    chatSessionId: session.id,
+    sessionId: session.id,
+    backend: 'external-sdk',
+    signal: controller.signal,
+    emit: () => {},
+    toolOutputStore: new ToolOutputStore(),
+    toolResultDedup: new ToolResultDedup(),
+    sessionStateStore: new SessionStateStore(),
+  });
+
+  const notice = session.messages.at(-1);
+  assert.equal(notice?.role, 'assistant');
+  assert.match(notice?.content ?? '', /finished this turn without producing output/);
+});

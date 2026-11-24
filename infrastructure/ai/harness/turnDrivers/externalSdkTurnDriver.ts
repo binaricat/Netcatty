@@ -126,6 +126,8 @@ async function runExternalTurn(
   let activeAssistantMessageId = assistantMsgId;
   let steerInFlight = false;
   let ended = false;
+  /** True once this turn produced text or a tool call (an empty turn is not a finished one). */
+  let producedOutput = false;
   interface BufferedUiOperation {
     operation: () => void;
     flushBeforeSteerBoundary: boolean;
@@ -176,6 +178,7 @@ async function runExternalTurn(
   let pendingText = '';
   let rafId: number | null = null;
   const appendTextToActiveAssistant = (textChunk: string) => {
+    if (textChunk) producedOutput = true;
     updateActiveAssistant(msg => ({
       ...msg,
       content: msg.content + textChunk,
@@ -277,6 +280,7 @@ async function runExternalTurn(
     },
     onToolCall: (toolName: string, args: Record<string, unknown>, toolCallId?: string) => {
       flushTextBeforeNonTextEvent();
+      producedOutput = true;
       runOrBufferUiOperation(() => {
         const id = toolCallId || `tc_${Date.now()}`;
         maybeCreateAssistantMsg();
@@ -500,6 +504,26 @@ async function runExternalTurn(
         totalTokens: estimatedUsage.totalTokens,
         estimated: true,
       } as import('../types').AgentEvent);
+    }
+
+    // An SDK turn that ends without text and without tool calls would leave an
+    // empty bubble and look like the agent simply stopped; say so instead.
+    if (!producedOutput && !signal.aborted) {
+      flushTextBeforeNonTextEvent();
+      const emptyTurnKey = 'ai.chat.emptyTurn';
+      const localizedEmptyTurn = ui.translate?.(emptyTurnKey);
+      const emptyTurnNote = localizedEmptyTurn && localizedEmptyTurn !== emptyTurnKey
+        ? localizedEmptyTurn
+        : `${agentConfig.name || 'The agent'} finished this turn without producing output. Send a message to continue.`;
+      runOrBufferUiOperation(() => {
+        ui.addMessageToSession(sessionId, {
+          id: generateId(),
+          role: 'assistant',
+          content: emptyTurnNote,
+          timestamp: Date.now(),
+          model: agentConfig.name || 'external',
+        });
+      });
     }
   } finally {
     ended = true;
