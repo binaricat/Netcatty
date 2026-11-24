@@ -55,3 +55,16 @@ test("resolveRpcTimeoutMs falls back to default for lightweight rpc", () => {
   });
   assert.equal(timeoutMs, RPC_TIMEOUT_DEFAULTS.DEFAULT_RPC_TIMEOUT_MS);
 });
+
+test("terminal_execute_bulk gets the same RPC timeout budget as terminal_execute", () => {
+  for (const options of [
+    { bridgeCommandTimeoutMs: 90_000 },
+    { bridgeCommandTimeoutMs: 60_000, bridgePermissionMode: "confirm" },
+    {},
+  ]) {
+    assert.equal(
+      resolveRpcTimeoutMs("netcatty/execBulk", options),
+      resolveRpcTimeoutMs("netcatty/exec", options),
+    );
+  }
+});

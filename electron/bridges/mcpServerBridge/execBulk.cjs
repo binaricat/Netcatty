@@ -93,6 +93,7 @@ function formatPreflightFailure(failures, total) {
   ].join("\n");
 }
 
+const BLOCKED_PATTERN = /^Command blocked by safety policy/;
 const TIMEOUT_PATTERN = /timed out/i;
 const CANCELLED_PATTERN = /cancel/i;
 const LOST_PATTERN = /connection lost|terminated unexpectedly|stream lost|connection closed/i;
@@ -121,7 +122,9 @@ function classifyHostResult(result) {
   }
   if (error) {
     let status = "error";
-    if (TIMEOUT_PATTERN.test(error)) status = "timeout";
+    // Refusals quote the matched blocklist pattern, which could contain any word.
+    if (BLOCKED_PATTERN.test(error)) status = "not_sent";
+    else if (TIMEOUT_PATTERN.test(error)) status = "timeout";
     else if (CANCELLED_PATTERN.test(error)) status = "cancelled";
     else if (LOST_PATTERN.test(error)) status = "connection_lost";
     // A failure with no output and no exit code means the command never ran
@@ -272,7 +275,9 @@ function createExecBulkHandler(deps) {
     const hasMainSession = Boolean(getSessions()?.get?.(sessionId));
     const meta = getSessionMeta(sessionId, ctx.chatSessionId);
     if (!hasMainSession && !meta) return fail("Session not found");
-    if (meta && meta.connected === false) return fail(`Session "${sessionId}" is not connected.`);
+    // A live main-process session is connected by definition; its metadata snapshot
+    // can be stale. Only worker-hosted sessions rely on the metadata flag.
+    if (!hasMainSession && meta.connected === false) return fail(`Session "${sessionId}" is not connected.`);
     return null;
   }
 
@@ -364,6 +369,8 @@ function createExecBulkHandler(deps) {
       }));
     if (claimConflicts.length > 0) return preflightFailureResult(claimConflicts, sessionIds.length);
     for (const sessionId of sessionIds) pendingSessionWriteApprovals.set(sessionId, BULK_RPC_METHOD);
+    // Keep the sessions from idle auto-close while waiting for approval and running.
+    const activeSessionIds = sessionIds.filter((sessionId) => sessionIdleManager.beginActivity(chatSessionId, sessionId));
 
     let chatLock = null;
     try {
@@ -410,7 +417,6 @@ function createExecBulkHandler(deps) {
       const labels = new Map(sessionIds.map((sessionId) => [sessionId, resolveLabel(sessionId, chatSessionId)]));
       const results = new Map();
       const runs = sessionIds.map((sessionId) => {
-        const activityStarted = sessionIdleManager.beginActivity(chatSessionId, sessionId);
         let started;
         try {
           started = Promise.resolve(execOnSession(
@@ -422,10 +428,7 @@ function createExecBulkHandler(deps) {
         }
         return started
           .catch((err) => ({ ok: false, thrown: true, error: err?.message || String(err) }))
-          .then((result) => { results.set(sessionId, result); })
-          .finally(() => {
-            if (activityStarted) sessionIdleManager.endActivity(chatSessionId, sessionId);
-          });
+          .then((result) => { results.set(sessionId, result); });
       });
 
       // Phase 4: wait. Each host enforces its own wall-clock timeout; this
@@ -461,6 +464,7 @@ function createExecBulkHandler(deps) {
       return payload;
     } finally {
       chatLock?.release?.();
+      for (const sessionId of activeSessionIds) sessionIdleManager.endActivity(chatSessionId, sessionId);
       for (const sessionId of sessionIds) {
         if (pendingSessionWriteApprovals.get(sessionId) === BULK_RPC_METHOD) {
           pendingSessionWriteApprovals.delete(sessionId);
