@@ -89,6 +89,11 @@ function evaluatePermissionWithGrants(ctx, grants = []) {
   if (!base.allowed || !base.requiresApproval || !base.capability) {
     return base;
   }
+  // Fan-out capabilities act on several hosts per call. A remembered grant was
+  // never given for that blast radius, so it can never replace the prompt.
+  if (base.capability.policy.requiresFreshApproval === true) {
+    return base;
+  }
 
   const { matchPermissionGrant } = require("../shared/permissionGrants.cjs");
   const params = ctx?.params && typeof ctx.params === "object" ? ctx.params : {};
