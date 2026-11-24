@@ -470,3 +470,37 @@ test("a single session is rejected and pointed at terminal_execute", () => {
   assert.match(result.error, /terminal_execute/);
   assert.equal(parseBulkExecParams({ command: "uptime", sessionIds: '["a","b"]' }).ok, true);
 });
+
+test("sessions are protected from idle close during approval and released on every path", async () => {
+  const denied = createHarness({ approve: false });
+  await denied.handler.run(denied.baseParams, {}, { requiresApproval: true });
+  assert.deepEqual(denied.state.activity.begun, ["a", "b", "c"]);
+  assert.deepEqual(denied.state.activity.ended.sort(), ["a", "b", "c"]);
+
+  let begunDuringApproval = null;
+  const approved = createHarness({ onApproval: ({ state }) => { begunDuringApproval = [...state.activity.begun]; } });
+  await approved.handler.run(approved.baseParams, {}, { requiresApproval: true });
+  assert.deepEqual(begunDuringApproval, ["a", "b", "c"], "protected before the user answers");
+  assert.deepEqual(approved.state.activity.ended.sort(), ["a", "b", "c"]);
+
+  const failedPreflight = createHarness({ inScope: ["a", "b"] });
+  await failedPreflight.handler.run(failedPreflight.baseParams, {}, {});
+  assert.deepEqual(failedPreflight.state.activity.begun, [], "nothing is held when preflight fails");
+});
+
+test("a stale disconnected snapshot does not reject a live main-process session", async () => {
+  const harness = createHarness({ disconnected: ["a", "b", "c"], mainIds: ["a"] });
+  const result = await harness.handler.run(harness.baseParams, {}, {});
+  // a is a live main-process session: accepted. b and c exist only as stale metadata: refused.
+  assert.equal(result.ok, false);
+  assert.doesNotMatch(result.error, /- a /);
+  assert.match(result.error, /- b \(web2\): Session "b" is not connected\./);
+  assert.match(result.error, /- c \(web3\): Session "c" is not connected\./);
+});
+
+test("a refusal that quotes a pattern containing status words is still not_sent", () => {
+  for (const pattern of ["cancel-job", "timed out", "connection lost"]) {
+    const result = classifyHostResult({ ok: false, error: `Command blocked by safety policy. Pattern: ${pattern}` });
+    assert.equal(result.status, "not_sent", pattern);
+  }
+});
