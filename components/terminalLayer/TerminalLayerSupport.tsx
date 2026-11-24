@@ -54,6 +54,7 @@ import type { SidePanelTool } from '../../domain/sidePanelLayout';
 import {
   PANE_MAGNIFICATION_DURATION_MS,
   resolveMagnifiedChromeBorderWidth,
+  resolvePaneMagnificationLayoutGeometry,
   resolvePaneMagnificationStyle,
   type PaneMagnificationController,
   type PaneMagnificationTarget,
@@ -1479,6 +1480,21 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     const update = () => {
       const bounds = surface.getBoundingClientRect();
       const origin = layoutParent.getBoundingClientRect();
+      if (pane && pane.style.position !== 'fixed') {
+        const geometry = {
+          left: pane.style.left,
+          top: pane.style.top,
+          width: pane.style.width,
+          height: pane.style.height,
+        };
+        if (Object.values(geometry).some((value) => value.endsWith('%'))) {
+          // Commit parent-resolved pixels while still absolute. Flush layout
+          // before switching to fixed so the transition starts from these px,
+          // rather than re-resolving the old percentages against the viewport.
+          Object.assign(pane.style, resolvePaneMagnificationLayoutGeometry(geometry, origin));
+          pane.getBoundingClientRect();
+        }
+      }
       setMagnifiedSurfaceBounds({
         left: bounds.left,
         top: bounds.top,

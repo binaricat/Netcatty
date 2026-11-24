@@ -119,6 +119,25 @@ export function snapCssRectToDevicePixels(
 
 export const PANE_MAGNIFICATION_DURATION_MS = 200;
 
+export function resolvePaneMagnificationLayoutGeometry(
+  original: React.CSSProperties,
+  layoutOrigin?: { width?: number; height?: number },
+): React.CSSProperties {
+  const resolveLength = (value: string | number | undefined, parentSize?: number) => {
+    if (typeof value === 'number') return `${value}px`;
+    if (typeof value === 'string' && value.endsWith('%') && parentSize !== undefined) {
+      return `${parseFloat(value) * parentSize / 100}px`;
+    }
+    return value;
+  };
+  return {
+    left: resolveLength(original.left, layoutOrigin?.width),
+    top: resolveLength(original.top, layoutOrigin?.height),
+    width: resolveLength(original.width, layoutOrigin?.width),
+    height: resolveLength(original.height, layoutOrigin?.height),
+  };
+}
+
 export function resolvePaneMagnificationStyle(
   original: React.CSSProperties,
   magnified: boolean,
@@ -147,21 +166,11 @@ export function resolvePaneMagnificationStyle(
   if (!magnified) {
     if (!surfaceBounds) return original;
     // Percentage lengths must keep using the layout parent when fixed.
-    const resolveLength = (value: string | number | undefined, parentSize?: number) => {
-      if (typeof value === 'number') return `${value}px`;
-      if (typeof value === 'string' && value.endsWith('%') && parentSize !== undefined) {
-        return `${parseFloat(value) * parentSize / 100}px`;
-      }
-      return value;
-    };
     return {
       ...original,
       ...transition,
       ...fixedOrigin,
-      left: resolveLength(original.left, layoutOrigin?.width),
-      top: resolveLength(original.top, layoutOrigin?.height),
-      width: resolveLength(original.width, layoutOrigin?.width),
-      height: resolveLength(original.height, layoutOrigin?.height),
+      ...resolvePaneMagnificationLayoutGeometry(original, layoutOrigin),
     };
   }
   if (surfaceBounds) {

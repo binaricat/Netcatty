@@ -26,6 +26,14 @@ test("magnified terminal panes snap overlay bounds to the device-pixel grid", ()
   assert.match(source, /const magnifiedDevicePixelRatio = typeof window === 'undefined' \? 1 : \(window\.devicePixelRatio \|\| 1\)/);
 });
 
+test("percentage zoom entry flushes pixel geometry before applying fixed bounds", () => {
+  const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /pane && pane\.style\.position !== 'fixed'/);
+  assert.match(source, /Object\.values\(geometry\)\.some\(\(value\) => value\.endsWith\('%'\)\)/);
+  assert.match(source, /Object\.assign\(pane\.style, resolvePaneMagnificationLayoutGeometry\(geometry, origin\)\);\s+pane\.getBoundingClientRect\(\);\s+\}\s+\}\s+setMagnifiedSurfaceBounds\(/);
+});
+
 test("terminal keyboard focus updates the pane selected for magnification", () => {
   const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
 

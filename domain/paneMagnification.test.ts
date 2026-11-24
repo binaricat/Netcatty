@@ -7,6 +7,7 @@ import {
   isPaneMagnificationSelectionValid,
   PANE_MAGNIFICATION_DURATION_MS,
   resolvePaneMagnificationCandidate,
+  resolvePaneMagnificationLayoutGeometry,
   resolvePaneMagnificationStyle,
   resolveMagnifiedChromeBorderWidth,
   resolveTwoPaneMagnificationStyle,
@@ -189,6 +190,31 @@ test('restore retains the same geometry transition and overlay stacking until bo
     assert.equal(restoring[property], original[property]);
   }
   assert.equal(resolvePaneMagnificationStyle(original, false, null), original);
+});
+
+test('standalone zoom entry commits parent-resolved pixels before switching to fixed', () => {
+  const original = { left: 0, top: 0, width: '100%', height: '100%' };
+  const surface = { left: 220, top: 36, width: 1180, height: 864 };
+  const origin = { left: 640, top: 36, width: 760, height: 864 };
+  // Commit and flush this geometry while absolute, then apply the fixed target.
+  // The CSS transition's starting lengths must already be px at that switch.
+  const entry = resolvePaneMagnificationLayoutGeometry(original, origin);
+  assert.deepEqual(entry, { left: '0px', top: '0px', width: '760px', height: '864px' });
+  assert.equal(entry.position, undefined);
+  assert.equal(entry.transitionDuration, undefined);
+  const target = resolvePaneMagnificationStyle(original, true, surface, 1, origin);
+  assert.deepEqual(target, {
+    ...geometryTransition,
+    position: 'fixed',
+    marginLeft: '640px',
+    marginTop: '36px',
+    left: '-408px',
+    top: '12px',
+    width: '1156px',
+    height: '840px',
+    zIndex: 50,
+  });
+  assert.deepEqual(original, { left: 0, top: 0, width: '100%', height: '100%' });
 });
 
 test('standalone terminal restore resolves percentage geometry against its layout parent', () => {
