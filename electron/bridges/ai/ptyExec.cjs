@@ -1239,6 +1239,7 @@ function execViaChannel(sshClient, command, options) {
             stderr,
             exitCode: -1,
             error: `Command output exceeded the ${outputLimitBytes} byte limit`,
+            outputTruncated: true,
           });
           terminateExecStream();
         };
@@ -1392,10 +1393,11 @@ function execViaRawPty(serialPort, command, options) {
       }
       cleaned = lines.join("\n").trim();
 
+      const capped = outputCapped ? { outputTruncated: true } : {};
       if (error) {
-        resolve({ ok: false, stdout: cleaned, stderr: "", exitCode: null, error });
+        resolve({ ok: false, stdout: cleaned, stderr: "", exitCode: null, error, ...capped });
       } else {
-        resolve({ ok: true, stdout: cleaned, stderr: "", exitCode: null });
+        resolve({ ok: true, stdout: cleaned, stderr: "", exitCode: null, ...capped });
       }
     }
 
@@ -1422,6 +1424,7 @@ function execViaRawPty(serialPort, command, options) {
     // (e.g. devices that continuously emit syslog/debug messages). Once the cap
     // is reached, stop resetting the idle timer so the function can resolve.
     const MAX_OUTPUT_BYTES = 512 * 1024; // 512 KB
+    let outputCapped = false;
 
     const onData = (data) => {
       // Encoding follows the session: utf8 for SSH PTY streams, whatever the
@@ -1440,6 +1443,8 @@ function execViaRawPty(serialPort, command, options) {
         // Only reset idle timer while accumulating — once capped, let it fire
         // so noisy sessions don't hang until the overall timeout.
         resetIdleTimer();
+      } else {
+        outputCapped = true;
       }
     };
 

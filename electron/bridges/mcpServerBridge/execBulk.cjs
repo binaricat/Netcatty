@@ -93,7 +93,30 @@ function formatPreflightFailure(failures, total) {
   ].join("\n");
 }
 
-const BLOCKED_PATTERN = /^Command blocked by safety policy/;
+// A result means "the command was never sent" only on explicit evidence from the exec layer.
+// A missing exit code alone proves nothing: a worker that dies after typing the command also
+// returns an error with no output, and the command may already have taken effect.
+const NOT_SENT_CODES = new Set([
+  "SHELL_READINESS_UNKNOWN",
+  "SHELL_NOT_READY",
+  "EXECUTION_NOT_AUTHORIZED",
+  "COMMAND_ALREADY_RUNNING",
+]);
+const NOT_SENT_PATTERNS = [
+  /^Command blocked by safety policy/,
+  /no command was sent/i,
+  /command was not sent/i,
+  /start a new chat/i,
+  /^Session already has /,
+  /^Session not found/,
+  /^Session ".*" is closing\./,
+  /^Session does not support command execution/,
+  /^No terminal stream or SSH client available/,
+  /^Network device session has no writable PTY stream/,
+  /^Serial file transfer is already in progress/,
+  /^AI execution is not supported/,
+  /^Another Netcatty command is already running/,
+];
 const TIMEOUT_PATTERN = /timed out/i;
 const CANCELLED_PATTERN = /cancel/i;
 const LOST_PATTERN = /connection lost|terminated unexpectedly|stream lost|connection closed/i;
@@ -128,19 +151,19 @@ function classifyHostResultCore(result) {
   if (result.thrown === true) {
     return { status: "error", exitCode: null, stdout, stderr, error: error || "Execution failed" };
   }
-  if (result.code === "SHELL_READINESS_UNKNOWN") {
-    return { status: "not_sent", exitCode: null, stdout: "", stderr: "", error: error || "Shell readiness unknown; no command was sent." };
+  if (NOT_SENT_CODES.has(result.code)) {
+    return { status: "not_sent", exitCode: null, stdout: "", stderr: "", error: error || "No command was sent." };
   }
   if (error) {
     let status = "error";
-    // Refusals quote the matched blocklist pattern, which could contain any word.
-    if (BLOCKED_PATTERN.test(error)) status = "not_sent";
+    // Refusals can quote text (such as a blocklist pattern) that contains any word,
+    // so check them before the status keywords.
+    if (NOT_SENT_PATTERNS.some((pattern) => pattern.test(error))) status = "not_sent";
     else if (TIMEOUT_PATTERN.test(error)) status = "timeout";
     else if (CANCELLED_PATTERN.test(error)) status = "cancelled";
     else if (LOST_PATTERN.test(error)) status = "connection_lost";
-    // A failure with no output and no exit code means the command never ran
-    // (blocked, busy, unsupported session, readiness refused, ...).
-    else if (!stdout && !stderr && numericExit === null) status = "not_sent";
+    // Anything else, including a worker that exited mid-command, is unknown: never claim
+    // the command was not sent without evidence.
     return { status, exitCode: null, stdout, stderr, error };
   }
   return { status: "completed", exitCode: numericExit, stdout, stderr, error: "" };

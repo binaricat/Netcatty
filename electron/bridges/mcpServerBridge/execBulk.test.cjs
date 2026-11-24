@@ -450,6 +450,22 @@ test("when no host received the command the call fails", async () => {
   assert.match(result.error, /- a \(web1\): Command blocked by safety policy/);
 });
 
+test("hosts proven not ready make the whole call fail, but an unexplained failure does not claim 'not sent'", async () => {
+  const refused = createHarness({
+    exec: () => Promise.resolve({ ok: false, code: "SHELL_NOT_READY", exitCode: -1, error: "Shell prompt is not ready; no command was sent" }),
+  });
+  const notSent = await refused.handler.run(refused.baseParams, {}, {});
+  assert.equal(notSent.ok, false);
+  assert.equal(notSent.code, "BULK_NOT_SENT");
+
+  const died = createHarness({
+    exec: () => Promise.resolve({ ok: false, error: "Terminal worker exited before replying" }),
+  });
+  const unknown = await died.handler.run(died.baseParams, {}, {});
+  assert.equal(unknown.ok, true, "the command may have run; do not invite a blind retry");
+  assert.deepEqual(unknown.counts, { error: 3 });
+});
+
 test("the deadline reports unfinished hosts as timeouts and cancels the chat's execs", async () => {
   let fireDeadline;
   let scheduledMs;
@@ -569,4 +585,42 @@ test("hosts that differ in only one field never share a group", () => {
   );
   // And identical results still merge.
   assert.equal(groupBulkResults([0, 1, 2].map((i) => ({ sessionId: `s${i}`, label: "", result: { ...base } }))).groups.length, 1);
+});
+
+test("not_sent requires explicit evidence; an unexplained failure is never reported as not sent", () => {
+  // A worker that exits after typing the command returns an error with no output and no exit code.
+  const unknown = classifyHostResult({ ok: false, error: "Terminal worker exited before replying" });
+  assert.equal(unknown.status, "error");
+  assert.equal(classifyHostResult({ ok: false, error: "boom" }).status, "error");
+
+  for (const code of ["SHELL_NOT_READY", "SHELL_READINESS_UNKNOWN", "EXECUTION_NOT_AUTHORIZED", "COMMAND_ALREADY_RUNNING"]) {
+    assert.equal(classifyHostResult({ ok: false, code, exitCode: -1, error: "x" }).status, "not_sent", code);
+  }
+  for (const error of [
+    "Command blocked by safety policy. Pattern: rm -rf",
+    "Shell prompt is not ready; no command was sent",
+    "The command was NOT sent - never blind-type",
+    "AI privacy session is unavailable or its settings changed; start a new chat",
+    "Session already has another command in progress. Wait for it.",
+    "Session not found",
+    'Session "s1" is closing.',
+    "Session does not support command execution",
+    "No terminal stream or SSH client available for this session",
+    "Network device session has no writable PTY stream for command execution",
+    "Serial file transfer is already in progress",
+    "AI execution is not supported for this local shell executable.",
+    'Another Netcatty command is already running for chat session "c".',
+  ]) {
+    assert.equal(classifyHostResult({ ok: false, error }).status, "not_sent", error);
+  }
+});
+
+test("source-capped outputs are never grouped", () => {
+  const capped = { ok: false, stdout: "prefix", exitCode: null, error: "Command output exceeded the 1048576 byte limit", outputTruncated: true };
+  const payload = groupBulkResults([
+    { sessionId: "s1", label: "a", result: { ...capped } },
+    { sessionId: "s2", label: "b", result: { ...capped } },
+  ]);
+  assert.equal(payload.groups.length, 2);
+  assert.ok(payload.groups.every((group) => group.outputTruncated === true));
 });
