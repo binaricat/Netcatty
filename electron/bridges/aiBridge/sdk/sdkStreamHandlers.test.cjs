@@ -1920,6 +1920,765 @@ test("list-models serves the persisted catalog without a live fetch on a non-for
   }
 });
 
+test("list-models refreshes a persisted catalog on use at the 12-hour boundary", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const now = Date.parse("2026-11-18T00:00:00Z");
+  const maxAge = 12 * 60 * 60 * 1000;
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const { handlers, ctx, cleanup } = makeLastKnownCtx();
+  try {
+    const driver = getDriver("claude");
+    t.mock.method(driver, "listModels", async () => [{ id: "old", name: "Old" }]);
+    const load = () => handlers.get("netcatty:ai:sdk-agent:list-models")(
+      { sender: {} }, { sdkBackend: "claude", agentCommand: "/test/lkg-expiry" },
+    );
+    await load();
+    ctx.sdkModelCache.clear();
+    t.mock.timers.setTime(now + maxAge - 1);
+    assert.equal((await load()).source, "last-known-good");
+    assert.equal(driver.listModels.mock.callCount(), 1);
+
+    t.mock.timers.setTime(now + maxAge);
+    driver.listModels.mock.mockImplementation(async () => [{ id: "new", name: "New" }]);
+    const loadCached = () => handlers.get("netcatty:ai:sdk-agent:list-models")(
+      { sender: {} }, { sdkBackend: "claude", agentCommand: "/test/lkg-expiry", cacheOnly: true },
+    );
+    const cached = await loadCached();
+    assert.equal(cached.source, "last-known-good");
+    assert.deepEqual(cached.models.map(({ id }) => id), ["old"]);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+    const [first, second] = await Promise.all([load(), load()]);
+    assert.equal(first.source, "live");
+    assert.deepEqual(first.models.map(({ id }) => id), ["new"]);
+    assert.deepEqual(second, first);
+    assert.equal(driver.listModels.mock.callCount(), 2);
+    ctx.sdkModelCache.clear();
+    assert.equal((await load()).models[0].id, "new");
+    assert.equal(driver.listModels.mock.callCount(), 2);
+  } finally {
+    cleanup();
+  }
+});
+
+test("list-models keeps stale models after failure and limits automatic retries", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const now = Date.parse("2026-11-18T00:00:00Z");
+  const expiredAt = now + 12 * 60 * 60 * 1000;
+  const retryAt = expiredAt + 15 * 60 * 1000;
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const { handlers, cleanup } = makeLastKnownCtx();
+  try {
+    const driver = getDriver("claude");
+    t.mock.method(driver, "listModels", async () => [{ id: "old", name: "Old" }]);
+    const load = (force = false) => handlers.get("netcatty:ai:sdk-agent:list-models")(
+      { sender: {} }, { sdkBackend: "claude", agentCommand: "/test/lkg-retry", force },
+    );
+    const seeded = await load();
+    t.mock.timers.setTime(expiredAt);
+    driver.listModels.mock.mockImplementation(async () => { throw new Error("offline"); });
+    const fallback = await load();
+    assert.equal(fallback.source, "last-known-good");
+    assert.deepEqual(fallback.models, seeded.models);
+    assert.equal(fallback.fetchedAt, seeded.fetchedAt);
+    assert.match(fallback.warning, /offline/);
+
+    t.mock.timers.setTime(retryAt - 1);
+    assert.deepEqual(await load(), fallback);
+    assert.equal(driver.listModels.mock.callCount(), 2);
+    t.mock.timers.setTime(retryAt);
+    assert.deepEqual(await load(), fallback);
+    assert.equal(driver.listModels.mock.callCount(), 3);
+
+    driver.listModels.mock.mockImplementation(async () => [{ id: "new", name: "New" }]);
+    assert.equal((await load(true)).models[0].id, "new");
+    assert.equal((await load()).models[0].id, "new");
+    assert.equal(driver.listModels.mock.callCount(), 4);
+  } finally {
+    cleanup();
+  }
+});
+
+test("list-models preserves saved rows, original timestamp, and retry interval when automatic stale refresh returns only currentModelId", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const now = Date.parse("2026-11-18T00:00:00Z");
+  const expiredAt = now + 12 * 60 * 60 * 1000;
+  const retryAt = expiredAt + 15 * 60 * 1000;
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const { handlers, catalogFile, cleanup } = makeLastKnownCtx();
+  try {
+    const driver = getDriver("claude");
+    const initialModels = [
+      { id: "old-a", name: "Old A" },
+      { id: "old-b", name: "Old B" },
+    ];
+    t.mock.method(driver, "listModels", async () => ({
+      currentModelId: "old-a",
+      models: initialModels,
+    }));
+    const load = (force = false) => handlers.get("netcatty:ai:sdk-agent:list-models")(
+      { sender: {} }, { sdkBackend: "claude", agentCommand: "/test/lkg-stale-current-only", force },
+    );
+    const seeded = await load();
+    assert.equal(seeded.source, "live");
+    assert.deepEqual(seeded.models, initialModels);
+
+    t.mock.timers.setTime(expiredAt);
+    driver.listModels.mock.mockImplementation(async () => ({
+      currentModelId: "old-b",
+      models: [],
+    }));
+    const preserved = await load();
+    assert.equal(driver.listModels.mock.callCount(), 2);
+    assert.equal(preserved.ok, true);
+    assert.equal(preserved.source, "last-known-good");
+    assert.equal(preserved.fetchedAt, seeded.fetchedAt);
+    assert.equal(preserved.currentModelId, "old-b");
+    assert.deepEqual(preserved.models, initialModels);
+    assert.equal(preserved.warning, undefined);
+
+    const [cacheKey] = Object.keys(readLastKnownCatalogStore(catalogFile));
+    const persisted = readLastKnownCatalogEntry(catalogFile, cacheKey);
+    assert.equal(persisted.fetchedAt, seeded.fetchedAt);
+    assert.equal(persisted.currentModelId, "old-b");
+    assert.deepEqual(persisted.models, initialModels);
+
+    // Degraded retry interval applies because the full catalog was not refreshed.
+    t.mock.timers.setTime(retryAt - 1);
+    assert.deepEqual(await load(), preserved);
+    assert.equal(driver.listModels.mock.callCount(), 2);
+
+    // After the retry interval, automatic refresh runs again; an unlisted
+    // current-only id is synthesized without discarding the saved rows or age.
+    t.mock.timers.setTime(retryAt);
+    driver.listModels.mock.mockImplementation(async () => ({
+      currentModelId: "new-current",
+      models: [],
+    }));
+    const retried = await load();
+    assert.equal(driver.listModels.mock.callCount(), 3);
+    assert.equal(retried.source, "last-known-good");
+    assert.equal(retried.fetchedAt, seeded.fetchedAt);
+    assert.equal(retried.currentModelId, "new-current");
+    assert.deepEqual(retried.models, [
+      ...initialModels,
+      { id: "new-current", name: "new-current" },
+    ]);
+
+    // A full catalog response replaces the stale rows and clears retry state.
+    const freshModels = [
+      { id: "live-1", name: "Live 1" },
+      { id: "live-2", name: "Live 2" },
+    ];
+    driver.listModels.mock.mockImplementation(async () => ({
+      currentModelId: "live-1",
+      models: freshModels,
+    }));
+    const forced = await load(true);
+    assert.equal(forced.source, "live");
+    assert.equal(forced.currentModelId, "live-1");
+    assert.deepEqual(forced.models, freshModels);
+    assert.notEqual(forced.fetchedAt, seeded.fetchedAt);
+    assert.equal(driver.listModels.mock.callCount(), 4);
+    assert.deepEqual(await load(), forced);
+    assert.equal(driver.listModels.mock.callCount(), 4);
+  } finally {
+    cleanup();
+  }
+});
+
+test("list-models cacheOnly returns empty without invoking the driver on a cold cache", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const { handlers, cleanup } = makeLastKnownCtx();
+  try {
+    const driver = getDriver("claude");
+    t.mock.method(driver, "listModels", async () => {
+      throw new Error("cacheOnly must not invoke driver.listModels");
+    });
+    const result = await handlers.get("netcatty:ai:sdk-agent:list-models")(
+      { sender: {} },
+      { sdkBackend: "claude", agentCommand: "/test/lkg-cache-only-cold", cacheOnly: true },
+    );
+    assert.deepEqual(result, { ok: true, currentModelId: null, models: [] });
+    assert.equal(driver.listModels.mock.callCount(), 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("list-models skips Cursor CLI probes during cacheOnly hydration and warm/fresh picker rechecks", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  let probeCalls = 0;
+  let pathResolveCalls = 0;
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/cursor-probe-skip-bin" }),
+    probeCursorCliAuth: async () => {
+      probeCalls += 1;
+      return { authenticated: true, authSource: "cli-login", email: "a@b.c", binPath: "/test/cursor-probe-skip-bin/cursor-agent" };
+    },
+    resolveCliFromPathAsync: async () => {
+      pathResolveCalls += 1;
+      return "/test/cursor-probe-skip-bin/cursor-agent";
+    },
+  });
+  ctx.cursorCliBinCache.clear();
+  try {
+    const driver = getDriver("cursor");
+    t.mock.method(driver, "listModels", async () => [
+      { id: "auto", name: "Auto" },
+      { id: "claude-4.5-sonnet", name: "Claude 4.5 Sonnet" },
+    ]);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const request = {
+      sdkBackend: "cursor",
+      agentCommand: "cursor",
+      agentEnv: { NETCATTY_CURSOR_AUTH_MODE: "cli-login", NETCATTY_CURSOR_CLI_BIN: "cursor" },
+    };
+
+    // 1. Cold cacheOnly hydration must not spawn Cursor probes or listModels.
+    const coldHydration = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.deepEqual(coldHydration, { ok: true, currentModelId: null, models: [] });
+    assert.equal(probeCalls, 0);
+    assert.equal(pathResolveCalls, 0);
+    assert.equal(driver.listModels.mock.callCount(), 0);
+
+    // 2. First live refresh probes once and caches both the resolved binary and catalog.
+    const live = await listModels({ sender: {} }, request);
+    assert.equal(live.source, "live");
+    assert.equal(live.models.length, 2);
+    assert.equal(probeCalls, 1);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+
+    // 3. Repeated picker-open rechecks (warm memory cache, then fresh disk LKG)
+    // and cacheOnly hydration must not re-probe Cursor.
+    const warmRecheck = await listModels({ sender: {} }, request);
+    assert.equal(warmRecheck.source, "live");
+    assert.equal(probeCalls, 1);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+
+    ctx.sdkModelCache.clear();
+    const freshLkgRecheck = await listModels({ sender: {} }, request);
+    assert.equal(freshLkgRecheck.source, "last-known-good");
+    assert.equal(freshLkgRecheck.models.length, 2);
+    assert.equal(probeCalls, 1);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+
+    const warmCacheOnly = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(warmCacheOnly.source, "last-known-good");
+    assert.equal(warmCacheOnly.models.length, 2);
+    assert.equal(probeCalls, 1);
+    assert.equal(pathResolveCalls, 0);
+
+    // 4. Simulate an app restart (all memory caches empty): cacheOnly AND the
+    // following idle/picker freshness check both recover the fresh persisted
+    // Cursor catalog from its alias without invoking any probe or PATH lookup.
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    ctx.cursorCliBinCache.clear();
+    const afterRestartCacheOnly = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(afterRestartCacheOnly.source, "last-known-good");
+    assert.deepEqual(afterRestartCacheOnly.models.map(({ id }) => id), ["auto", "claude-4.5-sonnet"]);
+    assert.equal(probeCalls, 1);
+    assert.equal(pathResolveCalls, 0);
+
+    const afterRestartFreshCheck = await listModels({ sender: {} }, request);
+    assert.equal(afterRestartFreshCheck.source, "last-known-good");
+    assert.deepEqual(afterRestartFreshCheck.models.map(({ id }) => id), ["auto", "claude-4.5-sonnet"]);
+    assert.equal(probeCalls, 1);
+    assert.equal(pathResolveCalls, 0);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+
+    // Even if an idle/picker freshness check runs directly after restart
+    // without a preceding cacheOnly call, it still uses the persisted alias first.
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    ctx.cursorCliBinCache.clear();
+    const directFreshCheck = await listModels({ sender: {} }, request);
+    assert.equal(directFreshCheck.source, "last-known-good");
+    assert.deepEqual(directFreshCheck.models.map(({ id }) => id), ["auto", "claude-4.5-sonnet"]);
+    assert.equal(probeCalls, 1);
+    assert.equal(pathResolveCalls, 0);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    ctx.cursorCliBinCache.clear();
+    cleanup();
+  }
+});
+
+test("list-models reprobes a moved Cursor executable during stale automatic revalidation", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const now = Date.parse("2026-11-18T00:00:00Z");
+  const expiredAt = now + 12 * 60 * 60 * 1000;
+  t.mock.timers.enable({ apis: ["Date"], now });
+  let currentCursorBin = "/old/cursor-agent";
+  let probeCalls = 0;
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/cursor-moved-bin" }),
+    probeCursorCliAuth: async () => {
+      probeCalls += 1;
+      return { authenticated: true, authSource: "cli-login", email: "a@b.c", binPath: currentCursorBin };
+    },
+  });
+  ctx.sdkModelKeyAliases.clear();
+  ctx.cursorCliBinCache.clear();
+  try {
+    const driver = getDriver("cursor");
+    t.mock.method(driver, "listModels", async ({ cursorCliBinPath }) => {
+      if (cursorCliBinPath === "/old/cursor-agent") return [{ id: "old-model", name: "Old Model" }];
+      if (cursorCliBinPath === "/new/cursor-agent") return [{ id: "new-model", name: "New Model" }];
+      return [];
+    });
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const request = {
+      sdkBackend: "cursor",
+      agentCommand: "cursor",
+      agentEnv: { NETCATTY_CURSOR_AUTH_MODE: "cli-login", NETCATTY_CURSOR_CLI_BIN: "cursor" },
+    };
+
+    // 1. Seed with /old/cursor-agent.
+    const seeded = await listModels({ sender: {} }, request);
+    assert.equal(seeded.source, "live");
+    assert.deepEqual(seeded.models.map(({ id }) => id), ["old-model"]);
+    assert.equal(probeCalls, 1);
+
+    // 2. Move cursor-agent to /new/cursor-agent, advance 12h, and restart.
+    currentCursorBin = "/new/cursor-agent";
+    t.mock.timers.setTime(expiredAt);
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    ctx.cursorCliBinCache.clear();
+
+    // cacheOnly hydrates stale models immediately without probing or pinning the old binary.
+    const cached = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(cached.source, "last-known-good");
+    assert.deepEqual(cached.models.map(({ id }) => id), ["old-model"]);
+    assert.equal(probeCalls, 1);
+
+    // Automatic stale revalidation re-probes, discovers /new/cursor-agent, and refreshes live models.
+    const refreshed = await listModels({ sender: {} }, request);
+    assert.equal(refreshed.source, "live");
+    assert.deepEqual(refreshed.models.map(({ id }) => id), ["new-model"]);
+    assert.equal(probeCalls, 2);
+
+    // Subsequent cacheOnly after restart recovers the new catalog via the updated alias.
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    ctx.cursorCliBinCache.clear();
+    const afterUpdate = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(afterUpdate.source, "last-known-good");
+    assert.deepEqual(afterUpdate.models.map(({ id }) => id), ["new-model"]);
+    assert.equal(probeCalls, 2);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    ctx.cursorCliBinCache.clear();
+    cleanup();
+  }
+});
+
+test("list-models cacheOnly avoids synchronous PATH discovery and never hydrates a bare command from another explicit binary", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  let syncPathCalls = 0;
+  let sdkBinCalls = 0;
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/bare-bin" }),
+    resolveCliFromPath: () => {
+      syncPathCalls += 1;
+      return "/test/bare-bin/opencode";
+    },
+    resolveSdkBinPath: () => {
+      sdkBinCalls += 1;
+      return "/test/bare-bin/claude";
+    },
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const claudeDriver = getDriver("claude");
+    const opencodeDriver = getDriver("opencode");
+    t.mock.method(claudeDriver, "listModels", async () => [{ id: "custom-only-model", name: "Custom Only" }]);
+    t.mock.method(opencodeDriver, "listModels", async () => [{ id: "openai/gpt-6", name: "GPT-6" }]);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+
+    // 1. Seed an explicit custom binary first: a bare command sharing the same
+    // backend and env must NOT hydrate from this explicit binary's catalog.
+    await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "/custom/isolated/claude" });
+    assert.equal(sdkBinCalls, 0);
+    ctx.sdkModelCache.clear();
+    const bareBeforeSeed = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude", cacheOnly: true });
+    assert.deepEqual(bareBeforeSeed, { ok: true, currentModelId: null, models: [] });
+    assert.equal(sdkBinCalls, 0);
+
+    // 2. Seed persisted catalogs for bare commands (resolved via PATH on live load).
+    claudeDriver.listModels.mock.mockImplementation(async () => [{ id: "claude-opus-6-2", name: "Opus 6.2" }]);
+    await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude" });
+    await listModels({ sender: {} }, { sdkBackend: "opencode", agentCommand: "opencode" });
+    assert.equal(sdkBinCalls, 1);
+    assert.equal(syncPathCalls, 1);
+
+    // Even if the explicit binary writes a newer catalog afterward, bare-command
+    // hydration must still resolve to its own persisted alias after restart.
+    claudeDriver.listModels.mock.mockImplementation(async () => [{ id: "custom-newer-model", name: "Custom Newer" }]);
+    await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "/custom/isolated/claude", force: true });
+    assert.equal(sdkBinCalls, 1);
+
+    // 3. Simulate app restart (all in-memory caches cleared): cacheOnly must
+    // hydrate each profile's own persisted catalog without sync PATH discovery.
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    const claudeCached = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude", cacheOnly: true });
+    const opencodeCached = await listModels({ sender: {} }, { sdkBackend: "opencode", agentCommand: "opencode", cacheOnly: true });
+    const customPathCached = await listModels({ sender: {} }, {
+      sdkBackend: "claude",
+      agentCommand: "/custom/isolated/claude",
+      cacheOnly: true,
+    });
+    assert.equal(claudeCached.source, "last-known-good");
+    assert.deepEqual(claudeCached.models.map(({ id }) => id), ["claude-opus-6-2"]);
+    assert.equal(opencodeCached.source, "last-known-good");
+    assert.deepEqual(opencodeCached.models.map(({ id }) => id), ["openai/gpt-6"]);
+    assert.equal(customPathCached.source, "last-known-good");
+    assert.deepEqual(customPathCached.models.map(({ id }) => id), ["custom-newer-model"]);
+    assert.equal(sdkBinCalls, 1);
+    assert.equal(syncPathCalls, 1);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+  }
+});
+
+test("list-models cacheOnly resolves pre-alias version-1 stores asynchronously by exact binary and ignores unrelated binaries", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  let syncSdkBinCalls = 0;
+  let syncPathCalls = 0;
+  let asyncSdkBinCalls = 0;
+  let asyncPathCalls = 0;
+  const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/upgrade-bin" }),
+    resolveSdkBinPath: () => {
+      syncSdkBinCalls += 1;
+      return "/test/upgrade-bin/claude";
+    },
+    resolveSdkBinPathAsync: async () => {
+      asyncSdkBinCalls += 1;
+      return "/test/upgrade-bin/claude";
+    },
+    resolveCliFromPath: () => {
+      syncPathCalls += 1;
+      return "/test/upgrade-bin/opencode";
+    },
+    resolveCliFromPathAsync: async () => {
+      asyncPathCalls += 1;
+      return "/test/upgrade-bin/opencode";
+    },
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("claude");
+    t.mock.method(driver, "listModels", async () => {
+      throw new Error("fresh pre-alias store must not invoke driver.listModels");
+    });
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const exactKey = buildSdkModelCacheKey("claude", "/test/upgrade-bin/claude", {}, "sdk:api-key");
+    const customLegacyKey = buildSdkModelCacheKey("claude", "/custom/only/claude", {}, "sdk:api-key");
+    const opencodeLegacyKey = buildSdkModelCacheKey("opencode", "/test/upgrade-bin/opencode", {}, "sdk:api-key");
+    const fetchedAt = new Date().toISOString();
+
+    // 1. Pre-alias v1 store containing ONLY an unrelated explicit binary:
+    // bare `claude` resolves to `/test/upgrade-bin/claude`, so it must NOT
+    // hydrate `/custom/only/claude` even though backend/runtime/env match.
+    fs.writeFileSync(catalogFile, JSON.stringify({
+      version: 1,
+      entries: {
+        [customLegacyKey]: {
+          backend: "claude",
+          models: [{ id: "custom-only-model", name: "Custom Only" }],
+          currentModelId: "custom-only-model",
+          fetchedAt,
+        },
+      },
+    }));
+
+    const unrelated = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude", cacheOnly: true });
+    assert.deepEqual(unrelated, { ok: true, currentModelId: null, models: [] });
+    assert.equal(syncSdkBinCalls, 0);
+    assert.equal(asyncSdkBinCalls, 1);
+
+    // 2. Pre-alias v1 store containing both matching and unrelated entries:
+    // async resolution matches ONLY the exact binary and persists its alias.
+    fs.writeFileSync(catalogFile, JSON.stringify({
+      version: 1,
+      entries: {
+        [exactKey]: {
+          backend: "claude",
+          models: [{ id: "claude-opus-5-5", name: "Opus 5.5" }],
+          currentModelId: "claude-opus-5-5",
+          fetchedAt,
+        },
+        [customLegacyKey]: {
+          backend: "claude",
+          models: [{ id: "custom-only-model", name: "Custom Only" }],
+          currentModelId: "custom-only-model",
+          fetchedAt,
+        },
+        [opencodeLegacyKey]: {
+          backend: "opencode",
+          models: [{ id: "openai/gpt-6", name: "GPT-6" }],
+          currentModelId: "openai/gpt-6",
+          fetchedAt,
+        },
+      },
+    }));
+
+    const hydrated = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude", cacheOnly: true });
+    assert.equal(hydrated.source, "last-known-good");
+    assert.equal(hydrated.fetchedAt, fetchedAt);
+    assert.deepEqual(hydrated.models.map(({ id }) => id), ["claude-opus-5-5"]);
+    assert.equal(syncSdkBinCalls, 0);
+    assert.equal(asyncSdkBinCalls, 2);
+
+    // After restart, the persisted alias resolves claude in O(1) without re-running async PATH resolution.
+    ctx.sdkModelKeyAliases.clear();
+    const afterRestart = await listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude", cacheOnly: true });
+    assert.equal(afterRestart.source, "last-known-good");
+    assert.deepEqual(afterRestart.models.map(({ id }) => id), ["claude-opus-5-5"]);
+    assert.equal(syncSdkBinCalls, 0);
+    assert.equal(asyncSdkBinCalls, 2);
+
+    // Unmigrated opencode entry in the same partially migrated store still hydrates asynchronously.
+    const opencodeHydrated = await listModels({ sender: {} }, {
+      sdkBackend: "opencode",
+      agentCommand: "opencode",
+      cacheOnly: true,
+    });
+    assert.equal(opencodeHydrated.source, "last-known-good");
+    assert.deepEqual(opencodeHydrated.models.map(({ id }) => id), ["openai/gpt-6"]);
+    assert.equal(syncPathCalls, 0);
+    assert.equal(asyncPathCalls, 1);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+  }
+});
+
+test("list-models cacheOnly recovers persisted models when a manually configured executable is missing", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  let cliExists = true;
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    normalizeCliPathForPlatform: (value) => (cliExists ? value : null),
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("claude");
+    t.mock.method(driver, "listModels", async () => [
+      { id: "claude-opus-6-2", name: "Opus 6.2" },
+      { id: "claude-sonnet-6-0", name: "Sonnet 6.0" },
+    ]);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const request = { sdkBackend: "claude", agentCommand: "/opt/moved/claude" };
+
+    // 1. Seed persisted catalog while the configured CLI exists.
+    const seeded = await listModels({ sender: {} }, request);
+    assert.equal(seeded.source, "live");
+    assert.equal(seeded.models.length, 2);
+
+    // 2. Delete/move the configured CLI and clear in-memory caches: BOTH
+    // cacheOnly AND the subsequent automatic / forced refresh must preserve
+    // the saved models instead of replacing them with an empty warned catalog.
+    cliExists = false;
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    const cached = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(cached.source, "last-known-good");
+    assert.deepEqual(cached.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+    assert.equal(cached.warning, undefined);
+
+    const normal = await listModels({ sender: {} }, request);
+    assert.equal(normal.source, "last-known-good");
+    assert.deepEqual(normal.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+    assert.equal(normal.warning, undefined);
+
+    const forced = await listModels({ sender: {} }, { ...request, force: true });
+    assert.equal(forced.source, "last-known-good");
+    assert.deepEqual(forced.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+    assert.match(forced.warning, /Agent CLI path not found: \/opt\/moved\/claude/);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+  }
+});
+
+test("list-models persists aliases for callers that join an in-flight load", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/join-bin" }),
+    resolveSdkBinPath: () => "/test/join-bin/claude",
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("claude");
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    t.mock.method(driver, "listModels", async () => {
+      await gate;
+      return [{ id: "claude-opus-6-2", name: "Opus 6.2" }];
+    });
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+
+    // Start two concurrent requests with different aliases resolving to the same binary.
+    const first = listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "claude" });
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = listModels({ sender: {} }, { sdkBackend: "claude", agentCommand: "/test/join-bin/claude" });
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    assert.deepEqual(secondResult, firstResult);
+    assert.equal(driver.listModels.mock.callCount(), 1);
+
+    // Both aliases must be persisted on disk once the shared load completes.
+    const stored = JSON.parse(fs.readFileSync(catalogFile, "utf8"));
+    assert.equal(Object.keys(stored.aliases || {}).length, 2);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+  }
+});
+
+test("list-models preserves saved models when a previously discovered bare CLI disappears", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  let cliAvailable = true;
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/disappear-bin" }),
+    resolveSdkBinPath: () => (cliAvailable ? "/test/disappear-bin/claude" : undefined),
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("claude");
+    t.mock.method(driver, "listModels", async () => [
+      { id: "claude-opus-6-2", name: "Opus 6.2" },
+      { id: "claude-sonnet-6-0", name: "Sonnet 6.0" },
+    ]);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const request = { sdkBackend: "claude", agentCommand: "claude" };
+
+    const seeded = await listModels({ sender: {} }, request);
+    assert.equal(seeded.source, "live");
+    assert.equal(seeded.models.length, 2);
+
+    // Bare CLI disappears from PATH after restart: cacheOnly, normal load, and
+    // forced refresh must all preserve the saved catalog via its alias.
+    cliAvailable = false;
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    driver.listModels.mock.mockImplementation(async () => {
+      throw new Error("spawn claude ENOENT");
+    });
+
+    const cached = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(cached.source, "last-known-good");
+    assert.deepEqual(cached.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+
+    const normal = await listModels({ sender: {} }, request);
+    assert.equal(normal.source, "last-known-good");
+    assert.deepEqual(normal.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+    assert.equal(normal.warning, undefined);
+
+    const forced = await listModels({ sender: {} }, { ...request, force: true });
+    assert.equal(forced.source, "last-known-good");
+    assert.deepEqual(forced.models.map(({ id }) => id), ["claude-opus-6-2", "claude-sonnet-6-0"]);
+    assert.match(forced.warning, /ENOENT/);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+  }
+});
+
+test("list-models preserves saved models when an environment-configured OPENCODE_BIN symlink target disappears", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "netcatty-env-symlink-"));
+  const targetBin = nodePath.join(tmpDir, "opencode-real");
+  const symlinkBin = nodePath.join(tmpDir, "opencode-link");
+  fs.writeFileSync(targetBin, "#!/bin/sh\n");
+  fs.symlinkSync(targetBin, symlinkBin);
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    normalizeCliPathForPlatform: (value) => (fs.existsSync(value) ? value : null),
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("opencode");
+    t.mock.method(driver, "listModels", async () => [
+      { id: "openai/gpt-6", name: "GPT-6" },
+      { id: "anthropic/claude-6", name: "Claude 6" },
+    ]);
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const request = {
+      sdkBackend: "opencode",
+      agentCommand: "opencode",
+      agentEnv: { OPENCODE_BIN: symlinkBin },
+    };
+
+    // 1. Seed catalog while OPENCODE_BIN symlink resolves to targetBin.
+    const seeded = await listModels({ sender: {} }, request);
+    assert.equal(seeded.source, "live");
+    assert.equal(seeded.models.length, 2);
+
+    // 2. Remove the symlink target and simulate restart: cacheOnly, normal load,
+    // and forced refresh must still recover the saved models via the env-bin alias.
+    fs.unlinkSync(targetBin);
+    ctx.sdkModelCache.clear();
+    ctx.sdkModelKeyAliases.clear();
+    driver.listModels.mock.mockImplementation(async () => {
+      throw new Error("spawn opencode ENOENT");
+    });
+
+    const cached = await listModels({ sender: {} }, { ...request, cacheOnly: true });
+    assert.equal(cached.source, "last-known-good");
+    assert.deepEqual(cached.models.map(({ id }) => id), ["openai/gpt-6", "anthropic/claude-6"]);
+
+    const normal = await listModels({ sender: {} }, request);
+    assert.equal(normal.source, "last-known-good");
+    assert.deepEqual(normal.models.map(({ id }) => id), ["openai/gpt-6", "anthropic/claude-6"]);
+    assert.equal(normal.warning, undefined);
+
+    const forced = await listModels({ sender: {} }, { ...request, force: true });
+    assert.equal(forced.source, "last-known-good");
+    assert.deepEqual(forced.models.map(({ id }) => id), ["openai/gpt-6", "anthropic/claude-6"]);
+    assert.match(forced.warning, /ENOENT/);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("list-models preserves PATH fallback when CODEBUDDY_CODE_PATH points to a missing file", async (t) => {
+  const { getDriver } = require("./index.cjs");
+  const seenBinPaths = [];
+  const { handlers, ctx, cleanup } = makeLastKnownCtx({
+    getShellEnv: async () => ({ PATH: "/test/codebuddy-path" }),
+    normalizeCliPathForPlatform: (value) => (value === "/test/codebuddy-path/codebuddy" ? value : null),
+    resolveCliFromPath: (cmd) => (cmd === "codebuddy" ? "/test/codebuddy-path/codebuddy" : null),
+  });
+  ctx.sdkModelKeyAliases.clear();
+  try {
+    const driver = getDriver("codebuddy");
+    t.mock.method(driver, "listModels", async ({ binPath }) => {
+      seenBinPaths.push(binPath);
+      return [{ id: "codebuddy-live", name: "CodeBuddy Live" }];
+    });
+    const listModels = handlers.get("netcatty:ai:sdk-agent:list-models");
+    const result = await listModels({ sender: {} }, {
+      sdkBackend: "codebuddy",
+      agentCommand: "codebuddy",
+      agentEnv: { CODEBUDDY_CODE_PATH: "/missing/codebuddy" },
+    });
+    assert.equal(result.source, "live");
+    assert.deepEqual(result.models.map(({ id }) => id), ["codebuddy-live"]);
+    assert.deepEqual(seenBinPaths, ["/test/codebuddy-path/codebuddy"]);
+  } finally {
+    ctx.sdkModelKeyAliases.clear();
+    cleanup();
+  }
+});
+
 test("list-models force refresh bypasses warm memory and last-known-good and updates both caches", async (t) => {
   const { getDriver } = require("./index.cjs");
   const { handlers, ctx, catalogFile, cleanup } = makeLastKnownCtx();

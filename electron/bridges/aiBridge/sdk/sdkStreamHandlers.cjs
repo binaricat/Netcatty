@@ -16,8 +16,11 @@ const codebuddyDriver = require("./codebuddyDriver.cjs");
 const { OPENCODE_SERVER_START_TIMEOUT_MS } = require("./opencodeDriver.cjs");
 const {
   buildLastKnownCatalogPath,
+  readLastKnownCatalogAlias,
   readLastKnownCatalogEntry,
+  readLastKnownCatalogStore,
   refreshLastKnownCatalogCurrentId,
+  writeLastKnownCatalogAlias,
   writeLastKnownCatalogEntry,
 } = require("./modelCatalogLastKnown.cjs");
 
@@ -31,6 +34,8 @@ const VALID_BACKENDS = new Set(listBackends());
 // (issue #2184).
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MODEL_CACHE_MAX_ENTRIES = 32;
+const MODEL_CATALOG_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const MODEL_CATALOG_RETRY_MS = 15 * 60 * 1000;
 const MODEL_LIST_TIMEOUT_MS = 10000;
 // Per-backend overrides for the catalog budget above. MiMo cold-boots a
 // dedicated `mimo serve` process for every catalog pull (unlike OpenCode's
@@ -39,6 +44,9 @@ const MODEL_LIST_TIMEOUT_MS = 10000;
 const MODEL_LIST_TIMEOUT_OVERRIDES_MS = { mimo: 30_000 };
 const sdkModelCache = new Map();
 const sdkModelInFlight = new Map();
+const sdkModelRefreshFailures = new Map();
+const sdkModelKeyAliases = new Map();
+const cursorCliBinCache = new Map();
 const {
   parseSdkSessionIdentity: parseSdkSessionIdentityPayload,
   normalizeSdkRuntime,
@@ -141,11 +149,15 @@ const SDK_MODEL_CACHE_ENV_KEYS = [
 // catalog + server teardown) instead of aborting mid-IPC.
 const MODEL_LIST_DEADLINE_HEADROOM_MS = 1_000;
 
-function buildSdkModelCacheKey(backendKey, binPath, env, runtime = "sdk") {
+function buildSdkModelEnvHash(env) {
   const envFingerprint = SDK_MODEL_CACHE_ENV_KEYS
     .map((key) => `${key}=${env?.[key] == null ? "" : String(env[key])}`)
     .join("\u0000");
-  const envHash = createHash("sha256").update(envFingerprint).digest("hex");
+  return createHash("sha256").update(envFingerprint).digest("hex");
+}
+
+function buildSdkModelCacheKey(backendKey, binPath, env, runtime = "sdk") {
+  const envHash = buildSdkModelEnvHash(env);
   return [String(backendKey || ""), String(binPath || ""), String(runtime || "sdk"), envHash].join("\u0000");
 }
 
@@ -221,6 +233,11 @@ function remapLastKnownCurrentModelId(lastKnown) {
       && model.thinkingLevels.some((level) => `${model.id}/${level}` === lastKnown.currentModelId)))
     ? lastKnown.currentModelId
     : lastKnown.models[0]?.id ?? null;
+}
+
+function isFreshModelCatalog(catalog) {
+  const fetchedAtMs = Date.parse(catalog?.fetchedAt || "");
+  return Number.isFinite(fetchedAtMs) && Date.now() - fetchedAtMs < MODEL_CATALOG_MAX_AGE_MS;
 }
 
 /**
@@ -447,7 +464,7 @@ function resolveRealCliPath(cliPath, realpath = realpathSync) {
   try { return realpath(cliPath); } catch { return cliPath; }
 }
 
-function normalizeConfiguredCommandPath(command, normalizeCliPathForPlatform) {
+function normalizeConfiguredCommandPath(command, normalizeCliPathForPlatform, { validate = true } = {}) {
   const raw = String(command || "").trim();
   const pathLike = raw.includes("/") || raw.includes("\\") || /^[a-z]:/i.test(raw);
   if (!raw || !pathLike) {
@@ -457,6 +474,7 @@ function normalizeConfiguredCommandPath(command, normalizeCliPathForPlatform) {
     ? normalizeCliPathForPlatform(raw)
     : raw;
   if (!normalized) {
+    if (!validate) return raw;
     throw new Error(`Agent CLI path not found: ${raw}`);
   }
   return normalized;
@@ -484,9 +502,14 @@ function resolveConfiguredSdkPath({
 function resolveSdkBackendBinPath({
   backendKey, configuredCommand, shellEnv, env, resolveCliFromPath, normalizeCliPathForPlatform,
   resolveSdkBinPath, resolveClaudeCodeExecutableForSdk, resolveCodexExecutableForSdk,
-  resolveCodebuddyExecutableForSdk, realpath = realpathSync,
+  resolveCodebuddyExecutableForSdk, realpath = realpathSync, allowPathProbe = true,
+  validateConfiguredPath = true,
 }) {
-  const configuredPath = normalizeConfiguredCommandPath(configuredCommand, normalizeCliPathForPlatform);
+  const configuredPath = normalizeConfiguredCommandPath(
+    configuredCommand,
+    normalizeCliPathForPlatform,
+    { validate: validateConfiguredPath },
+  );
   if (configuredPath) {
     return resolveConfiguredSdkPath({
       backendKey,
@@ -498,9 +521,18 @@ function resolveSdkBackendBinPath({
     });
   }
 
+  const normalizeOptionalEnvPath = (rawValue) => {
+    const raw = String(rawValue || "").trim();
+    if (!raw) return null;
+    const normalized = typeof normalizeCliPathForPlatform === "function"
+      ? normalizeCliPathForPlatform(raw)
+      : raw;
+    return normalized || (!validateConfiguredPath ? raw : null);
+  };
+
   if (backendKey === "codebuddy") {
-    const configuredEnvPath = normalizeCliPathForPlatform?.(env?.CODEBUDDY_CODE_PATH);
-    const rawPath = configuredEnvPath || resolveCliFromPath(backendKey, shellEnv) || undefined;
+    const configuredEnvPath = normalizeOptionalEnvPath(env?.CODEBUDDY_CODE_PATH);
+    const rawPath = configuredEnvPath || (allowPathProbe ? resolveCliFromPath(backendKey, shellEnv) : null) || undefined;
     if (!rawPath) return undefined;
     const realPath = resolveRealCliPath(rawPath, realpath);
     // On Windows the discovered path is an npm shim (codebuddy.cmd/.ps1) that the
@@ -513,16 +545,36 @@ function resolveSdkBackendBinPath({
     return sdkPath || undefined;
   }
   if (backendKey === "opencode") {
-    const configuredEnvPath = normalizeCliPathForPlatform?.(env?.OPENCODE_BIN);
-    const rawPath = configuredEnvPath || resolveCliFromPath(backendKey, shellEnv) || undefined;
+    const configuredEnvPath = normalizeOptionalEnvPath(env?.OPENCODE_BIN);
+    const rawPath = configuredEnvPath || (allowPathProbe ? resolveCliFromPath(backendKey, shellEnv) : null) || undefined;
     return rawPath ? resolveRealCliPath(rawPath, realpath) : undefined;
   }
   if (backendKey === "mimo") {
-    const configuredEnvPath = normalizeCliPathForPlatform?.(env?.MIMOCODE_BIN || env?.MIMOCODE_BIN_PATH);
-    const rawPath = configuredEnvPath || resolveCliFromPath(backendKey, shellEnv) || undefined;
+    const configuredEnvPath = normalizeOptionalEnvPath(env?.MIMOCODE_BIN || env?.MIMOCODE_BIN_PATH);
+    const rawPath = configuredEnvPath || (allowPathProbe ? resolveCliFromPath(backendKey, shellEnv) : null) || undefined;
     return rawPath ? resolveRealCliPath(rawPath, realpath) : undefined;
   }
-  return resolveSdkBinPath?.(backendKey, shellEnv) || undefined;
+  return allowPathProbe ? (resolveSdkBinPath?.(backendKey, shellEnv) || undefined) : undefined;
+}
+
+async function resolveSdkBackendBinPathAsync({
+  backendKey, shellEnv, resolveCliFromPathAsync, resolveSdkBinPathAsync,
+  resolveCodebuddyExecutableForSdk, realpath = realpathSync,
+}) {
+  if (backendKey === "codebuddy") {
+    const rawPath = await resolveCliFromPathAsync?.(backendKey, shellEnv) || undefined;
+    if (!rawPath) return undefined;
+    const realPath = resolveRealCliPath(rawPath, realpath);
+    const sdkPath = typeof resolveCodebuddyExecutableForSdk === "function"
+      ? resolveCodebuddyExecutableForSdk(realPath)
+      : realPath;
+    return sdkPath || undefined;
+  }
+  if (backendKey === "opencode" || backendKey === "mimo") {
+    const rawPath = await resolveCliFromPathAsync?.(backendKey, shellEnv) || undefined;
+    return rawPath ? resolveRealCliPath(rawPath, realpath) : undefined;
+  }
+  return await resolveSdkBinPathAsync?.(backendKey, shellEnv) || undefined;
 }
 
 function defaultWriteAttachmentToTemp(attachment) {
@@ -1126,6 +1178,7 @@ function registerSdkStreamHandlers(ctx) {
       // Manual refresh (retry banner / picker refresh button) must always go
       // live; automatic loads follow the LKG-first policy below.
       const force = payload?.force === true;
+      const cacheOnly = payload?.cacheOnly === true;
       const backendKey = resolveBackendKey(sdkBackend);
       if (!backendKey) return { ok: false, error: `Unknown SDK backend: ${sdkBackend}` };
 
@@ -1135,7 +1188,7 @@ function registerSdkStreamHandlers(ctx) {
           return { ok: true, currentModelId: null, models: [] };
         }
         const shellEnv = await getShellEnv();
-        const normalizedAgentEnv = normalizeAgentEnv(requestedAgentEnv);
+        const normalizedAgentEnv = { ...(normalizeAgentEnv(requestedAgentEnv) || {}) };
         const cursorAuthMode = normalizedAgentEnv.NETCATTY_CURSOR_AUTH_MODE === "cli-login"
           ? "cli-login"
           : "api-key";
@@ -1154,7 +1207,15 @@ function registerSdkStreamHandlers(ctx) {
         if (cursorAuthMode === "cli-login") {
           delete env.CURSOR_API_KEY;
         }
-        const binPath = resolveSdkBackendBinPath({
+        let configuredPathError = null;
+        if (!cacheOnly) {
+          try {
+            normalizeConfiguredCommandPath(agentCommand, normalizeCliPathForPlatform, { validate: true });
+          } catch (err) {
+            configuredPathError = err;
+          }
+        }
+        const explicitBinPath = resolveSdkBackendBinPath({
           backendKey,
           configuredCommand: agentCommand,
           shellEnv,
@@ -1165,74 +1226,318 @@ function registerSdkStreamHandlers(ctx) {
           resolveClaudeCodeExecutableForSdk,
           resolveCodexExecutableForSdk,
           resolveCodebuddyExecutableForSdk,
+          allowPathProbe: false,
+          validateConfiguredPath: false,
         });
-        if (backendKey === "cursor" && cursorAuthMode === "cli-login") {
-          const looksLikeSentinel = !cursorCliBinPath
-            || cursorCliBinPath === "cursor"
-            || /(?:^|[/\\])cursor$/i.test(cursorCliBinPath);
-          if (looksLikeSentinel && typeof probeCursorCliAuth === "function") {
-            try {
-              const cliAuth = probeCursorCliAuth({ env: shellEnv });
-              if (cliAuth?.binPath) cursorCliBinPath = cliAuth.binPath;
-            } catch { /* best effort */ }
-          }
-          if (!cursorCliBinPath) {
-            // Only `cursor-agent` — bare `agent` collides with other CLIs (e.g. Grok).
-            cursorCliBinPath = await resolveCliFromPathAsync?.("cursor-agent", shellEnv)
-              || null;
-          }
-        }
+        const binPath = cacheOnly || configuredPathError
+          ? explicitBinPath
+          : resolveSdkBackendBinPath({
+            backendKey,
+            configuredCommand: agentCommand,
+            shellEnv,
+            env,
+            resolveCliFromPath,
+            normalizeCliPathForPlatform,
+            resolveSdkBinPath,
+            resolveClaudeCodeExecutableForSdk,
+            resolveCodexExecutableForSdk,
+            resolveCodebuddyExecutableForSdk,
+            allowPathProbe: true,
+            validateConfiguredPath: true,
+          });
         const codexRuntime = backendKey === "codex" && requestedCodexRuntime === "app-server"
           ? "app-server"
           : "sdk";
+        const runtimeKey = `${codexRuntime}:${cursorAuthMode}`;
+        const shouldCacheModels = shouldCacheSdkRuntimeModels(backendKey);
+        const lastKnownPath = resolveLastKnownCatalogPath(electronModule);
+        const initialCursorCliBinPath = cursorCliBinPath;
+        const isCursorCliLoginSentinel = backendKey === "cursor"
+          && cursorAuthMode === "cli-login"
+          && (!cursorCliBinPath
+            || cursorCliBinPath === "cursor"
+            || /(?:^|[/\\])cursor$/i.test(cursorCliBinPath));
+        const rawConfiguredCommand = String(agentCommand || "").trim();
+        const hasConfiguredPathLikeCommand = Boolean(
+          rawConfiguredCommand
+          && (rawConfiguredCommand.includes("/") || rawConfiguredCommand.includes("\\") || /^[a-z]:/i.test(rawConfiguredCommand)),
+        );
+        const rawEnvBinPath = !hasConfiguredPathLikeCommand
+          ? (backendKey === "codebuddy"
+            ? String(env?.CODEBUDDY_CODE_PATH || "").trim()
+            : backendKey === "opencode"
+              ? String(env?.OPENCODE_BIN || "").trim()
+              : backendKey === "mimo"
+                ? String(env?.MIMOCODE_BIN || env?.MIMOCODE_BIN_PATH || "").trim()
+                : "")
+          : "";
+        const needsResolvedKeyAlias = isCursorCliLoginSentinel
+          || !explicitBinPath
+          || hasConfiguredPathLikeCommand
+          || Boolean(rawEnvBinPath);
+        const pathHash = needsResolvedKeyAlias
+          ? createHash("sha256").update(String(shellEnv?.PATH || "")).digest("hex")
+          : null;
+        const aliasKey = needsResolvedKeyAlias
+          ? buildSdkModelCacheKey(
+            backendKey,
+            hasConfiguredPathLikeCommand && !isCursorCliLoginSentinel
+              ? `alias:configured:${rawConfiguredCommand}`
+              : rawEnvBinPath && !isCursorCliLoginSentinel
+                ? `alias:env-bin:${rawEnvBinPath}`
+                : `alias:${rawConfiguredCommand}:${String(initialCursorCliBinPath || "")}:${pathHash}`,
+            env,
+            runtimeKey,
+          )
+          : null;
+        const recordResolvedKeyAlias = (targetKey) => {
+          if (!aliasKey || !targetKey || targetKey === aliasKey) return;
+          setSdkModelCacheEntry(sdkModelKeyAliases, aliasKey, {
+            at: Date.now(),
+            targetKey,
+          }, { ttlMs: MODEL_CATALOG_MAX_AGE_MS });
+          writeLastKnownCatalogAlias(lastKnownPath, aliasKey, targetKey);
+        };
+        const cursorBinCacheKey = isCursorCliLoginSentinel
+          ? createHash("sha256").update([
+            String(shellEnv?.PATH || ""),
+            String(shellEnv?.HOME || ""),
+            String(shellEnv?.USERPROFILE || ""),
+            String(initialCursorCliBinPath || ""),
+          ].join("\u0000")).digest("hex")
+          : null;
+        if (isCursorCliLoginSentinel && !force) {
+          const cachedCursorBin = getSdkModelCacheEntry(cursorCliBinCache, cursorBinCacheKey, {
+            ttlMs: MODEL_CATALOG_MAX_AGE_MS,
+          });
+          if (cachedCursorBin?.binPath) {
+            cursorCliBinPath = cachedCursorBin.binPath;
+          }
+        }
         // claude/copilot/opencode enumerate models via the SDK; codex's sdk
         // driver returns [] and falls back to the App Server catalog (see
         // fetchSdkModelCatalog). Cache + in-flight coalescing avoid spawn
         // storms (#2184).
-        const cacheKey = buildSdkModelCacheKey(
+        const buildCacheKey = () => buildSdkModelCacheKey(
           backendKey,
           cursorAuthMode === "cli-login" ? (cursorCliBinPath || binPath) : binPath,
           env,
-          `${codexRuntime}:${cursorAuthMode}`,
+          runtimeKey,
         );
-        const shouldCacheModels = shouldCacheSdkRuntimeModels(backendKey);
-        const cached = !force && shouldCacheModels ? getSdkModelCacheEntry(sdkModelCache, cacheKey) : null;
-        if (cached) {
-          // A cache hit replays the live fetch that populated the entry, so it
-          // keeps the live provenance (and the original fetchedAt).
-          return {
-            ok: true,
-            currentModelId: cached.currentModelId || null,
-            models: cached.models,
-            ...(cached.fetchedAt ? { source: "live", fetchedAt: cached.fetchedAt } : {}),
-          };
+        const tryServeCachedCatalog = (key) => {
+          const cached = !force && shouldCacheModels ? getSdkModelCacheEntry(sdkModelCache, key) : null;
+          if (cached) {
+            // A cache hit replays the live fetch that populated the entry, so it
+            // keeps the live provenance (and the original fetchedAt).
+            return {
+              value: {
+                ok: true,
+                currentModelId: cached.currentModelId || null,
+                models: cached.models,
+                ...(cached.fetchedAt ? { source: "live", fetchedAt: cached.fetchedAt } : {}),
+              },
+            };
+          }
+
+          // In-flight entries are live fetches, so forced refreshes can share
+          // them without replaying either memory or persisted cache results.
+          const existing = sdkModelInFlight.get(key);
+          if (existing && !cacheOnly) return { promise: existing };
+
+          // Normal loads reuse a fresh catalog and revalidate stale ones on use.
+          // A failed revalidation is briefly cached to avoid repeat queries when
+          // switching panels; manual refresh bypasses the retry interval.
+          if (!force || cacheOnly) {
+            const failedRefresh = getSdkModelCacheEntry(sdkModelRefreshFailures, key, {
+              ttlMs: MODEL_CATALOG_RETRY_MS,
+            });
+            if (failedRefresh) return { value: failedRefresh.result };
+
+            const lastKnown = readLastKnownCatalogEntry(lastKnownPath, key);
+            if (lastKnown && (cacheOnly || isFreshModelCatalog(lastKnown))) {
+              console.debug(
+                `[sdk] list-models(${backendKey}) serving last-known-good catalog from ${lastKnown.fetchedAt} without a live fetch`,
+              );
+              return {
+                value: {
+                  ok: true,
+                  currentModelId: remapLastKnownCurrentModelId(lastKnown),
+                  models: lastKnown.models,
+                  source: "last-known-good",
+                  fetchedAt: lastKnown.fetchedAt,
+                },
+              };
+            }
+          }
+          return null;
+        };
+
+        const resolveAliasedKey = () => {
+          if (!aliasKey) return null;
+          return getSdkModelCacheEntry(sdkModelKeyAliases, aliasKey, {
+            ttlMs: MODEL_CATALOG_MAX_AGE_MS,
+          })?.targetKey || readLastKnownCatalogAlias(lastKnownPath, aliasKey);
+        };
+        const cacheCursorBinFromKey = (targetKey) => {
+          if (!isCursorCliLoginSentinel || !cursorBinCacheKey || !targetKey) return;
+          const resolvedBin = targetKey.split("\u0000")[1] || "";
+          if (!resolvedBin || resolvedBin === "cursor" || /(?:^|[/\\])cursor$/i.test(resolvedBin)) return;
+          setSdkModelCacheEntry(cursorCliBinCache, cursorBinCacheKey, {
+            at: Date.now(),
+            binPath: resolvedBin,
+          }, { ttlMs: MODEL_CATALOG_MAX_AGE_MS });
+        };
+
+        if (cacheOnly) {
+          const aliasedKey = resolveAliasedKey();
+          if (aliasedKey) {
+            const aliasedImmediate = tryServeCachedCatalog(aliasedKey);
+            if (aliasedImmediate) {
+              if (aliasedImmediate.value?.source === "live" || isFreshModelCatalog(aliasedImmediate.value)) {
+                cacheCursorBinFromKey(aliasedKey);
+              }
+              return aliasedImmediate.value;
+            }
+          }
+          const exactKey = buildCacheKey();
+          const exactImmediate = tryServeCachedCatalog(exactKey);
+          if (exactImmediate) return exactImmediate.value;
+          // Backward-compatible exact lookup for pre-alias v1 stores: only when
+          // persisted entries exist for this backend+runtime, resolve the
+          // executable asynchronously (never blocking on sync PATH lookup and
+          // never spawning Cursor status probes) and match only its exact key.
+          if (isCursorCliLoginSentinel || !explicitBinPath) {
+            const hasStoredEntriesForBackend = Object.keys(readLastKnownCatalogStore(lastKnownPath)).some((key) => {
+              const parts = key.split("\u0000");
+              return parts.length === 4 && parts[0] === backendKey && parts[2] === runtimeKey;
+            });
+            if (hasStoredEntriesForBackend) {
+              const asyncBinPath = isCursorCliLoginSentinel
+                ? await resolveCliFromPathAsync?.("cursor-agent", shellEnv) || null
+                : await resolveSdkBackendBinPathAsync({
+                  backendKey,
+                  shellEnv,
+                  resolveCliFromPathAsync: typeof resolveCliFromPathAsync === "function" ? resolveCliFromPathAsync : undefined,
+                  resolveSdkBinPathAsync: typeof resolveSdkBinPathAsync === "function" ? resolveSdkBinPathAsync : undefined,
+                  resolveCodebuddyExecutableForSdk,
+                });
+              if (asyncBinPath) {
+                const asyncKey = buildSdkModelCacheKey(backendKey, asyncBinPath, env, runtimeKey);
+                const asyncImmediate = tryServeCachedCatalog(asyncKey);
+                if (asyncImmediate) {
+                  if (asyncImmediate.value?.source === "live" || isFreshModelCatalog(asyncImmediate.value)) {
+                    cacheCursorBinFromKey(asyncKey);
+                  }
+                  recordResolvedKeyAlias(asyncKey);
+                  return asyncImmediate.value;
+                }
+              }
+            }
+          }
+          return { ok: true, currentModelId: null, models: [] };
         }
 
-        // In-flight entries are live fetches, so forced refreshes can share
-        // them without replaying either memory or persisted cache results.
-        const existing = sdkModelInFlight.get(cacheKey);
-        if (existing) return await existing;
-
-        const lastKnownPath = resolveLastKnownCatalogPath(electronModule);
-        // LKG-first policy: a non-force load never spends the live-fetch budget
-        // while a persisted catalog exists — the picker hydrates instantly from
-        // disk (source 'last-known-good', persisted fetchedAt for the chip) and
-        // the user refreshes manually. Only a cache miss with no persisted
-        // entry (fresh install, new profile fingerprint) goes live
-        // automatically. force skips this branch and always attempts live.
-        if (!force) {
-          const lastKnown = readLastKnownCatalogEntry(lastKnownPath, cacheKey);
+        let cacheKey = (!binPath && !isCursorCliLoginSentinel)
+          ? (resolveAliasedKey() || buildCacheKey())
+          : buildCacheKey();
+        if (configuredPathError) {
+          const fallbackKey = resolveAliasedKey() || cacheKey;
+          const fallbackImmediate = tryServeCachedCatalog(fallbackKey);
+          if (fallbackImmediate) {
+            const result = fallbackImmediate.promise ? await fallbackImmediate.promise : fallbackImmediate.value;
+            recordResolvedKeyAlias(fallbackKey);
+            return result;
+          }
+          const lastKnown = readLastKnownCatalogEntry(lastKnownPath, fallbackKey);
           if (lastKnown) {
             console.debug(
-              `[sdk] list-models(${backendKey}) serving last-known-good catalog from ${lastKnown.fetchedAt} without a live fetch`,
+              `[sdk] list-models(${backendKey}) unavailable, serving last-known-good catalog from ${lastKnown.fetchedAt}`,
             );
-            return {
+            const result = {
               ok: true,
               currentModelId: remapLastKnownCurrentModelId(lastKnown),
               models: lastKnown.models,
+              warning: `${configuredPathError?.message || String(configuredPathError)} — serving the last-known-good catalog fetched at ${lastKnown.fetchedAt}`,
               source: "last-known-good",
               fetchedAt: lastKnown.fetchedAt,
             };
+            if (!isFreshModelCatalog(lastKnown)) {
+              setSdkModelCacheEntry(sdkModelRefreshFailures, fallbackKey, { at: Date.now(), result }, {
+                ttlMs: MODEL_CATALOG_RETRY_MS,
+              });
+            }
+            recordResolvedKeyAlias(fallbackKey);
+            return result;
+          }
+          throw configuredPathError;
+        }
+        const immediate = tryServeCachedCatalog(cacheKey);
+        if (immediate) {
+          const result = immediate.promise ? await immediate.promise : immediate.value;
+          recordResolvedKeyAlias(cacheKey);
+          return result;
+        }
+
+        if (isCursorCliLoginSentinel) {
+          const stillSentinel = !cursorCliBinPath
+            || cursorCliBinPath === "cursor"
+            || /(?:^|[/\\])cursor$/i.test(cursorCliBinPath);
+          if (stillSentinel && !force) {
+            const aliasedKey = resolveAliasedKey();
+            if (aliasedKey && aliasedKey !== cacheKey) {
+              const aliasedImmediate = tryServeCachedCatalog(aliasedKey);
+              if (aliasedImmediate) {
+                const result = aliasedImmediate.promise ? await aliasedImmediate.promise : aliasedImmediate.value;
+                cacheCursorBinFromKey(aliasedKey);
+                recordResolvedKeyAlias(aliasedKey);
+                return result;
+              }
+            }
+          }
+          // Any non-cached load (missing catalog, stale >=12h revalidation, or
+          // forced refresh) re-probes the sentinel so a moved cursor-agent
+          // binary is discovered automatically instead of staying pinned.
+          let resolvedCursorBin = null;
+          if (typeof probeCursorCliAuth === "function") {
+            try {
+              const cliAuth = await probeCursorCliAuth({ env: shellEnv });
+              if (cliAuth?.binPath) resolvedCursorBin = cliAuth.binPath;
+            } catch { /* best effort */ }
+          }
+          if (!resolvedCursorBin && (!cursorCliBinPath || stillSentinel)) {
+            // Only `cursor-agent` — bare `agent` collides with other CLIs (e.g. Grok).
+            resolvedCursorBin = await resolveCliFromPathAsync?.("cursor-agent", shellEnv)
+              || null;
+          }
+          if (resolvedCursorBin) {
+            cursorCliBinPath = resolvedCursorBin;
+            setSdkModelCacheEntry(cursorCliBinCache, cursorBinCacheKey, {
+              at: Date.now(),
+              binPath: resolvedCursorBin,
+            }, { ttlMs: MODEL_CATALOG_MAX_AGE_MS });
+          } else {
+            cursorCliBinCache.delete(cursorBinCacheKey);
+          }
+          const resolvedCacheKey = buildCacheKey();
+          if (resolvedCacheKey !== cacheKey) {
+            cacheKey = resolvedCacheKey;
+            const resolvedImmediate = tryServeCachedCatalog(cacheKey);
+            if (resolvedImmediate) {
+              const result = resolvedImmediate.promise ? await resolvedImmediate.promise : resolvedImmediate.value;
+              recordResolvedKeyAlias(cacheKey);
+              return result;
+            }
+          } else if (!resolvedCursorBin) {
+            const fallbackAliasedKey = resolveAliasedKey();
+            if (fallbackAliasedKey && fallbackAliasedKey !== cacheKey) {
+              cacheKey = fallbackAliasedKey;
+              const fallbackImmediate = tryServeCachedCatalog(cacheKey);
+              if (fallbackImmediate) {
+                const result = fallbackImmediate.promise ? await fallbackImmediate.promise : fallbackImmediate.value;
+                recordResolvedKeyAlias(cacheKey);
+                return result;
+              }
+            }
           }
         }
         const loadPromise = (async () => {
@@ -1263,6 +1568,44 @@ function registerSdkStreamHandlers(ctx) {
               abortController,
             );
             const { currentModelId, models } = normalizeSdkListModelsResult(raw);
+            if (models.length === 0 && currentModelId && !force) {
+              const existingLastKnown = readLastKnownCatalogEntry(lastKnownPath, cacheKey);
+              if (existingLastKnown) {
+                // Automatic stale-catalog revalidation returned only a current
+                // model id without catalog rows: treat it as incomplete so the
+                // picker keeps its saved choices and original catalog age while
+                // honoring the reported current id.
+                refreshLastKnownCatalogCurrentId(lastKnownPath, cacheKey, currentModelId);
+                const preserved = readLastKnownCatalogEntry(lastKnownPath, cacheKey) || existingLastKnown;
+                const hasCurrentRow = preserved.models.some((model) => model && (
+                  model.id === currentModelId
+                  || (Array.isArray(model.thinkingLevels)
+                    && model.thinkingLevels.some((level) => `${model.id}/${level}` === currentModelId))
+                ));
+                const preservedModels = hasCurrentRow
+                  ? preserved.models
+                  : [...preserved.models, { id: currentModelId, name: currentModelId }];
+                const result = {
+                  ok: true,
+                  currentModelId: remapLastKnownCurrentModelId({
+                    ...preserved,
+                    models: preservedModels,
+                    currentModelId,
+                  }),
+                  models: preservedModels,
+                  source: "last-known-good",
+                  fetchedAt: preserved.fetchedAt,
+                };
+                if (!isFreshModelCatalog(preserved)) {
+                  setSdkModelCacheEntry(sdkModelRefreshFailures, cacheKey, { at: Date.now(), result }, {
+                    ttlMs: MODEL_CATALOG_RETRY_MS,
+                  });
+                }
+                recordResolvedKeyAlias(cacheKey);
+                return result;
+              }
+            }
+            sdkModelRefreshFailures.delete(cacheKey);
             const fetchedAt = new Date().toISOString();
             // Do not cache degraded empty catalogs: listOpenCodeModels and
             // other drivers often return [] on timeout/startup failure, and
@@ -1280,6 +1623,7 @@ function registerSdkStreamHandlers(ctx) {
                 models,
                 currentModelId,
               });
+              recordResolvedKeyAlias(cacheKey);
             } else if (currentModelId) {
               // A current-only success still advertises a usable selection.
               // Keep previous rows when available; otherwise persist that
@@ -1293,6 +1637,7 @@ function registerSdkStreamHandlers(ctx) {
                   currentModelId,
                 });
               }
+              recordResolvedKeyAlias(cacheKey);
             }
             return {
               ok: true,
@@ -1316,7 +1661,7 @@ function registerSdkStreamHandlers(ctx) {
               console.debug(
                 `[sdk] list-models(${backendKey}) unavailable, serving last-known-good catalog from ${lastKnown.fetchedAt}`,
               );
-              return {
+              const result = {
                 ok: true,
                 currentModelId: remapLastKnownCurrentModelId(lastKnown),
                 models: lastKnown.models,
@@ -1324,6 +1669,13 @@ function registerSdkStreamHandlers(ctx) {
                 source: "last-known-good",
                 fetchedAt: lastKnown.fetchedAt,
               };
+              if (!isFreshModelCatalog(lastKnown)) {
+                setSdkModelCacheEntry(sdkModelRefreshFailures, cacheKey, { at: Date.now(), result }, {
+                  ttlMs: MODEL_CATALOG_RETRY_MS,
+                });
+              }
+              recordResolvedKeyAlias(cacheKey);
+              return result;
             }
             console.debug(`[sdk] list-models(${backendKey}) unavailable, using curated presets`);
             return {
@@ -1652,6 +2004,9 @@ function registerSdkStreamHandlers(ctx) {
     ctx.sdkRequestSessions = sdkRequestSessions;
     ctx.sdkRequestRuntimes = sdkRequestRuntimes;
     ctx.sdkModelCache = sdkModelCache; // exposed for catalog tests
+    ctx.sdkModelRefreshFailures = sdkModelRefreshFailures; // exposed for catalog tests
+    ctx.sdkModelKeyAliases = sdkModelKeyAliases; // exposed for catalog tests
+    ctx.cursorCliBinCache = cursorCliBinCache; // exposed for catalog tests
     ctx.codexAppServerRuntime = codexAppServerRuntime;
     ctx.codebuddySessionManager = codebuddySessionManager;
   }
