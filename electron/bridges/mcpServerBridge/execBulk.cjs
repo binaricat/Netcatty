@@ -99,6 +99,7 @@ function formatPreflightFailure(failures, total) {
 const NOT_SENT_CODES = new Set([
   "SHELL_READINESS_UNKNOWN",
   "SHELL_NOT_READY",
+  "SHELL_PROMPT_PENDING",
   "EXECUTION_NOT_AUTHORIZED",
   "COMMAND_ALREADY_RUNNING",
 ]);
@@ -119,7 +120,7 @@ const NOT_SENT_PATTERNS = [
 ];
 const TIMEOUT_PATTERN = /timed out/i;
 const CANCELLED_PATTERN = /cancel/i;
-const LOST_PATTERN = /connection lost|terminated unexpectedly|stream lost|connection closed/i;
+const LOST_PATTERN = /connection lost|terminated unexpectedly|closed unexpectedly|stream lost|connection closed/i;
 
 /**
  * Normalize one exec result into the public per-host shape.
@@ -147,12 +148,14 @@ function classifyHostResultCore(result) {
     ? result.exitCode
     : null;
 
-  // An exception inside the exec machinery: we cannot claim the command did or did not run.
-  if (result.thrown === true) {
-    return { status: "error", exitCode: null, stdout, stderr, error: error || "Execution failed" };
-  }
+  // The exec layer says explicitly that nothing was sent (this includes errors it threw
+  // with such a code before writing anything).
   if (NOT_SENT_CODES.has(result.code)) {
     return { status: "not_sent", exitCode: null, stdout: "", stderr: "", error: error || "No command was sent." };
+  }
+  // Any other exception inside the exec machinery: we cannot claim the command did or did not run.
+  if (result.thrown === true) {
+    return { status: "error", exitCode: null, stdout, stderr, error: error || "Execution failed" };
   }
   if (error) {
     let status = "error";
@@ -284,6 +287,7 @@ function createExecBulkHandler(deps) {
     requestApproval,
     sessionIdleManager,
     getCommandTimeoutMs,
+    getLivePermission,
     cancelExecsForChat,
     USER_DENIED_MESSAGE,
     CHAT_SESSION_CANCELLED_MESSAGE,
@@ -421,6 +425,7 @@ function createExecBulkHandler(deps) {
     const activeSessionIds = sessionIds.filter((sessionId) => sessionIdleManager.beginActivity(chatSessionId, sessionId));
 
     let chatLock = null;
+    let approvalGranted = false;
     try {
       // Phase 2: one approval listing every host. Never satisfied by grants or
       // session-wide approval.
@@ -435,6 +440,7 @@ function createExecBulkHandler(deps) {
           { ...approvalContext, requireFreshApproval: true },
         );
         if (!approved) return { ok: false, error: USER_DENIED_MESSAGE };
+        approvalGranted = true;
       }
 
       // Phase 3: commit. Guards that only read local state come first, so a call that is no
@@ -443,6 +449,18 @@ function createExecBulkHandler(deps) {
       const localGuards = () => {
         if (isChatSessionCancelled(chatSessionId)) {
           return { ok: false, error: CHAT_SESSION_CANCELLED_MESSAGE };
+        }
+        // The permission mode can change while the prompt is open or the hosts are being
+        // checked; the snapshot taken at dispatch time is not enough.
+        const live = typeof getLivePermission === "function" ? getLivePermission(params) : null;
+        if (live) {
+          if (live.allowed === false) return { ok: false, error: live.error };
+          if (live.requiresApproval === true && !approvalGranted) {
+            return {
+              ok: false,
+              error: "The permission mode changed to confirm while this call was pending. Run it again to be asked for approval.",
+            };
+          }
         }
         const recheck = sessionIds
           .map((sessionId) => checkTargetSync(sessionId, ctx, { includePendingWrite: false }))
@@ -493,10 +511,10 @@ function createExecBulkHandler(deps) {
             { beforeExecute: approvalContext.beforeExecute, [CHAT_LOCK_HELD]: true },
           ));
         } catch (err) {
-          started = Promise.resolve({ ok: false, thrown: true, error: err?.message || String(err) });
+          started = Promise.resolve({ ok: false, thrown: true, code: err?.code, error: err?.message || String(err) });
         }
         return started
-          .catch((err) => ({ ok: false, thrown: true, error: err?.message || String(err) }))
+          .catch((err) => ({ ok: false, thrown: true, code: err?.code, error: err?.message || String(err) }))
           .then((result) => { results.set(sessionId, result); });
       });
 

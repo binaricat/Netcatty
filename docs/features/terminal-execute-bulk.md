@@ -33,7 +33,9 @@ never revealed.
 
 ## Approval and safety
 
-- Observer mode refuses the call. Confirm mode asks **once**, with a card that lists the
+- Observer mode refuses the call, and the live permission mode is re-read after the prompt and
+  again just before the start, so switching to observer while a prompt is open refuses it.
+  Confirm mode asks **once**, with a card that lists the
   command and every host.
 - A fan-out approval is never satisfied by a remembered "always allow" grant, and it is
   never covered by "allow for this session" from an external MCP client. A pending

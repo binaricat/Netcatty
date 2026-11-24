@@ -2735,6 +2735,13 @@ const execBulkHandler = createExecBulkHandler({
   requestApproval: requestApprovalFromRenderer,
   sessionIdleManager,
   getCommandTimeoutMs: () => commandTimeoutMs,
+  getLivePermission: (params) => evaluateRpcPermission({
+    rpcMethod: "netcatty/execBulk",
+    surface: CAPABILITY_SURFACES.BUILTIN,
+    permissionMode,
+    params,
+    context: { chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId) },
+  }),
   cancelExecsForChat: (chatSessionId) => {
     cancelPtyExecsForSession(chatSessionId);
     cancelWorkerExecsForChat(chatSessionId);

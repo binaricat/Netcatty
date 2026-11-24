@@ -713,3 +713,74 @@ test("the local guards run again after the probes, which awaited, before anythin
   assert.deepEqual(result, { ok: false, error: "Operation cancelled: the SDK agent session was stopped." });
   assert.equal(harness.state.execCalls.length, 0, "nothing starts after a Stop that landed during the probes");
 });
+
+const OBSERVER_DENIED = { allowed: false, error: 'Operation denied: permission mode is "observer" (read-only).' };
+
+test("switching to observer while the prompt is open stops the call before any probe", async () => {
+  let mode = "confirm";
+  let phase = "before";
+  const log = [];
+  const harness = createHarness({ onApproval: () => { phase = "after"; mode = "observer"; } });
+  recordProbes(harness, log, () => phase);
+  harness.deps.getLivePermission = () => (mode === "observer" ? OBSERVER_DENIED : { allowed: true, requiresApproval: true });
+  const result = await createExecBulkHandler(harness.deps).run(harness.baseParams, {}, { requiresApproval: true });
+  assert.deepEqual(result, { ok: false, error: OBSERVER_DENIED.error });
+  assert.equal(log.filter((entry) => entry.probe === true).length, 0, "no probe after the mode changed");
+  assert.equal(harness.state.execCalls.length, 0);
+  assert.equal(harness.pending.size, 0);
+});
+
+test("switching to observer while the hosts are being probed stops the call before it starts", async () => {
+  let mode = "confirm";
+  const harness = createHarness();
+  harness.deps.preflightMainExec = async (_params, options) => {
+    if (options?.probe === true) mode = "observer";
+    return { ok: true };
+  };
+  harness.deps.getLivePermission = () => (mode === "observer" ? OBSERVER_DENIED : { allowed: true, requiresApproval: true });
+  const result = await createExecBulkHandler(harness.deps).run(harness.baseParams, {}, { requiresApproval: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, OBSERVER_DENIED.error);
+  assert.equal(harness.state.execCalls.length, 0, "nothing starts once the mode is observer");
+});
+
+test("a call that needed no approval is refused if the mode turns into confirm before it starts", async () => {
+  let mode = "auto";
+  const harness = createHarness();
+  harness.deps.preflightMainExec = async () => { mode = "confirm"; return { ok: true }; };
+  harness.deps.getLivePermission = () => ({ allowed: true, requiresApproval: mode === "confirm" });
+  const result = await createExecBulkHandler(harness.deps).run(harness.baseParams, {}, { requiresApproval: false });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /changed to confirm/);
+  assert.equal(harness.state.execCalls.length, 0);
+
+  // An approval the user did give still covers a run that stays in confirm mode.
+  const approved = createHarness();
+  approved.deps.getLivePermission = () => ({ allowed: true, requiresApproval: true });
+  const ok = await createExecBulkHandler(approved.deps).run(approved.baseParams, {}, { requiresApproval: true });
+  assert.equal(ok.ok, true);
+});
+
+test("explicit no-send codes thrown by the exec layer, and closed streams, are classified from the executors' real messages", async () => {
+  const pending = Object.assign(new Error("Terminal is still waiting for the shell prompt after the previous command"), { code: "SHELL_PROMPT_PENDING" });
+  const refused = createHarness({ exec: () => { throw pending; } });
+  const notSent = await refused.handler.run(refused.baseParams, {}, {});
+  assert.equal(notSent.ok, false, "every host refused before writing anything");
+  assert.equal(notSent.code, "BULK_NOT_SENT");
+
+  const mixed = createHarness({
+    exec: (params) => {
+      if (params.sessionId === "a") throw pending;
+      if (params.sessionId === "b") throw new Error("something unexpected");
+      return Promise.resolve({ ok: true, stdout: "ok", exitCode: 0 });
+    },
+  });
+  const payload = await mixed.handler.run(mixed.baseParams, {}, {});
+  assert.deepEqual(payload.counts, { not_sent: 1, error: 1, completed: 1 });
+
+  for (const error of ["Stream closed unexpectedly", "Serial port closed unexpectedly", "Command terminated unexpectedly (connection lost or signal)"]) {
+    assert.equal(classifyHostResult({ ok: false, error, stdout: "partial" }).status, "connection_lost", error);
+  }
+  assert.equal(classifyHostResult({ ok: false, thrown: true, error: "boom" }).status, "error");
+  assert.equal(classifyHostResult({ ok: false, thrown: true, code: "SHELL_PROMPT_PENDING", error: "x" }).status, "not_sent");
+});

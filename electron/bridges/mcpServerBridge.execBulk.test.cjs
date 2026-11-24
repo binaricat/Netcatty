@@ -410,3 +410,18 @@ test("confirm mode: no probe reaches the worker before approval, and none at all
   assert.ok(denied.prechecks.every((payload) => payload.probe === false), "a denied call never probes");
   assert.equal(denied.workerRequests.length, 0);
 });
+
+test("switching to observer after the prompt appeared refuses the approved call and touches no host", async () => {
+  const { bridge, workerRequests, prechecks, chat } = createBridge({ mode: "confirm" });
+  const approvals = captureApprovals(bridge);
+  const pending = bridge.dispatchBuiltinRpc("netcatty/execBulk", bulkParams(chat));
+  await tick();
+  assert.equal(approvals.length, 1);
+  bridge.setPermissionMode("observer");
+  bridge.resolveApprovalFromRenderer(approvals[0].approvalId, true);
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.match(result.error, /observer/);
+  assert.equal(workerRequests.length, 0, "no command reached any host");
+  assert.ok(prechecks.every((payload) => payload.probe === false), "and no host was probed");
+});
