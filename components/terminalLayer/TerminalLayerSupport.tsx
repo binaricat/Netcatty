@@ -52,6 +52,7 @@ import type { ResolvedAppearance, TerminalAppearanceHostScope } from '../../doma
 import type { TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePanelAutoOpen';
 import type { SidePanelTool } from '../../domain/sidePanelLayout';
 import {
+  PANE_MAGNIFICATION_DURATION_MS,
   resolveMagnifiedChromeBorderWidth,
   resolvePaneMagnificationStyle,
   type PaneMagnificationController,
@@ -1454,22 +1455,36 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     top: number;
     width: number;
     height: number;
+    layoutOrigin: { left: number; top: number };
   } | null>(null);
   useLayoutEffect(() => {
     if (!isMagnified) {
-      setMagnifiedSurfaceBounds(null);
-      return undefined;
+      if (!isVisible) {
+        setMagnifiedSurfaceBounds(null);
+        return undefined;
+      }
+      // Keep the geometry transition and stacking level through restore.
+      const timerId = window.setTimeout(
+        () => setMagnifiedSurfaceBounds(null),
+        PANE_MAGNIFICATION_DURATION_MS + 50,
+      );
+      return () => window.clearTimeout(timerId);
     }
     const pane = paneElementRef.current;
     const surface = pane?.closest<HTMLElement>('[data-section="terminal-workspace"]');
-    if (!surface) return undefined;
+    // The direct parent is the relative split layout container, even while
+    // the pane is fixed (offsetParent would be null during a quick re-zoom).
+    const layoutParent = pane?.parentElement;
+    if (!surface || !layoutParent) return undefined;
     const update = () => {
       const bounds = surface.getBoundingClientRect();
+      const origin = layoutParent.getBoundingClientRect();
       setMagnifiedSurfaceBounds({
         left: bounds.left,
         top: bounds.top,
         width: bounds.width,
         height: bounds.height,
+        layoutOrigin: { left: origin.left, top: origin.top },
       });
     };
     update();
@@ -1477,13 +1492,14 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     const observer = new ResizeObserver(update);
     observer.observe(surface);
     return () => observer.disconnect();
-  }, [isMagnified]);
+  }, [isMagnified, isVisible]);
   const magnifiedDevicePixelRatio = typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1);
   const style: React.CSSProperties = resolvePaneMagnificationStyle(
     layoutStyle,
     isMagnified && !!magnifiedSurfaceBounds,
     magnifiedSurfaceBounds,
     magnifiedDevicePixelRatio,
+    magnifiedSurfaceBounds?.layoutOrigin,
   );
 
   useLayoutEffect(() => {
@@ -1641,7 +1657,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",
         isVisible && "z-10",
-        isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl animate-in fade-in zoom-in-95 duration-150",
+        isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl",
       )}
       style={{
         ...style,

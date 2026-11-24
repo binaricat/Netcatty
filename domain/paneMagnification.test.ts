@@ -5,6 +5,7 @@ import {
   getAvailablePaneMagnificationController,
   getPaneMagnificationShortcutLabel,
   isPaneMagnificationSelectionValid,
+  PANE_MAGNIFICATION_DURATION_MS,
   resolvePaneMagnificationCandidate,
   resolvePaneMagnificationStyle,
   resolveMagnifiedChromeBorderWidth,
@@ -12,6 +13,12 @@ import {
   snapCssRectToDevicePixels,
   type PaneMagnificationController,
 } from './paneMagnification.ts';
+
+const geometryTransition = {
+  transitionProperty: 'left, top, width, height',
+  transitionDuration: '200ms',
+  transitionTimingFunction: 'ease-out',
+};
 
 test('selects the first controller that can magnify the active surface', () => {
   const unavailable: PaneMagnificationController = {
@@ -83,6 +90,7 @@ test('magnification overlays the original layout without changing its rect', () 
     width: 1400,
     height: 900,
   }), {
+    ...geometryTransition,
     position: 'fixed',
     left: '132px',
     top: '92px',
@@ -110,6 +118,7 @@ test('magnified surface bounds snap to the device-pixel grid after the 12px inse
     width: 1400,
     height: 900,
   }, 1), {
+    ...geometryTransition,
     position: 'fixed',
     left: '132px',
     top: '92px',
@@ -127,6 +136,7 @@ test('magnified surface bounds snap to the device-pixel grid after the 12px inse
     height: 900,
   }, 2);
   assert.deepEqual(snapped, {
+    ...geometryTransition,
     position: 'fixed',
     left: '132.5px',
     top: '92.5px',
@@ -137,6 +147,48 @@ test('magnified surface bounds snap to the device-pixel grid after the 12px inse
 
   const rect = snapCssRectToDevicePixels(10.2, 20.2, 110.2, 80.2, 2);
   assert.deepEqual(rect, { left: 10, top: 20, width: 100, height: 60 });
+});
+
+test('switching to fixed positioning preserves the split origin below the tabs', () => {
+  const original = { left: '300px', top: '0px', width: '300px', height: '400px' };
+  const surface = { left: 100.4, top: 80.4, width: 1000, height: 800 };
+  // A sidebar can offset the split containing block within the workspace.
+  const origin = { left: 280.4, top: 80.4 };
+  const magnified = resolvePaneMagnificationStyle(original, true, surface, 2, origin);
+  const px = (value: unknown) => parseFloat(String(value));
+
+  // The initial fixed frame uses the old local offsets. Non-transitioning
+  // margins keep that frame at the same viewport position as the split pane.
+  assert.equal(px(original.top) + px(magnified.marginTop), origin.top);
+  assert.equal(px(original.left) + px(magnified.marginLeft), origin.left + 300);
+  // The final rect is the device-snapped workspace inset, not a viewport inset
+  // or an inset from the smaller split containing block.
+  assert.equal(px(magnified.top) + px(magnified.marginTop), 92.5);
+  assert.equal(px(magnified.left) + px(magnified.marginLeft), 112.5);
+  assert.equal(px(magnified.width), 976);
+  assert.equal(px(magnified.height), 776);
+  assert.deepEqual(original, { left: '300px', top: '0px', width: '300px', height: '400px' });
+});
+
+test('restore retains the same geometry transition and overlay stacking until bounds clear', () => {
+  const original = { left: '0px', top: '400px', width: '600px', height: '400px' };
+  const surface = { left: 0, top: 80, width: 1200, height: 800 };
+  const origin = { left: 0, top: 80 };
+  const magnified = resolvePaneMagnificationStyle(original, true, surface, 1, origin);
+  const restoring = resolvePaneMagnificationStyle(original, false, surface, 1, origin);
+
+  for (const property of ['transitionProperty', 'transitionDuration', 'transitionTimingFunction'] as const) {
+    assert.equal(restoring[property], magnified[property]);
+    assert.equal(restoring[property], geometryTransition[property]);
+  }
+  assert.equal(PANE_MAGNIFICATION_DURATION_MS, 200);
+  assert.equal(restoring.zIndex, 50);
+  assert.equal(restoring.position, 'fixed');
+  assert.equal(restoring.marginTop, '80px');
+  for (const property of ['left', 'top', 'width', 'height'] as const) {
+    assert.equal(restoring[property], original[property]);
+  }
+  assert.equal(resolvePaneMagnificationStyle(original, false, null), original);
 });
 
 test('two-pane magnification keeps the dormant pane geometry unchanged', () => {

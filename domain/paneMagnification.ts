@@ -117,13 +117,34 @@ export function snapCssRectToDevicePixels(
   };
 }
 
+export const PANE_MAGNIFICATION_DURATION_MS = 200;
+
 export function resolvePaneMagnificationStyle(
   original: React.CSSProperties,
   magnified: boolean,
   surfaceBounds?: { left: number; top: number; width: number; height: number } | null,
   devicePixelRatio = 1,
+  layoutOrigin?: { left: number; top: number },
 ): React.CSSProperties {
-  if (!magnified) return original;
+  // Keep the fixed overlay and transition while restoring too, so the split
+  // container cannot clip the pane before it has finished shrinking.
+  const transition: React.CSSProperties = surfaceBounds ? {
+    transitionProperty: 'left, top, width, height',
+    transitionDuration: `${PANE_MAGNIFICATION_DURATION_MS}ms`,
+    transitionTimingFunction: 'ease-out',
+    zIndex: 50,
+  } : {};
+  // Margins compensate for the containing-block switch without animating or
+  // transforming the terminal and its descendants. Local split offsets then
+  // keep the same viewport origin when fixed positioning starts or ends.
+  const fixedOrigin: React.CSSProperties = {
+    position: 'fixed',
+    ...(layoutOrigin ? {
+      marginLeft: `${layoutOrigin.left}px`,
+      marginTop: `${layoutOrigin.top}px`,
+    } : {}),
+  };
+  if (!magnified) return surfaceBounds ? { ...original, ...transition, ...fixedOrigin } : original;
   if (surfaceBounds) {
     const snapped = snapCssRectToDevicePixels(
       surfaceBounds.left + 12,
@@ -133,9 +154,10 @@ export function resolvePaneMagnificationStyle(
       devicePixelRatio,
     );
     return {
-      position: 'fixed',
-      left: `${snapped.left}px`,
-      top: `${snapped.top}px`,
+      ...transition,
+      ...fixedOrigin,
+      left: `${snapped.left - (layoutOrigin?.left ?? 0)}px`,
+      top: `${snapped.top - (layoutOrigin?.top ?? 0)}px`,
       width: `${snapped.width}px`,
       height: `${snapped.height}px`,
       zIndex: 50,

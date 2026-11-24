@@ -13,7 +13,7 @@ test("magnified terminal panes use the resolved terminal accent for border chrom
   const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
   const paneSource = source.slice(source.indexOf('data-section="terminal-split-pane"'), source.indexOf("<Terminal\n"));
 
-  assert.match(paneSource, /isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl /);
+  assert.match(paneSource, /isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl"/);
   assert.match(paneSource, /borderColor: isMagnified && magnifiedSurfaceBounds \? sessionAppearanceTheme\.colors\.cursor : undefined/);
   assert.match(paneSource, /borderWidth: isMagnified && magnifiedSurfaceBounds/);
   assert.match(paneSource, /resolveMagnifiedChromeBorderWidth\(magnifiedDevicePixelRatio\)/);
@@ -21,7 +21,7 @@ test("magnified terminal panes use the resolved terminal accent for border chrom
 
 test("magnified terminal panes snap overlay bounds to the device-pixel grid", () => {
   const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
-  assert.match(source, /resolvePaneMagnificationStyle\(\s*layoutStyle,\s*isMagnified && !!magnifiedSurfaceBounds,\s*magnifiedSurfaceBounds,\s*magnifiedDevicePixelRatio,\s*\)/);
+  assert.match(source, /resolvePaneMagnificationStyle\(\s*layoutStyle,\s*isMagnified && !!magnifiedSurfaceBounds,\s*magnifiedSurfaceBounds,\s*magnifiedDevicePixelRatio,\s*magnifiedSurfaceBounds\?\.layoutOrigin,\s*\)/);
   assert.match(source, /const magnifiedDevicePixelRatio = typeof window === 'undefined' \? 1 : \(window\.devicePixelRatio \|\| 1\)/);
 });
 
