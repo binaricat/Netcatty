@@ -973,6 +973,24 @@ export function mergeSyncPayloads(
 
   const groupConfigs = unwrapGC(groupConfigsResult.merged);
 
+  // A host can win locally while the independent group merge deletes its
+  // path (e.g. a null baseline plus remote move tombstones, #4344). Retain
+  // occupied groups and ancestors, along with their removed defaults, so
+  // those hosts keep their configuration and the groups remain editable.
+  const restoredGroupPaths = new Set([
+    ...(local.customGroups ?? []), ...(remote.customGroups ?? []),
+  ].filter((path) => !customGroups.includes(path) && hosts.merged.some((host) => (
+    host.group === path || host.group?.startsWith(`${path}/`)
+  ))));
+  customGroups.push(...restoredGroupPaths);
+  const configPaths = new Set(groupConfigs.map((config) => config.path));
+  for (const config of [...(local.groupConfigs ?? []), ...(remote.groupConfigs ?? [])]) {
+    if (restoredGroupPaths.has(config.path) && !configPaths.has(config.path)) {
+      groupConfigs.push(config);
+      configPaths.add(config.path);
+    }
+  }
+
   // Plugin sidecars: three-way merge so local resets propagate and baselines
   // from missing plugins are preserved. An *omitted* pluginSidecars field means
   // legacy/unsupported (treat as base for that side). Explicit { entries: [] }
