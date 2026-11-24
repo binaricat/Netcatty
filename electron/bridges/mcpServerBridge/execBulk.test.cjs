@@ -214,7 +214,7 @@ function createHarness(options = {}) {
     requestApproval: async (...args) => {
       state.approvals.push(args);
       state.events.push("approval");
-      if (options.onApproval) await options.onApproval({ busy, closing, state, pending });
+      if (options.onApproval) await options.onApproval({ busy, closing, state, pending, inScope });
       return options.approve !== false;
     },
     sessionIdleManager: {
@@ -420,7 +420,7 @@ test("the privacy hook runs before the first command and can stop the call", asy
   assert.equal(result.ok, false);
   assert.match(result.error, /privacy settings changed/);
   assert.equal(harness.state.execCalls.length, 0);
-  assert.equal(harness.state.events.at(-1), "unlock");
+  assert.equal(harness.state.events.some((event) => event.startsWith("lock:")), false, "refused before the chat lock is taken");
 });
 
 test("per-host failures stay per host and the others still report", async () => {
@@ -668,4 +668,48 @@ test("without an approval prompt the full check runs up front", async () => {
   await createExecBulkHandler(harness.deps).run(harness.baseParams, {}, { requiresApproval: false });
   assert.ok(log.length >= 3);
   assert.ok(log.every((entry) => entry.probe === true));
+});
+
+test("a call that is no longer authorized after approval never probes a host", async () => {
+  const scenarios = {
+    "chat cancelled while the prompt was open": { onApproval: ({ state }) => { state.cancelled = true; } },
+    "session left the scope while the prompt was open": { onApproval: ({ inScope }) => { inScope.delete("b"); } },
+    "session became busy while the prompt was open": { onApproval: ({ busy }) => { busy.set("c", "Session already has exec in progress."); } },
+  };
+  for (const [name, options] of Object.entries(scenarios)) {
+    let phase = "before";
+    const log = [];
+    const harness = createHarness({ onApproval: (ctx) => { phase = "after"; options.onApproval(ctx); } });
+    recordProbes(harness, log, () => phase);
+    const result = await createExecBulkHandler(harness.deps).run(harness.baseParams, {}, { requiresApproval: true });
+    assert.equal(result.ok, false, name);
+    assert.equal(log.filter((entry) => entry.probe === true).length, 0, `${name}: no remote probe`);
+    assert.equal(harness.state.execCalls.length, 0, name);
+  }
+
+  // The privacy policy changing while the prompt was open is checked before the probes too.
+  let phase = "before";
+  const log = [];
+  const harness = createHarness({ onApproval: () => { phase = "after"; } });
+  recordProbes(harness, log, () => phase);
+  const result = await createExecBulkHandler(harness.deps).run(
+    harness.baseParams,
+    { beforeExecute: () => { if (phase === "after") throw new Error("privacy settings changed"); } },
+    { requiresApproval: true },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(log.filter((entry) => entry.probe === true).length, 0, "privacy change: no remote probe");
+});
+
+test("the local guards run again after the probes, which awaited, before anything starts", async () => {
+  let cancelDuringProbe = false;
+  const harness = createHarness();
+  harness.deps.preflightMainExec = async (_params, options) => {
+    if (options?.probe === true) cancelDuringProbe = true; // the chat is stopped while hosts are being probed
+    return { ok: true };
+  };
+  harness.deps.isChatSessionCancelled = () => cancelDuringProbe;
+  const result = await createExecBulkHandler(harness.deps).run(harness.baseParams, {}, { requiresApproval: true });
+  assert.deepEqual(result, { ok: false, error: "Operation cancelled: the SDK agent session was stopped." });
+  assert.equal(harness.state.execCalls.length, 0, "nothing starts after a Stop that landed during the probes");
 });

@@ -44,8 +44,8 @@ never revealed.
 - In confirm mode no host is contacted before you answer. The checks before the prompt only
   read local state and apply the shell-independent safety patterns. The shell-kind probe
   (which opens an SSH exec channel, as a single command does just before it runs) and the
-  shell-specific safety patterns run right after you approve, still before any command is
-  sent. So a refusal that depends on the host's shell can appear after approval, and denying
+  shell-specific safety patterns run right after you approve, once the local guards (Stop,
+  scope, privacy policy) have been rechecked and still before any command is sent. So a refusal that depends on the host's shell can appear after approval, and denying
   a call leaves every host untouched. Without a prompt (auto mode) the full check runs first.
 - Every command still goes through the normal execution path, including the per-shell
   safety policy, shell readiness checks, privacy masking, and cancel.

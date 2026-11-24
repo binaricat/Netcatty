@@ -437,24 +437,41 @@ function createExecBulkHandler(deps) {
         if (!approved) return { ok: false, error: USER_DENIED_MESSAGE };
       }
 
-      // Phase 3: commit. Re-run the full transport checks (worker precheck, shell-kind
-      // probe, shell-aware blocklist) for every claimed target: this is the first time the
-      // probes may run when a prompt was shown, and otherwise it catches changes during the
-      // wait. The claims keep other commands off these sessions meanwhile; no user command
-      // has been sent yet.
+      // Phase 3: commit. Guards that only read local state come first, so a call that is no
+      // longer authorized (cancelled, out of scope, privacy policy changed while the prompt
+      // was open) never causes a remote probe.
+      const localGuards = () => {
+        if (isChatSessionCancelled(chatSessionId)) {
+          return { ok: false, error: CHAT_SESSION_CANCELLED_MESSAGE };
+        }
+        const recheck = sessionIds
+          .map((sessionId) => checkTargetSync(sessionId, ctx, { includePendingWrite: false }))
+          .filter(Boolean);
+        if (recheck.length > 0) return preflightFailureResult(recheck, sessionIds.length);
+        try {
+          // Privacy policy may have changed while approval was pending.
+          approvalContext.beforeExecute?.();
+        } catch (err) {
+          return { ok: false, error: err?.message || String(err) };
+        }
+        return null;
+      };
+      const staleBeforeProbe = localGuards();
+      if (staleBeforeProbe) return staleBeforeProbe;
+
+      // Now re-run the full transport checks (worker precheck, shell-kind probe, shell-aware
+      // blocklist) for every claimed target: this is the first time the probes may run when a
+      // prompt was shown, and otherwise it catches changes during the wait. The claims keep
+      // other commands off these sessions meanwhile; no user command has been sent yet.
       const staleTransport = (await Promise.all(sessionIds.map((sessionId) => (
         checkTargetTransport(sessionId, resolveLabel(sessionId, chatSessionId), ctx, { probe: true })
       )))).filter(Boolean);
       if (staleTransport.length > 0) return preflightFailureResult(staleTransport, sessionIds.length);
 
-      // Everything from here to the start loop is synchronous.
-      if (isChatSessionCancelled(chatSessionId)) {
-        return { ok: false, error: CHAT_SESSION_CANCELLED_MESSAGE };
-      }
-      const recheck = sessionIds
-        .map((sessionId) => checkTargetSync(sessionId, ctx, { includePendingWrite: false }))
-        .filter(Boolean);
-      if (recheck.length > 0) return preflightFailureResult(recheck, sessionIds.length);
+      // That pass awaited, so check the local guards again. Everything from here to the
+      // start loop is synchronous.
+      const staleAfterProbe = localGuards();
+      if (staleAfterProbe) return staleAfterProbe;
       chatLock = beginChatExecution(chatSessionId, `bulk:${sessionIds.length}`, command);
       if (!chatLock.ok) {
         return {
@@ -464,12 +481,6 @@ function createExecBulkHandler(deps) {
           activeCommand: chatLock.active.command,
           activeSessionId: chatLock.active.sessionId,
         };
-      }
-      try {
-        // Privacy policy may have changed while approval was pending.
-        approvalContext.beforeExecute?.();
-      } catch (err) {
-        return { ok: false, error: err?.message || String(err) };
       }
 
       const labels = new Map(sessionIds.map((sessionId) => [sessionId, resolveLabel(sessionId, chatSessionId)]));
