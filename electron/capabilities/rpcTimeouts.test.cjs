@@ -56,7 +56,9 @@ test("resolveRpcTimeoutMs falls back to default for lightweight rpc", () => {
   assert.equal(timeoutMs, RPC_TIMEOUT_DEFAULTS.DEFAULT_RPC_TIMEOUT_MS);
 });
 
-test("terminal_execute_bulk gets the same RPC timeout budget as terminal_execute", () => {
+test("terminal_execute_bulk gets the single-exec RPC budget plus room for its preflight", () => {
+  const { BULK_EXEC_EXTRA_MS } = RPC_TIMEOUT_DEFAULTS;
+  assert.ok(BULK_EXEC_EXTRA_MS > 0);
   for (const options of [
     { bridgeCommandTimeoutMs: 90_000 },
     { bridgeCommandTimeoutMs: 60_000, bridgePermissionMode: "confirm" },
@@ -64,7 +66,10 @@ test("terminal_execute_bulk gets the same RPC timeout budget as terminal_execute
   ]) {
     assert.equal(
       resolveRpcTimeoutMs("netcatty/execBulk", options),
-      resolveRpcTimeoutMs("netcatty/exec", options),
+      resolveRpcTimeoutMs("netcatty/exec", options) + BULK_EXEC_EXTRA_MS,
     );
   }
+  // The backstop must fire before the client gives up on the RPC.
+  const { DEADLINE_GRACE_MS } = require("../bridges/mcpServerBridge/execBulk.cjs");
+  assert.ok(DEADLINE_GRACE_MS < RPC_TIMEOUT_DEFAULTS.RPC_TIMEOUT_BUFFER_MS + BULK_EXEC_EXTRA_MS);
 });

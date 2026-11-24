@@ -20,7 +20,7 @@ const MAX_TAIL_LINES = 2000;
 const MAX_DISTINCT_OUTPUT_CHARS = 32 * 1024;
 const MAX_RESPONSE_CHARS = 256 * 1024;
 const MIN_GROUP_OUTPUT_CHARS = 2 * 1024;
-const DEADLINE_GRACE_MS = 10 * 1000;
+const DEADLINE_GRACE_MS = 3 * 1000;
 const BULK_RPC_METHOD = "netcatty/execBulk";
 
 /**
@@ -103,6 +103,18 @@ const LOST_PATTERN = /connection lost|terminated unexpectedly|stream lost|connec
  * `status` records what happened; it never judges the exit code.
  */
 function classifyHostResult(result) {
+  const normalized = classifyHostResultCore(result);
+  const record = result && typeof result === "object" ? result : {};
+  // The exec layer keeps only the tail of very large output and reports that it did.
+  // Two hosts that differ only in the dropped head must not look identical.
+  return {
+    ...normalized,
+    sourceTruncated: record.outputTruncated === true,
+    sourceOffset: Number.isFinite(record.outputBaseOffset) ? record.outputBaseOffset : 0,
+  };
+}
+
+function classifyHostResultCore(result) {
   if (!result || typeof result !== "object") {
     return { status: "error", exitCode: null, stdout: "", stderr: "", error: "Invalid execution result" };
   }
@@ -182,6 +194,7 @@ function groupBulkResults(entries, options = {}) {
     counts[normalized.status] = (counts[normalized.status] || 0) + 1;
     const key = JSON.stringify([
       normalized.status, normalized.exitCode, normalized.stdout, normalized.stderr, normalized.error,
+      normalized.sourceTruncated, normalized.sourceOffset,
     ]);
     let group = groupsByKey.get(key);
     if (!group) {
@@ -199,8 +212,10 @@ function groupBulkResults(entries, options = {}) {
 
   const groups = [];
   for (const { normalized, hosts } of groupsByKey.values()) {
-    const out = tailText(normalized.stdout, tailLines, perGroupChars);
-    const err = tailText(normalized.stderr, tailLines, perGroupChars);
+    // One budget per group, shared by both streams, so the response stays under the cap.
+    const stdoutChars = Math.floor(perGroupChars * 0.75);
+    const out = tailText(normalized.stdout, tailLines, stdoutChars);
+    const err = tailText(normalized.stderr, tailLines, perGroupChars - stdoutChars);
     const omittedLines = out.omittedLines + err.omittedLines;
     const group = {
       hosts,
@@ -210,7 +225,7 @@ function groupBulkResults(entries, options = {}) {
     };
     if (err.text) group.stderr = err.text;
     if (normalized.error) group.error = normalized.error;
-    if (out.truncated || err.truncated) {
+    if (out.truncated || err.truncated || normalized.sourceTruncated) {
       group.outputTruncated = true;
       if (omittedLines > 0) group.omittedLines = omittedLines;
     }
@@ -293,7 +308,7 @@ function createExecBulkHandler(deps) {
     try {
       outcome = hasMainSession
         ? await preflightMainExec(probeParams)
-        : preflightWorkerExec(probeParams);
+        : await preflightWorkerExec(probeParams);
     } catch (err) {
       outcome = { ok: false, error: err?.message || String(err) };
     }

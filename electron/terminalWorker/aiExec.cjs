@@ -259,6 +259,9 @@ function createWorkerAiExecHandler({
       sessionMeta,
       enforceWallTimeout,
       commandBlocklist,
+      // terminal_execute_bulk validates every target before sending to any of them:
+      // run every deterministic check below, then stop without touching the session.
+      precheck,
     } = payload;
     const session = sessions?.get(sessionId);
     if (!session) {
@@ -281,6 +284,7 @@ function createWorkerAiExecHandler({
     const ptyStream = session.stream || session.pty || session.proc;
 
     if (isNetworkDevice && ptyStream && typeof ptyStream.write === "function") {
+      if (precheck === true) return { ok: true };
       const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
       if (blocked) return blocked;
       return execViaRawPty(ptyStream, command, {
@@ -308,6 +312,7 @@ function createWorkerAiExecHandler({
       if (safety.blocked) {
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
       }
+      if (precheck === true) return { ok: true };
       const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
       if (blocked) return blocked;
       return execViaPty(ptyStream, command, {
@@ -372,6 +377,7 @@ function createWorkerAiExecHandler({
       if (safety.blocked) {
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
       }
+      if (precheck === true) return { ok: true };
       const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
       if (blocked) return blocked;
       return execViaChannel(sshClient, command, {
@@ -385,6 +391,7 @@ function createWorkerAiExecHandler({
       if (session.ymodemActive || session.zmodemSentry?.isActive?.()) {
         return { ok: false, error: "Serial file transfer is already in progress" };
       }
+      if (precheck === true) return { ok: true };
       const blocked = await checkWorkerExecution(event, activePtyExecs, chatSessionId);
       if (blocked) return blocked;
       return execViaRawPty(session.serialPort, command, {
@@ -709,6 +716,10 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
   ipcMain.on("netcatty:ai:catty:cancel", (_event, payload = {}) => {
     cancelPtyExecsForSession(activePtyExecs, payload.chatSessionId);
     cancelWorkerBackgroundJobsForSession(backgroundJobs, payload.chatSessionId);
+  });
+  // Foreground execs only; background jobs of the same chat keep running.
+  ipcMain.on("netcatty:ai:exec:cancel", (_event, payload = {}) => {
+    cancelPtyExecsForSession(activePtyExecs, payload.chatSessionId);
   });
 }
 

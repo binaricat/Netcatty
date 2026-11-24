@@ -9,6 +9,7 @@ const {
   DEFAULT_OPERATION_TIMEOUT_MS,
   RPC_TIMEOUT_BUFFER_MS,
   DEFAULT_APPROVAL_TIMEOUT_MS,
+  BULK_EXEC_EXTRA_MS,
 } = RPC_TIMEOUT_DEFAULTS;
 
 function isLongRunningRpcMethod(method, surface = CAPABILITY_SURFACES.BUILTIN) {
@@ -35,10 +36,13 @@ function resolveRpcTimeoutMs(
     timeoutBufferMs = RPC_TIMEOUT_BUFFER_MS,
   } = {},
 ) {
+  const bulkExtraMs = getCapabilityByRpcMethod(method, surface)?.id === "terminal.executeBulk"
+    ? BULK_EXEC_EXTRA_MS
+    : 0;
   const operationTimeoutMs = isLongRunningRpcMethod(method, surface)
     ? (Number.isFinite(bridgeCommandTimeoutMs) && bridgeCommandTimeoutMs > 0
       ? bridgeCommandTimeoutMs
-      : defaultOperationTimeoutMs)
+      : defaultOperationTimeoutMs) + bulkExtraMs
     : 0;
 
   const approvalTimeoutMs = isApprovalWaitRpcMethod(method, surface, bridgePermissionMode)

@@ -79,7 +79,7 @@ test("formatPreflightFailure lists every failing target and carries no Error pre
 
 test("classifyHostResult reports what happened without judging the exit code", () => {
   assert.deepEqual(classifyHostResult({ ok: true, stdout: "a", stderr: "", exitCode: 0 }), {
-    status: "completed", exitCode: 0, stdout: "a", stderr: "", error: "",
+    status: "completed", exitCode: 0, stdout: "a", stderr: "", error: "", sourceTruncated: false, sourceOffset: 0,
   });
   assert.equal(classifyHostResult({ ok: false, stdout: "inactive", exitCode: 3 }).status, "completed");
   assert.equal(classifyHostResult({ ok: false, stdout: "inactive", exitCode: 3 }).exitCode, 3);
@@ -503,4 +503,28 @@ test("a refusal that quotes a pattern containing status words is still not_sent"
     const result = classifyHostResult({ ok: false, error: `Command blocked by safety policy. Pattern: ${pattern}` });
     assert.equal(result.status, "not_sent", pattern);
   }
+});
+
+test("hosts whose exec layer already dropped different amounts of output are not merged", () => {
+  const same = { ok: true, stdout: "tail", exitCode: 0 };
+  const payload = groupBulkResults([
+    { sessionId: "s1", label: "a", result: { ...same, outputTruncated: true, outputBaseOffset: 1_100_000 } },
+    { sessionId: "s2", label: "b", result: { ...same, outputTruncated: true, outputBaseOffset: 2_400_000 } },
+    { sessionId: "s3", label: "c", result: { ...same } },
+  ]);
+  assert.equal(payload.groups.length, 3);
+  assert.deepEqual(payload.groups.map((group) => group.outputTruncated), [true, true, undefined]);
+});
+
+test("stdout and stderr share one size budget per group so the response stays capped", () => {
+  const big = "x".repeat(40_000);
+  const entries = Array.from({ length: 20 }, (_, i) => ({
+    sessionId: `s${i}`, label: `h${i}`,
+    result: { ok: true, stdout: `${i}${big}`, stderr: `${i}${big}`, exitCode: 0 },
+  }));
+  const payload = groupBulkResults(entries, { tailLines: 2000 });
+  assert.equal(payload.groups.length, 20);
+  const total = payload.groups.reduce((sum, group) => sum + group.stdout.length + (group.stderr || "").length, 0);
+  assert.ok(total <= 256 * 1024, `response ${total} exceeds the cap`);
+  assert.ok(payload.groups.every((group) => group.outputTruncated === true));
 });
