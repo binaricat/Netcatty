@@ -394,7 +394,10 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
             !task.parentTaskId && !["completed", "failed", "cancelled"].includes(task.status)
           ));
           if (unfinishedTasks.length > 0) {
-            const resumable = unfinishedTasks.filter((task) => (
+            // Packed streams cannot pause or resume. Keep them in the quit
+            // confirmation, but let them run until the owner actually closes.
+            const pausableTasks = unfinishedTasks.filter((task) => task.controlKind !== "packed-download");
+            const resumable = pausableTasks.filter((task) => (
               task.status === "transferring" || task.status === "queued"
               || previousAttempt?.resumeTaskIds.has(task.id)
             ));
@@ -411,7 +414,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
             };
             transferQuitPendingRef.current = attempt;
             bridge.reportDirtyEditorsResult?.(true, reason, { ...response, pending: true });
-            const paused = await Promise.allSettled(unfinishedTasks.map((task) => sftpTransferCenterStore.pause(task.id)));
+            const paused = await Promise.allSettled(pausableTasks.map((task) => sftpTransferCenterStore.pause(task.id)));
             if (transferQuitPendingRef.current !== attempt) return;
             const expired = () => request && Date.now() >= request.deadline;
             if (!expired() && paused.every((result) => result.status === "fulfilled")) {
@@ -452,9 +455,33 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
   }, [enabled, t]);
 
   useEffect(() => {
+    let active = true;
+    let pendingActivePackedSync = true;
+    // Any global event observed while the initial active-packed snapshot is in
+    // flight is strictly newer than (or equal to) the snapshot; skip replaying
+    // those IDs so a settled transfer cannot be recreated as stuck "transferring".
+    const observedPackedEventIds = new Set<string>();
     const bridge = netcattyBridge.get();
     const unsubscribeEvents = bridge?.onGlobalSftpTransferEvent?.((event) => {
+      if (pendingActivePackedSync && event?.transferId) {
+        observedPackedEventIds.add(event.transferId);
+      }
       sftpTransferCenterStore.ingestBackgroundEvent(event);
+    });
+    void bridge?.listActivePackedDownloads?.().then((activePacked) => {
+      pendingActivePackedSync = false;
+      if (!active || !Array.isArray(activePacked)) {
+        observedPackedEventIds.clear();
+        return;
+      }
+      for (const event of activePacked) {
+        if (observedPackedEventIds.has(event.transferId)) continue;
+        sftpTransferCenterStore.ingestBackgroundEvent(event);
+      }
+      observedPackedEventIds.clear();
+    }).catch(() => {
+      pendingActivePackedSync = false;
+      observedPackedEventIds.clear();
     });
     const restartBackgroundTransfer = async (taskId: string, fromBeginning: boolean) => {
       const task = sftpTransferCenterStore.getSnapshot().tasks.find((candidate) => candidate.id === taskId);
@@ -592,6 +619,9 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
       },
     });
     return () => {
+      active = false;
+      pendingActivePackedSync = false;
+      observedPackedEventIds.clear();
       unsubscribeEvents?.();
       unregisterOwner();
     };

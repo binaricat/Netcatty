@@ -53,6 +53,8 @@ for (const accept of [false, true]) {
         { id: "already-paused", status: "paused" },
         { id: "pausing", status: "pausing" },
         { id: "interrupted", status: "interrupted" },
+        { id: "packed-running", status: "transferring", controlKind: "packed-download", resumable: false },
+        { id: "packed-queued", status: "queued", controlKind: "packed-download", resumable: false },
         { id: "child", parentTaskId: "running", status: "transferring" },
       ],
     }) as unknown as ReturnType<typeof sftpTransferCenterStore.getSnapshot>);
@@ -107,6 +109,44 @@ for (const accept of [false, true]) {
       assert.equal(resumeSettled, false);
       assert.equal(reports.length, 4);
     }
+  });
+}
+
+for (const accept of [false, true]) {
+  test(`packed-only quit still asks for confirmation without pausing or resuming (${accept ? "accept" : "cancel"})`, async (t) => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    const previousAct = Object.getOwnPropertyDescriptor(globalThis, "IS_REACT_ACT_ENVIRONMENT");
+    let renderer: ReactTestRenderer | undefined;
+    let prompts = 0;
+    let query!: () => Promise<void>;
+    const reports: Array<[boolean, string | undefined]> = [];
+    Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true });
+    Object.defineProperty(globalThis, "window", { configurable: true, value: {
+      confirm() { prompts++; return accept; },
+    } });
+    t.after(async () => {
+      await act(async () => renderer?.unmount());
+      if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow); else Reflect.deleteProperty(globalThis, "window");
+      if (previousAct) Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", previousAct); else Reflect.deleteProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT");
+    });
+    t.mock.method(sftpTransferCenterStore, "getSnapshot", () => ({
+      activeCount: 1, queuedCount: 0, attentionCount: 0,
+      tasks: [{ ...makeTask("packed", "transferring"), controlKind: "packed-download", resumable: false }],
+    }));
+    t.mock.method(sftpTransferCenterStore, "pause", async () => { assert.fail("packed downloads cannot be paused"); });
+    t.mock.method(sftpTransferCenterStore, "resume", async () => { assert.fail("packed selections cannot be replayed"); });
+    t.mock.method(netcattyBridge, "get", () => ({
+      onCheckDirtyEditors(callback: typeof query) { query = callback; return () => {}; },
+      reportDirtyEditorsResult(dirty: boolean, reason?: string) { reports.push([dirty, reason]); },
+    }));
+    function Probe() {
+      useAppStartupEffects({ enabled: false, updateState: {}, sessions: [], hosts: [], keys: [], identities: [], knownHosts: [], proxyProfiles: [], groupConfigs: [], workspaces: [], portForwardingRules: [], t: (key: string) => key });
+      return null;
+    }
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    await query();
+    assert.equal(prompts, 1);
+    assert.deepEqual(reports, [[true, "transfers"], accept ? [false, undefined] : [true, "transfers"]]);
   });
 }
 
@@ -249,4 +289,72 @@ test("retry Cancel preserves the expired attempt auto-resume ownership", async (
   assert.equal(prompts, 1);
   assert.equal(resumes, 1, "Cancel must restore work running before the first attempt");
   assert.deepEqual(replies.at(-1), { dirty: true, requestId: "retry" });
+});
+
+test("stale listActivePackedDownloads snapshot cannot resurrect a packed transfer settled while in flight", async (t) => {
+  const previousAct = Object.getOwnPropertyDescriptor(globalThis, "IS_REACT_ACT_ENVIRONMENT");
+  Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true });
+  let renderer: ReactTestRenderer | undefined;
+  const raceId = "packed-snapshot-race-settled";
+  const liveId = "packed-snapshot-race-live";
+  let emitGlobal!: (event: Record<string, unknown>) => void;
+  let resolveActive!: (events: Array<Record<string, unknown>>) => void;
+  const activePromise = new Promise<Array<Record<string, unknown>>>((resolve) => {
+    resolveActive = resolve;
+  });
+  t.after(async () => {
+    await act(async () => renderer?.unmount());
+    sftpTransferCenterStore.dismiss(raceId);
+    sftpTransferCenterStore.dismiss(liveId);
+    if (previousAct) Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", previousAct);
+    else Reflect.deleteProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT");
+  });
+  t.mock.method(netcattyBridge, "get", () => ({
+    onGlobalSftpTransferEvent: (cb: typeof emitGlobal) => { emitGlobal = cb; return () => {}; },
+    listActivePackedDownloads: () => activePromise,
+  }));
+  function Probe() {
+    useAppStartupEffects({
+      enabled: false, updateState: {}, sessions: [], hosts: [], keys: [], identities: [],
+      knownHosts: [], proxyProfiles: [], groupConfigs: [], workspaces: [], portForwardingRules: [],
+      t: (key: string) => key,
+    });
+    return null;
+  }
+  await act(async () => { renderer = create(React.createElement(Probe)); });
+
+  // Transfer completes before the active snapshot promise resolves; this window
+  // had no prior row for raceId so the completion event alone creates nothing.
+  emitGlobal({
+    type: "completed",
+    transferId: raceId,
+    controlKind: "packed-download",
+    transferred: 256,
+    totalBytes: 256,
+    endedAt: Date.now(),
+  });
+  assert.equal(sftpTransferCenterStore.getTask(raceId), undefined);
+
+  // Now the stale snapshot arrives containing both the settled raceId and a genuinely live transfer.
+  await act(async () => {
+    resolveActive([
+      {
+        type: "progress", transferId: raceId, direction: "download", fileName: "compose",
+        sourcePath: "/srv/compose", targetPath: "/tmp/compose", isDirectory: true,
+        controlKind: "packed-download", origin: "manual", retryable: false, resumable: false,
+        transferred: 128, phase: "transferring",
+      },
+      {
+        type: "progress", transferId: liveId, direction: "download", fileName: "still-running",
+        sourcePath: "/srv/still-running", targetPath: "/tmp/still-running", isDirectory: true,
+        controlKind: "packed-download", origin: "manual", retryable: false, resumable: false,
+        transferred: 64, phase: "extracting",
+      },
+    ]);
+    await activePromise;
+  });
+
+  assert.equal(sftpTransferCenterStore.getTask(raceId), undefined, "settled transfer must not be recreated as stuck transferring");
+  assert.equal(sftpTransferCenterStore.getTask(liveId)?.status, "transferring");
+  assert.equal(sftpTransferCenterStore.getTask(liveId)?.phase, "extracting");
 });

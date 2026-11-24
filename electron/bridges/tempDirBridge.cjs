@@ -15,6 +15,7 @@ const crypto = require("node:crypto");
 // so another OS user cannot claim Netcatty's path before startup.
 const NETCATTY_TEMP_DIR_NAME = "Netcatty";
 const MANAGED_TEMP_MARKER = ".netcatty-managed-temp";
+const ACTIVE_WORKSPACE_NAME = /^\d+_\d+_active-workspace-(\d+)-[a-f0-9]{32}-[A-Za-z0-9_-]+$/;
 const MAX_TOOL_OUTPUT_TEMP_CHARS = 4_000_000;
 const MAX_TOOL_OUTPUT_TEMP_BYTES = 8_000_000;
 const TOOL_OUTPUT_ORPHAN_TTL_MS = 30 * 60 * 1_000;
@@ -499,10 +500,18 @@ async function getTempDirInfo() {
       if (file === TOOL_OUTPUT_SIGNING_KEY_FILE) continue;
       try {
         const filePath = path.join(tempDir, file);
-        const stat = await fs.promises.stat(filePath);
-        if (stat.isFile()) {
-          totalSize += stat.size;
-          fileCount++;
+        const pending = [filePath];
+        while (pending.length) {
+          const current = pending.pop();
+          // Archives may contain symbolic links. Never include their targets in
+          // the managed directory's usage or follow them outside the temp root.
+          const stat = await fs.promises.lstat(current);
+          if (stat.isDirectory()) {
+            for (const child of await fs.promises.readdir(current)) pending.push(path.join(current, child));
+          } else if (stat.isFile() || stat.isSymbolicLink()) {
+            totalSize += stat.size;
+            fileCount++;
+          }
         }
       } catch {
         // Skip files that can't be stat'd
@@ -547,9 +556,12 @@ async function clearTempDir() {
       if (file === TOOL_OUTPUT_SIGNING_KEY_FILE && !resetUnavailableSigningKey) continue;
       try {
         const filePath = path.join(tempDir, file);
-        const stat = await fs.promises.stat(filePath);
-        
-        if (stat.isFile()) {
+        const stat = await fs.promises.lstat(filePath);
+        // The worker and main process share this directory. A workspace's
+        // owner is encoded in its atomic directory name, so cleanup cannot
+        // race a separately written lock file during creation.
+        if (stat.isDirectory() && isActiveTempWorkspace(file)) continue;
+        if (stat.isFile() || stat.isSymbolicLink()) {
           await fs.promises.unlink(filePath);
           deletedCount++;
           console.log(`[TempDir] Deleted: ${file}`);
@@ -587,6 +599,40 @@ function getTempFilePath(fileName) {
   tempFileCounter = (tempFileCounter + 1) % 1000000;
   const safeFileName = fileName.replace(/[<>:"/\\|?*]/g, "_");
   return path.join(tempDir, `${timestamp}_${tempFileCounter}_${safeFileName}`);
+}
+
+function isActiveTempWorkspace(fileName) {
+  const match = ACTIVE_WORKSPACE_NAME.exec(fileName);
+  if (!match) return false;
+  const pid = Number(match[1]);
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error.code !== "ESRCH"; } // Be conservative if process visibility is denied.
+}
+
+/** A private, managed workspace which Settings can count and clear after its owner exits. */
+function createManagedTempDirectory(label) {
+  if (!/^[A-Za-z0-9_-]+$/.test(label)) throw new Error("Invalid temporary workspace label");
+  const directory = getTempFilePath(`active-workspace-${process.pid}-${crypto.randomBytes(16).toString("hex")}-${label}`);
+  fs.mkdirSync(directory, { mode: 0o700 });
+  const identity = fs.lstatSync(directory);
+  let released = false;
+  return {
+    path: directory,
+    async dispose() {
+      if (released) return;
+      released = true;
+      const actual = await fs.promises.lstat(directory).catch(error => {
+        if (error.code !== "ENOENT") throw error;
+      });
+      if (!actual || actual.dev !== identity.dev || actual.ino !== identity.ino) return;
+      // Release the live-process protection before removal. Failed cleanup is
+      // then visible and removable in Settings even while this process lives.
+      const finished = path.join(path.dirname(directory), path.basename(directory).replace("_active-workspace-", "_finished-workspace-"));
+      await fs.promises.rename(directory, finished);
+      await fs.promises.rm(finished, { recursive: true, force: true, maxRetries: 3 });
+    },
+  };
 }
 
 function getTransferTempFilePath(transferId, fileName) {
@@ -1472,6 +1518,7 @@ module.exports = {
   getTempDirInfo,
   clearTempDir,
   getTempFilePath,
+  createManagedTempDirectory,
   getTransferTempFilePath,
   cleanupExpiredToolOutputFiles,
   registerHandlers,

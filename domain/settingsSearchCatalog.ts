@@ -1012,6 +1012,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.sftp.compressedUpload",
   },
   {
+    id: "sftp-packed-download",
+    tab: "file-associations",
+    labelKey: "settings.sftp.packedDownload.enable",
+    descriptionKey: "settings.sftp.packedDownload.enableDesc",
+    sectionKey: "settings.sftp.packedDownload",
+  },
+  {
     id: "sftp-follow-terminal-cwd",
     tab: "file-associations",
     labelKey: "settings.sftp.followTerminalCwd.enable",

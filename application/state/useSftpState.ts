@@ -544,6 +544,7 @@ export const useSftpState = (
     activeTransfersCount,
     startTransfer,
     downloadToLocal,
+    tryPackedDownload,
     cancelTransfer,
     pauseTransfer,
     resumeTransfer,
@@ -817,6 +818,7 @@ export const useSftpState = (
     releaseExternalFileWatches,
     startTransfer,
     downloadToLocal,
+    tryPackedDownload,
     cancelTransfer,
     pauseTransfer,
     resumeTransfer,
@@ -900,6 +902,7 @@ export const useSftpState = (
     releaseExternalFileWatches: (...args: Parameters<typeof releaseExternalFileWatches>) =>
       methodsRef.current.releaseExternalFileWatches(...args),
     startTransfer: (...args: Parameters<typeof startTransfer>) => methodsRef.current.startTransfer(...args),
+    tryPackedDownload: (...args: Parameters<typeof tryPackedDownload>) => methodsRef.current.tryPackedDownload(...args),
     downloadToLocal: (...args: Parameters<typeof downloadToLocal>) => methodsRef.current.downloadToLocal(...args),
     cancelTransfer: (...args: Parameters<typeof cancelTransfer>) => methodsRef.current.cancelTransfer(...args),
     pauseTransfer: (...args: Parameters<typeof pauseTransfer>) => methodsRef.current.pauseTransfer(...args),
