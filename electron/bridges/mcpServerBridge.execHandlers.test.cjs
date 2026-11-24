@@ -428,3 +428,97 @@ for (const route of ['exec', 'job']) {
     assert.equal(ctx.activeSessionExecutions.size, 0);
   });
 }
+
+// ── terminal_execute_bulk support: preflightExec + shared chat lock ──
+
+function createBulkExecContext(sessions, overrides = {}) {
+  const ctx = createExecHandlerTestContext({ sessions, backgroundJobs: new Map() });
+  ctx.checkCommandSafetyForShell = checkBlocklistForShell;
+  ctx.resolveSessionBlocklistShellKind = resolveSessionBlocklistShellKind;
+  ctx.execViaPty = async () => ({ ok: true, stdout: "ran", stderr: "", exitCode: 0 });
+  ctx.execViaChannel = async () => ({ ok: true, stdout: "ran", stderr: "", exitCode: 0 });
+  ctx.execViaRawPty = async () => ({ ok: true, stdout: "ran", stderr: "", exitCode: null });
+  Object.assign(ctx, overrides);
+  return createExecHandlerApi(ctx);
+}
+
+test("preflightExec accepts supported transports without sending a command", async () => {
+  const pty = new FakePty();
+  const sessions = new Map([
+    ["pty", { protocol: "ssh", shellKind: "posix", stream: pty }],
+    ["channel", { protocol: "ssh", shellKind: "posix", conn: { exec() {} } }],
+    // Serial sessions are network-device-like and expose their port as `stream`.
+    ["serial", { protocol: "serial", stream: { write() {} }, serialPort: { write() {} } }],
+  ]);
+  const api = createBulkExecContext(sessions);
+  for (const sessionId of sessions.keys()) {
+    const result = await api.preflightExec({ sessionId, command: "uptime", chatSessionId: "chat" });
+    assert.deepEqual(result, { ok: true }, sessionId);
+  }
+  assert.deepEqual(pty.writes, [], "preflight never types into the terminal");
+});
+
+test("preflightExec reports the same refusals handleExec would give", async () => {
+  const sessions = new Map([
+    ["blocked", { protocol: "ssh", shellKind: "posix", stream: new FakePty() }],
+    ["dead", { protocol: "ssh", shellKind: "posix" }],
+    ["net-no-pty", { protocol: "ssh", conn: { exec() {} } }],
+  ]);
+  const api = createBulkExecContext(sessions, {
+    getSessionMeta: (sessionId) => (sessionId === "net-no-pty" ? { deviceType: "network" } : {}),
+  });
+
+  const blocked = await api.preflightExec({ sessionId: "blocked", command: "rm -rf /", chatSessionId: "chat" });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /^Command blocked by safety policy\. Pattern: /);
+  assert.deepEqual(
+    await api.preflightExec({ sessionId: "dead", command: "uptime", chatSessionId: "chat" }),
+    { ok: false, error: "Session does not support command execution" },
+  );
+  assert.match(
+    (await api.preflightExec({ sessionId: "net-no-pty", command: "uptime", chatSessionId: "chat" })).error,
+    /no writable PTY stream/,
+  );
+  assert.deepEqual(
+    await api.preflightExec({ sessionId: "ghost", command: "uptime", chatSessionId: "chat" }),
+    { ok: false, error: "Session not found" },
+  );
+});
+
+test("preflightExec skips the blocklist for serial and network-device sessions like handleExec", async () => {
+  const sessions = new Map([
+    ["serial", { protocol: "serial", stream: { write() {} }, serialPort: { write() {} } }],
+    ["net", { protocol: "ssh", stream: new FakePty() }],
+  ]);
+  const api = createBulkExecContext(sessions, {
+    getSessionMeta: (sessionId) => (sessionId === "net" ? { deviceType: "network" } : {}),
+  });
+  for (const sessionId of ["serial", "net"]) {
+    assert.deepEqual(
+      await api.preflightExec({ sessionId, command: "shutdown", chatSessionId: "chat" }),
+      { ok: true },
+      sessionId,
+    );
+  }
+});
+
+test("handleExec takes the chat lock unless the bulk executor already holds it", async () => {
+  const { CHAT_LOCK_HELD } = require("./mcpServerBridge/execBulk.cjs");
+  const locks = [];
+  const make = () => createBulkExecContext(
+    new Map([["ssh", { protocol: "ssh", shellKind: "posix", stream: new FakePty() }]]),
+    { beginChatExecution: (...args) => { locks.push(args); return { ok: true, release() {} }; } },
+  );
+
+  await make().handleExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" });
+  assert.equal(locks.length, 1, "single exec takes the lock");
+
+  locks.length = 0;
+  await make().handleExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" }, { [CHAT_LOCK_HELD]: true });
+  assert.equal(locks.length, 0, "bulk-held lock is not taken twice");
+
+  locks.length = 0;
+  // A plain object key with the same text is not the private marker.
+  await make().handleExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" }, { chatLockHeld: true });
+  assert.equal(locks.length, 1);
+});

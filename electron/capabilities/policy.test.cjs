@@ -31,6 +31,7 @@ test("new vault management writes use the standard permission policy", () => {
 test("builtin write methods match legacy mcpServerBridge write set", () => {
   const legacyWriteMethods = [
     "netcatty/exec",
+    "netcatty/execBulk",
     "netcatty/sftp/write",
     "netcatty/sftp/download",
     "netcatty/sftp/upload",
@@ -534,4 +535,56 @@ test("evaluatePermissionWithGrants keeps commands after dollar-quoted here-doc d
 
   assert.equal(decision.allowed, true);
   assert.equal(decision.requiresApproval, true);
+});
+
+test("terminal_execute_bulk is a write, blocked in observer mode and approved in confirm mode", () => {
+  const params = { chatSessionId: "chat-1", command: "uptime", sessionIds: '["a","b"]' };
+  const observer = evaluateRpcPermission({
+    rpcMethod: "netcatty/execBulk", permissionMode: PERMISSION_MODES.OBSERVER, params,
+  });
+  assert.equal(observer.allowed, false);
+  assert.equal(observer.error, OBSERVER_DENY_MESSAGE);
+
+  const confirm = evaluateRpcPermission({
+    rpcMethod: "netcatty/execBulk", permissionMode: PERMISSION_MODES.CONFIRM, params,
+  });
+  assert.equal(confirm.allowed, true);
+  assert.equal(confirm.requiresApproval, true);
+
+  const auto = evaluateRpcPermission({
+    rpcMethod: "netcatty/execBulk", permissionMode: PERMISSION_MODES.AUTO, params,
+  });
+  assert.equal(auto.requiresApproval, false);
+
+  const noChat = evaluateRpcPermission({
+    rpcMethod: "netcatty/execBulk", permissionMode: PERMISSION_MODES.CONFIRM, params: { command: "uptime" },
+  });
+  assert.equal(noChat.allowed, false);
+});
+
+test("remembered grants never replace the approval for a fan-out capability", () => {
+  const grants = [
+    { id: "g1", capabilityId: "terminal.executeBulk", sessionPattern: "*", createdAt: Date.now() },
+    { id: "g2", capabilityId: "terminal.executeBulk", sessionPattern: "host:host-test", createdAt: Date.now() },
+    { id: "g3", capabilityId: "*", sessionPattern: "*", createdAt: Date.now() },
+    { id: "g4", capabilityId: "terminal.execute", sessionPattern: "session-a", createdAt: Date.now() },
+  ];
+  const decision = evaluatePermissionWithGrants({
+    rpcMethod: "netcatty/execBulk",
+    permissionMode: PERMISSION_MODES.CONFIRM,
+    params: { chatSessionId: "chat-1", command: "uptime", sessionIds: '["session-a"]' },
+    context: { hostId: "host-test" },
+  }, grants);
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.requiresApproval, true);
+  assert.equal(decision.matchedGrantId, undefined);
+
+  // The single-host capability keeps honoring grants.
+  const single = evaluatePermissionWithGrants({
+    rpcMethod: "netcatty/exec",
+    permissionMode: PERMISSION_MODES.CONFIRM,
+    params: { chatSessionId: "chat-1", sessionId: "session-a", command: "uptime" },
+    context: {},
+  }, [{ id: "g4", capabilityId: "terminal.execute", sessionPattern: "session-a", createdAt: Date.now() }]);
+  assert.equal(single.requiresApproval, false);
 });
