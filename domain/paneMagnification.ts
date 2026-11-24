@@ -117,13 +117,62 @@ export function snapCssRectToDevicePixels(
   };
 }
 
+export const PANE_MAGNIFICATION_DURATION_MS = 200;
+
+export function resolvePaneMagnificationLayoutGeometry(
+  original: React.CSSProperties,
+  layoutOrigin?: { width?: number; height?: number },
+): React.CSSProperties {
+  const resolveLength = (value: string | number | undefined, parentSize?: number) => {
+    if (typeof value === 'number') return `${value}px`;
+    if (typeof value === 'string' && value.endsWith('%') && parentSize !== undefined) {
+      return `${parseFloat(value) * parentSize / 100}px`;
+    }
+    return value;
+  };
+  return {
+    left: resolveLength(original.left, layoutOrigin?.width),
+    top: resolveLength(original.top, layoutOrigin?.height),
+    width: resolveLength(original.width, layoutOrigin?.width),
+    height: resolveLength(original.height, layoutOrigin?.height),
+  };
+}
+
 export function resolvePaneMagnificationStyle(
   original: React.CSSProperties,
   magnified: boolean,
   surfaceBounds?: { left: number; top: number; width: number; height: number } | null,
   devicePixelRatio = 1,
+  layoutOrigin?: { left: number; top: number; width?: number; height?: number },
 ): React.CSSProperties {
-  if (!magnified) return original;
+  // Keep the fixed overlay and transition while restoring too, so the split
+  // container cannot clip the pane before it has finished shrinking.
+  const transition: React.CSSProperties = surfaceBounds ? {
+    transitionProperty: 'left, top, width, height',
+    transitionDuration: `${PANE_MAGNIFICATION_DURATION_MS}ms`,
+    transitionTimingFunction: 'ease-out',
+    zIndex: 50,
+  } : {};
+  // Margins compensate for the containing-block switch without animating or
+  // transforming the terminal and its descendants. Local split offsets then
+  // keep the same viewport origin when fixed positioning starts or ends.
+  const fixedOrigin: React.CSSProperties = {
+    position: 'fixed',
+    ...(layoutOrigin ? {
+      marginLeft: `${layoutOrigin.left}px`,
+      marginTop: `${layoutOrigin.top}px`,
+    } : {}),
+  };
+  if (!magnified) {
+    if (!surfaceBounds) return original;
+    // Percentage lengths must keep using the layout parent when fixed.
+    return {
+      ...original,
+      ...transition,
+      ...fixedOrigin,
+      ...resolvePaneMagnificationLayoutGeometry(original, layoutOrigin),
+    };
+  }
   if (surfaceBounds) {
     const snapped = snapCssRectToDevicePixels(
       surfaceBounds.left + 12,
@@ -133,9 +182,10 @@ export function resolvePaneMagnificationStyle(
       devicePixelRatio,
     );
     return {
-      position: 'fixed',
-      left: `${snapped.left}px`,
-      top: `${snapped.top}px`,
+      ...transition,
+      ...fixedOrigin,
+      left: `${snapped.left - (layoutOrigin?.left ?? 0)}px`,
+      top: `${snapped.top - (layoutOrigin?.top ?? 0)}px`,
       width: `${snapped.width}px`,
       height: `${snapped.height}px`,
       zIndex: 50,
