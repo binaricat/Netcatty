@@ -41,6 +41,17 @@ test("connection timeout pauses while SSH waits for user confirmation", () => {
   }), false);
 });
 
+test("connection timeout pauses while waiting for a scheduled auto-reconnect delay", () => {
+  assert.equal(shouldRunConnectionTimeout({
+    ...baseTimeoutState,
+    isWaitingForAutoReconnect: true,
+  }), false);
+  assert.equal(shouldRunConnectionTimeout({
+    ...baseTimeoutState,
+    isWaitingForAutoReconnect: false,
+  }), true);
+});
+
 test("connection timeout switches from TCP dial to auth readiness after TCP connects", () => {
   assert.equal(getConnectionTimeoutMs(baseTimeoutState), SSH_TCP_CONNECT_TIMEOUT_MS);
   assert.equal(getConnectionTimeoutMs({
