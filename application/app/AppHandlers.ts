@@ -974,20 +974,16 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         const session = sessions.find((s) => s.id === currentId) ?? null;
         const workspace = workspaces.find((w) => w.id === currentId) ?? null;
 
-        const focusIsInsideTerminal = !!document.activeElement?.closest('[data-session-id]');
-
         const intent = resolveCloseIntent({
           activeTabId: currentId,
           workspace: workspace ? { id: workspace.id, focusedSessionId: workspace.focusedSessionId } : null,
           sessionForTab: session,
-          focusIsInsideTerminal,
         });
 
         closeTabInFlightRef.current = true;
         (async () => {
           try {
             switch (intent.kind) {
-              case 'closeTerminal':
               case 'closeSingleTab': {
                 const ok = await confirmIfBusyLocalTerminal([intent.sessionId]);
                 if (ok) closeSession(intent.sessionId);
@@ -1031,7 +1027,11 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
                 : aliveIds[0];
               if (focusedId) {
                 const ok = await confirmIfBusyLocalTerminal([focusedId]);
-                if (ok) closeSession(focusedId);
+                if (ok) {
+                  // The pane shortcut closes the tab when only one pane remains.
+                  if (aliveIds.length === 1) closeWorkspace(workspace.id);
+                  else closeSession(focusedId);
+                }
               }
             } else if (session) {
               // Standalone session tab — close the session
