@@ -765,3 +765,36 @@ test("worker exec:cancel stops only the chat's foreground execs", async () => {
   assert.match(result.error, /cancel/i);
   assert.deepEqual(pty.writes, []);
 });
+
+test("worker precheck with probe:false opens no channel to the host; the full precheck still probes", async () => {
+  const make = () => {
+    const calls = { probe: 0 };
+    const session = {
+      protocol: "ssh", shellKind: "", stream: new FakePty(), _promptTrackTail: "", lastIdlePrompt: "",
+      _shellKindExecProbe: async () => { calls.probe += 1; return "/bin/bash\n"; },
+    };
+    const ipcMain = createFakeIpcMain();
+    registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([["ssh", session]]) });
+    return { calls, session, exec: (extra) => ipcMain.handlers.get("netcatty:ai:exec")(createFakeEvent(), {
+      sessionId: "ssh", command: "uptime", chatSessionId: "chat", commandTimeoutMs: 2000, precheck: true, ...extra,
+    }) };
+  };
+
+  const light = make();
+  assert.deepEqual(await light.exec({ probe: false }), { ok: true });
+  assert.equal(light.calls.probe, 0, "no remote command before approval");
+  assert.match(
+    (await light.exec({ probe: false, command: "echo forbidden-word", commandBlocklist: ["forbidden-word"] })).error,
+    /^Command blocked by safety policy\. Pattern: /,
+    "user patterns still apply without probing",
+  );
+  assert.equal(light.calls.probe, 0);
+  assert.deepEqual(light.session.stream.writes, []);
+
+  const full = make();
+  assert.deepEqual(await full.exec({}), { ok: true });
+  const probesAfterFirst = full.calls.probe;
+  assert.ok(probesAfterFirst >= 1, "after approval the shell kind is probed as for any exec");
+  assert.deepEqual(await full.exec({}), { ok: true });
+  assert.equal(full.calls.probe, probesAfterFirst, "the result is cached for the real exec");
+});

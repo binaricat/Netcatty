@@ -16,6 +16,7 @@ const {
 } = require("../bridges/ai/sessionShellKind.cjs");
 const {
   checkBlocklistForShell,
+  checkBlocklistCommonOnly,
   resolveSessionBlocklistShellKind,
 } = require("../bridges/ai/commandSafety.cjs");
 
@@ -262,7 +263,19 @@ function createWorkerAiExecHandler({
       // terminal_execute_bulk validates every target before sending to any of them:
       // run every deterministic check below, then stop without touching the session.
       precheck,
+      probe,
     } = payload;
+    // A precheck with probe:false must not open any channel to the host.
+    const noProbe = precheck === true && probe === false;
+    const checkBlocklist = (cmd, session) => {
+      if (!noProbe) {
+        return checkBlocklistForShell(cmd, resolveSessionBlocklistShellKind(session), commandBlocklist);
+      }
+      const knownKind = resolveSessionBlocklistShellKind(session);
+      return knownKind
+        ? checkBlocklistForShell(cmd, knownKind, commandBlocklist)
+        : checkBlocklistCommonOnly(cmd, commandBlocklist);
+    };
     const session = sessions?.get(sessionId);
     if (!session) {
       return { ok: false, error: "Session not found" };
@@ -299,16 +312,14 @@ function createWorkerAiExecHandler({
       // Remote sessions may not set shellKind at connect time; probe once so
       // fish login shells get the fish wrapper (issue #1854). Cancellable so
       // Stop during the probe window does not still type the command.
-      const probed = await ensureSessionShellKindForExec(session, {
-        trackForCancellation: activePtyExecs,
-        chatSessionId,
-      });
-      if (!probed.ok) return probed;
-      const safety = checkBlocklistForShell(
-        command,
-        resolveSessionBlocklistShellKind(session),
-        commandBlocklist,
-      );
+      if (!noProbe) {
+        const probed = await ensureSessionShellKindForExec(session, {
+          trackForCancellation: activePtyExecs,
+          chatSessionId,
+        });
+        if (!probed.ok) return probed;
+      }
+      const safety = checkBlocklist(command, session);
       if (safety.blocked) {
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
       }
@@ -364,16 +375,14 @@ function createWorkerAiExecHandler({
 
     const sshClient = session.sshClient || session.conn;
     if (!session.singleChannelSsh && sshClient && typeof sshClient.exec === "function") {
-      const probed = await ensureSessionShellKindForExec(session, {
-        trackForCancellation: activePtyExecs,
-        chatSessionId,
-      });
-      if (!probed.ok) return probed;
-      const safety = checkBlocklistForShell(
-        command,
-        resolveSessionBlocklistShellKind(session),
-        commandBlocklist,
-      );
+      if (!noProbe) {
+        const probed = await ensureSessionShellKindForExec(session, {
+          trackForCancellation: activePtyExecs,
+          chatSessionId,
+        });
+        if (!probed.ok) return probed;
+      }
+      const safety = checkBlocklist(command, session);
       if (safety.blocked) {
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
       }

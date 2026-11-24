@@ -1919,7 +1919,7 @@ function checkWorkerExecSafety(sessionId, command, chatSessionId) {
  * the worker to run every other deterministic check (transport, shell kind, shell-aware
  * blocklist, unsupported local shell, busy background job) without sending anything.
  */
-async function preflightWorkerExec(params = {}) {
+async function preflightWorkerExec(params = {}, { probe = true } = {}) {
   const { sessionId, command, chatSessionId } = params;
   if (!terminalWorkerManager?.request) return { ok: false, error: "Session not found" };
   const blocked = checkWorkerExecSafety(sessionId, command, chatSessionId || null);
@@ -1934,6 +1934,8 @@ async function preflightWorkerExec(params = {}) {
       enforceWallTimeout: true,
       commandBlocklist,
       precheck: true,
+      // Before approval the worker must not open any channel to the host.
+      ...(probe ? {} : { probe: false }),
     }, {});
     return result && result.ok === false
       ? { ok: false, error: result.error || "Session does not support command execution" }
@@ -2693,7 +2695,7 @@ const execHandlerApi = createExecHandlerApi({
   get commandTimeoutMs() { return commandTimeoutMs; },
   DEFAULT_BACKGROUND_JOB_TIMEOUT_MS, DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS, MAX_BACKGROUND_JOB_OUTPUT_CHARS,
   backgroundJobs, activePtyExecs,
-  debugLog, getSessionMeta, checkCommandSafetyForShell, resolveSessionBlocklistShellKind, reserveSessionExecution, releaseSessionExecution,
+  debugLog, getSessionMeta, checkCommandSafetyForShell, checkCommandSafetyCommonOnly, resolveSessionBlocklistShellKind, reserveSessionExecution, releaseSessionExecution,
   beginChatExecution, execViaRawPty, execViaPty, execViaChannel, startPtyJob,
   getFreshIdlePrompt, echoCommandToSession, createBackgroundJobId, storeCompletedJobOutput,
   serializeBackgroundJob, validateSessionScope, Date, Error,

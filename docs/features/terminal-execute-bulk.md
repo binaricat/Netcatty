@@ -41,6 +41,12 @@ never revealed.
 - All targets are claimed before the prompt, so no other command can start on them while
   you decide. Everything is checked again right after approval; if anything changed,
   nothing is sent.
+- In confirm mode no host is contacted before you answer. The checks before the prompt only
+  read local state and apply the shell-independent safety patterns. The shell-kind probe
+  (which opens an SSH exec channel, as a single command does just before it runs) and the
+  shell-specific safety patterns run right after you approve, still before any command is
+  sent. So a refusal that depends on the host's shell can appear after approval, and denying
+  a call leaves every host untouched. Without a prompt (auto mode) the full check runs first.
 - Every command still goes through the normal execution path, including the per-shell
   safety policy, shell readiness checks, privacy masking, and cancel.
 - Sessions hosted by the terminal worker (the default) are checked the same way: the

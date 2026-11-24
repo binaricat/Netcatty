@@ -522,3 +522,38 @@ test("handleExec takes the chat lock unless the bulk executor already holds it",
   await make().handleExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" }, { chatLockHeld: true });
   assert.equal(locks.length, 1);
 });
+
+test("preflightExec with probe:false never opens a channel to the host and uses the common patterns", async () => {
+  const make = (session, overrides = {}) => createBulkExecContext(new Map([["ssh", session]]), {
+    checkCommandSafetyCommonOnly: (command) => (command.includes("forbidden")
+      ? { blocked: true, matchedPattern: "forbidden" } : { blocked: false }),
+    ...overrides,
+  });
+  const unknownShell = () => {
+    const calls = { probe: 0, exec: 0 };
+    const session = {
+      protocol: "ssh", shellKind: "", stream: new FakePty(),
+      _shellKindExecProbe: async () => { calls.probe += 1; return "/bin/bash\n"; },
+      conn: { exec() { calls.exec += 1; } },
+    };
+    return { session, calls };
+  };
+
+  const quiet = unknownShell();
+  const api = make(quiet.session);
+  assert.deepEqual(await api.preflightExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" }, { probe: false }), { ok: true });
+  assert.deepEqual(quiet.calls, { probe: 0, exec: 0 }, "no probe and no SSH channel before approval");
+  assert.match(
+    (await api.preflightExec({ sessionId: "ssh", command: "echo forbidden", chatSessionId: "chat" }, { probe: false })).error,
+    /Command blocked by safety policy\. Pattern: forbidden/,
+    "unknown shell falls back to the shell-independent patterns",
+  );
+
+  const loud = unknownShell();
+  const full = make(loud.session);
+  await full.preflightExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" });
+  const probesAfterFirst = loud.calls.probe;
+  assert.ok(probesAfterFirst >= 1, "the default (after approval) still probes the shell kind");
+  await full.preflightExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" });
+  assert.equal(loud.calls.probe, probesAfterFirst, "the result is cached, so the later exec does not probe again");
+});

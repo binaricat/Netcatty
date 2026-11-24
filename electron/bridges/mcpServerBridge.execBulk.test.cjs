@@ -386,3 +386,27 @@ test("the backstop deadline cancels the chat's foreground execs inside the worke
     global.setTimeout = realSetTimeout;
   }
 });
+
+test("confirm mode: no probe reaches the worker before approval, and none at all when denied", async () => {
+  const approved = createBridge({ mode: "confirm" });
+  const approvals = captureApprovals(approved.bridge);
+  const pending = approved.bridge.dispatchBuiltinRpc("netcatty/execBulk", bulkParams(approved.chat));
+  await tick();
+  assert.equal(approvals.length, 1);
+  assert.equal(approved.prechecks.length, 3);
+  assert.ok(approved.prechecks.every((payload) => payload.probe === false), "pre-approval prechecks are non-probing");
+  approved.bridge.resolveApprovalFromRenderer(approvals[0].approvalId, true);
+  assert.equal((await pending).ok, true);
+  assert.equal(approved.prechecks.length, 6);
+  assert.ok(approved.prechecks.slice(3).every((payload) => payload.probe === undefined), "after approval the full precheck runs");
+
+  const denied = createBridge({ mode: "confirm" });
+  const deniedApprovals = captureApprovals(denied.bridge);
+  const deniedCall = denied.bridge.dispatchBuiltinRpc("netcatty/execBulk", bulkParams(denied.chat));
+  await tick();
+  denied.bridge.resolveApprovalFromRenderer(deniedApprovals[0].approvalId, false);
+  assert.equal((await deniedCall).ok, false);
+  assert.equal(denied.prechecks.length, 3);
+  assert.ok(denied.prechecks.every((payload) => payload.probe === false), "a denied call never probes");
+  assert.equal(denied.workerRequests.length, 0);
+});

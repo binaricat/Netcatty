@@ -320,7 +320,12 @@ function createExecBulkHandler(deps) {
     return null;
   }
 
-  async function checkTargetTransport(sessionId, label, ctx) {
+  /**
+   * Transport + command-safety checks. With probe:false nothing may touch the remote host
+   * (used before the approval prompt); with probe:true the shell kind may be probed over an
+   * SSH exec channel, exactly like a single exec does after approval.
+   */
+  async function checkTargetTransport(sessionId, label, ctx, { probe = true } = {}) {
     const hasMainSession = Boolean(getSessions()?.get?.(sessionId));
     const probeParams = {
       sessionId,
@@ -331,8 +336,8 @@ function createExecBulkHandler(deps) {
     let outcome;
     try {
       outcome = hasMainSession
-        ? await preflightMainExec(probeParams)
-        : await preflightWorkerExec(probeParams);
+        ? await preflightMainExec(probeParams, { probe })
+        : await preflightWorkerExec(probeParams, { probe });
     } catch (err) {
       outcome = { ok: false, error: err?.message || String(err) };
     }
@@ -342,7 +347,7 @@ function createExecBulkHandler(deps) {
     return null;
   }
 
-  async function preflightAll(ctx) {
+  async function preflightAll(ctx, { probe = true } = {}) {
     const failures = new Array(ctx.sessionIds.length).fill(null);
     const pending = [];
     ctx.sessionIds.forEach((sessionId, index) => {
@@ -351,7 +356,7 @@ function createExecBulkHandler(deps) {
         failures[index] = syncFailure;
         return;
       }
-      pending.push(checkTargetTransport(sessionId, resolveLabel(sessionId, ctx.chatSessionId), ctx)
+      pending.push(checkTargetTransport(sessionId, resolveLabel(sessionId, ctx.chatSessionId), ctx, { probe })
         .then((failure) => { failures[index] = failure; }));
     });
     await Promise.all(pending);
@@ -394,7 +399,11 @@ function createExecBulkHandler(deps) {
         activeSessionId: active.sessionId,
       };
     }
-    const failures = await preflightAll(ctx);
+    // When a prompt is coming, nothing may touch the remote hosts before the user answers,
+    // so the shell-kind probes wait until after approval. Without a prompt there is no
+    // boundary to protect and the full check runs right away.
+    const approvalRequired = permission.requiresApproval === true;
+    const failures = await preflightAll(ctx, { probe: !approvalRequired });
     if (failures.length > 0) return preflightFailureResult(failures, sessionIds.length);
 
     // Claim every target synchronously so no other command can slip in while
@@ -428,11 +437,13 @@ function createExecBulkHandler(deps) {
         if (!approved) return { ok: false, error: USER_DENIED_MESSAGE };
       }
 
-      // Phase 3: commit. Approval can take a while, so first re-run the transport checks
-      // (worker precheck, shell kind, blocklist) for every claimed target. The claims keep
-      // other commands off these sessions meanwhile; nothing has been sent yet.
+      // Phase 3: commit. Re-run the full transport checks (worker precheck, shell-kind
+      // probe, shell-aware blocklist) for every claimed target: this is the first time the
+      // probes may run when a prompt was shown, and otherwise it catches changes during the
+      // wait. The claims keep other commands off these sessions meanwhile; no user command
+      // has been sent yet.
       const staleTransport = (await Promise.all(sessionIds.map((sessionId) => (
-        checkTargetTransport(sessionId, resolveLabel(sessionId, chatSessionId), ctx)
+        checkTargetTransport(sessionId, resolveLabel(sessionId, chatSessionId), ctx, { probe: true })
       )))).filter(Boolean);
       if (staleTransport.length > 0) return preflightFailureResult(staleTransport, sessionIds.length);
 

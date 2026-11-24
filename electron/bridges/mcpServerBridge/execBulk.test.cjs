@@ -624,3 +624,48 @@ test("source-capped outputs are never grouped", () => {
   assert.equal(payload.groups.length, 2);
   assert.ok(payload.groups.every((group) => group.outputTruncated === true));
 });
+
+function recordProbes(harness, log, getPhase) {
+  const record = (kind) => async ({ sessionId }, options) => {
+    log.push({ kind, sessionId, probe: options?.probe, phase: getPhase() });
+    return { ok: true };
+  };
+  harness.deps.preflightMainExec = record("main");
+  harness.deps.preflightWorkerExec = record("worker");
+}
+
+test("no host is probed before the approval prompt; probes run only after the user approves", async () => {
+  for (const mainIds of [["a", "b", "c"], []]) {
+    let phase = "before";
+    const log = [];
+    const harness = createHarness({ mainIds, onApproval: () => { phase = "after"; } });
+    recordProbes(harness, log, () => phase);
+    const result = await createExecBulkHandler(harness.deps).run(harness.baseParams, {}, { requiresApproval: true });
+    assert.equal(result.ok, true);
+    const before = log.filter((entry) => entry.phase === "before");
+    const after = log.filter((entry) => entry.phase === "after");
+    assert.equal(before.length, 3);
+    assert.ok(before.every((entry) => entry.probe === false), "pre-approval checks must not touch the hosts");
+    assert.equal(after.length, 3);
+    assert.ok(after.every((entry) => entry.probe === true), "the full check runs after approval");
+  }
+});
+
+test("a denied approval never probes any host", async () => {
+  const log = [];
+  const harness = createHarness({ approve: false });
+  recordProbes(harness, log, () => "before");
+  const result = await createExecBulkHandler(harness.deps).run(harness.baseParams, {}, { requiresApproval: true });
+  assert.equal(result.ok, false);
+  assert.equal(log.length, 3);
+  assert.ok(log.every((entry) => entry.probe === false), "denying must leave the hosts untouched");
+});
+
+test("without an approval prompt the full check runs up front", async () => {
+  const log = [];
+  const harness = createHarness();
+  recordProbes(harness, log, () => "before");
+  await createExecBulkHandler(harness.deps).run(harness.baseParams, {}, { requiresApproval: false });
+  assert.ok(log.length >= 3);
+  assert.ok(log.every((entry) => entry.probe === true));
+});
