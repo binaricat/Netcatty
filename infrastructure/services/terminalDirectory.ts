@@ -20,6 +20,7 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
   const check = (signal?: AbortSignal) => { if (!isCurrent() || signal?.aborted) throw new DirectoryPickerError('unavailable'); };
   const flavor = endpoint.pathFlavor ?? 'posix';
   const nativeWindows = endpoint.local && flavor === 'win32';
+  const windowsShell = endpoint.windowsShell ?? 'powershell';
   let lastNativeRevision = 0;
   let submittedNativeRevision = -1;
   const valid = (path: string | null | undefined): path is string => isDirectoryPath(path, flavor);
@@ -30,8 +31,8 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
     });
     check();
     const state = result?.directoryState;
-    if (!state || state.shellKind !== (endpoint.windowsShell ?? 'powershell') || state.pathFlavor !== 'win32') {
-      throw new DirectoryPickerError('integrationUnavailable');
+    if (!state || state.shellKind !== windowsShell || state.pathFlavor !== 'win32') {
+      throw new DirectoryPickerError(windowsShell === 'cmd' ? 'cmdIntegrationUnavailable' : 'integrationUnavailable');
     }
     if (state.provider !== 'FileSystem') throw new DirectoryPickerError('nonFilesystem');
     if (!result.success || !valid(result.cwd) || !Number.isSafeInteger(state.revision)

@@ -278,7 +278,7 @@ test('native CMD lists and changes directories through the original ConPTY sessi
   await waitFor(() => output.slice(nestedStart).includes('(c) Microsoft Corporation'));
   await waitFor(() => output.slice(nestedStart).includes(fixture + '>'));
   assert.equal((await read()).success, false);
-  await assert.rejects(io.list(fixture), { code: 'integrationUnavailable' });
+  await assert.rejects(io.list(fixture), { code: 'cmdIntegrationUnavailable' });
   send('exit\r');
   await waitFor(async () => (await read()).cwd === fixture);
   assert.ok(!output.includes('NetcattyCmdDirectory='));

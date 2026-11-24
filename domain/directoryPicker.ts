@@ -3,7 +3,7 @@ import { resolveInteractiveTerminalCdIntent } from './sessionRestore';
 import { isAbsoluteDirectoryPath, joinDirectoryPath, labelDirectoryPath, parentDirectoryPath, type DirectoryPathFlavor } from './directoryPath';
 
 export type DirectoryEntry = { name: string; path: string; hidden: boolean };
-export type DirectoryPickerErrorCode = 'unavailable' | 'unknown' | 'busy' | 'readFailed' | 'accessDenied' | 'changeFailed' | 'unsupportedPath' | 'integrationUnavailable' | 'nonFilesystem';
+export type DirectoryPickerErrorCode = 'unavailable' | 'unknown' | 'busy' | 'readFailed' | 'accessDenied' | 'changeFailed' | 'unsupportedPath' | 'integrationUnavailable' | 'cmdIntegrationUnavailable' | 'nonFilesystem';
 
 export class DirectoryPickerError extends Error {
   constructor(public readonly code: DirectoryPickerErrorCode) { super(code); }
