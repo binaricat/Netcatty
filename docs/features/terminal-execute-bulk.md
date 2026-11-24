@@ -1,7 +1,7 @@
 # Run one command on many sessions (`terminal_execute_bulk`)
 
 `terminal_execute_bulk` runs the same short command on 2–20 open terminal sessions and
-waits for all of them. It is available to MCP clients and to the sidebar agent. Load it
+waits for all of them. It is available to MCP clients only (the in-app agents do not get it yet). Load it
 over MCP with `load_netcatty_tools` and the `terminal_bulk` toolset. For a single host use
 `terminal_execute`; fewer than 2 sessions is rejected.
 
@@ -110,5 +110,5 @@ are grouped, which keeps the response small on large fleets.
 
 ## Not included
 
-The global (app-wide) agent does not get this tool. A CLI command, targets by group or tag, opening missing sessions, per-host commands, and
+The in-app agents (Catty and the global agent) do not get this tool yet. A CLI command, targets by group or tag, opening missing sessions, per-host commands, and
 a per-call timeout are not part of this tool. Plugin agents cannot call it.

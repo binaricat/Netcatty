@@ -79,7 +79,7 @@ test("formatPreflightFailure lists every failing target and carries no Error pre
 
 test("classifyHostResult reports what happened without judging the exit code", () => {
   assert.deepEqual(classifyHostResult({ ok: true, stdout: "a", stderr: "", exitCode: 0 }), {
-    status: "completed", exitCode: 0, stdout: "a", stderr: "", error: "", sourceTruncated: false, sourceOffset: 0,
+    status: "completed", exitCode: 0, stdout: "a", stderr: "", error: "", sourceTruncated: false,
   });
   assert.equal(classifyHostResult({ ok: false, stdout: "inactive", exitCode: 3 }).status, "completed");
   assert.equal(classifyHostResult({ ok: false, stdout: "inactive", exitCode: 3 }).exitCode, 3);
@@ -317,6 +317,25 @@ test("run refuses while another command holds the chat lock", async () => {
   assert.equal(harness.state.execCalls.length, 0);
 });
 
+test("transport checks run again after approval and can still cancel the whole call", async () => {
+  let refuseNow = false;
+  let transportChecks = 0;
+  const harness = createHarness({ onApproval: () => { refuseNow = true; } });
+  harness.deps.preflightMainExec = async ({ sessionId }) => {
+    transportChecks += 1;
+    return refuseNow && sessionId === "b"
+      ? { ok: false, error: "Session does not support command execution" }
+      : { ok: true };
+  };
+  const result = await createExecBulkHandler(harness.deps).run(harness.baseParams, {}, { requiresApproval: true });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /^nothing was sent\. 1 of 3 targets/);
+  assert.match(result.error, /- b \(web2\): Session does not support command execution/);
+  assert.equal(transportChecks, 6, "3 before approval + 3 after");
+  assert.equal(harness.state.execCalls.length, 0, "no host received the command");
+  assert.equal(harness.pending.size, 0, "claims are released");
+});
+
 test("run asks once with a fresh, readable approval and runs only after it", async () => {
   const harness = createHarness();
   const payload = await harness.handler.run(harness.baseParams, { externalSocket: "sock" }, { requiresApproval: true });
@@ -505,14 +524,17 @@ test("a refusal that quotes a pattern containing status words is still not_sent"
   }
 });
 
-test("hosts whose exec layer already dropped different amounts of output are not merged", () => {
+test("hosts whose exec layer already dropped part of the output are never grouped", () => {
   const same = { ok: true, stdout: "tail", exitCode: 0 };
   const payload = groupBulkResults([
+    // Same retained tail and same amount dropped: still cannot prove the full results match.
     { sessionId: "s1", label: "a", result: { ...same, outputTruncated: true, outputBaseOffset: 1_100_000 } },
-    { sessionId: "s2", label: "b", result: { ...same, outputTruncated: true, outputBaseOffset: 2_400_000 } },
+    { sessionId: "s2", label: "b", result: { ...same, outputTruncated: true, outputBaseOffset: 1_100_000 } },
     { sessionId: "s3", label: "c", result: { ...same } },
+    { sessionId: "s4", label: "d", result: { ...same } },
   ]);
   assert.equal(payload.groups.length, 3);
+  assert.deepEqual(payload.groups.map((group) => group.hosts.map((host) => host.sessionId)), [["s1"], ["s2"], ["s3", "s4"]]);
   assert.deepEqual(payload.groups.map((group) => group.outputTruncated), [true, true, undefined]);
 });
 

@@ -29,8 +29,6 @@ const TERMINAL_CAPABILITIES = [
     domain: "terminal",
     status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "Execute the same short command on several terminal sessions at once and wait for all of them.",
-    // The global agent always runs delegated, and delegated callers are refused.
-    agentKinds: ["sidebar"],
     policy: {
       write: true,
       sensitiveRead: false,

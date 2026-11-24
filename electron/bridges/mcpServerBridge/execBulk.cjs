@@ -110,7 +110,6 @@ function classifyHostResult(result) {
   return {
     ...normalized,
     sourceTruncated: record.outputTruncated === true,
-    sourceOffset: Number.isFinite(record.outputBaseOffset) ? record.outputBaseOffset : 0,
   };
 }
 
@@ -192,9 +191,11 @@ function groupBulkResults(entries, options = {}) {
   for (const entry of entries) {
     const normalized = classifyHostResult(entry.result);
     counts[normalized.status] = (counts[normalized.status] || 0) + 1;
+    // When the exec layer already dropped the head of a very large output, equal tails
+    // cannot prove equal results, so such hosts always stay in their own group.
     const key = JSON.stringify([
       normalized.status, normalized.exitCode, normalized.stdout, normalized.stderr, normalized.error,
-      normalized.sourceTruncated, normalized.sourceOffset,
+      normalized.sourceTruncated ? entry.sessionId : null,
     ]);
     let group = groupsByKey.get(key);
     if (!group) {
@@ -404,7 +405,15 @@ function createExecBulkHandler(deps) {
         if (!approved) return { ok: false, error: USER_DENIED_MESSAGE };
       }
 
-      // Phase 3: commit. Everything from here to the start loop is synchronous.
+      // Phase 3: commit. Approval can take a while, so first re-run the transport checks
+      // (worker precheck, shell kind, blocklist) for every claimed target. The claims keep
+      // other commands off these sessions meanwhile; nothing has been sent yet.
+      const staleTransport = (await Promise.all(sessionIds.map((sessionId) => (
+        checkTargetTransport(sessionId, resolveLabel(sessionId, chatSessionId), ctx)
+      )))).filter(Boolean);
+      if (staleTransport.length > 0) return preflightFailureResult(staleTransport, sessionIds.length);
+
+      // Everything from here to the start loop is synchronous.
       if (isChatSessionCancelled(chatSessionId)) {
         return { ok: false, error: CHAT_SESSION_CANCELLED_MESSAGE };
       }

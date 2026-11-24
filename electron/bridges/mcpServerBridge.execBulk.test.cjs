@@ -351,10 +351,10 @@ test("the precheck sends no command and the real run follows only after all prec
   });
   const result = await bridge.dispatchBuiltinRpc("netcatty/execBulk", bulkParams(chat));
   assert.equal(result.ok, true);
-  assert.equal(prechecks.length, 3);
+  assert.equal(prechecks.length, 6, "validated before and again after approval");
   assert.equal(workerRequests.length, 3);
-  assert.ok(order.slice(0, 3).every((entry) => entry.startsWith("precheck:")));
-  assert.ok(order.slice(3).every((entry) => entry.startsWith("exec:")));
+  assert.ok(order.slice(0, 6).every((entry) => entry.startsWith("precheck:")));
+  assert.ok(order.slice(6).every((entry) => entry.startsWith("exec:")));
 });
 
 test("the backstop deadline cancels the chat's foreground execs inside the worker too", async () => {
