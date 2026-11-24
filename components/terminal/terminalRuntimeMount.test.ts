@@ -499,6 +499,8 @@ test('authoritative display snapshots synchronize the prompt screen probe before
           'ContextViewportSnapshot', 'ContextScrollbackSnapshot', 'PendingBuffer', 'AlternateScreen',
         ].map(name => [`hibernate${name}Ref`, { current: '' }])),
         applyAuthoritativeHibernateSnapshot,
+        finalizeTerminalLogData: () => '',
+        connectionLogBufferRef: { current: { append: () => {} } },
       }) as (payload: unknown) => Promise<boolean>;
       assert.equal(await applySnapshot({
         sessionId: 'session', snapshot: 'restored display',
@@ -531,4 +533,60 @@ test('explicit plugin sensitivity survives vim ex, redraws and shell prompts', (
   observe(':');
   assert.equal(latch.current, true);
   assert.equal(latch.source, 'heuristic');
+});
+
+test('authoritative display snapshots merge popup connectionLogDelta into the home log buffer', async () => {
+  const handlerStart = terminalSource.indexOf('async (payload) => {',
+    terminalSource.indexOf('if (bridge?.onTerminalSessionApplySnapshot)'));
+  const handlerEnd = terminalSource.indexOf('}));', handlerStart);
+  assert.ok(handlerStart > 0 && handlerEnd > handlerStart);
+  const handlerCode = ts.transpileModule(
+    'const applySnapshot = ' + terminalSource.slice(handlerStart, handlerEnd + 1) + ';\napplySnapshot;',
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+  ).outputText;
+
+  const { context } = promptObserver();
+  const logChunks: string[] = ['pre-move\r\n'];
+  const sanitizerSeeds: boolean[] = [];
+  const term = {
+    reset: () => {},
+    write: (_snapshot: string, done: () => void) => done(),
+  };
+  Object.assign(context.termRef, { current: term });
+  const applySnapshot = runInNewContext(handlerCode, {
+    ...context,
+    sessionId: 'session',
+    flushPendingTerminalWritesBeforeHibernate: async () => true,
+    resetTerminalLineTimestamps: () => {},
+    xtermRuntimeRef: { current: null },
+    hibernatedRef: { current: false },
+    finalizeTerminalLogData: () => {
+      logChunks.push('[flushed]');
+      return logChunks.join('');
+    },
+    connectionLogBufferRef: {
+      current: {
+        append: (chunk: string) => logChunks.push(chunk),
+      },
+    },
+    commandLogRewriterRef: { current: null },
+    createProgrammaticCommandLogRewriter: () => ({ fresh: true }),
+    terminalLogSanitizerRef: { current: null },
+    createReplaySafeTerminalLogSanitizer: (opts: { alternateScreenActive: boolean }) => {
+      sanitizerSeeds.push(opts.alternateScreenActive);
+      return opts;
+    },
+  }) as (payload: unknown) => Promise<boolean>;
+
+  assert.equal(await applySnapshot({
+    sessionId: 'session',
+    snapshot: 'pre-move\r\nin-popup\r\n',
+    contextSnapshot: '',
+    contextViewportSnapshot: '',
+    contextScrollbackSnapshot: '',
+    alternateScreen: true,
+    connectionLogDelta: 'in-popup\r\n',
+  }), true);
+  assert.deepEqual(logChunks, ['pre-move\r\n', '[flushed]', 'in-popup\r\n']);
+  assert.deepEqual(sanitizerSeeds, [true]);
 });

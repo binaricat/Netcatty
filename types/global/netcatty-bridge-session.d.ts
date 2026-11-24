@@ -447,6 +447,7 @@ declare global {
       passwordPromptActive?: boolean;
       cwd?: string | null;
       title?: string | null;
+      pendingReplay?: string;
       error?: string;
     }>;
     /** Home renderer: listen for snapshot requests. */
@@ -479,6 +480,7 @@ declare global {
         passwordPromptActive?: boolean;
         cwd?: string | null;
         title?: string | null;
+        connectionLogDelta?: string;
       },
       authorization: string,
     ): Promise<{
@@ -486,7 +488,12 @@ declare global {
       error?: string;
     }>;
     markAttachPopupClosePrepared?(sessionId: string, authorization: string): Promise<{ success: boolean; error?: string }>;
+    reportTerminalAttachReady?(sessionId: string, authorization: string): Promise<{ success: boolean; error?: string }>;
+    reportTerminalAttachFailed?(sessionId: string, authorization: string, error?: string): Promise<{ success: boolean; error?: string }>;
+    getDetachedTerminalReplayData?(sessionId: string): Promise<{ success: boolean; data?: string }>;
     onTerminalPopupPrepareClose?(cb: (payload: { sessionId: string; authorization: string }) => void): () => void;
+    /** Fired in the home window after an attach popup for sessionId has closed. */
+    onTerminalPopupAttachClosed?(cb: (payload: { sessionId: string }) => void): () => void;
     /** Home renderer: apply a pushed snapshot from an observe popup. */
     onTerminalSessionApplySnapshot?(
       cb: (payload: {
@@ -502,6 +509,7 @@ declare global {
         passwordPromptActive?: boolean;
         cwd?: string | null;
         title?: string | null;
+        connectionLogDelta?: string;
         requestId: string;
       }) => boolean | Promise<boolean>,
     ): () => void;

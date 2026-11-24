@@ -874,6 +874,15 @@ function createBridgeRegistrar(context) {
       }
     });
 
+    ipcMain.handle("netcatty:window:closeTerminalPopup", async (event, popupId) => {
+      if (typeof popupId !== "string" || !popupId) {
+        return { success: false, error: "Invalid popup ID" };
+      }
+      const requesterWindow = BrowserWindow.fromWebContents(event.sender);
+      const closed = getWindowManager().closeTerminalPopupWindow(popupId, requesterWindow);
+      return { success: Boolean(closed) };
+    });
+
     ipcMain.handle("netcatty:window:openEditor", async (event, payload) => {
       try {
         const sourceWindow = BrowserWindow.fromWebContents(event.sender);

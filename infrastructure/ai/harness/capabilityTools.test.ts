@@ -520,6 +520,79 @@ describe('capabilityTools terminal context reader', () => {
     assert.equal(typeof first, 'object');
     assert.match(String(second), /^\[cached\]/);
   });
+
+  it('routes terminal_read_context through netcatty/readContext when the session is detached into a popup', async () => {
+    const rpcCalls: Array<{ method: string; params: Record<string, unknown>; chatSessionId?: string }> = [];
+    let localCalls = 0;
+    const { tools, toolsContext } = createCattyToolsFromCatalog(
+      {
+        aiCapability: async (method: string, params: Record<string, unknown>, chatSessionId?: string) => {
+          rpcCalls.push({ method, params, chatSessionId });
+          return {
+            ok: true,
+            sessionId: 'session-1',
+            range: 'tail',
+            content: 'live popup output',
+            totalLines: 1,
+            startLine: 0,
+            endLine: 0,
+            returnedLines: 1,
+            hasMoreBefore: false,
+            hasMoreAfter: false,
+            source: 'live',
+          };
+        },
+      },
+      {
+        sessions: [{
+          sessionId: 'session-1',
+          hostId: 'host-1',
+          hostname: 'prod.internal',
+          label: 'prod',
+          connected: true,
+        }],
+        detachedSessionIds: new Set(['session-1']),
+        readTerminalContext: async () => {
+          localCalls += 1;
+          return {
+            ok: true,
+            sessionId: 'session-1',
+            range: 'tail',
+            content: 'stale home screen',
+            totalLines: 1,
+            startLine: 0,
+            endLine: 0,
+            returnedLines: 1,
+            hasMoreBefore: false,
+            hasMoreAfter: false,
+            source: 'live',
+          };
+        },
+      },
+      [],
+      'auto',
+      undefined,
+      'chat-detached',
+    );
+
+    const reader = withCattyToolContext(
+      tools.terminal_read_context,
+      toolsContext.terminal_read_context,
+    );
+    const result = await reader.execute({ sessionId: 'session-1', range: 'tail', maxLines: 20 }) as {
+      ok: boolean;
+      content: string;
+    };
+
+    assert.equal(result.ok, true);
+    assert.equal(result.content, 'live popup output');
+    assert.equal(localCalls, 0);
+    assert.deepEqual(rpcCalls, [{
+      method: 'netcatty/readContext',
+      params: { sessionId: 'session-1', range: 'tail', startLine: undefined, maxLines: 20 },
+      chatSessionId: 'chat-detached',
+    }]);
+  });
 });
 
 describe('capabilityTools terminal polling', () => {

@@ -63,6 +63,34 @@ test("handleTrayJumpToSessionImpl opens a terminal popup for AI silent sessions"
   assert.deepEqual(opened[0], buildAiSilentSessionPopupPayload(session({ hiddenFromTabs: true })));
 });
 
+test("handleTrayJumpToSessionImpl reasserts poppedOut after reopening a moved tab", async () => {
+  const poppedCalls: Array<[string, boolean]> = [];
+  const opened: unknown[] = [];
+  await handleTrayJumpToSessionImpl(
+    () => ({
+      sessions: [session({ hiddenFromTabs: true, poppedOut: true })],
+      setActiveTabId: () => {},
+      setSessionPoppedOut: (id: string, poppedOut: boolean) => poppedCalls.push([id, poppedOut]),
+      setWorkspaceFocusedSession: () => {},
+      getActiveTabId: () => "vault",
+      netcattyBridge: {
+        get: () => ({
+          openTerminalPopup: async (payload: unknown) => {
+            opened.push(payload);
+            return { success: true, popupId: "popup-reopen" };
+          },
+        }),
+      },
+      toast: { error: () => {} },
+      t: (k: string) => k,
+    }),
+    "session-1",
+  );
+
+  assert.equal((opened[0] as { moveSession?: boolean }).moveSession, true);
+  assert.deepEqual(poppedCalls, [["session-1", true]]);
+});
+
 test("handleTrayJumpToSessionImpl still activates normal solo sessions in the main window", async () => {
   let activeTabId = "vault";
   let openedMain = 0;

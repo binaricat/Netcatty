@@ -769,6 +769,16 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             terminalLogSanitizerRef.current = createReplaySafeTerminalLogSanitizer({
               alternateScreenActive: isTerminalAlternateScreenActive(term),
             });
+            // If an earlier popup crashed before restoring output to home,
+            // replay its retained delta into both xterm and the log buffer.
+            if (typeof snap.pendingReplay === "string" && snap.pendingReplay.length > 0) {
+              captureTerminalLogData(snap.pendingReplay);
+              try {
+                await new Promise<void>((resolve) => term.write(snap.pendingReplay!, resolve));
+              } catch (replayErr) {
+                logger.warn("Failed to write pending detached replay to popup terminal", replayErr);
+              }
+            }
 
             const rebind = await terminalBackend.rebindSessionOutput?.(
               sessionId,
@@ -790,8 +800,14 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               return;
             }
             if (!rebind?.success) {
+              const attachError = rebind?.error || "Failed to attach to session";
               outputPauseLease.release();
-              setError(rebind?.error || "Failed to attach to session");
+              void terminalBackend.reportAttachFailed?.(
+                sessionId,
+                attachAuthorization || "",
+                attachError,
+              );
+              setError(attachError);
               updateStatus("disconnected");
               isBootActiveRef.current = false;
               return;
@@ -808,6 +824,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
             }
             // Resume only after the popup has subscribed to the live session.
             outputPauseLease.release();
+            void terminalBackend.reportAttachReady?.(sessionId, attachAuthorization || "");
             hasConnectedRef.current = true;
             updateStatus("connected");
             setTimeout(() => {
@@ -840,8 +857,14 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               outputPauseLease.release();
             }
             if (disposed) return;
+            const attachError = attachErr instanceof Error ? attachErr.message : String(attachErr);
             logger.error("Failed to attach existing session", attachErr);
-            setError(attachErr instanceof Error ? attachErr.message : String(attachErr));
+            void terminalBackend.reportAttachFailed?.(
+              sessionId,
+              attachAuthorization || "",
+              attachError,
+            );
+            setError(attachError);
             updateStatus("disconnected");
           }
           isBootActiveRef.current = false;

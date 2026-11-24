@@ -315,7 +315,8 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
           status: s.status,
           workspaceId: s.workspaceId,
           workspaceTitle: ws?.title,
-          aiHidden: s.hiddenFromTabs === true,
+          aiHidden: s.hiddenFromTabs === true && !s.poppedOut,
+          poppedOut: s.poppedOut === true,
         };
       });
 
