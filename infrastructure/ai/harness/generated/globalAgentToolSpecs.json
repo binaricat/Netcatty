@@ -166,41 +166,6 @@
     "agentKind": "global"
   },
   {
-    "capabilityId": "terminal.executeBulk",
-    "toolName": "terminal_execute_bulk",
-    "rpcMethod": "netcatty/execBulk",
-    "localExecution": false,
-    "description": "Execute the same short command on several terminal sessions at once and wait for all of them. Run the same command on several terminal sessions in parallel and wait for all of them. Call get_environment first to resolve sessionIds, and pass them as a JSON array of 2-20 unique ids. All ids are checked before anything is sent: if any id is out of scope, disconnected, busy or blocked by the safety policy, the call fails and no command runs on any host. Use only for commands expected to finish within about 60 seconds; every host gets the same timeout. Hosts with identical results are grouped, each group reports status, exitCode, stdout and stderr. A non-zero exitCode is a normal result, not a tool failure. Each confirm-mode call needs a fresh user approval listing every host. For a single session use terminal_execute; this tool rejects fewer than 2.",
-    "inputShape": {
-      "command": {
-        "type": "string",
-        "optional": false,
-        "description": "The shell command to execute on every target session."
-      },
-      "sessionIds": {
-        "type": "string",
-        "optional": false,
-        "description": "JSON array of 2-20 unique terminal session IDs, for example [\"s-1\",\"s-2\"]. Every ID must be connected and in scope, otherwise nothing is sent."
-      },
-      "tailLines": {
-        "type": "number",
-        "optional": true,
-        "description": "Keep only the last N lines of each distinct output (default 100, maximum 2000)."
-      }
-    },
-    "policy": {
-      "write": true,
-      "sensitiveRead": false,
-      "longRunning": true,
-      "requiresChatSession": true,
-      "bypassesObserverBlock": false,
-      "bypassesApproval": false,
-      "bypassesChatCancel": false,
-      "requiresFreshApproval": true
-    },
-    "agentKind": "global"
-  },
-  {
     "capabilityId": "terminal.start",
     "toolName": "terminal_start",
     "rpcMethod": "netcatty/jobStart",

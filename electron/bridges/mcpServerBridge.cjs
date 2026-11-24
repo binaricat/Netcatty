@@ -1914,12 +1914,43 @@ function checkWorkerExecSafety(sessionId, command, chatSessionId) {
   return safety.blocked ? `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` : null;
 }
 
-/** Bulk preflight for a worker-owned session: availability plus the safety check. */
-function preflightWorkerExec(params = {}) {
+/**
+ * Bulk preflight for a worker-owned session. Applies the bridge-side safety check, then asks
+ * the worker to run every other deterministic check (transport, shell kind, shell-aware
+ * blocklist, unsupported local shell, busy background job) without sending anything.
+ */
+async function preflightWorkerExec(params = {}) {
   const { sessionId, command, chatSessionId } = params;
   if (!terminalWorkerManager?.request) return { ok: false, error: "Session not found" };
   const blocked = checkWorkerExecSafety(sessionId, command, chatSessionId || null);
-  return blocked ? { ok: false, error: blocked } : { ok: true };
+  if (blocked) return { ok: false, error: blocked };
+  try {
+    const result = await terminalWorkerManager.request("netcatty:ai:exec", {
+      sessionId,
+      command,
+      chatSessionId: chatSessionId || null,
+      commandTimeoutMs,
+      sessionMeta: getSessionMeta(sessionId, chatSessionId || null) || {},
+      enforceWallTimeout: true,
+      commandBlocklist,
+      precheck: true,
+    }, {});
+    return result && result.ok === false
+      ? { ok: false, error: result.error || "Session does not support command execution" }
+      : { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+/** Cancel only the foreground execs a chat has running inside the terminal worker. */
+function cancelWorkerExecsForChat(chatSessionId) {
+  if (!chatSessionId) return;
+  try {
+    terminalWorkerManager?.send?.("netcatty:ai:exec:cancel", { chatSessionId }, {});
+  } catch {
+    // The worker may already be gone.
+  }
 }
 
 async function handleWorkerTerminalExec(params = {}, beforeExecute, options = {}) {
@@ -2702,7 +2733,10 @@ const execBulkHandler = createExecBulkHandler({
   requestApproval: requestApprovalFromRenderer,
   sessionIdleManager,
   getCommandTimeoutMs: () => commandTimeoutMs,
-  cancelExecsForChat: cancelPtyExecsForSession,
+  cancelExecsForChat: (chatSessionId) => {
+    cancelPtyExecsForSession(chatSessionId);
+    cancelWorkerExecsForChat(chatSessionId);
+  },
   USER_DENIED_MESSAGE,
   CHAT_SESSION_CANCELLED_MESSAGE,
   debugLog,

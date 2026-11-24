@@ -24,16 +24,26 @@ function deferred() {
  * Bridge wired to a fake terminal worker that hosts the given sessions.
  * `reply(sessionId)` may return a result or a promise.
  */
-function createBridge({ sessionIds = ["ssh-1", "ssh-2", "ssh-3"], reply, chat = "chat-1", mode = "auto" } = {}) {
+function createBridge({ sessionIds = ["ssh-1", "ssh-2", "ssh-3"], reply, refuse, chat = "chat-1", mode = "auto" } = {}) {
   const workerRequests = [];
+  const prechecks = [];
+  const workerMessages = [];
   const bridge = loadFreshBridge();
   bridge.init({
     sessions: new Map(),
     electronModule: null,
     terminalWorkerManager: {
+      send(channel, payload) {
+        workerMessages.push({ channel, payload });
+      },
       request(channel, payload) {
-        workerRequests.push({ channel, payload });
         if (channel !== "netcatty:ai:exec") return Promise.reject(new Error(`unexpected worker request: ${channel}`));
+        if (payload.precheck === true) {
+          prechecks.push(payload);
+          const error = refuse?.(payload.sessionId, payload);
+          return Promise.resolve(error ? { ok: false, error } : { ok: true });
+        }
+        workerRequests.push({ channel, payload });
         return Promise.resolve(reply ? reply(payload.sessionId, payload) : { ok: true, stdout: `out-${payload.sessionId}\n`, stderr: "", exitCode: 0 });
       },
     },
@@ -51,7 +61,7 @@ function createBridge({ sessionIds = ["ssh-1", "ssh-2", "ssh-3"], reply, chat = 
     })),
     chat,
   );
-  return { bridge, workerRequests, chat };
+  return { bridge, workerRequests, prechecks, workerMessages, chat };
 }
 
 function captureApprovals(bridge) {
@@ -300,4 +310,62 @@ test("a session that is closing or disconnected is reported, not run", async () 
   assert.equal(result.ok, false);
   assert.match(result.error, /- ssh-2 \(web2\): Session "ssh-2" is not connected\./);
   assert.equal(workerRequests.length, 0);
+});
+
+test("worker-hosted sessions are fully validated before any host receives the command", async () => {
+  const { bridge, workerRequests, prechecks, chat } = createBridge({
+    refuse: (sessionId) => (sessionId === "ssh-2"
+      ? "AI execution is not supported for this local shell executable. Configure the local terminal to use bash/zsh/sh, fish, PowerShell/pwsh, or cmd.exe."
+      : null),
+  });
+  const result = await bridge.dispatchBuiltinRpc("netcatty/execBulk", bulkParams(chat));
+  assert.equal(result.ok, false);
+  assert.match(result.error, /^nothing was sent\. 1 of 3 targets cannot run this command:/);
+  assert.match(result.error, /- ssh-2 \(web2\): AI execution is not supported/);
+  assert.equal(prechecks.length, 3, "every worker session is prechecked");
+  assert.equal(workerRequests.length, 0, "no host receives the command");
+});
+
+test("the precheck sends no command and the real run follows only after all prechecks pass", async () => {
+  const order = [];
+  const { bridge, workerRequests, prechecks, chat } = createBridge({
+    reply: (sessionId) => { order.push(`exec:${sessionId}`); return { ok: true, stdout: "x\n", exitCode: 0 }; },
+    refuse: (sessionId) => { order.push(`precheck:${sessionId}`); return null; },
+  });
+  const result = await bridge.dispatchBuiltinRpc("netcatty/execBulk", bulkParams(chat));
+  assert.equal(result.ok, true);
+  assert.equal(prechecks.length, 3);
+  assert.equal(workerRequests.length, 3);
+  assert.ok(order.slice(0, 3).every((entry) => entry.startsWith("precheck:")));
+  assert.ok(order.slice(3).every((entry) => entry.startsWith("exec:")));
+});
+
+test("the backstop deadline cancels the chat's foreground execs inside the worker too", async () => {
+  const realSetTimeout = global.setTimeout;
+  const timers = [];
+  global.setTimeout = (fn, ms, ...rest) => {
+    const handle = realSetTimeout(fn, ms, ...rest);
+    timers.push({ fn, ms, handle });
+    return handle;
+  };
+  try {
+    const { bridge, workerMessages, chat } = createBridge({
+      reply: (sessionId) => (sessionId === "ssh-3" ? new Promise(() => {}) : { ok: true, stdout: "ok\n", exitCode: 0 }),
+    });
+    const running = bridge.dispatchBuiltinRpc("netcatty/execBulk", bulkParams(chat));
+    await tick();
+    await tick();
+    const backstop = timers.find((timer) => timer.ms === 30000 + 3000);
+    assert.ok(backstop, "backstop is armed at command timeout + grace");
+    backstop.fn();
+    const result = await running;
+    assert.deepEqual(workerMessages, [{ channel: "netcatty:ai:exec:cancel", payload: { chatSessionId: chat } }]);
+    const timeout = result.groups.find((group) => group.status === "timeout");
+    assert.deepEqual(timeout.hosts.map((host) => host.sessionId), ["ssh-3"]);
+    // The chat lock was released, so the next command is accepted.
+    const single = await bridge.dispatchBuiltinRpc("netcatty/exec", { sessionId: "ssh-1", command: "pwd", chatSessionId: chat });
+    assert.equal(single.ok, true);
+  } finally {
+    global.setTimeout = realSetTimeout;
+  }
 });

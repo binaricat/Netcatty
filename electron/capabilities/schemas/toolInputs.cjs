@@ -18,7 +18,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     tailLines: {
       type: "number",
       optional: true,
-      description: "Keep only the last N lines of each distinct output (default 100, maximum 2000).",
+      description: "Keep only the last N lines of each distinct output (default 100, also used for 0; maximum 2000).",
     },
   },
   "terminal.start": {

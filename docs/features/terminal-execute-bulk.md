@@ -11,7 +11,7 @@ over MCP with `load_netcatty_tools` and the `terminal_bulk` toolset. For a singl
 |---|---|---|
 | `command` | string | Same rules as `terminal_execute`. |
 | `sessionIds` | string | JSON array of 2–20 unique session IDs, for example `["s-1","s-2"]`. Resolve IDs with `get_environment`. |
-| `tailLines` | number, optional | Keep the last N lines of each distinct output. Default 100, maximum 2000. |
+| `tailLines` | number, optional | Keep the last N lines of each distinct output. Default 100 (also used for 0), maximum 2000. |
 
 ## All-or-nothing
 
@@ -43,9 +43,14 @@ never revealed.
   nothing is sent.
 - Every command still goes through the normal execution path, including the per-shell
   safety policy, shell readiness checks, privacy masking, and cancel.
-- For sessions hosted by the terminal worker, the shell-specific safety patterns are
-  evaluated by the worker when the command starts. A host that refuses there is reported
-  as `not_sent` while the other hosts proceed.
+- Sessions hosted by the terminal worker (the default) are checked the same way: the
+  worker runs every deterministic check (transport, shell kind, the shell-specific safety
+  patterns, unsupported local shells, a busy background job) in a no-send `precheck` mode,
+  so a refusal there also cancels the whole call before any host receives the command.
+- The one thing that cannot be known in advance is the live state of a terminal at the
+  moment of sending, for example a pager, a password prompt, or a prompt that cannot be
+  recognized. A host in that state reports `not_sent` (`SHELL_READINESS_UNKNOWN`) and the
+  other hosts still run, because commands already sent cannot be taken back.
 
 ## Timeouts
 
@@ -53,7 +58,9 @@ Every host gets the same timeout, the global command timeout from Settings. Each
 has its own timer, started when that host's command starts, so a slow host never uses up
 another host's time. All hosts start together, so the call takes about one timeout in
 the worst case, like `terminal_execute`. As a backstop, a host that has not finished
-10 seconds after the timeout is reported as `timeout` and its command is cancelled.
+3 seconds after the timeout is reported as `timeout` and the chat's running commands are cancelled, including those inside the
+terminal worker, before the per-chat lock is released. The RPC timeout budget for this
+tool is larger than for `terminal_execute` so the backstop always fires first.
 
 ## Output
 
@@ -94,7 +101,7 @@ are grouped, which keeps the response small on large fleets.
 - `stderr` and `error` are omitted when empty.
 - Output is grouped on the full, untruncated result, so two hosts that differ only in the
   part that was cut off are never merged. `tailLines` and a per-group size cap are then
-  applied; a cut group has `outputTruncated: true` and, when lines were dropped,
+  applied; a cut group has `outputTruncated: true` (also set when the exec layer had already dropped the beginning of a very large output) and, when lines were dropped,
   `omittedLines`.
 - If no host received the command, the call fails with `Error: No command was sent to any
   host.` and one line per host.
@@ -103,5 +110,5 @@ are grouped, which keeps the response small on large fleets.
 
 ## Not included
 
-A CLI command, targets by group or tag, opening missing sessions, per-host commands, and
+The global (app-wide) agent does not get this tool. A CLI command, targets by group or tag, opening missing sessions, per-host commands, and
 a per-call timeout are not part of this tool. Plugin agents cannot call it.

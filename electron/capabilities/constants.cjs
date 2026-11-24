@@ -40,6 +40,8 @@ const RPC_TIMEOUT_DEFAULTS = Object.freeze({
   DEFAULT_OPERATION_TIMEOUT_MS: 60_000,
   RPC_TIMEOUT_BUFFER_MS: 5_000,
   DEFAULT_APPROVAL_TIMEOUT_MS: 110_000,
+  // terminal_execute_bulk validates every target (shell probes) before it starts the clock.
+  BULK_EXEC_EXTRA_MS: 10_000,
 });
 
 module.exports = {
