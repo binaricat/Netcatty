@@ -124,7 +124,7 @@ export function resolvePaneMagnificationStyle(
   magnified: boolean,
   surfaceBounds?: { left: number; top: number; width: number; height: number } | null,
   devicePixelRatio = 1,
-  layoutOrigin?: { left: number; top: number },
+  layoutOrigin?: { left: number; top: number; width?: number; height?: number },
 ): React.CSSProperties {
   // Keep the fixed overlay and transition while restoring too, so the split
   // container cannot clip the pane before it has finished shrinking.
@@ -144,7 +144,26 @@ export function resolvePaneMagnificationStyle(
       marginTop: `${layoutOrigin.top}px`,
     } : {}),
   };
-  if (!magnified) return surfaceBounds ? { ...original, ...transition, ...fixedOrigin } : original;
+  if (!magnified) {
+    if (!surfaceBounds) return original;
+    // Percentage lengths must keep using the layout parent when fixed.
+    const resolveLength = (value: string | number | undefined, parentSize?: number) => {
+      if (typeof value === 'number') return `${value}px`;
+      if (typeof value === 'string' && value.endsWith('%') && parentSize !== undefined) {
+        return `${parseFloat(value) * parentSize / 100}px`;
+      }
+      return value;
+    };
+    return {
+      ...original,
+      ...transition,
+      ...fixedOrigin,
+      left: resolveLength(original.left, layoutOrigin?.width),
+      top: resolveLength(original.top, layoutOrigin?.height),
+      width: resolveLength(original.width, layoutOrigin?.width),
+      height: resolveLength(original.height, layoutOrigin?.height),
+    };
+  }
   if (surfaceBounds) {
     const snapped = snapCssRectToDevicePixels(
       surfaceBounds.left + 12,

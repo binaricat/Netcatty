@@ -1455,7 +1455,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     top: number;
     width: number;
     height: number;
-    layoutOrigin: { left: number; top: number };
+    layoutOrigin: { left: number; top: number; width: number; height: number };
   } | null>(null);
   useLayoutEffect(() => {
     if (!isMagnified) {
@@ -1484,7 +1484,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         top: bounds.top,
         width: bounds.width,
         height: bounds.height,
-        layoutOrigin: { left: origin.left, top: origin.top },
+        layoutOrigin: { left: origin.left, top: origin.top, width: origin.width, height: origin.height },
       });
     };
     update();

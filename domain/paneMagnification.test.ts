@@ -173,7 +173,7 @@ test('switching to fixed positioning preserves the split origin below the tabs',
 test('restore retains the same geometry transition and overlay stacking until bounds clear', () => {
   const original = { left: '0px', top: '400px', width: '600px', height: '400px' };
   const surface = { left: 0, top: 80, width: 1200, height: 800 };
-  const origin = { left: 0, top: 80 };
+  const origin = { left: 0, top: 80, width: 1200, height: 800 };
   const magnified = resolvePaneMagnificationStyle(original, true, surface, 1, origin);
   const restoring = resolvePaneMagnificationStyle(original, false, surface, 1, origin);
 
@@ -189,6 +189,32 @@ test('restore retains the same geometry transition and overlay stacking until bo
     assert.equal(restoring[property], original[property]);
   }
   assert.equal(resolvePaneMagnificationStyle(original, false, null), original);
+});
+
+test('standalone terminal restore resolves percentage geometry against its layout parent', () => {
+  const original = { left: 0, top: 0, width: '100%', height: '100%' };
+  const surface = { left: 100, top: 80, width: 1200, height: 800 };
+  const origin = { left: 300, top: 100, width: 1000, height: 760 };
+  const magnified = resolvePaneMagnificationStyle(original, true, surface, 1, origin);
+  const restoring = resolvePaneMagnificationStyle(original, false, surface, 1, origin);
+
+  assert.deepEqual(restoring, {
+    ...geometryTransition,
+    position: 'fixed',
+    zIndex: 50,
+    marginLeft: '300px',
+    marginTop: '100px',
+    left: '0px',
+    top: '0px',
+    width: '1000px',
+    height: '760px',
+  });
+  for (const property of [
+    'transitionProperty', 'transitionDuration', 'transitionTimingFunction', 'position', 'zIndex',
+  ] as const) {
+    assert.equal(restoring[property], magnified[property]);
+  }
+  assert.equal(resolvePaneMagnificationStyle(original, false, null, 1, origin), original);
 });
 
 test('two-pane magnification keeps the dormant pane geometry unchanged', () => {

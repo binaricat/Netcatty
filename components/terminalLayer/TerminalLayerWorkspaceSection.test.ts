@@ -22,6 +22,7 @@ test("magnified terminal panes use the resolved terminal accent for border chrom
 test("magnified terminal panes snap overlay bounds to the device-pixel grid", () => {
   const source = readFileSync(new URL("./TerminalLayerSupport.tsx", import.meta.url), "utf8");
   assert.match(source, /resolvePaneMagnificationStyle\(\s*layoutStyle,\s*isMagnified && !!magnifiedSurfaceBounds,\s*magnifiedSurfaceBounds,\s*magnifiedDevicePixelRatio,\s*magnifiedSurfaceBounds\?\.layoutOrigin,\s*\)/);
+  assert.match(source, /layoutOrigin: \{ left: origin\.left, top: origin\.top, width: origin\.width, height: origin\.height \}/);
   assert.match(source, /const magnifiedDevicePixelRatio = typeof window === 'undefined' \? 1 : \(window\.devicePixelRatio \|\| 1\)/);
 });
 
