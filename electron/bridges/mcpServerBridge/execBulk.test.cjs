@@ -528,3 +528,23 @@ test("stdout and stderr share one size budget per group so the response stays ca
   assert.ok(total <= 256 * 1024, `response ${total} exceeds the cap`);
   assert.ok(payload.groups.every((group) => group.outputTruncated === true));
 });
+
+test("hosts that differ in only one field never share a group", () => {
+  const base = { ok: true, stdout: "same", stderr: "", exitCode: 0 };
+  const variants = [
+    base,
+    { ...base, exitCode: 1, ok: false },
+    { ...base, stderr: "warn" },
+    { ...base, ok: false, exitCode: -1, error: "Command timed out (60s)" },
+    { ...base, ok: false, exitCode: -1, error: "Cancelled" },
+    { ...base, exitCode: null },
+  ];
+  const payload = groupBulkResults(variants.map((result, i) => ({ sessionId: `s${i}`, label: "", result })));
+  assert.equal(payload.groups.length, variants.length, "one group per distinct result");
+  assert.deepEqual(
+    payload.groups.map((group) => [group.status, group.exitCode]),
+    [["completed", 0], ["completed", 1], ["completed", 0], ["timeout", null], ["cancelled", null], ["completed", null]],
+  );
+  // And identical results still merge.
+  assert.equal(groupBulkResults([0, 1, 2].map((i) => ({ sessionId: `s${i}`, label: "", result: { ...base } }))).groups.length, 1);
+});
