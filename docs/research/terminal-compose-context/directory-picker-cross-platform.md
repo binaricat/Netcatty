@@ -9,6 +9,7 @@
 | macOS／Linux 本地 POSIX | OSC 7；进程 cwd 回退 | 本地 FS | 现有交互 cd 策略，严格 cwd／realpath 确认 |
 | Unix SSH | 活动会话的严格查询／OSC 7 | 同一认证连接的 SFTP | 绑定原终端，按连接能力确认 |
 | Windows PowerShell 5.1／7 | 原 runspace 的 FileSystem ProviderPath | Windows 本地 FS | Set-Location -LiteralPath，等待新位置报告 |
+| Windows CMD | 会话 PROMPT 的 `$P` | Windows 本地 FS | `cd /d`，等待原 CMD 报告目标位置 |
 
 ## 路径与能力模型
 
@@ -51,10 +52,18 @@ PSDrive 根的 ProviderPath 可能带尾部反斜杠，因此路径比较按根�
 
 原生 Windows 路径提示符使用独立的边界识别，覆盖深目录、折行、FileSystem provider 前缀和命名 PSDrive；UNC 位置支持域名、IP 服务器及含空格的共享名。`>` 后的内容继续作为当前输入，目录操作复用同一套空提示符、敏感输入和 TUI 检查。
 
+## CMD 会话集成
+
+普通交互启动在原 `PROMPT` 前加入带会话标识的 OSC 属性，由 CMD 展开 `$P`。可见提示符、启动参数及命令状态沿用原会话设置。PTY 从输出中过滤属性，提交输入使旧报告失效。嵌套 CMD 会继承 `PROMPT`，因此读取位置时校验原进程及其子进程，等待控制权返回原 CMD。进程校验优先使用原生模块，缺少模块时使用 Windows CIM 查询。
+
+目录切换要求空提示符，使用 `cd /d` 处理盘符绝对路径，随后确认新报告。引号保留空格和 Unicode 目录名，前导空格避开 DOSKEY 别名。含 `%`、`!` 的目标继续作为可浏览的条目，切换时显示路径限制；UNC 映射和扩展关闭的启动方式保留为后续适配。
+
+目录列表遵循 Windows 访问权限。系统兼容链接拒绝枚举时，菜单显示权限原因，并保留父目录入口。
+
 ## 后续设计方向
 
 - POSIX hook：分别处理 bash 的 PROMPT_COMMAND、zsh 的启动链和 fish 事件，补齐事件上报。
-- CMD：围绕 PROMPT、`cd /d`、交互转义和 ERRORLEVEL 建立独立策略。
+- CMD：补充扩展关闭、提示符被启动脚本覆盖、变量展开字符和 UNC 映射场景。
 - WSL／MSYS／Cygwin：以 distro／mount authority 组织目录 helper 和路径映射。
 - 扩展远程环境：逐项明确活动 shell 与 SFTP／provider 的文件系统对应关系。
 
@@ -65,6 +74,7 @@ PSDrive 根的 ProviderPath 可能带尾部反斜杠，因此路径比较按根�
 - [PowerShell locations](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_locations)：runspace、provider 与当前位置。
 - [Set-Location](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/set-location) 与 [quoting rules](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_quoting_rules)：LiteralPath 与字符串引用。
 - [PowerShell execution policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies)：脚本加载策略。
+- [CMD](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd)、[PROMPT](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/prompt)、[CD](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cd)：启动参数、位置上报和盘符切换。
 - [VS Code shell integration](https://code.visualstudio.com/docs/terminal/shell-integration) 与 [PowerShell 实现](https://github.com/microsoft/vscode/blob/ce233327f26ef7791b7fff0143c24e81a8126bd2/src/vs/workbench/contrib/terminal/common/scripts/shellIntegration.ps1)：会话注入、prompt 保留与 OSC 属性通道。
 - [Windows Terminal shell integration](https://learn.microsoft.com/en-us/windows/terminal/tutorials/shell-integration)、[WSL filesystems](https://learn.microsoft.com/en-us/windows/wsl/filesystems)：Windows shell 上报与文件系统命名空间。
 - [Electron ASAR archives](https://www.electronjs.org/docs/latest/tutorial/asar-archives)：外部 shell 的实体脚本资源。

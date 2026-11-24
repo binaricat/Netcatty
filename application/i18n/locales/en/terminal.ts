@@ -16,6 +16,7 @@ export const enTerminalMessages: Messages = {
   'terminal.directory.nonFilesystem': 'The current PowerShell location is not a filesystem directory.',
   'terminal.directory.busy': 'Wait for an empty shell prompt.',
   'terminal.directory.readFailed': 'Could not read this directory. Try refreshing.',
+  'terminal.directory.accessDenied': 'Permission denied while listing this directory.',
   'terminal.directory.changeFailed': 'Could not confirm the directory change. Refresh before retrying.',
   'terminal.directory.unsupportedPath': 'This directory name cannot be sent safely to the terminal.',
   'settings.terminal.behavior.contextChips': 'Context Chips',
