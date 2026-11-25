@@ -698,6 +698,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.terminal.section.connection",
   },
   {
+    id: "terminal-ssh-auto-reconnect-interval",
+    tab: "terminal",
+    labelKey: "settings.terminal.connection.sshAutoReconnectInterval",
+    descriptionKey: "settings.terminal.connection.sshAutoReconnectInterval.desc",
+    sectionKey: "settings.terminal.section.connection",
+  },
+  {
     id: "terminal-keepalive-interval",
     tab: "terminal",
     labelKey: "settings.terminal.connection.keepaliveInterval",
@@ -1005,6 +1012,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.sftp.compressedUpload",
   },
   {
+    id: "sftp-packed-download",
+    tab: "file-associations",
+    labelKey: "settings.sftp.packedDownload.enable",
+    descriptionKey: "settings.sftp.packedDownload.enableDesc",
+    sectionKey: "settings.sftp.packedDownload",
+  },
+  {
     id: "sftp-follow-terminal-cwd",
     tab: "file-associations",
     labelKey: "settings.sftp.followTerminalCwd.enable",
@@ -1059,7 +1073,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     aiSubTab: "providers",
     labelKey: "ai.providers",
     descriptionKey: "ai.providers.empty",
-    keywords: ["openai", "anthropic", "gemini", "provider"],
+    keywords: ["openai", "anthropic", "gemini", "provider", "opencode"],
   },
   {
     id: "ai-codex",
@@ -1264,6 +1278,15 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     labelKey: "ai.safety.maxIterations",
     descriptionKey: "ai.safety.maxIterations.description",
     sectionKey: "ai.safety.title",
+  },
+  {
+    id: "ai-safety-tool-output-max-chars",
+    tab: "ai",
+    aiSubTab: "safety",
+    labelKey: "ai.safety.toolOutputMaxChars",
+    descriptionKey: "ai.safety.toolOutputMaxChars.description",
+    sectionKey: "ai.safety.title",
+    keywords: ["tool", "output", "truncate", "limit", "chars", "工具", "返回", "输出", "截断", "限制", "傳回", "輸出"],
   },
   {
     id: "ai-safety-blocklist",

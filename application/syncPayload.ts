@@ -104,6 +104,7 @@ import {
   STORAGE_KEY_SFTP_AUTO_SYNC,
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
+  STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD,
   STORAGE_KEY_SFTP_SKIP_UNCHANGED,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
@@ -131,6 +132,7 @@ import {
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
+  STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_AGENT_THINKING_MAP,
@@ -146,6 +148,7 @@ import {
 } from '../infrastructure/config/storageKeys';
 import { mergeAiSessionLists, mergeSyncPayloads, stripAiSessionDeviceState, stripAiSessionPayloadForSync } from '../domain/syncMerge';
 import { isTerminalSidePanelAutoOpenTab } from '../domain/terminalSidePanelAutoOpen';
+import { normalizeAiToolOutputMaxChars } from '../domain/aiToolOutputLimit';
 import { prepareRestoredPayloadConvergentWrites } from './convergentSyncReplica';
 
 // ---------------------------------------------------------------------------
@@ -337,6 +340,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_SFTP_AUTO_SYNC,
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
+  STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD,
   STORAGE_KEY_SFTP_SKIP_UNCHANGED,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
@@ -361,6 +365,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
+  STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_AGENT_THINKING_MAP,
@@ -561,6 +566,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (hidden === 'true' || hidden === 'false') settings.sftpShowHiddenFiles = hidden === 'true';
   const compress = localStorageAdapter.readString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD);
   if (compress === 'true' || compress === 'false') settings.sftpUseCompressedUpload = compress === 'true';
+  const packedDownload = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD);
+  if (packedDownload != null) settings.sftpUsePackedDownload = packedDownload;
   const skipUnchanged = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_SKIP_UNCHANGED);
   if (skipUnchanged != null) settings.sftpSkipUnchanged = skipUnchanged;
   const autoOpenSidebar = localStorageAdapter.readString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
@@ -638,6 +645,10 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   }
   const maxIterations = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS);
   if (maxIterations != null && Number.isFinite(maxIterations)) ai.maxIterations = maxIterations;
+  const toolOutputMaxChars = localStorageAdapter.readNumber(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS);
+  if (toolOutputMaxChars != null && Number.isFinite(toolOutputMaxChars)) {
+    ai.toolOutputMaxChars = normalizeAiToolOutputMaxChars(toolOutputMaxChars);
+  }
   const agentModelMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP);
   if (agentModelMap) ai.agentModelMap = agentModelMap;
   const agentProviderMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);
@@ -877,6 +888,7 @@ async function applySyncableSettings(
   if (settings.sftpAutoSync != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_SYNC, String(settings.sftpAutoSync));
   if (settings.sftpShowHiddenFiles != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES, String(settings.sftpShowHiddenFiles));
   if (settings.sftpUseCompressedUpload != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD, String(settings.sftpUseCompressedUpload));
+  if (typeof settings.sftpUsePackedDownload === 'boolean') localStorageAdapter.writeBoolean(STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD, settings.sftpUsePackedDownload);
   if (settings.sftpSkipUnchanged != null) localStorageAdapter.writeBoolean(STORAGE_KEY_SFTP_SKIP_UNCHANGED, settings.sftpSkipUnchanged);
   if (settings.sftpAutoOpenSidebar != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR, String(settings.sftpAutoOpenSidebar));
   if (settings.sftpFollowTerminalCwd != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD, String(settings.sftpFollowTerminalCwd));
@@ -946,6 +958,12 @@ async function applySyncableSettings(
       localStorageAdapter.writeNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, ai.responseIdleTimeout);
     }
     if (ai.maxIterations != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, ai.maxIterations);
+    if (ai.toolOutputMaxChars != null) {
+      localStorageAdapter.writeNumber(
+        STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS,
+        normalizeAiToolOutputMaxChars(ai.toolOutputMaxChars),
+      );
+    }
     if (ai.agentModelMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, ai.agentModelMap);
     if (ai.agentProviderMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, ai.agentProviderMap);
     if (ai.agentThinkingMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_THINKING_MAP, ai.agentThinkingMap);
@@ -1000,6 +1018,7 @@ function notifyAIStateAfterSync(ai: NonNullable<SyncPayload['settings']>['ai']):
   if (ai.commandTimeout != null) touched.push(STORAGE_KEY_AI_COMMAND_TIMEOUT);
   if (ai.responseIdleTimeout != null) touched.push(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT);
   if (ai.maxIterations != null) touched.push(STORAGE_KEY_AI_MAX_ITERATIONS);
+  if (ai.toolOutputMaxChars != null) touched.push(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS);
   if (ai.agentModelMap != null) touched.push(STORAGE_KEY_AI_AGENT_MODEL_MAP);
   if (ai.agentThinkingMap != null) touched.push(STORAGE_KEY_AI_AGENT_THINKING_MAP);
   // agentProviderMap is *always* potentially mutated because the reconcile

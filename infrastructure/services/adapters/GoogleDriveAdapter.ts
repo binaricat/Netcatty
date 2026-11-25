@@ -19,8 +19,13 @@ import {
   type SyncedFile,
   type PKCEChallenge,
 } from '../../../domain/sync';
-import { arrayBufferToBase64, generateRandomBytes } from '../EncryptionService';
 import { netcattyBridge } from '../netcattyBridge';
+import {
+  OAuthPKCEAdapterBase,
+  generatePKCEChallenge,
+} from './OAuthPKCEAdapterBase';
+
+export { generatePKCEChallenge };
 
 // ============================================================================
 // Types
@@ -39,54 +44,6 @@ export interface DriveFile {
   modifiedTime: string;
   size?: string;
 }
-
-// ============================================================================
-// PKCE Utilities
-// ============================================================================
-
-/**
- * Generate a cryptographically random code verifier
- */
-const generateCodeVerifier = (): string => {
-  const bytes = generateRandomBytes(32);
-  return base64UrlEncode(bytes);
-};
-
-/**
- * Generate code challenge from verifier (S256)
- */
-const generateCodeChallenge = async (verifier: string): Promise<string> => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(verifier);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return base64UrlEncode(new Uint8Array(digest));
-};
-
-/**
- * Base64 URL encoding (no padding, URL-safe chars)
- */
-const base64UrlEncode = (bytes: Uint8Array): string => {
-  const base64 = arrayBufferToBase64(bytes);
-  return base64
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-};
-
-/**
- * Generate PKCE challenge
- */
-export const generatePKCEChallenge = async (): Promise<PKCEChallenge> => {
-  const codeVerifier = generateCodeVerifier();
-  const codeChallenge = await generateCodeChallenge(codeVerifier);
-  const state = base64UrlEncode(generateRandomBytes(16));
-
-  return {
-    codeVerifier,
-    codeChallenge,
-    state,
-  };
-};
 
 // ============================================================================
 // OAuth Flow
@@ -480,160 +437,42 @@ export const deleteSyncFile = async (
 // Google Drive Adapter Class
 // ============================================================================
 
-export class GoogleDriveAdapter {
-  private tokens: OAuthTokens | null = null;
-  private fileId: string | null = null;
-  private account: ProviderAccount | null = null;
-  private pkceChallenge: PKCEChallenge | null = null;
-  /**
-   * Invoked whenever the access token is silently refreshed. Lets the owner
-   * (CloudSyncManager) persist the rotated tokens so the next launch doesn't
-   * load a stale access token and force a reconnect. Mirrors the OneDrive fix
-   * (#1189 / #1208); Google differs in that its refresh response usually omits a
-   * new refresh token, so refreshTokens() carries the previous one forward.
-   */
-  private onTokensRefreshed: ((tokens: OAuthTokens) => void) | null = null;
-
-  constructor(tokens?: OAuthTokens, fileId?: string) {
-    if (tokens) {
-      this.tokens = tokens;
-    }
-    this.fileId = fileId || null;
+export class GoogleDriveAdapter extends OAuthPKCEAdapterBase {
+  protected buildProviderAuthUrl(redirectUri: string): Promise<{ url: string; pkce: PKCEChallenge }> {
+    return buildAuthUrl(redirectUri);
   }
 
-  /**
-   * Register a callback that receives refreshed tokens so the caller can
-   * persist them. Passing null removes the callback.
-   */
-  setOnTokensRefreshed(callback: ((tokens: OAuthTokens) => void) | null): void {
-    this.onTokensRefreshed = callback;
+  protected exchangeProviderCode(
+    code: string,
+    codeVerifier: string,
+    redirectUri: string
+  ): Promise<OAuthTokens> {
+    return exchangeCodeForTokens(code, codeVerifier, redirectUri);
   }
 
-  /**
-   * Refresh the access token using the supplied refresh token, store the
-   * rotated tokens in-memory, and notify the persistence callback. Google
-   * typically returns the same (or no) refresh token on refresh, so the prior
-   * refresh token is preserved when the response omits one — otherwise the
-   * persisted credentials would lose the ability to refresh again and force a
-   * reconnect on the next launch.
-   */
-  private async refreshTokens(refreshToken: string): Promise<OAuthTokens> {
-    const refreshed = await refreshAccessToken(refreshToken);
+  protected refreshProviderToken(refreshToken: string): Promise<OAuthTokens> {
+    return refreshAccessToken(refreshToken);
+  }
+
+  protected fetchProviderUserInfo(accessToken: string): Promise<ProviderAccount> {
+    return getUserInfo(accessToken);
+  }
+
+  protected validateProviderToken(accessToken: string): Promise<boolean> {
+    return validateToken(accessToken);
+  }
+
+  protected override mergeRefreshedTokens(
+    refreshed: OAuthTokens,
+    priorRefreshToken: string
+  ): OAuthTokens {
     // Google's refresh response frequently omits refresh_token (it does not
     // rotate on every refresh). Never let a missing value clobber the working
     // refresh token, or the persisted connection becomes unrefreshable.
-    const merged: OAuthTokens = {
+    return {
       ...refreshed,
-      refreshToken: refreshed.refreshToken || refreshToken,
+      refreshToken: refreshed.refreshToken || priorRefreshToken,
     };
-    this.tokens = merged;
-    try {
-      this.onTokensRefreshed?.(merged);
-    } catch {
-      // Persistence is best-effort; a failed save must not abort the sync that
-      // triggered the refresh — the fresh tokens still work for this session.
-    }
-    return merged;
-  }
-
-  get isAuthenticated(): boolean {
-    return !!this.tokens?.accessToken;
-  }
-
-  get accountInfo(): ProviderAccount | null {
-    return this.account;
-  }
-
-  get resourceId(): string | null {
-    return this.fileId;
-  }
-
-  /**
-   * Start OAuth flow - returns URL to open in browser
-   */
-  async startAuth(redirectUri: string): Promise<string> {
-    const { url, pkce } = await buildAuthUrl(redirectUri);
-    this.pkceChallenge = pkce;
-    return url;
-  }
-
-  /**
-   * Get PKCE state for verification
-   */
-  getPKCEState(): string | null {
-    return this.pkceChallenge?.state || null;
-  }
-
-  /**
-   * Complete authentication with authorization code
-   */
-  async completeAuth(code: string, redirectUri: string): Promise<OAuthTokens> {
-    if (!this.pkceChallenge) {
-      throw new Error('No PKCE challenge - start auth first');
-    }
-
-    this.tokens = await exchangeCodeForTokens(
-      code,
-      this.pkceChallenge.codeVerifier,
-      redirectUri
-    );
-    this.pkceChallenge = null;
-
-    this.account = await getUserInfo(this.tokens.accessToken);
-
-    return this.tokens;
-  }
-
-  /**
-   * Set tokens from storage
-   */
-  async setTokens(tokens: OAuthTokens): Promise<void> {
-    this.tokens = tokens;
-
-    // Refresh if expired
-    if (tokens.expiresAt && Date.now() > tokens.expiresAt - 60000) {
-      if (tokens.refreshToken) {
-        this.tokens = await this.refreshTokens(tokens.refreshToken);
-      } else {
-        throw new Error('Token expired and no refresh token');
-      }
-    }
-
-    if (await validateToken(this.tokens.accessToken)) {
-      this.account = await getUserInfo(this.tokens.accessToken);
-    } else {
-      throw new Error('Token is invalid');
-    }
-  }
-
-  /**
-   * Ensure token is fresh
-   */
-  private async ensureValidToken(): Promise<string> {
-    if (!this.tokens) {
-      throw new Error('Not authenticated');
-    }
-
-    if (this.tokens.expiresAt && Date.now() > this.tokens.expiresAt - 60000) {
-      if (this.tokens.refreshToken) {
-        this.tokens = await this.refreshTokens(this.tokens.refreshToken);
-      } else {
-        throw new Error('Token expired');
-      }
-    }
-
-    return this.tokens.accessToken;
-  }
-
-  /**
-   * Sign out
-   */
-  signOut(): void {
-    this.tokens = null;
-    this.fileId = null;
-    this.account = null;
-    this.pkceChallenge = null;
-    this.onTokensRefreshed = null;
   }
 
   /**
@@ -688,13 +527,6 @@ export class GoogleDriveAdapter {
     const accessToken = await this.ensureValidToken();
     await deleteSyncFile(accessToken, this.fileId);
     this.fileId = null;
-  }
-
-  /**
-   * Get tokens for storage
-   */
-  getTokens(): OAuthTokens | null {
-    return this.tokens;
   }
 }
 

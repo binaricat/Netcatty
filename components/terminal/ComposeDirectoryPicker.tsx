@@ -51,19 +51,20 @@ export function ComposeDirectoryPicker({ sessionId, theme, onReturnFocus }: {
       <Popover open={model.open} onOpenChange={value => { if (value) outside.current = false; model.setOpen(value); }}>
         <PopoverTrigger asChild>
           <button type="button" disabled={model.pending}
-            aria-label={t('terminal.directory.open', { path: model.cwd ? directoryLabel(model.cwd, model.home) : t('terminal.directory.unknown') })}
+            aria-label={t('terminal.directory.open', { path: model.cwd ? directoryLabel(model.cwd, model.home, model.pathFlavor) : t('terminal.directory.unknown') })}
             title={model.cwd ? directoryDisplayName(model.cwd) : t('terminal.directory.unknown')}
             className="h-6 min-w-0 max-w-full flex items-center gap-1.5 rounded border px-2 text-[11px] font-mono focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60"
             style={{ backgroundColor: theme.chipBg, borderColor: theme.borderColor, color: theme.resolvedFg }}
           >
             {model.pending ? <LoaderCircle size={12} className="shrink-0 animate-spin" /> : <Folder size={12} className="shrink-0" />}
-            <span className="truncate">{model.cwd ? directoryDisplayName(directoryLabel(model.cwd, model.home)) : t('terminal.directory.unknown')}</span>
+            <span className="truncate">{model.cwd ? directoryDisplayName(directoryLabel(model.cwd, model.home, model.pathFlavor)) : t('terminal.directory.unknown')}</span>
             <ChevronDown size={10} className="shrink-0 opacity-60" />
           </button>
         </PopoverTrigger>
         <PopoverContent side="top" align="start" sideOffset={6}
           className="p-0 overflow-hidden w-[360px] max-w-[calc(100vw-16px)]"
           style={{ backgroundColor: theme.resolvedBg, borderColor: theme.borderColor, color: theme.resolvedFg }}
+          onContextMenu={(event) => event.stopPropagation()}
           onOpenAutoFocus={event => { event.preventDefault(); search.current?.focus(); }}
           onInteractOutside={() => { outside.current = true; }}
           onCloseAutoFocus={event => { event.preventDefault(); if (!outside.current) onReturnFocus(); }}

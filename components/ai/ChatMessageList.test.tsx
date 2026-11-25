@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
 
 import { I18nProvider } from "../../application/i18n/I18nProvider.tsx";
 import type { ChatMessage } from "../../infrastructure/ai/types.ts";
@@ -643,4 +644,136 @@ test('fork is offered only for safe completed replies and hidden while streaming
   );
   assert.equal((render(false).match(/Fork from here/g) ?? []).length, 1);
   assert.equal((render(true).match(/Fork from here/g) ?? []).length, 0);
+});
+
+test('ChatMessageList renders a non-error iteration limit notice with a Continue action', () => {
+  const messages: ChatMessage[] = [
+    { id: 'poll', role: 'tool', content: '', timestamp: 1,
+      toolResults: [{ toolCallId: 'poll-1', content: '{"jobId":"job-1","status":"running"}' }] },
+    { id: 'limit', role: 'assistant', content: '', timestamp: 2, iterationLimit: 20 },
+  ];
+  const render = (isStreaming: boolean) => renderToStaticMarkup(
+    <I18nProvider locale="en">
+      <TooltipProvider>
+        <ChatMessageList messages={messages} isStreaming={isStreaming} onContinue={() => {}} />
+      </TooltipProvider>
+    </I18nProvider>,
+  );
+  const markup = render(false);
+  assert.match(markup, /Tool-loop limit \(20 iterations\) reached/);
+  assert.match(markup, /<button[^>]*>Continue<\/button>/);
+  assert.doesNotMatch(markup, /bg-destructive/);
+  assert.match(render(true), /<button[^>]*disabled=""[^>]*>Continue<\/button>/);
+
+  const source = readFileSync(new URL('./ChatMessageList.tsx', import.meta.url), 'utf8');
+  const panel = readFileSync(new URL('../AIChatPanelContent.tsx', import.meta.url), 'utf8');
+  const sidePanel = readFileSync(new URL('../AIChatSidePanel.tsx', import.meta.url), 'utf8');
+  assert.match(source, /onClick=\{onContinue\}/);
+  assert.match(panel, /onContinue=\{handleContinue\}/);
+  assert.match(panel, /handleContinue = React.useCallback\(\(\) => handleSend\(t\('ai.chat.continue'\)\)/);
+  assert.match(sidePanel, /const handleSend = useCallback\(async \(textOverride\?: string\)/);
+  assert.match(sidePanel, /const trimmed = \(textOverride \?\? draft\?\.text \?\? ''\)\.trim\(\)/);
+});
+
+test('iteration limit Continue button invokes the provided send callback', async t => {
+  const previousWindow = globalThis.window;
+  const actGlobal = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previousActEnvironment = actGlobal.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.window = { setTimeout, clearTimeout } as unknown as Window & typeof globalThis;
+  actGlobal.IS_REACT_ACT_ENVIRONMENT = true;
+  t.after(() => {
+    globalThis.window = previousWindow;
+    actGlobal.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  });
+  let continued = 0;
+  let renderer: ReactTestRenderer;
+  await act(async () => {
+    renderer = create(
+      <I18nProvider locale="en">
+        <TooltipProvider>
+          <ChatMessageList
+            messages={[{ id: 'limit', role: 'assistant', content: '', timestamp: 1, iterationLimit: 20 }]}
+            onContinue={() => { continued += 1; }}
+          />
+        </TooltipProvider>
+      </I18nProvider>,
+    );
+  });
+  const button = renderer!.root.findAllByType('button').find(node => node.children.includes('Continue'));
+  assert.ok(button);
+  assert.equal(button.props.disabled, false);
+  await act(async () => { button.props.onClick(); });
+  assert.equal(continued, 1);
+  await act(async () => { renderer!.unmount(); });
+});
+
+test('ChatMessageList tints user prompt bubbles with theme accent while keeping assistant replies neutral', async t => {
+  const previousWindow = globalThis.window;
+  const actGlobal = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previousActEnvironment = actGlobal.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.window = { setTimeout, clearTimeout } as unknown as Window & typeof globalThis;
+  actGlobal.IS_REACT_ACT_ENVIRONMENT = true;
+  t.after(() => {
+    globalThis.window = previousWindow;
+    actGlobal.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  });
+
+  const messages: ChatMessage[] = [
+    { id: 'u1', role: 'user', content: 'Check nginx status', timestamp: 1 },
+    { id: 'a1', role: 'assistant', content: 'Nginx is running.', timestamp: 2 },
+  ];
+
+  let renderer: ReactTestRenderer;
+  await act(async () => {
+    renderer = create(
+      <I18nProvider locale="en">
+        <TooltipProvider>
+          <ChatMessageList messages={messages} />
+        </TooltipProvider>
+      </I18nProvider>,
+    );
+  });
+
+  const divs = renderer!.root.findAllByType('div');
+  const userRow = divs.find(
+    node => node.props['data-role'] === 'user' && String(node.props.className).includes('ai-chat-message '),
+  );
+  const assistantRow = divs.find(
+    node => node.props['data-role'] === 'assistant' && String(node.props.className).includes('ai-chat-message '),
+  );
+  const userBubble = divs.find(
+    node => node.props['data-role'] === 'user' && String(node.props.className).includes('ai-chat-message-content'),
+  );
+  const assistantContent = divs.find(
+    node => node.props['data-role'] === 'assistant' && String(node.props.className).includes('ai-chat-message-content'),
+  );
+
+  assert.ok(userRow, 'expected user message row');
+  assert.ok(assistantRow, 'expected assistant message row');
+  assert.ok(userBubble, 'expected user message bubble');
+  assert.ok(assistantContent, 'expected assistant message content');
+
+  const userRowClasses = String(userRow.props.className).split(/\s+/);
+  const assistantRowClasses = String(assistantRow.props.className).split(/\s+/);
+  assert.ok(userRowClasses.includes('is-user'));
+  assert.ok(!userRowClasses.includes('is-assistant'));
+  assert.ok(assistantRowClasses.includes('is-assistant'));
+  assert.ok(!assistantRowClasses.includes('is-user'));
+
+  const userBubbleClasses = String(userBubble.props.className).split(/\s+/);
+  assert.ok(userBubbleClasses.includes('group-[.is-user]:bg-primary/12'));
+  assert.ok(userBubbleClasses.includes('[.dark_&]:group-[.is-user]:bg-primary/18'));
+  assert.ok(userBubbleClasses.includes('group-[.is-user]:border-primary/25'));
+  assert.ok(userBubbleClasses.includes('[.dark_&]:group-[.is-user]:border-primary/30'));
+  assert.ok(userBubbleClasses.includes('group-[.is-user]:text-foreground'));
+  assert.ok(!userBubbleClasses.includes('group-[.is-user]:bg-muted/50'));
+  assert.ok(!userBubbleClasses.includes('group-[.is-user]:border-border/50'));
+
+  const assistantClasses = String(assistantContent.props.className).split(/\s+/);
+  assert.ok(assistantClasses.includes('group-[.is-assistant]:w-full'));
+  assert.ok(assistantClasses.includes('group-[.is-assistant]:text-foreground/90'));
+  assert.ok(!assistantClasses.some(cls => cls.startsWith('group-[.is-assistant]:bg-primary')));
+  assert.ok(!assistantClasses.some(cls => cls.startsWith('group-[.is-assistant]:border-primary')));
+
+  await act(async () => { renderer!.unmount(); });
 });

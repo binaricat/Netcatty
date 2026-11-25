@@ -25,6 +25,7 @@ export const getAppLevelActions = (): Set<string> => {
     'closeTab',
     'closeSession',
     'newTab',
+    'reopenClosedTab',
     'openHosts',
     'openSftp',
     'quickSwitch',

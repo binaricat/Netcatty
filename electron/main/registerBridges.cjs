@@ -1,6 +1,5 @@
 "use strict";
 
-let bridgesRegistered = false;
 let cloudSyncSessionPassword = null;
 const perfTrace = require("../perfTrace.cjs");
 const { readClipboardFiles, readClipboardImage, hasClipboardImage } = require("../bridges/clipboardFiles.cjs");
@@ -873,6 +872,15 @@ function createBridgeRegistrar(context) {
         console.error("[Main] Failed to open terminal popup:", err);
         return { success: false, error: err?.message || "Failed to open terminal popup" };
       }
+    });
+
+    ipcMain.handle("netcatty:window:closeTerminalPopup", async (event, popupId) => {
+      if (typeof popupId !== "string" || !popupId) {
+        return { success: false, error: "Invalid popup ID" };
+      }
+      const requesterWindow = BrowserWindow.fromWebContents(event.sender);
+      const closed = getWindowManager().closeTerminalPopupWindow(popupId, requesterWindow);
+      return { success: Boolean(closed) };
     });
 
     ipcMain.handle("netcatty:window:openEditor", async (event, payload) => {

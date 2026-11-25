@@ -11,15 +11,196 @@ let attachHomeLookup = null;
 let fanoutExitImpl = null;
 const attachPopupAuthorizations = new Map();
 const pendingAttachRestores = new Set();
+const pendingAttachRestoreListeners = new Map();
+const detachedReplayBuffers = new Map();
+const MAX_DETACHED_REPLAY_CHARS = 512 * 1024;
 
-function registerAttachPopupAuthorization(token, sessionId, webContentsId) {
+function startDetachedReplayCapture(sessionId) {
+  if (!sessionId) return;
+  // Preserve any retained replay data from an unrecovered crash so reopening
+  // the session does not drop output missing from the home terminal.
+  if (!detachedReplayBuffers.has(sessionId)) {
+    detachedReplayBuffers.set(sessionId, { chunks: [], length: 0 });
+  }
+}
+
+function peekDetachedReplayData(sessionId) {
+  if (!sessionId) return "";
+  const entry = detachedReplayBuffers.get(sessionId);
+  if (!entry || entry.chunks.length === 0) return "";
+  return entry.chunks.join("");
+}
+
+function appendDetachedReplayData(sessionId, data) {
+  if (!sessionId || typeof data !== "string" || data.length === 0) return;
+  const entry = detachedReplayBuffers.get(sessionId);
+  if (!entry) return;
+  if (data.length >= MAX_DETACHED_REPLAY_CHARS) {
+    const tail = data.slice(-MAX_DETACHED_REPLAY_CHARS);
+    entry.chunks = [tail];
+    entry.length = tail.length;
+    return;
+  }
+  entry.chunks.push(data);
+  entry.length += data.length;
+  while (entry.length > MAX_DETACHED_REPLAY_CHARS && entry.chunks.length > 0) {
+    const overflow = entry.length - MAX_DETACHED_REPLAY_CHARS;
+    const head = entry.chunks[0];
+    if (head.length <= overflow) {
+      entry.chunks.shift();
+      entry.length -= head.length;
+    } else {
+      entry.chunks[0] = head.slice(overflow);
+      entry.length -= overflow;
+    }
+  }
+}
+
+function takeDetachedReplayData(sessionId) {
+  if (!sessionId) return "";
+  const entry = detachedReplayBuffers.get(sessionId);
+  if (!entry) return "";
+  detachedReplayBuffers.delete(sessionId);
+  return entry.chunks.join("");
+}
+
+function clearDetachedReplayCapture(sessionId) {
+  if (sessionId) detachedReplayBuffers.delete(sessionId);
+}
+
+function notifyAttachRestoreListeners(sessionId) {
+  const listeners = pendingAttachRestoreListeners.get(sessionId);
+  if (!listeners) return;
+  pendingAttachRestoreListeners.delete(sessionId);
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function onAttachOutputRestored(sessionId, listener) {
+  if (!sessionId || typeof listener !== "function") return () => {};
+  let listeners = pendingAttachRestoreListeners.get(sessionId);
+  if (!listeners) {
+    listeners = new Set();
+    pendingAttachRestoreListeners.set(sessionId, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = pendingAttachRestoreListeners.get(sessionId);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) pendingAttachRestoreListeners.delete(sessionId);
+  };
+}
+
+function settleAttachPopupOutcome(grant, outcome) {
+  if (!grant || grant.outcomeSettled) return;
+  grant.outcomeSettled = true;
+  try {
+    grant.resolveOutcome?.(outcome);
+  } catch {
+    // ignore
+  }
+}
+
+function clearAttachRestoreListeners(sessionId) {
+  if (sessionId) pendingAttachRestoreListeners.delete(sessionId);
+}
+
+function registerAttachPopupAuthorization(token, sessionId, webContentsId, options = {}) {
   if (!token || !sessionId || typeof webContentsId !== "number") return false;
+  // A new attachment supersedes any stale pending-restore listeners from an earlier popup.
+  clearAttachRestoreListeners(sessionId);
+  let resolveOutcome = null;
+  const outcomePromise = new Promise((resolve) => {
+    resolveOutcome = resolve;
+  });
   attachPopupAuthorizations.set(token, {
     sessionId,
     webContentsId,
     closePrepared: false,
+    // A user tab moved into the popup: becomes the lifetime heir only once
+    // output has been rebound to the popup so closing the source mid-startup
+    // does not leave a live PTY stranded behind a failed attachment.
+    ownsLifetime: options?.ownsLifetime === true,
+    attached: false,
+    outcomeSettled: false,
+    outcomePromise,
+    resolveOutcome,
   });
   return true;
+}
+
+function markAttachPopupAttached(token, sessionId, webContentsId) {
+  if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
+  const grant = attachPopupAuthorizations.get(token);
+  grant.attached = true;
+  clearAttachRestoreListeners(sessionId);
+  startDetachedReplayCapture(sessionId);
+  return true;
+}
+
+function markAttachPopupReady(token, sessionId, webContentsId) {
+  if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
+  const grant = attachPopupAuthorizations.get(token);
+  if (!grant.attached) return false;
+  settleAttachPopupOutcome(grant, { success: true });
+  return true;
+}
+
+function failAttachPopupAuthorization(token, sessionId, webContentsId, error) {
+  if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
+  const grant = attachPopupAuthorizations.get(token);
+  settleAttachPopupOutcome(grant, {
+    success: false,
+    error: typeof error === "string" && error.trim() ? error.trim() : "Failed to attach terminal popup",
+  });
+  return true;
+}
+
+function isAttachPopupAttached(token) {
+  return attachPopupAuthorizations.get(token)?.attached === true;
+}
+
+function waitForAttachPopupOutcome(token, timeoutMs = 10000) {
+  const grant = token ? attachPopupAuthorizations.get(token) : null;
+  if (!grant) {
+    return Promise.resolve({ success: false, error: "Attach popup closed before attaching" });
+  }
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (outcome) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(outcome);
+    };
+    const timer = setTimeout(() => {
+      const failure = { success: false, error: "Timed out waiting for terminal popup to attach" };
+      settleAttachPopupOutcome(grant, failure);
+      finish(failure);
+    }, timeoutMs);
+    void grant.outcomePromise.then(finish);
+  });
+}
+
+function clearAttachPopupAttached(token, sessionId, webContentsId) {
+  if (!validateAttachPopupAuthorization(token, sessionId, webContentsId)) return false;
+  attachPopupAuthorizations.get(token).attached = false;
+  return true;
+}
+
+/** webContentsId of an attached moved-tab popup that should inherit sessionId if its home dies. */
+function getLifetimeHeirWebContentsId(sessionId) {
+  if (!sessionId) return null;
+  for (const grant of attachPopupAuthorizations.values()) {
+    if (grant.ownsLifetime && grant.attached && grant.sessionId === sessionId) return grant.webContentsId;
+  }
+  return null;
 }
 
 function validateAttachPopupAuthorization(token, sessionId, webContentsId) {
@@ -43,14 +224,24 @@ function isAttachPopupClosePrepared(token) {
 }
 
 function releaseAttachPopupAuthorization(token) {
-  if (token) attachPopupAuthorizations.delete(token);
+  if (!token) return;
+  const grant = attachPopupAuthorizations.get(token);
+  if (grant) {
+    settleAttachPopupOutcome(grant, { success: false, error: "Attach popup closed before attaching" });
+  }
+  attachPopupAuthorizations.delete(token);
 }
 
 function releaseAttachedSessionState(sessionId) {
   if (!sessionId) return;
   pendingAttachRestores.delete(sessionId);
+  clearDetachedReplayCapture(sessionId);
+  notifyAttachRestoreListeners(sessionId);
   for (const [token, grant] of attachPopupAuthorizations) {
-    if (grant?.sessionId === sessionId) attachPopupAuthorizations.delete(token);
+    if (grant?.sessionId === sessionId) {
+      settleAttachPopupOutcome(grant, { success: false, error: "Session closed before popup attached" });
+      attachPopupAuthorizations.delete(token);
+    }
   }
 }
 
@@ -60,13 +251,17 @@ function setRestoreAttachedSessionOutput(fn) {
 
 async function restoreAttachedSessionOutput(sessionId, preferredHomeWebContentsId = null) {
   if (!sessionId || typeof restoreImpl !== "function") {
-    return { success: false, restored: false };
+    return { success: false, restored: false, unavailable: true };
   }
   try {
     const result = await restoreImpl(sessionId, preferredHomeWebContentsId)
       || { success: true, restored: false };
-    if (result.success) pendingAttachRestores.delete(sessionId);
-    else pendingAttachRestores.add(sessionId);
+    if (result.success) {
+      pendingAttachRestores.delete(sessionId);
+      notifyAttachRestoreListeners(sessionId);
+    } else {
+      pendingAttachRestores.add(sessionId);
+    }
     return result;
   } catch (err) {
     pendingAttachRestores.add(sessionId);
@@ -128,8 +323,22 @@ function fanoutSessionExit(sessionId, primaryContents, payload) {
 module.exports = {
   registerAttachPopupAuthorization,
   validateAttachPopupAuthorization,
+  markAttachPopupAttached,
+  markAttachPopupReady,
+  failAttachPopupAuthorization,
+  isAttachPopupAttached,
+  waitForAttachPopupOutcome,
+  clearAttachPopupAttached,
+  onAttachOutputRestored,
+  clearAttachRestoreListeners,
+  startDetachedReplayCapture,
+  appendDetachedReplayData,
+  peekDetachedReplayData,
+  takeDetachedReplayData,
+  clearDetachedReplayCapture,
   markAttachPopupClosePrepared,
   isAttachPopupClosePrepared,
+  getLifetimeHeirWebContentsId,
   releaseAttachPopupAuthorization,
   releaseAttachedSessionState,
   setRestoreAttachedSessionOutput,

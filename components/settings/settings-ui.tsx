@@ -36,7 +36,7 @@ export const Toggle: React.FC<ToggleProps> = ({ checked, onChange, disabled, ari
 
 interface SelectProps {
   value: string;
-  options: { value: string; label: string; icon?: React.ReactNode }[];
+  options: { value: string; label: string; icon?: React.ReactNode; disabled?: boolean }[];
   onChange: (value: string) => void;
   className?: string;
   disabled?: boolean;
@@ -87,6 +87,7 @@ export const Select: React.FC<SelectProps> = ({
               <SelectPrimitive.Item
                 key={opt.value}
                 value={opt.value}
+                disabled={opt.disabled}
                 className="relative flex w-full min-w-0 cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
               >
                 <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">

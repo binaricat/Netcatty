@@ -371,6 +371,7 @@ test("buildSyncPayload includes AI configuration settings", () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_COMMAND_TIMEOUT, "120");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, "600");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS, "10");
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS, "64000");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({ codex: "gpt-test" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({ catty: "openai-main" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_THINKING_MAP, JSON.stringify({ catty: "high" }));
@@ -393,6 +394,7 @@ test("buildSyncPayload includes AI configuration settings", () => {
     commandTimeout: 120,
     responseIdleTimeout: 600,
     maxIterations: 10,
+    toolOutputMaxChars: 64_000,
     agentModelMap: { codex: "gpt-test" },
     agentProviderMap: { catty: "openai-main" },
     agentThinkingMap: { catty: "high" },
@@ -413,6 +415,14 @@ test("AI response wait time is syncable for auto-sync detection", () => {
   assert.ok(
     (SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(
       storageKeys.STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
+    ),
+  );
+});
+
+test("AI tool output limit is syncable for auto-sync detection", () => {
+  assert.ok(
+    (SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(
+      storageKeys.STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS,
     ),
   );
 });
@@ -773,6 +783,7 @@ test("applySyncPayload restores AI configuration settings", async () => {
         commandTimeout: 30,
         responseIdleTimeout: 900,
         maxIterations: 5,
+        toolOutputMaxChars: 80_000,
         agentModelMap: { claude: "claude-test" },
         agentProviderMap: { catty: "anthropic-main" },
         webSearchConfig: webSearch,
@@ -794,6 +805,7 @@ test("applySyncPayload restores AI configuration settings", async () => {
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_COMMAND_TIMEOUT), "30");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT), "900");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS), "5");
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS), "80000");
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP)!), { claude: "claude-test" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP)!), { catty: "anthropic-main" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!), webSearch);
@@ -2239,6 +2251,44 @@ test("missing local shell settings and invalid tabs preserve existing settings",
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB), "notes");
   localStorage.setItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB, "invalid");
   assert.equal((await buildSyncPayload(vault())).settings?.localShellSidePanelAutoOpenTab, undefined);
+});
+
+test("packed download preferences round-trip independently of upload compression", async () => {
+  const downloadKey = storageKeys.STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD;
+  const uploadKey = storageKeys.STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD;
+  assert.ok((SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(downloadKey));
+
+  for (const enabled of [true, false]) {
+    localStorage.clear();
+    localStorage.setItem(downloadKey, String(enabled));
+    localStorage.setItem(uploadKey, String(!enabled));
+    const payload = buildSyncPayload(vault());
+    assert.equal(payload.settings?.sftpUsePackedDownload, enabled);
+    assert.equal(payload.settings?.sftpUseCompressedUpload, !enabled);
+
+    localStorage.clear();
+    await applySyncPayload(payload, { importVaultData: () => {} });
+    assert.equal(localStorage.getItem(downloadKey), String(enabled));
+    assert.equal(localStorage.getItem(uploadKey), String(!enabled));
+  }
+});
+
+test("legacy and invalid packed download settings preserve the local preference", async () => {
+  const key = storageKeys.STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD;
+  const payload = buildSyncPayload(vault());
+  assert.equal(payload.settings?.sftpUsePackedDownload, undefined);
+
+  localStorage.setItem(key, "false");
+  await applySyncPayload(payload, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(key), "false");
+
+  for (const invalid of ["true", "false", 1, null]) {
+    await applySyncPayload({
+      ...payload,
+      settings: { sftpUsePackedDownload: invalid },
+    } as unknown as SyncPayload, { importVaultData: () => {} });
+    assert.equal(localStorage.getItem(key), "false");
+  }
 });
 
 test("old bottom tab preference is ignored by settings export and import", async () => {

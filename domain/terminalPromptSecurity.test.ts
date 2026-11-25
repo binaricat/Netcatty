@@ -6,6 +6,7 @@ import {
   appendTerminalPromptSecurityTail,
   foldTerminalPromptSecurityOutput,
   isConfirmedTerminalShellPrompt,
+  isJumpServerMenuPrompt,
   isSensitiveTerminalChallenge,
   isUntrustedTerminalInputPrompt,
   shouldUsePluginTerminalCompletionProvider,
@@ -14,7 +15,88 @@ import {
 const require = createRequire(import.meta.url);
 const sharedPromptSecurity = require('./terminalPromptSecurity.shared.cjs') as {
   isUntrustedTerminalInputPrompt: typeof isUntrustedTerminalInputPrompt;
+  extractTerminalPromptHostname(value: string): string | null;
 };
+
+const promptHostname = (text: string) =>
+  sharedPromptSecurity.extractTerminalPromptHostname(text);
+
+test('extractTerminalPromptHostname accepts a bracketed prompt host', () => {
+  assert.equal(
+    promptHostname('[root@k8s-10-1-64-1 ~]# '),
+    'k8s-10-1-64-1',
+  );
+});
+
+test('extractTerminalPromptHostname accepts a decorated two-line prompt', () => {
+  assert.equal(
+    promptHostname(
+      '[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\r\n# ',
+    ),
+    'k8s-10-1-64-1',
+  );
+});
+
+test('extractTerminalPromptHostname accepts user-at-host with spaced ys identity', () => {
+  assert.equal(
+    promptHostname('# root @ target-01 in ~ [12:34:56]\n# '),
+    'target-01',
+  );
+});
+
+test('extractTerminalPromptHostname rejects ambiguous and sensitive text', () => {
+  assert.equal(promptHostname('welcome\n# '), null);
+  assert.equal(promptHostname('copied output\n# '), null);
+  assert.equal(promptHostname('Password:\n# '), null);
+  assert.equal(promptHostname('[root@host ~] no trailing marker'), null);
+});
+
+test('extractTerminalPromptHostname rejects host-like text embedded in copied output', () => {
+  for (const text of [
+    'see [root@prod] logs\n# ',
+    '[root@prod] copied output\n# ',
+    'root@prod output\n# ',
+    '[root@prod] version = 1.2\n# ',
+  ]) {
+    assert.equal(promptHostname(text), null, text);
+  }
+});
+
+test('extractTerminalPromptHostname recognizes zsh, Alpine, and macOS root prompts', () => {
+  assert.equal(promptHostname('alice@target ~ % '), 'target');
+  assert.equal(promptHostname('alice@target ~ # '), 'target');
+  assert.equal(promptHostname('(venv) alice@target ~/src % '), 'target');
+  assert.equal(promptHostname('target:~# '), 'target');
+  assert.equal(promptHostname('target:~/projects$ '), 'target');
+  assert.equal(promptHostname('target:~ root# '), 'target');
+});
+
+test('extractTerminalPromptHostname handles redrawn bare markers and rejects non-prompt lines', () => {
+  const redrawn = [
+    'Last login: Mon Nov 23 16:01:46 2026 from 10.1.64.108\r\r\n',
+    '[\x1b[1;32mroot\x1b[m\x1b[1;33m@\x1b[m\x1b[1;35mk8s-10-1-64-1\x1b[m \x1b[4m~\x1b[m] \x1b[1;36mbr0 = 10.1.64.1\x1b[m\r\r\n',
+    '# \r\x1b[K# \r\x1b[K# \r\x1b[K# ',
+  ].join('');
+  assert.equal(promptHostname(redrawn), 'k8s-10-1-64-1');
+
+  for (const text of [
+    '[root@spoofed ~]# \r\n',
+    'alice@target 100%',
+    'alice@target ~ % echo 100%',
+    'alice@target ~ # echo foo #',
+  ]) {
+    assert.equal(promptHostname(text), null, JSON.stringify(text));
+  }
+});
+
+test('isJumpServerMenuPrompt detects active JumpServer menus and rejects non-menus', () => {
+  for (const prompt of ['Opt> ', 'Opt>', '[Host]> ', 'logout\r\n\x1b[32mOpt> \x1b[0m']) {
+    assert.equal(isJumpServerMenuPrompt(prompt), true, JSON.stringify(prompt));
+  }
+  for (const text of ['Opt> 11', 'Opt>\r\n', 'echo Opt>', 'Password:', '[root@target ~]# ']) {
+    assert.equal(isJumpServerMenuPrompt(text), false, JSON.stringify(text));
+  }
+});
 
 test('terminal prompt security recognizes password, MFA, OTP, PIN, and CJK challenges', () => {
   const challenges = [

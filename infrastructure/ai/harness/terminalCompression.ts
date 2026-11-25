@@ -1,6 +1,10 @@
 import { compressVerboseText, truncateTextWithHeadAndTail } from '../requestPayloadCompression';
 import type { ToolOutputStore } from './toolOutputStore';
 import { redactSecretsForModel } from './modelSecretRedaction';
+import {
+  normalizeAiToolOutputMaxChars,
+  resolveTerminalStderrMaxChars,
+} from '../../../domain/aiToolOutputLimit';
 
 export const MAX_LIVE_TERMINAL_STDOUT_CHARS = 24_000;
 export const MAX_LIVE_TERMINAL_STDERR_CHARS = 12_000;
@@ -26,19 +30,31 @@ export interface TerminalOutputHandle {
 export interface FitTerminalExecuteResultOptions {
   chatSessionId?: string;
   toolOutputStore?: ToolOutputStore;
+  maxOutputChars?: number;
+  maxStdoutChars?: number;
+  maxStderrChars?: number;
 }
 
 export function fitTerminalExecuteResultForModel(
   result: TerminalExecuteResult,
   options?: FitTerminalExecuteResultOptions,
 ): TerminalExecuteResult {
+  const maxStdoutChars = options?.maxStdoutChars
+    ?? (options?.maxOutputChars != null
+      ? normalizeAiToolOutputMaxChars(options.maxOutputChars)
+      : MAX_LIVE_TERMINAL_STDOUT_CHARS);
+  const maxStderrChars = options?.maxStderrChars
+    ?? (options?.maxOutputChars != null
+      ? resolveTerminalStderrMaxChars(options.maxOutputChars)
+      : MAX_LIVE_TERMINAL_STDERR_CHARS);
+
   const stdout = truncateTextWithHeadAndTail(
     redactSecretsForModel(compressVerboseText(result.stdout), options?.chatSessionId),
-    MAX_LIVE_TERMINAL_STDOUT_CHARS,
+    maxStdoutChars,
   );
   const stderr = truncateTextWithHeadAndTail(
     redactSecretsForModel(compressVerboseText(result.stderr), options?.chatSessionId),
-    MAX_LIVE_TERMINAL_STDERR_CHARS,
+    maxStderrChars,
   );
 
   const fitted: TerminalExecuteResult = {

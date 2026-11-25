@@ -25,6 +25,13 @@ test('terminalPaneSessionsEqual ignores dynamicTitle and codingCliProviderId', (
   assert.equal(terminalPaneSessionsEqual(prev, next), true);
 });
 
+test('terminalPaneSessionsEqual ignores promptHostname presentation updates', () => {
+  const prev = [session({ promptHostname: 'jumpserver.example.com' })];
+  const next = [session({ promptHostname: '10.1.64.1' })];
+  assert.equal(terminalPaneSessionsEqual(prev, next), true);
+  assert.equal(retainStableSessionsIgnoringPresentation(prev, next), prev);
+});
+
 test('terminalPaneSessionsEqual detects status and fontSize changes', () => {
   const base = session();
   assert.equal(

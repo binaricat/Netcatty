@@ -26,9 +26,7 @@ import type {
   CompactionTrace,
   ContextPrepareResult,
   ContextPrepareTrigger,
-  ExternalBridgeHistoryMessage,
 } from './types';
-import { buildExternalBridgeContextMessages } from './externalBridgeContext';
 import { repairToolMessageIntegrity } from './toolMessageIntegrity';
 import { pruneFirstModelMessage } from './compactionPruner';
 
@@ -42,6 +40,7 @@ export interface PrepareTurnContextInput {
   protectRecentMessages?: number;
   force?: boolean;
   compressForRequestTooLargeRetry?: boolean;
+  maxToolResultChars?: number;
   summarize?: (messagesToSummarize: ModelMessage[]) => Promise<string>;
   onEvent?: AgentEventListener;
   sessionId?: string;
@@ -235,7 +234,10 @@ export async function prepareTurnContext(
   } else {
     // Routine pre-turn pass: keep the user's attachment parts. Only the explicit
     // 413 retry above may trade them for text placeholders.
-    const typed = applyTypedMessageCompression(working, { preserveAttachments: true });
+    const typed = applyTypedMessageCompression(working, {
+      preserveAttachments: true,
+      maxToolResultChars: input.maxToolResultChars,
+    });
     if (typed.didAdjust) {
       working = typed.messages;
       didTypedCompression = true;
@@ -317,12 +319,6 @@ export async function prepareTurnContext(
   }
 
   return { messages: working, didAdjust: false };
-}
-
-export function buildExternalBridgeContext(
-  messages: ChatMessage[],
-): ExternalBridgeHistoryMessage[] {
-  return buildExternalBridgeContextMessages(messages);
 }
 
 export function extractLatestUserGoal(messages: ModelMessage[] | ChatMessage[]): string | undefined {
@@ -425,7 +421,11 @@ export async function prepareStepContext(
 
   // Step-level typed compression runs before every model call, so it must keep
   // multimodal parts: the user's image would otherwise never reach the model.
-  const typed = compressMessagesForRequestTooLargeRetry(working, { preserveAttachments: true });
+  const maxToolResultChars = input.toolOutputMaxChars ?? input.runtimeContext?.toolOutputMaxChars;
+  const typed = compressMessagesForRequestTooLargeRetry(working, {
+    preserveAttachments: true,
+    maxToolResultChars,
+  });
   working = typed.messages;
 
   const budgetGuard = applyStepBudgetGuard(working, {

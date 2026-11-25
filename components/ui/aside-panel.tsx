@@ -1,5 +1,5 @@
 import { ArrowLeft, MoreVertical, X } from 'lucide-react';
-import React, { createContext, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, ReactNode, useCallback, useContext, useState } from 'react';
 import { cn } from '../../lib/utils';
 import { localStorageAdapter } from '@/infrastructure/persistence/localStorageAdapter';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
@@ -43,34 +43,7 @@ function readPersistedAsideWidth(storageKey: string | undefined, fallback: numbe
     return clampAsideInlineWidth(stored);
 }
 
-// Types
-interface AsideContentItem {
-    id: string;
-    title: string;
-    subtitle?: string;
-    actions?: ReactNode;
-    content: ReactNode;
-}
-
-interface AsidePanelContextType {
-    push: (item: AsideContentItem) => void;
-    pop: () => void;
-    replace: (item: AsideContentItem) => void;
-    clear: () => void;
-    canGoBack: boolean;
-    currentItem: AsideContentItem | null;
-}
-
-const AsidePanelContext = createContext<AsidePanelContextType | null>(null);
 const AsideActionMenuContext = createContext<(() => void) | null>(null);
-
-export const useAsidePanel = () => {
-    const context = useContext(AsidePanelContext);
-    if (!context) {
-        throw new Error('useAsidePanel must be used within an AsidePanel');
-    }
-    return context;
-};
 
 // Props
 interface AsidePanelProps extends AsidePanelResizeProps {
@@ -104,7 +77,7 @@ interface AsidePanelHeaderProps {
 }
 
 // Header Component
-export const AsidePanelHeader: React.FC<AsidePanelHeaderProps> = ({
+const AsidePanelHeader: React.FC<AsidePanelHeaderProps> = ({
     title,
     subtitle,
     actions,
@@ -236,115 +209,7 @@ export const AsideActionMenuItem: React.FC<{
     );
 };
 
-// Main Panel Component with Stack Support
-interface AsidePanelStackProps {
-    open: boolean;
-    onClose: () => void;
-    initialItem: AsideContentItem;
-    className?: string;
-    width?: string;
-    layout?: AsidePanelLayout;
-    /**
-     * Optional stable identifier emitted as `data-section` on the panel
-     * root. Used as a targeting hook for Custom CSS.
-     */
-    dataSection?: string;
-}
-
 export type AsidePanelLayout = 'overlay' | 'inline';
-
-const resolveInlineWidth = (width: string) => {
-    const arbitraryWidthMatch = width.match(/w-\[(.+)\]/);
-    if (arbitraryWidthMatch) {
-        return arbitraryWidthMatch[1];
-    }
-
-    switch (width) {
-        case 'w-full':
-            return '100%';
-        case 'w-screen':
-            return '100vw';
-        default:
-            return '380px';
-    }
-};
-
-export const AsidePanelStack: React.FC<AsidePanelStackProps> = ({
-    open,
-    onClose,
-    initialItem,
-    className,
-    width = 'w-[380px]',
-    layout = 'overlay',
-    dataSection,
-}) => {
-    const [stack, setStack] = useState<AsideContentItem[]>([initialItem]);
-
-    const push = useCallback((item: AsideContentItem) => {
-        setStack(prev => [...prev, item]);
-    }, []);
-
-    const pop = useCallback(() => {
-        setStack(prev => {
-            if (prev.length > 1) {
-                return prev.slice(0, -1);
-            }
-            return prev;
-        });
-    }, []);
-
-    const replace = useCallback((item: AsideContentItem) => {
-        setStack([item]);
-    }, []);
-
-    const clear = useCallback(() => {
-        setStack([initialItem]);
-    }, [initialItem]);
-
-    const currentItem = stack[stack.length - 1];
-    const canGoBack = stack.length > 1;
-    const inlineWidth = useMemo(() => resolveInlineWidth(width), [width]);
-    const inlineStyle = layout === 'inline'
-        ? ({
-            width: inlineWidth,
-            ['--aside-inline-width' as string]: inlineWidth,
-        } as React.CSSProperties)
-        : undefined;
-
-    // Reset stack when panel closes/opens
-    React.useEffect(() => {
-        if (open) {
-            setStack([initialItem]);
-        }
-    }, [open, initialItem]);
-
-    if (!open) return null;
-
-    return (
-        <AsidePanelContext.Provider value={{ push, pop, replace, clear, canGoBack, currentItem }}>
-            <div className={cn(
-                layout === 'inline'
-                    ? "relative split-panel-enter shrink-0 h-full min-h-0 max-w-full border-l border-border/60 bg-background flex flex-col app-no-drag overflow-hidden shadow-[-16px_0_32px_hsl(var(--foreground)/0.08)]"
-                    : "absolute right-0 top-0 bottom-0 max-w-full border-l border-border/60 bg-background z-30 flex flex-col app-no-drag overflow-hidden",
-                layout === 'overlay' && width,
-                className
-            )}
-            style={inlineStyle}
-            data-section={dataSection}
-            data-native-view-occluder={layout === 'overlay' ? '' : undefined}>
-                <AsidePanelHeader
-                    title={currentItem.title}
-                    subtitle={currentItem.subtitle}
-                    actions={currentItem.actions}
-                    onBack={canGoBack ? pop : undefined}
-                    onClose={onClose}
-                    showBackButton={canGoBack}
-                />
-                {currentItem.content}
-            </div>
-        </AsidePanelContext.Provider>
-    );
-};
 
 // Simple Panel Component (no stack)
 export const AsidePanel: React.FC<AsidePanelProps> = ({
@@ -370,14 +235,21 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
         resizable ? readPersistedAsideWidth(persistWidthStorageKey, fallbackWidthPx) : fallbackWidthPx,
     );
     const [isResizing, setIsResizing] = useState(false);
+    const resizeCleanupRef = React.useRef<(() => void) | null>(null);
+    React.useEffect(() => () => resizeCleanupRef.current?.(), [open]);
     const effectivePanelWidthPx = resizable ? panelWidthPx : fallbackWidthPx;
+    // Only containers opting into this constraint limit the rendered width.
+    // Keep the animation's final minimum on the same cap as its width.
+    const renderedWidth = resizable && layout === 'inline'
+        ? `min(${effectivePanelWidthPx}px, var(--aside-inline-max-width, ${effectivePanelWidthPx}px))`
+        : `${effectivePanelWidthPx}px`;
     // Resizable panels always use pixel width so overlay and inline share the same drag path.
     const usesPixelWidth = resizable || layout === 'inline';
 
     const panelStyle = usesPixelWidth
         ? ({
-            width: `${effectivePanelWidthPx}px`,
-            ['--aside-inline-width' as string]: `${effectivePanelWidthPx}px`,
+            width: renderedWidth,
+            ['--aside-inline-width' as string]: renderedWidth,
         } as React.CSSProperties)
         : undefined;
 
@@ -386,9 +258,12 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
 
         event.preventDefault();
         event.stopPropagation();
+        resizeCleanupRef.current?.();
 
         const startX = event.clientX;
-        const startWidth = panelWidthPx;
+        const startWidth = layout === 'inline'
+            ? event.currentTarget.parentElement?.getBoundingClientRect().width || panelWidthPx
+            : panelWidthPx;
         const previousCursor = document.body.style.cursor;
         const previousUserSelect = document.body.style.userSelect;
 
@@ -397,26 +272,35 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
         document.body.style.userSelect = 'none';
 
         const handlePointerMove = (moveEvent: PointerEvent) => {
-            setPanelWidthPx(clampAsideInlineWidth(startWidth + startX - moveEvent.clientX));
+            setPanelWidthPx(moveEvent.clientX === startX ? panelWidthPx
+                : clampAsideInlineWidth(startWidth + startX - moveEvent.clientX));
         };
         const handlePointerUp = (upEvent: PointerEvent) => {
+            cleanup();
+            // A handle click is not a request to forget a larger preference.
+            if (upEvent.clientX === startX) return;
             const nextWidth = clampAsideInlineWidth(startWidth + startX - upEvent.clientX);
             setPanelWidthPx(nextWidth);
             if (persistWidthStorageKey) {
                 localStorageAdapter.writeNumber(persistWidthStorageKey, nextWidth);
             }
+        };
+        const cleanup = () => {
+            resizeCleanupRef.current = null;
+            setPanelWidthPx(panelWidthPx);
             setIsResizing(false);
             document.body.style.cursor = previousCursor;
             document.body.style.userSelect = previousUserSelect;
             window.removeEventListener('pointermove', handlePointerMove);
             window.removeEventListener('pointerup', handlePointerUp);
-            window.removeEventListener('pointercancel', handlePointerUp);
+            window.removeEventListener('pointercancel', cleanup);
         };
 
+        resizeCleanupRef.current = cleanup;
         window.addEventListener('pointermove', handlePointerMove);
         window.addEventListener('pointerup', handlePointerUp);
-        window.addEventListener('pointercancel', handlePointerUp);
-    }, [panelWidthPx, persistWidthStorageKey, resizable]);
+        window.addEventListener('pointercancel', cleanup);
+    }, [layout, panelWidthPx, persistWidthStorageKey, resizable]);
 
     if (!open) return null;
 

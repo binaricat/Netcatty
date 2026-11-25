@@ -19,12 +19,7 @@ import {
 } from '../ai-elements/conversation';
 import { LazyMessageResponse } from '../ai-elements/LazyMessageResponse';
 import { Message, MessageContent } from '../ai-elements/messageShell';
-import {
-  AI_MARKDOWN_WARMUP_INITIAL_DELAY_MS,
-  AI_MARKDOWN_WARMUP_RESUME_DELAY_MS,
-  isAiComposerTyping,
-  scheduleAiMarkdownWarmup,
-} from './aiMarkdownWarmup';
+import { warmAiMarkdownRenderer } from './aiMarkdownWarmup';
 import { ToolCall } from '../ai-elements/tool-call';
 import ThinkingBlock from './ThinkingBlock';
 import AgentActivityGroup from './AgentActivityGroup';
@@ -90,6 +85,7 @@ import ChatJumpNav from './ChatJumpNav';
 interface ChatMessageListProps {
   messages: ChatMessage[];
   isStreaming?: boolean;
+  onContinue?: () => void;
   /** Active chat session ID — used to filter standalone MCP approval blocks */
   activeSessionId?: string | null;
   activeCompaction?: ActiveCompactionUi | null;
@@ -185,6 +181,7 @@ export function pruneResolvedApprovals(
 const ChatMessageList: React.FC<ChatMessageListProps> = ({
   messages,
   isStreaming,
+  onContinue,
   activeSessionId,
   activeCompaction = null,
   contextCompaction,
@@ -391,16 +388,11 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
     [messages],
   );
 
-  // Do not start Streamdown on expand. Import cannot be cancelled, and idle
-  // right after open collides with the first few keystrokes. History stays
-  // plaintext until send, composer blur, or a long unfocused delay.
+  // Warm Streamdown immediately once assistant markdown is on screen so opening
+  // any chat renders formatted markdown right away instead of sitting as raw text.
   useEffect(() => {
-    if (!hasAssistantMarkdown) return undefined;
-    return scheduleAiMarkdownWarmup({
-      isBusy: isAiComposerTyping,
-      initialDelayMs: AI_MARKDOWN_WARMUP_INITIAL_DELAY_MS,
-      resumeDelayMs: AI_MARKDOWN_WARMUP_RESUME_DELAY_MS,
-    });
+    if (!hasAssistantMarkdown) return;
+    void warmAiMarkdownRenderer();
   }, [hasAssistantMarkdown]);
 
   const visibleMessages = useMemo(
@@ -713,29 +705,29 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                       !att.vaultNoteId && (att.contentUnavailable || !att.base64Data) ? (
                         <div
                           key={att.filename ? `${att.filename}-${i}` : `att-${message.id}-${i}`}
-                          className="inline-flex items-center gap-1.5 min-h-7 px-2 py-1 rounded-md bg-muted/20 border border-border/20 text-[11px] text-foreground/70"
+                          className="inline-flex items-center gap-1.5 min-h-7 px-2 py-1 rounded-md bg-background/60 border border-primary/20 text-[11px] text-foreground/80"
                           title={t('ai.chat.attachmentContentUnavailable')}
                         >
                           {att.terminalSelection
-                            ? <SquareTerminal size={12} className="text-muted-foreground/60 shrink-0" />
-                            : <FileText size={12} className="text-muted-foreground/60 shrink-0" />}
+                            ? <SquareTerminal size={12} className="text-foreground/60 shrink-0" />
+                            : <FileText size={12} className="text-foreground/60 shrink-0" />}
                           <span className="truncate max-w-[150px]">{att.filename || (att.terminalSelection ? 'terminal selection' : 'file')}</span>
                           <span className="text-muted-foreground">{t('ai.chat.attachmentContentUnavailable')}</span>
                         </div>
                       ) : att.terminalSelection ? (
                         <div
                           key={att.filename ? `${att.filename}-${i}` : `att-${message.id}-${i}`}
-                          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md bg-muted/20 border border-border/20 text-[11px] text-foreground/70"
+                          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md bg-background/60 border border-primary/20 text-[11px] text-foreground/80"
                         >
-                          <SquareTerminal size={12} className="text-muted-foreground/60 shrink-0" />
+                          <SquareTerminal size={12} className="text-foreground/60 shrink-0" />
                           <span className="truncate max-w-[150px]">{att.filename || 'terminal selection'}</span>
                         </div>
                       ) : att.vaultNoteId ? (
                         <div
                           key={att.filename ? `${att.filename}-${i}` : `att-${message.id}-${i}`}
-                          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md bg-muted/20 border border-border/20 text-[11px] text-foreground/70"
+                          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md bg-background/60 border border-primary/20 text-[11px] text-foreground/80"
                         >
-                          <BookOpen size={12} className="text-muted-foreground/60 shrink-0" />
+                          <BookOpen size={12} className="text-foreground/60 shrink-0" />
                           <span className="truncate max-w-[150px]">{att.vaultNoteTitle || att.filename || 'note'}</span>
                         </div>
                       ) : att.mediaType.startsWith('image/') ? (
@@ -743,15 +735,15 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                           key={att.filename ? `${att.filename}-${i}` : `att-${message.id}-${i}`}
                           src={`data:${att.mediaType};base64,${att.base64Data}`}
                           alt={att.filename || 'image'}
-                          className="max-h-[120px] max-w-[200px] rounded-md object-contain border border-border/20 cursor-pointer hover:opacity-80 transition-opacity"
+                          className="max-h-[120px] max-w-[200px] rounded-md object-contain border border-primary/20 cursor-pointer hover:opacity-80 transition-opacity"
                           onClick={() => openPreview(`data:${att.mediaType};base64,${att.base64Data}`, att.filename || 'image')}
                         />
                       ) : (
                         <div
                           key={att.filename ? `${att.filename}-${i}` : `att-${message.id}-${i}`}
-                          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md bg-muted/20 border border-border/20 text-[11px] text-foreground/70"
+                          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md bg-background/60 border border-primary/20 text-[11px] text-foreground/80"
                         >
-                          <FileText size={12} className="text-muted-foreground/60 shrink-0" />
+                          <FileText size={12} className="text-foreground/60 shrink-0" />
                           <span className="truncate max-w-[120px]">{att.filename || 'file'}</span>
                         </div>
                       )
@@ -774,7 +766,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                       : (
                           <React.Profiler {...getAIPanelProfilerProps('AIChatPanel.Markdown')}>
                             <div data-ai-content="markdown">
-                              <LazyMessageResponse deferUntilWarm isAnimating={!!isThisStreaming}>
+                              <LazyMessageResponse isAnimating={!!isThisStreaming}>
                                 {message.content}
                               </LazyMessageResponse>
                             </div>
@@ -810,6 +802,18 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                     <span className="thinking-shimmer text-xs">
                       {resolveCompactionStatusText(message.statusText, t)}
                     </span>
+                  </div>
+                )}
+
+                {message.iterationLimit != null && (
+                  <div role="status" className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm">
+                    <p>{t('ai.chat.iterationLimitReached', { limit: message.iterationLimit })}</p>
+                    <button
+                      type="button"
+                      onClick={onContinue}
+                      disabled={!!isStreaming || !onContinue}
+                      className="mt-2 rounded-md border border-border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                    >{t('ai.chat.continue')}</button>
                   </div>
                 )}
 
@@ -1079,6 +1083,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
 
 function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps): boolean {
   if (prev.isStreaming !== next.isStreaming) return false;
+  if (prev.onContinue !== next.onContinue) return false;
   if (prev.activeSessionId !== next.activeSessionId) return false;
   if (prev.notes !== next.notes) return false;
   if (prev.hosts !== next.hosts) return false;
@@ -1107,6 +1112,7 @@ function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps
         p.statusText !== n.statusText ||
         p.executionStatus !== n.executionStatus ||
         p.errorInfo !== n.errorInfo ||
+        p.iterationLimit !== n.iterationLimit ||
         p.toolCalls !== n.toolCalls ||
         p.toolResults !== n.toolResults ||
         p.agentActivities !== n.agentActivities ||

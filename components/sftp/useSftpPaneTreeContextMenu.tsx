@@ -5,6 +5,7 @@ import { getParentPath } from '../../application/state/sftp/utils';
 import { isKnownBinaryFile } from '../../lib/sftpFileUtils';
 import { isExtractableArchive } from '../../domain/sftpArchive';
 import { isNavigableDirectory } from './utils';
+import type { SftpFileEntry } from '../../types';
 import { getSftpTreeUploadFilesTargetPath, getSftpUploadFilesLabelKey, getSftpUploadFolderLabelKey } from './sftpUploadMenu';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -13,13 +14,31 @@ type SftpPaneTreeContextMenuProps = Record<string, any>;
 /** ".." is the tree's synthetic parent-navigation row, never a real entry. */
 export const isSftpTreeParentEntry = (entry: { name: string }): boolean => entry.name === '..';
 
+function downloadRoots(paths: string[], entries: ReadonlyMap<string, SftpFileEntry>) {
+  const roots = new Map<string, SftpFileEntry>();
+  for (const path of paths) {
+    const entry = entries.get(path);
+    if (entry && entry.name !== '..') roots.set(path, entry);
+  }
+  // A selected folder's download already includes its selected descendants.
+  return [...roots].filter(([path]) => {
+    let parent = getParentPath(path);
+    while (parent !== path) {
+      if (roots.has(parent)) return false;
+      path = parent;
+      parent = getParentPath(path);
+    }
+    return true;
+  });
+}
+
 export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) {
   const {
     contextTarget, pane, toggleExpand, stableOnOpenEntry, stableOnRefresh, getActionPaths, toTransferSources,
     executeMoveAction, triggerUploadPicker, onUploadExternalFolder, uploadEnabled, folderUploadEnabled,
     setMoveTargetPaths, setMoveToPath, setMoveToError, setMoveToSuggestions, setMoveToSuggestionIndex,
     setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onDuplicateEntriesRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef,
-    onEditFileRef, onDownloadFileRef, onExtractArchiveRef, onCreateArchiveRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
+    onEditFileRef, onDownloadFileRef, onDownloadFilesRef, entryByPathRef, onExtractArchiveRef, onCreateArchiveRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
     openNewFolderDialogRef, openNewFileDialogRef,
   } = props;
 
@@ -38,6 +57,16 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     const handleOpen = () => {
       if (isDir) void toggleExpand(entry, entryPath);
       else stableOnOpenEntry(entry, entryPath);
+    };
+
+    const handleDownload = () => {
+      const paths = getActionPaths(entryPath);
+      if (!isLocal && paths.length > 1 && onDownloadFilesRef?.current) {
+        const roots = downloadRoots(paths, entryByPathRef.current);
+        if (roots.length) onDownloadFilesRef.current(roots.map(([, item]) => item), roots.map(([path]) => path));
+      } else {
+        onDownloadFileRef.current?.(entry, entryPath);
+      }
     };
 
     const handleCopyToOtherPane = () => {
@@ -100,8 +129,8 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
             <Edit2 size={14} className="mr-2" />{tRef.current('sftp.context.edit')}
           </ContextMenuItem>
         )}
-        {onDownloadFileRef.current && (!isDir || !isLocal) && (
-          <ContextMenuItem onClick={() => onDownloadFileRef.current?.(entry, entryPath)}>
+        {onDownloadFileRef.current && entry.name !== '..' && (!isDir || !isLocal) && (
+          <ContextMenuItem onClick={handleDownload}>
             <Download size={14} className="mr-2" />{tRef.current('sftp.context.download')}
           </ContextMenuItem>
         )}
@@ -214,6 +243,8 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     onCopyToOtherPaneRef,
     onDuplicateEntriesRef,
     onDownloadFileRef,
+    onDownloadFilesRef,
+    entryByPathRef,
     onExtractArchiveRef,
     onCreateArchiveRef,
     onEditFileRef,

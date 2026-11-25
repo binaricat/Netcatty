@@ -1125,7 +1125,7 @@ const { safeSend } = require("./ipcUtils.cjs");
 /**
  * Start a port forwarding tunnel
  */
-async function startPortForward(event, payload) {
+async function startPortForward(event, payload, { bindChannels = bindPortForwardChannels } = {}) {
   const {
     ruleId,
     tunnelId,
@@ -1307,7 +1307,7 @@ async function startPortForward(event, payload) {
       attachSharedTransportLifecycle(tunnelId, tunnelState, existingTransport.conn, sendStatus);
       let sharedResult;
       try {
-        sharedResult = await bindPortForwardChannels({
+        sharedResult = await bindChannels({
           type,
           conn: existingTransport.conn,
           tunnelId,
@@ -1696,7 +1696,7 @@ async function startPortForward(event, payload) {
       console.log(`[PortForward] SSH connection ready for tunnel ${tunnelId}`);
       const peerSingleChannelSsh = remoteSoftwareRequiresSingleChannel(conn._remoteVer);
 
-      bindPortForwardChannels({
+      bindChannels({
         type,
         conn,
         tunnelId,

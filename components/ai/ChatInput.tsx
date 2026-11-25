@@ -231,6 +231,7 @@ interface ChatInputProps {
   modelCatalogWarning?: string;
   /** Manual refresh action for the picker's refresh button (force path). */
   onRefreshModelCatalog?: () => void;
+  onModelPickerOpen?: () => void;
   /**
    * Offer the picker's "use custom model" action. Disable when the current
    * agent locks the model (e.g. managed Codex `model` config overrides the
@@ -313,6 +314,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   modelCatalogFetchedAt,
   modelCatalogWarning,
   onRefreshModelCatalog,
+  onModelPickerOpen,
   allowCustomModelEntry = true,
   selectedModelId,
   onModelSelect,
@@ -1069,7 +1071,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   // now shows build-time presets during loading, with the loading row when
   // presets are still empty (#3584).
   const hasModelPicker = hasProviderSwitcher
-    || ((modelPresets.length > 0 || modelCatalogLoading) && !!onModelSelect);
+    || ((modelPresets.length > 0 || modelCatalogLoading || !!onModelPickerOpen) && !!onModelSelect);
   const thinkingLevels = useMemo(
     () => (
       hasProviderSwitcher && onThinkingLevelChange
@@ -1591,6 +1593,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     setMenuPos({ left, bottom: window.innerHeight - rect.top + 6 });
                   }
                   setActiveMenu('model');
+                  if (!hasProviderSwitcher) onModelPickerOpen?.();
                 } else {
                   closeAllMenus();
                 }
@@ -1887,6 +1890,7 @@ function chatInputPropsAreEqual(prev: ChatInputProps, next: ChatInputProps): boo
     && prev.modelCatalogFetchedAt === next.modelCatalogFetchedAt
     && prev.modelCatalogWarning === next.modelCatalogWarning
     && prev.onRefreshModelCatalog === next.onRefreshModelCatalog
+    && prev.onModelPickerOpen === next.onModelPickerOpen
     && prev.allowCustomModelEntry === next.allowCustomModelEntry
     && prev.selectedModelId === next.selectedModelId
     && prev.onModelSelect === next.onModelSelect

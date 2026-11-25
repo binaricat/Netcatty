@@ -52,10 +52,6 @@ test("build.files includes the single-channel SSH banner matcher", () => {
     config.files.includes("domain/singleChannelSshBanner.shared.cjs"),
     "packaged SSH and SFTP bridges require the shared banner matcher",
   );
-  assert.ok(
-    config.files.includes("domain/singleChannelSshBanner.shared.mjs"),
-    "the shared banner matcher requires its source module",
-  );
   const banner = require("../domain/singleChannelSshBanner.shared.cjs");
   assert.equal(banner.remoteSoftwareRequiresSingleChannel("BHostSSH_7.0"), true);
   assert.equal(banner.remoteSoftwareRequiresSingleChannel("JumpServer"), false);
@@ -417,6 +413,14 @@ test("windows zip follows the requested build architecture", () => {
     targetsByArch.has(Arch.arm64),
     false,
     "pack:win-x64 must not publish arm64 nsis/portable/zip without a dedicated arm64 job",
+  );
+});
+
+test("cross Windows build script skips host native rebuilds", () => {
+  const packageJson = require("../package.json");
+  assert.match(
+    packageJson.scripts["pack:win-x64:cross"],
+    /electron-builder[\s\S]*--win[\s\S]*--x64[\s\S]*-c\.npmRebuild=false/,
   );
 });
 

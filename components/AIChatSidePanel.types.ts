@@ -46,8 +46,8 @@ export interface AIChatSidePanelProps {
   updateSessionTitle: (sessionId: string, title: string) => void;
   /** Issue #4015 R2: rebind a dangling chat to this panel's scope (panel action, never agent content). */
   rebindSessionScope?: (sessionId: string, scope: { type: 'terminal' | 'workspace'; targetId: string; hostIds?: string[] }) => void;
-  /** Manual durability escape hatch: export the store to a JSON file (returns the path, '' when fixed-path). */
-  exportSessionsBackup?: () => Promise<string | null>;
+  /** Manual durability escape hatch: export the store to a JSON file (returns the path, '' when fixed-path). With `sessionIds`, exports only those chats. */
+  exportSessionsBackup?: (sessionIds?: readonly string[]) => Promise<string | null>;
   /** Import sessions from a JSON export; merges by id. Returns the imported count. */
   importSessionsBackup?: () => Promise<number>;
   updateSessionExternalSessionId: (sessionId: string, externalSessionId: string | undefined) => void;
@@ -95,6 +95,7 @@ export interface AIChatSidePanelProps {
   commandTimeout?: number;
   responseIdleTimeout?: number;
   maxIterations?: number;
+  toolOutputMaxChars?: number;
 
   // Web search
   webSearchConfig?: WebSearchConfig | null;
@@ -111,10 +112,18 @@ export interface AIChatSidePanelProps {
   focusedSessionId?: string;
   /** Issue #4098 phase 2: pin the AI chat a workspace scope is anchored to. */
   onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void;
-  /** Live workspaces (with their anchor chat), used for scope titles and anchor resolution. */
-  workspaces?: Array<{ id: string; title: string; anchorChatId?: string }>;
+  /** Live workspaces (with their anchor chat and member host IDs), used for scope titles, anchor resolution, and explicit workspace rebinds. */
+  workspaces?: Array<{ id: string; title: string; anchorChatId?: string; hostIds?: string[] }>;
   /** All currently live terminal (and workspace) scope target ids. */
   liveScopeTargetIds?: Set<string>;
+  /** App-wide open terminal infos (all tabs), for the global session manager's rebind targets and dangling detection. */
+  appTerminalSessions?: Array<{
+    sessionId: string;
+    hostId: string;
+    hostname: string;
+    label: string;
+    connected: boolean;
+  }>;
 
   // Terminal session context (from parent)
   terminalSessions?: Array<{

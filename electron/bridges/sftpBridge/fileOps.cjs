@@ -665,6 +665,7 @@ function createFileOpsApi(ctx) {
         }
       }
     
+      require("./packedDownload.cjs").cancelSession(sftpId);
       // Stop file watchers and clean up temp files for this SFTP session
       try {
         fileWatcherBridge.stopWatchersForSession(sftpId, true);

@@ -38,7 +38,6 @@ export const ruCoreMessages: Messages = {
   "settings.plugins.github.error.failed": "Не удалось проверить или установить плагин. Изучите технические подробности перед повторной попыткой.",
   "settings.plugins.github.error.details": "Технические подробности",
 
-
   // Common
   'common.save': 'Сохранить',
   'common.cancel': 'Отмена',
@@ -58,7 +57,6 @@ export const ruCoreMessages: Messages = {
   'common.edit': 'Редактировать',
   'common.clear': 'Очистить',
   'common.optional': 'Необязательно',
-  'common.selectPlaceholder': 'Выбрать...',
   'common.add': 'Добавить',
   'common.rename': 'Переименовать',
   'common.refresh': 'Обновить',
@@ -97,11 +95,9 @@ export const ruCoreMessages: Messages = {
   'field.label': 'Метка',
   'field.type': 'Тип',
   'auth.keyType': 'Тип {type}',
-  'auth.showAllKeys': 'Показать все ключи',
 
   // Dialogs / prompts
   'confirm.deleteHost': 'Удалить хост "{name}"?',
-  'confirm.deleteIdentity': 'Удалить идентификатор "{name}"?',
   'confirm.removeProvider': 'Удалить провайдера "{name}"?',
   'confirm.closeBusyTerminal.title': 'Подтвердите закрытие',
   'confirm.closeBusyTerminal.message': 'Процесс "{command}" всё ещё выполняется и будет завершён.',
@@ -359,7 +355,6 @@ export const ruCoreMessages: Messages = {
   'tray.status.inactive': 'Неактивно',
   'tray.status.error': 'Ошибка',
   'tray.status.unknown': 'Неизвестно',
-  'tray.recentHosts': 'Недавние хосты',
   'tray.empty.title': 'Пока здесь ничего нет',
   'tray.empty.subtitle': 'Подключитесь к серверу, они по вам скучают 🚀',
   'tray.quit': 'Выйти из Netcatty',
@@ -418,9 +413,6 @@ export const ruCoreMessages: Messages = {
   'update.downloadFailed.message': 'Не удалось скачать обновление. Вы можете скачать его вручную.',
   'update.needsSave.title': 'Несохранённые изменения',
   'update.needsSave.message': 'Сначала сохраните открытые редакторы, затем снова нажмите «Перезапустить сейчас», чтобы установить обновление.',
-  'update.openReleases': 'Открыть релизы',
-  'update.remindLater': 'Напомнить позже',
-  'update.skipVersion': 'Пропустить эту версию',
 
   // Settings > Appearance
   'settings.appearance.uiTheme': 'Тема интерфейса',
@@ -840,6 +832,8 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.connection.temporaryLegacyAlgorithms.desc': 'SSH-подключения без сохранённого хоста, включая запуск в стиле PuTTY и быстрое подключение, предлагают те же устаревшие алгоритмы, что и настройка хоста. Сохранённые хосты используют свою настройку. По умолчанию выключено: у этих алгоритмов есть известные слабости.',
   'settings.terminal.connection.temporaryNetworkDeviceMode': 'Режим сетевого устройства для временных подключений',
   'settings.terminal.connection.temporaryNetworkDeviceMode.desc': 'SSH-подключения без сохранённого хоста, включая внешний запуск и быстрое подключение, открываются в режиме сетевого устройства. Сохранённые хосты и группы сохраняют свой тип устройства. По умолчанию выключено.',
+  'settings.terminal.connection.sshAutoReconnectInterval': 'Интервал переподключения SSH (секунды)',
+  'settings.terminal.connection.sshAutoReconnectInterval.desc': 'Ожидание между попытками: 5–3600 секунд (по умолчанию 5). Изменение применяется к следующему ожиданию; уже запущенный таймер не меняется.',
   'settings.terminal.connection.keepaliveInterval': 'Интервал keepalive',
   'settings.terminal.connection.keepaliveInterval.desc': 'Как часто (в секундах) отправлять keepalive-пакеты на уровне SSH. Установите 0, чтобы отключить глобально. Учтите, что отдельные хосты могут переопределять это значение в своих настройках.',
   'settings.terminal.connection.keepaliveCountMax': 'Макс. число пропущенных keepalive',
@@ -958,6 +952,7 @@ export const ruCoreMessages: Messages = {
   'settings.shortcuts.binding.close-tab': 'Закрыть вкладку',
   'settings.shortcuts.binding.close-session': 'Закрыть панель сессии',
   'settings.shortcuts.binding.new-tab': 'Новая локальная вкладка',
+  'settings.shortcuts.binding.reopen-closed-tab': 'Повторно открыть закрытую вкладку',
   'settings.shortcuts.binding.copy': 'Копировать из терминала',
   'settings.shortcuts.binding.paste': 'Вставить в терминал',
   'settings.shortcuts.binding.paste-selection': 'Вставить выделение в терминал',
@@ -997,8 +992,6 @@ export const ruCoreMessages: Messages = {
   'settings.shortcuts.binding.sftp-navigate-to': 'Перейти в выбранную директорию',
 
   // Context menus / common actions
-  'action.newHost': 'Новый хост',
-  'action.newSubfolder': 'Новая подпапка',
   'action.copyPublicKey': 'Копировать публичный ключ',
   'action.keyExport': 'Экспорт ключа',
   'action.edit': 'Редактировать',
@@ -1188,12 +1181,9 @@ export const ruCoreMessages: Messages = {
   "settings.plugins.manager.remove": "Удалить",
   "settings.plugins.manager.removeNote": "Удаление очищает код пакета и локальные данные KV. Настройки пользователя, секреты и данные синхронизации сохраняются.",
   "settings.plugins.permissions.statusUnknown": "Состояние неизвестно",
-  "plugins.sidebar.extensions": "Страницы расширений",
   "plugins.sidebar.selectTerminal": "Сначала выберите открытый терминал.",
   "plugins.sidebar.loading": "Загрузка страницы расширения…",
   "plugins.vault.loading": "Загрузка страницы плагина…",
-  "plugins.vault.extensions": "Расширения",
-  "plugins.vault.back": "К хостам",
   "plugins.interaction.title": "Запрос плагина",
   "plugins.interaction.sharing": "Переданный текст доступен плагину и его разрешённым возможностям, включая сеть. Чтение не разрешает новый сетевой адрес.",
   "plugins.interaction.input": "Ввести текст",
@@ -1338,6 +1328,7 @@ export const ruCoreMessages: Messages = {
   'plugins.hostActions.selectionNote': 'Передаются только метаданные выбранных хостов: сохранённые имена, адреса, пользователи, протоколы, группы и теги. Группа включает только выбранные сейчас хосты. Дальнейшие запросы изменения или подключения зависят от настроек разрешений плагина.',
   'plugins.hostActions.create': 'Проверить черновик хоста',
   'plugins.hostActions.edit': 'Проверить изменения хоста',
+  'plugins.hostActions.streamNote': 'Разрешить этому плагину отправлять и получать данные по указанному адресу через выбранный SSH-сервер. Адреса разрешаются на этом сервере. Это может читать или изменять данные базы данных. Терминал и стартовые скрипты не запускаются. Пароли и ключи SSH остаются в приложении. Выберите SSH-сервер для продолжения.',
   'plugins.hostActions.connect': 'Подтвердить подключение',
   'plugins.hostActions.fieldDiff': 'Изменения для сохранения',
   'plugins.hostActions.defaultsWarning': 'Применяются сохранённые настройки подключения. Смена группы может изменить унаследованные настройки входа, прокси и скрипты.',

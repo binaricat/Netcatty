@@ -3,8 +3,9 @@ import type { TerminalSession } from './models';
 /**
  * Session fields that affect terminal pane React trees (xterm host, layout,
  * connect/startup chrome). Presentation-only fields used by TopTabs
- * (`dynamicTitle`, `codingCliProviderId`) are intentionally ignored so title
- * churn does not invalidate TerminalLayer / TerminalPanesHost memoization.
+ * (`dynamicTitle`, `promptHostname`, `codingCliProviderId`) are intentionally
+ * ignored so title churn does not invalidate TerminalLayer /
+ * TerminalPanesHost memoization.
  *
  * Keep this list aligned with props TerminalPane passes into `<Terminal />`.
  */

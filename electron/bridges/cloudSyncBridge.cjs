@@ -84,8 +84,8 @@ const readExistingByteLengthStrict = async (client, path) => {
 };
 
 const readRemoteText = async (client, path) => {
-  const remote = await client.getFileContents(path, { format: "text" });
-  return String(remote ?? "");
+  const remote = await client.getFileContents(path, { format: "text", details: true });
+  return { text: String(remote.data ?? ""), etag: remote.headers.etag || undefined };
 };
 
 const putWebdavFileReplacing = async (client, path, bodyBuffer) => {
@@ -105,9 +105,9 @@ const putWebdavFileReplacing = async (client, path, bodyBuffer) => {
       overwrite: true,
     });
     await client.moveFile(tmpPath, path, { overwrite: true });
-    const movedText = await readRemoteText(client, path);
-    if (remoteMatchesUploadedBody(movedText, bodyBuffer)) {
-      return;
+    const moved = await readRemoteText(client, path);
+    if (remoteMatchesUploadedBody(moved.text, bodyBuffer)) {
+      return moved.etag;
     }
   } catch {
     // fall through to padded in-place PUT
@@ -120,9 +120,9 @@ const putWebdavFileReplacing = async (client, path, bodyBuffer) => {
   for (let attempt = 0; attempt < 3; attempt++) {
     const payload = padBodyToAtLeast(bodyBuffer, minLen);
     await client.putFileContents(path, payload, { overwrite: true });
-    let remoteText = "";
+    let remote;
     try {
-      remoteText = await readRemoteText(client, path);
+      remote = await readRemoteText(client, path);
     } catch (error) {
       throw new Error(
         `WebDAV upload verification failed: could not re-read file (${
@@ -130,10 +130,10 @@ const putWebdavFileReplacing = async (client, path, bodyBuffer) => {
         })`
       );
     }
-    if (remoteMatchesUploadedBody(remoteText, bodyBuffer)) {
-      return;
+    if (remoteMatchesUploadedBody(remote.text, bodyBuffer)) {
+      return remote.etag;
     }
-    minLen = Math.max(minLen, Buffer.byteLength(remoteText, "utf8"), bodyBuffer.length);
+    minLen = Math.max(minLen, Buffer.byteLength(remote.text, "utf8"), bodyBuffer.length);
   }
   throw new Error(
     "WebDAV upload verification failed: remote file still does not match uploaded body after padded PUT"
@@ -362,23 +362,29 @@ const handleWebdavUpload = async (config, syncedFile) => {
     const client = await buildWebdavClient(config);
     const path = getWebdavPath();
     const body = serializeSyncedFileBody(syncedFile);
-    await putWebdavFileReplacing(client, path, body);
-    return { resourceId: path };
+    const etag = await putWebdavFileReplacing(client, path, body);
+    return { resourceId: path, etag };
   } catch (error) {
     throw wrapWebdavError("upload", error, config);
   }
 };
 
-const handleWebdavDownload = async (config) => {
+const handleWebdavDownload = async (config, etag) => {
   try {
     const client = await buildWebdavClient(config);
     const path = getWebdavPath();
-    const exists = await client.exists(path);
-    if (!exists) return { syncedFile: null };
-    const data = await client.getFileContents(path, { format: "text" });
-    if (!data) return { syncedFile: null };
-    return { syncedFile: parseSyncedFileJson(data) };
+    const result = await client.getFileContents(path, {
+      format: "text",
+      details: true,
+      ...(etag ? { headers: { "If-None-Match": etag } } : {}),
+    });
+    if (etag && result.status === 304) return { syncedFile: null, notModified: true };
+    return {
+      syncedFile: parseSyncedFileJson(result.data),
+      etag: result.headers.etag || undefined,
+    };
   } catch (error) {
+    if (error?.status === 404) return { syncedFile: null };
     throw wrapWebdavError("download", error, config);
   }
 };
@@ -484,7 +490,7 @@ const registerHandlers = (ipcMain, electronModule) => {
     return handleWebdavUpload(payload?.config, payload?.syncedFile);
   });
   ipcMain.handle("netcatty:cloudSync:webdav:download", async (_event, payload) => {
-    return handleWebdavDownload(payload?.config);
+    return handleWebdavDownload(payload?.config, payload?.etag);
   });
   ipcMain.handle("netcatty:cloudSync:webdav:delete", async (_event, payload) => {
     return handleWebdavDelete(payload?.config);

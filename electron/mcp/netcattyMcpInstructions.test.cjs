@@ -18,6 +18,9 @@ test("MCP server instructions route Netcatty terminal work through environment d
   assert.match(NETCATTY_MCP_SERVER_INSTRUCTIONS, /vault_hosts_list and host_open/);
   assert.match(NETCATTY_MCP_SERVER_INSTRUCTIONS, /load_netcatty_tools/);
   assert.match(NETCATTY_MCP_SERVER_INSTRUCTIONS, /15 core tools/);
+  assert.match(NETCATTY_MCP_SERVER_INSTRUCTIONS, /load_netcatty_tools: sessions,/);
+  assert.match(NETCATTY_MCP_SERVER_INSTRUCTIONS, /disconnected in-scope sessions, load sessions/);
+  assert.match(NETCATTY_MCP_SERVER_INSTRUCTIONS, /session_reconnect\/session_recover instead of host_open \(creates a new tab\)/);
 });
 
 test("stdio MCP server publishes the routing instructions during initialization", () => {

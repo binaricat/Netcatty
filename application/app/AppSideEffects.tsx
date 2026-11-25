@@ -47,7 +47,7 @@ import { materializeHostProxyProfile } from '../../domain/proxyProfiles';
 import { useVaultHostDeletion } from '../state/useVaultHostDeletion';
 import { buildSshDeepLinkConnectionHost, buildSshDeepLinkEphemeralHost, buildSshDeepLinkEphemeralHostFromSaved, buildSshDeepLinkHostDraft, findSshDeepLinkHost, parseSshDeepLink } from '../../domain/sshDeepLink';
 import { buildTelnetDeepLinkConnectionHost, buildTelnetDeepLinkEphemeralHostFromSaved, buildTelnetDeepLinkOpenHost, findTelnetDeepLinkHost, materializeTelnetDeepLinkMatchHost, parseTelnetDeepLink } from '../../domain/telnetDeepLink';
-import { buildJmsDeepLinkEphemeralHost, isSupportedJmsProtocol, parseJmsDeepLink } from '../../domain/jmsDeepLink';
+import { buildJmsDeepLinkEphemeralHost, parseJmsDeepLinkResult } from '../../domain/jmsDeepLink';
 import { applyEphemeralHostDistroUpdate, applyEphemeralHostsUpdate, splitHostsUpdateByEphemeral } from '../../domain/ephemeralHosts';
 import { prepareConnectionHost, temporaryConnectionPrepareOptions } from '../../domain/legacyAlgorithms';
 import { resolveHostAuth } from '../../domain/sshAuth';
@@ -104,7 +104,7 @@ import { collectSnippetDeleteIds } from '../../domain/snippetSelection.ts';
 import { shouldOpenLocalTerminalOnStartup, resolveStartupLandingSetting } from '../../domain/startupLanding';
 import { createOpenTerminalQueue } from './openTerminalQueue';
 import { useAppStartupEffects } from './useAppStartupEffects';
-import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, handleFidoPromptSubmitImpl, handleFidoPromptCancelImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, startRestoredSessionConnectionLogImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
+import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, handleFidoPromptSubmitImpl, handleFidoPromptCancelImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, moveSessionToNewWindowImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, startRestoredSessionConnectionLogImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
 
 type OpenSessionInNewWindowPayload = {
   title?: string;
@@ -264,6 +264,7 @@ export function AppSideEffects() {
     closeSession,
     closeSessions,
     closeWorkspace,
+    reopenLastClosedTab,
     updateSessionStatus,
     createWorkspaceWithHosts,
     createWorkspaceFromTargets,
@@ -283,6 +284,7 @@ export function AppSideEffects() {
     createSessionFromCloneSource,
     getSessionRestoreCwd,
     renameSessionInline,
+    setSessionPoppedOut,
   } = sessionState;
 
   // Presence-only list: keystrokes must not rebuild App domains / TopTabs structure.
@@ -292,6 +294,8 @@ export function AppSideEffects() {
     () => new Map(hosts.map((host) => [host.id, host])),
     [hosts],
   );
+  const hostByIdRef = useRef(hostById);
+  hostByIdRef.current = hostById;
   const terminalHosts = useMemo(
     () => (ephemeralHosts.length > 0 ? [...hosts, ...ephemeralHosts] : hosts),
     [hosts, ephemeralHosts],
@@ -604,6 +608,7 @@ export function AppSideEffects() {
       sessionId,
       sessions,
       setActiveTabId,
+      setSessionPoppedOut,
       setWorkspaceFocusedSession,
       getActiveTabId: () => activeTabStore.getActiveTabId(),
       netcattyBridge,
@@ -1027,6 +1032,24 @@ export function AppSideEffects() {
 
   const copySessionToNewWindowWithCurrentShell = useCallback((sessionId: string) => { return copySessionToNewWindowWithCurrentShellImpl(() => ({ classifyLocalShellType, discoveredShells, netcattyBridge, resolveShellSetting, sessions, terminalSettings, t, toast }), sessionId); }, [sessions, terminalSettings, discoveredShells, t]);
 
+  const moveSessionToNewWindow = useCallback((sessionId: string) => {
+    return moveSessionToNewWindowImpl(() => ({
+      getActiveTabId: () => activeTabStore.getActiveTabId(),
+      getOrderedTabs: () => orderedTabsRef.current,
+      netcattyBridge,
+      sessions: Array.from(sessionByIdRef.current.values()),
+      setActiveTabId,
+      setSessionPoppedOut,
+      t,
+      toast,
+    }), sessionId);
+  }, [setActiveTabId, setSessionPoppedOut, t]);
+
+  // A tab moved to its own window returns to the tab bar when that window closes.
+  useEffect(() => netcattyBridge.get()?.onTerminalPopupAttachClosed?.(({ sessionId }) => {
+    setSessionPoppedOut(sessionId, false);
+  }), [setSessionPoppedOut]);
+
   const closeTabKeyStr = useMemo(() => {
     if (hotkeyScheme === 'disabled') return null;
     const closeTabBinding = keyBindings.find((binding) => binding.action === 'closeTab');
@@ -1108,12 +1131,14 @@ export function AppSideEffects() {
       fromEditorTabId,
       handleOpenSettingsRef,
       handleRequestCloseEditorTabRef,
+      hostsById: hostByIdRef.current,
       isEditorTabId,
       isPluginViewTabId,
       isQuickSwitcherOpen: isQuickSwitcherOpenRef.current,
       lastMoveFocusTimeRef,
       moveFocusInWorkspace,
       orderedTabs: orderedTabsRef.current,
+      reopenLastClosedTab,
       resolveCloseIntent,
       resolveSnippetsShortcutIntent,
       sessions: sessionsRef.current,
@@ -1145,6 +1170,7 @@ export function AppSideEffects() {
     closePluginViewTab,
     closeSession,
     closeWorkspace,
+    reopenLastClosedTab,
     createLocalTerminalWithCurrentShell,
     splitSessionWithCurrentShell,
     moveFocusInWorkspace,
@@ -1734,16 +1760,16 @@ export function AppSideEffects() {
   const _processJmsDeepLink = useEffectEvent((payload: { url?: string }) => {
     startupLaunchIntentReceivedRef.current = true;
     const rawUrl = payload?.url || '';
-    const target = parseJmsDeepLink(rawUrl);
-    if (!target) {
-      toast.warning(t('deepLink.jms.invalid'));
+    const result = parseJmsDeepLinkResult(rawUrl);
+    if (result.ok === false) {
+      if (result.reason === 'unsupported_protocol') {
+        toast.warning(t('deepLink.jms.unsupported', { protocol: result.protocol }));
+      } else {
+        toast.warning(t('deepLink.jms.invalid'));
+      }
       return;
     }
-    if (!isSupportedJmsProtocol(target.protocol)) {
-      toast.warning(t('deepLink.jms.unsupported', { protocol: target.protocol }));
-      return;
-    }
-    const ephemeralHost = buildJmsDeepLinkEphemeralHost(target, {
+    const ephemeralHost = buildJmsDeepLinkEphemeralHost(result.target, {
       id: crypto.randomUUID(),
       now: Date.now(),
     });
@@ -2071,6 +2097,7 @@ export function AppSideEffects() {
       duplicateSessionWithCurrentShell,
       copyWorkspaceWithCurrentShell,
       copySessionToNewWindowWithCurrentShell,
+      moveSessionToNewWindow,
       createWorkspaceFromTargets: createWorkspaceFromEffectiveTargets,
       createWorkspaceWithHosts: createWorkspaceWithEffectiveHosts,
       handleConnectSerial,
@@ -2149,6 +2176,7 @@ export function AppSideEffects() {
     duplicateSessionWithCurrentShell,
     copyWorkspaceWithCurrentShell,
     copySessionToNewWindowWithCurrentShell,
+    moveSessionToNewWindow,
     createWorkspaceFromEffectiveTargets,
     createWorkspaceWithEffectiveHosts,
     handleConnectSerial,

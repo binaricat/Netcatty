@@ -8,6 +8,22 @@ const OSC_CONTROL_PATTERN = new RegExp(
   "gu",
 );
 const MAX_PROMPT_SECURITY_TAIL_CHARS = 2_048;
+const PROMPT_MARKER_LINE_PATTERN = /^[#$%]$/u;
+const BRACKETED_PROMPT_IDENTITY_PATTERN =
+  /^(?:\([^()\r\n]+\)\s+)?\[([^\s@\]]+)@([^\s\]:#$%]+)(?:\s+[^\]\r\n]+)?\](?:[$#%]|\s+[A-Za-z][A-Za-z0-9_.-]{0,31}\s*=\s*(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d))?$/u;
+const SPACED_PROMPT_IDENTITY_PATTERN =
+  /^#\s+([^\s@]+)\s+@\s+([^\s\]]+)/u;
+const POSIX_PROMPT_IDENTITY_PATTERN =
+  /^(?:\([^()\r\n]+\)\s+)?([^\s@():\]]+)@([^\s\]:#$%]+)(?::[^\r\n#$%]*)?[$#%]?$/u;
+const ZSH_PROMPT_IDENTITY_PATTERN =
+  /^(?:\([^()\r\n]+\)\s+)?([^\s@]+)@([^\s:%#$]+)\s+[^\s%#$][^%#$\r\n]*\s+[#$%]$/u;
+const ALPINE_PROMPT_IDENTITY_PATTERN =
+  /^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?:~(?:\/[^#$>\\\r\n]*)?|\/[^#$>\\\r\n]*)[#$]?$/u;
+const MACOS_ROOT_PROMPT_IDENTITY_PATTERN =
+  /^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?:~|\/[^#$>\\\s]*)\s+[A-Za-z0-9_.-]+[#$]?$/u;
+const JUMP_SERVER_MENU_PROMPT_PATTERN = /^(?:Opt|\[Host\])>$/u;
+const PROMPT_HOST_PATTERN =
+  /^(?:\[[A-Fa-f0-9:.]+\]|[A-Za-z0-9_][A-Za-z0-9_.-]*)$/u;
 
 const SENSITIVE_ENGLISH_LABEL = [
   String.raw`pass(?:word|phrase|code)`,
@@ -141,6 +157,68 @@ function isPlausibleShellPromptBody(body) {
   return /^[a-z0-9_.-]+$/u.test(trimmed);
 }
 
+function promptHostnameFromLine(line) {
+  const text = String(line || "");
+  for (const [pattern, hostnameGroup] of [
+    [BRACKETED_PROMPT_IDENTITY_PATTERN, 2],
+    [SPACED_PROMPT_IDENTITY_PATTERN, 2],
+    [POSIX_PROMPT_IDENTITY_PATTERN, 2],
+    [ZSH_PROMPT_IDENTITY_PATTERN, 2],
+    [MACOS_ROOT_PROMPT_IDENTITY_PATTERN, 1],
+    [ALPINE_PROMPT_IDENTITY_PATTERN, 1],
+  ]) {
+    const match = pattern.exec(text);
+    if (!match) continue;
+    const hostname = match[hostnameGroup].replace(/[.,;]+$/u, "");
+    if (PROMPT_HOST_PATTERN.test(hostname)) return hostname;
+  }
+  return null;
+}
+
+function isJumpServerMenuPrompt(value) {
+  const line = lastLogicalLine(value).trim();
+  if (!line) return false;
+  return JUMP_SERVER_MENU_PROMPT_PATTERN.test(line);
+}
+
+function extractTerminalPromptHostname(value) {
+  const plain = stripTerminalControlSequences(value);
+  if (!plain) return null;
+  if (isSensitiveTerminalChallenge(plain)) return null;
+
+  const lines = splitTerminalLogicalLines(plain);
+  const lastLineIndex = lines.length - 1;
+  let markerIndex = lastLineIndex;
+  while (markerIndex >= 0 && lines[markerIndex].trim().length === 0) {
+    markerIndex -= 1;
+  }
+  if (markerIndex < 0) return null;
+
+  const hasTrailingLineBreaks = markerIndex < lastLineIndex;
+  const markerLine = lines[markerIndex].trim();
+  if (!PROMPT_MARKER_LINE_PATTERN.test(markerLine)) {
+    if (hasTrailingLineBreaks) return null;
+    return /[#$%]$/u.test(markerLine)
+      ? promptHostnameFromLine(markerLine)
+      : null;
+  }
+
+  let identityIndex = markerIndex - 1;
+  while (
+    identityIndex >= 0
+    && (
+      lines[identityIndex].trim().length === 0
+      || lines[identityIndex].trim() === markerLine
+    )
+  ) {
+    identityIndex -= 1;
+  }
+  if (identityIndex < 0) return null;
+  const identityLine = lines[identityIndex].trim();
+  if (isSensitiveTerminalChallenge(identityLine)) return null;
+  return promptHostnameFromLine(identityLine);
+}
+
 function hasTypedInputAfterConfirmedPrompt(line, options = {}) {
   for (let i = 0; i < line.length - 1; i += 1) {
     const ch = line[i];
@@ -170,4 +248,14 @@ function isUntrustedTerminalInputPrompt(value, options = {}) {
   return !isConfirmedTerminalShellPrompt(value, options);
 }
 
-module.exports = { isUntrustedTerminalInputPrompt };
+module.exports = {
+  MAX_PROMPT_SECURITY_TAIL_CHARS,
+  stripTerminalControlSequences,
+  isSensitiveTerminalChallenge,
+  isConfirmedTerminalShellPrompt,
+  splitTerminalLogicalLines,
+  isBashPs2ContinuationLine,
+  isUntrustedTerminalInputPrompt,
+  isJumpServerMenuPrompt,
+  extractTerminalPromptHostname,
+};

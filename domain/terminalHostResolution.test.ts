@@ -255,6 +255,63 @@ test("resolveTerminalSessionHost preserves the session local-shell snapshot over
   assert.equal(resolved.localStartDir, "C:/project");
 });
 
+test("resolveTerminalSessionHost keeps startupCommand only when the saved local host matches the session launch target", () => {
+  const savedLocalHost: Host = {
+    id: "target",
+    label: "Project Shell",
+    hostname: "localhost",
+    username: "",
+    protocol: "local",
+    tags: ["local"],
+    os: "macos",
+    localShell: "/bin/zsh",
+    localShellArgs: ["-l"],
+    localStartDir: "/workspace/app",
+    startupCommand: "npm run dev",
+    startupCommandRunMode: "lineDelay",
+  };
+  const sessionSnapshot: TerminalSession = {
+    ...baseSession,
+    hostname: "localhost",
+    username: "local",
+    port: undefined,
+    protocol: "local",
+    localShell: "/bin/zsh",
+    localShellArgs: ["-l"],
+    localStartDir: "/workspace/app",
+  };
+
+  const matching = resolveTerminalSessionHost({
+    session: sessionSnapshot,
+    hosts: [savedLocalHost],
+    groupConfigs: [],
+    proxyProfiles,
+    localOs: "macos",
+  });
+  assert.equal(matching.startupCommand, "npm run dev");
+  assert.equal(matching.startupCommandRunMode, "lineDelay");
+
+  const mismatches: Array<[string, Partial<Host>]> = [
+    ["localShell", { localShell: "/bin/bash" }],
+    ["localShellArgs", { localShellArgs: ["--norc"] }],
+    ["localStartDir", { localStartDir: "/workspace/other" }],
+    ["protocol", { protocol: "ssh", hostname: "prod.example.com", username: "ops" }],
+  ];
+  for (const [label, patch] of mismatches) {
+    const resolved = resolveTerminalSessionHost({
+      session: sessionSnapshot,
+      hosts: [{ ...savedLocalHost, ...patch }],
+      groupConfigs: [],
+      proxyProfiles,
+      localOs: "macos",
+    });
+    assert.equal(resolved.localShell, "/bin/zsh", label);
+    assert.equal(resolved.localStartDir, "/workspace/app", label);
+    assert.equal(resolved.startupCommand, undefined, `${label} should drop edited host startupCommand`);
+    assert.equal(resolved.startupCommandRunMode, undefined, `${label} should drop edited host startupCommandRunMode`);
+  }
+});
+
 test("resolveTerminalSessionHost falls back to the saved local shell when the session has no snapshot", () => {
   const host: Host = {
     id: "target",

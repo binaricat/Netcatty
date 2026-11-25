@@ -143,6 +143,7 @@ function createPreloadApi(ctx) {
     return () => ipcRenderer.removeListener("netcatty:plugins:ai-host-request", listener);
   },
   setPluginInteractionReady: (ready) => ipcRenderer.invoke("netcatty:plugins:interaction-ready", { ready }),
+  openPluginHostStream: (payload) => ipcRenderer.invoke("netcatty:plugins:host-stream-open", payload),
   respondPluginInteraction: (response) => ipcRenderer.invoke("netcatty:plugins:interaction-response", response),
   onPluginInteraction: (callback) => {
     const listener = (_event, payload) => callback(payload);
@@ -567,6 +568,9 @@ function createPreloadApi(ctx) {
   openTerminalPopup: async (payload) => {
     return ipcRenderer.invoke("netcatty:window:openTerminalPopup", payload);
   },
+  closeTerminalPopup: async (popupId) => {
+    return ipcRenderer.invoke("netcatty:window:closeTerminalPopup", popupId);
+  },
   logDiagnostic: async (payload) => {
     return ipcRenderer.invoke("netcatty:diagnostics:log", payload);
   },
@@ -733,14 +737,26 @@ function createPreloadApi(ctx) {
         : undefined,
       cwd: context?.cwd === null ? null : typeof context?.cwd === "string" ? context.cwd : undefined,
       title: context?.title === null ? null : typeof context?.title === "string" ? context.title : undefined,
+      connectionLogDelta: typeof context?.connectionLogDelta === "string" ? context.connectionLogDelta : undefined,
       authorization,
     }),
   markAttachPopupClosePrepared: (sessionId, authorization) =>
     ipcRenderer.invoke("netcatty:terminal:markAttachClosePrepared", { sessionId, authorization }),
+  reportTerminalAttachReady: (sessionId, authorization) =>
+    ipcRenderer.invoke("netcatty:terminal:reportAttachReady", { sessionId, authorization }),
+  reportTerminalAttachFailed: (sessionId, authorization, error) =>
+    ipcRenderer.invoke("netcatty:terminal:reportAttachFailed", { sessionId, authorization, error }),
+  getDetachedTerminalReplayData: (sessionId) =>
+    ipcRenderer.invoke("netcatty:terminal:getDetachedReplayData", { sessionId }),
   onTerminalPopupPrepareClose: (cb) => {
     const handler = (_event, payload) => cb?.(payload);
     ipcRenderer.on("netcatty:terminal-popup:prepare-close", handler);
     return () => ipcRenderer.removeListener("netcatty:terminal-popup:prepare-close", handler);
+  },
+  onTerminalPopupAttachClosed: (cb) => {
+    const handler = (_event, payload) => cb?.(payload);
+    ipcRenderer.on("netcatty:terminal-popup:attach-closed", handler);
+    return () => ipcRenderer.removeListener("netcatty:terminal-popup:attach-closed", handler);
   },
   onTerminalSessionApplySnapshot: (cb) => {
     const handler = (_event, payload) => {
@@ -999,8 +1015,10 @@ function createPreloadApi(ctx) {
   closeSftp: async (sftpId) => {
     return ipcRenderer.invoke("netcatty:sftp:close", { sftpId });
   },
-  retainSftpTransferSession: async (sftpId, leaseId) => {
-    return ipcRenderer.invoke("netcatty:transfer:retain-sftp-session", { sftpId, leaseId });
+  retainSftpTransferSession: async (sftpId, leaseId, options) => {
+    return ipcRenderer.invoke("netcatty:transfer:retain-sftp-session", {
+      sftpId, leaseId, ...(options?.cancelOnOwnerGone === true ? { cancelOnOwnerGone: true } : {}),
+    });
   },
   releaseSftpTransferSession: async (sftpId, leaseId) => {
     return ipcRenderer.invoke("netcatty:transfer:release-sftp-session", { sftpId, leaseId });
@@ -1029,6 +1047,19 @@ function createPreloadApi(ctx) {
   createSftpArchive: async (sftpId, options, encoding) => {
     return ipcRenderer.invoke("netcatty:sftp:createArchive", { sftpId, options, encoding });
   },
+  registerPackedDownload: (metadata) => ipcRenderer.invoke("netcatty:sftp:registerPacked", metadata),
+  finishPackedDownload: (transferId, outcome) => ipcRenderer.invoke("netcatty:sftp:finishPacked", { transferId, ...outcome }),
+  listActivePackedDownloads: () => ipcRenderer.invoke("netcatty:sftp:listActivePacked"),
+  downloadPackedSftp: async (options, onProgress) => {
+    const channel = "netcatty:sftp:packedProgress";
+    const listener = (_event, update) => {
+      if (update?.transferId === options.transferId) onProgress({ phase: update.phase, bytes: update.bytes });
+    };
+    if (onProgress) ipcRenderer.on(channel, listener);
+    try { return await ipcRenderer.invoke("netcatty:sftp:downloadPacked", options); }
+    finally { if (onProgress) ipcRenderer.removeListener(channel, listener); }
+  },
+  cancelPackedSftp: (transferId) => ipcRenderer.invoke("netcatty:sftp:cancelPacked", { transferId }),
   getSftpHomeDir: async (sftpId, encoding) => {
     return ipcRenderer.invoke("netcatty:sftp:homeDir", { sftpId, encoding });
   },
@@ -1417,8 +1448,8 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:cloudSync:webdav:initialize", { config }),
   cloudSyncWebdavUpload: (config, syncedFile) =>
     ipcRenderer.invoke("netcatty:cloudSync:webdav:upload", { config, syncedFile }),
-  cloudSyncWebdavDownload: (config) =>
-    ipcRenderer.invoke("netcatty:cloudSync:webdav:download", { config }),
+  cloudSyncWebdavDownload: (config, etag) =>
+    ipcRenderer.invoke("netcatty:cloudSync:webdav:download", { config, etag }),
   cloudSyncWebdavDelete: (config) =>
     ipcRenderer.invoke("netcatty:cloudSync:webdav:delete", { config }),
 
@@ -2226,8 +2257,8 @@ function createPreloadApi(ctx) {
       clientUserMessageId,
     });
   },
-  aiSdkAgentListModels: async (sdkBackend, cwd, providerId, chatSessionId, agentEnv, agentCommand, codexRuntime, force) => {
-    return ipcRenderer.invoke("netcatty:ai:sdk-agent:list-models", { sdkBackend, cwd, providerId, chatSessionId, agentEnv, agentCommand, codexRuntime, force });
+  aiSdkAgentListModels: async (sdkBackend, cwd, providerId, chatSessionId, agentEnv, agentCommand, codexRuntime, force, cacheOnly) => {
+    return ipcRenderer.invoke("netcatty:ai:sdk-agent:list-models", { sdkBackend, cwd, providerId, chatSessionId, agentEnv, agentCommand, codexRuntime, force, cacheOnly });
   },
   codexAppServerGetStatus: async (agentCommand, agentEnv) => {
     return ipcRenderer.invoke("netcatty:ai:codex-app-server:status", { agentCommand, agentEnv });
@@ -2319,27 +2350,6 @@ function createPreloadApi(ctx) {
     };
     ipcRenderer.on("netcatty:ai:stream:error", handler);
     return () => ipcRenderer.removeListener("netcatty:ai:stream:error", handler);
-  },
-  onAiAgentStdout: (agentId, cb) => {
-    const handler = (_event, payload) => {
-      if (payload.agentId === agentId) cb(payload.data);
-    };
-    ipcRenderer.on("netcatty:ai:agent:stdout", handler);
-    return () => ipcRenderer.removeListener("netcatty:ai:agent:stdout", handler);
-  },
-  onAiAgentStderr: (agentId, cb) => {
-    const handler = (_event, payload) => {
-      if (payload.agentId === agentId) cb(payload.data);
-    };
-    ipcRenderer.on("netcatty:ai:agent:stderr", handler);
-    return () => ipcRenderer.removeListener("netcatty:ai:agent:stderr", handler);
-  },
-  onAiAgentExit: (agentId, cb) => {
-    const handler = (_event, payload) => {
-      if (payload.agentId === agentId) cb(payload.code);
-    };
-    ipcRenderer.on("netcatty:ai:agent:exit", handler);
-    return () => ipcRenderer.removeListener("netcatty:ai:agent:exit", handler);
   },
   scriptRun: async (params) => ipcRenderer.invoke("netcatty:script:run", params),
   scriptStop: async (runId) => ipcRenderer.invoke("netcatty:script:stop", { runId }),

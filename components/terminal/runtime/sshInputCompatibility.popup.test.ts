@@ -111,6 +111,8 @@ test("attached popups retain the active mode across snapshots and return, includ
           onTerminalCwdChange: undefined, onTerminalTitleChange: undefined, terminalCwdTracker: { setRendererCwd: noop },
           flushPendingTerminalWritesBeforeHibernate: async () => true, resetTerminalLineTimestamps: noop,
           applyAuthoritativeHibernateSnapshot: noop, logger: { warn: noop },
+          finalizeTerminalLogData: () => "",
+          connectionLogBufferRef: ref({ append: noop, reset: noop }),
           getTerminalPerCharacterInput: runtimeModule.getTerminalPerCharacterInput,
           restoreTerminalPerCharacterInput: runtimeModule.restoreTerminalPerCharacterInput,
         };

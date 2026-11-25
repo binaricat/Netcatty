@@ -86,7 +86,7 @@ declare global {
       settings: { mode: 'system' | 'direct' | 'custom'; url: string; bypass: string };
     }>;
     updateTrayMenuData?(data: {
-      sessions?: Array<{ id: string; label: string; hostLabel: string; status: "connecting" | "connected" | "disconnected"; workspaceId?: string; workspaceTitle?: string }>;
+      sessions?: Array<{ id: string; label: string; hostLabel: string; status: "connecting" | "connected" | "disconnected"; workspaceId?: string; workspaceTitle?: string; aiHidden?: boolean; poppedOut?: boolean }>;
       hosts?: Array<{ id: string; label?: string; hostname?: string; group?: string; pinned?: boolean; lastConnectedAt?: number; protocol?: string }>;
       portForwardRules?: Array<{
         id: string;
@@ -115,7 +115,7 @@ declare global {
     onTrayPanelCloseRequest?(callback: () => void): () => void;
     onTrayPanelRefresh?(callback: () => void): () => void;
     onTrayPanelMenuData?(callback: (data: {
-      sessions?: Array<{ id: string; label: string; hostLabel: string; status: "connecting" | "connected" | "disconnected"; workspaceId?: string; workspaceTitle?: string }>;
+      sessions?: Array<{ id: string; label: string; hostLabel: string; status: "connecting" | "connected" | "disconnected"; workspaceId?: string; workspaceTitle?: string; aiHidden?: boolean; poppedOut?: boolean }>;
       hosts?: Array<{ id: string; label?: string; hostname?: string; group?: string; pinned?: boolean; lastConnectedAt?: number; protocol?: string }>;
       portForwardRules?: Array<{
         id: string;

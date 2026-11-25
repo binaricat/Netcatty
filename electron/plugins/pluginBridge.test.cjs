@@ -53,6 +53,12 @@ test("disabled plugin runtime keeps passive host integration channels quiet", as
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.terminalProviders)({}, {}), []);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.terminalSessionEvent)({}, {}), []);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.extensionProviders)({}, {}), []);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.themeCatalog)({}), null);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.interactionReady)({}, { ready: true }), false);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.permissionReady)({}, { ready: true }), false);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.terminalTarget)({}, { sessionId: "s1" }), null);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.aiHostReady)({}, true), false);
+  assert.equal(await ipcMain.handlers.get(CHANNELS.agentHostReady)({}, true), false);
   assert.equal(await ipcMain.handlers.get(CHANNELS.credentialCatalogUpdate)({}, { entries: [] }), 0);
   assert.equal(await ipcMain.handlers.get(CHANNELS.setScopeCatalog)({}, {}), null);
   assert.deepEqual(await ipcMain.handlers.get(CHANNELS.getScopeCatalog)({}, {}), {
@@ -61,6 +67,23 @@ test("disabled plugin runtime keeps passive host integration channels quiet", as
     session: [],
     device: [{ id: "device", label: "This device" }],
   });
+
+  // Untrusted frame on permissionReady is still rejected even when disabled.
+  await assert.rejects(
+    ipcMain.handlers.get(CHANNELS.permissionReady)({ sender: { mainFrame: {} }, senderFrame: {} }, { ready: true }),
+    /Untrusted permission UI frame/,
+  );
+
+  // Untrusted senders on disabled fallback channels are still rejected.
+  const untrustedIpc = createIpcMain();
+  registerPluginBridge(untrustedIpc, {
+    manager: null,
+    env: {},
+    isTrustedSender: () => false,
+  });
+  for (const ch of [CHANNELS.interactionReady, CHANNELS.permissionReady, CHANNELS.terminalTarget, CHANNELS.aiHostReady, CHANNELS.agentHostReady]) {
+    await assert.rejects(untrustedIpc.handlers.get(ch)({}, {}), /Untrusted plugin management sender/);
+  }
 });
 
 test("plugin management bridge fails closed when the host manager is unavailable", async () => {

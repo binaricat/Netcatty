@@ -90,8 +90,8 @@ export interface UseSftpViewFileOpsResult {
   onExtractArchiveRight: (file: SftpFileEntry, fullPath?: string) => void | Promise<void>;
   onCreateArchiveLeft: (options: SftpArchiveCreationOptions, target: SftpArchiveCreationTarget) => Promise<SftpArchiveCreationResult>;
   onCreateArchiveRight: (options: SftpArchiveCreationOptions, target: SftpArchiveCreationTarget) => Promise<SftpArchiveCreationResult>;
-  onDownloadFilesLeft: (files: SftpFileEntry[]) => void;
-  onDownloadFilesRight: (files: SftpFileEntry[]) => void;
+  onDownloadFilesLeft: (files: SftpFileEntry[], fullPaths?: string[]) => void;
+  onDownloadFilesRight: (files: SftpFileEntry[], fullPaths?: string[]) => void;
   onUploadExternalFilesLeft: (dataTransfer: DataTransfer, targetPath?: string) => void;
   onUploadExternalFilesRight: (dataTransfer: DataTransfer, targetPath?: string) => void;
   onUploadExternalFileListLeft: (fileList: FileList, targetPath?: string) => void;

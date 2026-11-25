@@ -244,6 +244,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { id: 'close-tab', action: 'closeTab', label: 'Close Tab', mac: '⌘ + W', pc: 'Ctrl + W', category: 'tabs' },
   { id: 'close-session', action: 'closeSession', label: 'Close Session Pane', mac: '⌘ + Shift + W', pc: 'Ctrl + Shift + W', category: 'tabs' },
   { id: 'new-tab', action: 'newTab', label: 'New Local Tab', mac: '⌘ + T', pc: 'Ctrl + T', category: 'tabs' },
+  { id: 'reopen-closed-tab', action: 'reopenClosedTab', label: 'Reopen Closed Tab', mac: '⌘ + Shift + T', pc: 'Ctrl + Shift + T', category: 'tabs' },
 
   // Terminal Operations
   { id: 'copy', action: 'copy', label: 'Copy from Terminal', mac: '⌘ + C', pc: 'Ctrl + Shift + C', category: 'terminal' },

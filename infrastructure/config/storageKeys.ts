@@ -1,7 +1,6 @@
 export const STORAGE_KEY_HOSTS = 'netcatty_hosts_v1';
 export const STORAGE_KEY_KEYS = 'netcatty_keys_v1';
 export const STORAGE_KEY_GROUPS = 'netcatty_groups_v1';
-export const STORAGE_KEY_CUSTOM_GROUPS = STORAGE_KEY_GROUPS;
 export const STORAGE_KEY_SNIPPETS = 'netcatty_snippets_v1';
 export const STORAGE_KEY_SNIPPET_PACKAGES = 'netcatty_snippet_packages_v1';
 export const STORAGE_KEY_NOTES = 'netcatty_notes_v1';
@@ -70,9 +69,7 @@ export const STORAGE_KEY_VAULT_SIDEBAR_WIDTH = 'netcatty_vault_sidebar_width_v1'
 export const STORAGE_KEY_VAULT_KEYS_VIEW_MODE = 'netcatty_vault_keys_view_mode_v1';
 export const STORAGE_KEY_VAULT_PROXY_PROFILES_VIEW_MODE = 'netcatty_vault_proxy_profiles_view_mode_v1';
 export const STORAGE_KEY_VAULT_SNIPPETS_VIEW_MODE = 'netcatty_vault_snippets_view_mode_v1';
-export const STORAGE_KEY_VAULT_NOTES_VIEW_MODE = 'netcatty_vault_notes_view_mode_v1';
 export const STORAGE_KEY_VAULT_NOTES_EDITOR_MODE = 'netcatty_vault_notes_editor_mode_v1';
-export const STORAGE_KEY_VAULT_NOTES_SELECTED_GROUP = 'netcatty_vault_notes_selected_group_v1';
 export const STORAGE_KEY_VAULT_NOTES_TREE_WIDTH = 'netcatty_vault_notes_tree_width_v1';
 export const STORAGE_KEY_VAULT_NOTES_FONT_FAMILY = 'netcatty_vault_notes_font_family_v1';
 export const STORAGE_KEY_VAULT_NOTES_FONT_SIZE = 'netcatty_vault_notes_font_size_v1';
@@ -141,6 +138,7 @@ export const STORAGE_KEY_SFTP_DOUBLE_CLICK_BEHAVIOR = 'netcatty_sftp_double_clic
 export const STORAGE_KEY_SFTP_AUTO_SYNC = 'netcatty_sftp_auto_sync_v1';
 export const STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES = 'netcatty_sftp_show_hidden_files_v1';
 export const STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD = 'netcatty_sftp_use_compressed_upload_v1';
+export const STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD = 'netcatty_sftp_use_packed_download_v1';
 export const STORAGE_KEY_SFTP_TRANSFER_CENTER = 'netcatty_sftp_transfer_center_v1';
 export const STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR = 'netcatty_sftp_auto_open_sidebar_v1';
 export const STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD = 'netcatty_sftp_follow_terminal_cwd_v1';
@@ -217,6 +215,7 @@ export const STORAGE_KEY_AI_COMMAND_BLOCKLIST = 'netcatty_ai_command_blocklist_v
 export const STORAGE_KEY_AI_COMMAND_TIMEOUT = 'netcatty_ai_command_timeout_v1';
 export const STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT = 'netcatty_ai_response_idle_timeout_v1';
 export const STORAGE_KEY_AI_MAX_ITERATIONS = 'netcatty_ai_max_iterations_v1';
+export const STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS = 'netcatty_ai_tool_output_max_chars_v1';
 export const STORAGE_KEY_AI_SESSION_MESSAGE_CAP = 'netcatty_ai_session_message_cap_v1';
 export const STORAGE_KEY_AI_SESSIONS = 'netcatty_ai_sessions_v1';
 /** Byte-budget overflow JSON; further chunks use suffixes _2, _3, etc. */
@@ -270,11 +269,6 @@ export const STORAGE_KEY_AI_PANEL_DIAGNOSTIC_PROFILE = 'netcatty.aiDebug.profile
 
 // SFTP Transfer Concurrency
 export const STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY = 'netcatty_sftp_transfer_concurrency_v1';
-/**
- * Legacy key only. Folder full-tree pre-scan was removed; values are ignored
- * so old localStorage / sync payloads do not resurrect a live setting.
- */
-export const STORAGE_KEY_SFTP_FOLDER_PRESCAN = 'netcatty_sftp_folder_prescan_v1';
 /** Skip files when target size + mtime already match the source (rsync-like). */
 export const STORAGE_KEY_SFTP_SKIP_UNCHANGED = 'netcatty_sftp_skip_unchanged_v1';
 /**

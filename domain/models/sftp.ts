@@ -45,7 +45,7 @@ export type TransferStatus =
 export type TransferDirection = 'upload' | 'download' | 'remote-to-remote' | 'local-copy';
 export type TransferOrigin = 'manual' | 'drag-drop' | 'editor-sync' | 'agent' | 'internal';
 export type TransferPhase = 'scanning' | 'compressing' | 'uploading' | 'transferring' | 'extracting' | 'verifying';
-export type TransferControlKind = 'stream' | 'compressed-upload';
+export type TransferControlKind = 'stream' | 'compressed-upload' | 'packed-download';
 
 export interface DirectoryResumeCheckpoint {
   /** Version 1 used a full SHA-256 digest for every appended entry. Version 2
@@ -85,6 +85,8 @@ export interface TransferTask {
   endTime?: number;
   isDirectory: boolean;
   progressMode?: 'bytes' | 'files';
+  /** A packed multi-selection reserves these sibling targets, not their shared parent. */
+  packedTargetPaths?: string[];
   childTasks?: string[]; // For directory transfers
   parentTaskId?: string;
   sourceLastModified?: number; // Cached from file list to avoid redundant stat

@@ -145,6 +145,7 @@ interface TopTabsProps {
   onCopySession: (sessionId: string) => void;
   onDuplicateSession?: (sessionId: string) => void;
   onCopySessionToNewWindow: (sessionId: string) => void;
+  onMoveSessionToNewWindow?: (sessionId: string) => void;
   onEditHost?: (host: Host) => void;
   onRenameWorkspace: (workspaceId: string) => void;
   onCopyWorkspace: (workspaceId: string) => void;
@@ -200,6 +201,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onCopySession,
   onDuplicateSession,
   onCopySessionToNewWindow,
+  onMoveSessionToNewWindow,
   onEditHost,
   onRenameWorkspace,
   onCopyWorkspace,
@@ -937,6 +939,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             onCopySession={onCopySession}
             onDuplicateSession={onDuplicateSession}
             onCopySessionToNewWindow={onCopySessionToNewWindow}
+            onMoveSessionToNewWindow={onMoveSessionToNewWindow}
             onEditHost={onEditHost}
             renderBulkCloseItems={renderBulkCloseItems}
             dynamicTabTitleMode={dynamicTabTitleMode}
@@ -1157,8 +1160,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             {/* Scrollable container */}
             <div
               ref={tabsContainerRef}
-              className="flex items-end gap-0 overflow-x-auto scrollbar-none app-drag max-w-full"
-              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+              className="top-tab-scroll-viewport min-w-0 flex items-end gap-0 overflow-x-auto scrollbar-none app-no-drag max-w-full"
+              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', ...noDragRegionStyle }}
               onClick={handleScrollableTabClick}
               onDragOver={(e) => {
                 if (hasWorkspaceSessionDrag(e.dataTransfer)) {
@@ -1187,9 +1190,10 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                   <TooltipContent>{t('topTabs.openQuickSwitcher')}</TooltipContent>
                 </Tooltip>
               )}
-              {/* Draggable spacer - fixed width handle at the end */}
-              <div className="min-w-[20px] h-7 app-drag flex-shrink-0" style={dragRegionStyle} />
             </div>
+            {/* Keep unused space and the drag handle outside the scroll viewport's exclusion. */}
+            <div className="flex-1 app-drag" style={dragRegionStyle} />
+            <div className="min-w-[20px] h-7 app-drag flex-shrink-0 self-end" style={dragRegionStyle} />
 
             {/* Right fade mask */}
             {canScrollRight && (
@@ -1326,6 +1330,7 @@ export const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean
     prev.onCopySession === next.onCopySession &&
     prev.onDuplicateSession === next.onDuplicateSession &&
     prev.onCopySessionToNewWindow === next.onCopySessionToNewWindow &&
+    prev.onMoveSessionToNewWindow === next.onMoveSessionToNewWindow &&
     prev.onEditHost === next.onEditHost &&
     prev.onAppendHostToWorkspace === next.onAppendHostToWorkspace &&
     prev.onCopyWorkspace === next.onCopyWorkspace &&

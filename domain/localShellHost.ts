@@ -22,6 +22,7 @@ export interface LocalShellHostInput {
   shellName?: string;
   shellIcon?: string;
   startDir?: string;
+  startupCommand?: string;
   group?: string;
   tags?: string[];
   notes?: string;
@@ -45,6 +46,7 @@ export const createLocalShellHost = (input: LocalShellHostInput): Host => ({
   localShellName: input.shellName?.trim() || undefined,
   localShellIcon: input.shellIcon?.trim() || undefined,
   localStartDir: input.startDir?.trim() || undefined,
+  startupCommand: input.startupCommand?.trim() ? input.startupCommand : undefined,
 });
 
 /** What an existing vault host shows as its local-shell display name. */

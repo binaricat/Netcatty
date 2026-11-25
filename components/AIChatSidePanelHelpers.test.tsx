@@ -21,6 +21,8 @@ import {
   shouldAdoptSdkCurrentModel,
   shouldLoadSdkRuntimeModels,
   shouldUseStoredAgentModel,
+  stopActiveTurnBeforeScopeRebind,
+  syncWorkspaceAnchorsForScopeRebind,
 } from './AIChatSidePanelHelpers';
 import { createRequire } from 'node:module';
 import type { AgentModelPreset, ExternalAgentConfig } from '../infrastructure/ai/types';
@@ -683,6 +685,18 @@ test('reconcileRuntimeModelWarning clears only the banner that belongs to this c
   assert.equal(reconcileRuntimeModelWarning(current, 'copilot', 'k2', false, 'warn'), current);
 });
 
+test('cacheOnly hydration in AIChatSidePanel reconciles cached refresh warnings before applying persisted models', () => {
+  const source = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
+  assert.match(
+    source,
+    /target\.codexRuntime, false, true,\s*\)\.then\(\(result\) => \{[\s\S]*?reconcileRuntimeModelWarning\([\s\S]*?Boolean\(result\.warning\)[\s\S]*?applySdkRuntimeModelCatalog\(/,
+  );
+  assert.match(
+    source,
+    /loadSdkRuntimeModelCatalog\(target, \{ recheck: true \}\)\.then\(\(catalog\) => \{\s*if \(catalog\) applySdkRuntimeModelCatalog\(target, catalog, \{ adoptCurrentModel: true \}\);/,
+  );
+});
+
 test('renderer model cache env hints cover every key the main-process catalog cache fingerprints', () => {
   // Both caches must split on the same profile-affecting environment: a key that
   // only the main process knows lets the renderer serve one profile's catalog to another.
@@ -836,4 +850,142 @@ test('Copilot successful catalog without current id replaces an unlisted saved c
   const laterFailure = appendRetainedStoredModelPreset(live.models, next, agent, true);
   assert.deepEqual(laterFailure, live.models);
   assert.equal(resolveSdkRuntimeCatalogDefaultModelId({ ...live, warning: 'unavailable' }, agent), null);
+});
+
+test('stopActiveTurnBeforeScopeRebind awaits stop for a turn with an abort controller', async () => {
+  const events: string[] = [];
+  const deps = {
+    abortControllersRef: { current: new Map([['s-1', {}]]) },
+    streamingSessionIds: new Set<string>(),
+    stopStreamingForSession: async (id: string) => {
+      await Promise.resolve();
+      events.push(`stop:${id}`);
+    },
+  };
+  await stopActiveTurnBeforeScopeRebind('s-1', deps);
+  assert.deepEqual(events, ['stop:s-1'], 'stop is awaited before the caller proceeds to the scope rewrite');
+});
+
+test('stopActiveTurnBeforeScopeRebind also triggers on the streaming set alone', async () => {
+  const events: string[] = [];
+  const deps = {
+    abortControllersRef: { current: new Map() },
+    streamingSessionIds: new Set(['s-2']),
+    stopStreamingForSession: async (id: string) => {
+      events.push(`stop:${id}`);
+    },
+  };
+  await stopActiveTurnBeforeScopeRebind('s-2', deps);
+  await stopActiveTurnBeforeScopeRebind('s-3', deps);
+  assert.deepEqual(events, ['stop:s-2'], 'idle chats skip the stop; streaming chats do not');
+});
+
+test('both panel rebind paths stop active turns before rewriting scope', () => {
+  const source = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
+  const managerStart = source.indexOf('const handleManagerRebind');
+  const managerEnd = source.indexOf('const handleManagerDelete');
+  assert.ok(managerStart !== -1 && managerEnd !== -1 && managerEnd > managerStart, 'manager rebind handler found');
+  const managerBody = source.slice(managerStart, managerEnd);
+  assert.match(managerBody, /await stopActiveTurnBeforeScopeRebind/);
+  assert.ok(
+    managerBody.indexOf('await stopActiveTurnBeforeScopeRebind') < managerBody.indexOf('rebindSessionScope(sessionId'),
+    'manager rebind awaits the stop before rebindSessionScope',
+  );
+
+  const commandStart = source.indexOf('const handleRebindChat');
+  const commandEnd = source.indexOf('// Manual durability actions');
+  assert.ok(commandStart !== -1 && commandEnd !== -1 && commandEnd > commandStart, '/rebind command handler found');
+  const commandBody = source.slice(commandStart, commandEnd);
+  assert.match(commandBody, /await stopActiveTurnBeforeScopeRebind/);
+  assert.ok(
+    commandBody.indexOf('await stopActiveTurnBeforeScopeRebind') < commandBody.indexOf('rebindSessionScope?.(target.sessionId'),
+    '/rebind awaits the stop before rebindSessionScope',
+  );
+});
+
+test('rebindSessionScope clears source workspace views, covering both panel rebind paths', () => {
+  const aiStateSource = readFileSync(new URL('../application/state/useAIState.ts', import.meta.url), 'utf8');
+  const rebindStart = aiStateSource.indexOf('const rebindSessionScope');
+  const rebindEnd = aiStateSource.indexOf('const exportSessionsBackup');
+  assert.ok(rebindStart !== -1 && rebindEnd !== -1 && rebindEnd > rebindStart, 'rebindSessionScope found');
+  const rebindBody = aiStateSource.slice(rebindStart, rebindEnd);
+  // The single shared rebind purges every source-scope view pointing at the
+  // rebound chat before (re)setting the destination view to that chat.
+  assert.match(rebindBody, /clearSessionViewsForSession\(prev, sessionId, scopeKey\)/);
+  assert.match(rebindBody, /setSessionView\(/);
+
+  // Both the global manager and the /rebind <n> command delegate to that shared
+  // rebindSessionScope, so the source-view clear applies identically to both.
+  const panelSource = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
+  const managerStart = panelSource.indexOf('const handleManagerRebind');
+  const managerEnd = panelSource.indexOf('const handleManagerDelete');
+  const managerBody = panelSource.slice(managerStart, managerEnd);
+  assert.match(managerBody, /rebindSessionScope\(sessionId/);
+  const commandStart = panelSource.indexOf('const handleRebindChat');
+  const commandEnd = panelSource.indexOf('// Manual durability actions');
+  const commandBody = panelSource.slice(commandStart, commandEnd);
+  assert.match(commandBody, /rebindSessionScope\?\.\(target\.sessionId/);
+});
+
+test('round 4: rebind captures the PRE-rebind active map and demotes implicit source views in the same updater', () => {
+  const aiStateSource = readFileSync(new URL('../application/state/useAIState.ts', import.meta.url), 'utf8');
+  const rebindStart = aiStateSource.indexOf('const rebindSessionScope');
+  const rebindEnd = aiStateSource.indexOf('const exportSessionsBackup');
+  assert.ok(rebindStart !== -1 && rebindEnd !== -1 && rebindEnd > rebindStart, 'rebindSessionScope found');
+  const rebindBody = aiStateSource.slice(rebindStart, rebindEnd);
+
+  // The pre-rebind active map must be captured BEFORE rebindActiveSessionMap
+  // drops the source pointers — otherwise the implicit source keys are gone.
+  assert.match(rebindBody, /const preRebindActiveSessionIdMap\s*=/);
+  assert.ok(
+    rebindBody.indexOf('const preRebindActiveSessionIdMap') < rebindBody.indexOf('rebindActiveSessionMap(prev, sessionId, scopeKey)'),
+    'pre-rebind active map is captured before rebindActiveSessionMap clears the pointers',
+  );
+
+  // The captured PRE-rebind map feeds the SAME setPanelViewByScope updater that
+  // demotes explicit source views and sets the destination view (atomic: no
+  // intermediate state where resolveDisplayedPanelView can re-select sessions[0]).
+  assert.match(rebindBody, /demoteImplicitSourceViewsForSession\(/);
+  assert.ok(rebindBody.includes('preRebindActiveSessionIdMap,'), 'pre-rebind map is passed to the implicit-view demotion');
+  assert.match(rebindBody, /clearSessionViewsForSession\(prev, sessionId, scopeKey\)/);
+});
+
+test('syncWorkspaceAnchorsForScopeRebind clears persisted source anchors and pins destination workspace', () => {
+  const calls: Array<[string, string | null]> = [];
+  const workspaces = [
+    { id: 'ws-a', anchorChatId: 'chat-1' },
+    { id: 'ws-b', anchorChatId: 'chat-2' },
+    { id: 'ws-c', anchorChatId: 'chat-1' },
+  ];
+
+  syncWorkspaceAnchorsForScopeRebind(
+    'chat-1',
+    { type: 'workspace', targetId: 'ws-b' },
+    workspaces,
+    (workspaceId, chatId) => calls.push([workspaceId, chatId]),
+  );
+  assert.deepEqual(calls, [
+    ['ws-a', null],
+    ['ws-c', null],
+    ['ws-b', 'chat-1'],
+  ]);
+
+  // Rebinding to a terminal clears source workspace anchors without pinning any workspace.
+  calls.length = 0;
+  syncWorkspaceAnchorsForScopeRebind(
+    'chat-1',
+    { type: 'terminal', targetId: 'term-1' },
+    [{ id: 'ws-a', anchorChatId: 'chat-1' }, { id: 'ws-b', anchorChatId: 'chat-2' }],
+    (workspaceId, chatId) => calls.push([workspaceId, chatId]),
+  );
+  assert.deepEqual(calls, [['ws-a', null]]);
+
+  // Both panel rebind paths invoke syncWorkspaceAnchorsForScopeRebind.
+  const panelSource = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
+  const managerStart = panelSource.indexOf('const handleManagerRebind');
+  const managerEnd = panelSource.indexOf('const handleManagerDelete');
+  assert.match(panelSource.slice(managerStart, managerEnd), /syncWorkspaceAnchorsForScopeRebind\(/);
+  const commandStart = panelSource.indexOf('const handleRebindChat');
+  const commandEnd = panelSource.indexOf('// Manual durability actions');
+  assert.match(panelSource.slice(commandStart, commandEnd), /syncWorkspaceAnchorsForScopeRebind\(/);
 });

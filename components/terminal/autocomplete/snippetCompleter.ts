@@ -8,7 +8,7 @@
  */
 import type { Snippet } from "../../../domain/models";
 import { snippetAppliesToHost } from "../../../domain/snippetTargets";
-import { matchesSearchQuery, matchesWordPrefixQuery } from "../../../lib/searchMatcher";
+import { matchesSearchQuery, matchesWordPrefixQuery } from "../../../domain/searchMatcher";
 import type { CompletionSuggestion } from "./completionEngine";
 
 const SNIPPET_BASE_SCORE = 2000; // Above history (1000+freq) per "snippet > history".

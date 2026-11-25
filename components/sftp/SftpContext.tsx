@@ -64,7 +64,7 @@ export interface SftpPaneCallbacks {
     onOpenFileWithSystemDefault?: (entry: SftpFileEntry, fullPath?: string) => void;
     onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;  // Always show opener dialog
     onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;  // Download to local filesystem
-    onDownloadFiles?: (entries: SftpFileEntry[]) => void;  // Batch download — picks one target directory for remote panes
+    onDownloadFiles?: (entries: SftpFileEntry[], fullPaths?: string[]) => void;  // Batch download — picks one target directory for remote panes
     onExtractArchive?: (entry: SftpFileEntry, fullPath?: string) => void | Promise<void>;
     onCreateArchive?: (options: SftpArchiveCreationOptions, target: SftpArchiveCreationTarget) => Promise<SftpArchiveCreationResult>;
     // External file upload (supports folders via DataTransfer)
@@ -134,9 +134,6 @@ export interface SftpPaneCallbacksContextValue {
     rightCallbacks: SftpPaneCallbacks;
 }
 
-/** @deprecated Prefer useSftpHosts / useSftpPaneCallbacks to avoid cross-churn. */
-export type SftpContextValue = SftpHostsContextValue & SftpPaneCallbacksContextValue;
-
 export interface SftpDragContextValue {
     draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
     dragCallbacks: SftpDragCallbacks;
@@ -145,19 +142,6 @@ export interface SftpDragContextValue {
 const SftpHostsContext = createContext<SftpHostsContextValue | null>(null);
 const SftpPaneCallbacksContext = createContext<SftpPaneCallbacksContextValue | null>(null);
 const SftpDragContext = createContext<SftpDragContextValue | null>(null);
-
-/** @deprecated Prefer selective hooks; this re-renders on hosts OR callbacks churn. */
-export const useSftpContext = (): SftpContextValue => {
-    const hosts = useContext(SftpHostsContext);
-    const callbacks = useContext(SftpPaneCallbacksContext);
-    if (!hosts || !callbacks) {
-        throw new Error("useSftpContext must be used within SftpContextProvider");
-    }
-    return useMemo(
-        () => ({ ...hosts, ...callbacks }),
-        [hosts, callbacks],
-    );
-};
 
 // Hook to get callbacks for a specific side
 export const useSftpPaneCallbacks = (side: "left" | "right"): SftpPaneCallbacks => {

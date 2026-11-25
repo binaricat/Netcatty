@@ -11,24 +11,13 @@ const GOOGLE_DRIVE_API = "https://www.googleapis.com/drive/v3";
 const GOOGLE_DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const DEFAULT_SYNC_FILE_NAME = "netcatty-vault.json";
 const { randomUUID } = require("node:crypto");
-
-const isNonEmptyString = (v) => typeof v === "string" && v.trim().length > 0;
-
-const describeNetworkError = (err) => {
-  const msg = err?.message || String(err);
-  const cause = err?.cause;
-  const causeCode = cause?.code ? ` (${cause.code})` : "";
-  const causeMsg = cause?.message ? `: ${cause.message}` : "";
-  return `${msg}${causeCode}${causeMsg}`.trim();
-};
-
-const safeJsonParse = (text) => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
+const {
+  isNonEmptyString,
+  safeJsonParse,
+  describeNetworkError,
+  resolveFetch,
+  postOAuthForm,
+} = require("./oauthHttpHelper.cjs");
 
 const describeGoogleApiError = (status, text) => {
   const data = safeJsonParse(text);
@@ -45,8 +34,7 @@ const describeGoogleApiError = (status, text) => {
  * @param {import('electron')=} electronModule
  */
 function registerHandlers(ipcMain, electronModule) {
-  const fetchImpl =
-    electronModule?.net?.fetch ? electronModule.net.fetch.bind(electronModule.net) : fetch;
+  const fetchImpl = resolveFetch(electronModule);
 
   ipcMain.handle("netcatty:google:oauth:exchange", async (_event, payload) => {
     const clientId = payload?.clientId;
@@ -71,39 +59,10 @@ function registerHandlers(ipcMain, electronModule) {
       body.set("client_secret", clientSecret);
     }
 
-    let res;
-    try {
-      res = await fetchImpl(GOOGLE_TOKEN_URL, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: body.toString(),
-      });
-    } catch (err) {
-      throw new Error(
-        `Google token exchange network error. Check your network/VPN and whether Google services are reachable. (${describeNetworkError(err)})`
-      );
-    }
-
-    const text = await res.text();
-    if (!res.ok) {
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { error: text };
-      }
-      throw new Error(`Google token exchange failed: ${data.error_description || data.error || res.status}`);
-    }
-
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(`Google token exchange invalid JSON: ${text.slice(0, 200)}`);
-    }
+    const data = await postOAuthForm(fetchImpl, GOOGLE_TOKEN_URL, body, {
+      label: "Google token exchange",
+      serviceLabel: "Google services",
+    });
 
     return {
       accessToken: data.access_token,
@@ -131,39 +90,10 @@ function registerHandlers(ipcMain, electronModule) {
       body.set("client_secret", clientSecret);
     }
 
-    let res;
-    try {
-      res = await fetchImpl(GOOGLE_TOKEN_URL, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: body.toString(),
-      });
-    } catch (err) {
-      throw new Error(
-        `Google token refresh network error. Check your network/VPN and whether Google services are reachable. (${describeNetworkError(err)})`
-      );
-    }
-
-    const text = await res.text();
-    if (!res.ok) {
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { error: text };
-      }
-      throw new Error(`Google token refresh failed: ${data.error_description || data.error || res.status}`);
-    }
-
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(`Google token refresh invalid JSON: ${text.slice(0, 200)}`);
-    }
+    const data = await postOAuthForm(fetchImpl, GOOGLE_TOKEN_URL, body, {
+      label: "Google token refresh",
+      serviceLabel: "Google services",
+    });
 
     return {
       accessToken: data.access_token,

@@ -436,7 +436,7 @@ function TransferRow({
     task: TransferTask;
     children: TransferTask[];
   } | null>(null);
-  if (task.status === "pausing") {
+  if (task.status === "pausing" && !task.pauseUnavailableReason) {
     if (!pausingSnapshotRef.current) {
       pausingSnapshotRef.current = {
         task: { ...task },
@@ -464,20 +464,23 @@ function TransferRow({
     && !task.error;
   const sharedResuming = useSftpTransferResuming(task.id);
   const isResuming = sharedResuming || storeResuming;
-  const canPause = task.resumable !== false && task.status === "transferring" && canControl && !isResuming;
+  const pauseFailed = task.status === "pausing" && !!task.pauseUnavailableReason;
+  const canPause = task.resumable !== false && (task.status === "transferring" || pauseFailed) && canControl && !isResuming;
   // Orphaned tasks after app restart (interrupted / attention / paused without a
   // live panel owner) must still expose resume/cancel from the global center.
   // Conflict rows must use resolveConflict — Resume would overwrite blindly.
   // Non-resumable attention rows (e.g. duplicate-destination refusals) are
   // terminal: resuming them would start a second writer on the same path.
   // Do not show Resume during soft-drain "pausing" — play + spinner together
-  // makes the row twitch as buttons appear/disappear mid-drain.
+  // makes the row twitch as buttons appear/disappear mid-drain. A settled
+  // partial failure is different: offer Retry Pause and explicit Resume.
   const canResume = !isResuming && !task.conflict && (
     ["paused", "interrupted"].includes(task.status)
+    || (pauseFailed && task.resumable !== false)
     || (task.status === "attention" && task.resumable !== false)
     || (task.status === "failed" && task.resumable !== false && (task.checkpointBytes ?? 0) > 0)
   ) && canControl;
-  const isPausing = task.status === "pausing";
+  const isPausing = task.status === "pausing" && !pauseFailed;
   const canCancel = ["pending", "queued", "transferring", "pausing", "paused", "interrupted", "attention"].includes(task.status) && canControl;
   const canRetry = task.status === "failed" && task.retryable !== false && canControl;
   const isTerminal = ["completed", "failed", "cancelled"].includes(task.status);
@@ -500,6 +503,9 @@ function TransferRow({
       && (task.status === "pending" || task.status === "queued" || task.status === "transferring")
     ) {
       return t("sftp.transferCenter.phase.scanning");
+    }
+    if (task.controlKind === "packed-download" && task.status === "transferring") {
+      return t(task.phase === "extracting" ? "sftp.packedDownload.extracting" : "sftp.packedDownload.receiving");
     }
     if (task.phase && task.status === "transferring") {
       return t(`sftp.transferCenter.phase.${task.phase}`);
@@ -577,7 +583,7 @@ function TransferRow({
               <Pause size={13} />
             </TransferAction>
           )}
-          {task.status === "pausing" && (
+          {task.status === "pausing" && !pauseFailed && (
             <div className="flex h-8 w-8 items-center justify-center" role="status" aria-label={t("sftp.transferCenter.status.pausing")}>
               <Loader2 size={13} className="animate-spin text-amber-500" />
             </div>

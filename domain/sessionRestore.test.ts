@@ -106,6 +106,23 @@ test("buildSessionRestorePayload excludes silent MCP sessions and their tabs", (
   assert.notEqual(payload.activeTabId, "s2");
 });
 
+test("buildSessionRestorePayload keeps tabs moved to their own window as plain tabs", () => {
+  const payload = buildSessionRestorePayload({
+    sessions: [
+      session("s1"),
+      { ...session("s2"), hiddenFromTabs: true, poppedOut: true },
+    ],
+    workspaces: [],
+    tabOrder: ["s1", "s2"],
+    activeTabId: "s1",
+    now: 123,
+  });
+
+  assert.deepEqual(payload.sessions.map((entry) => entry.id), ["s1", "s2"]);
+  assert.equal("hiddenFromTabs" in payload.sessions[1], false);
+  assert.equal("poppedOut" in payload.sessions[1], false);
+});
+
 test("buildSessionRestorePayload only stores allowlisted session fields", () => {
   const payload = buildSessionRestorePayload({
     sessions: [{

@@ -160,6 +160,7 @@ export interface TerminalSettings {
   keepaliveInterval: number; // Seconds between SSH-level keepalive packets (0 = disabled)
   keepaliveCountMax: number; // Unanswered keepalives before declaring the connection dead
   sshAutoReconnectEnabled: boolean; // Automatically reconnect SSH sessions after unexpected disconnects
+  sshAutoReconnectInterval: number; // Seconds between automatic SSH reconnect attempts (5-3600)
   x11Display: string; // Optional local X11 DISPLAY override (empty = use system DISPLAY/default)
 
   // Mosh Connection
@@ -427,6 +428,15 @@ export const normalizeCursorBarWidth = (value: unknown): number => {
   return Number.isFinite(width) ? Math.min(4, Math.max(1, Math.round(width))) : DEFAULT_TERMINAL_SETTINGS.cursorBarWidth;
 };
 
+export const SSH_AUTO_RECONNECT_INTERVAL_MIN = 5;
+export const SSH_AUTO_RECONNECT_INTERVAL_MAX = 3600;
+
+export const normalizeSshAutoReconnectInterval = (value: unknown): number => (
+  typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(SSH_AUTO_RECONNECT_INTERVAL_MAX, Math.max(SSH_AUTO_RECONNECT_INTERVAL_MIN, Math.round(value)))
+    : SSH_AUTO_RECONNECT_INTERVAL_MIN
+);
+
 export const normalizeTerminalSettings = (
   settings?: Partial<TerminalSettings> | null,
 ): TerminalSettings => {
@@ -447,6 +457,7 @@ export const normalizeTerminalSettings = (
     linkBrowser: settings?.linkBrowser === 'system' ? 'system' as const : 'netcatty' as const,
     shiftEnterNewlineText,
     cursorBarWidth: normalizeCursorBarWidth(settings?.cursorBarWidth),
+    sshAutoReconnectInterval: normalizeSshAutoReconnectInterval(settings?.sshAutoReconnectInterval),
     dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
       ? settings.dynamicTabTitleMode
       : DEFAULT_TERMINAL_SETTINGS.dynamicTabTitleMode,
@@ -597,6 +608,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   // still close the tab, and administrative idle/timeout exits stay
   // disconnected. Users on always-stable links can turn it off.
   sshAutoReconnectEnabled: true,
+  sshAutoReconnectInterval: SSH_AUTO_RECONNECT_INTERVAL_MIN,
   x11Display: '', // Empty = use DISPLAY/default local X server
   moshClientPath: '', // Legacy mosh-client override; normal UI uses bundled mosh-client
   showHostInfoBar: true, // Preserve the existing host information bar by default
@@ -732,6 +744,8 @@ export interface TerminalSession {
   customName?: string;
   /** Runtime shell-reported window title (OSC 0/2), shown on tabs when enabled */
   dynamicTitle?: string;
+  /** Runtime hostname detected from the current shell prompt (presentation only) */
+  promptHostname?: string;
   /** Sticky coding CLI provider detected from launch command or window title */
   codingCliProviderId?: CodingCliProviderId;
   /** Runtime marker for sessions reconstructed from startup restore. */
@@ -751,6 +765,12 @@ export interface TerminalSession {
    * external MCP session list.
    */
   hiddenFromTabs?: boolean;
+  /**
+   * Runtime marker for a user tab moved into its own window ("Move tab to new
+   * window"). Set together with hiddenFromTabs; unlike silent AI sessions it
+   * still restores on relaunch and returns to the tab bar when the window closes.
+   */
+  poppedOut?: boolean;
   /** Runtime hint to auto-open a side panel once the session connects. */
   autoOpenSidePanel?: 'sftp';
   /** Latest known working directory captured from terminal cwd tracking. */

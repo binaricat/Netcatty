@@ -1,5 +1,5 @@
 import type { Snippet } from '@/domain/models';
-import { isScriptSnippet, scriptContainsWriteOperations } from '@/domain/snippetScript.ts';
+import { scriptContainsWriteOperations } from '@/domain/snippetScript.ts';
 import { localStorageAdapter } from '@/infrastructure/persistence/localStorageAdapter.ts';
 import { STORAGE_KEY_AI_PERMISSION_MODE } from '@/infrastructure/config/storageKeys.ts';
 import type { AIPermissionMode } from '@/infrastructure/ai/types.ts';
@@ -250,28 +250,6 @@ export async function runConnectScriptsSequential(params: {
       }
     }
   }
-}
-
-export async function runSnippetOrScript(params: {
-  snippet: Snippet;
-  sessionId: string;
-  runSnippetText: (
-    command: string,
-    noAutoRun?: boolean,
-    options?: { multiLineRunMode?: Snippet["multiLineRunMode"] },
-  ) => void;
-  command: string;
-}) {
-  if (isScriptSnippet(params.snippet)) {
-    await runAutomationScript({
-      snippet: params.snippet,
-      sessionId: params.sessionId,
-    });
-    return;
-  }
-  params.runSnippetText(params.command, params.snippet.noAutoRun, {
-    multiLineRunMode: params.snippet.multiLineRunMode,
-  });
 }
 
 export async function stopScriptRun(runId: string): Promise<{ ok: boolean }> {

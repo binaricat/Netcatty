@@ -265,7 +265,7 @@ function AppViewInner({ domains }: AppViewProps) {
 
   const {
     addShellHistoryEntry, clearAllCommandHistory, removeShellHistoryEntry, addSessionToWorkspace, addToWorkspaceDialog, appendHostToWorkspace, appendLocalTerminalToWorkspace, moveWorkspacePane,
-    clearAndRemoveSource, clearAndRemoveSources, closeLogView, closeSession, closeTabsBatch, closeWorkspace, commitPluginImporterData, commitVaultImportTransaction, commitVaultGroupMutation, copySessionToNewWindowWithCurrentShell, copySessionWithCurrentShell, duplicateSessionWithCurrentShell, copyWorkspaceWithCurrentShell,
+    clearAndRemoveSource, clearAndRemoveSources, closeLogView, closeSession, closeTabsBatch, closeWorkspace, commitPluginImporterData, commitVaultImportTransaction, commitVaultGroupMutation, copySessionToNewWindowWithCurrentShell, moveSessionToNewWindow, copySessionWithCurrentShell, duplicateSessionWithCurrentShell, copyWorkspaceWithCurrentShell,
     convertKnownHostToHost, createWorkspaceFromSessions, createWorkspaceFromTargets, createWorkspaceWithHosts,
     customGroups, currentTerminalTheme, deepLinkHostDraft, draggingSessionId, effectiveKnownHosts, editorTabs, editorWordWrap, emptyVaultConflict,
     followAppTerminalTheme,
@@ -278,7 +278,7 @@ function AppViewInner({ domains }: AppViewProps) {
     passphraseQueue, fidoPromptQueue, protocolSelectHost, proxyProfiles, portForwardingRules, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions,
     resolveEmptyVaultConflict, resolveSessionAppearance, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
     sessions, setActiveTabId, setDeepLinkHostDraft, setDraggingSessionId, setEditorWordWrap,
-    setNavigateToSection, setTerminalFontFamilyId, setTerminalFontSize, setVaultFocusRequest, updateSessionFontSize, updateSessionRestoreCwd, updateSessionDynamicTitle, updateSessionCodingCliProvider, clearSessionFontSizeOverride,
+    setNavigateToSection, setTerminalFontFamilyId, setTerminalFontSize, setVaultFocusRequest, updateSessionFontSize, updateSessionRestoreCwd, updateSessionDynamicTitle, updateSessionPromptHost, updateSessionCodingCliProvider, clearSessionFontSizeOverride,
     setWorkspaceFocusedSession, setWorkspaceAnchorChat, sftpAutoOpenSidebar, sftpFollowTerminalCwd, setSftpFollowTerminalCwd, sftpAutoSync, sftpDefaultViewMode, sftpDoubleClickBehavior,
     sftpShowHiddenFiles, sftpUseCompressedUpload, snippetPackages, snippets, splitSessionWithCurrentShell, startSessionRename,
     startWorkspaceRename, submitSessionRename, submitWorkspaceRename, t, terminalFontFamilyId, terminalFontSize, terminalSettings, terminalThemeId, themeById,
@@ -560,6 +560,7 @@ function AppViewInner({ domains }: AppViewProps) {
         onDuplicateSession={duplicateSessionWithCurrentShell}
         tabDoubleClickBehavior={terminalSettings.tabDoubleClickBehavior}
         onCopySessionToNewWindow={copySessionToNewWindowWithCurrentShell}
+        onMoveSessionToNewWindow={moveSessionToNewWindow}
         onEditHost={handleEditHostFromOverlay}
         onRenameWorkspace={startWorkspaceRename}
         onCopyWorkspace={copyWorkspaceWithCurrentShell}
@@ -652,7 +653,7 @@ function AppViewInner({ domains }: AppViewProps) {
             customGroups={customGroups}
             knownHosts={effectiveKnownHosts}
             managedSources={managedSources}
-            sessionCount={sessions.filter((s) => !s.hiddenFromTabs).length}
+            sessionCount={sessions.filter((s) => !s.hiddenFromTabs || s.poppedOut).length}
             hotkeyScheme={hotkeyScheme}
             keyBindings={keyBindings}
             terminalThemeId={terminalThemeId}
@@ -760,6 +761,7 @@ function AppViewInner({ domains }: AppViewProps) {
           onUpdateSessionFontSize={updateSessionFontSize}
           onUpdateSessionRestoreCwd={updateSessionRestoreCwd}
           onUpdateSessionDynamicTitle={updateSessionDynamicTitle}
+          onUpdateSessionPromptHost={updateSessionPromptHost}
           onUpdateSessionCodingCliProvider={updateSessionCodingCliProvider}
           onClearSessionFontSizeOverride={clearSessionFontSizeOverride}
           onUpdateTerminalFontWeight={handleUpdateTerminalFontWeight}

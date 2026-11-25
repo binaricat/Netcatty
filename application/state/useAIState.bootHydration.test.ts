@@ -35,10 +35,13 @@ import {
 } from './aiStateSnapshots';
 import {
   idbDeleteSessionIds,
+  AI_SESSIONS_META_ACTIVE_MAP_KEY,
   AI_SESSIONS_META_MIGRATION_KEY,
   idbPutSessions,
+  idbPutMeta,
   loadOrMigrateAiSessions,
   openAiSessionsIdb,
+  readActiveSessionMapFromIdb,
   resetAiSessionsIdbForTests,
 } from './aiSessionIdbStorage';
 import { installFakeIndexedDb } from './testSupport/fakeIndexedDb';
@@ -487,3 +490,65 @@ test('P2④: adopting an empty IndexedDB store after another window deleted the 
     resetAiSessionsIdbForTests();
   }
 });
+
+test('batched active chat selection and clearing keep the local and IndexedDB maps in sync', async () => {
+  const dom = installDom();
+  const idb = installFakeIndexedDb();
+  const alpha = { ...makeSession('alpha', 1), scope: { type: 'terminal', targetId: 'restored-tab' } } as AISession;
+  const beta = { ...alpha, id: 'beta', updatedAt: 2 };
+  await loadOrMigrateAiSessions(() => JSON.stringify([alpha, beta]));
+  let mounted = await mountAiState();
+  const scope = 'terminal:restored-tab';
+  try {
+    await act(async () => {
+      mounted.ai.setActiveSessionId(scope, alpha.id);
+      mounted.ai.setActiveSessionId(scope, beta.id);
+    });
+    const expected = { [scope]: beta.id };
+    assert.deepEqual(getAISessionsSnapshot().activeSessionIdMap, expected);
+    assert.deepEqual(await readActiveSessionMapFromIdb(), expected);
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(STORAGE_KEY_AI_ACTIVE_SESSION_MAP)!), expected);
+
+    await act(async () => { mounted.root.unmount(); });
+    mounted.container.remove();
+    resetBootState();
+    mounted = await mountAiState((ai) => ai.cleanupOrphanedSessions(new Set(['restored-tab'])));
+    assert.deepEqual(getAISessionsSnapshot().activeSessionIdMap, expected);
+    assert.deepEqual(await readActiveSessionMapFromIdb(), expected);
+
+    await act(async () => {
+      mounted.ai.setActiveSessionId(scope, alpha.id);
+      mounted.ai.setActiveSessionId(scope, null);
+    });
+    const cleared = { [scope]: null };
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(STORAGE_KEY_AI_ACTIVE_SESSION_MAP)!), cleared);
+    assert.deepEqual(await readActiveSessionMapFromIdb(), cleared);
+  } finally {
+    await unmount(mounted, dom);
+    idb.restore();
+    resetAiSessionsIdbForTests();
+  }
+});
+
+for (const hasExplicitEmptyLocalMap of [false, true]) {
+  test(`boot ${hasExplicitEmptyLocalMap ? 'honors an explicit empty local map' : 'restores an IndexedDB-only active pointer before mirroring'}`, async () => {
+    const dom = installDom();
+    const idb = installFakeIndexedDb();
+    const beta = makeSession('beta', 2);
+    const map = { 'terminal:restored-tab': beta.id };
+    await loadOrMigrateAiSessions(() => JSON.stringify([beta]));
+    await idbPutMeta(await openAiSessionsIdb(), AI_SESSIONS_META_ACTIVE_MAP_KEY, map);
+    if (hasExplicitEmptyLocalMap) dom.window.localStorage.setItem(STORAGE_KEY_AI_ACTIVE_SESSION_MAP, '{}');
+    const mounted = await mountAiState();
+    try {
+      const expected = hasExplicitEmptyLocalMap ? {} : map;
+      assert.deepEqual(getAISessionsSnapshot().activeSessionIdMap, expected);
+      assert.deepEqual(JSON.parse(dom.window.localStorage.getItem(STORAGE_KEY_AI_ACTIVE_SESSION_MAP)!), expected);
+      assert.deepEqual(await readActiveSessionMapFromIdb(), expected);
+    } finally {
+      await unmount(mounted, dom);
+      idb.restore();
+      resetAiSessionsIdbForTests();
+    }
+  });
+}

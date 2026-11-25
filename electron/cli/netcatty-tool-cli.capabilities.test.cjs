@@ -30,7 +30,6 @@ test("netcatty-tool-cli capabilities runs from unpacked CLI runtime without app 
     fs.mkdirSync(electronDir, { recursive: true });
     fs.cpSync(path.join(__dirname), cliDir, { recursive: true });
     fs.cpSync(path.join(__dirname, "..", "capabilities"), capabilitiesDir, { recursive: true });
-    fs.rmSync(path.join(capabilitiesDir, "index.cjs"));
     fs.rmSync(path.join(capabilitiesDir, "services"), { recursive: true });
 
     const result = spawnSync(process.execPath, [

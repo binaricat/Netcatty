@@ -64,8 +64,16 @@ import {
   isAIChatSessionStreaming,
   type DefaultTargetSessionHint,
 } from '../application/state/useAIChatStreaming';
-import { getScopedHistorySessions } from './ai/scopedHistorySessions';
+import {
+  getPreferredAutoResumeSessionId,
+  getScopedHistorySessions,
+} from './ai/scopedHistorySessions';
 import { buildAiChatsListingEntries, canRebindChat, formatAiChatsListingNote, resolveRebindTargetFromArg, type AiChatsListingEntry } from './ai/aiChatsListing';
+import { GlobalAIChatSessionManager } from './ai/GlobalAIChatSessionManager';
+import {
+  buildGlobalManagerRebindTargets,
+  type GlobalManagerScopeTarget,
+} from './ai/globalSessionManagerRows';
 import { resolveInheritedAIActiveSessionId } from '../domain/aiWorkspaceScopeInherit';
 import { resolveUndoLastTurnBoundary } from '../domain/aiUndoLastTurn';
 import { aiSessionIdSetEqual, exactScopeAISessionsEqual } from '../domain/aiSessionsForScope';
@@ -95,6 +103,8 @@ import {
   appendRetainedStoredModelPreset,
   shouldLoadSdkRuntimeModels,
   shouldUseStoredAgentModel,
+  stopActiveTurnBeforeScopeRebind,
+  syncWorkspaceAnchorsForScopeRebind,
   type SdkRuntimeModelCatalog,
   type SdkRuntimeModelCatalogSource,
 } from './AIChatSidePanelHelpers';
@@ -310,6 +320,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   commandTimeout,
   responseIdleTimeout,
   maxIterations = 20,
+  toolOutputMaxChars,
   webSearchConfig,
   quickMessages = [],
   scopeType,
@@ -320,6 +331,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   onSetWorkspaceAnchorChat,
   workspaces = [],
   terminalSessions = [],
+  appTerminalSessions,
   liveScopeTargetIds,
   resolveExecutorContext,
   isVisible = true,
@@ -451,8 +463,22 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const workspaceAnchorChatId = scopeType === 'workspace'
     ? workspaces.find((workspace) => workspace.id === scopeTargetId)?.anchorChatId
     : undefined;
-  // getScopedHistorySessions orders by scope match first, recency second.
-  const preferredHistorySessionId = historySessions[0]?.id ?? null;
+  // Implicit workspace auto-resume only considers exact workspace or member-
+  // terminal matches (rank >= 3) so a workspace never silently re-opens a chat
+  // bound to another workspace (e.g. after rebinding its last chat away and
+  // restarting). Other-workspace chats remain manually selectable in history.
+  const preferredHistorySessionId = useMemo(
+    () => getPreferredAutoResumeSessionId(
+      historySessions,
+      scopeType,
+      scopeTargetId,
+      scopeHostIds,
+      activeTerminalSessionIds,
+      workspaceMemberTerminalIds,
+      activeSessionIdMap,
+    ),
+    [historySessions, scopeType, scopeTargetId, scopeHostIds, activeTerminalSessionIds, workspaceMemberTerminalIds, activeSessionIdMap],
+  );
   const normalizedPanelView = useMemo<AIPanelView>(
     () => resolveDisplayedPanelView(explicitPanelView, currentDraft != null, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId, preferredHistorySessionId),
     [explicitPanelView, currentDraft, historySessions, persistedSessionId, scopeType, workspaceAnchorChatId, preferredHistorySessionId],
@@ -523,6 +549,28 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     handleRenameSession(activeSessionRef.current?.id ?? null, title);
   }, [handleRenameSession]);
 
+  // Defined before the /rebind command handler, which must await turn
+  // termination before rewriting a chat's scope.
+  const stopStreamingForSession = useCallback(async (sessionId: string) => {
+    const controller = abortControllersRef.current.get(sessionId);
+    setStreamingForScope(sessionId, false);
+    updateLastMessage(sessionId, (msg) => ({
+      ...msg,
+      statusText: '',
+      executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
+    }));
+    await stopAgentTurn({
+      chatSessionId: sessionId,
+      abortController: controller,
+      bridge: getNetcattyBridge(),
+      reason: 'user',
+    });
+    await getAgentRuntime().waitForActiveTurn(sessionId);
+    if (controller && abortControllersRef.current.get(sessionId) === controller) {
+      abortControllersRef.current.delete(sessionId);
+    }
+  }, [setStreamingForScope, updateLastMessage, abortControllersRef]);
+
   const handleListChats = useCallback(() => {
     // Prefer the app-wide live target set so chats bound to other still-open
     // terminals are not mislabelled dangling / offered for /rebind.
@@ -551,7 +599,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   // `/rebind <n>`: rebind the nth dangling chat from the last /chats listing
   // to this panel's current scope. Panel action — no agent round-trip.
-  const handleRebindChat = useCallback((arg: string) => {
+  const handleRebindChat = useCallback(async (arg: string) => {
     if (!scopeTargetId) {
       toast.warning(t('ai.chat.rebindUnavailable'));
       return;
@@ -566,7 +614,20 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     for (const workspace of workspaces) liveTargets.add(workspace.id);
     liveTargets.add(scopeTargetId);
     if (canRebindChat(session, liveTargets)) {
+      // Same race as the manager rebind: stop any in-flight turn first so the
+      // scope rewrite never happens under a live stream.
+      await stopActiveTurnBeforeScopeRebind(target.sessionId, {
+        abortControllersRef,
+        streamingSessionIds,
+        stopStreamingForSession,
+      });
       rebindSessionScope?.(target.sessionId, { type: scopeType, targetId: scopeTargetId, hostIds: scopeHostIds });
+      syncWorkspaceAnchorsForScopeRebind(
+        target.sessionId,
+        { type: scopeType, targetId: scopeTargetId },
+        workspaces,
+        onSetWorkspaceAnchorChat,
+      );
       toast.success(t('ai.chat.rebindDone').replace('{title}', target.title));
     } else {
       toast.warning(t('ai.chat.rebindUsage'));
@@ -588,7 +649,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }
     lastChatsListingRef.current = remaining;
     setPanelCommandNote(formatAiChatsListingNote(remaining, t));
-  }, [liveScopeTargetIds, rebindSessionScope, scopeHostIds, scopeTargetId, scopeType, sessions, t, workspaces, workspaceMemberTerminalIds]);
+  }, [abortControllersRef, liveScopeTargetIds, onSetWorkspaceAnchorChat, rebindSessionScope, scopeHostIds, scopeTargetId, scopeType, sessions, stopStreamingForSession, streamingSessionIds, t, workspaces, workspaceMemberTerminalIds]);
 
   // Manual durability actions (history drawer header). Export writes the
   // whole store to a user-chosen JSON file; import merges by id.
@@ -1205,9 +1266,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         ? prev
         : { ...prev, [agentId]: { cacheKey: target.cacheKey, models: catalogPresets, catalogUnavailable: Boolean(catalog.warning) } }
     ));
-    // Another path (e.g. send preflight) applied the catalog before the
-    // deferred idle callback scheduled in the visibility effect: clear its
-    // stale pending flag so the composer stops claiming models are loading.
+    // Another path (e.g. send preflight or picker open) applied the catalog
+    // before the deferred idle callback scheduled in the visibility effect:
+    // clear its stale pending flag so the composer stops claiming models are loading.
     setRuntimeModelLoading((prev) => {
       if (!prev[agentId] || prev[agentId].cacheKey !== target.cacheKey) return prev;
       const { [agentId]: _removed, ...rest } = prev;
@@ -1231,11 +1292,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     ) {
       setAgentModel(agentId, defaultModelId);
     }
-  }, [setAgentModel, setRuntimeModelLoading, buildExternalAgentRuntimeModelTarget, collectCustomModelIds]);
+  }, [setAgentModel, buildExternalAgentRuntimeModelTarget, collectCustomModelIds]);
 
   const loadSdkRuntimeModelCatalog = useCallback((
     target: SdkRuntimeModelTarget,
-    options: { force?: boolean; logErrors?: boolean } = {},
+    options: { force?: boolean; recheck?: boolean; logErrors?: boolean } = {},
   ): Promise<SdkRuntimeModelCatalog | null> => {
     const bridge = getNetcattyBridge();
     if (!bridge?.aiSdkAgentListModels) return Promise.resolve(null);
@@ -1275,7 +1336,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         return toSdkRuntimeModelCatalog(result);
       },
-      { force: options.force },
+      { force: options.force || options.recheck },
     ).then((catalog) => {
       // A refresh that joined another panel's in-flight load never ran the
       // loader above, so sync this panel's banner from the shared result.
@@ -1344,17 +1405,46 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     };
     let cancelled = false;
     let idleFired = false;
-    // Mark the catalog pending as soon as the refresh is scheduled so the
-    // composer can show its loading affordance for the whole idle delay (and
-    // longer while the composer stays focused) instead of silently keeping
-    // only the build-time presets (#3584). Only do this on a cache miss:
-    // when a cached catalog was already applied above, the runtime presets are
-    // available, so a pending flag would keep the composer banner/picker in the
-    // "loading" state indefinitely while the idle callback is deferred.
+    let loadSettled = false;
     if (!cached) {
-      setRuntimeModelLoading((prev) => (
-        prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
-      ));
+      // Hydrate persisted choices during the idle delay, including stale
+      // catalogs. This request never starts a runtime query. Only show the
+      // loading indicator when no persisted models exist yet (#3584).
+      void getNetcattyBridge()?.aiSdkAgentListModels?.(
+        target.sdkBackend, undefined, undefined, `models_${target.agentId}`,
+        target.agentEnv, target.agentCommand, target.codexRuntime, false, true,
+      ).then((result) => {
+        if (cancelled || sdkRuntimeModelCache.read(target.cacheKey)) return;
+        if (result?.ok && result.models?.length) {
+          setRuntimeModelWarnings((current) => {
+            const agent = externalAgentsRef.current.find((item) => item.id === target.agentId);
+            if (buildExternalAgentRuntimeModelTarget(agent)?.cacheKey !== target.cacheKey) return current;
+            return reconcileRuntimeModelWarning(
+              current,
+              target.agentId,
+              target.cacheKey,
+              Boolean(result.warning),
+              t('ai.chat.modelCatalogWarning'),
+            );
+          });
+          applySdkRuntimeModelCatalog(target, toSdkRuntimeModelCatalog({
+            ...result, models: result.models,
+          }));
+          return;
+        }
+        if (!loadSettled) {
+          setRuntimeModelLoading((prev) => (
+            prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
+          ));
+        }
+      }).catch((err) => {
+        console.debug('[AIChatSidePanel] Failed to read cached agent models:', err);
+        if (!cancelled && !loadSettled && !sdkRuntimeModelCache.read(target.cacheKey)) {
+          setRuntimeModelLoading((prev) => (
+            prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
+          ));
+        }
+      });
     }
     const cancelIdle = scheduleWhenAiComposerIdle(() => {
       idleFired = true;
@@ -1362,8 +1452,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         if (cancelled || !catalog) return;
         applySdkRuntimeModelCatalog(target, catalog, { adoptCurrentModel: true });
       }).finally(() => {
-        // Always clear, even after cancellation: a stale flag would keep the
-        // composer in the loading state forever.
+        loadSettled = true;
         clearRuntimeModelLoading();
       });
     });
@@ -1371,9 +1460,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     return () => {
       cancelled = true;
       cancelIdle();
-      // If the idle callback never fired, the load never started and nothing
-      // would clear the pending flag — do it here. In-flight loads clear their
-      // own flag in `.finally`, so leave them alone.
       if (!idleFired) clearRuntimeModelLoading();
     };
   }, [
@@ -1501,6 +1587,18 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     setAgentModel(currentAgentId, modelId);
   }, [currentAgentId, setAgentModel]);
 
+  const handleOpenSdkModelPicker = useCallback(() => {
+    if (hasCodexCustomConfig) return;
+    const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
+    if (!target) return;
+    // Check freshness in the main process even if the renderer cache is warm.
+    // Keep the existing choices usable while a stale catalog revalidates.
+    void loadSdkRuntimeModelCatalog(target, { recheck: true }).then((catalog) => {
+      if (catalog) applySdkRuntimeModelCatalog(target, catalog, { adoptCurrentModel: true });
+    });
+  }, [hasCodexCustomConfig, currentAgentConfig, buildExternalAgentRuntimeModelTarget,
+    loadSdkRuntimeModelCatalog, applySdkRuntimeModelCatalog]);
+
   // Retry a failed SDK runtime model catalog load (composer warning banner).
   // Failures are never cached, so a forced refresh re-queries the CLI/daemon.
   const handleRetrySdkModelCatalog = useCallback(() => {
@@ -1610,14 +1708,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   }, [currentAgentId, enterScopeDraftMode, updateScopeDraft]);
 
 
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(async (textOverride?: string) => {
     const draft = currentDraftRef.current;
     const currentPanelView = panelViewRef.current;
     const currentSessionView = activeSessionRef.current;
-    if (!validateNoteMentions(draft?.attachments ?? [])) return;
-    const trimmed = draft?.text.trim() ?? '';
+    if (textOverride === undefined && !validateNoteMentions(draft?.attachments ?? [])) return;
+    const trimmed = (textOverride ?? draft?.text ?? '').trim();
     const sendScopeKey = scopeKey;
-    const attachments = (draft?.attachments ?? []).map((file) => ({
+    const attachments = (textOverride === undefined ? draft?.attachments ?? [] : []).map((file) => ({
       base64Data: file.base64Data,
       mediaType: file.mediaType,
       filename: file.filename,
@@ -1645,12 +1743,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const agentConfig = sendAgentId !== 'catty' ? findEnabledExternalAgent(externalAgents, sendAgentId) : undefined;
     if (sendAgentId !== 'catty' && !agentConfig) return;
 
-    const selectedSkillSlugs = draft?.selectedUserSkillSlugs ?? [];
+    const selectedSkillSlugs = textOverride === undefined ? draft?.selectedUserSkillSlugs ?? [] : [];
     const modelPrompt = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
     const modelAttachments = attachments.filter((attachment) => !isInlineTextAttachment(attachment));
     const isDraftMode = currentPanelView.mode === 'draft';
 
-    flushDraftText();
+    if (textOverride === undefined) flushDraftText();
     const submittedText = draft?.text ?? '';
     const keepPendingAfterSend = () => {
       const pending = pendingComposerTextRef.current;
@@ -1739,7 +1837,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         const createdSession = createSession(scope, sendAgentId);
         sessionId = createdSession.id;
         currentSession = createdSession;
-        clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+        if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
         showScopeSessionView(createdSession.id);
         setActiveSessionId(createdSession.id);
         sessionSendGateKey = sessionId;
@@ -1770,7 +1868,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProvider'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {
-          clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+          if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
           showScopeSessionView(sessionId);
         }
         return;
@@ -1785,7 +1883,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProviderModel'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {
-          clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+          if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
           showScopeSessionView(sessionId);
         }
         return;
@@ -1798,7 +1896,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         ...(selectedSkillSlugs.length > 0 ? { selectedUserSkillSlugs: selectedSkillSlugs } : {}),
         timestamp: Date.now(),
       });
-      clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+      if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
       showScopeSessionView(sessionId);
       setActiveSessionId(sessionId);
       setStreamingForScope(sessionId, true);
@@ -1862,6 +1960,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           commandBlocklist,
           commandTimeout,
           responseIdleTimeout,
+          toolOutputMaxChars,
           terminalSessions,
           webSearchConfig,
           getExecutorContext: () => buildExecutorContextForScope(toolScope),
@@ -1885,7 +1984,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     setStreamingForScope,
     sendToExternalAgent, sendToCattyAgent, reportStreamError, autoTitleSession, t,
     abortControllersRef, terminalSessions, defaultTargetSession, providers, selectedAgentModel, updateSessionExternalSessionId,
-    scopeType, scopeTargetId, scopeHostIds, scopeLabel, commandBlocklist, commandTimeout, responseIdleTimeout, webSearchConfig, buildExecutorContextForScope,
+    scopeType, scopeTargetId, scopeHostIds, scopeLabel, commandBlocklist, commandTimeout, responseIdleTimeout, toolOutputMaxChars, webSearchConfig, buildExecutorContextForScope,
     toolIntegrationMode,
     clearScopeDraft, showScopeSessionView, setActiveSessionId,
     flushDraftText, currentAgentConfig, buildExternalAgentRuntimeModelTarget,
@@ -1929,6 +2028,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           commandBlocklist,
           commandTimeout,
           responseIdleTimeout,
+          toolOutputMaxChars,
           terminalSessions,
           webSearchConfig,
           getExecutorContext: () => buildExecutorContextForScope({
@@ -1954,6 +2054,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     commandBlocklist,
     commandTimeout,
     responseIdleTimeout,
+    toolOutputMaxChars,
     currentAgentId,
     effectiveActiveModelId,
     effectiveActiveProvider,
@@ -2024,26 +2125,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }
   }, [
     validateNoteMentions, canSteerCurrentTurn, clearScopeDraft, steerExternalAgent, steeringSessionId]);
-
-  const stopStreamingForSession = useCallback(async (sessionId: string) => {
-    const controller = abortControllersRef.current.get(sessionId);
-    setStreamingForScope(sessionId, false);
-    updateLastMessage(sessionId, (msg) => ({
-      ...msg,
-      statusText: '',
-      executionStatus: msg.executionStatus === 'running' ? 'cancelled' : msg.executionStatus,
-    }));
-    await stopAgentTurn({
-      chatSessionId: sessionId,
-      abortController: controller,
-      bridge: getNetcattyBridge(),
-      reason: 'user',
-    });
-    await getAgentRuntime().waitForActiveTurn(sessionId);
-    if (controller && abortControllersRef.current.get(sessionId) === controller) {
-      abortControllersRef.current.delete(sessionId);
-    }
-  }, [setStreamingForScope, updateLastMessage, abortControllersRef]);
 
   const { addGrant } = useAIPermissionGrantsState();
 
@@ -2172,6 +2253,173 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     ],
   );
 
+  // ── Global AI session manager (issue #4098 phases 4-5) ──
+  // App-wide open terminals (all tabs) feed the manager's scope resolution
+  // and rebind picker; fall back to this tab's terminals when absent.
+  const managerTerminalInfos = useMemo(
+    () => appTerminalSessions ?? terminalSessions,
+    [appTerminalSessions, terminalSessions],
+  );
+
+  const managerRebindTargets = useMemo<GlobalManagerScopeTarget[]>(
+    () => buildGlobalManagerRebindTargets(workspaces, managerTerminalInfos),
+    [managerTerminalInfos, workspaces],
+  );
+
+  // Clicking any chat in the All Chats tab opens it directly in this panel.
+  // Chats already belonging to this scope switch immediately; past/closed or
+  // other-scope chats attach to this panel transparently before closing the
+  // drawer so users never have to perform a manual two-step rebind.
+  const handleManagerActivate = useCallback(async (sessionId: string) => {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session) return;
+    const isAlreadyInScope = Boolean(
+      scopeTargetId
+      && !session.scopeDangling
+      && session.scope.type === scopeType
+      && session.scope.targetId === scopeTargetId,
+    );
+    if (isAlreadyInScope || !scopeTargetId || !rebindSessionScope) {
+      handleSelectSession(sessionId);
+      return;
+    }
+    await stopActiveTurnBeforeScopeRebind(sessionId, {
+      abortControllersRef,
+      streamingSessionIds,
+      stopStreamingForSession,
+    });
+    const destinationHostIds = scopeHostIds && scopeHostIds.length > 0
+      ? [...scopeHostIds]
+      : undefined;
+    rebindSessionScope(sessionId, {
+      type: scopeType,
+      targetId: scopeTargetId,
+      hostIds: destinationHostIds,
+    });
+    syncWorkspaceAnchorsForScopeRebind(
+      sessionId,
+      {
+        type: scopeType,
+        targetId: scopeTargetId,
+        label: '',
+        hostIds: destinationHostIds,
+      },
+      workspaces,
+      onSetWorkspaceAnchorChat,
+    );
+    setShowHistory(false);
+  }, [
+    abortControllersRef,
+    handleSelectSession,
+    onSetWorkspaceAnchorChat,
+    rebindSessionScope,
+    scopeHostIds,
+    scopeTargetId,
+    scopeType,
+    sessions,
+    stopStreamingForSession,
+    streamingSessionIds,
+    workspaces,
+  ]);
+
+  const handleManagerRebind = useCallback(async (sessionId: string, target: GlobalManagerScopeTarget) => {
+    if (!rebindSessionScope) return;
+    // A rebinding while a turn streams into the chat corrupts streaming state
+    // (the stream targets the old scope while the active map/pointer move).
+    // Await the stop instead of rejecting: stopStreamingForSession cleanly
+    // awaits termination, so the user's rebind intent is preserved.
+    await stopActiveTurnBeforeScopeRebind(sessionId, {
+      abortControllersRef,
+      streamingSessionIds,
+      stopStreamingForSession,
+    });
+    rebindSessionScope(sessionId, {
+      type: target.type,
+      targetId: target.targetId,
+      hostIds: target.hostIds,
+    });
+    syncWorkspaceAnchorsForScopeRebind(
+      sessionId,
+      target,
+      workspaces,
+      onSetWorkspaceAnchorChat,
+    );
+    const session = sessions.find((item) => item.id === sessionId);
+    toast.success(
+      t('ai.chat.managerRebindDone')
+        .replace('{title}', session?.title || t('ai.chat.untitled'))
+        .replace('{target}', target.label
+          || (target.type === 'workspace'
+            ? t('ai.chat.chatsScopeWorkspace')
+            : t('ai.chat.chatsScopeTerminal'))),
+    );
+  }, [abortControllersRef, onSetWorkspaceAnchorChat, rebindSessionScope, sessions, stopStreamingForSession, streamingSessionIds, t, workspaces]);
+
+  const handleManagerDelete = useCallback(async (sessionId: string) => {
+    if (abortControllersRef.current.has(sessionId) || streamingSessionIds.has(sessionId)) {
+      await stopStreamingForSession(sessionId);
+    }
+    // No scopeKey: this is a cross-scope surface, so the deleting panel is
+    // not necessarily the chat's owning panel. Stale active pointers of ANY
+    // panel are nulled by the #4125 validation effect in useAIState (it runs
+    // against the post-delete session set) and matching stale panel views are
+    // pruned alongside. Deleting the last chat is safe against resurrection:
+    // writeSessionsForStorage records the id as intentionally deleted and the
+    // #4125 migrationCompleted marker keeps the legacy localStorage key from
+    // re-seeding an empty IndexedDB store on the next boot.
+    deleteSession(sessionId);
+  }, [abortControllersRef, deleteSession, stopStreamingForSession, streamingSessionIds]);
+
+  const handleManagerExport = useCallback((sessionId: string) => {
+    void exportSessionsBackup?.([sessionId]).then((filePath) => {
+      if (filePath == null) {
+        toast.warning(t('ai.chat.exportUnavailable'));
+        return;
+      }
+      toast.success(
+        filePath
+          ? t('ai.chat.exportDone').replace('{path}', filePath)
+          : t('ai.chat.exportDoneNoPath'),
+      );
+    });
+  }, [exportSessionsBackup, t]);
+
+  const globalManagerNode = useMemo(() => (
+    <GlobalAIChatSessionManager
+      sessions={sessions}
+      activeSessionIdMap={activeSessionIdMap}
+      currentScopeType={scopeType}
+      currentScopeTargetId={scopeTargetId}
+      currentScopeHostIds={scopeHostIds}
+      workspaces={workspaces}
+      terminalInfos={managerTerminalInfos}
+      hosts={hosts}
+      externalAgents={externalAgents}
+      rebindTargets={managerRebindTargets}
+      onSelect={(sessionId) => { void handleManagerActivate(sessionId); }}
+      onRebind={handleManagerRebind}
+      onRename={handleRenameSession}
+      onDelete={(sessionId) => { void handleManagerDelete(sessionId); }}
+      onExport={handleManagerExport}
+    />
+  ), [
+    sessions,
+    activeSessionIdMap,
+    scopeType,
+    scopeTargetId,
+    scopeHostIds,
+    workspaces,
+    managerTerminalInfos,
+    hosts,
+    externalAgents,
+    managerRebindTargets,
+    handleManagerActivate,
+    handleManagerRebind,
+    handleRenameSession,
+    handleManagerDelete,
+    handleManagerExport,
+  ]);
+
   const handleAgentChange = useCallback((agentId: string) => {
     showScopeDraftView();
     ensureScopeDraft(agentId);
@@ -2236,6 +2484,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         onDismissPanelCommandNote={() => setPanelCommandNote(null)}
         onExportSessions={handleExportSessions}
         onImportSessions={handleImportSessions}
+        globalManagerNode={globalManagerNode}
         canUndoLastTurn={canUndoLastTurn}
         handleUndoLastTurn={undoLastTurnInSession ? handleUndoLastTurn : undefined}
         handleSteer={handleSteer}
@@ -2260,6 +2509,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         modelCatalogSource={modelCatalogSource}
         modelCatalogFetchedAt={modelCatalogFetchedAt}
         handleModelCatalogRetry={handleRetrySdkModelCatalog}
+        handleModelPickerOpen={!hasCodexCustomConfig && currentAgentConfig
+          && (shouldLoadSdkRuntimeModels(currentAgentConfig) || isCodexManagedAgent)
+          ? handleOpenSdkModelPicker
+          : undefined}
         agentModelPresets={agentModelPresets}
         // A managed Codex config's `model` field overrides every selection on
         // send, so the manual-entry action would be a silent no-op.
@@ -2343,6 +2596,7 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'commandTimeout',
   'responseIdleTimeout',
   'maxIterations',
+  'toolOutputMaxChars',
   'webSearchConfig',
   'quickMessages',
 ] as const satisfies readonly (keyof AIChatSidePanelProps)[];
@@ -2367,6 +2621,7 @@ export function aiChatSidePanelPropsAreEqual(
   if ((prev.isVisible ?? true) !== (next.isVisible ?? true)) return false;
   if (prev.scopeHostIds !== next.scopeHostIds) return false;
   if (prev.terminalSessions !== next.terminalSessions) return false;
+  if (prev.appTerminalSessions !== next.appTerminalSessions) return false;
   if (prev.liveScopeTargetIds !== next.liveScopeTargetIds) return false;
   if (prev.workspaces !== next.workspaces) return false;
   if (prev.resolveExecutorContext !== next.resolveExecutorContext) return false;

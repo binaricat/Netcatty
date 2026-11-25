@@ -5,7 +5,8 @@ export function getGlobalTransferBatchEligibility(tasks: readonly TransferTask[]
   return {
     cancellableCount: listGloballyCancellableTransferIds(tasks).length,
     pausableCount: topLevel.filter((task) => (
-      ["pending", "queued", "transferring"].includes(task.status)
+      (["pending", "queued", "transferring"].includes(task.status)
+        || (task.status === "pausing" && !!task.pauseUnavailableReason))
       && task.resumable !== false
       && !(task.ownerId === "dedicated-resume" && task.reconnectRequired)
     )).length,

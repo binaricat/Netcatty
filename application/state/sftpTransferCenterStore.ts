@@ -143,12 +143,17 @@ export interface SftpTransferCenterStore {
   markReconnectRequired(taskId: string, error?: string): void;
   reportResumePreparationFailure(taskId: string, error: string): void;
   ingestBackgroundEvent(event: {
-    type: "queued" | "started" | "progress" | "pausing" | "paused" | "resumed" | "cancelled" | "completed" | "failed";
+    type: "queued" | "started" | "progress" | "pausing" | "paused" | "resumed" | "cancelled" | "completed" | "failed" | "dismissed";
     transferId: string;
     direction?: TransferTask["direction"];
     fileName?: string;
     sourcePath?: string;
     targetPath?: string;
+    packedTargetPaths?: string[];
+    sourceConnectionId?: string;
+    sourceHostLabel?: string;
+    origin?: TransferTask["origin"];
+    retryable?: boolean;
     startedAt?: number;
     endedAt?: number;
     error?: string;
@@ -353,7 +358,22 @@ export function mergeOwnerPublishedTask(
     // Only a strictly newer lifecycle epoch may re-open transferring (resume).
     const incomingPaused = incoming.status === "paused" || incoming.status === "pausing";
     const existingPaused = existing.status === "paused" || existing.status === "pausing";
-    if (incomingPaused && incomingLifecycleEpoch >= existingLifecycleEpoch) {
+    // The panel can publish a snapshot from before the child acknowledgements
+    // arrived. Only a newer control decision may clear the folder's failure.
+    const rejectedFolderPause = existing.isDirectory && !existing.parentTaskId
+      && existing.status === "pausing" && !!existing.pauseUnavailableReason
+      && incomingLifecycleEpoch <= existingLifecycleEpoch
+      && isTransferPauseLatched(existing.id);
+    const rejectedChildPause = parentStatus === "pausing"
+      && !!existing.parentTaskId && existing.status === "transferring" && !!existing.pauseUnavailableReason;
+    if (rejectedFolderPause) {
+      merged.status = "pausing";
+      merged.speed = 0;
+      merged.pauseUnavailableReason = existing.pauseUnavailableReason;
+    } else if (rejectedChildPause && incomingLifecycleEpoch <= existingLifecycleEpoch) {
+      merged.status = "transferring";
+      merged.pauseUnavailableReason = existing.pauseUnavailableReason;
+    } else if (incomingPaused && incomingLifecycleEpoch >= existingLifecycleEpoch) {
       merged.status = incoming.status;
       merged.speed = 0;
       // Pin the visible bar while paused/latched. Soft-drain must not keep
@@ -392,6 +412,7 @@ export function mergeOwnerPublishedTask(
     const parentHoldsPause = parentStatus === "paused" || parentStatus === "pausing";
     if (
       parentHoldsPause
+      && !rejectedChildPause
       && !["completed", "cancelled", "failed"].includes(merged.status)
       && (merged.status === "transferring" || merged.status === "pending" || merged.status === "queued")
     ) {
@@ -436,9 +457,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     typeof persistedRaw === "string"
     && persistedRaw.length >= ASYNC_TRANSFER_HISTORY_RESTORE_THRESHOLD_BYTES
   );
+  // Track unfinished packed downloads that were only marked cancelled on
+  // hydration in case the app restarted. If a live global event arrives in the
+  // same process (new/reloaded non-owner window), that row can revive cleanly.
+  const restoredUnfinishedPackedIds = new Set<string>();
   const restored = shouldRestoreCooperatively
     ? { tasks: [] }
-    : deserializeSftpTransferCenter(persistedRaw);
+    : deserializeSftpTransferCenter(persistedRaw, {
+        onRestoredPackedTask: (id) => { restoredUnfinishedPackedIds.add(id); },
+      });
   let tasks = pruneSftpTransferHistory(restored.tasks);
   let restoreMigrationPending = shouldRestoreCooperatively;
   let replayingRestoreEvents = false;
@@ -1405,7 +1432,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
               try { await netcattyBridge.get()?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
             }));
           }
-        } else if (tasks.find((candidate) => candidate.id === taskId)?.status === "cancelled") {
+        } else if (task.controlKind !== "packed-download" && tasks.find((candidate) => candidate.id === taskId)?.status === "cancelled") {
           try {
             await netcattyBridge.get()?.cleanupTransferArtifacts?.({
               transferId: taskId,
@@ -1722,17 +1749,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         // Soft-drain / walk progress must not move the visible bar after Pause.
         // Latch or paused/pausing freezes transferredBytes/speed unless this patch
         // is an explicit resume (transferring + epoch, or dedicated-resume).
-        const pauseHeld = isTransferOrRootPauseLatched(task.parentTaskId ?? task.id, task.id)
+        const parent = task.parentTaskId ? tasks.find((candidate) => candidate.id === task.parentTaskId) : undefined;
+        const rejectedChildPause = parent?.status === "pausing" && !!parent.pauseUnavailableReason
+          && task.status === "transferring" && !!task.pauseUnavailableReason;
+        const pauseHeld = !rejectedChildPause && (isTransferOrRootPauseLatched(task.parentTaskId ?? task.id, task.id)
           || isTransferPauseLatched(task.id)
           || task.status === "paused"
           || task.status === "pausing"
-          || (!!task.parentTaskId && (
-            isTransferPauseLatched(task.parentTaskId)
-            || (() => {
-              const parent = tasks.find((candidate) => candidate.id === task.parentTaskId);
-              return parent?.status === "paused" || parent?.status === "pausing";
-            })()
-          ));
+          || parent?.status === "paused"
+          || parent?.status === "pausing");
         if (pauseHeld && !explicitResume) {
           // Keep lifecycle at paused/pausing; allow checkpoint metadata only.
           if (task.status === "pausing" || task.status === "paused") {
@@ -1869,11 +1894,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         && ["paused", "interrupted", "attention", "pending", "queued"].includes(task.status);
     },
     pause(taskId) {
+      // Packed selections have no resumable walk. Never latch them paused:
+      // their common source directory is display metadata, not a replay source.
+      if (tasks.find((task) => task.id === taskId)?.controlKind === "packed-download") return Promise.resolve();
       if (cancelInvocations.has(taskId) || isTransferOrRootCancelled(taskId)) return Promise.resolve();
       clearResumeRequest(taskId);
       return invoke(taskId, "pause");
     },
     async resume(taskId) {
+      if (tasks.find((task) => task.id === taskId)?.controlKind === "packed-download") return;
       // A cancelled scheduler job cannot be soft-resumed. Wait for the cancel
       // outcome and fresh re-walk rather than unlatching the old walk.
       const cancelling = cancelInvocations.get(taskId);
@@ -2056,6 +2085,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     async retry(taskId) {
       const ownerId = findOwner(taskId);
       const task = tasks.find((candidate) => candidate.id === taskId);
+      if (task?.controlKind === "packed-download") return;
       // The background-agent controller can only reopen an SFTP channel on the
       // original terminal session. Failed rows survive an app restart but that
       // session id does not, so Retry must take the same fresh dedicated path
@@ -2182,6 +2212,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       const removing = tasks.filter((candidate) => (
         candidate.id === taskId || candidate.parentTaskId === taskId
       ));
+      for (const removed of removing) restoredUnfinishedPackedIds.delete(removed.id);
       settleFinishedTransferControlState(removing, removing);
       tasks = tasks.filter((task) => task.id !== taskId && task.parentTaskId !== taskId);
       emit(true);
@@ -2198,6 +2229,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         && (status === undefined || task.status === status)
         && !(task.parentTaskId && unfinishedParents.has(task.parentTaskId)),
       );
+      for (const removed of removing) restoredUnfinishedPackedIds.delete(removed.id);
       const removingIds = new Set(removing.map((task) => task.id));
       settleFinishedTransferControlState(removing, removing);
       tasks = tasks.filter((task) => !removingIds.has(task.id) && !removingIds.has(task.parentTaskId ?? ""));
@@ -2228,6 +2260,23 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       }
       let existingIndex = tasks.findIndex((task) => task.id === event.transferId);
       let existing = tasks[existingIndex];
+      if (event.type === "dismissed") {
+        // Unsupported packed attempts release their reservations in every
+        // window before the originating renderer starts ordinary downloads.
+        restoredUnfinishedPackedIds.delete(event.transferId);
+        if (existing?.controlKind === "packed-download") {
+          tasks = tasks.filter((task) => task.id !== event.transferId);
+          emit(true);
+        }
+        return;
+      }
+      if ((event.type === "cancelled" || event.type === "failed") && existing?.controlKind === "packed-download"
+        && !TERMINAL_OWNER_STATUSES.has(existing.status)) {
+        // Another window can cancel, or the worker can fail, while the owner
+        // waits for a lease or concurrency slot. Stop its local queue too.
+        markTransferCancelledTree(event.transferId);
+        globalSftpTransferScheduler.cancel(event.transferId);
+      }
       const beforeEvent = existing;
       let parentControlsChanged = false;
       const eventParent = event.parentTaskId
@@ -2275,7 +2324,16 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           && (event.type === "completed" || event.type === "failed" || event.type === "cancelled")
         )
         || (event.sourceFingerprint !== undefined && event.sourceFingerprint !== existing?.sourceFingerprint);
+      const isRestoredProvisionalPacked = Boolean(
+        existing
+        && existing.controlKind === "packed-download"
+        && restoredUnfinishedPackedIds.has(existing.id),
+      );
+      if (isRestoredProvisionalPacked && existing) {
+        restoredUnfinishedPackedIds.delete(existing.id);
+      }
       const terminal = existing
+        && !isRestoredProvisionalPacked
         && (existing.status === "cancelled" || existing.status === "completed" || existing.status === "failed");
       // Never resurrect a finished/cancelled agent row with late queued/progress.
       if (terminal && event.type !== "cancelled") {
@@ -2351,7 +2409,8 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         tasks.push({
           id: event.transferId,
           ownerId: eventParent?.ownerId
-            ?? (event.controlKind === "compressed-upload" ? "background-transfer" : "background-agent"),
+            ?? (event.controlKind === "compressed-upload" || event.controlKind === "packed-download"
+              ? "background-transfer" : "background-agent"),
           fileName: event.fileName ?? (
             targetPath.split(/[\\/]/).pop()
             || sourcePath.split(/[\\/]/).pop()
@@ -2359,9 +2418,12 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           ),
           sourcePath,
           targetPath,
-          sourceConnectionId: event.direction === "upload" ? "local" : (event.sessionId ?? "agent"),
+          packedTargetPaths: event.packedTargetPaths ? [...event.packedTargetPaths] : undefined,
+          sourceConnectionId: event.sourceConnectionId
+            ?? (event.direction === "upload" ? "local" : (event.sessionId ?? "agent")),
           targetConnectionId: event.direction === "download" ? "local" : (event.sessionId ?? "agent"),
           sourceHostId: event.sourceHostId,
+          sourceHostLabel: event.sourceHostLabel,
           targetHostId: event.targetHostId,
           parentTaskId: event.parentTaskId,
           directoryEntryIndex: event.directoryEntryIndex,
@@ -2373,9 +2435,11 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           speed: event.speed ?? 0,
           startTime: event.startedAt ?? Date.now(),
           isDirectory: event.isDirectory ?? false,
-          origin: "agent",
+          origin: event.origin ?? (event.controlKind === "packed-download" ? "manual" : "agent"),
           background: !event.parentTaskId,
-          resumable: event.resumable ?? true,
+          resumable: event.controlKind === "packed-download" ? false : event.resumable ?? true,
+          retryable: event.controlKind === "packed-download" ? false : event.retryable,
+          progressMode: event.controlKind === "packed-download" ? "bytes" : undefined,
           pauseUnavailableReason: event.pauseUnavailableReason,
           controlKind: event.controlKind,
           phase: event.phase,
@@ -2391,12 +2455,20 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
             : event.lifecycleEpoch !== undefined && incomingEpoch >= currentEpoch;
           return {
             ...task,
+            ownerId: isRestoredProvisionalPacked && !controllers.has(task.ownerId ?? "")
+              ? "background-transfer"
+              : task.ownerId,
             status: acceptsLifecycle
               ? (event.type === "queued" ? "queued" : "transferring")
               : task.status,
             error: acceptsLifecycle ? undefined : task.error,
             endTime: acceptsLifecycle ? undefined : task.endTime,
             fileName: event.fileName ?? task.fileName,
+            sourceConnectionId: event.sourceConnectionId ?? task.sourceConnectionId,
+            sourceHostId: event.sourceHostId ?? task.sourceHostId,
+            sourceHostLabel: event.sourceHostLabel ?? task.sourceHostLabel,
+            origin: event.origin ?? task.origin,
+            packedTargetPaths: event.packedTargetPaths ? [...event.packedTargetPaths] : task.packedTargetPaths,
             totalBytes: event.totalBytes ?? task.totalBytes,
             isDirectory: event.isDirectory ?? task.isDirectory,
             controlKind: event.controlKind ?? task.controlKind,
@@ -2405,7 +2477,9 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
             directoryEntryIdentity: event.directoryEntryIdentity ?? task.directoryEntryIdentity,
             background: event.parentTaskId ? false : task.background,
             phase: event.phase ?? task.phase,
-            resumable: event.resumable ?? task.resumable,
+            resumable: (event.controlKind ?? task.controlKind) === "packed-download" ? false : event.resumable ?? task.resumable,
+            retryable: (event.controlKind ?? task.controlKind) === "packed-download" ? false : event.retryable ?? task.retryable,
+            progressMode: (event.controlKind ?? task.controlKind) === "packed-download" ? "bytes" : task.progressMode,
             pauseUnavailableReason: event.pauseUnavailableReason ?? task.pauseUnavailableReason,
             lifecycleEpoch: acceptsLifecycle && event.lifecycleEpoch !== undefined
               ? event.lifecycleEpoch
@@ -2451,10 +2525,12 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
             task.parentTaskId ?? task.id,
             task.id,
           ) || isTransferPauseLatched(task.id);
-          const uiPauseLatched = task.status === "paused"
+          const rejectedChildPause = parentRow?.status === "pausing" && !!parentRow.pauseUnavailableReason
+            && task.status === "transferring" && !!task.pauseUnavailableReason;
+          const uiPauseLatched = !rejectedChildPause && (task.status === "paused"
             || task.status === "pausing"
             || parentHoldsPause
-            || selfLatched;
+            || selfLatched);
           const explicitResume = lifecycleStatus === "transferring"
             && event.lifecycleEpoch !== undefined
             && incomingEpoch > currentEpoch;
@@ -2497,6 +2573,9 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           const keepPaused = nextStatus === "paused" || nextStatus === "pausing";
           return {
             ...task,
+            ownerId: isRestoredProvisionalPacked && !controllers.has(task.ownerId ?? "")
+              ? "background-transfer"
+              : task.ownerId,
             status: nextStatus,
             transferredBytes: keepPaused ? task.transferredBytes : nextTransferred,
             totalBytes: event.totalBytes === undefined
@@ -2510,8 +2589,11 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
             downloadCheckpointBytes: event.downloadCheckpointBytes ?? task.downloadCheckpointBytes,
             uploadCheckpointBytes: event.uploadCheckpointBytes ?? task.uploadCheckpointBytes,
             sourceFingerprint: event.sourceFingerprint ?? task.sourceFingerprint,
+            packedTargetPaths: event.packedTargetPaths ? [...event.packedTargetPaths] : task.packedTargetPaths,
             phase: event.phase ?? task.phase,
-            resumable: event.resumable ?? task.resumable,
+            resumable: (event.controlKind ?? task.controlKind) === "packed-download" ? false : event.resumable ?? task.resumable,
+            retryable: (event.controlKind ?? task.controlKind) === "packed-download" ? false : task.retryable,
+            progressMode: (event.controlKind ?? task.controlKind) === "packed-download" ? "bytes" : task.progressMode,
             pauseUnavailableReason: event.pauseUnavailableReason ?? task.pauseUnavailableReason,
             error: keepPaused ? task.error : undefined,
             endTime: undefined,
@@ -2631,6 +2713,9 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       // Keep the live row for an ID collision, then run the canonical bounded
       // prune once more over the now-small merged result.
       const liveIds = new Set(tasks.map((task) => task.id));
+      for (const id of migrated.restoredPackedTaskIds) {
+        if (!liveIds.has(id)) restoredUnfinishedPackedIds.add(id);
+      }
       tasks = pruneSftpTransferHistory([
         ...migrated.tasks.filter((task) => !liveIds.has(task.id)),
         ...tasks,
@@ -2671,14 +2756,6 @@ const browserPersistence: StorePersistence | undefined = typeof globalThis.local
     };
 
 export const sftpTransferCenterStore = createSftpTransferCenterStore(browserPersistence);
-
-export function useSftpTransferCenter(): SftpTransferCenterSnapshot {
-  return useSyncExternalStore(
-    sftpTransferCenterStore.subscribe,
-    sftpTransferCenterStore.getSnapshot,
-    sftpTransferCenterStore.getSnapshot,
-  );
-}
 
 /** Badge only — stable when counts are unchanged so TopTabs does not re-render every progress byte. */
 export function useSftpTransferCenterBadge(): { count: number; hasAttention: boolean } {

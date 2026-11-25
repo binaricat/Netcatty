@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { startPtyJob } = require('./ptyExec.cjs');
 const { getFreshIdlePrompt, getVisibleIdlePrompt, trackSessionIdlePrompt } = require('./shellUtils.cjs');
+const { classifyShellReadiness } = require('./shellReadinessState.cjs');
 const { terminalCursorLine } = require('../terminalLogSanitizer.cjs');
 
 function readyPrompt(session) {
@@ -53,6 +54,86 @@ test('macOS default zsh prompt is recognized as an idle prompt', async () => {
   const result = await job.resultPromise;
   assert.equal(result.ok, true);
   assert.equal(pty.writes.length, 1);
+});
+
+test('decorated two-line host prompt is ready for command execution', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const prompt = '[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n# ';
+  trackSessionIdlePrompt(session, `Last login\r\n${prompt}`);
+  assert.equal(readyPrompt(session), prompt);
+
+  const job = startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  });
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
+test('decorated two-line prompt with a newline suffix is ready for command execution', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const prompt = '[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n#';
+  trackSessionIdlePrompt(session, `Last login\r\n${prompt}\r\n`);
+  assert.equal(readyPrompt(session), `${prompt}\n\n`);
+
+  const job = startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  });
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
+test('decorated two-line prompt redrawn with CR and erase-line is ready for command execution', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const output = [
+    'Last login: Mon Nov 23 16:01:46 2026 from 10.1.64.108\r\r\n',
+    '[\x1b[1;32mroot\x1b[m\x1b[1;33m@\x1b[m\x1b[1;35mk8s-10-1-64-1\x1b[m \x1b[4m~\x1b[m] \x1b[1;36mbr0 = 10.1.64.1\x1b[m\r\r\n',
+    '# \r\x1b[K# \r\x1b[K# \r\x1b[K# \r\x1b[K# ',
+  ].join('');
+  trackSessionIdlePrompt(session, output);
+  assert.equal(
+    readyPrompt(session),
+    '[root@k8s-10-1-64-1 ~] br0 = 10.1.64.1\n\n\n# \n# \n# \n# \n# ',
+  );
+
+  const result = await startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  }).resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
+test('JumpServer menu prompt stays non-shell-ready and writes zero PTY bytes', async () => {
+  for (const prompt of ['Opt> ', '[Host]> ']) {
+    const pty = new TestPty();
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, `Welcome to JumpServer\r\n${prompt}`);
+    assert.equal(readyPrompt(session), '', prompt);
+    assert.equal(classifyShellReadiness(session), 'busy', prompt);
+    const result = await startPtyJob(pty, '11', {
+      shellKind: 'posix',
+      getReadyPrompt: () => readyPrompt(session),
+      classifyReadiness: () => classifyShellReadiness(session),
+      promptWaitTimeoutMs: 25,
+      timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.ok, false, prompt);
+    assert.equal(result.code, 'SHELL_NOT_READY', prompt);
+    assert.deepEqual(pty.writes, [], prompt);
+  }
 });
 
 test('zsh prompt with pending input does not become ready', async (t) => {
@@ -188,6 +269,27 @@ test('readiness failure does not echo a command or interrupt a waiting program',
   assert.deepEqual(pty.writes, []);
   assert.deepEqual(echoes, []);
   assert.deepEqual(interrupts, []);
+});
+
+test('host-like copied output before a bare marker never receives a command', async () => {
+  for (const output of [
+    'see [root@prod] logs\n# ',
+    '[root@prod] copied output\n# ',
+    'root@prod output\n# ',
+    '[root@prod] version = 1.2\n# ',
+  ]) {
+    const pty = new TestPty();
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, output);
+    const result = await startPtyJob(pty, 'echo forbidden', {
+      shellKind: 'posix',
+      getReadyPrompt: () => readyPrompt(session),
+      promptWaitTimeoutMs: 25,
+      timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.code, 'SHELL_NOT_READY', output);
+    assert.deepEqual(pty.writes, [], output);
+  }
 });
 
 test('wall deadline during startup fails without writing or interrupting', async () => {
@@ -455,4 +557,93 @@ test('OSC 133 C/D markers keep exec gated even when output echoes a known prompt
   assert.equal(result.code, 'SHELL_NOT_READY');
   assert.match(result.error, /no command was sent/);
   assert.deepEqual(pty.writes, []);
+});
+
+
+// ── macOS `sudo -i` root prompt (issue #4195): end-to-end startPtyJob seam ──
+
+test('macOS sudo -i root prompt is recognized as idle and allows exec', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  const prompt = 'ChrisdeMacBook-Air:~ root# ';
+  trackSessionIdlePrompt(session, `Password:\r\nSorry, try again.\r\n${prompt}`);
+  assert.equal(session.lastIdlePrompt, prompt);
+  assert.equal(readyPrompt(session), prompt);
+
+  const result = await startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  }).resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+});
+
+test('sudo Password: / Sorry, try again. still gate exec as SHELL_NOT_READY', async () => {
+  for (const line of ['Password:', 'Sorry, try again.']) {
+    const pty = new TestPty();
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, `zhangdanting@ChrisdeMacBook-Air ~ %\r\n${line}`);
+    assert.equal(readyPrompt(session), '', line);
+    const result = await startPtyJob(pty, 'echo forbidden', {
+      shellKind: 'posix',
+      getReadyPrompt: () => readyPrompt(session),
+      promptWaitTimeoutMs: 25,
+      timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.code, 'SHELL_NOT_READY', line);
+    assert.deepEqual(pty.writes, [], line);
+  }
+});
+
+// #4195 follow-up: the macOS root pattern must not read a `C:` drive prefix as
+// a hostname. These cmd.exe lines still have PENDING INPUT (an unfinished
+// command), so the readiness gate must stay closed and NO bytes may be typed.
+test('cmd.exe prompt-with-input lines are NOT idle-ready: zero PTY bytes written (#4048)', async () => {
+  for (const line of ['C:\\Users\\alice>echo hello#', 'C:\\> dir#']) {
+    const pty = new TestPty();
+    const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+    trackSessionIdlePrompt(session, line);
+    assert.equal(readyPrompt(session), '', line);
+    const result = await startPtyJob(pty, 'echo forbidden', {
+      shellKind: 'cmd',
+      getReadyPrompt: () => readyPrompt(session),
+      promptWaitTimeoutMs: 25,
+      timeoutMs: 1000,
+    }).resultPromise;
+    assert.equal(result.code, 'SHELL_NOT_READY', line);
+    assert.match(result.error, /no command was sent/, line);
+    assert.deepEqual(pty.writes, [], line);
+  }
+});
+
+// Valid macOS root prompts still open the gate (no false-negative from the
+// tightened pattern), and `Password:` stays blocked.
+test('valid macOS root prompt still ready; Password: still blocked end-to-end', async () => {
+  const pty = new TestPty();
+  const session = { _promptTrackTail: '', lastIdlePrompt: '' };
+  trackSessionIdlePrompt(session, 'Password:\r\nSorry, try again.\r\nhost:~ root$ ');
+  assert.equal(readyPrompt(session), 'host:~ root$ ');
+  const result = await startPtyJob(pty, 'echo OK', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(session),
+    promptWaitTimeoutMs: 200,
+    timeoutMs: 1000,
+  }).resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(pty.writes.length, 1);
+
+  const blockedPty = new TestPty();
+  const blockedSession = { _promptTrackTail: '', lastIdlePrompt: '' };
+  trackSessionIdlePrompt(blockedSession, 'Password:');
+  assert.equal(readyPrompt(blockedSession), '');
+  const blocked = await startPtyJob(blockedPty, 'echo forbidden', {
+    shellKind: 'posix',
+    getReadyPrompt: () => readyPrompt(blockedSession),
+    promptWaitTimeoutMs: 25,
+    timeoutMs: 1000,
+  }).resultPromise;
+  assert.equal(blocked.code, 'SHELL_NOT_READY');
+  assert.deepEqual(blockedPty.writes, []);
 });

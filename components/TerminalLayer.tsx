@@ -19,6 +19,7 @@ import { useTerminalBackend } from '../application/state/useTerminalBackend';
 import {
   useCodingCliSessionSignals,
 } from '../application/state/codingCliSessionSignalController';
+import { createPromptHostnameSessionSignalController } from '../application/state/promptHostnameSessionSignalController';
 import { collectSessionIds } from '../domain/workspace';
 import { isPluginHostProtocol } from '../domain/pluginConnection';
 import { isSameSftpHostSelection } from '../domain/sftpTerminalIdentity';
@@ -112,6 +113,7 @@ import {
 import {
   DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   resolveSessionSidePanelAutoOpen,
+  shouldAutoOpenSftpForHost,
 } from '../domain/terminalSidePanelAutoOpen';
 import { canScheduleCommandCwdProbe, shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
 import {
@@ -232,6 +234,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onUpdateSessionFontSize,
   onUpdateSessionRestoreCwd,
   onUpdateSessionDynamicTitle,
+  onUpdateSessionPromptHost,
   onUpdateSessionCodingCliProvider,
   onClearSessionFontSizeOverride,
   onCloseSession,
@@ -429,7 +432,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onUpdateSessionDynamicTitle,
   });
   const handleTerminalTitleChange = codingCliSignalController.handleTerminalTitleChange;
-  const handleTerminalOutput = codingCliSignalController.handleTerminalOutput;
+  const promptHostnameSignalController = useMemo(
+    () => createPromptHostnameSessionSignalController({
+      getSession: (sessionId) => sessionsRef.current.find((session) => session.id === sessionId),
+      onChange: (sessionId, hostname) => onUpdateSessionPromptHost?.(sessionId, hostname),
+    }),
+    [onUpdateSessionPromptHost],
+  );
+  useEffect(() => {
+    promptHostnameSignalController.pruneSessions(new Set(codingCliSessionIds));
+  }, [codingCliSessionIds, promptHostnameSignalController]);
+  const handleTerminalOutput = useCallback((sessionId: string, chunk: string) => {
+    codingCliSignalController.handleTerminalOutput(sessionId, chunk);
+    promptHostnameSignalController.handleTerminalOutput(sessionId, chunk);
+  }, [codingCliSignalController, promptHostnameSignalController]);
 
   const handleTerminalBell = useCallback((sessionId: string) => {
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
@@ -437,6 +453,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (!shouldMarkSessionActivity(activeTabStore.getActiveTabId(), session)) return;
     sessionActivityStore.setTabActive(sessionId, true);
   }, []);
+
+  // Terminal backend for broadcast writes and SSH session remote info
+  const terminalBackend = useTerminalBackend();
+  const sidePanelAutoOpenGenRef = useRef<Map<string, number>>(new Map());
 
   // Stable callback references for Terminal components
   const handleCloseSession = useCallback((sessionId: string) => {
@@ -456,10 +476,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       cwdProbeGenerationRef,
       cwdProbeCancelersRef,
     }, sessionId);
+    sidePanelAutoOpenGenRef.current.delete(sessionId);
     codingCliSignalController.forgetSession(sessionId);
+    promptHostnameSignalController.forgetSession(sessionId);
     sessionCapabilitiesStore.delete(sessionId);
     onCloseSession(sessionId);
-  }, [codingCliSignalController, onCloseSession]);
+  }, [codingCliSignalController, promptHostnameSignalController, onCloseSession]);
 
   const sftpAutoOpenSidebarRef = useRef(sftpAutoOpenSidebar);
   sftpAutoOpenSidebarRef.current = sftpAutoOpenSidebar;
@@ -478,13 +500,21 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // each render, and depending on that object would recreate the preset
   // callbacks (and in turn handleStatusChange) on unrelated state updates,
   // defeating the terminal pane memoization.
-  const { resolveDefaultLayoutForSession, saveWorkspaceLayoutAsDefault: persistWorkspaceLayoutAsDefault } =
-    useWorkspaceLayoutPresetState();
+  const {
+    resolveDefaultLayoutForSession,
+    hasDefaultLayoutSftpPane,
+    saveWorkspaceLayoutAsDefault: persistWorkspaceLayoutAsDefault,
+  } = useWorkspaceLayoutPresetState();
 
-  const applyWorkspaceLayoutPresetForSession = useCallback((session: TerminalSession, tabId: string, sftpHostOverride?: Host) => {
+  const applyWorkspaceLayoutPresetForSession = useCallback((
+    session: TerminalSession,
+    tabId: string,
+    sftpHostOverride?: Host,
+    options?: { host?: Host; remoteSshVersion?: string },
+  ) => {
     // Preset persistence and resolution live in the application layer; the
     // component only mounts the resolved panes into its UI state.
-    const resolved = resolveDefaultLayoutForSession(session);
+    const resolved = resolveDefaultLayoutForSession(session, options);
     if (!resolved) return false;
     const { layout, focusedTool, protocol: proto } = resolved;
 
@@ -566,6 +596,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [persistWorkspaceLayoutAsDefault, t]);
 
   const handleStatusChange = useCallback((sessionId: string, status: TerminalSession['status'], sftpHostOverride?: Host) => {
+    const connectGen = (sidePanelAutoOpenGenRef.current.get(sessionId) ?? 0) + 1;
+    sidePanelAutoOpenGenRef.current.set(sessionId, connectGen);
     onUpdateSessionStatus(sessionId, status);
 
     if (status !== 'connected') return;
@@ -611,75 +643,128 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     if (sidePanelOpenTabsRef.current.has(tabId)) return;
 
-    const targetPanel = resolveSessionSidePanelAutoOpen({
+    const presetHost =
+      (presetSession.id === sessionId ? sftpHostOverride : undefined)
+      ?? sessionHostsMapRef.current.get(presetSession.id)
+      ?? hostsRef.current.find(h => h.id === presetSession.hostId);
+
+    const applyAutoOpen = (remoteSshVersion?: string) => {
+      if (sidePanelOpenTabsRef.current.has(tabId)) return;
+
+      const targetPanel = resolveSessionSidePanelAutoOpen({
+        session: presetSession,
+        host: presetHost,
+        remoteSshVersion,
+        terminalEnabled: terminalSidePanelAutoOpenRef.current,
+        terminalTab: terminalSidePanelAutoOpenTabRef.current,
+        localEnabled: localShellSidePanelAutoOpenRef.current,
+        localTab: localShellSidePanelAutoOpenTabRef.current,
+        legacySftpEnabled: sftpAutoOpenSidebarRef.current,
+      });
+
+      // Explicit SFTP (JumpServer deep link / host.autoOpenSftpPanel) wins over a
+      // saved default that may omit file transfer -- only when SFTP is actually
+      // available. Ordinary auto-open still yields to the saved default.
+      if (targetPanel !== "sftp") {
+        if (applyWorkspaceLayoutPresetForSession(
+          presetSession,
+          tabId,
+          presetSession.id === sessionId ? sftpHostOverride : undefined,
+          { host: presetHost, remoteSshVersion },
+        )) return;
+        if (!targetPanel) return;
+      }
+
+      lastSidePanelTabRef.current.set(tabId, targetPanel);
+
+      if (targetPanel === 'sftp') {
+        sftpPaneClosedTabIdsRef.current.delete(tabId);
+        setSftpHostSourceSessionForTab(prev => new Map(prev).set(tabId, presetSession.id));
+        const host = hostsRef.current.find(h => h.id === presetSession.hostId);
+        const hostWithOverrides: Host = host
+          ? {
+            ...host,
+            protocol: presetSession.protocol ?? host.protocol,
+            port: presetSession.port ?? host.port,
+            moshEnabled: presetSession.moshEnabled ?? host.moshEnabled,
+            etEnabled: presetSession.etEnabled ?? host.etEnabled,
+          }
+          : {
+            id: presetSession.hostId || presetSession.id,
+            hostname: presetSession.hostname,
+            username: presetSession.username,
+            port: presetSession.port ?? 22,
+            protocol: proto,
+            label: presetSession.customName || presetSession.hostLabel || presetSession.hostname,
+          } as Host;
+
+        setSftpHostForTab(prev => {
+          const next = new Map(prev);
+          next.set(tabId, presetSession.id === sessionId && sftpHostOverride ? sftpHostOverride : hostWithOverrides);
+          return next;
+        });
+      } else if (targetPanel === 'ai') {
+        setAiMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (targetPanel === 'scripts') {
+        setScriptsMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (targetPanel === 'theme') {
+        setThemeMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (targetPanel === 'system') {
+        setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (targetPanel === 'notes') {
+        setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (targetPanel === 'browser') {
+        setBrowserMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      }
+
+      setSidePanelOpenTabs(prev => {
+        const next = new Map(prev);
+        next.set(tabId, targetPanel);
+        return next;
+      });
+    };
+
+    const explicitSftpAutoOpen =
+      presetSession.autoOpenSidePanel === 'sftp' || presetHost?.autoOpenSftpPanel === true;
+    const initialTargetPanel = resolveSessionSidePanelAutoOpen({
       session: presetSession,
+      host: presetHost,
       terminalEnabled: terminalSidePanelAutoOpenRef.current,
       terminalTab: terminalSidePanelAutoOpenTabRef.current,
       localEnabled: localShellSidePanelAutoOpenRef.current,
       localTab: localShellSidePanelAutoOpenTabRef.current,
       legacySftpEnabled: sftpAutoOpenSidebarRef.current,
     });
+    const mayAutoOpenSftp =
+      initialTargetPanel === 'sftp'
+      || hasDefaultLayoutSftpPane();
+    const needsSshBannerCheck =
+      proto === 'ssh'
+      && !explicitSftpAutoOpen
+      && mayAutoOpenSftp
+      && shouldAutoOpenSftpForHost(presetHost)
+      && typeof terminalBackend?.getSessionRemoteInfo === 'function';
 
-    // Explicit SFTP (JumpServer deep link / host.autoOpenSftpPanel) wins over a
-    // saved default that may omit file transfer — only when SFTP is actually
-    // available. Ordinary auto-open still yields to the saved default.
-    if (targetPanel !== "sftp") {
-      if (applyWorkspaceLayoutPresetForSession(
-        presetSession,
-        tabId,
-        presetSession.id === sessionId ? sftpHostOverride : undefined,
-      )) return;
-      if (!targetPanel) return;
+    if (needsSshBannerCheck) {
+      const presetGen = sidePanelAutoOpenGenRef.current.get(presetSession.id) ?? 0;
+      const isAttemptStillCurrent = () =>
+        sidePanelAutoOpenGenRef.current.get(sessionId) === connectGen
+        && (sidePanelAutoOpenGenRef.current.get(presetSession.id) ?? 0) === presetGen
+        && sessionsRef.current.some(s => s.id === presetSession.id);
+      void terminalBackend.getSessionRemoteInfo(presetSession.id)
+        .then((info) => {
+          if (!isAttemptStillCurrent()) return;
+          applyAutoOpen(info?.remoteSshVersion);
+        })
+        .catch(() => {
+          if (!isAttemptStillCurrent()) return;
+          applyAutoOpen();
+        });
+      return;
     }
 
-    lastSidePanelTabRef.current.set(tabId, targetPanel);
-
-    if (targetPanel === 'sftp') {
-      sftpPaneClosedTabIdsRef.current.delete(tabId);
-      setSftpHostSourceSessionForTab(prev => new Map(prev).set(tabId, presetSession.id));
-      const host = hostsRef.current.find(h => h.id === presetSession.hostId);
-      const hostWithOverrides: Host = host
-        ? {
-          ...host,
-          protocol: presetSession.protocol ?? host.protocol,
-          port: presetSession.port ?? host.port,
-          moshEnabled: presetSession.moshEnabled ?? host.moshEnabled,
-          etEnabled: presetSession.etEnabled ?? host.etEnabled,
-        }
-        : {
-          id: presetSession.hostId || presetSession.id,
-          hostname: presetSession.hostname,
-          username: presetSession.username,
-          port: presetSession.port ?? 22,
-          protocol: proto,
-          label: presetSession.customName || presetSession.hostLabel || presetSession.hostname,
-        } as Host;
-
-      setSftpHostForTab(prev => {
-        const next = new Map(prev);
-        next.set(tabId, presetSession.id === sessionId && sftpHostOverride ? sftpHostOverride : hostWithOverrides);
-        return next;
-      });
-    } else if (targetPanel === 'ai') {
-      setAiMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
-    } else if (targetPanel === 'scripts') {
-      setScriptsMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
-    } else if (targetPanel === 'theme') {
-      setThemeMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
-    } else if (targetPanel === 'system') {
-      setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
-    } else if (targetPanel === 'notes') {
-      setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
-    } else if (targetPanel === 'browser') {
-      setBrowserMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
-    }
-
-    setSidePanelOpenTabs(prev => {
-      const next = new Map(prev);
-      next.set(tabId, targetPanel);
-      return next;
-    });
-  }, [applyWorkspaceLayoutPresetForSession, onUpdateSessionStatus, setSidePanelOpenTabs, sidePanelOpenTabsRef]);
+    applyAutoOpen();
+  }, [applyWorkspaceLayoutPresetForSession, hasDefaultLayoutSftpPane, onUpdateSessionStatus, setSidePanelOpenTabs, sidePanelOpenTabsRef, terminalBackend]);
 
   const handleSessionExit = useCallback((sessionId: string, evt: TerminalSessionExitEvent) => {
     const intent = resolveTerminalSessionExitIntent(
@@ -711,8 +796,6 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return onTerminalDataCapture?.(sessionId, data);
   }, [onTerminalDataCapture]);
 
-  // Terminal backend for broadcast writes
-  const terminalBackend = useTerminalBackend();
   const snippetExecutorsRef = useRef<Map<string, SnippetExecutor>>(new Map());
   const broadcastInterruptPrioritizersRef = useRef<Map<string, () => void>>(new Map());
   const programmaticCommandLogRewriteHandlersRef = useRef<Map<string, (rewrite: ProgrammaticCommandLogRewrite) => void>>(new Map());

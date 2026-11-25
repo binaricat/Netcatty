@@ -1,5 +1,8 @@
 const { moshExtraResources } = require('./scripts/mosh-extra-resources.cjs');
 const { etExtraResources } = require('./scripts/et-extra-resources.cjs');
+const nodeProcess = require('node:process');
+const processEnv = nodeProcess.env;
+const includeWindowsHelloHelper = processEnv.NETCATTY_SKIP_WINDOWS_HELLO_HELPER !== '1';
 
 /**
  * @type {import('electron-builder').Configuration}
@@ -78,7 +81,6 @@ module.exports = {
         // TypeScript under domain/ is excluded below, so the .cjs must be listed.
         'domain/systemManager/containerRuntime.shared.cjs',
         'domain/singleChannelSshBanner.shared.cjs',
-        'domain/singleChannelSshBanner.shared.mjs',
         'domain/sshServerVendor.mjs',
         // sshAuthHelper.cjs requires this at load. TypeScript under domain/
         // is excluded below, so the shared TOTP runtime must be listed.
@@ -286,11 +288,11 @@ module.exports = {
         extraResources: [
             ...moshExtraResources('win32'),
             ...etExtraResources('win32'),
-            {
+            ...(includeWindowsHelloHelper ? [{
                 from: 'electron/bridges/windowsHelloHelper/build/${arch}/NetcattyWindowsHello.exe',
                 to: 'windowsHello/NetcattyWindowsHello.exe',
                 filter: ['**/*']
-            }
+            }] : [])
         ]
     },
     portable: {

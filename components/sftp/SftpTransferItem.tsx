@@ -139,6 +139,8 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     // panel setTransfersState for every tick — that re-rendered the whole SFTP
     // tree and pegged the renderer during large copies.
     const task = useSftpTransferTask(propsTask.id, propsTask);
+    const pauseFailed = task.status === 'pausing' && !!task.pauseUnavailableReason;
+    const isPausing = task.status === 'pausing' && !pauseFailed;
 
     // Same progress model as the global transfer center (done · found for folders).
     const isDirParent = isDirectoryParentTask(task);
@@ -192,11 +194,13 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
         && (task.status === 'pending' || task.status === 'queued' || task.status === 'transferring');
     const progressOverlayText = isResuming
         ? resumingLabel
+        : task.controlKind === 'packed-download' && task.status === 'transferring'
+        ? t(task.phase === 'extracting' ? 'sftp.packedDownload.extracting' : 'sftp.packedDownload.receiving')
         : isLiveScanning
         ? (fileCountDisplay
             ? `${t('sftp.transferCenter.phase.scanning')} · ${fileCountDisplay}`
             : t('sftp.transferCenter.phase.scanning'))
-        : task.status === 'pausing'
+        : isPausing
             ? pausingLabel
             : isDirParent
                 ? (fileCountDisplay
@@ -227,7 +231,9 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
 
     const statusIcon = isResuming
         ? <Loader2 size={12} className="animate-spin text-primary" />
-        : task.status === 'pausing'
+        : pauseFailed
+        ? <Pause size={12} className="text-amber-500" />
+        : isPausing
         ? <Loader2 size={12} className="animate-spin text-amber-500" />
         : task.status === 'transferring'
         ? <Loader2 size={12} className="animate-spin text-primary" />
@@ -285,12 +291,12 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
         || (isDirParent && !!fileCountDisplay)
         ? [speedFormatted, progressOverlayText].filter(Boolean).join(' • ')
         : '';
-    const showTransferSizeCalculation = task.status === 'transferring' && !hasKnownTotal && !isDirParent;
+    const showTransferSizeCalculation = task.controlKind !== 'packed-download' && task.status === 'transferring' && !hasKnownTotal && !isDirParent;
     const showFailedError = task.status === 'failed' && !!task.error;
     // Surface hard pause misses (e.g. "cannot be paused yet") so the panel
     // pause button never looks dead when the backend refuses.
     const showPauseUnavailable = !!task.pauseUnavailableReason
-        && (task.status === 'transferring' || task.status === 'queued' || task.status === 'pending');
+        && (pauseFailed || task.status === 'transferring' || task.status === 'queued' || task.status === 'pending');
     const showWarning = task.status === 'completed' && !!task.warning;
     const hasFooterContent = showTransferSizeCalculation || showFailedError || showPauseUnavailable || showWarning || childWarningCount > 0;
     const retryActionLabel = t('sftp.transfers.retryAction');
@@ -352,7 +358,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                     </Button>
                 </IconButtonWithTooltip>
             )}
-            {task.status === 'transferring' && task.resumable !== false && onPause && !isResuming && (
+            {(task.status === 'transferring' || pauseFailed) && task.resumable !== false && onPause && !isResuming && (
                 <IconButtonWithTooltip label={pauseActionLabel}>
                     <Button
                         type="button"
@@ -367,7 +373,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                     </Button>
                 </IconButtonWithTooltip>
             )}
-            {task.status === 'pausing' && (
+            {isPausing && (
                 <IconButtonWithTooltip label={pausingLabel}>
                     <Button
                         type="button"
@@ -397,7 +403,7 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                     </Button>
                 </IconButtonWithTooltip>
             )}
-            {(task.status === 'paused' || task.status === 'interrupted') && onResume && !isResuming && (
+            {(task.status === 'paused' || task.status === 'interrupted' || (pauseFailed && task.resumable !== false)) && onResume && !isResuming && (
                 <IconButtonWithTooltip label={resumeActionLabel}>
                     <Button
                         type="button"

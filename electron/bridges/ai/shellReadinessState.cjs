@@ -15,6 +15,7 @@
  * evolves independently of positive-signal additions such as #4197.
  */
 const { stripAnsi } = require("./shellUtils.cjs");
+const { isJumpServerMenuPrompt } = require("../../../domain/terminalPromptSecurity.shared.cjs");
 
 /** Distinct, non-terminal code emitted when the gate cannot prove busy. */
 const READINESS_UNKNOWN = "SHELL_READINESS_UNKNOWN";
@@ -92,9 +93,13 @@ function classifyShellReadiness(session, context = {}) {
   // sessionRecoveryService.cjs:55-56, 101-102).
   if (session.waitingForInput === true || session.busy === true) return "busy";
   if (session.status === "disconnected" || session.status === "stopped") return "busy";
-  // Credential prompt waiting for the user's secret (#4195).
+  // Credential prompt waiting for the user's secret (#4195) or an interactive
+  // JumpServer asset-selector menu (not a POSIX shell).
   const line = lastVisibleLine(session);
   if (line && BLOCKING_INPUT_PATTERNS.some((pattern) => pattern.test(line))) return "busy";
+  if (typeof session._promptTrackTail === "string" && isJumpServerMenuPrompt(session._promptTrackTail)) {
+    return "busy";
+  }
   // Connection alive, no proven-busy evidence, prompt not recognized.
   return "unknown";
 }

@@ -187,13 +187,13 @@ test("reconnect is requested for auto-start and auto-reconnect rules only", () =
   assert.equal(isPortForwardingReconnectRequested([], "rule-1"), false);
 });
 
-test("network recovery starts an exhausted auto-start rule through the real service path", async (t) => {
+test("network recovery nudges a long-backoff auto-start rule immediately and ignores auth-failed or stopped rules", async (t) => {
   const env = installStorage();
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   let onlineListener: (() => void) | undefined;
   const startedRuleIds: string[] = [];
-  const exhaustedStartResult = deferred<{ success: boolean; error: string }>();
-  let preparingExhaustedRule = true;
+  const backoffStartResult = deferred<{ success: boolean; error: string }>();
+  let preparingBackoffRule = true;
   const backendSnapshot = deferred<[]>();
   let snapshotCalls = 0;
   const target = {
@@ -214,8 +214,11 @@ test("network recovery starts an exhausted auto-start rule through the real serv
         },
         startPortForward: async ({ ruleId }: { ruleId: string }) => {
           startedRuleIds.push(ruleId);
-          if (ruleId === "exhausted" && preparingExhaustedRule) {
-            return exhaustedStartResult.promise;
+          if (ruleId === "backing-off" && preparingBackoffRule) {
+            return backoffStartResult.promise;
+          }
+          if (ruleId === "auth-failed") {
+            return { success: false, error: "All configured authentication methods failed" };
           }
           return { success: true };
         },
@@ -226,7 +229,8 @@ test("network recovery starts an exhausted auto-start rule through the real serv
   });
   t.after(async () => {
     await Promise.all([
-      stopAndCleanupRuleAndWait("exhausted"),
+      stopAndCleanupRuleAndWait("backing-off"),
+      stopAndCleanupRuleAndWait("auth-failed"),
       stopAndCleanupRuleAndWait("already-active"),
     ]);
     setReconnectCallback(null);
@@ -236,14 +240,19 @@ test("network recovery starts an exhausted auto-start rule through the real serv
   });
 
   const rules = [
-    rule({ id: "exhausted", autoStart: true }),
+    rule({ id: "backing-off", autoStart: true }),
     rule({ id: "already-active", autoStart: true }),
+    rule({ id: "auth-failed", autoStart: true }),
     rule({ id: "manually-stopped", autoStart: true, status: "inactive" }),
     rule({ id: "manual", autoStart: false }),
   ];
   env.storage.setItem(STORAGE_KEY_PORT_FORWARDING, JSON.stringify(rules));
-  setReconnectCallback(async () => ({ success: true }));
-  const exhaustedStart = startPortForward(
+  setReconnectCallback(async (ruleId, onStatusChange) => {
+    const targetRule = rules.find((item) => item.id === ruleId)!;
+    return startPortForward(targetRule, host(), [host()], [], [], onStatusChange, true);
+  });
+
+  const backoffStart = startPortForward(
     rules[0]!,
     host(),
     [host()],
@@ -252,22 +261,17 @@ test("network recovery starts an exhausted auto-start rule through the real serv
     () => undefined,
     true,
   );
-  const exhaustedConnection = getActiveConnection("exhausted");
-  assert.ok(exhaustedConnection);
-  exhaustedConnection.reconnectAttempts = 5;
-  exhaustedStartResult.resolve({ success: false, error: "offline socket" });
-  await exhaustedStart;
-  preparingExhaustedRule = false;
+  const backoffConnection = getActiveConnection("backing-off");
+  assert.ok(backoffConnection);
+  backoffConnection.reconnectAttempts = 5;
+  backoffStartResult.resolve({ success: false, error: "offline socket" });
+  await backoffStart;
+  assert.equal(backoffConnection.reconnectAttempts, 6);
+  assert.ok(backoffConnection.reconnectTimerCallback);
+  preparingBackoffRule = false;
 
-  await startPortForward(
-    rules[1]!,
-    host(),
-    [host()],
-    [],
-    [],
-    () => undefined,
-    true,
-  );
+  await startPortForward(rules[1]!, host(), [host()], [], [], () => undefined, true);
+  await startPortForward(rules[2]!, host(), [host()], [], [], () => undefined, true);
   startedRuleIds.length = 0;
 
   const unsubscribe = subscribeToPortForwardingNetworkRecovery(target, (recoveryRuleIds) =>
@@ -282,13 +286,13 @@ test("network recovery starts an exhausted auto-start rule through the real serv
   assert.equal(snapshotCalls, 1);
   backendSnapshot.resolve([]);
   await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.deepEqual(startedRuleIds, ["exhausted"]);
+  assert.deepEqual(startedRuleIds, ["backing-off"]);
 
   unsubscribe();
   assert.equal(onlineListener, undefined);
 });
 
-test("network recovery refreshes retries for a connecting final attempt", async (t) => {
+test("network recovery refreshes retries for a connecting retry attempt", async (t) => {
   const env = installStorage();
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const startResult = deferred<{ success: boolean; error: string }>();
@@ -350,17 +354,18 @@ test("network recovery refreshes retries for a connecting final attempt", async 
   startResult.resolve({ success: false, error: "offline socket" });
   await pendingStart;
   assert.equal(connection.reconnectAttempts, 1);
+  assert.equal(connection.error, "Reconnecting (attempt #1, next in 3s)...");
   assert.ok(connection.reconnectTimerCallback);
 });
 
-test("manual stop cancels an exhausted recovery while backend sync is pending", async (t) => {
+test("manual stop cancels a pending backoff recovery while backend sync is pending", async (t) => {
   const env = installStorage();
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  const exhaustedStartResult = deferred<{ success: boolean; error: string }>();
+  const backoffStartResult = deferred<{ success: boolean; error: string }>();
   const backendSnapshot = deferred<[]>();
   const stopResult = deferred<{ stopped: number; failed: number; errors: string[] }>();
   const startedRuleIds: string[] = [];
-  let preparingExhaustedRule = true;
+  let preparingBackoffRule = true;
   let onlineListener: (() => void) | undefined;
   const target = {
     addEventListener(type: string, listener: () => void) {
@@ -377,7 +382,7 @@ test("manual stop cancels an exhausted recovery while backend sync is pending", 
         listPortForwards: async () => backendSnapshot.promise,
         startPortForward: async ({ ruleId }: { ruleId: string }) => {
           startedRuleIds.push(ruleId);
-          if (preparingExhaustedRule) return exhaustedStartResult.promise;
+          if (preparingBackoffRule) return backoffStartResult.promise;
           return { success: true };
         },
         onPortForwardStatus: () => () => undefined,
@@ -385,9 +390,11 @@ test("manual stop cancels an exhausted recovery while backend sync is pending", 
       },
     },
   });
-  const exhaustedRule = rule({ id: "exhausted-then-stopped", autoStart: true });
-  env.storage.setItem(STORAGE_KEY_PORT_FORWARDING, JSON.stringify([exhaustedRule]));
-  setReconnectCallback(async () => ({ success: true }));
+  const backoffRule = rule({ id: "backoff-then-stopped", autoStart: true });
+  env.storage.setItem(STORAGE_KEY_PORT_FORWARDING, JSON.stringify([backoffRule]));
+  setReconnectCallback(async (ruleId, onStatusChange) => {
+    return startPortForward(backoffRule, host(), [host()], [], [], onStatusChange, true);
+  });
   const unsubscribe = subscribeToPortForwardingNetworkRecovery(target, (recoveryRuleIds) =>
     runPortForwardingAutoStart({
       ...autoStartOptions([host()]),
@@ -397,14 +404,14 @@ test("manual stop cancels an exhausted recovery while backend sync is pending", 
   t.after(async () => {
     unsubscribe();
     setReconnectCallback(null);
-    await stopAndCleanupRuleAndWait(exhaustedRule.id);
+    await stopAndCleanupRuleAndWait(backoffRule.id);
     env.restore();
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
     else Reflect.deleteProperty(globalThis, "window");
   });
 
-  const exhaustedStart = startPortForward(
-    exhaustedRule,
+  const backoffStart = startPortForward(
+    backoffRule,
     host(),
     [host()],
     [],
@@ -412,17 +419,17 @@ test("manual stop cancels an exhausted recovery while backend sync is pending", 
     () => undefined,
     true,
   );
-  const connection = getActiveConnection(exhaustedRule.id);
+  const connection = getActiveConnection(backoffRule.id);
   assert.ok(connection);
   connection.reconnectAttempts = 5;
-  exhaustedStartResult.resolve({ success: false, error: "offline socket" });
-  await exhaustedStart;
-  preparingExhaustedRule = false;
+  backoffStartResult.resolve({ success: false, error: "offline socket" });
+  await backoffStart;
+  preparingBackoffRule = false;
   startedRuleIds.length = 0;
 
   onlineListener?.();
   await new Promise<void>((resolve) => setImmediate(resolve));
-  const manualStop = stopPortForward(exhaustedRule.id, () => undefined);
+  const manualStop = stopPortForward(backoffRule.id, () => undefined);
   backendSnapshot.resolve([]);
   await new Promise<void>((resolve) => setImmediate(resolve));
 

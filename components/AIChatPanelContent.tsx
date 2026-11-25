@@ -55,7 +55,7 @@ interface AIChatPanelContentProps {
   contextUsage?: import('../application/state/useAgentCompactionUi').AgentContextUsage | null;
   inputValue: string;
   setInputValue: (value: string) => void;
-  handleSend: () => void;
+  handleSend: (textOverride?: string) => void;
   handleCompact: () => void;
   /** Rename a chat by id (history drawer edit affordance). Panel action, never agent content. */
   onRenameSession?: (sessionId: string, title: string) => void;
@@ -71,6 +71,8 @@ interface AIChatPanelContentProps {
   /** Manual durability escape hatch: export/import the whole session store. */
   onExportSessions?: () => void;
   onImportSessions?: () => void;
+  /** Global session manager slot rendered by the drawer's "all chats" tab (#4098). */
+  globalManagerNode?: React.ReactNode;
   /** Undo last turn is offered at a safe boundary (never mid-tool / mid-compaction). */
   canUndoLastTurn?: boolean;
   handleUndoLastTurn?: () => void;
@@ -93,6 +95,7 @@ interface AIChatPanelContentProps {
   modelCatalogFetchedAt?: string;
   /** Retry a failed SDK model catalog load from the warning banner. */
   handleModelCatalogRetry?: () => void;
+  handleModelPickerOpen?: () => void;
   agentModelPresets: AgentModelPreset[];
   /** Suppress the composer picker's "use custom model" action (locked model). */
   allowCustomModelEntry?: boolean;
@@ -164,12 +167,14 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   onDismissPanelCommandNote,
   onExportSessions,
   onImportSessions,
+  globalManagerNode,
   canUndoLastTurn = false,
   handleUndoLastTurn,
   canCompact = false,
   handleSteer,
   handleStop,
   handleModelCatalogRetry,
+  handleModelPickerOpen,
   canSteer,
   isSteering,
   steerWarning,
@@ -211,6 +216,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   parked = false,
   sending = false,
 }) => {
+  const handleContinue = React.useCallback(() => handleSend(t('ai.chat.continue')), [handleSend, t]);
   const mentionHosts = React.useMemo(
     () => terminalSessions.map((session) => ({
       sessionId: session.sessionId,
@@ -334,6 +340,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
             onRename={onRenameSession}
             onExportSessions={onExportSessions}
             onImportSessions={onImportSessions}
+            globalManager={globalManagerNode}
             onClose={() => setShowHistory(false)}
           />
         </React.Profiler>
@@ -345,6 +352,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
               <ChatMessageList
                 messages={messages}
                 isStreaming={isStreaming}
+                onContinue={handleContinue}
                 activeSessionId={activeSessionId}
                 activeCompaction={activeCompaction}
                 contextCompaction={activeSession?.contextCompaction}
@@ -456,6 +464,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   modelCatalogFetchedAt={modelCatalogFetchedAt}
                   modelCatalogWarning={modelCatalogWarning}
                   onRefreshModelCatalog={handleModelCatalogRetry}
+                  onModelPickerOpen={handleModelPickerOpen}
                   allowCustomModelEntry={allowCustomModelEntry}
                   selectedModelId={selectedAgentModel}
                   onModelSelect={handleAgentModelSelect}

@@ -6,6 +6,7 @@ const { assertPluginContextKey, evaluateContextKeyExpression } = require("./cont
 const { assertPluginJsonValue } = require("./jsonBoundary.cjs");
 const { compileRestrictedJsonSchema } = require("./restrictedJsonSchema.cjs");
 const { PluginRpcError, RPC_ERRORS } = require("./rpcRouter.cjs");
+const { invalidArgument, freezeJson } = require("./validationUtils.cjs");
 const { InteractiveCommandFeature, InteractiveCommandLimits } = require("./generated/plugin-contract.schema.json").$defs;
 
 const MAX_SETTING_BYTES = 128 * 1024;
@@ -14,22 +15,8 @@ const MAX_PATTERN_VALUE_LENGTH = 4_096;
 const MAX_SCOPE_ID_LENGTH = 256;
 const SETTINGS_SCOPES = new Set(["application", "workspace", "host", "session", "device"]);
 
-function invalidArgument(message) {
-  return new PluginRpcError(RPC_ERRORS.invalidArgument, message);
-}
-
 function notFound(message) {
   return new PluginRpcError(RPC_ERRORS.notFound, message);
-}
-
-function freezeJson(value) {
-  const clone = structuredClone(value);
-  const freeze = (item) => {
-    if (!item || typeof item !== "object" || Object.isFrozen(item)) return item;
-    for (const child of Array.isArray(item) ? item : Object.values(item)) freeze(child);
-    return Object.freeze(item);
-  };
-  return freeze(clone);
 }
 
 function assertJsonValue(value, label = "value") {

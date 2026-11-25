@@ -9,6 +9,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { terminalReconnectRegistry } from '../../application/state/terminalReconnectRegistry';
 import { useComposeBarHistory } from '../../application/state/useComposeBarHistory';
 import { canNavigateComposeBarHistory } from '../../domain/composeBarHistory';
+import type { PinnedSnippetDropPosition } from '../../domain/composeBarPinnedSnippets';
 import { STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS } from '../../infrastructure/config/storageKeys';
 import { useStoredBoolean } from '../../application/state/useStoredBoolean';
 import { useComposeBarHeight } from '../../application/state/useComposeBarHeight';
@@ -29,6 +30,45 @@ import {
 
 const SNIPPET_STRIP_HEIGHT = 30;
 const RESIZE_HANDLE_HEIGHT = 6;
+
+export const COMPOSE_SNIPPET_DRAG_MIME = 'application/x-netcatty-compose-snippet';
+
+const COMPOSE_EDITABLE_CONTEXT_SELECTOR = 'textarea, input, [contenteditable]';
+
+function hasComposeSnippetDragType(dataTransfer: DataTransfer | null | undefined): boolean {
+  if (!dataTransfer?.types) return false;
+  return Array.from(dataTransfer.types).includes(COMPOSE_SNIPPET_DRAG_MIME);
+}
+
+function resolveChipDropPosition(
+  event: Pick<React.DragEvent<HTMLElement>, 'clientX' | 'currentTarget'>,
+): PinnedSnippetDropPosition {
+  const rect = event.currentTarget.getBoundingClientRect();
+  if (!rect || rect.width <= 0) return 'before';
+  return event.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+}
+
+function resolveStripDropTarget(
+  strip: HTMLElement,
+  clientX: number,
+  pinnedSnippets: readonly Snippet[],
+): { id: string; position: PinnedSnippetDropPosition } | null {
+  const lastSnippet = pinnedSnippets[pinnedSnippets.length - 1];
+  if (!lastSnippet) return null;
+
+  const chips = Array.from(strip.querySelectorAll<HTMLElement>('[data-compose-snippet-id]'));
+  for (const chip of chips) {
+    const id = chip.dataset.composeSnippetId;
+    if (!id) continue;
+    const rect = chip.getBoundingClientRect();
+    if (!rect || rect.width <= 0) continue;
+    if (clientX < rect.left + rect.width / 2) {
+      return { id, position: 'before' };
+    }
+  }
+
+  return { id: lastSnippet.id, position: 'after' };
+}
 
 export type ComposeBarTheme = {
   resolvedBg: string;
@@ -63,6 +103,14 @@ interface ComposeBarSnippetChipProps {
   onUnpin: (id: string) => void;
   unpinLabel: string;
   clickHint: string;
+  canReorder: boolean;
+  isBeingDragged: boolean;
+  isDraggingAny: boolean;
+  dropIndicator: PinnedSnippetDropPosition | null;
+  onDragStart: (event: React.DragEvent<HTMLDivElement>, id: string) => void;
+  onDragOver: (event: React.DragEvent<HTMLDivElement>, id: string) => void;
+  onDrop: (event: React.DragEvent<HTMLDivElement>, id: string) => void;
+  onDragEnd: () => void;
 }
 
 const ComposeBarSnippetChip = memo(function ComposeBarSnippetChip({
@@ -72,12 +120,30 @@ const ComposeBarSnippetChip = memo(function ComposeBarSnippetChip({
   onUnpin,
   unpinLabel,
   clickHint,
+  canReorder,
+  isBeingDragged,
+  isDraggingAny,
+  dropIndicator,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
 }: ComposeBarSnippetChipProps) {
   const commandPreview = snippet.command.split('\n')[0];
 
   return (
     <div
-      className="group/chip flex items-stretch h-6 max-w-[168px] rounded overflow-hidden flex-shrink-0 transition-colors duration-150"
+      data-compose-snippet-id={snippet.id}
+      draggable={canReorder}
+      onDragStart={(event) => onDragStart(event, snippet.id)}
+      onDragOver={(event) => onDragOver(event, snippet.id)}
+      onDrop={(event) => onDrop(event, snippet.id)}
+      onDragEnd={onDragEnd}
+      className={cn(
+        'group/chip relative flex items-stretch h-6 max-w-[168px] rounded overflow-hidden flex-shrink-0 transition-[background-color,opacity] duration-150',
+        canReorder && 'cursor-grab active:cursor-grabbing',
+        isBeingDragged && 'opacity-45',
+      )}
       style={{ backgroundColor: theme.chipBg, color: theme.resolvedFg }}
       onMouseEnter={(e) => {
         e.currentTarget.style.backgroundColor = theme.chipHoverBg;
@@ -86,6 +152,17 @@ const ComposeBarSnippetChip = memo(function ComposeBarSnippetChip({
         e.currentTarget.style.backgroundColor = theme.chipBg;
       }}
     >
+      {dropIndicator && (
+        <span
+          aria-hidden="true"
+          data-compose-snippet-drop-indicator={dropIndicator}
+          className={cn(
+            'pointer-events-none absolute inset-y-0.5 w-[2px] rounded-full z-10',
+            dropIndicator === 'before' ? 'left-0' : 'right-0',
+          )}
+          style={{ backgroundColor: theme.resolvedFg }}
+        />
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -96,16 +173,20 @@ const ComposeBarSnippetChip = memo(function ComposeBarSnippetChip({
             {snippet.label}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-xs">
-          <p className="font-medium">{snippet.label}</p>
-          <p className="text-[10px] opacity-80 mt-0.5 font-mono line-clamp-2">
-            {commandPreview}
-          </p>
-          <p className="text-[10px] opacity-60 mt-1">{clickHint}</p>
-        </TooltipContent>
+        {!isDraggingAny && (
+          <TooltipContent side="top" className="max-w-xs">
+            <p className="font-medium">{snippet.label}</p>
+            <p className="text-[10px] opacity-80 mt-0.5 font-mono line-clamp-2">
+              {commandPreview}
+            </p>
+            <p className="text-[10px] opacity-60 mt-1">{clickHint}</p>
+          </TooltipContent>
+        )}
       </Tooltip>
       <button
         type="button"
+        data-compose-snippet-unpin
+        draggable={false}
         className={cn(
           'flex items-center justify-center w-5 shrink-0',
           'opacity-40 hover:opacity-100 group-hover/chip:opacity-70',
@@ -189,6 +270,7 @@ const ComposeBarSnippetManagePopover = memo(function ComposeBarSnippetManagePopo
         align="end"
         side="top"
         sideOffset={6}
+        onContextMenu={(event) => event.stopPropagation()}
         style={{
           backgroundColor: theme.resolvedBg,
           borderColor: theme.borderColor,
@@ -323,10 +405,16 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
     () => resolveComposeBarDefaultSeedIds(snippets),
     [snippets],
   );
-  const { pinnedIds, unpin, toggle, isPinned } = useComposeBarPinnedSnippets(
+  const { pinnedIds, unpin, toggle, reorder, isPinned } = useComposeBarPinnedSnippets(
     snippetIdKey,
     defaultSeedIds,
   );
+  const draggedSnippetIdRef = useRef<string | null>(null);
+  const [draggedSnippetId, setDraggedSnippetId] = useState<string | null>(null);
+  const [snippetDropTarget, setSnippetDropTarget] = useState<{
+    id: string;
+    position: PinnedSnippetDropPosition;
+  } | null>(null);
 
   heightRef.current = barHeight;
 
@@ -360,9 +448,21 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
 
   const sendToAll = composeSendToAll ?? Boolean(isBroadcastEnabled);
   const handleBroadcastContextMenu = useCallback((event: React.MouseEvent) => {
-    if (!isBroadcastEnabled && !sendToAll) return;
-    event.preventDefault();
+    // A solo composer is inside the terminal's context-menu trigger, but this
+    // gesture must never run a terminal action (such as paste into the PTY).
     event.stopPropagation();
+    if (!isBroadcastEnabled && !sendToAll) {
+      const targetElement = event.target instanceof Element
+        ? event.target
+        : event.target instanceof Node
+          ? event.target.parentElement
+          : null;
+      if (!targetElement?.closest(COMPOSE_EDITABLE_CONTEXT_SELECTOR)) {
+        event.preventDefault();
+      }
+      return;
+    }
+    event.preventDefault();
     setBroadcastMenuAnchor({
       x: event.clientX,
       y: event.clientY,
@@ -426,6 +526,123 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
       .filter((snippet): snippet is Snippet => Boolean(snippet)),
     [pinnedIds, snippetsById],
   );
+  const canReorderSnippets = pinnedSnippets.length > 1;
+
+  const clearSnippetDragState = useCallback(() => {
+    draggedSnippetIdRef.current = null;
+    setDraggedSnippetId(null);
+    setSnippetDropTarget(null);
+  }, []);
+
+  const isComposeSnippetDragEvent = useCallback((event: React.DragEvent) => (
+    draggedSnippetIdRef.current !== null || hasComposeSnippetDragType(event.dataTransfer)
+  ), []);
+
+  const readDraggedSnippetId = useCallback((event: React.DragEvent): string | null => {
+    if (draggedSnippetIdRef.current) return draggedSnippetIdRef.current;
+    try {
+      const fromTransfer = event.dataTransfer?.getData(COMPOSE_SNIPPET_DRAG_MIME);
+      return fromTransfer || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const handleSnippetDragStart = useCallback((event: React.DragEvent<HTMLDivElement>, id: string) => {
+    if (!canReorderSnippets) {
+      event.preventDefault();
+      return;
+    }
+    const targetElement = event.target instanceof Element ? event.target : null;
+    if (targetElement?.closest('[data-compose-snippet-unpin]')) {
+      event.preventDefault();
+      return;
+    }
+    event.stopPropagation();
+    draggedSnippetIdRef.current = id;
+    setDraggedSnippetId(id);
+    setSnippetDropTarget(null);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      try {
+        event.dataTransfer.setData(COMPOSE_SNIPPET_DRAG_MIME, id);
+      } catch {
+        // Ignore synthetic DragEvent implementations without writable dataTransfer.
+      }
+    }
+  }, [canReorderSnippets]);
+
+  const handleSnippetDragOver = useCallback((event: React.DragEvent<HTMLDivElement>, targetId: string) => {
+    if (!isComposeSnippetDragEvent(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    const draggedId = readDraggedSnippetId(event);
+    if (draggedId && draggedId === targetId) {
+      setSnippetDropTarget(null);
+      return;
+    }
+    const position = resolveChipDropPosition(event);
+    setSnippetDropTarget((prev) => (
+      prev?.id === targetId && prev.position === position ? prev : { id: targetId, position }
+    ));
+  }, [isComposeSnippetDragEvent, readDraggedSnippetId]);
+
+  const handleSnippetDrop = useCallback((event: React.DragEvent<HTMLDivElement>, targetId: string) => {
+    if (!isComposeSnippetDragEvent(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const draggedId = readDraggedSnippetId(event);
+    const position = resolveChipDropPosition(event);
+    clearSnippetDragState();
+    if (!draggedId || draggedId === targetId) return;
+    reorder(draggedId, targetId, position);
+  }, [clearSnippetDragState, isComposeSnippetDragEvent, readDraggedSnippetId, reorder]);
+
+  const handleSnippetStripDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!isComposeSnippetDragEvent(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    if (event.target !== event.currentTarget) return;
+    const draggedId = readDraggedSnippetId(event);
+    const target = resolveStripDropTarget(event.currentTarget, event.clientX, pinnedSnippets);
+    if (!target || target.id === draggedId) {
+      setSnippetDropTarget(null);
+      return;
+    }
+    setSnippetDropTarget((prev) => (
+      prev?.id === target.id && prev.position === target.position ? prev : target
+    ));
+  }, [isComposeSnippetDragEvent, pinnedSnippets, readDraggedSnippetId]);
+
+  const handleSnippetStripDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!isComposeSnippetDragEvent(event)) return;
+    event.stopPropagation();
+    const related = event.relatedTarget;
+    if (related instanceof Node && event.currentTarget.contains(related)) return;
+    setSnippetDropTarget(null);
+  }, [isComposeSnippetDragEvent]);
+
+  const handleSnippetStripDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!isComposeSnippetDragEvent(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const draggedId = readDraggedSnippetId(event);
+    const target = resolveStripDropTarget(event.currentTarget, event.clientX, pinnedSnippets);
+    clearSnippetDragState();
+    if (!draggedId || !target || draggedId === target.id) return;
+    reorder(draggedId, target.id, target.position);
+  }, [clearSnippetDragState, isComposeSnippetDragEvent, pinnedSnippets, readDraggedSnippetId, reorder]);
+
+  const isolateComposeSnippetDrag = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!isComposeSnippetDragEvent(event)) return;
+    event.stopPropagation();
+  }, [isComposeSnippetDragEvent]);
 
   const clickHint = t('terminal.composeBar.snippetClickHint');
 
@@ -566,6 +783,10 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
         borderTop: `1px solid ${theme.borderColor}`,
       }}
       onContextMenu={handleBroadcastContextMenu}
+      onDragEnter={isolateComposeSnippetDrag}
+      onDragOver={isolateComposeSnippetDrag}
+      onDragLeave={isolateComposeSnippetDrag}
+      onDrop={isolateComposeSnippetDrag}
     >
       <div
         role="separator"
@@ -586,7 +807,13 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
         className="flex-shrink-0 flex items-center gap-1 px-2 min-w-0"
         style={{ height: SNIPPET_STRIP_HEIGHT }}
       >
-        <div className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto scrollbar-thin">
+        <div
+          data-compose-snippet-strip
+          className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto scrollbar-thin"
+          onDragOver={handleSnippetStripDragOver}
+          onDragLeave={handleSnippetStripDragLeave}
+          onDrop={handleSnippetStripDrop}
+        >
           {pinnedSnippets.map((snippet) => (
             <ComposeBarSnippetChip
               key={snippet.id}
@@ -596,6 +823,14 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
               unpinLabel={t('terminal.composeBar.unpinSnippet', { label: snippet.label })}
               onUnpin={unpin}
               onActivate={handleSnippetActivate}
+              canReorder={canReorderSnippets}
+              isBeingDragged={draggedSnippetId === snippet.id}
+              isDraggingAny={draggedSnippetId !== null}
+              dropIndicator={snippetDropTarget?.id === snippet.id ? snippetDropTarget.position : null}
+              onDragStart={handleSnippetDragStart}
+              onDragOver={handleSnippetDragOver}
+              onDrop={handleSnippetDrop}
+              onDragEnd={clearSnippetDragState}
             />
           ))}
         </div>
@@ -705,7 +940,10 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
             color: theme.resolvedFg,
           }}
           onMouseDown={(event) => event.preventDefault()}
-          onContextMenu={(e) => e.preventDefault()}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
         >
           {broadcastMenuAnchor.inTextarea && (
             <>

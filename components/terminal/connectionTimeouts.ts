@@ -39,6 +39,7 @@ type ConnectionTimeoutState = {
   needsHostKeyVerification: boolean;
   isConnectionAwaitingUserInput: boolean;
   isConnectionPastTcpDial: boolean;
+  isWaitingForAutoReconnect?: boolean;
 };
 
 export function getConnectionTimeoutMs(
@@ -67,5 +68,6 @@ export function shouldRunConnectionTimeout(state: ConnectionTimeoutState): boole
     && !state.isLocalConnection
     && !state.isSerialConnection
     && !state.needsHostKeyVerification
-    && !state.isConnectionAwaitingUserInput;
+    && !state.isConnectionAwaitingUserInput
+    && !state.isWaitingForAutoReconnect;
 }

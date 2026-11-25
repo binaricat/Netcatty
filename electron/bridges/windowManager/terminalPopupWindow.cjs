@@ -5,9 +5,11 @@ const { randomUUID } = require("node:crypto");
 const crashLogBridge = require("../crashLogBridge.cjs");
 const {
   isAttachPopupClosePrepared,
+  onAttachOutputRestored,
   registerAttachPopupAuthorization,
   releaseAttachPopupAuthorization,
   restoreAttachedSessionOutput,
+  waitForAttachPopupOutcome,
 } = require("../terminalAttachRestore.cjs");
 const {
   windowsFramelessContentChromeOptions,
@@ -85,11 +87,17 @@ function createTerminalPopupWindowApi(ctx) {
     async function openTerminalPopupWindow(electronModule, options, payload) {
       const { BrowserWindow, shell } = electronModule;
       const { preload, devServerUrl, isDev, appIcon, isMac, electronDir, sourceWindow } = options;
+      // Pin the home window at open time so a later mainWindow reassignment
+      // cannot redirect a moved tab's restore or close notification elsewhere.
+      const homeWindow = sourceWindow || mainWindow;
 
       const attachSessionId = typeof payload?.attachSessionId === "string" && payload.attachSessionId
         ? payload.attachSessionId
         : null;
       const attachAuthorization = attachSessionId ? randomUUID() : null;
+      // "Move Tab to New Window": the popup owns the session until it hands it back.
+      const ownsSessionLifetime = Boolean(attachSessionId && payload?.moveSession === true);
+      const isHomeGone = () => ownsSessionLifetime && !isLiveWindow(homeWindow);
       if (attachSessionId) {
         const existingPopupId = attachSessionPopups.get(attachSessionId);
         const existing = existingPopupId ? terminalPopupWindows.get(existingPopupId) : null;
@@ -165,17 +173,82 @@ function createTerminalPopupWindowApi(ctx) {
       let lifecycleReleased = false;
       let closePreparationRequested = false;
       let closePreparationTimer = null;
+      let restoreRetryTimer = null;
+      let attachClosedNotified = false;
+      const clearRestoreRetryTimer = () => {
+        if (restoreRetryTimer) {
+          clearTimeout(restoreRetryTimer);
+          restoreRetryTimer = null;
+        }
+      };
+      const notifyAttachClosed = () => {
+        clearRestoreRetryTimer();
+        if (!attachSessionId || attachClosedNotified) return;
+        // If a newer attach popup already took over this session, do not unhide the tab.
+        if (attachSessionPopups.has(attachSessionId)) {
+          attachClosedNotified = true;
+          return;
+        }
+        attachClosedNotified = true;
+        // Lets a tab moved into this popup reappear in the window it came from.
+        try {
+          if (isLiveWindow(homeWindow)) {
+            homeWindow.webContents.send("netcatty:terminal-popup:attach-closed", { sessionId: attachSessionId });
+          }
+        } catch {
+          // ignore destroyed home window
+        }
+      };
+      const scheduleAttachRestoreRetry = (attempt = 0) => {
+        if (
+          attachClosedNotified
+          || !attachSessionId
+          || !isLiveWindow(homeWindow)
+          || attachSessionPopups.has(attachSessionId)
+        ) {
+          clearRestoreRetryTimer();
+          return;
+        }
+        onAttachOutputRestored(attachSessionId, notifyAttachClosed);
+        if (attempt >= 4) return;
+        clearRestoreRetryTimer();
+        restoreRetryTimer = setTimeout(() => {
+          restoreRetryTimer = null;
+          if (
+            attachClosedNotified
+            || !isLiveWindow(homeWindow)
+            || attachSessionPopups.has(attachSessionId)
+          ) {
+            return;
+          }
+          void Promise.resolve(restoreAttachedSessionOutput(attachSessionId))
+            .then((res) => {
+              if (attachSessionPopups.has(attachSessionId)) return;
+              if (!res || res.success || res.unavailable) {
+                notifyAttachClosed();
+              } else {
+                scheduleAttachRestoreRetry(attempt + 1);
+              }
+            })
+            .catch(() => {
+              scheduleAttachRestoreRetry(attempt + 1);
+            });
+        }, 150 * (2 ** attempt));
+        restoreRetryTimer.unref?.();
+      };
       const releaseLifecycle = () => {
         if (lifecycleReleased) return;
         lifecycleReleased = true;
         if (closePreparationTimer) clearTimeout(closePreparationTimer);
         terminalPopupWindows.delete(popupId);
-        if (attachSessionId && attachSessionPopups.get(attachSessionId) === popupId) {
+        const homeGone = isHomeGone();
+        let restorePromise = null;
+        if (attachSessionId && attachSessionPopups.get(attachSessionId) === popupId && !homeGone) {
           attachSessionPopups.delete(attachSessionId);
           // Window may be destroyed before React cleanup runs; always restore
           // the display route from the main-process lifecycle.
           try {
-            restoreAttachedSessionOutput(attachSessionId);
+            restorePromise = Promise.resolve(restoreAttachedSessionOutput(attachSessionId));
           } catch (err) {
             crashLogBridge.captureError?.("terminal-popup", err, {
               popupId,
@@ -185,16 +258,34 @@ function createTerminalPopupWindowApi(ctx) {
           }
         }
         releaseAttachPopupAuthorization(attachAuthorization);
+        if (attachSessionPopups.get(attachSessionId) === popupId) attachSessionPopups.delete(attachSessionId);
+        if (attachSessionId && !homeGone) {
+          if (restorePromise) {
+            void restorePromise.then((res) => {
+              if (!res || res.success || res.unavailable) {
+                notifyAttachClosed();
+              } else {
+                // Keep the home tab hidden and actively retry output recovery.
+                scheduleAttachRestoreRetry(0);
+              }
+            }).catch(() => {
+              scheduleAttachRestoreRetry(0);
+            });
+          } else {
+            notifyAttachClosed();
+          }
+        }
         unregisterAppContentWindow(win);
         notifyAppContentWindowClosed(win);
       };
-      terminalPopupWindows.set(popupId, { releaseLifecycle, win });
+      terminalPopupWindows.set(popupId, { releaseLifecycle, win, homeWindow });
       if (attachSessionId) {
         attachSessionPopups.set(attachSessionId, popupId);
         registerAttachPopupAuthorization(
           attachAuthorization,
           attachSessionId,
           win.webContents.id,
+          { ownsLifetime: ownsSessionLifetime },
         );
       }
       registerAppContentWindow(win);
@@ -213,7 +304,7 @@ function createTerminalPopupWindowApi(ctx) {
       }
 
       win.on("close", (event) => {
-        if (!attachSessionId || isAttachPopupClosePrepared(attachAuthorization)) return;
+        if (!attachSessionId || isAttachPopupClosePrepared(attachAuthorization) || isHomeGone()) return;
         event?.preventDefault?.();
         if (closePreparationRequested) return;
         closePreparationRequested = true;
@@ -247,7 +338,7 @@ function createTerminalPopupWindowApi(ctx) {
         });
         win.webContents?.on?.("render-process-gone", (_event, details) => {
           console.warn("[TerminalPopup] Renderer process gone", { popupId, details });
-          if (attachSessionId) {
+          if (attachSessionId && !isHomeGone()) {
             restoreAttachedSessionOutput(attachSessionId);
           }
           try {
@@ -327,6 +418,24 @@ function createTerminalPopupWindowApi(ctx) {
           popupId,
           title,
         });
+        if (ownsSessionLifetime) {
+          // Wait for the popup to actually attach (snapshot + output rebind)
+          // before showing it or telling the source window to hide the tab.
+          const attachOutcome = await waitForAttachPopupOutcome(attachAuthorization);
+          if (!attachOutcome?.success || lifecycleReleased || !isLiveWindow(win)) {
+            const errorMessage = attachOutcome?.error || "Failed to attach terminal popup";
+            try {
+              if (isLiveWindow(win)) {
+                if (typeof win.destroy === "function") win.destroy();
+                else win.close();
+              }
+            } catch {
+              // Lifecycle cleanup below remains fail-safe if Electron cleanup throws.
+            }
+            releaseLifecycle();
+            return { success: false, error: errorMessage };
+          }
+        }
         showAndFocusWindow(win);
         crashLogBridge.captureDiagnostic("terminal-popup", "popup window shown", {
           popupId,
@@ -348,12 +457,15 @@ function createTerminalPopupWindowApi(ctx) {
       }
     }
 
-    function closeTerminalPopupWindow(popupId) {
+    function closeTerminalPopupWindow(popupId, requesterWindow = null) {
       const record = terminalPopupWindows.get(popupId);
-      if (!record) return;
+      if (!record) return false;
+      if (requesterWindow && record.homeWindow && requesterWindow !== record.homeWindow && requesterWindow !== record.win) {
+        return false;
+      }
       if (!isLiveWindow(record.win)) {
         record.releaseLifecycle();
-        return;
+        return true;
       }
       try {
         record.win.close();
@@ -366,6 +478,7 @@ function createTerminalPopupWindowApi(ctx) {
           record.releaseLifecycle();
         }
       }
+      return true;
     }
 
     return {

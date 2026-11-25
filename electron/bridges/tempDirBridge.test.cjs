@@ -1120,3 +1120,64 @@ test("custom temp preference validates, creates, persists, and resets roots", as
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });
+
+
+test("managed worker workspaces are visible, survive active cleanup, and can be cleared after a crash", async t => {
+  const { spawn } = require("node:child_process");
+  const { once } = require("node:events");
+  const root = fs.realpathSync(await fs.promises.mkdtemp(path.join(require("node:os").tmpdir(), "netcatty-workspace-")));
+  const previous = tempDirBridge.getCustomTempDir();
+  const managed = tempDirBridge.applyCustomTempDir(root);
+  const outside = path.join(root, "outside");
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, "keep"), "outside");
+  const script = `
+    const fs = require("node:fs"), path = require("node:path");
+    const bridge = require(${JSON.stringify(require.resolve("./tempDirBridge.cjs"))});
+    bridge.applyCustomTempDir(process.argv[1]);
+    const workspace = bridge.createManagedTempDirectory("packed-download");
+    fs.mkdirSync(path.join(workspace.path, "contents"));
+    fs.writeFileSync(path.join(workspace.path, "archive"), "archive");
+    fs.writeFileSync(path.join(workspace.path, "contents", "data"), "unpacked");
+    process.send({ path: workspace.path });
+    setInterval(() => {}, 1000);
+  `;
+  const child = spawn(process.execPath, ["-e", script, managed], { stdio: ["ignore", "ignore", "pipe", "ipc"] });
+  t.after(async () => {
+    if (child.exitCode == null && child.signalCode == null) { child.kill("SIGKILL"); await once(child, "exit"); }
+    tempDirBridge.applyCustomTempDir(previous);
+    await fs.promises.rm(root, { recursive: true, force: true });
+  });
+  const [{ path: workspace }] = await once(child, "message");
+  if (process.platform !== "win32") fs.symlinkSync(outside, path.join(workspace, "outside-link"));
+  const info = await tempDirBridge.getTempDirInfo();
+  assert.equal(info.fileCount, process.platform === "win32" ? 2 : 3);
+  assert.equal(info.totalSize, 15 + (process.platform === "win32" ? 0 : fs.lstatSync(path.join(workspace, "outside-link")).size));
+  assert.deepEqual(await tempDirBridge.clearTempDir(), { deletedCount: 0, failedCount: 0 });
+  assert.equal(fs.existsSync(path.join(workspace, "archive")), true, "main-process cleanup must preserve the active worker's data");
+  child.kill("SIGKILL");
+  await once(child, "exit");
+  assert.deepEqual(await tempDirBridge.clearTempDir(), { deletedCount: 1, failedCount: 0 });
+  assert.equal(fs.existsSync(workspace), false);
+  assert.equal(fs.readFileSync(path.join(outside, "keep"), "utf8"), "outside");
+  assert.equal((await tempDirBridge.getTempDirInfo()).fileCount, 0);
+});
+
+test("failed workspace disposal releases active protection for manual cleanup in the same process", async t => {
+  const root = fs.realpathSync(await fs.promises.mkdtemp(path.join(require("node:os").tmpdir(), "netcatty-workspace-dispose-")));
+  const previous = tempDirBridge.getCustomTempDir();
+  const managed = tempDirBridge.applyCustomTempDir(root);
+  t.after(async () => { tempDirBridge.applyCustomTempDir(previous); await fs.promises.rm(root, { recursive: true, force: true }); });
+  const workspace = tempDirBridge.createManagedTempDirectory("packed-download");
+  fs.writeFileSync(path.join(workspace.path, "archive"), "archive");
+  const realRm = fs.promises.rm.bind(fs.promises);
+  const mockedRm = t.mock.method(fs.promises, "rm", async file => {
+    if (path.dirname(file) === managed) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+    return realRm(file, { recursive: true, force: true });
+  });
+  await assert.rejects(workspace.dispose(), { code: "EBUSY" });
+  mockedRm.mock.restore();
+  assert.equal((await tempDirBridge.getTempDirInfo()).totalSize, 7);
+  assert.deepEqual(await tempDirBridge.clearTempDir(), { deletedCount: 1, failedCount: 0 });
+  assert.deepEqual(fs.readdirSync(managed), [".netcatty-managed-temp"]);
+});

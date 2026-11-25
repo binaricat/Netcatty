@@ -22,6 +22,7 @@ export const cattyRuntimeContextSchema = z.object({
   lastCompaction: z.custom<CompactionTrace>().optional(),
   lastStepAdjusted: z.boolean().optional(),
   promptContext: z.custom<PromptContextSnapshot>().optional(),
+  toolOutputMaxChars: z.number().optional(),
 });
 
 export type CattyRuntimeContext = z.infer<typeof cattyRuntimeContextSchema>;
@@ -35,6 +36,7 @@ export const cattyToolContextSchema = z.object({
   getExecutorContext: z.custom<() => ExecutorContext>(),
   toolOutputStore: z.custom<ToolOutputStore>().optional(),
   toolResultDedup: z.custom<ToolResultDedup>().optional(),
+  toolOutputMaxChars: z.number().optional(),
 });
 
 export type CattyToolContext = z.infer<typeof cattyToolContextSchema>;
@@ -51,6 +53,7 @@ export function createInitialCattyRuntimeContext(input: {
   delegated?: boolean;
   scopeLabel?: string;
   promptContext?: PromptContextSnapshot;
+  toolOutputMaxChars?: number;
 }): CattyRuntimeContext {
   return {
     chatSessionId: input.chatSessionId,
@@ -64,6 +67,7 @@ export function createInitialCattyRuntimeContext(input: {
     scopeType: input.scopeType,
     scopeLabel: input.scopeLabel,
     promptContext: input.promptContext,
+    toolOutputMaxChars: input.toolOutputMaxChars,
   };
 }
 

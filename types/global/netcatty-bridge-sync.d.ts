@@ -167,8 +167,12 @@ declare global {
     cloudSyncWebdavUpload?(
       config: WebDAVConfig,
       syncedFile: SyncedFile
-    ): Promise<{ resourceId: string }>;
-    cloudSyncWebdavDownload?(config: WebDAVConfig): Promise<{ syncedFile: SyncedFile | null }>;
+    ): Promise<{ resourceId: string; etag?: string }>;
+    cloudSyncWebdavDownload?(config: WebDAVConfig, etag?: string): Promise<{
+      syncedFile: SyncedFile | null;
+      etag?: string;
+      notModified?: boolean;
+    }>;
     cloudSyncWebdavDelete?(config: WebDAVConfig): Promise<{ ok: true }>;
 
     cloudSyncS3Initialize?(config: S3Config): Promise<{ resourceId: string | null }>;

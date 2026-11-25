@@ -30,7 +30,7 @@ export interface PersistedSftpTransferCenter {
 }
 
 const SAFE_TASK_KEYS: ReadonlySet<keyof TransferTask> = new Set([
-  "id", "batchId", "fileName", "originalFileName", "sourcePath", "targetPath",
+  "id", "batchId", "fileName", "originalFileName", "sourcePath", "targetPath", "packedTargetPaths",
   "sourceConnectionId", "targetConnectionId", "targetHostId", "targetConnectionKey",
   "direction", "status", "totalBytes", "transferredBytes", "speed", "error", "warning",
   "startTime", "endTime", "isDirectory", "progressMode", "childTasks", "parentTaskId",
@@ -48,7 +48,15 @@ const SAFE_TASK_KEYS: ReadonlySet<keyof TransferTask> = new Set([
   "directoryResumeCheckpoint",
 ]);
 
-export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
+export interface SanitizeSftpTransferTaskOptions {
+  restoreAfterRestart?: boolean;
+  onRestoredPackedTask?: (taskId: string) => void;
+}
+
+export function sanitizeSftpTransferTask(
+  value: unknown,
+  options?: SanitizeSftpTransferTaskOptions,
+): TransferTask | null {
   if (!value || typeof value !== "object") return null;
   const source = value as Record<string, unknown>;
   if (typeof source.id !== "string" || typeof source.fileName !== "string") return null;
@@ -58,6 +66,12 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
     if (source[key] !== undefined) sanitized[key] = source[key];
   }
   const task = sanitized as unknown as TransferTask;
+  if (Array.isArray(task.packedTargetPaths)) {
+    const validPaths = task.packedTargetPaths.filter((item): item is string => typeof item === "string" && item.length > 0);
+    task.packedTargetPaths = validPaths.length > 0 ? validPaths : undefined;
+  } else {
+    task.packedTargetPaths = undefined;
+  }
   if (typeof task.warning !== "string" || !task.warning.trim()) task.warning = undefined;
   if (task.preflightStatSkipped !== true) task.preflightStatSkipped = undefined;
   if (!Number.isSafeInteger(task.directoryEntryIndex) || (task.directoryEntryIndex ?? -1) < 0) {
@@ -79,26 +93,40 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
       manifestHash: checkpoint.manifestHash,
     };
   }
-  // After force-quit / restart no backend stream remains. Every unfinished row
-  // (including a previously interrupted row that was already persisted) needs a
-  // dedicated reconnect — do not leave reconnectRequired false.
-  if (RESTORED_INTERRUPTED_STATUSES.has(task.status) || task.status === "interrupted") {
-    task.status = "interrupted";
-    task.speed = 0;
-    task.reconnectRequired = true;
-    // Phase labels like "transferring" would otherwise still render as "传输中"
-    // even though the task is dead after restart.
-    task.phase = undefined;
-    task.error = task.error || undefined;
-    // Stale lifecycle epochs from a previous process must not block first
-    // progress after dedicated reconnect.
-    task.lifecycleEpoch = undefined;
-  }
-  // An attention row can still control a live compression job after Cancel
-  // fails. A persisted copy cannot: keep its attention/conflict details, but
-  // require reconnect rather than routing Resume to the old compression job.
-  if (task.controlKind === "compressed-upload" && task.status === "attention") {
-    task.reconnectRequired = true;
+  const restoreAfterRestart = options?.restoreAfterRestart ?? true;
+  if (restoreAfterRestart) {
+    // Packed streams have no resumable SFTP walk. In particular a multi-select
+    // stores its common parent for display, never as a source to recursively replay.
+    if (task.controlKind === "packed-download" && !TERMINAL_STATUSES.has(task.status)) {
+      options?.onRestoredPackedTask?.(task.id);
+      task.status = "cancelled";
+      task.speed = 0;
+      task.retryable = false;
+      task.resumable = false;
+      task.reconnectRequired = false;
+      task.phase = undefined;
+    }
+    // After force-quit / restart no backend stream remains. Every unfinished row
+    // (including a previously interrupted row that was already persisted) needs a
+    // dedicated reconnect — do not leave reconnectRequired false.
+    if (RESTORED_INTERRUPTED_STATUSES.has(task.status) || task.status === "interrupted") {
+      task.status = "interrupted";
+      task.speed = 0;
+      task.reconnectRequired = true;
+      // Phase labels like "transferring" would otherwise still render as "传输中"
+      // even though the task is dead after restart.
+      task.phase = undefined;
+      task.error = task.error || undefined;
+      // Stale lifecycle epochs from a previous process must not block first
+      // progress after dedicated reconnect.
+      task.lifecycleEpoch = undefined;
+    }
+    // An attention row can still control a live compression job after Cancel
+    // fails. A persisted copy cannot: keep its attention/conflict details, but
+    // require reconnect rather than routing Resume to the old compression job.
+    if (task.controlKind === "compressed-upload" && task.status === "attention") {
+      task.reconnectRequired = true;
+    }
   }
   // Terminal rows must not keep conflict payloads. Older Skip paths cancelled the
   // task without clearing conflict, so SFTP remount reopened the conflict dialog
@@ -112,11 +140,16 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
 export function serializeSftpTransferCenter(tasks: readonly TransferTask[]): string {
   return JSON.stringify({
     version: SFTP_TRANSFER_CENTER_VERSION,
-    tasks: tasks.map((task) => sanitizeSftpTransferTask(task)).filter((task): task is TransferTask => task !== null),
+    tasks: tasks
+      .map((task) => sanitizeSftpTransferTask(task, { restoreAfterRestart: false }))
+      .filter((task): task is TransferTask => task !== null),
   } satisfies PersistedSftpTransferCenter);
 }
 
-export function deserializeSftpTransferCenter(raw: string | null | undefined): PersistedSftpTransferCenter {
+export function deserializeSftpTransferCenter(
+  raw: string | null | undefined,
+  options?: SanitizeSftpTransferTaskOptions,
+): PersistedSftpTransferCenter {
   if (!raw) return { version: SFTP_TRANSFER_CENTER_VERSION, tasks: [] };
   try {
     const parsed = JSON.parse(raw) as { version?: unknown; tasks?: unknown };
@@ -125,7 +158,9 @@ export function deserializeSftpTransferCenter(raw: string | null | undefined): P
     }
     return {
       version: SFTP_TRANSFER_CENTER_VERSION,
-      tasks: parsed.tasks.map(sanitizeSftpTransferTask).filter((task): task is TransferTask => task !== null),
+      tasks: parsed.tasks
+        .map((task) => sanitizeSftpTransferTask(task, options))
+        .filter((task): task is TransferTask => task !== null),
     };
   } catch {
     return { version: SFTP_TRANSFER_CENTER_VERSION, tasks: [] };

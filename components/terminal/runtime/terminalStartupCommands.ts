@@ -4,25 +4,23 @@ import { markPromptLineBreakCommandPending } from "./promptLineBreak";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 
 /**
- * Host startup is scheduled only after the shell attaches. Restored SSH panes
- * boot from the session fallback first; vault hydration (including group
- * defaults) replaces `hostRef` while that dial is still in flight. `startSSH`
- * keeps dialing the boot snapshot (`ctx.host`). The startup command may come
- * from the live host only when that object is still this dial: same id,
- * hostname, username, and dial port (`port || 22`), and the same protocol
- * when the live host sets one. A missing protocol is a legacy SSH host.
- * A saved host edited onto another endpoint since the workspace was saved
- * keeps the snapshot, so its command is not typed into the old session.
+ * Host startup is scheduled only after the shell attaches. Restored SSH and
+ * local panes boot from the session fallback first; vault hydration replaces
+ * `hostRef` while that start is still in flight. The startup command may come
+ * from the live host only when that object still describes this launch:
+ * - SSH: same id, hostname, username, dial port (`port || 22`), and protocol.
+ * - Local: same id, protocol `"local"`, shell, shell args, and start directory.
+ * A saved host edited onto another endpoint or shell since the workspace was
+ * saved keeps the snapshot, so its command is not typed into the old session.
  *
- * Serial preflight uses this same resolver to decide whether to wait for
- * auto-login, then schedules again after the port opens. Non-SSH transports
- * stay on the snapshot, so a command that appears on `hostRef` during the
- * open is not typed into a saved username/password exchange.
- * A ref that only carries a write-path toggle (no id) is not a host snapshot.
- * A different host id is a later pane, not this dial, so keep the snapshot.
+ * Serial and Telnet preflight stay on the snapshot so a command that appears
+ * on `hostRef` during open is not typed into a saved username/password
+ * exchange. A ref that only carries a write-path toggle (no id) is not a host
+ * snapshot. A different host id is a later pane, not this launch, so keep the
+ * snapshot.
  */
 const prefersLiveStartupHost = (protocol: string | undefined): boolean =>
-  protocol === "ssh" || protocol === undefined;
+  protocol === "ssh" || protocol === "local" || protocol === undefined;
 
 const sshDialPort = (port: number | undefined): number => port || 22;
 
@@ -38,6 +36,30 @@ const sameSshDialTarget = (
   return true;
 };
 
+const sameLocalShellArgs = (
+  left: string[] | undefined,
+  right: string[] | undefined,
+): boolean => {
+  const normalizedLeft = left?.length ? left : undefined;
+  const normalizedRight = right?.length ? right : undefined;
+  if (!normalizedLeft && !normalizedRight) return true;
+  if (!normalizedLeft || !normalizedRight || normalizedLeft.length !== normalizedRight.length) {
+    return false;
+  }
+  return normalizedLeft.every((arg, index) => arg === normalizedRight[index]);
+};
+
+const sameLocalLaunchTarget = (
+  dial: TerminalSessionStartersContext["host"],
+  live: TerminalSessionStartersContext["host"],
+): boolean => {
+  if (live.protocol !== "local") return false;
+  if ((live.localShell ?? "") !== (dial.localShell ?? "")) return false;
+  if (!sameLocalShellArgs(dial.localShellArgs, live.localShellArgs)) return false;
+  if ((live.localStartDir || "~") !== (dial.localStartDir || "~")) return false;
+  return true;
+};
+
 const resolveStartupHost = (
   ctx: TerminalSessionStartersContext,
 ): TerminalSessionStartersContext["host"] => {
@@ -46,7 +68,9 @@ const resolveStartupHost = (
     prefersLiveStartupHost(ctx.host.protocol)
     && live
     && live.id === ctx.host.id
-    && sameSshDialTarget(ctx.host, live)
+    && (ctx.host.protocol === "local"
+      ? sameLocalLaunchTarget(ctx.host, live)
+      : sameSshDialTarget(ctx.host, live))
   ) {
     return live;
   }

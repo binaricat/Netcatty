@@ -7,6 +7,3 @@ export const AGENT_KINDS = {
 } as const;
 
 export type AgentKind = (typeof AGENT_KINDS)[keyof typeof AGENT_KINDS];
-
-export const SIDEBAR_AGENT_KIND: AgentKind = AGENT_KINDS.SIDEBAR;
-export const GLOBAL_AGENT_KIND: AgentKind = AGENT_KINDS.GLOBAL;

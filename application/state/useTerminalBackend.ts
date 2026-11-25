@@ -338,6 +338,10 @@ export const useTerminalBackend = () => {
       perCharacterInput?: boolean;
       kittyKeyboardModeState?: NetcattyKittyKeyboardModeState;
       kittyKeyboardProtocolEnabled?: boolean;
+      passwordPromptActive?: boolean;
+      cwd?: string | null;
+      title?: string | null;
+      connectionLogDelta?: string;
     },
     authorization: string,
   ) => {
@@ -346,6 +350,25 @@ export const useTerminalBackend = () => {
       return { success: false as const, error: "applyTerminalSessionSnapshot unavailable" };
     }
     return bridge.applyTerminalSessionSnapshot(sessionId, snapshot, context, authorization);
+  }, []);
+
+  const reportAttachReady = useCallback(async (
+    sessionId: string,
+    authorization: string,
+  ) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.reportTerminalAttachReady) return { success: false as const };
+    return bridge.reportTerminalAttachReady(sessionId, authorization);
+  }, []);
+
+  const reportAttachFailed = useCallback(async (
+    sessionId: string,
+    authorization: string,
+    error?: string,
+  ) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.reportTerminalAttachFailed) return { success: false as const };
+    return bridge.reportTerminalAttachFailed(sessionId, authorization, error);
   }, []);
 
   const setSessionEncoding = useCallback(async (sessionId: string, encoding: string) => {
@@ -628,6 +651,8 @@ export const useTerminalBackend = () => {
         restoreSessionOutput,
         requestSessionSnapshot,
         applySessionSnapshot,
+        reportAttachReady,
+        reportAttachFailed,
         setSessionEncoding,
         onSessionData,
         onSessionExit,
@@ -713,6 +738,8 @@ export const useTerminalBackend = () => {
       restoreSessionOutput,
       requestSessionSnapshot,
       applySessionSnapshot,
+      reportAttachReady,
+      reportAttachFailed,
       setSessionEncoding,
       onSessionData,
       onSessionExit,

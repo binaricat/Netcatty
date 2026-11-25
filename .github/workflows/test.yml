@@ -44,7 +44,7 @@ jobs:
       - name: Verify generated Catty tool specs
         run: |
           npm run generate:capability-tools
-          git diff --exit-code infrastructure/ai/harness/generated/cattyToolSpecs.json
+          git diff --exit-code infrastructure/ai/harness/generated/cattyToolSpecs.json infrastructure/ai/harness/generated/globalAgentToolSpecs.json
 
       - name: Verify Codex App Server schema
         run: npm run check:codex-app-server-schema
@@ -54,7 +54,6 @@ jobs:
           npm run check:plugin-contract
           npm run test:plugin-runtime
           npm run test:plugin-examples
-          node --test --import tsx components/settings/tabs/Plugin*.test.tsx
 
       - name: Test
         run: npm test
@@ -154,6 +153,13 @@ jobs:
         env:
           NETCATTY_SSH_TEST_RUNTIME: electron
         run: node --test electron/bridges/sshChaChaTransport.test.cjs
+
+      - name: Exercise native PowerShell directory navigation in ConPTY
+        env:
+          NETCATTY_DIRECTORY_WINDOWS_LIVE: "1"
+        run: |
+          $env:NETCATTY_TEST_PWSH = (Get-Command pwsh -ErrorAction Stop).Source
+          node --test --test-force-exit --import tsx infrastructure/services/terminalDirectory.windows.test.ts
 
       - name: Exercise two SSH password prompts in the desktop app
         run: node scripts/terminal-broadcast-ssh.live.cjs

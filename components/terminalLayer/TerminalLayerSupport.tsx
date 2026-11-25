@@ -52,6 +52,9 @@ import type { ResolvedAppearance, TerminalAppearanceHostScope } from '../../doma
 import type { TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePanelAutoOpen';
 import type { SidePanelTool } from '../../domain/sidePanelLayout';
 import {
+  PANE_MAGNIFICATION_DURATION_MS,
+  resolveMagnifiedChromeBorderWidth,
+  resolvePaneMagnificationLayoutGeometry,
   resolvePaneMagnificationStyle,
   type PaneMagnificationController,
   type PaneMagnificationTarget,
@@ -177,13 +180,6 @@ export function adjustSaturationToken(hsl: string, factor: number): string {
   return `${parts[0]} ${Math.round(newS * 10) / 10}% ${parts[2]}`;
 }
 
-export type { TerminalThemePreviewState } from './terminalThemePreview';
-export {
-  emptyTerminalThemePreview,
-  listThemePreviewSessionIds,
-  resolvePaneThemePreviewId,
-} from './terminalThemePreview';
-
 export const clearTerminalPreviewVars = (sessionId: string | null) => {
   if (!sessionId || typeof document === 'undefined') return;
   const pane = document.querySelector<HTMLElement>(`[data-session-id="${sessionId}"]`);
@@ -287,6 +283,12 @@ interface AIChatPanelsHostProps {
   /** All live terminal+workspace target ids (for /chats dangling detection). */
   liveScopeTargetIds: Set<string>;
   contextsByTabId: Map<string, AIPanelContext>;
+  /**
+   * Per-session AI info for EVERY live terminal (full terminal session store,
+   * all tabs) — the global session manager's rebind targets and dangling
+   * detection must include terminals whose tab has no mounted AI context.
+   */
+  appTerminalSessions?: AITerminalSessionInfo[];
   resolveExecutorContext: (scope: {
     type: 'terminal' | 'workspace';
     targetId?: string;
@@ -460,6 +462,7 @@ function aiChatPanelsHostAreEqual(
   if (prev.mountedTabIds !== next.mountedTabIds) return false;
   if (prev.liveScopeTargetIds !== next.liveScopeTargetIds) return false;
   if (prev.contextsByTabId !== next.contextsByTabId) return false;
+  if (prev.appTerminalSessions !== next.appTerminalSessions) return false;
   if (prev.activeSidePanelTab !== next.activeSidePanelTab) return false;
   if (prev.pendingTerminalSelection !== next.pendingTerminalSelection) return false;
   if (prev.onPendingTerminalSelectionConsumed !== next.onPendingTerminalSelectionConsumed) return false;
@@ -502,6 +505,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   activeSidePanelTab,
   liveScopeTargetIds,
   contextsByTabId,
+  appTerminalSessions,
   resolveExecutorContext,
   pendingTerminalSelection,
   onPendingTerminalSelectionConsumed,
@@ -531,14 +535,49 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     showDraftView,
     updateDraft,
   } = aiConfig;
-  const aiPanelWorkspaces = useMemo(
-    () => (workspaces ?? []).map((workspace) => ({
-      id: workspace.id,
-      title: workspace.title,
-      anchorChatId: workspace.anchorChatId,
-    })),
-    [workspaces],
-  );
+  const previousAiPanelWorkspacesRef = useRef<Array<{ id: string; title: string; anchorChatId?: string; hostIds?: string[] }> | null>(null);
+  const aiPanelWorkspaces = useMemo(() => {
+    const hostIdBySessionId = new Map<string, string>();
+    for (const info of appTerminalSessions ?? []) {
+      if (info.sessionId && info.hostId) {
+        hostIdBySessionId.set(info.sessionId, info.hostId);
+      }
+    }
+    const next = (workspaces ?? []).map((workspace) => {
+      const hostIds = Array.from(
+        new Set(
+          collectSessionIds(workspace.root)
+            .map((sessionId) => hostIdBySessionId.get(sessionId))
+            .filter((hostId): hostId is string => !!hostId),
+        ),
+      );
+      return hostIds.length > 0
+        ? { id: workspace.id, title: workspace.title, anchorChatId: workspace.anchorChatId, hostIds }
+        : { id: workspace.id, title: workspace.title, anchorChatId: workspace.anchorChatId };
+    });
+    const prev = previousAiPanelWorkspacesRef.current;
+    if (
+      prev
+      && prev.length === next.length
+      && prev.every((entry, idx) => {
+        const candidate = next[idx];
+        if (
+          entry.id !== candidate.id
+          || entry.title !== candidate.title
+          || entry.anchorChatId !== candidate.anchorChatId
+        ) {
+          return false;
+        }
+        const a = entry.hostIds ?? [];
+        const b = candidate.hostIds ?? [];
+        return a.length === b.length && a.every((id, i) => id === b[i]);
+      })
+    ) {
+      return prev;
+    }
+    previousAiPanelWorkspacesRef.current = next;
+    return next;
+  }, [workspaces, appTerminalSessions]);
 
   useEffect(() => {
     if (!pendingTerminalSelection) return;
@@ -639,6 +678,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     commandTimeout={aiConfig.commandTimeout}
                     responseIdleTimeout={aiConfig.responseIdleTimeout}
                     maxIterations={aiConfig.maxIterations}
+                    toolOutputMaxChars={aiConfig.toolOutputMaxChars}
                     webSearchConfig={aiConfig.webSearchConfig}
                     quickMessages={aiConfig.quickMessages}
                     scopeType={context.scopeType}
@@ -649,6 +689,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     workspaces={aiPanelWorkspaces}
                     onSetWorkspaceAnchorChat={onSetWorkspaceAnchorChat}
                     terminalSessions={context.terminalSessions}
+                    appTerminalSessions={appTerminalSessions}
                     liveScopeTargetIds={liveScopeTargetIds}
                     resolveExecutorContext={resolveExecutorContext}
                     isVisible={isVisible}
@@ -715,6 +756,7 @@ export interface TerminalLayerProps {
   onUpdateSessionFontSize?: (sessionId: string, fontSize: number) => void;
   onUpdateSessionRestoreCwd?: (sessionId: string, cwd: string | null) => void;
   onUpdateSessionDynamicTitle?: (sessionId: string, title: string | null) => void;
+  onUpdateSessionPromptHost?: (sessionId: string, hostname: string | null) => void;
   onUpdateSessionCodingCliProvider?: (sessionId: string, providerId: import('../../domain/codingCliProviders').CodingCliProviderId | null) => void;
   onClearSessionFontSizeOverride?: (sessionId: string) => void;
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
@@ -1415,22 +1457,51 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     top: number;
     width: number;
     height: number;
+    layoutOrigin: { left: number; top: number; width: number; height: number };
   } | null>(null);
   useLayoutEffect(() => {
     if (!isMagnified) {
-      setMagnifiedSurfaceBounds(null);
-      return undefined;
+      if (!isVisible) {
+        setMagnifiedSurfaceBounds(null);
+        return undefined;
+      }
+      // Keep the geometry transition and stacking level through restore.
+      const timerId = window.setTimeout(
+        () => setMagnifiedSurfaceBounds(null),
+        PANE_MAGNIFICATION_DURATION_MS + 50,
+      );
+      return () => window.clearTimeout(timerId);
     }
     const pane = paneElementRef.current;
     const surface = pane?.closest<HTMLElement>('[data-section="terminal-workspace"]');
-    if (!surface) return undefined;
+    // The direct parent is the relative split layout container, even while
+    // the pane is fixed (offsetParent would be null during a quick re-zoom).
+    const layoutParent = pane?.parentElement;
+    if (!surface || !layoutParent) return undefined;
     const update = () => {
       const bounds = surface.getBoundingClientRect();
+      const origin = layoutParent.getBoundingClientRect();
+      if (pane && pane.style.position !== 'fixed') {
+        const geometry = {
+          left: pane.style.left,
+          top: pane.style.top,
+          width: pane.style.width,
+          height: pane.style.height,
+        };
+        if (Object.values(geometry).some((value) => value.endsWith('%'))) {
+          // Commit parent-resolved pixels while still absolute. Flush layout
+          // before switching to fixed so the transition starts from these px,
+          // rather than re-resolving the old percentages against the viewport.
+          Object.assign(pane.style, resolvePaneMagnificationLayoutGeometry(geometry, origin));
+          pane.getBoundingClientRect();
+        }
+      }
       setMagnifiedSurfaceBounds({
         left: bounds.left,
         top: bounds.top,
         width: bounds.width,
         height: bounds.height,
+        layoutOrigin: { left: origin.left, top: origin.top, width: origin.width, height: origin.height },
       });
     };
     update();
@@ -1438,11 +1509,14 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     const observer = new ResizeObserver(update);
     observer.observe(surface);
     return () => observer.disconnect();
-  }, [isMagnified]);
+  }, [isMagnified, isVisible]);
+  const magnifiedDevicePixelRatio = typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1);
   const style: React.CSSProperties = resolvePaneMagnificationStyle(
     layoutStyle,
     isMagnified && !!magnifiedSurfaceBounds,
     magnifiedSurfaceBounds,
+    magnifiedDevicePixelRatio,
+    magnifiedSurfaceBounds?.layoutOrigin,
   );
 
   useLayoutEffect(() => {
@@ -1600,11 +1674,14 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",
         isVisible && "z-10",
-        isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl animate-in fade-in zoom-in-95 duration-150",
+        isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl",
       )}
       style={{
         ...style,
         borderColor: isMagnified && magnifiedSurfaceBounds ? sessionAppearanceTheme.colors.cursor : undefined,
+        borderWidth: isMagnified && magnifiedSurfaceBounds
+          ? resolveMagnifiedChromeBorderWidth(magnifiedDevicePixelRatio)
+          : undefined,
       }}
       tabIndex={-1}
       onClick={handlePaneClick}

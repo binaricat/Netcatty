@@ -8,6 +8,7 @@ const dns = require("node:dns/promises");
 const { randomUUID } = require("node:crypto");
 const { PluginRpcError, RPC_ERRORS, raceWithAbort } = require("./rpcRouter.cjs");
 
+const HOST_LIMITS = Object.freeze(require("./generated/plugin-contract.schema.json").$defs.HostByteStreamLimits.const);
 const LIMITS = Object.freeze(require("./generated/plugin-contract.schema.json").$defs.ByteStreamLimits.const);
 const { canonicalizeStreamEndpoint, isLocalControlAddress } = require("./byteStreamEndpoint.cjs");
 
@@ -31,7 +32,7 @@ class PluginByteStreamBroker {
     this.revocation = this.permissionEngine.onDidRevoke((event) => {
       for (const state of this.connections.values()) {
         if (state.pluginId === event.pluginId
-          && (event.permission === undefined || event.permission === "network.stream")
+          && (event.permission === undefined || event.permission === (state.permission ?? "network.stream"))
           && (event.resource === undefined || event.resource === state.endpoint)) {
           this.finish(state, failure("permissionDenied", "Byte stream permission was revoked"));
         }
@@ -71,7 +72,7 @@ class PluginByteStreamBroker {
   touch(state) {
     clearTimeout(state.idleTimer);
     state.idleTimer = setTimeout(() => this.finish(state,
-      failure("deadlineExceeded", "Byte stream idle timeout")), LIMITS.idleMs);
+      failure("deadlineExceeded", "Byte stream idle timeout")), (state.limits ?? LIMITS).idleMs);
     state.idleTimer.unref?.();
   }
 
@@ -90,7 +91,7 @@ class PluginByteStreamBroker {
     context.assertCommit?.();
   }
 
-  async connect(endpoint, context) {
+  async connect(endpoint, context, hostTransport) {
     let target;
     try { target = canonicalizeStreamEndpoint(endpoint); }
     catch { throw failure("invalidArgument", "Byte stream endpoint is invalid"); }
@@ -103,7 +104,9 @@ class PluginByteStreamBroker {
       throw failure("resourceExhausted", "Byte stream connection limit exceeded");
     }
     const state = {
-      ...target, id: randomUUID(), pluginId: context.pluginId, runtimeId: context.runtimeId,
+      ...target, permission: hostTransport ? "network.hostStream" : "network.stream",
+      limits: hostTransport ? HOST_LIMITS : LIMITS,
+      id: randomUUID(), pluginId: context.pluginId, runtimeId: context.runtimeId,
       controller: new AbortController(), bytesRead: 0, bytesWritten: 0,
       sourceOwner: context.sourceOwner, sourceId: context.sourceId,
       closed: false, reading: false, writing: false, socket: null,
@@ -114,7 +117,7 @@ class PluginByteStreamBroker {
     try {
       await this.active(state, context);
       this.assertCommit(state, context);
-      await raceWithAbort(Promise.resolve(this.permissionEngine.authorize({ ...context, signal: state.controller.signal }, {
+      if (!hostTransport) await raceWithAbort(Promise.resolve(this.permissionEngine.authorize({ ...context, signal: state.controller.signal }, {
         permission: "network.stream", resources: [target.endpoint],
         reason: `Open byte stream to ${target.endpoint}`,
         operationId: `network.stream:${target.endpoint}`,
@@ -122,41 +125,46 @@ class PluginByteStreamBroker {
       })), state.controller.signal);
       await this.active(state, context);
       state.connectTimer = setTimeout(() => this.finish(state,
-        failure("deadlineExceeded", "Byte stream connect timeout")), LIMITS.connectMs);
-      const addresses = net.isIP(target.host)
-        ? [{ address: target.host, family: net.isIP(target.host) }]
-        : await raceWithAbort(Promise.resolve(this.lookup(target.host, { all: true, verbatim: true })), state.controller.signal);
-      await this.active(state, context);
-      if (!Array.isArray(addresses) || addresses.length === 0 || addresses.length > 64) {
-        throw failure("unavailable", "Byte stream hostname could not be resolved");
-      }
-      // Validate the whole DNS answer and pin one literal address. No second
-      // lookup, redirect, proxy discovery, or reconnect can change the peer.
-      for (const peer of addresses) {
-        if (![4, 6].includes(peer.family) || net.isIP(peer.address) !== peer.family) {
-          throw failure("unavailable", "Byte stream resolver returned an invalid address");
+        failure("deadlineExceeded", "Byte stream connect timeout")), state.limits.connectMs);
+      let socket;
+      if (hostTransport) {
+        socket = await raceWithAbort(hostTransport.open(state.controller.signal), state.controller.signal);
+      } else {
+        const addresses = net.isIP(target.host)
+          ? [{ address: target.host, family: net.isIP(target.host) }]
+          : await raceWithAbort(Promise.resolve(this.lookup(target.host, { all: true, verbatim: true })), state.controller.signal);
+        await this.active(state, context);
+        if (!Array.isArray(addresses) || addresses.length === 0 || addresses.length > 64) {
+          throw failure("unavailable", "Byte stream hostname could not be resolved");
         }
-        const local = isLocalControlAddress(peer.address);
-        const allowedTestPeer = this.testLocalEndpoints.has(target.endpoint)
-          && !this.isControlEndpoint(peer.address, target.port);
-        if ((local && !allowedTestPeer) || (!local && this.isControlEndpoint(peer.address, target.port))) {
-          throw failure("permissionDenied", "Byte streams cannot reach local or application control endpoints");
+        // Validate the whole DNS answer and pin one literal address. No second
+        // lookup, redirect, proxy discovery, or reconnect can change the peer.
+        for (const peer of addresses) {
+          if (![4, 6].includes(peer.family) || net.isIP(peer.address) !== peer.family) {
+            throw failure("unavailable", "Byte stream resolver returned an invalid address");
+          }
+          const local = isLocalControlAddress(peer.address);
+          const allowedTestPeer = this.testLocalEndpoints.has(target.endpoint)
+            && !this.isControlEndpoint(peer.address, target.port);
+          if ((local && !allowedTestPeer) || (!local && this.isControlEndpoint(peer.address, target.port))) {
+            throw failure("permissionDenied", "Byte streams cannot reach local or application control endpoints");
+          }
         }
+        const peer = addresses[0];
+        const params = {
+          host: peer.address, port: target.port, family: peer.family,
+          highWaterMark: LIMITS.bufferBytes,
+        };
+        if (target.transport === "tls") {
+          Object.assign(params, {
+            rejectUnauthorized: true, minVersion: "TLSv1.2",
+            ...(net.isIP(target.host) ? {} : { servername: target.host }),
+            checkServerIdentity: (_name, certificate) => tls.checkServerIdentity(target.host, certificate),
+          });
+        }
+        this.assertCommit(state, context);
+        socket = target.transport === "tls" ? this.connectTls(params) : this.connectSocket(params);
       }
-      const peer = addresses[0];
-      const params = {
-        host: peer.address, port: target.port, family: peer.family,
-        highWaterMark: LIMITS.bufferBytes,
-      };
-      if (target.transport === "tls") {
-        Object.assign(params, {
-          rejectUnauthorized: true, minVersion: "TLSv1.2",
-          ...(net.isIP(target.host) ? {} : { servername: target.host }),
-          checkServerIdentity: (_name, certificate) => tls.checkServerIdentity(target.host, certificate),
-        });
-      }
-      this.assertCommit(state, context);
-      const socket = target.transport === "tls" ? this.connectTls(params) : this.connectSocket(params);
       state.socket = socket;
       if (state.closed) { socket.destroy(); throw state.error ?? failure("cancelled", "Byte stream connection cancelled"); }
       socket.on("error", () => this.finish(state, failure("unavailable", "Byte stream transport failed")));
@@ -167,7 +175,7 @@ class PluginByteStreamBroker {
       });
       socket.on("end", () => { state.eof = true; });
       socket.pause();
-      await raceWithAbort(new Promise((resolve) => socket.once(
+      if (!hostTransport) await raceWithAbort(new Promise((resolve) => socket.once(
         target.transport === "tls" ? "secureConnect" : "connect", resolve,
       )), state.controller.signal);
       await this.active(state, context);
@@ -176,7 +184,7 @@ class PluginByteStreamBroker {
       }
       clearTimeout(state.connectTimer);
       state.lifetimeTimer = setTimeout(() => this.finish(state,
-        failure("deadlineExceeded", "Byte stream lifetime exceeded")), LIMITS.lifetimeMs);
+        failure("deadlineExceeded", "Byte stream lifetime exceeded")), state.limits.lifetimeMs);
       state.lifetimeTimer.unref?.();
       this.touch(state);
       this.assertCommit(state, context);
@@ -200,7 +208,7 @@ class PluginByteStreamBroker {
   }
 
   charge(state, direction, size) {
-    if (state.bytesRead + state.bytesWritten + size > LIMITS.connectionBytes) {
+    if (state.bytesRead + state.bytesWritten + size > (state.limits ?? LIMITS).connectionBytes) {
       throw failure("resourceExhausted", "Byte stream byte limit exceeded");
     }
     this.quotaManager?.chargeBytes(state.runtimeId, "network.stream", size);

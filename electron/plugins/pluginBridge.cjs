@@ -27,12 +27,15 @@ const CHANNELS = Object.freeze({
   logClear: "netcatty:plugins:log-clear",
   terminalTarget: "netcatty:plugins:terminal-target",
   interactionReady: "netcatty:plugins:interaction-ready",
+  hostStreamOpen: "netcatty:plugins:host-stream-open",
   interactionResponse: "netcatty:plugins:interaction-response",
   list: "netcatty:plugins:list",
   permissions: "netcatty:plugins:permissions",
   setPermissionMode: "netcatty:plugins:set-permission-mode",
   permissionReady: "netcatty:plugins:permission-ready",
   permissionResponse: "netcatty:plugins:permission-response",
+  aiHostReady: "netcatty:plugins:ai-host-ready",
+  agentHostReady: "netcatty:plugins:agent-host-ready",
   revokePermissions: "netcatty:plugins:revoke-permissions",
   resetSource: "netcatty:plugins:reset-source",
   sourceBinding: "netcatty:plugins:source-binding",
@@ -709,9 +712,13 @@ function registerPluginBridge(ipcMain, options) {
     if (!options.catalogService) throw new Error("Plugin catalog unavailable");
     return options.catalogService.install(payload?.id, payload?.selectionToken, payload?.sourceId, payload?.acceptedSourceId);
   });
-  handle(CHANNELS.interactionReady, async (_manager, payload, event) => {
+  handlePassive(CHANNELS.interactionReady, false, async (_manager, payload, event) => {
     if (!options.interactionService) throw new Error("Host interactions are unavailable");
     return options.interactionService.setReady(event.sender, payload?.ready);
+  });
+  handle(CHANNELS.hostStreamOpen, async (_manager, payload, event) => {
+    if (!options.interactionService || !payload?.connectionOptions || payload?.response?.action !== "commit") throw new Error("Reviewed host connection is unavailable");
+    return options.interactionService.respond(event.sender, payload.response, payload.connectionOptions);
   });
   handle(CHANNELS.interactionResponse, async (_manager, payload, event) => {
     if (!options.interactionService) throw new Error("Host interactions are unavailable");
@@ -739,7 +746,14 @@ function registerPluginBridge(ipcMain, options) {
     if ("senderFrame" in event && (!event.senderFrame || event.senderFrame !== event.sender?.mainFrame)) throw new Error("Untrusted permission UI frame");
     return event.sender;
   };
-  handle(CHANNELS.permissionReady, async (_manager, payload, event) => options.permissionDecisionHost?.setReady(permissionSender(event), payload?.ready));
+  handlePassive(
+    CHANNELS.permissionReady,
+    (_payload, event) => {
+      permissionSender(event);
+      return false;
+    },
+    async (_manager, payload, event) => options.permissionDecisionHost?.setReady(permissionSender(event), payload?.ready),
+  );
   handle(CHANNELS.permissionResponse, async (_manager, payload, event) => options.permissionDecisionHost?.respond(permissionSender(event), payload));
   handle(CHANNELS.setPermissionMode, async (_manager, payload) => {
     const pluginId = assertManagedPluginId(payload);
@@ -800,11 +814,17 @@ function registerPluginBridge(ipcMain, options) {
   ));
   handle(CHANNELS.restart, async (activeManager, payload) => activeManager.restart(payload?.pluginId));
   handle(CHANNELS.uninstall, async (activeManager, payload) => activeManager.uninstall(payload?.pluginId));
-  handle(CHANNELS.terminalTarget, async (_manager, target, event) => {
+  handlePassive(CHANNELS.terminalTarget, null, async (_manager, target, event) => {
     if (!options.interactionService) throw new Error("Host interactions unavailable");
     return options.interactionService.setTerminalTarget(event.sender, target);
   });
-  handle(CHANNELS.themeCatalog, async () => {
+  if (!configured) {
+    // Trusted AI/Agent host adapters only register IPC handlers when the plugin
+    // host starts; register quiet fallbacks so disabled-runtime startup stays clean.
+    handlePassive(CHANNELS.aiHostReady, false, async () => false);
+    handlePassive(CHANNELS.agentHostReady, false, async () => false);
+  }
+  handlePassive(CHANNELS.themeCatalog, null, async () => {
     if (!options.themeService) throw new Error("Plugin themes are unavailable");
     return options.themeService.catalog();
   });

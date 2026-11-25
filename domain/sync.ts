@@ -345,6 +345,7 @@ export interface SyncPayload {
     sftpAutoSync?: boolean;
     sftpShowHiddenFiles?: boolean;
     sftpUseCompressedUpload?: boolean;
+    sftpUsePackedDownload?: boolean;
     sftpSkipUnchanged?: boolean;
     sftpAutoOpenSidebar?: boolean;
     sftpFollowTerminalCwd?: boolean;
@@ -388,6 +389,7 @@ export interface SyncPayload {
       commandTimeout?: number;
       responseIdleTimeout?: number;
       maxIterations?: number;
+      toolOutputMaxChars?: number;
       agentModelMap?: Record<string, string>;
       agentProviderMap?: Record<string, string>;
       agentThinkingMap?: Record<string, string>;

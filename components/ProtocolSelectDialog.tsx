@@ -5,7 +5,15 @@ import { formatHostPort } from "../domain/host";
 import { isPluginHostProtocol } from "../domain/pluginConnection";
 import { cn } from "../lib/utils";
 import { Host, HostProtocol } from "../types";
-import { getProtocolVisualStyle, type ProtocolVisualKey } from "./protocolVisuals";
+import {
+  getProtocolOptionCardClass,
+  getProtocolVisualStyle,
+  PROTOCOL_OPTION_SUBTITLE_IDLE_CLASS,
+  PROTOCOL_OPTION_SUBTITLE_SELECTED_CLASS,
+  PROTOCOL_OPTION_TITLE_IDLE_CLASS,
+  PROTOCOL_OPTION_TITLE_SELECTED_CLASS,
+  type ProtocolVisualKey,
+} from "./protocolVisuals";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -157,36 +165,50 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
             <h3 className="text-sm font-medium">{t("protocolSelect.chooseProtocol")}</h3>
             <div className="space-y-3">
               {protocolOptions.map((option) => {
+                const isSelected = selectedProtocol === option.protocol;
                 const visual = isPluginHostProtocol(option.protocol)
                   ? {
                     icon: <Plug size={18} />,
-                    selected: "bg-primary text-primary-foreground",
+                    selected: "bg-primary text-primary-foreground shadow-sm",
                     idle: "bg-secondary text-muted-foreground",
                   }
                   : getProtocolVisualStyle(option.protocol as ProtocolVisualKey);
                 return (
                   <button
                     key={option.protocol}
-                    className={cn(
-                      "w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all text-left",
-                      selectedProtocol === option.protocol
-                        ? "border-primary bg-primary/5"
-                        : "border-border/60 hover:border-border hover:bg-secondary/50",
-                    )}
+                    type="button"
+                    aria-pressed={isSelected}
+                    data-state={isSelected ? "active" : "inactive"}
+                    data-protocol={option.protocol}
+                    className={getProtocolOptionCardClass(isSelected)}
                     onClick={() => setSelectedProtocol(option.protocol)}
                   >
                     <div className="flex items-center gap-3">
                       <div
                         className={cn(
-                          "h-10 w-10 rounded-lg flex items-center justify-center",
-                          selectedProtocol === option.protocol ? visual.selected : visual.idle,
+                          "h-10 w-10 rounded-lg flex items-center justify-center transition-colors",
+                          isSelected ? visual.selected : visual.idle,
                         )}
                       >
                         {visual.icon}
                       </div>
                       <div>
-                        <div className="font-medium">{option.label}</div>
-                        <div className="text-xs text-muted-foreground font-mono">
+                        <div
+                          className={
+                            isSelected
+                              ? PROTOCOL_OPTION_TITLE_SELECTED_CLASS
+                              : PROTOCOL_OPTION_TITLE_IDLE_CLASS
+                          }
+                        >
+                          {option.label}
+                        </div>
+                        <div
+                          className={
+                            isSelected
+                              ? PROTOCOL_OPTION_SUBTITLE_SELECTED_CLASS
+                              : PROTOCOL_OPTION_SUBTITLE_IDLE_CLASS
+                          }
+                        >
                           {option.description}
                         </div>
                       </div>

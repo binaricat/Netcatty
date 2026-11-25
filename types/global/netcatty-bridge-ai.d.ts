@@ -200,7 +200,7 @@ declare global {
       message?: string;
       turnKind?: 'review' | 'compact';
     }>;
-    aiSdkAgentListModels?(sdkBackend: string, cwd?: string, providerId?: string, chatSessionId?: string, agentEnv?: Record<string, string>, agentCommand?: string, codexRuntime?: 'sdk' | 'app-server', force?: boolean): Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[]; defaultThinkingLevel?: string }>; currentModelId?: string | null; warning?: string; source?: 'live' | 'last-known-good'; fetchedAt?: string; error?: string }>;
+    aiSdkAgentListModels?(sdkBackend: string, cwd?: string, providerId?: string, chatSessionId?: string, agentEnv?: Record<string, string>, agentCommand?: string, codexRuntime?: 'sdk' | 'app-server', force?: boolean, cacheOnly?: boolean): Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[]; defaultThinkingLevel?: string }>; currentModelId?: string | null; warning?: string; source?: 'live' | 'last-known-good'; fetchedAt?: string; error?: string }>;
     codexAppServerGetStatus?(agentCommand?: string, agentEnv?: Record<string, string>): Promise<{ ok: boolean; available: boolean; error?: string }>;
     onCodexAppServerInteractionRequest?(cb: (payload: Record<string, unknown>) => void): () => void;
     onCodexAppServerInteractionCleared?(cb: (payload: { interactionIds: string[]; chatSessionId?: string }) => void): () => void;
@@ -262,9 +262,6 @@ declare global {
     onAiStreamData?(requestId: string, cb: (data: string) => void): () => void;
     onAiStreamEnd?(requestId: string, cb: () => void): () => void;
     onAiStreamError?(requestId: string, cb: (error: string) => void): () => void;
-    onAiAgentStdout?(agentId: string, cb: (data: string) => void): () => void;
-    onAiAgentStderr?(agentId: string, cb: (data: string) => void): () => void;
-    onAiAgentExit?(agentId: string, cb: (code: number | null) => void): () => void;
   }
 }
 
