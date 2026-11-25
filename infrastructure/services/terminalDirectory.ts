@@ -14,12 +14,13 @@ export interface TerminalDirectoryIO {
 /** Uses the exact authenticated terminal transport; never dials another host. */
 export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: string,
   endpoint: { local: boolean; hostname: string; username: string; port?: number; encoding?: import('../../types').SftpFilenameEncoding;
-    pathFlavor?: DirectoryPathFlavor },
+    pathFlavor?: DirectoryPathFlavor; windowsShell?: 'powershell' | 'cmd' },
   isCurrent: () => boolean = () => true,
 ): TerminalDirectoryIO {
   const check = (signal?: AbortSignal) => { if (!isCurrent() || signal?.aborted) throw new DirectoryPickerError('unavailable'); };
   const flavor = endpoint.pathFlavor ?? 'posix';
   const nativeWindows = endpoint.local && flavor === 'win32';
+  const windowsShell = endpoint.windowsShell ?? 'powershell';
   let lastNativeRevision = 0;
   let submittedNativeRevision = -1;
   const valid = (path: string | null | undefined): path is string => isDirectoryPath(path, flavor);
@@ -30,7 +31,9 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
     });
     check();
     const state = result?.directoryState;
-    if (!state || state.shellKind !== 'powershell' || state.pathFlavor !== 'win32') throw new DirectoryPickerError('integrationUnavailable');
+    if (!state || state.shellKind !== windowsShell || state.pathFlavor !== 'win32') {
+      throw new DirectoryPickerError(windowsShell === 'cmd' ? 'cmdIntegrationUnavailable' : 'integrationUnavailable');
+    }
     if (state.provider !== 'FileSystem') throw new DirectoryPickerError('nonFilesystem');
     if (!result.success || !valid(result.cwd) || !Number.isSafeInteger(state.revision)
       || state.revision < lastNativeRevision || state.revision <= submittedNativeRevision) throw new DirectoryPickerError('unknown');
@@ -77,7 +80,14 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
       if (!valid(path)) throw new DirectoryPickerError('unsupportedPath');
       if (endpoint.local) {
         const native = nativeWindows ? await readNative() : null;
-        const files = await bridge.listLocalDir(path);
+        const files = await bridge.listLocalDir(path).catch((error: unknown) => {
+          // Electron IPC preserves the Node error message but drops its code.
+          if (nativeWindows && error instanceof Error && (/^(?:EACCES|EPERM)$/.test(String((error as NodeJS.ErrnoException).code))
+            || /^(?:Error invoking remote method 'netcatty:local:list': )?(?:Error: )?(?:EACCES|EPERM):/.test(error.message))) {
+            throw new DirectoryPickerError('accessDenied');
+          }
+          throw error;
+        });
         check(signal);
         const home = nativeWindows ? native!.home : await bridge.getHomeDir?.().catch(() => null) ?? null;
         check(signal);

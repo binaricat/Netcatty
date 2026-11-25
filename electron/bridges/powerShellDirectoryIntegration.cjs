@@ -2,11 +2,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const tempDirBridge = require('./tempDirBridge.cjs');
+const { MAX_REPORT, createDirectoryReportStream } = require('./directoryReportStream.cjs');
 
 // A private property on the existing OSC 633 property channel. Its payload is
 // consumed in the PTY owner, before logging, replay, prompt tracking or output.
 const PREFIX = '\x1b]633;P;NetcattyDirectory=';
-const MAX_REPORT = 24 * 1024;
 
 function nativePath(value) {
   return typeof value === 'string' && value.length <= 8192 && !/[\x00-\x1f\x7f]/.test(value)
@@ -15,12 +15,10 @@ function nativePath(value) {
 }
 
 function createDirectoryReportReader(nonce) {
-  let pending = '';
   let revision = 0;
   let state = null;
   let processId = null;
   let sequence = 0;
-  let dropping = false;
   return {
     setProcessId(pid) { processId = pid; },
     invalidate() { state = null; },
@@ -30,50 +28,20 @@ function createDirectoryReportReader(nonce) {
         error: state.provider === 'FileSystem' ? undefined : 'PowerShell location is not a filesystem',
         directoryState: { ...state, revision, shellKind: 'powershell', pathFlavor: 'win32' } };
     },
-    consume(chunk) {
-      let input = pending + String(chunk);
-      pending = '';
-      let output = '';
-      while (input) {
-        if (dropping) {
-          const end = /\x07|\x1b\\/.exec(input);
-          if (!end) { pending = input.endsWith('\x1b') ? '\x1b' : ''; return output; }
-          input = input.slice(end.index + end[0].length);
-          dropping = false;
-          continue;
-        }
-        const start = input.indexOf(PREFIX);
-        if (start < 0) {
-          let keep = Math.min(input.length, PREFIX.length - 1);
-          while (keep > 0 && !PREFIX.startsWith(input.slice(-keep))) keep--;
-          pending = keep ? input.slice(-keep) : '';
-          return output + input.slice(0, input.length - keep);
-        }
-        output += input.slice(0, start);
-        input = input.slice(start + PREFIX.length);
-        const end = /\x07|\x1b\\/.exec(input);
-        if (!end) {
-          if (input.length > MAX_REPORT) { dropping = true; pending = input.endsWith('\x1b') ? '\x1b' : ''; }
-          else pending = PREFIX + input;
-          return output;
-        }
-        const payload = input.slice(0, end.index);
-        input = input.slice(end.index + end[0].length);
-        if (payload.length > MAX_REPORT || !/^[A-Za-z0-9+/]+={0,2}$/.test(payload)) continue;
-        try {
-          const report = JSON.parse(Buffer.from(payload, 'base64').toString('utf8'));
-          if (report.version !== 1 || report.nonce !== nonce || report.pid !== processId
-            || !Number.isSafeInteger(report.sequence) || report.sequence <= sequence
-            || typeof report.provider !== 'string' || report.provider.length > 128) continue;
-          if (report.provider === 'FileSystem' && !nativePath(report.cwd)) continue;
-          sequence = report.sequence;
-          revision++;
-          state = { provider: report.provider, cwd: report.provider === 'FileSystem' ? report.cwd : null,
-            home: nativePath(report.home) ? report.home : null };
-        } catch { /* Retain capability state only for validated reports. */ }
-      }
-      return output;
-    },
+    consume: createDirectoryReportStream(PREFIX, payload => {
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(payload)) return;
+      try {
+        const report = JSON.parse(Buffer.from(payload, 'base64').toString('utf8'));
+        if (report.version !== 1 || report.nonce !== nonce || report.pid !== processId
+          || !Number.isSafeInteger(report.sequence) || report.sequence <= sequence
+          || typeof report.provider !== 'string' || report.provider.length > 128) return;
+        if (report.provider === 'FileSystem' && !nativePath(report.cwd)) return;
+        sequence = report.sequence;
+        revision++;
+        state = { provider: report.provider, cwd: report.provider === 'FileSystem' ? report.cwd : null,
+          home: nativePath(report.home) ? report.home : null };
+      } catch { /* Retain capability state only for validated reports. */ }
+    }),
   };
 }
 

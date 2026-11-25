@@ -154,7 +154,7 @@ jobs:
           NETCATTY_SSH_TEST_RUNTIME: electron
         run: node --test electron/bridges/sshChaChaTransport.test.cjs
 
-      - name: Exercise native PowerShell directory navigation in ConPTY
+      - name: Exercise native PowerShell and CMD directory navigation in ConPTY
         env:
           NETCATTY_DIRECTORY_WINDOWS_LIVE: "1"
         run: |

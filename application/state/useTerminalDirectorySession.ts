@@ -21,8 +21,9 @@ export function useTerminalDirectorySession(options: {
   live.current = options;
   const { sessionId, status, shellType, host } = options;
   const local = host.protocol === 'local';
+  const windowsShell = shellType === 'powershell' || shellType === 'cmd' ? shellType : undefined;
   const supported = (local || ((host.protocol ?? 'ssh') === 'ssh' && !host.moshEnabled && !host.etEnabled))
-    && (shellType !== 'powershell' || local) && shellType !== 'cmd'
+    && (!windowsShell || local)
     && host.deviceType !== 'network' && classifyDistroId(host.distro) !== 'network-device'
     && !hostRestrictsExtraSshChannels(host);
   useEffect(() => {
@@ -40,10 +41,11 @@ export function useTerminalDirectorySession(options: {
           local, hostname: host.hostname, username: host.username || 'root', port: host.port,
           encoding: host.sftpEncoding,
           pathFlavor,
+          windowsShell,
         }, isCurrent),
         target: { authority: `${local ? 'local' : 'ssh'}:${backendId}`, pathFlavor },
         capabilities: COMPLETE_DIRECTORY_CAPABILITIES,
-        buildChangeCommand: path => directoryChangeCommand(path, pathFlavor === 'win32' ? 'powershell' : 'posix', pathFlavor),
+        buildChangeCommand: path => directoryChangeCommand(path, windowsShell ?? 'posix', pathFlavor),
         isCurrent,
         isReady: () => live.current.isReady(),
         publish: cwd => live.current.publish(cwd),
@@ -54,10 +56,10 @@ export function useTerminalDirectorySession(options: {
       // POSIX wrappers on Windows still use win32 PTYs. Neither their cwd nor
       // their path namespace is supported by readLocalSessionCwd/local FS.
       void bridge.getAppInfo?.().then(info => {
-        if ((info.platform === 'darwin' || info.platform === 'linux') && shellType !== 'powershell') register();
-        else if (info.platform === 'win32' && shellType === 'powershell') register('win32');
+        if ((info.platform === 'darwin' || info.platform === 'linux') && !windowsShell) register();
+        else if (info.platform === 'win32' && windowsShell) register('win32');
       }).catch(() => {});
     } else register();
     return () => { active = false; unregister(); };
-  }, [sessionId, status, supported, local, host.hostname, host.username, host.port, host.sftpEncoding, shellType]);
+  }, [sessionId, status, supported, local, host.hostname, host.username, host.port, host.sftpEncoding, windowsShell]);
 }

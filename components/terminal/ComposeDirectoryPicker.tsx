@@ -124,7 +124,6 @@ export function ComposeDirectoryPicker({ sessionId, theme, onReturnFocus }: {
           </div>
         </PopoverContent>
       </Popover>
-      {!model.open && errorText && <span role="status" title={errorText} className="truncate text-[10px]" style={{ color: theme.mutedFg }}>{errorText}</span>}
     </div>
   );
 }

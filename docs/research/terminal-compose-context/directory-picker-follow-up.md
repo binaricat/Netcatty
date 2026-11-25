@@ -8,10 +8,11 @@
 | --- | --- | --- |
 | A：路径与能力 | POSIX／Win32 路径模型；盘符／UNC 根；authority、cwd revision；独立 read／list／change／confirm 能力；可注入命令策略 | 将目标文件系统和 shell 语法分别建模，保持菜单可复用 |
 | B：PowerShell | 5.1／7 会话级脚本；原 runspace ProviderPath；私有位置报告；本地 FS；LiteralPath 切换和实际结果确认 | 用原 shell 状态串联展示、读取和执行 |
+| C：CMD | 交互 CMD 的 PROMPT 上报；盘符目录读取与 `cd /d` 切换；原进程和新提示符确认 | 复用目录控制器，按 CMD 的变量展开和进程继承划定支持范围 |
 | 状态恢复 | provider 切换清空旧目录与列表；恢复 FileSystem 后重新读取；提交输入使旧报告失效 | 让菜单始终对应当前有效的文件系统位置 |
 | 生命周期 | 单会话请求排序、旧控制器失效、受管脚本清理、终端就绪门控 | 将异步操作与实际会话代次绑定 |
 
-路径与状态回归覆盖盘符、UNC、链接、特殊字符、控制字节、草稿、广播隔离、重连和关闭芯片。Windows 原生 ConPTY 覆盖 PowerShell 5.1／7、PSDrive、provider、执行策略、状态码及真实 terminal bridge；现有 Windows CI 显式执行该组用例。macOS／Linux 继续覆盖真实 POSIX PTY 和 SSH fixture。
+Windows CI 使用原生 ConPTY 覆盖 PowerShell 5.1／7 以及 CMD 的特殊字符、跨盘符和嵌套会话。macOS／Linux 继续覆盖真实 POSIX PTY 和 SSH fixture。
 
 ## 后续阶段
 
@@ -30,11 +31,9 @@
 
 交付目标是复用位置报告和控制器，保留原 prompt、PATH、历史与命令状态，按有效集成优先使用事件更新。
 
-### C：CMD 原生导航
+### CMD 覆盖扩展
 
-先完成 PROMPT、`cd /d`、命令扩展、delayed expansion、百分号／感叹号、编码和 ERRORLEVEL 的交互实验，再接入独立命令策略。
-
-首个交付覆盖已验证的盘符绝对目录，并将路径限制体现为明确能力状态。UNC 的 pushd／popd 方案单独定义临时盘符、目录栈和退出清理语义。
+为 `%`、`!` 目录验证保留字面值的传递方式；为自定义 AutoRun、关闭命令扩展和前后台子进程补充原生用例。UNC 的 `pushd`／`popd` 单独定义临时盘符、目录栈和退出清理语义。
 
 ### D：WSL、Git Bash 与 Cygwin
 

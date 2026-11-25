@@ -45,6 +45,41 @@ test('Windows local IO never substitutes process cwd or home for absent integrat
   assert.equal(reads, 0);
 });
 
+test('CMD directory reads wait for a report from the expected shell', async () => {
+  const cwd = 'C:\\base';
+  let shellKind: 'powershell' | 'cmd' | undefined;
+  let reads = 0;
+  const io = createTerminalDirectoryIO({
+    getSessionPwd: async () => ({ success: true, cwd, directoryState: shellKind && {
+      revision: 1, provider: 'FileSystem', shellKind, pathFlavor: 'win32', cwd, home: null,
+    } }),
+    listLocalDir: async () => { reads++; return []; },
+  } as unknown as NetcattyBridge, 'cmd', { local: true, hostname: '', username: '', pathFlavor: 'win32', windowsShell: 'cmd' });
+  await assert.rejects(io.cwd(), { code: 'cmdIntegrationUnavailable' });
+  shellKind = 'powershell';
+  await assert.rejects(io.list(cwd), { code: 'cmdIntegrationUnavailable' });
+  assert.equal(reads, 0);
+  shellKind = 'cmd';
+  assert.equal(await io.cwd(), cwd);
+  assert.deepEqual(await io.list(cwd), { entries: [], home: null });
+  assert.equal(reads, 1);
+});
+
+test('Windows local IO distinguishes denied listings from other read failures', async () => {
+  const cwd = 'C:\\legacy-junction';
+  let failure = new Error("Error invoking remote method 'netcatty:local:list': Error: EPERM: operation not permitted, scandir");
+  const io = createTerminalDirectoryIO({
+    getSessionPwd: async () => ({ success: true, cwd, directoryState: {
+      revision: 1, provider: 'FileSystem', shellKind: 'cmd', pathFlavor: 'win32', cwd, home: null,
+    } }),
+    listLocalDir: async () => { throw failure; },
+  } as unknown as NetcattyBridge, 'cmd', { local: true, hostname: '', username: '', pathFlavor: 'win32', windowsShell: 'cmd' });
+  await assert.rejects(io.list(cwd), { code: 'accessDenied' });
+  assert.equal(await io.cwd(), cwd);
+  failure = new Error('ENOENT: directory removed');
+  await assert.rejects(io.list(cwd), failure);
+});
+
 test('remote reads use only the exact terminal connection and always close their channel', async () => {
   const calls: unknown[] = [];
   const bridge = {

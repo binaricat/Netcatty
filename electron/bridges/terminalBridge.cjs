@@ -65,6 +65,7 @@ const { isWindowsAppExecutionAliasPath } = require("../../lib/localShell.cjs");
 const moshHandshake = require("./moshHandshake.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
 const { preparePowerShellDirectoryIntegration } = require('./powerShellDirectoryIntegration.cjs');
+const { prepareCmdDirectoryIntegration } = require('./cmdDirectoryIntegration.cjs');
 const { createTelnetAutoLogin, isAutoLoginWakeInput } = require("./telnetAutoLogin.cjs");
 const telnetProtocol = require("./telnetProtocol.cjs");
 const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
@@ -1125,7 +1126,8 @@ async function startLocalSession(event, payload) {
     }
   }
   
-  const directoryIntegration = preparePowerShellDirectoryIntegration(shell, shellArgs);
+  const directoryIntegration = preparePowerShellDirectoryIntegration(shell, shellArgs)
+    ?? prepareCmdDirectoryIntegration(shell, shellArgs, env);
   let proc;
   try {
     proc = pty.spawn(shell, directoryIntegration?.args ?? shellArgs, {
@@ -1139,7 +1141,7 @@ async function startLocalSession(event, payload) {
       useConptyDll: process.platform === "win32",
     });
   } catch (error) {
-    directoryIntegration?.cleanup();
+    directoryIntegration?.cleanup?.();
     throw error;
   }
   directoryIntegration?.reader.setProcessId(proc.pid);
@@ -1179,7 +1181,7 @@ async function startLocalSession(event, payload) {
   const { claimSessionSlot } = require("./sessionBootEpoch.cjs");
   const claim = claimSessionSlot(sessions, sessionId, session, payload?.bootEpoch);
   if (!claim.ok) {
-    directoryIntegration?.cleanup();
+    directoryIntegration?.cleanup?.();
     try { proc.kill(); } catch { /* ignore */ }
     const supersededError = new Error("Local session superseded by a newer reconnect");
     supersededError.code = "NETCATTY_BOOT_SUPERSEDED";
@@ -1279,7 +1281,7 @@ async function startLocalSession(event, payload) {
     const finalizeExit = () => {
       if (localExitFinalized) return;
       localExitFinalized = true;
-      directoryIntegration?.cleanup();
+      directoryIntegration?.cleanup?.();
       sessionLogStreamManager.stopStream(sessionId, logStreamToken);
       if (sessions.get(sessionId) !== session) return;
       ptyProcessTree.unregisterPid(sessionId);
