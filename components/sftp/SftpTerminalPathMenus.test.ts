@@ -253,7 +253,7 @@ test("SftpSidePanel guards terminal path insertion and cd writes and SftpPaneVie
   );
   assert.match(
     sidePanelSource,
-    /const handleCdInTerminal = useCallback\([\s\S]*?isTerminalSensitiveInputActive\(action\.sessionId\)[\s\S]*?isTerminalReadyForCommandInjection\(action\.sessionId\)[\s\S]*?terminalBackend\.writeToSession\(action\.sessionId, action\.data, \{ automated: true \}\)[\s\S]*?scheduleDeferredTerminalFocus\(onRequestTerminalFocus\)/,
+    /const handleCdInTerminal = useCallback\([\s\S]*?isTerminalSensitiveInputActive\(action\.sessionId\)[\s\S]*?isTerminalReadyForCommandInjection\(action\.sessionId\)[\s\S]*?getTerminalPromptDraftContext\(action\.sessionId\)[\s\S]*?isTerminalDraftContextSafeForCd\(draftContext\)[\s\S]*?terminalBackend\.writeToSession\(action\.sessionId, action\.data, \{ automated: true \}\)[\s\S]*?scheduleDeferredTerminalFocus\(onRequestTerminalFocus\)/,
   );
   assert.match(
     sidePanelSource,

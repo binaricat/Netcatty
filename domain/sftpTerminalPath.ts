@@ -25,8 +25,12 @@ const WINDOWS_UNC_PATH_RE = /^\\\\[^\\]+\\[^\\]+/;
 const POWERSHELL_SINGLE_QUOTE_RE = /['\u2018\u2019\u201A\u201B]/g;
 const POWERSHELL_SINGLE_QUOTE_CHARS = new Set(["'", "\u2018", "\u2019", "\u201A", "\u201B"]);
 const POWERSHELL_DOUBLE_QUOTE_CHARS = new Set(['"', "\u201C", "\u201D", "\u201E"]);
-const CONTINUATION_PROMPT_RE =
-  /^(?:(?:[a-z]*quote|heredoc|cmdsubst|pipe|for|if|while|until|case|select|then|else|elif|cursh|subsh|brace|math|array|param)?>|>>?)\s*$/i;
+const CONTINUATION_PROMPT_WORD =
+  "(?:[a-z]*quote|heredoc|cmdsubst|pipe|for|if|while|until|case|select|then|else|elif|cursh|subsh|brace|math|array|param|function|repeat|foreach|eval|and|or)";
+const CONTINUATION_PROMPT_RE = new RegExp(
+  `^(?:(?:${CONTINUATION_PROMPT_WORD}(?:\\s+${CONTINUATION_PROMPT_WORD})*)?>|>>?|More\\?)\\s*$`,
+  "i",
+);
 
 /**
  * True when a string contains control bytes (C0, DEL, C1) or Unicode line
@@ -204,20 +208,36 @@ export function canSendSftpPathToTerminal(
     || protocol === "local";
 }
 
+const POSIX_IDENTIFIER_CHAR_RE = /[A-Za-z0-9_]/;
+const POSIX_LET_COMMAND_RE = /^\s*let(?:\s+|$)/;
+const POSIX_DOUBLE_BRACKET_ARITH_OP_RE = /(?:^|\s)-(?:eq|ne|lt|le|gt|ge)\s+\S*$/;
+
 function isPosixDraftSafeForPathInsertion(draft: string): boolean {
-  type Context = "single" | "ansiSingle" | "double" | "backtick" | "cmdsubst";
-  const stack: Context[] = [];
+  type Frame =
+    | { kind: "single" }
+    | { kind: "ansiSingle" }
+    | { kind: "double" }
+    | { kind: "backtick" }
+    | { kind: "cmdsubst"; parenDepth: number; segmentStart: number }
+    | { kind: "arith"; parenDepth: number }
+    | { kind: "arithBracket"; bracketDepth: number }
+    | { kind: "param" }
+    | { kind: "subscript"; bracketDepth: number }
+    | { kind: "doubleBracket"; startIdx: number };
+
+  const stack: Frame[] = [];
+  let rootSegmentStart = 0;
 
   for (let i = 0; i < draft.length; i += 1) {
     const ch = draft[i];
     const top = stack[stack.length - 1];
 
-    if (top === "single") {
+    if (top?.kind === "single") {
       if (ch === "'") stack.pop();
       continue;
     }
 
-    if (top === "ansiSingle") {
+    if (top?.kind === "ansiSingle") {
       if (ch === "\\") {
         if (i + 1 >= draft.length) return false;
         i += 1;
@@ -227,26 +247,41 @@ function isPosixDraftSafeForPathInsertion(draft: string): boolean {
       continue;
     }
 
-    if (top === "double") {
+    if (top?.kind === "double") {
       if (ch === "\\") {
         if (i + 1 >= draft.length) return false;
         i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "(" && draft[i + 2] === "(") {
+        stack.push({ kind: "arith", parenDepth: 0 });
+        i += 2;
         continue;
       }
       if (ch === "$" && draft[i + 1] === "(") {
-        stack.push("cmdsubst");
+        stack.push({ kind: "cmdsubst", parenDepth: 0, segmentStart: i + 2 });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "[") {
+        stack.push({ kind: "arithBracket", bracketDepth: 0 });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "{") {
+        stack.push({ kind: "param" });
         i += 1;
         continue;
       }
       if (ch === "`") {
-        stack.push("backtick");
+        stack.push({ kind: "backtick" });
         continue;
       }
       if (ch === '"') stack.pop();
       continue;
     }
 
-    if (top === "backtick") {
+    if (top?.kind === "backtick") {
       if (ch === "\\") {
         if (i + 1 >= draft.length) return false;
         i += 1;
@@ -256,7 +291,210 @@ function isPosixDraftSafeForPathInsertion(draft: string): boolean {
       continue;
     }
 
-    // Outside quotes (top === undefined or top === "cmdsubst")
+    if (top?.kind === "arith") {
+      if (ch === "\\") {
+        if (i + 1 >= draft.length) return false;
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "(" && draft[i + 2] === "(") {
+        stack.push({ kind: "arith", parenDepth: 0 });
+        i += 2;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "(") {
+        stack.push({ kind: "cmdsubst", parenDepth: 0, segmentStart: i + 2 });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "[") {
+        stack.push({ kind: "arithBracket", bracketDepth: 0 });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "{") {
+        stack.push({ kind: "param" });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "'") {
+        stack.push({ kind: "ansiSingle" });
+        i += 1;
+        continue;
+      }
+      if (ch === "'") {
+        stack.push({ kind: "single" });
+        continue;
+      }
+      if (ch === '"') {
+        stack.push({ kind: "double" });
+        continue;
+      }
+      if (ch === "`") {
+        stack.push({ kind: "backtick" });
+        continue;
+      }
+      if (ch === "(") {
+        top.parenDepth += 1;
+        continue;
+      }
+      if (ch === ")") {
+        if (top.parenDepth > 0) {
+          top.parenDepth -= 1;
+          continue;
+        }
+        if (draft[i + 1] === ")") {
+          stack.pop();
+          i += 1;
+        }
+      }
+      continue;
+    }
+
+    if (top?.kind === "arithBracket") {
+      if (ch === "\\") {
+        if (i + 1 >= draft.length) return false;
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "'") {
+        stack.push({ kind: "ansiSingle" });
+        i += 1;
+        continue;
+      }
+      if (ch === "'") {
+        stack.push({ kind: "single" });
+        continue;
+      }
+      if (ch === '"') {
+        stack.push({ kind: "double" });
+        continue;
+      }
+      if (ch === "`") {
+        stack.push({ kind: "backtick" });
+        continue;
+      }
+      if (ch === "[") {
+        top.bracketDepth += 1;
+        continue;
+      }
+      if (ch === "]") {
+        if (top.bracketDepth > 0) {
+          top.bracketDepth -= 1;
+        } else {
+          stack.pop();
+        }
+      }
+      continue;
+    }
+
+    if (top?.kind === "param") {
+      if (ch === "\\") {
+        if (i + 1 >= draft.length) return false;
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "'") {
+        stack.push({ kind: "ansiSingle" });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "(" && draft[i + 2] === "(") {
+        stack.push({ kind: "arith", parenDepth: 0 });
+        i += 2;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "(") {
+        stack.push({ kind: "cmdsubst", parenDepth: 0, segmentStart: i + 2 });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "[") {
+        stack.push({ kind: "arithBracket", bracketDepth: 0 });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "{") {
+        stack.push({ kind: "param" });
+        i += 1;
+        continue;
+      }
+      if (ch === "'") {
+        stack.push({ kind: "single" });
+        continue;
+      }
+      if (ch === '"') {
+        stack.push({ kind: "double" });
+        continue;
+      }
+      if (ch === "`") {
+        stack.push({ kind: "backtick" });
+        continue;
+      }
+      if (ch === "}") {
+        stack.pop();
+      }
+      continue;
+    }
+
+    if (top?.kind === "subscript") {
+      if (ch === "\\") {
+        if (i + 1 >= draft.length) return false;
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "'") {
+        stack.push({ kind: "ansiSingle" });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "(" && draft[i + 2] === "(") {
+        stack.push({ kind: "arith", parenDepth: 0 });
+        i += 2;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "(") {
+        stack.push({ kind: "cmdsubst", parenDepth: 0, segmentStart: i + 2 });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "[") {
+        stack.push({ kind: "arithBracket", bracketDepth: 0 });
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && draft[i + 1] === "{") {
+        stack.push({ kind: "param" });
+        i += 1;
+        continue;
+      }
+      if (ch === "'") {
+        stack.push({ kind: "single" });
+        continue;
+      }
+      if (ch === '"') {
+        stack.push({ kind: "double" });
+        continue;
+      }
+      if (ch === "`") {
+        stack.push({ kind: "backtick" });
+        continue;
+      }
+      if (ch === "[") {
+        top.bracketDepth += 1;
+        continue;
+      }
+      if (ch === "]") {
+        if (top.bracketDepth > 0) {
+          top.bracketDepth -= 1;
+        } else {
+          stack.pop();
+        }
+      }
+      continue;
+    }
+
+    // Outside quotes (top === undefined, "cmdsubst", or "doubleBracket")
     if (ch === "\\") {
       if (i + 1 >= draft.length) return false;
       i += 1;
@@ -268,34 +506,130 @@ function isPosixDraftSafeForPathInsertion(draft: string): boolean {
       return false;
     }
     if (ch === "$" && draft[i + 1] === "'") {
-      stack.push("ansiSingle");
+      stack.push({ kind: "ansiSingle" });
       i += 1;
+      continue;
+    }
+    if (ch === "$" && draft[i + 1] === "(" && draft[i + 2] === "(") {
+      stack.push({ kind: "arith", parenDepth: 0 });
+      i += 2;
       continue;
     }
     if (ch === "$" && draft[i + 1] === "(") {
-      stack.push("cmdsubst");
+      stack.push({ kind: "cmdsubst", parenDepth: 0, segmentStart: i + 2 });
       i += 1;
       continue;
     }
+    if (ch === "$" && draft[i + 1] === "[") {
+      stack.push({ kind: "arithBracket", bracketDepth: 0 });
+      i += 1;
+      continue;
+    }
+    if (ch === "$" && draft[i + 1] === "{") {
+      stack.push({ kind: "param" });
+      i += 1;
+      continue;
+    }
+    if (ch === "(" && draft[i + 1] === "(") {
+      stack.push({ kind: "arith", parenDepth: 0 });
+      i += 1;
+      continue;
+    }
+    if (
+      ch === "["
+      && draft[i + 1] === "["
+      && (i === 0 || /[\s;|&(\n]/.test(draft[i - 1]))
+      && (i + 2 >= draft.length || /\s/.test(draft[i + 2]))
+    ) {
+      stack.push({ kind: "doubleBracket", startIdx: i + 2 });
+      i += 1;
+      continue;
+    }
+    if (
+      top?.kind === "doubleBracket"
+      && ch === "]"
+      && draft[i + 1] === "]"
+    ) {
+      stack.pop();
+      i += 1;
+      continue;
+    }
+    if (ch === "[" && i > 0 && POSIX_IDENTIFIER_CHAR_RE.test(draft[i - 1])) {
+      // Array element subscript (e.g. `a[`, `unset arr[`, `declare a[`) is
+      // evaluated in arithmetic context by Bash/Zsh where single quotes do not
+      // suppress `$(...)` expansion.
+      stack.push({ kind: "subscript", bracketDepth: 0 });
+      continue;
+    }
     if (ch === "'") {
-      stack.push("single");
+      stack.push({ kind: "single" });
       continue;
     }
     if (ch === '"') {
-      stack.push("double");
+      stack.push({ kind: "double" });
       continue;
     }
     if (ch === "`") {
-      stack.push("backtick");
+      stack.push({ kind: "backtick" });
       continue;
     }
-    if (ch === ")" && top === "cmdsubst") {
-      stack.pop();
+    if (ch === "(" && top?.kind === "cmdsubst") {
+      top.parenDepth += 1;
+      top.segmentStart = i + 1;
+      continue;
+    }
+    if (ch === ")" && top?.kind === "cmdsubst") {
+      if (top.parenDepth > 0) {
+        top.parenDepth -= 1;
+      } else {
+        stack.pop();
+      }
+      continue;
+    }
+    if (ch === ";" || ch === "|" || ch === "&" || ch === "\n" || ch === "(") {
+      if (top?.kind === "cmdsubst") {
+        top.segmentStart = i + 1;
+      } else if (top === undefined) {
+        rootSegmentStart = i + 1;
+      }
     }
   }
 
+  // Reject if any enclosing frame is an arithmetic, parameter-expansion, or
+  // array-subscript context (even when nested inside `$(...)`, whose output
+  // would still be re-evaluated by the enclosing arithmetic expression).
+  if (
+    stack.some(
+      (frame) =>
+        frame.kind === "arith"
+        || frame.kind === "arithBracket"
+        || frame.kind === "param"
+        || frame.kind === "subscript",
+    )
+  ) {
+    return false;
+  }
+
   const top = stack[stack.length - 1];
-  return top === undefined || top === "cmdsubst";
+  if (top?.kind === "doubleBracket") {
+    const tail = draft.slice(top.startIdx);
+    if (POSIX_DOUBLE_BRACKET_ARITH_OP_RE.test(tail)) {
+      return false;
+    }
+    return true;
+  }
+  if (top !== undefined && top.kind !== "cmdsubst") {
+    return false;
+  }
+
+  // Bash/Zsh `let` evaluates all arguments as arithmetic expressions.
+  const segmentStart = top?.kind === "cmdsubst" ? top.segmentStart : rootSegmentStart;
+  const activeSegment = draft.slice(segmentStart);
+  if (POSIX_LET_COMMAND_RE.test(activeSegment)) {
+    return false;
+  }
+
+  return true;
 }
 
 function isFishDraftSafeForPathInsertion(draft: string): boolean {
@@ -465,6 +799,25 @@ export function isTerminalDraftContextSafeForPathInsertion(options: {
     isShellDraftSafeForPathInsertion(userInput, shellKind)
     && isShellDraftSafeForPathInsertion(pending, shellKind)
   );
+}
+
+/**
+ * Validate the live terminal prompt + draft text before automatically
+ * submitting a `cd` command. Rejects secondary/continuation prompts (such as
+ * PS2 `>` or `dquote>`) where the shell is still reading an unterminated quote
+ * or compound command, as well as any non-empty draft input.
+ */
+export function isTerminalDraftContextSafeForCd(options: {
+  promptText?: string;
+  userInput: string;
+  pendingTypedInput?: string;
+}): boolean {
+  if (options.promptText && isTerminalContinuationPrompt(options.promptText)) {
+    return false;
+  }
+  if (options.userInput.trim().length > 0) return false;
+  if ((options.pendingTypedInput ?? "").trim().length > 0) return false;
+  return true;
 }
 
 /** Build the PTY write payload for inserting a quoted path into the paired terminal. */

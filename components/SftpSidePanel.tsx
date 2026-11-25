@@ -79,6 +79,7 @@ import {
 } from "../domain/sftpLocatePathInTerminal";
 import {
   canSendSftpPathToTerminal,
+  isTerminalDraftContextSafeForCd,
   isTerminalDraftContextSafeForPathInsertion,
   resolveCdSftpPathInTerminalAction,
   resolveInsertSftpPathInTerminalAction,
@@ -1940,6 +1941,10 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     if (isTerminalSensitiveInputActive(action.sessionId)) return;
     // Only submit cd at an idle shell prompt -- never append into typed input or a TUI.
     if (!isTerminalReadyForCommandInjection(action.sessionId)) return;
+    // Reject continuation prompts (e.g. PS2 `>`, `dquote>`) where the shell is
+    // still reading an unterminated quote or compound command.
+    const draftContext = getTerminalPromptDraftContext(action.sessionId);
+    if (!draftContext || !isTerminalDraftContextSafeForCd(draftContext)) return;
     terminalBackend.writeToSession(action.sessionId, action.data, { automated: true });
     scheduleDeferredTerminalFocus(onRequestTerminalFocus);
   }, [buildLiveTerminalPathContext, onRequestTerminalFocus, terminalBackend]);

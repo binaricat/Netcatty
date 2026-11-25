@@ -8,6 +8,7 @@ import {
   hasUnsafeTerminalControlChars,
   isShellDraftSafeForPathInsertion,
   isTerminalContinuationPrompt,
+  isTerminalDraftContextSafeForCd,
   isTerminalDraftContextSafeForPathInsertion,
   quoteSftpPathForShell,
   resolveCdSftpPathInTerminalAction,
@@ -429,5 +430,105 @@ test("isTerminalDraftContextSafeForPathInsertion rejects continuation prompts an
       shellKind: "posix",
     }),
     true,
+  );
+});
+
+test("isShellDraftSafeForPathInsertion rejects POSIX arithmetic, parameter expansion, array subscripts, and let contexts", () => {
+  // Arithmetic expansion $(( ... )) and arithmetic command (( ... ))
+  assert.equal(isShellDraftSafeForPathInsertion("echo $((", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $(( 1 + ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion('echo "$((', "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $(( (1 + 2) + ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("(( ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("for (( i=0; ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $(( $(echo ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $(( 'a))' + ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $(( 1 + 2 )) ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $(( (1 + 2) + 3 )) ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion('echo "$((1 + 2))" ', "posix"), true);
+
+  // Legacy $[...] arithmetic
+  assert.equal(isShellDraftSafeForPathInsertion("echo $[", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion('echo "$[', "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $[1 + 2] ", "posix"), true);
+
+  // Parameter expansions and array subscripts
+  assert.equal(isShellDraftSafeForPathInsertion("echo ${a[", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion('echo "${a[', "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo ${var:-", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("a[", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("unset arr[", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("declare -i x[", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("cp ${DIR}/", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion('echo "${a[0]}" ', "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("a[0]=", "posix"), true);
+
+  // `let` arithmetic builtin and `[[` arithmetic comparison operators
+  assert.equal(isShellDraftSafeForPathInsertion("let ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo ok; let ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo $(let ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion('echo "foo; let " ', "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("[[ 1 -eq ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("[[ $x -gt ", "posix"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("[[ -f ", "posix"), true);
+  assert.equal(isShellDraftSafeForPathInsertion("[[ 1 -eq 1 ]] && ls ", "posix"), true);
+});
+
+test("isTerminalDraftContextSafeForCd rejects continuation prompts and non-empty drafts", () => {
+  assert.equal(
+    isTerminalDraftContextSafeForCd({
+      promptText: "user@host:~$ ",
+      userInput: "",
+      pendingTypedInput: "",
+    }),
+    true,
+  );
+  assert.equal(
+    isTerminalDraftContextSafeForCd({
+      promptText: "root@host:/# ",
+      userInput: "",
+      pendingTypedInput: "",
+    }),
+    true,
+  );
+
+  // Continuation prompts must be rejected even when draft input is empty
+  for (const promptText of [
+    "dquote> ",
+    "quote> ",
+    "> ",
+    ">> ",
+    "heredoc> ",
+    "dquote cmdsubst> ",
+    "pipe dquote> ",
+    "More? ",
+  ]) {
+    assert.equal(
+      isTerminalDraftContextSafeForCd({
+        promptText,
+        userInput: "",
+        pendingTypedInput: "",
+      }),
+      false,
+      `expected continuation prompt ${JSON.stringify(promptText)} to block auto-cd`,
+    );
+  }
+
+  // Non-empty draft input or un-echoed typed input must block auto-cd
+  assert.equal(
+    isTerminalDraftContextSafeForCd({
+      promptText: "user@host:~$ ",
+      userInput: "ls ",
+      pendingTypedInput: "",
+    }),
+    false,
+  );
+  assert.equal(
+    isTerminalDraftContextSafeForCd({
+      promptText: "user@host:~$ ",
+      userInput: "",
+      pendingTypedInput: "rm -rf",
+    }),
+    false,
   );
 });
