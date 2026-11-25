@@ -9,7 +9,7 @@
 
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { isSensitiveTerminalChallenge } from "../../../domain/terminalPromptSecurity";
-import { sliceStringByCellColumns } from "./terminalStringCellWidth";
+import { sliceStringByCellColumns, stringCellWidth } from "./terminalStringCellWidth";
 import { COMMON_SHELL_COMMANDS, NON_PROMPT_PATTERNS, PROMPT_CHARS } from "./promptDetectorPatterns";
 
 export interface PromptDetectionResult {
@@ -681,8 +681,56 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
 }
 
 /**
- * Extract the text on the active logical line to the right of the cursor,
- * including any wrapped continuation rows belonging to the same line.
+ * True when single-row text after the cursor looks like a right-aligned shell
+ * prompt decoration (e.g. zsh `RPROMPT`, fish `fish_right_prompt`, Powerlevel10k,
+ * Starship) rather than editable command text left behind after `Ctrl+A`.
+ *
+ * Right prompts sit flush against the terminal's right margin (allowing up to
+ * 2 trailing indent cells, e.g. zsh's default `ZLE_RPROMPT_INDENT=1`), separated
+ * from the cursor by a run of padding spaces wider than any internal gap inside
+ * the decoration itself.
+ */
+function isRightPromptDecorationAfterCursor(
+  rowAfter: string,
+  cursorX: number,
+  cols: number,
+  term: XTerm,
+): boolean {
+  if (!Number.isFinite(cols) || cols <= 0) return false;
+  const trimmedRight = rowAfter.trimEnd();
+  if (!trimmedRight) return false;
+
+  const leadingSpaces = trimmedRight.length - trimmedRight.trimStart().length;
+  if (leadingSpaces < 2) return false;
+
+  const endCol = cursorX + stringCellWidth(trimmedRight, term);
+  if (endCol < cols - 2) return false;
+
+  // Reject lines where editable text sits near the cursor before a wider gap
+  // leading into the right prompt (e.g. `$   rm -rf /foo        12:34:56 `).
+  const body = trimmedRight.trimStart();
+  let maxInternalSpaceRun = 0;
+  let currentSpaceRun = 0;
+  for (let i = 0; i < body.length; i += 1) {
+    if (body[i] === " ") {
+      currentSpaceRun += 1;
+      if (currentSpaceRun > maxInternalSpaceRun) {
+        maxInternalSpaceRun = currentSpaceRun;
+      }
+    } else {
+      currentSpaceRun = 0;
+    }
+  }
+  if (maxInternalSpaceRun >= leadingSpaces) return false;
+
+  return true;
+}
+
+/**
+ * Extract editable text on the active logical line to the right of the cursor,
+ * including any wrapped continuation rows belonging to the same line, while
+ * ignoring right-aligned prompt decorations (e.g. zsh `RPROMPT`) on an
+ * unwrapped row.
  */
 export function getPromptLineTextAfterCursor(term: XTerm): string {
   const buffer = term.buffer.active;
@@ -691,14 +739,25 @@ export function getPromptLineTextAfterCursor(term: XTerm): string {
   const line = buffer.getLine(cursorY);
   if (!line) return "";
 
-  let after = sliceStringByCellColumns(line.translateToString(false), cursorX, undefined, term);
+  const rowAfter = sliceStringByCellColumns(line.translateToString(false), cursorX, undefined, term);
+  let wrappedAfter = "";
   const maxRow = typeof buffer.length === "number" ? buffer.length : Number.POSITIVE_INFINITY;
   for (let row = cursorY + 1; row < maxRow; row += 1) {
     const nextLine = buffer.getLine(row);
     if (!nextLine || !nextLine.isWrapped) break;
-    after += nextLine.translateToString(false);
+    wrappedAfter += nextLine.translateToString(false);
   }
-  return after;
+
+  if (wrappedAfter.trim().length > 0) {
+    return rowAfter + wrappedAfter;
+  }
+  if (rowAfter.trim().length === 0) {
+    return "";
+  }
+  if (isRightPromptDecorationAfterCursor(rowAfter, cursorX, term.cols, term)) {
+    return "";
+  }
+  return rowAfter;
 }
 
 /**

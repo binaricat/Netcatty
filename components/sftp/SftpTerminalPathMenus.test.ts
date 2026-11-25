@@ -362,6 +362,59 @@ test("after-cursor text after Ctrl+A on recalled history blocks idle cd injectio
   );
 });
 
+test("right-aligned shell prompt decorations (e.g. zsh RPROMPT) do not block idle readiness while recalled commands still do", () => {
+  const cols = 80;
+  const makeTerm = (line: string, cursorX: number) => ({
+    cols,
+    buffer: {
+      active: {
+        baseY: 0,
+        cursorY: 0,
+        cursorX,
+        length: 1,
+        getLine: (row: number) => (row === 0 ? { isWrapped: false, translateToString: () => line } : undefined),
+      },
+    },
+  });
+
+  // Zsh RPROMPT clock with default ZLE_RPROMPT_INDENT=1 (`$ ` + 69 spaces + `12:34:56 ` = 80 cols).
+  const rpromptClock = "$ " + " ".repeat(69) + "12:34:56 ";
+  const rpromptTerm = makeTerm(rpromptClock, 2);
+  const rprompt = detectPrompt(rpromptTerm as never);
+  assert.equal(rprompt.isAtPrompt, true);
+  assert.equal(rprompt.userInput, "");
+  const rpromptAfter = getPromptLineTextAfterCursor(rpromptTerm as never).trim();
+  assert.equal(rpromptAfter, "");
+  assert.equal(
+    isIdleShellReadyForCommandInjection({
+      sensitiveInputActive: false,
+      hasLiveTerminal: true,
+      alternateScreenActive: false,
+      isAtPrompt: rprompt.isAtPrompt,
+      userInputLength: rprompt.userInput.length,
+      pendingTypedInputLength: 0,
+      afterCursorInputLength: rpromptAfter.length,
+    }),
+    true,
+  );
+
+  // Flush-right multi-segment RPROMPT (ZLE_RPROMPT_INDENT=0).
+  const flushRight = "user@host:~$ " + " ".repeat(53) + "main  12:34:56";
+  assert.equal(getPromptLineTextAfterCursor(makeTerm(flushRight, 13) as never).trim(), "");
+
+  // Recalled command at cursor with RPROMPT still present MUST remain blocked.
+  const recalledWithRprompt = "$ rm -rf /tmp/foo" + " ".repeat(54) + "12:34:56 ";
+  assert.ok(getPromptLineTextAfterCursor(makeTerm(recalledWithRprompt, 2) as never).trim().length > 0);
+
+  // Recalled command with leading spaces + RPROMPT MUST remain blocked.
+  const spacedRecalledWithRprompt = "$   rm -rf /tmp/foo" + " ".repeat(52) + "12:34:56 ";
+  assert.ok(getPromptLineTextAfterCursor(makeTerm(spacedRecalledWithRprompt, 2) as never).trim().length > 0);
+
+  // Recalled command with leading spaces and no RPROMPT (not right-aligned) MUST remain blocked.
+  const spacedRecalled = ("$    rm -rf /tmp/foo").padEnd(cols, " ");
+  assert.ok(getPromptLineTextAfterCursor(makeTerm(spacedRecalled, 2) as never).trim().length > 0);
+});
+
 test("prompt draft reader blocks insertion when cursor is inside an open double quote and cleans up on unregister", () => {
   const sessionId = "sftp-insert-draft-test";
   let draft = { promptText: "user@host:~$ ", userInput: "cat \"", pendingTypedInput: "cat \"" };
