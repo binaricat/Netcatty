@@ -89,6 +89,8 @@ type TimestampStore = {
   ledger: TimestampLedgerEntry[];
   /** Monotonic revision bumped whenever ledger entries or anchors mutate. */
   ledgerRevision: number;
+  /** Monotonic revision bumped when a parsed terminal write completes. */
+  writeRevision: number;
   /** Cached sorted snapshot keyed by ledgerRevision + buffer geometry. */
   sortedLedgerCache: SortedLedgerCache | null;
   /** O(1) live-anchor probes detecting in-place IMarker.line drift at constant buffer geometry. */
@@ -519,6 +521,7 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
       entries: [],
       ledger: [],
       ledgerRevision: 0,
+      writeRevision: 0,
       sortedLedgerCache: null,
       firstAnchoredProbe: null,
       lastAnchoredProbe: null,
@@ -1884,7 +1887,7 @@ export const getTerminalLineTimestampViewportStateKey = (term: XTerm): string =>
   const cursorX = typeof active?.cursorX === "number" ? active.cursorX : 0;
   const cols = Number.isFinite(term.cols) ? term.cols : 0;
   const rows = Number.isFinite(term.rows) ? term.rows : 0;
-  return `${store.ledgerRevision}|${viewportY}|${baseY}|${bufferLength}|${cols}|${rows}|${bufferType}|${cursorY}|${cursorX}`;
+  return `${store.ledgerRevision}|${store.writeRevision}|${viewportY}|${baseY}|${bufferLength}|${cols}|${rows}|${bufferType}|${cursorY}|${cursorX}`;
 };
 
 export const getVisibleTerminalLineTimestampRows = (
@@ -1988,6 +1991,9 @@ const writeTerminalDataWithSecondLedger = (
 
   const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
   term.write(data, () => {
+    if (data.length > 0) {
+      store.writeRevision += 1;
+    }
     attachLedgerAnchors(term, store, pendingAnchors);
     rebaseLedgerForScrollback(term, store);
     if (ledgerChanged) {
@@ -2049,6 +2055,9 @@ export const writeTerminalDataWithLineTimestamps = (
   const writeFallbackOnly = (fallbackData: string, onComplete: () => void): void => {
     const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
     term.write(fallbackData, () => {
+      if (fallbackData.length > 0) {
+        getTimestampStore(term).writeRevision += 1;
+      }
       if (diagnostics) {
         diagnostics.onStep?.({
           kind: "fallback-write",

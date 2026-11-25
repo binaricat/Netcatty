@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import React from "react";
+import xterm from "@xterm/xterm";
 
 import {
   TERMINAL_TIMESTAMP_GUTTER_HORIZONTAL_PADDING,
@@ -350,4 +351,114 @@ test("timestamp gutter skips getBoundingClientRect on idle onRender ticks and re
     resizeObserverCb?.();
   });
   assert.equal(rectReads, readsAfterInitialRender + 2, "ResizeObserver must force layout check");
+});
+
+test("timestamp gutter drops emptied cursor row label after same-second EL erase while idle onRender still skips", async (t) => {
+  const env = installDomEnvironment();
+  const renderer = await createDomRenderer(env.document);
+
+  const term = new xterm.Terminal({
+    cols: 40,
+    rows: 6,
+    scrollback: 20,
+    allowProposedApi: true,
+  });
+
+  let onRenderCb: (() => void) | null = null;
+  Object.defineProperty(term, "onRender", {
+    configurable: true,
+    value: (cb: () => void) => {
+      onRenderCb = cb;
+      return { dispose() {} };
+    },
+  });
+  Object.defineProperty(term, "onScroll", {
+    configurable: true,
+    value: () => ({ dispose() {} }),
+  });
+  Object.defineProperty(term, "onResize", {
+    configurable: true,
+    value: () => ({ dispose() {} }),
+  });
+
+  const container = env.document.createElement("div");
+  const screen = env.document.createElement("div");
+  screen.className = "xterm-screen";
+  Object.defineProperty(screen, "clientHeight", { configurable: true, value: 120 });
+  let rectReads = 0;
+  screen.getBoundingClientRect = () => {
+    rectReads += 1;
+    return new env.window.DOMRect(0, 10, 400, 120);
+  };
+  container.appendChild(screen);
+  env.document.body.appendChild(container);
+
+  const writeAtSecond = (data: string, second = 0) => new Promise<void>((resolve) => {
+    writeTerminalDataWithLineTimestamps(term, data, resolve, {
+      timestampDate: new Date(2026, 9, 29, 12, 0, second),
+    });
+  });
+
+  t.after(async () => {
+    await renderer.unmount();
+    term.dispose();
+    env.cleanup();
+  });
+
+  await writeAtSecond("a\r\nb\r", 0);
+
+  await renderer.render(
+    React.createElement(TerminalTimestampGutter, {
+      termRef: { current: term },
+      containerRef: { current: container },
+      enabled: true,
+      top: "0px",
+      sessionId: "s-erase",
+      color: "#66e8ff",
+      fontFamily: "monospace",
+      fontSize: 12,
+      fontWeight: 400,
+      width: 64,
+    }),
+  );
+
+  const gutter = env.document.querySelector('[data-section="terminal-timestamp-gutter"]') as HTMLElement | null;
+  assert.ok(gutter, "gutter element should be mounted");
+  const visibleLabels = () => Array.from(gutter.children)
+    .filter((child) => (child as HTMLElement).style.display !== "none")
+    .map((child) => child.textContent);
+
+  assert.deepEqual(visibleLabels(), ["12:00:00", "12:00:00"]);
+  const readsAfterMount = rectReads;
+
+  // Idle onRender ticks before erase must short-circuit.
+  await runWithAct(() => {
+    onRenderCb?.();
+    onRenderCb?.();
+  });
+  assert.equal(rectReads, readsAfterMount, "idle onRender must skip layout before erase");
+
+  // Same-second EL erase empties row 1 without moving cursor or anchors.
+  await writeAtSecond("\x1b[K", 0);
+  assert.equal(term.buffer.active.cursorY, 1);
+  assert.equal(term.buffer.active.cursorX, 0);
+
+  await runWithAct(() => {
+    onRenderCb?.();
+  });
+
+  assert.deepEqual(
+    visibleLabels(),
+    ["12:00:00"],
+    "gutter must drop the emptied cursor row label after same-second EL erase",
+  );
+  const readsAfterErase = rectReads;
+  assert.equal(readsAfterErase, readsAfterMount + 1, "erasing write must trigger one gutter re-measure");
+
+  // Idle onRender ticks after erase must short-circuit again.
+  await runWithAct(() => {
+    onRenderCb?.();
+    onRenderCb?.();
+  });
+  assert.equal(rectReads, readsAfterErase, "idle onRender must skip layout after erase");
 });

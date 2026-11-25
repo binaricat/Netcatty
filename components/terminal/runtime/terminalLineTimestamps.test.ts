@@ -1344,3 +1344,45 @@ test("full-scrollback in-place IMarker.line drift and flood bypass invalidate vi
     "flood bypass completion must invalidate cached state key",
   );
 });
+
+test("real xterm same-second EL erase invalidates viewport state key without cursor movement", async () => {
+  const fixture = createRealTimestampTerm();
+  try {
+    await fixture.write("a\r\nb\r", 0);
+    assert.equal(fixture.term.buffer.active.cursorY, 1);
+    assert.equal(fixture.term.buffer.active.cursorX, 0);
+    assert.deepEqual(getVisibleTerminalLineTimestampRows(fixture.term), [
+      { row: 0, label: "12:00:00" },
+      { row: 1, label: "12:00:00" },
+    ]);
+
+    const keyBeforeErase = getTerminalLineTimestampViewportStateKey(fixture.term);
+    assert.equal(
+      getTerminalLineTimestampViewportStateKey(fixture.term),
+      keyBeforeErase,
+      "idle queries without a write must keep the same viewport state key",
+    );
+
+    // Erase cursor row in place within the same second: cursor and geometry stay identical.
+    await fixture.write("\x1b[K", 0);
+    assert.equal(fixture.term.buffer.active.cursorY, 1);
+    assert.equal(fixture.term.buffer.active.cursorX, 0);
+
+    const keyAfterErase = getTerminalLineTimestampViewportStateKey(fixture.term);
+    assert.notEqual(
+      keyAfterErase,
+      keyBeforeErase,
+      "content-mutating write must invalidate viewport state key even when cursor and anchors do not move",
+    );
+    assert.equal(
+      getTerminalLineTimestampViewportStateKey(fixture.term),
+      keyAfterErase,
+      "subsequent idle queries must stabilize on the new viewport state key",
+    );
+    assert.deepEqual(getVisibleTerminalLineTimestampRows(fixture.term), [
+      { row: 0, label: "12:00:00" },
+    ]);
+  } finally {
+    fixture.dispose();
+  }
+});
