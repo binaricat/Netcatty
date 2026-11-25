@@ -694,6 +694,9 @@ function createMoshSessionApi(ctx) {
       sshPty.onExit(({ exitCode, signal }) => {
         releaseFidoAgent();
         if (sessions.get(sessionId) !== session || session.closed) {
+          if (logStreamToken) {
+            sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+          }
           cleanupMoshAuthTempFiles(moshAuth.tempFiles);
           return;
         }
@@ -732,8 +735,10 @@ function createMoshSessionApi(ctx) {
             });
           } catch (err) {
             flushPaced(() => {
+              if (logStreamToken) {
+                sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+              }
               if (sessions.get(sessionId) !== session) return;
-              sessionLogStreamManager.stopStream(sessionId, logStreamToken);
               const contents = electronModule.webContents.fromId(session.webContentsId);
               fanoutSessionExit(sessionId, contents, {
                 sessionId,
@@ -765,8 +770,10 @@ function createMoshSessionApi(ctx) {
           // Best-effort diagnostics; still tear the session down below.
         }
         flushPaced(() => {
+          if (logStreamToken) {
+            sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+          }
           if (sessions.get(sessionId) !== session) return;
-          sessionLogStreamManager.stopStream(sessionId, logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);
           fanoutSessionExit(sessionId, contents, {
             sessionId,
@@ -947,6 +954,9 @@ function createMoshSessionApi(ctx) {
     
       mcPty.onExit(({ exitCode, signal }) => {
         if (sessions.get(sessionId) !== session || session.closed) {
+          if (session.logStreamToken) {
+            sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
+          }
           return;
         }
         // Tear down the host-info stats companion ssh2 connection (issue
@@ -955,8 +965,10 @@ function createMoshSessionApi(ctx) {
         try { session.moshStatsConn?.end(); } catch { /* ignore */ }
         bufferData(MOSH_PRIMARY_SCREEN_RESET);
         flushPaced(() => {
+          if (session.logStreamToken) {
+            sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
+          }
           if (sessions.get(sessionId) !== session) return;
-          sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
           const contents = electronModule.webContents.fromId(session.webContentsId);
           fanoutSessionExit(sessionId, contents, {
             sessionId,

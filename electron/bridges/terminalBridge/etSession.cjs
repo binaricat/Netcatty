@@ -1466,16 +1466,21 @@ main();
 
         let etExitFinalized = false;
         proc.onExit((evt) => {
+          if ((sessions.get(sessionId) !== session || session.closed) && session.logStreamToken) {
+            sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
+          }
           flushEtPaced(() => {
             if (etExitFinalized) return;
             etExitFinalized = true;
             // Release before the map check: explicit close already deleted the
             // session entry, but the agent/askpass lease must still be dropped.
             releaseFidoAgents();
+            if (session.logStreamToken) {
+              sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
+            }
             if (sessions.get(sessionId) !== session) return;
             try { session.etStatsConn?.end(); } catch { /* ignore */ }
             cleanupSessionExternalAuthArtifacts(session);
-            sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
             closeTerminalOutputSession?.(sessionId);
             sessions.delete(sessionId);
             if (session.closed) return;
