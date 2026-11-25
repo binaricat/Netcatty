@@ -60,10 +60,18 @@ module.exports = {
         // The Windows Hello helper is shipped once through win.extraResources.
         // Exclude local per-arch build output from app.asar on every platform.
         '!electron/bridges/windowsHelloHelper/build/**/*',
-        // Runtime smoke fixtures are built test packages, not host resources.
-        // Keep them out of production ASARs so no example plugin can be
-        // mistaken for an installed or host-trusted package.
-        '!electron/plugins/fixtures/**/*',
+        // Test fixtures, test-only helpers, and dev/CI schema snapshots are not
+        // runtime resources. Keep them out of production ASARs (including plugin
+        // smoke fixtures so no example plugin can be mistaken for an installed package).
+        '!electron/**/fixtures/**/*',
+        '!electron/bridges/testSupport/**/*',
+        '!electron/bridges/cliDiscoveryTestIsolation.cjs',
+        '!electron/bridges/sshBridge/serverStatsTestHelpers.cjs',
+        '!electron/bridges/terminalBridge.moshConpty.integration.cjs',
+        '!electron/bridges/aiBridge/codexAppServer/protocol.schema.json',
+        // Build-time vector sources copied from public/ into dist/.
+        '!dist/icon.svg',
+        '!dist/tray-iconTemplate.svg',
         // Main-process terminal flow control reads shared thresholds from here
         // (terminalFlowAck.cjs). Must ship beside electron/ in app.asar.
         'infrastructure/config/terminalFlowConstants.cjs',
@@ -141,6 +149,39 @@ module.exports = {
         '!node_modules/katex/**/*',
         '!node_modules/shiki/**/*',
         '!node_modules/@shiki/**/*',
+        // @remote-dom/core is bundled into dist/ by Vite for renderer and into
+        // plugin packages at plugin build time; main process never requires it.
+        // Must still be explicitly excluded because workspace @netcatty/plugin-sdk
+        // declares it in dependencies.
+        '!node_modules/@remote-dom/**/*',
+        // web-streams-polyfill is only a Node < 16.5 fallback inside fetch-blob;
+        // Netcatty requires Node >= 22 / Electron 42 with native Web Streams.
+        '!node_modules/web-streams-polyfill/**/*',
+        // Main process only CJS-requires css-tree (cjs/index.cjs) and mdn-data's
+        // css/{at-rules,properties,syntaxes}.json; skip browser/ESM/l10n/schema copies.
+        '!node_modules/css-tree/dist/**/*',
+        '!node_modules/css-tree/lib/**/*',
+        '!node_modules/mdn-data/l10n/**/*',
+        '!node_modules/mdn-data/api/**/*',
+        '!node_modules/mdn-data/css/*.schema.json',
+        // Browser/CDN/schema/unused builds inside Node runtime packages.
+        '!node_modules/@statsig/js-client/build/**/*',
+        '!node_modules/@agentclientprotocol/sdk/schema/**/*',
+        '!node_modules/yaml/browser/**/*',
+        '!node_modules/webdav/dist/web/**/*',
+        '!node_modules/webdav/dist/react-native/**/*',
+        '!node_modules/@withfig/autocomplete/icons/**/*',
+        '!node_modules/js-yaml/dist/js-yaml.js',
+        '!node_modules/js-yaml/dist/js-yaml.min.js',
+        // Build caches and non-license markdown/README docs inside node_modules.
+        // Preserve all LICENSE*/LICENCE*/NOTICE*/COPYING*/PATENTS* files and
+        // @anthropic-ai/claude-agent-sdk/README.md (whose package.json declares
+        // "license": "SEE LICENSE IN README.md").
+        '!node_modules/**/tsconfig*.tsbuildinfo',
+        '!node_modules/**/!(LICENSE*|license*|LICENCE*|licence*|NOTICE*|notice*|COPYING*|copying*|PATENTS*|patents*|README*|readme*).{md,MD}',
+        '!node_modules/!(@anthropic-ai)/**/{README,readme}*',
+        '!node_modules/@anthropic-ai/!(claude-agent-sdk)/**/{README,readme}*',
+        '!node_modules/**/HISTORY.md',
         // Heavy cloud completion specs are intentionally not bundled. The main
         // process filters the same prefixes so dev and packaged builds behave
         // consistently.
@@ -232,6 +273,9 @@ module.exports = {
         // iconutil-generated bundle instead so Finder and app switchers do not
         // render those representations as colored noise.
         icon: 'build/icon.icns',
+        files: [
+            '!node_modules/@vscode/windows-process-tree/**/*'
+        ],
         target: [
             {
                 target: 'dmg',
@@ -277,6 +321,9 @@ module.exports = {
     },
     win: {
         icon: 'public/icon-win.png',
+        files: [
+            '!dist/icons/variants/macos/**/*'
+        ],
         // Do not hard-code arch here. pack:win-x64 / pack:win pass --x64/--arm64,
         // and electron-builder unions config arch with the CLI set. Hard-coding
         // ['x64', 'arm64'] made the official x64 CI job also emit win-arm64 and
@@ -316,6 +363,10 @@ module.exports = {
         // installs only hicolor/1024x1024 and launchers miss the icon (#274,
         // #1340). Do NOT set linux.icon to a single 1024px PNG either.
         icon: 'icons',
+        files: [
+            '!dist/icons/variants/macos/**/*',
+            '!node_modules/@vscode/windows-process-tree/**/*'
+        ],
         target: ['AppImage', 'deb', 'rpm', 'pacman'],
         category: 'Development',
         extraResources: [...moshExtraResources('linux'), ...etExtraResources('linux')]

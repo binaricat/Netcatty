@@ -455,3 +455,130 @@ test("linux FPM packages use the custom post-install template", () => {
     );
   }
 });
+
+test("@remote-dom/core is a root devDependency while remaining in plugin-sdk and excluded from app.asar", () => {
+  const rootPkg = require("../package.json");
+  const sdkPkg = require("../packages/plugin-sdk/package.json");
+  assert.equal(rootPkg.dependencies["@remote-dom/core"], undefined);
+  assert.ok(rootPkg.devDependencies["@remote-dom/core"]);
+  assert.ok(sdkPkg.dependencies["@remote-dom/core"]);
+  assert.ok(config.files.includes("!node_modules/@remote-dom/**/*"));
+});
+
+test("node_modules packaging exclusions prune unused payloads while preserving license notices and css-tree CJS", () => {
+  const { getNodeModuleFileMatcher } = require("app-builder-lib/out/fileMatcher");
+  const root = path.resolve(__dirname, "..");
+  const outDir = path.join(root, "release");
+  const stat = { isDirectory: () => false };
+
+  const nmMac = getNodeModuleFileMatcher(root, outDir, (v) => v, config.mac, {
+    config,
+    debugLogger: { isEnabled: false },
+  }).createFilter();
+  const nmWin = getNodeModuleFileMatcher(root, outDir, (v) => v, config.win, {
+    config,
+    debugLogger: { isEnabled: false },
+  }).createFilter();
+  const nmLinux = getNodeModuleFileMatcher(root, outDir, (v) => v, config.linux, {
+    config,
+    debugLogger: { isEnabled: false },
+  }).createFilter();
+
+  for (const dropped of [
+    "node_modules/@remote-dom/core/build/esm/index.mjs",
+    "node_modules/web-streams-polyfill/dist/ponyfill.es2018.js",
+    "node_modules/css-tree/dist/csstree.js",
+    "node_modules/css-tree/lib/index.js",
+    "node_modules/mdn-data/l10n/css.json",
+    "node_modules/mdn-data/api/inheritance.json",
+    "node_modules/mdn-data/css/properties.schema.json",
+    "node_modules/@statsig/js-client/build/statsig-js-client.min.js",
+    "node_modules/@agentclientprotocol/sdk/schema/schema.json",
+    "node_modules/yaml/browser/index.js",
+    "node_modules/webdav/dist/web/index.js",
+    "node_modules/webdav/dist/react-native/index.js",
+    "node_modules/@withfig/autocomplete/icons/git.png",
+    "node_modules/js-yaml/dist/js-yaml.js",
+    "node_modules/js-yaml/dist/js-yaml.min.js",
+    "node_modules/foo/tsconfig.tsbuildinfo",
+    "node_modules/foo/README.md",
+    "node_modules/foo/readme.txt",
+    "node_modules/foo/CHANGELOG.md",
+    "node_modules/foo/HISTORY.md",
+    "node_modules/@anthropic-ai/sdk/README.md",
+  ]) {
+    assert.equal(nmMac(path.join(root, dropped), stat), false, `expected excluded: ${dropped}`);
+  }
+
+  for (const kept of [
+    "node_modules/css-tree/cjs/index.cjs",
+    "node_modules/mdn-data/css/properties.json",
+    "node_modules/mdn-data/css/at-rules.json",
+    "node_modules/mdn-data/css/syntaxes.json",
+    "node_modules/yaml/dist/index.js",
+    "node_modules/webdav/dist/node/index.js",
+    "node_modules/js-yaml/index.js",
+    "node_modules/js-yaml/dist/js-yaml.mjs",
+    "node_modules/foo/LICENSE",
+    "node_modules/foo/LICENSE.md",
+    "node_modules/foo/LICENSE-MIT.md",
+    "node_modules/foo/NOTICE.md",
+    // @anthropic-ai/claude-agent-sdk declares "license": "SEE LICENSE IN README.md"
+    "node_modules/@anthropic-ai/claude-agent-sdk/README.md",
+    "node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
+  ]) {
+    assert.equal(nmMac(path.join(root, kept), stat), true, `expected preserved: ${kept}`);
+  }
+
+  // Platform-scoped @vscode/windows-process-tree exclusion
+  const winProcTree = path.join(root, "node_modules/@vscode/windows-process-tree/lib/index.js");
+  assert.equal(nmMac(winProcTree, stat), false);
+  assert.equal(nmLinux(winProcTree, stat), false);
+  assert.equal(nmWin(winProcTree, stat), true);
+
+  // Verify css-tree + mdn-data runtime loader still works cleanly
+  const policy = require("../domain/pluginViewStylePolicy.cjs");
+  assert.equal(typeof policy.validatePluginStylesheet, "function");
+});
+
+test("app file exclusions prune dev schemas, test helpers/fixtures, svg sources, and non-target macOS icons", () => {
+  const { getFileMatchers } = require("app-builder-lib/out/fileMatcher");
+  const root = path.resolve(__dirname, "..");
+  const outDir = path.join(root, "release");
+  const stat = { isDirectory: () => false };
+
+  const makeFilter = (platformOpts) =>
+    getFileMatchers(config, "files", outDir, {
+      macroExpander: (v) => v,
+      customBuildOptions: platformOpts,
+      globalOutDir: outDir,
+      defaultSrc: root,
+    })[0].createFilter();
+
+  const macFilter = makeFilter(config.mac);
+  const winFilter = makeFilter(config.win);
+  const linuxFilter = makeFilter(config.linux);
+
+  for (const dropped of [
+    "electron/bridges/aiBridge/codexAppServer/protocol.schema.json",
+    "electron/plugins/fixtures/inProcessBrowserRuntime.cjs",
+    "electron/bridges/fixtures/sample.cs",
+    "electron/hostBrowser/fixtures/renderer.html",
+    "electron/bridges/testSupport/bridgeHarness.cjs",
+    "electron/bridges/cliDiscoveryTestIsolation.cjs",
+    "electron/bridges/sshBridge/serverStatsTestHelpers.cjs",
+    "electron/bridges/terminalBridge.moshConpty.integration.cjs",
+    "dist/icon.svg",
+    "dist/tray-iconTemplate.svg",
+  ]) {
+    assert.equal(macFilter(path.join(root, dropped), stat), false, `expected excluded: ${dropped}`);
+  }
+
+  assert.equal(macFilter(path.join(root, "dist/index.html"), stat), true);
+  assert.equal(macFilter(path.join(root, "electron/main.cjs"), stat), true);
+
+  const macosVariantIcon = path.join(root, "dist/icons/variants/macos/icon.png");
+  assert.equal(macFilter(macosVariantIcon, stat), true);
+  assert.equal(winFilter(macosVariantIcon, stat), false);
+  assert.equal(linuxFilter(macosVariantIcon, stat), false);
+});
