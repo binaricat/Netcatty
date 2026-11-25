@@ -9,7 +9,9 @@ import {
   type VaultNote,
 } from "../../domain/notes";
 import { copyToClipboard } from "../keychain/utils";
+import { Button } from "../ui/button";
 import { toast } from "../ui/toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 export interface NoteExportMenuProps {
   note: VaultNote | null;
@@ -101,17 +103,24 @@ export const NoteExportMenu: React.FC<NoteExportMenuProps> = ({
 
   return (
     <div className={`relative inline-block ${className}`} ref={menuRef}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-        title={t("notes.export.share")}
-        onClick={() => setOpen((prev) => !prev)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-      >
-        <Share2 size={16} />
-      </button>
+      <Tooltip open={open ? false : undefined}>
+        <TooltipTrigger asChild>
+          <Button
+            ref={triggerRef}
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="app-no-drag h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground transition-colors hover:bg-secondary/70 hover:text-foreground"
+            aria-label={t("notes.export.share")}
+            onClick={() => setOpen((prev) => !prev)}
+            aria-haspopup="menu"
+            aria-expanded={open}
+          >
+            <Share2 size={16} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t("notes.export.share")}</TooltipContent>
+      </Tooltip>
 
       {open && (
         <div role="menu" className="absolute right-0 top-full mt-1.5 w-56 bg-popover border border-border rounded-lg shadow-lg py-1.5 z-50 text-sm animate-in fade-in-50 zoom-in-95">

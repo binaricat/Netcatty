@@ -10,6 +10,7 @@ import { isFontInstalled } from '../../lib/fontAvailability';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Combobox, type ComboboxOption } from '../ui/combobox';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import {
   buildTerminalCjkFontOptions,
   getTerminalCjkFontSelectionStatus,
@@ -107,18 +108,24 @@ export const TerminalCjkFontSelect: React.FC<Props> = ({
         onInputValueChange={setPreviewValue}
         disabled={disabled}
       />
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className="h-9 w-9 shrink-0"
-        aria-label={t('settings.terminal.font.cjk.refresh')}
-        title={t('settings.terminal.font.cjk.refresh')}
-        disabled={disabled || isLoading}
-        onClick={() => void refreshFonts()}
-      >
-        <RefreshCw size={14} className={cn(isLoading && 'animate-spin')} />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-9 w-9"
+              aria-label={t('settings.terminal.font.cjk.refresh')}
+              disabled={disabled || isLoading}
+              onClick={() => void refreshFonts()}
+            >
+              <RefreshCw size={14} className={cn(isLoading && 'animate-spin')} />
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{t('settings.terminal.font.cjk.refresh')}</TooltipContent>
+      </Tooltip>
     </div>
   );
 

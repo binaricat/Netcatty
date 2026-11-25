@@ -3,6 +3,7 @@ import { Check, Copy, Eye, EyeOff } from "lucide-react";
 import { cn } from "../../../../lib/utils";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
 
 type CopyableCodeBlockProps = {
   label?: string;
@@ -52,18 +53,24 @@ export const CopyableCodeBlock: React.FC<CopyableCodeBlockProps> = ({
         {sensitive && value ? <Button type="button" variant="ghost" size="sm" className="absolute right-10 top-1.5 h-7 w-7 p-0" onClick={() => setRevealed(!revealed)} aria-label={t(revealed ? "ai.toolSettings.hideSecret" : "ai.toolSettings.showSecret")}>
           {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
         </Button> : null}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={!canCopy}
-          className="absolute right-1.5 top-1.5 h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-          onClick={() => void onCopy(copyKey, value)}
-          aria-label={isCopied ? copiedLabel : copyLabel}
-          title={isCopied ? copiedLabel : copyLabel}
-        >
-          {isCopied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="absolute right-1.5 top-1.5 inline-flex">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={!canCopy}
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                onClick={() => void onCopy(copyKey, value)}
+                aria-label={isCopied ? copiedLabel : copyLabel}
+              >
+                {isCopied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{isCopied ? copiedLabel : copyLabel}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

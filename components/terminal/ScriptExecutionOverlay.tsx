@@ -3,6 +3,7 @@ import React, { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import { useI18n } from '@/application/i18n/I18nProvider';
 import type { ScriptRun } from '@/types/global/netcatty-bridge-script.d.ts';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils.ts';
 
 export interface ScriptExecutionOverlayProps {
@@ -258,9 +259,16 @@ export const ScriptExecutionOverlay: React.FC<ScriptExecutionOverlayProps> = ({
         ) : null}
         <div className="flex items-center gap-1 shrink-0">
           {isFinished ? (
-            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onDismiss} title={t('scripts.running.dismiss')}>
-              <X size={14} />
-            </Button>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onDismiss} aria-label={t('scripts.running.dismiss')}>
+                    <X size={14} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t('scripts.running.dismiss')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           ) : (
             <>
               {run.status === 'running' ? (

@@ -162,7 +162,7 @@ test('custom CSS help mentions the top tab hooks in every locale', () => {
     assert.equal(typeof help, 'string', locale.name);
     assert.equal(typeof placeholder, 'string', locale.name);
     for (const hook of HOOKS) {
-      assert.ok(desc.includes(hook), `${locale.name} description missing ${hook}`);
+      assert.ok(!desc.includes(hook), `${locale.name} description should keep ${hook} inside help modal`);
       assert.ok(help.includes(hook), `${locale.name} help missing ${hook}`);
       assert.ok(placeholder.includes(hook), `${locale.name} placeholder missing ${hook}`);
     }

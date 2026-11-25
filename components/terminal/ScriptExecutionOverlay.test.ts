@@ -11,6 +11,7 @@ import {
   SCRIPT_OVERLAY_FINISHED_DISMISS_DELAY_MS,
   ScriptExecutionOverlay,
 } from "./ScriptExecutionOverlay.tsx";
+import { installDomEnvironment } from "../test-support/renderReactDom.tsx";
 import type { ScriptRun } from "@/types/global/netcatty-bridge-script.d.ts";
 
 const completedRun: ScriptRun = {
@@ -50,6 +51,7 @@ test("script overlay covers compact speed-dial full-width instead of reserving a
 });
 
 test("script overlay dismisses a completed run after five seconds", () => {
+  const dom = installDomEnvironment();
   mock.timers.enable({ apis: ["setTimeout"] });
   let dismissCount = 0;
   let renderer: ReturnType<typeof create> | undefined;
@@ -81,7 +83,10 @@ test("script overlay dismisses a completed run after five seconds", () => {
     mock.timers.tick(1);
     assert.equal(dismissCount, 1);
   } finally {
-    renderer?.unmount();
+    act(() => {
+      renderer?.unmount();
+    });
     mock.timers.reset();
+    dom.cleanup();
   }
 });

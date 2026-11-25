@@ -78,9 +78,11 @@ test("NoteToolbar fits formatting controls to the available row width", async (t
     assert.ok(!element.classList.contains("flex-wrap"));
     return element;
   };
+  const buttonLabel = (element: HTMLButtonElement) =>
+    element.getAttribute("aria-label") || element.textContent?.trim() || "";
   const button = (label: string, parent: ParentNode = window.document) => {
     const element = Array.from(parent.querySelectorAll<HTMLButtonElement>("button"))
-      .find((candidate) => candidate.title === label || candidate.textContent?.trim() === label);
+      .find((candidate) => buttonLabel(candidate) === label);
     assert.ok(element, `${label} should be reachable`);
     return element;
   };
@@ -114,10 +116,11 @@ test("NoteToolbar fits formatting controls to the available row width", async (t
 
   try {
     await render();
-    const defaultOrder = Array.from(row().querySelectorAll("button"), (element) => element.title);
+    const defaultOrder = Array.from(row().querySelectorAll<HTMLButtonElement>("button"), buttonLabel);
 
     await t.test("wide row preserves all controls inline without a scrollbar track", async () => {
       assert.equal(defaultOrder.length, 19);
+      assert.equal(row().querySelectorAll("button[title]").length, 0, "toolbar buttons should use custom tooltips instead of native title");
       assert.deepEqual(defaultOrder.slice(0, 5), ["Undo (Ctrl+Z)", "Redo (Ctrl+Y)", "Code font and typography settings", "Heading Level", "Bold (Ctrl+B)"]);
       assert.equal(defaultOrder.at(-1), "Insert Image");
       assert.equal(row().querySelector("[data-toolbar-overflow-trigger]"), null);
@@ -131,11 +134,15 @@ test("NoteToolbar fits formatting controls to the available row width", async (t
 
     await t.test("narrow row spills the end of the existing order and keeps every action reachable", async () => {
       await resize(320);
-      const inlineLabels = Array.from(row().querySelectorAll<HTMLButtonElement>("button[title]"), (element) => element.title);
+      const inlineLabels = Array.from(
+        row().querySelectorAll<HTMLButtonElement>("button:not([data-toolbar-overflow-trigger])"),
+        buttonLabel,
+      );
       assert.ok(inlineLabels.length < defaultOrder.length);
       assert.deepEqual(inlineLabels, defaultOrder.slice(0, inlineLabels.length));
       const menu = await openOverflow();
-      const overflowLabels = Array.from(menu.querySelectorAll("button"), (element) => element.title);
+      const overflowLabels = Array.from(menu.querySelectorAll<HTMLButtonElement>("button"), buttonLabel);
+      assert.equal(menu.querySelectorAll("button[title]").length, 0);
       assert.deepEqual([...inlineLabels, ...overflowLabels], defaultOrder);
       const expectedActions = ["bullet", "number", "task", "quote", "codeblock", "math", "table", "divider", "link", "image"];
       for (let index = 0; index < overflowLabels.length; index += 1) {
@@ -179,7 +186,7 @@ test("NoteToolbar fits formatting controls to the available row width", async (t
 
     await t.test("resizing back to wide restores controls and removes the overflow trigger", async () => {
       await resize(900);
-      assert.deepEqual(Array.from(row().querySelectorAll("button"), (element) => element.title), defaultOrder);
+      assert.deepEqual(Array.from(row().querySelectorAll<HTMLButtonElement>("button"), buttonLabel), defaultOrder);
       assert.equal(row().querySelector("[data-toolbar-overflow-trigger]"), null);
     });
 
@@ -234,7 +241,9 @@ test("full notes and the sidebar overlay both render the shared format toolbar",
       assert.equal(rows.length, 1, `${displayMode} should use NoteToolbar`);
       assert.doesNotMatch(rows[0].className, /overflow-x-auto|overflow-auto|scrollbar/);
       assert.equal(rows[0].querySelectorAll("button").length, 19);
-      assert.equal(dom.window.document.querySelector("[data-note-title-row] button[title='Undo (Ctrl+Z)']"), null);
+      assert.equal(rows[0].querySelectorAll("button[title]").length, 0);
+      assert.equal(dom.window.document.querySelector("[data-note-title-row] button[aria-label='Undo (Ctrl+Z)']"), null);
+      assert.equal(dom.window.document.querySelector("[data-note-title-row] button[title]"), null);
     } finally {
       dom.window.close();
     }

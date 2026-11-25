@@ -26,4 +26,5 @@ test("note outline renders a borderless hierarchy without heading-level labels",
   assert.match(markup, /padding-left:22px/);
   assert.doesNotMatch(markup, />H[1-6]</);
   assert.doesNotMatch(markup, /border-l|border-b|uppercase|tracking-wider/);
+  assert.doesNotMatch(markup, /\btitle=/);
 });

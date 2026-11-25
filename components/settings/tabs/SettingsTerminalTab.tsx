@@ -28,6 +28,7 @@ import { Button } from "../../ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../ui/dialog";
 import { Input } from "../../ui/input";
 import { Select as ShadcnSelect, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip";
 import { SectionHeader, Select, SettingsAnchor, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
 import { ThemeSelectModal } from "../ThemeSelectModal";
 import { TerminalFontSelect } from "../TerminalFontSelect";
@@ -930,18 +931,23 @@ function SettingsTerminalTab(props: {
               </SelectContent>
             </ShadcnSelect>
             {showCustomShellInput && (
-              <button
-                type="button"
-                onClick={openCustomShellModal}
-                title={t("common.edit")}
-                className="flex items-center gap-1 text-xs text-muted-foreground max-w-48 hover:text-foreground"
-              >
-                <Pencil size={11} className="shrink-0" />
-                <span className="truncate">
-                  {terminalSettings.localShell}
-                  {terminalSettings.localShellArgs?.length ? ` ${formatShellArgs(terminalSettings.localShellArgs)}` : ""}
-                </span>
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={openCustomShellModal}
+                    aria-label={t("common.edit")}
+                    className="flex items-center gap-1 text-xs text-muted-foreground max-w-48 hover:text-foreground"
+                  >
+                    <Pencil size={11} className="shrink-0" />
+                    <span className="truncate">
+                      {terminalSettings.localShell}
+                      {terminalSettings.localShellArgs?.length ? ` ${formatShellArgs(terminalSettings.localShellArgs)}` : ""}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("common.edit")}</TooltipContent>
+              </Tooltip>
             )}
             {!showCustomShellInput && defaultShell && !terminalSettings.localShell && (
               <span className="text-xs text-muted-foreground">

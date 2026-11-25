@@ -6,6 +6,7 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 export interface BrowserIconSelection {
   mode: 'website' | 'text' | 'image';
@@ -76,9 +77,14 @@ export function BrowserIconEditor({ value, onChange, readIcon, onBusyChange, all
           style={{ backgroundColor: color }} onClick={() => onChange({ color })}>
           {value.color.toLowerCase() === color && <Check size={12} className="text-white" />}
         </button>)}
-        <label className="relative grid h-6 w-6 cursor-pointer place-items-center rounded-full border border-border text-muted-foreground hover:text-foreground focus-within:ring-1 focus-within:ring-ring" title={t('terminal.browser.customColor')}>
-          <Pipette size={12} /><input aria-label={t('terminal.browser.customColor')} type="color" className="absolute inset-0 h-full w-full cursor-pointer opacity-0" value={value.color} onChange={(event) => onChange({ color: event.target.value })} />
-        </label>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <label className="relative grid h-6 w-6 cursor-pointer place-items-center rounded-full border border-border text-muted-foreground hover:text-foreground focus-within:ring-1 focus-within:ring-ring">
+              <Pipette size={12} /><input aria-label={t('terminal.browser.customColor')} type="color" className="absolute inset-0 h-full w-full cursor-pointer opacity-0" value={value.color} onChange={(event) => onChange({ color: event.target.value })} />
+            </label>
+          </TooltipTrigger>
+          <TooltipContent>{t('terminal.browser.customColor')}</TooltipContent>
+        </Tooltip>
       </div>
     </div>}
     {value.mode === 'image' && <div className="space-y-2" onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}

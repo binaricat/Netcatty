@@ -46,6 +46,7 @@ test('history keep-alive source stays mounted and gates the shell-history subscr
   assert.match(listSource, /remeasure/);
   assert.match(listSource, /scrollToIndex\(index, 'auto'\)/);
   assert.match(listSource, /if \(!measureEnabledRef\.current && next === 0\) return/);
+  assert.doesNotMatch(historySource, /<(?:button|div)[^>]*\btitle=/);
 });
 
 const hostA = {

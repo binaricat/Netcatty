@@ -246,25 +246,29 @@ const ComposeBarSnippetManagePopover = memo(function ComposeBarSnippetManagePopo
         if (!next) setSearch('');
       }}
     >
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="h-6 w-6 flex-shrink-0 flex items-center justify-center rounded transition-colors duration-150"
-          style={{ color: theme.mutedFg }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = theme.hoverBg;
-            e.currentTarget.style.color = theme.resolvedFg;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'transparent';
-            e.currentTarget.style.color = theme.mutedFg;
-          }}
-          aria-label={manageLabel}
-          title={manageLabel}
-        >
-          <Plus size={12} />
-        </button>
-      </PopoverTrigger>
+      <Tooltip open={open ? false : undefined}>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="h-6 w-6 flex-shrink-0 flex items-center justify-center rounded transition-colors duration-150"
+              style={{ color: theme.mutedFg }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme.hoverBg;
+                e.currentTarget.style.color = theme.resolvedFg;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = theme.mutedFg;
+              }}
+              aria-label={manageLabel}
+            >
+              <Plus size={12} />
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{manageLabel}</TooltipContent>
+      </Tooltip>
       <PopoverContent
         className="w-72 p-0"
         align="end"

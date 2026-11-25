@@ -4,6 +4,7 @@ import { useI18n } from "../../application/i18n/I18nProvider";
 import type { MonitorStats } from "../../domain/monitorRuntime";
 import { formatMonitorRate } from "../../domain/monitorFormatting";
 import { buildMonitorDiskListLayout, type MonitorDiskListLayout } from "../../domain/monitorDisks";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { MonitorSystemDiskToggle } from "./MonitorSystemDiskToggle";
 
 type DiskRates = { diskReadSpeed?: number | null; diskWriteSpeed?: number | null };
@@ -34,26 +35,41 @@ export function MonitorDiskIo({ stats, listLayout, showSystemToggle = false, onT
   const { t } = useI18n();
   const layout = listLayout ?? buildMonitorDiskListLayout(stats);
   return (
-    <div className="w-full min-w-0 space-y-1.5 text-[10px] tabular-nums text-muted-foreground">
-      {layout.rows.map((row, index) => {
-        if (row.kind === "system") return showSystemToggle
-          ? <MonitorSystemDiskToggle key="system" row={row} onToggle={onToggleSystem} />
-          : <div key="system" data-monitor-system-io-slot aria-hidden="true" className="h-4" />;
-        const { disk } = row;
-        return (
-        <div key={`${disk.mountPoint}-${index}`} data-monitor-disk-io={disk.mountPoint}
-          className="grid h-4 grid-cols-2 items-center gap-2"
-          title={`${disk.mountPoint}\n${t("monitor.partitionIoHint")}`}>
-          <span className="sr-only">{disk.mountPoint} </span>
-          <Rates stats={disk} />
-        </div>
-        );
-      })}
-      <div data-monitor-disk-io-total className="flex h-5 items-center justify-between gap-2 border-t border-border/40 pt-1"
-        title={t("monitor.diskIoHint")}>
-        <span>{t("monitor.diskIoTotal")}</span>
-        <div className="flex items-center gap-2"><Rates stats={stats} /></div>
+    <TooltipProvider delayDuration={180}>
+      <div className="w-full min-w-0 space-y-1.5 text-[10px] tabular-nums text-muted-foreground">
+        {layout.rows.map((row, index) => {
+          if (row.kind === "system") return showSystemToggle
+            ? <MonitorSystemDiskToggle key="system" row={row} onToggle={onToggleSystem} />
+            : <div key="system" data-monitor-system-io-slot aria-hidden="true" className="h-4" />;
+          const { disk } = row;
+          return (
+            <Tooltip key={`${disk.mountPoint}-${index}`}>
+              <TooltipTrigger asChild>
+                <div
+                  data-monitor-disk-io={disk.mountPoint}
+                  aria-label={`${disk.mountPoint}: ${t("monitor.partitionIoHint")}`}
+                  className="grid h-4 grid-cols-2 items-center gap-2"
+                >
+                  <span className="sr-only">{disk.mountPoint} </span>
+                  <Rates stats={disk} />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs whitespace-pre-line">
+                {`${disk.mountPoint}\n${t("monitor.partitionIoHint")}`}
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div data-monitor-disk-io-total className="flex h-5 items-center justify-between gap-2 border-t border-border/40 pt-1">
+              <span>{t("monitor.diskIoTotal")}</span>
+              <div className="flex items-center gap-2"><Rates stats={stats} /></div>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top">{t("monitor.diskIoHint")}</TooltipContent>
+        </Tooltip>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }

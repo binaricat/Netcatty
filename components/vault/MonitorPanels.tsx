@@ -75,7 +75,7 @@ import { useMonitorDiskGroups } from "../../application/state/useMonitorDiskGrou
 import { formatMonitorRate as rate } from "../../domain/monitorFormatting";
 import { VaultHeaderSearch, VaultPageHeader, vaultHeaderIconButtonClass, vaultHeaderSecondaryButtonClass } from "./VaultPageHeader";
 import { toast } from "../ui/toast";
-import { TooltipProvider } from "../ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { MonitorHostCollection } from "./MonitorHostCollection";
 import { MonitorHostLatency, MonitorHostNotes, MonitorHostTags } from "./MonitorHostMetadata";
 
@@ -471,6 +471,7 @@ export function MonitorPanels({
     if (detail && !detailAvailable) setDetail(null);
   }, [detail, detailAvailable]);
   return (
+    <TooltipProvider delayDuration={180}>
     <section
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
       data-section="vault-monitor"
@@ -531,32 +532,40 @@ export function MonitorPanels({
           )}
           <div className="min-w-0 flex-1" />
           {panel && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className={cn(vaultHeaderSecondaryButtonClass, "shrink-0")}
-              aria-label={t(running ? "monitor.stop" : "monitor.start")}
-              title={t(running ? "monitor.stop" : "monitor.start")}
-              onClick={() =>
-                running
-                  ? monitorActions.stop(panel.id)
-                  : monitorActions.start(panel.id)
-              }
-            >
-              {running ? <Square size={13} /> : <Play size={13} />}
-              <span className="monitor-header-action-label">{t(running ? "monitor.stop" : "monitor.start")}</span>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className={cn(vaultHeaderSecondaryButtonClass, "shrink-0")}
+                  aria-label={t(running ? "monitor.stop" : "monitor.start")}
+                  onClick={() =>
+                    running
+                      ? monitorActions.stop(panel.id)
+                      : monitorActions.start(panel.id)
+                  }
+                >
+                  {running ? <Square size={13} /> : <Play size={13} />}
+                  <span className="monitor-header-action-label">{t(running ? "monitor.stop" : "monitor.start")}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t(running ? "monitor.stop" : "monitor.start")}</TooltipContent>
+            </Tooltip>
           )}
-          <Button
-            variant="secondary"
-            className={cn(vaultHeaderSecondaryButtonClass, "shrink-0")}
-            aria-label={t("monitor.create")}
-            title={t("monitor.create")}
-            onClick={() => startEdit(null)}
-          >
-            <Plus size={14} />
-            <span className="monitor-header-action-label">{t("monitor.create")}</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="secondary"
+                className={cn(vaultHeaderSecondaryButtonClass, "shrink-0")}
+                aria-label={t("monitor.create")}
+                onClick={() => startEdit(null)}
+              >
+                <Plus size={14} />
+                <span className="monitor-header-action-label">{t("monitor.create")}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("monitor.create")}</TooltipContent>
+          </Tooltip>
         </VaultPageHeader>
         {runtime.unavailable && (
           <p
@@ -677,7 +686,6 @@ export function MonitorPanels({
                   {t("monitor.noMatches")}
                 </div>
               ) : (
-                <TooltipProvider delayDuration={180}>
                   <MonitorHostCollection
                     items={rows}
                     view={panel.view}
@@ -815,22 +823,28 @@ export function MonitorPanels({
                             </span>
                           </div>
                         </button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="absolute right-3 top-3 h-7 w-7 text-muted-foreground"
-                          data-monitor-terminal={id}
-                          aria-label={`${t("monitor.openTerminal")}: ${host?.label ?? t("monitor.missingHost")}`}
-                          title={t("monitor.openTerminal")}
-                          disabled={!host}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (host) onConnect(host);
-                          }}
-                        >
-                          <Terminal size={14} />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="absolute right-3 top-3 inline-flex">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted-foreground"
+                                data-monitor-terminal={id}
+                                aria-label={`${t("monitor.openTerminal")}: ${host?.label ?? t("monitor.missingHost")}`}
+                                disabled={!host}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (host) onConnect(host);
+                                }}
+                              >
+                                <Terminal size={14} />
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">{t("monitor.openTerminal")}</TooltipContent>
+                        </Tooltip>
                       </article>
                     )}
                     renderCells={({ id, host, state }, visibleColumns) => {
@@ -952,27 +966,32 @@ export function MonitorPanels({
                         </td>),
                       status: (<td>{stateBadge(host, state)}</td>),
                       terminal: (<td className="sticky right-0 z-10 justify-center !bg-background before:pointer-events-none before:absolute before:inset-0 before:rounded-r-xl before:bg-card/70 group-hover:before:bg-card">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="relative h-7 w-7 text-muted-foreground"
-                            data-monitor-terminal={id}
-                            aria-label={`${t("monitor.openTerminal")}: ${host?.label ?? t("monitor.missingHost")}`}
-                            title={t("monitor.openTerminal")}
-                            disabled={!host}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (host) onConnect(host);
-                            }}
-                          >
-                            <Terminal size={14} />
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="relative inline-flex">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-muted-foreground"
+                                  data-monitor-terminal={id}
+                                  aria-label={`${t("monitor.openTerminal")}: ${host?.label ?? t("monitor.missingHost")}`}
+                                  disabled={!host}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    if (host) onConnect(host);
+                                  }}
+                                >
+                                  <Terminal size={14} />
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">{t("monitor.openTerminal")}</TooltipContent>
+                          </Tooltip>
                         </td>)
                     });
                     }}
                   />
-                </TooltipProvider>
               )}
             </>
           )}
@@ -1369,5 +1388,6 @@ export function MonitorPanels({
         </DialogContent>
       </Dialog>
     </section>
+    </TooltipProvider>
   );
 }

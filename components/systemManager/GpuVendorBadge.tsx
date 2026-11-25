@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { AcceleratorVendor } from '../../domain/systemManager/types';
 import { cn } from '../../lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 /** Simple Icons NVIDIA path (CC0-1.0) — monochrome, uses currentColor. */
 const NVIDIA_PATH =
@@ -61,17 +62,21 @@ export const GpuVendorBadge = memo(function GpuVendorBadge({
       : null;
 
   return (
-    <span
-      title={label}
-      className={cn(
-        'inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-[10px] font-medium',
-        // Match SystemPanelStatusBadge muted tone so logos stay legible.
-        'bg-slate-500 text-white dark:bg-slate-400 dark:text-slate-950',
-        className,
-      )}
-    >
-      {mark}
-      <span className="max-w-[4.5rem] truncate leading-none">{label}</span>
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            'inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-[10px] font-medium',
+            // Match SystemPanelStatusBadge muted tone so logos stay legible.
+            'bg-slate-500 text-white dark:bg-slate-400 dark:text-slate-950',
+            className,
+          )}
+        >
+          {mark}
+          <span className="max-w-[4.5rem] truncate leading-none">{label}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 });
