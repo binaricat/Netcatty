@@ -717,11 +717,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         setBrowserMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
       }
 
-      setSidePanelOpenTabs(prev => {
-        const next = new Map(prev);
-        next.set(tabId, targetPanel);
-        return next;
-      });
+      selectSidePanelToolForTab(tabId, targetPanel);
     };
 
     const explicitSftpAutoOpen =
@@ -764,7 +760,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
 
     applyAutoOpen();
-  }, [applyWorkspaceLayoutPresetForSession, hasDefaultLayoutSftpPane, onUpdateSessionStatus, setSidePanelOpenTabs, sidePanelOpenTabsRef, terminalBackend]);
+  }, [applyWorkspaceLayoutPresetForSession, hasDefaultLayoutSftpPane, onUpdateSessionStatus, selectSidePanelToolForTab, sidePanelOpenTabsRef, terminalBackend]);
 
   const handleSessionExit = useCallback((sessionId: string, evt: TerminalSessionExitEvent) => {
     const intent = resolveTerminalSessionExitIntent(
@@ -1178,11 +1174,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
     sftpPaneClosedTabIdsRef.current.delete(tabId);
 
-    setSidePanelOpenTabs(prev => {
-      const next = new Map(prev);
-      next.set(tabId, 'sftp');
-      return next;
-    });
+    selectSidePanelToolForTab(tabId, 'sftp');
 
     setSftpHostForTab(prev => {
       const next = new Map(prev);
@@ -1247,7 +1239,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       ]);
       return next;
     });
-  }, [closeTerminalSidePanelTab, resolveSftpOpenTarget, setSidePanelOpenTabs, sidePanelLayoutsRef, sidePanelOpenTabsRef]);
+  }, [closeTerminalSidePanelTab, resolveSftpOpenTarget, selectSidePanelToolForTab, sidePanelLayoutsRef, sidePanelOpenTabsRef]);
 
   const handlePendingUploadHandled = useCallback((tabId: string, requestId: string) => {
     setSftpPendingUploadsForTab(prev => {
@@ -2054,13 +2046,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     markSidePanelSubTabOpened(tabId, 'scripts');
     startTransition(() => {
-      setSidePanelOpenTabs(prev => {
-        const next = new Map(prev);
-        next.set(tabId, 'scripts');
-        return next;
-      });
+      selectSidePanelToolForTab(tabId, 'scripts');
     });
-  }, [handleCloseSidePanel, markSidePanelSubTabOpened, setSidePanelOpenTabs, sidePanelOpenTabsRef]);
+  }, [handleCloseSidePanel, markSidePanelSubTabOpened, selectSidePanelToolForTab, sidePanelOpenTabsRef]);
 
   // Toggle the whole side panel (new ⌘/Ctrl+\ shortcut). Close if open; if
   // closed, reopen the tab's last sub-panel, defaulting to SFTP (when a host is
@@ -2158,8 +2146,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         .catch((error: unknown) => toast.error(error instanceof Error ? error.message : String(error)));
     }
     setBrowserMountedTabIds((previous) => addMountedSidePanelTabId(previous, tabId));
-    setSidePanelOpenTabs((previous) => new Map(previous).set(tabId, 'browser'));
-  }), [onConnectToHost, setSidePanelOpenTabs]);
+    selectSidePanelToolForTab(tabId, 'browser');
+  }), [onConnectToHost, selectSidePanelToolForTab]);
 
   useEffect(() => {
     setBrowserMountedTabIds((previous) => {
@@ -2198,12 +2186,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return next;
     });
     setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
-    setSidePanelOpenTabs((prev) => {
-      const next = new Map(prev);
-      next.set(tabId, 'notes');
-      return next;
-    });
-  }, [setSidePanelOpenTabs]);
+    selectSidePanelToolForTab(tabId, 'notes');
+  }, [selectSidePanelToolForTab]);
 
   const handleOpenHostFromNotes = useCallback((host: Host, source?: { noteId?: string }) => {
     const sourceNoteId = source?.noteId;
