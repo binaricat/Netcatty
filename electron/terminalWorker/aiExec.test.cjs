@@ -7,6 +7,8 @@ const test = require("node:test");
 const { setRendererFlowPaused, clearSessionFlowState } = require("../bridges/terminalFlowAck.cjs");
 
 const {
+  collapseCarriageReturns,
+  createWorkerAiJobPollHandler,
   createWorkerAiJobStartHandler,
   registerWorkerAiExecHandlers,
 } = require("./aiExec.cjs");
@@ -797,4 +799,54 @@ test("worker precheck with probe:false opens no channel to the host; the full pr
   assert.ok(probesAfterFirst >= 1, "after approval the shell kind is probed as for any exec");
   assert.deepEqual(await full.exec({}), { ok: true });
   assert.equal(full.calls.probe, probesAfterFirst, "the result is cached for the real exec");
+});
+
+test("worker collapseCarriageReturns preserves CR/CRLF/trailing-CR semantics and scales linearly on 256KB output", () => {
+  const cases = [
+    ["", ""],
+    ["plain\nline", "plain\nline"],
+    ["\r", ""],
+    ["\r\n", "\n"],
+    ["hello\r\nworld\r", "hello\nworld"],
+    ["10%\r50%\r100%\r\nnext\r", "100%\nnext"],
+    ["a\r\r\r\nb\rc\r", "a\nc"],
+    ["\r\ra\n\rb", "a\nb"],
+  ];
+  for (const [input, expected] of cases) {
+    assert.equal(collapseCarriageReturns(input), expected, `mismatch for ${JSON.stringify(input)}`);
+  }
+
+  const frameCount = 5000;
+  const frames = [];
+  for (let i = 0; i < frameCount; i += 1) {
+    frames.push(`Transfer [${"=".repeat(32)}] ${String(i).padStart(4, "0")}/${frameCount}`);
+  }
+  const stdout = `start\r\n${frames.join("\r")}\r`;
+  assert.ok(stdout.length > 256 * 1024);
+
+  const backgroundJobs = new Map([
+    ["job-cr", {
+      id: "job-cr",
+      sessionId: "ssh-1",
+      chatSessionId: "chat-cr",
+      command: "rsync -P src dst",
+      status: "completed",
+      startedAt: 1,
+      updatedAt: 2,
+      exitCode: 0,
+      error: null,
+      stdout,
+      outputBaseOffset: 0,
+      totalOutputChars: stdout.length,
+      outputTruncated: false,
+    }],
+  ]);
+  const poll = createWorkerAiJobPollHandler({ backgroundJobs });
+  const startedAt = Date.now();
+  const polled = poll(createFakeEvent(), { jobId: "job-cr", chatSessionId: "chat-cr", offset: 0 });
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(polled.ok, true);
+  assert.equal(polled.output, `start\n${frames[frameCount - 1]}`);
+  assert.ok(elapsedMs < 500, `expected linear worker jobPoll CR collapse on 256KB+ output, took ${elapsedMs}ms`);
 });

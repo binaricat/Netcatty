@@ -557,3 +557,99 @@ test("preflightExec with probe:false never opens a channel to the host and uses 
   await full.preflightExec({ sessionId: "ssh", command: "uptime", chatSessionId: "chat" });
   assert.equal(loud.calls.probe, probesAfterFirst, "the result is cached, so the later exec does not probe again");
 });
+
+function referenceCollapseCarriageReturns(text) {
+  if (!text || text.indexOf("\r") === -1) return text;
+  let result = "";
+  let crPending = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === "\r") {
+      crPending = true;
+      continue;
+    }
+    if (ch === "\n") {
+      crPending = false;
+      result += ch;
+      continue;
+    }
+    if (crPending) {
+      const lastNl = result.lastIndexOf("\n");
+      result = lastNl >= 0 ? result.slice(0, lastNl + 1) : "";
+      crPending = false;
+    }
+    result += ch;
+  }
+  return result;
+}
+
+test("collapseCarriageReturns preserves exact CR, CRLF, and trailing-CR semantics", () => {
+  const ctx = createExecHandlerTestContext({ sessions: new Map(), backgroundJobs: new Map() });
+  const cases = [
+    "",
+    null,
+    undefined,
+    "plain text\nline 2",
+    "\r",
+    "\r\r\r",
+    "\r\n",
+    "hello\r\n",
+    "hello\r",
+    "a\rb\r",
+    "a\rb\r\n",
+    "a\rb\n",
+    "a\r\r\r\n",
+    "\r\ra",
+    "line1\n\rline2",
+    "line1\r\nline2\r\nline3\r",
+    "10%\r50%\r100%\r\ndone\r",
+    "\n\r\n\r",
+    "a\r\n\rb\rc\r\n",
+    "\u8fdb\u5ea610%\r\u8fdb\u5ea6100% \u{1F680}\r\n\u5b8c\u6210\r",
+  ];
+  for (const input of cases) {
+    assert.equal(
+      ctx.collapseCarriageReturns(input),
+      referenceCollapseCarriageReturns(input),
+      `mismatch for ${JSON.stringify(input)}`,
+    );
+  }
+
+  // Exhaustive parity check over {a, b, \r, \n} up to length 5.
+  const alphabet = ["a", "b", "\r", "\n"];
+  const checkAll = (prefix, remaining) => {
+    if (remaining === 0) {
+      assert.equal(
+        ctx.collapseCarriageReturns(prefix),
+        referenceCollapseCarriageReturns(prefix),
+        `exhaustive mismatch for ${JSON.stringify(prefix)}`,
+      );
+      return;
+    }
+    for (const ch of alphabet) {
+      checkAll(prefix + ch, remaining - 1);
+    }
+  };
+  for (let len = 1; len <= 5; len += 1) {
+    checkAll("", len);
+  }
+});
+
+test("collapseCarriageReturns handles 256KB CR-heavy progress output in linear time", () => {
+  const ctx = createExecHandlerTestContext({ sessions: new Map(), backgroundJobs: new Map() });
+  const frameCount = 5000;
+  const frames = [];
+  for (let i = 0; i < frameCount; i += 1) {
+    frames.push(`Downloading [${"#".repeat(32)}] ${String(i).padStart(4, "0")}/${frameCount}`);
+  }
+  const progressLine = `${frames.join("\r")}\r`;
+  const payload = `header line\r\n${progressLine}\nfooter\rfinal frame\r`;
+  assert.ok(payload.length > 256 * 1024);
+
+  const startedAt = Date.now();
+  const collapsed = ctx.collapseCarriageReturns(payload);
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(collapsed, `header line\n${frames[frameCount - 1]}\nfinal frame`);
+  assert.ok(elapsedMs < 500, `expected linear collapseCarriageReturns on 256KB+ payload, took ${elapsedMs}ms`);
+});
