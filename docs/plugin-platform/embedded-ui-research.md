@@ -14,12 +14,9 @@ because it can render a view.
 
 ## Evidence from the current runtime
 
-`electron/plugins/embeddedFrameSecurity.live.test.cjs` is an isolated Electron
-proof, not a product implementation. Run it with:
-
-```
-./node_modules/.bin/electron electron/plugins/embeddedFrameSecurity.live.test.cjs
-```
+An isolated Electron iframe PoC (not a product implementation; removed after
+iframe plugin UI was rejected in favor of host-rendered UI) produced the
+following findings:
 
 On Electron 42.11.12 (Chromium 148.0.7778.280), a frame with `sandbox=allow-scripts`,
 a restrictive CSP and no Node integration could not read its parent or local
