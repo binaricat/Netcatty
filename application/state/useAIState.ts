@@ -1,19 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import {
-  STORAGE_KEY_AI_PROVIDERS,
-  STORAGE_KEY_AI_ACTIVE_PROVIDER,
-  STORAGE_KEY_AI_ACTIVE_MODEL,
-  STORAGE_KEY_AI_PERMISSION_MODE,
-  STORAGE_KEY_AI_TOOL_INTEGRATION_MODE,
   STORAGE_KEY_AI_HOST_PERMISSIONS,
-  STORAGE_KEY_AI_EXTERNAL_AGENTS,
-  STORAGE_KEY_AI_DEFAULT_AGENT,
-  STORAGE_KEY_AI_COMMAND_BLOCKLIST,
-  STORAGE_KEY_AI_COMMAND_TIMEOUT,
-  STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
-  STORAGE_KEY_AI_MAX_ITERATIONS,
-  STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS,
   STORAGE_KEY_AI_SESSIONS,
   STORAGE_KEY_AI_SESSIONS_OVERFLOW,
   STORAGE_KEY_AI_SESSIONS_DISK_OVERFLOW,
@@ -21,35 +9,16 @@ import {
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_AGENT_THINKING_MAP,
-  STORAGE_KEY_AI_WEB_SEARCH,
-  STORAGE_KEY_AI_QUICK_MESSAGES,
   STORAGE_KEY_CLOUD_SYNC_AI_SESSIONS,
 } from '../../infrastructure/config/storageKeys';
-import type { AIQuickMessage } from '../../infrastructure/ai/quickMessages';
-import { sanitizeQuickMessages } from '../../infrastructure/ai/quickMessages';
 import type {
   AIDraft,
   AISessionContextCompaction,
   AISession,
-  AIPermissionMode,
-  AIToolIntegrationMode,
-  ProviderConfig,
   HostAIPermission,
-  ExternalAgentConfig,
   ChatMessage,
   AISessionScope,
-  WebSearchConfig,
 } from '../../infrastructure/ai/types';
-import {
-  DEFAULT_COMMAND_TIMEOUT_SECONDS,
-  DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
-  normalizeCommandTimeoutSeconds,
-  normalizeResponseIdleTimeoutSeconds,
-} from '../../infrastructure/ai/types';
-import {
-  DEFAULT_AI_TOOL_OUTPUT_MAX_CHARS,
-  normalizeAiToolOutputMaxChars,
-} from '../../domain/aiToolOutputLimit';
 import {
   activateDraftView,
   clearScopeDraftState,
@@ -119,10 +88,7 @@ import {
   readLiveSessionsArray,
 } from './aiSessionsBackup';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
-import {
-  persistCommandBlocklistSetting,
-  readCommandBlocklistSetting,
-} from './commandBlocklistSettings';
+import { useSharedAISettingsState } from './useAISettingsState';
 import {
   handoffDissolvedWorkspaceAIScope,
   retargetWorkspaceActiveChatAfterMemberLoss,
@@ -133,83 +99,9 @@ import {
   type UndoLastTurnRestoredDraft,
 } from '../../domain/aiUndoLastTurn';
 
-
-function providerPatchIsNoop(
-  current: ProviderConfig,
-  updates: Partial<ProviderConfig>,
-): boolean {
-  for (const key of Object.keys(updates) as Array<keyof ProviderConfig>) {
-    const nextValue = updates[key];
-    const prevValue = current[key];
-    if (nextValue === prevValue) continue;
-    if (key === 'modelContextWindows') {
-      const prevWindows = (prevValue ?? {}) as Record<string, number>;
-      const nextWindows = (nextValue ?? {}) as Record<string, number>;
-      const nextKeys = Object.keys(nextWindows);
-      if (nextKeys.length !== Object.keys(prevWindows).length) return false;
-      if (nextKeys.some((modelId) => prevWindows[modelId] !== nextWindows[modelId])) return false;
-      continue;
-    }
-    return false;
-  }
-  return true;
-}
-
 export function useAIState() {
-  // ── Provider Config ──
-  const [providers, setProvidersRaw] = useState<ProviderConfig[]>(() =>
-    localStorageAdapter.read<ProviderConfig[]>(STORAGE_KEY_AI_PROVIDERS) ?? []
-  );
-  const [activeProviderId, setActiveProviderIdRaw] = useState<string>(() =>
-    localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_PROVIDER) ?? ''
-  );
-  const [activeModelId, setActiveModelIdRaw] = useState<string>(() =>
-    localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL) ?? ''
-  );
-
-  // ── Permission Model ──
-  const [globalPermissionMode, setGlobalPermissionModeRaw] = useState<AIPermissionMode>(() => {
-    const stored = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
-    if (stored === 'observer' || stored === 'confirm' || stored === 'auto') return stored;
-    return 'confirm';
-  });
-  const [toolIntegrationMode, setToolIntegrationModeRaw] = useState<AIToolIntegrationMode>(() => {
-    const stored = localStorageAdapter.readString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE);
-    return stored === 'skills' ? 'skills' : 'mcp';
-  });
   const [hostPermissions, setHostPermissionsRaw] = useState<HostAIPermission[]>(() =>
     localStorageAdapter.read<HostAIPermission[]>(STORAGE_KEY_AI_HOST_PERMISSIONS) ?? []
-  );
-
-  // ── External Agents ──
-  const [externalAgents, setExternalAgentsRaw] = useState<ExternalAgentConfig[]>(() =>
-    localStorageAdapter.read<ExternalAgentConfig[]>(STORAGE_KEY_AI_EXTERNAL_AGENTS) ?? []
-  );
-  const [defaultAgentId, setDefaultAgentIdRaw] = useState<string>(() =>
-    localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT) ?? 'catty'
-  );
-
-  // ── Safety Settings ──
-  const [commandBlocklist, setCommandBlocklistRaw] = useState<string[]>(readCommandBlocklistSetting);
-  const [commandTimeout, setCommandTimeoutRaw] = useState<number>(() =>
-    normalizeCommandTimeoutSeconds(
-      localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    )
-  );
-  const [responseIdleTimeout, setResponseIdleTimeoutRaw] = useState<number>(() =>
-    normalizeResponseIdleTimeoutSeconds(
-      localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT)
-        ?? DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
-    )
-  );
-  const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
-    localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20
-  );
-  const [toolOutputMaxChars, setToolOutputMaxCharsRaw] = useState<number>(() =>
-    normalizeAiToolOutputMaxChars(
-      localStorageAdapter.readNumber(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS)
-        ?? DEFAULT_AI_TOOL_OUTPUT_MAX_CHARS,
-    )
   );
 
   // ── Sessions ──
@@ -461,15 +353,59 @@ export function useAIState() {
     localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_THINKING_MAP) ?? {}
   );
 
-  // ── Web Search Config ──
-  const [webSearchConfig, setWebSearchConfigRaw] = useState<WebSearchConfig | null>(() =>
-    localStorageAdapter.read<WebSearchConfig>(STORAGE_KEY_AI_WEB_SEARCH) ?? null
-  );
+  const handleRemoveProviderReferences = useCallback((id: string) => {
+    const cleanup = removeProviderReferences(
+      id,
+      agentProviderMapRef.current,
+      agentModelMapRef.current,
+    );
+    if (cleanup.providerMapChanged) {
+      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, cleanup.agentProviderMap);
+      setAgentProviderMapRaw(cleanup.agentProviderMap);
+    }
+    if (cleanup.modelMapChanged) {
+      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, cleanup.agentModelMap);
+      setAgentModelMapRaw(cleanup.agentModelMap);
+    }
+  }, []);
 
-  // ── Quick Messages (slash prompts) ──
-  const [quickMessages, setQuickMessagesRaw] = useState<AIQuickMessage[]>(() =>
-    sanitizeQuickMessages(localStorageAdapter.read<unknown>(STORAGE_KEY_AI_QUICK_MESSAGES)),
-  );
+  const {
+    providers,
+    setProviders,
+    addProvider,
+    updateProvider,
+    removeProvider,
+    activeProviderId,
+    setActiveProviderId,
+    activeModelId,
+    setActiveModelId,
+    activeProvider,
+    globalPermissionMode,
+    setGlobalPermissionMode,
+    toolIntegrationMode,
+    setToolIntegrationMode,
+    externalAgents,
+    setExternalAgents,
+    defaultAgentId,
+    setDefaultAgentId,
+    commandBlocklist,
+    setCommandBlocklist,
+    commandTimeout,
+    setCommandTimeout,
+    responseIdleTimeout,
+    setResponseIdleTimeout,
+    maxIterations,
+    setMaxIterations,
+    toolOutputMaxChars,
+    setToolOutputMaxChars,
+    webSearchConfig,
+    setWebSearchConfig,
+    quickMessages,
+    setQuickMessages,
+  } = useSharedAISettingsState({
+    ignoreInvalidPermissionModeOnStorage: true,
+    onRemoveProvider: handleRemoveProviderReferences,
+  });
 
   useEffect(() => {
     setLatestAISessionsSnapshot(sessions);
@@ -600,53 +536,6 @@ export function useAIState() {
     });
   }, []);
 
-  const setWebSearchConfig = useCallback((config: WebSearchConfig | null) => {
-    setWebSearchConfigRaw(config);
-    if (config) {
-      localStorageAdapter.write(STORAGE_KEY_AI_WEB_SEARCH, config);
-    } else {
-      localStorageAdapter.remove(STORAGE_KEY_AI_WEB_SEARCH);
-    }
-  }, []);
-
-  const setQuickMessages = useCallback((value: AIQuickMessage[] | ((prev: AIQuickMessage[]) => AIQuickMessage[])) => {
-    setQuickMessagesRaw((prev) => {
-      const nextRaw = typeof value === 'function' ? value(prev) : value;
-      const next = sanitizeQuickMessages(nextRaw);
-      localStorageAdapter.write(STORAGE_KEY_AI_QUICK_MESSAGES, next);
-      emitAIStateChanged(STORAGE_KEY_AI_QUICK_MESSAGES);
-      return next;
-    });
-  }, []);
-
-  // ── Persist helpers ──
-  const setProviders = useCallback((value: ProviderConfig[] | ((prev: ProviderConfig[]) => ProviderConfig[])) => {
-    setProvidersRaw(prev => {
-      const next = typeof value === 'function' ? value(prev) : value;
-      if (next === prev) return prev;
-      localStorageAdapter.write(STORAGE_KEY_AI_PROVIDERS, next);
-      return next;
-    });
-  }, []);
-
-  const setActiveProviderId = useCallback((id: string) => {
-    setActiveProviderIdRaw(id);
-    localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_PROVIDER, id);
-  }, []);
-
-  const setActiveModelId = useCallback((id: string) => {
-    setActiveModelIdRaw(id);
-    localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_MODEL, id);
-  }, []);
-
-  const setGlobalPermissionMode = useCallback((mode: AIPermissionMode) => {
-    setGlobalPermissionModeRaw(mode);
-    localStorageAdapter.writeString(STORAGE_KEY_AI_PERMISSION_MODE, mode);
-    // Sync to MCP Server bridge (observer mode blocks write operations)
-    const bridge = getAIBridge();
-    bridge?.aiMcpSetPermissionMode?.(mode);
-  }, []);
-
   const setHostPermissions = useCallback((value: HostAIPermission[] | ((prev: HostAIPermission[]) => HostAIPermission[])) => {
     setHostPermissionsRaw(prev => {
       const next = typeof value === 'function' ? value(prev) : value;
@@ -655,161 +544,14 @@ export function useAIState() {
     });
   }, []);
 
-  const setToolIntegrationMode = useCallback((mode: AIToolIntegrationMode) => {
-    setToolIntegrationModeRaw(mode);
-    localStorageAdapter.writeString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE, mode);
-    const bridge = getAIBridge();
-    bridge?.aiMcpSetToolIntegrationMode?.(mode);
-  }, []);
-
-  const setExternalAgents = useCallback((value: ExternalAgentConfig[] | ((prev: ExternalAgentConfig[]) => ExternalAgentConfig[])) => {
-    setExternalAgentsRaw(prev => {
-      const next = typeof value === 'function' ? value(prev) : value;
-      localStorageAdapter.write(STORAGE_KEY_AI_EXTERNAL_AGENTS, next);
-      return next;
-    });
-  }, []);
-
-  const setDefaultAgentId = useCallback((id: string) => {
-    setDefaultAgentIdRaw(id);
-    localStorageAdapter.writeString(STORAGE_KEY_AI_DEFAULT_AGENT, id);
-  }, []);
-
-  const setCommandBlocklist = useCallback((value: string[]) => {
-    setCommandBlocklistRaw(value);
-    persistCommandBlocklistSetting(value);
-    // Sync to MCP Server bridge so SDK agents also respect the blocklist
-    const bridge = getAIBridge();
-    bridge?.aiMcpSetCommandBlocklist?.(value);
-  }, []);
-
-  const setCommandTimeout = useCallback((value: number) => {
-    const normalizedValue = normalizeCommandTimeoutSeconds(value);
-    setCommandTimeoutRaw(normalizedValue);
-    localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, normalizedValue);
-    // Sync to MCP Server bridge
-    const bridge = getAIBridge();
-    bridge?.aiMcpSetCommandTimeout?.(normalizedValue);
-  }, []);
-
-  const setResponseIdleTimeout = useCallback((value: number) => {
-    const normalizedValue = normalizeResponseIdleTimeoutSeconds(value);
-    setResponseIdleTimeoutRaw(normalizedValue);
-    localStorageAdapter.writeNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, normalizedValue);
-  }, []);
-
-  const setMaxIterations = useCallback((value: number) => {
-    setMaxIterationsRaw(value);
-    localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, value);
-    // Sync to MCP Server bridge (used by SDK agent path)
-    const bridge = getAIBridge();
-    bridge?.aiMcpSetMaxIterations?.(value);
-  }, []);
-
-  const setToolOutputMaxChars = useCallback((value: number) => {
-    const normalizedValue = normalizeAiToolOutputMaxChars(value);
-    setToolOutputMaxCharsRaw(normalizedValue);
-    localStorageAdapter.writeNumber(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS, normalizedValue);
-  }, []);
-
   // ── Cross-window sync via storage events ──
-  // When the settings window updates localStorage, the main window picks up changes.
+  // Shared AI settings sync is handled by useSharedAISettingsState; this
+  // listener handles session/agent/host-permission keys owned by useAIState.
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       try {
         const key = e.key;
         switch (key) {
-          case STORAGE_KEY_AI_PROVIDERS: {
-            const parsed = localStorageAdapter.read<ProviderConfig[]>(STORAGE_KEY_AI_PROVIDERS);
-            if (parsed != null && !Array.isArray(parsed)) {
-              console.warn('[useAIState] Cross-window sync: AI_PROVIDERS is not an array, skipping');
-              break;
-            }
-            setProvidersRaw(parsed ?? []);
-            break;
-          }
-          case STORAGE_KEY_AI_ACTIVE_PROVIDER:
-            setActiveProviderIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_PROVIDER) ?? '');
-            break;
-          case STORAGE_KEY_AI_ACTIVE_MODEL:
-            setActiveModelIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL) ?? '');
-            break;
-          case STORAGE_KEY_AI_PERMISSION_MODE: {
-            const mode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
-            if (mode === 'observer' || mode === 'confirm' || mode === 'auto') {
-              setGlobalPermissionModeRaw(mode);
-              getAIBridge()?.aiMcpSetPermissionMode?.(mode);
-            }
-            break;
-          }
-          case STORAGE_KEY_AI_TOOL_INTEGRATION_MODE:
-            {
-              const mode = localStorageAdapter.readString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE) === 'skills'
-                ? 'skills'
-                : 'mcp';
-              setToolIntegrationModeRaw(mode);
-              getAIBridge()?.aiMcpSetToolIntegrationMode?.(mode);
-            }
-            break;
-          case STORAGE_KEY_AI_EXTERNAL_AGENTS: {
-            const agents = localStorageAdapter.read<ExternalAgentConfig[]>(STORAGE_KEY_AI_EXTERNAL_AGENTS);
-            if (agents != null && !Array.isArray(agents)) {
-              console.warn('[useAIState] Cross-window sync: AI_EXTERNAL_AGENTS is not an array, skipping');
-              break;
-            }
-            setExternalAgentsRaw(agents ?? []);
-            break;
-          }
-          case STORAGE_KEY_AI_DEFAULT_AGENT:
-            setDefaultAgentIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT) ?? 'catty');
-            break;
-          case STORAGE_KEY_AI_COMMAND_BLOCKLIST: {
-            const blocklist = readCommandBlocklistSetting();
-            setCommandBlocklistRaw(blocklist);
-            getAIBridge()?.aiMcpSetCommandBlocklist?.(blocklist);
-            break;
-          }
-          case STORAGE_KEY_AI_COMMAND_TIMEOUT: {
-            const timeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS;
-            if (!Number.isFinite(timeout)) {
-              console.warn('[useAIState] Cross-window sync: AI_COMMAND_TIMEOUT is not a finite number, skipping');
-              break;
-            }
-            const normalizedTimeout = normalizeCommandTimeoutSeconds(timeout);
-            setCommandTimeoutRaw(normalizedTimeout);
-            getAIBridge()?.aiMcpSetCommandTimeout?.(normalizedTimeout);
-            break;
-          }
-          case STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT: {
-            const timeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT)
-              ?? DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS;
-            if (!Number.isFinite(timeout)) {
-              console.warn('[useAIState] Cross-window sync: AI_RESPONSE_IDLE_TIMEOUT is not a finite number, skipping');
-              break;
-            }
-            setResponseIdleTimeoutRaw(normalizeResponseIdleTimeoutSeconds(timeout));
-            break;
-          }
-          case STORAGE_KEY_AI_MAX_ITERATIONS: {
-            const iters = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20;
-            if (!Number.isFinite(iters)) {
-              console.warn('[useAIState] Cross-window sync: AI_MAX_ITERATIONS is not a finite number, skipping');
-              break;
-            }
-            setMaxIterationsRaw(iters);
-            getAIBridge()?.aiMcpSetMaxIterations?.(iters);
-            break;
-          }
-          case STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS: {
-            const limit = localStorageAdapter.readNumber(STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS)
-              ?? DEFAULT_AI_TOOL_OUTPUT_MAX_CHARS;
-            if (!Number.isFinite(limit)) {
-              console.warn('[useAIState] Cross-window sync: AI_TOOL_OUTPUT_MAX_CHARS is not a finite number, skipping');
-              break;
-            }
-            setToolOutputMaxCharsRaw(normalizeAiToolOutputMaxChars(limit));
-            break;
-          }
           case STORAGE_KEY_AI_HOST_PERMISSIONS: {
             const perms = localStorageAdapter.read<HostAIPermission[]>(STORAGE_KEY_AI_HOST_PERMISSIONS);
             if (perms != null && !Array.isArray(perms)) {
@@ -842,14 +584,6 @@ export function useAIState() {
               localStorageAdapter.read<Record<string, string | null>>(STORAGE_KEY_AI_ACTIVE_SESSION_MAP) ?? {};
             setLatestAIActiveSessionMapSnapshot(nextActiveSessionIdMap);
             setActiveSessionIdMapRaw(nextActiveSessionIdMap);
-            break;
-          }
-          case STORAGE_KEY_AI_WEB_SEARCH:
-            setWebSearchConfigRaw(localStorageAdapter.read<WebSearchConfig>(STORAGE_KEY_AI_WEB_SEARCH) ?? null);
-            break;
-          case STORAGE_KEY_AI_QUICK_MESSAGES: {
-            const messages = localStorageAdapter.read<unknown>(STORAGE_KEY_AI_QUICK_MESSAGES);
-            setQuickMessagesRaw(sanitizeQuickMessages(messages));
             break;
           }
         }
@@ -922,30 +656,6 @@ export function useAIState() {
       }
     })();
   }), []);
-
-  // ── Sync initial safety settings to MCP Server on mount ──
-  useEffect(() => {
-    const bridge = getAIBridge();
-    const initialBlocklist = readCommandBlocklistSetting();
-    bridge?.aiMcpSetCommandBlocklist?.(initialBlocklist);
-    const initialTimeout = normalizeCommandTimeoutSeconds(
-      localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    );
-    bridge?.aiMcpSetCommandTimeout?.(initialTimeout);
-    const initialMaxIter = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20;
-    bridge?.aiMcpSetMaxIterations?.(initialMaxIter);
-    const storedPermMode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
-    const initialPermMode: AIPermissionMode =
-      storedPermMode === 'observer' || storedPermMode === 'confirm' || storedPermMode === 'auto'
-        ? storedPermMode
-        : 'confirm';
-    bridge?.aiMcpSetPermissionMode?.(initialPermMode);
-    const initialToolMode: AIToolIntegrationMode =
-      localStorageAdapter.readString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE) === 'skills'
-        ? 'skills'
-        : 'mcp';
-    bridge?.aiMcpSetToolIntegrationMode?.(initialToolMode);
-  }, []);
 
   // ── Session CRUD ──
   const persistSessions = useCallback((next: AISession[], deletedSessionIds?: readonly string[]) => {
@@ -1690,51 +1400,6 @@ export function useAIState() {
       setSessionsRaw(result.sessions);
     }
   }, [persistSessions]);
-
-  // ── Provider CRUD helpers ──
-  const addProvider = useCallback((provider: ProviderConfig) => {
-    setProviders(prev => [...prev, provider]);
-  }, [setProviders]);
-
-  const updateProvider = useCallback((id: string, updates: Partial<ProviderConfig>) => {
-    setProviders((prev) => {
-      const index = prev.findIndex((provider) => provider.id === id);
-      if (index < 0) return prev;
-      const current = prev[index];
-      if (providerPatchIsNoop(current, updates)) return prev;
-      const next = prev.slice();
-      next[index] = { ...current, ...updates };
-      return next;
-    });
-  }, [setProviders]);
-
-  const removeProvider = useCallback((id: string) => {
-    setProviders(prev => prev.filter(p => p.id !== id));
-    setActiveProviderIdRaw(prevId => {
-      if (prevId === id) {
-        const next = '';
-        localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_PROVIDER, next);
-        return next;
-      }
-      return prevId;
-    });
-    const cleanup = removeProviderReferences(
-      id,
-      agentProviderMapRef.current,
-      agentModelMapRef.current,
-    );
-    if (cleanup.providerMapChanged) {
-      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, cleanup.agentProviderMap);
-      setAgentProviderMapRaw(cleanup.agentProviderMap);
-    }
-    if (cleanup.modelMapChanged) {
-      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, cleanup.agentModelMap);
-      setAgentModelMapRaw(cleanup.agentModelMap);
-    }
-  }, [setProviders]);
-
-  // ── Computed ──
-  const activeProvider = providers.find(p => p.id === activeProviderId) ?? null;
 
   // Stream/message updates publish here so AIConfig Context consumers do not
   // re-render on every token. AIChatPanelsHost reads aiSessionsStore instead.
