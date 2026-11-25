@@ -42,6 +42,98 @@ let externalMcpStartupReadyWaitResolve: (() => void) | null = null;
 /** Bumps on every intentional enable/disable so stale startup applies lose. */
 let externalMcpEnableGeneration = 0;
 let externalMcpConfigError: string | null = null;
+// Module-level ref-counted runtime status poller so multiple mounted hook
+// instances (AppView + Settings > AI) share a single 3s timer and pause while hidden.
+let externalMcpPollRefs = 0;
+let externalMcpPollIntervalId: ReturnType<typeof setInterval> | null = null;
+let externalMcpPollInFlight = false;
+let externalMcpPollGeneration = 0;
+let externalMcpPollVisibilityDocument: Document | null = null;
+
+function isExternalMcpDocumentHidden(): boolean {
+  if (typeof document === 'undefined') return false;
+  if (typeof document.visibilityState === 'string') {
+    return document.visibilityState === 'hidden';
+  }
+  return document.hidden === true;
+}
+
+async function syncExternalMcpRuntimeStatus(): Promise<void> {
+  if (externalMcpPollRefs <= 0 || externalMcpPollInFlight || isExternalMcpDocumentHidden()) {
+    return;
+  }
+  const generation = externalMcpPollGeneration;
+  externalMcpPollInFlight = true;
+  try {
+    // Wait until App has finished startup reconcile so a still-disabled runtime
+    // is not mistaken for "user turned it off / idle timeout".
+    await waitForExternalMcpStartupReady();
+    if (generation !== externalMcpPollGeneration || externalMcpPollRefs <= 0 || isExternalMcpDocumentHidden()) {
+      return;
+    }
+    const status = await netcattyBridge.get()?.externalMcpGetStatus?.();
+    if (generation !== externalMcpPollGeneration || externalMcpPollRefs <= 0) {
+      return;
+    }
+    // Only clear the shared switch for an intentional runtime-off (idle /
+    // explicit disable). Start failures set error and should keep preference.
+    if (status?.ok && !status.enabled && !status.error) {
+      localStorageAdapter.writeBoolean(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED, false);
+      emitAIStateChanged(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED);
+    }
+  } catch {
+    // Keep the user's stored switch state during transient bridge errors.
+  } finally {
+    externalMcpPollInFlight = false;
+  }
+}
+
+function syncExternalMcpPollTimer(): void {
+  const shouldPoll = externalMcpPollRefs > 0 && !isExternalMcpDocumentHidden();
+  if (shouldPoll) {
+    if (externalMcpPollIntervalId === null) {
+      externalMcpPollIntervalId = setInterval(() => {
+        void syncExternalMcpRuntimeStatus();
+      }, EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS);
+    }
+  } else if (externalMcpPollIntervalId !== null) {
+    clearInterval(externalMcpPollIntervalId);
+    externalMcpPollIntervalId = null;
+  }
+}
+
+function handleExternalMcpVisibilityChange(): void {
+  if (isExternalMcpDocumentHidden()) {
+    externalMcpPollGeneration += 1;
+    syncExternalMcpPollTimer();
+    return;
+  }
+  syncExternalMcpPollTimer();
+  void syncExternalMcpRuntimeStatus();
+}
+
+function attachExternalMcpVisibilityListener(): void {
+  if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') {
+    return;
+  }
+  if (externalMcpPollVisibilityDocument === document) return;
+  if (
+    externalMcpPollVisibilityDocument
+    && typeof externalMcpPollVisibilityDocument.removeEventListener === 'function'
+  ) {
+    externalMcpPollVisibilityDocument.removeEventListener('visibilitychange', handleExternalMcpVisibilityChange);
+  }
+  document.addEventListener('visibilitychange', handleExternalMcpVisibilityChange);
+  externalMcpPollVisibilityDocument = document;
+}
+
+function detachExternalMcpVisibilityListener(): void {
+  if (!externalMcpPollVisibilityDocument) return;
+  if (typeof externalMcpPollVisibilityDocument.removeEventListener === 'function') {
+    externalMcpPollVisibilityDocument.removeEventListener('visibilitychange', handleExternalMcpVisibilityChange);
+  }
+  externalMcpPollVisibilityDocument = null;
+}
 
 function getWindowHash(hash?: string): string {
   if (typeof hash === 'string') return hash;
@@ -81,6 +173,14 @@ export function resetExternalMcpStartupReadyForTests(): void {
   externalMcpEnableGeneration = 0;
   externalMcpConfigError = null;
   externalMcpStartupSyncPromise = null;
+  if (externalMcpPollIntervalId !== null) {
+    clearInterval(externalMcpPollIntervalId);
+    externalMcpPollIntervalId = null;
+  }
+  detachExternalMcpVisibilityListener();
+  externalMcpPollRefs = 0;
+  externalMcpPollInFlight = false;
+  externalMcpPollGeneration = 0;
 }
 
 export function getExternalMcpEnableGenerationForTests(): number {
@@ -763,35 +863,26 @@ export function useExternalMcpToggleState() {
   useEffect(() => {
     // Peer windows must never auto-clear the shared stored switch from runtime status.
     if (isPeerSessionWindow || !enabled) return;
-    let cancelled = false;
 
-    const syncRuntimeStatus = async () => {
-      try {
-        // Wait until App has finished startup reconcile so a still-disabled runtime
-        // is not mistaken for "user turned it off / idle timeout".
-        await waitForExternalMcpStartupReady();
-        if (cancelled) return;
-        const status = await netcattyBridge.get()?.externalMcpGetStatus?.();
-        if (cancelled) return;
-        // Only clear the shared switch for an intentional runtime-off (idle /
-        // explicit disable). Start failures set error and should keep preference.
-        if (status?.ok && !status.enabled && !status.error) {
-          persistEnabled(false);
-        }
-      } catch {
-        // Keep the user's stored switch state during transient bridge errors.
+    externalMcpPollRefs += 1;
+    if (externalMcpPollRefs === 1) {
+      externalMcpPollGeneration += 1;
+      attachExternalMcpVisibilityListener();
+      syncExternalMcpPollTimer();
+      void syncExternalMcpRuntimeStatus();
+    } else if (!isExternalMcpDocumentHidden() && externalMcpPollIntervalId === null) {
+      syncExternalMcpPollTimer();
+    }
+
+    return () => {
+      externalMcpPollRefs = Math.max(0, externalMcpPollRefs - 1);
+      if (externalMcpPollRefs === 0) {
+        externalMcpPollGeneration += 1;
+        detachExternalMcpVisibilityListener();
+        syncExternalMcpPollTimer();
       }
     };
-
-    const intervalId = window.setInterval(() => {
-      void syncRuntimeStatus();
-    }, EXTERNAL_MCP_RUNTIME_STATUS_POLL_MS);
-    void syncRuntimeStatus();
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [enabled, isPeerSessionWindow, persistEnabled]);
+  }, [enabled, isPeerSessionWindow]);
 
   return { enabled, setEnabled, error };
 }

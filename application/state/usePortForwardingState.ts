@@ -43,8 +43,20 @@ let reconnectCancelListenerRefs = 0;
 let reconnectCancelCleanup: (() => void) | undefined;
 let heartbeatRefs = 0;
 let heartbeatIntervalId: ReturnType<typeof setInterval> | undefined;
+let heartbeatTickInFlight = false;
+let heartbeatVisibilityDocument: Document | null = null;
 let runtimeSubscriptionRefs = 0;
 let runtimeSubscriptionCleanup: (() => void) | undefined;
+
+const HEARTBEAT_INTERVAL_MS = 4_000;
+
+const isPortForwardingDocumentHidden = (): boolean => {
+  if (typeof document === "undefined") return false;
+  if (typeof document.visibilityState === "string") {
+    return document.visibilityState === "hidden";
+  }
+  return document.hidden === true;
+};
 
 export type { ViewMode };
 
@@ -123,6 +135,104 @@ const listeners = new Set<(rules: PortForwardingRule[]) => void>();
 // Store Actions
 const notifyListeners = () => {
   listeners.forEach((listener) => listener(globalRules));
+  syncPortForwardingHeartbeatTimer();
+};
+
+export const shouldRunPortForwardingHeartbeat = (): boolean => (
+  heartbeatRefs > 0
+  && !isPortForwardingDocumentHidden()
+  && (globalRules.length > 0 || hasActivePortForwardRuntime() || !snapshotAvailable)
+);
+
+const runPortForwardingHeartbeatTick = async (): Promise<void> => {
+  if (heartbeatTickInFlight || heartbeatRefs <= 0 || isPortForwardingDocumentHidden()) {
+    return;
+  }
+  heartbeatTickInFlight = true;
+  try {
+    const reconciliation = await reconcileWithBackend();
+    snapshotAvailable = reconciliation.snapshotAvailable;
+    if (!reconciliation.snapshotAvailable) {
+      // Snapshot failure must surface as unknown/stale — never as inactive.
+      applyRuntimeSnapshotProjection(new Set(), false);
+      return;
+    }
+    // Always re-derive the visible state from the live connection map.
+    // Runtime phases stay in memory only.
+    const normalizedRules = normalizeRulesWithConnections(
+      globalRules,
+      {
+        reconciledGoneRuleIds: new Set(reconciliation.gone),
+        snapshotAvailable: true,
+      },
+    );
+    if (havePortForwardingRuntimeStatesChanged(globalRules, normalizedRules)) {
+      setRuntimeProjection(normalizedRules);
+    } else if (hasPortForwardingRuntimePresenceChanged(reconciliation)) {
+      globalRules = normalizedRules;
+      notifyListeners();
+    }
+  } finally {
+    heartbeatTickInFlight = false;
+    syncPortForwardingHeartbeatTimer();
+  }
+};
+
+const syncPortForwardingHeartbeatTimer = (): void => {
+  if (shouldRunPortForwardingHeartbeat()) {
+    if (heartbeatIntervalId === undefined) {
+      heartbeatIntervalId = setInterval(() => {
+        void runPortForwardingHeartbeatTick();
+      }, HEARTBEAT_INTERVAL_MS);
+    }
+  } else if (heartbeatIntervalId !== undefined) {
+    clearInterval(heartbeatIntervalId);
+    heartbeatIntervalId = undefined;
+  }
+};
+
+const handlePortForwardingVisibilityChange = (): void => {
+  if (isPortForwardingDocumentHidden()) {
+    syncPortForwardingHeartbeatTimer();
+    return;
+  }
+  syncPortForwardingHeartbeatTimer();
+  if (shouldRunPortForwardingHeartbeat()) {
+    void runPortForwardingHeartbeatTick();
+  }
+};
+
+const attachPortForwardingVisibilityListener = (): void => {
+  if (typeof document === "undefined" || typeof document.addEventListener !== "function") {
+    return;
+  }
+  if (heartbeatVisibilityDocument === document) return;
+  if (heartbeatVisibilityDocument && typeof heartbeatVisibilityDocument.removeEventListener === "function") {
+    heartbeatVisibilityDocument.removeEventListener("visibilitychange", handlePortForwardingVisibilityChange);
+  }
+  document.addEventListener("visibilitychange", handlePortForwardingVisibilityChange);
+  heartbeatVisibilityDocument = document;
+};
+
+const detachPortForwardingVisibilityListener = (): void => {
+  if (!heartbeatVisibilityDocument) return;
+  if (typeof heartbeatVisibilityDocument.removeEventListener === "function") {
+    heartbeatVisibilityDocument.removeEventListener("visibilitychange", handlePortForwardingVisibilityChange);
+  }
+  heartbeatVisibilityDocument = null;
+};
+
+export const resetPortForwardingStateForTests = (): void => {
+  if (heartbeatIntervalId !== undefined) {
+    clearInterval(heartbeatIntervalId);
+    heartbeatIntervalId = undefined;
+  }
+  detachPortForwardingVisibilityListener();
+  heartbeatRefs = 0;
+  heartbeatTickInFlight = false;
+  globalRules = [];
+  isInitialized = false;
+  snapshotAvailable = false;
 };
 
 const persistPortForwardingConfig = (rules: PortForwardingRule[]) => {
@@ -333,6 +443,7 @@ const initializeStore = async () => {
       snapshotAvailable,
     }));
   }
+  syncPortForwardingHeartbeatTimer();
 };
 
 const subscribeToPortForwardRuntime = (): (() => void) => {
@@ -367,6 +478,7 @@ const subscribeToPortForwardRuntime = (): (() => void) => {
       snapshotAvailable = reconciliation.snapshotAvailable;
       if (!reconciliation.snapshotAvailable) {
         applyRuntimeSnapshotProjection(new Set(), false);
+        syncPortForwardingHeartbeatTimer();
         return;
       }
       applyRuntimeSnapshotProjection(
@@ -374,10 +486,12 @@ const subscribeToPortForwardRuntime = (): (() => void) => {
         true,
         reconciliation.appeared,
       );
+      syncPortForwardingHeartbeatTimer();
     } catch {
       if (disposed) return;
       snapshotAvailable = false;
       applyRuntimeSnapshotProjection(new Set(), false);
+      syncPortForwardingHeartbeatTimer();
     }
   };
 
@@ -399,6 +513,7 @@ const subscribeToPortForwardRuntime = (): (() => void) => {
       snapshotAvailable = reconciliation.snapshotAvailable;
       if (!reconciliation.snapshotAvailable) {
         applyRuntimeSnapshotProjection(new Set(), false);
+        syncPortForwardingHeartbeatTimer();
         return;
       }
       applyRuntimeSnapshotProjection(
@@ -406,6 +521,7 @@ const subscribeToPortForwardRuntime = (): (() => void) => {
         true,
         reconciliation.appeared,
       );
+      syncPortForwardingHeartbeatTimer();
     });
   });
 
@@ -524,47 +640,20 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
   }, []);
 
   // Periodic heartbeat: reconcile renderer state with the backend every 4s.
-  // Ref-counted — same pattern as the reconnect cancel listener.
+  // Ref-counted and dynamically armed only while visible and needed (rules
+  // configured, active runtime tunnels, or runtime snapshot not yet available).
   useEffect(() => {
     heartbeatRefs++;
-    let intervalId: ReturnType<typeof setInterval> | undefined;
     if (heartbeatRefs === 1) {
-      const HEARTBEAT_INTERVAL_MS = 4_000;
-
-      const tick = async () => {
-        const reconciliation = await reconcileWithBackend();
-        snapshotAvailable = reconciliation.snapshotAvailable;
-        if (!reconciliation.snapshotAvailable) {
-          // Snapshot failure must surface as unknown/stale — never as inactive.
-          applyRuntimeSnapshotProjection(new Set(), false);
-          return;
-        }
-        // Always re-derive the visible state from the live connection map.
-        // Runtime phases stay in memory only.
-        const normalizedRules = normalizeRulesWithConnections(
-          globalRules,
-          {
-            reconciledGoneRuleIds: new Set(reconciliation.gone),
-            snapshotAvailable: true,
-          },
-        );
-        if (havePortForwardingRuntimeStatesChanged(globalRules, normalizedRules)) {
-          setRuntimeProjection(normalizedRules);
-        } else if (hasPortForwardingRuntimePresenceChanged(reconciliation)) {
-          globalRules = normalizedRules;
-          notifyListeners();
-        }
-      };
-
-      intervalId = setInterval(tick, HEARTBEAT_INTERVAL_MS);
-      heartbeatIntervalId = intervalId;
+      attachPortForwardingVisibilityListener();
     }
+    syncPortForwardingHeartbeatTimer();
     return () => {
-      heartbeatRefs--;
-      if (heartbeatRefs === 0 && heartbeatIntervalId !== undefined) {
-        clearInterval(heartbeatIntervalId);
-        heartbeatIntervalId = undefined;
+      heartbeatRefs = Math.max(0, heartbeatRefs - 1);
+      if (heartbeatRefs === 0) {
+        detachPortForwardingVisibilityListener();
       }
+      syncPortForwardingHeartbeatTimer();
     };
   }, []);
 
@@ -831,6 +920,14 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
 
   const selectedRule = rules.find((r) => r.id === selectedRuleId);
 
+  const stopRuleTunnels = useCallback(async (ruleId: string) => {
+    try {
+      return await stopAndCleanupRuleAndWait(ruleId);
+    } finally {
+      syncPortForwardingHeartbeatTimer();
+    }
+  }, []);
+
   return {
     rules,
     selectedRuleId,
@@ -857,7 +954,7 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
     stopTunnel,
     startAllTunnels,
     stopAllTunnels,
-    stopRuleTunnels: stopAndCleanupRuleAndWait,
+    stopRuleTunnels,
     hasRuntimeTunnel,
     hasAnyRuntimeTunnel,
 

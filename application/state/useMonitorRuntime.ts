@@ -159,18 +159,32 @@ export function useMonitorRuntime() {
     retryVersion,
   ]);
   // Poll every second while anything is monitored (here or in another window);
-  // otherwise only every 10 s to notice monitors started elsewhere. Starting a
-  // panel here publishes demand and reads a snapshot immediately, and flipping
-  // `hasRunningPanels` restarts this loop at the fast cadence.
+  // otherwise only every 10 s to notice monitors started elsewhere. Pause
+  // renderer polling while hidden and run an immediate catch-up poll on return
+  // to visible (main-process sampling stays untouched).
   const hasRunningPanels = running.size > 0;
   useEffect(() => {
     const bridge = netcattyBridge.get();
     let disposed = false;
     let pending = false;
+    let resyncOnIdle = false;
     let remoteRunning = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const isHidden = () => {
+      if (typeof document === "undefined") return false;
+      if (typeof document.visibilityState === "string") {
+        return document.visibilityState === "hidden";
+      }
+      return document.hidden === true;
+    };
+    const clearTimer = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
     const poll = async () => {
-      if (pending || !bridge?.monitorSnapshot) return;
+      if (disposed || pending || isHidden() || !bridge?.monitorSnapshot) return;
       pending = true;
       try {
         const snapshot = await bridge.monitorSnapshot(getMonitorHistoryCursor());
@@ -196,15 +210,41 @@ export function useMonitorRuntime() {
       }
     };
     const schedule = () => {
-      if (disposed) return;
+      if (disposed || isHidden()) return;
+      if (resyncOnIdle) {
+        resyncOnIdle = false;
+        void poll().finally(schedule);
+        return;
+      }
+      clearTimer();
       timer = setTimeout(() => {
+        timer = null;
         void poll().finally(schedule);
       }, hasRunningPanels || remoteRunning ? 1000 : 10_000);
     };
-    void poll().finally(schedule);
+    const handleVisibilityChange = () => {
+      if (disposed) return;
+      if (isHidden()) {
+        resyncOnIdle = false;
+        clearTimer();
+        return;
+      }
+      clearTimer();
+      if (pending) {
+        resyncOnIdle = true;
+        return;
+      }
+      void poll().finally(schedule);
+    };
+    const doc = typeof document !== "undefined" ? document : null;
+    doc?.addEventListener?.("visibilitychange", handleVisibilityChange);
+    if (!isHidden()) {
+      void poll().finally(schedule);
+    }
     return () => {
       disposed = true;
-      if (timer) clearTimeout(timer);
+      clearTimer();
+      doc?.removeEventListener?.("visibilitychange", handleVisibilityChange);
     };
   }, [hasRunningPanels]);
 }

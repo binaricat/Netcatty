@@ -1029,26 +1029,18 @@ export function setAutoSyncImpl(this: any,enabled: boolean, intervalMinutes?: nu
     }
   }
 
-export function startAutoSyncImpl(this: any): void {
-    if (this.autoSyncTimer) {
-      return;
-    }
+/**
+ * No-op retained for compatibility with callers and test mocks.
+ * Real periodic auto-sync is driven by `useAutoSync` (`application/state/useAutoSync.ts`);
+ * `CloudSyncManager` only stores `autoSyncEnabled` / `autoSyncInterval` preferences.
+ */
+export function startAutoSyncImpl(): void {
+    // Intentionally empty: avoid scheduling a dead interval that emits unconsumed SYNC_STARTED events.
+}
 
-    this.autoSyncTimer = setInterval(
-      () => {
-        // Auto-sync callback - caller should provide payload
-        this.emit({ type: 'SYNC_STARTED', provider: 'github' }); // Trigger UI to initiate sync
-      },
-      this.state.autoSyncInterval * 60 * 1000
-    );
-  }
-
-export function stopAutoSyncImpl(this: any): void {
-    if (this.autoSyncTimer) {
-      clearInterval(this.autoSyncTimer);
-      this.autoSyncTimer = null;
-    }
-  }
+export function stopAutoSyncImpl(): void {
+    // Intentionally empty: no manager-owned auto-sync interval exists.
+}
 
 export function saveSyncConfigImpl(
     this: any,
