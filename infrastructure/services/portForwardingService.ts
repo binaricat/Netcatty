@@ -11,34 +11,13 @@ import {
   selectStartablePortForwardingRules,
   selectStoppablePortForwardingRules,
 } from '../../domain/portForwardingBulkActions';
-import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from '../../domain/credentials';
 import {
   computePortForwardReconnectDelayMs,
   formatPortForwardReconnectMessage,
   isPortForwardingAutoReconnectEnabled,
   isPortForwardingNonRetryableError,
 } from '../../domain/portForwardingReconnect';
-import { resolveBridgeKeyAuth, resolveBridgeSshAgentAuth, resolveHostAuth } from '../../domain/sshAuth';
-import { resolveHostKeepalive } from '../../domain/host';
-import { connectionTotpFields } from '../../domain/totpConfig';
-import { resolveHostSshConnectionTimeouts } from '../../domain/sshConnectionTimeouts';
-import {
-  findIncompleteProxyIdentityId,
-  findMissingProxyIdentityId,
-  formatIncompleteProxyIdentityMessage,
-  formatMissingProxyIdentityMessage,
-  hasUnreadableProxyCredential,
-  hasUsableProxyConfig,
-  resolveProxyConfigAuth,
-} from '../../domain/proxyProfiles';
-
-// Fallback matching DEFAULT_TERMINAL_SETTINGS so older call sites that don't
-// thread terminalSettings still get the cloud-friendly defaults.
-const FALLBACK_TERMINAL_SETTINGS = {
-  verifyHostKeys: true,
-  keepaliveInterval: 30,
-  keepaliveCountMax: 10,
-};
+import { buildSshConnectionCredentials } from '../../domain/sshConnectionCredentials';
 import { logger } from '../../lib/logger';
 import { localStorageAdapter } from '../persistence/localStorageAdapter';
 import { STORAGE_KEY_PF_RECONNECT_CANCEL } from '../config/storageKeys';
@@ -971,7 +950,6 @@ export const startPortForward = async (
   knownHosts?: KnownHost[],
   options?: { dedicatedTransport?: boolean; prepareOnly?: boolean },
 ): Promise<{ success: boolean; error?: string; localPort?: number; tunnelId?: string; connectionOptions?: PortForwardOptions }> => {
-  const globalTerminalSettings = { ...FALLBACK_TERMINAL_SETTINGS, ...(terminalSettings ?? {}) };
   const bridge = netcattyBridge.get();
   if (rulesPendingCleanup.has(rule.id)) {
     return { success: false, error: 'This port forwarding rule is currently being stopped.' };
@@ -1005,136 +983,21 @@ export const startPortForward = async (
     // Generate a unique tunnel ID
     const tunnelId = `pf-${rule.id}-${Date.now()}`;
 
-    if (host.proxyProfileId && !host.proxyConfig) {
-      throw new Error(`Saved proxy for host "${host.label || host.hostname}" is missing. Open host settings and select a valid proxy.`);
-    }
-    if (findMissingProxyIdentityId(host.proxyConfig, identities)) {
-      throw new Error(formatMissingProxyIdentityMessage(host.label || host.hostname));
-    }
-    if (findIncompleteProxyIdentityId(host.proxyConfig, identities)) {
-      throw new Error(formatIncompleteProxyIdentityMessage(host.label || host.hostname));
-    }
-
-    const resolved = resolveHostAuth({ host, keys, identities });
-    const key = resolved.key;
-    const proxy = host.proxyConfig
-      ? resolveProxyConfigAuth(host.proxyConfig, identities)
-      : undefined;
-    let jumpHosts: NetcattyJumpHost[] | undefined;
-    if (host.hostChain?.hostIds?.length) {
-      const resolvedJumpHosts = host.hostChain.hostIds.map((hostId) =>
-        hosts.find((candidate) => candidate.id === hostId),
-      );
-      const missingJumpHostIds = host.hostChain.hostIds.filter((_, index) => !resolvedJumpHosts[index]);
-      if (missingJumpHostIds.length > 0) {
-        throw new Error(`Missing jump host configuration for host chain: ${missingJumpHostIds.join(", ")}`);
-      }
-      jumpHosts = resolvedJumpHosts
-        .filter((jumpHost): jumpHost is Host => Boolean(jumpHost))
-        .map((jumpHost, index) => {
-          if (jumpHost.proxyProfileId && !jumpHost.proxyConfig) {
-            throw new Error(`Saved proxy for jump host "${jumpHost.label || jumpHost.hostname}" is missing. Open host settings and select a valid proxy.`);
-          }
-          if (findMissingProxyIdentityId(jumpHost.proxyConfig, identities)) {
-            throw new Error(formatMissingProxyIdentityMessage(jumpHost.label || jumpHost.hostname));
-          }
-          if (findIncompleteProxyIdentityId(jumpHost.proxyConfig, identities)) {
-            throw new Error(formatIncompleteProxyIdentityMessage(jumpHost.label || jumpHost.hostname));
-          }
-          const hasConfiguredJumpProxyEndpoint =
-            index === 0 &&
-            hasUsableProxyConfig(jumpHost.proxyConfig);
-          if (
-            hasConfiguredJumpProxyEndpoint &&
-            hasUnreadableProxyCredential(jumpHost.proxyConfig, identities)
-          ) {
-            throw new Error(`Proxy credentials for jump host "${jumpHost.label || jumpHost.hostname}" cannot be decrypted on this device. Open host settings and re-enter the proxy password.`);
-          }
-          const jumpResolved = resolveHostAuth({ host: jumpHost, keys, identities });
-          const jumpKey = jumpResolved.key;
-          const jumpPassword = sanitizeCredentialValue(jumpResolved.password);
-          const jumpKeyAuth = resolveBridgeKeyAuth({
-            key: jumpKey,
-            fallbackIdentityFilePaths: jumpResolved.authMethod === "password" || jumpResolved.keyId
-              ? undefined
-              : jumpHost.identityFilePaths,
-            passphrase: jumpResolved.passphrase,
-          });
-          const jumpAgentAuth = resolveBridgeSshAgentAuth(jumpHost, jumpKey, jumpResolved.authMethod);
-          const hasJumpKeyMaterial = Boolean(
-            jumpAgentAuth.useSshAgent || jumpKeyAuth.privateKey || jumpKeyAuth.identityFilePaths?.length,
-          );
-          const hasUnreadableJumpCredential =
-            isEncryptedCredentialPlaceholder(jumpResolved.password) ||
-            isEncryptedCredentialPlaceholder(jumpKey?.privateKey) ||
-            isEncryptedCredentialPlaceholder(jumpResolved.passphrase);
-          if (
-            (jumpResolved.authMethod === "password" && isEncryptedCredentialPlaceholder(jumpResolved.password) && !jumpPassword) ||
-            (jumpResolved.authMethod !== "password" && jumpResolved.authMethod !== "auto" && hasUnreadableJumpCredential && !jumpPassword && !hasJumpKeyMaterial)
-          ) {
-            throw new Error(`Saved credentials for jump host "${jumpHost.label || jumpHost.hostname}" cannot be decrypted on this device. Open host settings and re-enter them.`);
-          }
-          const hopKeepalive = resolveHostKeepalive(jumpHost, globalTerminalSettings);
-          const hopConnectionTimeouts = resolveHostSshConnectionTimeouts(jumpHost);
-          return {
-            hostname: jumpHost.hostname,
-            hostId: jumpHost.id,
-            port: jumpHost.port || 22,
-            username: jumpResolved.username || 'root',
-            authMethod: jumpResolved.authMethod,
-            requiresMfa: !!jumpHost.requiresMfa,
-            password: jumpPassword,
-            ...connectionTotpFields(jumpHost),
-            privateKey: jumpKeyAuth.privateKey,
-            certificate: jumpKey?.certificate,
-            passphrase: jumpKeyAuth.passphrase,
-            publicKey: jumpKey?.publicKey,
-            keyId: jumpResolved.keyId,
-            keySource: jumpKey?.source,
-            label: jumpHost.label,
-            proxy: hasUsableProxyConfig(jumpHost.proxyConfig)
-              ? resolveProxyConfigAuth(jumpHost.proxyConfig, identities)
-              : undefined,
-            identityFilePaths: jumpKeyAuth.identityFilePaths,
-            ...jumpAgentAuth,
-            keepaliveInterval: hopKeepalive.interval,
-            keepaliveCountMax: hopKeepalive.countMax,
-            sshTcpConnectTimeoutMs: hopConnectionTimeouts.tcpConnectTimeoutSeconds * 1000,
-            sshAuthReadyTimeoutMs: hopConnectionTimeouts.authReadyTimeoutSeconds * 1000,
-            verifyHostKeys: globalTerminalSettings.verifyHostKeys,
-            legacyAlgorithms: jumpHost.legacyAlgorithms,
-            skipEcdsaHostKey: jumpHost.skipEcdsaHostKey,
-            algorithmOverrides: jumpHost.algorithms,
-          };
-        });
-    }
-    const usesTargetProxyForFirstHop = !!proxy && !jumpHosts?.[0]?.proxy;
-    if (usesTargetProxyForFirstHop && hasUnreadableProxyCredential(host.proxyConfig, identities)) {
-      throw new Error('Proxy credentials cannot be decrypted on this device. Open host settings and re-enter the proxy password.');
-    }
-    
-    const keyAuth = resolveBridgeKeyAuth({
-      key,
-      fallbackIdentityFilePaths: resolved.authMethod === "password" || resolved.keyId
-        ? undefined
-        : host.identityFilePaths,
-      passphrase: resolved.passphrase,
+    const sshCredentials = buildSshConnectionCredentials({
+      host,
+      hosts,
+      keys,
+      identities,
+      knownHosts,
+      terminalSettings,
+      formatMissingJumpHostsError: (missingJumpHostIds) =>
+        `Missing jump host configuration for host chain: ${missingJumpHostIds.join(", ")}`,
     });
-    const targetAgentAuth = resolveBridgeSshAgentAuth(host, key, resolved.authMethod);
-    const password = sanitizeCredentialValue(resolved.password);
-    const hasKeyMaterial = Boolean(
-      targetAgentAuth.useSshAgent || keyAuth.privateKey || keyAuth.identityFilePaths?.length,
-    );
-    const hasUnreadableCredential =
-      isEncryptedCredentialPlaceholder(resolved.password) ||
-      isEncryptedCredentialPlaceholder(key?.privateKey) ||
-      isEncryptedCredentialPlaceholder(resolved.passphrase);
-    if (
-      (resolved.authMethod === "password" && isEncryptedCredentialPlaceholder(resolved.password) && !password) ||
-      (resolved.authMethod !== "password" && resolved.authMethod !== "auto" && hasUnreadableCredential && !password && !hasKeyMaterial)
-    ) {
-      throw new Error('Saved credentials cannot be decrypted on this device. Open host settings and re-enter them.');
-    }
+    const {
+      publicKey: _publicKey,
+      keySource: _keySource,
+      ...portForwardSshCredentials
+    } = sshCredentials;
 
     // Subscribe to status updates first
     let expectedTunnelId = tunnelId;
@@ -1216,8 +1079,8 @@ export const startPortForward = async (
     onStatusChange('connecting');
     
     // Start the tunnel
-    const connectionTimeouts = resolveHostSshConnectionTimeouts(host);
     const connectionOptions: PortForwardOptions = {
+      ...portForwardSshCredentials,
       ruleId: rule.id,
       tunnelId,
       type: rule.type,
@@ -1225,31 +1088,7 @@ export const startPortForward = async (
       bindAddress: rule.bindAddress,
       remoteHost: rule.remoteHost,
       remotePort: rule.remotePort,
-      hostname: host.hostname,
-      hostId: host.id,
       port: host.port,
-      username: resolved.username,
-      authMethod: resolved.authMethod,
-      requiresMfa: !!host.requiresMfa,
-      password,
-      ...connectionTotpFields(host),
-      privateKey: keyAuth.privateKey,
-      certificate: key?.certificate,
-      keyId: resolved.keyId,
-      passphrase: keyAuth.passphrase,
-      knownHosts,
-      verifyHostKeys: globalTerminalSettings.verifyHostKeys,
-      proxy,
-      jumpHosts: jumpHosts && jumpHosts.length > 0 ? jumpHosts : undefined,
-      identityFilePaths: keyAuth.identityFilePaths,
-      ...targetAgentAuth,
-      legacyAlgorithms: host.legacyAlgorithms,
-      skipEcdsaHostKey: host.skipEcdsaHostKey,
-      algorithmOverrides: host.algorithms,
-      keepaliveInterval: resolveHostKeepalive(host, globalTerminalSettings).interval,
-      keepaliveCountMax: resolveHostKeepalive(host, globalTerminalSettings).countMax,
-      sshTcpConnectTimeoutMs: connectionTimeouts.tcpConnectTimeoutSeconds * 1000,
-      sshAuthReadyTimeoutMs: connectionTimeouts.authReadyTimeoutSeconds * 1000,
       reuseTransport: !options?.dedicatedTransport,
     };
     if (options?.prepareOnly) {
