@@ -1,4 +1,4 @@
-export type SftpTerminalShellKind = "posix" | "fish" | "powershell" | "cmd";
+export type SftpTerminalShellKind = "posix" | "fish" | "unix-portable" | "powershell" | "cmd";
 
 export type SftpTerminalPathContext = {
   sessionId?: string | null;
@@ -8,6 +8,8 @@ export type SftpTerminalPathContext = {
   sftpIsLocal?: boolean;
   protocol?: string | null;
   shellType?: string | null;
+  hostOs?: string | null;
+  promptText?: string | null;
   isNetworkDevice?: boolean;
   sessionHostname?: string | null;
   sessionUsername?: string | null;
@@ -20,7 +22,12 @@ export type SftpTerminalPathContext = {
 const POSIX_SAFE_UNQUOTED_RE = /^[A-Za-z0-9._/@:+][A-Za-z0-9._/@:+-]*$/;
 const WINDOWS_SAFE_UNQUOTED_RE = /^[A-Za-z0-9._\\/:+][A-Za-z0-9._\\/:+-]*$/;
 const WINDOWS_DRIVE_PATH_RE = /^[A-Za-z]:[\\/]/;
+const WINDOWS_OPENSSH_DRIVE_PATH_RE = /^\/[A-Za-z]:[\\/]/;
 const WINDOWS_UNC_PATH_RE = /^\\\\[^\\]+\\[^\\]+/;
+// PowerShell prompt (e.g. `PS C:\Users\alice> `, `PS /home/alice> `, `(venv) PS C:\> `).
+const POWERSHELL_PROMPT_RE = /^(?:\([^)]+\)\s+)*PS\s+(?:[A-Za-z]:[\\/]|\\\\|\/|~|\S+[^>]*)\s*>\s*$/;
+// cmd.exe prompt (e.g. `C:\Users\alice>`, `D:\work>`).
+const CMD_PROMPT_RE = /^[A-Za-z]:\\[^>]*>\s*$/;
 // PowerShell treats curly single quotes (U+2018..U+201B) as string delimiters.
 const POWERSHELL_SINGLE_QUOTE_RE = /['\u2018\u2019\u201A\u201B]/g;
 const POWERSHELL_SINGLE_QUOTE_CHARS = new Set(["'", "\u2018", "\u2019", "\u201A", "\u201B"]);
@@ -52,14 +59,73 @@ export function hasUnsafeTerminalControlChars(value: string): boolean {
   return false;
 }
 
-/** Map a terminal session's shellType to a concrete quoting dialect. */
+function isWindowsStylePath(path?: string | null): boolean {
+  const trimmed = path?.trim() ?? "";
+  if (!trimmed) return false;
+  return WINDOWS_DRIVE_PATH_RE.test(trimmed)
+    || WINDOWS_OPENSSH_DRIVE_PATH_RE.test(trimmed)
+    || WINDOWS_UNC_PATH_RE.test(trimmed);
+}
+
+/**
+ * Normalize Windows OpenSSH SFTP drive paths (e.g. `/C:/Users/alice`) into
+ * native drive-letter paths (`C:\Users\alice`) for PowerShell and cmd.exe.
+ */
+function normalizeWindowsShellPath(
+  path: string,
+  shellKind: "powershell" | "cmd",
+): string {
+  if (WINDOWS_OPENSSH_DRIVE_PATH_RE.test(path)) {
+    return path.slice(1).replace(/\//g, "\\");
+  }
+  if (shellKind === "cmd" && WINDOWS_DRIVE_PATH_RE.test(path)) {
+    return path.replace(/\//g, "\\");
+  }
+  return path;
+}
+
+/**
+ * Map a terminal session's shellType, live prompt text, host OS, and path
+ * shape to a concrete quoting dialect.
+ *
+ * When `shellType` is unset on a remote session:
+ * - Recognizes PowerShell (`PS ...>`) and CMD (`C:\...>`) from the live prompt.
+ * - Refuses (`null`) on Windows hosts or Windows drive/UNC paths when the
+ *   active Windows shell dialect cannot be identified, avoiding incompatible
+ *   POSIX quoting.
+ * - Uses `"unix-portable"` on non-Windows hosts so quoting works identically
+ *   across POSIX shells (sh/bash/zsh/dash/ksh) and fish, even for paths
+ *   containing backslashes.
+ */
 export function resolveSftpTerminalShellKind(
   shellType?: string | null,
-): SftpTerminalShellKind {
-  if (shellType === "fish" || shellType === "powershell" || shellType === "cmd") {
+  options?: {
+    promptText?: string | null;
+    hostOs?: string | null;
+    path?: string | null;
+  },
+): SftpTerminalShellKind | null {
+  if (
+    shellType === "posix"
+    || shellType === "fish"
+    || shellType === "powershell"
+    || shellType === "cmd"
+  ) {
     return shellType;
   }
-  return "posix";
+
+  const prompt = options?.promptText?.trim() ?? "";
+  if (prompt) {
+    if (POWERSHELL_PROMPT_RE.test(prompt)) return "powershell";
+    if (CMD_PROMPT_RE.test(prompt)) return "cmd";
+  }
+
+  const isWindowsHost = options?.hostOs?.trim().toLowerCase() === "windows";
+  if (isWindowsHost || isWindowsStylePath(options?.path)) {
+    return null;
+  }
+
+  return "unix-portable";
 }
 
 function quotePosixSingle(value: string): string {
@@ -70,6 +136,46 @@ function quoteFishSingle(value: string): string {
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
+/**
+ * Quote a path so it evaluates to the exact same literal string in both POSIX
+ * shells (sh/bash/zsh/dash/ksh) and fish. Single quotes keep `$`, `` ` ``, `"`,
+ * spaces, and globs literal, while `'` and `\` are emitted outside single
+ * quotes as `\'` and `\\`, which both POSIX and fish unescape identically.
+ */
+function quoteUnixPortable(value: string): string {
+  let out = "";
+  let buf = "";
+  const flush = () => {
+    if (buf.length > 0) {
+      out += `'${buf}'`;
+      buf = "";
+    }
+  };
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+    if (ch === "'") {
+      flush();
+      out += "\\'";
+    } else if (ch === "\\") {
+      flush();
+      out += "\\\\";
+    } else {
+      buf += ch;
+    }
+  }
+  flush();
+  return out || "''";
+}
+
+function quoteUnixPath(
+  value: string,
+  shellKind: "posix" | "fish" | "unix-portable",
+): string {
+  if (shellKind === "fish") return quoteFishSingle(value);
+  if (shellKind === "unix-portable") return quoteUnixPortable(value);
+  return quotePosixSingle(value);
+}
+
 function quotePowerShellSingle(value: string): string {
   return `'${value.replace(POWERSHELL_SINGLE_QUOTE_RE, "$&$&")}'`;
 }
@@ -77,7 +183,9 @@ function quotePowerShellSingle(value: string): string {
 function isPosixCdPathEligible(path: string): boolean {
   const trimmed = path.trim();
   if (!trimmed) return false;
-  if (WINDOWS_DRIVE_PATH_RE.test(trimmed)) return false;
+  if (WINDOWS_DRIVE_PATH_RE.test(trimmed) || WINDOWS_OPENSSH_DRIVE_PATH_RE.test(trimmed)) {
+    return false;
+  }
   return trimmed.startsWith("/") || trimmed === "~" || trimmed.startsWith("~/");
 }
 
@@ -111,20 +219,22 @@ export function quoteSftpPathForShell(
   if (hasUnsafeTerminalControlChars(path)) return null;
 
   if (shellKind === "powershell") {
-    if (WINDOWS_SAFE_UNQUOTED_RE.test(path)) return path;
-    return quotePowerShellSingle(path);
+    const normalized = normalizeWindowsShellPath(path, "powershell");
+    if (WINDOWS_SAFE_UNQUOTED_RE.test(normalized)) return normalized;
+    return quotePowerShellSingle(normalized);
   }
 
   if (shellKind === "cmd") {
+    const normalized = normalizeWindowsShellPath(path, "cmd");
     // Interactive cmd.exe expands %VAR% and delayed !VAR! inside double quotes,
     // and double quotes cannot be safely escaped without risking command breakout.
-    if (path.includes('"') || path.includes("%") || path.includes("!")) return null;
-    if (WINDOWS_SAFE_UNQUOTED_RE.test(path)) return path;
-    return `"${path}"`;
+    if (normalized.includes('"') || normalized.includes("%") || normalized.includes("!")) return null;
+    if (WINDOWS_SAFE_UNQUOTED_RE.test(normalized)) return normalized;
+    return `"${normalized}"`;
   }
 
   if (POSIX_SAFE_UNQUOTED_RE.test(path)) return path;
-  return shellKind === "fish" ? quoteFishSingle(path) : quotePosixSingle(path);
+  return quoteUnixPath(path, shellKind);
 }
 
 /**
@@ -151,15 +261,17 @@ export function formatSftpCdCommand(
   if (hasUnsafeTerminalControlChars(dirPath)) return null;
 
   if (shellKind === "powershell") {
-    if (!isPowerShellCdPathEligible(dirPath)) return null;
-    if (dirPath === "~") return "cd ~";
-    return `cd -LiteralPath ${quotePowerShellSingle(dirPath)}`;
+    const normalized = normalizeWindowsShellPath(dirPath, "powershell");
+    if (!isPowerShellCdPathEligible(normalized)) return null;
+    if (normalized === "~") return "cd ~";
+    return `cd -LiteralPath ${quotePowerShellSingle(normalized)}`;
   }
 
   if (shellKind === "cmd") {
-    if (!isCmdCdPathEligible(dirPath)) return null;
-    if (dirPath.includes('"') || dirPath.includes("%") || dirPath.includes("!")) return null;
-    return `cd /d "${dirPath}"`;
+    const normalized = normalizeWindowsShellPath(dirPath, "cmd");
+    if (!isCmdCdPathEligible(normalized)) return null;
+    if (normalized.includes('"') || normalized.includes("%") || normalized.includes("!")) return null;
+    return `cd /d "${normalized}"`;
   }
 
   if (!isPosixCdPathEligible(dirPath)) return null;
@@ -167,10 +279,10 @@ export function formatSftpCdCommand(
   if (dirPath.startsWith("~/")) {
     const suffix = dirPath.slice(2);
     if (!suffix) return "cd -- ~";
-    const quotedSuffix = shellKind === "fish" ? quoteFishSingle(suffix) : quotePosixSingle(suffix);
+    const quotedSuffix = quoteUnixPath(suffix, shellKind);
     return `cd -- ~/${quotedSuffix}`;
   }
-  const quotedDir = shellKind === "fish" ? quoteFishSingle(dirPath) : quotePosixSingle(dirPath);
+  const quotedDir = quoteUnixPath(dirPath, shellKind);
   return `cd -- ${quotedDir}`;
 }
 
@@ -759,6 +871,9 @@ export function isShellDraftSafeForPathInsertion(
 ): boolean {
   if (!draft) return true;
   if (shellKind === "fish") return isFishDraftSafeForPathInsertion(draft);
+  if (shellKind === "unix-portable") {
+    return isPosixDraftSafeForPathInsertion(draft) && isFishDraftSafeForPathInsertion(draft);
+  }
   if (shellKind === "powershell") return isPowerShellDraftSafeForPathInsertion(draft);
   if (shellKind === "cmd") return isCmdDraftSafeForPathInsertion(draft);
   return isPosixDraftSafeForPathInsertion(draft);
@@ -825,7 +940,12 @@ export function resolveInsertSftpPathInTerminalAction(
   options: SftpTerminalPathContext & { path?: string | null },
 ): { sessionId: string; data: string; shellKind: SftpTerminalShellKind } | null {
   if (!canSendSftpPathToTerminal(options) || !options.sessionId) return null;
-  const shellKind = resolveSftpTerminalShellKind(options.shellType);
+  const shellKind = resolveSftpTerminalShellKind(options.shellType, {
+    promptText: options.promptText,
+    hostOs: options.hostOs,
+    path: options.path,
+  });
+  if (!shellKind) return null;
   const data = formatSftpPathForTerminalInsert(options.path, shellKind);
   if (!data) return null;
   return { sessionId: options.sessionId, data, shellKind };
@@ -836,7 +956,12 @@ export function resolveCdSftpPathInTerminalAction(
   options: SftpTerminalPathContext & { path?: string | null },
 ): { sessionId: string; data: string } | null {
   if (!canSendSftpPathToTerminal(options) || !options.sessionId) return null;
-  const shellKind = resolveSftpTerminalShellKind(options.shellType);
+  const shellKind = resolveSftpTerminalShellKind(options.shellType, {
+    promptText: options.promptText,
+    hostOs: options.hostOs,
+    path: options.path,
+  });
+  if (!shellKind) return null;
   const command = formatSftpCdCommand(options.path, shellKind);
   if (!command) return null;
   return { sessionId: options.sessionId, data: `${command}\r` };

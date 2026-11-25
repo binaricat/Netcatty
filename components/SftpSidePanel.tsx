@@ -79,13 +79,14 @@ import {
 } from "../domain/sftpLocatePathInTerminal";
 import {
   canSendSftpPathToTerminal,
+  isTerminalContinuationPrompt,
   isTerminalDraftContextSafeForCd,
   isTerminalDraftContextSafeForPathInsertion,
   resolveCdSftpPathInTerminalAction,
   resolveInsertSftpPathInTerminalAction,
 } from "../domain/sftpTerminalPath";
 import { sftpRequiresDedicatedLogin } from "../domain/sftpDedicatedLogin";
-import { classifyDistroId } from "../domain/host";
+import { classifyDistroId, resolveHostOs } from "../domain/host";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import { isTerminalSensitiveInputActive } from "./terminal/runtime/terminalSensitiveInputRegistry";
 import {
@@ -1845,6 +1846,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
       sftpIsLocal: Boolean(connection?.isLocal),
       protocol: session?.protocol ?? host?.protocol,
       shellType: session?.shellType,
+      hostOs: host ? resolveHostOs(host) : undefined,
       isNetworkDevice,
       sessionHostname: session?.hostname,
       sessionUsername: session?.username,
@@ -1904,22 +1906,28 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   ]);
 
   const handleInsertPathToTerminal = useCallback((targetPath: string) => {
+    const context = buildLiveTerminalPathContext();
+    if (!canSendSftpPathToTerminal(context) || !context.sessionId) return;
+    // Never insert paths into a password/sudo prompt.
+    if (isTerminalSensitiveInputActive(context.sessionId)) return;
+    // Allow inserting at a prompt that already has a typed command draft (e.g. `vim `),
+    // while still blocking alternate-screen TUIs and non-prompt states.
+    if (!isTerminalReadyForCommandInjection(context.sessionId, { allowDraft: true })) return;
+    // Refuse insertion if the cursor is inside an unclosed quote, backtick,
+    // trailing escape, or continuation prompt where standalone quoting is unsafe.
+    const draftContext = getTerminalPromptDraftContext(context.sessionId);
+    if (!draftContext || isTerminalContinuationPrompt(draftContext.promptText)) {
+      toast.warning(t("sftp.terminal.insertBlockedUnsafeQuote"), "SFTP");
+      return;
+    }
     const action = resolveInsertSftpPathInTerminalAction({
-      ...buildLiveTerminalPathContext(),
+      ...context,
+      promptText: draftContext.promptText,
       path: targetPath,
     });
     if (!action) return;
-    // Never insert paths into a password/sudo prompt.
-    if (isTerminalSensitiveInputActive(action.sessionId)) return;
-    // Allow inserting at a prompt that already has a typed command draft (e.g. `vim `),
-    // while still blocking alternate-screen TUIs and non-prompt states.
-    if (!isTerminalReadyForCommandInjection(action.sessionId, { allowDraft: true })) return;
-    // Refuse insertion if the cursor is inside an unclosed quote, backtick,
-    // trailing escape, or continuation prompt where standalone quoting is unsafe.
-    const draftContext = getTerminalPromptDraftContext(action.sessionId);
     if (
-      !draftContext
-      || !isTerminalDraftContextSafeForPathInsertion({
+      !isTerminalDraftContextSafeForPathInsertion({
         ...draftContext,
         shellKind: action.shellKind,
       })
@@ -1932,19 +1940,22 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   }, [buildLiveTerminalPathContext, onRequestTerminalFocus, t, terminalBackend]);
 
   const handleCdInTerminal = useCallback((targetPath: string) => {
+    const context = buildLiveTerminalPathContext();
+    if (!canSendSftpPathToTerminal(context) || !context.sessionId) return;
+    // Never inject cd into a password/sudo prompt.
+    if (isTerminalSensitiveInputActive(context.sessionId)) return;
+    // Only submit cd at an idle shell prompt -- never append into typed input or a TUI.
+    if (!isTerminalReadyForCommandInjection(context.sessionId)) return;
+    // Reject continuation prompts (e.g. PS2 `>`, `dquote>`) where the shell is
+    // still reading an unterminated quote or compound command.
+    const draftContext = getTerminalPromptDraftContext(context.sessionId);
+    if (!draftContext || !isTerminalDraftContextSafeForCd(draftContext)) return;
     const action = resolveCdSftpPathInTerminalAction({
-      ...buildLiveTerminalPathContext(),
+      ...context,
+      promptText: draftContext.promptText,
       path: targetPath,
     });
     if (!action) return;
-    // Never inject cd into a password/sudo prompt.
-    if (isTerminalSensitiveInputActive(action.sessionId)) return;
-    // Only submit cd at an idle shell prompt -- never append into typed input or a TUI.
-    if (!isTerminalReadyForCommandInjection(action.sessionId)) return;
-    // Reject continuation prompts (e.g. PS2 `>`, `dquote>`) where the shell is
-    // still reading an unterminated quote or compound command.
-    const draftContext = getTerminalPromptDraftContext(action.sessionId);
-    if (!draftContext || !isTerminalDraftContextSafeForCd(draftContext)) return;
     terminalBackend.writeToSession(action.sessionId, action.data, { automated: true });
     scheduleDeferredTerminalFocus(onRequestTerminalFocus);
   }, [buildLiveTerminalPathContext, onRequestTerminalFocus, terminalBackend]);

@@ -249,11 +249,11 @@ test("SftpSidePanel guards terminal path insertion and cd writes and SftpPaneVie
 
   assert.match(
     sidePanelSource,
-    /const handleInsertPathToTerminal = useCallback\([\s\S]*?isTerminalSensitiveInputActive\(action\.sessionId\)[\s\S]*?isTerminalReadyForCommandInjection\(action\.sessionId, \{ allowDraft: true \}\)[\s\S]*?getTerminalPromptDraftContext\(action\.sessionId\)[\s\S]*?isTerminalDraftContextSafeForPathInsertion\(\{[\s\S]*?shellKind: action\.shellKind[\s\S]*?toast\.warning\(t\("sftp\.terminal\.insertBlockedUnsafeQuote"\), "SFTP"\)[\s\S]*?terminalBackend\.writeToSession\(action\.sessionId, action\.data, \{ automated: true \}\)[\s\S]*?scheduleDeferredTerminalFocus\(onRequestTerminalFocus\)/,
+    /const handleInsertPathToTerminal = useCallback\([\s\S]*?isTerminalSensitiveInputActive\(context\.sessionId\)[\s\S]*?isTerminalReadyForCommandInjection\(context\.sessionId, \{ allowDraft: true \}\)[\s\S]*?getTerminalPromptDraftContext\(context\.sessionId\)[\s\S]*?resolveInsertSftpPathInTerminalAction\(\{[\s\S]*?promptText: draftContext\.promptText[\s\S]*?isTerminalDraftContextSafeForPathInsertion\(\{[\s\S]*?shellKind: action\.shellKind[\s\S]*?toast\.warning\(t\("sftp\.terminal\.insertBlockedUnsafeQuote"\), "SFTP"\)[\s\S]*?terminalBackend\.writeToSession\(action\.sessionId, action\.data, \{ automated: true \}\)[\s\S]*?scheduleDeferredTerminalFocus\(onRequestTerminalFocus\)/,
   );
   assert.match(
     sidePanelSource,
-    /const handleCdInTerminal = useCallback\([\s\S]*?isTerminalSensitiveInputActive\(action\.sessionId\)[\s\S]*?isTerminalReadyForCommandInjection\(action\.sessionId\)[\s\S]*?getTerminalPromptDraftContext\(action\.sessionId\)[\s\S]*?isTerminalDraftContextSafeForCd\(draftContext\)[\s\S]*?terminalBackend\.writeToSession\(action\.sessionId, action\.data, \{ automated: true \}\)[\s\S]*?scheduleDeferredTerminalFocus\(onRequestTerminalFocus\)/,
+    /const handleCdInTerminal = useCallback\([\s\S]*?isTerminalSensitiveInputActive\(context\.sessionId\)[\s\S]*?isTerminalReadyForCommandInjection\(context\.sessionId\)[\s\S]*?getTerminalPromptDraftContext\(context\.sessionId\)[\s\S]*?isTerminalDraftContextSafeForCd\(draftContext\)[\s\S]*?resolveCdSftpPathInTerminalAction\(\{[\s\S]*?promptText: draftContext\.promptText[\s\S]*?terminalBackend\.writeToSession\(action\.sessionId, action\.data, \{ automated: true \}\)[\s\S]*?scheduleDeferredTerminalFocus\(onRequestTerminalFocus\)/,
   );
   assert.match(
     sidePanelSource,

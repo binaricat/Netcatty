@@ -28,14 +28,46 @@ const baseRemote = {
   isNetworkDevice: false,
 };
 
-test("resolveSftpTerminalShellKind maps shellType to quoting dialect", () => {
+test("resolveSftpTerminalShellKind maps shellType, live prompt, and host OS to quoting dialect", () => {
   assert.equal(resolveSftpTerminalShellKind("posix"), "posix");
   assert.equal(resolveSftpTerminalShellKind("fish"), "fish");
   assert.equal(resolveSftpTerminalShellKind("powershell"), "powershell");
   assert.equal(resolveSftpTerminalShellKind("cmd"), "cmd");
-  assert.equal(resolveSftpTerminalShellKind("unknown"), "posix");
-  assert.equal(resolveSftpTerminalShellKind(undefined), "posix");
-  assert.equal(resolveSftpTerminalShellKind(null), "posix");
+  assert.equal(resolveSftpTerminalShellKind("unknown"), "unix-portable");
+  assert.equal(resolveSftpTerminalShellKind(undefined), "unix-portable");
+  assert.equal(resolveSftpTerminalShellKind(null), "unix-portable");
+
+  // Remote SSH without shellType infers PowerShell/CMD from live prompt text.
+  assert.equal(
+    resolveSftpTerminalShellKind(undefined, { promptText: "PS C:\\Users\\alice> ", hostOs: "windows" }),
+    "powershell",
+  );
+  assert.equal(
+    resolveSftpTerminalShellKind(undefined, { promptText: "(venv) PS /home/alice> ", hostOs: "linux" }),
+    "powershell",
+  );
+  assert.equal(
+    resolveSftpTerminalShellKind(undefined, { promptText: "C:\\Users\\alice>", hostOs: "windows" }),
+    "cmd",
+  );
+
+  // Unknown Windows host or Windows path must never silently fall back to POSIX.
+  assert.equal(
+    resolveSftpTerminalShellKind(undefined, { hostOs: "windows" }),
+    null,
+  );
+  assert.equal(
+    resolveSftpTerminalShellKind(undefined, { promptText: "custom> ", hostOs: "windows" }),
+    null,
+  );
+  assert.equal(
+    resolveSftpTerminalShellKind(undefined, { path: "/C:/Users/alice/file.txt" }),
+    null,
+  );
+  assert.equal(
+    resolveSftpTerminalShellKind(undefined, { path: "C:\\Users\\alice\\file.txt" }),
+    null,
+  );
 });
 
 test("formatSftpPathForTerminalInsert quotes POSIX paths safely with trailing space", () => {
@@ -530,5 +562,129 @@ test("isTerminalDraftContextSafeForCd rejects continuation prompts and non-empty
       pendingTypedInput: "rm -rf",
     }),
     false,
+  );
+});
+
+test("unix-portable dialect quotes backslashes and quotes identically for POSIX and fish and intersects draft safety", () => {
+  // Consecutive and trailing backslashes are emitted outside single quotes so
+  // both POSIX shells (sh/bash/zsh) and fish decode the exact same literal path.
+  assert.equal(
+    formatSftpPathForTerminalInsert("/tmp/a\\b", "unix-portable"),
+    "'/tmp/a'\\\\'b' ",
+  );
+  assert.equal(
+    formatSftpPathForTerminalInsert("/tmp/a\\\\b", "unix-portable"),
+    "'/tmp/a'\\\\\\\\'b' ",
+  );
+  assert.equal(
+    formatSftpPathForTerminalInsert("/tmp/a\\", "unix-portable"),
+    "'/tmp/a'\\\\ ",
+  );
+  assert.equal(
+    formatSftpPathForTerminalInsert("/tmp/a\\'b", "unix-portable"),
+    "'/tmp/a'\\\\\\''b' ",
+  );
+  assert.equal(
+    formatSftpCdCommand("/tmp/a\\\\b", "unix-portable"),
+    "cd -- '/tmp/a'\\\\\\\\'b'",
+  );
+
+  // Draft validation under unix-portable rejects BOTH POSIX-unsafe arithmetic
+  // AND fish-unsafe escaped single quotes (`'foo\'` is unclosed in fish).
+  assert.equal(isShellDraftSafeForPathInsertion("echo $((", "unix-portable"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("echo 'foo\\'", "unix-portable"), false);
+  assert.equal(isShellDraftSafeForPathInsertion("cat ", "unix-portable"), true);
+});
+
+test("remote SSH sessions with unset shellType resolve PowerShell/CMD from prompt, normalize /C:/ paths, and reject unknown Windows shells", () => {
+  const remoteNoShellType = { ...baseRemote, shellType: undefined };
+
+  // Remote Unix SSH uses unix-portable dialect for backslash paths.
+  assert.deepEqual(
+    resolveInsertSftpPathInTerminalAction({
+      ...remoteNoShellType,
+      hostOs: "linux",
+      promptText: "user@host ~> ",
+      path: "/tmp/a\\\\b",
+    }),
+    {
+      sessionId: "sess-1",
+      data: "'/tmp/a'\\\\\\\\'b' ",
+      shellKind: "unix-portable",
+    },
+  );
+
+  // Remote Windows OpenSSH running PowerShell normalizes /C:/... paths.
+  assert.deepEqual(
+    resolveInsertSftpPathInTerminalAction({
+      ...remoteNoShellType,
+      hostOs: "windows",
+      promptText: "PS C:\\Users\\alice> ",
+      path: "/C:/Users/alice/my file.txt",
+    }),
+    {
+      sessionId: "sess-1",
+      data: "'C:\\Users\\alice\\my file.txt' ",
+      shellKind: "powershell",
+    },
+  );
+  assert.deepEqual(
+    resolveCdSftpPathInTerminalAction({
+      ...remoteNoShellType,
+      hostOs: "windows",
+      promptText: "PS C:\\Users\\alice> ",
+      path: "/C:/Users/alice/my dir",
+    }),
+    {
+      sessionId: "sess-1",
+      data: "cd -LiteralPath 'C:\\Users\\alice\\my dir'\r",
+    },
+  );
+
+  // Remote Windows OpenSSH running cmd.exe normalizes /C:/... paths.
+  assert.deepEqual(
+    resolveInsertSftpPathInTerminalAction({
+      ...remoteNoShellType,
+      hostOs: "windows",
+      promptText: "C:\\Users\\alice>",
+      path: "/C:/Users/alice/my file.txt",
+    }),
+    {
+      sessionId: "sess-1",
+      data: '"C:\\Users\\alice\\my file.txt" ',
+      shellKind: "cmd",
+    },
+  );
+  assert.deepEqual(
+    resolveCdSftpPathInTerminalAction({
+      ...remoteNoShellType,
+      hostOs: "windows",
+      promptText: "C:\\Users\\alice>",
+      path: "/C:/Users/alice/my dir",
+    }),
+    {
+      sessionId: "sess-1",
+      data: 'cd /d "C:\\Users\\alice\\my dir"\r',
+    },
+  );
+
+  // Remote Windows SSH with unknown shell dialect refuses instead of emitting POSIX syntax.
+  assert.equal(
+    resolveInsertSftpPathInTerminalAction({
+      ...remoteNoShellType,
+      hostOs: "windows",
+      promptText: "custom> ",
+      path: "/C:/Users/alice/my file.txt",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveCdSftpPathInTerminalAction({
+      ...remoteNoShellType,
+      hostOs: "windows",
+      promptText: "custom> ",
+      path: "/C:/Users/alice/my dir",
+    }),
+    null,
   );
 });
