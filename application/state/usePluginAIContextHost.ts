@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import type { TerminalSession, Workspace } from '../../domain/models';
 import { getNotesSnapshot } from './notesStore';
-import { useActiveTabId } from './activeTabStore';
+import { activeTabStore } from './activeTabStore';
 import { getAppAppLockRuntime } from './appRuntimeBridge';
 import type { createTrustedPluginAIHostRuntime } from '../../infrastructure/ai/plugin/trustedHostRuntime';
 import { buildSelectedPluginSources } from '../../infrastructure/ai/plugin/selectedSources';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 
 export function usePluginAIContextHost({ sessions, workspaces }: { sessions: TerminalSession[]; workspaces: Workspace[] }) {
-  const activeTabId = useActiveTabId();
-  const latest = useRef({ activeTabId, sessions, workspaces });
-  latest.current = { activeTabId, sessions, workspaces };
+  const latest = useRef({ sessions, workspaces });
+  latest.current = { sessions, workspaces };
   const [choice, setChoice] = useState<{ confirm: (id: string) => void; cancel: () => void } | null>(null);
   const [noteId, setNoteId] = useState('');
   const [noteChoices, setNoteChoices] = useState<Array<{ id: string; title: string }>>([]);
@@ -51,8 +50,11 @@ export function usePluginAIContextHost({ sessions, workspaces }: { sessions: Ter
             chooser = null; signal.removeEventListener('abort', cancel); setChoice(null);
             if (id === null || signal.aborted) { reject(Error('Selection cancelled')); return; }
             selectedNoteId = id || null;
-            resolve(buildSelectedPluginSources(() => ({ ...latest.current,
-              note: getNotesSnapshot().notes.find((note) => note.id === selectedNoteId) ?? null })));
+            resolve(buildSelectedPluginSources(() => ({
+              ...latest.current,
+              activeTabId: activeTabStore.getActiveTabId(),
+              note: getNotesSnapshot().notes.find((note) => note.id === selectedNoteId) ?? null,
+            })));
           };
           const cancel = () => finish(null);
           chooser = { runtimeId, cancel };

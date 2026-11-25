@@ -1,6 +1,6 @@
 import { Folder, FolderLock, Lock, Menu, MoreHorizontal, Plus, Settings, Sparkles } from 'lucide-react';
-import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { fromEditorTabId, isEditorTabId, toEditorTabId, useActiveTabId } from '../application/state/activeTabStore';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { activeTabStore, fromEditorTabId, isEditorTabId, toEditorTabId } from '../application/state/activeTabStore';
 import { topTabsSessionsEqual } from '../domain/topTabsSessionsEqual';
 import { isHostTreeWorkTabSurface } from '../application/app/workTabSurface';
 import { buildTabShortcutNumberById } from '../application/app/tabShortcutTargets';
@@ -89,6 +89,34 @@ export function shouldShowHostTreeToggle({
     sessionIds,
     workspaceIds,
   });
+}
+
+export function useShowHostTreeToggle({
+  enabled,
+  logViewIds,
+  orderedTabs,
+  sessionIds,
+  workspaceIds,
+}: {
+  enabled: boolean;
+  logViewIds?: ReadonlySet<string>;
+  orderedTabs: readonly string[];
+  sessionIds: ReadonlySet<string>;
+  workspaceIds: ReadonlySet<string>;
+}): boolean {
+  const getSnapshot = useCallback(
+    () =>
+      shouldShowHostTreeToggle({
+        enabled,
+        activeTabId: activeTabStore.getActiveTabId(),
+        logViewIds,
+        orderedTabs,
+        sessionIds,
+        workspaceIds,
+      }),
+    [enabled, logViewIds, orderedTabs, sessionIds, workspaceIds],
+  );
+  return useSyncExternalStore(activeTabStore.subscribe, getSnapshot, getSnapshot);
 }
 
 export function shouldKeepHostTreeToggleSurface({
@@ -265,7 +293,6 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   const isHostTreeOpen = useTerminalHostTreeOpen();
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
   const toggleHostTree = useToggleTerminalHostTree();
-  const activeTabId = useActiveTabId();
   // Presentation (dynamic title / coding-CLI icon) is applied per-tab inside
   // SessionTopTab via usePresentedSession — do not remap the whole bar on
   // every sibling title tick.
@@ -387,14 +414,17 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     return counts;
   }, [sessions]);
 
+  const orphanSessionIds = useMemo(() => new Set(orphanSessionMap.keys()), [orphanSessionMap]);
+  const workspaceIds = useMemo(() => new Set(workspaceMap.keys()), [workspaceMap]);
+  const logViewIds = useMemo(() => new Set(logViewMap.keys()), [logViewMap]);
+
   const activeWorkTabCount = orderedTabs.length;
-  const showHostTreeToggle = shouldShowHostTreeToggle({
+  const showHostTreeToggle = useShowHostTreeToggle({
     enabled: showHostTreeSidebar,
-    activeTabId,
-    logViewIds: new Set(logViewMap.keys()),
+    logViewIds,
     orderedTabs,
-    sessionIds: new Set(orphanSessionMap.keys()),
-    workspaceIds: new Set(workspaceMap.keys()),
+    sessionIds: orphanSessionIds,
+    workspaceIds,
   });
   const hasHostTreeToggleSurface = shouldKeepHostTreeToggleSurface({
     enabled: showHostTreeSidebar,

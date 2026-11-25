@@ -489,3 +489,9 @@ test("host tree toggle is hidden on root pages", () => {
     workspaceIds: new Set(),
   }), false);
 });
+
+test("TopTabs narrows active-tab subscription via useShowHostTreeToggle", () => {
+  const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(topTabsSource, /\buseActiveTabId\b/);
+  assert.match(topTabsSource, /const showHostTreeToggle = useShowHostTreeToggle\(/);
+});
