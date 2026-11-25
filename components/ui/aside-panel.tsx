@@ -271,9 +271,35 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
 
+        let rafId: number | null = null;
+        let pendingWidth: number | null = null;
+
+        const cancelPendingFrame = () => {
+            if (rafId !== null) {
+                window.cancelAnimationFrame?.(rafId);
+                rafId = null;
+            }
+            pendingWidth = null;
+        };
+
         const handlePointerMove = (moveEvent: PointerEvent) => {
-            setPanelWidthPx(moveEvent.clientX === startX ? panelWidthPx
-                : clampAsideInlineWidth(startWidth + startX - moveEvent.clientX));
+            const nextWidth = moveEvent.clientX === startX
+                ? panelWidthPx
+                : clampAsideInlineWidth(startWidth + startX - moveEvent.clientX);
+            if (typeof window.requestAnimationFrame !== 'function') {
+                setPanelWidthPx(nextWidth);
+                return;
+            }
+            pendingWidth = nextWidth;
+            if (rafId !== null) return;
+            rafId = window.requestAnimationFrame(() => {
+                rafId = null;
+                if (pendingWidth !== null) {
+                    const committedWidth = pendingWidth;
+                    pendingWidth = null;
+                    setPanelWidthPx(committedWidth);
+                }
+            });
         };
         const handlePointerUp = (upEvent: PointerEvent) => {
             cleanup();
@@ -287,6 +313,7 @@ export const AsidePanel: React.FC<AsidePanelProps> = ({
         };
         const cleanup = () => {
             resizeCleanupRef.current = null;
+            cancelPendingFrame();
             setPanelWidthPx(panelWidthPx);
             setIsResizing(false);
             document.body.style.cursor = previousCursor;
