@@ -401,23 +401,21 @@ html.platform-win32 {
 
 @keyframes split-panel-enter {
   0% {
-    width: 0;
-    min-width: 0;
+    transform: translateX(100%);
     opacity: 0;
   }
   55% {
     opacity: 0.88;
   }
   100% {
-    width: var(--aside-inline-width);
-    min-width: var(--aside-inline-width);
+    transform: translateX(0);
     opacity: 1;
   }
 }
 
 .split-panel-enter {
-  animation: split-panel-enter 220ms cubic-bezier(0.24, 0.84, 0.32, 1) both;
-  will-change: width, opacity;
+  animation: split-panel-enter 220ms cubic-bezier(0.24, 0.84, 0.32, 1) backwards;
+  will-change: transform, opacity;
 }
 
 /* Security-key prompts use the same tokens as the shared dialog. Motion stays
