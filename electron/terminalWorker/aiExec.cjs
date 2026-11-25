@@ -26,6 +26,7 @@ const {
   refreshRunningJobSnapshot: refreshRunningWorkerJobSnapshot,
   storeCompletedJobOutput: sharedStoreCompletedJobOutput,
   pruneCompletedBackgroundJobs: sharedPruneCompletedBackgroundJobs,
+  collapseCarriageReturns,
   serializeBackgroundJob: sharedSerializeBackgroundJob,
 } = require("../bridges/ai/backgroundJobOutput.cjs");
 
@@ -612,6 +613,7 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
 }
 
 module.exports = {
+  collapseCarriageReturns,
   cancelWorkerBackgroundJobsForSession,
   cancelPtyExecsForSession,
   createWorkerAiExecHandler,

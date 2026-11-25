@@ -107,27 +107,41 @@ function pruneCompletedBackgroundJobs(
 // offsets while polled output shows the latest frame.
 function collapseCarriageReturns(text) {
   if (!text || text.indexOf("\r") === -1) return text;
-  let result = "";
-  let crPending = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (ch === "\r") {
-      crPending = true;
-      continue;
+  const parts = [];
+  let segStart = 0;
+  let lastSegStart = 0;
+  let lastSegEnd = 0;
+  const len = text.length;
+
+  for (let i = 0; i < len; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code === 13) {
+      if (i > segStart) {
+        lastSegStart = segStart;
+        lastSegEnd = i;
+      }
+      segStart = i + 1;
+    } else if (code === 10) {
+      if (i > segStart) {
+        parts.push(text.slice(segStart, i + 1));
+      } else if (lastSegEnd > lastSegStart) {
+        parts.push(text.slice(lastSegStart, lastSegEnd), "\n");
+      } else {
+        parts.push("\n");
+      }
+      segStart = i + 1;
+      lastSegStart = segStart;
+      lastSegEnd = segStart;
     }
-    if (ch === "\n") {
-      crPending = false;
-      result += ch;
-      continue;
-    }
-    if (crPending) {
-      const lastNl = result.lastIndexOf("\n");
-      result = lastNl >= 0 ? result.slice(0, lastNl + 1) : "";
-      crPending = false;
-    }
-    result += ch;
   }
-  return result;
+
+  if (len > segStart) {
+    parts.push(text.slice(segStart, len));
+  } else if (lastSegEnd > lastSegStart) {
+    parts.push(text.slice(lastSegStart, lastSegEnd));
+  }
+
+  return parts.join("");
 }
 
 function serializeBackgroundJob(

@@ -311,6 +311,7 @@ class SessionOutputBuffer {
     this.sessionId = sessionId;
     this.maxSize = maxSize;
     this.chunks = [];
+    this.chunkHead = 0;
     this.totalLength = 0;
     this.scanOffset = 0;
     this.waiters = [];
@@ -322,30 +323,46 @@ class SessionOutputBuffer {
   append(data) {
     if (!data) return;
     this.preservedTailMatch = null;
-    this.chunks.push(String(data));
-    this.totalLength += this.chunks[this.chunks.length - 1].length;
-    while (this.totalLength > this.maxSize && this.chunks.length > 1) {
-      const removed = this.chunks.shift();
+    const text = String(data);
+    this.chunks.push(text);
+    this.totalLength += text.length;
+    let totalRemoved = 0;
+    while (this.totalLength > this.maxSize && this.chunks.length - this.chunkHead > 1) {
+      const removed = this.chunks[this.chunkHead];
+      this.chunks[this.chunkHead] = undefined;
+      this.chunkHead += 1;
       const removedLength = removed.length;
       this.totalLength -= removedLength;
-      this.scanOffset = Math.max(0, this.scanOffset - removedLength);
+      totalRemoved += removedLength;
+    }
+    if (totalRemoved > 0) {
+      this.scanOffset = Math.max(0, this.scanOffset - totalRemoved);
       if (typeof this.seededLength === "number") {
-        this.seededLength = Math.max(0, this.seededLength - removedLength);
+        this.seededLength = Math.max(0, this.seededLength - totalRemoved);
       }
       for (const waiter of this.waiters) {
         if (typeof waiter.freshBoundary === "number") {
-          waiter.freshBoundary = Math.max(0, waiter.freshBoundary - removedLength);
+          waiter.freshBoundary = Math.max(0, waiter.freshBoundary - totalRemoved);
         }
         if (waiter.custom && typeof waiter.custom.freshBoundary === "number") {
-          waiter.custom.freshBoundary = Math.max(0, waiter.custom.freshBoundary - removedLength);
+          waiter.custom.freshBoundary = Math.max(0, waiter.custom.freshBoundary - totalRemoved);
         }
       }
+    }
+    if (this.chunkHead >= 1024 && this.chunkHead * 2 >= this.chunks.length) {
+      this.chunks = this.chunks.slice(this.chunkHead);
+      this.chunkHead = 0;
     }
     this.flushWaiters();
   }
 
   getText() {
-    return this.chunks.join("");
+    const liveCount = this.chunks.length - this.chunkHead;
+    if (liveCount <= 0) return "";
+    if (liveCount === 1) return this.chunks[this.chunkHead];
+    return this.chunkHead === 0
+      ? this.chunks.join("")
+      : this.chunks.slice(this.chunkHead).join("");
   }
 
   getPendingText() {
@@ -365,7 +382,7 @@ class SessionOutputBuffer {
   }
 
   currentFreshBoundary() {
-    const textLength = this.getText().length;
+    const textLength = this.totalLength;
     const normalBoundary = Math.max(this.scanOffset, textLength - FRESH_MATCH_TAIL_SLACK);
     if (typeof this.seededLength === "number" && this.scanOffset < this.seededLength) {
       // Startup viewport rows must all be waitable for waitFor / waitForText /
@@ -387,7 +404,7 @@ class SessionOutputBuffer {
    * Generic waitForAny uses currentFreshBoundary instead.
    */
   currentTailFreshBoundary() {
-    const textLength = this.getText().length;
+    const textLength = this.totalLength;
     let boundary = Math.max(this.scanOffset, textLength - FRESH_MATCH_TAIL_SLACK);
     if (typeof this.seededLength === "number") {
       if (this.scanOffset >= this.seededLength) {
@@ -417,7 +434,7 @@ class SessionOutputBuffer {
     this.clear();
     this.append(normalized);
     // Seed only the visible viewport — not sync-race trailing bytes.
-    this.seededLength = this.getText().length;
+    this.seededLength = this.totalLength;
     this.scanOffset = 0;
     // Re-open pending waiters onto the seeded viewport (#1960).
     for (const waiter of this.waiters) {
@@ -438,7 +455,7 @@ class SessionOutputBuffer {
     }
     if (fresh !== null) {
       this.preservedTailMatch = {
-        textLength: this.getText().length,
+        textLength: this.totalLength,
         value: fresh.matched.value,
         endOffset: fresh.matched.endOffset,
       };
@@ -455,7 +472,7 @@ class SessionOutputBuffer {
   invalidateStartupSeed() {
     this.seededLength = null;
     this.preservedTailMatch = null;
-    this.scanOffset = this.getText().length;
+    this.scanOffset = this.totalLength;
   }
 
   /**
@@ -466,7 +483,7 @@ class SessionOutputBuffer {
   consumeThroughAbsolute(absoluteLength) {
     this.seededLength = null;
     this.preservedTailMatch = null;
-    const capped = Math.max(0, Math.min(this.getText().length, Number(absoluteLength) || 0));
+    const capped = Math.max(0, Math.min(this.totalLength, Number(absoluteLength) || 0));
     this.scanOffset = Math.max(this.scanOffset, capped);
   }
 
@@ -552,7 +569,7 @@ class SessionOutputBuffer {
 
   advanceScanOffset(endOffset) {
     const absoluteEnd = this.scanOffset + endOffset;
-    this.scanOffset = Math.min(absoluteEnd, this.getText().length);
+    this.scanOffset = Math.min(absoluteEnd, this.totalLength);
     // Normal waits that consume past a preserved startup prompt invalidate it
     // (e.g. waitForText matched trailingFresh after the prompt). Baseline via
     // markOutputConsumedThrough sets scanOffset directly and keeps the prompt.
@@ -565,7 +582,7 @@ class SessionOutputBuffer {
   }
 
   markCurrentOutputConsumed(options = {}) {
-    this.markOutputConsumedThrough(this.getText().length, options);
+    this.markOutputConsumedThrough(this.totalLength, options);
   }
 
   markOutputConsumedThrough(length, options = {}) {
@@ -595,11 +612,11 @@ class SessionOutputBuffer {
   consumePreservedTailMatchAny(patterns) {
     const preserved = this.preservedTailMatch;
     if (!preserved) return null;
-    const text = this.getText();
-    if (text.length !== preserved.textLength) {
+    if (this.totalLength !== preserved.textLength) {
       this.preservedTailMatch = null;
       return null;
     }
+    const text = this.getText();
 
     const fresh = findMatchingPreservedTailMatch(text, patterns, preserved);
     if (fresh === null) return null;
@@ -616,7 +633,7 @@ class SessionOutputBuffer {
     // Sync-race trailingFresh sits past the original seededLength. Keep it fully
     // waitable even when longer than FRESH_MATCH_TAIL_SLACK; otherwise a marker
     // near the start of a large burst (READY + long menu) times out after prompt.
-    const textLength = this.getText().length;
+    const textLength = this.totalLength;
     if (textLength > this.scanOffset) {
       this.seededLength = textLength;
     } else {
@@ -627,6 +644,7 @@ class SessionOutputBuffer {
 
   clear() {
     this.chunks = [];
+    this.chunkHead = 0;
     this.totalLength = 0;
     this.scanOffset = 0;
     this.preservedTailMatch = null;
@@ -897,6 +915,7 @@ class SessionOutputBuffer {
     }
     this.waiters = [];
     this.chunks = [];
+    this.chunkHead = 0;
     this.totalLength = 0;
     this.scanOffset = 0;
     this.preservedTailMatch = null;
