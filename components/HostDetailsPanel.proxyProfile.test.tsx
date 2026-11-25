@@ -8,6 +8,7 @@ import type { Host, Identity } from "../types.ts";
 import HostDetailsPanel, { parseOptionalPortInput } from "./HostDetailsPanel.tsx";
 import { applyGroupDefaults } from "../domain/groupConfig.ts";
 import {
+  mapProxySaveErrorKey,
   prepareProxyConfigForSave,
   prepareTelnetCredentialsForSave,
   resolvePrimaryProtocolSavePort,
@@ -748,4 +749,13 @@ test("HostDetailsPanel empty jump-host override hides the inherited group chain"
   assert.doesNotMatch(markup, /bastion\.example\.com/);
   assert.doesNotMatch(markup, /edge\.example\.com/);
   assert.doesNotMatch(markup, /Inherited from group/);
+});
+
+test("mapProxySaveErrorKey maps every proxy save validation error to its i18n key", () => {
+  assert.equal(mapProxySaveErrorKey("required"), "hostDetails.proxyPanel.error.required");
+  assert.equal(mapProxySaveErrorKey("port"), "proxyProfiles.error.port");
+  assert.equal(mapProxySaveErrorKey("missingSaved"), "hostDetails.proxyPanel.missingSaved");
+  assert.equal(mapProxySaveErrorKey("missingIdentity"), "hostDetails.proxyPanel.missingIdentity");
+  assert.equal(mapProxySaveErrorKey("incompleteIdentity"), "hostDetails.proxyPanel.incompleteIdentity");
+  assert.equal(mapProxySaveErrorKey("unreadableIdentity"), "hostDetails.proxyPanel.unreadableIdentity");
 });

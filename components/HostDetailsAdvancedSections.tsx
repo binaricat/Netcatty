@@ -1,15 +1,14 @@
 import { getHostOsSelection, HOST_OS_SELECTIONS, resolveHostOs } from '../domain/host';
 import { applyGroupDefaults } from "../domain/groupConfig";
 import React from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Forward, Globe, HeartPulse, KeyRound, Link2, Palette, Plus, Router, ShieldAlert, TerminalSquare, Timer, Wifi, X, Variable } from "lucide-react";
+import { AlertTriangle, ChevronDown, Forward, Globe, HeartPulse, KeyRound, Link2, Palette, Plus, Router, ShieldAlert, TerminalSquare, Timer, Wifi, X, Variable } from "lucide-react";
 import { customThemeStore } from "../application/state/customThemeStore";
 import { clearHostFontSizeOverride, clearHostThemeOverride } from "../domain/terminalAppearance";
 import { resolveSshAgentToggleUpdate } from "../domain/sshAuth";
 import { MAX_FONT_SIZE, MIN_FONT_SIZE } from "../infrastructure/config/fonts";
-import { AlgorithmOverridesPanel } from "./host-details/AlgorithmOverridesPanel";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { HostDetailsSection, HostDetailsSettingRow, HostDetailsOverrideReset } from "./host-details";
+import { HostDetailsSection, HostDetailsSettingRow, HostDetailsOverrideReset, SshAlgorithmOverridesCollapsible } from "./host-details";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -456,42 +455,23 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
               !(form.skipEcdsaHostKey ?? effectiveGroupDefaults?.skipEcdsaHostKey),
             )}
           />
-          <Collapsible open={showAlgorithmOverrides} onOpenChange={setShowAlgorithmOverrides}>
-            <CollapsibleTrigger asChild>
-              <Button
-                variant="ghost"
-                className="w-full justify-between h-8 px-2 hover:bg-accent/50"
-              >
-                <span className="text-xs font-medium text-muted-foreground">
-                  {t("hostDetails.algorithms.advanced")}
-                  {form.algorithms && Object.keys(form.algorithms).length > 0 && (
-                    <span className="ml-1.5 text-[10px] text-yellow-600 dark:text-yellow-400">
-                      ({t("hostDetails.algorithms.customized")})
-                    </span>
-                  )}
-                </span>
-                {showAlgorithmOverrides
-                  ? <ChevronUp size={14} className="text-muted-foreground" />
-                  : <ChevronDown size={14} className="text-muted-foreground" />}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="mt-2">
-              <AlgorithmOverridesPanel
-                value={form.algorithms}
-                /* Use the effective legacy flag (host value falling back to
-                   the currently selected group's default) so the seed
-                   reflects what the host would actually advertise. We
-                   read from `effectiveGroupDefaults` (re-resolved on
-                   every form.group change), not the `groupDefaults` prop
-                   — otherwise switching the host into a different group
-                   without saving first would seed from the original
-                   group's flag and silently mis-populate the override. */
-                legacyEnabled={!!(form.legacyAlgorithms ?? effectiveGroupDefaults?.legacyAlgorithms)}
-                inheritedFromGroup={effectiveGroupDefaults?.algorithms}
-                onChange={(next) => update("algorithms", next)}
-              />
-            </CollapsibleContent>
-          </Collapsible>
+          <SshAlgorithmOverridesCollapsible
+            open={showAlgorithmOverrides}
+            onOpenChange={setShowAlgorithmOverrides}
+            value={form.algorithms}
+            /* Use the effective legacy flag (host value falling back to
+               the currently selected group's default) so the seed
+               reflects what the host would actually advertise. We
+               read from `effectiveGroupDefaults` (re-resolved on
+               every form.group change), not the `groupDefaults` prop
+               — otherwise switching the host into a different group
+               without saving first would seed from the original
+               group's flag and silently mis-populate the override. */
+            legacyEnabled={!!(form.legacyAlgorithms ?? effectiveGroupDefaults?.legacyAlgorithms)}
+            inheritedFromGroup={effectiveGroupDefaults?.algorithms}
+            onChange={(next) => update("algorithms", next)}
+            t={t}
+          />
         </HostDetailsSection>
 
         {/* Terminal Behavior — input/output key mappings (backspace, etc.) */}
