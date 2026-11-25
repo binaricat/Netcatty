@@ -161,7 +161,7 @@ host.
 Commands:
 
 ```sh
-node --test electron/plugins/modelInvocation.test.cjs
+node --test electron/plugins/ai/*.test.cjs electron/plugins/context/selectedContextAuthority.test.cjs
 node --test --import tsx infrastructure/ai/plugin/modelInvocationAdapter.test.ts
 npx eslint infrastructure/ai/plugin/*.ts infrastructure/ai/sdk/providers.ts examples/plugins/assistant/panel.js
 ```
