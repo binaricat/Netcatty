@@ -706,3 +706,74 @@ test('iteration limit Continue button invokes the provided send callback', async
   assert.equal(continued, 1);
   await act(async () => { renderer!.unmount(); });
 });
+
+test('ChatMessageList tints user prompt bubbles with theme accent while keeping assistant replies neutral', async t => {
+  const previousWindow = globalThis.window;
+  const actGlobal = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previousActEnvironment = actGlobal.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.window = { setTimeout, clearTimeout } as unknown as Window & typeof globalThis;
+  actGlobal.IS_REACT_ACT_ENVIRONMENT = true;
+  t.after(() => {
+    globalThis.window = previousWindow;
+    actGlobal.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  });
+
+  const messages: ChatMessage[] = [
+    { id: 'u1', role: 'user', content: 'Check nginx status', timestamp: 1 },
+    { id: 'a1', role: 'assistant', content: 'Nginx is running.', timestamp: 2 },
+  ];
+
+  let renderer: ReactTestRenderer;
+  await act(async () => {
+    renderer = create(
+      <I18nProvider locale="en">
+        <TooltipProvider>
+          <ChatMessageList messages={messages} />
+        </TooltipProvider>
+      </I18nProvider>,
+    );
+  });
+
+  const divs = renderer!.root.findAllByType('div');
+  const userRow = divs.find(
+    node => node.props['data-role'] === 'user' && String(node.props.className).includes('ai-chat-message '),
+  );
+  const assistantRow = divs.find(
+    node => node.props['data-role'] === 'assistant' && String(node.props.className).includes('ai-chat-message '),
+  );
+  const userBubble = divs.find(
+    node => node.props['data-role'] === 'user' && String(node.props.className).includes('ai-chat-message-content'),
+  );
+  const assistantContent = divs.find(
+    node => node.props['data-role'] === 'assistant' && String(node.props.className).includes('ai-chat-message-content'),
+  );
+
+  assert.ok(userRow, 'expected user message row');
+  assert.ok(assistantRow, 'expected assistant message row');
+  assert.ok(userBubble, 'expected user message bubble');
+  assert.ok(assistantContent, 'expected assistant message content');
+
+  const userRowClasses = String(userRow.props.className).split(/\s+/);
+  const assistantRowClasses = String(assistantRow.props.className).split(/\s+/);
+  assert.ok(userRowClasses.includes('is-user'));
+  assert.ok(!userRowClasses.includes('is-assistant'));
+  assert.ok(assistantRowClasses.includes('is-assistant'));
+  assert.ok(!assistantRowClasses.includes('is-user'));
+
+  const userBubbleClasses = String(userBubble.props.className).split(/\s+/);
+  assert.ok(userBubbleClasses.includes('group-[.is-user]:bg-primary/12'));
+  assert.ok(userBubbleClasses.includes('[.dark_&]:group-[.is-user]:bg-primary/18'));
+  assert.ok(userBubbleClasses.includes('group-[.is-user]:border-primary/25'));
+  assert.ok(userBubbleClasses.includes('[.dark_&]:group-[.is-user]:border-primary/30'));
+  assert.ok(userBubbleClasses.includes('group-[.is-user]:text-foreground'));
+  assert.ok(!userBubbleClasses.includes('group-[.is-user]:bg-muted/50'));
+  assert.ok(!userBubbleClasses.includes('group-[.is-user]:border-border/50'));
+
+  const assistantClasses = String(assistantContent.props.className).split(/\s+/);
+  assert.ok(assistantClasses.includes('group-[.is-assistant]:w-full'));
+  assert.ok(assistantClasses.includes('group-[.is-assistant]:text-foreground/90'));
+  assert.ok(!assistantClasses.some(cls => cls.startsWith('group-[.is-assistant]:bg-primary')));
+  assert.ok(!assistantClasses.some(cls => cls.startsWith('group-[.is-assistant]:border-primary')));
+
+  await act(async () => { renderer!.unmount(); });
+});
