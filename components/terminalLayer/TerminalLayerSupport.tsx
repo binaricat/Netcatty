@@ -678,6 +678,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     commandTimeout={aiConfig.commandTimeout}
                     responseIdleTimeout={aiConfig.responseIdleTimeout}
                     maxIterations={aiConfig.maxIterations}
+                    toolOutputMaxChars={aiConfig.toolOutputMaxChars}
                     webSearchConfig={aiConfig.webSearchConfig}
                     quickMessages={aiConfig.quickMessages}
                     scopeType={context.scopeType}

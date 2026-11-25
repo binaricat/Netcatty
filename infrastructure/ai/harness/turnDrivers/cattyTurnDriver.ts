@@ -48,6 +48,7 @@ import type { CattyTurnInput, TurnDriver, TurnDriverContext } from './types';
 import { fitLargeUserInputForModel } from '../largeUserInput';
 import { buildPromptContextSnapshot } from '../promptContextSnapshot';
 import { initializeModelPrivacy, protectModel, redactOpenAIChatAssistantFields, type ModelPrivacyBridge } from '../modelPrivacy';
+import { normalizeAiToolOutputMaxChars } from '../../../../domain/aiToolOutputLimit';
 
 export class CattyTurnDriver implements TurnDriver {
   readonly backend = 'catty' as const;
@@ -163,6 +164,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     workspaceId: context.scopeType === 'workspace' ? context.scopeTargetId : undefined,
     workspaceName: context.scopeType === 'workspace' ? context.scopeLabel : undefined,
   }));
+  const toolOutputMaxChars = normalizeAiToolOutputMaxChars(context.toolOutputMaxChars);
   const toolsBundle = createCattyToolsFromCatalog(
     netcattyBridge,
     getExecutorContext,
@@ -172,7 +174,11 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     sessionId,
     ctx.toolOutputStore,
     ctx.toolResultDedup,
-    { agentKind: context.agentKind, allowedCapabilityIds: context.allowedCapabilityIds },
+    {
+      agentKind: context.agentKind,
+      allowedCapabilityIds: context.allowedCapabilityIds,
+      toolOutputMaxChars,
+    },
   );
   const { tools } = toolsBundle;
 
@@ -358,6 +364,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         trigger: options.force ? 'force' : options.compressForRequestTooLargeRetry ? '413-retry' : 'pre-turn',
         force: options.force,
         compressForRequestTooLargeRetry: options.compressForRequestTooLargeRetry,
+        maxToolResultChars: options.compressForRequestTooLargeRetry ? undefined : toolOutputMaxChars,
         protectRecentMessages: options.protectRecentMessages,
         onCompactionStart: (trigger) => {
           ctx.emit({
@@ -464,6 +471,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       scopeLabel: context.scopeLabel,
       userGoal: extractLatestUserGoal(messagesForStream),
       promptContext,
+      toolOutputMaxChars,
     });
     const commandTimeoutSeconds =
       Number.isFinite(context.commandTimeout) && context.commandTimeout > 0
@@ -505,6 +513,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
             reservedTokens: getRequestReserveTokens(),
             maxOutputTokens: compactionMaxOutputTokens,
             toolOutputStore: ctx.toolOutputStore,
+            toolOutputMaxChars,
             runtimeContext: stepRuntimeContext,
             onEvent: (event) => ctx.emit(event),
           });

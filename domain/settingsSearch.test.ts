@@ -248,6 +248,7 @@ test("later-added settings retain their tab and sub-tab destinations", () => {
     ["ai-chat-history-message-cap", "ai", "tools", "ai.chatHistory.messageCap"],
     ["ai-web-search-max-results", "ai", "search", "ai.webSearch.maxResults"],
     ["ai-safety-max-iterations", "ai", "safety", "ai.safety.maxIterations"],
+    ["ai-safety-tool-output-max-chars", "ai", "safety", "ai.safety.toolOutputMaxChars"],
     ["sync-ai-sessions", "sync", "status", "cloudSync.aiSessions.title"],
     ["system-network-proxy-url", "system", undefined, "settings.system.networkProxy.url"],
   ] as const) {

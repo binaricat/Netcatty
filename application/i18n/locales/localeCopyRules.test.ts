@@ -210,3 +210,21 @@ test("managed group delete warning mentions SSH config backup in every locale", 
     );
   }
 });
+
+test("AI tool output limit settings copy is localized across all five locales", () => {
+  const keys = [
+    "ai.safety.toolOutputMaxChars",
+    "ai.safety.toolOutputMaxChars.description",
+    "ai.safety.toolOutputMaxChars.unit",
+  ] as const;
+  for (const [locale, messages] of Object.entries(ALL_LOCALES)) {
+    for (const key of keys) {
+      assert.ok(messages[key]?.trim(), `${locale}: missing ${key}`);
+      if (locale !== "en") {
+        assert.notEqual(messages[key], en[key], `${locale}: ${key} should be translated`);
+      }
+    }
+  }
+  assert.match(zhTW["ai.safety.toolOutputMaxChars.description"], /傳回/);
+  assert.equal(zhTW["ai.safety.toolOutputMaxChars.description"].includes("返回"), false);
+});
