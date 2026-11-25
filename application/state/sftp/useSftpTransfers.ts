@@ -332,6 +332,28 @@ function notifyPathConflict(
   notify.warning(message, t("sftp.transfers.pathConflict.title"));
 }
 
+export function applyTransferProgressToRows(
+  rows: TransferTask[],
+  taskId: string,
+  updates: Partial<TransferTask>,
+  isLatched: (rootId: string, rowId: string) => boolean = isTransferOrRootPauseLatched,
+): TransferTask[] {
+  const index = rows.findIndex((row) => row.id === taskId);
+  if (index === -1) return rows;
+  const row = rows[index];
+  const merged = { ...row, ...updates };
+  const latched = isLatched(row.parentTaskId ?? row.id, row.id);
+  const nextRow = (
+    (latched || row.status === "paused" || row.status === "pausing")
+    && (updates.status === "transferring" || updates.status === "pending" || updates.status === "queued")
+  )
+    ? { ...merged, status: row.status, speed: 0 }
+    : merged;
+  const next = rows.slice();
+  next[index] = nextRow;
+  return next;
+}
+
 export const useSftpTransfers = ({
   ownerId,
   canPrepareAdoption,
@@ -511,18 +533,7 @@ export const useSftpTransfers = ({
     pendingProgressByIdRef.current.set(taskId, { ...prevPending, ...updates });
     // Keep ref hot for cancel/pause checks without waiting for paint.
     // A byte tick that still says "transferring" must not reopen a latched pause.
-    transfersRef.current = transfersRef.current.map((row) => {
-      if (row.id !== taskId) return row;
-      const merged = { ...row, ...updates };
-      const latched = isTransferOrRootPauseLatched(row.parentTaskId ?? row.id, row.id);
-      if (
-        (latched || row.status === "paused" || row.status === "pausing")
-        && (updates.status === "transferring" || updates.status === "pending" || updates.status === "queued")
-      ) {
-        return { ...merged, status: row.status, speed: 0 };
-      }
-      return merged;
-    });
+    transfersRef.current = applyTransferProgressToRows(transfersRef.current, taskId, updates);
     scheduleProgressFlush();
   }, [scheduleProgressFlush]);
   useEffect(() => () => {
