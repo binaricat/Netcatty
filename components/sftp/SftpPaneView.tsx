@@ -38,6 +38,7 @@ import { useGlobalSftpBookmarks } from "./hooks/useGlobalSftpBookmarks";
 import { useSftpHostViewMode } from "../../application/state/sftp/sftpHostViewModeStore";
 import { useSftpListDensity } from "../../application/state/sftp/sftpListDensityStore";
 import { sftpListOrderStore } from "./hooks/useSftpListOrderStore";
+import { sftpKeyboardSelectionStore } from "./hooks/useSftpKeyboardShortcuts";
 import { sftpTreeSelectionStore } from "../../application/state/sftp/sftpTreeSelectionStore";
 import { sftpClipboardUploadStore } from "./clipboardUpload";
 
@@ -525,6 +526,10 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     }
     return () => sftpPaneViewModeStore.clear(pane.id);
   }, [pane.id, viewMode]);
+
+  useEffect(() => () => {
+    sftpKeyboardSelectionStore.clear(pane.id);
+  }, [pane.id]);
 
   // When connecting to a host, restore its saved view mode preference
   const prevHostIdRef = useRef<string | undefined>(undefined);

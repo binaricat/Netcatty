@@ -98,6 +98,7 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
 
   const rafIdRef = useRef<number | null>(null);
   const lastClientXRef = useRef(0);
+  const activeDragCleanupRef = useRef<(() => void) | null>(null);
 
   const applyColumnWidth = useCallback(() => {
     if (!resizingRef.current) return;
@@ -121,6 +122,20 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
     }));
   }, []);
 
+  const cleanupActiveResize = useCallback(() => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    resizingRef.current = null;
+    activeDragCleanupRef.current?.();
+    activeDragCleanupRef.current = null;
+  }, []);
+
+  useEffect(() => () => {
+    cleanupActiveResize();
+  }, [cleanupActiveResize]);
+
   const handleResizeMove = useCallback((e: MouseEvent) => {
     if (!resizingRef.current) return;
     lastClientXRef.current = e.clientX;
@@ -132,13 +147,15 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
   }, [applyColumnWidth]);
 
   const handleResizeEnd = useCallback(() => {
-    if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
     applyColumnWidth();
-    rafIdRef.current = null;
     resizingRef.current = null;
-    document.removeEventListener("mousemove", handleResizeMove);
-    document.removeEventListener("mouseup", handleResizeEnd);
-  }, [applyColumnWidth, handleResizeMove]);
+    activeDragCleanupRef.current?.();
+    activeDragCleanupRef.current = null;
+  }, [applyColumnWidth]);
 
   const handleResizeStart = (
     field: keyof ColumnWidths,
@@ -146,6 +163,7 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
   ) => {
     e.preventDefault();
     e.stopPropagation();
+    cleanupActiveResize();
     lastClientXRef.current = e.clientX;
     resizingRef.current = {
       field,
@@ -154,6 +172,10 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
     };
     document.addEventListener("mousemove", handleResizeMove);
     document.addEventListener("mouseup", handleResizeEnd);
+    activeDragCleanupRef.current = () => {
+      document.removeEventListener("mousemove", handleResizeMove);
+      document.removeEventListener("mouseup", handleResizeEnd);
+    };
   };
 
   return {
