@@ -16,6 +16,7 @@ import { Button } from './ui/button';
 import { Combobox, ComboboxOption } from './ui/combobox';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Textarea } from './ui/textarea';
 import {
   AsidePanel,
   AsidePanelContent,
@@ -60,6 +61,7 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
   const [label, setLabel] = useState(initialData?.label ?? '');
   const [shell, setShell] = useState(initialData?.localShell ?? '');
   const [startDir, setStartDir] = useState(initialData?.localStartDir ?? '');
+  const [startupCommand, setStartupCommand] = useState(initialData?.startupCommand ?? '');
   // On creation, initialize from defaultGroup so the field reflects what a
   // plain save would persist; clearing it then intentionally saves at the
   // vault root. Edits keep the host's own group (possibly empty).
@@ -125,6 +127,7 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
       shellName: shellMeta?.name,
       shellIcon: shellMeta?.icon,
       startDir,
+      startupCommand,
       // Save the controlled value directly: '' means the user explicitly
       // cleared the group, which persists at the vault root.
       group: group,
@@ -225,6 +228,24 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
               </button>
             )}
           </div>
+        </div>
+
+        {/* Startup command */}
+        <div className="space-y-2">
+          <Label htmlFor="local-shell-startup-command">
+            {t('hostDetails.startupCommand')}
+          </Label>
+          <Textarea
+            id="local-shell-startup-command"
+            value={startupCommand}
+            onChange={(e) => setStartupCommand(e.target.value)}
+            placeholder={t('localShell.field.startupCommandPlaceholder')}
+            className="min-h-[80px] font-mono text-sm"
+            rows={3}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t('localShell.field.startupCommandDesc')}
+          </p>
         </div>
       </AsidePanelContent>
 

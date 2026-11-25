@@ -109,3 +109,40 @@ test("local shell save: duplicated host with a new id saves as a new entry", () 
   assert.equal(saved[0].notes, "tweaked");
   assert.equal(connected, undefined);
 });
+
+test("local shell save: persists, edits, and clears startupCommand cleanly", () => {
+  const opened = createLocalShellHost({
+    id: "local-cmd-1",
+    label: "Dev Shell",
+    startDir: "/workspace/app",
+    startupCommand: "npm run dev",
+  });
+  let saved: Host[] = [opened];
+  const hostsRef: { current: Host[] } = { current: [opened] };
+
+  const runSave = (editingHost: Host, draft: Host) => {
+    const save = new Function(
+      "hosts", "editingLocalShellHost", "onUpdateHosts", "onConnect",
+      "setIsLocalShellHostPanelOpen", "setEditingLocalShellHost",
+      "upsertHostById", "saveWorkSurfaceHostDraft",
+      `${compiled} return save;`,
+    )(
+      hostsRef.current, editingHost,
+      (data: Host[] | ((prev: Host[]) => Host[])) => {
+        const next = typeof data === "function" ? data(hostsRef.current) : data;
+        if (next) hostsRef.current = next;
+        saved = next ?? hostsRef.current;
+      },
+      () => {}, () => {}, () => {}, upsertHostById, saveWorkSurfaceHostDraft,
+    );
+    save(draft, false);
+  };
+
+  const edited = { ...opened, ...createLocalShellHost({ id: opened.id, label: opened.label, startDir: opened.localStartDir, startupCommand: "pnpm test" }), createdAt: opened.createdAt };
+  runSave(opened, edited);
+  assert.equal(saved[0].startupCommand, "pnpm test");
+
+  const cleared = { ...edited, ...createLocalShellHost({ id: opened.id, label: opened.label, startDir: opened.localStartDir, startupCommand: "   " }), createdAt: opened.createdAt };
+  runSave(edited, cleared);
+  assert.equal(saved[0].startupCommand, undefined);
+});

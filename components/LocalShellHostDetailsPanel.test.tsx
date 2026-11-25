@@ -25,11 +25,13 @@ const existingLocalHost = {
   localShell: "powershell",
   localShellName: "Windows PowerShell",
   localShellIcon: "powershell",
+  localStartDir: "/workspace/project-a",
+  startupCommand: "npm run dev",
 } as unknown as Host;
 
 const noop = () => {};
 
-test("renderToStaticMarkup: create mode shows title, default-shell option and Save & Connect", () => {
+test("renderToStaticMarkup: create mode shows title, default-shell option, startup command field and Save & Connect", () => {
   const markup = renderToStaticMarkup(
     <LocalShellHostDetailsPanel
       defaultGroup="Projects/A"
@@ -45,9 +47,15 @@ test("renderToStaticMarkup: create mode shows title, default-shell option and Sa
   assert.match(markup, /localShell\.field\.shellDefault/);
   assert.match(markup, /localShell\.saveAndConnect/);
   assert.match(markup, /localShell\.saveAndConnect|common\.save/);
+  assert.match(markup, /hostDetails\.startupCommand/);
+  assert.match(markup, /localShell\.field\.startupCommandPlaceholder/);
+  assert.match(markup, /localShell\.field\.startupCommandDesc/);
+  const startDirIdx = markup.indexOf("local-shell-start-dir");
+  const startupCmdIdx = markup.indexOf("local-shell-startup-command");
+  assert.ok(startDirIdx >= 0 && startupCmdIdx > startDirIdx, "startup command field must render below start directory");
 });
 
-test("renderToStaticMarkup: edit mode hides Save & Connect and shows existing shell", () => {
+test("renderToStaticMarkup: edit mode hides Save & Connect and shows existing shell and startup command", () => {
   const markup = renderToStaticMarkup(
     <LocalShellHostDetailsPanel
       initialData={existingLocalHost}
@@ -60,9 +68,15 @@ test("renderToStaticMarkup: edit mode hides Save & Connect and shows existing sh
 
   assert.match(markup, /localShell\.panel\.title\.edit/);
   assert.doesNotMatch(markup, /localShell\.saveAndConnect/);
-  // Existing label is carried into the form
+  // Existing label, start directory, and startup command are carried into the form
   assert.match(markup, /Project A CMD/);
   assert.match(markup, /local-shell-start-dir/);
+  assert.match(markup, /local-shell-startup-command/);
+  assert.match(markup, /npm run dev/);
+});
+
+test("buildHost forwards startupCommand to createLocalShellHost", () => {
+  assert.match(panelSource, /startDir,\s*\n\s*startupCommand,/);
 });
 
 test("buildHost preserves the saved OS on edits and detects it only for new entries", () => {

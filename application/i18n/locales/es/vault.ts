@@ -1006,6 +1006,8 @@ export const esVaultMessages: Messages = {
   'localShell.field.shellResolved': 'Ejecuta {command}',
   'localShell.field.startDir': 'Directorio de inicio',
   'localShell.field.startDirPlaceholder': 'Heredar directorio inicial global (personal si no se configura)',
+  'localShell.field.startupCommandPlaceholder': 'Comando para ejecutar al iniciar la shell (p. ej., npm run dev)',
+  'localShell.field.startupCommandDesc': 'Se ejecuta automáticamente cuando la shell local inicia en el directorio configurado.',
   'localShell.saveAndConnect': 'Guardar y conectar',
 
   'hostDetails.plugin.title': 'Conexión de plugin',

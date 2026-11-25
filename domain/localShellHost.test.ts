@@ -15,6 +15,7 @@ test('createLocalShellHost builds a grouped local-protocol host', () => {
     shellIcon: 'powershell',
     group: 'Projects/A',
     startDir: ' /home/user/work ',
+    startupCommand: 'npm run dev',
     tags: ['local', 'build'],
   });
 
@@ -27,8 +28,20 @@ test('createLocalShellHost builds a grouped local-protocol host', () => {
   assert.equal(host.localShellName, 'Windows PowerShell');
   assert.equal(host.localShellIcon, 'powershell');
   assert.equal(host.localStartDir, '/home/user/work');
+  assert.equal(host.startupCommand, 'npm run dev');
   assert.deepEqual(host.tags, ['local', 'build']);
   assert.ok(host.id.startsWith('local-'));
+});
+
+test('createLocalShellHost preserves startupCommand verbatim when non-empty and clears blank input', () => {
+  const withLeadingSpace = createLocalShellHost({ startupCommand: ' echo secret' });
+  assert.equal(withLeadingSpace.startupCommand, ' echo secret');
+
+  const multiLine = createLocalShellHost({ startupCommand: 'source .venv/bin/activate\npytest' });
+  assert.equal(multiLine.startupCommand, 'source .venv/bin/activate\npytest');
+
+  assert.equal(createLocalShellHost({ startupCommand: '' }).startupCommand, undefined);
+  assert.equal(createLocalShellHost({ startupCommand: '   \n\t  ' }).startupCommand, undefined);
 });
 
 test('createLocalShellHost falls back to defaults for empty input', () => {

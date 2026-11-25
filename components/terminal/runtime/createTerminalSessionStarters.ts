@@ -1951,7 +1951,24 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         { replayBacklog: true },
       );
 
+      let localSessionExited = false;
+      let cancelPendingStartupCommand: (() => void) | undefined;
+      const isLocalConnectionCurrent = () =>
+        !localSessionExited
+        && options?.signal?.aborted !== true
+        && (ctx.bootEpochRef?.current ?? 0) === bootEpoch;
+      const handleAbortStartupCommand = () => {
+        cancelPendingStartupCommand?.();
+        cancelPendingStartupCommand = undefined;
+      };
+      const clearAbortStartupListener = () => {
+        options?.signal?.removeEventListener("abort", handleAbortStartupCommand);
+      };
+
       ctx.disposeExitRef.current = ctx.terminalBackend.onSessionExit(id, async (evt) => {
+        localSessionExited = true;
+        handleAbortStartupCommand();
+        clearAbortStartupListener();
         ctx.updateStatus("disconnected");
         const exitMessage = `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`;
         writeTerminalLine(ctx, term, exitMessage);
@@ -1988,7 +2005,23 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
 
       ctx.onSessionAttached?.(id);
       consumeRestoreCwdIntent(term, id);
-      scheduleStartupCommand(ctx, term, id);
+      cancelPendingStartupCommand = scheduleStartupCommand(
+        ctx,
+        term,
+        id,
+        () => {
+          cancelPendingStartupCommand = undefined;
+          clearAbortStartupListener();
+        },
+        isLocalConnectionCurrent,
+      );
+      if (cancelPendingStartupCommand && options?.signal) {
+        if (options.signal.aborted) {
+          handleAbortStartupCommand();
+        } else {
+          options.signal.addEventListener("abort", handleAbortStartupCommand, { once: true });
+        }
+      }
     } catch (err) {
       if (ignoreStaleAttemptUi()) return;
       const message = err instanceof Error ? err.message : String(err);
