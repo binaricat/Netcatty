@@ -204,7 +204,6 @@ export class CloudSyncManager {
   private adapters: Map<CloudProvider, CloudAdapter> = new Map();
   private eventListeners: Set<SyncEventCallback> = new Set();
   private stateChangeListeners: Set<() => void> = new Set(); // For useSyncExternalStore
-  private autoSyncTimer: ReturnType<typeof setInterval> | null = null;
   private masterPassword: string | null = null; // In memory only!
   private syncSecurityGeneration = 0;
   private hasStorageListener = false;

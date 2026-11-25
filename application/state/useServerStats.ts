@@ -114,6 +114,41 @@ interface SharedServerStatsSession {
 const CONSECUTIVE_FAILURE_LIMIT = 3;
 const serverStatsSessions = new Map<string, SharedServerStatsSession>();
 let nextClientId = 1;
+let attachedVisibilityDocument: Document | null = null;
+
+function isServerStatsDocumentHidden(): boolean {
+  if (typeof document === 'undefined') return false;
+  if (typeof document.visibilityState === 'string') {
+    return document.visibilityState === 'hidden';
+  }
+  return document.hidden === true;
+}
+
+function handleServerStatsVisibilityChange(): void {
+  for (const session of serverStatsSessions.values()) {
+    reconcileSharedServerStatsSession(session);
+  }
+}
+
+function ensureServerStatsVisibilityListener(): void {
+  if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') {
+    return;
+  }
+  if (attachedVisibilityDocument === document) return;
+  if (attachedVisibilityDocument && typeof attachedVisibilityDocument.removeEventListener === 'function') {
+    attachedVisibilityDocument.removeEventListener('visibilitychange', handleServerStatsVisibilityChange);
+  }
+  document.addEventListener('visibilitychange', handleServerStatsVisibilityChange);
+  attachedVisibilityDocument = document;
+}
+
+function maybeDetachServerStatsVisibilityListener(): void {
+  if (serverStatsSessions.size > 0 || !attachedVisibilityDocument) return;
+  if (typeof attachedVisibilityDocument.removeEventListener === 'function') {
+    attachedVisibilityDocument.removeEventListener('visibilitychange', handleServerStatsVisibilityChange);
+  }
+  attachedVisibilityDocument = null;
+}
 
 function createEmptyServerStats(): ServerStats {
   return {
@@ -281,6 +316,7 @@ async function fetchSharedServerStats(session: SharedServerStatsSession, force =
   }
   if (session.givenUp && !force) return;
   if (getActiveServerStatsClients(session).length === 0) return;
+  if (!force && isServerStatsDocumentHidden()) return;
 
   const bridge = netcattyBridge.get();
   if (!bridge?.getServerStats) return;
@@ -348,13 +384,13 @@ async function fetchSharedServerStats(session: SharedServerStatsSession, force =
 function reconcileSharedServerStatsSession(session: SharedServerStatsSession): void {
   const activeClients = getActiveServerStatsClients(session);
 
-  if (activeClients.length === 0) {
-    // Pause polling only. Keep the last successful stats so remounting Overview
-    // (or re-enabling a terminal stats strip) can paint immediately instead of
-    // flashing "No system overview data yet." Still clear give-up / failure so a
-    // later resume can auto-retry (old reset wiped stats + flags together).
-    // Invalidate a request before pausing: a late reply must not publish data
-    // or re-arm failure/retry timers after disconnect/disable.
+  if (activeClients.length === 0 || isServerStatsDocumentHidden()) {
+    // Pause polling only. Keep the last successful stats so remounting Overview,
+    // re-enabling a terminal stats strip, or returning from a hidden window
+    // can paint immediately instead of flashing "No system overview data yet."
+    // Still clear give-up / failure so a later resume can auto-retry (old reset
+    // wiped stats + flags together). Invalidate a request before pausing: a late
+    // reply must not publish data or re-arm failure/retry timers after pause.
     if (session.pollingActive || session.inflight || session.givenUp) {
       session.fetchGeneration += 1;
     }
@@ -398,6 +434,7 @@ function maybeDisposeSharedServerStatsSession(session: SharedServerStatsSession)
   clearServerStatsTimers(session);
   session.fetchGeneration += 1;
   serverStatsSessions.delete(session.sessionId);
+  maybeDetachServerStatsVisibilityListener();
 }
 
 export function useServerStats({
@@ -420,6 +457,7 @@ export function useServerStats({
     const clientId = clientIdRef.current;
     if (clientId === null) return;
 
+    ensureServerStatsVisibilityListener();
     const listener: ServerStatsListener = (nextState) => {
       setState(nextState);
     };
