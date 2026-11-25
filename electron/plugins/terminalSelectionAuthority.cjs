@@ -23,8 +23,35 @@ class TerminalSelectionAuthority {
     this.listeners = new Set();
     this.observed = null;
     this.disposables = [];
-    this.timer = setInterval(() => this.invalidate(), 1_000);
-    this.timer.unref?.();
+    this.timer = null;
+    this.activeWatches = 0;
+    this.closed = false;
+  }
+
+  #syncTimer() {
+    const shouldRun = !this.closed && (this.handles.size > 0 || this.activeWatches > 0);
+    if (shouldRun && !this.timer) {
+      this.timer = setInterval(() => this.invalidate(), 1_000);
+      this.timer.unref?.();
+    } else if (!shouldRun && this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  watch() {
+    if (this.closed) return { dispose() {} };
+    let disposed = false;
+    this.activeWatches += 1;
+    this.#syncTimer();
+    return {
+      dispose: () => {
+        if (disposed) return;
+        disposed = true;
+        if (this.activeWatches > 0) this.activeWatches -= 1;
+        this.#syncTimer();
+      },
+    };
   }
 
   onDidInvalidate(listener) { this.listeners.add(listener); return { dispose: () => this.listeners.delete(listener) }; }
@@ -92,6 +119,7 @@ class TerminalSelectionAuthority {
     for (const [token, entry] of this.handles) {
       if (entry.expiresAt <= this.clock() || !this.isCurrent(entry.target)) this.handles.delete(token);
     }
+    this.#syncTimer();
   }
   issue(target, context) {
     this.assertCurrent(target);
@@ -107,6 +135,7 @@ class TerminalSelectionAuthority {
     ])).digest("base64url");
     const handle = `${nonce}.${signature}`;
     this.handles.set(handle, { target, expiresAt, pluginVersion: context.pluginVersion, runtimeId: context.runtimeId });
+    this.#syncTimer();
     return { handle, expiresAt };
   }
   resolve(handle, context) {
@@ -120,13 +149,28 @@ class TerminalSelectionAuthority {
     this.assertCurrent(entry.target);
     return entry.target;
   }
-  releaseRuntime(runtimeId) { for (const [key, entry] of this.handles) if (entry.runtimeId === runtimeId) this.handles.delete(key); }
-  releasePlugin(pluginId) { for (const [key, entry] of this.handles) if (entry.target.pluginId === pluginId) this.handles.delete(key); }
+  releaseRuntime(runtimeId) {
+    for (const [key, entry] of this.handles) if (entry.runtimeId === runtimeId) this.handles.delete(key);
+    this.#syncTimer();
+  }
+  releasePlugin(pluginId) {
+    for (const [key, entry] of this.handles) if (entry.target.pluginId === pluginId) this.handles.delete(key);
+    this.#syncTimer();
+  }
   releaseWindow(sender) { if (this.target?.sender === sender) this.target = null; this.invalidate(); }
-  clearHandles() { this.handles.clear(); }
+  clearHandles() {
+    this.handles.clear();
+    this.#syncTimer();
+  }
   shutdown() {
-    clearInterval(this.timer);
+    this.closed = true;
+    this.activeWatches = 0;
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
     for (const item of this.disposables) item?.dispose?.();
+    this.disposables = [];
     this.handles.clear(); this.listeners.clear(); this.target = null; this.key.fill(0);
   }
 }

@@ -299,3 +299,112 @@ test("single-line inputs reject CR/LF before display and submission while clipbo
   assert.deepEqual(await copy.promise, { cancelled: false, value: true });
   assert.deepEqual(f.writes, ["first\nsecond"]);
 });
+
+test("terminalSelection timer stays idle without terminal dialogs/handles and still cancels pending selection dialogs on non-event invalidation", async (t) => {
+  const { privateOwner, LOCAL_SOURCE, OFFICIAL_SOURCE } = require("./sourceIdentity.cjs");
+  t.mock.timers.enable({ apis: ["setInterval"] });
+
+  let senderDestroyed = false;
+  let source = LOCAL_SOURCE;
+  const messages = [];
+  const sender = Object.assign(new EventEmitter(), {
+    id: 7,
+    isDestroyed: () => senderDestroyed,
+    send: (channel, message) => { assert.equal(channel, PROMPT_CHANNEL); messages.push(message); },
+  });
+  const window = Object.assign(new EventEmitter(), {
+    webContents: sender,
+    isFocused: () => true,
+    isVisible: () => true,
+    isDestroyed: () => false,
+  });
+  const manager = {
+    getPluginSessionBinding: (sessionId, ownerId) => (sessionId === "term-1" && ownerId === 7
+      ? { epoch: "worker-1", generation: 1 } : null),
+  };
+  const service = new PluginHostInteractionService({
+    getWindow: () => window,
+    getTerminalWorkerManager: () => manager,
+    isLocked: () => false,
+    permissionEngine: { onDidRevoke: () => ({ dispose() {} }), getMode: () => "ask" },
+    database: {
+      recordSecurityAudit() {},
+      privateOwner: (id) => privateOwner(source, id),
+      publicPluginId: (owner) => (owner === privateOwner(source, "com.example.synthetic") ? "com.example.synthetic" : null),
+    },
+    quotaManager: { chargeBytes() {} },
+    clipboard: { readText: () => "", writeText() {} },
+  });
+  service.setReady(sender, true);
+  t.after(() => service.shutdown());
+  service.setTerminalTarget(sender, { sessionId: "term-1", rendererId: "renderer-1", label: "Main terminal" });
+
+  const signal = new AbortController();
+  const context = {
+    pluginId: "com.example.synthetic",
+    pluginVersion: "1.0.0",
+    runtimeId: "runtime-synthetic",
+    signal: signal.signal,
+    manifest: { features: { required: ["terminal.selection-sharing", "terminal.input-drafts"] } },
+    async assertActive() { signal.signal.throwIfAborted(); },
+  };
+
+  // Idle service has zero active selection-authority intervals.
+  assert.equal(service.terminalSelection.timer, null);
+
+  // Non-terminal interaction dialogs do not arm the selection-authority timer.
+  const inputPromise = service.request(assertInteractionRequest({ kind: "input", title: "Plain input" }), context);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(service.terminalSelection.timer, null);
+  const inputPrompt = messages.filter((m) => !m.closed).at(-1);
+  await service.respond(sender, { requestId: inputPrompt.requestId, actionToken: inputPrompt.actionToken, action: "cancel" });
+  await inputPromise;
+  assert.equal(service.terminalSelection.timer, null);
+
+  // Case 1: pending terminal.selection.read arms timer BEFORE issue() (handles.size === 0),
+  // and non-event sender.isDestroyed() cancels it on the 1s tick and disarms the timer.
+  const share1 = service.request(assertInteractionRequest({ kind: "terminal.selection.read", title: "Share" }), context);
+  void share1.catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(service.terminalSelection.handles.size, 0);
+  assert.notEqual(service.terminalSelection.timer, null);
+  senderDestroyed = true;
+  t.mock.timers.tick(1_000);
+  await assert.rejects(share1, /Selected terminal connection changed/);
+  assert.equal(service.terminalSelection.timer, null, "timer disarms after pending dialog cancels");
+
+  // Case 2: non-event database.privateOwner revocation cancels a pending selection dialog and disarms.
+  senderDestroyed = false;
+  const share2 = service.request(assertInteractionRequest({ kind: "terminal.selection.read", title: "Share again" }), context);
+  void share2.catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.notEqual(service.terminalSelection.timer, null);
+  source = OFFICIAL_SOURCE;
+  t.mock.timers.tick(1_000);
+  await assert.rejects(share2, /Selected terminal connection changed/);
+  assert.equal(service.terminalSelection.timer, null);
+
+  // Case 3: cancelling a pending selection dialog disarms; completing it hands off to the handle timer.
+  source = LOCAL_SOURCE;
+  const share3 = service.request(assertInteractionRequest({ kind: "terminal.selection.read", title: "Cancel me" }), context);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.notEqual(service.terminalSelection.timer, null);
+  const prompt3 = messages.filter((m) => !m.closed).at(-1);
+  await service.respond(sender, { requestId: prompt3.requestId, actionToken: prompt3.actionToken, action: "cancel" });
+  assert.deepEqual(await share3, { cancelled: true });
+  assert.equal(service.terminalSelection.timer, null);
+
+  const share4 = service.request(assertInteractionRequest({ kind: "terminal.selection.read", title: "Complete me" }), context);
+  await new Promise((resolve) => setImmediate(resolve));
+  const prompt4 = messages.filter((m) => !m.closed).at(-1);
+  await service.respond(sender, { requestId: prompt4.requestId, actionToken: prompt4.actionToken, action: "preview", value: "selected" });
+  const preview4 = messages.filter((m) => !m.closed).at(-1);
+  await service.respond(sender, { requestId: preview4.requestId, actionToken: preview4.actionToken, action: "submit" });
+  const completed = await share4;
+  assert.equal(completed.cancelled, false);
+  assert.equal(service.terminalSelection.handles.size, 1);
+  assert.equal(service.terminalSelection.activeWatches, 0);
+  assert.notEqual(service.terminalSelection.timer, null, "timer stays armed for issued handle");
+  service.terminalSelection.clearHandles();
+  assert.equal(service.terminalSelection.timer, null, "timer disarms once handle is cleared");
+});

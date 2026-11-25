@@ -69,3 +69,70 @@ test('quotas, undeclared features and malformed targets fail before issuing a re
   for (let i = 0; i < LIMITS.handlesPerRuntime; i++) f.authority.issue(target, f.context);
   assert.throws(() => f.authority.issue(target, f.context), /limit/);
 });
+
+test('expiry timer is armed lazily on handles or watches and disarmed on all 1->0 paths', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const f = fixture(t);
+  let invalidations = 0;
+  f.authority.onDidInvalidate(() => { invalidations += 1; });
+
+  assert.equal(f.authority.timer, null, 'no idle timer when handles and watches are empty');
+  t.mock.timers.tick(5_000);
+  assert.equal(invalidations, 0, 'idle authority must not wake on a 1s interval');
+
+  const target = f.capture();
+  f.authority.issue(target, f.context);
+  assert.notEqual(f.authority.timer, null, 'issue() arms timer');
+  t.mock.timers.tick(1_000);
+  assert.equal(invalidations, 1);
+
+  // Keeping a second handle active preserves the timer when only one runtime is released.
+  const otherContext = { ...f.context, runtimeId: 'runtime-b' };
+  f.authority.issue(target, otherContext);
+  f.authority.releaseRuntime('runtime-a');
+  assert.notEqual(f.authority.timer, null, 'timer stays armed while another handle remains');
+  f.authority.releaseRuntime('runtime-b');
+  assert.equal(f.authority.timer, null, 'releaseRuntime() disarms timer at 1->0');
+
+  f.authority.issue(target, f.context);
+  assert.notEqual(f.authority.timer, null);
+  f.authority.releasePlugin(f.context.pluginId);
+  assert.equal(f.authority.timer, null, 'releasePlugin() disarms timer at 1->0');
+
+  f.authority.issue(target, f.context);
+  assert.notEqual(f.authority.timer, null);
+  f.authority.clearHandles();
+  assert.equal(f.authority.timer, null, 'clearHandles() disarms timer at 1->0');
+
+  // prune() disarms when the last handle expires on a timer tick.
+  f.authority.issue(target, f.context);
+  assert.notEqual(f.authority.timer, null);
+  f.expire();
+  assert.equal(f.authority.handles.size, 0);
+  assert.equal(f.authority.timer, null, 'prune() disarms timer when last handle expires');
+  const countAfterExpire = invalidations;
+  t.mock.timers.tick(5_000);
+  assert.equal(invalidations, countAfterExpire, 'no further ticks after last handle expires');
+
+  // Ref-counted watch leases keep the timer armed even when handles.size === 0.
+  const watchA = f.authority.watch();
+  const watchB = f.authority.watch();
+  assert.notEqual(f.authority.timer, null, 'watch() arms timer while a dialog is pending');
+  t.mock.timers.tick(1_000);
+  assert.equal(invalidations, countAfterExpire + 1);
+  watchA.dispose();
+  watchA.dispose(); // idempotent
+  assert.notEqual(f.authority.timer, null, 'timer stays armed until last watch disposes');
+  watchB.dispose();
+  assert.equal(f.authority.timer, null, 'disposing last watch disarms timer');
+
+  // shutdown() disarms active watches and prevents re-arming.
+  const watchC = f.authority.watch();
+  assert.notEqual(f.authority.timer, null);
+  f.authority.shutdown();
+  assert.equal(f.authority.timer, null, 'shutdown() disarms timer');
+  watchC.dispose();
+  const postShutdown = f.authority.watch();
+  assert.equal(f.authority.timer, null, 'watch() after shutdown() must not arm timer');
+  postShutdown.dispose();
+});

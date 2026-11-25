@@ -186,6 +186,8 @@ class PluginHostInteractionService {
   #finish(entry, result, error) {
     if (this.pending.get(entry.id) !== entry) return false;
     this.pending.delete(entry.id);
+    entry.terminalWatch?.dispose();
+    entry.terminalWatch = null;
     // A delivered stream outlives its request; cancelled/invalid results must
     // tear down pending SSH authentication and any late-arriving connection.
     const deliveredStream = !error && result?.handleId && validateResult(result);
@@ -288,12 +290,13 @@ class PluginHostInteractionService {
     return new Promise((resolve, reject) => {
       const entry = {
         id: randomUUID(), context, params, sender, resolve, reject, terminalTarget, permissionMode, controller: new AbortController(),
-        expiresAt: now + this.timeoutMs, phase: "request", actionToken: null,
+        expiresAt: now + this.timeoutMs, phase: "request", actionToken: null, terminalWatch: null,
       };
       entry.onAbort = () => this.#finish(entry, null, fail("cancelled", "Host interaction was cancelled"));
       entry.timer = setTimeout(() => this.#finish(entry, null, fail("deadlineExceeded", "Host interaction expired")), this.timeoutMs);
       entry.timer.unref?.();
       this.pending.set(entry.id, entry);
+      if (terminalTarget) entry.terminalWatch = this.terminalSelection.watch();
       context.signal?.addEventListener("abort", entry.onAbort, { once: true });
       if (context.signal?.aborted) { entry.onAbort(); return; }
       try {
