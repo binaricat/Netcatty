@@ -221,12 +221,9 @@ function createStreamEntry(sessionId, opts) {
       // A delayed error from an old connection must not disable a new stream.
       entry.disabled = true;
       entry.error = err;
+      clearFlushTimer(entry);
     });
   }
-
-  entry.flushTimer = setInterval(() => {
-    flushBuffer(entry);
-  }, FLUSH_INTERVAL);
 
   activeStreams.set(sessionId, entry);
   sessionLogs.set(sessionId, { entry, filePath, startToken, stopPromise: null, error: null });
@@ -270,11 +267,28 @@ function startStreamToFile(sessionId, opts = {}) {
   }
 }
 
+function clearFlushTimer(entry) {
+  if (!entry?.flushTimer) return;
+  clearTimeout(entry.flushTimer);
+  entry.flushTimer = null;
+}
+
+function scheduleFlush(entry) {
+  if (!entry || entry.flushTimer || entry.disabled || entry.closing || entry.buffer.length === 0) {
+    return;
+  }
+  entry.flushTimer = setTimeout(() => {
+    entry.flushTimer = null;
+    flushBuffer(entry);
+  }, FLUSH_INTERVAL);
+}
+
 /**
  * Flush buffered data to the write stream.
  * @param {object} entry - The stream entry
  */
 function flushBuffer(entry) {
+  clearFlushTimer(entry);
   if (!entry || entry.disabled || entry.buffer.length === 0) return;
 
   try {
@@ -299,6 +313,7 @@ function flushBuffer(entry) {
     console.error("[SessionLogStream] Flush error:", err.message);
     entry.disabled = true;
     entry.error = err;
+    clearFlushTimer(entry);
   }
 }
 
@@ -431,6 +446,11 @@ function appendBufferedData(entry, dataChunk) {
   if (entry.buffer.length + entry.sudoAutofillPending.length >= MAX_BUFFER_SIZE) {
     flushBuffer(entry);
   }
+
+  // Schedule a one-shot flush only when buffered data remains.
+  if (entry.buffer.length > 0 && !entry.flushTimer && !entry.disabled && !entry.closing) {
+    scheduleFlush(entry);
+  }
 }
 
 // Preserve each sanitized chunk's receipt time through the periodic disk flush.
@@ -489,11 +509,8 @@ async function stopStream(sessionId, expectedToken) {
 async function finalizeStream(sessionId, entry) {
   clearSnapshotRetry(entry);
 
-  // Stop periodic flush
-  if (entry.flushTimer) {
-    clearInterval(entry.flushTimer);
-    entry.flushTimer = null;
-  }
+  // Stop pending flush
+  clearFlushTimer(entry);
 
   // Flush remaining buffer
   if (entry.pendingInitialLineLeadingCarriageReturn) {

@@ -2211,3 +2211,206 @@ test("tray icon crop drops the transparent margin and keeps a full-bleed image",
   assert.equal(bridge.__cropTransparentMarginForTests(fullBleed), fullBleed);
   assert.equal(cropCalls, 0);
 });
+
+function withPatchedIntervals(run) {
+  const originalSetInterval = global.setInterval;
+  const originalClearInterval = global.clearInterval;
+  let nextIntervalId = 1;
+  let createdCount = 0;
+  const intervals = new Map();
+
+  global.setInterval = (fn, delay, ...args) => {
+    const id = nextIntervalId++;
+    createdCount += 1;
+    intervals.set(id, { fn: () => fn(...args), delay });
+    return id;
+  };
+
+  global.clearInterval = (id) => {
+    intervals.delete(id);
+  };
+
+  const tickIntervals = () => {
+    for (const entry of [...intervals.values()]) {
+      entry.fn();
+    }
+  };
+
+  return Promise.resolve()
+    .then(() =>
+      run({
+        getActiveIntervalCount: () => intervals.size,
+        getCreatedIntervalCount: () => createdCount,
+        tickIntervals,
+      }))
+    .finally(() => {
+      global.setInterval = originalSetInterval;
+      global.clearInterval = originalClearInterval;
+    });
+}
+
+test("tray panel refresh timer clears on blur, hide, and closed (resetting panel state on closed)", async () => {
+  await withPatchedIntervals(async ({ getActiveIntervalCount, tickIntervals }) => {
+    await withPlatform("darwin", async () => {
+      const bridge = loadBridge();
+      const electronModule = createElectronStub();
+      const sentMessages = [];
+      const createdWindows = [];
+
+      class FakePanelWindow extends FakeWindow {
+        constructor() {
+          super();
+          this.visible = false;
+          this.focused = false;
+          createdWindows.push(this);
+          const webContents = new EventEmitter();
+          webContents.send = (channel, ...args) => {
+            sentMessages.push([channel, ...args]);
+          };
+          this.webContents = webContents;
+        }
+
+        async loadURL() {}
+        getBounds() { return { width: 360, height: 520 }; }
+        setBounds() {}
+        destroy() { this.destroyed = true; }
+      }
+
+      FakePanelWindow.getAllWindows = () => [];
+      electronModule.BrowserWindow = FakePanelWindow;
+      electronModule.screen = {
+        getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }),
+      };
+
+      try {
+        await enableCloseToTray(bridge, electronModule);
+        const trayInstance = bridge.getTray();
+        trayInstance.getBounds = () => ({ x: 100, y: 0, width: 24, height: 24 });
+
+        // Open tray panel -> starts 1s refresh timer.
+        trayInstance.handlers.get("click")();
+        assert.equal(createdWindows.length, 1);
+        const firstWin = createdWindows[0];
+        assert.equal(getActiveIntervalCount(), 1);
+        firstWin.webContents.emit("did-finish-load");
+        assert.equal(firstWin.isVisible(), true);
+
+        sentMessages.length = 0;
+        tickIntervals();
+        assert.deepEqual(sentMessages, [["netcatty:trayPanel:refresh"]]);
+
+        // Normal dismissal via blur must call hideTrayPanel() and clear the refresh timer.
+        firstWin.emit("blur");
+        assert.equal(firstWin.isVisible(), false);
+        assert.equal(getActiveIntervalCount(), 0);
+        sentMessages.length = 0;
+        tickIntervals();
+        assert.deepEqual(sentMessages, []);
+
+        // Re-open, then simulate external/OS hide event without hideTrayPanel().
+        trayInstance.handlers.get("click")();
+        assert.equal(firstWin.isVisible(), true);
+        assert.equal(getActiveIntervalCount(), 1);
+        firstWin.visible = false;
+        firstWin.emit("hide");
+        assert.equal(getActiveIntervalCount(), 0);
+
+        // Re-open, then close the panel window: must clear timer and reset panel state.
+        trayInstance.handlers.get("click")();
+        assert.equal(getActiveIntervalCount(), 1);
+        firstWin.destroyed = true;
+        firstWin.emit("closed");
+        assert.equal(getActiveIntervalCount(), 0);
+        assert.equal(bridge.getTrayPanelWindow(), null);
+
+        // Next click must recreate the panel window and wait for did-finish-load
+        // (proving trayPanelReady and trayPanelShowWhenReady were reset on closed).
+        trayInstance.handlers.get("click")();
+        assert.equal(createdWindows.length, 2);
+        const secondWin = createdWindows[1];
+        assert.equal(secondWin.showCalls, 0);
+        assert.equal(getActiveIntervalCount(), 1);
+        secondWin.webContents.emit("did-finish-load");
+        assert.equal(secondWin.showCalls, 1);
+      } finally {
+        bridge.cleanup();
+      }
+    });
+  });
+});
+
+test("destroyTray hides tray panel, clears refresh timer, cancels pending show, and unbinds Windows scale listener", async () => {
+  await withPatchedIntervals(async ({ getActiveIntervalCount }) => {
+    await withPlatform("win32", async () => {
+      const appIconManager = require("./appIconManager.cjs");
+      const bridge = loadBridge();
+      const scaleHolder = { scale: 1 };
+      const { electronModule, resizes, fireScaleChange } = createRecordingTrayElectron(scaleHolder);
+      const createdWindows = [];
+
+      class FakePanelWindow extends FakeWindow {
+        constructor() {
+          super();
+          this.visible = false;
+          this.focused = false;
+          createdWindows.push(this);
+          const webContents = new EventEmitter();
+          webContents.send = () => {};
+          this.webContents = webContents;
+        }
+
+        async loadURL() {}
+        getBounds() { return { width: 360, height: 520 }; }
+        setBounds() {}
+        destroy() { this.destroyed = true; }
+      }
+
+      FakePanelWindow.getAllWindows = () => [];
+      electronModule.BrowserWindow = FakePanelWindow;
+      electronModule.screen.getDisplayNearestPoint = () => ({
+        workArea: { x: 0, y: 0, width: 1440, height: 900 },
+      });
+
+      try {
+        appIconManager.initializeAppIconManager(process.cwd(), { preferPublic: true, isMac: false });
+        assert.equal(applyIconVariant("bright"), true);
+        const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+        const trayInstance = bridge.getTray();
+        assert.ok(trayInstance);
+
+        // Open tray panel on Windows via right-click before did-finish-load completes.
+        trayInstance.handlers.get("right-click")(null, { x: 1200, y: 860, width: 24, height: 24 });
+        assert.equal(createdWindows.length, 1);
+        const panelWin = createdWindows[0];
+        assert.equal(getActiveIntervalCount(), 1);
+
+        // Hiding the tray icon calls destroyTray() while the app stays alive.
+        await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: false });
+        assert.equal(bridge.getTray(), null);
+        assert.equal(getActiveIntervalCount(), 0);
+        assert.equal(panelWin.hideCalls, 1);
+
+        // Late did-finish-load must not pop the panel back open.
+        panelWin.webContents.emit("did-finish-load");
+        assert.equal(panelWin.showCalls, 0);
+
+        // Scale listener must have been unbound by destroyTray().
+        const resizeCountAfterDestroy = resizes.length;
+        scaleHolder.scale = 2;
+        fireScaleChange();
+        assert.equal(resizes.length, resizeCountAfterDestroy);
+
+        // Re-enabling the tray icon re-binds the scale listener cleanly.
+        await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: true });
+        assert.ok(bridge.getTray());
+        const resizeCountAfterRecreate = resizes.length;
+        scaleHolder.scale = 1.5;
+        fireScaleChange();
+        assert.ok(resizes.length > resizeCountAfterRecreate);
+      } finally {
+        bridge.cleanup();
+        appIconManager.initializeAppIconManager(process.cwd(), { preferPublic: true, isMac: false });
+      }
+    });
+  });
+});
