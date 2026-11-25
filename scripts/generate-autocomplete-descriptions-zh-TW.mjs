@@ -118,6 +118,21 @@ if (!source || typeof source !== "object" || Array.isArray(source)) {
   throw new Error("zh-CN description dictionary must be a JSON object");
 }
 
+// Keep reviewed cp wording scoped to its description keys.
+const descriptionOverrides = new Map([
+  ["Copy directories recursively (legacy option; prefer -R for portability)", "遞迴複製目錄及其內容（舊版相容選項，跨平台使用時建議使用 -R）"],
+  ["Copy directories recursively; a trailing slash on the source copies only its contents", "遞迴複製目錄及其內容；來源目錄以 / 結尾時只複製目錄內容"],
+  ["Copy files and directories", "複製檔案和目錄"],
+  ["Copy source symbolic links without following them", "複製來源符號連結本身，無須跟隨連結"],
+  ["Do not copy Extended Attributes (EAs) or resource forks", "不複製延伸屬性（EA）或資源分支"],
+  ["Follow all symbolic links in the source", "跟隨來源檔案和目錄中的所有符號連結"],
+  ["Follow only symbolic links given as source arguments", "僅跟隨以來源引數傳入的符號連結"],
+  ["If the destination cannot be opened, remove it and retry the copy", "如果無法開啟目的檔案，就刪除該檔案並重試複製"],
+  ["Preserve file attributes such as permissions, ownership, and timestamps", "保留權限、擁有者和所屬群組、時間戳記等檔案屬性"],
+  ["Preserve permissions, ownership, and timestamps", "保留權限、擁有者和所屬群組及時間戳記"],
+  ["Prompt before overwriting an existing file", "覆蓋現有檔案前提示確認"],
+]);
+
 const convert = OpenCC.Converter({ from: "cn", to: "twp" });
 const converted = {};
 
@@ -125,7 +140,7 @@ for (const [key, value] of Object.entries(source)) {
   if (typeof value !== "string") {
     throw new Error(`Expected a string value for ${JSON.stringify(key)}`);
   }
-  const traditional = toTraditionalTaiwan(value, convert);
+  const traditional = descriptionOverrides.get(key) ?? toTraditionalTaiwan(value, convert);
   const sourceTokens = printfTokens(value);
   const convertedTokens = printfTokens(traditional);
   if (sourceTokens.join(" ") !== convertedTokens.join(" ")) {

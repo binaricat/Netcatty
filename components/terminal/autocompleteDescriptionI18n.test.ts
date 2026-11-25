@@ -308,11 +308,17 @@ test("committed zh-TW dictionary keeps zh-CN keys and Taiwan terminology", () =>
     assert.equal(converted.includes("进程"), false);
     assert.equal(converted.includes("默认"), false);
     assert.equal(converted.includes("网络"), false);
-    processCount += source.split("进程").length - 1;
-    tripCount += converted.split("行程").length - 1;
+    const sourceCount = source.split("进程").length - 1;
+    if (sourceCount === 0) continue;
+    // Only count inside entries that actually contain 进程: 行程 also occurs
+    // as part of unrelated Taiwan wording such as 執行程式.
+    const convertedCount = converted.split("行程").length - 1;
+    assert.ok(convertedCount >= sourceCount, `${key}: 进程 was not mapped to 行程`);
+    processCount += sourceCount;
+    tripCount += convertedCount;
   }
   assert.ok(processCount > 0);
-  assert.equal(tripCount, processCount);
+  assert.ok(tripCount >= processCount);
 });
 
 test("command-name suggestions carry Chinese descriptions", async () => {

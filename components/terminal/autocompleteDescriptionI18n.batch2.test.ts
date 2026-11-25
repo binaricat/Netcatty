@@ -12,8 +12,10 @@ const SPEC_DIR = path.join(ROOT, "node_modules/@withfig/autocomplete/build");
 const DICT_DIR = path.join(HERE, "autocomplete");
 const COMMANDS = ["python", "python3", "node", "vim", "sort", "awk", "sed"] as const;
 
-const DEFERRED_NODE_KEY =
+const SHARED_DJANGO_KEY =
   "Follows symlinks to directories when examining source code and templates for translation strings";
+const NODE_PRESERVE_SYMLINKS_KEY =
+  "Preserve symbolic links when resolving and caching modules";
 
 const specs = Object.fromEntries(
   await Promise.all(
@@ -86,18 +88,29 @@ function suggestionNamed(
   return suggestions.find((suggestion) => suggestion.displayText === displayText);
 }
 
-test("batch specs cover every description except the documented node shared-key conflict", () => {
+test("batch specs cover every description after the node override", () => {
   const missing = batchDescriptions.filter(
     (description) => !(typeof simplified[description] === "string" && simplified[description].length > 0),
   );
 
-  assert.deepEqual(missing, [DEFERRED_NODE_KEY]);
-  assert.equal(typeof simplified[DEFERRED_NODE_KEY], "undefined");
-  assert.equal(typeof traditional[DEFERRED_NODE_KEY], "undefined");
+  assert.deepEqual(missing, []);
+  assert.equal(simplified[NODE_PRESERVE_SYMLINKS_KEY], "解析和缓存模块时保留符号链接");
+  assert.ok(batchDescriptions.includes(NODE_PRESERVE_SYMLINKS_KEY));
+  assert.equal(batchDescriptions.includes(SHARED_DJANGO_KEY), false);
+  // django-admin and n still use the shared Django wording, so it is now
+  // translated; node no longer reads it after the local spec override.
+  assert.equal(typeof simplified[SHARED_DJANGO_KEY], "string");
+  assert.equal(typeof traditional[SHARED_DJANGO_KEY], "string");
+  assert.ok(simplified[SHARED_DJANGO_KEY].length > 0);
+  assert.ok(traditional[SHARED_DJANGO_KEY].length > 0);
   assert.ok(batchDescriptions.length >= 178);
 });
 
 test("batch zh-TW spot checks cover generated terminology", () => {
+  assert.equal(
+    traditional[NODE_PRESERVE_SYMLINKS_KEY],
+    "解析和快取模組時保留符號連結",
+  );
   assert.equal(
     traditional["Don’t display the copyright and version messages even in interactive mode"],
     "即使在互動模式下也不顯示版權和版本訊息",
@@ -172,8 +185,8 @@ test("python, node, vim, sort, awk, and sed options localize without changing in
     {
       input: "node -",
       option: "--preserve-symlinks",
-      key: DEFERRED_NODE_KEY,
-      zhCn: DEFERRED_NODE_KEY,
+      key: NODE_PRESERVE_SYMLINKS_KEY,
+      zhCn: "解析和缓存模块时保留符号链接",
     },
     {
       input: "vim -",

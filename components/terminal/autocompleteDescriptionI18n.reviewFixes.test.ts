@@ -8,6 +8,10 @@ import { createRequire } from "node:module";
 import type { FigSpec } from "./autocomplete/figSpecLoader.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const { loadFigSpec } = createRequire(import.meta.url)("../../electron/main/registerBridges.cjs") as {
+  loadFigSpec: (electronDir: string, name: string, os?: string) => Promise<FigSpec | null>;
+};
+const electronDir = path.join(ROOT, "electron");
 
 async function loadFixture(relativePath: string): Promise<FigSpec> {
   const mod = await import(pathToFileURL(path.join(ROOT, relativePath)).href);
@@ -42,9 +46,9 @@ Object.defineProperty(globalThis, "localStorage", {
 Object.defineProperty(globalThis, "window", {
   value: {
     netcatty: {
-      listFigSpecs: async () => ["su", "readlink", "date", "base64"],
+      listFigSpecs: async () => ["su", "readlink", "date", "base64", "cp"],
       loadFigSpec: async (name: string, hostOs?: string) =>
-        byPlatform[hostOs ?? "linux"]?.[name] ?? null,
+        name === "cp" ? loadFigSpec(electronDir, name, hostOs) : byPlatform[hostOs ?? "linux"]?.[name] ?? null,
     },
   },
   configurable: true,
@@ -115,10 +119,57 @@ test("all descriptions in macOS date and base64 specs have both translations", (
   }
 });
 
-test("macOS date falls back to the bundled spec and keeps its original option semantics", async () => {
-  const { loadFigSpec } = createRequire(import.meta.url)("../../electron/main/registerBridges.cjs") as {
-    loadFigSpec: (electronDir: string, name: string, os: string) => Promise<FigSpec | null>;
+test("cp recursive options localize without changing insertion text", async () => {
+  const expected: Record<Locale, { recursive: string; macLegacy: string; macRecursive: string }> = {
+    en: {
+      recursive: "Copy directories recursively",
+      macLegacy: "Copy directories recursively (legacy option; prefer -R for portability)",
+      macRecursive: "Copy directories recursively; a trailing slash on the source copies only its contents",
+    },
+    "zh-CN": {
+      recursive: "递归复制目录及其内容",
+      macLegacy: "递归复制目录及其内容（旧版兼容选项，跨平台使用时推荐 -R）",
+      macRecursive: "递归复制目录及其内容；源目录以 / 结尾时只复制目录内容",
+    },
+    "zh-TW": {
+      recursive: "遞迴複製目錄及其內容",
+      macLegacy: "遞迴複製目錄及其內容（舊版相容選項，跨平台使用時建議使用 -R）",
+      macRecursive: "遞迴複製目錄及其內容；來源目錄以 / 結尾時只複製目錄內容",
+    },
   };
+  for (const locale of ["en", "zh-CN", "zh-TW"] as const) {
+    const linux = await suggestions("cp -", "linux", locale);
+    for (const flag of ["-r", "-R", "--recursive"]) {
+      const option = linux.find((item) => item.displayText === flag);
+      assert.equal(option?.text, `cp ${flag}`);
+      assert.equal(option?.description, expected[locale].recursive);
+    }
+    assert.equal(linux.some((item) => item.displayText === "-c"), false);
+
+    const mac = await suggestions("cp -", "macos", locale);
+    const legacy = mac.find((item) => item.displayText === "-r");
+    assert.equal(legacy?.text, "cp -r");
+    assert.equal(legacy?.description, expected[locale].macLegacy);
+    const recursive = mac.find((item) => item.displayText === "-R");
+    assert.equal(recursive?.text, "cp -R");
+    assert.equal(recursive?.description, expected[locale].macRecursive);
+    assert.equal(mac.some((item) => item.displayText === "--recursive"), false);
+    assert.equal(mac.some((item) => item.displayText === "-c"), true);
+  }
+});
+
+test("both cp platform specs have complete Simplified and Traditional Chinese descriptions", async () => {
+  for (const os of ["linux", "macos"]) {
+    const spec = await loadFigSpec(electronDir, "cp", os);
+    assert.ok(spec);
+    for (const [locale, dictionary] of Object.entries(dictionaries)) {
+      const missing = [...collectDescriptions(spec)].filter((description) => !dictionary[description]?.trim());
+      assert.deepEqual(missing, [], `cp (${os}): missing ${locale} translations`);
+    }
+  }
+});
+
+test("macOS date falls back to the bundled spec and keeps its original option semantics", async () => {
   // This existing directory has no local specs but shares the real node_modules.
   const electronDirWithoutOverrides = path.join(ROOT, "scripts");
   assert.equal(fs.existsSync(path.join(electronDirWithoutOverrides, "specs/macos/date.js")), false);
