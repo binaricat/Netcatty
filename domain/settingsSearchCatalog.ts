@@ -1012,6 +1012,14 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.sftp.compressedUpload",
   },
   {
+    id: "sftp-default-download-directory",
+    tab: "file-associations",
+    labelKey: "settings.sftp.downloadLocation.directory",
+    descriptionKey: "settings.sftp.downloadLocation.directoryDesc",
+    sectionKey: "settings.sftp.downloadLocation",
+    keywords: ["download folder", "download path", "save location", "下载目录", "保存位置", "下載目錄", "儲存位置"],
+  },
+  {
     id: "sftp-packed-download",
     tab: "file-associations",
     labelKey: "settings.sftp.packedDownload.enable",

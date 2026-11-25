@@ -662,6 +662,13 @@ export const ruVaultMessages: Messages = {
   'settings.sftp.packedDownload': 'Скачивание архивом',
   'settings.sftp.packedDownload.enable': 'Упаковывать папки и выбранные вместе файлы перед скачиванием',
   'settings.sftp.packedDownload.enableDesc': 'Выбранные файлы передаются одним потоком и распаковываются с сохранением структуры папок. Если сервер не поддерживает упаковку, файлы скачиваются по отдельности.',
+  'settings.sftp.downloadLocation': 'Папка для загрузок',
+  'settings.sftp.downloadLocation.directory': 'Папка загрузок по умолчанию',
+  'settings.sftp.downloadLocation.directoryDesc': 'Диалоги скачивания по SFTP открываются в этой папке. Если она не задана или больше не существует, используется системная папка «Загрузки».',
+  'settings.sftp.downloadLocation.systemDefault': 'Системная папка «Загрузки»',
+  'settings.sftp.downloadLocation.browse': 'Обзор…',
+  'settings.sftp.downloadLocation.reset': 'Использовать системную папку «Загрузки»',
+  'settings.sftp.downloadLocation.select': 'Выберите папку загрузок по умолчанию',
 
   'settings.sftp.skipUnchanged.enable': 'Пропускать неизменённые файлы',
   'settings.sftp.skipUnchanged.enableDesc': 'Пропускать файлы, у которых размер и время изменения уже совпадают с назначением (в стиле rsync). Отключается при замене папки во временный путь.',

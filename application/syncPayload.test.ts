@@ -2389,3 +2389,14 @@ test('sync prepares header encryption once before importing and leaves input unc
   assert.equal(JSON.stringify(payload), original);
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PROVIDERS)!)[0].customHeaders, { 'X-Tenant': sealed });
 });
+
+test("SFTP default download folder stays device-local and is never synced", async () => {
+  const key = storageKeys.STORAGE_KEY_SFTP_DEFAULT_DOWNLOAD_DIR;
+  assert.equal((SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(key), false);
+  localStorage.clear();
+  localStorage.setItem(key, "/Users/me/server-files");
+  const payload = buildSyncPayload(vault());
+  assert.equal(JSON.stringify(payload).includes("/Users/me/server-files"), false);
+  await applySyncPayload(payload, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(key), "/Users/me/server-files");
+});

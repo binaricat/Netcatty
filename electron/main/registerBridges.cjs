@@ -9,6 +9,10 @@ const {
   registerExternalMcpApprovalAlertHandlers,
 } = require("../bridges/windowAttention.cjs");
 const { handleZmodemDragDropUpload } = require("../bridges/zmodemDragDropHandler.cjs");
+const {
+  resolveSaveDialogDefaultPath,
+  resolveDirectoryDialogDefaultPath,
+} = require("./dialogDefaultPath.cjs");
 
 const excludedFigSpecPrefixes = ["aws", "gcloud", "az"];
 
@@ -1222,11 +1226,11 @@ function createBridgeRegistrar(context) {
     });
   
     // Show save file dialog and return selected path
-    ipcMain.handle("netcatty:showSaveDialog", async (_event, { defaultPath, filters }) => {
+    ipcMain.handle("netcatty:showSaveDialog", async (_event, { defaultPath, filters, directoryOptions }) => {
       const { dialog } = electronModule;
   
       const result = await dialog.showSaveDialog({
-        defaultPath,
+        defaultPath: resolveSaveDialogDefaultPath(defaultPath, directoryOptions, { app, fs, path }),
         filters: filters || [{ name: "All Files", extensions: ["*"] }],
       });
   
@@ -1256,12 +1260,12 @@ function createBridgeRegistrar(context) {
     });
   
     // Select a directory and return the selected path
-    ipcMain.handle("netcatty:selectDirectory", async (_event, { title, defaultPath }) => {
+    ipcMain.handle("netcatty:selectDirectory", async (_event, { title, defaultPath, directoryOptions }) => {
       const { dialog } = electronModule;
   
       const result = await dialog.showOpenDialog({
         title: title || "Select Directory",
-        defaultPath,
+        defaultPath: resolveDirectoryDialogDefaultPath(defaultPath, directoryOptions, { app, fs, path }),
         properties: ["openDirectory", "createDirectory"],
       });
   

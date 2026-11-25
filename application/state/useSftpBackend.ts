@@ -159,17 +159,22 @@ export const useSftpBackend = () => {
 
   const showSaveDialog = useCallback(async (
     defaultPath: string,
-    filters?: Array<{ name: string; extensions: string[] }>
+    filters?: Array<{ name: string; extensions: string[] }>,
+    directoryOptions?: NetcattyDialogDirectoryOptions,
   ) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.showSaveDialog) return null;
-    return bridge.showSaveDialog(defaultPath, filters);
+    return bridge.showSaveDialog(defaultPath, filters, directoryOptions);
   }, []);
 
-  const selectDirectory = async (title?: string, defaultPath?: string) => {
+  const selectDirectory = async (
+    title?: string,
+    defaultPath?: string,
+    directoryOptions?: NetcattyDialogDirectoryOptions,
+  ) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.selectDirectory) return null;
-    return bridge.selectDirectory(title, defaultPath);
+    return bridge.selectDirectory(title, defaultPath, directoryOptions);
   };
 
   return {
