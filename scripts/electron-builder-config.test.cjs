@@ -40,6 +40,37 @@ test("build.files includes the prompt classifier required by Mosh", () => {
   assert.equal(promptSecurity.isUntrustedTerminalInputPrompt("验证码："), true);
 });
 
+test("build.files includes shared interrupt parsing, command log, SDK session identity, and localShell CJS modules", () => {
+  for (const sharedPath of [
+    "domain/terminalInterruptParsing.shared.cjs",
+    "domain/programmaticCommandLog.shared.cjs",
+    "domain/sdkSessionIdentity.shared.cjs",
+  ]) {
+    assert.ok(
+      config.files.includes(sharedPath),
+      `packaged Electron build requires ${sharedPath} in build.files`,
+    );
+  }
+  assert.ok(
+    config.files.includes("lib/**/*.cjs") && config.files.includes("lib/**/*.json"),
+    "packaged Electron build requires lib/localShell.cjs and lib/localShellRules.json",
+  );
+
+  const interruptParsing = require("../domain/terminalInterruptParsing.shared.cjs");
+  assert.equal(interruptParsing.isCompletePasswordPrompt("[sudo] password for alice:"), true);
+
+  const commandLog = require("../domain/programmaticCommandLog.shared.cjs");
+  assert.equal(typeof commandLog.createProgrammaticCommandLogRewriter, "function");
+
+  const sdkIdentity = require("../domain/sdkSessionIdentity.shared.cjs");
+  const encoded = sdkIdentity.encodeSdkSessionIdentity("t-1", "codex", "/bin/codex", "app-server");
+  assert.equal(sdkIdentity.parseSdkSessionIdentity(encoded)?.runtime, "app-server");
+
+  const localShell = require("../lib/localShell.cjs");
+  assert.equal(localShell.classifyLocalShellType("/bin/zsh", "darwin"), "posix");
+  assert.equal(typeof localShell.isWindowsAppExecutionAliasPath, "function");
+});
+
 test("build.files includes the container runtime adapter", () => {
   assert.ok(
     config.files.includes("domain/systemManager/containerRuntime.shared.cjs"),
