@@ -2,7 +2,7 @@
  * Real-host integration through fileOps entry points (list/mkdir/write/rename/delete)
  * used by UI IPC — same scpBackend under the hood, different ship surface.
  *
- * Env: NETCATTY_SCP_IT_HOST / USER / PASSWORD (same as scpIntegration.real.test.cjs)
+ * Env: NETCATTY_SCP_IT_HOST / USER / PASSWORD (same as scpIntegration.live.test.cjs)
  */
 
 "use strict";
@@ -153,11 +153,4 @@ suite("real SCP via fileOps IPC surface", () => {
     assert.ok(!afterDel.includes("b.txt"));
     console.log("[scp-fileops-it] ops ok", { names, afterDel });
   });
-
 });
-
-if (!ENABLED) {
-  describe("real SCP fileOps (skipped)", () => {
-    it("needs NETCATTY_SCP_IT_* env", () => { assert.ok(true); });
-  });
-}

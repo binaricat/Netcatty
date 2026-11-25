@@ -236,15 +236,3 @@ suite("real OpenSSH SCP integration (shipped scpBackend)", () => {
     assert.equal(link.linkTarget, "directory");
   });
 });
-
-// Always-visible marker so logs show skip reason when env unset
-if (!ENABLED) {
-  describe("real OpenSSH SCP integration (skipped — set NETCATTY_SCP_IT_HOST/PASSWORD)", () => {
-    it("documents skip condition", () => {
-      console.log(
-        "[scp-it] skipped: export NETCATTY_SCP_IT_HOST NETCATTY_SCP_IT_USER NETCATTY_SCP_IT_PASSWORD (or NETCATTY_SCP_IT=1 with those set)",
-      );
-      assert.ok(true);
-    });
-  });
-}
