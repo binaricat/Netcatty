@@ -2110,11 +2110,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       tabId = workspace.id;
     } else {
       const terminal = sessionsRef.current.find((candidate) => candidate.id === target.targetId);
-      if (!terminal) return false;
-      tabId = terminal.workspaceId ?? terminal.id;
-      if (terminal.workspaceId) {
-        onSetWorkspaceFocusedSessionRef.current?.(terminal.workspaceId, terminal.id);
-      }
+      // Reject hidden/popped-out terminals (no main-window tab) and workspace
+      // members (focused via their owning `workspace:<id>` scope so the active
+      // chat shown in the workspace matches the clicked row).
+      if (!terminal || terminal.hiddenFromTabs || terminal.workspaceId) return false;
+      tabId = terminal.id;
     }
     activeTabStore.setActiveTabId(tabId);
     if (prepareSidePanelTool(tabId, 'ai')) {

@@ -15,6 +15,8 @@ export type AITerminalSessionInfo = {
   shellType?: string;
   deviceType?: string;
   connected: boolean;
+  workspaceId?: string;
+  hiddenFromTabs?: boolean;
   hostChain?: Array<{ hostId: string; label?: string; hostname?: string }>;
   activePortForwards?: Array<{
     ruleId: string;
@@ -98,6 +100,8 @@ export const buildAITerminalSessionInfo = (
     shellType: session?.shellType && session.shellType !== 'unknown' ? session.shellType : undefined,
     deviceType,
     connected: session?.status === 'connected',
+    ...(session?.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session?.hiddenFromTabs ? { hiddenFromTabs: true } : {}),
     ...(hostChain?.length ? { hostChain } : {}),
     ...(activePortForwards?.length ? { activePortForwards } : {}),
   };

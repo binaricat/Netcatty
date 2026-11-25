@@ -20,6 +20,8 @@ export interface GlobalManagerTerminalInfo {
   label: string;
   hostname: string;
   connected: boolean;
+  workspaceId?: string;
+  hiddenFromTabs?: boolean;
 }
 
 export interface GlobalManagerHostInfo {
@@ -135,7 +137,16 @@ export function buildGlobalManagerRows(input: BuildGlobalManagerRowsInput): Glob
       }
     } else if (scopeKey.startsWith('terminal:')) {
       const targetId = scopeKey.slice('terminal:'.length);
-      if (liveTerminals.has(targetId) && !activeElsewhereTargetBySessionId.has(activeChatId)) {
+      const terminal = liveTerminals.get(targetId);
+      // Only standalone, visible main-window terminal tabs own an independent
+      // AI side panel. Workspace members defer to their `workspace:<id>` panel
+      // pointer, and hidden/popped-out terminals have no main-window tab.
+      if (
+        terminal
+        && !terminal.workspaceId
+        && !terminal.hiddenFromTabs
+        && !activeElsewhereTargetBySessionId.has(activeChatId)
+      ) {
         activeElsewhereTargetBySessionId.set(activeChatId, { type: 'terminal', targetId });
       }
     }

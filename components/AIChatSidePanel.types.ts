@@ -125,6 +125,8 @@ export interface AIChatSidePanelProps {
     hostname: string;
     label: string;
     connected: boolean;
+    workspaceId?: string;
+    hiddenFromTabs?: boolean;
   }>;
 
   // Terminal session context (from parent)

@@ -31,6 +31,8 @@ export type AIPanelTerminalSessionLike = {
   shellType?: string;
   deviceType?: string;
   connected: boolean;
+  workspaceId?: string;
+  hiddenFromTabs?: boolean;
   hostChain?: AIPanelHostChainHop[];
   activePortForwards?: AIPanelPortForwardLike[];
 };
@@ -97,6 +99,8 @@ function aiTerminalSessionInfoEqual(
     && a.shellType === b.shellType
     && a.deviceType === b.deviceType
     && a.connected === b.connected
+    && a.workspaceId === b.workspaceId
+    && Boolean(a.hiddenFromTabs) === Boolean(b.hiddenFromTabs)
     && hostChainEqual(a.hostChain, b.hostChain)
     && portForwardsEqual(a.activePortForwards, b.activePortForwards);
 }
