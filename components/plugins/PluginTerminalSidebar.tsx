@@ -8,7 +8,7 @@ import { collectPluginTerminalSidebarPages, PLUGIN_TERMINAL_SIDEBAR_CONTEXT, req
 import { PluginContributionIcon } from './PluginContributionIcon';
 import { Button } from '../ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
-import { PluginHostDrawnPage } from './PluginHostDrawnPage';
+import { LazyPluginHostDrawnPage } from './LazyPluginHostDrawnPage';
 
 export function PluginTerminalSidebarLauncher({ sessionId, buttonClassName = 'h-6 w-6' }: { sessionId: string; buttonClassName?: string }) {
   const { locale } = useI18n();
@@ -44,6 +44,6 @@ export function PluginTerminalSidebarPageHost({ page, tabId, sessionId, getSessi
   }, [getSession, sessionId, tabId]);
   return <section className="flex h-full min-h-0 flex-col overflow-hidden" aria-label={`${page.title} — ${page.pluginName}`} data-plugin-terminal-sidebar>
     {showHeader && <header className="flex h-7 shrink-0 items-center gap-2 border-b border-border px-2 text-xs"><PluginContributionIcon pluginId={page.pluginId} icon={page.icon} size={12} /><span className="truncate">{page.title}</span></header>}
-    <div className="min-h-0 flex-1" onFocusCapture={focused}><PluginHostDrawnPage pluginId={page.pluginId} viewId={page.viewId} version={page.version} slot={`terminal-sidebar:${tabId}:${sessionId}`} active context={PLUGIN_TERMINAL_SIDEBAR_CONTEXT} subscribeHidden={subscribeHidden} unavailable={unavailable} loadingLabel={t('plugins.sidebar.loading')} /></div>
+    <div className="min-h-0 flex-1" onFocusCapture={focused}><LazyPluginHostDrawnPage pluginId={page.pluginId} viewId={page.viewId} version={page.version} slot={`terminal-sidebar:${tabId}:${sessionId}`} active context={PLUGIN_TERMINAL_SIDEBAR_CONTEXT} subscribeHidden={subscribeHidden} unavailable={unavailable} loadingLabel={t('plugins.sidebar.loading')} /></div>
   </section>;
 }

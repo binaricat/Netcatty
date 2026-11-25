@@ -2,7 +2,12 @@ import { useHostDrawnPluginView } from '../../application/state/useHostDrawnPlug
 import { PluginSettingsEntry } from './PluginSettingsEntry';
 import { PluginRemoteSurface } from './PluginRemoteSurface';
 
-export function PluginHostDrawnPage(props: Parameters<typeof useHostDrawnPluginView>[0] & { loadingLabel: string; pluginId: string }) {
+export type PluginHostDrawnPageProps = Parameters<typeof useHostDrawnPluginView>[0] & {
+  loadingLabel: string;
+  pluginId: string;
+};
+
+export function PluginHostDrawnPage(props: PluginHostDrawnPageProps) {
   const view = useHostDrawnPluginView(props);
   if (!view.visible) return null;
   if (view.loading) return <p data-plugin-view-slot={props.slot.split(':')[0]} role="status" className="p-4 text-sm text-muted-foreground">{props.loadingLabel}</p>;

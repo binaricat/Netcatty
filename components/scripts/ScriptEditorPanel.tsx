@@ -5,7 +5,7 @@ import type { Snippet } from '@/domain/models';
 import { DEFAULT_SCRIPT_TEMPLATE } from '@/domain/snippetScript.ts';
 import { STORAGE_KEY_SCRIPT_EDITOR_HEIGHT } from '@/infrastructure/config/storageKeys.ts';
 import { localStorageAdapter } from '@/infrastructure/persistence/localStorageAdapter.ts';
-import { ScriptCodeEditor } from './ScriptCodeEditor';
+import { LazyScriptCodeEditor } from './LazyScriptCodeEditor';
 import { ScriptMetaFields } from './ScriptMetaFields';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -141,7 +141,7 @@ export const ScriptEditorPanel: React.FC<ScriptEditorPanelProps> = ({
         </div>
 
         <div className="relative rounded-md border border-border/60 overflow-hidden bg-background">
-          <ScriptCodeEditor
+          <LazyScriptCodeEditor
             value={editorValue}
             onChange={(command) => onChange({ ...snippet, command })}
             language={language}

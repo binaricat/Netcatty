@@ -18,7 +18,7 @@ import {
   resolvePluginViewSnapshotSelection,
   type PluginViewSnapshotSelection,
 } from './pluginViewLifecycle';
-import { pluginViewSessions } from './pluginViewSession';
+import { closePluginViewSessionIfLoaded } from './pluginViewSessionRegistry';
 import { usePluginContributions } from './usePluginContributions';
 
 export const OPEN_PLUGIN_VIEW_EVENT = 'netcatty:open-plugin-view';
@@ -137,13 +137,13 @@ export function usePluginViewLifecycle({
   }, [activeView, requested]);
 
   useEffect(() => {
-    const stop = pluginViewTabStore.onDidClose(({ tab }) => pluginViewSessions.closeView(tab.viewId));
+    const stop = pluginViewTabStore.onDidClose(({ tab }) => closePluginViewSessionIfLoaded(tab.viewId));
     return () => { stop(); };
   }, []);
 
   const close = useCallback(async () => {
     setRequested(null);
-    if (activeView) pluginViewSessions.closeView(activeView.view.id);
+    if (activeView) closePluginViewSessionIfLoaded(activeView.view.id);
     // An overlay can be requested while a different plugin tab stays active.
     // Dismissing that overlay must not close the tab underneath it.
     if (activeView?.view.location === 'tab' && activePluginTab?.viewId === activeView.view.id) {

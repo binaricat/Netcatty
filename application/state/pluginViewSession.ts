@@ -1,4 +1,5 @@
 import { createPluginRemoteTree } from './pluginRemoteTree';
+import { registerLoadedPluginViewSessions } from './pluginViewSessionRegistry';
 import { validatePluginStylesheet } from '@/domain/pluginViewStylePolicy.cjs';
 import type { HostDrawnViewEvent } from '@netcatty/plugin-contract';
 
@@ -76,3 +77,4 @@ export class PluginViewSessions {
   dispose() { for (const session of [...this.sessions.values()]) session.dispose(); }
 }
 export const pluginViewSessions = new PluginViewSessions();
+registerLoadedPluginViewSessions(pluginViewSessions);

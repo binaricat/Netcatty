@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import { RE2JS } from "re2js";
 import type { Host, HostTotpConfig } from "../domain/models";
 import { netcattyBridge } from "@/infrastructure/services/netcattyBridge.ts";
 import { Button } from "./ui/button";
@@ -77,11 +76,14 @@ async function decodeQrFile(file: File): Promise<string> {
   }
 }
 
-function validPattern(value: string): string | null {
+async function validPattern(value: string): Promise<string | null> {
   const trimmed = value.trim();
   if (!trimmed) return "";
   if (trimmed.length > 200) return null;
   try {
+    // Loaded on demand: RE2JS is only needed when validating a custom TOTP prompt
+    // regex, while the host editor is part of the startup bundle.
+    const { RE2JS } = await import("re2js");
     RE2JS.compile(trimmed);
     return trimmed;
   } catch {
@@ -259,7 +261,8 @@ export const HostTotpFields: React.FC<HostTotpFieldsProps> = ({
 
   const commitSetup = async (options?: { requireSecret?: boolean }): Promise<HostTotpFlushResult> => {
     const expectedHostId = hostIdRef.current;
-    const patternValue = validPattern(patternRef.current);
+    const patternValue = await validPattern(patternRef.current);
+    if (hostIdRef.current !== expectedHostId) return { ok: false };
     if (patternValue == null) {
       setError("pattern");
       return { ok: false };

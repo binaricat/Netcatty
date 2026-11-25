@@ -44,7 +44,13 @@ test('Vault navigation mounts a real content slot, yields to host dialogs, and w
   }
   const root = createRoot(document.getElementById('root')!);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 35));
-  const clickPage = async () => { await act(async () => { document.querySelector<HTMLButtonElement>('button[aria-label="Synthetic page — Synthetic plugin"]')!.click(); await settle(); }); };
+  const clickPage = async () => {
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('button[aria-label="Synthetic page — Synthetic plugin"]')!.click();
+      await import('./plugins/PluginHostDrawnPage');
+      await settle();
+    });
+  };
   try {
     activeTabStore.setActiveTabId('vault');
     await act(async () => { root.render(<I18nProvider locale="en"><Fixture /></I18nProvider>); await settle(); });
