@@ -410,6 +410,50 @@ test("extractTrailingIdlePrompt recognizes Powerlevel10k ❯ and preserves trail
   assert.equal(extractTrailingIdlePrompt("welcome\r\n~ ❯\r\n"), "");
 });
 
+test("isDefaultPosixPromptLine matches Powerline separator idle prompts", () => {
+  for (const prompt of [
+    " ubuntu@VM-0-10-ubuntu \uE0B0 /opt/xxxx \uE0B0 ",
+    "\uE0B2 ubuntu@VM-0-10-ubuntu \uE0B0 /opt/xxxx \uE0B0 ",
+    "ubuntu@VM-0-10-ubuntu\uE0B0 /opt/xxxx\uE0B0",
+    "user@host\uE0B0 ",
+    "~\uE0B0 ",
+    "~/src \uE0B0 ",
+    "/opt/xxxx\uE0B0 ",
+    ...Array.from({ length: 8 }, (_, i) => `~/src ${String.fromCharCode(0xE0B0 + i)} `),
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt, prompt);
+  }
+});
+
+test("Powerline recognition rejects pending input, bare separators, and other PUA endings", () => {
+  for (const line of [
+    " ubuntu@VM-0-10-ubuntu \uE0B0 /opt/xxxx \uE0B0 ls",
+    "\uE0B2 ubuntu@VM-0-10-ubuntu \uE0B0 /opt/xxxx \uE0B0 echo hi",
+    "ubuntu@VM-0-10-ubuntu\uE0B0 /opt/xxxx\uE0B0ls",
+    "~/src \uE0B0 echo hi",
+    "proj \uE0B0 ",
+    "copied output \uE0B0 ",
+    " ubuntu@VM-0-10-ubuntu  /opt/xxxx ",
+    ...Array.from({ length: 8 }, (_, i) => String.fromCharCode(0xE0B0 + i))
+      .flatMap(separator => [separator, `${separator} `]),
+    ...[0xE000, 0xE0AF, 0xE0B8, 0xF000, 0xF8FF]
+      .map(code => `~/src ${String.fromCharCode(code)} `),
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
+test("Powerline recognition preserves existing idle prompt recognition", () => {
+  for (const prompt of ["~ ❯", "user@host ~ ❯", "user@host:~$"]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+    assert.equal(extractTrailingIdlePrompt(prompt), prompt, prompt);
+  }
+  const twoLinePrompt = "[demo@example-host ~]\n$";
+  assert.equal(extractTrailingIdlePrompt(twoLinePrompt), twoLinePrompt);
+});
+
 test("trackSessionIdlePrompt and getFreshIdlePrompt accept a Powerlevel10k ❯ prompt", () => {
   const session = {};
   trackSessionIdlePrompt(session, "Last login...\r\n~ ❯ ");
