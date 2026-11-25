@@ -55,6 +55,7 @@ import {
   resolvePrimaryProtocolSwitchPort,
   prepareTelnetCredentialsForSave,
   prepareProxyConfigForSave,
+  mapProxySaveErrorKey,
   nextFormAfterSelectProxyProfile,
   nextFormAfterClearHostChain,
   nextFormAfterRemoveHostFromChain,
@@ -571,18 +572,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       identities,
     });
     if (proxySave.error) {
-      const messageKey = proxySave.error === "port"
-        ? "proxyProfiles.error.port"
-        : proxySave.error === "required"
-          ? "hostDetails.proxyPanel.error.required"
-          : proxySave.error === "missingSaved"
-            ? "hostDetails.proxyPanel.missingSaved"
-            : proxySave.error === "missingIdentity"
-              ? "hostDetails.proxyPanel.missingIdentity"
-              : proxySave.error === "incompleteIdentity"
-                ? "hostDetails.proxyPanel.incompleteIdentity"
-                : "hostDetails.proxyPanel.unreadableIdentity";
-      toast.error(t(messageKey));
+      toast.error(t(mapProxySaveErrorKey(proxySave.error)));
       setActiveSubPanel("proxy");
       return;
     }

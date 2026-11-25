@@ -2,10 +2,9 @@
  * Serial Host Details Panel
  * A dedicated editor for serial port hosts (distinct from SSH HostDetailsPanel)
  */
-import { Eye, EyeOff, Save, Tag, Usb, X } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Eye, EyeOff, Save, Tag, X } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
-import { useTerminalBackend } from '../application/state/useTerminalBackend';
 import type { GroupConfig, Host, SerialConfig, SerialFlowControl, SerialParity } from '../domain/models';
 import {
   resolveSerialBackspaceFormValue,
@@ -17,8 +16,9 @@ import { isSerialEndpointPath, isWindowsNamedPipePath } from '../domain/serialEn
 import {
   SerialAdvancedOptionsSection,
   SerialBaudRateField,
-  type SerialPortInfo,
 } from './SerialAdvancedOptions';
+import { SerialPortField } from './serial/SerialPortField';
+import { useSerialPortDiscovery } from './serial/useSerialPortDiscovery';
 import { Button } from './ui/button';
 import { Combobox, ComboboxOption, MultiCombobox } from './ui/combobox';
 import { Input } from './ui/input';
@@ -61,9 +61,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
   resizeAriaLabel,
 }) => {
   const { t } = useI18n();
-  const terminalBackend = useTerminalBackend();
-  const [ports, setPorts] = useState<SerialPortInfo[]>([]);
-  const [isLoadingPorts, setIsLoadingPorts] = useState(false);
+  const { portOptions, isLoadingPorts, loadPorts } = useSerialPortDiscovery();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -100,22 +98,6 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
   const [tags, setTags] = useState<string[]>(initialData.tags || []);
   const [group, setGroup] = useState(initialData.group || '');
   const [notes, setNotes] = useState(initialData.notes ?? '');
-
-  const loadPorts = useCallback(async () => {
-    setIsLoadingPorts(true);
-    try {
-      const result = await terminalBackend.listSerialPorts();
-      setPorts(result);
-    } catch (err) {
-      console.error('[Serial] Failed to list ports:', err);
-    } finally {
-      setIsLoadingPorts(false);
-    }
-  }, [terminalBackend]);
-
-  useEffect(() => {
-    loadPorts();
-  }, [loadPorts]);
 
   const handleSave = () => {
     if (!selectedPort) return;
@@ -163,15 +145,6 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
 
     onSave(updatedHost);
   };
-
-  // Convert ports to Combobox options
-  const portOptions: ComboboxOption[] = useMemo(() => {
-    return ports.map((port) => ({
-      value: port.path,
-      label: port.path,
-      sublabel: port.manufacturer || undefined,
-    }));
-  }, [ports]);
 
   // Tag options for MultiCombobox
   const tagOptions: ComboboxOption[] = useMemo(() => {
@@ -227,38 +200,14 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
         </div>
 
         {/* Serial Port */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="serial-port">{t('serial.field.port')}</Label>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={loadPorts}
-              disabled={isLoadingPorts}
-              className="h-6 px-2 text-xs"
-            >
-              {t('common.refresh')}
-            </Button>
-          </div>
-          <Combobox
-            options={portOptions}
-            value={selectedPort}
-            onValueChange={setSelectedPort}
-            placeholder={t('serial.field.selectPort')}
-            emptyText={t('serial.noPorts')}
-            allowCreate
-            createText={t('common.use')}
-            icon={<Usb size={14} className="text-muted-foreground" />}
-          />
-          <p className="text-xs text-muted-foreground">
-            {t('serial.field.namedPipeHint')}
-          </p>
-          {!isPortValid && selectedPort && (
-            <p className="text-xs text-destructive">
-              {t('serial.field.customPortPlaceholder')}
-            </p>
-          )}
-        </div>
+        <SerialPortField
+          value={selectedPort}
+          onChange={setSelectedPort}
+          portOptions={portOptions}
+          isLoadingPorts={isLoadingPorts}
+          onRefresh={loadPorts}
+          isPortValid={isPortValid}
+        />
 
         {/* Baud Rate (not used by named pipes) */}
         {!isNamedPipe && (

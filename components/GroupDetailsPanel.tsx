@@ -60,7 +60,7 @@ import { useAvailableFonts } from "../application/state/fontStore";
 import { toast } from "./ui/toast";
 import { HostNotesEditor } from "./host/HostNotesEditor";
 import { GroupSshSettingsSection } from "./GroupSshSettingsSection";
-import { prepareProxyConfigForSave } from "./HostDetailsPanel.helpers";
+import { mapProxySaveErrorKey, prepareProxyConfigForSave } from "./HostDetailsPanel.helpers";
 import { TerminalEncodingSelect } from "./TerminalEncodingSelect";
 
 type SubPanel = "none" | "proxy" | "chain" | "env-vars" | "theme-select";
@@ -535,18 +535,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
       })
       : null;
     if (proxySave?.error) {
-      const messageKey = proxySave.error === "port"
-        ? "proxyProfiles.error.port"
-        : proxySave.error === "required"
-          ? "hostDetails.proxyPanel.error.required"
-          : proxySave.error === "missingSaved"
-            ? "hostDetails.proxyPanel.missingSaved"
-            : proxySave.error === "missingIdentity"
-              ? "hostDetails.proxyPanel.missingIdentity"
-              : proxySave.error === "incompleteIdentity"
-                ? "hostDetails.proxyPanel.incompleteIdentity"
-                : "hostDetails.proxyPanel.unreadableIdentity";
-      toast.error(t(messageKey));
+      toast.error(t(mapProxySaveErrorKey(proxySave.error)));
       setActiveSubPanel("proxy");
       return;
     }

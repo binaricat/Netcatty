@@ -22,3 +22,6 @@ export {
 } from './HostDetailsSection';
 
 export { HostDetailsOverrideReset } from './HostDetailsOverrideReset';
+
+export { SshAlgorithmOverridesCollapsible } from './SshAlgorithmOverridesCollapsible';
+export type { SshAlgorithmOverridesCollapsibleProps } from './SshAlgorithmOverridesCollapsible';
