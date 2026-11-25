@@ -6,6 +6,7 @@
  */
 import { Check, Search, Terminal } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useI18n } from '../../application/i18n/I18nProvider';
 import { matchesWorkspaceHostPickerQuery } from '../../domain/searchMatcher';
 import { Host } from '../../types';
 import { DistroAvatar } from '../DistroAvatar';
@@ -70,6 +71,8 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
   workspaceTitle,
   onAdd,
 }) => {
+  const { t } = useI18n();
+  const localTerminalLabel = t('qs.localTerminal');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -109,8 +112,8 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
   const localMatches = useMemo(() => {
     const term = query.trim().toLowerCase();
     if (!term) return true;
-    return 'local terminal localhost'.includes(term);
-  }, [query]);
+    return 'local terminal localhost'.includes(term) || localTerminalLabel.toLowerCase().includes(term);
+  }, [query, localTerminalLabel]);
 
   const filteredHosts = useMemo(() => {
     const term = query.trim();
@@ -134,18 +137,18 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
     };
 
     if (localMatches) {
-      pushHeader('header:local', 'Local Shells');
+      pushHeader('header:local', t('qs.localShells'));
       pushItem({ type: 'local', id: LOCAL_ITEM_ID });
     }
     if (filteredHosts.length > 0) {
-      pushHeader('header:hosts', 'Hosts');
+      pushHeader('header:hosts', t('qs.hosts'));
       for (const host of filteredHosts) {
         pushItem({ type: 'host', id: host.id, host });
       }
     }
 
     return { items: list, visualRows: visual, itemIndexToVisualIndex: itemToVisual };
-  }, [filteredHosts, localMatches]);
+  }, [filteredHosts, localMatches, t]);
 
   useEffect(() => {
     if (!open) return;
@@ -219,13 +222,13 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
     if (row.kind === 'hint') {
       return (
         <div className="px-4 py-2 flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Pick one or more</span>
-          <kbd className="text-[10px] text-muted-foreground bg-muted px-1 py-0.5 rounded">Space / Enter</kbd>
-          <span className="text-[10px] text-muted-foreground">toggle</span>
+          <span className="text-xs text-muted-foreground">{t('workspace.picker.selectHint')}</span>
+          <kbd className="text-[10px] text-muted-foreground bg-muted px-1 py-0.5 rounded">{t('workspace.picker.toggleKeys')}</kbd>
+          <span className="text-[10px] text-muted-foreground">{t('workspace.picker.toggleHint')}</span>
           <kbd className="text-[10px] text-muted-foreground bg-muted px-1 py-0.5 rounded">
             {typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter
           </kbd>
-          <span className="text-[10px] text-muted-foreground">add</span>
+          <span className="text-[10px] text-muted-foreground">{t('common.add')}</span>
         </div>
       );
     }
@@ -250,7 +253,7 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
           <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground">
             <Terminal size={16} />
           </div>
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">Local Terminal</span>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{localTerminalLabel}</span>
           {isChecked && <Check size={14} className="text-primary shrink-0" />}
         </div>
       );
@@ -268,13 +271,13 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
         </div>
         <div className="ml-2 flex min-w-0 shrink-0 items-center gap-2">
           <div className="max-w-[12rem] truncate text-[11px] text-muted-foreground">
-            {host.group ? `Personal / ${host.group}` : 'Personal'}
+            {t('workspace.picker.personal')}{host.group ? ` / ${host.group}` : ''}
           </div>
           {isChecked && <Check size={14} className="text-primary shrink-0" />}
         </div>
       </div>
     );
-  }, [handleTargetClick, selected, selectedIndex]);
+  }, [handleTargetClick, localTerminalLabel, selected, selectedIndex, t]);
 
   if (!open) return null;
 
@@ -301,7 +304,7 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
               setSelectedIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Search hosts, tags, or local shells..."
+            placeholder={t('workspace.picker.search')}
             className="flex-1 h-8 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-0 text-sm"
           />
           {workspaceTitle && (
@@ -318,7 +321,7 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
         <div className="min-h-0 flex-1 overflow-hidden" data-host-picker-virtual="add-workspace">
           {items.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-muted-foreground">
-              No matches
+              {t('common.noResultsFound')}
             </div>
           ) : (
             <VariableSizeVirtualList<VisualRow>
@@ -337,10 +340,10 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
             QuickSwitcher's chrome with a single action strip tacked on. */}
         <div className="flex items-center justify-end gap-2 px-3 py-2 border-t border-border">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button size="sm" disabled={count === 0} onClick={handleCommit}>
-            {count === 0 ? 'Add' : `Add ${count}`}
+            {count === 0 ? t('common.add') : t('workspace.picker.addCount', { count })}
           </Button>
         </div>
       </div>

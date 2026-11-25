@@ -1137,7 +1137,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
                 update("group", val);
                 setGroupInputValue(val);
               }}
-              createText="Create Group"
+              createText={t("hostDetails.createGroup")}
               triggerClassName="flex-1 h-10"
             />
           </div>
@@ -1150,10 +1150,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
               options={tagOptions}
               values={form.tags || []}
               onValuesChange={(vals) => update("tags", vals)}
-              placeholder="Add tags..."
+              placeholder={t("hostDetails.addTag")}
               allowCreate={true}
               onCreateNew={(val) => onCreateTag?.(val)}
-              createText="Create Tag"
+              createText={t("hostDetails.createTag")}
               triggerClassName="flex-1 min-h-10"
             />
           </div>

@@ -1,4 +1,5 @@
 import React, { useRef } from "react";
+import { useI18n } from "../../application/i18n/I18nProvider";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -33,6 +34,7 @@ export const SftpClipboardUploadDialog: React.FC<SftpClipboardUploadDialogProps>
   currentPath,
   onUploaded,
 }) => {
+  const { t } = useI18n();
   // Double-click guard is scoped to the request identity so a later paste can
   // confirm while an earlier background transfer is still running.
   const confirmStartedForRef = useRef<SftpClipboardUploadRequest | null>(null);
@@ -66,9 +68,9 @@ export const SftpClipboardUploadDialog: React.FC<SftpClipboardUploadDialogProps>
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-[calc(100vw-2rem)] overflow-hidden sm:max-w-md">
         <DialogHeader className="min-w-0 pr-6">
-          <DialogTitle>Upload clipboard files?</DialogTitle>
+          <DialogTitle>{t("sftp.clipboardUpload.title")}</DialogTitle>
           <DialogDescription>
-            Upload {fileCount} item{fileCount === 1 ? "" : "s"} to:
+            {t("sftp.clipboardUpload.description", { count: fileCount })}
           </DialogDescription>
         </DialogHeader>
 
@@ -90,7 +92,7 @@ export const SftpClipboardUploadDialog: React.FC<SftpClipboardUploadDialogProps>
               ))}
               {remainingCount > 0 && (
                 <div className="px-3 py-2 text-sm text-muted-foreground">
-                  and {remainingCount} more...
+                  {t("sftp.clipboardUpload.more", { count: remainingCount })}
                 </div>
               )}
             </div>
@@ -102,10 +104,10 @@ export const SftpClipboardUploadDialog: React.FC<SftpClipboardUploadDialogProps>
             variant="outline"
             onClick={() => sftpClipboardUploadStore.clear(request)}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={handleConfirm} disabled={!request}>
-            Upload
+            {t("sftp.upload")}
           </Button>
         </DialogFooter>
       </DialogContent>
