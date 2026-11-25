@@ -80,6 +80,9 @@ module.exports = {
         // Renderer and Mosh's main-process bootstrap share the same
         // fail-closed prompt classifier at runtime.
         'domain/terminalPromptSecurity.shared.cjs',
+        'domain/terminalInterruptParsing.shared.cjs',
+        'domain/programmaticCommandLog.shared.cjs',
+        'domain/sdkSessionIdentity.shared.cjs',
         'domain/pluginRuntimePolicy.cjs',
         'domain/pluginGitHubRepository.cjs',
         'domain/pluginPermissionDescriptions.cjs',
