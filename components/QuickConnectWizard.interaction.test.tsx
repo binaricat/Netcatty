@@ -209,6 +209,31 @@ test("explicit Close dismisses the protocol step", async () => {
   });
 });
 
+test("switching protocol options updates aria-pressed, data-state, and active contrast classes", async () => {
+  await withWizard(async (f) => {
+    const ssh = document.querySelector<HTMLButtonElement>('button[data-protocol="ssh"]')!;
+    const telnet = document.querySelector<HTMLButtonElement>('button[data-protocol="telnet"]')!;
+    assert.ok(ssh && telnet);
+
+    assert.equal(ssh.getAttribute("aria-pressed"), "true");
+    assert.equal(ssh.getAttribute("data-state"), "active");
+    assert.ok(ssh.className.includes("border-primary"));
+    assert.equal(telnet.getAttribute("aria-pressed"), "false");
+    assert.equal(telnet.getAttribute("data-state"), "inactive");
+    assert.ok(!telnet.className.includes("border-primary"));
+
+    await f.click(telnet);
+
+    assert.equal(telnet.getAttribute("aria-pressed"), "true");
+    assert.equal(telnet.getAttribute("data-state"), "active");
+    assert.ok(telnet.className.includes("border-primary"));
+    assert.ok(telnet.className.includes("ring-primary/30"));
+    assert.equal(ssh.getAttribute("aria-pressed"), "false");
+    assert.equal(ssh.getAttribute("data-state"), "inactive");
+    assert.ok(!ssh.className.includes("border-primary"));
+  });
+});
+
 for (const step of ["username", "auth"]) {
   test(`the header X explicitly closes the ${step} step`, async () => {
     await withWizard(async (f) => {

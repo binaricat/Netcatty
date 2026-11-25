@@ -31,7 +31,28 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Dropdown, DropdownContent, DropdownTrigger } from "./ui/dropdown";
 import { ScrollArea } from "./ui/scroll-area";
-import { PROTOCOL_VISUAL_STYLES } from "./protocolVisuals";
+import {
+  getProtocolOptionCardClass,
+  PROTOCOL_OPTION_CARD_IDLE_CLASS,
+  PROTOCOL_OPTION_CARD_SELECTED_CLASS,
+  PROTOCOL_OPTION_SUBTITLE_IDLE_CLASS,
+  PROTOCOL_OPTION_SUBTITLE_SELECTED_CLASS,
+  PROTOCOL_OPTION_TITLE_IDLE_CLASS,
+  PROTOCOL_OPTION_TITLE_SELECTED_CLASS,
+  PROTOCOL_VISUAL_STYLES,
+} from "./protocolVisuals";
+
+const QUICK_CONNECT_PROTOCOLS: ReadonlyArray<{
+  protocol: QuickConnectProtocol;
+  label: string;
+  commandPrefix: string;
+  defaultPort: number;
+}> = [
+  { protocol: "ssh", label: "SSH", commandPrefix: "ssh", defaultPort: 22 },
+  { protocol: "mosh", label: "Mosh", commandPrefix: "mosh", defaultPort: 22 },
+  { protocol: "et", label: "Eternal Terminal", commandPrefix: "et", defaultPort: 22 },
+  { protocol: "telnet", label: "Telnet", commandPrefix: "telnet", defaultPort: 23 },
+];
 
 
 
@@ -264,173 +285,66 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
       <div className="space-y-4">
       <h3 className="text-sm font-medium">{t("protocolSelect.chooseProtocol")}</h3>
       <div className="space-y-3">
-        {/* SSH */}
-        <button
-          className={cn(
-            "w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all text-left",
-            protocol === "ssh"
-              ? "border-primary bg-primary/5"
-              : "border-border/60 hover:border-border hover:bg-secondary/50",
-          )}
-          onClick={() => handleProtocolSelect("ssh")}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "h-10 w-10 rounded-lg flex items-center justify-center",
-                protocol === "ssh"
-                  ? PROTOCOL_VISUAL_STYLES.ssh.selected
-                  : PROTOCOL_VISUAL_STYLES.ssh.idle,
-              )}
+        {QUICK_CONNECT_PROTOCOLS.map((item) => {
+          const isSelected = protocol === item.protocol;
+          const visual = PROTOCOL_VISUAL_STYLES[item.protocol];
+          return (
+            <button
+              key={item.protocol}
+              type="button"
+              aria-pressed={isSelected}
+              data-state={isSelected ? "active" : "inactive"}
+              data-protocol={item.protocol}
+              className={getProtocolOptionCardClass(isSelected)}
+              onClick={() => handleProtocolSelect(item.protocol)}
             >
-              {PROTOCOL_VISUAL_STYLES.ssh.icon}
-            </div>
-            <div>
-              <div className="font-medium">SSH</div>
-              <div className="text-xs text-muted-foreground font-mono">
-                ssh {target.hostname}
+              <div className="flex items-center gap-3">
+                <div
+                  className={cn(
+                    "h-10 w-10 rounded-lg flex items-center justify-center transition-colors",
+                    isSelected ? visual.selected : visual.idle,
+                  )}
+                >
+                  {visual.icon}
+                </div>
+                <div>
+                  <div
+                    className={
+                      isSelected
+                        ? PROTOCOL_OPTION_TITLE_SELECTED_CLASS
+                        : PROTOCOL_OPTION_TITLE_IDLE_CLASS
+                    }
+                  >
+                    {item.label}
+                  </div>
+                  <div
+                    className={
+                      isSelected
+                        ? PROTOCOL_OPTION_SUBTITLE_SELECTED_CLASS
+                        : PROTOCOL_OPTION_SUBTITLE_IDLE_CLASS
+                    }
+                  >
+                    {item.commandPrefix} {target.hostname}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">{t("protocolSelect.port")}</span>
-            <Input
-              type="number"
-              value={protocol === "ssh" ? port : 22}
-              onChange={(e) => handleProtocolPortChange("ssh", e.target.value, 22)}
-              onClick={(e) => e.stopPropagation()}
-              className="w-16 h-7 text-xs text-center"
-              min={1}
-              max={65535}
-            />
-          </div>
-        </button>
-
-        {/* Mosh */}
-        <button
-          className={cn(
-            "w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all text-left",
-            protocol === "mosh"
-              ? "border-primary bg-primary/5"
-              : "border-border/60 hover:border-border hover:bg-secondary/50",
-          )}
-          onClick={() => handleProtocolSelect("mosh")}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "h-10 w-10 rounded-lg flex items-center justify-center",
-                protocol === "mosh"
-                  ? PROTOCOL_VISUAL_STYLES.mosh.selected
-                  : PROTOCOL_VISUAL_STYLES.mosh.idle,
-              )}
-            >
-              {PROTOCOL_VISUAL_STYLES.mosh.icon}
-            </div>
-            <div>
-              <div className="font-medium">Mosh</div>
-              <div className="text-xs text-muted-foreground font-mono">
-                mosh {target.hostname}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">{t("protocolSelect.port")}</span>
+                <Input
+                  type="number"
+                  value={isSelected ? port : item.defaultPort}
+                  onChange={(e) =>
+                    handleProtocolPortChange(item.protocol, e.target.value, item.defaultPort)
+                  }
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-16 h-7 text-xs text-center"
+                  min={1}
+                  max={65535}
+                />
               </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">{t("protocolSelect.port")}</span>
-            <Input
-              type="number"
-              value={protocol === "mosh" ? port : 22}
-              onChange={(e) => handleProtocolPortChange("mosh", e.target.value, 22)}
-              onClick={(e) => e.stopPropagation()}
-              className="w-16 h-7 text-xs text-center"
-              min={1}
-              max={65535}
-            />
-          </div>
-        </button>
-
-        {/* Eternal Terminal */}
-        <button
-          className={cn(
-            "w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all text-left",
-            protocol === "et"
-              ? "border-primary bg-primary/5"
-              : "border-border/60 hover:border-border hover:bg-secondary/50",
-          )}
-          onClick={() => handleProtocolSelect("et")}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "h-10 w-10 rounded-lg flex items-center justify-center",
-                protocol === "et"
-                  ? PROTOCOL_VISUAL_STYLES.et.selected
-                  : PROTOCOL_VISUAL_STYLES.et.idle,
-              )}
-            >
-              {PROTOCOL_VISUAL_STYLES.et.icon}
-            </div>
-            <div>
-              <div className="font-medium">Eternal Terminal</div>
-              <div className="text-xs text-muted-foreground font-mono">
-                et {target.hostname}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">{t("protocolSelect.port")}</span>
-            <Input
-              type="number"
-              value={protocol === "et" ? port : 22}
-              onChange={(e) => handleProtocolPortChange("et", e.target.value, 22)}
-              onClick={(e) => e.stopPropagation()}
-              className="w-16 h-7 text-xs text-center"
-              min={1}
-              max={65535}
-            />
-          </div>
-        </button>
-
-        {/* Telnet */}
-        <button
-          className={cn(
-            "w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all text-left",
-            protocol === "telnet"
-              ? "border-primary bg-primary/5"
-              : "border-border/60 hover:border-border hover:bg-secondary/50",
-          )}
-          onClick={() => handleProtocolSelect("telnet")}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "h-10 w-10 rounded-lg flex items-center justify-center",
-                protocol === "telnet"
-                  ? PROTOCOL_VISUAL_STYLES.telnet.selected
-                  : PROTOCOL_VISUAL_STYLES.telnet.idle,
-              )}
-            >
-              {PROTOCOL_VISUAL_STYLES.telnet.icon}
-            </div>
-            <div>
-              <div className="font-medium">Telnet</div>
-              <div className="text-xs text-muted-foreground font-mono">
-                telnet {target.hostname}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">{t("protocolSelect.port")}</span>
-            <Input
-              type="number"
-              value={protocol === "telnet" ? port : 23}
-              onChange={(e) => handleProtocolPortChange("telnet", e.target.value, 23)}
-              onClick={(e) => e.stopPropagation()}
-              className="w-16 h-7 text-xs text-center"
-              min={1}
-              max={65535}
-            />
-          </div>
-        </button>
+            </button>
+          );
+        })}
       </div>
       </div>
 
@@ -534,6 +448,9 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
       {/* Auth method tabs */}
       <div className="flex gap-1 p-1 bg-secondary/80 rounded-lg border border-border/60">
         <button
+          type="button"
+          aria-pressed={authMethod === "password"}
+          data-state={authMethod === "password" ? "active" : "inactive"}
           className={cn(
             "flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all",
             authMethod === "password"
@@ -549,6 +466,9 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
           {t("terminal.auth.password")}
         </button>
         <button
+          type="button"
+          aria-pressed={authMethod !== "password"}
+          data-state={authMethod !== "password" ? "active" : "inactive"}
           className={cn(
             "flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-md transition-all",
             authMethod !== "password"
@@ -607,38 +527,46 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
               <div className="space-y-2">
                 {keys
                   .filter((k) => k.category === "key")
-                  .map((key) => (
-                    <button
-                      key={key.id}
-                      className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors text-left",
-                        selectedKeyId === key.id
-                          ? "border-primary bg-primary/5"
-                          : "border-border/50 hover:bg-secondary/50",
-                      )}
-                      onClick={() => {
-                        setSelectedIdentityId(null);
-                        setSelectedKeyId(key.id);
-                      }}
-                    >
-                      <div
+                  .map((key) => {
+                    const isKeySelected = selectedKeyId === key.id;
+                    return (
+                      <button
+                        key={key.id}
+                        type="button"
+                        aria-pressed={isKeySelected}
+                        data-state={isKeySelected ? "active" : "inactive"}
                         className={cn(
-                          "h-8 w-8 rounded-lg flex items-center justify-center",
-                          "bg-primary/20 text-primary",
+                          "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border-2 transition-all text-left",
+                          isKeySelected
+                            ? PROTOCOL_OPTION_CARD_SELECTED_CLASS
+                            : PROTOCOL_OPTION_CARD_IDLE_CLASS,
                         )}
+                        onClick={() => {
+                          setSelectedIdentityId(null);
+                          setSelectedKeyId(key.id);
+                        }}
                       >
-                        <Key size={14} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">
-                          {key.label}
+                        <div
+                          className={cn(
+                            "h-8 w-8 rounded-lg flex items-center justify-center transition-colors",
+                            isKeySelected
+                              ? "bg-primary text-primary-foreground shadow-sm"
+                              : "bg-primary/10 text-primary",
+                          )}
+                        >
+                          <Key size={14} />
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          Type {key.type}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">
+                            {key.label}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            Type {key.type}
+                          </div>
                         </div>
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
               </div>
             </ScrollArea>
           )}
