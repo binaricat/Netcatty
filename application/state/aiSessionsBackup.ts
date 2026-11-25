@@ -119,28 +119,37 @@ export function mergeImportedSessions(current: AISession[], imported: AISession[
   return Array.from(byId.values()).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 }
 
+export type BackupMirrorInput = string | (() => string);
+
 /**
  * Debounced mirror scheduler. One rolling timer per process: the last
  * mutation batch wins, and the write happens `debounceMs` after the batch
  * settles (at most once per batch, per the durability spec).
+ * Accepts either a pre-serialized JSON string or a lazy serializer invoked
+ * only when the debounce timer or `flushNow()` actually runs.
  */
 export class DebouncedBackupMirror {
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private pendingJson: string | null = null;
+  private pendingInput: BackupMirrorInput | null = null;
 
   constructor(
     private readonly write: (json: string) => void,
     private readonly debounceMs: number = AI_SESSIONS_BACKUP_DEBOUNCE_MS,
   ) {}
 
-  schedule(json: string) {
-    this.pendingJson = json;
+  private emit(input: BackupMirrorInput) {
+    const json = typeof input === 'function' ? input() : input;
+    this.write(json);
+  }
+
+  schedule(input: BackupMirrorInput) {
+    this.pendingInput = input;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
-      const json = this.pendingJson;
-      this.pendingJson = null;
-      if (json != null) this.write(json);
+      const pending = this.pendingInput;
+      this.pendingInput = null;
+      if (pending != null) this.emit(pending);
     }, this.debounceMs);
   }
 
@@ -149,14 +158,14 @@ export class DebouncedBackupMirror {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    const json = this.pendingJson;
-    this.pendingJson = null;
-    if (json != null) this.write(json);
+    const pending = this.pendingInput;
+    this.pendingInput = null;
+    if (pending != null) this.emit(pending);
   }
 
   reset() {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    this.pendingJson = null;
+    this.pendingInput = null;
   }
 }

@@ -138,6 +138,52 @@ test('DebouncedBackupMirror flushNow writes the pending payload immediately', ()
   assert.deepEqual(writes, ['{"gen":1}']);
 });
 
+test('DebouncedBackupMirror defers lazy serializer execution until debounce timer or flushNow fires', async () => {
+  const writes: string[] = [];
+  const serialized: number[] = [];
+  const mirror = new DebouncedBackupMirror((json) => writes.push(json), 15);
+
+  mirror.schedule(() => {
+    serialized.push(1);
+    return '{"gen":1}';
+  });
+  mirror.schedule(() => {
+    serialized.push(2);
+    return '{"gen":2}';
+  });
+  // Neither producer runs synchronously during burst scheduling.
+  assert.deepEqual(serialized, []);
+  assert.deepEqual(writes, []);
+
+  await new Promise((resolve) => setTimeout(resolve, 35));
+  // Only the final producer in the burst is invoked when the timer fires.
+  assert.deepEqual(serialized, [2]);
+  assert.deepEqual(writes, ['{"gen":2}']);
+
+  // flushNow invokes only the pending lazy producer immediately; reset discards without calling it.
+  mirror.schedule(() => {
+    serialized.push(3);
+    return '{"gen":3}';
+  });
+  mirror.schedule(() => {
+    serialized.push(4);
+    return '{"gen":4}';
+  });
+  assert.deepEqual(serialized, [2]);
+  mirror.flushNow();
+  assert.deepEqual(serialized, [2, 4]);
+  assert.deepEqual(writes, ['{"gen":2}', '{"gen":4}']);
+
+  mirror.schedule(() => {
+    serialized.push(5);
+    return '{"gen":5}';
+  });
+  mirror.reset();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(serialized, [2, 4]);
+  assert.deepEqual(writes, ['{"gen":2}', '{"gen":4}']);
+});
+
 test('readLiveSessionsArray treats non-array JSON as empty (corrupt)', () => {
   assert.deepEqual(readLiveSessionsArray(null), []);
   assert.deepEqual(readLiveSessionsArray(''), []);
