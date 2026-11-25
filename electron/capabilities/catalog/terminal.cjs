@@ -25,6 +25,28 @@ const TERMINAL_CAPABILITIES = [
     },
   },
   {
+    id: "terminal.executeBulk",
+    domain: "terminal",
+    status: CAPABILITY_STATUS.IMPLEMENTED,
+    description: "Execute the same short command on several terminal sessions at once and wait for all of them.",
+    policy: {
+      write: true,
+      sensitiveRead: false,
+      longRunning: true,
+      requiresChatSession: true,
+      bypassesObserverBlock: false,
+      bypassesApproval: false,
+      bypassesChatCancel: false,
+      // One approval covers many hosts, so remembered grants and session-wide
+      // approvals must never satisfy it.
+      requiresFreshApproval: true,
+    },
+    surfaces: {
+      builtin: { rpcMethod: "netcatty/execBulk", mcpTool: "terminal_execute_bulk" },
+      public: { rpcMethod: "public/terminalExecuteBulk", mcpTool: "terminal_execute_bulk" },
+    },
+  },
+  {
     id: "terminal.start",
     domain: "terminal",
     status: CAPABILITY_STATUS.IMPLEMENTED,

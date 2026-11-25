@@ -1555,3 +1555,37 @@ test("skipPendingInputClear does not send line-kill keys", async () => {
   job.cancel();
 });
 
+
+test("execViaRawPty reports when it stopped collecting output at its cap", async () => {
+  const port = new EventEmitter();
+  port.write = () => {};
+  const resultPromise = execViaRawPty(port, "show log", { timeoutMs: 2_000, idleMs: 30 });
+  const chunk = "x".repeat(300 * 1024);
+  port.emit("data", chunk);
+  port.emit("data", chunk); // reaches the 512 KB cap
+  port.emit("data", "dropped-after-cap");
+  const capped = await resultPromise;
+  assert.equal(capped.outputTruncated, true);
+  assert.ok(!capped.stdout.includes("dropped-after-cap"));
+
+  const small = new EventEmitter();
+  small.write = () => {};
+  const pending = execViaRawPty(small, "show version", { timeoutMs: 2_000, idleMs: 30 });
+  small.emit("data", "short output");
+  const result = await pending;
+  assert.equal("outputTruncated" in result, false, "uncapped results are unchanged");
+});
+
+test("execViaChannel marks the result truncated when output exceeds its byte limit", async () => {
+  const stream = new EventEmitter();
+  stream.stderr = new EventEmitter();
+  stream.close = () => {};
+  const fakeClient = { exec(_command, callback) { callback(null, stream); } };
+  const pending = execViaChannel(fakeClient, "cat huge", { timeoutMs: 2_000, maxOutputBytes: 64 });
+  await new Promise((resolve) => setImmediate(resolve));
+  stream.emit("data", Buffer.from("a".repeat(200)));
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.match(result.error, /exceeded the 64 byte limit/);
+  assert.equal(result.outputTruncated, true);
+});

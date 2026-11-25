@@ -493,3 +493,11 @@ test("terminal_execute MCP response keeps exit-only non-zero without isError", a
   assert.equal(result.content?.[0]?.text, "[exit code: 1]");
   assert.doesNotMatch(result.content?.[0]?.text || "", /Operation failed/);
 });
+
+test("terminal_execute_bulk is MCP-only: no sidebar or global agent exposure", () => {
+  const { listMcpTools, listCattyToolSpecs, listAgentToolSpecs } = require("./toolSurfaces.cjs");
+  const { AGENT_KINDS } = require("../constants.cjs");
+  assert.ok(listMcpTools().some((tool) => tool.mcpTool === "terminal_execute_bulk"));
+  assert.equal(listCattyToolSpecs().some((spec) => spec.capabilityId === "terminal.executeBulk"), false);
+  assert.equal(listAgentToolSpecs(AGENT_KINDS.GLOBAL).some((spec) => spec.capabilityId === "terminal.executeBulk"), false);
+});
