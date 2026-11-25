@@ -847,3 +847,75 @@ test('rewriting the same sessions array skips re-serialization and store writes'
     __resetIdbPersistenceForTests();
   }
 });
+
+test('writeSessionsForStorage defers backup JSON.stringify during bursts and skips unchanged rewrites when sync is disabled', async (t) => {
+  const {
+    writeSessionsForStorage,
+    flushBackupMirror,
+    __flushIdbWritesForTests,
+    __resetBackupMirrorForTests,
+    __resetIdbPersistenceForTests,
+  } = await import('./aiStateSnapshots');
+  __resetBackupMirrorForTests();
+  __resetIdbPersistenceForTests();
+  const idb = installFakeIndexedDb();
+  const backupWrites: string[] = [];
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      netcatty: {
+        aiSessionsBackupWrite: async (payload: { json: string }) => {
+          backupWrites.push(payload.json);
+          return { ok: true };
+        },
+      },
+    },
+  });
+  // Default syncEnabled=false path: pruneSessionsForStorage allocates a new array each call.
+  t.mock.method(localStorageAdapter, 'read', () => null);
+  t.mock.method(localStorageAdapter, 'writeString', () => true);
+  try {
+    const stringify = t.mock.method(JSON, 'stringify');
+    const a1 = makeSession('chat-a', 1, [{ id: 'm1', role: 'assistant', content: 'chunk 1', timestamp: 1 }]);
+    const b = makeSession('chat-b', 0, []);
+    const a2 = makeSession('chat-a', 2, [{ id: 'm1', role: 'assistant', content: 'chunk 1+2', timestamp: 2 }]);
+    const a3 = makeSession('chat-a', 3, [{ id: 'm1', role: 'assistant', content: 'chunk 1+2+3', timestamp: 3 }]);
+
+    // Streaming persist burst: 3 consecutive writes must perform 0 eager JSON.stringify calls.
+    assert.equal(writeSessionsForStorage([a1, b]), true);
+    assert.equal(writeSessionsForStorage([a2, b]), true);
+    assert.equal(writeSessionsForStorage([a3, b]), true);
+    assert.equal(stringify.mock.callCount(), 0, 'JSON.stringify must not run eagerly on writeSessionsForStorage');
+    assert.equal(backupWrites.length, 0);
+
+    // Flushing the debounced mirror serializes only the latest persisted snapshot once.
+    flushBackupMirror();
+    assert.equal(stringify.mock.callCount(), 1);
+    assert.equal(backupWrites.length, 1);
+    const flushed = JSON.parse(backupWrites[0]) as AISession[];
+    assert.equal(flushed.find((s) => s.id === 'chat-a')?.messages[0]?.content, 'chunk 1+2+3');
+
+    // Rewriting unchanged sessions with syncEnabled=false (fresh array from pruneSessionsForStorage)
+    // must NOT schedule a redundant mirror or run JSON.stringify on flush.
+    assert.equal(writeSessionsForStorage([a3, b]), true);
+    flushBackupMirror();
+    assert.equal(stringify.mock.callCount(), 1, 'unchanged sessions must not re-schedule mirror when sync is disabled');
+    assert.equal(backupWrites.length, 1);
+
+    // Removing a session still schedules and mirrors the updated set.
+    assert.equal(writeSessionsForStorage([a3], { deletedSessionIds: ['chat-b'] }), true);
+    assert.equal(stringify.mock.callCount(), 1, 'deletion backup serialization is also deferred until flush/debounce');
+    flushBackupMirror();
+    assert.equal(stringify.mock.callCount(), 2);
+    assert.equal(backupWrites.length, 2);
+    assert.deepEqual((JSON.parse(backupWrites[1]) as AISession[]).map((s) => s.id), ['chat-a']);
+
+    await __flushIdbWritesForTests();
+  } finally {
+    idb.restore();
+    __resetBackupMirrorForTests();
+    __resetIdbPersistenceForTests();
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+  }
+});
