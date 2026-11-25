@@ -243,7 +243,7 @@ function SidePanelSftpSlotInner({
 export const SidePanelSftpSlot = memo(SidePanelSftpSlotInner);
 SidePanelSftpSlot.displayName = 'SidePanelSftpSlot';
 
-function SidePanelBrowserSlot({ tabId, ctx, isVisible }: {
+function SidePanelBrowserSlotInner({ tabId, ctx, isVisible }: {
   tabId: string;
   ctx: SidePanelStableContext;
   isVisible: boolean;
@@ -293,6 +293,9 @@ function SidePanelBrowserSlot({ tabId, ctx, isVisible }: {
     </div>
   );
 }
+
+export const SidePanelBrowserSlot = memo(SidePanelBrowserSlotInner);
+SidePanelBrowserSlot.displayName = 'SidePanelBrowserSlot';
 
 function SidePanelSystemSlotInner({
   tabId,
