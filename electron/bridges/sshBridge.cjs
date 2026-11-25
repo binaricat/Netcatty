@@ -279,6 +279,12 @@ function resetSessionDecoders(sessionId) {
   sessionDecoders.set(sessionId, decoders);
 }
 
+function clearSessionEncodingState(sessionId) {
+  if (!sessionId) return;
+  sessionEncodings.delete(sessionId);
+  sessionDecoders.delete(sessionId);
+}
+
 function getAuthCacheKey(username, hostname, port) {
   return `${username}@${hostname}:${port || 22}`;
 }
@@ -1546,4 +1552,8 @@ module.exports = {
   _canRetryWithEncryptedDefaultKeys: canRetryWithEncryptedDefaultKeys,
   _canFailedHopRetryWithEncryptedDefaultKeys: canFailedHopRetryWithEncryptedDefaultKeys,
   ensureMoshStatsConnection,
+  clearSessionEncodingState,
+  _getSessionDecoder: getSessionDecoder,
+  _sessionEncodings: sessionEncodings,
+  _sessionDecoders: sessionDecoders,
 };

@@ -1617,11 +1617,13 @@ async function startSerialSession(event, options) {
 
         let serialExitFinalized = false;
         const finalizeSerialExit = ({ exitCode, error, reason }) => {
+          if (logStreamToken) {
+            sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+          }
           if (serialExitFinalized || sessions.get(sessionId) !== session) return;
           serialExitFinalized = true;
           session.zmodemSentry?.cancel();
           session.ymodemAbortController?.abort();
-          sessionLogStreamManager.stopStream(sessionId, logStreamToken);
           const primaryId = session.webContentsId;
           ptyProcessTree.unregisterPid(sessionId);
           clearPendingAutomatedWrites(session);
@@ -2389,6 +2391,21 @@ function shouldRevokeOpenedSessionOwnership(payload) {
   return payload?.retainOwnership !== true;
 }
 
+function stopSessionLogStreamIfOwned(sessionId, session) {
+  const logStreamToken = session?.logStreamToken ?? session?._logStreamToken;
+  if (logStreamToken) {
+    sessionLogStreamManager.stopStream(sessionId, logStreamToken);
+  }
+}
+
+function clearSshSessionEncodingState(sessionId) {
+  try {
+    require("./sshBridge.cjs").clearSessionEncodingState?.(sessionId);
+  } catch {
+    // Ignore if sshBridge is unavailable in isolated unit tests.
+  }
+}
+
 function reportOpenedSessionClosed(sessionId, payload) {
   if (!shouldRevokeOpenedSessionOwnership(payload)) return;
   try {
@@ -2505,10 +2522,12 @@ function closeSession(event, payload) {
   } catch (err) {
     console.warn("Close failed", err);
   } finally {
+    stopSessionLogStreamIfOwned(payload.sessionId, session);
     cleanupMoshAuthTempFiles(session.moshAuthTempFiles);
   }
   ptyProcessTree.unregisterPid(payload.sessionId);
   sessions.delete(payload.sessionId);
+  clearSshSessionEncodingState(payload.sessionId);
   forgetBootEpoch(payload.sessionId, payload?.bootEpoch);
   reportOpenedSessionClosed(payload.sessionId, payload);
   return { closed: true };
@@ -2913,7 +2932,7 @@ function bundledEtClient(opts = {}) {
  */
 function cleanupAllSessions() {
   console.log(`[Terminal] Cleaning up ${sessions.size} sessions before quit`);
-  for (const [sessionId, session] of sessions) {
+  for (const [sessionId, session] of [...sessions.entries()]) {
     try {
       session.zmodemSentry?.cancel();
       cancelActiveYmodemSession(session);
@@ -2954,10 +2973,11 @@ function cleanupAllSessions() {
       }
     } catch (err) {
       // Ignore cleanup errors
+    } finally {
+      try { stopSessionLogStreamIfOwned(sessionId, session); } catch { /* ignore */ }
+      ptyProcessTree.unregisterPid(sessionId);
+      clearSshSessionEncodingState(sessionId);
     }
-  }
-  for (const [sessionId] of sessions) {
-    ptyProcessTree.unregisterPid(sessionId);
   }
   sessions.clear();
   terminalOutputChannel?.closeAll?.();
