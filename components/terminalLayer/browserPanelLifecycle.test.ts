@@ -115,7 +115,7 @@ function createStatusChangeHarness(options: {
     setSftpHostSourceSessionForTab: () => {},
     setSftpHostForTab: () => {},
     setBrowserMountedTabIds: (update: (previous: string[]) => string[]) => { mounted = update(mounted); },
-    setSidePanelOpenTabs: (update: (previous: Map<string, string>) => Map<string, string>) => { opened = update(opened); },
+    selectSidePanelToolForTab: (tabId: string, tool: string) => { opened = new Map(opened).set(tabId, tool); },
   }) as (sessionId: string, status: string) => void;
   return {
     statusChange,
@@ -228,7 +228,7 @@ test('host-only browser requests skip hidden and unsupported sessions', () => {
       onConnectToHost: () => 'new-visible',
       addMountedSidePanelTabId: (previous: string[], tabId: string) => [...previous, tabId],
       setBrowserMountedTabIds: (update: (previous: string[]) => string[]) => { mounted = update(mounted); },
-      setSidePanelOpenTabs: (update: (previous: Map<string, string>) => Map<string, string>) => { opened = update(opened); },
+      selectSidePanelToolForTab: (tabId: string, tool: string) => { opened = new Map(opened).set(tabId, tool); },
     });
     const expected = sessions.includes(visible) ? 'visible' : 'new-visible';
     assert.deepEqual(mounted, [expected]);

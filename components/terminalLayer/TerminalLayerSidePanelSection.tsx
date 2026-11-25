@@ -589,8 +589,10 @@ function hasMountedSidePanelContent(ctx: SidePanelContext): boolean {
   );
 }
 
+const EMPTY_SIDE_PANEL_LAYOUTS: ReadonlyMap<string, SidePanelLayout> = new Map();
+
 function TerminalLayerSidePanelSectionInner({ ctx }: { ctx: SidePanelContext }) {
-  const pluginSidebar = usePluginTerminalSidebar({ layouts: ctx.sidePanelLayouts ?? new Map(),
+  const pluginSidebar = usePluginTerminalSidebar({ layouts: ctx.sidePanelLayouts ?? EMPTY_SIDE_PANEL_LAYOUTS,
     getSession: ctx.getActiveTerminalSessionId ?? (() => null),
     isTerminalTab: (tabId) => (ctx.sessions ?? []).some((session: { id: string }) => session.id === tabId) || !!ctx.workspaceById?.has(tabId),
     select: (tool) => ctx.handleSwitchSidePanelTab?.(tool),
@@ -631,6 +633,8 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
   const sidePanelOpenTabs = ctx.sidePanelOpenTabs as Map<string, SidePanelTab>;
   const sidePanelLayouts = ctx.sidePanelLayouts as Map<string, SidePanelLayout>;
   const isSidePanelOpenForCurrentTab = activeTabId ? sidePanelOpenTabs.has(activeTabId) : false;
+  const isSidePanelOpenRef = useRef(isSidePanelOpenForCurrentTab);
+  isSidePanelOpenRef.current = isSidePanelOpenForCurrentTab;
   const activeSidePanelTab = activeTabId ? sidePanelOpenTabs.get(activeTabId) ?? null : null;
   const activeSidePanelLayout = activeTabId ? sidePanelLayouts.get(activeTabId) ?? null : null;
 
@@ -720,10 +724,16 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
     let observedWorkspaceColumn: Element | null = null;
     const resizeObserver = typeof ResizeObserver === 'undefined'
       ? null
-      : new ResizeObserver(() => updateAvailableWidth());
+      : new ResizeObserver(() => {
+        if (!isSidePanelOpenRef.current) return;
+        updateAvailableWidth();
+      });
     const mutationObserver = typeof MutationObserver === 'undefined'
       ? null
-      : new MutationObserver(() => updateAvailableWidth());
+      : new MutationObserver(() => {
+        if (!isSidePanelOpenRef.current) return;
+        updateAvailableWidth();
+      });
     const updateAvailableWidth = () => {
       const focusSidebar = terminalLayer.querySelector('[data-section="terminal-workspace-sidebar"]');
       if (resizeObserver && focusSidebar !== observedFocusSidebar) {
@@ -781,7 +791,6 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
       '[data-section="terminal-workspace-row"]',
     );
     if (workspaceRow) mutationObserver?.observe(workspaceRow, { childList: true });
-    updateAvailableWidth();
     return () => {
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
@@ -793,15 +802,20 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
     };
   }, []);
   // The compose bar mounts inside the terminal pane, below the observed
-  // workspace column. Remeasure when it opens/closes or the active tab changes;
-  // the ResizeObserver above then follows subsequent compose-bar height drags.
+  // workspace column. Remeasure when it opens/closes, when the side panel opens,
+  // or when the active tab changes while open; the ResizeObserver above then
+  // follows subsequent compose-bar height drags.
   useLayoutEffect(() => {
+    if (!isSidePanelOpenForCurrentTab) return undefined;
     updateAvailableSurfaceRef.current();
     // The compose bar is rendered by a sibling subtree. Its mount can land
     // after this layout effect, so measure again once that commit has painted.
-    const frame = requestAnimationFrame(() => updateAvailableSurfaceRef.current());
+    const frame = requestAnimationFrame(() => {
+      if (!isSidePanelOpenRef.current) return;
+      updateAvailableSurfaceRef.current();
+    });
     return () => cancelAnimationFrame(frame);
-  }, [activeTabId, ctx.isComposeBarOpen]);
+  }, [activeTabId, ctx.isComposeBarOpen, isSidePanelOpenForCurrentTab]);
   const handlePaneHostChange = useCallback((tool: SidePanelTab, host: HTMLElement | null) => {
     setPaneHosts((current) => {
       if (host && current.get(tool) === host) return current;
