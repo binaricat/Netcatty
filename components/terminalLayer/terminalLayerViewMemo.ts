@@ -316,6 +316,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'handleOpenScripts',
   'handleOpenTheme',
   'handleOpenAI',
+  'handleFocusAIScopeTarget',
   'handleOpenNotes',
   'getActiveTerminalSessionId',
   'handleSwitchSidePanelTab',

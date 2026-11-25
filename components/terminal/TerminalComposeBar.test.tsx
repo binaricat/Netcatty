@@ -44,6 +44,9 @@ test('disabling Context Chips preserves the compose draft and stops extra cwd re
   let root!: ReactTestRenderer;
   await act(async () => { root = create(render(true), { createNodeMock: el => el.type === 'textarea' ? textarea : null }); });
   assert.equal(probes, 1);
+  const topBar = root.root.findByProps({ 'data-compose-top-bar': true });
+  assert.equal(topBar.findAllByProps({ 'aria-label': 'Context Chips' }).length, 1);
+  assert.equal(topBar.findAllByProps({ 'data-compose-snippet-strip': true }).length, 1);
   textarea.value = 'keep this draft'; textarea.selectionStart = 2; textarea.selectionEnd = 8;
   await act(async () => { root.update(render(false)); });
   assert.equal(root.root.findAllByProps({ 'aria-label': 'Context Chips' }).length, 0);

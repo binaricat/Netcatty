@@ -101,20 +101,69 @@ test("active marker distinguishes current panel active chat vs active elsewhere"
   input.sessions = [
     baseSession({ id: "s-active-here", scope: { type: "terminal", targetId: "t-1" } }),
     baseSession({ id: "s-active-elsewhere", scope: { type: "terminal", targetId: "t-2" } }),
+    baseSession({ id: "s-active-workspace", scope: { type: "workspace", targetId: "w-1" } }),
+    baseSession({ id: "s-stale-active", scope: { type: "terminal", targetId: "t-dead" } }),
     baseSession({ id: "s-idle", scope: { type: "terminal", targetId: "t-1" } }),
   ];
-  input.activeSessionIdMap = { "terminal:t-1": "s-active-here", "terminal:t-2": "s-active-elsewhere" };
+  input.activeSessionIdMap = {
+    "terminal:t-1": "s-active-here",
+    "terminal:t-2": "s-active-elsewhere",
+    "workspace:w-1": "s-active-workspace",
+    "terminal:t-dead": "s-stale-active",
+  };
   const rows = buildGlobalManagerRows(input);
   const byId = new Map(rows.map((row) => [row.session.id, row]));
   assert.equal(byId.get("s-active-here")!.scopeState, "active");
   assert.equal(byId.get("s-active-here")!.isCurrentActive, true);
   assert.equal(byId.get("s-active-here")!.isActiveElsewhere, false);
+  assert.equal(byId.get("s-active-here")!.activeElsewhereTarget, null);
   assert.equal(byId.get("s-active-elsewhere")!.scopeState, "active");
   assert.equal(byId.get("s-active-elsewhere")!.isCurrentActive, false);
   assert.equal(byId.get("s-active-elsewhere")!.isActiveElsewhere, true);
+  assert.deepEqual(byId.get("s-active-elsewhere")!.activeElsewhereTarget, { type: "terminal", targetId: "t-2" });
+  assert.equal(byId.get("s-active-workspace")!.scopeState, "active");
+  assert.equal(byId.get("s-active-workspace")!.isActiveElsewhere, true);
+  assert.deepEqual(byId.get("s-active-workspace")!.activeElsewhereTarget, { type: "workspace", targetId: "w-1" });
+  // Stale active map entries for closed scopes must not mark a past chat as active elsewhere.
+  assert.equal(byId.get("s-stale-active")!.scopeState, "dangling");
+  assert.equal(byId.get("s-stale-active")!.isActiveElsewhere, false);
+  assert.equal(byId.get("s-stale-active")!.activeElsewhereTarget, null);
   assert.equal(byId.get("s-idle")!.scopeState, "idle");
   assert.equal(byId.get("s-idle")!.isCurrentActive, false);
   assert.equal(byId.get("s-idle")!.isActiveElsewhere, false);
+  assert.equal(byId.get("s-idle")!.activeElsewhereTarget, null);
+});
+
+test("workspace member and hidden terminal active pointers are not treated as jumpable elsewhere panels", () => {
+  const input = baseInput();
+  input.terminalInfos = [
+    ...input.terminalInfos,
+    { sessionId: "t-member", hostId: "h-3", label: "member", hostname: "member.example", connected: true, workspaceId: "w-1" },
+    { sessionId: "t-hidden", hostId: "h-4", label: "popout", hostname: "popout.example", connected: true, hiddenFromTabs: true },
+  ];
+  input.sessions = [
+    baseSession({ id: "s-ws-active", scope: { type: "workspace", targetId: "w-1" } }),
+    baseSession({ id: "s-member-retained", scope: { type: "terminal", targetId: "t-member" } }),
+    baseSession({ id: "s-hidden-active", scope: { type: "terminal", targetId: "t-hidden" } }),
+  ];
+  input.activeSessionIdMap = {
+    "workspace:w-1": "s-ws-active",
+    "terminal:t-member": "s-member-retained",
+    "terminal:t-hidden": "s-hidden-active",
+  };
+  const rows = buildGlobalManagerRows(input);
+  const byId = new Map(rows.map((row) => [row.session.id, row]));
+
+  assert.equal(byId.get("s-ws-active")!.isActiveElsewhere, true);
+  assert.deepEqual(byId.get("s-ws-active")!.activeElsewhereTarget, { type: "workspace", targetId: "w-1" });
+
+  assert.equal(byId.get("s-member-retained")!.isActiveElsewhere, false);
+  assert.equal(byId.get("s-member-retained")!.activeElsewhereTarget, null);
+  assert.equal(byId.get("s-member-retained")!.scopeState, "idle");
+
+  assert.equal(byId.get("s-hidden-active")!.isActiveElsewhere, false);
+  assert.equal(byId.get("s-hidden-active")!.activeElsewhereTarget, null);
+  assert.equal(byId.get("s-hidden-active")!.scopeState, "idle");
 });
 
 test("rows sort by updatedAt descending and carry agent labels + counts", () => {
