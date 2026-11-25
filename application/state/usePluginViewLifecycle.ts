@@ -33,6 +33,16 @@ export type ResolvedPluginView = {
   view: NetcattyPluginContributionSnapshot['plugins'][number]['views'][number];
 };
 
+const DEFAULT_VIEW_QUERY_CONTEXT: Readonly<Record<string, unknown>> = Object.freeze({
+  'netcatty.surface': 'view',
+});
+
+export function hasPluginKeybindingContributions(
+  snapshot: NetcattyPluginContributionSnapshot,
+): boolean {
+  return snapshot.plugins.some((plugin) => plugin.keybindings.length > 0);
+}
+
 export function requestOpenPluginView(detail: OpenPluginViewDetail) {
   window.dispatchEvent(new CustomEvent(OPEN_PLUGIN_VIEW_EVENT, { detail }));
 }
@@ -54,12 +64,22 @@ export function usePluginViewLifecycle({
   const activePluginTab = pluginViewTabs.find((tab) => tab.id === activeTabId) ?? null;
   const effectiveRequested = resolvePluginViewRequest(requested, activePluginTab);
   const viewQueryContext = useMemo(
-    () => effectiveRequested?.context ?? { 'netcatty.surface': 'view' },
+    () => effectiveRequested?.context ?? DEFAULT_VIEW_QUERY_CONTEXT,
     [effectiveRequested?.context],
   );
   const viewQueryContextKey = useMemo(() => JSON.stringify(viewQueryContext), [viewQueryContext]);
-  const contributions = usePluginContributions({ locale, context: keybindingContext });
-  const viewContributions = usePluginContributions({ locale, context: viewQueryContext });
+  const keybindingQuery = useMemo(
+    () => ({ locale, context: keybindingContext }),
+    [locale, keybindingContext],
+  );
+  const viewQuery = useMemo(
+    () => ({ locale, context: viewQueryContext }),
+    [locale, viewQueryContext],
+  );
+  const contributions = usePluginContributions(keybindingQuery, {
+    isContextSensitive: hasPluginKeybindingContributions,
+  });
+  const viewContributions = usePluginContributions(viewQuery);
   const {
     snapshot,
     executeCommand,
@@ -88,10 +108,14 @@ export function usePluginViewLifecycle({
       : null;
   }, [effectiveRequested?.viewId, resolvedActiveView, viewContributions.loading, viewQueryContextKey]);
 
+  const keybindingContextRef = useRef(keybindingContext);
+  keybindingContextRef.current = keybindingContext;
+
   useEffect(() => {
     const bindings = snapshot.plugins.flatMap((plugin) => plugin.keybindings)
       .filter((binding) => binding.enabled)
       .sort((left, right) => `${left.command}:${left.key}`.localeCompare(`${right.command}:${right.key}`));
+    if (bindings.length === 0) return;
     const platformKey = resolvePluginShortcutPlatform(navigator.platform);
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || isPluginShortcutEditableEvent(event)) return;
@@ -103,11 +127,11 @@ export function usePluginViewLifecycle({
       });
       if (!binding) return;
       event.preventDefault();
-      void executeCommand(binding.command, binding.args, keybindingContext);
+      void executeCommand(binding.command, binding.args, keybindingContextRef.current);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [executeCommand, keybindingContext, snapshot.plugins]);
+  }, [executeCommand, snapshot.plugins]);
 
   useEffect(() => {
     const listener = (event: Event) => setRequested((event as CustomEvent<OpenPluginViewDetail>).detail);
@@ -151,40 +175,74 @@ export function usePluginViewLifecycle({
     }
   }, [activePluginTab, activeView]);
 
+  const runtimeAvailable = contributions.available;
+  const environmentStateRef = useRef({
+    locale,
+    theme,
+    suppliedThemeTokens,
+    setEnvironment,
+  });
+  environmentStateRef.current = {
+    locale,
+    theme,
+    suppliedThemeTokens,
+    setEnvironment,
+  };
+  const environmentPublisherRef = useRef<{ publish: () => void } | null>(null);
+
   useEffect(() => {
-    if (!contributions.available) return;
+    if (!runtimeAvailable) {
+      environmentPublisherRef.current = null;
+      return;
+    }
     const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     const forcedColorsQuery = window.matchMedia('(forced-colors: active)');
     const contrastQuery = window.matchMedia('(prefers-contrast: more)');
     let frame = 0;
+    const cancelPendingPublish = () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+    };
     const publish = () => {
-      frame = 0;
-      const styles = suppliedThemeTokens ? null : getComputedStyle(document.documentElement);
-      const themeTokens = suppliedThemeTokens ?? Object.fromEntries(PLUGIN_THEME_TOKEN_NAMES
+      cancelPendingPublish();
+      const current = environmentStateRef.current;
+      const styles = current.suppliedThemeTokens ? null : getComputedStyle(document.documentElement);
+      const themeTokens = current.suppliedThemeTokens ?? Object.fromEntries(PLUGIN_THEME_TOKEN_NAMES
         .map((name) => [name, styles?.getPropertyValue(name).trim() ?? '']));
-      void setEnvironment({
-        locale,
-        theme,
+      void current.setEnvironment({
+        locale: current.locale,
+        theme: current.theme,
         reducedMotion: reducedMotionQuery.matches,
         highContrast: forcedColorsQuery.matches || contrastQuery.matches,
         themeTokens,
       }).catch(() => {});
     };
     const schedulePublish = () => {
-      if (frame) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(publish);
+      cancelPendingPublish();
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        publish();
+      });
     };
+    environmentPublisherRef.current = { publish };
     const queries = [reducedMotionQuery, forcedColorsQuery, contrastQuery];
     for (const query of queries) query.addEventListener?.('change', schedulePublish);
     const observer = new MutationObserver(schedulePublish);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
-    publish();
     return () => {
-      if (frame) cancelAnimationFrame(frame);
+      environmentPublisherRef.current = null;
+      cancelPendingPublish();
       observer.disconnect();
       for (const query of queries) query.removeEventListener?.('change', schedulePublish);
     };
-  }, [contributions.available, locale, setEnvironment, suppliedThemeTokens, theme]);
+  }, [runtimeAvailable]);
+
+  useEffect(() => {
+    if (!runtimeAvailable) return;
+    environmentPublisherRef.current?.publish();
+  }, [runtimeAvailable, locale, setEnvironment, suppliedThemeTokens, theme]);
 
   return {
     activeView,
