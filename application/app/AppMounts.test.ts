@@ -22,6 +22,10 @@ test('visible log view leaves room for the terminal host sidebar', () => {
   assert.deepEqual(getLogViewWrapperStyle(true, 220), {
     left: 220,
   });
+  assert.deepEqual(getLogViewWrapperStyle(true, 220, true), {
+    left: 220,
+    transition: 'left 220ms cubic-bezier(0.4, 0, 0.2, 1)',
+  });
 });
 
 test('hidden log view remains hidden while preserving host sidebar offset', () => {
