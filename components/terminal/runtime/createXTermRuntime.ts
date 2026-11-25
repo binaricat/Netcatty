@@ -1763,6 +1763,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   } | null = null;
   const win32InputModeForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   const kittyForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
+  const suppressedKeyUpIdentities = new Set<string>();
   const broadcastForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   const win32BroadcastForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   // Command+Period interrupt presses are recorded under their normalized Ctrl+C identity
@@ -2109,6 +2110,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       );
       const identity = kittyKeyIdentity(releaseEvent);
       const hasForwardedWin32KeyDown = win32InputModeForwardedKeys.delete(identity);
+      const hasSuppressedKeyUp = suppressedKeyUpIdentities.delete(identity);
       if (broadcastLegacyDataPending === identity) clearBroadcastLegacyDataPending();
       if (term.modes.win32InputMode) {
         // Broadcast peers may still need a paired Kitty release for a keydown
@@ -2128,6 +2130,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           logicalData: null,
         };
         return true;
+      }
+      if (hasSuppressedKeyUp) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
       }
       if (releaseForwardedKittyPress(toKittyKeyboardEvent(releaseEvent)) || releasedInterrupt) {
         e.preventDefault();
@@ -2639,6 +2646,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       e.key === "Insert" && e.ctrlKey
       && !e.shiftKey && !e.altKey && !e.metaKey
     ) {
+      suppressedKeyUpIdentities.add(kittyKeyIdentity(e));
       e.preventDefault();
       e.stopPropagation();
       const selection = previewSelection || getTerminalSelectionForClipboard(
@@ -2970,6 +2978,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     win32InputModePendingEvent = null;
     win32InputModeForwardedKeys.clear();
     kittyForwardedKeys.clear();
+    suppressedKeyUpIdentities.clear();
     // broadcastForwardedKeys is retained so pending peer releases still pair
     // after a reconnect; keep the aliases whose normalized press is still
     // owed a broadcast release, otherwise the physical keyup can no longer
@@ -3008,9 +3017,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         kittyKeyboardLockState,
       );
       kittyForwardedKeys.clear();
+      suppressedKeyUpIdentities.clear();
       win32InputModePendingEvent = null;
     } else {
       win32InputModeForwardedKeys.clear();
+      suppressedKeyUpIdentities.clear();
       flushKittyKeyboardBroadcastReleases(
         kittyForwardedKeys,
         (input) => {

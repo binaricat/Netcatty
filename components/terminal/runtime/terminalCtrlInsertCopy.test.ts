@@ -30,7 +30,12 @@ test("Ctrl+Insert copies selection, preserves selection, and leaks no PTY bytes 
     define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta": "{}" },
   }).outputFiles[0].text;
 
-  const dom = new JSDOM("<body/>", { url: "http://localhost", runScripts: "outside-only", pretendToBeVisual: true });
+  const dom = new JSDOM("<body/>", {
+    url: "http://localhost",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36",
+    runScripts: "outside-only",
+    pretendToBeVisual: true,
+  });
   Object.assign(dom.window, { structuredClone });
   try {
     dom.window.eval(`
@@ -98,8 +103,8 @@ test("Ctrl+Insert copies selection, preserves selection, and leaks no PTY bytes 
 
       const modes = [
         { name: 'legacy', kitty: false, setup: '' },
-        { name: 'native-kitty', kitty: false, setup: '\\x1b[>1u' },
-        { name: 'netcatty-kitty', kitty: true, setup: '\\x1b[>1u' },
+        { name: 'native-kitty', kitty: false, setup: '\\x1b[>3u' },
+        { name: 'netcatty-kitty', kitty: true, setup: '\\x1b[>3u' },
         { name: 'win32', kitty: false, setup: '\\x1b[?9001h' },
       ];
 
