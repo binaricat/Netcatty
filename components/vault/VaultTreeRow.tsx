@@ -1,7 +1,8 @@
 import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
-import React, { useEffect, useRef, useState } from "react";
+import React from "react";
 
 import { cn } from "../../lib/utils";
+import { InlineRenameInput } from "../ui/inline-rename-input";
 
 type VaultTreeInlineRenameInputProps = {
   initialName: string;
@@ -11,81 +12,15 @@ type VaultTreeInlineRenameInputProps = {
   style?: React.CSSProperties;
 };
 
-export const VaultTreeInlineRenameInput: React.FC<VaultTreeInlineRenameInputProps> = ({
-  initialName,
-  onCommit,
-  onCancel,
-  className,
-  style,
-}) => {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [value, setValue] = useState(initialName);
-  const submittingRef = useRef(false);
-
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    input.focus();
-    input.select();
-  }, []);
-
-  const commit = async () => {
-    if (submittingRef.current) return;
-    submittingRef.current = true;
-    try {
-      const committed = await onCommit(value);
-      if (committed === false) submittingRef.current = false;
-    } catch {
-      submittingRef.current = false;
-    }
-  };
-
-  const cancel = () => {
-    if (submittingRef.current) return;
-    submittingRef.current = true;
-    onCancel();
-  };
-
-  return (
-    <input
-      ref={inputRef}
-      data-vault-tree-inline-edit="true"
-      data-inline-group-edit="true"
-      value={value}
-      draggable={false}
-      onChange={(event) => setValue(event.target.value)}
-      onBlur={() => {
-        queueMicrotask(() => {
-          void commit();
-        });
-      }}
-      onClick={(event) => event.stopPropagation()}
-      onDoubleClick={(event) => event.stopPropagation()}
-      onMouseDown={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
-      onDragStart={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-      onKeyDown={(event) => {
-        event.stopPropagation();
-        if (event.key === "Enter") {
-          event.preventDefault();
-          void commit();
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          cancel();
-        }
-      }}
-      className={cn(
-        "min-w-0 flex-1 truncate select-text rounded-sm border border-primary/50 bg-background/80 px-1 py-0 text-sm font-medium outline-none ring-1 ring-primary/30",
-        className,
-      )}
-      style={style}
-    />
-  );
-};
+export const VaultTreeInlineRenameInput: React.FC<VaultTreeInlineRenameInputProps> = (
+  props,
+) => (
+  <InlineRenameInput
+    data-vault-tree-inline-edit="true"
+    data-inline-group-edit="true"
+    {...props}
+  />
+);
 
 type VaultTreeGroupRowProps = Omit<React.HTMLAttributes<HTMLDivElement>, "children"> & {
   name: string;
