@@ -117,19 +117,27 @@ describe("sdkDriverUtils", () => {
 
     const ac = new AbortController();
     const kills = [];
-    const aborted = await collectBoundedStdout({
-      spawnChild: () => {
-        const child = new EventEmitter();
-        child.stdout = new EventEmitter();
-        child.kill = () => {};
-        queueMicrotask(() => ac.abort());
-        return child;
-      },
-      maxBytes: 1024,
-      signal: ac.signal,
-      abortGraceMs: 10,
-      forceKillImpl: (_c, sig) => kills.push(sig),
-    });
+    // Keep the event loop referenced on Node 20 while the fake EventEmitter child
+    // waits for attachAbortGraceKill's unref'd grace timer to fire.
+    const keepAlive = setTimeout(() => {}, 1000);
+    let aborted;
+    try {
+      aborted = await collectBoundedStdout({
+        spawnChild: () => {
+          const child = new EventEmitter();
+          child.stdout = new EventEmitter();
+          child.kill = () => {};
+          queueMicrotask(() => ac.abort());
+          return child;
+        },
+        maxBytes: 1024,
+        signal: ac.signal,
+        abortGraceMs: 10,
+        forceKillImpl: (_c, sig) => kills.push(sig),
+      });
+    } finally {
+      clearTimeout(keepAlive);
+    }
     assert.equal(aborted, null);
     assert.deepEqual(kills, ["SIGTERM", "SIGKILL"]);
   });
