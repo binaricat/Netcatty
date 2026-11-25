@@ -5,12 +5,19 @@ import type { Disposable, PluginViews } from './index.js';
 type ControlPropertyTarget = {
   ctor: 'HTMLInputElement' | 'HTMLTextAreaElement' | 'HTMLSelectElement' | 'HTMLOptionElement';
   prop: string;
+  kind?: 'setter' | 'method';
 };
 
 const CONTROL_PROPERTY_TARGETS: readonly ControlPropertyTarget[] = [
   { ctor: 'HTMLInputElement', prop: 'value' },
   { ctor: 'HTMLInputElement', prop: 'checked' },
+  { ctor: 'HTMLInputElement', prop: 'valueAsNumber' },
+  { ctor: 'HTMLInputElement', prop: 'valueAsDate' },
+  { ctor: 'HTMLInputElement', prop: 'stepUp', kind: 'method' },
+  { ctor: 'HTMLInputElement', prop: 'stepDown', kind: 'method' },
+  { ctor: 'HTMLInputElement', prop: 'setRangeText', kind: 'method' },
   { ctor: 'HTMLTextAreaElement', prop: 'value' },
+  { ctor: 'HTMLTextAreaElement', prop: 'setRangeText', kind: 'method' },
   { ctor: 'HTMLSelectElement', prop: 'value' },
   { ctor: 'HTMLSelectElement', prop: 'selectedIndex' },
   { ctor: 'HTMLOptionElement', prop: 'selected' },
@@ -44,21 +51,38 @@ function subscribeControlPropertyMutations(container: HTMLElement, onMutation: (
   if (!state) {
     state = { watchers: new Set(), restores: [] };
     const activeState = state;
-    for (const { ctor, prop } of CONTROL_PROPERTY_TARGETS) {
+    const notify = (target: Node) => {
+      for (const watcher of activeState.watchers) {
+        if (watcher.container.contains(target)) watcher.onMutation();
+      }
+    };
+    for (const { ctor, prop, kind = 'setter' } of CONTROL_PROPERTY_TARGETS) {
       const prototype = win[ctor]?.prototype;
       if (!prototype) continue;
       const descriptor = Object.getOwnPropertyDescriptor(prototype, prop);
-      if (!descriptor?.set || !descriptor.configurable) continue;
-      const originalSet = descriptor.set;
-      Object.defineProperty(prototype, prop, {
-        ...descriptor,
-        set(this: Node, value: unknown) {
-          originalSet.call(this, value);
-          for (const watcher of activeState.watchers) {
-            if (watcher.container.contains(this)) watcher.onMutation();
-          }
-        },
-      });
+      if (!descriptor?.configurable) continue;
+      if (kind === 'method') {
+        if (typeof descriptor.value !== 'function') continue;
+        const originalMethod = descriptor.value as (this: Node, ...args: unknown[]) => unknown;
+        Object.defineProperty(prototype, prop, {
+          ...descriptor,
+          value(this: Node, ...args: unknown[]) {
+            const result = originalMethod.apply(this, args);
+            notify(this);
+            return result;
+          },
+        });
+      } else {
+        if (!descriptor.set) continue;
+        const originalSet = descriptor.set;
+        Object.defineProperty(prototype, prop, {
+          ...descriptor,
+          set(this: Node, value: unknown) {
+            originalSet.call(this, value);
+            notify(this);
+          },
+        });
+      }
       activeState.restores.push(() => {
         Object.defineProperty(prototype, prop, descriptor);
       });
@@ -88,6 +112,7 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
     unmount: () => void;
     observer: RemoteMutationObserver;
     domObserver: MutationObserver;
+    flushObserver: MutationObserver;
     disposeWatchers: () => void;
     elementsById: Map<string, Element>;
     controlElements: Set<Element>;
@@ -104,6 +129,7 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
     const view = instances.get(id); if (!view) return;
     instances.delete(id);
     view.disposeWatchers();
+    view.flushObserver.disconnect();
     view.domObserver.disconnect();
     view.observer.disconnect();
     view.elementsById.clear();
@@ -206,7 +232,7 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
       };
       const send = (mutations: readonly unknown[]) => {
         if (instances.get(id) !== view) return;
-        syncElementIndex();
+        if (mutations.length > 0) syncElementIndex();
         const records = [...mutations]; const live = new Set<string>();
         for (const control of controlElements) {
           if (!container.contains(control)) {
@@ -228,19 +254,25 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
         view.sentAck = view.acknowledgedEvent;
         views.postMessage(viewId, JSON.parse(JSON.stringify({ kind: 'host-ui.update', instanceId: id, sequence: ++view.sequence, acknowledgedEvent: view.acknowledgedEvent, css, mutations: records })) as JsonValue);
       };
-      const scheduleFlush = () => {
-        if (view.flushScheduled || instances.get(id) !== view) return;
-        view.flushScheduled = true;
-        queueMicrotask(() => {
-          view.flushScheduled = false;
-          if (instances.get(id) !== view) return;
-          send([]);
-        });
-      };
       const observer = new RemoteMutationObserver({
         mutate(mutations) { send(mutations); },
         call() { throw new Error('Direct host methods are unavailable'); },
       });
+      // Created after domObserver and RemoteMutationObserver so DOM MutationObserver
+      // creation-order delivery guarantees structural insertions precede control flushes.
+      const flushNode = document.createTextNode('');
+      let flushToggle = 0;
+      const flushObserver = new MutationObserver(() => {
+        view.flushScheduled = false;
+        if (instances.get(id) !== view) return;
+        send([]);
+      });
+      const scheduleFlush = () => {
+        if (view.flushScheduled || instances.get(id) !== view) return;
+        view.flushScheduled = true;
+        flushToggle ^= 1;
+        flushNode.data = String(flushToggle);
+      };
       const onControlEvent = () => scheduleFlush();
       for (const eventType of CONTROL_EVENT_TYPES) container.addEventListener(eventType, onControlEvent, true);
       const disposePropertyWatcher = subscribeControlPropertyMutations(container, scheduleFlush);
@@ -253,6 +285,7 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
         unmount: () => {},
         observer,
         domObserver,
+        flushObserver,
         disposeWatchers,
         elementsById,
         controlElements,
@@ -267,6 +300,7 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
       instances.set(id, view);
       domObserver.observe(container, { childList: true, subtree: true });
       observer.observe(container);
+      flushObserver.observe(flushNode, { characterData: true });
       // A valid component may render nothing; complete initial loading even when
       // React makes no DOM mutations.
       views.postMessage(viewId, { kind: 'host-ui.update', instanceId: id, sequence: ++view.sequence, css, mutations: [] });

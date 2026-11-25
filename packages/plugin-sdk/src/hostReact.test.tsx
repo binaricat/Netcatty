@@ -262,3 +262,163 @@ test('hostDom maintains O(1) element index across recursive subtree additions an
     dom.window.close();
   }
 });
+
+test('hostDom delivers structural insertion before control property updates in the same task', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost', pretendToBeVisual: true });
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLOptionElement', 'HTMLFormElement', 'Node', 'MutationObserver', 'Event', 'MouseEvent']) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: key === 'window' ? dom.window : dom.window[key as keyof typeof dom.window] });
+  }
+
+  const { remoteId } = await import('@remote-dom/core/elements');
+  const { registerHostDomView } = await import('./hostDom.js');
+
+  let receive: (value: JsonValue) => void = () => {};
+  const messages: Array<Extract<HostDrawnViewMessage, { kind: 'host-ui.update' }>> = [];
+  const views = {
+    onDidReceiveMessage(_id: string, listener: (value: JsonValue) => void) { receive = listener; return { dispose() {} }; },
+    postMessage(_id: string, value: JsonValue) { messages.push(value as unknown as Extract<HostDrawnViewMessage, { kind: 'host-ui.update' }>); },
+    getState: async () => undefined,
+    setState: async () => {},
+  };
+
+  let rootRef: HTMLElement | null = null;
+  let existingInput: HTMLInputElement | null = null;
+
+  const registration = registerHostDomView(views, 'com.example.order', (container) => {
+    rootRef = container;
+    existingInput = document.createElement('input');
+    existingInput.value = 'initial';
+    container.appendChild(existingInput);
+  });
+
+  try {
+    receive({ kind: 'host-ui.open', instanceId: 'ord-1' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const countBefore = messages.length;
+    // Mutate an existing input first (scheduling a control flush), then append a new input
+    // with a programmatic value in the same synchronous task.
+    existingInput!.value = 'updated';
+    const newInput = document.createElement('input');
+    newInput.value = 'new';
+    rootRef!.appendChild(newInput);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const newInputId = remoteId(newInput);
+    const existingInputId = remoteId(existingInput!);
+    const emittedMutations = messages.slice(countBefore).flatMap((m) => m.mutations as unknown[][]);
+
+    const insertIndex = emittedMutations.findIndex(
+      (record) => record[0] === 0 && typeof record[2] === 'object' && record[2] !== null && (record[2] as { id?: string }).id === newInputId,
+    );
+    const newPropIndex = emittedMutations.findIndex(
+      (record) => record[0] === 3 && record[1] === newInputId && record[2] === 'value' && record[3] === 'new',
+    );
+    const existingPropIndex = emittedMutations.findIndex(
+      (record) => record[0] === 3 && record[1] === existingInputId && record[2] === 'value' && record[3] === 'updated',
+    );
+
+    assert.notEqual(insertIndex, -1, 'new input structural insertion must be emitted');
+    assert.notEqual(newPropIndex, -1, 'new input programmatic value must be emitted');
+    assert.notEqual(existingPropIndex, -1, 'existing input updated value must be emitted');
+    assert.ok(insertIndex < newPropIndex, `structural insertion (${insertIndex}) must precede control property update (${newPropIndex})`);
+  } finally {
+    registration.dispose();
+    for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key); }
+    dom.window.close();
+  }
+});
+
+test('hostDom syncs valueAsNumber, valueAsDate, stepUp, stepDown, and setRangeText mutations', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost', pretendToBeVisual: true });
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLOptionElement', 'HTMLFormElement', 'Node', 'MutationObserver', 'Event', 'MouseEvent']) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: key === 'window' ? dom.window : dom.window[key as keyof typeof dom.window] });
+  }
+
+  const origValueAsNumber = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'valueAsNumber');
+  const origValueAsDate = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'valueAsDate');
+  const origStepUp = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'stepUp');
+  const origStepDown = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'stepDown');
+  const origInputSetRangeText = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'setRangeText');
+  const origTextareaSetRangeText = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'setRangeText');
+
+  const { registerHostDomView } = await import('./hostDom.js');
+
+  let receive: (value: JsonValue) => void = () => {};
+  const messages: Array<Extract<HostDrawnViewMessage, { kind: 'host-ui.update' }>> = [];
+  const views = {
+    onDidReceiveMessage(_id: string, listener: (value: JsonValue) => void) { receive = listener; return { dispose() {} }; },
+    postMessage(_id: string, value: JsonValue) { messages.push(value as unknown as Extract<HostDrawnViewMessage, { kind: 'host-ui.update' }>); },
+    getState: async () => undefined,
+    setState: async () => {},
+  };
+
+  let numberInput: HTMLInputElement | null = null;
+  let dateInput: HTMLInputElement | null = null;
+  let textInput: HTMLInputElement | null = null;
+  let textarea: HTMLTextAreaElement | null = null;
+
+  const registration = registerHostDomView(views, 'com.example.native-mutators', (container) => {
+    numberInput = document.createElement('input');
+    numberInput.type = 'number';
+    numberInput.value = '10';
+    dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    textInput = document.createElement('input');
+    textInput.type = 'text';
+    textInput.value = 'hello world';
+    textarea = document.createElement('textarea');
+    textarea.value = 'alpha beta';
+    container.append(numberInput, dateInput, textInput, textarea);
+  });
+
+  try {
+    receive({ kind: 'host-ui.open', instanceId: 'mut-1' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    let before = messages.length;
+    numberInput!.valueAsNumber = 42;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.match(JSON.stringify(messages.slice(before)), /"value","42"/, 'valueAsNumber must trigger sync');
+
+    before = messages.length;
+    numberInput!.stepUp();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.match(JSON.stringify(messages.slice(before)), /"value","43"/, 'stepUp must trigger sync');
+
+    before = messages.length;
+    numberInput!.stepDown(3);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.match(JSON.stringify(messages.slice(before)), /"value","40"/, 'stepDown must trigger sync');
+
+    before = messages.length;
+    dateInput!.valueAsDate = new Date(Date.UTC(2026, 4, 15));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.match(JSON.stringify(messages.slice(before)), /"value","2026-05-15"/, 'valueAsDate must trigger sync');
+
+    before = messages.length;
+    textInput!.setRangeText('catty', 6, 11);
+    textarea!.setRangeText('gamma', 6, 10);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const rangePayload = JSON.stringify(messages.slice(before));
+    assert.match(rangePayload, /"value","hello catty"/, 'input.setRangeText must trigger sync');
+    assert.match(rangePayload, /"value","alpha gamma"/, 'textarea.setRangeText must trigger sync');
+
+    receive({ kind: 'host-ui.close', instanceId: 'mut-1' });
+    assert.equal(Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'valueAsNumber')?.set, origValueAsNumber?.set);
+    assert.equal(Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'valueAsDate')?.set, origValueAsDate?.set);
+    assert.equal(Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'stepUp')?.value, origStepUp?.value);
+    assert.equal(Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'stepDown')?.value, origStepDown?.value);
+    assert.equal(Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'setRangeText')?.value, origInputSetRangeText?.value);
+    assert.equal(Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'setRangeText')?.value, origTextareaSetRangeText?.value);
+  } finally {
+    registration.dispose();
+    for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key); }
+    dom.window.close();
+  }
+});
