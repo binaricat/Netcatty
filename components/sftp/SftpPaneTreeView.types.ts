@@ -34,6 +34,8 @@ export interface SftpPaneTreeViewProps {
   onUploadExternalFiles?: (dataTransfer: DataTransfer, targetPath?: string) => Promise<void>;
   onUploadExternalFileList?: (fileList: FileList, targetPath?: string) => Promise<void>;
   onUploadExternalFolder?: (targetPath?: string) => Promise<void>;
+  onInsertPathToTerminal?: (path: string) => void;
+  onCdInTerminal?: (dirPath: string) => void;
   sorting: UseSftpPaneSortingResult;
   reloadRequest: { token: number; paths?: string[]; full?: boolean };
 }

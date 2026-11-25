@@ -926,3 +926,25 @@ test("password, passphrase, PIN, and secret prompts stay uncompletable (#3622)",
     assert.equal(resolveAutocompleteQueryInput(result.prompt, "use", true), null, line);
   }
 });
+
+test("detectPrompt recognizes standard root-directory shell prompts ending in :/$ (#1982)", () => {
+  for (const [line, expectedPrompt, expectedInput] of [
+    ["ubuntu@prod:/$ ", "ubuntu@prod:/$ ", ""],
+    ['ubuntu@prod:/$ echo "unclosed', "ubuntu@prod:/$ ", 'echo "unclosed'],
+    ["(venv) ubuntu@prod:/$ ls", "(venv) ubuntu@prod:/$ ", "ls"],
+    ["alpine:/$ ", "alpine:/$ ", ""],
+    ["/$ ", "/$ ", ""],
+    ["ubuntu@box:~$ echo user@host:/$ ", "ubuntu@box:~$ ", "echo user@host:/$ "],
+  ] as const) {
+    const result = detectPrompt(createFakeTerm(line, line.length) as never);
+    assert.equal(result.isAtPrompt, true, line);
+    assert.equal(result.promptText, expectedPrompt, line);
+    assert.equal(result.userInput, expectedInput, line);
+  }
+
+  for (const nonPrompt of ["echo foo/$ ", "https://example.com/$ "]) {
+    const result = detectPrompt(createFakeTerm(nonPrompt, nonPrompt.length) as never);
+    assert.equal(result.isAtPrompt, false, nonPrompt);
+  }
+});
+

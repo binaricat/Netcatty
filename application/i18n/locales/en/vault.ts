@@ -493,6 +493,9 @@ export const enVaultMessages: Messages = {
 
   // SFTP File Opener
   'sftp.context.copyPath': 'Copy file path',
+  'sftp.context.insertPathToTerminal': 'Insert path into terminal',
+  'sftp.context.cdInTerminal': 'Open in terminal (cd)',
+  'sftp.terminal.insertBlockedUnsafeQuote': 'Cannot insert path while the terminal cursor is inside an unclosed quote or escape',
   'sftp.context.openWithDefault': 'Open with system default',
   'sftp.context.openWith': 'Open with...',
   'sftp.context.edit': 'Edit',

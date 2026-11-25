@@ -83,6 +83,8 @@ interface SftpPaneViewProps {
   onToggleShowHiddenFiles?: () => void;
   onGoToTerminalCwd?: () => void;
   onLocatePathInTerminal?: () => void;
+  onInsertPathToTerminal?: (path: string) => void;
+  onCdInTerminal?: (dirPath: string) => void;
   followTerminalCwd?: boolean;
   onToggleFollowTerminalCwd?: () => void;
   /** When true, treat this pane as always active (used by SftpSidePanel which manages visibility itself) */
@@ -100,6 +102,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   onToggleShowHiddenFiles,
   onGoToTerminalCwd,
   onLocatePathInTerminal,
+  onInsertPathToTerminal,
+  onCdInTerminal,
   followTerminalCwd,
   onToggleFollowTerminalCwd,
   forceActive,
@@ -666,6 +670,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
             onUploadExternalFiles={handleUploadExternalFiles}
             onUploadExternalFileList={handleUploadExternalFileList}
             onUploadExternalFolder={handleUploadExternalFolder}
+            onInsertPathToTerminal={onInsertPathToTerminal}
+            onCdInTerminal={onCdInTerminal}
             sorting={sortingControls}
             reloadRequest={treeReloadRequest}
           />
@@ -716,6 +722,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           onEditPermissions={callbacks.onEditPermissions}
           onUploadExternalFileList={handleUploadExternalFileList}
           onUploadExternalFolder={handleUploadExternalFolder}
+          onInsertPathToTerminal={onInsertPathToTerminal}
+          onCdInTerminal={onCdInTerminal}
           isLocal={!!pane.connection?.isLocal}
           openRenameDialog={openRenameDialog}
           openDeleteConfirm={openDeleteConfirm}
@@ -807,6 +815,8 @@ const sftpPaneViewAreEqual = (
   if (prev.onToggleFollowTerminalCwd !== next.onToggleFollowTerminalCwd) return false;
   if (prev.onGoToTerminalCwd !== next.onGoToTerminalCwd) return false;
   if (prev.onLocatePathInTerminal !== next.onLocatePathInTerminal) return false;
+  if (prev.onInsertPathToTerminal !== next.onInsertPathToTerminal) return false;
+  if (prev.onCdInTerminal !== next.onCdInTerminal) return false;
   if (prev.onToggleShowHiddenFiles !== next.onToggleShowHiddenFiles) return false;
 
   return true;

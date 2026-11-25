@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AppWindow, Archive, ArrowRight, ArrowUp, ClipboardCopy, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Trash2, Upload } from 'lucide-react';
+import { AppWindow, Archive, ArrowRight, ArrowUp, ClipboardCopy, Copy, CopyPlus, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Terminal, TerminalSquare, Trash2, Upload } from 'lucide-react';
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '../ui/context-menu';
 import { getParentPath } from '../../application/state/sftp/utils';
 import { isKnownBinaryFile } from '../../lib/sftpFileUtils';
@@ -35,7 +35,7 @@ function downloadRoots(paths: string[], entries: ReadonlyMap<string, SftpFileEnt
 export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) {
   const {
     contextTarget, pane, toggleExpand, stableOnOpenEntry, stableOnRefresh, getActionPaths, toTransferSources,
-    executeMoveAction, triggerUploadPicker, onUploadExternalFolder, uploadEnabled, folderUploadEnabled,
+    executeMoveAction, triggerUploadPicker, onUploadExternalFolder, onInsertPathToTerminal, onCdInTerminal, uploadEnabled, folderUploadEnabled,
     setMoveTargetPaths, setMoveToPath, setMoveToError, setMoveToSuggestions, setMoveToSuggestionIndex,
     setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onDuplicateEntriesRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef,
     onEditFileRef, onDownloadFileRef, onDownloadFilesRef, entryByPathRef, onExtractArchiveRef, onCreateArchiveRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
@@ -156,6 +156,16 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
         <ContextMenuItem onClick={() => navigator.clipboard.writeText(entryPath)}>
           <ClipboardCopy size={14} className="mr-2" />{tRef.current('sftp.context.copyPath')}
         </ContextMenuItem>
+        {onInsertPathToTerminal && !isParentEntry && (
+          <ContextMenuItem onClick={() => onInsertPathToTerminal(entryPath)}>
+            <TerminalSquare size={14} className="mr-2" />{tRef.current('sftp.context.insertPathToTerminal')}
+          </ContextMenuItem>
+        )}
+        {onCdInTerminal && isDir && !isParentEntry && (
+          <ContextMenuItem onClick={() => onCdInTerminal(entryPath)}>
+            <Terminal size={14} className="mr-2" />{tRef.current('sftp.context.cdInTerminal')}
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         {(() => {
           const sourceParent = getParentPath(entryPath);
@@ -240,6 +250,8 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     uploadEnabled,
     folderUploadEnabled,
     onUploadExternalFolder,
+    onInsertPathToTerminal,
+    onCdInTerminal,
     onCopyToOtherPaneRef,
     onDuplicateEntriesRef,
     onDownloadFileRef,

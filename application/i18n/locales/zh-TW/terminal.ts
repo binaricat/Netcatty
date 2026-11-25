@@ -97,6 +97,9 @@ export const zhTWTerminalMessages: Messages = {
   'history.clearAll.dialog.confirm': '全部清空',
   // SFTP File Opener
   'sftp.context.copyPath': '複製檔案路徑',
+  'sftp.context.insertPathToTerminal': '插入路徑到終端機',
+  'sftp.context.cdInTerminal': '在終端機中開啟 (cd)',
+  'sftp.terminal.insertBlockedUnsafeQuote': '終端機游標位於未閉合的引號或跳脫字元內，無法安全插入路徑',
   'sftp.context.openWith': '開啟方式...',
   'sftp.context.edit': '編輯',
   'sftp.opener.title': '開啟方式',

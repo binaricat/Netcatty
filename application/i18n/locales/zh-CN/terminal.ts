@@ -97,6 +97,9 @@ export const zhCNTerminalMessages: Messages = {
   'history.clearAll.dialog.confirm': '全部清空',
   // SFTP File Opener
   'sftp.context.copyPath': '复制文件路径',
+  'sftp.context.insertPathToTerminal': '插入路径到终端',
+  'sftp.context.cdInTerminal': '在终端中打开 (cd)',
+  'sftp.terminal.insertBlockedUnsafeQuote': '终端光标位于未闭合的引号或转义符内，无法安全插入路径',
   'sftp.context.openWith': '打开方式...',
   'sftp.context.edit': '编辑',
   'sftp.opener.title': '打开方式',
