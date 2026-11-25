@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { useAppearanceChromeStore } from '../../application/state/appearanceChromeStore';
 import type { ResolvedAppearance, TerminalAppearanceHostScope } from '../../domain/terminalAppearanceRuntime';
@@ -178,7 +178,68 @@ export function useTerminalThemePanelState({
     ],
   );
 
+  // Keep latest focus/host/font/theme inputs in a ref updated synchronously on
+  // render so all 8 theme/font handlers preserve stable references across tab
+  // switches and split-pane focus changes (these handlers live in
+  // SIDE_PANEL_STABLE_CTX_KEYS).
+  const latestRef = useRef({
+    activeSession,
+    activeWorkspace,
+    clearIntent,
+    focusedFontFamilyId,
+    focusedFontSize,
+    focusedFontWeight,
+    focusedHost,
+    focusedSessionId,
+    followAppTerminalTheme,
+    hostMap,
+    isFocusedHostEphemeral,
+    listSelectedThemeId,
+    onClearSessionFontSizeOverride,
+    onUpdateHost,
+    onUpdateSessionFontSize,
+    onUpdateTerminalFontFamilyId,
+    onUpdateTerminalFontSize,
+    onUpdateTerminalFontWeight,
+    onUpdateTerminalThemeId,
+    pickTheme,
+    rawFocusedHost,
+  });
+  latestRef.current = {
+    activeSession,
+    activeWorkspace,
+    clearIntent,
+    focusedFontFamilyId,
+    focusedFontSize,
+    focusedFontWeight,
+    focusedHost,
+    focusedSessionId,
+    followAppTerminalTheme,
+    hostMap,
+    isFocusedHostEphemeral,
+    listSelectedThemeId,
+    onClearSessionFontSizeOverride,
+    onUpdateHost,
+    onUpdateSessionFontSize,
+    onUpdateTerminalFontFamilyId,
+    onUpdateTerminalFontSize,
+    onUpdateTerminalFontWeight,
+    onUpdateTerminalThemeId,
+    pickTheme,
+    rawFocusedHost,
+  };
+
   const handleThemeChangeForFocusedSession = useCallback((themeId: string) => {
+    const {
+      focusedHost,
+      followAppTerminalTheme,
+      isFocusedHostEphemeral,
+      listSelectedThemeId,
+      onUpdateHost,
+      onUpdateTerminalThemeId,
+      pickTheme,
+      rawFocusedHost,
+    } = latestRef.current;
     if (themeId === listSelectedThemeId) return;
     if (!focusedHost && !followAppTerminalTheme) return;
 
@@ -196,24 +257,32 @@ export function useTerminalThemePanelState({
     } else if (rawFocusedHost) {
       onUpdateHost({ ...rawFocusedHost, theme: themeId, themeOverride: true });
     }
-  }, [
-    focusedHost,
-    followAppTerminalTheme,
-    isFocusedHostEphemeral,
-    listSelectedThemeId,
-    onUpdateHost,
-    onUpdateTerminalThemeId,
-    pickTheme,
-    rawFocusedHost,
-  ]);
+  }, []);
 
   const handleThemeResetForFocusedSession = useCallback(() => {
+    const {
+      clearIntent,
+      focusedHost,
+      isFocusedHostEphemeral,
+      onUpdateHost,
+      rawFocusedHost,
+    } = latestRef.current;
     clearIntent();
     if (!focusedHost || isFocusedHostEphemeral || !rawFocusedHost) return;
     onUpdateHost(clearHostThemeOverride(rawFocusedHost));
-  }, [clearIntent, focusedHost, isFocusedHostEphemeral, onUpdateHost, rawFocusedHost]);
+  }, []);
 
   const handleFontFamilyChangeForFocusedSession = useCallback((fontFamilyId: string) => {
+    // Snapshot target host/session state synchronously before startTransition
+    // so a focus change prior to transition commit cannot mutate another host.
+    const {
+      focusedHost,
+      focusedFontFamilyId,
+      isFocusedHostEphemeral,
+      onUpdateTerminalFontFamilyId,
+      onUpdateHost,
+      rawFocusedHost,
+    } = latestRef.current;
     if (!focusedHost || isSameResolvedTerminalFont(fontFamilyId, focusedFontFamilyId, navigatorPlatform)) return;
     startTransition(() => {
       if (isFocusedHostEphemeral) {
@@ -224,14 +293,34 @@ export function useTerminalThemePanelState({
         onUpdateHost({ ...rawFocusedHost, fontFamily: fontFamilyId, fontFamilyOverride: true });
       }
     });
-  }, [focusedHost, focusedFontFamilyId, isFocusedHostEphemeral, onUpdateTerminalFontFamilyId, onUpdateHost, rawFocusedHost]);
+  }, []);
 
   const handleFontFamilyResetForFocusedSession = useCallback(() => {
+    const {
+      focusedHost,
+      isFocusedHostEphemeral,
+      onUpdateHost,
+      rawFocusedHost,
+    } = latestRef.current;
     if (!focusedHost || isFocusedHostEphemeral || !rawFocusedHost) return;
     onUpdateHost(clearHostFontFamilyOverride(rawFocusedHost));
-  }, [focusedHost, isFocusedHostEphemeral, onUpdateHost, rawFocusedHost]);
+  }, []);
 
   const handleFontSizeChangeForFocusedSession = useCallback((newFontSize: number) => {
+    // Snapshot target host/session state synchronously before startTransition
+    // so a focus change prior to transition commit cannot mutate another host.
+    const {
+      activeSession,
+      activeWorkspace,
+      focusedHost,
+      focusedFontSize,
+      focusedSessionId,
+      isFocusedHostEphemeral,
+      onUpdateSessionFontSize,
+      onUpdateTerminalFontSize,
+      onUpdateHost,
+      rawFocusedHost,
+    } = latestRef.current;
     if (!focusedHost || newFontSize === focusedFontSize) return;
     startTransition(() => {
       if (activeWorkspace && focusedSessionId) {
@@ -253,9 +342,19 @@ export function useTerminalThemePanelState({
         onUpdateHost({ ...rawFocusedHost, fontSize: newFontSize, fontSizeOverride: true });
       }
     });
-  }, [activeSession, activeWorkspace, focusedHost, focusedFontSize, focusedSessionId, isFocusedHostEphemeral, onUpdateSessionFontSize, onUpdateTerminalFontSize, onUpdateHost, rawFocusedHost]);
+  }, []);
 
   const handleFontSizeResetForFocusedSession = useCallback(() => {
+    const {
+      activeSession,
+      activeWorkspace,
+      focusedHost,
+      focusedSessionId,
+      isFocusedHostEphemeral,
+      onClearSessionFontSizeOverride,
+      onUpdateHost,
+      rawFocusedHost,
+    } = latestRef.current;
     if (!focusedHost) return;
     if (activeWorkspace && focusedSessionId) {
       onClearSessionFontSizeOverride?.(focusedSessionId);
@@ -268,29 +367,45 @@ export function useTerminalThemePanelState({
     }
     if (!rawFocusedHost) return;
     onUpdateHost(clearHostFontSizeOverride(rawFocusedHost));
-  }, [activeSession, activeWorkspace, focusedHost, focusedSessionId, isFocusedHostEphemeral, onClearSessionFontSizeOverride, onUpdateHost, rawFocusedHost]);
+  }, []);
 
   const handleFontWeightChangeForFocusedSession = useCallback((newFontWeight: number) => {
+    // Snapshot target host/session state synchronously before startTransition
+    // so a focus change prior to transition commit cannot mutate another host.
+    const {
+      focusedHost,
+      focusedFontWeight,
+      hostMap,
+      isFocusedHostEphemeral,
+      onUpdateTerminalFontWeight,
+      onUpdateHost,
+    } = latestRef.current;
     if (!focusedHost || newFontWeight === focusedFontWeight) return;
+    const rawHost = isFocusedHostEphemeral ? undefined : hostMap.get(focusedHost.id);
     startTransition(() => {
       if (isFocusedHostEphemeral) {
         onUpdateTerminalFontWeight?.(newFontWeight);
         return;
       }
-      const rawHost = hostMap.get(focusedHost.id);
       if (rawHost) {
         onUpdateHost({ ...rawHost, fontWeight: newFontWeight, fontWeightOverride: true });
       }
     });
-  }, [focusedHost, focusedFontWeight, isFocusedHostEphemeral, onUpdateTerminalFontWeight, onUpdateHost, hostMap]);
+  }, []);
 
   const handleFontWeightResetForFocusedSession = useCallback(() => {
+    const {
+      focusedHost,
+      hostMap,
+      isFocusedHostEphemeral,
+      onUpdateHost,
+    } = latestRef.current;
     if (!focusedHost || isFocusedHostEphemeral) return;
     const rawHost = hostMap.get(focusedHost.id);
     if (rawHost) {
       onUpdateHost(clearHostFontWeightOverride(rawHost));
     }
-  }, [focusedHost, isFocusedHostEphemeral, onUpdateHost, hostMap]);
+  }, []);
 
   const composeBarThemeColors = useMemo(() => {
     if (!activeWorkspace || !focusedSessionId) return terminalTheme.colors;
