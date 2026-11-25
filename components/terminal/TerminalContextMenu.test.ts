@@ -46,9 +46,15 @@ const shouldOpenTerminalContextMenu = (
       terminalMouseTrackingMode?: string;
       showReconnectAction?: boolean;
       forceMenuInAlternateScreen?: boolean;
+      isComposeBarTarget?: boolean;
     }) => boolean;
   }
 ).shouldOpenTerminalContextMenu;
+const isComposeBarContextMenuTarget = (
+  terminalContextMenu as {
+    isComposeBarContextMenuTarget?: (target: EventTarget | null) => boolean;
+  }
+).isComposeBarContextMenuTarget;
 const shouldRenderTerminalContextMenuContent = (
   terminalContextMenu as {
     shouldRenderTerminalContextMenuContent?: (options: {
@@ -488,4 +494,25 @@ test("opens Shift right-click menu content for all right-click modes while mouse
     }),
     false,
   );
+});
+
+test("excludes compose bar targets from terminal context menu and right-click paste decisions", () => {
+  assert.equal(typeof shouldOpenTerminalContextMenu, "function");
+  assert.equal(typeof isComposeBarContextMenuTarget, "function");
+
+  for (const rightClickBehavior of ["context-menu", "paste", "select-word"] as const) {
+    assert.equal(
+      shouldOpenTerminalContextMenu({
+        event: {
+          shiftKey: true,
+          nativeEvent: {} as MouseEvent,
+        },
+        rightClickBehavior,
+        isComposeBarTarget: true,
+      }),
+      false,
+    );
+  }
+
+  assert.equal(isComposeBarContextMenuTarget(null), false);
 });

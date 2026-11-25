@@ -64,6 +64,7 @@ export function ComposeDirectoryPicker({ sessionId, theme, onReturnFocus }: {
         <PopoverContent side="top" align="start" sideOffset={6}
           className="p-0 overflow-hidden w-[360px] max-w-[calc(100vw-16px)]"
           style={{ backgroundColor: theme.resolvedBg, borderColor: theme.borderColor, color: theme.resolvedFg }}
+          onContextMenu={(event) => event.stopPropagation()}
           onOpenAutoFocus={event => { event.preventDefault(); search.current?.focus(); }}
           onInteractOutside={() => { outside.current = true; }}
           onCloseAutoFocus={event => { event.preventDefault(); if (!outside.current) onReturnFocus(); }}
