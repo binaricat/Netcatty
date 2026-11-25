@@ -542,6 +542,17 @@ function removeCliDiscoveryFile() {
   }
 }
 
+function parseCliDiscoveryIsCurrent(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed?.port === tcpPort
+      && parsed?.token === authToken
+      && parsed?.pid === process.pid;
+  } catch {
+    return false;
+  }
+}
+
 function isCliDiscoveryFileCurrent() {
   const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
   if (!cliDiscoveryFilePath) return true;
@@ -551,14 +562,7 @@ function isCliDiscoveryFileCurrent() {
   } catch {
     return false;
   }
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed?.port === tcpPort
-      && parsed?.token === authToken
-      && parsed?.pid === process.pid;
-  } catch {
-    return false;
-  }
+  return parseCliDiscoveryIsCurrent(raw);
 }
 
 // Self-heal: the discovery file is a runtime pointer that can be deleted
@@ -573,14 +577,60 @@ function ensureCliDiscoveryFile() {
   writeCliDiscoveryFile();
 }
 
+let discoverySelfHealInFlight = false;
+
+async function ensureCliDiscoveryFileAsync() {
+  if (discoverySelfHealInFlight) return;
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
+  const expectedTimer = discoverySelfHealTimer;
+  const expectedPort = tcpPort;
+  const expectedToken = authToken;
+  if (!expectedPort || !expectedToken || !expectedTimer || !cliDiscoveryFilePath) return;
+  discoverySelfHealInFlight = true;
+  try {
+    let current = false;
+    try {
+      const raw = await fs.promises.readFile(cliDiscoveryFilePath, "utf8");
+      if (
+        !tcpPort
+        || !authToken
+        || !discoverySelfHealTimer
+        || discoverySelfHealTimer !== expectedTimer
+        || tcpPort !== expectedPort
+        || authToken !== expectedToken
+      ) {
+        return;
+      }
+      current = parseCliDiscoveryIsCurrent(raw);
+    } catch {
+      current = false;
+    }
+    // Re-check host liveness after async disk I/O so an in-flight tick can
+    // never rewrite a discovery file already removed by shutdownHost().
+    if (
+      !tcpPort
+      || !authToken
+      || !discoverySelfHealTimer
+      || discoverySelfHealTimer !== expectedTimer
+      || tcpPort !== expectedPort
+      || authToken !== expectedToken
+    ) {
+      return;
+    }
+    if (current) return;
+    debugLog("self-healing CLI discovery file");
+    writeCliDiscoveryFile();
+  } finally {
+    discoverySelfHealInFlight = false;
+  }
+}
+
 function startDiscoverySelfHeal() {
   stopDiscoverySelfHeal();
   discoverySelfHealTimer = setInterval(() => {
-    try {
-      ensureCliDiscoveryFile();
-    } catch {
+    void ensureCliDiscoveryFileAsync().catch(() => {
       // Self-heal is best-effort.
-    }
+    });
   }, DISCOVERY_SELF_HEAL_INTERVAL_MS);
   if (typeof discoverySelfHealTimer.unref === "function") discoverySelfHealTimer.unref();
 }
@@ -2759,6 +2809,7 @@ const configAndCleanupApi = createConfigAndCleanupApi({
   cancelWorkerBackgroundJobsForSession,
   cancelWorkerBackgroundJobsForTerminalSession,
   clearPendingApprovals, cancelSftpOpsForSession, sftpBridge,
+  get terminalWorkerManager() { return terminalWorkerManager; },
   preserveIdleSessionCleanup: sessionIdleManager.scopeCleared,
   clearOpenedSessionScope: openedSessionOwnership.clearScope,
 });
@@ -2822,6 +2873,7 @@ module.exports = {
   getScopedSessionIds,
   getOrCreateHost,
   ensureCliDiscoveryFile,
+  ensureCliDiscoveryFileAsync,
   buildMcpServerConfig,
   activePtyExecs,
   cancelBackgroundJobsForSession,

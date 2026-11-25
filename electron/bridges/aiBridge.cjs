@@ -1079,6 +1079,20 @@ function cleanup() {
   codexLoginSessions.clear();
   invalidateCodexValidationCache();
   try {
+    // Only reset the OpenCode list-server pool if the driver module was already
+    // loaded in this process; never cold-load opencodeDriver.cjs during quit.
+    const opencodeDriverPath = require.resolve("./aiBridge/sdk/opencodeDriver.cjs");
+    const cachedOpencodeDriver = require.cache[opencodeDriverPath];
+    if (cachedOpencodeDriver?.exports?.resetOpenCodeListServerPool) {
+      cachedOpencodeDriver.exports.resetOpenCodeListServerPool();
+    } else {
+      const opencodeV2Path = require.resolve("./aiBridge/sdk/opencodeV2.cjs");
+      require.cache[opencodeV2Path]?.exports?.resetOpenCodeV2ListServerPool?.();
+    }
+  } catch {
+    // Ignore OpenCode list-server pool cleanup failures during shutdown.
+  }
+  try {
     externalMcpController?.cleanup?.();
   } catch {
     // Ignore external MCP cleanup failures during shutdown.

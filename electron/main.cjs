@@ -1754,6 +1754,11 @@ if (!gotLock) {
       console.warn("Error during port forwarding cleanup:", err);
     }
     try {
+      getFileWatcherBridge().cleanup?.();
+    } catch (err) {
+      console.warn("Error during file watcher cleanup:", err);
+    }
+    try {
       getGlobalShortcutBridge().cleanup();
     } catch (err) {
       console.warn("Error during global shortcut cleanup:", err);
