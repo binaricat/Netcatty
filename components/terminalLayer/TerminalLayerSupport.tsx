@@ -305,6 +305,8 @@ interface AIChatPanelsHostProps {
   onOpenVaultSnippetFromChat?: (snippetId: string) => void;
   /** Issue #4098 phase 2: pin the AI chat a workspace scope is anchored to. */
   onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void;
+  /** Focus an already-open terminal or workspace hosting an active AI chat. */
+  onFocusAIScopeTarget?: (target: { type: 'terminal' | 'workspace'; targetId: string }) => boolean;
   /** Live workspaces, threaded to AI chats for `/chats` scope titles. */
   workspaces?: Workspace[] | null;
 }
@@ -475,6 +477,7 @@ function aiChatPanelsHostAreEqual(
   if (prev.onOpenVaultSectionFromChat !== next.onOpenVaultSectionFromChat) return false;
   if (prev.onOpenVaultSnippetFromChat !== next.onOpenVaultSnippetFromChat) return false;
   if (prev.onSetWorkspaceAnchorChat !== next.onSetWorkspaceAnchorChat) return false;
+  if (prev.onFocusAIScopeTarget !== next.onFocusAIScopeTarget) return false;
   if (prev.workspaces !== next.workspaces) return false;
   if (prev.activeTabId === next.activeTabId) return true;
 
@@ -517,6 +520,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   onOpenVaultSectionFromChat,
   onOpenVaultSnippetFromChat,
   onSetWorkspaceAnchorChat,
+  onFocusAIScopeTarget,
   workspaces,
 }) => {
   const aiConfig = useContext(AIConfigContext);
@@ -688,6 +692,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     focusedSessionId={context.focusedSessionId}
                     workspaces={aiPanelWorkspaces}
                     onSetWorkspaceAnchorChat={onSetWorkspaceAnchorChat}
+                    onFocusAIScopeTarget={onFocusAIScopeTarget}
                     terminalSessions={context.terminalSessions}
                     appTerminalSessions={appTerminalSessions}
                     liveScopeTargetIds={liveScopeTargetIds}

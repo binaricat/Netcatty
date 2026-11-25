@@ -329,6 +329,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   scopeLabel,
   focusedSessionId,
   onSetWorkspaceAnchorChat,
+  onFocusAIScopeTarget,
   workspaces = [],
   terminalSessions = [],
   appTerminalSessions,
@@ -2322,6 +2323,17 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     workspaces,
   ]);
 
+  const handleManagerFocusScope = useCallback((target: {
+    type: 'terminal' | 'workspace';
+    targetId: string;
+  }): boolean => {
+    const focused = onFocusAIScopeTarget?.(target) ?? false;
+    if (focused) {
+      setShowHistory(false);
+    }
+    return focused;
+  }, [onFocusAIScopeTarget]);
+
   const handleManagerRebind = useCallback(async (sessionId: string, target: GlobalManagerScopeTarget) => {
     if (!rebindSessionScope) return;
     // A rebinding while a turn streams into the chat corrupts streaming state
@@ -2397,6 +2409,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       externalAgents={externalAgents}
       rebindTargets={managerRebindTargets}
       onSelect={(sessionId) => { void handleManagerActivate(sessionId); }}
+      onFocusScope={onFocusAIScopeTarget ? handleManagerFocusScope : undefined}
       onRebind={handleManagerRebind}
       onRename={handleRenameSession}
       onDelete={(sessionId) => { void handleManagerDelete(sessionId); }}
@@ -2414,10 +2427,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     externalAgents,
     managerRebindTargets,
     handleManagerActivate,
+    handleManagerFocusScope,
     handleManagerRebind,
     handleRenameSession,
     handleManagerDelete,
     handleManagerExport,
+    onFocusAIScopeTarget,
   ]);
 
   const handleAgentChange = useCallback((agentId: string) => {
@@ -2632,6 +2647,7 @@ export function aiChatSidePanelPropsAreEqual(
   if (prev.onOpenVaultHost !== next.onOpenVaultHost) return false;
   if (prev.onOpenVaultSnippet !== next.onOpenVaultSnippet) return false;
   if (prev.onOpenVaultSection !== next.onOpenVaultSection) return false;
+  if (prev.onFocusAIScopeTarget !== next.onFocusAIScopeTarget) return false;
 
   const scopeKey = `${prev.scopeType}:${prev.scopeTargetId ?? ''}`;
   if (

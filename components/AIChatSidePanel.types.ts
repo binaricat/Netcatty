@@ -112,6 +112,8 @@ export interface AIChatSidePanelProps {
   focusedSessionId?: string;
   /** Issue #4098 phase 2: pin the AI chat a workspace scope is anchored to. */
   onSetWorkspaceAnchorChat?: (workspaceId: string, chatId: string | null) => void;
+  /** Focus an already-open terminal or workspace tab and ensure its AI side panel is visible. */
+  onFocusAIScopeTarget?: (target: { type: 'terminal' | 'workspace'; targetId: string }) => boolean;
   /** Live workspaces (with their anchor chat and member host IDs), used for scope titles, anchor resolution, and explicit workspace rebinds. */
   workspaces?: Array<{ id: string; title: string; anchorChatId?: string; hostIds?: string[] }>;
   /** All currently live terminal (and workspace) scope target ids. */

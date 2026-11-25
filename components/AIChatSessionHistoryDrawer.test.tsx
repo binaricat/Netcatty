@@ -94,9 +94,6 @@ test("history drawer filters, pages, clears and explains the bounded search in e
     await enterQuery("[](){}");
     assert.equal(rows().length, 0);
     assert.match(renderer.container.textContent ?? "", /No matches in titles or recent retained content/);
-    assert.match(renderer.container.textContent ?? "", /prioritizing newer messages and entries/);
-    assert.match(renderer.container.textContent ?? "", /only a limited portion at the beginning is searched/);
-    assert.match(renderer.container.textContent ?? "", /not full-text search/);
     await click(renderer.container.querySelector("input")?.parentElement?.querySelector("button"));
     assert.equal(renderer.container.querySelector("input")?.value, "");
     assert.equal(rows().length, 80);
@@ -113,13 +110,12 @@ test("history drawer filters, pages, clears and explains the bounded search in e
       await enterQuery("no-such-content");
       const messages = getLoadedLocaleMessages(locale)!;
       const input = renderer.container.querySelector("input")!;
-      const hint = dom.document.getElementById(input.getAttribute("aria-describedby")!);
-      for (const key of ["ai.chat.searchSessions", "ai.chat.searchSessionsHint", "ai.chat.noMatchingSessions"]) {
+      for (const key of ["ai.chat.searchSessions", "ai.chat.noMatchingSessions"]) {
         assert.ok(messages[key], `${locale} is missing ${key}`);
       }
       assert.equal(input.placeholder, messages["ai.chat.searchSessions"]);
       assert.equal(input.getAttribute("aria-label"), messages["ai.chat.searchSessions"]);
-      assert.equal(hint?.textContent, messages["ai.chat.searchSessionsHint"]);
+      assert.equal(input.getAttribute("aria-describedby"), null);
       assert.ok(renderer.container.textContent?.includes(messages["ai.chat.noMatchingSessions"]));
       await render([], locale);
       assert.ok(renderer.container.textContent?.includes(messages["ai.chat.noSessions"]));

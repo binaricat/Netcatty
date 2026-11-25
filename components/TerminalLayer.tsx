@@ -2097,6 +2097,34 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSwitchSidePanelTab('ai');
   }, [handleSwitchSidePanelTab]);
 
+  // Focus an already-open terminal or workspace hosting an active AI chat and
+  // ensure its AI side panel is visible, instead of moving/interrupting it.
+  const handleFocusAIScopeTarget = useCallback((target: {
+    type: 'terminal' | 'workspace';
+    targetId: string;
+  }): boolean => {
+    let tabId: string | null = null;
+    if (target.type === 'workspace') {
+      const workspace = workspacesRef.current.find((candidate) => candidate.id === target.targetId);
+      if (!workspace) return false;
+      tabId = workspace.id;
+    } else {
+      const terminal = sessionsRef.current.find((candidate) => candidate.id === target.targetId);
+      if (!terminal) return false;
+      tabId = terminal.workspaceId ?? terminal.id;
+      if (terminal.workspaceId) {
+        onSetWorkspaceFocusedSessionRef.current?.(terminal.workspaceId, terminal.id);
+      }
+    }
+    activeTabStore.setActiveTabId(tabId);
+    if (prepareSidePanelTool(tabId, 'ai')) {
+      startTransition(() => {
+        selectSidePanelToolForTab(tabId, 'ai');
+      });
+    }
+    return true;
+  }, [prepareSidePanelTool, selectSidePanelToolForTab]);
+
   const handleOpenSystem = useCallback(() => {
     handleSwitchSidePanelTab('system');
   }, [handleSwitchSidePanelTab]);
@@ -2715,6 +2743,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleOpenScripts,
     handleOpenTheme,
     handleOpenAI,
+    handleFocusAIScopeTarget,
     handleOpenSystem,
     handleOpenNotes,
     getActiveTerminalSessionId,

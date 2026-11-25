@@ -50,9 +50,11 @@ export interface GlobalManagerRow {
   isCurrentActive: boolean;
   /** True when the chat is currently active in another open panel. */
   isActiveElsewhere: boolean;
+  /** Live panel currently displaying this chat when `isActiveElsewhere` is true. */
+  activeElsewhereTarget: { type: 'terminal' | 'workspace'; targetId: string } | null;
   /**
-   * Clicking the row opens the chat in the viewing panel: directly when it is
-   * already in scope, or by attaching it to the viewing panel automatically.
+   * Clicking the row jumps to the owning open panel when active elsewhere, or
+   * opens the chat in the viewing panel directly when in scope or historical.
    */
   canActivate: boolean;
   messageCount: number;
@@ -114,15 +116,30 @@ export function buildGlobalManagerRows(input: BuildGlobalManagerRowsInput): Glob
       hostNamesById.set(info.hostId, name);
     }
   }
-  const activeSessionIds = new Set(
-    Object.values(activeSessionIdMap).filter((id): id is string => Boolean(id)),
-  );
   const currentScopeKey = currentScopeTargetId
     ? `${currentScopeType}:${currentScopeTargetId}`
     : null;
   const currentPanelActiveSessionId = currentScopeKey
     ? activeSessionIdMap[currentScopeKey] ?? null
     : null;
+  const activeElsewhereTargetBySessionId = new Map<
+    string,
+    { type: 'terminal' | 'workspace'; targetId: string }
+  >();
+  for (const [scopeKey, activeChatId] of Object.entries(activeSessionIdMap)) {
+    if (!activeChatId || scopeKey === currentScopeKey) continue;
+    if (scopeKey.startsWith('workspace:')) {
+      const targetId = scopeKey.slice('workspace:'.length);
+      if (workspaceTitles.has(targetId) && !activeElsewhereTargetBySessionId.has(activeChatId)) {
+        activeElsewhereTargetBySessionId.set(activeChatId, { type: 'workspace', targetId });
+      }
+    } else if (scopeKey.startsWith('terminal:')) {
+      const targetId = scopeKey.slice('terminal:'.length);
+      if (liveTerminals.has(targetId) && !activeElsewhereTargetBySessionId.has(activeChatId)) {
+        activeElsewhereTargetBySessionId.set(activeChatId, { type: 'terminal', targetId });
+      }
+    }
+  }
 
   return sessions
     .map((session) => {
@@ -158,7 +175,10 @@ export function buildGlobalManagerRows(input: BuildGlobalManagerRowsInput): Glob
       }
 
       const isCurrentActive = currentPanelActiveSessionId === session.id;
-      const isActiveElsewhere = !isCurrentActive && !isDangling && activeSessionIds.has(session.id);
+      const activeElsewhereTarget = !isCurrentActive
+        ? activeElsewhereTargetBySessionId.get(session.id) ?? null
+        : null;
+      const isActiveElsewhere = activeElsewhereTarget !== null;
 
       return {
         session,
@@ -166,15 +186,16 @@ export function buildGlobalManagerRows(input: BuildGlobalManagerRowsInput): Glob
         agentId: session.agentId,
         agentLabel: resolveChatAgentLabel(session.agentId, externalAgents),
         scopeLabel,
-        scopeState: isDangling
+        scopeState: isDangling && !isActiveElsewhere
           ? 'dangling'
-          : activeSessionIds.has(session.id)
+          : isCurrentActive || isActiveElsewhere
             ? 'active'
             : 'idle',
         isCurrentView,
         isCurrentActive,
         isActiveElsewhere,
-        canActivate: Boolean(isCurrentView || currentScopeTargetId),
+        activeElsewhereTarget,
+        canActivate: Boolean(isCurrentView || currentScopeTargetId || isActiveElsewhere),
         messageCount: session.messages.length,
       } satisfies GlobalManagerRow;
     })

@@ -740,6 +740,10 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
     }
   }, [handleSend, navigate, onClose, sessionId]);
 
+  const handleReturnFocus = useCallback(() => {
+    textareaRef.current?.focus({ preventScroll: true });
+  }, []);
+
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     resizeCleanupRef.current?.();
@@ -804,9 +808,28 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
       </div>
 
       <div
-        className="flex-shrink-0 flex items-center gap-1 px-2 min-w-0"
+        data-compose-top-bar
+        className="flex-shrink-0 flex items-center gap-1.5 px-2 min-w-0"
         style={{ height: SNIPPET_STRIP_HEIGHT }}
       >
+        {contextChipsEnabled && (
+          <>
+            <ComposeDirectoryPicker
+              key={sessionId}
+              sessionId={sessionId}
+              theme={theme}
+              onReturnFocus={handleReturnFocus}
+            />
+            {pinnedSnippets.length > 0 && (
+              <span
+                aria-hidden="true"
+                className="h-3.5 w-px flex-shrink-0"
+                style={{ backgroundColor: theme.borderColor }}
+              />
+            )}
+          </>
+        )}
+
         <div
           data-compose-snippet-strip
           className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto scrollbar-thin"
@@ -848,9 +871,6 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
           pinnedCountLabel={t('terminal.composeBar.pinnedCount', { count: pinnedSnippets.length })}
         />
       </div>
-
-      {contextChipsEnabled && <ComposeDirectoryPicker key={sessionId} sessionId={sessionId} theme={theme}
-        onReturnFocus={() => textareaRef.current?.focus({ preventScroll: true })} />}
 
       <div className="flex-1 min-h-0 px-3 pt-1.5 pb-2 flex flex-col">
         <div className="flex flex-1 min-h-0 items-start gap-1.5">
