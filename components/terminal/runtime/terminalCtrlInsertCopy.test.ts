@@ -32,14 +32,17 @@ test("Ctrl+Insert copies selection, preserves selection, and leaks no PTY bytes 
 
   const dom = new JSDOM("<body/>", {
     url: "http://localhost",
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36",
     runScripts: "outside-only",
     pretendToBeVisual: true,
   });
   Object.assign(dom.window, { structuredClone });
   try {
     dom.window.eval(`
-      Object.defineProperty(navigator, 'platform', { value: 'Win32' });
+      Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+      Object.defineProperty(navigator, 'userAgent', {
+        configurable: true,
+        value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36',
+      });
       window.matchMedia = () => ({ matches: false, addListener(){}, removeListener(){}, addEventListener(){}, removeEventListener(){} });
       window.ResizeObserver = window.IntersectionObserver = class { observe(){} unobserve(){} disconnect(){} };
       HTMLCanvasElement.prototype.getContext = function(type) {
