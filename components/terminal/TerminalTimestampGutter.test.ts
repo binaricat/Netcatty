@@ -1,16 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import React from "react";
 
 import {
   TERMINAL_TIMESTAMP_GUTTER_HORIZONTAL_PADDING,
   TERMINAL_TIMESTAMP_GUTTER_MIN_WIDTH,
+  TerminalTimestampGutter,
   getTerminalTimestampTypography,
   resolveTerminalTimestampGutterRenderSignature,
   resolveTerminalTimestampGutterColor,
   resolveTerminalTimestampGutterWidth,
   syncTerminalTimestampGutterRows,
 } from "./TerminalTimestampGutter.tsx";
+import { writeTerminalDataWithLineTimestamps } from "./runtime/terminalLineTimestamps.ts";
+import { createDomRenderer, installDomEnvironment, runWithAct } from "../test-support/renderReactDom.tsx";
 
 test("timestamp gutter uses a bright color from the active terminal theme", () => {
   assert.equal(
@@ -219,4 +223,131 @@ test("timestamp gutter reuses row nodes across paints instead of rebuilding the 
       };
     }
   }
+});
+
+test("timestamp gutter skips getBoundingClientRect on idle onRender ticks and re-measures on resize", async (t) => {
+  const env = installDomEnvironment();
+  const renderer = await createDomRenderer(env.document);
+
+  let onRenderCb: (() => void) | null = null;
+  let onResizeCb: (() => void) | null = null;
+  let resizeObserverCb: (() => void) | null = null;
+  const previousResizeObserver = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class MockResizeObserver {
+    constructor(cb: ResizeObserverCallback) {
+      resizeObserverCb = () => cb([], this as unknown as ResizeObserver);
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+
+  const container = env.document.createElement("div");
+  const screen = env.document.createElement("div");
+  screen.className = "xterm-screen";
+  Object.defineProperty(screen, "clientHeight", { configurable: true, value: 80 });
+  let rectReads = 0;
+  screen.getBoundingClientRect = () => {
+    rectReads += 1;
+    return new env.window.DOMRect(0, 10, 400, 80);
+  };
+  container.appendChild(screen);
+  env.document.body.appendChild(container);
+
+  const lines = ["hello"];
+  const fakeTerm = {
+    cols: 80,
+    rows: 4,
+    options: { scrollback: 100 },
+    buffer: {
+      active: {
+        type: "normal",
+        baseY: 0,
+        viewportY: 0,
+        cursorY: 0,
+        cursorX: 5,
+        length: 1,
+        getLine: (idx: number) => ({
+          isWrapped: false,
+          translateToString: () => lines[idx] ?? "",
+        }),
+      },
+      normal: {
+        baseY: 0,
+        viewportY: 0,
+        cursorY: 0,
+        cursorX: 5,
+        length: 1,
+      },
+    },
+    write(_data: string, cb?: () => void) {
+      cb?.();
+    },
+    onScroll: () => ({ dispose() {} }),
+    onRender: (cb: () => void) => {
+      onRenderCb = cb;
+      return { dispose() {} };
+    },
+    onResize: (cb: () => void) => {
+      onResizeCb = cb;
+      return { dispose() {} };
+    },
+  };
+
+  writeTerminalDataWithLineTimestamps(
+    fakeTerm as never,
+    "hello\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 0) },
+  );
+
+  const termRef = { current: fakeTerm as never };
+  const containerRef = { current: container };
+
+  t.after(async () => {
+    await renderer.unmount();
+    globalThis.ResizeObserver = previousResizeObserver;
+    env.cleanup();
+  });
+
+  await renderer.render(
+    React.createElement(TerminalTimestampGutter, {
+      termRef,
+      containerRef,
+      enabled: true,
+      top: "0px",
+      sessionId: "s1",
+      color: "#66e8ff",
+      fontFamily: "monospace",
+      fontSize: 12,
+      fontWeight: 400,
+      width: 64,
+    }),
+  );
+
+  const readsAfterInitialRender = rectReads;
+  assert.equal(readsAfterInitialRender, 1, "initial render measures screen rect once");
+
+  // Simulate 10 idle cursor-blink onRender events with unchanged viewport/ledger state.
+  await runWithAct(() => {
+    for (let i = 0; i < 10; i += 1) {
+      onRenderCb?.();
+    }
+  });
+  assert.equal(
+    rectReads,
+    readsAfterInitialRender,
+    "idle onRender cursor-blink ticks must not call getBoundingClientRect",
+  );
+
+  // onResize and ResizeObserver must still force a full layout measurement.
+  await runWithAct(() => {
+    onResizeCb?.();
+  });
+  assert.equal(rectReads, readsAfterInitialRender + 1, "onResize must force layout check");
+
+  await runWithAct(() => {
+    resizeObserverCb?.();
+  });
+  assert.equal(rectReads, readsAfterInitialRender + 2, "ResizeObserver must force layout check");
 });

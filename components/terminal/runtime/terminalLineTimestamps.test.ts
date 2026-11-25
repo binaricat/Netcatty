@@ -8,6 +8,7 @@ import {
   createTerminalLineTimestampSegmenter,
   formatTerminalLineTimestamp,
   getTerminalLineTimestampLedgerCount,
+  getTerminalLineTimestampViewportStateKey,
   getVisibleTerminalLineTimestampRows,
   isSimpleAsciiControlText,
   onTerminalLineTimestampsChange,
@@ -19,6 +20,7 @@ import {
   type StampCursorEstimate,
 } from "./terminalLineTimestamps.ts";
 import { MAX_INCOMPLETE_TERMINAL_CONTROL_SEQUENCE_CHARS } from "./terminalControlSequenceLimits.ts";
+import { noteTerminalOutputPressureData } from "./terminalOutputPressure.ts";
 import { installEraseInDisplayHandlers } from "../clearTerminalViewport.ts";
 
 const createRealTimestampTerm = (wipeScrollback = true) => {
@@ -1152,5 +1154,193 @@ test("capacity follows small scrollback and caps large histories", () => {
       options: { scrollback: 100000 },
     } as never),
     MAX_TERMINAL_LINE_TIMESTAMP_ENTRIES,
+  );
+});
+
+test("cached sorted ledger serves O(log N + rows) viewport queries and invalidates on reflow marker mutations", () => {
+  const markers: Array<{ line: number; isDisposed: boolean; dispose: () => void }> = [];
+  const fake = createFakeTerm({ rows: 5, cols: 80, scrollback: 5000 });
+  const term = fake.term as unknown as {
+    cols: number;
+    rows: number;
+    registerMarker: (offset: number) => { line: number; isDisposed: boolean; dispose: () => void };
+    buffer: { active: { baseY: number; viewportY: number; cursorY: number; cursorX: number; length: number } };
+  };
+  term.registerMarker = (offset: number) => {
+    const abs = Math.max(0, term.buffer.active.baseY + term.buffer.active.cursorY + offset);
+    const marker = {
+      line: abs,
+      isDisposed: false,
+      dispose() {
+        this.isDisposed = true;
+      },
+    };
+    markers.push(marker);
+    return marker;
+  };
+
+  // Populate 1,000 distinct seconds (2 lines each => 2,000 buffer lines).
+  for (let sec = 0; sec < 1000; sec += 1) {
+    const date = new Date(2026, 5, 6, 12, Math.floor(sec / 60), sec % 60);
+    writeTerminalDataWithLineTimestamps(
+      fake.term as never,
+      `line-${sec}-a\r\nline-${sec}-b\r\n`,
+      () => {},
+      { timestampDate: date },
+    );
+  }
+
+  // Binary search queries at top, middle, and bottom of history.
+  fake.setViewportY(0);
+  const topRows = getVisibleTerminalLineTimestampRows(fake.term as never);
+  assert.equal(topRows[0]?.label, "12:00:00");
+  assert.equal(topRows[2]?.label, "12:00:01");
+
+  fake.setViewportY(1000);
+  const midRows = getVisibleTerminalLineTimestampRows(fake.term as never);
+  assert.equal(midRows.length, 5);
+  assert.equal(midRows[0]?.label, "12:08:20");
+  assert.equal(midRows[2]?.label, "12:08:21");
+
+  // Simulate xterm mutating live IMarker.line out-of-order during a cols reflow.
+  const swapped = markers[500]!;
+  const neighbor = markers[501]!;
+  const origLine = swapped.line;
+  swapped.line = neighbor.line + 4;
+  neighbor.line = origLine;
+  term.cols = 60; // geometry change must invalidate sortedLedgerCache and re-sort.
+
+  fake.setViewportY(origLine);
+  const reflowedRows = getVisibleTerminalLineTimestampRows(fake.term as never);
+  assert.equal(
+    reflowedRows[0]?.label,
+    "12:08:21",
+    "cache must invalidate and re-sort when cols reflow moves live marker lines",
+  );
+});
+
+test("getTerminalLineTimestampViewportStateKey stays stable when idle and tracks viewport/geometry/ledger changes", () => {
+  const fake = createFakeTerm({ rows: 10, cols: 80, scrollback: 100 });
+  const term = fake.term as unknown as {
+    cols: number;
+    rows: number;
+    buffer: { active: { cursorX: number; cursorY: number } };
+  };
+  writeTerminalDataWithLineTimestamps(
+    fake.term as never,
+    "hello\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 0) },
+  );
+
+  const key0 = getTerminalLineTimestampViewportStateKey(fake.term as never);
+  const keyIdle = getTerminalLineTimestampViewportStateKey(fake.term as never);
+  assert.equal(keyIdle, key0);
+
+  fake.setViewportY(1);
+  const keyScrolled = getTerminalLineTimestampViewportStateKey(fake.term as never);
+  assert.notEqual(keyScrolled, key0);
+
+  fake.setViewportY(0);
+  term.cols = 100;
+  assert.notEqual(getTerminalLineTimestampViewportStateKey(fake.term as never), key0);
+
+  term.cols = 80;
+  term.buffer.active.cursorX = 3;
+  assert.notEqual(getTerminalLineTimestampViewportStateKey(fake.term as never), key0);
+});
+
+test("full-scrollback in-place IMarker.line drift and flood bypass invalidate viewport key and sorted cache", () => {
+  const markers: Array<{ line: number; isDisposed: boolean; dispose: () => void }> = [];
+  const fake = createFakeTerm({ rows: 4, cols: 80, scrollback: 6 });
+  const term = fake.term as unknown as {
+    cols: number;
+    rows: number;
+    registerMarker: (offset: number) => { line: number; isDisposed: boolean; dispose: () => void };
+    buffer: { active: { baseY: number; viewportY: number; cursorY: number; cursorX: number; length: number } };
+  };
+  term.registerMarker = (offset: number) => {
+    const abs = Math.max(0, term.buffer.active.baseY + term.buffer.active.cursorY + offset);
+    const marker = {
+      line: abs,
+      isDisposed: false,
+      dispose() {
+        this.isDisposed = true;
+      },
+    };
+    markers.push(marker);
+    return marker;
+  };
+
+  // Fill buffer to capacity (maxLines = 4 + 6 = 10) with stamps on rows 4 and 6.
+  writeTerminalDataWithLineTimestamps(
+    fake.term as never,
+    "a\r\nb\r\nc\r\nd\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 0) },
+  );
+  writeTerminalDataWithLineTimestamps(
+    fake.term as never,
+    "e\r\nf\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 1) },
+  );
+  writeTerminalDataWithLineTimestamps(
+    fake.term as never,
+    "g\r\nh\r\ni\r\nj\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 2) },
+  );
+
+  // Pin geometry to full scrollback and populate sortedLedgerCache.
+  fake.setViewportY(0);
+  const initialRows = getVisibleTerminalLineTimestampRows(fake.term as never);
+  const keyBeforeShift = getTerminalLineTimestampViewportStateKey(fake.term as never);
+  assert.equal(initialRows[0]?.label, "12:00:00");
+
+  // Simulate full-scrollback output trimming top rows while baseY/length/cols/rows
+  // remain constant and xterm decrements live IMarker.line in-place without
+  // disposing any sparse marker.
+  const baseYBefore = term.buffer.active.baseY;
+  const lengthBefore = term.buffer.active.length;
+  for (const marker of markers) {
+    marker.line = Math.max(0, marker.line - 2);
+  }
+  assert.equal(term.buffer.active.baseY, baseYBefore);
+  assert.equal(term.buffer.active.length, lengthBefore);
+
+  const keyAfterShift = getTerminalLineTimestampViewportStateKey(fake.term as never);
+  assert.notEqual(
+    keyAfterShift,
+    keyBeforeShift,
+    "viewport state key must change immediately on in-place live IMarker.line drift",
+  );
+
+  const shiftedRows = getVisibleTerminalLineTimestampRows(fake.term as never);
+  assert.equal(
+    shiftedRows[2]?.label,
+    "12:00:01",
+    "sortedLedgerCache must invalidate and reflect shifted marker lines at constant geometry",
+  );
+
+  // Also verify the flood bypass path (`shouldSkipTerminalLineTimestamps`) marks
+  // the ledger dirty on write completion even when geometry stays constant.
+  const keyBeforeFlood = getTerminalLineTimestampViewportStateKey(fake.term as never);
+  const floodPayload = "x".repeat(200_000);
+  noteTerminalOutputPressureData(fake.term as never, floodPayload);
+  let floodDone = false;
+  writeTerminalDataWithLineTimestamps(
+    fake.term as never,
+    "flood-line\r\n",
+    () => {
+      floodDone = true;
+    },
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 3) },
+  );
+  assert.equal(floodDone, true);
+  assert.notEqual(
+    getTerminalLineTimestampViewportStateKey(fake.term as never),
+    keyBeforeFlood,
+    "flood bypass completion must invalidate cached state key",
   );
 });
