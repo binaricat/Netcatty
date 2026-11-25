@@ -2630,6 +2630,27 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       return false;
     }
 
+    // Claim Ctrl+Insert as clipboard copy before Kitty/Win32 or xterm can
+    // encode it as an Insert key (under Windows ConPTY win32InputMode, letting
+    // xterm encode Ctrl+Insert clears the selection, cancels copyOnSelect, and
+    // leaks ESC[2;5~ / "5~" into nested shells when selection tools like Doubao
+    // inject Ctrl+Insert), while preserving user shortcut precedence (#4351).
+    if (
+      e.key === "Insert" && e.ctrlKey
+      && !e.shiftKey && !e.altKey && !e.metaKey
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      const selection = previewSelection || getTerminalSelectionForClipboard(
+        term,
+        ctx.terminalSettingsRef.current?.normalizeTextOnCopy ?? true,
+      );
+      if (selection) {
+        void Promise.resolve(navigator.clipboard?.writeText?.(selection)).catch(() => {});
+      }
+      return false;
+    }
+
     // Sogou/macOS CJK punctuation: keydown still reports ASCII "," while the
     // full-width "，" arrives on insertText. Returning false (without
     // preventDefault) stops xterm/Kitty from sending the half-width key so the
