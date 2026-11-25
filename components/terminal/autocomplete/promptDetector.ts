@@ -680,22 +680,36 @@ export function detectPrompt(term: XTerm): PromptDetectionResult {
   return NO_PROMPT;
 }
 
+type CellInspectableBufferLine = {
+  getCell?: (x: number) => {
+    getCode?: () => number;
+    getChars?: () => string;
+  } | undefined;
+};
+
 /**
- * True when single-row text after the cursor looks like a right-aligned shell
- * prompt decoration (e.g. zsh `RPROMPT`, fish `fish_right_prompt`, Powerlevel10k,
- * Starship) rather than editable command text left behind after `Ctrl+A`.
+ * True when single-row text after the cursor is confirmed by xterm cell
+ * metadata to be a cursor-jumped right-aligned shell prompt decoration (e.g.
+ * zsh `RPROMPT`, fish `fish_right_prompt`, Powerlevel10k, Starship) rather than
+ * editable command text left behind after `Ctrl+A`.
  *
- * Right prompts sit flush against the terminal's right margin (allowing up to
- * 2 trailing indent cells, e.g. zsh's default `ZLE_RPROMPT_INDENT=1`), separated
- * from the cursor by a run of padding spaces wider than any internal gap inside
- * the decoration itself.
+ * Shells draw right prompts by erasing to end-of-line (`EL`) and jumping to the
+ * right margin (`CUF`/`CHA`), leaving unwritten null cells (`code === 0`,
+ * `chars === ""`) in the gap starting at `cursorX`. By contrast, recalled or
+ * typed commands with leading spaces write literal ASCII space characters
+ * (`code === 32`, `chars === " "`) starting at `cursorX`, so checking the cell
+ * buffer prevents space-padded commands near the right margin from ever being
+ * misclassified as non-editable decorations. Rows without `getCell` metadata
+ * are conservatively treated as editable text.
  */
 function isRightPromptDecorationAfterCursor(
+  line: CellInspectableBufferLine,
   rowAfter: string,
   cursorX: number,
   cols: number,
   term: XTerm,
 ): boolean {
+  if (typeof line.getCell !== "function") return false;
   if (!Number.isFinite(cols) || cols <= 0) return false;
   const trimmedRight = rowAfter.trimEnd();
   if (!trimmedRight) return false;
@@ -706,8 +720,22 @@ function isRightPromptDecorationAfterCursor(
   const endCol = cursorX + stringCellWidth(trimmedRight, term);
   if (endCol < cols - 2) return false;
 
+  // Confirm the padding gap starting at cursorX consists of unwritten null
+  // cells left by cursor-forward jumps (not literal 0x20 space characters
+  // written by a recalled command). Allow at most 1 written leading space at
+  // the end of the gap in case the RPROMPT text itself starts with a space.
+  let unwrittenGapCells = 0;
+  for (let offset = 0; offset < leadingSpaces; offset += 1) {
+    const cell = line.getCell(cursorX + offset);
+    if (!cell || typeof cell.getCode !== "function") return false;
+    const isUnwritten = cell.getCode() === 0 && (!cell.getChars || cell.getChars() === "");
+    if (!isUnwritten) break;
+    unwrittenGapCells += 1;
+  }
+  if (unwrittenGapCells < 2 || unwrittenGapCells < leadingSpaces - 1) return false;
+
   // Reject lines where editable text sits near the cursor before a wider gap
-  // leading into the right prompt (e.g. `$   rm -rf /foo        12:34:56 `).
+  // leading into the right prompt.
   const body = trimmedRight.trimStart();
   let maxInternalSpaceRun = 0;
   let currentSpaceRun = 0;
@@ -721,7 +749,7 @@ function isRightPromptDecorationAfterCursor(
       currentSpaceRun = 0;
     }
   }
-  if (maxInternalSpaceRun >= leadingSpaces) return false;
+  if (maxInternalSpaceRun >= unwrittenGapCells) return false;
 
   return true;
 }
@@ -729,8 +757,8 @@ function isRightPromptDecorationAfterCursor(
 /**
  * Extract editable text on the active logical line to the right of the cursor,
  * including any wrapped continuation rows belonging to the same line, while
- * ignoring right-aligned prompt decorations (e.g. zsh `RPROMPT`) on an
- * unwrapped row.
+ * ignoring cell-confirmed right-aligned prompt decorations (e.g. zsh `RPROMPT`)
+ * on an unwrapped row.
  */
 export function getPromptLineTextAfterCursor(term: XTerm): string {
   const buffer = term.buffer.active;
@@ -754,7 +782,7 @@ export function getPromptLineTextAfterCursor(term: XTerm): string {
   if (rowAfter.trim().length === 0) {
     return "";
   }
-  if (isRightPromptDecorationAfterCursor(rowAfter, cursorX, term.cols, term)) {
+  if (isRightPromptDecorationAfterCursor(line, rowAfter, cursorX, term.cols, term)) {
     return "";
   }
   return rowAfter;

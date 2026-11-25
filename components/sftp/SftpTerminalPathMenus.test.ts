@@ -362,9 +362,13 @@ test("after-cursor text after Ctrl+A on recalled history blocks idle cd injectio
   );
 });
 
-test("right-aligned shell prompt decorations (e.g. zsh RPROMPT) do not block idle readiness while recalled commands still do", () => {
-  const cols = 80;
-  const makeTerm = (line: string, cursorX: number) => ({
+test("right-aligned shell prompt decorations (e.g. zsh RPROMPT) do not block idle readiness while space-padded recalled commands still do", () => {
+  const makeCellTerm = (
+    cols: number,
+    line: string,
+    cursorX: number,
+    unwrittenRange?: { start: number; end: number },
+  ) => ({
     cols,
     buffer: {
       active: {
@@ -372,14 +376,30 @@ test("right-aligned shell prompt decorations (e.g. zsh RPROMPT) do not block idl
         cursorY: 0,
         cursorX,
         length: 1,
-        getLine: (row: number) => (row === 0 ? { isWrapped: false, translateToString: () => line } : undefined),
+        getLine: (row: number) =>
+          row === 0
+            ? {
+                isWrapped: false,
+                translateToString: () => line,
+                getCell: (x: number) => {
+                  if (unwrittenRange && x >= unwrittenRange.start && x < unwrittenRange.end) {
+                    return { getCode: () => 0, getChars: () => "" };
+                  }
+                  const ch = line[x] ?? "";
+                  return {
+                    getCode: () => (ch ? ch.codePointAt(0) ?? 0 : 0),
+                    getChars: () => ch,
+                  };
+                },
+              }
+            : undefined,
       },
     },
   });
 
-  // Zsh RPROMPT clock with default ZLE_RPROMPT_INDENT=1 (`$ ` + 69 spaces + `12:34:56 ` = 80 cols).
+  // Zsh RPROMPT clock with default ZLE_RPROMPT_INDENT=1 (`$ ` + 69 unwritten cells + `12:34:56 ` = 80 cols).
   const rpromptClock = "$ " + " ".repeat(69) + "12:34:56 ";
-  const rpromptTerm = makeTerm(rpromptClock, 2);
+  const rpromptTerm = makeCellTerm(80, rpromptClock, 2, { start: 2, end: 71 });
   const rprompt = detectPrompt(rpromptTerm as never);
   assert.equal(rprompt.isAtPrompt, true);
   assert.equal(rprompt.userInput, "");
@@ -398,21 +418,47 @@ test("right-aligned shell prompt decorations (e.g. zsh RPROMPT) do not block idl
     true,
   );
 
-  // Flush-right multi-segment RPROMPT (ZLE_RPROMPT_INDENT=0).
+  // Flush-right multi-segment RPROMPT (ZLE_RPROMPT_INDENT=0) with cursor-jumped gap.
   const flushRight = "user@host:~$ " + " ".repeat(53) + "main  12:34:56";
-  assert.equal(getPromptLineTextAfterCursor(makeTerm(flushRight, 13) as never).trim(), "");
+  assert.equal(
+    getPromptLineTextAfterCursor(makeCellTerm(80, flushRight, 13, { start: 13, end: 66 }) as never).trim(),
+    "",
+  );
+
+  // Recalled command in a 40-col Bash terminal with written leading spaces reaching the right margin
+  // MUST remain blocked (literal 0x20 space cells, not unwritten cursor-jump cells).
+  const recalledRightAligned = "$ " + " ".repeat(17) + "true; printf INJECTED";
+  assert.equal(recalledRightAligned.length, 40);
+  assert.ok(
+    getPromptLineTextAfterCursor(makeCellTerm(40, recalledRightAligned, 2) as never).trim().length > 0,
+  );
 
   // Recalled command at cursor with RPROMPT still present MUST remain blocked.
   const recalledWithRprompt = "$ rm -rf /tmp/foo" + " ".repeat(54) + "12:34:56 ";
-  assert.ok(getPromptLineTextAfterCursor(makeTerm(recalledWithRprompt, 2) as never).trim().length > 0);
+  assert.ok(
+    getPromptLineTextAfterCursor(makeCellTerm(80, recalledWithRprompt, 2, { start: 17, end: 71 }) as never).trim().length > 0,
+  );
 
   // Recalled command with leading spaces + RPROMPT MUST remain blocked.
   const spacedRecalledWithRprompt = "$   rm -rf /tmp/foo" + " ".repeat(52) + "12:34:56 ";
-  assert.ok(getPromptLineTextAfterCursor(makeTerm(spacedRecalledWithRprompt, 2) as never).trim().length > 0);
+  assert.ok(
+    getPromptLineTextAfterCursor(makeCellTerm(80, spacedRecalledWithRprompt, 2, { start: 19, end: 71 }) as never).trim().length > 0,
+  );
 
-  // Recalled command with leading spaces and no RPROMPT (not right-aligned) MUST remain blocked.
-  const spacedRecalled = ("$    rm -rf /tmp/foo").padEnd(cols, " ");
-  assert.ok(getPromptLineTextAfterCursor(makeTerm(spacedRecalled, 2) as never).trim().length > 0);
+  // Rows without getCell metadata conservatively retain right-aligned suffixes as editable text.
+  const noCellMetadataTerm = {
+    cols: 80,
+    buffer: {
+      active: {
+        baseY: 0,
+        cursorY: 0,
+        cursorX: 2,
+        length: 1,
+        getLine: (row: number) => (row === 0 ? { isWrapped: false, translateToString: () => rpromptClock } : undefined),
+      },
+    },
+  };
+  assert.ok(getPromptLineTextAfterCursor(noCellMetadataTerm as never).trim().length > 0);
 });
 
 test("prompt draft reader blocks insertion when cursor is inside an open double quote and cleans up on unregister", () => {
