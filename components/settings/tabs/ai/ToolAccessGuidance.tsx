@@ -6,6 +6,7 @@ import { cn } from "../../../../lib/utils";
 import { useToolAccessGuidanceState } from "../../../../application/state/useToolAccessGuidanceState";
 import { ToolSettingsDialog } from "./ToolSettingsDialog";
 import { EXTERNAL_MCP_DISCOVERY_ENV_VAR } from "./ExternalMcpCard";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
 
 /** Build a ready-to-paste prompt so an external AI client can register Netcatty MCP itself. */
 export function buildMcpOnboardingPrompt(
@@ -76,16 +77,22 @@ const CopyRow: React.FC<CopyRowProps> = ({ value, label, copyLabel, copiedLabel,
         >
           {value}
         </pre>
-        <button
-          type="button"
-          disabled={!canCopy}
-          className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
-          onClick={() => void handleCopy()}
-          aria-label={copied ? copiedLabel : copyLabel}
-          title={copied ? copiedLabel : copyLabel}
-        >
-          {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="absolute right-1.5 top-1.5 inline-flex">
+              <button
+                type="button"
+                disabled={!canCopy}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
+                onClick={() => void handleCopy()}
+                aria-label={copied ? copiedLabel : copyLabel}
+              >
+                {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+              </button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{copied ? copiedLabel : copyLabel}</TooltipContent>
+        </Tooltip>
       </div>
       {copyError ? <p role="alert" className="text-xs text-destructive">{t("ai.externalMcp.copyFailed")}</p> : null}
     </div>

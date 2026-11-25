@@ -31,6 +31,7 @@ import {
   type AsidePanelResizeProps,
 } from './ui/aside-panel';
 import { HostNotesEditor } from './host/HostNotesEditor';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { cn } from '../lib/utils';
 
 interface SerialHostDetailsPanelProps {
@@ -292,19 +293,23 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
             />
             <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
               {(initialData.password !== undefined || password !== '') && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPassword('');
-                    setPasswordChanged(true);
-                    setPasswordCleared(true);
-                  }}
-                  title={t('serial.field.clearPassword')}
-                  aria-label={t('serial.field.clearPassword')}
-                  className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <X size={14} />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPassword('');
+                        setPasswordChanged(true);
+                        setPasswordCleared(true);
+                      }}
+                      aria-label={t('serial.field.clearPassword')}
+                      className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('serial.field.clearPassword')}</TooltipContent>
+                </Tooltip>
               )}
               <button
                 type="button"

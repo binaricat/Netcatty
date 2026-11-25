@@ -5,6 +5,7 @@ import type { useHostBrowserControls } from '../../application/state/useHostBrow
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Button } from '../ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 function size(bytes: number) {
   const units = ['B', 'KB', 'MB', 'GB'];
@@ -15,7 +16,15 @@ function size(bytes: number) {
 export function BrowserDownloads({ items, command }: { items: HostBrowserDownload[]; command: ReturnType<typeof useHostBrowserControls>['downloadCommand'] }) {
   const { t } = useI18n();
   return <div className="min-w-0">
-    <div className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2"><div className="min-w-0"><p className="text-xs font-medium">{t('terminal.browser.downloads')}</p><p className="mt-1 text-[11px] text-muted-foreground">{t('terminal.browser.downloadLocation')}</p></div><Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" aria-label={t('terminal.browser.openFolder')} title={t('terminal.browser.openFolder')} onClick={() => void command('open-folder')}><FolderOpen size={14} /></Button></div>
+    <div className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2">
+      <div className="min-w-0"><p className="text-xs font-medium">{t('terminal.browser.downloads')}</p><p className="mt-1 text-[11px] text-muted-foreground">{t('terminal.browser.downloadLocation')}</p></div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" aria-label={t('terminal.browser.openFolder')} onClick={() => void command('open-folder')}><FolderOpen size={14} /></Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t('terminal.browser.openFolder')}</TooltipContent>
+      </Tooltip>
+    </div>
     <div className="max-h-80 overflow-y-auto p-1">
       {!items.length && <p className="px-3 py-8 text-center text-xs text-muted-foreground">{t('terminal.browser.downloadEmpty')}</p>}
       {items.map((item) => {
@@ -24,8 +33,21 @@ export function BrowserDownloads({ items, command }: { items: HostBrowserDownloa
         return <div key={item.id} data-download-id={item.id} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-2 hover:bg-secondary/50">
           <File size={16} className="shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="truncate text-xs" title={item.filename}>{item.filename}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{t(`terminal.browser.${item.missing ? 'missing' : item.status}`)}{item.status === 'progressing' ? ` · ${size(item.received)}${item.total ? ` / ${size(item.total)}` : ''}` : item.status === 'completed' ? ` · ${size(item.total || item.received)}` : ''}</p>
           {item.status === 'progressing' && <div className="mt-1 h-1 overflow-hidden rounded bg-secondary"><div className={`h-full bg-primary${item.total ? '' : ' animate-pulse'}`} style={{ width: `${item.total ? Math.min(100, item.received * 100 / item.total) : 20}%` }} /></div>}</div>
-          {running ? <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label={t('terminal.browser.cancelDownload')} title={t('terminal.browser.cancelDownload')} onClick={() => void command('cancel', item.id)}><X size={13} /></Button>
-            : canOpen ? <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" title={t('terminal.browser.reveal')} onClick={() => void command('reveal', item.id)}><FolderOpen size={13} /></Button> : null}
+          {running ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label={t('terminal.browser.cancelDownload')} onClick={() => void command('cancel', item.id)}><X size={13} /></Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('terminal.browser.cancelDownload')}</TooltipContent>
+            </Tooltip>
+          ) : canOpen ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label={t('terminal.browser.reveal')} onClick={() => void command('reveal', item.id)}><FolderOpen size={13} /></Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('terminal.browser.reveal')}</TooltipContent>
+            </Tooltip>
+          ) : null}
           <Popover><PopoverTrigger asChild><Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label={t('terminal.browser.more')}><MoreHorizontal size={13} /></Button></PopoverTrigger><PopoverContent align="end" className="w-40 p-1">
             {canOpen && <Button variant="ghost" size="sm" className="w-full justify-start text-xs" onClick={() => void command('open', item.id)}>{t('terminal.browser.openFile')}</Button>}
             {canOpen && <Button variant="ghost" size="sm" className="w-full justify-start text-xs" onClick={() => void command('save-as', item.id)}>{t('terminal.browser.saveAs')}</Button>}

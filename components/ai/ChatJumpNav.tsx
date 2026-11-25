@@ -8,6 +8,7 @@ import { useStickToBottomContext } from 'use-stick-to-bottom';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { ChatJumpEntry } from '../../domain/chatJumpNav';
 import { cn } from '../../lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 export interface ChatJumpNavProps {
   entries: ChatJumpEntry[];
@@ -83,21 +84,25 @@ const ChatJumpNav: React.FC<ChatJumpNavProps> = ({
 
   return (
     <div ref={rootRef} className="absolute top-3 right-3 z-20 flex flex-col items-end gap-1.5">
-      <button
-        type="button"
-        className={cn(
-          'h-7 w-7 rounded-full border border-border/40 bg-background/90 backdrop-blur-sm',
-          'flex items-center justify-center shadow-sm',
-          'text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer',
-          open && 'text-foreground bg-muted',
-        )}
-        aria-label={t('ai.chat.jumpNav')}
-        aria-expanded={open}
-        title={t('ai.chat.jumpNav')}
-        onClick={() => setOpen((value) => !value)}
-      >
-        {open ? <X size={14} /> : <ListTree size={14} />}
-      </button>
+      <Tooltip open={open ? false : undefined}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'h-7 w-7 rounded-full border border-border/40 bg-background/90 backdrop-blur-sm',
+              'flex items-center justify-center shadow-sm',
+              'text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer',
+              open && 'text-foreground bg-muted',
+            )}
+            aria-label={t('ai.chat.jumpNav')}
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {open ? <X size={14} /> : <ListTree size={14} />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="left">{t('ai.chat.jumpNav')}</TooltipContent>
+      </Tooltip>
 
       {open && (
         <div

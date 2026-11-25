@@ -8,6 +8,7 @@ import type {
   AcceleratorSnapshot,
 } from '../../domain/systemManager/types';
 import { cn } from '../../lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { ResourceBar } from './ResourceBar';
 import { GpuVendorBadge, vendorDisplayLabel } from './GpuVendorBadge';
 import {
@@ -134,18 +135,28 @@ const DeviceCard = memo(function DeviceCard({
         </div>
         <div className="flex items-center gap-2 shrink-0 text-[10px] text-muted-foreground tabular-nums">
           {Number.isFinite(device.temperatureC) ? (
-            <span className="inline-flex items-center gap-0.5" title={t('systemManager.gpu.temperature')}>
-              <Thermometer size={10} />
-              {Math.round(Number(device.temperatureC))}°C
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center gap-0.5">
+                  <Thermometer size={10} />
+                  {Math.round(Number(device.temperatureC))}°C
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{t('systemManager.gpu.temperature')}</TooltipContent>
+            </Tooltip>
           ) : null}
           {Number.isFinite(device.powerDrawW) ? (
-            <span className="inline-flex items-center gap-0.5" title={t('systemManager.gpu.power')}>
-              <Zap size={10} />
-              {Number(device.powerDrawW).toFixed(0)}
-              {Number.isFinite(device.powerLimitW) ? `/${Math.round(Number(device.powerLimitW))}` : ''}
-              W
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center gap-0.5">
+                  <Zap size={10} />
+                  {Number(device.powerDrawW).toFixed(0)}
+                  {Number.isFinite(device.powerLimitW) ? `/${Math.round(Number(device.powerLimitW))}` : ''}
+                  W
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{t('systemManager.gpu.power')}</TooltipContent>
+            </Tooltip>
           ) : null}
         </div>
       </div>

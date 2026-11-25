@@ -2,6 +2,7 @@ import { Pause, Play, Square } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '@/application/i18n/I18nProvider';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils.ts';
 
 export interface ScriptRecordingIndicatorProps {
@@ -35,17 +36,32 @@ export const ScriptRecordingIndicator: React.FC<ScriptRecordingIndicatorProps> =
       </span>
       <span className="tabular-nums text-muted-foreground">{formatElapsed(elapsedMs)}</span>
       {isPaused ? (
-        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onResume} title={t('scripts.recording.resume')}>
-          <Play size={14} />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onResume} aria-label={t('scripts.recording.resume')}>
+              <Play size={14} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t('scripts.recording.resume')}</TooltipContent>
+        </Tooltip>
       ) : (
-        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onPause} title={t('scripts.recording.pause')}>
-          <Pause size={14} />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onPause} aria-label={t('scripts.recording.pause')}>
+              <Pause size={14} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t('scripts.recording.pause')}</TooltipContent>
+        </Tooltip>
       )}
-      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onStop} title={t('scripts.recording.stop')}>
-        <Square size={14} />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onStop} aria-label={t('scripts.recording.stop')}>
+            <Square size={14} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t('scripts.recording.stop')}</TooltipContent>
+      </Tooltip>
     </div>
   );
 };

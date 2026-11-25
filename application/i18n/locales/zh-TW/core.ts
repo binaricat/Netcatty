@@ -482,7 +482,7 @@ export const zhTWCoreMessages: Messages = {
   'settings.appearance.themeColor.dark': '深色主題',
   'settings.appearance.customCss': '自訂 CSS',
   'settings.appearance.customCss.desc':
-    '使用自訂 CSS 個人化介面，修改會立即生效。選取的頂部分頁（`.top-tab[data-active="true"]`）會讀取 `--top-tab-active-bg`、`--top-tab-active-fg` 和 `--top-tab-active-border`。不設定則維持目前外觀。',
+    '使用自訂 CSS 個人化介面，修改會立即生效。',
   'settings.appearance.customCss.help.ariaLabel': '自訂 CSS 說明',
   'settings.appearance.customCss.help.title': '自訂 CSS 說明',
   'settings.appearance.customCss.help.body': `主要 UI 區塊都公開了 \`data-section\` 屬性，供你用 CSS 定位。編輯後會立即生效。

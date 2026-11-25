@@ -456,21 +456,27 @@ export const SystemPanelActionChip = memo(function SystemPanelActionChip({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'h-6 px-2 inline-flex items-center gap-1 rounded text-[10px] transition-colors disabled:opacity-40',
-        destructive
-          ? 'text-muted-foreground hover:text-destructive hover:bg-destructive/10'
-          : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
-      )}
-    >
-      {children}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <button
+            type="button"
+            aria-label={title}
+            disabled={disabled}
+            onClick={onClick}
+            className={cn(
+              'h-6 px-2 inline-flex items-center gap-1 rounded text-[10px] transition-colors disabled:opacity-40',
+              destructive
+                ? 'text-muted-foreground hover:text-destructive hover:bg-destructive/10'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
+            )}
+          >
+            {children}
+          </button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{title}</TooltipContent>
+    </Tooltip>
   );
 });
 

@@ -2,6 +2,7 @@ import { ListTree, X } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { extractNoteHeadings, type NoteHeadingItem } from "../../domain/notes";
 import { useI18n } from "../../application/i18n/I18nProvider";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
 export interface NoteOutlineProps {
   content: string;
@@ -31,6 +32,7 @@ export const NoteOutline: React.FC<NoteOutlineProps> = ({
   }, [content]);
 
   return (
+    <TooltipProvider delayDuration={300}>
     <nav
       aria-label={t("notes.outline.title")}
       data-note-outline="true"
@@ -45,15 +47,19 @@ export const NoteOutline: React.FC<NoteOutlineProps> = ({
           </span>
         </div>
         {onClose && (
-          <button
-            type="button"
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
-            onClick={onClose}
-            title={t("common.close")}
-            aria-label={t("common.close")}
-          >
-            <X size={14} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+                onClick={onClose}
+                aria-label={t("common.close")}
+              >
+                <X size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("common.close")}</TooltipContent>
+          </Tooltip>
         )}
       </div>
 
@@ -67,28 +73,34 @@ export const NoteOutline: React.FC<NoteOutlineProps> = ({
           </div>
         ) : (
           headings.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              data-note-outline-item={item.id}
-              data-heading-level={item.level}
-              className={`flex w-full items-center rounded-md py-1.5 pr-2 text-left text-xs leading-5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 ${
-                activeHeadingId === item.id
-                  ? "bg-secondary/60 font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-secondary/40 hover:text-foreground"
-              }`}
-              style={{ paddingLeft: `${10 + Math.min(item.level - minimumHeadingLevel, 4) * 12}px` }}
-              onClick={() => {
-                setActiveHeadingId(item.id);
-                onSelectHeading?.(item, index);
-              }}
-              title={item.text}
-            >
-              <span className="truncate">{item.text}</span>
-            </button>
+            <Tooltip key={item.id}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  data-note-outline-item={item.id}
+                  data-heading-level={item.level}
+                  className={`flex w-full items-center rounded-md py-1.5 pr-2 text-left text-xs leading-5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 ${
+                    activeHeadingId === item.id
+                      ? "bg-secondary/60 font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-secondary/40 hover:text-foreground"
+                  }`}
+                  style={{ paddingLeft: `${10 + Math.min(item.level - minimumHeadingLevel, 4) * 12}px` }}
+                  onClick={() => {
+                    setActiveHeadingId(item.id);
+                    onSelectHeading?.(item, index);
+                  }}
+                >
+                  <span className="truncate">{item.text}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="max-w-xs break-words">
+                {item.text}
+              </TooltipContent>
+            </Tooltip>
           ))
         )}
       </div>
     </nav>
+    </TooltipProvider>
   );
 };

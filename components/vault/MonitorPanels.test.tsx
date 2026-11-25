@@ -212,7 +212,8 @@ test("disk I/O distinguishes warming up or unsupported from idle and reports bot
     )).window.document;
     const io = document.querySelector("[data-monitor-disk-io]")!;
     for (const text of expected) assert.ok(io.textContent?.includes(text));
-    assert.match(io.getAttribute("title")!, /block device.*not supported on macOS/);
+    assert.equal(io.getAttribute("title"), null);
+    assert.match(io.getAttribute("aria-label")!, /block device.*not supported on macOS/);
   }
 });
 

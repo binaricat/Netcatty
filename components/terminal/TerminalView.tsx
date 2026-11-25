@@ -795,22 +795,26 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
                   )}
                 >
                   {!showHostInfoBar && inWorkspace && onDetachPointerDown && (
-                    <div
-                      role="button"
-                      tabIndex={-1}
-                      title={t("terminal.toolbar.dragPane")}
-                      aria-label={t("terminal.toolbar.dragPane")}
-                      className={cn(
-                        "flex h-6 w-5 shrink-0 items-center justify-center rounded-md",
-                        "cursor-grab active:cursor-grabbing",
-                        "text-[color:var(--terminal-toolbar-fg)] opacity-45 hover:opacity-90",
-                        "hover:bg-[color:var(--terminal-toolbar-btn-hover)] transition-colors",
-                      )}
-                      data-terminal-detach-drag-handle="true"
-                      onPointerDown={onDetachPointerDown}
-                    >
-                      <GripVertical size={12} strokeWidth={2} aria-hidden="true" />
-                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div
+                          role="button"
+                          tabIndex={-1}
+                          aria-label={t("terminal.toolbar.dragPane")}
+                          className={cn(
+                            "flex h-6 w-5 shrink-0 items-center justify-center rounded-md",
+                            "cursor-grab active:cursor-grabbing",
+                            "text-[color:var(--terminal-toolbar-fg)] opacity-45 hover:opacity-90",
+                            "hover:bg-[color:var(--terminal-toolbar-btn-hover)] transition-colors",
+                          )}
+                          data-terminal-detach-drag-handle="true"
+                          onPointerDown={onDetachPointerDown}
+                        >
+                          <GripVertical size={12} strokeWidth={2} aria-hidden="true" />
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{t("terminal.toolbar.dragPane")}</TooltipContent>
+                    </Tooltip>
                   )}
                   {showHostInfoBar && <div
                     className={cn(

@@ -19,6 +19,7 @@ import { encryptField, decryptField } from "../../../../infrastructure/persisten
 import { OPENCODE_GO_PROVIDER_ID } from "../../../../infrastructure/ai/opencodeGo";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
 import { cn } from "../../../../lib/utils";
 import type { BuiltinProviderIcon } from "./types";
 import { BUILTIN_PROVIDER_ICONS, getFetchBridge } from "./types";
@@ -444,21 +445,25 @@ export const ProviderConfigForm: React.FC<{
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.name')}</label>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowIconPicker((v) => !v)}
-            className="group relative shrink-0 rounded-md transition-all hover:brightness-110 hover:ring-2 hover:ring-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-            aria-label={t('ai.providers.icon.change')}
-            title={t('ai.providers.icon.change')}
-          >
-            <ProviderIconBadge provider={previewProvider} />
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-background bg-primary text-primary-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-            >
-              <Pencil size={9} strokeWidth={2.5} />
-            </span>
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setShowIconPicker((v) => !v)}
+                className="group relative shrink-0 rounded-md transition-all hover:brightness-110 hover:ring-2 hover:ring-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                aria-label={t('ai.providers.icon.change')}
+              >
+                <ProviderIconBadge provider={previewProvider} />
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-background bg-primary text-primary-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                >
+                  <Pencil size={9} strokeWidth={2.5} />
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('ai.providers.icon.change')}</TooltipContent>
+          </Tooltip>
           <input
             type="text"
             value={form.name}
@@ -521,7 +526,6 @@ export const ProviderConfigForm: React.FC<{
                 size="sm"
                 onClick={() => setShowIconPicker(false)}
                 aria-label={t('ai.providers.icon.close')}
-                title={t('ai.providers.icon.close')}
               >
                 <X size={12} className="mr-1.5" />
                 {t('ai.providers.icon.close')}

@@ -595,14 +595,19 @@ function SettingsAppearanceTab(props: {
           <h3 className="text-sm font-semibold text-foreground">
             {t("settings.appearance.customCss")}
           </h3>
-          <button
-            type="button"
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            aria-label={t("settings.appearance.customCss.help.ariaLabel")}
-            onClick={() => setCustomCssHelpOpen(true)}
-          >
-            <HelpCircle size={13} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                aria-label={t("settings.appearance.customCss.help.ariaLabel")}
+                onClick={() => setCustomCssHelpOpen(true)}
+              >
+                <HelpCircle size={13} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("settings.appearance.customCss.help.ariaLabel")}</TooltipContent>
+          </Tooltip>
         </div>
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
