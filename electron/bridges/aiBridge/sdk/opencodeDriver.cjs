@@ -5,7 +5,12 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
 const { withExclusiveProcessEnv } = require("./processEnvGate.cjs");
-const { getAvailablePort: getSharedAvailablePort } = require("./sdkDriverUtils.cjs");
+const {
+  createAbortWait,
+  createStopWait,
+  findFirstExistingExecutable,
+  getAvailablePort: getSharedAvailablePort,
+} = require("./sdkDriverUtils.cjs");
 const {
   buildOpenCodeNativeSkillsPermissionRules,
   buildOpenCodeSkillsPermissionRules,
@@ -21,17 +26,7 @@ const DEFAULT_OPENCODE_PORT = 4096;
 const OPENCODE_SERVER_START_TIMEOUT_MS = process.platform === "win32" ? 60000 : 30000;
 
 function resolveUsableOpenCodeBinPath(binPath, env) {
-  const candidates = [];
-  if (binPath) candidates.push(String(binPath));
-  if (env?.OPENCODE_BIN) candidates.push(String(env.OPENCODE_BIN));
-  for (const candidate of candidates) {
-    try {
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-        return candidate;
-      }
-    } catch {}
-  }
-  return undefined;
+  return findFirstExistingExecutable([binPath, env?.OPENCODE_BIN]);
 }
 
 function isOpenCodeImageAttachment(attachment) {
@@ -508,36 +503,6 @@ async function createDefaultOpenCode(options, env, binPath) {
     cleanup();
     throw error;
   }
-}
-
-function createAbortWait(signal) {
-  if (!signal) return { promise: new Promise(() => {}), dispose() {} };
-  if (signal.aborted) return { promise: Promise.resolve(), dispose() {} };
-  let resolveAbort;
-  const promise = new Promise((resolve) => { resolveAbort = resolve; });
-  const onAbort = () => resolveAbort();
-  signal.addEventListener("abort", onAbort, { once: true });
-  return {
-    promise,
-    dispose() {
-      signal.removeEventListener("abort", onAbort);
-    },
-  };
-}
-
-function createStopWait() {
-  let stopped = false;
-  let resolveStop;
-  const promise = new Promise((resolve) => { resolveStop = resolve; });
-  return {
-    promise,
-    get stopped() { return stopped; },
-    stop() {
-      if (stopped) return;
-      stopped = true;
-      resolveStop();
-    },
-  };
 }
 
 async function runOpenCodeV1Turn({

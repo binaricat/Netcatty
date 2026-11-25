@@ -11,12 +11,19 @@
  * matching the Cursor CLI workspace MCP merge pattern.
  */
 const { spawn } = require("node:child_process");
-const { StringDecoder } = require("node:string_decoder");
 const fs = require("node:fs");
 const path = require("node:path");
 const { prepareCommandForSpawn } = require("../../ai/shellUtils.cjs");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
-const { closeReasoning } = require("./sdkDriverUtils.cjs");
+const {
+  attachAbortGraceKill,
+  closeReasoning,
+  collectBoundedStdout,
+  createBoundedTextCollector,
+  createLineBuffer: createSharedLineBuffer,
+  resultToText: sharedResultToText,
+  signalProcessTree,
+} = require("./sdkDriverUtils.cjs");
 
 const NETCATTY_MCP_NAME = "netcatty-remote-hosts";
 const GROK_ABORT_GRACE_MS = 1_500;
@@ -79,36 +86,6 @@ function spawnGrokProcess(spawnImpl, cliPath, args, options = {}) {
     ...options,
     shell: spawnSpec.shell,
   });
-}
-
-function signalGrokProcessTree(child, signal, forceKillImpl) {
-  if (!child) return;
-  if (typeof forceKillImpl === "function") {
-    try { forceKillImpl(child, signal); } catch { /* ignore */ }
-    return;
-  }
-  if (process.platform === "win32" && signal === "SIGKILL" && child.pid) {
-    try {
-      const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      killer.on("error", () => {});
-      killer.unref?.();
-      return;
-    } catch {
-      // Fall through.
-    }
-  }
-  if (process.platform !== "win32" && child.pid) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // Fall through.
-    }
-  }
-  try { child.kill(signal); } catch { /* ignore */ }
 }
 
 function escapeTomlBasicString(value) {
@@ -364,16 +341,7 @@ function buildGrokCliArgs({
 }
 
 function resultToText(result) {
-  if (result == null) return "";
-  if (typeof result === "string") return result;
-  if (typeof result === "number" || typeof result === "boolean") return String(result);
-  if (typeof result === "object") {
-    if (typeof result.content === "string") return result.content;
-    if (typeof result.text === "string") return result.text;
-    if (typeof result.message === "string") return result.message;
-    try { return JSON.stringify(result); } catch { return String(result); }
-  }
-  return String(result);
+  return sharedResultToText(result, { includeText: true, includeMessage: true });
 }
 
 /**
@@ -677,41 +645,11 @@ function emitGrokUsage(emitter, usage) {
 }
 
 function createLineBuffer(onLine, maxBufferBytes = MAX_GROK_LINE_BYTES) {
-  let buffer = "";
-  let bufferedBytes = 0;
-  let overflowed = false;
-  const decoder = new StringDecoder("utf8");
-  return {
-    push(chunk) {
-      if (overflowed) return;
-      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk || ""));
-      bufferedBytes += bytes.length;
-      buffer += decoder.write(bytes);
-      let idx;
-      let consumedLine = false;
-      while ((idx = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        consumedLine = true;
-        if (line) onLine(line);
-      }
-      if (consumedLine) bufferedBytes = Buffer.byteLength(buffer, "utf8") + decoder.lastNeed;
-      if (bufferedBytes > maxBufferBytes) {
-        overflowed = true;
-        buffer = "";
-        const error = new Error(`Grok Build message exceeded ${maxBufferBytes} bytes`);
-        error.code = "GROK_LINE_LIMIT";
-        throw error;
-      }
-    },
-    flush() {
-      if (overflowed) return;
-      buffer += decoder.end();
-      const line = buffer.trim();
-      buffer = "";
-      if (line) onLine(line);
-    },
-  };
+  return createSharedLineBuffer(onLine, {
+    maxBytes: maxBufferBytes,
+    errorLabel: "Grok Build",
+    errorCode: "GROK_LINE_LIMIT",
+  });
 }
 
 async function runGrokTurn({
@@ -811,11 +749,7 @@ async function runGrokTurn({
   };
 
   const stdoutBuffer = createLineBuffer(handleLine);
-  let stderrText = "";
-  let stderrBytes = 0;
-  let stderrTruncated = false;
-  let stderrEnded = false;
-  const stderrDecoder = new StringDecoder("utf8");
+  const stderrCollector = createBoundedTextCollector(MAX_GROK_STDERR_CHARS);
 
   child.stdout?.on("data", (chunk) => {
     if (signal?.aborted) return;
@@ -826,26 +760,20 @@ async function runGrokTurn({
         state.failed = true;
         emitter.emitError(formatGrokErrorForUser(error?.message || String(error)));
       }
-      signalGrokProcessTree(child, "SIGKILL", forceKillImpl);
+      signalProcessTree(child, "SIGKILL", forceKillImpl);
     }
   });
   child.stderr?.on("data", (chunk) => {
     if (signal?.aborted) return;
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-    const remaining = Math.max(0, MAX_GROK_STDERR_CHARS - stderrBytes);
-    const accepted = buffer.length <= remaining ? buffer : buffer.subarray(0, remaining);
-    if (accepted.length > 0) stderrText += stderrDecoder.write(accepted);
-    stderrBytes += accepted.length;
-    if (accepted.length < buffer.length) stderrTruncated = true;
+    stderrCollector.push(chunk);
   });
 
-  let abortHandler = null;
-  let forceKillTimer = null;
+  let abortGuard = null;
   await new Promise((resolve) => {
     const finish = () => {
       if (settled) return;
       settled = true;
-      clearTimeout(forceKillTimer);
+      abortGuard?.clearTimer();
       if (!signal?.aborted) stdoutBuffer.flush();
       resolve();
     };
@@ -857,10 +785,7 @@ async function runGrokTurn({
       finish();
     });
     child.on("close", (code, exitSignal) => {
-      if (!stderrEnded) {
-        stderrEnded = true;
-        if (!stderrTruncated || stderrDecoder.lastNeed === 0) stderrText += stderrDecoder.end();
-      }
+      const stderrText = stderrCollector.end();
       // Only ignore exit after protocol completion (end event).
       // Incomplete turns fail even on exit 0; signal kills report code=null.
       if (shouldReportGrokProcessExitFailure(state, signal, code, exitSignal)) {
@@ -875,25 +800,16 @@ async function runGrokTurn({
       finish();
     });
 
-    let terminationStarted = false;
-    abortHandler = () => {
-      if (settled || terminationStarted) return;
-      terminationStarted = true;
-      forceKillTimer = setTimeout(() => {
-        if (settled) return;
-        signalGrokProcessTree(child, "SIGKILL", forceKillImpl);
-        finish();
-      }, Math.max(0, abortGraceMs));
-      forceKillTimer.unref?.();
-      signalGrokProcessTree(child, "SIGTERM");
-    };
-    if (signal) {
-      if (signal.aborted) abortHandler();
-      else signal.addEventListener("abort", abortHandler, { once: true });
-    }
+    abortGuard = attachAbortGraceKill(child, {
+      signal,
+      abortGraceMs,
+      forceKillImpl,
+      isSettled: () => settled,
+      onGraceTimeout: () => finish(),
+    });
   });
 
-  if (signal) signal.removeEventListener("abort", abortHandler);
+  abortGuard?.dispose();
   cleanup();
   closeReasoning(state, emitter);
 
@@ -1038,71 +954,20 @@ async function listGrokModels({
 
   const childEnv = { ...(env || process.env) };
 
-  return await new Promise((resolve) => {
-    let stdout = "";
-    let stdoutBytes = 0;
-    let stdoutTruncated = false;
-    let stdoutEnded = false;
-    const stdoutDecoder = new StringDecoder("utf8");
-    let settled = false;
-    let abortHandler = null;
-    let forceKillTimer = null;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(forceKillTimer);
-      if (abortSignal && abortHandler) {
-        abortSignal.removeEventListener("abort", abortHandler);
-      }
-      resolve(value);
-    };
-
-    let child;
-    try {
-      child = spawnGrokProcess(spawnImpl, cliPath, ["--no-auto-update", "models"], {
-        env: childEnv,
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-        detached: process.platform !== "win32",
-      });
-    } catch {
-      finish({ currentModelId: null, models: [] });
-      return;
-    }
-
-    child.stdout?.on("data", (chunk) => {
-      if (abortSignal?.aborted) return;
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-      const remaining = Math.max(0, MAX_GROK_MODEL_STDOUT_CHARS - stdoutBytes);
-      const accepted = buffer.length <= remaining ? buffer : buffer.subarray(0, remaining);
-      if (accepted.length > 0) stdout += stdoutDecoder.write(accepted);
-      stdoutBytes += accepted.length;
-      if (accepted.length < buffer.length) stdoutTruncated = true;
-    });
-    child.on("error", () => finish({ currentModelId: null, models: [] }));
-    child.on("close", () => {
-      if (!stdoutEnded) {
-        stdoutEnded = true;
-        if (!stdoutTruncated || stdoutDecoder.lastNeed === 0) stdout += stdoutDecoder.end();
-      }
-      finish(parseGrokModelsOutput(stdout));
-    });
-
-    abortHandler = () => {
-      if (settled) return;
-      forceKillTimer = setTimeout(() => {
-        if (settled) return;
-        signalGrokProcessTree(child, "SIGKILL", forceKillImpl);
-        finish({ currentModelId: null, models: [] });
-      }, Math.max(0, abortGraceMs));
-      forceKillTimer.unref?.();
-      signalGrokProcessTree(child, "SIGTERM", forceKillImpl);
-    };
-    if (abortSignal) {
-      if (abortSignal.aborted) abortHandler();
-      else abortSignal.addEventListener("abort", abortHandler, { once: true });
-    }
+  const stdout = await collectBoundedStdout({
+    spawnChild: () => spawnGrokProcess(spawnImpl, cliPath, ["--no-auto-update", "models"], {
+      env: childEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      detached: process.platform !== "win32",
+    }),
+    maxBytes: MAX_GROK_MODEL_STDOUT_CHARS,
+    signal: abortSignal,
+    abortGraceMs,
+    forceKillImpl,
   });
+  if (stdout == null) return { currentModelId: null, models: [] };
+  return parseGrokModelsOutput(stdout);
 }
 
 module.exports = {
