@@ -107,6 +107,7 @@ import { watchDevicePixelRatio } from "./rendererDprWatch";
 import { dispatchWin32InputModeEvent } from "./win32InputMode";
 import { shouldDeferWebglUntilVisible } from "./webglRendererPolicy";
 import {
+  createBoundedLigaturesAddon,
   createTerminalLigatureController,
   terminalFontLigaturesEnabled,
 } from "./terminalFontLigatures";
@@ -732,6 +733,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     _core?: {
       _renderService?: {
         _renderer?: MaybeRenderer;
+        dimensions?: {
+          device?: {
+            cell?: {
+              width?: number;
+            };
+          };
+        };
       };
     };
     options?: {
@@ -961,8 +969,29 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // The ligatures addon sets font-feature-settings on the terminal element.
   // WebGL's glyph atlas inherits that only when the atlas is created, so this
   // has to run before the first WebGL load. Later toggles rebuild WebGL.
+  // Wrap the addon's character joiner so unbounded horizontal-rule ligatures
+  // (e.g. `nvidia-smi` `+---...---+` borders) cannot exceed WebGL's 512px
+  // normal atlas page and trigger a 16384x16384 (~2 GiB) overflow atlas.
   const ligatures = createTerminalLigatureController({
-    createAddon: () => new LigaturesAddon(),
+    createAddon: () =>
+      createBoundedLigaturesAddon(new LigaturesAddon(), {
+        getDeviceCellWidth: () => {
+          const measured = (term as IntrospectableTerminal)._core?._renderService
+            ?.dimensions?.device?.cell?.width;
+          if (typeof measured === "number" && Number.isFinite(measured) && measured > 0) {
+            return measured;
+          }
+          const fontSize =
+            typeof term.options.fontSize === "number" && Number.isFinite(term.options.fontSize) && term.options.fontSize > 0
+              ? term.options.fontSize
+              : 14;
+          const dpr =
+            typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0
+              ? window.devicePixelRatio
+              : 1;
+          return fontSize * dpr;
+        },
+      }),
     loadAddon: (addon) => term.loadAddon(addon),
     isWebglActive: () => webglLoaded,
     recreateWebgl: reloadWebglRenderer,
