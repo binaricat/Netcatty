@@ -133,3 +133,21 @@ test('SessionStateStore reinjects edited files and unfinished plan items', () =>
   assert.match(text, /\[done\] inspect failure/);
   assert.match(text, /\[todo\] run regression tests/);
 });
+
+test('SessionStateStore evicts least-recently-used sessions beyond maxSessions', () => {
+  const store = new SessionStateStore(3);
+  store.mergeFromUserGoal('chat-1', 'Goal 1');
+  store.mergeFromUserGoal('chat-2', 'Goal 2');
+  store.mergeFromUserGoal('chat-3', 'Goal 3');
+
+  // Read chat-1 to refresh its recency so chat-2 is evicted next
+  assert.equal(store.get('chat-1').userGoal, 'Goal 1');
+
+  store.mergeFromUserGoal('chat-4', 'Goal 4');
+
+  assert.equal(store.get('chat-2').userGoal, undefined);
+  assert.equal(store.toReinjectionText('chat-2'), undefined);
+  assert.equal(store.get('chat-1').userGoal, 'Goal 1');
+  assert.equal(store.get('chat-3').userGoal, 'Goal 3');
+  assert.equal(store.get('chat-4').userGoal, 'Goal 4');
+});
