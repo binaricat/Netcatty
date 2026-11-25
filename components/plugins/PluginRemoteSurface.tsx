@@ -1,16 +1,18 @@
-import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { LazyLoadBoundary } from '../ui/lazy-load-boundary';
 import { PluginViewPopover } from './PluginViewPopover';
 import { createPortal } from 'react-dom';
 import { validatePluginRemoteTree } from '@/domain/pluginRemoteTreePolicy.cjs';
 import { validatePluginStylesheet } from '@/domain/pluginViewStylePolicy.cjs';
 
-type RemoteNode = { id: string; type: 3; data: string } | { id: string; type: 8; data: string } | {
+type RemoteElementNode = {
   id: string; type: 1; element: string; attributes: Record<string, string>; children: RemoteNode[];
 };
+type RemoteNode = { id: string; type: 3; data: string } | { id: string; type: 8; data: string } | RemoteElementNode;
 export type PluginSurfaceEvent = import('@netcatty/plugin-contract').HostDrawnViewEvent;
 const ATTRIBUTE_NAMES: Record<string, string> = { class: 'className', for: 'htmlFor', readonly: 'readOnly', tabindex: 'tabIndex', maxlength: 'maxLength', minlength: 'minLength', colspan: 'colSpan', rowspan: 'rowSpan', autocomplete: 'autoComplete' };
 const BOOLEAN_ATTRIBUTES = new Set(['checked', 'disabled', 'readonly', 'required', 'multiple', 'selected', 'open']);
+const preventFormSubmit = (event: React.FormEvent) => event.preventDefault();
 
 const SurfaceContext = createContext<{ css: string; onEvent(event: PluginSurfaceEvent): void; depth: number }>({ css: '', onEvent: () => {}, depth: 0 });
 function remoteText(nodes: RemoteNode[]): string {
@@ -19,30 +21,7 @@ function remoteText(nodes: RemoteNode[]): string {
 
 const ResourceLoader = createContext<((path: string) => Promise<string>) | undefined>(undefined);
 
-function RemoteElement({ node, settled }: { node: RemoteNode; settled: boolean }): React.ReactNode {
-  const attrs = node.type === 1 ? node.attributes : {};
-  const surface = useContext(SurfaceContext);
-  const loadImage = useContext(ResourceLoader);
-  const imagePath = node.type === 1 && node.element === 'img' ? attrs.src?.slice(6) : undefined;
-  const [imageUrl, setImageUrl] = useState<string | undefined>();
-  useEffect(() => {
-    let cancelled = false; setImageUrl(undefined);
-    if (imagePath && loadImage) void loadImage(imagePath).then((url) => { if (!cancelled) setImageUrl(url); }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [imagePath, loadImage]);
-  const remoteSelection = JSON.stringify(node.type === 1 && node.element === 'select'
-    ? node.children.filter((child) => child.type === 1 && child.element === 'option' && Object.hasOwn(child.attributes, 'selected')).map((child) => child.type === 1 ? child.attributes.value ?? remoteText(child.children).replace(/[\t\n\f\r ]+/g, ' ').trim() : '') : []);
-  const [localSelection, setLocalSelection] = useState<string[]>(() => JSON.parse(remoteSelection));
-  useEffect(() => { if (settled) setLocalSelection(JSON.parse(remoteSelection)); }, [remoteSelection, settled]);
-  const remoteValue = attrs.value ?? (node.type === 1 && node.element === 'textarea' ? remoteText(node.children) : undefined);
-  const remoteChecked = Object.hasOwn(attrs, 'checked');
-  const [localValue, setLocalValue] = useState(remoteValue ?? '');
-  const [localChecked, setLocalChecked] = useState(remoteChecked);
-  useEffect(() => { if (settled && remoteValue !== undefined) setLocalValue(remoteValue); }, [remoteValue, settled]);
-  useEffect(() => { if (settled) setLocalChecked(remoteChecked); }, [remoteChecked, settled]);
-  if (node.type === 3) return node.data;
-  if (node.type === 8) return null;
-  if (attrs['data-plugin-popover'] === 'true') return surface.depth < 1 ? <PluginViewPopover anchor={attrs['data-plugin-anchor'] ?? ''} open={Object.hasOwn(attrs, 'open')} dismiss={() => surface.onEvent({ nodeId: node.id, type: 'dismiss' })}><PluginRemoteSurface tree={{ children: node.children }} css={surface.css} onEvent={surface.onEvent} settled={settled} loadImage={loadImage} depth={surface.depth + 1} /></PluginViewPopover> : null;
+function buildRemoteElementProps(node: RemoteElementNode): Record<string, unknown> {
   const props: Record<string, unknown> = { 'data-netcatty-remote-node': node.id };
   let inlineStyle: string | undefined;
   for (const [name, value] of Object.entries(node.attributes)) {
@@ -53,23 +32,89 @@ function RemoteElement({ node, settled }: { node: RemoteNode; settled: boolean }
   }
   // The policy validated this declaration list before this component rendered.
   props.ref = (el: HTMLElement | null) => { if (el) { if (inlineStyle === undefined) el.removeAttribute('style'); else el.setAttribute('style', inlineStyle); } };
-  if (node.element === 'img') props.src = imageUrl;
-  if (node.element === 'form') props.onSubmit = (event: React.FormEvent) => event.preventDefault();
-  if (['input', 'select', 'textarea'].includes(node.element)) {
-    if (node.element === 'select' && Object.hasOwn(attrs, 'multiple')) props.value = localSelection;
-    else if (remoteValue !== undefined) props.value = localValue;
-    props.autoComplete = 'off';
-    if (node.element === 'input' && ['checkbox', 'radio'].includes(attrs.type ?? '')) props.checked = localChecked;
-    props.onChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-      setLocalValue(event.currentTarget.value);
-      if (event.currentTarget instanceof event.currentTarget.ownerDocument.defaultView!.HTMLSelectElement && event.currentTarget.multiple) setLocalSelection([...event.currentTarget.selectedOptions].map((option) => option.value));
-      if (event.currentTarget instanceof event.currentTarget.ownerDocument.defaultView!.HTMLInputElement) setLocalChecked(event.currentTarget.checked);
-    };
-  }
-  // React treats textarea/option text specially; do not wrap it in components.
-  if (node.element === 'textarea') return React.createElement(node.element, props);
+  if (node.element === 'form') props.onSubmit = preventFormSubmit;
+  return props;
+}
+
+const RemotePopoverElement = memo(function RemotePopoverElement({ node, settled }: { node: RemoteElementNode; settled: boolean }): React.ReactNode {
+  const surface = useContext(SurfaceContext);
+  const loadImage = useContext(ResourceLoader);
+  if (surface.depth >= 1) return null;
+  const attrs = node.attributes;
+  return <PluginViewPopover anchor={attrs['data-plugin-anchor'] ?? ''} open={Object.hasOwn(attrs, 'open')} dismiss={() => surface.onEvent({ nodeId: node.id, type: 'dismiss' })}><PluginRemoteSurface tree={{ children: node.children }} css={surface.css} onEvent={surface.onEvent} settled={settled} loadImage={loadImage} depth={surface.depth + 1} /></PluginViewPopover>;
+});
+
+const RemoteImageElement = memo(function RemoteImageElement({ node }: { node: RemoteElementNode }): React.ReactNode {
+  const loadImage = useContext(ResourceLoader);
+  const imagePath = node.attributes.src?.slice(6);
+  const [imageUrl, setImageUrl] = useState<string | undefined>();
+  useEffect(() => {
+    let cancelled = false; setImageUrl(undefined);
+    if (imagePath && loadImage) void loadImage(imagePath).then((url) => { if (!cancelled) setImageUrl(url); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [imagePath, loadImage]);
+  const props = buildRemoteElementProps(node);
+  props.src = imageUrl;
+  return React.createElement('img', props);
+});
+
+const RemoteSelectElement = memo(function RemoteSelectElement({ node, settled }: { node: RemoteElementNode; settled: boolean }): React.ReactNode {
+  const attrs = node.attributes;
+  const isMultiple = Object.hasOwn(attrs, 'multiple');
+  const remoteSelection = isMultiple
+    ? JSON.stringify(node.children.filter((child) => child.type === 1 && child.element === 'option' && Object.hasOwn(child.attributes, 'selected')).map((child) => child.type === 1 ? child.attributes.value ?? remoteText(child.children).replace(/[\t\n\f\r ]+/g, ' ').trim() : ''))
+    : '[]';
+  const [localSelection, setLocalSelection] = useState<string[]>(() => (isMultiple ? JSON.parse(remoteSelection) : []));
+  useEffect(() => { if (settled && isMultiple) setLocalSelection(JSON.parse(remoteSelection)); }, [isMultiple, remoteSelection, settled]);
+  const remoteValue = attrs.value;
+  const [localValue, setLocalValue] = useState(remoteValue ?? '');
+  useEffect(() => { if (settled && remoteValue !== undefined) setLocalValue(remoteValue); }, [remoteValue, settled]);
+  const props = buildRemoteElementProps(node);
+  if (isMultiple) props.value = localSelection;
+  else if (remoteValue !== undefined) props.value = localValue;
+  props.autoComplete = 'off';
+  props.onChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    setLocalValue(event.currentTarget.value);
+    if (event.currentTarget.multiple) setLocalSelection([...event.currentTarget.selectedOptions].map((option) => option.value));
+  };
+  return React.createElement('select', props, ...node.children.map((child) => renderRemoteNode(child, settled)));
+});
+
+const RemoteInputElement = memo(function RemoteInputElement({ node, settled }: { node: RemoteElementNode; settled: boolean }): React.ReactNode {
+  const attrs = node.attributes;
+  const remoteValue = attrs.value ?? (node.element === 'textarea' ? remoteText(node.children) : undefined);
+  const remoteChecked = Object.hasOwn(attrs, 'checked');
+  const [localValue, setLocalValue] = useState(remoteValue ?? '');
+  const [localChecked, setLocalChecked] = useState(remoteChecked);
+  useEffect(() => { if (settled && remoteValue !== undefined) setLocalValue(remoteValue); }, [remoteValue, settled]);
+  useEffect(() => { if (settled) setLocalChecked(remoteChecked); }, [remoteChecked, settled]);
+  const props = buildRemoteElementProps(node);
+  if (remoteValue !== undefined) props.value = localValue;
+  props.autoComplete = 'off';
+  if (node.element === 'input' && ['checkbox', 'radio'].includes(attrs.type ?? '')) props.checked = localChecked;
+  props.onChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setLocalValue(event.currentTarget.value);
+    if (event.currentTarget instanceof event.currentTarget.ownerDocument.defaultView!.HTMLInputElement) setLocalChecked(event.currentTarget.checked);
+  };
+  // React treats textarea text specially; do not wrap it in components.
+  return React.createElement(node.element, props);
+});
+
+const RemotePlainElement = memo(function RemotePlainElement({ node, settled }: { node: RemoteElementNode; settled: boolean }): React.ReactNode {
+  const props = buildRemoteElementProps(node);
+  // React treats option text specially; do not wrap it in components.
   if (node.element === 'option') return React.createElement(node.element, props, remoteText(node.children));
-  return React.createElement(node.element, props, ...node.children.map((child) => <RemoteElement key={child.id} node={child} settled={settled} />));
+  return React.createElement(node.element, props, ...node.children.map((child) => renderRemoteNode(child, settled)));
+});
+
+function renderRemoteNode(node: RemoteNode, settled: boolean): React.ReactNode {
+  if (node.type === 3) return node.data;
+  if (node.type === 8) return null;
+  if (node.attributes['data-plugin-popover'] === 'true') return <RemotePopoverElement key={node.id} node={node} settled={settled} />;
+  if (node.element === 'img') return <RemoteImageElement key={node.id} node={node} />;
+  if (node.element === 'select') return <RemoteSelectElement key={node.id} node={node} settled={settled} />;
+  if (node.element === 'input' || node.element === 'textarea') return <RemoteInputElement key={node.id} node={node} settled={settled} />;
+  return <RemotePlainElement key={node.id} node={node} settled={settled} />;
 }
 
 /** Host-owned DOM, kept inside a closed shadow root and a clipped stacking context. */
@@ -80,8 +125,13 @@ export function PluginRemoteSurface({ tree, css, onEvent, settled = true, loadIm
       return { tree: tree as { children: RemoteNode[] }, css: validatePluginStylesheet(css) };
     } catch { return null; }
   }, [tree, css]);
-  if (!checked) return <p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>;
-  return <LazyLoadBoundary name="Plugin view" fallback={<p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>}><SurfaceContext.Provider value={{ css: checked.css, onEvent, depth }}><ResourceLoader.Provider value={loadImage}><ValidatedPluginRemoteSurface tree={checked.tree} css={checked.css} onEvent={onEvent} settled={settled} /></ResourceLoader.Provider></SurfaceContext.Provider></LazyLoadBoundary>;
+  const checkedCss = checked?.css;
+  const surfaceContextValue = useMemo(
+    () => (checkedCss !== undefined ? { css: checkedCss, onEvent, depth } : null),
+    [checkedCss, onEvent, depth],
+  );
+  if (!checked || !surfaceContextValue) return <p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>;
+  return <LazyLoadBoundary name="Plugin view" fallback={<p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>}><SurfaceContext.Provider value={surfaceContextValue}><ResourceLoader.Provider value={loadImage}><ValidatedPluginRemoteSurface tree={checked.tree} css={checked.css} onEvent={onEvent} settled={settled} /></ResourceLoader.Provider></SurfaceContext.Provider></LazyLoadBoundary>;
 }
 
 function ValidatedPluginRemoteSurface({ tree, css, onEvent, settled }: { settled: boolean; tree: { children: RemoteNode[] }; css: string; onEvent(event: PluginSurfaceEvent): void }) {
@@ -122,6 +172,6 @@ function ValidatedPluginRemoteSurface({ tree, css, onEvent, settled }: { settled
   }, [shadow]);
   return <div className="h-full w-full min-h-0 min-w-0 overflow-hidden [contain:paint] isolate relative" data-plugin-remote-surface>
     <div ref={hostRef} className="h-full min-h-0 overflow-auto [container-type:inline-size]" />
-    {shadow && createPortal(<><style>{css}</style>{tree.children.map((node) => <RemoteElement key={node.id} node={node} settled={settled} />)}</>, shadow)}
+    {shadow && createPortal(<><style>{css}</style>{tree.children.map((node) => renderRemoteNode(node, settled))}</>, shadow)}
   </div>;
 }
