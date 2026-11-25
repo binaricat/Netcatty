@@ -1,8 +1,14 @@
+import {
+  getSharedPluginRuntimeStatus,
+  invalidateSharedPluginRuntimeStatus,
+} from './pluginRuntimeStatusCache';
+
 export interface PluginTerminalProviderBridge {
   listPluginTerminalProviders(options: NetcattyTerminalProviderQuery): Promise<ReadonlyArray<NetcattyTerminalProviderContribution>>;
   providePluginTerminal(request: NetcattyTerminalProviderRequest): Promise<ReadonlyArray<NetcattyTerminalProviderResult>>;
   cancelPluginTerminalRequest(requestId: string): Promise<boolean>;
   publishPluginTerminalSessionEvent(event: NetcattyTerminalSessionEvent): Promise<ReadonlyArray<{ pluginId: string; delivered: boolean }>>;
+  getPluginRuntimeStatus?(): Promise<NetcattyPluginRuntimeStatus>;
   onPluginContributionsChanged?(callback: () => void): () => void;
 }
 
@@ -52,6 +58,7 @@ function mergeLifecycleSessionSnapshot(
 
 export class PluginTerminalProviderRegistry {
   readonly #bridge: PluginTerminalProviderBridge;
+  readonly #statusBridge: Pick<NetcattyBridge, 'getPluginRuntimeStatus'>;
   readonly #activeRequests = new Map<string, string>();
   readonly #sessionSnapshots = new Map<string, NetcattyTerminalSessionSnapshot>();
   readonly #providerListeners = new Set<() => void>();
@@ -62,11 +69,16 @@ export class PluginTerminalProviderRegistry {
   #bridgeAvailability: 'unknown' | 'available' | 'unavailable' = 'unknown';
   #disposed = false;
 
-  constructor(bridge: PluginTerminalProviderBridge) {
+  constructor(
+    bridge: PluginTerminalProviderBridge,
+    statusBridge: Pick<NetcattyBridge, 'getPluginRuntimeStatus'> = bridge,
+  ) {
     this.#bridge = bridge;
+    this.#statusBridge = statusBridge;
     this.#disposeContributionListener = bridge.onPluginContributionsChanged?.(() => {
       this.#providerListGeneration += 1;
       this.#bridgeAvailability = 'unknown';
+      invalidateSharedPluginRuntimeStatus(this.#statusBridge);
       this.#providerListCache.clear();
       this.#pendingProviderLists.clear();
       for (const requestId of this.#activeRequests.values()) {
@@ -77,6 +89,33 @@ export class PluginTerminalProviderRegistry {
         try { listener(); } catch { /* isolate application listeners */ }
       }
     });
+  }
+
+  #isUnavailable(): boolean {
+    return this.#disposed || this.#bridgeAvailability === 'unavailable';
+  }
+
+  async #probeRuntimeStatus(generation: number): Promise<boolean> {
+    try {
+      const status = await getSharedPluginRuntimeStatus(this.#statusBridge);
+      if (this.#disposed) return false;
+      if (generation !== this.#providerListGeneration) {
+        return this.#bridgeAvailability !== 'unavailable';
+      }
+      if (!status.available) {
+        this.#bridgeAvailability = 'unavailable';
+        this.#providerListCache.clear();
+        return false;
+      }
+      this.#bridgeAvailability = 'available';
+      return true;
+    } catch {
+      if (!this.#disposed && generation === this.#providerListGeneration) {
+        this.#bridgeAvailability = 'unavailable';
+        this.#providerListCache.clear();
+      }
+      return false;
+    }
   }
 
   onDidChangeProviders(listener: () => void): () => void {
@@ -96,6 +135,16 @@ export class PluginTerminalProviderRegistry {
     const generation = this.#providerListGeneration;
     const request = (async () => {
       try {
+        if (
+          this.#bridgeAvailability === 'unknown'
+          && typeof this.#statusBridge.getPluginRuntimeStatus === 'function'
+        ) {
+          const available = await this.#probeRuntimeStatus(generation);
+          if (!available) return Object.freeze([]);
+        }
+        if (this.#isUnavailable()) {
+          return Object.freeze([]);
+        }
         const providers = freezeValue(await this.#bridge.listPluginTerminalProviders(query));
         if (generation === this.#providerListGeneration) {
           if (this.#bridgeAvailability !== 'unavailable') this.#bridgeAvailability = 'available';
@@ -206,11 +255,21 @@ export class PluginTerminalProviderRegistry {
 
   async publishSessionEvent(event: NetcattyTerminalSessionEvent): Promise<void> {
     if (this.#disposed) return;
+    // Short-circuit BEFORE mergeLifecycleSessionSnapshot so disabled plugin
+    // hosts never run structuredClone/Object.freeze or retain session snapshots.
+    if (this.#bridgeAvailability === 'unavailable') return;
+    if (
+      this.#bridgeAvailability === 'unknown'
+      && typeof this.#statusBridge.getPluginRuntimeStatus === 'function'
+    ) {
+      const available = await this.#probeRuntimeStatus(this.#providerListGeneration);
+      if (!available) return;
+    }
+    if (this.#isUnavailable()) return;
     const previous = this.#sessionSnapshots.get(event.session.sessionId);
     const session = mergeLifecycleSessionSnapshot(previous, event);
     if (event.type === 'disposed') this.#sessionSnapshots.delete(session.sessionId);
     else this.#sessionSnapshots.set(session.sessionId, session);
-    if (this.#bridgeAvailability === 'unavailable') return;
     try {
       await this.#bridge.publishPluginTerminalSessionEvent(freezeValue({ ...event, session }));
       this.#bridgeAvailability = 'available';
@@ -302,10 +361,13 @@ export function createWindowPluginTerminalProviderRegistry(
     providePluginTerminal: (request) => bridge.providePluginTerminal!(request),
     cancelPluginTerminalRequest: (requestId) => bridge.cancelPluginTerminalRequest!(requestId),
     publishPluginTerminalSessionEvent: (event) => bridge.publishPluginTerminalSessionEvent!(event),
+    getPluginRuntimeStatus: bridge.getPluginRuntimeStatus
+      ? () => bridge.getPluginRuntimeStatus!()
+      : undefined,
     onPluginContributionsChanged: bridge.onPluginContributionsChanged
       ? (callback) => bridge.onPluginContributionsChanged!(callback)
       : undefined,
-  });
+  }, bridge);
 }
 
 let windowRegistry: PluginTerminalProviderRegistry | null | undefined;
