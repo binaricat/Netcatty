@@ -13,6 +13,7 @@ import { localStorageAdapter } from "../../infrastructure/persistence/localStora
 import {
   getActiveConnection,
   isReconnectRecoveryEligible,
+  nudgePendingReconnect,
   resetReconnectAttempts,
   setReconnectCallback,
   startPortForward,
@@ -214,12 +215,21 @@ export const runPortForwardingAutoStart = async ({
   const rules = localStorageAdapter.read<PortForwardingRule[]>(
     STORAGE_KEY_PORT_FORWARDING,
   ) ?? [];
+
+  if (recoveryRuleIds) {
+    // Nudge rules waiting on a long backoff timer so they retry immediately
+    // after the network comes back online instead of waiting up to 60s.
+    for (const rule of rules) {
+      if (!recoveryRuleIds.has(rule.id)) continue;
+      if (!isPortForwardingAutoReconnectEnabled(rule)) continue;
+      if (!isReconnectRecoveryEligible(rule.id)) continue;
+      nudgePendingReconnect(rule.id);
+    }
+    return;
+  }
+
   const autoStartRules = rules.filter((rule) =>
-    recoveryRuleIds
-      ? recoveryRuleIds.has(rule.id) &&
-        isReconnectRecoveryEligible(rule.id) &&
-        shouldRestartPortForwardingReconnectRule(rule, getActiveConnection(rule.id))
-      : shouldStartPortForwardingAutoStartRule(rule, getActiveConnection(rule.id)),
+    shouldStartPortForwardingAutoStartRule(rule, getActiveConnection(rule.id)),
   );
 
   if (autoStartRules.length === 0) return;
@@ -445,9 +455,9 @@ export const usePortForwardingAutoStart = ({
     runAutoStart,
   ]);
 
-  // A local outage can consume all bounded SSH retries. Only an explicit
-  // network recovery event starts a fresh retry cycle, so an unreachable
-  // server still stops retrying after the existing limit.
+  // When the OS reports network restoration, reset backoff counters and nudge
+  // any pending backoff timers so tunnels recover immediately instead of
+  // waiting out a long (up to 60s) retry interval.
   useEffect(() => {
     if (!enabled || !isVaultInitialized || typeof window === "undefined") return;
     return subscribeToPortForwardingNetworkRecovery(window, runAutoStart);
