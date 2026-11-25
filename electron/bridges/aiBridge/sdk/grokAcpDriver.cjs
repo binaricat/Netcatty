@@ -17,9 +17,13 @@
  * Keep the headless streaming-json driver as an explicit fallback runtime.
  */
 const path = require("node:path");
-const { spawn } = require("node:child_process");
-const { StringDecoder } = require("node:string_decoder");
-const { closeReasoning } = require("./sdkDriverUtils.cjs");
+const {
+  attachAbortGraceKill,
+  closeReasoning,
+  createBoundedTextCollector,
+  resultToText: sharedResultToText,
+  signalProcessTree,
+} = require("./sdkDriverUtils.cjs");
 const {
   GROK_MCP_MODE_DISALLOWED_LOCAL_TOOLS,
   createLineBuffer,
@@ -53,36 +57,6 @@ const GROK_REASONING_EFFORTS = new Set([
   "xhigh",
   "max",
 ]);
-
-function signalProcessTree(child, signal, forceKillImpl) {
-  if (!child) return;
-  if (typeof forceKillImpl === "function") {
-    try { forceKillImpl(child, signal); } catch { /* ignore */ }
-    return;
-  }
-  if (process.platform === "win32" && signal === "SIGKILL" && child.pid) {
-    try {
-      const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      killer.on("error", () => {});
-      killer.unref?.();
-      return;
-    } catch {
-      // fall through
-    }
-  }
-  if (process.platform !== "win32" && child.pid) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // fall through
-    }
-  }
-  try { child.kill(signal); } catch { /* ignore */ }
-}
 
 /**
  * Resolve absolute cwd for ACP session lifecycle (protocol requires absolute path).
@@ -607,15 +581,7 @@ async function establishGrokAcpSession(rpc, {
 }
 
 function resultToText(result) {
-  if (result == null) return "";
-  if (typeof result === "string") return result;
-  if (typeof result === "number" || typeof result === "boolean") return String(result);
-  if (typeof result === "object") {
-    if (typeof result.content === "string") return result.content;
-    if (typeof result.text === "string") return result.text;
-    try { return JSON.stringify(result); } catch { return String(result); }
-  }
-  return String(result);
+  return sharedResultToText(result, { includeText: true });
 }
 
 /**
@@ -1019,14 +985,9 @@ async function runGrokAcpTurn({
     return { sessionId: state.sessionId, runtime: "acp" };
   }
 
-  let stderrText = "";
-  let stderrBytes = 0;
-  let stderrTruncated = false;
-  let stderrEnded = false;
-  const stderrDecoder = new StringDecoder("utf8");
+  const stderrCollector = createBoundedTextCollector(MAX_GROK_ACP_STDERR_CHARS);
   let settled = false;
-  let forceKillTimer = null;
-  let abortHandler = null;
+  let abortGuard = null;
   /** @type {ReturnType<typeof createJsonRpcClient>|null} */
   let rpc = null;
 
@@ -1121,19 +1082,14 @@ async function runGrokAcpTurn({
   });
   child.stderr?.on("data", (chunk) => {
     if (signal?.aborted) return;
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-    const remaining = Math.max(0, MAX_GROK_ACP_STDERR_CHARS - stderrBytes);
-    const accepted = buffer.length <= remaining ? buffer : buffer.subarray(0, remaining);
-    if (accepted.length > 0) stderrText += stderrDecoder.write(accepted);
-    stderrBytes += accepted.length;
-    if (accepted.length < buffer.length) stderrTruncated = true;
+    stderrCollector.push(chunk);
   });
 
   const closePromise = new Promise((resolve) => {
     const finish = () => {
       if (settled) return;
       settled = true;
-      clearTimeout(forceKillTimer);
+      abortGuard?.clearTimer();
       if (!signal?.aborted) {
         try { lineBuffer.flush(); } catch { /* ignore */ }
       }
@@ -1148,10 +1104,7 @@ async function runGrokAcpTurn({
       finish();
     });
     child.on("close", (code, exitSignal) => {
-      if (!stderrEnded) {
-        stderrEnded = true;
-        if (!stderrTruncated || stderrDecoder.lastNeed === 0) stderrText += stderrDecoder.end();
-      }
+      const stderrText = stderrCollector.end();
       // Only ignore exit after session/prompt succeeded (turnCompleted).
       // Incomplete turns fail even on exit 0; signal kills report code=null.
       if (shouldReportGrokProcessExitFailure(state, signal, code, exitSignal)) {
@@ -1167,29 +1120,24 @@ async function runGrokAcpTurn({
       finish();
     });
 
-    let terminationStarted = false;
-    abortHandler = () => {
-      if (settled || terminationStarted) return;
-      terminationStarted = true;
-      // Prefer protocol cancel when a session is active (ACP prompt-turn).
-      if (state.sessionId) {
-        try {
-          rpc.notify("session/cancel", { sessionId: state.sessionId });
-        } catch { /* ignore */ }
-      }
-      forceKillTimer = setTimeout(() => {
-        if (settled) return;
-        signalProcessTree(child, "SIGKILL", forceKillImpl);
-        finish();
-      }, Math.max(0, abortGraceMs));
-      forceKillTimer.unref?.();
-      signalProcessTree(child, "SIGTERM");
-      try { child.stdin?.end(); } catch { /* ignore */ }
-    };
-    if (signal) {
-      if (signal.aborted) abortHandler();
-      else signal.addEventListener("abort", abortHandler, { once: true });
-    }
+    abortGuard = attachAbortGraceKill(child, {
+      signal,
+      abortGraceMs,
+      forceKillImpl,
+      isSettled: () => settled,
+      onBeforeSignal: () => {
+        // Prefer protocol cancel when a session is active (ACP prompt-turn).
+        if (state.sessionId) {
+          try {
+            rpc.notify("session/cancel", { sessionId: state.sessionId });
+          } catch { /* ignore */ }
+        }
+      },
+      onAfterTerm: () => {
+        try { child.stdin?.end(); } catch { /* ignore */ }
+      },
+      onGraceTimeout: () => finish(),
+    });
   });
 
   try {
@@ -1235,7 +1183,7 @@ async function runGrokAcpTurn({
     if (!state.failed && !signal?.aborted) {
       state.failed = true;
       const message = err?.message || String(err);
-      const stderr = stderrText.trim();
+      const stderr = stderrCollector.text().trim();
       emitter.emitError(formatGrokErrorForUser(
         stderr && !message.includes(stderr) ? `${message} (${stderr})` : message,
       ));
@@ -1247,7 +1195,7 @@ async function runGrokAcpTurn({
       signalProcessTree(child, "SIGTERM", forceKillImpl);
     }
     await closePromise;
-    if (signal) signal.removeEventListener("abort", abortHandler);
+    abortGuard?.dispose();
   }
 
   closeReasoning(state, emitter);
