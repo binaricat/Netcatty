@@ -2116,6 +2116,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (!terminal || terminal.hiddenFromTabs || terminal.workspaceId) return false;
       tabId = terminal.id;
     }
+    setMagnifiedPane((current) => (
+      current?.tabId === tabId
+      && !(current.target.kind === 'side-panel' && current.target.tool === 'ai')
+        ? null
+        : current
+    ));
     activeTabStore.setActiveTabId(tabId);
     if (prepareSidePanelTool(tabId, 'ai')) {
       startTransition(() => {
