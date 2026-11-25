@@ -962,6 +962,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
 
         return (
           <WorkspaceTopTab
+            tabDoubleClickBehavior={tabDoubleClickBehavior}
             key={workspace.id}
             workspace={workspace}
             paneCount={paneCount}

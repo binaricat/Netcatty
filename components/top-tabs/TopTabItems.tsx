@@ -284,7 +284,10 @@ export const resolveWorkspaceTopTabLabel = (
 export const createTopTabCopyDoubleClickHandler = (
   onCopy: (id: string) => void,
   id: string,
-): React.MouseEventHandler<HTMLDivElement> => () => onCopy(id);
+  behavior: TerminalTabDoubleClickBehavior,
+): React.MouseEventHandler<HTMLDivElement> => () => {
+  if (behavior !== 'disabled') onCopy(id);
+};
 
 export const createTopTabSessionDoubleClickHandler = ({
   behavior,
@@ -1017,6 +1020,7 @@ SessionTopTab.displayName = 'SessionTopTab';
 
 interface WorkspaceTopTabProps {
   workspace: Workspace;
+  tabDoubleClickBehavior: TerminalTabDoubleClickBehavior;
   paneCount: number;
   workspaceSessionIds: readonly string[];
   isBeingDragged: boolean;
@@ -1066,6 +1070,7 @@ WorkspaceDetachSessionMenuItem.displayName = 'WorkspaceDetachSessionMenuItem';
 
 export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
   workspace,
+  tabDoubleClickBehavior,
   paneCount,
   workspaceSessionIds,
   workspaceSessions,
@@ -1097,8 +1102,8 @@ export const WorkspaceTopTab: React.FC<WorkspaceTopTabProps> = memo(({
     activeTabStore.setActiveTabId(workspace.id);
   }, [workspace.id]);
   const handleDoubleClick = useMemo(
-    () => createTopTabCopyDoubleClickHandler(onCopyWorkspace, workspace.id),
-    [onCopyWorkspace, workspace.id],
+    () => createTopTabCopyDoubleClickHandler(onCopyWorkspace, workspace.id, tabDoubleClickBehavior),
+    [onCopyWorkspace, workspace.id, tabDoubleClickBehavior],
   );
   const detachSessions = workspaceSessions ?? [];
   const tabLabel = resolveWorkspaceTopTabLabel(workspace, detachSessions);
