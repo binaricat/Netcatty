@@ -199,6 +199,22 @@ export function scheduleAiMarkdownWarmup(options?: {
     }
   };
 
+  const removeListeners = () => {
+    if (typeof window === 'undefined') return;
+    window.removeEventListener('focusin', onFocusIn);
+    window.removeEventListener('focusout', onFocusOut);
+    window.removeEventListener('keydown', onComposerEvent, true);
+    window.removeEventListener('compositionstart', onComposerEvent, true);
+    window.removeEventListener('compositionupdate', onComposerEvent, true);
+  };
+
+  const cleanup = () => {
+    if (cancelled) return;
+    cancelled = true;
+    clearTimers();
+    removeListeners();
+  };
+
   const tryLoad = () => {
     idleId = null;
     timeoutId = null;
@@ -207,7 +223,8 @@ export function scheduleAiMarkdownWarmup(options?: {
       timeoutId = window.setTimeout(armIdle, Math.max(resumeDelayMs, AI_COMPOSER_IDLE_MS));
       return;
     }
-    load();
+    cleanup();
+    void load();
   };
 
   const armIdle = () => {
@@ -262,14 +279,5 @@ export function scheduleAiMarkdownWarmup(options?: {
   }
   arm();
 
-  return () => {
-    cancelled = true;
-    clearTimers();
-    if (typeof window === 'undefined') return;
-    window.removeEventListener('focusin', onFocusIn);
-    window.removeEventListener('focusout', onFocusOut);
-    window.removeEventListener('keydown', onComposerEvent, true);
-    window.removeEventListener('compositionstart', onComposerEvent, true);
-    window.removeEventListener('compositionupdate', onComposerEvent, true);
-  };
+  return cleanup;
 }
