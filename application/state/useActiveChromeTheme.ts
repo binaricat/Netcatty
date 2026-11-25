@@ -1,4 +1,5 @@
 import { pluginThemeRegistry } from '../../infrastructure/config/pluginThemeRegistry';
+import { useAppearanceChromeStore } from './appearanceChromeStore';
 import { usePluginThemeRevision } from './usePluginThemeRuntime';
 import { getSettingsChromeSnapshot, useSettingsChromeStore } from './settingsChromeStore';
 import { useLayoutEffect, useRef } from "react";
@@ -278,17 +279,60 @@ export function useActiveChromeTheme({
   applyAppTheme: () => void;
 }) {
   const pluginThemeRevision = usePluginThemeRevision();
-  const { resolvedTheme } = useSettingsChromeStore();
+  const { theme, resolvedTheme, lightUiThemeId, darkUiThemeId } = useSettingsChromeStore();
+  const { accentMode, customAccent } = useAppearanceChromeStore();
   const effectiveTheme = pluginThemeRegistry.isActive(resolvedTheme) ? null : activeTheme;
   const applyAppThemeRef = useRef(applyAppTheme);
   applyAppThemeRef.current = applyAppTheme;
+  const prevSurfaceTriggersRef = useRef({
+    theme,
+    resolvedTheme,
+    lightUiThemeId,
+    darkUiThemeId,
+    accentMode,
+    customAccent,
+    pluginThemeRevision,
+    applyAppTheme,
+  });
 
   useLayoutEffect(() => {
-    // Settings may have just applied the OS theme over a fixed terminal theme.
-    // Reassert its visual surfaces even when the terminal fingerprint is stable;
-    // tab-switch callers retain the default fingerprint fast path.
-    syncActiveChromeTheme(effectiveTheme, applyAppTheme, { refreshSurfaces: true });
-  }, [effectiveTheme, applyAppTheme, pluginThemeRevision, resolvedTheme]);
+    const prev = prevSurfaceTriggersRef.current;
+    const refreshSurfaces =
+      prev.theme !== theme ||
+      prev.resolvedTheme !== resolvedTheme ||
+      prev.lightUiThemeId !== lightUiThemeId ||
+      prev.darkUiThemeId !== darkUiThemeId ||
+      prev.accentMode !== accentMode ||
+      prev.customAccent !== customAccent ||
+      prev.pluginThemeRevision !== pluginThemeRevision ||
+      prev.applyAppTheme !== applyAppTheme;
+    prevSurfaceTriggersRef.current = {
+      theme,
+      resolvedTheme,
+      lightUiThemeId,
+      darkUiThemeId,
+      accentMode,
+      customAccent,
+      pluginThemeRevision,
+      applyAppTheme,
+    };
+
+    // Settings or plugin themes may have just applied the app theme over a fixed
+    // terminal theme. Reassert its visual surfaces only when one of those
+    // surface-refresh triggers changed; same-theme tab switches retain the
+    // default fingerprint fast path.
+    syncActiveChromeTheme(effectiveTheme, applyAppTheme, { refreshSurfaces });
+  }, [
+    effectiveTheme,
+    applyAppTheme,
+    pluginThemeRevision,
+    theme,
+    resolvedTheme,
+    lightUiThemeId,
+    darkUiThemeId,
+    accentMode,
+    customAccent,
+  ]);
 
   useLayoutEffect(() => {
     return () => {
