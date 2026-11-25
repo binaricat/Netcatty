@@ -112,13 +112,65 @@ export interface TextEditorPaneProps {
   initialViewState?: Monaco.editor.ICodeEditorViewState | null;
 }
 
-/** Monaco commands share a window-level resolver; bind each to its owning editor. */
-export function registerTextEditorCommand(
-  editor: Pick<Monaco.editor.IStandaloneCodeEditor, 'addCommand' | 'getId'>,
-  keybinding: number,
-  handler: Monaco.editor.ICommandHandler,
-): string | null {
-  return editor.addCommand(keybinding, handler, `editorId == '${editor.getId()}'`);
+export interface TextEditorActionConfig {
+  id: string;
+  label: string;
+  keybinding: number;
+  run: () => void;
+}
+
+/**
+ * Register a disposable Monaco editor action instead of `editor.addCommand`
+ * (which drops the keybinding disposable in Monaco's global registry).
+ * `addAction` auto-scopes keybindings to `editorId == editor.getId()`, and
+ * omitting `contextMenuGroupId` keeps the editor context menu untouched.
+ */
+export function registerTextEditorAction(
+  editor: Pick<Monaco.editor.IStandaloneCodeEditor, 'addAction'>,
+  { id, label, keybinding, run }: TextEditorActionConfig,
+): Monaco.IDisposable {
+  return editor.addAction({
+    id,
+    label,
+    keybindings: [keybinding],
+    run: () => {
+      run();
+    },
+  });
+}
+
+export function bindTextEditorActions(
+  editor: Pick<Monaco.editor.IStandaloneCodeEditor, 'addAction' | 'onDidDispose'>,
+  actions: readonly TextEditorActionConfig[],
+  onCleanup?: () => void,
+): Monaco.IDisposable {
+  const disposables: Monaco.IDisposable[] = [];
+  let disposed = false;
+
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    for (const handle of disposables.splice(0)) {
+      try {
+        handle.dispose();
+      } catch {
+        // Best-effort cleanup during editor teardown.
+      }
+    }
+    onCleanup?.();
+  };
+
+  try {
+    for (const action of actions) {
+      disposables.push(registerTextEditorAction(editor, action));
+    }
+    disposables.push(editor.onDidDispose(dispose));
+  } catch (error) {
+    dispose();
+    throw error;
+  }
+
+  return { dispose };
 }
 
 export const isTextEditorReadOnly = ({ saving }: { saving: boolean }): boolean => saving;
@@ -198,6 +250,13 @@ const TextEditorPaneInner: React.FC<TextEditorPaneProps> = ({
   const monaco = useMonaco();
   const customThemeName = useNetcattyMonacoTheme(monaco);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const actionBindingRef = useRef<Monaco.IDisposable | null>(null);
+
+  useEffect(() => () => {
+    actionBindingRef.current?.dispose();
+    actionBindingRef.current = null;
+    editorRef.current = null;
+  }, []);
 
   // Ref to store the latest save function to avoid stale closure in keyboard shortcut
   const handleSaveRef = useRef<() => void>(() => {});
@@ -296,39 +355,73 @@ const TextEditorPaneInner: React.FC<TextEditorPaneProps> = ({
   }, [onContentChange, saving]);
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
+    actionBindingRef.current?.dispose();
+    actionBindingRef.current = null;
     editorRef.current = editor;
 
     if (initialViewState) editor.restoreViewState(initialViewState);
 
-    // Add save shortcut - use ref to avoid stale closure
-    registerTextEditorCommand(editor, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      handleSaveRef.current();
-    });
-
-    // Close-tab shortcut inside Monaco. The capture-phase keydown on the
-    // Pane's root div also tries to handle this, but Monaco's internal
-    // key-event dispatcher fires first for focused editor keystrokes, so
-    // registering the command here is the reliable path.
-    registerTextEditorCommand(editor, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW, () => {
-      if (!closeTabCommandWEnabledRef.current) return;
-      handleCloseRef.current?.();
-    });
-
-    // Add find shortcut (Ctrl+F / Cmd+F)
-    registerTextEditorCommand(editor, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF, () => {
-      // Trigger Monaco's built-in find widget
-      editor.trigger('keyboard', 'actions.find', null);
-    });
-
-    // Fallback paste path for Electron environments where Monaco paste can fail.
-    // When focus is in the find/replace widget, paste into that input instead of the body.
-    registerTextEditorCommand(editor, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV, () => {
-      void pasteForMonacoEditorCommand({
-        activeElement: document.activeElement,
-        readClipboardText: () => readClipboardTextRef.current(),
-        pasteIntoEditor: () => handlePasteRef.current(),
-      });
-    });
+    let binding: Monaco.IDisposable | null = null;
+    binding = bindTextEditorActions(
+      editor,
+      [
+        // Add save shortcut - use ref to avoid stale closure
+        {
+          id: 'netcatty.textEditor.save',
+          label: 'Save File',
+          keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+          run: () => {
+            handleSaveRef.current();
+          },
+        },
+        // Close-tab shortcut inside Monaco. The capture-phase keydown on the
+        // Pane's root div also tries to handle this, but Monaco's internal
+        // key-event dispatcher fires first for focused editor keystrokes, so
+        // registering the action here is the reliable path.
+        {
+          id: 'netcatty.textEditor.closeTab',
+          label: 'Close Editor Tab',
+          keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW,
+          run: () => {
+            if (!closeTabCommandWEnabledRef.current) return;
+            handleCloseRef.current?.();
+          },
+        },
+        // Add find shortcut (Ctrl+F / Cmd+F)
+        {
+          id: 'netcatty.textEditor.find',
+          label: 'Find',
+          keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF,
+          run: () => {
+            // Trigger Monaco's built-in find widget
+            editor.trigger('keyboard', 'actions.find', null);
+          },
+        },
+        // Fallback paste path for Electron environments where Monaco paste can fail.
+        // When focus is in the find/replace widget, paste into that input instead of the body.
+        {
+          id: 'netcatty.textEditor.paste',
+          label: 'Paste',
+          keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV,
+          run: () => {
+            void pasteForMonacoEditorCommand({
+              activeElement: document.activeElement,
+              readClipboardText: () => readClipboardTextRef.current(),
+              pasteIntoEditor: () => handlePasteRef.current(),
+            });
+          },
+        },
+      ],
+      () => {
+        if (actionBindingRef.current === binding) {
+          actionBindingRef.current = null;
+        }
+        if (editorRef.current === editor) {
+          editorRef.current = null;
+        }
+      },
+    );
+    actionBindingRef.current = binding;
 
     editor.focus();
   }, [initialViewState]);
