@@ -1832,11 +1832,91 @@ test("startSSH resolves jump host proxy credentials from an identity", async () 
   assert.equal(jumpHosts[0]?.sshAuthReadyTimeoutMs, 360_000);
 });
 
+test("startSSH prefills the saved host password on target auth failure without retrying automatically", async () => {
+  let password = "";
+  let needsAuth = false;
+  let retryMessage: string | null = null;
+  let error: string | null = "previous error";
+  let status = "";
+  const attempts: Record<string, unknown>[] = [];
+  const ctx = createStarterContext({
+    host: {
+      id: "host-1",
+      label: "JMS",
+      hostname: "jms.example.test",
+      port: 2222,
+      username: "alice",
+      authMethod: "password",
+      requiresMfa: false,
+      savePassword: true,
+      password: "saved-secret",
+    },
+    terminalBackend: createMockTerminalBackend({
+      startSSHSession: async (options: Record<string, unknown>) => {
+        attempts.push(options);
+        throw new Error("All configured authentication methods failed");
+      },
+    }),
+    setNeedsAuth: (value: boolean) => { needsAuth = value; },
+    setAuthPassword: (value: string) => { password = value; },
+    setAuthRetryMessage: (value: string | null) => { retryMessage = value; },
+    setError: (value: string | null) => { error = value; },
+    setStatus: (value: string) => { status = value; },
+  });
+
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].username, "alice");
+  assert.equal(attempts[0].password, "saved-secret");
+  assert.equal(attempts[0].requiresMfa, false);
+  assert.equal(needsAuth, true);
+  assert.equal(password, "saved-secret");
+  assert.equal(retryMessage, "Authentication failed. Please check your credentials and try again.");
+  assert.equal(error, null);
+  assert.equal(status, "connecting");
+});
+
+test("startSSH auth retry only prefills a usable saved direct host password", async (t) => {
+  const cases = [
+    { name: "no saved password", host: {}, expected: "" },
+    { name: "saving disabled", host: { password: "unsaved-secret", savePassword: false }, expected: "" },
+    { name: "unreadable password", host: { password: ENCRYPTED_CREDENTIAL_PLACEHOLDER, savePassword: true }, expected: "" },
+    { name: "legacy default save setting", host: { password: "legacy-secret" }, expected: "legacy-secret" },
+    { name: "whitespace password", host: { password: " ", savePassword: true }, expected: " " },
+    { name: "identity password only", host: { identityId: "identity-1", savePassword: true }, expected: "" },
+  ];
+  for (const item of cases) {
+    await t.test(item.name, async () => {
+      let password = "previous-value";
+      const ctx = createStarterContext({
+        host: {
+          id: "host-1", label: "Target", hostname: "target.example.test", username: "alice",
+          ...item.host,
+        },
+        identities: [{
+          id: "identity-1", label: "Saved identity", username: "alice",
+          authMethod: "password", password: "identity-secret", created: 0,
+        }],
+        terminalBackend: createMockTerminalBackend({
+          startSSHSession: async () => { throw new Error("Authentication failed"); },
+        }),
+        setAuthPassword: (value: string) => { password = value; },
+      });
+
+      await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+
+      assert.equal(password, item.expected);
+    });
+  }
+});
+
 test("startSSH shows jump-host auth failures without opening target auth retry", async () => {
   let error = "";
   let needsAuth = false;
   let retryMessage: string | null = "previous retry";
   let status = "";
+  let password = "previous-value";
   const progressLogs: string[] = [];
   const terminalBackend = createMockTerminalBackend({
     startSSHSession: async () => {
@@ -1853,6 +1933,8 @@ test("startSSH shows jump-host auth failures without opening target auth retry",
       hostname: "target.example.test",
       username: "alice",
       hostChain: { hostIds: ["jump-1"] },
+      password: "target-secret",
+      savePassword: true,
     },
     resolvedChainHosts: [{
       id: "jump-1",
@@ -1863,6 +1945,7 @@ test("startSSH shows jump-host auth failures without opening target auth retry",
     }],
     setError: (message: string) => { error = message; },
     setNeedsAuth: (value: boolean) => { needsAuth = value; },
+    setAuthPassword: (value: string) => { password = value; },
     setAuthRetryMessage: (message: string | null) => { retryMessage = message; },
     setStatus: (next: string) => { status = next; },
     updateStatus: (next: string) => { status = next; },
@@ -1879,6 +1962,7 @@ test("startSSH shows jump-host auth failures without opening target auth retry",
 
   assert.equal(needsAuth, false);
   assert.equal(retryMessage, null);
+  assert.equal(password, "");
   assert.equal(status, "disconnected");
   assert.match(error, /Jump host authentication failed for "Bastion"/);
   assert.equal(progressLogs.some((line) => /Authentication failed\. Please try again/.test(line)), false);
