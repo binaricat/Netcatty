@@ -76,3 +76,10 @@ test('terminal layer force-mounts immediately when a hidden MCP session exists',
   assert.match(appMountsSource, /useState\(isVisible \|\| hasHiddenSession\)/);
   assert.match(appMountsSource, /if \(isVisible \|\| hasHiddenSession\) setShouldMount\(true\)/);
 });
+
+test('AppMounts narrows active-tab subscriptions instead of using useActiveTabId', () => {
+  assert.doesNotMatch(appMountsSource, /\buseActiveTabId\b/);
+  assert.match(appMountsSource, /const isVisible = useIsTabActive\(logView\.id\);/);
+  assert.match(appMountsSource, /const isTerminalSurfaceActive = useIsTerminalSurfaceActive\(sessionIds, workspaceIds\);/);
+  assert.match(appMountsSource, /<LazyLoadBoundary name="Terminal" resetKey=\{isVisible \? "active" : "idle"\}>/);
+});

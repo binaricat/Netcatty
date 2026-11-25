@@ -1,5 +1,5 @@
-import React, { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useActiveTabId, useIsSftpActive, useIsVaultActive } from '../state/activeTabStore';
+import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { activeTabStore, useIsSftpActive, useIsTabActive, useIsVaultActive } from '../state/activeTabStore';
 import { useTerminalHostTreeLayoutWidth } from '../state/terminalHostTreeStore';
 import { isTerminalContentTabSurface } from './workTabSurface';
 import { cn } from '../../lib/utils';
@@ -78,8 +78,7 @@ export function getLogViewWrapperStyle(
 }
 
 export const LogViewWrapper: React.FC<LogViewWrapperProps> = ({ logView, defaultTerminalTheme, defaultFontSize, onClose, onUpdateLog }) => {
-  const activeTabId = useActiveTabId();
-  const isVisible = activeTabId === logView.id;
+  const isVisible = useIsTabActive(logView.id);
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
 
   const containerStyle = getLogViewWrapperStyle(isVisible, hostTreeLayoutWidth);
@@ -163,15 +162,27 @@ export const SftpViewMount: React.FC<SftpViewProps> = (props) => {
   );
 };
 
+export function useIsTerminalSurfaceActive(
+  sessionIds: ReadonlySet<string>,
+  workspaceIds: ReadonlySet<string>,
+): boolean {
+  const getSnapshot = useCallback(
+    () =>
+      isTerminalContentTabSurface({
+        activeTabId: activeTabStore.getActiveTabId(),
+        sessionIds,
+        workspaceIds,
+      }),
+    [sessionIds, workspaceIds],
+  );
+  return useSyncExternalStore(activeTabStore.subscribe, getSnapshot, getSnapshot);
+}
+
 export const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
-  const activeTabId = useActiveTabId();
   const sessionIds = useMemo(() => new Set(props.sessions.map((session) => session.id)), [props.sessions]);
   const workspaceIds = useMemo(() => new Set(props.workspaces.map((workspace) => workspace.id)), [props.workspaces]);
-  const isVisible = isTerminalContentTabSurface({
-    activeTabId,
-    sessionIds,
-    workspaceIds,
-  }) || !!props.draggingSessionId;
+  const isTerminalSurfaceActive = useIsTerminalSurfaceActive(sessionIds, workspaceIds);
+  const isVisible = isTerminalSurfaceActive || !!props.draggingSessionId;
   // Silent MCP sessions never become the activeTabId, so `isVisible` alone
   // would leave this whole layer (and its PTY-starting TerminalPane) unmounted
   // for up to 5s (the idle-callback fallback below) after host_open returns —
@@ -203,7 +214,7 @@ export const TerminalLayerMount: React.FC<TerminalLayerProps> = (props) => {
   if (!shouldRender) return null;
 
   return (
-    <LazyLoadBoundary name="Terminal" resetKey={activeTabId}>
+    <LazyLoadBoundary name="Terminal" resetKey={isVisible ? "active" : "idle"}>
       <Suspense fallback={<TerminalLayerFallback visible={isVisible} />}>
         <LazyTerminalLayer {...props} />
       </Suspense>
