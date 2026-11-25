@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import type { Terminal as XTerm } from "@xterm/xterm";
 
 import {
+  getTerminalLineTimestampViewportStateKey,
   getVisibleTerminalLineTimestampRows,
   onTerminalLineTimestampsChange,
 } from "./runtime/terminalLineTimestamps";
@@ -273,10 +274,14 @@ export function TerminalTimestampGutter({
     let disposables: DisposableLike[] = [];
     let resizeObserver: ResizeObserver | null = null;
     let lastRenderSignature = "";
+    let lastViewportStateKey = "";
+    let layoutDirty = true;
     let lastFloodRenderAt = 0;
 
     const clearGutter = () => {
       lastRenderSignature = "";
+      lastViewportStateKey = "";
+      layoutDirty = true;
       clearElement(gutter);
     };
 
@@ -292,6 +297,13 @@ export function TerminalTimestampGutter({
         clearGutter();
         return;
       }
+
+      const viewportStateKey = getTerminalLineTimestampViewportStateKey(term);
+      if (!layoutDirty && lastRenderSignature !== "" && viewportStateKey === lastViewportStateKey) {
+        return;
+      }
+      layoutDirty = false;
+      lastViewportStateKey = viewportStateKey;
 
       const screen = getTerminalScreen(container);
       const rows = Math.max(1, term.rows || 1);
@@ -389,18 +401,25 @@ export function TerminalTimestampGutter({
           scheduleRender(pressure.largeOutput ? "normal" : "immediate");
         }),
         term.onRender?.(() => scheduleRender("normal")),
-        term.onResize?.(() => scheduleRender("immediate")),
+        term.onResize?.(() => {
+          layoutDirty = true;
+          scheduleRender("immediate");
+        }),
       ].filter(Boolean) as DisposableLike[];
       disposables.push({
         dispose: onTerminalLineTimestampsChange(term, () => scheduleRender("normal")),
       });
 
       if (typeof ResizeObserver !== "undefined") {
-        resizeObserver = new ResizeObserver(() => scheduleRender("immediate"));
+        resizeObserver = new ResizeObserver(() => {
+          layoutDirty = true;
+          scheduleRender("immediate");
+        });
         resizeObserver.observe(container);
         resizeObserver.observe(getTerminalScreen(container));
       }
 
+      layoutDirty = true;
       scheduleRender("immediate");
     };
 

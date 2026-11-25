@@ -75,6 +75,7 @@ const RECOLOR_SLICE_LINES = 32;
 const RECOLOR_SLICE_BUDGET_MS = 4;
 const BULK_WRITE_LINE_BREAKS = 8;
 const MAX_LOGICAL_LINE_ROWS = 128;
+const ABSOLUTE_ROW_CONTROL_RE = /(?:\x1b\[|\x9b)\d*(?:(?:;\d*)?[Hf]|d)/; // eslint-disable-line no-control-regex
 
 const withRgbFg = (originalFg: number, rgb: number): number => (
   (originalFg & STYLE_MASK) | CM_RGB | (rgb & 0xffffff)
@@ -383,23 +384,31 @@ export class KeywordHighlighter implements IDisposable {
     for (const disposable of this.disposables) disposable.dispose();
   }
 
+  private invalidateAbsoluteControlTracking(): void {
+    this.absoluteControlTail = "";
+    this.absoluteOriginControlTail = "";
+    this.absoluteOriginMode = null;
+    this.absoluteActiveBuffer = null;
+    this.absoluteNormalSavedOriginMode = null;
+    this.absoluteAlternateSavedOriginMode = null;
+  }
+
   private readonly write: XTerm["write"] = (data, callback) => {
     if (this.disposed) return this.originalWrite(data, callback);
-    const originModeNeedsSafety = this.trackAbsoluteOriginMode(data);
-    const absoluteControls = this.collectAbsoluteControls(data);
     const startedOnNormal = this.term.buffer.active.type === "normal";
-    if (!startedOnNormal && this.compiledPatterns.length === 0 && !this.hasPendingCatchUp()) {
+    if (this.compiledPatterns.length === 0 && !this.hasPendingCatchUp()) {
+      if (startedOnNormal) this.hasOutput = true;
+      // Bypassing DECOM/CSI tracking while highlighting is inactive means
+      // origin-mode state is unknown; reset to null so mid-session rule enable
+      // stays DECOM-safe.
+      this.invalidateAbsoluteControlTracking();
       return this.originalWrite(data, callback);
     }
     this.hasOutput = startedOnNormal || this.hasOutput;
-    if (this.compiledPatterns.length === 0 && !this.hasPendingCatchUp() && startedOnNormal) {
-      return this.originalWrite(data, callback);
-    }
+    const originModeNeedsSafety = this.trackAbsoluteOriginMode(data);
+    const absoluteControls = this.collectAbsoluteControls(data);
     const startBaseY = this.term.buffer.active.baseY;
     const startY = startBaseY + this.term.buffer.active.cursorY;
-    const absoluteRepaintRange = absoluteControls !== null
-      ? this.resolveAbsoluteRepaintRange(absoluteControls, originModeNeedsSafety)
-      : null;
     const bypass = !startedOnNormal || this.shouldBypassWrite(data);
     // Freeze in-frame eligibility at entry: the pressure window is a rolling
     // sample, and by the time this write's callback runs (xterm parses in a
@@ -412,7 +421,9 @@ export class KeywordHighlighter implements IDisposable {
     const colorDuringBypass = bypass && this.mayColorViewportDuringBypass(data);
     if (bypass) {
       if (startedOnNormal && (this.enabled || this.compiledPatterns.length > 0 || this.hasPendingCatchUp())) {
-        this.markCatchUp(absoluteRepaintRange === null ? startY : Math.min(startY, startBaseY));
+        const hasAbsoluteRowControl = absoluteControls !== null
+          && ABSOLUTE_ROW_CONTROL_RE.test(absoluteControls);
+        this.markCatchUp(hasAbsoluteRowControl ? Math.min(startY, startBaseY) : startY);
         this.scheduleCatchUp();
       }
       return this.originalWrite(data, () => {
@@ -447,6 +458,9 @@ export class KeywordHighlighter implements IDisposable {
         callback?.();
       });
     }
+    const absoluteRepaintRange = absoluteControls !== null
+      ? this.resolveAbsoluteRepaintRange(absoluteControls, originModeNeedsSafety)
+      : null;
     // In-place CR / backspace / EL / ICH / DCH rewrite the current row.
     // `\r\n` is a line advance and must not restore/repaint the previous prompt.
     const startsWithLineAdvance = typeof data === "string" && /^(?:\r\n|\n)/.test(data);
@@ -579,6 +593,13 @@ export class KeywordHighlighter implements IDisposable {
       this.absoluteAlternateSavedOriginMode = null;
       return true;
     }
+    if (
+      this.absoluteOriginControlTail.length === 0
+      && !data.includes("\x1b")
+      && !data.includes("\x9b")
+    ) {
+      return this.absoluteOriginMode !== false;
+    }
     const controls = this.absoluteOriginControlTail + data;
     this.absoluteOriginControlTail = trailingIncompleteCsi(controls);
     const saveOriginMode = () => {
@@ -650,6 +671,13 @@ export class KeywordHighlighter implements IDisposable {
   private collectAbsoluteControls(data: string | Uint8Array): string | null {
     if (typeof data !== "string") {
       this.absoluteControlTail = "";
+      return null;
+    }
+    if (
+      this.absoluteControlTail.length === 0
+      && !data.includes("\x1b")
+      && !data.includes("\x9b")
+    ) {
       return null;
     }
     const controls = this.absoluteControlTail + data;
@@ -963,13 +991,19 @@ export class KeywordHighlighter implements IDisposable {
     return { startY: first, endY: last };
   }
 
-  private readLogicalLineText(startY: number, endY: number): string {
+  private readLogicalLineFingerprints(startY: number, endY: number): {
+    rowFingerprints: string[];
+    fastText: string;
+  } {
     const buffer = this.term.buffer.active;
-    let text = "";
+    const rowFingerprints: string[] = [];
+    let fastText = "";
     for (let y = startY; y <= endY; y += 1) {
-      text += buffer.getLine(y)?.translateToString(y === endY) ?? "";
+      const raw = buffer.getLine(y)?.translateToString(false) ?? "";
+      rowFingerprints.push(raw);
+      fastText += y === endY ? raw.trimEnd() : raw;
     }
-    return text;
+    return { rowFingerprints, fastText };
   }
 
   private recolorLogicalBounds(startY: number, endY: number, force: boolean): void {
@@ -979,13 +1013,19 @@ export class KeywordHighlighter implements IDisposable {
       this.stampLogicalLine(startY, endY);
       return;
     }
-    if (collectMatches(this.readLogicalLineText(startY, endY), this.compiledPatterns).length === 0) {
-      this.stampLogicalLine(startY, endY);
+    const { rowFingerprints, fastText } = this.readLogicalLineFingerprints(startY, endY);
+    const fastMatches = collectMatches(fastText, this.compiledPatterns);
+    if (fastMatches.length === 0) {
+      this.stampLogicalLine(startY, endY, rowFingerprints);
       return;
     }
     const logical = this.readLogicalLine(startY, endY);
     if (!logical) return;
-    const matches = collectMatches(logical.text, this.compiledPatterns);
+    // Reuse fastMatches directly when readPluginTerminalBufferText produces
+    // identical text (exact UTF-16 offset parity); only rescan on divergence.
+    const matches = logical.text === fastText
+      ? fastMatches
+      : collectMatches(logical.text, this.compiledPatterns);
     for (const match of matches) {
       const startCell = logical.cellAtStringOffset[match.start];
       const lastCell = match.end > match.start
@@ -1006,7 +1046,7 @@ export class KeywordHighlighter implements IDisposable {
       }
       this.colorPhysicalRange(lastCell.y, 0, lastCell.x + 1, match.rgb);
     }
-    this.stampLogicalLine(startY, endY);
+    this.stampLogicalLine(startY, endY, rowFingerprints);
   }
 
   private logicalLineIsCurrent(startY: number, endY: number): boolean {
@@ -1039,14 +1079,16 @@ export class KeywordHighlighter implements IDisposable {
     return true;
   }
 
-  private stampLogicalLine(startY: number, endY: number): void {
+  private stampLogicalLine(startY: number, endY: number, rowFingerprints?: readonly string[]): void {
     const buffer = this.term.buffer.active;
     for (let y = startY; y <= endY; y += 1) {
       const publicLine = buffer.getLine(y);
       const internal = getInternalLine(publicLine);
       if (!internal) continue;
       this.coloredGeneration.set(internal, this.ruleGeneration);
-      const fingerprint = publicLine?.translateToString(false) ?? "";
+      const fingerprint = rowFingerprints
+        ? rowFingerprints[y - startY] ?? ""
+        : (publicLine?.translateToString(false) ?? "");
       const originals = this.originals.get(internal);
       if (originals) originals.fingerprint = fingerprint;
       else this.fingerprints.set(internal, fingerprint);
@@ -1075,8 +1117,6 @@ export class KeywordHighlighter implements IDisposable {
       }
       internal._data[dataIndex + CELL_FG] = withRgbFg(originals.fg[x], rgb);
     }
-    const publicLine = this.term.buffer.active.getLine(y);
-    if (publicLine) originals.fingerprint = publicLine.translateToString(false);
   }
 
   private restorePhysicalLine(y: number, buffer = this.term.buffer.active): void {

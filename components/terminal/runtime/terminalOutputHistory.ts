@@ -445,6 +445,8 @@ export const createTerminalOutputHistoryPreview = (options?: {
   // preview's first row for it must carry xterm's isWrapped flag and join the
   // previous line's last row during selection.
   let lineWrapFlags: boolean[] = [];
+  // Head index for amortized O(1) eviction without O(N) Array.shift() on each line.
+  let lineHead = 0;
   let currentStartsWrapped = false;
   let current = "";
   let cursor = 0;
@@ -495,11 +497,22 @@ export const createTerminalOutputHistoryPreview = (options?: {
     cursorCell = 0;
     currentStartsWrapped = false;
     // Never trim away the last retained line.
-    while (lines.length > maxLines || (totalChars > maxChars && lines.length > 1)) {
-      const dropped = lines.shift();
+    while (
+      lines.length - lineHead > maxLines
+      || (totalChars > maxChars && lines.length - lineHead > 1)
+    ) {
+      const dropped = lines[lineHead];
       if (dropped === undefined) break;
-      lineWrapFlags.shift();
+      // Clear vacated slots so evicted strings can be reclaimed before compaction.
+      lines[lineHead] = "";
+      lineWrapFlags[lineHead] = false;
+      lineHead += 1;
       totalChars -= dropped.length;
+    }
+    if (lineHead >= 256 && lineHead * 2 >= lines.length) {
+      lines = lines.slice(lineHead);
+      lineWrapFlags = lineWrapFlags.slice(lineHead);
+      lineHead = 0;
     }
   };
 
@@ -1178,13 +1191,25 @@ export const createTerminalOutputHistoryPreview = (options?: {
     }
   };
 
-  const getLines = (): readonly string[] => (current ? [...lines, current] : lines);
+  const getRetainedLines = (): readonly string[] => (
+    lineHead === 0 ? lines : lines.slice(lineHead)
+  );
+
+  const getRetainedWrapFlags = (): readonly boolean[] => (
+    lineHead === 0 ? lineWrapFlags : lineWrapFlags.slice(lineHead)
+  );
+
+  const getLines = (): readonly string[] => {
+    const retained = getRetainedLines();
+    return current ? [...retained, current] : retained;
+  };
 
   const refreshPreviewCache = (cols: number) => {
     if (!cacheDirty && cacheCols === cols) return;
+    const retainedFlags = getRetainedWrapFlags();
     cacheRows = buildPreviewRows(
       getLines(),
-      current ? [...lineWrapFlags, currentStartsWrapped] : lineWrapFlags,
+      current ? [...retainedFlags, currentStartsWrapped] : retainedFlags,
       cols,
       widthTerm,
     );
@@ -1204,6 +1229,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
     clear(): void {
       lines = [];
       lineWrapFlags = [];
+      lineHead = 0;
       currentStartsWrapped = false;
       current = "";
       openGrapheme = null;

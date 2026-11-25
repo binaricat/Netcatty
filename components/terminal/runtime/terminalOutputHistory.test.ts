@@ -880,3 +880,38 @@ test("resizing invalidates cached preview row counts after trimming a wide line"
   assert.deepEqual(history.getPreviewRows({ cols: 4, rows: 1, top: 0 }).rows,
     [{ text: "abc", isWrapped: false }]);
 });
+
+test("head-index eviction preserves exact lines, wrap flags, and clear semantics across compactions", () => {
+  const history = createTerminalOutputHistoryPreview({ maxLines: 50, maxChars: 100_000 });
+  history.setViewportCols(10);
+  // Emit enough lines (including wrapped lines) to trigger multiple head-index compactions.
+  for (let i = 0; i < 1200; i += 1) {
+    history.append(`line-${String(i).padStart(4, "0")}-wrapped-tail\r\n`);
+  }
+  const retained = history.getLines();
+  assert.equal(retained.length, 50);
+  // Each input line wraps into 3 lines at 10 cols: 10 + 10 + 2 ("il").
+  // The last 50 retained lines must align with exact wrapped continuations.
+  const preview = history.getPreviewRows({ cols: 10, rows: 50, top: 0 });
+  assert.equal(preview.totalRows, 50);
+  assert.equal(preview.rows[preview.rows.length - 1]?.text, "il");
+  assert.equal(preview.rows[preview.rows.length - 1]?.isWrapped, true);
+
+  // Stress check: 20,000 lines at default 2,000-line cap stays fast (amortized O(1) eviction).
+  const bulk = createTerminalOutputHistoryPreview({ maxLines: 2000, maxChars: 200_000 });
+  const startedAt = performance.now();
+  const batch = Array.from({ length: 1000 }, (_, i) => `row-${i}\r\n`).join("");
+  for (let round = 0; round < 20; round += 1) {
+    bulk.append(batch);
+  }
+  const elapsedMs = performance.now() - startedAt;
+  assert.equal(bulk.getLines().length, 2000);
+  assert.equal(bulk.getLines()[0], "row-0");
+  assert.equal(bulk.getLines()[1999], "row-999");
+  assert.ok(elapsedMs < 2000, `expected linear-time eviction for 20k lines, took ${elapsedMs.toFixed(1)}ms`);
+
+  bulk.clear();
+  assert.deepEqual(bulk.getLines(), []);
+  bulk.append("after-clear\r\n");
+  assert.deepEqual(bulk.getLines(), ["after-clear"]);
+});
