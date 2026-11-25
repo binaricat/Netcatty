@@ -3,7 +3,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import type { usePluginVaultPages } from '../../application/state/usePluginVaultPages';
 import { PluginContributionIcon } from './PluginContributionIcon';
 import { Button } from '../ui/button';
-import { PluginHostDrawnPage } from './PluginHostDrawnPage';
+import { LazyPluginHostDrawnPage } from './LazyPluginHostDrawnPage';
 
 type VaultPages = ReturnType<typeof usePluginVaultPages>;
 const subscribeHidden = (hide: () => void) => activeTabStore.subscribeSync((id) => { if (id !== 'vault') hide(); });
@@ -28,7 +28,7 @@ export function PluginVaultPage({ model }: { model: VaultPages }) {
   const { t } = useI18n();
   const page = model.selected!;
   return <section className="flex min-h-0 flex-1 flex-col" aria-label={page.title} data-plugin-vault-page={page.key}>
-    <PluginHostDrawnPage pluginId={page.pluginId} viewId={page.viewId} version={page.version} slot="vault-page" active={model.active} context={model.context}
+    <LazyPluginHostDrawnPage pluginId={page.pluginId} viewId={page.viewId} version={page.version} slot="vault-page" active={model.active} context={model.context}
       subscribeHidden={subscribeHidden} unavailable={model.fallback} loadingLabel={t('plugins.vault.loading')} />
   </section>;
 }

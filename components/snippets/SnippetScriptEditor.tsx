@@ -4,10 +4,8 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { STORAGE_KEY_SNIPPET_SCRIPT_EDITOR_HEIGHT } from '@/infrastructure/config/storageKeys.ts';
 import { localStorageAdapter } from '@/infrastructure/persistence/localStorageAdapter.ts';
 import { Button } from '../ui/button';
-import {
-  ScriptCodeEditor,
-  type ScriptCodeEditorHandle,
-} from '../scripts/ScriptCodeEditor';
+import { LazyScriptCodeEditor } from '../scripts/LazyScriptCodeEditor';
+import type { ScriptCodeEditorHandle } from '../scripts/ScriptCodeEditor';
 import {
   Dialog,
   DialogContent,
@@ -156,7 +154,7 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
           className="relative overflow-hidden rounded-md border border-border/60 bg-background"
           style={{ height }}
         >
-          <ScriptCodeEditor
+          <LazyScriptCodeEditor
             ref={inlineEditorRef}
             value={value}
             onChange={onChange}
@@ -186,7 +184,7 @@ export const SnippetScriptEditor: React.FC<SnippetScriptEditorProps> = ({
             <DialogTitle>{t('snippets.scriptEditor.modalTitle')}</DialogTitle>
           </DialogHeader>
           <div className="flex-1 min-h-0 mx-6 mb-3 overflow-hidden rounded-md border border-border/60 bg-background">
-            <ScriptCodeEditor
+            <LazyScriptCodeEditor
               value={value}
               onChange={onChange}
               language="shell"

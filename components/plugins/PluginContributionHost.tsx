@@ -7,7 +7,7 @@ import {
 } from '../../application/state/usePluginViewLifecycle';
 import { Button } from '../ui/button';
 import { PluginContributionIcon } from './PluginContributionIcon';
-import { PluginHostDrawnPage } from './PluginHostDrawnPage';
+import { LazyPluginHostDrawnPage } from './LazyPluginHostDrawnPage';
 
 export { requestOpenPluginView };
 
@@ -41,7 +41,7 @@ export function PluginContributionHost({
 
   if (!effectiveRequested || !activeView) return null;
   const location = activeView.view.location;
-  const content = <PluginHostDrawnPage pluginId={activeView.plugin.id} viewId={activeView.view.id} version={activeView.plugin.version} slot={`view:${activeView.view.id}`} active context={viewQueryContext}
+  const content = <LazyPluginHostDrawnPage pluginId={activeView.plugin.id} viewId={activeView.view.id} version={activeView.plugin.version} slot={`view:${activeView.view.id}`} active context={viewQueryContext}
         subscribeHidden={subscribeNoop} unavailable={() => void close()} loadingLabel={t('plugins.vault.loading')} />;
   const containerClass = location === 'aside'
     ? 'absolute inset-y-0 right-0 z-40 w-[420px] border-l border-border bg-background shadow-2xl'

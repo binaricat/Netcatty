@@ -82,7 +82,11 @@ test('terminal extension pages use actual split panes, focus and session ownersh
     assert.equal(document.querySelector('button[aria-label="Extension pages"]'), null, 'pages do not require opening a grouped menu');
     assert.ok(document.querySelector('button[aria-label="Second page — Synthetic plugin"]'), 'each contributed page has a direct toolbar button');
     const firstButton = document.querySelector<HTMLButtonElement>('button[aria-label="First page — Synthetic plugin"]')!;
-    await act(async () => { firstButton.click(); await settle(); });
+    await act(async () => {
+      firstButton.click();
+      await import('./plugins/PluginHostDrawnPage');
+      await settle();
+    });
     assert.equal(document.querySelectorAll('[data-section="terminal-side-panel-pane"]').length, 1);
     assert.ok(document.querySelector('[data-pane-tool] [data-plugin-view-slot="terminal-sidebar"]'));
     assert.equal(document.querySelectorAll('[data-plugin-terminal-sidebar] header').length, 1);
