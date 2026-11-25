@@ -4,80 +4,84 @@
  * used by SSH, SFTP, and Port Forwarding bridges.
  */
 
-// Keyboard-interactive authentication pending requests
-// Map of requestId -> { finishCallback, webContentsId, sessionId, createdAt, timeoutId }
-const { randomUUID } = require("node:crypto");
-
-const keyboardInteractiveRequests = new Map();
+const { createIpcPromptRegistry } = require("./ipcPromptRegistry.cjs");
 
 // TTL for abandoned requests (5 minutes)
 const REQUEST_TTL_MS = 5 * 60 * 1000;
+const CANCEL_CHANNEL = "netcatty:keyboard-interactive-cancelled";
+
+const registry = createIpcPromptRegistry({
+  prefix: "ki",
+  ttlMs: REQUEST_TTL_MS,
+  cancelChannel: CANCEL_CHANNEL,
+  logTag: "[KeyboardInteractive]",
+  notifyBeforeResolve: false,
+  buildCancelPayload: (pending, _requestId, reason) => ({
+    sessionId: pending.sessionId,
+    reason,
+  }),
+});
 
 /**
  * Generate a unique request ID for keyboard-interactive requests
  */
-function generateRequestId(prefix = 'ki') {
-  return `${prefix}-${randomUUID()}`;
+function generateRequestId(prefix = "ki") {
+  return registry.generateRequestId(prefix);
 }
 
 /**
  * Store a keyboard-interactive request with TTL cleanup
  */
 function storeRequest(requestId, finishCallback, webContentsId, sessionId, sender) {
-  // Set up TTL timeout to clean up abandoned requests
-  const timeoutId = setTimeout(() => {
-    const pending = keyboardInteractiveRequests.get(requestId);
-    if (pending) {
-      console.warn(`[KeyboardInteractive] Request ${requestId} timed out after ${REQUEST_TTL_MS / 1000}s, cleaning up`);
-      keyboardInteractiveRequests.delete(requestId);
-      // Call finish with empty responses to abort the authentication
-      try {
-        pending.finishCallback([]);
-      } catch (err) {
-        console.warn(`[KeyboardInteractive] Failed to call finishCallback for timed out request:`, err.message);
-      }
-      notifyCancellation(pending, requestId, "timeout");
-    }
-  }, REQUEST_TTL_MS);
-
-  keyboardInteractiveRequests.set(requestId, {
-    finishCallback,
-    webContentsId,
-    sessionId,
-    sender,
-    createdAt: Date.now(),
-    timeoutId,
-  });
+  registry.register(
+    requestId,
+    {
+      finishCallback,
+      resolveCallback: finishCallback,
+      webContentsId,
+      sessionId,
+      sender,
+    },
+    {
+      onTimeout: (id) => {
+        console.warn(`[KeyboardInteractive] Request ${id} timed out after ${REQUEST_TTL_MS / 1000}s, cleaning up`);
+        // Call finish with empty responses to abort the authentication before notifying renderer.
+        registry.cancel(id, "timeout", [], {
+          catchResolveError: true,
+          resolveErrorMessage: "Failed to call finishCallback for timed out request:",
+        });
+      },
+    },
+  );
 }
 
 /**
  * Handle keyboard-interactive authentication response from renderer
  */
 function handleResponse(_event, payload) {
-  console.log(`[KeyboardInteractive] handleResponse called`, {
+  console.log("[KeyboardInteractive] handleResponse called", {
     requestId: payload?.requestId,
     cancelled: Boolean(payload?.cancelled),
     responsesCount: Array.isArray(payload?.responses) ? payload.responses.length : 0,
   });
 
   const { requestId, responses, cancelled } = payload;
-  const pending = keyboardInteractiveRequests.get(requestId);
+  const requests = registry.getMap();
+  const verification = registry.verifySender(_event, requestId);
 
-  console.log(`[KeyboardInteractive] Looking for request ${requestId}, found:`, !!pending);
-  console.log(`[KeyboardInteractive] Current pending requests:`, Array.from(keyboardInteractiveRequests.keys()));
+  console.log(`[KeyboardInteractive] Looking for request ${requestId}, found:`, requests.has(requestId));
+  console.log("[KeyboardInteractive] Current pending requests:", Array.from(requests.keys()));
 
-  if (!pending) {
-    console.warn(`[KeyboardInteractive] No pending request for ${requestId}`);
-    return { success: false, error: 'Request not found' };
+  if (!verification.ok) {
+    if (verification.error === "Request not found") {
+      console.warn(`[KeyboardInteractive] No pending request for ${requestId}`);
+    } else {
+      console.warn(`[KeyboardInteractive] Wrong sender for request ${requestId}`);
+    }
+    return { success: false, error: verification.error };
   }
 
-  if (_event?.sender?.id !== pending.webContentsId) {
-    console.warn(`[KeyboardInteractive] Wrong sender for request ${requestId}`);
-    return { success: false, error: 'Wrong sender' };
-  }
-
-  if (pending.timeoutId) clearTimeout(pending.timeoutId);
-  keyboardInteractiveRequests.delete(requestId);
+  const pending = registry.removeEntry(requestId);
 
   try {
     if (cancelled) {
@@ -89,7 +93,13 @@ function handleResponse(_event, payload) {
     }
   } catch (err) {
     console.warn(`[KeyboardInteractive] Failed to deliver response for ${requestId}:`, err?.message);
-    notifyCancellation(pending, requestId, "delivery-failed");
+    registry.sendNotification(pending, requestId, {
+      channel: CANCEL_CHANNEL,
+      payload: {
+        sessionId: pending.sessionId,
+        reason: "delivery-failed",
+      },
+    });
     return { success: false, error: "Failed to deliver response" };
   }
 
@@ -99,44 +109,23 @@ function handleResponse(_event, payload) {
 /**
  * Cancel every pending request owned by a session or external operation.
  */
-function notifyCancellation(pending, requestId, reason) {
-  try {
-    if (!pending.sender?.isDestroyed?.()) {
-      pending.sender?.send?.("netcatty:keyboard-interactive-cancelled", {
-        requestId,
-        sessionId: pending.sessionId,
-        reason,
-      });
-    }
-  } catch (err) {
-    console.warn(`[KeyboardInteractive] Failed to notify cancellation for ${requestId}:`, err.message);
-  }
-}
-
 function cancelRequestsForSession(sessionId, reason = "cancelled") {
-  let cancelled = 0;
-  for (const [requestId, pending] of keyboardInteractiveRequests) {
-    if (pending.sessionId !== sessionId) continue;
-    if (pending.timeoutId) {
-      clearTimeout(pending.timeoutId);
-    }
-    keyboardInteractiveRequests.delete(requestId);
-    try {
-      pending.finishCallback([]);
-    } catch (err) {
-      console.warn(`[KeyboardInteractive] Failed to cancel request ${requestId}:`, err.message);
-    }
-    notifyCancellation(pending, requestId, reason);
-    cancelled += 1;
-  }
-  return cancelled;
+  return registry.cancelWhere(
+    (pending) => pending.sessionId === sessionId,
+    reason,
+    [],
+    {
+      catchResolveError: true,
+      resolveErrorMessage: "Failed to cancel request:",
+    },
+  );
 }
 
 /**
  * Get the requests map (for debugging/testing)
  */
 function getRequests() {
-  return keyboardInteractiveRequests;
+  return registry.getMap();
 }
 
 /**
