@@ -33,6 +33,7 @@ const {
 } = await import("../application/state/terminalDragData.ts");
 const {
   activateLogViewTab,
+  createTopTabCopyDoubleClickHandler,
   createTopTabSessionDoubleClickHandler,
   formatSessionTopTabLabel,
   formatSessionTopTabTooltip,
@@ -199,6 +200,20 @@ test("duplicate double-click behavior falls back to copying when unavailable", (
   handleDoubleClick({} as Parameters<typeof handleDoubleClick>[0]);
 
   assert.deepEqual(copiedSessionIds, ["session-1"]);
+});
+
+test("workspace double-click honors Do nothing and retains copying for enabled modes", () => {
+  for (const behavior of ["disabled", "copy", "duplicate"] as const) {
+    const copiedWorkspaces: string[] = [];
+    const handler = createTopTabCopyDoubleClickHandler(
+      (id) => copiedWorkspaces.push(id), "workspace-1", behavior,
+    );
+    handler({} as Parameters<typeof handler>[0]);
+    assert.deepEqual(copiedWorkspaces, behavior === "disabled" ? [] : ["workspace-1"]);
+  }
+
+  const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+  assert.match(topTabsSource, /<WorkspaceTopTab\b[^>]*tabDoubleClickBehavior=\{tabDoubleClickBehavior\}/);
 });
 
 test("session top tab label only shows the host label for ssh sessions", () => {
