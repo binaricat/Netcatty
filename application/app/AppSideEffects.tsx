@@ -264,6 +264,7 @@ export function AppSideEffects() {
     closeSession,
     closeSessions,
     closeWorkspace,
+    reopenLastClosedTab,
     updateSessionStatus,
     createWorkspaceWithHosts,
     createWorkspaceFromTargets,
@@ -293,6 +294,8 @@ export function AppSideEffects() {
     () => new Map(hosts.map((host) => [host.id, host])),
     [hosts],
   );
+  const hostByIdRef = useRef(hostById);
+  hostByIdRef.current = hostById;
   const terminalHosts = useMemo(
     () => (ephemeralHosts.length > 0 ? [...hosts, ...ephemeralHosts] : hosts),
     [hosts, ephemeralHosts],
@@ -1128,12 +1131,14 @@ export function AppSideEffects() {
       fromEditorTabId,
       handleOpenSettingsRef,
       handleRequestCloseEditorTabRef,
+      hostsById: hostByIdRef.current,
       isEditorTabId,
       isPluginViewTabId,
       isQuickSwitcherOpen: isQuickSwitcherOpenRef.current,
       lastMoveFocusTimeRef,
       moveFocusInWorkspace,
       orderedTabs: orderedTabsRef.current,
+      reopenLastClosedTab,
       resolveCloseIntent,
       resolveSnippetsShortcutIntent,
       sessions: sessionsRef.current,
@@ -1165,6 +1170,7 @@ export function AppSideEffects() {
     closePluginViewTab,
     closeSession,
     closeWorkspace,
+    reopenLastClosedTab,
     createLocalTerminalWithCurrentShell,
     splitSessionWithCurrentShell,
     moveFocusInWorkspace,
