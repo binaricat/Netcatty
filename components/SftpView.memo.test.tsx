@@ -38,6 +38,16 @@ test("SFTP keyboard focus tracks the active side and blocks the covered sibling"
   assert.match(source, /inert=\{magnifiedSide === 'left' \? true : undefined\}[\s\S]*onFocusCapture=\{\(\) => handlePaneFocus\("right"\)\}/);
 });
 
+test("SftpView passes stable hidden-files handler and avoids passing changing focus props to all panes", () => {
+  const source = readFileSync(new URL("./SftpView.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /useSftpFocusedSide\s*\(/);
+  assert.doesNotMatch(source, /isPaneFocused=\{focusedSide\s*===/);
+  assert.doesNotMatch(source, /onToggleShowHiddenFiles=\{\(\)\s*=>\s*handleToggleHiddenFiles\(/);
+  const stableMatches = source.match(/onToggleShowHiddenFiles=\{handleToggleHiddenFiles\}/g) ?? [];
+  assert.equal(stableMatches.length, 2);
+});
+
 test("SftpView re-renders when host-key verification setting changes", async () => {
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
