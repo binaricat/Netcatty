@@ -1731,10 +1731,10 @@ function createPreloadApi(ctx) {
     }),
 
   // Save dialog for file downloads
-  showSaveDialog: (defaultPath, filters) =>
-    ipcRenderer.invoke("netcatty:showSaveDialog", { defaultPath, filters }),
-  selectDirectory: (title, defaultPath) =>
-    ipcRenderer.invoke("netcatty:selectDirectory", { title, defaultPath }),
+  showSaveDialog: (defaultPath, filters, directoryOptions) =>
+    ipcRenderer.invoke("netcatty:showSaveDialog", { defaultPath, filters, directoryOptions }),
+  selectDirectory: (title, defaultPath, directoryOptions) =>
+    ipcRenderer.invoke("netcatty:selectDirectory", { title, defaultPath, directoryOptions }),
   selectFile: (title, defaultPath, filters) =>
     ipcRenderer.invoke("netcatty:selectFile", { title, defaultPath, filters }),
 

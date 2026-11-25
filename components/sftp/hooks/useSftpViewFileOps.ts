@@ -12,6 +12,7 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { getFileExtension, getLanguageId, FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { isNavigableDirectory } from "../utils";
 import { resolveDownloadSourceSnapshot } from "../../../application/state/sftp/downloadSourceSnapshot";
+import { getSftpDownloadDialogDirectoryOptions } from "../../../application/state/sftp/downloadLocation";
 import { reportSftpUploadResults } from "../reportSftpUploadResults";
 import { editorTabStore } from "../../../application/state/editorTabStore";
 import { popOutEditorTab } from "../../../application/state/editorWindowClient";
@@ -462,7 +463,11 @@ export const useSftpViewFileOps = ({
       const status = await sftpRef.current.tryPackedDownload?.({ ...request, localDirectory }) ?? "regular";
       if (status === "conflict") {
         if (!window.confirm(t("sftp.packedDownload.conflict"))) return null;
-        const destination = await selectDirectory?.(t("sftp.context.download"));
+        const destination = await selectDirectory?.(
+          t("sftp.context.download"),
+          undefined,
+          getSftpDownloadDialogDirectoryOptions(),
+        );
         if (!destination) return null;
         localDirectory = destination;
         continue;
@@ -536,7 +541,11 @@ export const useSftpViewFileOps = ({
             return;
           }
 
-          const selectedDirectory = await selectDirectory(t("sftp.context.download"));
+          const selectedDirectory = await selectDirectory(
+            t("sftp.context.download"),
+            undefined,
+            getSftpDownloadDialogDirectoryOptions(),
+          );
           if (!selectedDirectory) return;
 
           // The picker may stay open while the remote entry changes again.
@@ -586,7 +595,11 @@ export const useSftpViewFileOps = ({
 
           return;
         }
-        const targetPath = await showSaveDialog(file.name);
+        const targetPath = await showSaveDialog(
+          file.name,
+          undefined,
+          getSftpDownloadDialogDirectoryOptions(),
+        );
         if (!targetPath) return;
 
         const selectedSnapshot = await resolveDownloadSourceSnapshot(
@@ -774,7 +787,11 @@ export const useSftpViewFileOps = ({
         return;
       }
       const parents = paths.map((path) => getParentPath(path));
-      let selectedDirectory = await selectDirectory(t("sftp.context.download"));
+      let selectedDirectory = await selectDirectory(
+        t("sftp.context.download"),
+        undefined,
+        getSftpDownloadDialogDirectoryOptions(),
+      );
       if (!selectedDirectory) return;
 
       if (parents.every((parent) => parent === parents[0]) && files.every((file) => file.type !== "symlink")) {

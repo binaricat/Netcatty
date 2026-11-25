@@ -225,6 +225,13 @@ export const zhCNTerminalMessages: Messages = {
   'settings.sftp.packedDownload': '打包下载',
   'settings.sftp.packedDownload.enable': '下载文件夹或多选项目时打包',
   'settings.sftp.packedDownload.enableDesc': '将所选内容一次传回，在本地自动还原原有目录结构。服务器不支持打包时，自动逐文件下载。',
+  'settings.sftp.downloadLocation': '下载位置',
+  'settings.sftp.downloadLocation.directory': '默认下载文件夹',
+  'settings.sftp.downloadLocation.directoryDesc': '下载 SFTP 文件时，保存对话框默认打开此文件夹。未设置或文件夹已不存在时，使用系统“下载”文件夹。',
+  'settings.sftp.downloadLocation.systemDefault': '系统“下载”文件夹',
+  'settings.sftp.downloadLocation.browse': '浏览…',
+  'settings.sftp.downloadLocation.reset': '恢复为系统“下载”文件夹',
+  'settings.sftp.downloadLocation.select': '选择默认下载文件夹',
 
   'settings.sftp.skipUnchanged.enable': '跳过未改文件',
   'settings.sftp.skipUnchanged.enableDesc': '当目标文件的大小与修改时间已与源一致时跳过传输（类似 rsync）。替换到暂存路径时自动禁用。',

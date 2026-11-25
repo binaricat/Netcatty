@@ -212,3 +212,88 @@ test("duplicate-name downloads keep captured paths and stop when the source conn
     globals.IS_REACT_ACT_ENVIRONMENT = previousAct;
   }
 });
+
+test("download dialogs open in the configured default download folder", async () => {
+  const globals = globalThis as typeof globalThis & {
+    IS_REACT_ACT_ENVIRONMENT?: boolean;
+    localStorage?: Storage;
+  };
+  const previousAct = globals.IS_REACT_ACT_ENVIRONMENT;
+  const hadLocalStorage = Object.prototype.hasOwnProperty.call(globals, "localStorage");
+  const previousLocalStorage = globals.localStorage;
+  globals.IS_REACT_ACT_ENVIRONMENT = true;
+  const store = new Map<string, string>();
+  Object.defineProperty(globals, "localStorage", {
+    configurable: true,
+    writable: true,
+    value: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, String(value)); },
+      removeItem: (key: string) => { store.delete(key); },
+      clear: () => store.clear(),
+      key: () => null,
+      get length() { return store.size; },
+    } as Storage,
+  });
+
+  const types = new Map<string, SftpStatResult>([
+    ["/remote/a.txt", { name: "a.txt", size: 1, sizeKnown: true, type: "file", lastModified: 0 }],
+    ["/remote/b.txt", { name: "b.txt", size: 1, sizeKnown: true, type: "file", lastModified: 0 }],
+    ["/remote/dir", { name: "dir", size: 0, sizeKnown: true, type: "directory", lastModified: 0 }],
+  ]);
+  const saveOptions: unknown[] = [];
+  const directoryOptions: unknown[] = [];
+  const connection = { id: "conn-1", hostId: "host-1", hostLabel: "Host", currentPath: "/remote", isLocal: false };
+  const pane = { connection, filenameEncoding: "auto" };
+  const sftpRef = { current: {
+    leftPane: pane, rightPane: pane,
+    joinPath: (parent: string, name: string) => `${parent}/${name}`,
+    tryPackedDownload: async () => "regular",
+    downloadToLocal: async () => "completed",
+  } as unknown as SftpStateApi };
+  let ops: ReturnType<typeof useSftpViewFileOps> | undefined;
+  let renderer: ReactTestRenderer | undefined;
+  function Probe() {
+    ops = useSftpViewFileOps({
+      sftpRef,
+      behaviorRef: { current: "" },
+      autoSyncRef: { current: false },
+      getOpenerForFileRef: { current: () => null },
+      setOpenerForExtension: () => undefined,
+      t: (key) => key,
+      showSaveDialog: async (name, _filters, options) => { saveOptions.push(options); return `/picked/${name}`; },
+      selectDirectory: async (_title, _defaultPath, options) => { directoryOptions.push(options); return "/picked"; },
+      getSftpIdForConnection: () => "sftp-1",
+      statSftp: async (_id, path) => types.get(path) ?? null as unknown as SftpStatResult,
+      listSftp: async () => [],
+    });
+    return null;
+  }
+
+  try {
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    const single = ops!.onDownloadFileLeft as unknown as (entry: SftpFileEntry) => Promise<void>;
+    const batch = ops!.onDownloadFilesLeft as unknown as (entries: SftpFileEntry[]) => Promise<void>;
+
+    await act(async () => { await single(file("a.txt", 1)); });
+    assert.deepEqual(saveOptions.at(-1), { fallbackDirectory: "downloads" },
+      "unset preference falls back to the system Downloads folder");
+
+    store.set("netcatty_sftp_default_download_dir_v1", "/home/me/server-files");
+    const configured = { preferredDirectory: "/home/me/server-files", fallbackDirectory: "downloads" };
+    await act(async () => { await single(file("a.txt", 1)); });
+    assert.deepEqual(saveOptions.at(-1), configured, "Save As opens in the configured folder");
+    await act(async () => { await single(file("dir", 0, "directory")); });
+    assert.deepEqual(directoryOptions.at(-1), configured, "folder downloads use the configured folder");
+    await act(async () => { await batch([file("a.txt", 1), file("b.txt", 1)]); });
+    assert.deepEqual(directoryOptions.at(-1), configured, "multi-select downloads use the configured folder");
+  } finally {
+    await act(async () => { renderer?.unmount(); });
+    globals.IS_REACT_ACT_ENVIRONMENT = previousAct;
+    if (hadLocalStorage) {
+      Object.defineProperty(globals, "localStorage", { configurable: true, writable: true, value: previousLocalStorage });
+    } else {
+      delete (globals as { localStorage?: Storage }).localStorage;
+    }
+  }
+});

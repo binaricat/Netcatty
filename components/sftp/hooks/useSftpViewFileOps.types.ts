@@ -19,8 +19,16 @@ export interface UseSftpViewFileOpsParams {
     systemApp?: SystemAppInfo,
   ) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
-  showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
-  selectDirectory?: (title?: string, defaultPath?: string) => Promise<string | null>;
+  showSaveDialog?: (
+    defaultPath: string,
+    filters?: Array<{ name: string; extensions: string[] }>,
+    directoryOptions?: NetcattyDialogDirectoryOptions,
+  ) => Promise<string | null>;
+  selectDirectory?: (
+    title?: string,
+    defaultPath?: string,
+    directoryOptions?: NetcattyDialogDirectoryOptions,
+  ) => Promise<string | null>;
   getSftpIdForConnection?: (connectionId: string) => string | undefined;
   /** Application-layer fresh stat for download source snapshots (kept off the raw bridge). */
   statSftp?: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<SftpStatResult>;

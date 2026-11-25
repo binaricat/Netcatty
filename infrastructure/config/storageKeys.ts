@@ -139,6 +139,12 @@ export const STORAGE_KEY_SFTP_AUTO_SYNC = 'netcatty_sftp_auto_sync_v1';
 export const STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES = 'netcatty_sftp_show_hidden_files_v1';
 export const STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD = 'netcatty_sftp_use_compressed_upload_v1';
 export const STORAGE_KEY_SFTP_USE_PACKED_DOWNLOAD = 'netcatty_sftp_use_packed_download_v1';
+/**
+ * Default local folder for SFTP download dialogs. Device-local on purpose:
+ * absolute paths differ between machines, so this key is never cloud-synced.
+ * Empty / missing means "system Downloads folder".
+ */
+export const STORAGE_KEY_SFTP_DEFAULT_DOWNLOAD_DIR = 'netcatty_sftp_default_download_dir_v1';
 export const STORAGE_KEY_SFTP_TRANSFER_CENTER = 'netcatty_sftp_transfer_center_v1';
 export const STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR = 'netcatty_sftp_auto_open_sidebar_v1';
 export const STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD = 'netcatty_sftp_follow_terminal_cwd_v1';
