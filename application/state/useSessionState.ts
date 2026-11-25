@@ -44,6 +44,7 @@ import {
 import {
   closeSessionsState,
   detachSessionFromWorkspaceState,
+  resolveActiveTabAfterCloseWorkspace,
 } from './sessionWorkspaceDetach';
 import { getAISessionsSnapshot } from './aiSessionsStore';
 import { getPersistedAiSessionsSnapshot } from './aiStateSnapshots';
@@ -624,23 +625,33 @@ export const useSessionState = ({
     for (const sessionId of closedIds) {
       sessionPresentationStore.clearSession(sessionId);
     }
+    const preferredTabId = activeTabStore.getPreviousActiveTabId();
+    const tabOrderSnapshot = tabOrderRef.current;
+    const sessionsSnapshot = sessionsRef.current;
+    setTabOrder(prevTabOrder => prevTabOrder.filter(id => id !== workspaceId));
     setWorkspaces(prevWorkspaces => {
       const remainingWorkspaces = prevWorkspaces.filter(w => w.id !== workspaceId);
+      const remainingSessions = sessionsSnapshot.filter(s => s.workspaceId !== workspaceId);
 
       setSessions(prevSessions => prevSessions.filter(s => s.workspaceId !== workspaceId));
 
-      const currentActiveTabId = activeTabStore.getActiveTabId();
-      if (currentActiveTabId === workspaceId) {
-        if (remainingWorkspaces.length > 0) {
-          setActiveTabId(remainingWorkspaces[remainingWorkspaces.length - 1].id);
-        } else {
-          setActiveTabId('vault');
-        }
+      const nextActiveTabId = resolveActiveTabAfterCloseWorkspace({
+        currentActiveTabId: activeTabStore.getActiveTabId(),
+        closedWorkspaceId: workspaceId,
+        previousWorkspaces: prevWorkspaces,
+        remainingWorkspaces,
+        remainingSessions,
+        tabOrder: tabOrderSnapshot,
+        preferredTabId,
+      });
+      if (nextActiveTabId) {
+        // Closing must not rewrite previous-tab history to the closed workspace.
+        activeTabStore.setActiveTabId(nextActiveTabId, { recordPrevious: false });
       }
 
       return remainingWorkspaces;
     });
-  }, [setActiveTabId]);
+  }, []);
 
   const closeSessions = useCallback((sessionIds: string[]) => {
     captureClosingTerminalSessions(sessionIds);

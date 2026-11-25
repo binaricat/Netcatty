@@ -1,6 +1,10 @@
 import type { TerminalSession, Workspace } from "../../domain/models";
 import type { AIChatRecencyEntry } from "../../domain/aiSessionRecency";
 import { resolveMostRecentlyActiveMemberTerminalId } from "../../domain/aiSessionRecency";
+import {
+  buildOrderedTerminalTabIds,
+  resolveNextActiveTabAfterTerminalClose,
+} from "../../domain/tabCloseFocus";
 import { collectSessionIds, createEmptyWorkspaceRoot, pruneWorkspaceNode } from "../../domain/workspace";
 
 export type DetachSessionFromWorkspaceStateResult = {
@@ -128,7 +132,6 @@ export function isPreferredTabAvailableAfterClose(
 } {
   const { preferredTabId, closedSessionId, layoutResult, remainingSessions } = input;
   if (!preferredTabId || preferredTabId === closedSessionId) return false;
-  if (preferredTabId === "vault" || preferredTabId === "sftp") return true;
   if (layoutResult.workspaces.some((workspace) => workspace.id === preferredTabId)) return true;
   return remainingSessions.some((session) => (
     session.id === preferredTabId
@@ -143,6 +146,8 @@ export function resolveActiveTabAfterCloseSession({
   layoutResult,
   remainingSessions,
   preferredTabId,
+  orderedTabIdsBeforeClose,
+  tabOrder,
 }: {
   currentActiveTabId: string | null;
   closedSessionId: string;
@@ -150,30 +155,61 @@ export function resolveActiveTabAfterCloseSession({
   layoutResult: CloseSessionWorkspaceLayoutResult;
   remainingSessions: readonly TerminalSession[];
   preferredTabId?: string | null;
+  orderedTabIdsBeforeClose?: readonly string[];
+  tabOrder?: readonly string[];
 }): string | null {
-  const fallbackWorkspace = layoutResult.workspaces[layoutResult.workspaces.length - 1];
-  const fallbackSolo = remainingSessions.filter((session) => !session.workspaceId && !session.hiddenFromTabs).slice(-1)[0];
-  const preferredInput = {
-    preferredTabId,
-    closedSessionId,
-    layoutResult,
-    remainingSessions,
-  };
-  const preferredFallback = isPreferredTabAvailableAfterClose(preferredInput)
-    ? preferredInput.preferredTabId
-    : undefined;
-  const fallback = preferredFallback
-    ?? fallbackWorkspace?.id
-    ?? fallbackSolo?.id
-    ?? "vault";
+  const survivingTabIds = buildOrderedTerminalTabIds({
+    sessions: remainingSessions,
+    workspaces: layoutResult.workspaces,
+    tabOrder,
+  });
 
   // Workspaces survive member loss (#4098 phase 2), so only a closed session
   // tab that was active needs a replacement.
-  if (currentActiveTabId === closedSessionId) {
-    return fallback;
-  }
+  return resolveNextActiveTabAfterTerminalClose({
+    currentActiveTabId,
+    closedTabId: closedSessionId,
+    orderedTabIdsBeforeClose,
+    survivingTabIds,
+    preferredTabId,
+  });
+}
 
-  return null;
+export function resolveActiveTabAfterCloseWorkspace({
+  currentActiveTabId,
+  closedWorkspaceId,
+  previousWorkspaces,
+  remainingWorkspaces,
+  remainingSessions,
+  tabOrder,
+  preferredTabId,
+}: {
+  currentActiveTabId: string | null;
+  closedWorkspaceId: string;
+  previousWorkspaces: readonly Workspace[];
+  remainingWorkspaces: readonly Workspace[];
+  remainingSessions: readonly TerminalSession[];
+  tabOrder?: readonly string[];
+  preferredTabId?: string | null;
+}): string | null {
+  const orderedTabIdsBeforeClose = buildOrderedTerminalTabIds({
+    sessions: remainingSessions,
+    workspaces: previousWorkspaces,
+    tabOrder,
+  });
+  const survivingTabIds = buildOrderedTerminalTabIds({
+    sessions: remainingSessions,
+    workspaces: remainingWorkspaces,
+    tabOrder,
+  });
+
+  return resolveNextActiveTabAfterTerminalClose({
+    currentActiveTabId,
+    closedTabId: closedWorkspaceId,
+    orderedTabIdsBeforeClose,
+    survivingTabIds,
+    preferredTabId,
+  });
 }
 
 export function closeSessionsState({
@@ -203,6 +239,11 @@ export function closeSessionsState({
     const targetSession = nextSessions.find((session) => session.id === sessionId);
     if (!targetSession) continue;
 
+    const orderedTabIdsBeforeClose = buildOrderedTerminalTabIds({
+      sessions: nextSessions,
+      workspaces: nextWorkspaces,
+      tabOrder: nextTabOrder,
+    });
     const workspaceId = targetSession.workspaceId;
     const layoutResult = closeSessionWorkspaceLayoutState(
       nextWorkspaces,
@@ -220,7 +261,10 @@ export function closeSessionsState({
       layoutResult,
       remainingSessions: nextSessions,
       preferredTabId,
+      orderedTabIdsBeforeClose,
+      tabOrder: nextTabOrder,
     });
+    nextTabOrder = nextTabOrder.filter((id) => id !== sessionId);
     if (activeTabAfterClose) {
       nextActiveTabId = activeTabAfterClose;
       resolvedActiveTabId = activeTabAfterClose;

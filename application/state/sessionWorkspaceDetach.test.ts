@@ -7,7 +7,9 @@ import {
   closeSessionsState,
   closeSessionWorkspaceLayoutState,
   detachSessionFromWorkspaceState,
+  isPreferredTabAvailableAfterClose,
   resolveActiveTabAfterCloseSession,
+  resolveActiveTabAfterCloseWorkspace,
 } from "./sessionWorkspaceDetach";
 
 const session = (id: string, workspaceId = "ws-1"): TerminalSession => ({
@@ -307,4 +309,189 @@ test("closing a subset of standalone sessions keeps tabs outside the batch", () 
 
   assert.deepEqual(result.sessions.map((candidate) => candidate.id), ["s1"]);
   assert.equal(result.activeTabId, undefined);
+});
+
+test("issue #4249 scenario 1: closing terminal tabs right-to-left focuses B -> A -> vault", () => {
+  const standaloneSession = (id: string): TerminalSession => ({
+    ...session(id),
+    workspaceId: undefined,
+  });
+
+  const step1 = closeSessionsState({
+    sessions: [standaloneSession("a"), standaloneSession("b"), standaloneSession("c")],
+    workspaces: [],
+    sessionIds: ["c"],
+    currentActiveTabId: "c",
+    preferredTabId: "b",
+    tabOrder: ["a", "b", "c"],
+  });
+  assert.equal(step1.activeTabId, "b");
+
+  const step2 = closeSessionsState({
+    sessions: step1.sessions,
+    workspaces: step1.workspaces,
+    sessionIds: ["b"],
+    currentActiveTabId: step1.activeTabId ?? null,
+    preferredTabId: "b",
+    tabOrder: step1.tabOrder,
+  });
+  assert.equal(step2.activeTabId, "a");
+
+  const step3 = closeSessionsState({
+    sessions: step2.sessions,
+    workspaces: step2.workspaces,
+    sessionIds: ["a"],
+    currentActiveTabId: step2.activeTabId ?? null,
+    preferredTabId: "b",
+    tabOrder: step2.tabOrder,
+  });
+  assert.equal(step3.activeTabId, "vault");
+});
+
+test("issue #4249 scenario 2: after visiting vault or sftp, closing C -> B -> A stays on adjacent terminals until the last tab closes", () => {
+  const standaloneSession = (id: string): TerminalSession => ({
+    ...session(id),
+    workspaceId: undefined,
+  });
+
+  for (const rootView of ["vault", "sftp"] as const) {
+    const step1 = closeSessionsState({
+      sessions: [standaloneSession("a"), standaloneSession("b"), standaloneSession("c")],
+      workspaces: [],
+      sessionIds: ["c"],
+      currentActiveTabId: "c",
+      preferredTabId: rootView,
+      tabOrder: ["a", "b", "c"],
+    });
+    assert.equal(step1.activeTabId, "b", `closing C after ${rootView} should focus B`);
+
+    const step2 = closeSessionsState({
+      sessions: step1.sessions,
+      workspaces: step1.workspaces,
+      sessionIds: ["b"],
+      currentActiveTabId: step1.activeTabId ?? null,
+      preferredTabId: rootView,
+      tabOrder: step1.tabOrder,
+    });
+    assert.equal(step2.activeTabId, "a", `closing B after ${rootView} should focus A`);
+
+    const step3 = closeSessionsState({
+      sessions: step2.sessions,
+      workspaces: step2.workspaces,
+      sessionIds: ["a"],
+      currentActiveTabId: step2.activeTabId ?? null,
+      preferredTabId: rootView,
+      tabOrder: step2.tabOrder,
+    });
+    assert.equal(step3.activeTabId, rootView, `closing last tab A should fall back to ${rootView}`);
+  }
+});
+
+test("closing a terminal tab follows visual tabOrder instead of raw session/workspace arrays", () => {
+  const standaloneSession = (id: string): TerminalSession => ({
+    ...session(id),
+    workspaceId: undefined,
+  });
+
+  // Raw arrays have [s1, s2] and [ws-1], while visual tab order is [ws-1, s1, s2].
+  const result = closeSessionsState({
+    sessions: [session("ws-pane", "ws-1"), standaloneSession("s1"), standaloneSession("s2")],
+    workspaces: [workspace(["ws-pane"])],
+    sessionIds: ["s2"],
+    currentActiveTabId: "s2",
+    preferredTabId: "vault",
+    tabOrder: ["ws-1", "s1", "s2"],
+  });
+
+  // Must focus adjacent terminal s1, not jump over s1 to ws-1 or vault.
+  assert.equal(result.activeTabId, "s1");
+});
+
+test("closing a middle or leftmost terminal tab picks left neighbor first, then right neighbor", () => {
+  const standaloneSession = (id: string): TerminalSession => ({
+    ...session(id),
+    workspaceId: undefined,
+  });
+
+  const closeMiddle = closeSessionsState({
+    sessions: [standaloneSession("a"), standaloneSession("b"), standaloneSession("c")],
+    workspaces: [],
+    sessionIds: ["b"],
+    currentActiveTabId: "b",
+    preferredTabId: "sftp",
+    tabOrder: ["a", "b", "c"],
+  });
+  assert.equal(closeMiddle.activeTabId, "a");
+
+  const closeLeftmost = closeSessionsState({
+    sessions: closeMiddle.sessions,
+    workspaces: [],
+    sessionIds: ["a"],
+    currentActiveTabId: "a",
+    preferredTabId: "sftp",
+    tabOrder: closeMiddle.tabOrder,
+  });
+  assert.equal(closeLeftmost.activeTabId, "c");
+});
+
+test("resolveActiveTabAfterCloseWorkspace focuses adjacent terminal/workspace before falling back to root view", () => {
+  const standaloneSession = (id: string): TerminalSession => ({
+    ...session(id),
+    workspaceId: undefined,
+  });
+  const ws1 = workspace(["p1"], { id: "ws-1" });
+
+  assert.equal(
+    resolveActiveTabAfterCloseWorkspace({
+      currentActiveTabId: "ws-1",
+      closedWorkspaceId: "ws-1",
+      previousWorkspaces: [ws1],
+      remainingWorkspaces: [],
+      remainingSessions: [standaloneSession("s1"), standaloneSession("s2")],
+      tabOrder: ["s1", "ws-1", "s2"],
+      preferredTabId: "sftp",
+    }),
+    "s1",
+  );
+
+  assert.equal(
+    resolveActiveTabAfterCloseWorkspace({
+      currentActiveTabId: "ws-1",
+      closedWorkspaceId: "ws-1",
+      previousWorkspaces: [ws1],
+      remainingWorkspaces: [],
+      remainingSessions: [],
+      tabOrder: ["ws-1"],
+      preferredTabId: "sftp",
+    }),
+    "sftp",
+  );
+});
+
+test("isPreferredTabAvailableAfterClose does not treat vault or sftp as surviving terminal tabs", () => {
+  const standaloneSession = (id: string): TerminalSession => ({
+    ...session(id),
+    workspaceId: undefined,
+  });
+  const layoutResult = closeSessionWorkspaceLayoutState([], undefined, "c");
+  const remainingSessions = [standaloneSession("a"), standaloneSession("b")];
+
+  assert.equal(
+    isPreferredTabAvailableAfterClose({
+      preferredTabId: "vault",
+      closedSessionId: "c",
+      layoutResult,
+      remainingSessions,
+    }),
+    false,
+  );
+  assert.equal(
+    isPreferredTabAvailableAfterClose({
+      preferredTabId: "sftp",
+      closedSessionId: "c",
+      layoutResult,
+      remainingSessions,
+    }),
+    false,
+  );
 });
