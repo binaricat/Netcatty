@@ -5,59 +5,24 @@
  * Mirrors passphraseHandler: main requests → renderer modal → respond IPC.
  */
 
-const { randomUUID } = require("node:crypto");
-
-/** @type {Map<string, {
- *   resolveCallback: (result: { cancelled?: boolean, response?: string|null }) => void,
- *   sender: Electron.WebContents,
- *   webContentsId: number,
- *   kind: string,
- *   leaseId: string,
- *   createdAt: number,
- *   timeoutId: NodeJS.Timeout,
- * }>} */
-const fidoPromptRequests = new Map();
+const { createIpcPromptRegistry } = require("./ipcPromptRegistry.cjs");
 
 const REQUEST_TTL_MS = 3 * 60 * 1000;
 
+const registry = createIpcPromptRegistry({
+  prefix: "fido",
+  ttlMs: REQUEST_TTL_MS,
+  cancelChannel: "netcatty:fido-prompt-cancelled",
+  logTag: "[FidoPrompt]",
+  notifyBeforeResolve: true,
+});
+
 function generateRequestId(prefix = "fido") {
-  return `${prefix}-${randomUUID()}`;
-}
-
-function settleRequest(requestId, result, notification) {
-  const pending = fidoPromptRequests.get(requestId);
-  if (!pending) return false;
-
-  if (pending.timeoutId) clearTimeout(pending.timeoutId);
-  pending.abortCleanup?.();
-  fidoPromptRequests.delete(requestId);
-
-  if (notification) {
-    try {
-      if (!pending.sender?.isDestroyed?.()) {
-        pending.sender?.send?.(notification.channel, {
-          requestId,
-          ...(notification.payload || {}),
-        });
-      }
-    } catch (err) {
-      console.warn(`[FidoPrompt] Failed to send ${notification.channel}:`, err.message);
-    }
-  }
-
-  pending.resolveCallback(result);
-  return true;
+  return registry.generateRequestId(prefix);
 }
 
 function cancelFidoPromptRequest(requestId, reason = "cancelled") {
-  return settleRequest(
-    requestId,
-    { cancelled: true },
-    {
-      channel: "netcatty:fido-prompt-cancelled",
-      payload: { reason },
-    },
-  );
+  return registry.cancel(requestId, reason, { cancelled: true });
 }
 
 /**
@@ -68,13 +33,11 @@ function cancelFidoPromptRequest(requestId, reason = "cancelled") {
  */
 function cancelFidoPromptRequestsForLease(leaseId, reason = "lease-released", notificationsOnly = false) {
   if (typeof leaseId !== "string" || !leaseId) return 0;
-  let cancelled = 0;
-  for (const [requestId, pending] of [...fidoPromptRequests.entries()]) {
-    if (pending.leaseId !== leaseId) continue;
-    if (notificationsOnly && !pending.notificationOnly) continue;
-    if (cancelFidoPromptRequest(requestId, reason)) cancelled += 1;
-  }
-  return cancelled;
+  return registry.cancelWhere(
+    (pending) => pending.leaseId === leaseId && (!notificationsOnly || pending.notificationOnly),
+    reason,
+    { cancelled: true },
+  );
 }
 
 /**
@@ -103,34 +66,33 @@ function requestFidoPrompt(sender, options = {}) {
     const kind = ["touch", "confirm", "recovery"].includes(options.kind) ? options.kind : "pin";
     const leaseId = typeof options.leaseId === "string" ? options.leaseId : "";
     const requestId = generateRequestId(kind);
-    const timeoutId = setTimeout(() => {
-      settleRequest(
-        requestId,
-        { cancelled: true },
-        { channel: "netcatty:fido-prompt-timeout" },
-      );
-    }, REQUEST_TTL_MS);
 
-    fidoPromptRequests.set(requestId, {
-      resolveCallback: resolve,
-      sender,
-      webContentsId: sender.id,
-      kind,
-      leaseId,
-      notificationOnly: options.notificationOnly === true,
-      createdAt: Date.now(),
-      timeoutId,
-    });
+    const { abortedImmediately } = registry.register(
+      requestId,
+      {
+        resolveCallback: resolve,
+        sender,
+        webContentsId: sender.id,
+        kind,
+        leaseId,
+        notificationOnly: options.notificationOnly === true,
+      },
+      {
+        onTimeout: (id) => {
+          registry.settle(
+            id,
+            { cancelled: true },
+            { channel: "netcatty:fido-prompt-timeout" },
+          );
+        },
+        signal: options.signal,
+        onAbort: (id) => cancelFidoPromptRequest(id, "helper-exited"),
+        triggerIfAborted: true,
+      },
+    );
 
-    if (options.signal) {
-      const onAbort = () => cancelFidoPromptRequest(requestId, "helper-exited");
-      const pending = fidoPromptRequests.get(requestId);
-      pending.abortCleanup = () => options.signal.removeEventListener("abort", onAbort);
-      options.signal.addEventListener("abort", onAbort, { once: true });
-      if (options.signal.aborted) {
-        onAbort();
-        return;
-      }
+    if (abortedImmediately) {
+      return;
     }
 
     try {
@@ -146,24 +108,21 @@ function requestFidoPrompt(sender, options = {}) {
       });
     } catch (err) {
       console.error("[FidoPrompt] Failed to send request:", err);
-      settleRequest(requestId, null);
+      registry.settle(requestId, null);
     }
   });
 }
 
 function handleResponse(_event, payload = {}) {
   const { requestId, response, cancelled } = payload;
-  const pending = fidoPromptRequests.get(requestId);
-  if (!pending) {
-    return { success: false, error: "Request not found" };
-  }
-  if (_event?.sender?.id !== pending.webContentsId) {
-    return { success: false, error: "Wrong sender" };
+  const verification = registry.verifySender(_event, requestId);
+  if (!verification.ok) {
+    return { success: false, error: verification.error };
   }
   if (cancelled) {
-    settleRequest(requestId, { cancelled: true });
+    registry.settle(requestId, { cancelled: true });
   } else {
-    settleRequest(requestId, { response: typeof response === "string" ? response : "" });
+    registry.settle(requestId, { response: typeof response === "string" ? response : "" });
   }
   return { success: true };
 }
@@ -173,7 +132,7 @@ function registerHandler(ipcMain) {
 }
 
 function getRequests() {
-  return fidoPromptRequests;
+  return registry.getMap();
 }
 
 /**
