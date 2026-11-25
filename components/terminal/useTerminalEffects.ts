@@ -1346,7 +1346,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       const timerId = setTimeout(() => {
         layoutRecoveryTimersRef.current = layoutRecoveryTimersRef.current.filter((id) => id !== timerId);
         if (!isVisibleRef.current) return;
-        runImmediateRefit({ force: true, repeatOnNextFrame: false });
+        // Follow-up settling timers only need to refit and sync PTY size if the
+        // container dimensions or display DPR actually changed after the initial pass.
+        if (delayMs > 0 && currentContainerSizeAlreadyFit()) return;
+        runImmediateRefit({ force: delayMs === 0, repeatOnNextFrame: false });
         finishLayoutRecoveryAfterFit();
       }, delayMs);
       layoutRecoveryTimersRef.current.push(timerId);
@@ -1385,13 +1388,28 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     lastCommittedVisibleLayoutKeyRef.current = paneLayoutKey;
   };
 
+  const getCurrentDevicePixelRatio = () => (
+    typeof window !== 'undefined'
+    && typeof window.devicePixelRatio === 'number'
+    && window.devicePixelRatio > 0
+      ? window.devicePixelRatio
+      : 1
+  );
+
   const currentContainerSizeAlreadyFit = () => {
     const container = containerRef.current;
     const lastSize = lastFittedSizeRef.current;
     if (!container || !lastSize) return false;
     const width = container.clientWidth;
     const height = container.clientHeight;
-    return width > 0 && height > 0 && lastSize.width === width && lastSize.height === height;
+    const dpr = getCurrentDevicePixelRatio();
+    return (
+      width > 0
+      && height > 0
+      && lastSize.width === width
+      && lastSize.height === height
+      && (lastSize.dpr ?? 1) === dpr
+    );
   };
 
   const getHiddenDurationMs = () => (
@@ -2003,11 +2021,14 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   useEffect(() => {
     if (!isVisible) return;
 
-    const recoverWebglRendererOnAppResume = () => {
-      xtermRuntimeRef.current?.ensureWebglRenderer();
-    };
+    let wasDocumentHidden = document.visibilityState !== 'visible';
+
+    const recoverWebglRendererOnAppResume = (): boolean => (
+      xtermRuntimeRef.current?.ensureWebglRenderer() === true
+    );
 
     const recoverTerminalOnAppResume = () => {
+      wasDocumentHidden = false;
       const term = termRef.current;
       if (term) {
         syncOutputPressureVisibility();
@@ -2022,6 +2043,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') {
+        wasDocumentHidden = true;
         syncOutputPressureVisibility();
         return;
       }
@@ -2029,7 +2051,28 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     };
 
     const handleWindowFocus = () => {
-      recoverTerminalOnAppResume();
+      if (wasDocumentHidden || document.visibilityState !== 'visible') {
+        recoverTerminalOnAppResume();
+        return;
+      }
+      const term = termRef.current;
+      if (term) {
+        syncOutputPressureVisibility();
+        cancelScheduledUnfocusedRepaint(term);
+        flushPendingTerminalWritesOnResume(term);
+      }
+      flushPendingOutputScroll();
+      // macOS Spaces or display wake can evict WebGL without firing
+      // visibilitychange. If ensureWebglRenderer had to recreate the context
+      // (or container bounds/DPR changed), still run full repaint/recovery.
+      const recreatedWebgl = recoverWebglRendererOnAppResume();
+      if (!recreatedWebgl && currentContainerSizeAlreadyFit()) {
+        return;
+      }
+      if (term) {
+        forceTerminalRepaintBypassingAnimationFrame(term);
+      }
+      scheduleLayoutRecoveryRefit([0, 100, 300]);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);

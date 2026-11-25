@@ -198,7 +198,21 @@ test("recovery load failure stays on DOM and still repaints the viewport", () =>
 
 test("disabled WebGL ensure is a no-op", () => {
   const harness = createHarness({ enabled: false });
-  harness.controller.ensure();
+  assert.equal(harness.controller.ensure(), false);
   assert.equal(harness.loadCalls, 0);
   assert.equal(harness.addons.length, 0);
+});
+
+test("ensure returns true only when it creates and loads a new WebGL renderer", () => {
+  const harness = createHarness();
+  assert.equal(harness.controller.ensure(), true, "initial load returns true");
+  assert.equal(harness.controller.ensure(), false, "already-loaded ensure returns false");
+
+  harness.controller.suspend();
+  assert.equal(harness.controller.ensure(), true, "recreating after suspend returns true");
+  assert.equal(harness.controller.ensure(), false, "subsequent ensure while live returns false");
+
+  // Failed load returns false.
+  const failing = createHarness({ failLoads: new Set([1]) });
+  assert.equal(failing.controller.ensure(), false, "failed load returns false");
 });

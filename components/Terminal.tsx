@@ -713,7 +713,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   isRendererActiveRef.current = isRendererActive;
   const pendingOutputScrollRef = useRef(false);
   const reflowReadingPositionRef = useRef(createTerminalReflowReadingPosition());
-  const lastFittedSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const lastFittedSizeRef = useRef<{ width: number; height: number; dpr?: number } | null>(null);
   const fontWeightFixupDoneRef = useRef(false);
 
   const captureTerminalLogData = useCallback((data: string) => {
@@ -3258,9 +3258,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       return;
     }
 
+    const dpr = typeof window !== "undefined" && typeof window.devicePixelRatio === "number" && window.devicePixelRatio > 0
+      ? window.devicePixelRatio
+      : 1;
+
     if (!options?.force) {
       const lastSize = lastFittedSizeRef.current;
-      if (lastSize && lastSize.width === width && lastSize.height === height) {
+      if (lastSize && lastSize.width === width && lastSize.height === height && (lastSize.dpr ?? 1) === dpr) {
         autocompleteRepositionRef.current?.();
         return;
       }
@@ -3385,7 +3389,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           }
         }
 
-        lastFittedSizeRef.current = { width, height };
+        lastFittedSizeRef.current = { width, height, dpr };
         // addon-fit 0.11 clears the renderer before resizing, which can show
         // as a one-frame WebGL blink during layout changes. Resize directly
         // using the proposed dimensions to preserve the existing behavior
