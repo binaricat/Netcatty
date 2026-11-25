@@ -10,46 +10,12 @@ import {
 import { runThemeTransition } from "./themeTransition";
 import { TERMINAL_THEMES } from "../../infrastructure/config/terminalThemes";
 import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
-import { resolveReadableForegroundForHsl } from "../../domain/colorContrast";
-
-function hexToHsl(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16) / 255;
-  const g = parseInt(hex.slice(3, 5), 16) / 255;
-  const b = parseInt(hex.slice(5, 7), 16) / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  let h = 0;
-  let s = 0;
-  const l = (max + min) / 2;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r:
-        h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-        break;
-      case g:
-        h = ((b - r) / d + 2) / 6;
-        break;
-      default:
-        h = ((r - g) / d + 4) / 6;
-        break;
-    }
-  }
-  return `${Math.round(h * 3600) / 10} ${Math.round(s * 1000) / 10}% ${Math.round(l * 1000) / 10}%`;
-}
-
-function adjustLightness(hsl: string, delta: number): string {
-  const parts = hsl.split(/\s+/);
-  const nextLightness = Math.max(0, Math.min(100, parseFloat(parts[2]) + delta));
-  return `${parts[0]} ${parts[1]} ${Math.round(nextLightness * 10) / 10}%`;
-}
-
-function adjustSaturation(hsl: string, factor: number): string {
-  const parts = hsl.split(/\s+/);
-  const nextSaturation = Math.max(0, Math.min(100, parseFloat(parts[1]) * factor));
-  return `${parts[0]} ${Math.round(nextSaturation * 10) / 10}% ${parts[2]}`;
-}
+import {
+  adjustLightnessToken,
+  adjustSaturationToken,
+  hexToHslToken,
+  resolveReadableForegroundForHsl,
+} from "../../domain/colorContrast";
 
 const CSS_VARS = [
   "background",
@@ -74,15 +40,15 @@ const CSS_VARS = [
 ] as const;
 
 function buildChromeCss(theme: TerminalTheme): string {
-  const bg = hexToHsl(theme.colors.background);
-  const fg = hexToHsl(theme.colors.foreground);
-  const cursor = hexToHsl(theme.colors.cursor);
+  const bg = hexToHslToken(theme.colors.background);
+  const fg = hexToHslToken(theme.colors.foreground);
+  const cursor = hexToHslToken(theme.colors.cursor);
   const isDark = theme.type === "dark";
-  const card = adjustLightness(bg, isDark ? 4 : -3);
-  const secondary = adjustLightness(bg, isDark ? 6 : -5);
-  const muted = adjustLightness(bg, isDark ? 10 : -8);
-  const mutedFg = adjustSaturation(adjustLightness(fg, isDark ? -20 : 20), 0.5);
-  const border = adjustLightness(bg, isDark ? 12 : -10);
+  const card = adjustLightnessToken(bg, isDark ? 4 : -3);
+  const secondary = adjustLightnessToken(bg, isDark ? 6 : -5);
+  const muted = adjustLightnessToken(bg, isDark ? 10 : -8);
+  const mutedFg = adjustSaturationToken(adjustLightnessToken(fg, isDark ? -20 : 20), 0.5);
+  const border = adjustLightnessToken(bg, isDark ? 12 : -10);
   const primaryFg = resolveReadableForegroundForHsl(cursor);
 
   const values = [
