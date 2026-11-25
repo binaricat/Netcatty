@@ -15,6 +15,37 @@ const isAnnotatedLsofName = (name) =>
   /\s\([A-Za-z][A-Za-z0-9]*: .*\)$/.test(name);
 
 /**
+ * lsof -Fn escapes every non-ASCII or non-printable byte as \xHH and a
+ * literal backslash as \\, so a path containing Chinese characters arrives
+ * as ASCII escapes instead of UTF-8. Decode those escapes back to bytes
+ * before treating the name as a path.
+ */
+function decodeLsofName(name) {
+  if (!name.includes("\\")) return name;
+  const bytes = [];
+  for (let index = 0; index < name.length;) {
+    if (name[index] === "\\") {
+      if (name[index + 1] === "\\") {
+        bytes.push(0x5c);
+        index += 2;
+        continue;
+      }
+      const hex = name.slice(index + 2, index + 4);
+      if (name[index + 1] === "x" && /^[0-9a-fA-F]{2}$/.test(hex)) {
+        bytes.push(parseInt(hex, 16));
+        index += 4;
+        continue;
+      }
+    }
+    const codePoint = name.codePointAt(index);
+    const char = String.fromCodePoint(codePoint);
+    for (const byte of Buffer.from(char, "utf8")) bytes.push(byte);
+    index += char.length;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+/**
  * Parse `lsof -F n` (optionally with `t` type records) and return the cwd
  * name when lsof reports a directory.
  */
@@ -35,7 +66,7 @@ function parseLsofCwdOutput(stdout) {
       continue;
     }
     if (line.startsWith("n") && (!sawType || isDir)) {
-      name = line.slice(1);
+      name = decodeLsofName(line.slice(1));
     }
   }
   if (!isAbsolutePosixPath(name) || isAnnotatedLsofName(name)) return null;

@@ -25,8 +25,17 @@ test('directory picker changes a real POSIX PTY cwd with quoted names and direct
   fs.mkdirSync(target);
   fs.symlinkSync(target, path.join(fixture, 'link'));
   let ready = false;
+  // Bash 3.2 mangles multibyte input when the inherited locale is not UTF-8,
+  // replacing 中文 in the typed path with dashes. Pin a UTF-8 locale so the
+  // real PTY exercises quoting rather than the host's locale settings.
+  const utf8Locale = [process.env.LC_ALL, process.env.LC_CTYPE, process.env.LANG]
+    .find(value => /utf-?8/i.test(value ?? '')) ?? (process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8');
   const shell = pty.spawn('/bin/bash', ['--noprofile', '--norc', '-i'], {
-    cwd: fixture, env: { ...process.env, PS1: '__DIRECTORY_READY__ ', PROMPT_COMMAND: '' },
+    cwd: fixture,
+    env: {
+      ...process.env, PS1: '__DIRECTORY_READY__ ', PROMPT_COMMAND: '',
+      LC_ALL: utf8Locale, LANG: utf8Locale, TERM: 'xterm-256color',
+    },
     cols: 100, rows: 24,
   });
   shell.onData(data => { if (data.includes('__DIRECTORY_READY__ ')) ready = true; });

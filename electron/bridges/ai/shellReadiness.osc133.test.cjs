@@ -192,9 +192,14 @@ test('real Bash vi replacement and multiline Ctrl-L remain unready through every
   assert.equal(result.status, 0, result.stderr);
   const scenarios = JSON.parse(result.stdout);
   assert.equal(scenarios.length, 2);
-  assert.equal(scenarios[0].readline_line, ' ', 'bind -x confirms vi replacement leaves real input');
+  // READLINE_LINE in `bind -x` requires Bash 4+. macOS ships Bash 3.2, where
+  // the capture is empty even though the PTY states below remain valid.
+  const bashMajor = Number(spawnSync('/bin/bash', ['-c', 'echo "${BASH_VERSINFO[0]}"'], { encoding: 'utf8' }).stdout?.trim());
+  if (bashMajor >= 4) {
+    assert.equal(scenarios[0].readline_line, ' ', 'bind -x confirms vi replacement leaves real input');
+    assert.equal(scenarios[1].readline_line, 'echo pending');
+  }
   assert.equal(scenarios[0].states.slice(1).map(({ raw }) => raw).join(''), 'x\b \b');
-  assert.equal(scenarios[1].readline_line, 'echo pending');
   const redraw = scenarios[1].states.at(-1).raw;
   assert.ok(redraw.includes(A + 'header\r\r\n'));
   assert.ok(redraw.includes(B), 'Ctrl-L redraw includes the input boundary before re-echo');
