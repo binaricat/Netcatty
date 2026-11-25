@@ -19,10 +19,12 @@ Object.defineProperty(globalThis, "requestAnimationFrame", {
 
 const {
   computeHostTreeTabGutter,
+  getHostTreeTabGutterStyle,
   resolveWorkspaceSessionTabDropTarget,
   shouldKeepHostTreeToggleSurface,
   shouldShowHostTreeToggle,
 } = await import("./TopTabs.tsx");
+const { TERMINAL_HOST_TREE_WIDTH_TRANSITION } = await import("../application/state/terminalHostTreeAnimation.ts");
 const {
   WORKSPACE_SESSION_DRAG_TYPE,
   dataTransferHasType,
@@ -62,6 +64,20 @@ const topTabSession = (
 
 test("host tree tab gutter fills the remaining sidebar width", () => {
   assert.equal(computeHostTreeTabGutter(280, 120), 160);
+});
+
+test("host tree tab gutter style animates only when host tree transitions and yields to exit class", () => {
+  assert.deepEqual(getHostTreeTabGutterStyle(120, false, true), {
+    width: 120,
+    transition: TERMINAL_HOST_TREE_WIDTH_TRANSITION,
+  });
+  assert.deepEqual(getHostTreeTabGutterStyle(120, false, false), {
+    width: 120,
+    transition: "none",
+  });
+  assert.deepEqual(getHostTreeTabGutterStyle(0, true, false), {
+    width: 0,
+  });
 });
 
 test("workspace tabs resolve generated labels from live prompt hosts", () => {

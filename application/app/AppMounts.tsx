@@ -1,6 +1,10 @@
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { activeTabStore, useIsSftpActive, useIsTabActive, useIsVaultActive } from '../state/activeTabStore';
-import { useTerminalHostTreeLayoutWidth } from '../state/terminalHostTreeStore';
+import {
+  useTerminalHostTreeLayoutTransitionAnimated,
+  useTerminalHostTreeLayoutWidth,
+} from '../state/terminalHostTreeStore';
+import { TERMINAL_HOST_TREE_LEFT_TRANSITION } from '../state/terminalHostTreeAnimation';
 import { isTerminalContentTabSurface } from './workTabSurface';
 import { cn } from '../../lib/utils';
 import { ConnectionLog, TerminalTheme } from '../../types';
@@ -68,9 +72,11 @@ interface LogViewWrapperProps {
 export function getLogViewWrapperStyle(
   isVisible: boolean,
   hostTreeLayoutWidth: number,
+  animateLayout = false,
 ): React.CSSProperties {
-  const baseStyle = {
+  const baseStyle: React.CSSProperties = {
     left: hostTreeLayoutWidth,
+    ...(animateLayout ? { transition: TERMINAL_HOST_TREE_LEFT_TRANSITION } : null),
   };
   return isVisible
     ? baseStyle
@@ -80,8 +86,13 @@ export function getLogViewWrapperStyle(
 export const LogViewWrapper: React.FC<LogViewWrapperProps> = ({ logView, defaultTerminalTheme, defaultFontSize, onClose, onUpdateLog }) => {
   const isVisible = useIsTabActive(logView.id);
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
+  const hostTreeLayoutAnimated = useTerminalHostTreeLayoutTransitionAnimated();
 
-  const containerStyle = getLogViewWrapperStyle(isVisible, hostTreeLayoutWidth);
+  const containerStyle = getLogViewWrapperStyle(
+    isVisible,
+    hostTreeLayoutWidth,
+    isVisible && hostTreeLayoutAnimated,
+  );
 
   return (
     <div

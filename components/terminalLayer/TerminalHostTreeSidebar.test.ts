@@ -26,6 +26,7 @@ const {
   getTerminalHostTreeSidebarPanelStyle,
   getTerminalHostTreeSidebarShellStyle,
   isTerminalHostTreeSidebarVisible,
+  terminalHostTreeSidebarPropsEqual,
 } = await import('./TerminalHostTreeSidebar.tsx');
 const { TERMINAL_HOST_TREE_WIDTH_TRANSITION } = await import('../../application/state/terminalHostTreeAnimation.ts');
 
@@ -79,28 +80,78 @@ test('host tree layout sync can sample the current shell width before targeting'
   assert.equal(getTerminalHostTreeMeasuredLayoutWidth(null, 240), 240);
 });
 
-test('host tree layout width follows the animated shell via ResizeObserver', () => {
+test('host tree publishes target layout width once without ResizeObserver thrash', () => {
   const source = readFileSync(new URL('./TerminalHostTreeSidebar.tsx', import.meta.url), 'utf8');
 
-  assert.match(source, /new ResizeObserver/);
-  assert.match(source, /syncLayoutWidthFromShell/);
+  assert.doesNotMatch(source, /new ResizeObserver/);
+  assert.doesNotMatch(source, /syncLayoutWidthFromShell/);
   assert.doesNotMatch(source, /performance\.now\(\)/);
+  assert.match(source, /terminalHostTreeStore\.setLayoutWidth\(targetLayoutWidth,\s*true\)/);
+  assert.match(source, /terminalHostTreeStore\.setLayoutWidth\(targetLayoutWidth,\s*false\)/);
+  assert.match(source, /terminalHostTreeStore\.setLayoutTransitionAnimated\(false\)/);
 });
 
-test('host tree keeps shell width while hidden behind root pages', () => {
+test('host tree keeps shell width while hidden behind root pages and snaps layout width without animation', () => {
   const source = readFileSync(new URL('./TerminalHostTreeSidebar.tsx', import.meta.url), 'utf8');
 
   assert.match(source, /isResizing \|\| !surfaceVisible/);
   assert.match(source, /const hiddenSurfaceShellWidth = getTerminalHostTreeHiddenSurfaceShellWidth/);
-  assert.match(source, /if \(!surfaceVisible\) \{\s*setShellWidth\(hiddenSurfaceShellWidth\);\s*terminalHostTreeStore\.setLayoutWidth\(0\);/);
+  assert.match(source, /if \(!surfaceVisible\) \{\s*setShellWidth\(hiddenSurfaceShellWidth\);\s*terminalHostTreeStore\.setLayoutWidth\(0,\s*false\);/);
   assert.doesNotMatch(source, /if \(!surfaceVisible\) \{\s*setShellWidth\(0\);/);
 });
 
-test('host tree sidebar memo tracks surface visibility and theme changes', () => {
+test('host tree sidebar memo tracks surface visibility and ignores hidden activeHostId/theme diffs', () => {
   const source = readFileSync(new URL('./TerminalHostTreeSidebar.tsx', import.meta.url), 'utf8');
 
   assert.match(source, /prev\.surfaceVisible === next\.surfaceVisible/);
   assert.match(source, /themeFingerprint\(prev\.resolvedPreviewTheme\) === themeFingerprint\(next\.resolvedPreviewTheme\)/);
+
+  const themeA = {
+    id: 'theme-a',
+    name: 'Theme A',
+    type: 'dark' as const,
+    colors: {
+      background: '#000000', foreground: '#ffffff', cursor: '#ffffff', selection: '#444444',
+      black: '#000', red: '#f00', green: '#0f0', yellow: '#ff0', blue: '#00f', magenta: '#f0f', cyan: '#0ff', white: '#fff',
+      brightBlack: '#888', brightRed: '#f88', brightGreen: '#8f8', brightYellow: '#ff8', brightBlue: '#88f', brightMagenta: '#f8f', brightCyan: '#8ff', brightWhite: '#fff',
+    },
+  };
+  const themeB = { ...themeA, id: 'theme-b', colors: { ...themeA.colors, background: '#111111' } };
+  const baseProps = {
+    enabled: true,
+    surfaceVisible: false,
+    hosts: [host],
+    customGroups: [],
+    resolvedPreviewTheme: themeA,
+    activeHostId: 'host-1',
+    onConnect: () => {},
+  };
+
+  assert.equal(
+    terminalHostTreeSidebarPropsEqual(baseProps, { ...baseProps, activeHostId: 'host-2', resolvedPreviewTheme: themeB }),
+    true,
+  );
+  assert.equal(
+    terminalHostTreeSidebarPropsEqual(
+      { ...baseProps, enabled: false, surfaceVisible: true },
+      { ...baseProps, enabled: false, surfaceVisible: true, activeHostId: 'host-2', resolvedPreviewTheme: themeB },
+    ),
+    true,
+  );
+  assert.equal(
+    terminalHostTreeSidebarPropsEqual(
+      { ...baseProps, surfaceVisible: true },
+      { ...baseProps, surfaceVisible: true, activeHostId: 'host-2' },
+    ),
+    false,
+  );
+  assert.equal(
+    terminalHostTreeSidebarPropsEqual(
+      { ...baseProps, surfaceVisible: true },
+      { ...baseProps, surfaceVisible: true, resolvedPreviewTheme: themeB },
+    ),
+    false,
+  );
 });
 
 test('host tree sidebar wires app-level host creation and editing actions', () => {

@@ -722,18 +722,21 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
     let observedFocusSidebar: Element | null = null;
     let observedComposeBar: Element | null = null;
     let observedWorkspaceColumn: Element | null = null;
+    let deferredWhileSuppressed = false;
+    const scheduleAvailableWidthUpdate = () => {
+      if (!isSidePanelOpenRef.current) return;
+      if (terminalLayoutSuppressStore.getActive()) {
+        deferredWhileSuppressed = true;
+        return;
+      }
+      updateAvailableWidth();
+    };
     const resizeObserver = typeof ResizeObserver === 'undefined'
       ? null
-      : new ResizeObserver(() => {
-        if (!isSidePanelOpenRef.current) return;
-        updateAvailableWidth();
-      });
+      : new ResizeObserver(() => scheduleAvailableWidthUpdate());
     const mutationObserver = typeof MutationObserver === 'undefined'
       ? null
-      : new MutationObserver(() => {
-        if (!isSidePanelOpenRef.current) return;
-        updateAvailableWidth();
-      });
+      : new MutationObserver(() => scheduleAvailableWidthUpdate());
     const updateAvailableWidth = () => {
       const focusSidebar = terminalLayer.querySelector('[data-section="terminal-workspace-sidebar"]');
       if (resizeObserver && focusSidebar !== observedFocusSidebar) {
@@ -791,7 +794,15 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
       '[data-section="terminal-workspace-row"]',
     );
     if (workspaceRow) mutationObserver?.observe(workspaceRow, { childList: true });
+    const unsubscribeSuppress = terminalLayoutSuppressStore.subscribe(() => {
+      if (deferredWhileSuppressed && !terminalLayoutSuppressStore.getActive()) {
+        deferredWhileSuppressed = false;
+        if (!isSidePanelOpenRef.current) return;
+        updateAvailableWidth();
+      }
+    });
     return () => {
+      unsubscribeSuppress();
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
       observedFocusSidebar = null;

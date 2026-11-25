@@ -11,7 +11,11 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { saveEditorTab } from '../../application/state/editorTabSave';
 import { editorTabStore, useEditorTab, type EditorTabId } from '../../application/state/editorTabStore';
 import { useIsEditorTabActive } from '../../application/state/activeTabStore';
-import { useTerminalHostTreeLayoutWidth } from '../../application/state/terminalHostTreeStore';
+import {
+  useTerminalHostTreeLayoutTransitionAnimated,
+  useTerminalHostTreeLayoutWidth,
+} from '../../application/state/terminalHostTreeStore';
+import { TERMINAL_HOST_TREE_LEFT_TRANSITION } from '../../application/state/terminalHostTreeAnimation';
 import type { HotkeyScheme, KeyBinding } from '../../domain/models';
 import type { Host } from '../../types';
 import { toast } from '../ui/toast';
@@ -29,11 +33,16 @@ export interface TextEditorTabViewProps {
   onPopOut?: (tabId: EditorTabId) => void;
 }
 
-export function getTextEditorTabShellStyle(isVisible: boolean, hostTreeLayoutWidth: number): React.CSSProperties {
+export function getTextEditorTabShellStyle(
+  isVisible: boolean,
+  hostTreeLayoutWidth: number,
+  animateLayout = false,
+): React.CSSProperties {
   return {
     ...(isVisible ? null : { pointerEvents: 'none', visibility: 'hidden' }),
     zIndex: 20,
     left: hostTreeLayoutWidth,
+    ...(animateLayout ? { transition: TERMINAL_HOST_TREE_LEFT_TRANSITION } : null),
   };
 }
 
@@ -51,6 +60,7 @@ const TextEditorTabViewImpl: React.FC<TextEditorTabViewProps> = ({
   // instance, not AppView/App.
   const isVisible = useIsEditorTabActive(tabId);
   const hostTreeLayoutWidth = useTerminalHostTreeLayoutWidth();
+  const hostTreeLayoutAnimated = useTerminalHostTreeLayoutTransitionAnimated();
 
   const handleContentChange = useCallback(
     (content: string, viewState: Monaco.editor.ICodeEditorViewState | null) => {
@@ -111,7 +121,7 @@ const TextEditorTabViewImpl: React.FC<TextEditorTabViewProps> = ({
     // z-index high enough to stay above the terminal workspace while leaving
     // room for the shared host sidebar when it is open.
     <div
-      style={getTextEditorTabShellStyle(isVisible, hostTreeLayoutWidth)}
+      style={getTextEditorTabShellStyle(isVisible, hostTreeLayoutWidth, isVisible && hostTreeLayoutAnimated)}
       className="absolute top-0 right-0 bottom-0 min-h-0 flex flex-col bg-background"
     >
       <TextEditorPane

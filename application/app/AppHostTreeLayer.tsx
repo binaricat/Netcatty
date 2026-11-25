@@ -1,9 +1,10 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo, useMemo, useRef } from 'react';
 
 import { useActiveTabId } from '../state/activeTabStore';
 import { useAppearanceChromeStore } from '../state/appearanceChromeStore';
 import type { EditorTabChrome } from '../state/editorTabStore';
 import type { LogView } from '../state/logViewState';
+import { useTerminalHostTreeOpen } from '../state/terminalHostTreeStore';
 import { useManualTerminalChromeSurfaceInjection } from '../state/useManualTerminalChromeSurfaceInjection';
 import { TerminalHostTreeSidebar } from '../../components/terminalLayer/TerminalHostTreeSidebar';
 import type {
@@ -93,6 +94,7 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
   onCreateLocalTerminal,
 }) => {
   const activeTabId = useActiveTabId();
+  const isHostTreeOpen = useTerminalHostTreeOpen();
   const { accentMode, customAccent } = useAppearanceChromeStore();
   const sessionIds = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
   const workspaceIds = useMemo(() => new Set(workspaces.map((workspace) => workspace.id)), [workspaces]);
@@ -113,13 +115,18 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
     sessionIds,
     workspaceIds,
   });
+  const sidebarActive = surfaceVisible && enabled && isHostTreeOpen;
 
-  const activeHostId = useMemo(() => resolveWorkTabActiveHostId({
-    activeTabId,
-    editorTabs,
-    sessions,
-    workspaces,
-  }), [activeTabId, editorTabs, sessions, workspaces]);
+  const activeHostId = useMemo(() => (
+    sidebarActive
+      ? resolveWorkTabActiveHostId({
+          activeTabId,
+          editorTabs,
+          sessions,
+          workspaces,
+        })
+      : undefined
+  ), [activeTabId, editorTabs, sessions, sidebarActive, workspaces]);
 
   const hostTreeTheme = useMemo(() => (
     resolveActiveChromeTheme({
@@ -150,6 +157,13 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
     themeById,
     workspaceById,
   ]);
+  const lastActiveSidebarThemeRef = useRef(hostTreeTheme);
+  if (sidebarActive) {
+    lastActiveSidebarThemeRef.current = hostTreeTheme;
+  }
+  const sidebarPreviewTheme = sidebarActive
+    ? hostTreeTheme
+    : lastActiveSidebarThemeRef.current;
 
   useManualTerminalChromeSurfaceInjection(
     hostTreeTheme,
@@ -168,7 +182,7 @@ const AppHostTreeLayerInner: React.FC<AppHostTreeLayerProps> = ({
         hosts={hosts}
         customGroups={customGroups}
         groupConfigs={groupConfigs}
-        resolvedPreviewTheme={hostTreeTheme}
+        resolvedPreviewTheme={sidebarPreviewTheme}
         activeHostId={activeHostId}
         onConnect={onConnect}
         onNewHost={onNewHost}
