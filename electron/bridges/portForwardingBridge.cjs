@@ -799,14 +799,22 @@ function bindPortForwardChannels({
       const server = net.createServer((socket) => {
         const pipeEntry = trackTunnelPipe(tunnelState, socket);
         let greetingSent = false;
+        let onHandshakeData = null;
+        const detachHandshakeListener = () => {
+          if (!onHandshakeData) return;
+          socket.removeListener("data", onHandshakeData);
+          onHandshakeData = null;
+        };
         const parser = createSocks5RequestParser({
           onFailure: (code) => {
+            detachHandshakeListener();
             if (!greetingSent && code === 0xff) socket.write(Buffer.from([0x05, 0xff]));
             else if (greetingSent) socket.write(Buffer.from([0x05, code, 0, 1, 0, 0, 0, 0, 0, 0]));
             socket.end();
             destroyTunnelPipeEntry(tunnelState, pipeEntry, { abortOpen: false });
           },
           onConnect: (targetHost, targetPort, remaining) => {
+            detachHandshakeListener();
             socket.pause();
             socket.setTimeout(0);
             pipeEntry.openStarted = true;
@@ -845,8 +853,9 @@ function bindPortForwardChannels({
           greetingSent = true;
           socket.write(Buffer.from([0x05, 0x00]));
         };
+        onHandshakeData = (data) => parser.push(data);
         socket.setTimeout(15_000, () => socket.destroy());
-        socket.on("data", (data) => parser.push(data));
+        socket.on("data", onHandshakeData);
         socket.on("error", () => destroyTunnelPipeEntry(tunnelState, pipeEntry, { abortOpen: false }));
       });
 

@@ -350,6 +350,11 @@ function main() {
         ensureMoshStatsConnection: (...args) => sshBridge.ensureMoshStatsConnection(...args),
         process,
       }).registerHandlers(ipcMain);
+      ipcMain.on("netcatty:sftp:clearEncodingStateByPrefix", (_event, payload) => {
+        if (typeof payload?.prefix === "string" && payload.prefix) {
+          sftpBridge.clearSftpEncodingStateByPrefix?.(payload.prefix);
+        }
+      });
       ipcMain.on("netcatty:zmodem:cancel", (_event, payload) => {
         sessions.get(payload?.sessionId)?.zmodemSentry?.cancel(payload?.options);
       });

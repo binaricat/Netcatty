@@ -126,6 +126,96 @@ function waitForApplicationSpawn(child, requireCleanLauncherExit = false) {
   });
 }
 
+async function launchFileWithApplication({
+  filePath,
+  appPath,
+  platform = process.platform,
+  spawnImpl = require("node:child_process").spawn,
+}) {
+  console.log(`[Main] Opening file with application:`);
+  console.log(`[Main]   File: ${filePath}`);
+  console.log(`[Main]   App: ${appPath}`);
+  console.log(`[Main]   Platform: ${platform}`);
+
+  let child;
+  try {
+    // On macOS, `open -a` is a short-lived launcher whose exit we await via
+    // waitForApplicationSpawn(..., true), so piping stderr only captures launch
+    // errors and destroying it afterwards cannot SIGPIPE the launched GUI app.
+    // On Linux/Windows we launch the detached GUI app directly and return on
+    // "spawn", so use stdio: "ignore" to avoid both leaked pipe FDs and SIGPIPE
+    // from closing the read end while the detached app writes warnings to stderr.
+    const spawnOptions = {
+      detached: true,
+      stdio: platform === "darwin" ? ["ignore", "ignore", "pipe"] : "ignore",
+    };
+    if (platform === "darwin") {
+      // On macOS, use 'open' command with -a flag for specific app
+      const args = ["-a", appPath, filePath];
+      console.log(`[Main]   Command: open ${args.join(' ')}`);
+      child = spawnImpl("open", args, spawnOptions);
+    } else if (platform === "win32") {
+      // Spawn the selected executable directly. This preserves paths with
+      // spaces without a shell and reports an invalid app path as ENOENT.
+      console.log(`[Main]   Command: ${appPath} ${filePath}`);
+      child = spawnImpl(appPath, [filePath], spawnOptions);
+    } else {
+      // On Linux, spawn the app with the file
+      console.log(`[Main]   Command: ${appPath} ${filePath}`);
+      child = spawnImpl(appPath, [filePath], spawnOptions);
+    }
+
+    // Log any errors from the child process
+    child.on("error", (err) => {
+      console.error(`[Main] Failed to start application:`, err.message);
+    });
+
+    child.stderr?.on("data", (data) => {
+      // On Windows, stderr may be encoded in GBK/CP936, try to decode
+      if (platform === "win32") {
+        try {
+          // Try decoding as GBK (code page 936) for Chinese Windows
+          const { TextDecoder } = require("node:util");
+          const decoder = new TextDecoder("gbk");
+          const decoded = decoder.decode(data);
+          console.log(`[Main] Application stderr: ${decoded}`);
+        } catch {
+          // Fallback to hex dump if decoding fails
+          console.log(`[Main] Application stderr (hex): ${data.toString("hex")}`);
+        }
+      } else {
+        console.error(`[Main] Application stderr:`, data.toString());
+      }
+    });
+
+    child.on("exit", (code, signal) => {
+      // On Windows, many apps (like Notepad++) pass the file to an existing instance
+      // and immediately exit with code 1, this is normal behavior
+      if (code !== 0 && code !== null) {
+        if (platform === "win32") {
+          console.log(`[Main] Application exited with code: ${code}, signal: ${signal} (this may be normal for single-instance apps)`);
+        } else {
+          console.warn(`[Main] Application exited with code: ${code}, signal: ${signal}`);
+        }
+      } else {
+        console.log(`[Main] Application started successfully`);
+      }
+    });
+
+    // spawn() reports ENOENT and similar launch failures asynchronously.
+    // Do not acknowledge success until the child has actually started, so
+    // the renderer can unregister and delete its downloaded temp file.
+    await waitForApplicationSpawn(child, platform === "darwin");
+    child.stderr?.destroy?.();
+    child.unref();
+    return true;
+  } catch (err) {
+    child?.stderr?.destroy?.();
+    console.error(`[Main] Error opening file with application:`, err);
+    throw err;
+  }
+}
+
 function createCloudSyncSessionPasswordReader({
   getAppLockController,
   getCachedPassword,
@@ -1163,78 +1253,7 @@ function createBridgeRegistrar(context) {
   
     // Open a file with a specific application
     ipcMain.handle("netcatty:openWithApplication", async (_event, { filePath, appPath }) => {
-      const { spawn: cpSpawn } = require("node:child_process");
-      
-      console.log(`[Main] Opening file with application:`);
-      console.log(`[Main]   File: ${filePath}`);
-      console.log(`[Main]   App: ${appPath}`);
-      console.log(`[Main]   Platform: ${process.platform}`);
-      
-      try {
-        let child;
-        if (process.platform === "darwin") {
-          // On macOS, use 'open' command with -a flag for specific app
-          const args = ["-a", appPath, filePath];
-          console.log(`[Main]   Command: open ${args.join(' ')}`);
-          child = cpSpawn("open", args, { detached: true, stdio: "pipe" });
-        } else if (process.platform === "win32") {
-          // Spawn the selected executable directly. This preserves paths with
-          // spaces without a shell and reports an invalid app path as ENOENT.
-          console.log(`[Main]   Command: ${appPath} ${filePath}`);
-          child = cpSpawn(appPath, [filePath], { detached: true, stdio: "pipe" });
-        } else {
-          // On Linux, spawn the app with the file
-          console.log(`[Main]   Command: ${appPath} ${filePath}`);
-          child = cpSpawn(appPath, [filePath], { detached: true, stdio: "pipe" });
-        }
-        
-        // Log any errors from the child process
-        child.on("error", (err) => {
-          console.error(`[Main] Failed to start application:`, err.message);
-        });
-        
-        child.stderr?.on("data", (data) => {
-          // On Windows, stderr may be encoded in GBK/CP936, try to decode
-          if (process.platform === "win32") {
-            try {
-              // Try decoding as GBK (code page 936) for Chinese Windows
-              const { TextDecoder } = require("node:util");
-              const decoder = new TextDecoder("gbk");
-              const decoded = decoder.decode(data);
-              console.log(`[Main] Application stderr: ${decoded}`);
-            } catch {
-              // Fallback to hex dump if decoding fails
-              console.log(`[Main] Application stderr (hex): ${data.toString("hex")}`);
-            }
-          } else {
-            console.error(`[Main] Application stderr:`, data.toString());
-          }
-        });
-        
-        child.on("exit", (code, signal) => {
-          // On Windows, many apps (like Notepad++) pass the file to an existing instance
-          // and immediately exit with code 1, this is normal behavior
-          if (code !== 0 && code !== null) {
-            if (process.platform === "win32") {
-              console.log(`[Main] Application exited with code: ${code}, signal: ${signal} (this may be normal for single-instance apps)`);
-            } else {
-              console.warn(`[Main] Application exited with code: ${code}, signal: ${signal}`);
-            }
-          } else {
-            console.log(`[Main] Application started successfully`);
-          }
-        });
-
-        // spawn() reports ENOENT and similar launch failures asynchronously.
-        // Do not acknowledge success until the child has actually started, so
-        // the renderer can unregister and delete its downloaded temp file.
-        await waitForApplicationSpawn(child, process.platform === "darwin");
-        child.unref();
-        return true;
-      } catch (err) {
-        console.error(`[Main] Error opening file with application:`, err);
-        throw err;
-      }
+      return launchFileWithApplication({ filePath, appPath });
     });
 
     // Open a file with the system default application
@@ -1396,4 +1415,5 @@ module.exports = {
   loadFigSpec,
   registerFigSpecHandlers,
   _waitForApplicationSpawnForTests: waitForApplicationSpawn,
+  _launchFileWithApplicationForTests: launchFileWithApplication,
 };

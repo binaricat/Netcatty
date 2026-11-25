@@ -413,3 +413,39 @@ test("failed external app launch can unregister and immediately delete its temp 
   assert.equal(result.retained, false);
   await assert.rejects(fs.promises.stat(harness.localPath), { code: "ENOENT" });
 });
+
+test("cleanup stops all active watchers and clears tracked temp files", async (t) => {
+  const harness = createHarness(t);
+  assert.equal(typeof fileWatcherBridge.cleanup, "function");
+
+  await harness.handlers.get("netcatty:filewatch:registerTempFile")(harness.event, {
+    sftpId: harness.sftpId,
+    localPath: harness.localPath,
+  });
+  await harness.handlers.get("netcatty:filewatch:start")(harness.event, {
+    localPath: harness.localPath,
+    remotePath: "/remote/cleanup.txt",
+    sftpId: harness.sftpId,
+    encoding: "utf-8",
+  });
+
+  assert.equal(harness.listenersByPath.get(harness.localPath)?.size, 1);
+
+  fileWatcherBridge.cleanup();
+
+  const listed = await harness.handlers.get("netcatty:filewatch:list")(harness.event, {});
+  assert.equal(listed.length, 0);
+  assert.equal(harness.listenersByPath.has(harness.localPath), false);
+
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    try {
+      await fs.promises.stat(harness.localPath);
+    } catch (error) {
+      if (error?.code === "ENOENT") break;
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  await assert.rejects(fs.promises.stat(harness.localPath), { code: "ENOENT" });
+});

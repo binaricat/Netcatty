@@ -80,7 +80,22 @@ function createConfigAndCleanupApi(ctx) {
         // write lock held until the approval timeout expires.
         clearPendingApprovals(chatSessionId);
         await cancelSftpOpsForSession(chatSessionId);
-        sftpBridge.clearSftpEncodingStateByPrefix?.(`chat:${chatSessionId}:session:`);
+        const encodingPrefix = `chat:${chatSessionId}:session:`;
+        sftpBridge.clearSftpEncodingStateByPrefix?.(encodingPrefix);
+        try {
+          if (
+            terminalWorkerManager
+            && (typeof terminalWorkerManager.isRunning !== "function" || terminalWorkerManager.isRunning())
+          ) {
+            terminalWorkerManager.send?.(
+              "netcatty:sftp:clearEncodingStateByPrefix",
+              { prefix: encodingPrefix },
+              {},
+            );
+          }
+        } catch {
+          // Worker may already be gone while cleaning up a torn-down chat session.
+        }
       }
     }
 
