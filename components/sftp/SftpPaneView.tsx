@@ -12,7 +12,8 @@ import { SftpPaneFileList } from "./SftpPaneFileList";
 import { SftpPaneToolbar } from "./SftpPaneToolbar";
 import { SftpPaneTreeView } from "./SftpPaneTreeView";
 import {
-  useActiveTabId,
+  useIsSftpPaneActive,
+  useIsSftpPaneFocused,
   useSftpConnectedHosts,
   useSftpDrag,
   useSftpHosts,
@@ -54,8 +55,7 @@ interface SftpPaneWrapperProps {
 }
 
 const SftpPaneWrapper = memo<SftpPaneWrapperProps>(({ side, paneId, isFirstPane, children }) => {
-  const activeTabId = useActiveTabId(side);
-  const isActive = activeTabId ? paneId === activeTabId : isFirstPane;
+  const isActive = useIsSftpPaneActive(side, paneId, isFirstPane);
 
   const containerStyle: React.CSSProperties = isActive
     ? {}
@@ -76,11 +76,12 @@ interface SftpPaneViewProps {
   side: "left" | "right";
   pane: SftpPane;
   dialogActionScopeId: string;
-  isPaneFocused: boolean;
+  /** Explicit focus override (used by SftpSidePanel). When omitted, subscribes to sftpFocusStore only while active. */
+  isPaneFocused?: boolean;
   sftpDefaultViewMode: 'list' | 'tree';
   showHeader?: boolean;
   showEmptyHeader?: boolean;
-  onToggleShowHiddenFiles?: () => void;
+  onToggleShowHiddenFiles?: (side: "left" | "right", paneId: string) => void;
   onGoToTerminalCwd?: () => void;
   onLocatePathInTerminal?: () => void;
   onInsertPathToTerminal?: (path: string) => void;
@@ -108,8 +109,12 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   onToggleFollowTerminalCwd,
   forceActive,
 }) => {
-  const activeTabId = useActiveTabId(side);
-  const isActive = forceActive || (activeTabId ? pane.id === activeTabId : true);
+  const isActive = useIsSftpPaneActive(side, pane.id, true, Boolean(forceActive));
+  const effectiveIsPaneFocused = useIsSftpPaneFocused(side, isActive, isPaneFocused);
+  const handleToggleShowHiddenFiles = useMemo(
+    () => (onToggleShowHiddenFiles ? () => onToggleShowHiddenFiles(side, pane.id) : undefined),
+    [onToggleShowHiddenFiles, side, pane.id],
+  );
 
   const callbacks = useSftpPaneCallbacks(side);
   const { draggedFiles, onDragStart, onDragEnd } = useSftpDrag();
@@ -622,7 +627,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         onReorderBookmark={reorderBookmark}
         onRenameBookmark={renameBookmark}
         showHiddenFiles={pane.showHiddenFiles}
-        onToggleShowHiddenFiles={onToggleShowHiddenFiles}
+        onToggleShowHiddenFiles={handleToggleShowHiddenFiles}
         onGoToTerminalCwd={onGoToTerminalCwd}
         onLocatePathInTerminal={onLocatePathInTerminal}
         followTerminalCwd={followTerminalCwd}
@@ -684,7 +689,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           t={t}
           pane={pane}
           side={side}
-          isPaneFocused={isPaneFocused}
+          isPaneFocused={effectiveIsPaneFocused}
           sorting={sortingControls}
           fileListRef={fileListRef}
           handleFileListScroll={handleFileListScroll}
@@ -818,6 +823,7 @@ const sftpPaneViewAreEqual = (
   if (prev.onInsertPathToTerminal !== next.onInsertPathToTerminal) return false;
   if (prev.onCdInTerminal !== next.onCdInTerminal) return false;
   if (prev.onToggleShowHiddenFiles !== next.onToggleShowHiddenFiles) return false;
+  if (prev.forceActive !== next.forceActive) return false;
 
   return true;
 };
