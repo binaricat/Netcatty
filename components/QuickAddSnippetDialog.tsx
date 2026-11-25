@@ -11,17 +11,10 @@
 import { Keyboard, Package, RotateCcw } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
-import type { Snippet } from '../domain/models';
-import { findActiveSystemShortcutConflict } from '../domain/activeKeyBindings';
-import {
-  type HotkeyScheme,
-  type KeyBinding,
-  keyEventToString,
-  keyStringToKeyboardEvent,
-  matchesKeyBinding,
-} from '../domain/models';
+import { useSnippetShortkeyRecorder } from '../application/state/useSnippetShortkeyRecorder';
+import type { HotkeyScheme, KeyBinding, Snippet } from '../domain/models';
 import { isScriptSnippet } from '../domain/snippetScript.ts';
-import { cn, isMacPlatform } from '../lib/utils';
+import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Combobox } from './ui/combobox';
 import {
@@ -71,10 +64,22 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
   const [noAutoRun, setNoAutoRun] = useState(false);
   const [multiLineRunMode, setMultiLineRunMode] = useState<Snippet['multiLineRunMode']>(undefined);
   const [shortkey, setShortkey] = useState<string | undefined>(undefined);
-  const [isRecordingShortkey, setIsRecordingShortkey] = useState(false);
-  const [shortkeyError, setShortkeyError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Snippet | null>(null);
   const labelInputRef = useRef<HTMLInputElement>(null);
+
+  const {
+    isRecordingShortkey,
+    setIsRecordingShortkey,
+    shortkeyError,
+    setShortkeyError,
+  } = useSnippetShortkeyRecorder({
+    snippets,
+    editingSnippetId: editing?.id,
+    hotkeyScheme,
+    keyBindings,
+    t,
+    onCapture: setShortkey,
+  });
 
   // Listen for the global "add snippet" request dispatched by the
   // terminal-side ScriptsSidePanel + button. We reset form state on
@@ -94,7 +99,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
     };
     window.addEventListener('netcatty:snippets:add', handler);
     return () => window.removeEventListener('netcatty:snippets:add', handler);
-  }, []);
+  }, [setIsRecordingShortkey, setShortkeyError]);
 
   // Sibling event for editing an existing snippet from the ScriptsSidePanel
   // context menu. Prefills the form and flips the dialog into update mode.
@@ -116,7 +121,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
     };
     window.addEventListener('netcatty:snippets:edit', handler);
     return () => window.removeEventListener('netcatty:snippets:edit', handler);
-  }, []);
+  }, [setIsRecordingShortkey, setShortkeyError]);
 
   // Focus the label field when the modal opens.
   useEffect(() => {
@@ -124,100 +129,6 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
     const focusTimer = window.setTimeout(() => labelInputRef.current?.focus(), 50);
     return () => window.clearTimeout(focusTimer);
   }, [open]);
-
-  const isMac = useMemo(() => (
-    hotkeyScheme === 'mac' || (hotkeyScheme === 'disabled' && isMacPlatform())
-  ), [hotkeyScheme]);
-
-  const existingShortkeys = useMemo(() => (
-    snippets.filter((s) => Boolean(s.shortkey) && s.id !== editing?.id)
-  ), [snippets, editing?.id]);
-
-  const normalizeKeyString = useCallback((value: string) => (
-    value.toLowerCase().replace(/\s+/g, '')
-  ), []);
-
-  const validateShortkey = useCallback((key: string): string | null => {
-    if (!key) return null;
-
-    const systemConflict = findActiveSystemShortcutConflict(key, hotkeyScheme, keyBindings);
-    if (systemConflict) {
-      const nameKey = `settings.shortcuts.binding.${systemConflict.id}`;
-      const name = t(nameKey) !== nameKey ? t(nameKey) : systemConflict.label;
-      return t('snippets.shortkey.error.systemConflict', { name });
-    }
-
-    const syntheticEvent = keyStringToKeyboardEvent(key);
-    if (syntheticEvent) {
-      for (const snippet of existingShortkeys) {
-        if (snippet.shortkey && matchesKeyBinding(syntheticEvent, snippet.shortkey, isMac)) {
-          return t('snippets.shortkey.error.snippetConflict', { name: snippet.label });
-        }
-      }
-    } else {
-      const normalizedKey = normalizeKeyString(key);
-      const conflictingSnippet = existingShortkeys.find((snippet) => (
-        snippet.shortkey && normalizeKeyString(snippet.shortkey) === normalizedKey
-      ));
-      if (conflictingSnippet) {
-        return t('snippets.shortkey.error.snippetConflict', { name: conflictingSnippet.label });
-      }
-    }
-
-    return null;
-  }, [
-    existingShortkeys,
-    hotkeyScheme,
-    isMac,
-    keyBindings,
-    normalizeKeyString,
-    t,
-  ]);
-
-  // Shortkey recording capture. Escape cancels recording only (does not close the modal).
-  useEffect(() => {
-    if (!isRecordingShortkey) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.key === 'Escape') {
-        setIsRecordingShortkey(false);
-        setShortkeyError(null);
-        return;
-      }
-
-      if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return;
-
-      const keyString = keyEventToString(e, isMac);
-      const error = validateShortkey(keyString);
-      if (error) {
-        setShortkeyError(error);
-        return;
-      }
-
-      setShortkeyError(null);
-      setShortkey(keyString);
-      setIsRecordingShortkey(false);
-    };
-
-    const handleClick = () => {
-      setIsRecordingShortkey(false);
-      setShortkeyError(null);
-    };
-
-    const timer = setTimeout(() => {
-      window.addEventListener('click', handleClick, true);
-    }, 100);
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('keydown', handleKeyDown, true);
-      window.removeEventListener('click', handleClick, true);
-    };
-  }, [isRecordingShortkey, isMac, validateShortkey]);
 
   // Derive combobox options from the union of existing packages (from
   // props) and any package path referenced by an existing snippet, so
@@ -239,7 +150,7 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
     setOpen(false);
     setIsRecordingShortkey(false);
     setShortkeyError(null);
-  }, []);
+  }, [setIsRecordingShortkey, setShortkeyError]);
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     if (!nextOpen) {

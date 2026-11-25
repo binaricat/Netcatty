@@ -37,6 +37,7 @@ import {
   localizeSpecSuggestionDescriptions,
 } from "./autocompleteDescriptionI18n";
 import type { AutocompleteHistoryScope, Snippet } from "../../../domain/models";
+import { tokenizeShellLike } from "../../../domain/shellTokenizer";
 import type { AutocompleteCwdSource } from "./terminalAutocompleteLayout";
 
 /** Source indicator for where a suggestion came from */
@@ -169,64 +170,10 @@ export function shellEscape(name: string): string {
 }
 
 /**
- * Parse a command line string into tokens, handling quoting.
- */
-function tokenize(input: string): string[] {
-  const tokens: string[] = [];
-  let current = "";
-  let inSingleQuote = false;
-  let inDoubleQuote = false;
-  let escaped = false;
-
-  for (let i = 0; i < input.length; i++) {
-    const ch = input[i];
-
-    if (escaped) {
-      current += ch;
-      escaped = false;
-      continue;
-    }
-
-    if (ch === "\\") {
-      escaped = true;
-      current += ch;
-      continue;
-    }
-
-    if (ch === "'" && !inDoubleQuote) {
-      inSingleQuote = !inSingleQuote;
-      current += ch;
-      continue;
-    }
-
-    if (ch === '"' && !inSingleQuote) {
-      inDoubleQuote = !inDoubleQuote;
-      current += ch;
-      continue;
-    }
-
-    if (ch === " " && !inSingleQuote && !inDoubleQuote) {
-      if (current.length > 0) {
-        tokens.push(current);
-        current = "";
-      }
-      continue;
-    }
-
-    current += ch;
-  }
-
-  // Always include the last token (even if empty, to indicate trailing space)
-  tokens.push(current);
-
-  return tokens;
-}
-
-/**
  * Parse the current command line into a CompletionContext.
  */
 export function parseCommandLine(input: string): CompletionContext {
-  const tokens = tokenize(input);
+  const tokens = tokenizeShellLike(input);
   const wordIndex = tokens.length - 1;
   const currentWord = tokens[wordIndex] || "";
   const commandName = tokens.length > 0 ? normalizeCommandName(tokens[0]) : "";
