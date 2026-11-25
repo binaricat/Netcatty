@@ -88,7 +88,7 @@ export type WakeTerminalFromHibernateOptions = {
   safeFit: (options?: { force?: boolean; requireVisible?: boolean }) => void;
   resizeSession: () => void;
   forceSyncRenderAfterResize: (term: XTerm) => void;
-  lastFittedSizeRef: MutableRefObject<{ width: number; height: number } | null>;
+  lastFittedSizeRef: MutableRefObject<{ width: number; height: number; dpr?: number } | null>;
   isBootActiveRef: MutableRefObject<boolean>;
   sessionId: string;
   updateStatus: (status: "connected") => void;

@@ -307,7 +307,7 @@ export type XTermRuntime = {
    * not been created yet. Idempotent; a no-op when WebGL is disabled or already
    * active. Called when a deferred pane first becomes visible.
    */
-  ensureWebglRenderer: () => void;
+  ensureWebglRenderer: () => boolean;
   /** Drop the WebGL addon while keeping the terminal alive (soft-hide). */
   suspendWebglRenderer: () => void;
   /**

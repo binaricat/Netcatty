@@ -6,7 +6,8 @@ export interface WebglRendererAddon {
 }
 
 export interface WebglRendererController<TAddon extends WebglRendererAddon> {
-  ensure(): void;
+  /** Ensures WebGL is loaded; returns true when a new WebGL renderer was loaded. */
+  ensure(): boolean;
   suspend(): void;
   dispose(): void;
   getAddon(): TAddon | null;
@@ -92,10 +93,10 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
     recoveryTimer = null;
   };
 
-  const ensure = () => {
-    if (loaded || circuitBroken || disposed || !options.enabled) return;
+  const ensure = (): boolean => {
+    if (loaded || circuitBroken || disposed || !options.enabled) return false;
     // Panes past the budget keep the DOM renderer until a slot is available.
-    if (budget && !budget.tryAcquire(budgetMember)) return;
+    if (budget && !budget.tryAcquire(budgetMember)) return false;
     let nextAddon: TAddon | null = null;
     try {
       nextAddon = options.createAddon();
@@ -151,6 +152,7 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
       addon = ownedAddon;
       options.loadAddon(ownedAddon);
       publishLoaded(true);
+      return true;
     } catch (error) {
       try {
         if (nextAddon) disposeAddon(nextAddon);
@@ -164,6 +166,7 @@ export function createWebglRendererController<TAddon extends WebglRendererAddon>
         "[XTerm] WebGL addon failed, using DOM renderer. Error:",
         error instanceof Error ? error.message : error,
       );
+      return false;
     }
   };
 
