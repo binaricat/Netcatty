@@ -191,7 +191,6 @@ export default defineConfig(() => {
           '@ai-sdk/google',
           'streamdown',
           '@streamdown/cjk',
-          '@streamdown/code',
           'zod',
         ],
       },
