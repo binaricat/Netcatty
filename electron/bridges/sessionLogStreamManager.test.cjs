@@ -1244,3 +1244,181 @@ for (const outcome of ["success", "throw", "failure", "different-session", "new-
     }
   });
 }
+
+function withPatchedStreamTimers(run) {
+  const originalSetInterval = global.setInterval;
+  const originalClearInterval = global.clearInterval;
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  let nextId = 1;
+  let setIntervalCalls = 0;
+  const timeouts = new Map();
+
+  global.setInterval = (...args) => {
+    setIntervalCalls += 1;
+    return originalSetInterval(...args);
+  };
+
+  global.clearInterval = (id) => originalClearInterval(id);
+
+  global.setTimeout = (fn, delay, ...args) => {
+    const id = nextId++;
+    timeouts.set(id, { fn: () => fn(...args), delay });
+    return id;
+  };
+
+  global.clearTimeout = (id) => {
+    timeouts.delete(id);
+  };
+
+  const runNextTimeout = () => {
+    const entry = timeouts.entries().next().value;
+    if (!entry) return false;
+    const [id, item] = entry;
+    timeouts.delete(id);
+    item.fn();
+    return true;
+  };
+
+  return Promise.resolve()
+    .then(() =>
+      run({
+        getSetIntervalCalls: () => setIntervalCalls,
+        getPendingTimeouts: () => [...timeouts.values()],
+        runNextTimeout,
+      }))
+    .finally(() => {
+      global.setInterval = originalSetInterval;
+      global.clearInterval = originalClearInterval;
+      global.setTimeout = originalSetTimeout;
+      global.clearTimeout = originalClearTimeout;
+    });
+}
+
+test("sessionLogStreamManager uses on-demand flush timeout with zero idle wakeups", async (t) => {
+  const { EventEmitter } = require("node:events");
+  const directory = path.join(TEMP_ROOT, `on-demand-flush-${Date.now()}`);
+  const filePath = path.join(directory, "session.log");
+  const sessionId = "on-demand-flush";
+  const writtenChunks = [];
+
+  class FakeWriteStream extends EventEmitter {
+    write(chunk, cb) {
+      writtenChunks.push(chunk);
+      if (typeof cb === "function") cb();
+      return true;
+    }
+    end(cb) {
+      if (typeof cb === "function") cb();
+    }
+  }
+
+  t.mock.method(fs, "createWriteStream", () => new FakeWriteStream());
+  t.after(async () => {
+    await stopStream(sessionId);
+    forgetSessionLog(sessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  await withPatchedStreamTimers(async ({ getSetIntervalCalls, getPendingTimeouts, runNextTimeout }) => {
+    const started = startStreamToFile(sessionId, { filePath, format: "raw" });
+    assert.equal(started.ok, true);
+    assert.equal(getSetIntervalCalls(), 0, "must never allocate a permanent setInterval");
+    assert.equal(getPendingTimeouts().length, 0, "idle stream must not schedule a flush timer");
+
+    // Small chunks arm a single 500ms one-shot timer without resetting it.
+    appendData(sessionId, "hello ");
+    assert.equal(getPendingTimeouts().length, 1);
+    assert.equal(getPendingTimeouts()[0].delay, 500);
+    appendData(sessionId, "world\n");
+    assert.equal(getPendingTimeouts().length, 1);
+    assert.deepEqual(writtenChunks, []);
+
+    // Firing the one-shot flushes data and leaves 0 timers while idle.
+    assert.equal(runNextTimeout(), true);
+    assert.deepEqual(writtenChunks, ["hello world\n"]);
+    assert.equal(getPendingTimeouts().length, 0, "must not re-arm timer when idle");
+
+    // Exceeding MAX_BUFFER_SIZE flushes immediately and cancels any armed timer.
+    appendData(sessionId, "prefix-");
+    assert.equal(getPendingTimeouts().length, 1);
+    const largeChunk = "x".repeat(64 * 1024);
+    appendData(sessionId, largeChunk);
+    assert.equal(writtenChunks.length, 2);
+    assert.equal(writtenChunks[1], `prefix-${largeChunk}`);
+    assert.equal(getPendingTimeouts().length, 0, "immediate large flush must clear pending timer and stay idle");
+
+    // stopStream cancels any pending timer and flushes final data.
+    appendData(sessionId, "tail");
+    assert.equal(getPendingTimeouts().length, 1);
+    const finalPath = await stopStream(sessionId);
+    assert.equal(finalPath, filePath);
+    assert.equal(writtenChunks.at(-1), "tail");
+    assert.equal(getPendingTimeouts().length, 0);
+  });
+});
+
+test("sessionLogStreamManager clears flush timer on writeStream error and synchronous flush error", async (t) => {
+  const { EventEmitter } = require("node:events");
+  const directory = path.join(TEMP_ROOT, `flush-error-timers-${Date.now()}`);
+  const asyncErrorSessionId = "flush-async-error-timer";
+  const syncErrorSessionId = "flush-sync-error-timer";
+  let currentStream = null;
+
+  t.mock.method(fs, "createWriteStream", () => currentStream);
+  t.after(async () => {
+    await stopStream(asyncErrorSessionId);
+    await stopStream(syncErrorSessionId);
+    forgetSessionLog(asyncErrorSessionId);
+    forgetSessionLog(syncErrorSessionId);
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  await withPatchedStreamTimers(async ({ getSetIntervalCalls, getPendingTimeouts, runNextTimeout }) => {
+    // 1. Asynchronous writeStream error clears an armed flush timer and prevents re-arming.
+    class AsyncErrorStream extends EventEmitter {
+      write(_chunk, cb) {
+        if (typeof cb === "function") cb();
+        return true;
+      }
+      end(cb) {
+        if (typeof cb === "function") cb();
+      }
+    }
+    currentStream = new AsyncErrorStream();
+    startStreamToFile(asyncErrorSessionId, {
+      filePath: path.join(directory, "async-error.log"),
+      format: "raw",
+    });
+    appendData(asyncErrorSessionId, "buffered");
+    assert.equal(getPendingTimeouts().length, 1);
+    currentStream.emit("error", new Error("disk error"));
+    assert.equal(getPendingTimeouts().length, 0, "writeStream error must clear pending flush timer");
+    appendData(asyncErrorSessionId, "ignored-after-error");
+    assert.equal(getPendingTimeouts().length, 0, "disabled stream must not schedule flush timers");
+    assert.equal(await stopStream(asyncErrorSessionId), null);
+
+    // 2. Synchronous write() failure clears timer state and leaves 0 post-error timers.
+    class SyncErrorStream extends EventEmitter {
+      write() {
+        throw new Error("sync write failed");
+      }
+      end(cb) {
+        if (typeof cb === "function") cb();
+      }
+    }
+    currentStream = new SyncErrorStream();
+    startStreamToFile(syncErrorSessionId, {
+      filePath: path.join(directory, "sync-error.log"),
+      format: "raw",
+    });
+    appendData(syncErrorSessionId, "buffered");
+    assert.equal(getPendingTimeouts().length, 1);
+    assert.equal(runNextTimeout(), true);
+    assert.equal(getPendingTimeouts().length, 0, "failed flush must leave 0 timers");
+    appendData(syncErrorSessionId, "ignored-after-sync-error");
+    assert.equal(getPendingTimeouts().length, 0);
+    assert.equal(await stopStream(syncErrorSessionId), null);
+    assert.equal(getSetIntervalCalls(), 0);
+  });
+});
