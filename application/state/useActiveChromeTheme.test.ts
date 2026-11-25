@@ -499,3 +499,138 @@ test("useActiveChromeTheme refreshes surfaces when theme mode, pluginThemeRevisi
     dom.window.close();
   }
 });
+
+test("useActiveChromeTheme restores terminal surfaces when UI palette or accent changes with a stable applyAppTheme wrapper", { timeout: 15000 }, async () => {
+  const { JSDOM } = await import("jsdom");
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { useActiveChromeTheme } = await import("./useActiveChromeTheme");
+  const { getSettingsChromeSnapshot, publishSettingsChromeSnapshot } = await import("./settingsChromeStore");
+  const { getAppearanceChromeSnapshot, publishAppearanceChromeSnapshot } = await import("./appearanceChromeStore");
+
+  const dom = new JSDOM('<!doctype html><html><head></head><body><div data-top-tabs-root></div></body></html>');
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalSettingsSnapshot = getSettingsChromeSnapshot();
+  const originalAppearanceSnapshot = getAppearanceChromeSnapshot();
+  const environment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const originalActEnvironment = environment.IS_REACT_ACT_ENVIRONMENT;
+  environment.IS_REACT_ACT_ENVIRONMENT = true;
+
+  const themeCalls: string[] = [];
+  const backgroundCalls: string[] = [];
+  const testWindow = dom.window as unknown as Window & typeof globalThis;
+  globalThis.window = testWindow;
+  globalThis.document = dom.window.document;
+  testWindow.netcatty = {
+    setTheme: async (source: string) => { themeCalls.push(source); return true; },
+    setBackgroundColor: async (color: string) => { backgroundCalls.push(color); return true; },
+  } as unknown as NetcattyBridge;
+
+  const lightTerminalTheme = TERMINAL_THEMES.find((candidate) => candidate.type === "light");
+  assert.ok(lightTerminalTheme);
+  // ChromeHost passes a permanently stable applyAppTheme callback wrapper.
+  const stableApplyAppTheme = () => {};
+
+  function Harness({ activeTheme }: { activeTheme: typeof lightTerminalTheme }) {
+    useActiveChromeTheme({ activeTheme: activeTheme!, applyAppTheme: stableApplyAppTheme });
+    return null;
+  }
+
+  publishSettingsChromeSnapshot({
+    ...originalSettingsSnapshot,
+    theme: "dark",
+    resolvedTheme: "dark",
+    darkUiThemeId: "default",
+    lightUiThemeId: "default",
+  });
+  publishAppearanceChromeSnapshot({
+    accentMode: "custom",
+    customAccent: "210 90% 50%",
+  });
+
+  let renderer: ReturnType<typeof createRoot> | undefined;
+  try {
+    await act(async () => {
+      renderer = createRoot(document.createElement("div"));
+      renderer.render(createElement(Harness, { activeTheme: lightTerminalTheme }));
+    });
+    assert.equal(document.documentElement.classList.contains("light"), true);
+    assert.equal(themeCalls.at(-1), "light");
+    assert.equal(backgroundCalls.at(-1), lightTerminalTheme.colors.background);
+
+    // 1. Dark UI palette changes while light terminal stays active (with a cloned
+    //    theme object of identical fingerprint). Simulate applyThemeTokens resetting
+    //    root class and native window background to dark app palette first.
+    document.documentElement.className = "dark";
+    themeCalls.push("dark");
+    backgroundCalls.push("#111111");
+    await act(async () => {
+      publishSettingsChromeSnapshot({
+        ...originalSettingsSnapshot,
+        theme: "dark",
+        resolvedTheme: "dark",
+        darkUiThemeId: "midnight",
+        lightUiThemeId: "default",
+      });
+      renderer!.render(createElement(Harness, {
+        activeTheme: { ...lightTerminalTheme, colors: { ...lightTerminalTheme.colors } },
+      }));
+    });
+    assert.equal(document.documentElement.classList.contains("light"), true);
+    assert.equal(themeCalls.at(-1), "light");
+    assert.equal(backgroundCalls.at(-1), lightTerminalTheme.colors.background);
+
+    // 2. Light UI palette changes.
+    document.documentElement.className = "dark";
+    themeCalls.push("dark");
+    backgroundCalls.push("#111111");
+    await act(async () => {
+      publishSettingsChromeSnapshot({
+        ...originalSettingsSnapshot,
+        theme: "dark",
+        resolvedTheme: "dark",
+        darkUiThemeId: "midnight",
+        lightUiThemeId: "paper",
+      });
+    });
+    assert.equal(document.documentElement.classList.contains("light"), true);
+    assert.equal(themeCalls.at(-1), "light");
+    assert.equal(backgroundCalls.at(-1), lightTerminalTheme.colors.background);
+
+    // 3. Accent mode / custom accent changes while light terminal stays active.
+    document.documentElement.className = "dark";
+    themeCalls.push("dark");
+    backgroundCalls.push("#111111");
+    await act(async () => {
+      publishAppearanceChromeSnapshot({
+        accentMode: "custom",
+        customAccent: "340 80% 55%",
+      });
+    });
+    assert.equal(document.documentElement.classList.contains("light"), true);
+    assert.equal(themeCalls.at(-1), "light");
+    assert.equal(backgroundCalls.at(-1), lightTerminalTheme.colors.background);
+
+    document.documentElement.className = "dark";
+    themeCalls.push("dark");
+    backgroundCalls.push("#111111");
+    await act(async () => {
+      publishAppearanceChromeSnapshot({
+        accentMode: "theme",
+        customAccent: "340 80% 55%",
+      });
+    });
+    assert.equal(document.documentElement.classList.contains("light"), true);
+    assert.equal(themeCalls.at(-1), "light");
+    assert.equal(backgroundCalls.at(-1), lightTerminalTheme.colors.background);
+  } finally {
+    await act(async () => { renderer?.unmount(); });
+    environment.IS_REACT_ACT_ENVIRONMENT = originalActEnvironment;
+    publishSettingsChromeSnapshot(originalSettingsSnapshot);
+    publishAppearanceChromeSnapshot(originalAppearanceSnapshot);
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+    dom.window.close();
+  }
+});

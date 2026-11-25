@@ -1,4 +1,5 @@
 import { pluginThemeRegistry } from '../../infrastructure/config/pluginThemeRegistry';
+import { useAppearanceChromeStore } from './appearanceChromeStore';
 import { usePluginThemeRevision } from './usePluginThemeRuntime';
 import { getSettingsChromeSnapshot, useSettingsChromeStore } from './settingsChromeStore';
 import { useLayoutEffect, useRef } from "react";
@@ -278,13 +279,18 @@ export function useActiveChromeTheme({
   applyAppTheme: () => void;
 }) {
   const pluginThemeRevision = usePluginThemeRevision();
-  const { theme, resolvedTheme } = useSettingsChromeStore();
+  const { theme, resolvedTheme, lightUiThemeId, darkUiThemeId } = useSettingsChromeStore();
+  const { accentMode, customAccent } = useAppearanceChromeStore();
   const effectiveTheme = pluginThemeRegistry.isActive(resolvedTheme) ? null : activeTheme;
   const applyAppThemeRef = useRef(applyAppTheme);
   applyAppThemeRef.current = applyAppTheme;
   const prevSurfaceTriggersRef = useRef({
     theme,
     resolvedTheme,
+    lightUiThemeId,
+    darkUiThemeId,
+    accentMode,
+    customAccent,
     pluginThemeRevision,
     applyAppTheme,
   });
@@ -294,11 +300,19 @@ export function useActiveChromeTheme({
     const refreshSurfaces =
       prev.theme !== theme ||
       prev.resolvedTheme !== resolvedTheme ||
+      prev.lightUiThemeId !== lightUiThemeId ||
+      prev.darkUiThemeId !== darkUiThemeId ||
+      prev.accentMode !== accentMode ||
+      prev.customAccent !== customAccent ||
       prev.pluginThemeRevision !== pluginThemeRevision ||
       prev.applyAppTheme !== applyAppTheme;
     prevSurfaceTriggersRef.current = {
       theme,
       resolvedTheme,
+      lightUiThemeId,
+      darkUiThemeId,
+      accentMode,
+      customAccent,
       pluginThemeRevision,
       applyAppTheme,
     };
@@ -308,7 +322,17 @@ export function useActiveChromeTheme({
     // surface-refresh triggers changed; same-theme tab switches retain the
     // default fingerprint fast path.
     syncActiveChromeTheme(effectiveTheme, applyAppTheme, { refreshSurfaces });
-  }, [effectiveTheme, applyAppTheme, pluginThemeRevision, theme, resolvedTheme]);
+  }, [
+    effectiveTheme,
+    applyAppTheme,
+    pluginThemeRevision,
+    theme,
+    resolvedTheme,
+    lightUiThemeId,
+    darkUiThemeId,
+    accentMode,
+    customAccent,
+  ]);
 
   useLayoutEffect(() => {
     return () => {
