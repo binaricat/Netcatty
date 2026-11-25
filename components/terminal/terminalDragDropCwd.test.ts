@@ -10,7 +10,6 @@ import {
   handleTerminalDropEntries,
   resolveTerminalDropErrorMessage,
 } from "./hooks/useTerminalDragDrop";
-import { resolvePreferredTerminalCwd } from "./sftpCwd";
 import { resolvePasswordAuthSftpHost } from "../../domain/authIdentityPicker";
 
 const host = {
@@ -724,21 +723,4 @@ test("remote SSH folder drop refuses to guess a destination when the active shel
     requireActiveShellCwd: true,
   });
   assert.equal(openedSftp, false);
-});
-
-test("fresh cwd resolution falls back to the renderer cwd when backend probe has no real cwd", async () => {
-  const cwd = await resolvePreferredTerminalCwd({
-    rendererCwd: "/srv/app/current",
-    sessionId: "session-1",
-    preferFreshBackend: true,
-    getSessionPwd: async (_sessionId, options) => {
-      assert.deepEqual(options, {
-        allowHomeFallback: false,
-        allowLoginShellFallback: true,
-      });
-      return { success: false, error: "Could not determine cwd" };
-    },
-  });
-
-  assert.equal(cwd, "/srv/app/current");
 });

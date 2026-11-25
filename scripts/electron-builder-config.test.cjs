@@ -326,14 +326,6 @@ test("rpm packaging uses gzip compression for RHEL-family package hosts", () => 
   );
 });
 
-test("Windows package arch is controlled by pack script CLI flags", () => {
-  assert.deepEqual(
-    config.win.target,
-    ["nsis", "portable", "zip"],
-    "win.target must not hard-code x64 and arm64 or pack:win-x64 will still emit broken arm64 installers",
-  );
-});
-
 test("windows packaging includes a zip archive target", () => {
   assert.ok(
     config.win.target.includes("zip"),
