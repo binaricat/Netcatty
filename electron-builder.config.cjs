@@ -63,6 +63,7 @@ module.exports = {
         // Test fixtures, test-only helpers, and dev/CI schema snapshots are not
         // runtime resources. Keep them out of production ASARs (including plugin
         // smoke fixtures so no example plugin can be mistaken for an installed package).
+        '!electron/plugins/fixtures/**/*',
         '!electron/**/fixtures/**/*',
         '!electron/bridges/testSupport/**/*',
         '!electron/bridges/cliDiscoveryTestIsolation.cjs',
