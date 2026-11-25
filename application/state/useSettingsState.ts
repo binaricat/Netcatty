@@ -91,7 +91,7 @@ import {
   STORAGE_KEY_SHOW_TAB_NUMBER_BADGES,
   STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM,
 } from '../../infrastructure/config/storageKeys';
-import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from '../../infrastructure/config/i18n';
+import { resolveDefaultUiLocale, resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import {
   areCustomKeyBindingsEqual,
   nextCustomKeyBindingsSyncVersion,
@@ -357,7 +357,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   }, []);
   const [uiLanguage, setUiLanguage] = useState<UILanguage>(() => {
     const stored = readStoredString(STORAGE_KEY_UI_LANGUAGE);
-    return resolveSupportedLocale(stored || DEFAULT_UI_LOCALE);
+    return resolveDefaultUiLocale(stored);
   });
   const [appLockSettings, setAppLockSettingsState] = useState<AppLockSettings>({
     enabled: false,

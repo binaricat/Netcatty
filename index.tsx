@@ -14,7 +14,7 @@ import '@fontsource/jetbrains-mono/600.css';
 import App from './App';
 import { AppLockGate } from './components/AppLockGate';
 import { loadLocaleMessages } from './application/i18n/messages';
-import { DEFAULT_UI_LOCALE, resolveSupportedLocale } from './infrastructure/config/i18n';
+import { resolveDefaultUiLocale } from './infrastructure/config/i18n';
 import { STORAGE_KEY_UI_LANGUAGE } from './infrastructure/config/storageKeys';
 import { localStorageAdapter } from './infrastructure/persistence/localStorageAdapter';
 
@@ -265,11 +265,11 @@ const renderApp = () => {
   }
 };
 
-// Load the saved UI language before the first render (only English ships in
+// Load the resolved UI language before the first render (only English ships in
 // the startup chunk), so no window flashes English first. Render regardless
 // if the dictionary fails to load; I18nProvider retries and falls back to en.
 void loadLocaleMessages(
-  resolveSupportedLocale(localStorageAdapter.readString(STORAGE_KEY_UI_LANGUAGE) || DEFAULT_UI_LOCALE),
+  resolveDefaultUiLocale(localStorageAdapter.readString(STORAGE_KEY_UI_LANGUAGE)),
 )
   .catch(() => {})
   .finally(() => {
