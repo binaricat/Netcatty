@@ -33,6 +33,10 @@ interface UseSftpViewPaneActionsResult {
   onPrepareSelectionRight: () => void;
   onNavigateToLeft: (path: string) => void;
   onNavigateToRight: (path: string) => void;
+  onNavigateBackLeft: () => void;
+  onNavigateBackRight: () => void;
+  onNavigateForwardLeft: () => void;
+  onNavigateForwardRight: () => void;
   onNavigateUpLeft: () => void;
   onNavigateUpRight: () => void;
   onRefreshLeft: () => void;
@@ -255,6 +259,18 @@ export const useSftpViewPaneActions = ({
     (path: string) => sftpRef.current.navigateTo("right", path),
     [sftpRef],
   );
+  const onNavigateBackLeft = useCallback(() => {
+    void sftpRef.current.navigateBack("left");
+  }, [sftpRef]);
+  const onNavigateBackRight = useCallback(() => {
+    void sftpRef.current.navigateBack("right");
+  }, [sftpRef]);
+  const onNavigateForwardLeft = useCallback(() => {
+    void sftpRef.current.navigateForward("left");
+  }, [sftpRef]);
+  const onNavigateForwardRight = useCallback(() => {
+    void sftpRef.current.navigateForward("right");
+  }, [sftpRef]);
   const onNavigateUpLeft = useCallback(() => sftpRef.current.navigateUp("left"), [sftpRef]);
   const onNavigateUpRight = useCallback(() => sftpRef.current.navigateUp("right"), [sftpRef]);
   const onRefreshLeft = useCallback(() => sftpRef.current.refresh("left"), [sftpRef]);
@@ -403,6 +419,10 @@ export const useSftpViewPaneActions = ({
     onPrepareSelectionRight,
     onNavigateToLeft,
     onNavigateToRight,
+    onNavigateBackLeft,
+    onNavigateBackRight,
+    onNavigateForwardLeft,
+    onNavigateForwardRight,
     onNavigateUpLeft,
     onNavigateUpRight,
     onRefreshLeft,

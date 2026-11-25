@@ -421,6 +421,8 @@ export const esVaultMessages: Messages = {
   'sftp.encoding.auto': 'Auto',
   'sftp.encoding.utf8': 'UTF-8',
   'sftp.encoding.gb18030': 'GB18030',
+  'sftp.goBack': 'Ir atrás',
+  'sftp.goForward': 'Ir adelante',
   'sftp.goHome': 'Ir al inicio',
   'sftp.goRoot': 'Ir a la raíz',
   'sftp.folderName': 'Nombre de la carpeta',

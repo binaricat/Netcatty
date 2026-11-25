@@ -9,7 +9,8 @@ import { useSftpDirectoryListing } from "./useSftpDirectoryListing";
 import { useSftpHostCredentials } from "./useSftpHostCredentials";
 import { buildCacheKey, getSharedRemoteHostCache, setSharedRemoteHostCache } from "./sharedRemoteHostCache";
 import { resolveRemoteSftpStartState } from "./sftpConnectStartPath";
-import { normalizeSftpPaneNavigationPath } from "./utils";
+import { isSameSftpPath, normalizeSftpPaneNavigationPath } from "./utils";
+import { createNavHistory, resolveSftpConnectNavHistory } from "../../../domain/sftpNavHistory";
 import {
   setDirectoryCacheEntry,
   type DirectoryListingCache,
@@ -967,6 +968,12 @@ export const useSftpConnections = ({
           error: null,
           connectionLogs: [],
           filenameEncoding, // Reset encoding for new connection
+          navHistory: resolveSftpConnectNavHistory({
+            sameEndpointReconnect,
+            previousHistory: prev.navHistory,
+            startPath,
+            isSamePath: isSameSftpPath,
+          }),
         }));
 
         try {
@@ -1039,6 +1046,7 @@ export const useSftpConnections = ({
           connectionLogs: [],
           files: isReconnectAttempt ? prev.files : (sharedHostCache?.files ?? []),
           filenameEncoding, // Reset encoding for new connection
+          navHistory: sameEndpointReconnect ? prev.navHistory : createNavHistory(),
         }));
 
         // Subscribe to SFTP connection progress events for auth logging
@@ -1280,6 +1288,12 @@ export const useSftpConnections = ({
             loading: false,
             reconnecting: false,
             connectionLogs: [], // Clear after successful connect to avoid replay during navigation
+            navHistory: resolveSftpConnectNavHistory({
+              sameEndpointReconnect,
+              previousHistory: prev.navHistory,
+              startPath,
+              isSamePath: isSameSftpPath,
+            }),
           }));
         } catch (err) {
           await settleFailedSftpConnectIfCurrent({

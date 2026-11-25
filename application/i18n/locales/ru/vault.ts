@@ -464,6 +464,8 @@ export const ruVaultMessages: Messages = {
   'sftp.encoding.auto': 'Авто',
   'sftp.encoding.utf8': 'UTF-8',
   'sftp.encoding.gb18030': 'GB18030',
+  'sftp.goBack': 'Назад',
+  'sftp.goForward': 'Вперёд',
   'sftp.goHome': 'Перейти в домашний каталог',
   'sftp.goRoot': 'Перейти в корень',
   'sftp.folderName': 'Имя папки',

@@ -466,6 +466,8 @@ export const useSftpState = (
 
   const {
     navigateTo,
+    navigateBack,
+    navigateForward,
     refresh,
     navigateUp,
     openEntry,
@@ -523,7 +525,7 @@ export const useSftpState = (
         setTimeout(() => {
           const refreshedPane = getActivePane(side);
           if (refreshedPane?.connection) {
-            navigateTo(side, refreshedPane.connection.currentPath, { force: true });
+            navigateTo(side, refreshedPane.connection.currentPath, { force: true, historyMode: "none" });
           }
         }, 0);
       }
@@ -781,6 +783,8 @@ export const useSftpState = (
     connect,
     disconnect,
     navigateTo,
+    navigateBack,
+    navigateForward,
     navigateUp,
     refresh,
     openEntry,
@@ -853,6 +857,8 @@ export const useSftpState = (
     connect: (...args: Parameters<typeof connect>) => methodsRef.current.connect(...args),
     disconnect: (...args: Parameters<typeof disconnect>) => methodsRef.current.disconnect(...args),
     navigateTo: (...args: Parameters<typeof navigateTo>) => methodsRef.current.navigateTo(...args),
+    navigateBack: (...args: Parameters<typeof navigateBack>) => methodsRef.current.navigateBack(...args),
+    navigateForward: (...args: Parameters<typeof navigateForward>) => methodsRef.current.navigateForward(...args),
     navigateUp: (...args: Parameters<typeof navigateUp>) => methodsRef.current.navigateUp(...args),
     refresh: (...args: Parameters<typeof refresh>) => methodsRef.current.refresh(...args),
     openEntry: (...args: Parameters<typeof openEntry>) => methodsRef.current.openEntry(...args),

@@ -1167,6 +1167,8 @@ Vaults 分頁維持扁平，不使用這塊背景。
   'sftp.encoding.auto': '自動',
   'sftp.encoding.utf8': 'UTF-8',
   'sftp.encoding.gb18030': 'GB18030',
+  'sftp.goBack': '後退',
+  'sftp.goForward': '前進',
   'sftp.goHome': '返回主目錄',
   'sftp.goRoot': '回到根目錄',
   'sftp.folderName': '資料夾名稱',
