@@ -911,7 +911,11 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
             "Authentication failed. Please check your credentials and try again.",
           ),
         );
-        ctx.setAuthPassword("");
+        ctx.setAuthPassword(
+          ctx.host.savePassword !== false
+            ? (sanitizeCredentialValue(ctx.host.password) ?? "")
+            : "",
+        );
         ctx.setProgressLogs((prev) => [
           ...prev,
           tr("terminal.auth.retryLog", "Authentication failed. Please try again."),
