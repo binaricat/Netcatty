@@ -490,6 +490,17 @@ describe('handleVaultAgentOp vault hosts', () => {
       assert.deepEqual(await listIds({ group: 'prod/db//' }), ['h2']);
     });
 
+    it('normalizes the group filter like saved group paths', async () => {
+      assert.deepEqual(await listIds({ group: '/prod' }), ['h1', 'h2', 'h5']);
+      assert.deepEqual(await listIds({ group: '/prod/web/' }), ['h1']);
+      assert.deepEqual(await listIds({ group: 'prod / web' }), ['h1']);
+      assert.deepEqual(await listIds({ group: 'prod\\web' }), ['h1']);
+      assert.deepEqual(await listIds({ group: 'prod//db' }), ['h2']);
+      // Normalizing never widens a path-boundary match.
+      assert.deepEqual(await listIds({ group: '/production-old' }), ['h3']);
+      assert.deepEqual(await listIds({ group: '/prod/we' }), []);
+    });
+
     it('group is case-sensitive and ignores ungrouped hosts', async () => {
       assert.deepEqual(await listIds({ group: 'PROD' }), []);
       assert.equal((await listIds({ group: 'prod' })).includes('h4'), false);
@@ -527,6 +538,54 @@ describe('handleVaultAgentOp vault hosts', () => {
     it('returns an empty list, not an error, when nothing matches', async () => {
       const result = await handleVaultAgentOp('host.list', { query: 'zzz' }, createDeps({ hosts }));
       assert.deepEqual(result, { ok: true, hosts: [] });
+    });
+
+    describe('empty group results explain themselves', () => {
+      async function list(params: Record<string, unknown>, customGroups: string[] = []) {
+        const result = await handleVaultAgentOp('host.list', params, createDeps({ hosts, customGroups }));
+        assert.equal(result.ok, true);
+        return result as { ok: true; hosts: unknown[]; note?: string };
+      }
+
+      it('suggests the right case for a case-only mismatch', async () => {
+        const result = await list({ group: 'PROD' });
+        assert.deepEqual(result.hosts, []);
+        assert.equal(result.note, 'No group "PROD". Did you mean "prod"? Group names are case-sensitive.');
+        assert.equal(
+          (await list({ group: 'Prod/Web' })).note,
+          'No group "Prod/Web". Did you mean "prod/web"? Group names are case-sensitive.',
+        );
+      });
+
+      it('points to vault_groups_list for an unknown group', async () => {
+        const result = await list({ group: 'prd' });
+        assert.deepEqual(result.hosts, []);
+        assert.equal(result.note, 'No group "prd". Use vault_groups_list to see group names.');
+        // A path-boundary near miss is still unknown, not a subgroup match.
+        assert.equal((await list({ group: 'prod/we' })).note, 'No group "prod/we". Use vault_groups_list to see group names.');
+      });
+
+      it('says when a saved group has no hosts', async () => {
+        const result = await list({ group: '/staging/' }, ['staging']);
+        assert.deepEqual(result.hosts, []);
+        assert.equal(result.note, 'Group "staging" exists but has no hosts.');
+        // Saved subgroups make their parents known too.
+        assert.equal((await list({ group: 'qa' }, ['qa/api'])).note, 'Group "qa" exists but has no hosts.');
+      });
+
+      it('adds no note when hosts are found or the query causes the empty result', async () => {
+        assert.equal('note' in (await list({ group: 'prod' })), false);
+        assert.equal('note' in (await list({ group: 'prod', query: 'zzz' })), false);
+        assert.equal('note' in (await list({ query: 'zzz' })), false);
+        assert.equal('note' in (await list({})), false);
+      });
+
+      it('still explains an unknown group when a query is also given', async () => {
+        assert.equal(
+          (await list({ group: 'prd', query: 'root' })).note,
+          'No group "prd". Use vault_groups_list to see group names.',
+        );
+      });
     });
 
     it('combines query and group', async () => {
