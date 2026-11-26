@@ -41,6 +41,8 @@ test("builtin write methods match legacy mcpServerBridge write set", () => {
     "netcatty/sftp/chmod",
     "netcatty/jobStart",
     "netcatty/jobStop",
+    "netcatty/jobStartBulk",
+    "netcatty/jobStopBulk",
   ];
   assert.deepEqual(new Set(legacyWriteMethods), BUILTIN_WRITE_RPC_METHODS);
 });

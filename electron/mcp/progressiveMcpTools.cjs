@@ -28,6 +28,9 @@ const CORE_MCP_TOOL_NAMES = Object.freeze([
 const DEFERRED_MCP_TOOLSETS = Object.freeze({
   terminal_bulk: Object.freeze([
     "terminal_execute_bulk",
+    "terminal_start_bulk",
+    "terminal_poll_bulk",
+    "terminal_stop_bulk",
   ]),
   sessions: Object.freeze([
     "session_reconnect",

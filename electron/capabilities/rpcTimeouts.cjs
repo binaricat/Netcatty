@@ -36,7 +36,9 @@ function resolveRpcTimeoutMs(
     timeoutBufferMs = RPC_TIMEOUT_BUFFER_MS,
   } = {},
 ) {
-  const bulkExtraMs = getCapabilityByRpcMethod(method, surface)?.id === "terminal.executeBulk"
+  const capabilityId = getCapabilityByRpcMethod(method, surface)?.id;
+  // Bulk starts validate every target (shell probes) before anything runs.
+  const bulkExtraMs = capabilityId === "terminal.executeBulk" || capabilityId === "terminal.startBulk"
     ? BULK_EXEC_EXTRA_MS
     : 0;
   const operationTimeoutMs = isLongRunningRpcMethod(method, surface)

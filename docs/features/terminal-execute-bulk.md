@@ -3,7 +3,8 @@
 `terminal_execute_bulk` runs the same short command on 2–20 open terminal sessions and
 waits for all of them. It is available to MCP clients only (the in-app agents do not get it yet). Load it
 over MCP with `load_netcatty_tools` and the `terminal_bulk` toolset. For a single host use
-`terminal_execute`; fewer than 2 sessions is rejected.
+`terminal_execute`; fewer than 2 sessions is rejected. For long-running commands on many sessions use
+`terminal_start_bulk` (see [terminal-bulk-jobs.md](terminal-bulk-jobs.md)).
 
 ## Input
 

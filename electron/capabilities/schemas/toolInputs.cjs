@@ -32,6 +32,26 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "terminal.stop": {
     jobId: { type: "string", description: "The background job ID returned by terminal_start." },
   },
+  "terminal.startBulk": {
+    command: { type: "string", description: "The long-running command to start on every target session." },
+    sessionIds: {
+      type: "string",
+      description: "JSON array of 2-20 unique terminal session IDs, for example [\"s-1\",\"s-2\"]. Every ID must be connected and in scope, otherwise no job is started.",
+    },
+  },
+  "terminal.pollBulk": {
+    bulkId: { type: "string", optional: true, description: "The bulkId returned by terminal_start_bulk. Pass this or jobIds." },
+    jobIds: { type: "string", optional: true, description: "JSON array of 1-20 background job IDs to poll instead of a bulkId." },
+    offsets: {
+      type: "string",
+      optional: true,
+      description: "JSON object mapping jobId to the nextOffset from a previous poll, for example {\"job-a\":5120} (default 0).",
+    },
+  },
+  "terminal.stopBulk": {
+    bulkId: { type: "string", optional: true, description: "The bulkId returned by terminal_start_bulk. Pass this or jobIds." },
+    jobIds: { type: "string", optional: true, description: "JSON array of 1-20 background job IDs to stop instead of a bulkId." },
+  },
   "session.environment": {},
   "session.reconnect": {
     sessionId: { type: "string", description: "An existing disconnected terminal session ID in the current granted scope." },
@@ -440,6 +460,10 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
     "Use this instead of the local shell for long-running commands on a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes. Shell state such as cd or export does not persist between calls — combine cd with the command.",
   "terminal.poll":
     "Wait at least about 30 seconds between polls unless output justifies checking sooner.",
+  "terminal.startBulk":
+    "Call get_environment first and pass 2-20 unique sessionIds as a JSON array. All ids are checked before anything starts: if any id is out of scope, disconnected, busy or blocked by the safety policy, no job starts on any host. Each confirm-mode call needs a fresh user approval listing every host. Returns a bulkId and one jobId per host; poll and stop them with terminal_poll_bulk and terminal_stop_bulk. Jobs keep running if the agent run is stopped. For one session use terminal_start; for short commands use terminal_execute_bulk.",
+  "terminal.pollBulk":
+    "Pass each job's nextOffset in offsets to get only new output. Each job returns at most about 4 KB, less when many jobs are busy; when there is more, the newest output is returned and skippedChars says how much was skipped. Use terminal_poll on one job for its full output. allCompleted is true when no job is running. Wait at least about 30 seconds between polls unless output justifies checking sooner.",
   "vault.host.notes.get":
     "Host metadata notes on a saved host — not Vault → Notes sidebar entries.",
   "vault.host.notes.set":

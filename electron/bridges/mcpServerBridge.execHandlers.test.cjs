@@ -653,3 +653,38 @@ test("collapseCarriageReturns handles 256KB CR-heavy progress output in linear t
   assert.equal(collapsed, `header line\n${frames[frameCount - 1]}\nfinal frame`);
   assert.ok(elapsedMs < 500, `expected linear collapseCarriageReturns on 256KB+ payload, took ${elapsedMs}ms`);
 });
+
+// ── terminal_start_bulk support: preflightJobStart ──
+
+test("preflightJobStart accepts a shell PTY session without starting a job or typing", async () => {
+  const pty = new FakePty();
+  const backgroundJobs = new Map();
+  const ctx = createExecHandlerTestContext({ sessions: new Map([["pty", { protocol: "ssh", shellKind: "posix", stream: pty }]]), backgroundJobs });
+  ctx.checkCommandSafetyForShell = checkBlocklistForShell;
+  ctx.resolveSessionBlocklistShellKind = resolveSessionBlocklistShellKind;
+  const api = createExecHandlerApi(ctx);
+  assert.deepEqual(await api.preflightJobStart({ sessionId: "pty", command: "apt-get -y upgrade", chatSessionId: "chat" }), { ok: true });
+  assert.deepEqual(pty.writes, [], "preflight never types into the terminal");
+  assert.equal(backgroundJobs.size, 0, "preflight never creates a job");
+  assert.equal(ctx.activeSessionExecutions.size, 0, "preflight never reserves the session");
+});
+
+test("preflightJobStart reports the same refusals handleJobStart would give", async () => {
+  const sessions = new Map([
+    ["blocked", { protocol: "ssh", shellKind: "posix", stream: new FakePty() }],
+    ["channel-only", { protocol: "ssh", shellKind: "posix", conn: { exec() {} } }],
+    ["serial", { protocol: "serial", stream: { write() {} }, serialPort: { write() {} } }],
+    ["net", { protocol: "ssh", stream: new FakePty() }],
+  ]);
+  const api = createBulkExecContext(sessions, {
+    getSessionMeta: (sessionId) => (sessionId === "net" ? { deviceType: "network" } : {}),
+  });
+  const call = (sessionId, command = "uptime") => api.preflightJobStart({ sessionId, command, chatSessionId: "chat" });
+
+  assert.match((await call("blocked", "rm -rf /")).error, /^Command blocked by safety policy\. Pattern: /);
+  // terminal_execute can fall back to an exec channel; background jobs cannot.
+  assert.match((await call("channel-only")).error, /requires a writable PTY-backed terminal session/);
+  assert.match((await call("serial")).error, /supports shell-backed PTY sessions only/);
+  assert.match((await call("net")).error, /supports shell-backed PTY sessions only/);
+  assert.deepEqual(await call("ghost"), { ok: false, error: "Session not found" });
+});
