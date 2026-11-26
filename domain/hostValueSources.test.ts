@@ -51,6 +51,33 @@ test('valueSources reports username and auth method from the identity that appli
   assert.equal(sources.authMethod, 'group:prod/web');
 });
 
+test('valueSources reports an explicit empty value set by a child group', () => {
+  const configs: GroupConfig[] = [
+    { path: 'prod', startupCommand: 'parent-start', identityId: 'identity-1' },
+    { path: 'prod/web', startupCommand: '', identityId: '' },
+  ];
+  const sources = sourcesFor(makeHost({ group: 'prod/web' }), configs);
+
+  assert.equal(sources.startupCommand, 'group:prod/web');
+  assert.equal(sources.identityId, 'group:prod/web');
+});
+
+test('valueSources ignores a deleted identity for username and auth method', () => {
+  const configs: GroupConfig[] = [{ path: 'prod', identityId: 'deleted-identity' }];
+  const host = makeHost({ group: 'prod', username: 'root' });
+  const options = { validProxyProfileIds: new Set<string>(), globalProxyProfileId: '' };
+  const effective = applyGroupDefaults(host, resolveGroupDefaults('prod', configs, options), options);
+
+  const withoutIdentity = resolveHostValueSources(host, effective, configs, []);
+  assert.equal(withoutIdentity.identityId, 'group:prod');
+  assert.equal(withoutIdentity.username, 'host');
+
+  const withIdentity = resolveHostValueSources(host, effective, configs, [
+    { id: 'deleted-identity', label: 'deploy', username: 'deploy', authMethod: 'key', created: 1 },
+  ]);
+  assert.equal(withIdentity.username, 'group:prod');
+});
+
 test('valueSources reports every proxy source', () => {
   const configs: GroupConfig[] = [{ path: 'prod', proxyProfileId: 'group-proxy' }];
   const groupOneOff: GroupConfig[] = [{ path: 'prod', proxyConfig: { type: 'http', host: 'gw.example.com', port: 3128 } }];

@@ -716,7 +716,7 @@ export async function handleVaultAgentOp(
       return {
         ok: true,
         host: sanitizeHostForAgent(effectiveHost),
-        valueSources: resolveHostValueSources(host, effectiveHost, deps.getGroupConfigs()),
+        valueSources: resolveHostValueSources(host, effectiveHost, deps.getGroupConfigs(), deps.identities),
       };
     }
     case 'host.list': {

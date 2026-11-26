@@ -1,4 +1,4 @@
-import type { GroupConfig, Host } from './models';
+import type { GroupConfig, Host, Identity } from './models';
 
 /**
  * Where an effective host value comes from, so agents can tell a value set on
@@ -57,6 +57,7 @@ export function resolveHostValueSources(
   host: Host,
   effectiveHost: Host,
   groupConfigs: GroupConfig[],
+  identities?: Identity[],
 ): Record<string, HostValueSource> {
   const configByPath = new Map(groupConfigs.map((config) => [config.path, config]));
   const ancestors = ancestorPathsNearestFirst(host.group)
@@ -70,16 +71,19 @@ export function resolveHostValueSources(
       continue;
     }
     const effectiveValue = effectiveHost[key];
-    if (effectiveValue === undefined || effectiveValue === null || effectiveValue === '') continue;
-    const group = ancestors.find((config) => (
-      config[key] !== undefined && sameValue(config[key], effectiveValue)
-    ));
-    if (group) sources[field] = `group:${group.path}`;
+    if (effectiveValue === undefined || effectiveValue === null) continue;
+    // The nearest group that sets the key wins in resolveGroupDefaults. Report
+    // it when its value is the one that applies, including an explicit empty
+    // value that blocks a parent default.
+    const group = ancestors.find((config) => config[key] !== undefined);
+    if (group && sameValue(group[key], effectiveValue)) sources[field] = `group:${group.path}`;
   }
 
-  // resolveHostAuth logs in with the identity's username and method, so
-  // report them from wherever the identity comes from.
-  if (effectiveHost.identityId && sources.identityId) {
+  // resolveHostAuth logs in with the identity's username and method when the
+  // identity still exists, so report them from wherever the identity comes from.
+  const identityApplies = Boolean(effectiveHost.identityId)
+    && (!identities || identities.some((identity) => identity.id === effectiveHost.identityId));
+  if (identityApplies && sources.identityId) {
     sources.username = sources.identityId;
     sources.authMethod = sources.identityId;
   }
