@@ -27,6 +27,19 @@ import {
   resolveTerminalHibernateEnabled,
   resolveTerminalHibernateEnabledForProtocol,
 } from '../../domain/terminalHibernate';
+import {
+  hasCompanionRdp,
+  hasCompanionVnc,
+  isRemoteDesktopProtocol,
+  type RemoteDesktopProtocol,
+} from '../../domain/remoteDesktop';
+import {
+  createRemoteDesktopUploadedFile,
+  subscribeAddRemoteScreenToAI,
+  type RemoteDesktopScreenshotDraftPayload,
+} from '../ai/remoteDesktopAiDraft';
+import { canOpenCompanionRemoteDesktopSftp } from '../remoteDesktop/remoteDesktopHelpers';
+import { RdpProtocolIcon, VncProtocolIcon } from '../icons/RemoteDesktopIcons';
 import { KeyBinding, TerminalSettings } from '../../domain/models';
 import type { TerminalCwdChangeMeta } from '../terminal/sftpCwd';
 import { STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION } from '../../infrastructure/config/storageKeys';
@@ -63,6 +76,9 @@ export type SidePanelTab = SidePanelTool;
 
 const LazyAIChatSidePanel = lazy(() =>
   import('../AIChatSidePanel').then((module) => ({ default: module.AIChatSidePanel })),
+);
+const LazyRemoteDesktopPane = lazy(() =>
+  import('../remoteDesktop/RemoteDesktopPane').then((module) => ({ default: module.RemoteDesktopPane })),
 );
 
 if (typeof requestIdleCallback === 'function') {
@@ -136,6 +152,62 @@ export type PendingTerminalSelectionForAI = {
   tabId: string;
   text: string;
 };
+
+type RemoteDesktopAskAiHandler = (
+  sessionId: string,
+  payload: RemoteDesktopScreenshotDraftPayload | null,
+) => void;
+
+const EMPTY_SIDE_PANEL_OPEN_TABS: ReadonlyMap<string, SidePanelTab> = new Map();
+let remoteDesktopSidePanelOpenTabs: ReadonlyMap<string, SidePanelTab> = EMPTY_SIDE_PANEL_OPEN_TABS;
+let remoteDesktopAskAiHandler: RemoteDesktopAskAiHandler | null = null;
+const remoteDesktopLayerBridgeListeners = new Set<() => void>();
+const pendingRemoteScreenDraftQueue: RemoteDesktopScreenshotDraftPayload[] = [];
+
+export function publishRemoteDesktopLayerBridge(state: {
+  sidePanelOpenTabs: ReadonlyMap<string, SidePanelTab>;
+  onAddRemoteScreenToAI: RemoteDesktopAskAiHandler | null;
+}): void {
+  const tabsChanged = remoteDesktopSidePanelOpenTabs !== state.sidePanelOpenTabs;
+  const handlerChanged = remoteDesktopAskAiHandler !== state.onAddRemoteScreenToAI;
+  if (!tabsChanged && !handlerChanged) return;
+  remoteDesktopSidePanelOpenTabs = state.sidePanelOpenTabs;
+  remoteDesktopAskAiHandler = state.onAddRemoteScreenToAI;
+  for (const listener of remoteDesktopLayerBridgeListeners) {
+    listener();
+  }
+}
+
+export function enqueuePendingRemoteScreenForAI(
+  payload: RemoteDesktopScreenshotDraftPayload,
+): void {
+  pendingRemoteScreenDraftQueue.push(payload);
+  if (pendingRemoteScreenDraftQueue.length > 8) {
+    pendingRemoteScreenDraftQueue.shift();
+  }
+}
+
+function subscribeRemoteDesktopLayerBridge(listener: () => void): () => void {
+  remoteDesktopLayerBridgeListeners.add(listener);
+  return () => {
+    remoteDesktopLayerBridgeListeners.delete(listener);
+  };
+}
+
+function getRemoteDesktopSftpOpenForTab(tabId: string): boolean {
+  return remoteDesktopSidePanelOpenTabs.get(tabId) === 'sftp';
+}
+
+function getHasRemoteDesktopAskAiHandler(): boolean {
+  return remoteDesktopAskAiHandler !== null;
+}
+
+function invokeRemoteDesktopAskAi(
+  sessionId: string,
+  payload: RemoteDesktopScreenshotDraftPayload | null,
+): void {
+  remoteDesktopAskAiHandler?.(sessionId, payload);
+}
 
 export {
   adjustLightnessToken,
@@ -582,6 +654,54 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     updateDraft,
   ]);
 
+  // P2-AI: Attach full-screen or region-snip remote desktop screenshots to the tab's AI draft.
+  useEffect(() => {
+    const attachRemoteScreen = (payload: RemoteDesktopScreenshotDraftPayload): boolean => {
+      const targetTabId = payload.workspaceId || payload.sessionId;
+      const context = contextsByTabId.get(targetTabId) ?? contextsByTabId.get(payload.sessionId);
+      if (!context) return false;
+      const scopeKey = `${context.scopeType}:${context.scopeTargetId ?? ''}`;
+      const isSessionView =
+        panelViewByScope[scopeKey]?.mode === 'session'
+        || activeSessionIdMap[scopeKey] != null;
+      if (!isSessionView) {
+        showDraftView(scopeKey);
+      }
+      const uploaded = createRemoteDesktopUploadedFile(payload);
+      updateDraft(scopeKey, defaultAgentId, (draft) => ({
+        ...draft,
+        attachments: [...draft.attachments, uploaded],
+      }));
+      return true;
+    };
+
+    // Drain any screenshot queued right before the AI panel mounted on a fresh remote desktop tab.
+    if (pendingRemoteScreenDraftQueue.length > 0) {
+      const remaining: RemoteDesktopScreenshotDraftPayload[] = [];
+      for (const queued of pendingRemoteScreenDraftQueue) {
+        if (!attachRemoteScreen(queued)) {
+          remaining.push(queued);
+        }
+      }
+      pendingRemoteScreenDraftQueue.length = 0;
+      pendingRemoteScreenDraftQueue.push(...remaining);
+    }
+
+    return subscribeAddRemoteScreenToAI((payload) => {
+      if (attachRemoteScreen(payload)) {
+        const idx = pendingRemoteScreenDraftQueue.indexOf(payload);
+        if (idx >= 0) pendingRemoteScreenDraftQueue.splice(idx, 1);
+      }
+    });
+  }, [
+    activeSessionIdMap,
+    contextsByTabId,
+    defaultAgentId,
+    panelViewByScope,
+    showDraftView,
+    updateDraft,
+  ]);
+
   return (
     <>
       {mountedTabIds.map((tabId) => {
@@ -759,6 +879,12 @@ export interface TerminalLayerProps {
   ) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   onConnectToHost: (host: Host) => string | void;
+  onConnectRemoteDesktop?: (
+    host: Host,
+    protocol: RemoteDesktopProtocol,
+    options?: { splitFromSessionId?: string },
+  ) => string | null | void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
   onCreateLocalTerminal?: () => void;
   // Broadcast mode
   isBroadcastEnabled?: (workspaceId: string) => boolean;
@@ -871,6 +997,12 @@ interface TerminalPaneProps {
   onCommandSubmitted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
+  onConnectRemoteDesktop?: (
+    host: Host,
+    protocol: RemoteDesktopProtocol,
+    options?: { splitFromSessionId?: string },
+  ) => string | null | void;
+  onCopySessionToNewWindow?: (sessionId: string) => void;
   isBroadcastEnabled?: (workspaceId: string) => boolean;
   isComposeSendToAll?: (workspaceId: string) => boolean;
   isGlobalBroadcastEnabled?: boolean;
@@ -925,8 +1057,11 @@ const getPaneRenderedWorkspaceRect = (props: Pick<TerminalPaneProps, 'session' |
   if (!workspaceId) return null;
   const workspace = props.workspaceById.get(workspaceId);
   if (!workspace) return null;
-  if (resolveTerminalHibernateEnabledForProtocol(props.terminalSettings, props.host.protocol)
-    && activeTabStore.getActiveTabId() !== workspaceId) {
+  if (
+    !isRemoteDesktopProtocol(props.session.protocol)
+    && resolveTerminalHibernateEnabledForProtocol(props.terminalSettings, props.host.protocol)
+    && activeTabStore.getActiveTabId() !== workspaceId
+  ) {
     return null;
   }
   if (workspace.viewMode === 'focus' && workspace.focusedSessionId === props.session.id) {
@@ -1004,6 +1139,8 @@ const terminalPanePropsAreEqual = (
   prev.onCommandSubmitted === next.onCommandSubmitted &&
   prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
   prev.onSplitSession === next.onSplitSession &&
+  prev.onConnectRemoteDesktop === next.onConnectRemoteDesktop &&
+  prev.onCopySessionToNewWindow === next.onCopySessionToNewWindow &&
   prev.isBroadcastEnabled === next.isBroadcastEnabled &&
   prev.isComposeSendToAll === next.isComposeSendToAll &&
   prev.isGlobalBroadcastEnabled === next.isGlobalBroadcastEnabled &&
@@ -1298,6 +1435,8 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   onCommandSubmitted,
   onSetWorkspaceFocusedSession,
   onSplitSession,
+  onConnectRemoteDesktop,
+  onCopySessionToNewWindow,
   isBroadcastEnabled,
   isComposeSendToAll,
   isGlobalBroadcastEnabled,
@@ -1355,10 +1494,12 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     setPaneVisible(session.id, isVisible);
   }, [session.id, isVisible]);
   useEffect(() => () => removePaneVisible(session.id), [session.id]);
+  const isRemoteDesktop = isRemoteDesktopProtocol(session.protocol);
   const inActiveWorkspace = !!activeWorkspaceId;
   const isFocusMode = paneState.mode === 'focus';
   const isSplitViewVisible = paneState.mode === 'split';
-  const hibernateHiddenTabs = resolveTerminalHibernateEnabledForProtocol(terminalSettings, host.protocol);
+  const hibernateHiddenTabs = !isRemoteDesktop
+    && resolveTerminalHibernateEnabledForProtocol(terminalSettings, host.protocol);
   const layoutWorkspaceId = activeWorkspaceId ?? (!hibernateHiddenTabs ? session.workspaceId : undefined);
   const layoutWorkspace = layoutWorkspaceId ? workspaceById.get(layoutWorkspaceId) : undefined;
   const keepsWorkspacePresentation = !!layoutWorkspace;
@@ -1635,6 +1776,43 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     onTerminalFontSizeChange?.(session.id, nextFontSize);
   }, [onTerminalFontSizeChange, session.id]);
 
+  const companionVnc = !isRemoteDesktop && hasCompanionVnc(host);
+  const companionRdp = !isRemoteDesktop && hasCompanionRdp(host);
+  const showCompanionQuickActions = Boolean(
+    onConnectRemoteDesktop && (companionVnc || companionRdp) && isVisible && session.status === 'connected',
+  );
+  const remoteDesktopTabId = activeWorkspaceId ?? session.id;
+  const subscribeRemoteDesktopBridge = useCallback(
+    (listener: () => void) => (isRemoteDesktop ? subscribeRemoteDesktopLayerBridge(listener) : () => {}),
+    [isRemoteDesktop],
+  );
+  const isRemoteDesktopSftpOpen = useSyncExternalStore(
+    subscribeRemoteDesktopBridge,
+    () => (isRemoteDesktop ? getRemoteDesktopSftpOpenForTab(remoteDesktopTabId) : false),
+    () => false,
+  );
+  const hasRemoteDesktopAskAi = useSyncExternalStore(
+    subscribeRemoteDesktopBridge,
+    () => (isRemoteDesktop ? getHasRemoteDesktopAskAiHandler() : false),
+    () => false,
+  );
+  const canOpenCompanionSftp = isRemoteDesktop && canOpenCompanionRemoteDesktopSftp(session, host);
+  const handleOpenCompanionSftp = useCallback(() => {
+    onOpenSftp(host, undefined, undefined, session.id);
+  }, [host, onOpenSftp, session.id]);
+  const handleRemoteDesktopAskAi = useCallback(
+    (payload: RemoteDesktopScreenshotDraftPayload | null) => {
+      invokeRemoteDesktopAskAi(session.id, payload);
+    },
+    [session.id],
+  );
+  const handleRemoteDesktopStatusChange = useCallback(
+    (sid: string, nextStatus: 'connecting' | 'connected' | 'disconnected') => {
+      onStatusChange(sid, nextStatus);
+    },
+    [onStatusChange],
+  );
+
   return (
     <div
       ref={paneElementRef}
@@ -1659,7 +1837,70 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       onClick={handlePaneClick}
       onFocusCapture={handlePaneClick}
     >
-      <Terminal
+      {isRemoteDesktop && isRemoteDesktopProtocol(session.protocol) ? (
+        <LazyLoadBoundary name="Remote desktop" resetKey={session.id}>
+          <Suspense fallback={<div className="h-full w-full bg-black" aria-hidden="true" />}>
+            <LazyRemoteDesktopPane
+              sessionId={session.id}
+              workspaceId={session.workspaceId}
+              protocol={session.protocol}
+              host={host}
+              chainHosts={chainHosts}
+              keys={keys}
+              identities={identities}
+              knownHosts={knownHosts}
+              isVisible={isVisible}
+              isFocused={isFocusedPane}
+              inWorkspace={keepsWorkspacePresentation}
+              onStatusChange={handleRemoteDesktopStatusChange}
+              onCloseSession={onCloseSession}
+              onPopOut={onCopySessionToNewWindow}
+              onOpenSftp={canOpenCompanionSftp ? handleOpenCompanionSftp : undefined}
+              isSftpOpen={canOpenCompanionSftp ? isRemoteDesktopSftpOpen : false}
+              onAskAi={hasRemoteDesktopAskAi ? handleRemoteDesktopAskAi : undefined}
+              onTerminalDataCapture={onTerminalDataCapture}
+            />
+          </Suspense>
+        </LazyLoadBoundary>
+      ) : (
+        <>
+          {showCompanionQuickActions && (
+            <div
+              className="pointer-events-auto absolute right-2 top-1.5 z-20 flex items-center gap-1 opacity-45 transition-opacity hover:opacity-100"
+              data-section="ssh-companion-desktop-actions"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {companionRdp && (
+                <button
+                  type="button"
+                  className="inline-flex h-6 items-center gap-1 rounded-md border border-blue-500/30 bg-background/90 px-1.5 text-[10px] font-semibold text-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-blue-500/15 hover:border-blue-500/50"
+                  title="Open RDP in split pane"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onConnectRemoteDesktop?.(host, 'rdp', { splitFromSessionId: session.id });
+                  }}
+                >
+                  <RdpProtocolIcon size={12} className="text-blue-500" />
+                  <span>RDP</span>
+                </button>
+              )}
+              {companionVnc && (
+                <button
+                  type="button"
+                  className="inline-flex h-6 items-center gap-1 rounded-md border border-teal-500/30 bg-background/90 px-1.5 text-[10px] font-semibold text-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-teal-500/15 hover:border-teal-500/50"
+                  title="Open VNC in split pane"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onConnectRemoteDesktop?.(host, 'vnc', { splitFromSessionId: session.id });
+                  }}
+                >
+                  <VncProtocolIcon size={12} className="text-teal-500" />
+                  <span>VNC</span>
+                </button>
+              )}
+            </div>
+          )}
+          <Terminal
         host={host}
         keys={keys}
         identities={identities}
@@ -1753,6 +1994,8 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         onDetachDragStart={inActiveWorkspace ? handleDetachDragStart : undefined}
         onDetachDragEnd={inActiveWorkspace ? handleDetachDragEnd : undefined}
       />
+        </>
+      )}
     </div>
   );
 }, terminalPanePropsAreEqual);
@@ -1823,6 +2066,12 @@ interface TerminalPanesHostProps {
   onCommandSubmitted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
+  onConnectRemoteDesktop?: (
+    host: Host,
+    protocol: RemoteDesktopProtocol,
+    options?: { splitFromSessionId?: string },
+  ) => string | null | void;
+  onCopySessionToNewWindow?: (sessionId: string) => void;
   isBroadcastEnabled?: (workspaceId: string) => boolean;
   isComposeSendToAll?: (workspaceId: string) => boolean;
   isGlobalBroadcastEnabled?: boolean;
@@ -1918,6 +2167,8 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.onCommandSubmitted !== next.onCommandSubmitted) return false;
   if (prev.onSetWorkspaceFocusedSession !== next.onSetWorkspaceFocusedSession) return false;
   if (prev.onSplitSession !== next.onSplitSession) return false;
+  if (prev.onConnectRemoteDesktop !== next.onConnectRemoteDesktop) return false;
+  if (prev.onCopySessionToNewWindow !== next.onCopySessionToNewWindow) return false;
   if (prev.isBroadcastEnabled !== next.isBroadcastEnabled) return false;
   if (prev.isComposeSendToAll !== next.isComposeSendToAll) return false;
   if (prev.isGlobalBroadcastEnabled !== next.isGlobalBroadcastEnabled) return false;
@@ -1951,10 +2202,12 @@ const terminalPanesHostPropsAreEqual = (
   const activeWorkspace = activeTabId ? next.workspaceById.get(activeTabId) : undefined;
 
   return prev.sessions.every((session) => {
-    const isLocalTerminal = next.sessionHostsMap.get(session.id)?.protocol === 'local';
+    const isLocalOrRemoteDesktop =
+      next.sessionHostsMap.get(session.id)?.protocol === 'local'
+      || isRemoteDesktopProtocol(session.protocol);
     const isInVisibleSplitWorkspace = activeWorkspace?.viewMode !== 'focus'
       && session.workspaceId === activeWorkspace?.id;
-    if (!isLocalTerminal && !isInVisibleSplitWorkspace) return true;
+    if (!isLocalOrRemoteDesktop && !isInVisibleSplitWorkspace) return true;
     return workspaceRectsEqual(
       getPaneWorkspaceRect({ session, workspaceRectsById: prev.workspaceRectsById }),
       getPaneWorkspaceRect({ session, workspaceRectsById: next.workspaceRectsById }),

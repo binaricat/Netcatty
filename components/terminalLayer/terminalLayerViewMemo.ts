@@ -426,6 +426,8 @@ const WORKSPACE_CTX_KEYS = [
   'onSetWorkspaceFocusedSession',
   'onSetWorkspaceAnchorChat',
   'onSplitSession',
+  'onConnectRemoteDesktop',
+  'onCopySessionToNewWindow',
   'isBroadcastEnabled',
   'isComposeSendToAll',
   'onToggleComposeSendTarget',

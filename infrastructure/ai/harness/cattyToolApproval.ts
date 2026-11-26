@@ -1,7 +1,11 @@
 import type { ToolApprovalConfiguration } from 'ai';
+import { findHighRiskRemoteDesktopActionsFromInput } from '../../../domain/remoteDesktopActionCodec';
 import type { AIPermissionMode } from '../types';
 import { requestApproval as defaultRequestApproval } from '../shared/approvalGate';
-import { resolveCapabilityId } from './permissionGrants';
+import {
+  HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID,
+  resolveCapabilityId,
+} from './permissionGrants';
 import cattyToolSpecs from './generated/cattyToolSpecs.json';
 
 type CattyToolPolicySpec = {
@@ -45,18 +49,28 @@ export function buildCattyToolApproval(input: {
       return { type: 'denied' as const, reason: 'Observer mode blocks write operations.' };
     }
 
-    if (!needsUserApproval(toolCall.toolName, permissionMode)) {
+    const args = (toolCall.input ?? {}) as Record<string, unknown>;
+    const isRemoteDesktopAct =
+      toolCall.toolName === 'remote_desktop_act'
+      || spec.capabilityId === 'harness.remote_desktop.act';
+    const highRiskMatches = isRemoteDesktopAct
+      ? findHighRiskRemoteDesktopActionsFromInput(args)
+      : [];
+    const requiresFreshHighRiskApproval = highRiskMatches.length > 0;
+
+    if (!requiresFreshHighRiskApproval && !needsUserApproval(toolCall.toolName, permissionMode)) {
       return undefined;
     }
 
-    const args = (toolCall.input ?? {}) as Record<string, unknown>;
     const approved = await requestApproval(
       toolCall.toolCallId,
       toolCall.toolName,
       args,
       chatSessionId,
       undefined,
-      spec.capabilityId ?? resolveCapabilityId(toolCall.toolName),
+      requiresFreshHighRiskApproval
+        ? HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID
+        : (spec.capabilityId ?? resolveCapabilityId(toolCall.toolName)),
     );
 
     if (approved) {

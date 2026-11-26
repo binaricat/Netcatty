@@ -1,4 +1,6 @@
-import type { Host } from "./models";
+import type { Host, RdpConfig, VncConfig } from "./models";
+import { parsedRdpFileToRdpConfig, parseRdpFile } from "./rdpFileParser";
+import { buildStandaloneRdpHost, buildStandaloneVncHost } from "./remoteDesktop";
 
 export interface JmsDeepLinkTarget {
   protocol: string;
@@ -7,6 +9,13 @@ export interface JmsDeepLinkTarget {
   username: string;
   password: string;
   label: string;
+  domain?: string;
+  rdpConfig?: RdpConfig;
+  vncConfig?: VncConfig;
+  /** Raw `.rdp` content from JumpServer v4 embedded file payloads (for System RDP Client mode). */
+  rawRdpFileContent?: string;
+  /** Original `.rdp` filename from JumpServer v4 embedded file payloads. */
+  rawRdpFileName?: string;
 }
 
 export type JmsDeepLinkParseResult =
@@ -60,7 +69,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 export const isSupportedJmsProtocol = (protocol: string): boolean => {
   const normalized = protocol.toLowerCase();
-  return normalized === "ssh" || normalized === "sftp" || normalized === "telnet";
+  return (
+    normalized === "ssh"
+    || normalized === "sftp"
+    || normalized === "telnet"
+    || normalized === "rdp"
+    || normalized === "vnc"
+  );
 };
 
 const parseJmsPayload = (rawUrl: string): Record<string, unknown> | null => {
@@ -85,10 +100,53 @@ const parseJmsPayload = (rawUrl: string): Record<string, unknown> | null => {
   return parsed;
 };
 
+const extractEmbeddedRdpTarget = (
+  payload: Record<string, unknown>,
+): JmsDeepLinkTarget | null => {
+  const file = isRecord(payload.file) ? payload.file : undefined;
+  const rawContent = typeof file?.content === "string" ? file.content : "";
+  if (!rawContent.trim()) return null;
+
+  const parsed = parseRdpFile(rawContent);
+  if (!parsed.hostname) return null;
+
+  const token = isRecord(payload.token) ? payload.token : undefined;
+  const tokenId = nonEmptyString(token?.id ?? payload.id);
+  const tokenValue = nonEmptyString(token?.value ?? payload.value);
+  const asset = isRecord(payload.asset) ? payload.asset : undefined;
+  const fileName = nonEmptyString(file?.name);
+  const fileBaseName = fileName?.replace(/\.rdp$/i, "").trim() || null;
+
+  const label = nonEmptyString(asset?.name)
+    || nonEmptyString(payload.name)
+    || fileBaseName
+    || parsed.hostname;
+  const username = parsed.username || (tokenId ? `JMS-${tokenId}` : "");
+  const rdpConfig = parsedRdpFileToRdpConfig(parsed);
+
+  return {
+    protocol: "rdp",
+    hostname: parsed.hostname,
+    port: parsed.port,
+    username,
+    password: tokenValue ?? "",
+    label,
+    ...(parsed.domain ? { domain: parsed.domain } : {}),
+    rdpConfig,
+    rawRdpFileContent: rawContent,
+    ...(fileName ? { rawRdpFileName: fileName } : {}),
+  };
+};
+
 const extractJmsTarget = (
   payload: Record<string, unknown>,
   protocol: string,
 ): JmsDeepLinkTarget | null => {
+  if (protocol === "rdp") {
+    const embedded = extractEmbeddedRdpTarget(payload);
+    if (embedded) return embedded;
+  }
+
   const token = isRecord(payload.token) ? payload.token : undefined;
   const tokenId = nonEmptyString(token?.id ?? payload.id);
   const tokenValue = nonEmptyString(token?.value ?? payload.value);
@@ -96,7 +154,12 @@ const extractJmsTarget = (
 
   const endpoint = isRecord(payload.endpoint) ? payload.endpoint : undefined;
   const hostname = nonEmptyString(endpoint?.host);
-  const port = parsePort(endpoint?.port);
+  const rawPort = protocol === "rdp"
+    ? (endpoint?.port ?? endpoint?.rdp_port)
+    : protocol === "vnc"
+      ? (endpoint?.port ?? endpoint?.vnc_port)
+      : endpoint?.port;
+  const port = parsePort(rawPort);
   if (!hostname || port === null) return null;
 
   const asset = isRecord(payload.asset) ? payload.asset : undefined;
@@ -143,6 +206,40 @@ export const buildJmsDeepLinkEphemeralHost = (
   target: JmsDeepLinkTarget,
   options: JmsDeepLinkDraftOptions,
 ): Host => {
+  const normalizedProtocol = target.protocol.toLowerCase();
+
+  if (normalizedProtocol === "rdp") {
+    return buildStandaloneRdpHost({
+      id: options.id,
+      label: target.label,
+      hostname: target.hostname,
+      port: target.port,
+      username: target.username,
+      password: target.password || undefined,
+      savePassword: false,
+      ephemeral: true,
+      createdAt: options.now,
+      rdpConfig: target.rdpConfig
+        ? { ...target.rdpConfig, ...(target.domain ? { domain: target.domain } : {}) }
+        : { port: target.port, ...(target.domain ? { domain: target.domain } : {}) },
+    });
+  }
+
+  if (normalizedProtocol === "vnc") {
+    return buildStandaloneVncHost({
+      id: options.id,
+      label: target.label,
+      hostname: target.hostname,
+      port: target.port,
+      username: target.username,
+      password: target.password || undefined,
+      savePassword: false,
+      ephemeral: true,
+      createdAt: options.now,
+      vncConfig: target.vncConfig ? { ...target.vncConfig } : { port: target.port },
+    });
+  }
+
   return {
     id: options.id,
     label: target.label,
@@ -156,7 +253,7 @@ export const buildJmsDeepLinkEphemeralHost = (
     protocol: "ssh",
     // JumpServer sftp payloads target file transfer: connect the gateway
     // shell and surface Netcatty's SFTP side panel for that session.
-    ...(target.protocol === "sftp" ? { autoOpenSftpPanel: true } : {}),
+    ...(normalizedProtocol === "sftp" ? { autoOpenSftpPanel: true } : {}),
     group: "",
     tags: [],
     os: "linux",

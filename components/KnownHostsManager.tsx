@@ -56,6 +56,15 @@ import {
 import { VaultDeleteConfirmDialog } from "./vault/VaultDeleteConfirmDialog";
 import { VaultEntityIcon, vaultPrimaryIconClass } from "./vault/VaultEntityIcon";
 import { useVaultItemReorder } from "./vault/vaultReorderDrag";
+import { RemoteDesktopCertList } from "./vault/RemoteDesktopCertList";
+import {
+  clearAllKnownRemoteDesktopCerts,
+  listKnownRemoteDesktopCerts,
+  removeKnownRemoteDesktopCertByKey,
+  subscribeKnownRemoteDesktopCerts,
+  type KnownRemoteDesktopCertEntry,
+} from "./remoteDesktop/knownRemoteDesktopCerts";
+import { formatHostPort } from "../domain/host";
 
 interface KnownHostsManagerProps {
   knownHosts: KnownHost[];
@@ -315,8 +324,46 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
   const { readKnownHosts } = useKnownHostsBackend();
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
+  const [activeTab, setActiveTab] = useState<"ssh" | "certs">("ssh");
+  const [remoteCerts, setRemoteCerts] = useState<KnownRemoteDesktopCertEntry[]>(() =>
+    listKnownRemoteDesktopCerts(),
+  );
+  const [revokeCertTarget, setRevokeCertTarget] = useState<KnownRemoteDesktopCertEntry | null>(null);
+  const [clearAllCertsOpen, setClearAllCertsOpen] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setRemoteCerts(listKnownRemoteDesktopCerts());
+    return subscribeKnownRemoteDesktopCerts(() => {
+      setRemoteCerts(listKnownRemoteDesktopCerts());
+    });
+  }, []);
+
+  const handleConfirmRevokeCert = useCallback(() => {
+    if (!revokeCertTarget) return;
+    const removed = removeKnownRemoteDesktopCertByKey(revokeCertTarget.key);
+    setRemoteCerts(listKnownRemoteDesktopCerts());
+    if (removed) {
+      toast.success(
+        t("knownHosts.certs.toast.revoked"),
+        formatHostPort(revokeCertTarget.host, revokeCertTarget.port),
+      );
+    }
+    setRevokeCertTarget(null);
+  }, [revokeCertTarget, t]);
+
+  const handleConfirmClearAllCerts = useCallback(() => {
+    const count = clearAllKnownRemoteDesktopCerts();
+    setRemoteCerts(listKnownRemoteDesktopCerts());
+    if (count > 0) {
+      toast.success(
+        t("knownHosts.certs.toast.clearedAll", { count }),
+        t("vault.nav.knownHosts"),
+      );
+    }
+    setClearAllCertsOpen(false);
+  }, [t]);
   const [viewMode, setViewMode] = useStoredViewMode(
     STORAGE_KEY_VAULT_KNOWN_HOSTS_VIEW_MODE,
     "grid",
@@ -625,39 +672,111 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
           />
         </div>
         <div className="w-px h-5 bg-border/50" />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="secondary"
-            className={vaultHeaderSecondaryButtonClass}
-            onClick={() => handleScanSystem()}
-            disabled={isScanning}
-          >
-            <RefreshCw
-              size={14}
-              className={cn("mr-2", isScanning && "animate-spin")}
+        {activeTab === "ssh" ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              className={vaultHeaderSecondaryButtonClass}
+              onClick={() => handleScanSystem()}
+              disabled={isScanning}
+            >
+              <RefreshCw
+                size={14}
+                className={cn("mr-2", isScanning && "animate-spin")}
+              />
+              {t("knownHosts.action.scanSystem")}
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,known_hosts"
+              className="hidden"
+              onChange={handleFileSelect}
             />
-            {t("knownHosts.action.scanSystem")}
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".txt,known_hosts"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-          <Button
-            variant="secondary"
-            className={vaultHeaderSecondaryButtonClass}
-            onClick={openFilePicker}
-          >
-            <Import size={14} className="mr-2" />
-            {t("knownHosts.action.importFile")}
-          </Button>
-        </div>
+            <Button
+              variant="secondary"
+              className={vaultHeaderSecondaryButtonClass}
+              onClick={openFilePicker}
+            >
+              <Import size={14} className="mr-2" />
+              {t("knownHosts.action.importFile")}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              className={cn(
+                vaultHeaderSecondaryButtonClass,
+                "text-destructive hover:text-destructive hover:bg-destructive/10",
+              )}
+              onClick={() => setClearAllCertsOpen(true)}
+              disabled={remoteCerts.length === 0}
+            >
+              <Trash2 size={14} className="mr-2" />
+              {t("knownHosts.certs.clearAll")}
+            </Button>
+          </div>
+        )}
       </VaultPageHeader>
+
+      {/* Segmented Tab Strip: SSH Host Keys | Remote Desktop Certificates */}
+      <div className="px-4 py-2 border-b border-border/50 bg-background/60 shrink-0">
+        <div
+          role="tablist"
+          aria-label={t("vault.nav.knownHosts")}
+          className="inline-flex items-center rounded-lg bg-secondary/70 p-0.5 gap-0.5"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "ssh"}
+            data-known-hosts-tab="ssh"
+            onClick={() => setActiveTab("ssh")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+              activeTab === "ssh"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span>{t("knownHosts.tabs.ssh")}</span>
+            <span className="rounded-full bg-secondary px-1.5 py-0 text-[10px] tabular-nums text-muted-foreground">
+              {filteredHosts.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "certs"}
+            data-known-hosts-tab="certs"
+            onClick={() => setActiveTab("certs")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+              activeTab === "certs"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <span>{t("knownHosts.tabs.remoteDesktopCerts")}</span>
+            <span className="rounded-full bg-secondary px-1.5 py-0 text-[10px] tabular-nums text-muted-foreground">
+              {remoteCerts.length}
+            </span>
+          </button>
+        </div>
+      </div>
 
       {/* Content */}
       <ScrollArea className="flex-1">
+        {activeTab === "certs" ? (
+          <RemoteDesktopCertList
+            certs={remoteCerts}
+            search={deferredSearch}
+            viewMode={viewMode}
+            sortMode={sortMode}
+            onRequestRevoke={setRevokeCertTarget}
+          />
+        ) : (
         <div
           ref={listRef}
           className={cn(
@@ -724,6 +843,7 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
             </>
           )}
         </div>
+        )}
       </ScrollArea>
       <VaultDeleteConfirmDialog
         open={Boolean(deleteTargetId)}
@@ -735,6 +855,28 @@ const KnownHostsManager: React.FC<KnownHostsManagerProps> = ({
           if (!open) setDeleteTargetId(null);
         }}
         onConfirm={confirmDelete}
+      />
+      <VaultDeleteConfirmDialog
+        open={Boolean(revokeCertTarget)}
+        title={t("knownHosts.certs.revokeConfirm.title", {
+          endpoint: revokeCertTarget
+            ? formatHostPort(revokeCertTarget.host, revokeCertTarget.port)
+            : "",
+        })}
+        description={t("knownHosts.certs.revokeConfirm.desc")}
+        confirmLabel={t("knownHosts.certs.action.revoke")}
+        onOpenChange={(open) => {
+          if (!open) setRevokeCertTarget(null);
+        }}
+        onConfirm={handleConfirmRevokeCert}
+      />
+      <VaultDeleteConfirmDialog
+        open={clearAllCertsOpen}
+        title={t("knownHosts.certs.clearAllConfirm.title")}
+        description={t("knownHosts.certs.clearAllConfirm.desc", { count: remoteCerts.length })}
+        confirmLabel={t("knownHosts.certs.clearAll")}
+        onOpenChange={setClearAllCertsOpen}
+        onConfirm={handleConfirmClearAllCerts}
       />
     </div>
   );

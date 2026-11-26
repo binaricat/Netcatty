@@ -116,6 +116,7 @@ const NOT_SENT_PATTERNS = [
   /^Network device session has no writable PTY stream/,
   /^Serial file transfer is already in progress/,
   /^AI execution is not supported/,
+  /^Remote desktop \((?:VNC|RDP)\) sessions /,
   /^Another Netcatty command is already running/,
 ];
 const TIMEOUT_PATTERN = /timed out/i;
@@ -318,8 +319,13 @@ function createBulkTargetGuards(deps) {
     if (includePendingWrite && pendingSessionWriteApprovals.has(sessionId)) {
       return fail("Session already has another command request awaiting approval or startup. Wait for it to finish before starting a new command.");
     }
-    const hasMainSession = Boolean(getSessions()?.get?.(sessionId));
+    const mainSession = getSessions()?.get?.(sessionId);
+    const hasMainSession = Boolean(mainSession);
     const meta = getSessionMeta(sessionId, ctx.chatSessionId);
+    const sessionProtocol = String(mainSession?.protocol || mainSession?.type || meta?.protocol || "").toLowerCase();
+    if (sessionProtocol === "vnc" || sessionProtocol === "rdp") {
+      return fail(`Remote desktop (${sessionProtocol.toUpperCase()}) sessions do not support terminal command execution.`);
+    }
     if (!hasMainSession && !meta) return fail("Session not found");
     // A live main-process session is connected by definition; its metadata snapshot
     // can be stale. Only worker-hosted sessions rely on the metadata flag.

@@ -31,6 +31,7 @@ import { toast } from "../ui/toast";
 import { AppWordmark } from "../AppWordmark";
 import { openHostBrowser } from "../../application/hostBrowser";
 import { PluginVaultNavigation, PluginVaultPage } from '../plugins/PluginVaultPages';
+import { RdpProtocolIcon, VncProtocolIcon } from "../icons/RemoteDesktopIcons";
 
 type VaultViewLayoutContext = Record<string, any>;
 
@@ -304,6 +305,8 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     handleHostConnect,
     handleImportFileSelected,
     handleNewHost,
+    handleNewRdpHost,
+    handleNewVncHost,
     handleNewLocalShellHost,
     handleCancelLocalShellHost,
     handleSaveLocalShellHost,
@@ -354,13 +357,16 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     Network,
     newFolderName,
     newHostGroupPath,
+    newHostProtocol,
     onConnect,
+    onConnectRemoteDesktop,
     onConnectSerial,
     onCreateLocalTerminal,
     onDeleteHost,
     onImportOrReuseKey,
     onOpenLogView,
     onOpenSettings,
+    onOpenSystemRemoteDesktop,
     onRunSnippet,
     onUpdateCustomGroups,
     onUpdateGroupConfigs,
@@ -1093,6 +1099,26 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                   <DropdownContent className="flex w-max min-w-44 flex-col" align="end" alignToParent>
                     <Button
                       variant="ghost"
+                      className="justify-start gap-2.5"
+                      onClick={handleNewRdpHost}
+                    >
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-blue-500/12 text-blue-500">
+                        <RdpProtocolIcon size={13} />
+                      </span>
+                      {t("vault.hosts.newRdpHost")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="justify-start gap-2.5"
+                      onClick={handleNewVncHost}
+                    >
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-teal-500/12 text-teal-500">
+                        <VncProtocolIcon size={13} />
+                      </span>
+                      {t("vault.hosts.newVncHost")}
+                    </Button>
+                    <Button
+                      variant="ghost"
                       className="justify-start gap-2"
                       onClick={handleNewLocalShellHost}
                     >
@@ -1320,7 +1346,9 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 moveGroup,
                 moveHostToGroup,
                 moveHostsToGroup,
+                onConnectRemoteDesktop,
                 onDeleteHost,
+                onOpenSystemRemoteDesktop,
                 Pin,
                 pinnedHosts,
                 pinnedRecentIds,
@@ -1580,9 +1608,14 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             isHostPanelOpen &&
             editingHost?.protocol !== "serial" && (
               <HostDetailsPanel
+                key={editingHost?.id ?? `new-${newHostProtocol || "ssh"}`}
                 initialData={editingHost}
+                initialProtocol={editingHost ? undefined : newHostProtocol}
                 availableKeys={keys}
                 identities={identities}
+                onCreateIdentity={(identity) =>
+                  onUpdateIdentities([...identities, identity])
+                }
                 proxyProfiles={proxyProfiles}
                 groups={allGroupPaths}
                 managedSources={managedSources}

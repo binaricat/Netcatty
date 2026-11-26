@@ -5,10 +5,15 @@ import { addLogView, getLogViewTabId, removeLogView, type LogView } from './logV
 import {
   createHostTerminalSession,
   createLocalTerminalSession,
+  createRemoteDesktopSession,
   createSerialTerminalSession,
   createWorkspaceHostTerminalSession,
   type LocalTerminalOptions,
 } from './sessionFactories';
+import {
+  isRemoteDesktopProtocol,
+  type RemoteDesktopProtocol,
+} from '../../domain/remoteDesktop';
 import { isScriptSnippet } from '../../domain/snippetScript.ts';
 import {
 appendPaneToWorkspaceRoot,
@@ -57,7 +62,40 @@ import {
   LOCAL_STORAGE_ADAPTER_CHANGED_EVENT,
   localStorageAdapter,
 } from '../../infrastructure/persistence/localStorageAdapter';
-import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
+import {
+  netcattyBridge,
+  type RemoteDesktopBridgeApi,
+  type RemoteDesktopCertDecisionValue,
+  type RemoteDesktopCertVerifyEvent,
+  type RemoteDesktopLocalDisplay,
+  type RemoteDesktopOpenSystemClientOptions,
+  type RemoteDesktopRdpdrDriveConfig,
+  type RemoteDesktopRdpdrPickFolderResult,
+  type RemoteDesktopRdpdrRegisterDrivesResult,
+  type RemoteDesktopRdpdrRequest,
+  type RemoteDesktopRdpdrResponse,
+  type RemoteDesktopStartOptions,
+  type RemoteDesktopStatsEvent,
+} from '../../infrastructure/services/netcattyBridge';
+
+export type {
+  RemoteDesktopBridgeApi,
+  RemoteDesktopCertDecisionValue,
+  RemoteDesktopCertVerifyEvent,
+  RemoteDesktopLocalDisplay,
+  RemoteDesktopOpenSystemClientOptions,
+  RemoteDesktopRdpdrDriveConfig,
+  RemoteDesktopRdpdrPickFolderResult,
+  RemoteDesktopRdpdrRegisterDrivesResult,
+  RemoteDesktopRdpdrRequest,
+  RemoteDesktopRdpdrResponse,
+  RemoteDesktopStartOptions,
+  RemoteDesktopStatsEvent,
+};
+
+export function getRemoteDesktopBridge(): RemoteDesktopBridgeApi | undefined {
+  return netcattyBridge.get()?.remoteDesktop;
+}
 import { sessionRestoreStorage } from './sessionRestoreStorage';
 import {
   buildAndWriteSessionRestorePayload,
@@ -596,11 +634,86 @@ export const useSessionState = ({
 
   const connectToHost = useCallback((host: Host, options?: { hidden?: boolean }) => {
     const hidden = options?.hidden === true;
-    const newSession = createHostTerminalSession(crypto.randomUUID(), host);
+    const isSshHost = !host.protocol || host.protocol === "ssh" || host.protocol === "mosh" || host.protocol === "et";
+    const defaultCompanionProto: RemoteDesktopProtocol | null = isSshHost
+      ? host.rdpConfig?.enabled && host.rdpConfig?.defaultConnect
+        ? "rdp"
+        : host.vncConfig?.enabled && host.vncConfig?.defaultConnect
+          ? "vnc"
+          : null
+      : null;
+    const newSession = defaultCompanionProto
+      ? createRemoteDesktopSession(crypto.randomUUID(), host, defaultCompanionProto)
+      : createHostTerminalSession(crypto.randomUUID(), host);
     const sessionToAdd = hidden ? { ...newSession, hiddenFromTabs: true } : newSession;
     setSessions(prev => [...prev, sessionToAdd]);
     if (!hidden) setActiveTabId(newSession.id);
     return newSession.id;
+  }, [setActiveTabId]);
+
+  const connectToHostRemoteDesktop = useCallback((
+    host: Host,
+    protocol: RemoteDesktopProtocol,
+    options?: { splitFromSessionId?: string; direction?: SplitDirection },
+  ) => {
+    const newSessionId = crypto.randomUUID();
+    const splitFromId = options?.splitFromSessionId;
+    if (splitFromId) {
+      const sourceSession = sessionsRef.current.find((s) => s.id === splitFromId);
+      if (sourceSession) {
+        const direction: SplitDirection = options?.direction ?? 'vertical';
+        const position = direction === 'horizontal' ? 'bottom' : 'right';
+        if (sourceSession.workspaceId) {
+          const wsId = sourceSession.workspaceId;
+          const newSession = createRemoteDesktopSession(newSessionId, host, protocol, {
+            workspaceId: wsId,
+          });
+          setSessions((prev) => addTerminalSessionIfMissing(prev, newSession));
+          setWorkspaces((prev) =>
+            insertWorkspacePaneIfMissing(prev, wsId, newSessionId, {
+              direction,
+              position,
+              targetSessionId: splitFromId,
+            }),
+          );
+          setActiveTabId(wsId);
+          return newSessionId;
+        }
+        const standaloneHint: SplitHint = { direction, position };
+        const createdWs = createWorkspaceEntity(splitFromId, newSessionId, standaloneHint);
+        const newSession = createRemoteDesktopSession(newSessionId, host, protocol, {
+          workspaceId: createdWs.id,
+        });
+        const mergedTitle = buildMergedWorkspaceTitle(
+          getSessionConnectionLabel(sourceSession),
+          getSessionConnectionLabel(newSession),
+        );
+        const newWorkspace = mergedTitle
+          ? { ...createdWs, title: mergedTitle, autoTitle: false, generatedTitle: true }
+          : createdWs;
+        setSessions((prev) => {
+          const withUpdatedSource = prev.map((s) =>
+            s.id === splitFromId ? { ...s, workspaceId: newWorkspace.id } : s,
+          );
+          return addTerminalSessionIfMissing(withUpdatedSource, newSession);
+        });
+        setWorkspaces((prev) => addWorkspaceIfMissing(prev, newWorkspace));
+        setTabOrder((prev) => {
+          const idx = prev.indexOf(splitFromId);
+          if (idx === -1) return prev;
+          const next = [...prev];
+          next[idx] = newWorkspace.id;
+          return next;
+        });
+        setActiveTabId(newWorkspace.id);
+        return newSessionId;
+      }
+    }
+
+    const newSession = createRemoteDesktopSession(newSessionId, host, protocol);
+    setSessions((prev) => [...prev, newSession]);
+    setActiveTabId(newSessionId);
+    return newSessionId;
   }, [setActiveTabId]);
 
   const setSessionPoppedOut = useCallback((sessionId: string, poppedOut: boolean) => {
@@ -1360,7 +1473,7 @@ export const useSessionState = ({
   // orphanSessions changes with every session status update.
   const orphanSessionsRef = useRef(orphanSessions);
   orphanSessionsRef.current = orphanSessions;
-  const canUseGlobalBroadcast = orphanSessions.length >= 2;
+  const canUseGlobalBroadcast = orphanSessions.filter((s) => !isRemoteDesktopProtocol(s.protocol)).length >= 2;
 
   // Losing the group must disarm broadcast before another tab can join it.
   // Compose-bar send target follows the toolbar switch back to active-only.
@@ -1663,6 +1776,7 @@ export const useSessionState = ({
     createLocalTerminal,
     createSerialSession,
     connectToHost,
+    connectToHostRemoteDesktop,
     closeSession,
     closeSessions,
     closeWorkspace,

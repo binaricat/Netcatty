@@ -91,7 +91,9 @@ export async function importVaultHostFiles({
     ? sourceFiles.filter(({ file }) => !shouldIgnoreSecureCrtFile(file))
     : format === "finalshell"
       ? sourceFiles.filter(({ file }) => file.name.toLowerCase().endsWith(".json"))
-      : sourceFiles.slice(0, 1);
+      : format === "rdp"
+        ? sourceFiles.filter(({ file }) => file.name.toLowerCase().endsWith(".rdp") || sourceFiles.length === 1)
+        : sourceFiles.slice(0, 1);
   const hosts: Host[] = [];
   const issues: VaultImportIssue[] = [];
   const keyPassphrases: NonNullable<VaultImportResult["keyPassphrases"]> = [];
@@ -133,14 +135,22 @@ export async function importVaultHostFiles({
           skipped++;
           issues.push({
             level: "warning",
-            message: `${file.name}: no importable ${format === "securecrt" ? "SecureCRT session" : "FinalShell connection"} found.`,
+            message: `${file.name}: no importable ${
+              format === "securecrt"
+                ? "SecureCRT session"
+                : format === "finalshell"
+                  ? "FinalShell connection"
+                  : format === "rdp"
+                    ? "RDP connection"
+                    : "connection"
+            } found.`,
           });
         }
       } else {
         hosts.push(...fileHosts);
       }
     } catch (error) {
-      if ((format !== "securecrt" && format !== "finalshell") || selectedFiles.length <= 1) throw error;
+      if ((format !== "securecrt" && format !== "finalshell" && format !== "rdp") || selectedFiles.length <= 1) throw error;
       skipped++;
       issues.push({
         level: "error",

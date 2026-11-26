@@ -855,3 +855,56 @@ test("CSV export/import preserves independent SSH input compatibility choices", 
   const second = importVaultHostsFromText("csv", exportHostsToCsvWithStats(imported.hosts).csv);
   assert.deepEqual(second.hosts.map(host => host.sshInputCompatibility), [false, true]);
 });
+
+test("CSV export/import round-trips standalone RDP and VNC hosts with default ports and RDP domain", () => {
+  const hosts: Host[] = [
+    {
+      ...hostDefaults,
+      id: "rdp-1",
+      label: "Win Prod",
+      hostname: "10.0.2.10",
+      protocol: "rdp",
+      port: 3389,
+      username: "Administrator",
+      password: "win-password",
+      os: "windows",
+      rdpConfig: { port: 3389, domain: "CORP" },
+    },
+    {
+      ...hostDefaults,
+      id: "vnc-1",
+      label: "KVM Console",
+      hostname: "10.0.2.20",
+      protocol: "vnc",
+      port: 5900,
+      username: "",
+      password: "vnc-password",
+      os: "linux",
+      vncConfig: { port: 5900 },
+    },
+  ];
+
+  const exported = exportHostsToCsvWithStats(hosts);
+  assert.equal(exported.exportedCount, 2);
+  assert.equal(exported.skippedCount, 0);
+
+  const imported = importVaultHostsFromText("csv", exported.csv);
+  assert.equal(imported.hosts.length, 2);
+
+  const rdp = imported.hosts.find((h) => h.protocol === "rdp");
+  const vnc = imported.hosts.find((h) => h.protocol === "vnc");
+  assert.ok(rdp);
+  assert.ok(vnc);
+
+  assert.equal(rdp.port, 3389);
+  assert.equal(rdp.username, "Administrator");
+  assert.equal(rdp.rdpConfig?.domain, "CORP");
+  assert.equal(rdp.os, "windows");
+  assert.equal(rdp.password, "win-password");
+  assert.equal(rdp.authMethod, "password");
+
+  assert.equal(vnc.port, 5900);
+  assert.equal(vnc.username, "");
+  assert.equal(vnc.password, "vnc-password");
+  assert.equal(vnc.authMethod, "password");
+});

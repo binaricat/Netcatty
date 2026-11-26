@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  Building2,
   ChevronDown,
   Eye,
   EyeOff,
@@ -23,9 +24,14 @@ import {
   type QuickConnectAuthMethod,
   type QuickConnectProtocol,
 } from "../domain/quickConnectHost";
+import {
+  formatVncDisplayNumber,
+  parseVncPortOrDisplay,
+} from "../domain/remoteDesktop";
 import { cn } from "../lib/utils";
 import { Host, Identity, SSHKey } from "../types";
 import { Button } from "./ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { Combobox } from "./ui/combobox";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -49,6 +55,8 @@ const QUICK_CONNECT_PROTOCOLS: ReadonlyArray<{
   defaultPort: number;
 }> = [
   { protocol: "ssh", label: "SSH", commandPrefix: "ssh", defaultPort: 22 },
+  { protocol: "rdp", label: "RDP", commandPrefix: "rdp://", defaultPort: 3389 },
+  { protocol: "vnc", label: "VNC", commandPrefix: "vnc://", defaultPort: 5900 },
   { protocol: "mosh", label: "Mosh", commandPrefix: "mosh", defaultPort: 22 },
   { protocol: "et", label: "Eternal Terminal", commandPrefix: "et", defaultPort: 22 },
   { protocol: "telnet", label: "Telnet", commandPrefix: "telnet", defaultPort: 23 },
@@ -84,10 +92,17 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
 }) => {
   const { t } = useI18n();
   // Wizard state
+  const initialProtocol: QuickConnectProtocol = target.protocol ?? "ssh";
   const [step, setStep] = useState<WizardStep>("protocol");
-  const [protocol, setProtocol] = useState<QuickConnectProtocol>("ssh");
+  const [protocol, setProtocol] = useState<QuickConnectProtocol>(initialProtocol);
   const [username, setUsername] = useState(target.username || "");
-  const [port, setPort] = useState<number>(target.port || 22);
+  const [domain, setDomain] = useState(target.domain || "");
+  const [port, setPort] = useState<number>(
+    target.port || getQuickConnectDefaultPort(initialProtocol),
+  );
+  const [vncUsernameOpen, setVncUsernameOpen] = useState<boolean>(
+    Boolean(target.username),
+  );
 
   // Known host verification state
   const [knownHostInfo, setKnownHostInfo] = useState<{
@@ -110,10 +125,14 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
   // Reset state when target changes
   React.useEffect(() => {
     if (open) {
+      const nextProto: QuickConnectProtocol = target.protocol ?? "ssh";
       setStep("protocol");
-      setProtocol("ssh");
+      setProtocol(nextProto);
       setUsername(target.username || "");
-      setPort(target.port || 22);
+      setDomain(target.domain || "");
+      setPort(target.port || getQuickConnectDefaultPort(nextProto));
+      setVncUsernameOpen(Boolean(target.username));
+      setAuthMethod("password");
       setPassword("");
       setSelectedKeyId(null);
       setSelectedIdentityId(null);
@@ -158,6 +177,7 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
     if (!identity || !isQuickConnectIdentityCompatible(identity, target)) return;
     setSelectedIdentityId(identity.id);
     setUsername(identity.username);
+    if (identity.domain) setDomain(identity.domain);
     setAuthMethod(identity.authMethod);
     setPassword("");
     setSelectedKeyId(identity.keyId || null);
@@ -169,6 +189,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
     if (proto === "telnet") {
       if (selectedIdentityId) clearSelectedIdentity();
       setAuthMethod("password");
+    } else if (proto === "rdp" || proto === "vnc") {
+      setAuthMethod("password");
+      if (selectedIdentity && !isQuickConnectIdentityUsable(selectedIdentity, keys, proto)) {
+        clearSelectedIdentity();
+      }
     }
     if (port === getQuickConnectDefaultPort(protocol)) {
       setPort(getQuickConnectDefaultPort(proto));
@@ -181,7 +206,12 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
     fallbackPort: number,
   ) => {
     handleProtocolSelect(proto);
-    setPort(parseInt(rawValue) || fallbackPort);
+    if (proto === "vnc") {
+      const parsedVnc = parseVncPortOrDisplay(rawValue);
+      setPort(parsedVnc ?? (parseInt(rawValue, 10) || fallbackPort));
+      return;
+    }
+    setPort(parseInt(rawValue, 10) || fallbackPort);
   };
 
   // Navigate to next step
@@ -190,6 +220,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
       case "protocol":
         if (canUseSelectedIdentity) {
           handleConnect();
+          break;
+        }
+        // VNC does not require a username; jump directly to auth step
+        if (protocol === "vnc") {
+          setStep("auth");
           break;
         }
         // Always go to username step to let user confirm/edit username
@@ -217,15 +252,17 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
         setStep("username");
         break;
       case "auth":
-        // Always go back to username step
-        setStep("username");
+        setStep(protocol === "vnc" ? "protocol" : "username");
         break;
     }
   };
 
   // Create host and connect
   const handleConnect = (save = false) => {
-    const effectiveUsername = username || target.username || "root";
+    const isRemoteDesktop = protocol === "rdp" || protocol === "vnc";
+    const effectiveUsername = isRemoteDesktop
+      ? (username.trim() || target.username?.trim() || "")
+      : (username || target.username || "root");
     const effectivePort = port || getQuickConnectDefaultPort(protocol);
     const now = Date.now();
     const tempHost = buildQuickConnectHost({
@@ -235,7 +272,8 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
       protocol,
       port: effectivePort,
       username: effectiveUsername,
-      authMethod,
+      domain: protocol === "rdp" ? (domain.trim() || undefined) : undefined,
+      authMethod: isRemoteDesktop ? "password" : authMethod,
       password,
       selectedKeyId,
       selectedIdentityId: selectedIdentity?.id,
@@ -261,7 +299,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
         return true;
       case "auth":
         if (selectedIdentity && protocol !== "telnet") return canUseSelectedIdentity;
-        if (authMethod === "password") {
+        if (protocol === "vnc") {
+          // VNC servers may allow passwordless auth (SecurityType None) or password auth.
+          return true;
+        }
+        if (protocol === "rdp" || authMethod === "password") {
           // Whitespace-only passwords are valid SSH secrets (issue #2036).
           return password.length > 0;
         }
@@ -308,14 +350,26 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
                   {visual.icon}
                 </div>
                 <div>
-                  <div
-                    className={
-                      isSelected
-                        ? PROTOCOL_OPTION_TITLE_SELECTED_CLASS
-                        : PROTOCOL_OPTION_TITLE_IDLE_CLASS
-                    }
-                  >
-                    {item.label}
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={
+                        isSelected
+                          ? PROTOCOL_OPTION_TITLE_SELECTED_CLASS
+                          : PROTOCOL_OPTION_TITLE_IDLE_CLASS
+                      }
+                    >
+                      {item.label}
+                    </span>
+                    {(item.protocol === "rdp" || item.protocol === "vnc") && (
+                      <span
+                        className={cn(
+                          "rounded-md border px-1.5 py-0 text-[10px] font-medium leading-4",
+                          visual.badge,
+                        )}
+                      >
+                        {item.protocol === "rdp" ? "Remote Desktop" : "RFB Desktop"}
+                      </span>
+                    )}
                   </div>
                   <div
                     className={
@@ -324,11 +378,18 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
                         : PROTOCOL_OPTION_SUBTITLE_IDLE_CLASS
                     }
                   >
-                    {item.commandPrefix} {target.hostname}
+                    {item.commandPrefix.endsWith("://")
+                      ? `${item.commandPrefix}${target.hostname}`
+                      : `${item.commandPrefix} ${target.hostname}`}
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {item.protocol === "vnc" && isSelected && formatVncDisplayNumber(port) && (
+                  <span className="rounded border border-teal-500/25 bg-teal-500/12 px-1.5 py-0.5 text-[11px] font-mono font-medium text-teal-600 dark:text-teal-400">
+                    {formatVncDisplayNumber(port)}
+                  </span>
+                )}
                 <span className="text-xs text-muted-foreground">{t("protocolSelect.port")}</span>
                 <Input
                   type="number"
@@ -337,7 +398,7 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
                     handleProtocolPortChange(item.protocol, e.target.value, item.defaultPort)
                   }
                   onClick={(e) => e.stopPropagation()}
-                  className="w-16 h-7 text-xs text-center"
+                  className="w-[78px] h-7 px-1.5 text-xs text-center font-mono tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   min={1}
                   max={65535}
                 />
@@ -375,7 +436,10 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
   const renderUsernameStep = () => (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="quick-username">{t("terminal.auth.username")}</Label>
+        <Label htmlFor="quick-username" className="inline-flex items-center gap-1.5">
+          <User size={13} className="text-muted-foreground" />
+          {t("terminal.auth.username")}
+        </Label>
         <Input
           id="quick-username"
           value={username}
@@ -383,7 +447,11 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
             if (selectedIdentityId) detachSelectedIdentity();
             setUsername(e.target.value);
           }}
-          placeholder={t("terminal.auth.username.placeholder")}
+          placeholder={
+            protocol === "rdp"
+              ? t("hostDetails.rdp.usernamePlaceholder")
+              : t("terminal.auth.username.placeholder")
+          }
           autoFocus
           onKeyDown={(e) => {
             if (e.key === "Enter" && username.trim()) {
@@ -392,6 +460,25 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
           }}
         />
       </div>
+      {protocol === "rdp" && (
+        <div className="space-y-2">
+          <Label htmlFor="quick-domain" className="inline-flex items-center gap-1.5">
+            <Building2 size={13} className="text-muted-foreground" />
+            {t("quickConnect.rdp.domain")}
+          </Label>
+          <Input
+            id="quick-domain"
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            placeholder={t("quickConnect.rdp.domainPlaceholder")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && username.trim()) {
+                handleContinue();
+              }
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 
@@ -445,7 +532,8 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
         </div>
       ) : (
         <>
-      {/* Auth method tabs */}
+      {/* Auth method tabs — hidden for RDP/VNC (password-only) */}
+      {protocol !== "rdp" && protocol !== "vnc" && (
       <div className="flex gap-1 p-1 bg-secondary/80 rounded-lg border border-border/60">
         <button
           type="button"
@@ -484,39 +572,77 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
           {t("terminal.auth.sshKey")}
         </button>
       </div>
+      )}
 
       {/* Password field */}
-      {authMethod === "password" && (
-        <div className="space-y-2">
-          <Label htmlFor="quick-password">{t("terminal.auth.passwordLabel")}</Label>
-          <div className="relative">
-            <Input
-              id="quick-password"
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={t("terminal.auth.password.placeholder")}
-              className="pr-10"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && password.length > 0) {
-                  handleConnect();
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              onClick={() => setShowPassword(!showPassword)}
-            >
-              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
+      {(authMethod === "password" || protocol === "rdp" || protocol === "vnc") && (
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="quick-password">{t("terminal.auth.passwordLabel")}</Label>
+            <div className="relative">
+              <Input
+                id="quick-password"
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={t("terminal.auth.password.placeholder")}
+                className="pr-10"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (protocol === "vnc" || password.length > 0)) {
+                    handleConnect();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            {protocol === "vnc" && (
+              <p className="text-xs text-muted-foreground">
+                {t("quickConnect.vnc.passwordHint")}
+              </p>
+            )}
           </div>
+
+          {protocol === "vnc" && (
+            <Collapsible open={vncUsernameOpen} onOpenChange={setVncUsernameOpen}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="group w-full justify-between px-2 h-8 text-xs text-muted-foreground"
+                >
+                  <span>{t("quickConnect.vnc.optionalUsername")}</span>
+                  <ChevronDown
+                    size={14}
+                    className="group-data-[state=open]:rotate-180 transition-transform"
+                  />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-2 space-y-1.5">
+                <Input
+                  id="quick-vnc-username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={t("hostDetails.vnc.usernamePlaceholder")}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t("quickConnect.vnc.optionalUsernameHint")}
+                </p>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
         </div>
       )}
 
       {/* Key selection */}
-      {authMethod === "key" && (
+      {protocol !== "rdp" && protocol !== "vnc" && authMethod === "key" && (
         <div className="space-y-2">
           {keys.filter((k) => k.category === "key").length === 0 ? (
             <div className="text-sm text-muted-foreground p-3 border border-dashed border-border/60 rounded-lg text-center">

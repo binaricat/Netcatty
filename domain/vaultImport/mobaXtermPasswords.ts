@@ -17,14 +17,39 @@ export interface AttachMobaXtermPasswordsOptions {
   masterPassword?: string;
 }
 
-const parsePasswordKey = (raw: string): { username?: string; hostname?: string } => {
-  const stripped = raw.replace(/^[A-Za-z]+\d*:/, "");
+const parsePasswordKey = (
+  raw: string,
+): { protocol?: string; port?: number; username?: string; hostname?: string } => {
+  const prefixMatch = raw.match(/^([A-Za-z]+)(\d*):(.*)$/);
+  const protocol = prefixMatch ? prefixMatch[1].toLowerCase() : undefined;
+  const portStr = prefixMatch?.[2];
+  const port = portStr ? Number.parseInt(portStr, 10) : undefined;
+  const stripped = prefixMatch ? prefixMatch[3] : raw;
+
   const at = stripped.lastIndexOf("@");
-  if (at <= 0 || at === stripped.length - 1) return {};
-  return {
-    username: stripped.slice(0, at),
-    hostname: stripped.slice(at + 1),
-  };
+  if (at === 0 && stripped.length > 1) {
+    return {
+      protocol,
+      port: Number.isFinite(port) ? port : undefined,
+      hostname: stripped.slice(1),
+    };
+  }
+  if (at > 0 && at < stripped.length - 1) {
+    return {
+      protocol,
+      port: Number.isFinite(port) ? port : undefined,
+      username: stripped.slice(0, at),
+      hostname: stripped.slice(at + 1),
+    };
+  }
+  if (at === -1 && stripped.length > 0 && protocol) {
+    return {
+      protocol,
+      port: Number.isFinite(port) ? port : undefined,
+      hostname: stripped,
+    };
+  }
+  return {};
 };
 
 const sameHost = (left: string | undefined, right: string | undefined): boolean => (
@@ -35,38 +60,71 @@ const presentMasterPassword = (value: string | undefined): string | undefined =>
   value === undefined || value === "" ? undefined : value
 );
 
+const protocolPrefixForHost = (host: Host): { prefix: string; defaultPort: number } => {
+  if (host.protocol === "rdp") return { prefix: "rdp", defaultPort: 3389 };
+  if (host.protocol === "vnc") return { prefix: "vnc", defaultPort: 5900 };
+  return { prefix: "ssh", defaultPort: 22 };
+};
+
 const lookupPlaintext = (
   host: Host,
   passwords: Map<string, string>,
   credentialsByUser: Map<string, string[]>,
 ): string | undefined => {
   const username = host.username?.trim();
+  const domain = host.protocol === "rdp" ? host.rdpConfig?.domain?.trim() : undefined;
+  const domainUsername = domain && username ? `${domain}\\${username}` : undefined;
   const hostname = host.hostname;
-  const port = host.port ?? 22;
+  const { prefix, defaultPort } = protocolPrefixForHost(host);
+  const port = host.port ?? defaultPort;
+
+  const exactKeys: string[] = [];
+  if (domainUsername) {
+    exactKeys.push(
+      `${domainUsername}@${hostname}`,
+      `${prefix}${port}:${domainUsername}@${hostname}`,
+      `${prefix}:${domainUsername}@${hostname}`,
+    );
+  }
   if (username) {
-    const exactKeys = [
+    exactKeys.push(
       `${username}@${hostname}`,
-      `ssh${port}:${username}@${hostname}`,
-      `ssh:${username}@${hostname}`,
-    ];
-    for (const key of exactKeys) {
-      const value = passwords.get(key);
-      if (value) return value;
-    }
+      `${prefix}${port}:${username}@${hostname}`,
+      `${prefix}:${username}@${hostname}`,
+    );
+  } else if (prefix === "vnc" || prefix === "rdp") {
+    exactKeys.push(
+      `${prefix}${port}:${hostname}`,
+      `${prefix}:${hostname}`,
+      `${prefix}${port}:@${hostname}`,
+      `${prefix}:@${hostname}`,
+    );
+  }
+
+  for (const key of exactKeys) {
+    const value = passwords.get(key);
+    if (value) return value;
   }
 
   const hostMatches: string[] = [];
   for (const [key, value] of passwords) {
     const parsed = parsePasswordKey(key);
+    if (parsed.protocol && parsed.protocol !== prefix) continue;
     if (!sameHost(parsed.hostname, hostname)) continue;
-    if (username && parsed.username && parsed.username !== username) continue;
-    if (username && parsed.username === username) return value;
+    if (username && parsed.username) {
+      if (parsed.username === username || (domainUsername && parsed.username === domainUsername)) {
+        return value;
+      }
+      continue;
+    }
+    if (!username && parsed.username) continue;
     hostMatches.push(value);
   }
   if (!username && hostMatches.length === 1) return hostMatches[0];
 
   if (username) {
-    const named = credentialsByUser.get(username);
+    const named = credentialsByUser.get(username)
+      ?? (domainUsername ? credentialsByUser.get(domainUsername) : undefined);
     if (named?.length === 1) return named[0];
   }
   return undefined;
@@ -160,13 +218,22 @@ export const attachMobaXtermPasswords = (
     const password = lookupPlaintext(host, decryptedPasswords, credentialsByUser);
     if (!password) return host;
     attached++;
+    if (host.protocol === "rdp" || host.protocol === "vnc") {
+      return {
+        ...host,
+        password,
+        savePassword: true,
+        authMethod: "password" as const,
+        authPolicyVersion: 1 as const,
+      };
+    }
     return { ...host, password, savePassword: true };
   });
 
   if (attached === 0) {
     issues.push({
       level: "warning",
-      message: "Decrypted MobaXterm passwords, but none matched the imported SSH sessions.",
+      message: "Decrypted MobaXterm passwords, but none matched the imported sessions.",
     });
   }
 

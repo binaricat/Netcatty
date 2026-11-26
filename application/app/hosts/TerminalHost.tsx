@@ -195,6 +195,8 @@ export function TerminalHost() {
       resolveSessionAppearance: resolveFocusedAppearance,
       handleConnectSerial: handlers.handleConnectSerial,
       handleConnectToHost: handlers.handleConnectToHost,
+      handleConnectRemoteDesktop: handlers.handleConnectRemoteDesktop,
+      handleOpenSystemRemoteDesktop: handlers.handleOpenSystemRemoteDesktop,
       handleCreateLocalTerminal: handlers.handleCreateLocalTerminal,
       handleDefaultTerminalThemeChange,
       handleFollowAppTerminalThemeChange,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildQuickConnectHost,
+  getQuickConnectDefaultPort,
   isQuickConnectIdentityCompatible,
   isQuickConnectIdentityUsable,
 } from "./quickConnectHost.ts";
@@ -170,4 +171,66 @@ test("quick connect never applies an SSH identity to Telnet", () => {
   assert.equal(host.username, "telnet-user");
   assert.equal(host.password, "telnet-secret");
   assert.equal(host.telnetPort, 2323);
+});
+
+test("quick connect builds valid standalone RDP and VNC hosts and resolves default ports", () => {
+  assert.equal(getQuickConnectDefaultPort("rdp"), 3389);
+  assert.equal(getQuickConnectDefaultPort("vnc"), 5900);
+
+  const rdpHost = buildQuickConnectHost({
+    id: "quick-rdp",
+    createdAt: 10,
+    target: { hostname: "win.example.com", protocol: "rdp", domain: "CORP" },
+    protocol: "rdp",
+    port: 3390,
+    username: "Administrator",
+    authMethod: "password",
+    password: "rdp-secret",
+  });
+  assert.equal(rdpHost.protocol, "rdp");
+  assert.equal(rdpHost.os, "windows");
+  assert.equal(rdpHost.port, 3390);
+  assert.equal(rdpHost.username, "Administrator");
+  assert.equal(rdpHost.password, "rdp-secret");
+  assert.equal(rdpHost.authMethod, "password");
+  assert.equal(rdpHost.rdpConfig?.domain, "CORP");
+  assert.equal(rdpHost.rdpConfig?.port, 3390);
+  assert.equal(rdpHost.ephemeral, true);
+
+  const vncHost = buildQuickConnectHost({
+    id: "quick-vnc",
+    createdAt: 20,
+    target: { hostname: "vnc.example.com", protocol: "vnc" },
+    protocol: "vnc",
+    port: 5901,
+    username: "",
+    authMethod: "password",
+    password: "vnc-secret",
+    save: true,
+  });
+  assert.equal(vncHost.protocol, "vnc");
+  assert.equal(vncHost.username, "");
+  assert.equal(vncHost.port, 5901);
+  assert.equal(vncHost.password, "vnc-secret");
+  assert.equal(vncHost.authMethod, "password");
+  assert.equal(vncHost.vncConfig?.port, 5901);
+  assert.equal(vncHost.ephemeral, false);
+
+  assert.equal(isQuickConnectIdentityUsable({
+    id: "vnc-pass-only",
+    label: "VNC Pass",
+    username: "",
+    authMethod: "password",
+    password: "secret",
+    created: 1,
+  }, [], "vnc"), true);
+
+  assert.equal(isQuickConnectIdentityUsable({
+    id: "ssh-key-only",
+    label: "Key Only",
+    username: "admin",
+    authMethod: "key",
+    keyId: "k1",
+    created: 1,
+  }, [{ id: "k1", label: "K", type: "ED25519", privateKey: "pem", source: "imported", category: "key", created: 1 }], "rdp"), false);
 });

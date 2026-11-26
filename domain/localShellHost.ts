@@ -1,4 +1,6 @@
 import type { Host } from './models';
+import { formatHostPort } from './host';
+import { DEFAULT_RDP_PORT, DEFAULT_VNC_PORT, splitWindowsUserDomain } from './remoteDesktop';
 
 /**
  * Vault-side "local shell" (CMD / PowerShell / WSL / custom shell) host entry.
@@ -62,13 +64,34 @@ export interface VaultHostRowSubtitleOptions {
 
 /** Row subtitle shared by the vault tree rows and host cards. */
 export const getVaultHostRowSubtitle = (
-  host: Pick<Host, 'protocol' | 'localShellName' | 'username' | 'hostname'>,
+  host: Pick<Host, 'protocol' | 'localShellName' | 'username' | 'hostname'>
+    & Partial<Pick<Host, 'port' | 'rdpConfig' | 'vncConfig'>>,
   options?: VaultHostRowSubtitleOptions,
-): string => (
-  host.protocol === 'local'
-    ? getLocalShellHostSubtitle(host, options?.localFallback)
-    : `${host.username ?? ''}@${host.hostname ?? ''}`
-);
+): string => {
+  if (host.protocol === 'local') {
+    return getLocalShellHostSubtitle(host, options?.localFallback);
+  }
+  if (host.protocol === 'rdp') {
+    const hostname = (host.hostname ?? '').trim();
+    const port = host.rdpConfig?.port ?? host.port;
+    const hostPart = port !== undefined && port !== DEFAULT_RDP_PORT
+      ? formatHostPort(hostname, port)
+      : hostname;
+    const { domain, username } = splitWindowsUserDomain(host.username, host.rdpConfig?.domain);
+    const userPart = username ? (domain ? `${domain}\\${username}` : username) : '';
+    return userPart ? `${userPart}@${hostPart}` : hostPart;
+  }
+  if (host.protocol === 'vnc') {
+    const hostname = (host.hostname ?? '').trim();
+    const port = host.vncConfig?.port ?? host.port;
+    const hostPart = port !== undefined && port !== DEFAULT_VNC_PORT
+      ? formatHostPort(hostname, port)
+      : hostname;
+    const username = (host.username ?? '').trim();
+    return username ? `${username}@${hostPart}` : hostPart;
+  }
+  return `${host.username ?? ''}@${host.hostname ?? ''}`;
+};
 
 export interface ResolveDefaultLocalShellContext {
   discoveredShells?: DiscoveredShell[];

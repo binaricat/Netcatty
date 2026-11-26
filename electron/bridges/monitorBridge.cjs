@@ -5,6 +5,15 @@ const {
   readSharedStats,
   cancelSharedStats,
 } = require("./sshBridge/sharedStats.cjs");
+const {
+  probeRemoteDesktop: defaultProbeRemoteDesktop,
+} = require("./remoteDesktopProbe.cjs");
+
+const MAX_CONCURRENT_PROBES = 16;
+const MIN_PROBE_INTERVAL_SECONDS = 5;
+const MIN_COMPANION_PROBE_INTERVAL_SECONDS = 15;
+const PROBE_HISTORY_WINDOW_MS = 30 * 60 * 1000;
+const PROBE_HISTORY_MAX_POINTS = 1800;
 
 /** Worker-owned volatile demand graph. The SSH registry remains the only connection pool. */
 function createMonitorService({
@@ -12,6 +21,7 @@ function createMonitorService({
   cancelConnection,
   getStats,
   prepareOptions,
+  probeRemoteDesktop = defaultProbeRemoteDesktop,
   now = Date.now,
   timers = globalThis,
 }) {
@@ -23,8 +33,45 @@ function createMonitorService({
   let disposed = false;
   let epoch = 0;
   const runtimeId = randomUUID();
+
+  // Bounded probe semaphore (max 16 concurrent probes, completely outside SSH dialTail).
+  let activeProbeCount = 0;
+  const probeWaiters = [];
+  function acquireProbeSlot() {
+    if (activeProbeCount < MAX_CONCURRENT_PROBES) {
+      activeProbeCount += 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      probeWaiters.push(resolve);
+    });
+  }
+  function releaseProbeSlot() {
+    if (probeWaiters.length > 0) {
+      const next = probeWaiters.shift();
+      next();
+      return;
+    }
+    activeProbeCount = Math.max(0, activeProbeCount - 1);
+  }
+
   function keyFor(options) {
     return pool.buildEndpointKey(pool.buildConnectionReuseEndpoint(options));
+  }
+  function probeKeyFor(probe) {
+    if (!probe || typeof probe !== "object") return "";
+    const protocol = String(probe.protocol || "").toLowerCase();
+    if (protocol !== "rdp" && protocol !== "vnc") return "";
+    const hostname = String(probe.hostname || "").trim().toLowerCase();
+    if (!hostname) return "";
+    const port = Number(probe.port) || (protocol === "rdp" ? 3389 : 5900);
+    const proxyPart = probe.proxy && probe.proxy.type
+      ? `${probe.proxy.type}:${probe.proxy.host || probe.proxy.hostname || ""}:${probe.proxy.port || ""}:${probe.proxy.command || ""}`
+      : "";
+    const jumpPart = Array.isArray(probe.jumpHosts) && probe.jumpHosts.length > 0
+      ? probe.jumpHosts.map((j) => `${j.hostname || ""}:${j.port || 22}:${j.username || ""}`).join(",")
+      : "";
+    return `probe:${protocol}:${hostname}:${port}:${proxyPart}:${jumpPart}`;
   }
   function publishState(entry, status) {
     entry.status = status;
@@ -33,28 +80,180 @@ function createMonitorService({
     entry.cancelled = true;
     entry.controller.abort();
     if (entry.timer) timers.clearTimeout(entry.timer);
-    if (entry.connecting) cancelConnection(entry.sessionId);
-    if (entry.transport) {
-      const identity = pool.buildEndpointKey(entry.transport.endpoint);
-      const stillNeeded = [...entries.values()].some(
-        (other) =>
-          other !== entry &&
-          !other.cancelled &&
-          other.transport &&
-          (other.transport.conn === entry.transport.conn ||
-            pool.buildEndpointKey(other.transport.endpoint) === identity),
-      );
-      if (!stillNeeded) cancelSharedStats(entry.transport.conn);
-      pool.returnTransport(entry.holder);
+    if (entry.mode !== "probe") {
+      if (entry.connecting) cancelConnection(entry.sessionId);
+      if (entry.transport) {
+        const identity = pool.buildEndpointKey(entry.transport.endpoint);
+        const stillNeeded = [...entries.values()].some(
+          (other) =>
+            other !== entry &&
+            !other.cancelled &&
+            other.transport &&
+            (other.transport.conn === entry.transport.conn ||
+              pool.buildEndpointKey(other.transport.endpoint) === identity),
+        );
+        if (!stillNeeded) cancelSharedStats(entry.transport.conn);
+        pool.returnTransport(entry.holder);
+      }
     }
     entries.delete(entry.key);
   }
   function intervalFor(entry) {
-    return Math.min(
-      ...[...panels.values()]
-        .filter((p) => p.keys.includes(entry.key))
-        .map((p) => p.interval),
-    );
+    const intervals = [...panels.values()]
+      .filter((p) => p.keys.includes(entry.key))
+      .map((p) => p.interval);
+    return intervals.length > 0 ? Math.min(...intervals) : 5;
+  }
+  function probeIntervalMsFor(entry) {
+    return Math.max(intervalFor(entry), MIN_PROBE_INTERVAL_SECONDS) * 1000;
+  }
+  async function collectCompanionProbes(entry) {
+    if (
+      entry.cancelled ||
+      disposed ||
+      entry.companionSampling ||
+      !entry.transport?.conn ||
+      !Array.isArray(entry.companionProbes) ||
+      entry.companionProbes.length === 0
+    ) {
+      return;
+    }
+    const minIntervalMs = Math.max(intervalFor(entry), MIN_COMPANION_PROBE_INTERVAL_SECONDS) * 1000;
+    if (entry.companionAt && now() - entry.companionAt < minIntervalMs) {
+      return;
+    }
+    entry.companionSampling = true;
+    const probes = [...entry.companionProbes];
+    try {
+      await acquireProbeSlot();
+      try {
+        const nextResults = { ...(entry.companionResults || {}) };
+        for (const cp of probes) {
+          if (entry.cancelled || disposed || !entry.transport?.conn) break;
+          if (entry.transport.state === "dead" || entry.transport.state === "closing") break;
+          const res = await probeRemoteDesktop(
+            { ...cp, mode: "heartbeat" },
+            {
+              sshConn: cp.tunnelViaHostSsh === false ? undefined : entry.transport.conn,
+              signal: entry.controller.signal,
+              now,
+            },
+          );
+          if (entry.cancelled || disposed) break;
+          const checkedAt = res.checkedAt || now();
+          nextResults[cp.protocol] = {
+            protocol: cp.protocol,
+            port: Number(cp.port) || (cp.protocol === "rdp" ? 3389 : 5900),
+            reachable: Boolean(res.ok || res.reachable),
+            rttMs: typeof res.rttMs === "number" ? res.rttMs : null,
+            bannerVerified: Boolean(res.bannerVerified),
+            ...(res.bannerDetail ? { bannerDetail: res.bannerDetail } : {}),
+            ...(res.error ? { error: res.error } : {}),
+            checkedAt,
+            tunnelViaHostSsh: cp.tunnelViaHostSsh !== false,
+          };
+        }
+        if (!entry.cancelled && !disposed) {
+          entry.companionResults = nextResults;
+          entry.companionAt = now();
+        }
+      } finally {
+        releaseProbeSlot();
+      }
+    } catch {
+      // Companion probe errors must never disrupt SSH metric sampling.
+    } finally {
+      entry.companionSampling = false;
+    }
+  }
+  async function collectProbe(entry) {
+    if (entry.cancelled || disposed || entry.sampling) return;
+    entry.sampling = true;
+    if (entry.status === "queued") {
+      publishState(entry, "connecting");
+    }
+    try {
+      await acquireProbeSlot();
+      let res;
+      try {
+        if (entry.cancelled || disposed) return;
+        res = await probeRemoteDesktop(
+          { ...entry.probeOptions, mode: "heartbeat" },
+          { signal: entry.controller.signal, now },
+        );
+      } finally {
+        releaseProbeSlot();
+      }
+      if (entry.cancelled || disposed) return;
+      const checkedAt = res.checkedAt || now();
+      const reachable = Boolean(res.ok || res.reachable);
+      const rttMs = typeof res.rttMs === "number" ? res.rttMs : null;
+      entry.at = checkedAt;
+      entry.probeAt = checkedAt;
+      entry.lastProbe = {
+        protocol: entry.probeOptions.protocol,
+        port: Number(entry.probeOptions.port) || (entry.probeOptions.protocol === "rdp" ? 3389 : 5900),
+        reachable,
+        rttMs,
+        bannerVerified: Boolean(res.bannerVerified),
+        ...(res.bannerDetail ? { bannerDetail: res.bannerDetail } : {}),
+        ...(res.error ? { error: res.error } : {}),
+        checkedAt,
+      };
+      if (reachable) {
+        entry.failures = 0;
+        publishState(entry, "live");
+      } else if (res.requiresLogin) {
+        entry.failures += 1;
+        publishState(entry, "login");
+      } else {
+        entry.failures += 1;
+        publishState(entry, "offline");
+      }
+      entry.points.push({
+        at: checkedAt,
+        latencyMs: reachable ? rttMs : null,
+        cpu: null,
+        memory: null,
+        disk: null,
+        rx: null,
+        tx: null,
+      });
+      const cutoff = checkedAt - PROBE_HISTORY_WINDOW_MS;
+      while (entry.points.length > 0 && entry.points[0].at < cutoff) {
+        entry.points.shift();
+      }
+      if (entry.points.length > PROBE_HISTORY_MAX_POINTS) {
+        entry.points.splice(0, entry.points.length - PROBE_HISTORY_MAX_POINTS);
+      }
+    } catch (err) {
+      if (!entry.cancelled && !disposed) {
+        const checkedAt = now();
+        entry.at = checkedAt;
+        entry.probeAt = checkedAt;
+        entry.failures += 1;
+        entry.lastProbe = {
+          protocol: entry.probeOptions.protocol,
+          port: Number(entry.probeOptions.port) || (entry.probeOptions.protocol === "rdp" ? 3389 : 5900),
+          reachable: false,
+          rttMs: null,
+          bannerVerified: false,
+          error: err?.message || String(err),
+          checkedAt,
+        };
+        publishState(entry, "offline");
+      }
+    }
+    entry.sampling = false;
+    if (!entry.cancelled && !disposed) {
+      const delay = probeIntervalMsFor(entry) * Math.min(6, 2 ** entry.failures);
+      entry.due = now() + delay;
+      entry.timer = timers.setTimeout(() => {
+        entry.timer = null;
+        void collectProbe(entry);
+      }, delay);
+      entry.timer?.unref?.();
+    }
   }
   async function collect(entry) {
     if (entry.cancelled || !entry.transport || entry.sampling) return;
@@ -80,6 +279,9 @@ function createMonitorService({
       if (result.success) {
         entry.failures = 0;
         publishState(entry, "live");
+        if (entry.companionProbes && entry.companionProbes.length > 0) {
+          void collectCompanionProbes(entry);
+        }
       } else {
         entry.failures++;
         publishState(
@@ -230,6 +432,22 @@ function createMonitorService({
       const hosts = [];
       for (const host of panel.hosts) {
         if (typeof host.id !== "string") continue;
+        if (host.kind === "probe" && host.probe) {
+          const pKey = probeKeyFor(host.probe);
+          if (!pKey) {
+            hosts.push({
+              id: host.id,
+              status:
+                host.status === "login" || host.status === "error"
+                  ? host.status
+                  : "unsupported",
+            });
+            continue;
+          }
+          keys.push(pKey);
+          hosts.push({ id: host.id, key: pKey, kind: "probe", probe: host.probe });
+          continue;
+        }
         const options = host.options;
         if (!options || options.singleChannelSsh || !options.hostname) {
           hosts.push({
@@ -247,8 +465,11 @@ function createMonitorService({
           continue;
         }
         keys.push(key);
-        hosts.push({ id: host.id, key });
-        hosts[hosts.length - 1].options = options;
+        const item = { id: host.id, key, options };
+        if (Array.isArray(host.companionProbes) && host.companionProbes.length > 0) {
+          item.companionProbes = host.companionProbes;
+        }
+        hosts.push(item);
       }
       const interval = [1, 2, 3, 5, 10, 30, 60].includes(panel.interval) ? panel.interval : 5;
       const previous = panels.get(id);
@@ -280,14 +501,55 @@ function createMonitorService({
     for (const entry of entries.values())
       if (
         !needed.has(entry.key) ||
-        (!entry.transport &&
+        (entry.mode !== "probe" &&
+          !entry.transport &&
           entry.owner === owner &&
           !ownKeys.has(entry.key)) ||
-        (ownKeys.has(entry.key) && retryKeys.has(entry.key))
+        (entry.mode !== "probe" && ownKeys.has(entry.key) && retryKeys.has(entry.key))
       )
         release(entry);
+    // Sync companion probe specs onto live SSH entries.
+    for (const entry of entries.values()) {
+      if (entry.mode === "probe") continue;
+      const merged = new Map();
+      for (const panel of panels.values()) {
+        for (const host of panel.hosts) {
+          if (host.key === entry.key && Array.isArray(host.companionProbes)) {
+            for (const cp of host.companionProbes) {
+              if (cp && (cp.protocol === "rdp" || cp.protocol === "vnc")) {
+                merged.set(cp.protocol, cp);
+              }
+            }
+          }
+        }
+      }
+      entry.companionProbes = [...merged.values()];
+      if (entry.companionProbes.length === 0) {
+        entry.companionResults = null;
+      }
+    }
     admitEntries(owner);
     for (const entry of entries.values()) {
+      if (entry.mode === "probe") {
+        if ((freshKeys.has(entry.key) || (ownKeys.has(entry.key) && retryKeys.has(entry.key))) && !entry.sampling) {
+          if (entry.timer) timers.clearTimeout(entry.timer);
+          entry.timer = null;
+          entry.failures = 0;
+          void collectProbe(entry);
+          continue;
+        }
+        const targetDelay = probeIntervalMsFor(entry);
+        if (entry.timer && entry.due - now() > targetDelay) {
+          timers.clearTimeout(entry.timer);
+          entry.due = now() + targetDelay;
+          entry.timer = timers.setTimeout(() => {
+            entry.timer = null;
+            void collectProbe(entry);
+          }, targetDelay);
+          entry.timer?.unref?.();
+        }
+        continue;
+      }
       if (freshKeys.has(entry.key) && entry.ready && entry.transport && !entry.sampling) {
         if (entry.timer) timers.clearTimeout(entry.timer);
         entry.timer = null;
@@ -317,7 +579,32 @@ function createMonitorService({
     for (const panel of candidates)
       for (const host of panel.hosts) {
         if (!host.key || entries.has(host.key) || entries.size >= 256) continue;
+        if (host.kind === "probe" && host.probe) {
+          const entry = {
+            mode: "probe",
+            key: host.key,
+            historyId: randomUUID(),
+            hostname: host.probe.hostname,
+            sessionId: `monitor-probe-${randomUUID()}`,
+            owner: panel.owner,
+            probeOptions: host.probe,
+            status: "queued",
+            failures: 0,
+            at: 0,
+            probeAt: 0,
+            lastProbe: null,
+            points: [],
+            timer: null,
+            sampling: false,
+            cancelled: false,
+            controller: new AbortController(),
+          };
+          entries.set(host.key, entry);
+          void collectProbe(entry);
+          continue;
+        }
         const entry = {
+          mode: "ssh",
           key: host.key,
           historyId: randomUUID(),
           hostname: host.options.hostname,
@@ -331,6 +618,10 @@ function createMonitorService({
           timer: null,
           cancelled: false,
           controller: new AbortController(),
+          companionProbes: Array.isArray(host.companionProbes) ? [...host.companionProbes] : [],
+          companionResults: null,
+          companionAt: 0,
+          companionSampling: false,
         };
         entries.set(host.key, entry);
         connect(entry, panel.event, host.options);
@@ -343,19 +634,41 @@ function createMonitorService({
     for (const panel of own)
       for (const host of panel.hosts) {
         const entry = entries.get(host.key);
+        const historyId = entry?.historyId ?? "";
+        const last = cursor?.after?.[host.id];
+        if (entry?.mode === "probe") {
+          const unchanged = append && last?.historyId === historyId && last.statsAt === entry.probeAt;
+          hosts[host.id] = {
+            historyId,
+            mode: "probe",
+            status: entry.status,
+            at: entry.at,
+            statsAt: entry.probeAt,
+            ...(unchanged ? {} : { probe: entry.lastProbe }),
+            points: append && last?.historyId === historyId
+              ? entry.points.filter((point) => point.at > last.at)
+              : [...entry.points],
+          };
+          continue;
+        }
         const shared = entry?.transport
           ? readSharedStats(entry.transport.conn)
           : null;
-        const historyId = entry?.historyId ?? "";
-        const last = cursor?.after?.[host.id];
+        const baseStatsAt = shared?.statsAt ?? shared?.at ?? 0;
+        const companionAt = entry?.companionAt ?? 0;
+        const effectiveStatsAt = companionAt > baseStatsAt ? companionAt : baseStatsAt;
+        const unchangedStats = append && last?.historyId === historyId && last.statsAt === effectiveStatsAt;
         hosts[host.id] = {
           historyId,
           status: entry?.status ?? host.status ?? "limit",
           at: shared?.at ?? 0,
-          statsAt: shared?.statsAt ?? shared?.at ?? 0,
-          ...(append && last?.historyId === historyId && last.statsAt === (shared?.statsAt ?? shared?.at ?? 0)
+          statsAt: effectiveStatsAt,
+          ...(unchangedStats
             ? {}
             : { stats: shared?.result?.success ? shared.result.stats : null }),
+          ...(entry?.companionResults && Object.keys(entry.companionResults).length > 0 && !unchangedStats
+            ? { companionProbes: { ...entry.companionResults } }
+            : {}),
           points: append && last?.historyId === historyId
             ? (shared?.points ?? []).filter((point) => point.at > last.at)
             : shared?.points ?? [],
@@ -408,9 +721,23 @@ function createMonitorService({
       if (p.owner === event.sender.id)
         for (const host of p.hosts) {
           const entry = entries.get(host.key);
+          if (host.id !== hostId || !entry) continue;
+          if (entry.mode === "probe") {
+            if (["offline", "error", "login", "live", "disconnected"].includes(entry.status)) {
+              if (entry.timer) {
+                timers.clearTimeout(entry.timer);
+                entry.timer = null;
+              }
+              entry.failures = 0;
+              if (!entry.sampling) {
+                void collectProbe(entry);
+              } else {
+                keys.add(host.key);
+              }
+            }
+            continue;
+          }
           if (
-            host.id === hostId &&
-            entry &&
             ["login", "error", "unsupported", "disconnected"].includes(
               entry.status,
             )

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import ts from 'typescript';
+import { isRemoteDesktopProtocol } from '../../domain/remoteDesktop';
 import { canUseDirectSessionWriteFallback } from './terminalLayerSessionRouting';
 
 // Exercise the actual workspace send callback without constructing terminals.
@@ -24,6 +25,7 @@ function setup(
   broadcastPasswordBypass = false,
   restoredDisconnected = new Set<string>(),
   composeSendToAll?: boolean,
+  protocols: Array<string | undefined> = [],
 ) {
   const writes: string[] = [];
   const context = {
@@ -32,6 +34,7 @@ function setup(
     activeWorkspaceRef: { current: { id: 'workspace', focusedSessionId: '0' } },
     sessionsRef: { current: statuses.map((status, index) => ({
       id: String(index), workspaceId: 'workspace', status,
+      protocol: protocols[index],
       restoreState: restoredDisconnected.has(String(index)) ? 'restored-disconnected' : undefined,
     })) },
     isBroadcastEnabled: () => broadcast,
@@ -40,6 +43,7 @@ function setup(
     broadcastPasswordBypassRef: { current: broadcastPasswordBypass },
     snippetExecutorsRef: { current: executors },
     canUseDirectSessionWriteFallback,
+    isRemoteDesktopProtocol,
     terminalBackend: { writeToSession: (id: string) => writes.push(id) },
   };
   runInNewContext(code, context);
@@ -219,6 +223,34 @@ test('executor waking into a sensitive prompt does not record history', async ()
   const sensitive = new Set<string>();
   const executors = new Map<string, Executor>([['0', async () => { sensitive.add('0'); return true; }]]);
   assert.equal(await setup(['connected'], false, executors, sensitive).send('command'), false);
+});
+
+test('workspace compose skips VNC and RDP remote desktop sessions', async () => {
+  const { send, writes } = setup(
+    ['connected', 'connected', 'connected'],
+    false,
+    new Map(),
+    new Set(),
+    false,
+    new Set(),
+    true,
+    ['ssh', 'rdp', 'vnc'],
+  );
+  assert.equal(await send('uname -a'), true);
+  assert.deepEqual(writes, ['0']);
+
+  const rdpOnly = setup(
+    ['connected'],
+    false,
+    new Map(),
+    new Set(),
+    false,
+    new Set(),
+    false,
+    ['rdp'],
+  );
+  assert.equal(await rdpOnly.send('uname -a'), false);
+  assert.deepEqual(rdpOnly.writes, []);
 });
 
 const soloSource = readFileSync(new URL('../terminal/TerminalView.tsx', import.meta.url), 'utf8');

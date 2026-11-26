@@ -38,6 +38,12 @@ function createExecHandlerApi(ctx) {
       // Prefer session.protocol (runtime truth) over meta.protocol (renderer hint)
       // because Mosh tabs report as protocol:"ssh" in metadata but "mosh" in session.
       const sessionProtocol = session.protocol || session.type || meta.protocol || "";
+      if (sessionProtocol === "vnc" || sessionProtocol === "rdp") {
+        return {
+          ok: false,
+          error: `Remote desktop (${sessionProtocol.toUpperCase()}) sessions do not support terminal command execution.`,
+        };
+      }
       const isSshOrSerial = sessionProtocol === "ssh" || sessionProtocol === "serial";
       const isNetworkDevice = (meta.deviceType === "network" && isSshOrSerial) || sessionProtocol === "serial";
     

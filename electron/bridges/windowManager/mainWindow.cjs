@@ -3,6 +3,10 @@ const {
   windowsFramelessContentChromeOptions,
 } = require("./windowsWindowChrome.cjs");
 const { attachDisplayRecovery } = require("./displayRecovery.cjs");
+const {
+  attachRemoteDesktopKeyboardGrab,
+  hasRemoteDesktopKeyboardGrab,
+} = require("./remoteDesktopKeyboardGrab.cjs");
 const perfTrace = require("../../perfTrace.cjs");
 const { finalizeSessionLogs } = require("../sessionLogShutdown.cjs");
 
@@ -543,8 +547,15 @@ function createMainWindowApi(ctx) {
         minHeight: MIN_WINDOW_HEIGHT,
       });
 
+      const detachRemoteDesktopKeyboardGrab = attachRemoteDesktopKeyboardGrab(win);
+
       // Clear reference when the main window is destroyed
       win.on('closed', () => {
+        try {
+          detachRemoteDesktopKeyboardGrab?.();
+        } catch {
+          // ignore
+        }
         try {
           detachDisplayRecovery?.();
         } catch {
@@ -650,6 +661,11 @@ function createMainWindowApi(ctx) {
       // Using setIgnoreMenuShortcuts lets the keydown still reach the page (xterm.js)
       // while preventing Chromium's built-in shortcuts from triggering.
       win.webContents.on("before-input-event", (event, input) => {
+        if (hasRemoteDesktopKeyboardGrab(win)) {
+          win.webContents.setIgnoreMenuShortcuts(true);
+          return;
+        }
+
         if (isMac && shouldCloseWindowFromInput(input)) {
           event.preventDefault();
           requestWindowCommandClose(win);

@@ -5,9 +5,16 @@ import { hostCardFocusClassName } from "../../domain/hostClickBehavior";
 import { getVaultHostRowSubtitle } from "../../domain/localShellHost";
 import type { Host } from "../../domain/models";
 import { isPluginHostProtocol } from "../../domain/pluginConnection";
+import { type RemoteDesktopProtocol } from "../../domain/remoteDesktop";
 import { isVaultHostDraggable } from "../../domain/vaultHostDrag";
 import { HostNotesIndicator } from "../host/HostNotesIndicator";
-import { OpenDualPaneSftpMenuItem, OpenHostBrowserMenuItem } from "../host/HostTreeContextMenus";
+import { HostRemoteDesktopIndicators } from "../host/HostRemoteDesktopIndicators";
+import {
+  CompanionRemoteDesktopMenuItems,
+  OpenDualPaneSftpMenuItem,
+  OpenHostBrowserMenuItem,
+  OpenSystemRemoteDesktopMenuItems,
+} from "../host/HostTreeContextMenus";
 
 export type VaultHostCardSection = "pinned" | "recent" | "grouped" | "main";
 
@@ -46,6 +53,8 @@ export interface VaultHostContextMenuProps {
   >;
   t: (key: string, params?: Record<string, unknown>) => string;
   onConnect: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
   onOpenBrowser?: (host: Host) => void;
   onEdit: (host: Host) => void;
   onDuplicate: (host: Host) => void;
@@ -61,6 +70,8 @@ export const VaultHostContextMenu: React.FC<VaultHostContextMenuProps> = ({
   primitives,
   t,
   onConnect,
+  onConnectRemoteDesktop,
+  onOpenSystemRemoteDesktop,
   onOpenBrowser,
   onEdit,
   onDuplicate,
@@ -89,7 +100,16 @@ export const VaultHostContextMenu: React.FC<VaultHostContextMenuProps> = ({
         <Plug className="mr-2 h-4 w-4" /> {t("vault.hosts.connect")}
       </ContextMenuItem>
       <OpenDualPaneSftpMenuItem host={host} />
+      <CompanionRemoteDesktopMenuItems
+        host={host}
+        onConnect={onConnect}
+        onConnectRemoteDesktop={onConnectRemoteDesktop}
+      />
       <OpenHostBrowserMenuItem host={host} onOpenBrowser={onOpenBrowser} />
+      <OpenSystemRemoteDesktopMenuItems
+        host={host}
+        onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
+      />
       <ContextMenuItem onClick={() => onEdit(host)}>
         <Edit2 className="mr-2 h-4 w-4" /> {t("action.edit")}
       </ContextMenuItem>
@@ -132,6 +152,8 @@ export interface VaultHostCardProps {
   onDragStart: (e: React.DragEvent, hostId: string) => void;
   onActivate: (safeHost: Host) => void;
   onConnect: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
   onOpenBrowser?: (host: Host) => void;
   onEdit: (host: Host) => void;
   onDuplicate: (host: Host) => void;
@@ -161,6 +183,8 @@ export const VaultHostCard: React.FC<VaultHostCardProps> = ({
   onDragStart,
   onActivate,
   onConnect,
+  onConnectRemoteDesktop,
+  onOpenSystemRemoteDesktop,
   onOpenBrowser,
   onEdit,
   onDuplicate,
@@ -248,8 +272,13 @@ export const VaultHostCard: React.FC<VaultHostCardProps> = ({
             )}
             <DistroAvatar host={safeHost} fallback={distroBadge.text} size="lg" />
             <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-semibold truncate leading-5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <HostRemoteDesktopIndicators
+                  host={safeHost}
+                  size={14}
+                  onConnectRemoteDesktop={onConnectRemoteDesktop}
+                />
+                <span className="text-sm font-semibold truncate leading-5 min-w-0">
                   {safeHost.label}
                 </span>
                 {viewMode !== "grid" && renderEditButton(host, true)}
@@ -260,8 +289,10 @@ export const VaultHostCard: React.FC<VaultHostCardProps> = ({
                 )}
                 <HostNotesIndicator notes={safeHost.notes} />
               </div>
-              <div className="text-[11px] text-muted-foreground font-mono truncate leading-4">
-                {getVaultHostRowSubtitle(safeHost, { localFallback: t("localShell.subtitle") })}
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className="text-[11px] text-muted-foreground font-mono truncate leading-4 min-w-0 flex-1">
+                  {getVaultHostRowSubtitle(safeHost, { localFallback: t("localShell.subtitle") })}
+                </div>
               </div>
             </div>
             {viewMode === "grid" && renderEditButton(host)}
@@ -274,6 +305,8 @@ export const VaultHostCard: React.FC<VaultHostCardProps> = ({
         primitives={primitives}
         t={t}
         onConnect={onConnect}
+        onConnectRemoteDesktop={onConnectRemoteDesktop}
+        onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
         onOpenBrowser={onOpenBrowser}
         onEdit={onEdit}
         onDuplicate={onDuplicate}

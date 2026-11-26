@@ -158,14 +158,24 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions) => {
     globalProxyProfileId: "",
   };
   for (const host of exportableHosts) {
-    // For telnet hosts, use telnet-specific port and username
+    // Resolve protocol-specific default port and username
     const isTelnet = host.protocol === "telnet";
+    const isRdp = host.protocol === "rdp";
+    const isVnc = host.protocol === "vnc";
     const effectivePort = isTelnet
       ? (host.telnetPort ?? host.port ?? 23)
-      : (host.port ?? 22);
+      : isRdp
+        ? (host.rdpConfig?.port ?? host.port ?? 3389)
+        : isVnc
+          ? (host.vncConfig?.port ?? host.port ?? 5900)
+          : (host.port ?? 22);
+    const rdpDomain = isRdp ? host.rdpConfig?.domain?.trim() : undefined;
+    const rawRdpUsername = host.username ?? "";
     const effectiveUsername = isTelnet
       ? (host.telnetUsername ?? host.username ?? "")
-      : (host.username ?? "");
+      : isRdp && rdpDomain && rawRdpUsername && !rawRdpUsername.includes("\\")
+        ? `${rdpDomain}\\${rawRdpUsername}`
+        : rawRdpUsername;
     const keyPath = resolveVaultCsvHostKeyPath(host, options);
     const passphrase = keyPath
       ? (

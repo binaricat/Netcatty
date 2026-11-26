@@ -1,7 +1,11 @@
+import { parseVncPortOrDisplay, splitWindowsUserDomain } from "./remoteDesktop";
+
 export interface QuickConnectTarget {
   hostname: string;
   username?: string;
   port?: number;
+  protocol?: "rdp" | "vnc";
+  domain?: string;
   /** The @ separators in the address are part of a JumpServer login name. */
   isJumpServerLogin?: true;
 }
@@ -336,12 +340,110 @@ const parseSshCommand = (input: string): QuickConnectParseResult | null => {
   };
 };
 
-// Parse user@host:port or ssh command formats with warning details
+const REMOTE_DESKTOP_URI_RE = /^(rdp|vnc):\/\/(.+)$/i;
+const URI_IPV4_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+const URI_IPV6_RE = /^\[?[a-fA-F0-9:]+\]?$/;
+const URI_DOMAIN_RE =
+  /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/;
+
+const decodeUriComponentSafe = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const parseRemoteDesktopUri = (input: string): QuickConnectTarget | null => {
+  const match = input.match(REMOTE_DESKTOP_URI_RE);
+  if (!match) return null;
+
+  const protocol = match[1].toLowerCase() as "rdp" | "vnc";
+  const authority = match[2].replace(/\/+$/, "").trim();
+  if (!authority || /\s/.test(authority)) return null;
+
+  const atIndex = authority.lastIndexOf("@");
+  const rawUserInfo = atIndex >= 0 ? authority.slice(0, atIndex) : undefined;
+  const hostPort = atIndex >= 0 ? authority.slice(atIndex + 1) : authority;
+  if (!hostPort) return null;
+
+  let hostname: string;
+  let portStr: string | undefined;
+
+  if (hostPort.startsWith("[")) {
+    const closeIdx = hostPort.indexOf("]");
+    if (closeIdx === -1) return null;
+    hostname = hostPort.slice(1, closeIdx);
+    const rest = hostPort.slice(closeIdx + 1);
+    if (rest) {
+      if (!rest.startsWith(":")) return null;
+      portStr = rest.slice(1);
+    }
+  } else if (isBareIPv6(hostPort)) {
+    hostname = hostPort;
+  } else {
+    const colonIdx = hostPort.indexOf(":");
+    if (colonIdx !== -1) {
+      if (hostPort.indexOf(":", colonIdx + 1) !== -1) return null;
+      hostname = hostPort.slice(0, colonIdx);
+      portStr = hostPort.slice(colonIdx + 1);
+    } else {
+      hostname = hostPort;
+    }
+  }
+
+  if (
+    !hostname ||
+    (!URI_IPV4_RE.test(hostname) && !URI_IPV6_RE.test(hostname) && !URI_DOMAIN_RE.test(hostname))
+  ) {
+    return null;
+  }
+
+  let port: number | undefined;
+  if (portStr !== undefined) {
+    if (!/^\d+$/.test(portStr)) return null;
+    if (protocol === "vnc") {
+      const parsedVnc = parseVncPortOrDisplay(portStr);
+      if (parsedVnc === null) return null;
+      port = parsedVnc;
+    } else {
+      const parsedPort = parseInt(portStr, 10);
+      if (Number.isNaN(parsedPort) || parsedPort < 1 || parsedPort > 65535) return null;
+      port = parsedPort;
+    }
+  }
+
+  let username: string | undefined;
+  let domain: string | undefined;
+  if (rawUserInfo !== undefined && rawUserInfo.length > 0) {
+    const decodedUser = decodeUriComponentSafe(rawUserInfo);
+    if (protocol === "rdp") {
+      const split = splitWindowsUserDomain(decodedUser);
+      username = split.username || undefined;
+      domain = split.domain || undefined;
+    } else {
+      username = decodedUser.trim() || undefined;
+    }
+  }
+
+  return {
+    protocol,
+    hostname,
+    username,
+    port,
+    ...(domain ? { domain } : {}),
+  };
+};
+
+// Parse user@host:port, rdp://, vnc://, or ssh command formats with warning details
 export function parseQuickConnectInputWithWarnings(
   input: string,
 ): QuickConnectParseResult {
   const trimmed = input.trim();
   if (!trimmed) return { target: null, warnings: [] };
+
+  const remoteDesktopTarget = parseRemoteDesktopUri(trimmed);
+  if (remoteDesktopTarget) return { target: remoteDesktopTarget, warnings: [] };
 
   const sshTarget = parseSshCommand(trimmed);
   if (sshTarget) return sshTarget;
@@ -371,6 +473,7 @@ const SWITCHER_PORT_SUFFIX = /:(\d{1,5})$/;
 export function isSwitcherQuickConnectInput(input: string): boolean {
   if (!isQuickConnectInput(input)) return false;
   const trimmed = input.trim();
+  if (REMOTE_DESKTOP_URI_RE.test(trimmed)) return true;
   if (trimmed.includes("@") || trimmed.includes(".")) return true;
 
   const portMatch = trimmed.match(SWITCHER_PORT_SUFFIX);

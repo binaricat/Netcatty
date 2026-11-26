@@ -2048,6 +2048,13 @@ async function handleWorkerTerminalExec(params = {}, beforeExecute, options = {}
 
   const chatSessionId = params?.chatSessionId || null;
   const meta = getSessionMeta(sessionId, chatSessionId) || {};
+  const metaProtocol = String(meta.protocol || "").toLowerCase();
+  if (metaProtocol === "vnc" || metaProtocol === "rdp") {
+    return {
+      ok: false,
+      error: `Remote desktop (${metaProtocol.toUpperCase()}) sessions do not support terminal command execution.`,
+    };
+  }
   const blockedMessage = checkWorkerExecSafety(sessionId, command, chatSessionId);
   if (blockedMessage) return { ok: false, error: blockedMessage };
 
@@ -2102,6 +2109,13 @@ async function handleWorkerJobStart(params = {}, beforeExecute) {
 
   const chatSessionId = params?.chatSessionId || null;
   const meta = getSessionMeta(sessionId, chatSessionId) || {};
+  const metaProtocol = String(meta.protocol || "").toLowerCase();
+  if (metaProtocol === "vnc" || metaProtocol === "rdp") {
+    return {
+      ok: false,
+      error: `Remote desktop (${metaProtocol.toUpperCase()}) sessions do not support terminal command execution.`,
+    };
+  }
   if (!isNetworkDeviceLikeMeta(meta)) {
     // Same shell-aware deferral as handleWorkerTerminalExec: the terminal
     // worker re-runs the shell-selected defaults on the live session.
@@ -2337,6 +2351,14 @@ async function handleReadContext(params = {}) {
   if (!sessionId) return { ok: false, error: "sessionId is required when the scope does not contain exactly one terminal." };
   const scopeError = validateSessionScope(sessionId, params.chatSessionId, params.scopedSessionIds);
   if (scopeError) return { ok: false, error: scopeError };
+  const readMeta = getSessionMeta(sessionId, params.chatSessionId) || {};
+  const readProtocol = String(sessions?.get(sessionId)?.protocol || readMeta.protocol || "").toLowerCase();
+  if (readProtocol === "vnc" || readProtocol === "rdp") {
+    return {
+      ok: false,
+      error: `Remote desktop (${readProtocol.toUpperCase()}) sessions are graphical and do not support terminal_read_context. Use remote_desktop_read_screen instead.`,
+    };
+  }
   if (!invokeVaultAgentFn) return { ok: false, error: "Terminal context reader is unavailable." };
   const ownerId = terminalWorkerManager?.getSessionOwnerWebContentsId?.(sessionId)
     ?? sessions?.get(sessionId)?.webContentsId;
@@ -2355,6 +2377,64 @@ async function handleReadContext(params = {}) {
   return currentScopeError ? { ok: false, error: currentScopeError } : result;
 }
 
+function getSessionProtocol(sessionId, chatSessionId) {
+  const meta = getSessionMeta(sessionId, chatSessionId) || {};
+  return String(sessions?.get(sessionId)?.protocol || meta.protocol || "").toLowerCase();
+}
+
+async function handleReadRemoteScreen(params = {}) {
+  const scopedIds = resolveScopedSessionIds(params.chatSessionId, params.scopedSessionIds);
+  let sessionId = typeof params.sessionId === "string" && params.sessionId.trim()
+    ? params.sessionId.trim()
+    : null;
+  if (!sessionId && Array.isArray(scopedIds) && scopedIds.length > 0) {
+    const rdIds = scopedIds.filter((id) => {
+      const protocol = getSessionProtocol(id, params.chatSessionId);
+      return protocol === "vnc" || protocol === "rdp";
+    });
+    if (rdIds.length === 1) {
+      sessionId = rdIds[0];
+    } else if (scopedIds.length === 1) {
+      sessionId = scopedIds[0];
+    }
+  }
+  if (!sessionId) {
+    return {
+      ok: false,
+      error: "sessionId is required when the scope does not contain exactly one remote desktop session.",
+    };
+  }
+  const scopeError = validateSessionScope(sessionId, params.chatSessionId, params.scopedSessionIds);
+  if (scopeError) return { ok: false, error: scopeError };
+  const protocol = getSessionProtocol(sessionId, params.chatSessionId);
+  if (protocol !== "vnc" && protocol !== "rdp") {
+    return {
+      ok: false,
+      error: `Session "${sessionId}" is not a VNC or RDP remote desktop session. Use terminal_read_context for terminal sessions.`,
+    };
+  }
+  if (!invokeVaultAgentFn) {
+    return { ok: false, error: "Remote desktop screen reader is unavailable." };
+  }
+  const ownerId = terminalWorkerManager?.getSessionOwnerWebContentsId?.(sessionId)
+    ?? sessions?.get(sessionId)?.webContentsId;
+  const owner = ownerId == null ? undefined : electronModule?.webContents?.fromId?.(ownerId);
+  if (ownerId != null && (!owner || owner.isDestroyed?.())) {
+    return { ok: false, error: "Remote desktop window is unavailable." };
+  }
+  const result = await invokeVaultAgentFn("remoteDesktop.readScreen", {
+    sessionId,
+    quality: params.quality,
+    cropX: params.cropX,
+    cropY: params.cropY,
+    cropWidth: params.cropWidth,
+    cropHeight: params.cropHeight,
+  }, { webContents: owner });
+  // Scope can change while the renderer captures the canvas frame.
+  const currentScopeError = validateSessionScope(sessionId, params.chatSessionId, params.scopedSessionIds);
+  return currentScopeError ? { ok: false, error: currentScopeError } : result;
+}
+
 let builtinRpcHandlerRegistry = null;
 
 function getBuiltinRpcHandlerRegistry() {
@@ -2365,6 +2445,7 @@ function getBuiltinRpcHandlerRegistry() {
       "attachment.list": handleListAttachments,
       "attachment.read": handleReadAttachment,
       "harness.terminal.read_context": handleReadContext,
+      "harness.remote_desktop.read_screen": handleReadRemoteScreen,
       "terminal.execute": handleExec,
       // terminal_execute_bulk is intercepted in dispatchCore (preflight, one
       // fresh approval, fan-out). Reaching the registry means that path was

@@ -27,6 +27,7 @@ type DistroOption = {
 
 type HostIconPickerProps = {
   previewHost?: Host;
+  hideAutoDistro?: boolean;
   distroMode?: "auto" | "manual";
   manualDistro?: string;
   effectiveDistro?: string;
@@ -98,6 +99,7 @@ const colorHexForId = (colorId?: HostIconColorId) =>
 
 export const HostIconPicker: React.FC<HostIconPickerProps> = ({
   previewHost,
+  hideAutoDistro = false,
   distroMode,
   manualDistro,
   effectiveDistro,
@@ -112,8 +114,8 @@ export const HostIconPicker: React.FC<HostIconPickerProps> = ({
   onChange,
 }) => {
   const { t } = useI18n();
-  const manualSource = distroMode === "manual" || iconMode === "custom";
-  const selectedBrandId = manualDistro || effectiveDistro || "linux";
+  const manualSource = hideAutoDistro || distroMode === "manual" || iconMode === "custom";
+  const selectedBrandId = manualDistro || effectiveDistro || previewHost?.os || "linux";
   const selectedBrand = distroOptions.find((option) => option.value === selectedBrandId);
   const selectedIconId = isHostIconId(iconId) ? iconId : DEFAULT_HOST_ICON_ID;
   const selectedIconTab = iconMode === "custom" ? "type" : "brand";
@@ -226,7 +228,8 @@ export const HostIconPicker: React.FC<HostIconPickerProps> = ({
         </div>
       ) : null}
 
-      <div className="grid gap-2 md:grid-cols-2">
+      <div className={cn("grid gap-2", !hideAutoDistro && "md:grid-cols-2")}>
+        {!hideAutoDistro && (
         <div className="space-y-1">
           <span className="text-xs text-muted-foreground">{t("hostDetails.icon.source")}</span>
           <Select value={manualSource ? "manual" : "auto"} onValueChange={(value) => setSource(value as "auto" | "manual")}>
@@ -241,6 +244,7 @@ export const HostIconPicker: React.FC<HostIconPickerProps> = ({
             </SelectContent>
           </Select>
         </div>
+        )}
 
         {manualSource ? (
           <div className="space-y-1">

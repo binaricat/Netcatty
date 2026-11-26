@@ -4,6 +4,19 @@ const nodeProcess = require('node:process');
 const processEnv = nodeProcess.env;
 const includeWindowsHelloHelper = processEnv.NETCATTY_SKIP_WINDOWS_HELLO_HELPER !== '1';
 
+// IronRDP WASM and the AudioWorklet script are bundled into dist/ by Vite.
+// Platform-specific `files` arrays (mac/win/linux) create their own FileMatcher
+// in electron-builder, so exclusions must appear both at top-level and in each
+// platform `files` array to prevent duplicate copies from landing in app.asar.
+const REMOTE_DESKTOP_DUPLICATE_EXCLUSIONS = [
+    '!node_modules/@netcatty/ironrdp-wasm/**/*',
+    '!node_modules/ironrdp-wasm/**/*',
+    '!packages/netcatty-ironrdp-wasm/**/*',
+    '!scripts/ironrdp-web-patches/**/*',
+    '!scripts/build-ironrdp-wasm.sh',
+    '!public/audio/**/*',
+];
+
 /**
  * @type {import('electron-builder').Configuration}
  */
@@ -158,6 +171,10 @@ module.exports = {
         // Must still be explicitly excluded because workspace @netcatty/plugin-sdk
         // declares it in dependencies.
         '!node_modules/@remote-dom/**/*',
+        // IronRDP WASM is bundled for the renderer into dist/ by Vite; exclude
+        // both node_modules and workspace source/build copies so the WASM binary
+        // is not shipped twice in app.asar.
+        ...REMOTE_DESKTOP_DUPLICATE_EXCLUSIONS,
         // web-streams-polyfill is only a Node < 16.5 fallback inside fetch-blob;
         // Netcatty requires Node >= 22 / Electron 42 with native Web Streams.
         '!node_modules/web-streams-polyfill/**/*',
@@ -278,7 +295,8 @@ module.exports = {
         // render those representations as colored noise.
         icon: 'build/icon.icns',
         files: [
-            '!node_modules/@vscode/windows-process-tree/**/*'
+            '!node_modules/@vscode/windows-process-tree/**/*',
+            ...REMOTE_DESKTOP_DUPLICATE_EXCLUSIONS,
         ],
         target: [
             {
@@ -326,7 +344,8 @@ module.exports = {
     win: {
         icon: 'public/icon-win.png',
         files: [
-            '!dist/icons/variants/macos/**/*'
+            '!dist/icons/variants/macos/**/*',
+            ...REMOTE_DESKTOP_DUPLICATE_EXCLUSIONS,
         ],
         // Do not hard-code arch here. pack:win-x64 / pack:win pass --x64/--arm64,
         // and electron-builder unions config arch with the CLI set. Hard-coding
@@ -369,7 +388,8 @@ module.exports = {
         icon: 'icons',
         files: [
             '!dist/icons/variants/macos/**/*',
-            '!node_modules/@vscode/windows-process-tree/**/*'
+            '!node_modules/@vscode/windows-process-tree/**/*',
+            ...REMOTE_DESKTOP_DUPLICATE_EXCLUSIONS,
         ],
         target: ['AppImage', 'deb', 'rpm', 'pacman'],
         category: 'Development',

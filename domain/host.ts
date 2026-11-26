@@ -12,6 +12,7 @@ import {
   sanitizePluginConnection,
   stripBuiltInConnectionFieldsForPluginHost,
 } from './pluginConnection.ts';
+import { sanitizeRdpConfig, sanitizeVncConfig } from './remoteDesktop.ts';
 
 export type HostLabelRenameResult =
   | { ok: true; changed: true; hosts: Host[] }
@@ -460,8 +461,17 @@ export const sanitizeHost = (host: Host, snippets: Snippet[] = []): Host => {
         : undefined
   );
   const pluginConnection = sanitizePluginConnection(host.pluginConnection, host.protocol);
+  const rdpConfig = sanitizeRdpConfig(host.rdpConfig);
+  const vncConfig = sanitizeVncConfig(host.vncConfig);
+  const connectProtocolBehavior =
+    host.connectProtocolBehavior === 'ask' || host.connectProtocolBehavior === 'default'
+      ? host.connectProtocolBehavior
+      : undefined;
   const sanitized: Host = {
     ...migrated,
+    rdpConfig,
+    vncConfig,
+    connectProtocolBehavior,
     authMethod: isLegacyPasswordDefault
       ? undefined
       : migrated.authMethod ?? inferredLegacyAuthMethod,

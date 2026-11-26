@@ -110,3 +110,22 @@ test('untrusted session metadata cannot become the last instruction in the promp
   assert.match(prompt.slice(reminder), /only act on connected sessions/);
   assert.match(prompt.slice(reminder), /never bypass the command blocklist/);
 });
+
+test('system prompt documents VNC/RDP read-only screen capture, 2-pass crop zoom, and SSH correlation', () => {
+  const prompt = buildSystemPrompt({
+    scopeType: 'workspace',
+    hosts: [{
+      sessionId: 'rdp-1',
+      hostname: 'win.internal',
+      label: 'Win Server',
+      protocol: 'rdp',
+      connected: true,
+    }],
+    permissionMode: 'observer',
+  });
+
+  assert.match(prompt, /remote_desktop_read_screen/);
+  assert.match(prompt, /cropX.*cropY.*cropWidth.*cropHeight/);
+  assert.match(prompt, /quality: "high"/);
+  assert.match(prompt, /companion SSH/i);
+});

@@ -152,3 +152,45 @@ test("worker receiving handlers accept the actual IPC sender without WebContents
   assert.equal(handlers.get("netcatty:monitor:snapshot")(e).count, 0);
   handlers.get("netcatty:monitor:stop-all")(e);
 });
+
+test("worker IPC netcatty:monitor:update triggers main-process ensureMacLocalNetworkAccess for SSH and probe hosts before forwarding", async () => {
+  const probed = [];
+  const forwarded = [];
+  const handlers = new Map();
+  bridge.init({ sessions: new Map(), electronModule: {} });
+  bridge.registerHandlers(
+    { handle: (channel, handler) => handlers.set(channel, handler), on() {} },
+    {
+      ensureMacLocalNetworkAccess: async (target) => {
+        probed.push(target.hostname);
+        return { probed: true, hostname: target.hostname };
+      },
+      terminalWorkerManager: {
+        request: async (channel, payload, meta) => {
+          forwarded.push({ channel, payload, meta });
+          return { hosts: {} };
+        },
+      },
+    },
+  );
+
+  const e = event(88);
+  await handlers.get("netcatty:monitor:update")(e, [
+    {
+      id: "panel-lan",
+      runId: "r1",
+      interval: 5,
+      hosts: [
+        { id: "ssh-1", kind: "ssh", options: { hostname: "192.168.1.10", port: 22 } },
+        { id: "rdp-1", kind: "probe", probe: { protocol: "rdp", hostname: "192.168.1.20", port: 3389 } },
+        { id: "vnc-dup", kind: "probe", probe: { protocol: "vnc", hostname: "192.168.1.20", port: 5900 } },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(probed, ["192.168.1.10", "192.168.1.20"]);
+  assert.equal(forwarded.length, 1);
+  assert.equal(forwarded[0].channel, "netcatty:monitor:update");
+  assert.equal(forwarded[0].payload[0].hosts[0].options._macLocalNetworkMainProbed, true);
+  assert.equal(forwarded[0].payload[0].hosts[1].probe._macLocalNetworkMainProbed, true);
+});

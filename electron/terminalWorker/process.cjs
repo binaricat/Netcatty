@@ -227,6 +227,11 @@ function registerPortForwardingWorkerBridge(ipcMain) {
   portForwardingBridge.registerHandlers(ipcMain);
 }
 
+function registerRemoteDesktopWorkerBridge(ipcMain) {
+  const remoteDesktopBridge = require("../bridges/remoteDesktopBridge.cjs");
+  remoteDesktopBridge.registerHandlers(ipcMain);
+}
+
 function main() {
   const parentPort = process.parentPort;
   if (!parentPort) {
@@ -331,6 +336,7 @@ function main() {
       terminalBridge.registerHandlers(ipcMain);
       sftpBridge.registerHandlers(ipcMain);
       registerPortForwardingWorkerBridge(ipcMain);
+      registerRemoteDesktopWorkerBridge(ipcMain);
       transferBridge.registerHandlers(ipcMain);
       fileWatcherBridge.registerHandlers(ipcMain);
       compressUploadBridge.registerHandlers(ipcMain);
@@ -380,5 +386,6 @@ module.exports = {
   normalizeParentPortMessage,
   registerExternalSessionHandlers,
   registerPortForwardingWorkerBridge,
+  registerRemoteDesktopWorkerBridge,
   main,
 };

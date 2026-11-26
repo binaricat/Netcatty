@@ -16,11 +16,13 @@ import {
   Key,
   LayoutGrid,
   List,
+  Monitor,
   Network,
   NotebookText,
   Pin,
   Plug,
   Plus,
+  ScreenShare,
   Search,
   Settings,
   Square,
@@ -74,6 +76,11 @@ import {
   sanitizeHost,
   upsertHostById,
 } from "../domain/host";
+import {
+  applyHostDefaultConnectProtocol,
+  buildHostForProtocolOverride,
+  shouldPromptHostProtocolOnConnect,
+} from "../domain/remoteDesktop";
 import { exportHostsToCsvWithStats } from "../domain/vaultImport";
 import { saveWorkSurfaceHostDraft, type WorkSurfaceHostEditorTarget } from "../application/state/useWorkSurfaceHostEditor";
 import { upsertKnownHost } from "../domain/knownHosts";
@@ -243,6 +250,8 @@ interface VaultViewProps {
   ) => void;
   onDeleteHost: (id: string) => void;
   onConnect: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: "vnc" | "rdp") => void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: "vnc" | "rdp") => void;
   onOpenHostFromNote?: (host: Host, source?: { noteId: string }) => void;
   onUpdateHosts: (
     hosts: Host[] | ((prev: Host[]) => Host[]),
@@ -332,6 +341,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   onConnectSerial,
   onDeleteHost,
   onConnect,
+  onConnectRemoteDesktop,
+  onOpenSystemRemoteDesktop,
   onOpenHostFromNote,
   onUpdateHosts,
   onReadPersistedHosts,
@@ -466,6 +477,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   // Host panel state (local to hosts section)
   const [isHostPanelOpen, setIsHostPanelOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<Host | null>(null);
+  const [newHostProtocol, setNewHostProtocol] = useState<"ssh" | "rdp" | "vnc">("ssh");
   const [newHostGroupPath, setNewHostGroupPath] = useState<string | null>(null);
   // Local shell (CMD) host panel state — a vault host entry with protocol 'local'
   const [isLocalShellHostPanelOpen, setIsLocalShellHostPanelOpen] = useState(false);
@@ -626,12 +638,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
             {},
             { validProxyProfileIds: proxyProfileIdSet },
           );
-      // Only prompt when Telnet is available but isn't the host's default
-      // protocol, and only for SSH hosts: local-shell and serial hosts must
-      // always launch their own transport, never an inherited group Telnet
-      // flag. Hosts without an explicit protocol are legacy SSH entries.
-      const effectiveProtocol = effective.protocol ?? "ssh";
-      if (effectiveProtocol === "ssh" && effective.telnetEnabled) {
+      if (shouldPromptHostProtocolOnConnect(effective)) {
         setProtocolSelectHost(effective);
       } else if (effective.protocol === "telnet") {
         // Telnet-as-default wins over a stray moshEnabled flag.
@@ -645,20 +652,35 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
   // Handle protocol selection
   const handleProtocolSelect = useCallback(
-    (protocol: HostProtocol, port: number) => {
+    (protocol: HostProtocol, port: number, rememberDefault?: boolean) => {
       if (protocolSelectHost) {
-        const hostWithProtocol: Host = {
-          ...protocolSelectHost,
-          protocol: protocol === "mosh" || protocol === "et" ? "ssh" : protocol,
-          port,
-          moshEnabled: protocol === "mosh",
-          etEnabled: protocol === "et",
-        };
-        onConnect(hostWithProtocol);
+        if (
+          rememberDefault &&
+          (protocol === "ssh" ||
+            protocol === "mosh" ||
+            protocol === "et" ||
+            protocol === "rdp" ||
+            protocol === "vnc" ||
+            protocol === "telnet")
+        ) {
+          onUpdateHosts(
+            hosts.map((h) =>
+              h.id === protocolSelectHost.id
+                ? applyHostDefaultConnectProtocol(h, protocol)
+                : h,
+            ),
+          );
+        }
+        const dispatch = buildHostForProtocolOverride(protocolSelectHost, protocol, port);
+        if (dispatch.mode === "remoteDesktop" && onConnectRemoteDesktop) {
+          onConnectRemoteDesktop(dispatch.host, dispatch.protocol);
+        } else {
+          onConnect(dispatch.host);
+        }
         setProtocolSelectHost(null);
       }
     },
-    [protocolSelectHost, onConnect],
+    [protocolSelectHost, onConnect, onConnectRemoteDesktop, onUpdateHosts, hosts],
   );
 
   // Handle quick connect
@@ -685,6 +707,29 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setIsGroupPanelOpen(false);
     setEditingGroupPath(null);
     setEditingHost(null);
+    setNewHostProtocol("ssh");
+    setIsLocalShellHostPanelOpen(false);
+    setEditingLocalShellHost(null);
+    setNewHostGroupPath(null);
+    setIsHostPanelOpen(true);
+  }, []);
+
+  const handleNewRdpHost = useCallback(() => {
+    setIsGroupPanelOpen(false);
+    setEditingGroupPath(null);
+    setEditingHost(null);
+    setNewHostProtocol("rdp");
+    setIsLocalShellHostPanelOpen(false);
+    setEditingLocalShellHost(null);
+    setNewHostGroupPath(null);
+    setIsHostPanelOpen(true);
+  }, []);
+
+  const handleNewVncHost = useCallback(() => {
+    setIsGroupPanelOpen(false);
+    setEditingGroupPath(null);
+    setEditingHost(null);
+    setNewHostProtocol("vnc");
     setIsLocalShellHostPanelOpen(false);
     setEditingLocalShellHost(null);
     setNewHostGroupPath(null);
@@ -897,11 +942,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       // Only use telnet-specific port and credentials when protocol is explicitly telnet
       // Don't treat telnetEnabled as primary - that's just an optional protocol
       const isTelnet = effective.protocol === "telnet";
+      const isRdp = effective.protocol === "rdp";
+      const isVnc = effective.protocol === "vnc";
 
-      const defaultPort = isTelnet ? 23 : 22;
+      const defaultPort = isTelnet ? 23 : isRdp ? 3389 : isVnc ? 5900 : 22;
       const effectivePort = isTelnet
         ? resolveTelnetPort(effective)
-        : (effective.port ?? 22);
+        : (effective.port ?? defaultPort);
 
       // Bracket IPv6 addresses when appending non-default port
       let address: string;
@@ -1571,6 +1618,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           handleHostConnect,
           handleImportFileSelected,
           handleNewHost,
+          handleNewRdpHost,
+          handleNewVncHost,
           handleNewLocalShellHost,
           handleCancelLocalShellHost,
           handleSaveLocalShellHost,
@@ -1618,16 +1667,19 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           List,
           managedGroupPaths,
           managedSources,
+          Monitor,
           moveGroup,
           moveHostToGroup,
           moveHostsToGroup,
           Network,
           newFolderName,
           newHostGroupPath,
+          newHostProtocol,
           NotebookText,
           NotesManager,
           onCommitPluginImporterData,
           onConnect,
+          onConnectRemoteDesktop,
           onConnectSerial,
           onCreateLocalTerminal,
           onDeleteHost,
@@ -1635,6 +1687,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           onOpenHostFromNote,
           onOpenLogView,
           onOpenSettings,
+          onOpenSystemRemoteDesktop,
           onRunSnippet,
           onUpdateCustomGroups,
           onUpdateGroupConfigs,
@@ -1670,6 +1723,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           RippleButton,
           rootRef,
           sanitizeHost,
+          ScreenShare,
           search,
           Search,
           selectedGroupPath,

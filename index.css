@@ -1000,3 +1000,131 @@ html.window-background-blur body {
 html.window-background-blur #root {
   opacity: var(--window-content-opacity, 1);
 }
+
+/* ============================================
+   Remote Desktop AI Computer Use Effects
+   ============================================ */
+@property --rd-aurora-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes rd-aurora-spin {
+  from {
+    --rd-aurora-angle: 0deg;
+  }
+  to {
+    --rd-aurora-angle: 360deg;
+  }
+}
+
+@keyframes rd-aurora-breathe {
+  0%, 100% {
+    opacity: 0.74;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes rd-click-ripple-wave {
+  0% {
+    transform: translate(-50%, -50%) scale(0.25);
+    opacity: 0.95;
+  }
+  70% {
+    opacity: 0.45;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes rd-click-core-pop {
+  0% {
+    transform: translate(-50%, -50%) scale(0.4);
+    opacity: 1;
+  }
+  40% {
+    transform: translate(-50%, -50%) scale(1.2);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(0.7);
+    opacity: 0;
+  }
+}
+
+.rd-ai-aurora-border {
+  background: conic-gradient(
+    from var(--rd-aurora-angle),
+    rgba(34, 211, 238, 0.95),
+    rgba(56, 189, 248, 0.95),
+    rgba(99, 102, 241, 0.95),
+    rgba(168, 85, 247, 0.95),
+    rgba(236, 72, 153, 0.9),
+    rgba(56, 189, 248, 0.95),
+    rgba(34, 211, 238, 0.95)
+  );
+  padding: 2px;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  animation: rd-aurora-spin 3.4s linear infinite;
+}
+
+/* Smooth 4-edge inward exponential fade-out aura (zero hard inner cut edge) */
+.rd-ai-aurora-glow {
+  background: conic-gradient(
+    from var(--rd-aurora-angle),
+    rgba(34, 211, 238, 0.72),
+    rgba(56, 189, 248, 0.62),
+    rgba(99, 102, 241, 0.72),
+    rgba(168, 85, 247, 0.72),
+    rgba(236, 72, 153, 0.64),
+    rgba(56, 189, 248, 0.62),
+    rgba(34, 211, 238, 0.72)
+  );
+  -webkit-mask-image:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.36) 22%, rgba(0, 0, 0, 0.13) 50%, rgba(0, 0, 0, 0.03) 78%, rgba(0, 0, 0, 0) 100%),
+    linear-gradient(to top, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.36) 22%, rgba(0, 0, 0, 0.13) 50%, rgba(0, 0, 0, 0.03) 78%, rgba(0, 0, 0, 0) 100%),
+    linear-gradient(to right, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.36) 22%, rgba(0, 0, 0, 0.13) 50%, rgba(0, 0, 0, 0.03) 78%, rgba(0, 0, 0, 0) 100%),
+    linear-gradient(to left, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.36) 22%, rgba(0, 0, 0, 0.13) 50%, rgba(0, 0, 0, 0.03) 78%, rgba(0, 0, 0, 0) 100%);
+  -webkit-mask-size: 100% 72px, 100% 72px, 72px 100%, 72px 100%;
+  -webkit-mask-position: top left, bottom left, top left, top right;
+  -webkit-mask-repeat: no-repeat;
+  mask-image:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.36) 22%, rgba(0, 0, 0, 0.13) 50%, rgba(0, 0, 0, 0.03) 78%, rgba(0, 0, 0, 0) 100%),
+    linear-gradient(to top, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.36) 22%, rgba(0, 0, 0, 0.13) 50%, rgba(0, 0, 0, 0.03) 78%, rgba(0, 0, 0, 0) 100%),
+    linear-gradient(to right, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.36) 22%, rgba(0, 0, 0, 0.13) 50%, rgba(0, 0, 0, 0.03) 78%, rgba(0, 0, 0, 0) 100%),
+    linear-gradient(to left, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.36) 22%, rgba(0, 0, 0, 0.13) 50%, rgba(0, 0, 0, 0.03) 78%, rgba(0, 0, 0, 0) 100%);
+  mask-size: 100% 72px, 100% 72px, 72px 100%, 72px 100%;
+  mask-position: top left, bottom left, top left, top right;
+  mask-repeat: no-repeat;
+  mask-composite: add;
+  contain: strict;
+  will-change: opacity;
+  animation:
+    rd-aurora-spin 3.4s linear infinite,
+    rd-aurora-breathe 2.6s ease-in-out infinite;
+}
+
+.rd-ai-ripple-ring {
+  animation: rd-click-ripple-wave 0.78s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.rd-ai-ripple-ring-delayed {
+  animation: rd-click-ripple-wave 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.14s forwards;
+  opacity: 0;
+}
+
+.rd-ai-ripple-core {
+  animation: rd-click-core-pop 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

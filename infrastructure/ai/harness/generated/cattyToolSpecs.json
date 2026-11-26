@@ -2392,6 +2392,107 @@
     }
   },
   {
+    "capabilityId": "harness.remote_desktop.read_screen",
+    "toolName": "remote_desktop_read_screen",
+    "rpcMethod": "netcatty/readRemoteScreen",
+    "localExecution": false,
+    "description": "Capture a read-only screenshot of a connected VNC or RDP remote desktop session in the active AI scope. Use this for graphical VNC or RDP sessions (which have no text PTY). Start with a full-screen standard capture; pass grid=\"true\" when you need precise 0-1000 coordinates before clicking with remote_desktop_act. If small dialog or log text is hard to read, re-call with cropX/cropY/cropWidth/cropHeight (0-1000 permille coordinates) and quality=\"high\" for a crisp 1:1 native-pixel zoom.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": true,
+        "description": "Remote desktop (VNC/RDP) session ID. Optional when the current AI scope contains only one remote desktop session."
+      },
+      "quality": {
+        "type": "string",
+        "optional": true,
+        "description": "Capture quality preset: standard (default, up to 1280px max edge) or high (up to 1920px max edge for dense text)."
+      },
+      "cropX": {
+        "type": "number",
+        "optional": true,
+        "description": "Optional crop left edge in 0-1000 normalized permille coordinates of the full desktop width."
+      },
+      "cropY": {
+        "type": "number",
+        "optional": true,
+        "description": "Optional crop top edge in 0-1000 normalized permille coordinates of the full desktop height."
+      },
+      "cropWidth": {
+        "type": "number",
+        "optional": true,
+        "description": "Optional crop width in 1-1000 normalized permille coordinates. Must be provided together with cropX, cropY, and cropHeight."
+      },
+      "cropHeight": {
+        "type": "number",
+        "optional": true,
+        "description": "Optional crop height in 1-1000 normalized permille coordinates. Must be provided together with cropX, cropY, and cropWidth."
+      },
+      "grid": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to true to draw a translucent 0-1000 global coordinate grid overlay on the captured screenshot (useful before clicking with remote_desktop_act). Default false."
+      }
+    },
+    "policy": {
+      "write": false,
+      "sensitiveRead": true,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": true,
+      "bypassesChatCancel": true
+    }
+  },
+  {
+    "capabilityId": "harness.remote_desktop.act",
+    "toolName": "remote_desktop_act",
+    "rpcMethod": null,
+    "localExecution": true,
+    "description": "Perform mouse and keyboard actions on a connected VNC or RDP remote desktop session in the active AI scope. Use this to interact with graphical VNC or RDP sessions (which have no text PTY). Always inspect the screen first with remote_desktop_read_screen (pass grid=\"true\" for exact 0-1000 coordinates). Batch up to 12 logical steps per call (for example click an input field, type text, and press Enter). By default a post-action verification screenshot is captured automatically after settleMs; inspect it before acting again. High-risk OS chords (Ctrl+Alt+Del, Alt+F4, Win+R, Win+L, Ctrl+Shift+Esc, Cmd+Q) always require explicit user confirmation. If USER_PREEMPTED, AI_READ_BLOCKED, or SESSION_VIEW_ONLY is returned, stop and check with the user.",
+    "inputShape": {
+      "sessionId": {
+        "type": "string",
+        "optional": true,
+        "description": "Remote desktop (VNC/RDP) session ID. Optional when the current AI scope contains only one remote desktop session."
+      },
+      "actions": {
+        "type": "string",
+        "optional": false,
+        "description": "JSON array of 1-12 mouse/keyboard actions in 0-1000 normalized permille coordinates. Supported types: click ({type:\"click\",x,y,button?,clickCount?,modifiers?}), move ({type:\"move\",x,y}), drag ({type:\"drag\",fromX,fromY,toX,toY,button?,steps?}), scroll ({type:\"scroll\",x,y,deltaX?,deltaY?}), type ({type:\"type\",text}), key ({type:\"key\",key}), wait ({type:\"wait\",ms})."
+      },
+      "captureAfter": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to false to skip capturing a post-action verification screenshot. Default true."
+      },
+      "settleMs": {
+        "type": "number",
+        "optional": true,
+        "description": "Milliseconds to wait after actions before capturing the post-action screenshot (default 350, clamped 0-3000)."
+      },
+      "quality": {
+        "type": "string",
+        "optional": true,
+        "description": "Post-action screenshot quality preset: standard (default) or high."
+      },
+      "grid": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to true to overlay a 0-1000 coordinate grid on the post-action screenshot. Default false."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": true,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
     "capabilityId": "harness.web.search",
     "toolName": "web_search",
     "rpcMethod": null,

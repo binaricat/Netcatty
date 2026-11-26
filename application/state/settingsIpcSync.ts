@@ -72,6 +72,11 @@ import {
 import { isTerminalSidePanelAutoOpenTab, type TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePanelAutoOpen';
 import { isStartupLanding, type StartupLanding } from '../../domain/startupLanding';
 import type { AppearanceSyncEvent } from './appearanceSync';
+import {
+  isJumpServerRdpLaunchMode,
+  STORAGE_KEY_JUMPSERVER_RDP_LAUNCH_MODE,
+  type JumpServerRdpLaunchMode,
+} from './settingsStorageSync';
 
 interface UseSettingsIpcSyncParams {
   enabled?: boolean;
@@ -94,6 +99,7 @@ interface UseSettingsIpcSyncParams {
   setSshDebugLogsEnabled: Dispatch<SetStateAction<boolean>>;
   setSshDeepLinkEnabledState: (enabled: boolean) => void;
   setJmsDeepLinkEnabledState: (enabled: boolean) => void;
+  setJumpServerRdpLaunchModeState: Dispatch<SetStateAction<JumpServerRdpLaunchMode>>;
   setExplorerContextMenuEnabledState: (enabled: boolean) => void;
   setHotkeyScheme: Dispatch<SetStateAction<HotkeyScheme>>;
   applyIncomingCustomKeyBindings: (incoming: { bindings: CustomKeyBindings; version: number; origin: string }) => void;
@@ -144,6 +150,7 @@ export function useSettingsIpcSync({
   setSshDebugLogsEnabled,
   setSshDeepLinkEnabledState,
   setJmsDeepLinkEnabledState,
+  setJumpServerRdpLaunchModeState,
   setExplorerContextMenuEnabledState,
   setHotkeyScheme,
   applyIncomingCustomKeyBindings,
@@ -260,6 +267,9 @@ export function useSettingsIpcSync({
       }
       if (key === STORAGE_KEY_JMS_DEEP_LINK_ENABLED && typeof value === 'boolean') {
         setJmsDeepLinkEnabledState(value);
+      }
+      if (key === STORAGE_KEY_JUMPSERVER_RDP_LAUNCH_MODE && isJumpServerRdpLaunchMode(value)) {
+        setJumpServerRdpLaunchModeState((prev) => (prev === value ? prev : value));
       }
       if (key === STORAGE_KEY_EXPLORER_CONTEXT_MENU_ENABLED && typeof value === 'boolean') {
         setExplorerContextMenuEnabledState(value);
@@ -387,6 +397,7 @@ export function useSettingsIpcSync({
     setSessionLogsTimestampsEnabled,
     setSshDeepLinkEnabledState,
     setJmsDeepLinkEnabledState,
+    setJumpServerRdpLaunchModeState,
     setExplorerContextMenuEnabledState,
     setSshDebugLogsEnabled,
     setSftpAutoOpenSidebar,

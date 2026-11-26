@@ -51,9 +51,73 @@ export interface EnvVar {
 }
 
 // Protocol type for connections
-export type BuiltInHostProtocol = 'ssh' | 'telnet' | 'mosh' | 'et' | 'local' | 'serial';
+export type BuiltInHostProtocol = 'ssh' | 'telnet' | 'mosh' | 'et' | 'local' | 'serial' | 'vnc' | 'rdp';
 export type PluginHostProtocol = `plugin:${string}`;
 export type HostProtocol = BuiltInHostProtocol | PluginHostProtocol;
+
+export type RdpResolutionMode = 'dynamic' | 'fit' | 'fixed';
+export type RdpMultiMonitorMode = 'single' | 'dual' | 'all-local';
+export type RdpColorDepth = 16 | 24 | 32;
+export type RdpSecurityMode = 'auto' | 'nla' | 'tls' | 'rdp';
+
+/**
+ * Non-sensitive RDP session configuration.
+ * NEVER add plaintext password fields here: legacy iOS sync only strips top-level
+ * `password` and `telnetPassword`, so credentials must stay in `Host.password`
+ * or be referenced via `identityId` / `Host.identityId`.
+ * NEVER add local filesystem paths (e.g. RDPDR shared folders) here so cloud
+ * and iOS sync payloads stay device-independent.
+ */
+export interface RdpConfig {
+  enabled?: boolean;
+  defaultConnect?: boolean;
+  port?: number;
+  domain?: string;
+  identityId?: string;
+  username?: string;
+  useHostCredentials?: boolean;
+  tunnelViaHostSsh?: boolean;
+  tunnelTargetHost?: string;
+  resolutionMode?: RdpResolutionMode;
+  multiMonitorMode?: RdpMultiMonitorMode;
+  width?: number;
+  height?: number;
+  colorDepth?: RdpColorDepth;
+  audioEnabled?: boolean;
+  clipboardSync?: boolean;
+  clipboardFilesEnabled?: boolean;
+  securityMode?: RdpSecurityMode;
+  ignoreCertErrors?: boolean;
+  loadBalanceInfo?: string;
+  alternateShell?: string;
+  shellWorkingDir?: string;
+  remoteApplicationMode?: boolean;
+  remoteApplicationProgram?: string;
+}
+
+export type VncScalingMode = 'fit' | 'actual' | 'stretch' | 'dynamic';
+
+/**
+ * Non-sensitive VNC session configuration.
+ * NEVER add plaintext password fields here (see RdpConfig sync redline).
+ */
+export interface VncConfig {
+  enabled?: boolean;
+  defaultConnect?: boolean;
+  port?: number;
+  identityId?: string;
+  username?: string;
+  useHostCredentials?: boolean;
+  tunnelViaHostSsh?: boolean;
+  tunnelTargetHost?: string;
+  scalingMode?: VncScalingMode;
+  quality?: number;
+  compressionLevel?: number;
+  viewOnly?: boolean;
+  sharedSession?: boolean;
+  clipboardSync?: boolean;
+  showRemoteCursor?: boolean;
+}
 export type PluginConfigurationValue =
   | null
   | boolean
@@ -168,6 +232,7 @@ export interface HostTotpConfig {
 
 export type HostOperatingSystem = 'linux' | 'windows' | 'macos' | 'freebsd' | 'unknown';
 export type HostOsSelection = 'auto' | HostOperatingSystem;
+export type HostConnectProtocolBehavior = 'default' | 'ask';
 
 export interface Host {
   id: string;
@@ -178,6 +243,10 @@ export interface Host {
   // Optional reference to a reusable identity (username + auth) stored in Keychain.
   identityId?: string;
   group?: string;
+  // Double-click / primary connect behavior when multiple protocols are enabled:
+  // 'default' connects directly to the host's default protocol; 'ask' opens ProtocolSelectDialog.
+  // Undefined preserves legacy behavior (SSH+Telnet prompts; SSH+VNC/RDP connects default).
+  connectProtocolBehavior?: HostConnectProtocolBehavior;
   tags: string[];
   // Legacy compatibility value; use resolveHostOs for runtime decisions.
   os: 'linux' | 'windows' | 'macos';
@@ -275,6 +344,9 @@ export interface Host {
   telnetPassword?: string; // Telnet-specific password
   // Serial-specific configuration (for protocol='serial' hosts)
   serialConfig?: SerialConfig;
+  // Remote desktop configuration (standalone or companion on SSH hosts; never holds passwords)
+  rdpConfig?: RdpConfig;
+  vncConfig?: VncConfig;
   // SFTP specific configuration
   sftpSudo?: boolean; // Use sudo for SFTP operations (requires password)
   // Remote file browser protocol: Auto tries SFTP then falls back to SCP-mode
@@ -366,6 +438,8 @@ export interface Identity {
   id: string;
   label: string;
   username: string;
+  /** Optional Windows domain (used by RDP identities). */
+  domain?: string;
   authMethod: IdentityAuthMethod;
   password?: string; // For password auth
   keyId?: string; // Reference to SSHKey for key/certificate auth

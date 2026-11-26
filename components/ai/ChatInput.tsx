@@ -6,7 +6,7 @@
  * and a bottom toolbar with muted controls + subtle send button.
  */
 
-import { ArrowUp, AtSign, BookOpen, Check, ChevronDown, ChevronRight, Cpu, Eye, FileText, ImageIcon, Loader2, MessageSquare, Package, Plus, ShieldCheck, SquareTerminal, X, Zap } from 'lucide-react';
+import { AlertTriangle, ArrowUp, AtSign, BookOpen, Check, ChevronDown, ChevronRight, Cpu, Eye, FileText, ImageIcon, Loader2, MessageSquare, Package, Plus, ShieldCheck, Sparkles, SquareTerminal, X, Zap } from 'lucide-react';
 import {
   resolveModelSelectionWithThinking,
   resolveThinkingSelection,
@@ -75,6 +75,11 @@ import {
   resolveVisibleChatInputHeight,
   resolveVisibleChatInputMaxHeight,
 } from './chatInputResize';
+import { resolveModelVisionSupport } from '../../infrastructure/ai/visionCapability';
+import {
+  isRemoteDesktopScreenshotFile,
+  REMOTE_DESKTOP_QUICK_PROMPTS,
+} from './remoteDesktopAiDraft';
 
 const PERMISSION_PICKER_WIDTH = 200;
 const THINKING_PICKER_WIDTH = 168;
@@ -203,7 +208,7 @@ const ComposerSendUi = React.memo(function ComposerSendUi({
 interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
-  onSend: () => void;
+  onSend: (textOverride?: string) => void;
   onCompact?: () => void;
   /** When false, hide/ignore `/compact` so the composer is not cleared as a silent no-op. */
   canCompact?: boolean;
@@ -249,7 +254,13 @@ interface ChatInputProps {
   /** Callback to remove a file */
   onRemoveFile?: (id: string) => void;
   /** Available hosts for @ mention */
-  hosts?: Array<{ sessionId: string; hostname: string; label: string; connected: boolean }>;
+  hosts?: Array<{ sessionId: string; hostname: string; label: string; connected: boolean; protocol?: string }>;
+  /** Explicit signal that the active tab/scope is a VNC or RDP remote desktop. */
+  isRemoteDesktopContext?: boolean;
+  /** Optional handler invoked when a remote desktop quick prompt chip is clicked. */
+  onSendQuickPrompt?: (promptText: string) => void;
+  /** Force-show remote desktop quick prompt chips (auto-shown when a remote screen image is attached). */
+  showRemoteScreenQuickPrompts?: boolean;
   /** Available Vault → Notes entries for the Mention Note picker */
   notes?: VaultNote[];
   /** Callback when the user picks a note to attach as context */
@@ -322,6 +333,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onAddFiles,
   onRemoveFile,
   hosts = [],
+  isRemoteDesktopContext = false,
+  onSendQuickPrompt,
+  showRemoteScreenQuickPrompts,
   notes = [],
   onMentionNote,
   selectedUserSkills = [],
@@ -341,7 +355,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onRebindChat,
 }) => {
   const { t } = useI18n();
-  const hasTerminalSelectionAttachment = files.some((file) => file.terminalSelection || file.vaultNoteId);
+  const hasImageAttachment = files.some((file) => file.mediaType.startsWith('image/'));
+  const hasRemoteScreenAttachment = files.some((file) => isRemoteDesktopScreenshotFile(file));
+  const hasTerminalSelectionAttachment = files.some(
+    (file) => file.terminalSelection || file.vaultNoteId || file.mediaType.startsWith('image/'),
+  );
   const composerDisabled = disabled || isSteering;
   const composerTextRef = useRef(value);
   const hasTextStoreRef = useRef<ComposerHasTextStore | null>(null);
@@ -1117,6 +1135,49 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const popoverMaxWidth = hasProviderSwitcher
     ? COMPOSER_PROVIDER_PICKER_WIDTH
     : COMPOSER_MODEL_PICKER_WIDTH;
+  const activeVisionProviderId = hasProviderSwitcher
+    ? selectedSwitcherProvider?.providerId
+    : undefined;
+  const activeVisionModelId = hasProviderSwitcher
+    ? (providerSwitcher?.selectedModelId || selectedSwitcherProvider?.defaultModel)
+    : (selectedBaseModelId || selectedModelId || modelName);
+  const hasRemoteDesktopHostInScope = hosts.some((host) => {
+    const protocol = host.protocol?.toLowerCase();
+    return protocol === 'vnc' || protocol === 'rdp';
+  });
+  const hasVisionContext = hasImageAttachment || isRemoteDesktopContext || hasRemoteDesktopHostInScope;
+  const activeModelVisionSupport = useMemo(
+    () => resolveModelVisionSupport({
+      providerId: activeVisionProviderId,
+      modelId: activeVisionModelId,
+    }),
+    [activeVisionProviderId, activeVisionModelId],
+  );
+  const showVisionWarningBanner = hasVisionContext && activeModelVisionSupport === 'no';
+  const showQuickPromptChips = (showRemoteScreenQuickPrompts ?? hasRemoteScreenAttachment)
+    && !isStreaming
+    && !composerDisabled;
+
+  const openModelPickerPopover = useCallback(() => {
+    if (!hasModelPicker || lockTurnConfiguration) return;
+    const rect = modelBtnRef.current?.getBoundingClientRect();
+    if (rect) {
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - popoverMaxWidth - 8));
+      setMenuPos({ left, bottom: window.innerHeight - rect.top + 6 });
+    }
+    setActiveMenu('model');
+    if (!hasProviderSwitcher) onModelPickerOpen?.();
+  }, [hasModelPicker, hasProviderSwitcher, lockTurnConfiguration, onModelPickerOpen, popoverMaxWidth]);
+
+  const handleQuickPromptClick = useCallback((promptText: string) => {
+    if (composerDisabled || isStreaming) return;
+    if (onSendQuickPrompt) {
+      onSendQuickPrompt(promptText);
+      return;
+    }
+    commitComposerText(promptText);
+    onSend(promptText);
+  }, [commitComposerText, composerDisabled, isStreaming, onSend, onSendQuickPrompt]);
   const contextUsagePercent = contextUsage
     ? Math.min(100, Math.max(0, (contextUsage.inputTokens / contextUsage.contextWindow) * 100))
     : 0;
@@ -1141,6 +1202,48 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   return (
     <div className="shrink-0 px-4 pb-4">
+      {showVisionWarningBanner && (
+        <div
+          role="status"
+          data-testid="ai-vision-model-warning"
+          className="mb-2 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-4 text-amber-600 dark:text-amber-400"
+        >
+          <AlertTriangle size={12} className="shrink-0 text-amber-500" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            {t('ai.vision.unsupportedModelWarning').replace('{model}', activeVisionModelId || modelLabel)}
+          </span>
+          {hasModelPicker && !lockTurnConfiguration && (
+            <button
+              type="button"
+              onClick={openModelPickerPopover}
+              className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-amber-700 underline-offset-2 transition-colors hover:bg-amber-500/15 hover:underline cursor-pointer dark:text-amber-300"
+            >
+              {t('ai.vision.switchModel')}
+            </button>
+          )}
+        </div>
+      )}
+      {showQuickPromptChips && (
+        <div
+          data-testid="ai-remote-screen-quick-prompts"
+          className="mb-1.5 flex flex-wrap items-center gap-1.5"
+        >
+          {REMOTE_DESKTOP_QUICK_PROMPTS.map((chip) => {
+            const label = t(chip.labelKey);
+            return (
+              <button
+                key={chip.id}
+                type="button"
+                onClick={() => handleQuickPromptClick(label)}
+                className="inline-flex h-6 items-center gap-1 rounded-full border border-border/60 bg-muted/30 px-2.5 text-[11px] text-foreground/82 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-foreground cursor-pointer"
+              >
+                <Sparkles size={10} className="shrink-0 text-primary/70" aria-hidden="true" />
+                <span>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div
         ref={inputShellRef}
         className="relative"
@@ -1193,6 +1296,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   <SquareTerminal size={12} className="text-muted-foreground/70 shrink-0" />
                 ) : file.vaultNoteId ? (
                   <BookOpen size={11} className="text-muted-foreground/60 shrink-0" />
+                ) : file.mediaType.startsWith('image/') && file.dataUrl ? (
+                  <img
+                    src={file.dataUrl}
+                    alt={file.filename}
+                    className="h-4 w-4 rounded-[3px] object-cover shrink-0 border border-border/40"
+                  />
                 ) : file.mediaType.startsWith('image/') ? (
                   <ImageIcon size={11} className="text-muted-foreground/60 shrink-0" />
                 ) : (
@@ -1898,6 +2007,9 @@ function chatInputPropsAreEqual(prev: ChatInputProps, next: ChatInputProps): boo
     && prev.onAddFiles === next.onAddFiles
     && prev.onRemoveFile === next.onRemoveFile
     && prev.hosts === next.hosts
+    && prev.isRemoteDesktopContext === next.isRemoteDesktopContext
+    && prev.onSendQuickPrompt === next.onSendQuickPrompt
+    && prev.showRemoteScreenQuickPrompts === next.showRemoteScreenQuickPrompts
     && prev.notes === next.notes
     && prev.onMentionNote === next.onMentionNote
     && prev.selectedUserSkills === next.selectedUserSkills

@@ -49,6 +49,9 @@ export function canOpenDualPaneSftp(host: { protocol?: string }): boolean {
   // Local-shell vault hosts have no SFTP/SSH channel: opening dual-pane SFTP
   // from one would try to SSH into localhost with empty credentials.
   if (protocol === "local") return false;
+  // Standalone remote-desktop hosts have no SSH/SFTP channel. SSH hosts with
+  // companion VNC/RDP keep protocol === "ssh" (or undefined) and still return true.
+  if (protocol === "vnc" || protocol === "rdp") return false;
   if (isPluginHostProtocol(protocol)) return false;
   return true;
 }

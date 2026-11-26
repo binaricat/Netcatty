@@ -31,3 +31,8 @@ test("canUseDirectSessionWriteFallback allows connected sessions", () => {
 test("canUseDirectSessionWriteFallback preserves existing connecting fallback writes", () => {
   assert.equal(canUseDirectSessionWriteFallback({ status: "connecting" }), true);
 });
+
+test("canUseDirectSessionWriteFallback blocks remote desktop vnc/rdp sessions", () => {
+  assert.equal(canUseDirectSessionWriteFallback({ status: "connected", protocol: "rdp" }), false);
+  assert.equal(canUseDirectSessionWriteFallback({ status: "connected", protocol: "vnc" }), false);
+});

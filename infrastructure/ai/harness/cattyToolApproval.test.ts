@@ -95,4 +95,38 @@ describe('buildCattyToolApproval', () => {
       reason: 'User denied tool execution.',
     });
   });
+
+  it('requires fresh high-risk approval for OS chords in remote_desktop_act even in auto mode', async () => {
+    const requestedCaps: string[] = [];
+    const approval = buildCattyToolApproval({
+      permissionMode: 'auto',
+      chatSessionId: 'chat-rd',
+      requestApproval: async (_id, _name, _args, _chatId, _timeout, capabilityId) => {
+        requestedCaps.push(capabilityId ?? '');
+        return true;
+      },
+    });
+
+    // Benign click in auto mode requires no prompt
+    const benign = await approval({
+      toolCall: {
+        toolCallId: 'call-rd-1',
+        toolName: 'remote_desktop_act',
+        input: { sessionId: 'rd-1', actions: [{ type: 'click', x: 500, y: 500 }] },
+      },
+    } as Parameters<typeof approval>[0]);
+    assert.equal(benign, undefined);
+    assert.deepEqual(requestedCaps, []);
+
+    // High-risk Ctrl+Alt+Del chord in auto mode forces fresh high-risk approval
+    const highRisk = await approval({
+      toolCall: {
+        toolCallId: 'call-rd-2',
+        toolName: 'remote_desktop_act',
+        input: { sessionId: 'rd-1', actions: [{ type: 'key', key: 'Ctrl+Alt+Del' }] },
+      },
+    } as Parameters<typeof approval>[0]);
+    assert.deepEqual(highRisk, { type: 'approved' });
+    assert.deepEqual(requestedCaps, ['harness.remote_desktop.act:high-risk']);
+  });
 });

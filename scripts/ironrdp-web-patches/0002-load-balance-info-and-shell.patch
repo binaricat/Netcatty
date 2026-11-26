@@ -1,0 +1,186 @@
+diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
+index 67808ed..5a51a91 100644
+--- a/crates/ironrdp-web/src/session.rs
++++ b/crates/ironrdp-web/src/session.rs
+@@ -76,6 +76,9 @@ struct SessionBuilderInner {
+     pcb: Option<String>,
+     vmconnect: Option<String>,
+     kdc_proxy_url: Option<String>,
++    load_balance_info: Option<String>,
++    alternate_shell: Option<String>,
++    work_dir: Option<String>,
+     entra_assertion_callback: Option<js_sys::Function>,
+     client_name: String,
+     desktop_size: DesktopSize,
+@@ -132,6 +135,9 @@ impl Default for SessionBuilderInner {
+             pcb: None,
+             vmconnect: None,
+             kdc_proxy_url: None,
++            load_balance_info: None,
++            alternate_shell: None,
++            work_dir: None,
+             entra_assertion_callback: None,
+             client_name: "ironrdp-web".to_owned(),
+             desktop_size: DesktopSize {
+@@ -317,6 +323,28 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             |pcb: String| { self.0.borrow_mut().pcb = Some(pcb) };
+             |vmconnect: String| { self.0.borrow_mut().vmconnect = Some(vmconnect) };
+             |kdc_proxy_url: String| { self.0.borrow_mut().kdc_proxy_url = Some(kdc_proxy_url) };
++            |load_balance_info: String| {
++                let trimmed = load_balance_info.trim_end_matches(['\r', '\n']);
++                self.0.borrow_mut().load_balance_info = if trimmed.is_empty() {
++                    None
++                } else {
++                    Some(trimmed.to_owned())
++                };
++            };
++            |alternate_shell: String| {
++                self.0.borrow_mut().alternate_shell = if alternate_shell.is_empty() {
++                    None
++                } else {
++                    Some(alternate_shell)
++                };
++            };
++            |work_dir: String| {
++                self.0.borrow_mut().work_dir = if work_dir.is_empty() {
++                    None
++                } else {
++                    Some(work_dir)
++                };
++            };
+             |entra_assertion: JsValue| {
+                 // A function signing the RDP assertion (see entra::perform_entra_auth); anything else leaves
+                 // Microsoft Entra ID sign-in off.
+@@ -619,6 +647,15 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             config.performance_flags = performance_flags;
+         }
+ 
++        if let Some(alternate_shell) = self.0.borrow().alternate_shell.clone() {
++            config.alternate_shell = alternate_shell;
++        }
++        if let Some(work_dir) = self.0.borrow().work_dir.clone() {
++            config.work_dir = work_dir;
++        }
++        let opaque_load_balance_info =
++            apply_load_balance_info(&mut config, self.0.borrow().load_balance_info.clone());
++
+         if let Some(factor) = self.0.borrow().desktop_scale_factor {
+             config.desktop_scale_factor = factor;
+             config.device_scale_factor = Some(DeviceScaleFactor::from_desktop_scale_factor(factor).value());
+@@ -737,6 +774,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             pcb,
+             vmconnect,
+             kdc_proxy_url,
++            load_balance_info: opaque_load_balance_info,
+             entra_assertion_callback,
+             clipboard_backend: clipboard.as_ref().map(|clip| clip.backend()),
+             printer_backend,
+@@ -1980,6 +2018,31 @@ fn parse_file_metadata_array(files: JsValue) -> Result<Vec<FileMetadata>, IronEr
+     Ok(file_list)
+ }
+ 
++/// Routes a caller-supplied `load_balance_info` string to the appropriate X.224
++/// negotiation field:
++/// - `Cookie: msts=<token>` or `msts=<token>` -> `config.request_data = Some(NegoRequestData::routing_token(<token>))`
++/// - Any other printable routing info (e.g. `tsv://MS Terminal Services Plugin.1.<Collection>`,
++///   `Cookie: tsv://...`, or JumpServer/broker tokens) -> returned for `ClientConnector::with_load_balance_info`.
++fn apply_load_balance_info(config: &mut connector::Config, load_balance_info: Option<String>) -> Option<String> {
++    let raw = load_balance_info?;
++    let trimmed = raw.trim_end_matches(['\r', '\n']);
++    if trimmed.is_empty() {
++        return None;
++    }
++
++    if let Some(token) = trimmed
++        .strip_prefix("Cookie: msts=")
++        .or_else(|| trimmed.strip_prefix("msts="))
++    {
++        if !token.is_empty() {
++            config.request_data = Some(ironrdp::pdu::nego::NegoRequestData::routing_token(token.to_owned()));
++            return None;
++        }
++    }
++
++    Some(trimmed.to_owned())
++}
++
+ fn build_config(
+     username: String,
+     password: String,
+@@ -2111,6 +2174,7 @@ struct ConnectParams {
+     pcb: Option<String>,
+     vmconnect: Option<String>,
+     kdc_proxy_url: Option<String>,
++    load_balance_info: Option<String>,
+     entra_assertion_callback: Option<js_sys::Function>,
+     clipboard_backend: Option<WasmClipboardBackend>,
+     printer_backend: Option<WasmPrinterBackend>,
+@@ -2213,6 +2277,7 @@ async fn connect(
+         pcb,
+         vmconnect,
+         kdc_proxy_url,
++        load_balance_info,
+         entra_assertion_callback,
+         clipboard_backend,
+         printer_backend,
+@@ -2233,6 +2298,10 @@ async fn connect(
+ 
+     let mut connector = ClientConnector::new(config, dummy_client_addr);
+ 
++    if let Some(load_balance_info) = load_balance_info {
++        connector = connector.with_load_balance_info(load_balance_info);
++    }
++
+     if entra_assertion_callback.is_some() {
+         connector = connector.with_entra_auth();
+     }
+@@ -3386,6 +3455,49 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn test_apply_load_balance_info_routing_token_and_opaque() {
++        let sec = SecurityConfig {
++            enable_credssp: true,
++            enable_standard_rdp_security: false,
++        };
++
++        let mut cfg_msts = connector_config(false, sec);
++        let opaque = apply_load_balance_info(&mut cfg_msts, Some("Cookie: msts=3640205228.15629.0000\r\n".to_owned()));
++        assert_eq!(opaque, None);
++        assert_eq!(
++            cfg_msts.request_data,
++            Some(ironrdp::pdu::nego::NegoRequestData::routing_token(
++                "3640205228.15629.0000".to_owned()
++            ))
++        );
++
++        let mut cfg_short_msts = connector_config(false, sec);
++        let opaque = apply_load_balance_info(&mut cfg_short_msts, Some("msts=1234.5678.0000".to_owned()));
++        assert_eq!(opaque, None);
++        assert_eq!(
++            cfg_short_msts.request_data,
++            Some(ironrdp::pdu::nego::NegoRequestData::routing_token(
++                "1234.5678.0000".to_owned()
++            ))
++        );
++
++        let mut cfg_tsv = connector_config(false, sec);
++        let opaque = apply_load_balance_info(
++            &mut cfg_tsv,
++            Some("tsv://MS Terminal Services Plugin.1.MyCollection\r\n".to_owned()),
++        );
++        assert_eq!(cfg_tsv.request_data, None);
++        assert_eq!(
++            opaque.as_deref(),
++            Some("tsv://MS Terminal Services Plugin.1.MyCollection")
++        );
++
++        let mut cfg_empty = connector_config(false, sec);
++        assert_eq!(apply_load_balance_info(&mut cfg_empty, Some("\r\n".to_owned())), None);
++        assert_eq!(cfg_empty.request_data, None);
++    }
++
+     #[cfg(target_arch = "wasm32")]
+     #[wasm_bindgen_test::wasm_bindgen_test]
+     fn the_camera_h264_extension_sets_the_flag() {

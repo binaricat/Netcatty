@@ -165,6 +165,12 @@ function createWorkerAiExecHandler({
 
     const meta = sessionMeta || {};
     const { sessionProtocol, isNetworkDevice } = isNetworkDeviceSession(session, meta);
+    if (sessionProtocol === "vnc" || sessionProtocol === "rdp") {
+      return {
+        ok: false,
+        error: `Remote desktop (${sessionProtocol.toUpperCase()}) sessions do not support terminal command execution.`,
+      };
+    }
     const timeoutMs = Number.isFinite(commandTimeoutMs) ? commandTimeoutMs : 60000;
 
     if ((session.protocol === "local" || session.type === "local") && session.shellKind === "unknown") {
@@ -337,6 +343,12 @@ function createWorkerAiJobStartHandler({
 
     const meta = sessionMeta || {};
     const { sessionProtocol, isNetworkDevice } = isNetworkDeviceSession(session, meta);
+    if (sessionProtocol === "vnc" || sessionProtocol === "rdp") {
+      return {
+        ok: false,
+        error: `Remote desktop (${sessionProtocol.toUpperCase()}) sessions do not support terminal command execution.`,
+      };
+    }
     if (isNetworkDevice || sessionProtocol === "serial") {
       return {
         ok: false,

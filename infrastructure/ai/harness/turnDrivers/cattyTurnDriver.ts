@@ -22,9 +22,14 @@ import {
   resolveEffectiveCattyReasoningEffort,
 } from '../../cattyReasoning';
 import { createModelFromConfig } from '../../sdk/providers';
-import { createCattyToolsFromCatalog } from '../capabilityTools';
+import {
+  createCattyToolsFromCatalog,
+  type PendingRemoteScreenImage,
+} from '../capabilityTools';
 import { createInitialCattyRuntimeContext } from '../cattyRuntimeContext';
 import { prepareStepContext, extractLatestUserGoal } from '../contextManager';
+import { SYNTHETIC_REMOTE_SCREEN_MARKER } from '../staleContextPruner';
+import { resolveModelVisionSupport } from '../../visionCapability';
 import {
   compactCattyMessages,
   prepareCattyMessagesForStream,
@@ -49,6 +54,46 @@ import { fitLargeUserInputForModel } from '../largeUserInput';
 import { buildPromptContextSnapshot } from '../promptContextSnapshot';
 import { initializeModelPrivacy, protectModel, redactOpenAIChatAssistantFields, type ModelPrivacyBridge } from '../modelPrivacy';
 import { normalizeAiToolOutputMaxChars } from '../../../../domain/aiToolOutputLimit';
+
+export function drainPendingRemoteScreenImagesIntoMessages(
+  messages: ModelMessage[],
+  pendingScreenImages: PendingRemoteScreenImage[],
+): { messages: ModelMessage[]; didInject: boolean } {
+  if (!pendingScreenImages.length) {
+    return { messages, didInject: false };
+  }
+  const drained = pendingScreenImages.splice(0, pendingScreenImages.length);
+  const injected: ModelMessage[] = drained.map((img) => {
+    const details = [
+      `sessionId=${img.sessionId}`,
+      img.protocol ? `protocol=${img.protocol}` : undefined,
+      img.hostLabel ? `host=${img.hostLabel}` : undefined,
+      `resolution=${img.width}x${img.height}`,
+      `natural=${img.naturalWidth}x${img.naturalHeight}`,
+      img.crop ? `crop=${img.crop.x},${img.crop.y},${img.crop.width}x${img.crop.height}` : undefined,
+      `capturedAt=${img.capturedAt}`,
+    ].filter(Boolean).join(', ');
+    return {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: `${SYNTHETIC_REMOTE_SCREEN_MARKER} ${details}]`,
+        },
+        {
+          type: 'file',
+          data: img.base64Data,
+          mediaType: img.mediaType,
+          filename: img.mediaType === 'image/png' ? 'remote-screen.png' : 'remote-screen.jpg',
+        },
+      ],
+    };
+  });
+  return {
+    messages: [...messages, ...injected],
+    didInject: true,
+  };
+}
 
 export class CattyTurnDriver implements TurnDriver {
   readonly backend = 'catty' as const;
@@ -164,6 +209,22 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     workspaceId: context.scopeType === 'workspace' ? context.scopeTargetId : undefined,
     workspaceName: context.scopeType === 'workspace' ? context.scopeLabel : undefined,
   }));
+  const activeModelId = context.activeModelId || context.activeProvider?.defaultModel || '';
+  const providerStyle = context.activeProvider
+    ? resolveProviderStyle(context.activeProvider, activeModelId)
+    : 'openai';
+  const openAIApi = context.activeProvider
+    ? resolveOpenAIApi(context.activeProvider, activeModelId)
+    : 'chat';
+  const supportsMultimodalToolResult =
+    providerStyle === 'anthropic'
+    || providerStyle === 'google'
+    || (providerStyle === 'openai' && openAIApi === 'responses');
+  const modelVisionSupport = resolveModelVisionSupport({
+    providerId: context.activeProvider?.providerId,
+    modelId: activeModelId,
+  });
+
   const toolOutputMaxChars = normalizeAiToolOutputMaxChars(context.toolOutputMaxChars);
   const toolsBundle = createCattyToolsFromCatalog(
     netcattyBridge,
@@ -178,6 +239,9 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       agentKind: context.agentKind,
       allowedCapabilityIds: context.allowedCapabilityIds,
       toolOutputMaxChars,
+      supportsMultimodalToolResult,
+      modelVisionSupport,
+      activeModelId,
     },
   );
   const { tools } = toolsBundle;
@@ -195,8 +259,6 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     ui.reportStreamError(sessionId, signal, 'No AI provider configured. Please configure a provider in Settings → AI.');
     return;
   }
-
-  const activeModelId = context.activeModelId || context.activeProvider.defaultModel || '';
   const promptContext = buildPromptContextSnapshot({
     agentKind: context.agentKind,
     providerId: context.activeProvider.providerId,
@@ -502,8 +564,12 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         runtimeContext,
         onAgentEvent: (event) => ctx.emit(event),
         prepareStep: async ({ stepNumber, messages, runtimeContext: stepRuntimeContext }) => {
-          const prepared = await prepareStepContext({
+          const drainedScreens = drainPendingRemoteScreenImagesIntoMessages(
             messages,
+            toolsBundle.pendingScreenImages,
+          );
+          const prepared = await prepareStepContext({
+            messages: drainedScreens.messages,
             stepNumber,
             sessionId,
             chatSessionId: sessionId,

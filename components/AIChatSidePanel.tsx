@@ -1733,14 +1733,18 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   }, [currentAgentId, enterScopeDraftMode, updateScopeDraft]);
 
 
-  const handleSend = useCallback(async (textOverride?: string) => {
+  const handleSend = useCallback(async (
+    textOverride?: string,
+    options?: { includeDraftAttachments?: boolean },
+  ) => {
     const draft = currentDraftRef.current;
     const currentPanelView = panelViewRef.current;
     const currentSessionView = activeSessionRef.current;
-    if (textOverride === undefined && !validateNoteMentions(draft?.attachments ?? [])) return;
+    const useDraftAttachments = textOverride === undefined || options?.includeDraftAttachments === true;
+    if (useDraftAttachments && !validateNoteMentions(draft?.attachments ?? [])) return;
     const trimmed = (textOverride ?? draft?.text ?? '').trim();
     const sendScopeKey = scopeKey;
-    const attachments = (textOverride === undefined ? draft?.attachments ?? [] : []).map((file) => ({
+    const attachments = (useDraftAttachments ? draft?.attachments ?? [] : []).map((file) => ({
       base64Data: file.base64Data,
       mediaType: file.mediaType,
       filename: file.filename,
@@ -1752,30 +1756,35 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       lineCount: file.lineCount,
     }));
     const hasInlineTextAttachments = attachments.some(isInlineTextAttachment);
-    if ((!trimmed && !hasInlineTextAttachments) || isStreaming) return;
+    const hasImageAttachments = attachments.some((attachment) => attachment.mediaType.startsWith('image/'));
+    if ((!trimmed && !hasInlineTextAttachments && !hasImageAttachments) || isStreaming) return;
     // While undo-last-turn is creating the branch, the target is still the source; a
     // turn submitted now would run in the soon-hidden source session, so
     // block it until the branch settles.
     if (isUndoingLastTurn) return;
-    // Note-only sends (empty text + a mentioned note) still need a usable
-    // session title: fall back to the first mentioned note's title so these
+    // Note-only / image-only sends (empty text + attachment) still need a usable
+    // session title: fall back to the note title or image filename so these
     // conversations don't all show up as "Untitled" in history.
     const noteOnlyTitle = attachments.find(
       (attachment) => isVaultNoteAttachment(attachment) && attachment.vaultNoteTitle,
     )?.vaultNoteTitle ?? '';
-    const titleText = trimmed || noteOnlyTitle.trim();
+    const imageOnlyTitle = attachments.find(
+      (attachment) => attachment.mediaType.startsWith('image/') && attachment.filename,
+    )?.filename ?? '';
+    const titleText = trimmed || noteOnlyTitle.trim() || imageOnlyTitle.trim();
     const sendAgentId = currentSessionView?.agentId ?? draft?.agentId ?? currentAgentId;
     const agentConfig = sendAgentId !== 'catty' ? findEnabledExternalAgent(externalAgents, sendAgentId) : undefined;
     if (sendAgentId !== 'catty' && !agentConfig) return;
 
-    const selectedSkillSlugs = textOverride === undefined ? draft?.selectedUserSkillSlugs ?? [] : [];
+    const selectedSkillSlugs = useDraftAttachments ? draft?.selectedUserSkillSlugs ?? [] : [];
     const modelPrompt = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
     const modelAttachments = attachments.filter((attachment) => !isInlineTextAttachment(attachment));
     const isDraftMode = currentPanelView.mode === 'draft';
 
-    if (textOverride === undefined) flushDraftText();
+    if (useDraftAttachments) flushDraftText();
     const submittedText = draft?.text ?? '';
     const keepPendingAfterSend = () => {
+      if (options?.includeDraftAttachments) return false;
       const pending = pendingComposerTextRef.current;
       return pending != null && pending !== submittedText;
     };
@@ -1862,7 +1871,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         const createdSession = createSession(scope, sendAgentId);
         sessionId = createdSession.id;
         currentSession = createdSession;
-        if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+        if (useDraftAttachments) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
         showScopeSessionView(createdSession.id);
         setActiveSessionId(createdSession.id);
         sessionSendGateKey = sessionId;
@@ -1893,7 +1902,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProvider'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {
-          if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+          if (useDraftAttachments) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
           showScopeSessionView(sessionId);
         }
         return;
@@ -1908,7 +1917,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProviderModel'), timestamp: Date.now() });
         if (currentPanelView.mode === 'session') {
-          if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+          if (useDraftAttachments) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
           showScopeSessionView(sessionId);
         }
         return;
@@ -1921,7 +1930,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         ...(selectedSkillSlugs.length > 0 ? { selectedUserSkillSlugs: selectedSkillSlugs } : {}),
         timestamp: Date.now(),
       });
-      if (textOverride === undefined) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
+      if (useDraftAttachments) clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
       showScopeSessionView(sessionId);
       setActiveSessionId(sessionId);
       setStreamingForScope(sessionId, true);
@@ -2156,6 +2165,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   useEffect(() => {
     return registerGrantPersister((rule) => { addGrant(rule); });
   }, [addGrant]);
+
+  const handleSendQuickPrompt = useCallback((promptText: string) => {
+    void handleSend(promptText, { includeDraftAttachments: true });
+  }, [handleSend]);
 
   const handleStop = useCallback(() => {
     if (!activeSessionId) return;
@@ -2514,6 +2527,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         inputValue={inputValue}
         setInputValue={setInputValue}
         handleSend={handleSend}
+        handleSendQuickPrompt={handleSendQuickPrompt}
         handleCompact={handleCompact}
         onRenameSession={handleRenameSession}
         onRenameActiveChat={handleRenameSlashCommand}

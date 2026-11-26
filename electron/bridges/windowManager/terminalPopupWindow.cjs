@@ -15,6 +15,9 @@ const {
   windowsFramelessContentChromeOptions,
 } = require("./windowsWindowChrome.cjs");
 const { placeTerminalPopup } = require("./terminalPopupPlacement.cjs");
+const {
+  attachRemoteDesktopKeyboardGrab,
+} = require("./remoteDesktopKeyboardGrab.cjs");
 
 const ATTACH_CLOSE_PREPARE_TIMEOUT_MS = 2000;
 
@@ -171,6 +174,7 @@ function createTerminalPopupWindowApi(ctx) {
       });
 
       let lifecycleReleased = false;
+      const detachRemoteDesktopKeyboardGrab = attachRemoteDesktopKeyboardGrab(win);
       let closePreparationRequested = false;
       let closePreparationTimer = null;
       let restoreRetryTimer = null;
@@ -239,6 +243,11 @@ function createTerminalPopupWindowApi(ctx) {
       const releaseLifecycle = () => {
         if (lifecycleReleased) return;
         lifecycleReleased = true;
+        try {
+          detachRemoteDesktopKeyboardGrab?.();
+        } catch {
+          // ignore
+        }
         if (closePreparationTimer) clearTimeout(closePreparationTimer);
         terminalPopupWindows.delete(popupId);
         const homeGone = isHomeGone();

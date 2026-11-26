@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { LayoutGrid, Plus } from 'lucide-react';
 import { Button } from '../ui/button';
 import { collectSessionIds } from '../../domain/workspace';
+import { isRemoteDesktopProtocol } from '../../domain/remoteDesktop';
 
 import {
   getSidePanelLiveSnapshot,
@@ -106,6 +107,8 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     onSetWorkspaceFocusedSession,
     onRequestAddToWorkspace,
     onSplitSession,
+    onConnectRemoteDesktop,
+    onCopySessionToNewWindow,
     isBroadcastEnabled,
     isComposeSendToAll,
     onToggleComposeSendTarget,
@@ -274,6 +277,8 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           onCommandSubmitted={handleCommandSubmitted}
           onSetWorkspaceFocusedSession={onSetWorkspaceFocusedSession}
           onSplitSession={onSplitSession}
+          onConnectRemoteDesktop={onConnectRemoteDesktop}
+          onCopySessionToNewWindow={onCopySessionToNewWindow}
           isBroadcastEnabled={isBroadcastEnabled}
           isComposeSendToAll={isComposeSendToAll}
           isGlobalComposeSendToAll={isGlobalComposeSendToAll}
@@ -370,7 +375,9 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
         workspaceOuterRef.current,
       )}
 
-      {activeWorkspace && focusedSessionId && isComposeBarOpen && (
+      {activeWorkspace && focusedSessionId && isComposeBarOpen && !isRemoteDesktopProtocol(
+        sessions.find((s: { id: string; protocol?: string }) => s.id === focusedSessionId)?.protocol,
+      ) && (
         <TerminalComposeBar
           sessionId={focusedSessionId}
           contextChipsEnabled={terminalSettings?.contextChipsEnabled !== false}

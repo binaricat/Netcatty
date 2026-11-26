@@ -12,6 +12,7 @@ import { useSystemCapabilitiesWarmup } from '../../application/state/useSystemMa
 import { cn } from '../../lib/utils';
 import type { Host, TerminalSession, Workspace } from '../../types';
 import { resolveTerminalHibernateEnabled } from '../../domain/terminalHibernate';
+import { isRemoteDesktopProtocol } from '../../domain/remoteDesktop';
 import { resolveTerminalSftpHost } from '../../domain/sftpTerminalIdentity';
 import { shouldMeasureTerminalLayerLayout } from '../terminalPaneVisibility';
 import { TerminalLayerView } from './TerminalLayerView';
@@ -68,7 +69,11 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
   const hibernateHiddenTabs = resolveTerminalHibernateEnabled(s.terminalSettings);
   const localWorkspaceIds = useMemo(() => new Set(
     sessions
-      .filter((session) => session.workspaceId && sessionHostsMap.get(session.id)?.protocol === 'local')
+      .filter((session) =>
+        session.workspaceId
+        && (sessionHostsMap.get(session.id)?.protocol === 'local'
+          || isRemoteDesktopProtocol(session.protocol)),
+      )
       .map((session) => session.workspaceId as string),
   ), [sessionHostsMap, sessions]);
   const shouldKeepHiddenWorkspaceLaidOut = useCallback(
@@ -580,6 +585,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     systemMountedTabIds: s.systemMountedTabIds,
     themeMountedTabIds: s.themeMountedTabIds,
     onConnectToHost: s.onConnectToHost,
+    onConnectRemoteDesktop: s.onConnectRemoteDesktop,
     onCreateLocalTerminal: s.onCreateLocalTerminal,
     onHotkeyAction: s.onHotkeyAction,
     onReorderWorkspaceSessions: s.onReorderWorkspaceSessions,

@@ -20,19 +20,32 @@ export const parseOptionalPortInput = (value: string): number | undefined =>
 
 export const resolvePrimaryProtocolSwitchPort = (
   currentPort: number | undefined,
-  nextProtocol: "ssh" | "telnet",
+  nextProtocol: "ssh" | "telnet" | "rdp" | "vnc",
   hasGroupTelnetPortDefault: boolean,
   hasGroupSshPortDefault: boolean,
 ): number | undefined => {
+  const isKnownDefaultPort =
+    currentPort === undefined ||
+    currentPort === 22 ||
+    currentPort === 23 ||
+    currentPort === 3389 ||
+    currentPort === 5900;
+
+  if (nextProtocol === "rdp") {
+    return isKnownDefaultPort ? 3389 : currentPort;
+  }
+  if (nextProtocol === "vnc") {
+    return isKnownDefaultPort ? 5900 : currentPort;
+  }
   if (nextProtocol === "telnet") {
     // Don't override if group provides a Telnet default
     if (hasGroupTelnetPortDefault || hasGroupSshPortDefault) return currentPort;
-    if (currentPort === 22 || currentPort === undefined) return 23;
+    if (isKnownDefaultPort) return 23;
     return currentPort;
   }
   if (nextProtocol === "ssh") {
     if (hasGroupSshPortDefault) return currentPort;
-    if (currentPort === 23 || currentPort === undefined) return 22;
+    if (isKnownDefaultPort) return 22;
     return currentPort;
   }
   return currentPort;
@@ -44,6 +57,12 @@ export const resolvePrimaryProtocolSavePort = (
   hasGroupSshPortDefault: boolean,
   hasGroupTelnetPortDefault: boolean,
 ): number | undefined => {
+  if (protocol === "rdp") {
+    return currentPort ?? 3389;
+  }
+  if (protocol === "vnc") {
+    return currentPort ?? 5900;
+  }
   if (protocol === "telnet") {
     if (currentPort !== undefined) return currentPort;
     if (hasGroupTelnetPortDefault || hasGroupSshPortDefault) return undefined;

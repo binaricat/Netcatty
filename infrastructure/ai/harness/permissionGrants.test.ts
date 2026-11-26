@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import {
   buildGrantFromApproval,
   buildGrantsFromApproval,
+  HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID,
+  isFreshApprovalOnlyCapability,
   listGrantableCapabilityIds,
   matchPermissionGrant,
   patternMatches,
+  sanitizePermissionGrants,
   type PermissionGrantRule,
 } from './permissionGrants';
 
@@ -456,5 +459,34 @@ describe('permissionGrants', () => {
   it('patternMatches supports regex literals', () => {
     assert.equal(patternMatches('/^ls\\b/', 'ls -la'), true);
     assert.equal(patternMatches('/^ls\\b/', 'cat file'), false);
+  });
+
+  it('keeps high-risk remote desktop chords fresh-approval-only (never grantable or matched)', () => {
+    assert.equal(isFreshApprovalOnlyCapability(HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID), true);
+    assert.equal(isFreshApprovalOnlyCapability('harness.remote_desktop.act'), false);
+    assert.deepEqual(buildGrantsFromApproval(HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID, {}), []);
+
+    // Even if a stored rule or wildcard rule exists, matchPermissionGrant refuses it
+    const rules: PermissionGrantRule[] = [
+      baseRule({ capabilityId: HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID, sessionPattern: '*' }),
+      baseRule({ id: 'grant-host', capabilityId: '*', sessionPattern: 'host:win-1' }),
+    ];
+    assert.equal(
+      matchPermissionGrant(rules, {
+        capabilityId: HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID,
+        sessionId: 'rdp-1',
+        hostId: 'win-1',
+        args: { actions: [{ type: 'key', key: 'Ctrl+Alt+Del' }] },
+      }),
+      null,
+    );
+
+    // sanitizePermissionGrants strips any legacy/tampered high-risk grant
+    const sanitized = sanitizePermissionGrants([
+      { id: 'bad', capabilityId: HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID, sessionPattern: '*', createdAt: 1 },
+      { id: 'ok', capabilityId: 'harness.remote_desktop.act', sessionPattern: '*', createdAt: 2 },
+    ]);
+    assert.equal(sanitized.length, 1);
+    assert.equal(sanitized[0]?.capabilityId, 'harness.remote_desktop.act');
   });
 });

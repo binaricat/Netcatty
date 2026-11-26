@@ -26,6 +26,7 @@ import { STORAGE_KEY_AI_PERMISSION_GRANTS } from '../../config/storageKeys';
 import { globalTraceStore } from '../harness/traceStore';
 import {
   getActivePermissionGrants,
+  isFreshApprovalOnlyCapability,
   matchPermissionGrant,
   resolveCapabilityId,
   sanitizePermissionGrants,
@@ -146,8 +147,11 @@ function emitApprovalEvent(
 }
 
 function isGrantedByRules(request: ApprovalRequest): boolean {
-  refreshPermissionGrantsFromStorage();
   const capabilityId = request.capabilityId ?? resolveCapabilityId(request.toolName);
+  if (isFreshApprovalOnlyCapability(capabilityId)) {
+    return false;
+  }
+  refreshPermissionGrantsFromStorage();
   return matchPermissionGrant(getActivePermissionGrants(), {
     capabilityId,
     chatSessionId: request.chatSessionId,
