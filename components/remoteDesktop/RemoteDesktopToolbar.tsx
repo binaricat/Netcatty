@@ -57,7 +57,6 @@ import {
   SystemVncClientIcon,
   VncProtocolIcon,
 } from '../icons/RemoteDesktopIcons';
-import { getProtocolBadgeClass } from '../protocolVisuals';
 import { Button } from '../ui/button';
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Switch } from '../ui/switch';
@@ -289,64 +288,64 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
 
   const statusDotClass =
     status === 'connected'
-      ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.75)]'
+      ? 'bg-emerald-500'
       : status === 'connecting'
         ? 'bg-amber-400 animate-pulse'
-        : 'bg-muted-foreground/50';
+        : 'bg-muted-foreground/45';
 
   const resolutionLabel = resolution ? `${resolution.width}×${resolution.height}` : '--';
   const fpsLabel = typeof fps === 'number' && fps > 0 ? `${Math.round(fps)} FPS` : '';
   const volumePercent = Math.round((audioMuted ? 0 : audioVolume) * 100);
+  const activeDisplayOption = DISPLAY_MODE_OPTIONS.find((opt) => opt.id === displayMode);
+  const activeDisplayLabel = activeDisplayOption
+    ? tr(t, activeDisplayOption.labelKey, activeDisplayOption.fallback)
+    : tr(t, 'remoteDesktop.display.fit', 'Fit to Pane');
 
   const barContent = (
     <div
       className={cn(
-        'flex items-center gap-1 text-[11px] select-none',
+        'flex items-center gap-1 text-xs select-none',
         isFullscreen
-          ? 'rounded-full border border-border/80 bg-background/95 px-3 py-1 shadow-2xl ring-1 ring-black/10 backdrop-blur-md'
-          : 'h-[32px] w-full shrink-0 border-b border-border/60 bg-background/95 px-2 backdrop-blur-sm',
+          ? 'h-9 rounded-full border border-border/70 bg-background/95 px-3 shadow-xl ring-1 ring-black/10 backdrop-blur-md'
+          : 'h-9 w-full shrink-0 border-b border-border/60 bg-background px-2.5',
       )}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Status & Protocol / Tunnel / Encryption Pill */}
+      {/* Status & Minimalist Host Identity */}
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted/60">
-            <span className={cn('h-2 w-2 shrink-0 rounded-full', statusDotClass)} />
-            <span
-              className={cn(
-                'inline-flex items-center gap-1 rounded-md border px-1.5 py-0 text-[10px] font-semibold uppercase leading-4 shrink-0',
-                getProtocolBadgeClass(protocol),
-              )}
-            >
-              {isRdp ? <RdpProtocolIcon size={11} /> : <VncProtocolIcon size={11} />}
-              {protocol}
+          <div className="flex h-7 min-w-0 items-center gap-2 rounded-md px-1.5 transition-colors hover:bg-muted/60">
+            <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', statusDotClass)} />
+            <span className={cn('shrink-0', isRdp ? 'text-blue-500' : 'text-teal-500')}>
+              {isRdp ? <RdpProtocolIcon size={13} /> : <VncProtocolIcon size={13} />}
             </span>
-            <span className="max-w-[140px] truncate font-medium text-foreground">
+            <span className="max-w-[160px] truncate text-xs font-medium text-foreground">
               {hostLabel}
             </span>
             {tunneled && (
-              <span className="inline-flex items-center gap-0.5 rounded-md border border-emerald-500/25 bg-emerald-500/12 px-1.5 py-0 text-[10px] font-medium leading-4 text-emerald-600 dark:text-emerald-400 shrink-0">
-                <SshTunnelIcon size={10} />
-                SSH
+              <span
+                className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 shrink-0"
+                title={tr(t, 'remoteDesktop.toolbar.sshTunneled', 'Tunneled over SSH')}
+              >
+                <SshTunnelIcon size={11} />
+                <span>SSH</span>
               </span>
             )}
             {encrypted && (
-              <span
-                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-emerald-500/12 text-emerald-500"
-                title="Encrypted TLS connection"
-              >
-                <Lock size={10} />
-              </span>
+              <Lock
+                size={11}
+                className="shrink-0 text-emerald-500/80"
+                aria-label={tr(t, 'remoteDesktop.toolbar.encrypted', 'Encrypted TLS connection')}
+              />
             )}
             {viewOnly && (
-              <span className="inline-flex items-center gap-0.5 rounded-md border border-amber-500/25 bg-amber-500/12 px-1.5 py-0 text-[10px] font-medium leading-4 text-amber-600 dark:text-amber-400 shrink-0">
+              <span className="inline-flex items-center gap-1 rounded bg-amber-500/12 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 shrink-0">
                 <Eye size={10} />
-                View
+                <span>{tr(t, 'remoteDesktop.toolbar.viewOnlyBadge', 'View')}</span>
               </span>
             )}
             {resolution && !isFullscreen && (
-              <span className="hidden lg:inline-block rounded bg-secondary/80 px-1.5 py-px font-mono text-[10px] text-muted-foreground shrink-0">
+              <span className="hidden lg:inline-block font-mono text-[11px] text-muted-foreground/75 shrink-0">
                 {resolutionLabel}
               </span>
             )}
@@ -373,7 +372,7 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
         </TooltipContent>
       </Tooltip>
 
-      <div className="mx-0.5 h-3.5 w-px bg-border/60" />
+      <div className="mx-1 h-3.5 w-px bg-border/50" />
 
       {/* Input Group: Keyboard Grab Toggle + Send Special Keys */}
       <Tooltip>
@@ -383,21 +382,21 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
             variant="ghost"
             size="sm"
             className={cn(
-              'h-6 gap-1 rounded-md px-2 text-[11px] font-medium transition-all',
+              'h-7 gap-1.5 rounded-md px-2 text-xs font-normal transition-colors',
               keyboardGrabActive
-                ? 'border border-primary/40 bg-primary/15 text-primary shadow-xs hover:bg-primary/20'
-                : 'text-muted-foreground hover:text-foreground',
+                ? 'bg-primary/12 text-primary font-medium hover:bg-primary/18'
+                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
             )}
             onClick={onToggleKeyboardGrab}
             disabled={viewOnly}
           >
-            <Keyboard size={12} />
+            <Keyboard size={13} />
             <span>
               {keyboardGrabActive
                 ? tr(t, 'remoteDesktop.toolbar.keysRemote', 'Keys: Remote')
                 : tr(t, 'remoteDesktop.toolbar.keysLocal', 'Keys: Local')}
             </span>
-            {keyboardGrabActive && <Lock size={10} className="ml-0.5 opacity-90" />}
+            {keyboardGrabActive && <Lock size={10} className="opacity-85" />}
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="max-w-[260px] text-xs">
@@ -422,10 +421,10 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
             type="button"
             variant="ghost"
             size="sm"
-            className="h-6 gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+            className="h-7 gap-1.5 rounded-md px-2 text-xs font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
             disabled={status !== 'connected' || viewOnly}
           >
-            <Command size={12} />
+            <Command size={13} />
             <span>{tr(t, 'remoteDesktop.toolbar.sendKeys', 'Send Keys')}</span>
           </Button>
         </PopoverTrigger>
@@ -496,13 +495,11 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
             type="button"
             variant="ghost"
             size="sm"
-            className="h-6 gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+            className="h-7 gap-1.5 rounded-md px-2 text-xs font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
             title={tr(t, 'remoteDesktop.toolbar.display', 'Display Scaling')}
           >
-            <Scaling size={12} />
-            <span className="hidden sm:inline">
-              {DISPLAY_MODE_OPTIONS.find((opt) => opt.id === displayMode)?.fallback ?? 'Fit'}
-            </span>
+            <Scaling size={13} />
+            <span className="hidden sm:inline">{activeDisplayLabel}</span>
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-48 p-1.5 text-xs">
@@ -615,14 +612,14 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                 data-testid="remote-desktop-sftp-btn"
                 aria-pressed={isSftpOpen}
                 className={cn(
-                  'h-6 gap-1 rounded-md px-1.5 text-[11px] font-medium transition-colors',
+                  'h-7 gap-1.5 rounded-md px-2 text-xs font-normal transition-colors',
                   isSftpOpen
-                    ? 'border border-primary/35 bg-primary/15 text-primary hover:bg-primary/20'
-                    : 'text-muted-foreground hover:text-foreground',
+                    ? 'bg-primary/12 text-primary font-medium hover:bg-primary/18'
+                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                 )}
                 onClick={onOpenSftp}
               >
-                <FolderTree size={12} />
+                <FolderTree size={13} />
                 <span>{tr(t, 'remoteDesktop.toolbar.openSftp', 'SFTP')}</span>
               </Button>
             </TooltipTrigger>
@@ -641,10 +638,10 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                 variant="ghost"
                 size="icon"
                 className={cn(
-                  'h-6 w-6 rounded-md',
+                  'h-7 w-7 rounded-md',
                   audioMuted || audioVolume <= 0
-                    ? 'text-muted-foreground/60 hover:text-foreground'
-                    : 'text-sky-500 hover:bg-sky-500/10 hover:text-sky-400',
+                    ? 'text-muted-foreground/55 hover:bg-muted/60 hover:text-foreground'
+                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                 )}
                 aria-label={tr(t, 'remoteDesktop.toolbar.audio', 'Audio')}
                 title={tr(t, 'remoteDesktop.toolbar.audio', 'RDP Audio')}
@@ -696,18 +693,18 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
               variant="ghost"
               size="sm"
               className={cn(
-                'h-6 gap-1 rounded-md px-1.5 text-[11px]',
+                'h-7 gap-1 rounded-md px-1.5 text-xs',
                 remoteClipboardFiles.length > 0
-                  ? 'border border-blue-500/30 bg-blue-500/15 text-blue-500 hover:bg-blue-500/20'
+                  ? 'bg-primary/12 text-primary hover:bg-primary/18'
                   : clipboardSyncEnabled
-                    ? 'text-muted-foreground hover:text-foreground'
-                    : 'text-muted-foreground/50 hover:text-foreground',
+                    ? 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                    : 'text-muted-foreground/45 hover:bg-muted/60 hover:text-foreground',
               )}
               title={tr(t, 'remoteDesktop.toolbar.clipboard', 'Clipboard Sync')}
             >
-              {remoteClipboardFiles.length > 0 ? <FileDown size={12} /> : <Clipboard size={12} />}
+              {remoteClipboardFiles.length > 0 ? <FileDown size={13} /> : <Clipboard size={13} />}
               {remoteClipboardFiles.length > 0 && (
-                <span className="font-mono font-semibold">{remoteClipboardFiles.length}</span>
+                <span className="font-mono text-[11px] font-semibold">{remoteClipboardFiles.length}</span>
               )}
             </Button>
           </PopoverTrigger>
@@ -834,11 +831,11 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
               type="button"
               variant="ghost"
               size="icon"
-              className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
+              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground"
               aria-label={tr(t, 'remoteDesktop.toolbar.options', 'Quality & Input Options')}
               title={tr(t, 'remoteDesktop.toolbar.options', 'Quality & Input Options')}
             >
-              <SlidersHorizontal size={12} />
+              <SlidersHorizontal size={13} />
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-60 space-y-3 p-3 text-xs">
@@ -913,12 +910,12 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
               type="button"
               variant="ghost"
               size="icon"
-              className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
+              className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground"
               disabled={status !== 'connected'}
               aria-label={tr(t, 'remoteDesktop.toolbar.screenshot', 'Screenshot')}
               title={tr(t, 'remoteDesktop.toolbar.screenshot', 'Screenshot')}
             >
-              <Camera size={12} />
+              <Camera size={13} />
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-52 p-1.5 text-xs">
@@ -947,7 +944,7 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
 
         {/* Ask AI Split Button + Region Snip + Privacy Lock (P2-AI) */}
         {(onAskAiFull || onOpenAiChat) && (
-          <div className="inline-flex items-center rounded-md border border-border/60 bg-secondary/40">
+          <div className="inline-flex h-7 items-center rounded-md transition-colors hover:bg-muted/60">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -955,14 +952,14 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                   variant="ghost"
                   size="sm"
                   data-testid="remote-desktop-ask-ai-btn"
-                  className="h-6 gap-1 rounded-l-md rounded-r-none px-1.5 text-[11px] font-medium text-foreground hover:bg-primary/15 hover:text-primary"
+                  className="h-7 gap-1 rounded-l-md rounded-r-none px-2 text-xs font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
                   disabled={status !== 'connected'}
                   onClick={onAskAiFull ?? onOpenAiChat}
                 >
-                  <Sparkles size={11} className="text-primary" />
+                  <Sparkles size={13} className="text-primary/85" />
                   <span>{tr(t, 'ai.vision.askAi', 'Ask AI')}</span>
                   {aiReadBlocked && (
-                    <ShieldOff size={10} className="text-amber-500" aria-label={tr(t, 'ai.vision.privacyLockOn', 'AI screen reading blocked')} />
+                    <ShieldOff size={11} className="text-amber-500" aria-label={tr(t, 'ai.vision.privacyLockOn', 'AI screen reading blocked')} />
                   )}
                 </Button>
               </TooltipTrigger>
@@ -977,11 +974,11 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                   variant="ghost"
                   size="icon"
                   data-testid="remote-desktop-ask-ai-menu"
-                  className="h-6 w-4 rounded-l-none rounded-r-md border-l border-border/50 px-0 text-muted-foreground hover:bg-primary/15 hover:text-foreground"
+                  className="h-7 w-4 rounded-l-none rounded-r-md px-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
                   disabled={status !== 'connected'}
                   aria-label={tr(t, 'ai.vision.askAi', 'Ask AI')}
                 >
-                  <ChevronDown size={10} />
+                  <ChevronDown size={11} />
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-60 p-1.5 text-xs">
@@ -1061,13 +1058,13 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                   size="sm"
                   data-testid="remote-desktop-record-btn"
                   data-recording="true"
-                  className="h-6 gap-1.5 rounded-md border border-rose-500/40 bg-rose-500/15 px-2 text-[11px] font-medium text-rose-500 hover:bg-rose-500/25"
+                  className="h-7 gap-1.5 rounded-md bg-rose-500/12 px-2 text-xs font-medium text-rose-500 hover:bg-rose-500/20"
                   onClick={onToggleRecording}
                   aria-label={tr(t, 'remoteDesktop.toolbar.stopRecording', 'Stop recording')}
                 >
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-rose-500 animate-pulse" />
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500 animate-pulse" />
                   <Square size={9} className="fill-current" />
-                  <span className="font-mono text-[10px] font-semibold">{recordingElapsedLabel}</span>
+                  <span className="font-mono text-[11px] font-medium">{recordingElapsedLabel}</span>
                 </Button>
               ) : (
                 <Button
@@ -1076,13 +1073,13 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                   size="icon"
                   data-testid="remote-desktop-record-btn"
                   data-recording="false"
-                  className="h-6 w-6 rounded-md text-muted-foreground hover:text-rose-500"
+                  className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted/60 hover:text-rose-500"
                   disabled={status !== 'connected' || !recordingSupported}
                   onClick={onToggleRecording}
                   aria-label={tr(t, 'remoteDesktop.toolbar.record', 'Record session')}
                   title={tr(t, 'remoteDesktop.toolbar.record', 'Record session')}
                 >
-                  <Circle size={12} className="fill-rose-500/75 text-rose-500" />
+                  <Circle size={12} />
                 </Button>
               )}
             </TooltipTrigger>
@@ -1094,19 +1091,19 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
           </Tooltip>
         )}
 
-        <div className="mx-0.5 h-3.5 w-px bg-border/60" />
+        <div className="mx-1 h-3.5 w-px bg-border/50" />
 
         {/* Fullscreen */}
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
+          className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground"
           onClick={onToggleFullscreen}
-          aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+          aria-label={isFullscreen ? tr(t, 'remoteDesktop.toolbar.exitFullscreen', 'Exit Fullscreen') : tr(t, 'remoteDesktop.toolbar.fullscreen', 'Fullscreen')}
           title={isFullscreen ? tr(t, 'remoteDesktop.toolbar.exitFullscreen', 'Exit Fullscreen') : tr(t, 'remoteDesktop.toolbar.fullscreen', 'Fullscreen')}
         >
-          {isFullscreen ? <Minimize size={12} /> : <Maximize size={12} />}
+          {isFullscreen ? <Minimize size={13} /> : <Maximize size={13} />}
         </Button>
 
         {/* Pin pill toggle (fullscreen only) */}
@@ -1116,15 +1113,15 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
             variant="ghost"
             size="icon"
             className={cn(
-              'h-6 w-6 rounded-md',
+              'h-7 w-7 rounded-md',
               pinnedFullscreen
-                ? 'bg-primary/15 text-primary'
-                : 'text-muted-foreground hover:text-foreground',
+                ? 'bg-primary/12 text-primary'
+                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
             )}
             onClick={() => setPinnedFullscreen((p) => !p)}
-            title={pinnedFullscreen ? 'Unpin toolbar' : 'Pin toolbar'}
+            title={pinnedFullscreen ? tr(t, 'remoteDesktop.toolbar.unpin', 'Unpin toolbar') : tr(t, 'remoteDesktop.toolbar.pin', 'Pin toolbar')}
           >
-            {pinnedFullscreen ? <PinOff size={12} /> : <Pin size={12} />}
+            {pinnedFullscreen ? <PinOff size={13} /> : <Pin size={13} />}
           </Button>
         )}
 
@@ -1134,12 +1131,12 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
             type="button"
             variant="ghost"
             size="icon"
-            className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground"
             onClick={onPopOut}
             aria-label={tr(t, 'remoteDesktop.toolbar.popOut', 'Open in New Window')}
             title={tr(t, 'remoteDesktop.toolbar.popOut', 'Open in New Window')}
           >
-            <ExternalLink size={12} />
+            <ExternalLink size={13} />
           </Button>
         )}
 
@@ -1148,12 +1145,12 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
           type="button"
           variant="ghost"
           size="icon"
-          className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
+          className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground"
           onClick={onReconnect}
           aria-label={tr(t, 'remoteDesktop.toolbar.reconnect', 'Reconnect')}
           title={tr(t, 'remoteDesktop.toolbar.reconnect', 'Reconnect')}
         >
-          <RefreshCw size={12} />
+          <RefreshCw size={13} />
         </Button>
 
         {/* Disconnect */}
@@ -1161,12 +1158,12 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
           type="button"
           variant="ghost"
           size="icon"
-          className="h-6 w-6 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          className="h-7 w-7 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
           onClick={onDisconnect}
           aria-label={tr(t, 'remoteDesktop.toolbar.disconnect', 'Disconnect')}
           title={tr(t, 'remoteDesktop.toolbar.disconnect', 'Disconnect')}
         >
-          <Power size={12} />
+          <Power size={13} />
         </Button>
       </div>
     </div>

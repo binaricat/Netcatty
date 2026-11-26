@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Check, Eye, KeyRound, Loader2, Plug, RefreshCw, ShieldCheck, Unplug, X } from 'lucide-react';
+import { AlertCircle, Check, Eye, KeyRound, Loader2, Plug, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { useTerminalSessionCloseCapture } from '../../application/state/terminalSessionCloseCapture';
 import type { Host, Identity, KnownHost, SSHKey, TerminalSession } from '../../types';
@@ -28,7 +28,6 @@ import {
   SystemVncClientIcon,
   VncProtocolIcon,
 } from '../icons/RemoteDesktopIcons';
-import { getProtocolBadgeClass } from '../protocolVisuals';
 import { Button } from '../ui/button';
 import { toast } from '../ui/toast';
 import {
@@ -96,6 +95,19 @@ function resolveProgressStepIndex(stage: string, wsReady: boolean, tunneled: boo
   if (normalized.includes('tls') || normalized.includes('cert')) return 1;
   if (normalized.includes('tunnel') || normalized.includes('bastion') || tunneled) return 0;
   return 0;
+}
+
+function sanitizeRemoteDesktopError(raw: string | null): string | null {
+  if (!raw) return null;
+  // Never expose local loopback proxy query tokens (sessionId/token) in the UI.
+  let cleaned = raw
+    .replace(/wss?:\/\/127\.0\.0\.1:\d+\/rd\?[^\s)]+/gi, 'local remote-desktop proxy')
+    .replace(/([?&]token=)[^&\s)]+/gi, '$1***')
+    .trim();
+  if (/failed to connect to local remote-desktop proxy/i.test(cleaned)) {
+    cleaned = 'Failed to establish local remote-desktop proxy channel. Please retry.';
+  }
+  return cleaned;
 }
 
 function formatBackendStage(stage: string, isRdp: boolean): string {
@@ -1142,13 +1154,15 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
           onCancel={() => setIsSnipping(false)}
         />
 
-        {/* Connecting Progress Overlay — mirrors Netcatty TerminalConnectionDialog stepper */}
+        {/* Connecting Progress Overlay — matches Netcatty TerminalConnectionDialog */}
         {status === 'connecting' && !pendingCert && !needsAuthPrompt && (() => {
           const activeStep = resolveProgressStepIndex(stageMessage, Boolean(wsUrl), tunneled);
           const steps = [
             {
               key: 'transport',
-              label: tunneled ? 'Bastion' : 'Network',
+              label: tunneled
+                ? tr(t, 'remoteDesktop.step.bastion', 'Bastion')
+                : tr(t, 'remoteDesktop.step.network', 'Network'),
               icon: tunneled ? <SshTunnelIcon size={13} /> : <Plug size={13} />,
             },
             {
@@ -1158,21 +1172,23 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
             },
             {
               key: 'auth',
-              label: isRdp ? 'NLA Auth' : 'RFB Auth',
+              label: isRdp
+                ? tr(t, 'remoteDesktop.step.nla', 'NLA Auth')
+                : tr(t, 'remoteDesktop.step.rfb', 'RFB Auth'),
               icon: <KeyRound size={13} />,
             },
             {
               key: 'desktop',
-              label: 'Desktop',
+              label: tr(t, 'remoteDesktop.step.desktop', 'Desktop'),
               icon: isRdp ? <RdpProtocolIcon size={13} /> : <VncProtocolIcon size={13} />,
             },
           ];
 
           return (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/75 p-4 backdrop-blur-[2px]">
-              <div className="w-[460px] max-w-[90vw] rounded-xl border border-border/80 bg-card/95 p-4 text-card-foreground shadow-2xl space-y-4 animate-in fade-in-0 zoom-in-95 duration-200">
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/85 p-4 backdrop-blur-sm">
+              <div className="w-[460px] max-w-[90vw] rounded-xl border border-border/70 bg-card/95 p-5 text-card-foreground shadow-xl space-y-4 animate-in fade-in-0 zoom-in-95 duration-200">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
                     <DistroAvatar
                       host={host}
                       fallback={effectiveLabel.slice(0, 2).toUpperCase()}
@@ -1184,17 +1200,8 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
                         <span className="truncate text-sm font-semibold text-foreground">
                           {effectiveLabel}
                         </span>
-                        <span
-                          className={cn(
-                            'inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold uppercase leading-4 shrink-0',
-                            getProtocolBadgeClass(protocol),
-                          )}
-                        >
-                          {isRdp ? <RdpProtocolIcon size={10} /> : <VncProtocolIcon size={10} />}
-                          {protocol}
-                        </span>
                         {tunneled && (
-                          <span className="inline-flex items-center gap-0.5 rounded-md border border-emerald-500/25 bg-emerald-500/12 px-1.5 py-0 text-[10px] font-medium leading-4 text-emerald-500 shrink-0">
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-500 shrink-0">
                             <SshTunnelIcon size={10} />
                             SSH
                           </span>
@@ -1209,85 +1216,65 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="h-7 shrink-0 px-2.5 text-[11px]"
+                    className="h-7 shrink-0 px-3 text-xs"
                     onClick={handleDisconnect}
                   >
                     {tr(t, 'common.cancel', 'Cancel')}
                   </Button>
                 </div>
 
-                {/* Animated 4-step connection stepper */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center">
-                    {steps.map((step, idx) => {
-                      const isDone = idx < activeStep;
-                      const isActive = idx === activeStep;
-                      return (
-                        <React.Fragment key={step.key}>
-                          <div className="flex flex-col items-center gap-1">
+                {/* Minimalist 4-step connection stepper */}
+                <div className="flex items-center pt-1">
+                  {steps.map((step, idx) => {
+                    const isDone = idx < activeStep;
+                    const isActive = idx === activeStep;
+                    return (
+                      <React.Fragment key={step.key}>
+                        <div className="flex flex-col items-center gap-1.5">
+                          <div
+                            className={cn(
+                              'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors',
+                              isDone
+                                ? 'bg-primary/15 text-primary'
+                                : isActive
+                                  ? 'bg-primary text-primary-foreground'
+                                  : 'bg-muted/70 text-muted-foreground',
+                            )}
+                          >
+                            {isDone ? (
+                              <Check size={13} />
+                            ) : isActive && idx === steps.length - 1 ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              step.icon
+                            )}
+                          </div>
+                          <span
+                            className={cn(
+                              'text-[10px] font-medium',
+                              isDone || isActive ? 'text-foreground' : 'text-muted-foreground',
+                            )}
+                          >
+                            {step.label}
+                          </span>
+                        </div>
+                        {idx < steps.length - 1 && (
+                          <div className="relative mx-2 mb-5 h-1 flex-1 overflow-hidden rounded-full bg-border/60">
                             <div
                               className={cn(
-                                'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-all duration-200',
-                                isDone
-                                  ? 'bg-emerald-500/15 text-emerald-500'
-                                  : isActive
-                                    ? isRdp
-                                      ? 'bg-blue-500 text-white ring-2 ring-blue-500/25 shadow-sm'
-                                      : 'bg-teal-500 text-white ring-2 ring-teal-500/25 shadow-sm'
-                                    : 'bg-muted text-muted-foreground',
+                                'absolute inset-y-0 left-0 rounded-full bg-primary transition-all duration-300',
+                                isDone ? 'w-full' : isActive ? 'w-1/2 animate-pulse' : 'w-0',
                               )}
-                            >
-                              {isDone ? (
-                                <Check size={13} />
-                              ) : isActive && idx === steps.length - 1 ? (
-                                <Loader2 size={13} className="animate-spin" />
-                              ) : (
-                                step.icon
-                              )}
-                            </div>
-                            <span
-                              className={cn(
-                                'text-[10px] font-medium',
-                                isDone
-                                  ? 'text-emerald-500'
-                                  : isActive
-                                    ? 'text-foreground'
-                                    : 'text-muted-foreground',
-                              )}
-                            >
-                              {step.label}
-                            </span>
+                            />
                           </div>
-                          {idx < steps.length - 1 && (
-                            <div className="relative mx-2 mb-4 h-1.5 flex-1 overflow-hidden rounded-full bg-border/60">
-                              <div
-                                className={cn(
-                                  'absolute inset-y-0 left-0 rounded-full transition-all duration-300',
-                                  isDone
-                                    ? 'w-full bg-emerald-500'
-                                    : isActive
-                                      ? isRdp
-                                        ? 'w-1/2 bg-blue-500 animate-pulse'
-                                        : 'w-1/2 bg-teal-500 animate-pulse'
-                                      : 'w-0 bg-primary',
-                                )}
-                              />
-                            </div>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </div>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </div>
 
-                <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-secondary/45 px-3 py-2 text-xs text-muted-foreground">
-                  <Loader2
-                    size={13}
-                    className={cn(
-                      'shrink-0 animate-spin',
-                      isRdp ? 'text-blue-500' : 'text-teal-500',
-                    )}
-                  />
+                <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+                  <Loader2 size={13} className="shrink-0 animate-spin text-primary" />
                   <span className="truncate">{stageMessage}</span>
                 </div>
               </div>
@@ -1295,75 +1282,157 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
           );
         })()}
 
-        {/* Dimmed Last-Frame Reconnect Overlay */}
-        {status === 'disconnected' && !needsAuthPrompt && !pendingCert && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/72 p-6 backdrop-blur-[3px]">
-            <div className="w-full max-w-md rounded-xl border border-border/80 bg-card/95 p-5 text-center text-card-foreground shadow-2xl animate-in fade-in-0 zoom-in-95 duration-200">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-secondary border border-border/70 text-muted-foreground">
-                <Unplug size={22} />
-              </div>
-              <div className="mt-3 flex items-center justify-center gap-1.5">
-                <span
-                  className={cn(
-                    'inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold uppercase leading-4',
-                    getProtocolBadgeClass(protocol),
-                  )}
-                >
-                  {isRdp ? <RdpProtocolIcon size={10} /> : <VncProtocolIcon size={10} />}
-                  {protocol}
-                </span>
-                <h3 className="text-sm font-semibold text-foreground">
-                  {tr(t, 'remoteDesktop.disconnected.title', 'Session Disconnected')}
-                </h3>
-              </div>
-              <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-                {effectiveLabel} · {spec.hostHostname}:{spec.port}
-              </p>
-              {disconnectError && (
-                <div className="mt-3 rounded-lg border border-destructive/25 bg-destructive/8 px-3 py-2 text-xs text-destructive break-words">
-                  {disconnectError}
+        {/* Minimalist Disconnected Overlay — mirrors Netcatty TerminalConnectionDialog */}
+        {status === 'disconnected' && !needsAuthPrompt && !pendingCert && (() => {
+          const displayError = sanitizeRemoteDesktopError(disconnectError);
+          const hasError = Boolean(displayError);
+          return (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/85 p-6 backdrop-blur-sm">
+              <div className="w-[460px] max-w-[90vw] rounded-xl border border-border/70 bg-card/95 p-5 text-card-foreground shadow-xl space-y-4 animate-in fade-in-0 zoom-in-95 duration-200">
+                {/* Header */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <DistroAvatar
+                      host={host}
+                      fallback={effectiveLabel.slice(0, 2).toUpperCase()}
+                      size="md"
+                      className="shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-foreground">
+                        {effectiveLabel}
+                      </div>
+                      <div className="truncate font-mono text-[11px] text-muted-foreground">
+                        {protocol.toUpperCase()} {spec.hostHostname}:{spec.port}
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                    onClick={handleDisconnect}
+                    aria-label={tr(t, 'common.close', 'Close')}
+                  >
+                    <X size={14} />
+                  </Button>
                 </div>
-              )}
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                <Button type="button" size="sm" className="gap-1.5" onClick={handleReconnect}>
-                  <RefreshCw size={13} />
-                  <span>{tr(t, 'remoteDesktop.toolbar.reconnect', 'Reconnect')}</span>
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => {
-                    setAuthErrorMessage(null);
-                    setNeedsAuthPrompt(true);
-                  }}
-                >
-                  <KeyRound size={13} />
-                  <span>{tr(t, 'remoteDesktop.auth.reenter', 'Re-enter Credentials')}</span>
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => void handleOpenSystemClient()}
-                >
-                  {isRdp ? (
-                    <SystemRdpClientIcon size={14} className="text-blue-500" />
+
+                {/* 3-node status bar matching TerminalConnectionDialog */}
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
+                      hasError
+                        ? 'bg-destructive/15 text-destructive'
+                        : 'bg-muted/70 text-muted-foreground',
+                    )}
+                  >
+                    <Plug size={13} />
+                  </div>
+                  <div className="h-1 flex-1 overflow-hidden rounded-full bg-border/60">
+                    <div
+                      className={cn(
+                        'h-full w-full rounded-full',
+                        hasError ? 'bg-destructive/80' : 'bg-muted-foreground/30',
+                      )}
+                    />
+                  </div>
+                  <div
+                    className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
+                      hasError
+                        ? 'bg-destructive/15 text-destructive'
+                        : 'bg-muted/70 text-muted-foreground',
+                    )}
+                  >
+                    <ShieldCheck size={13} />
+                  </div>
+                  <div className="h-1 flex-1 overflow-hidden rounded-full bg-border/60">
+                    <div
+                      className={cn(
+                        'h-full w-full rounded-full',
+                        hasError ? 'bg-destructive/80' : 'bg-muted-foreground/30',
+                      )}
+                    />
+                  </div>
+                  <div
+                    className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
+                      hasError
+                        ? 'bg-destructive/15 text-destructive'
+                        : 'bg-muted/70 text-muted-foreground',
+                    )}
+                  >
+                    {isRdp ? <RdpProtocolIcon size={13} /> : <VncProtocolIcon size={13} />}
+                  </div>
+                </div>
+
+                {/* Clean status / error box */}
+                <div className="rounded-lg border border-border/50 bg-background/60 px-3 py-2.5 text-xs leading-relaxed">
+                  {displayError ? (
+                    <div className="flex items-start gap-2 text-destructive">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
+                      <span className="break-words">{displayError}</span>
+                    </div>
                   ) : (
-                    <SystemVncClientIcon size={14} className="text-teal-500" />
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                      <span>{tr(t, 'remoteDesktop.disconnected.title', 'Session Disconnected')}</span>
+                    </div>
                   )}
-                  <span>
-                    {isRdp
-                      ? tr(t, 'remoteDesktop.toolbar.openSystemRdp', 'Open in System RDP')
-                      : tr(t, 'remoteDesktop.toolbar.openSystemVnc', 'Open in Screen Sharing')}
-                  </span>
-                </Button>
+                </div>
+
+                {/* Footer actions */}
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => void handleOpenSystemClient()}
+                  >
+                    {isRdp ? (
+                      <SystemRdpClientIcon size={13} className="text-blue-500" />
+                    ) : (
+                      <SystemVncClientIcon size={13} className="text-teal-500" />
+                    )}
+                    <span>
+                      {isRdp
+                        ? tr(t, 'remoteDesktop.toolbar.openSystemRdp', 'Open in System RDP')
+                        : tr(t, 'remoteDesktop.toolbar.openSystemVnc', 'Open in Screen Sharing')}
+                    </span>
+                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5 px-3 text-xs"
+                      onClick={() => {
+                        setAuthErrorMessage(null);
+                        setNeedsAuthPrompt(true);
+                      }}
+                    >
+                      <KeyRound size={13} />
+                      <span>{tr(t, 'remoteDesktop.auth.reenter', 'Credentials')}</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 gap-1.5 px-3.5 text-xs"
+                      onClick={handleReconnect}
+                    >
+                      <RefreshCw size={13} />
+                      <span>{tr(t, 'remoteDesktop.toolbar.reconnect', 'Reconnect')}</span>
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* TLS TOFU Certificate Dialog */}
         {pendingCert && (
