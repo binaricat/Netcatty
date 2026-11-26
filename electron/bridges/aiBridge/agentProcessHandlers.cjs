@@ -2,6 +2,7 @@
 function registerAgentProcessHandlers(ctx) {
   with (ctx) {
   const maxCommandTimeoutSeconds = 24 * 60 * 60;
+  const maxMaxIterations = 1000;
   // ── MCP Server session metadata ──
 
   ipcMain.handle("netcatty:ai:mcp:update-sessions", async (event, { sessions: sessionList, chatSessionId, delegationTag }) => {
@@ -105,8 +106,8 @@ function registerAgentProcessHandlers(ctx) {
   ipcMain.handle("netcatty:ai:mcp:set-max-iterations", async (event, { maxIterations }) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     const value = Number(maxIterations);
-    if (!Number.isFinite(value) || value < 1 || value > 100) {
-      return { ok: false, error: "maxIterations must be a number between 1 and 100" };
+    if (!Number.isFinite(value) || value < 1 || value > maxMaxIterations) {
+      return { ok: false, error: `maxIterations must be a number between 1 and ${maxMaxIterations}` };
     }
     mcpServerBridge.setMaxIterations(value);
     return { ok: true };

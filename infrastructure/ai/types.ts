@@ -436,7 +436,7 @@ export interface AISettings {
   commandBlocklist: string[];    // global command blocklist patterns
   commandTimeout: number;        // seconds, default 60
   responseIdleTimeout: number;   // seconds without response data, default 120
-  maxIterations: number;         // doom loop prevention, default 20
+  maxIterations: number;         // doom loop prevention, default 200
   toolOutputMaxChars?: number;   // inline tool result character cap for built-in AI, default 24000
   webSearchConfig?: WebSearchConfig;
 }
@@ -452,6 +452,8 @@ export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 60;
 export const MAX_COMMAND_TIMEOUT_SECONDS = 24 * 60 * 60;
 export const DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS = 2 * 60;
 export const MAX_RESPONSE_IDLE_TIMEOUT_SECONDS = 24 * 60 * 60;
+export const DEFAULT_MAX_ITERATIONS = 200;
+export const MAX_MAX_ITERATIONS = 1000;
 
 export function normalizeCommandTimeoutSeconds(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_COMMAND_TIMEOUT_SECONDS;
@@ -461,6 +463,11 @@ export function normalizeCommandTimeoutSeconds(value: number): number {
 export function normalizeResponseIdleTimeoutSeconds(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS;
   return Math.min(MAX_RESPONSE_IDLE_TIMEOUT_SECONDS, Math.max(1, value));
+}
+
+export function normalizeMaxIterations(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_MAX_ITERATIONS;
+  return Math.min(MAX_MAX_ITERATIONS, Math.max(1, Math.floor(value)));
 }
 
 export interface ProviderPreset {

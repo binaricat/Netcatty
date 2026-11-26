@@ -2,6 +2,8 @@ const MCP_TOOL_NAME_PREFIX = 'mcp__';
 
 const KNOWN_ARTIFACT_TOOL_NAMES = [
   'terminal_read_context',
+  'remote_desktop_read_screen',
+  'remote_desktop_act',
   'vault_notes_create',
   'vault_notes_update',
   'vault_notes_get',
