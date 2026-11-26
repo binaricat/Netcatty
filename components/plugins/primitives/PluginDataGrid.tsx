@@ -272,7 +272,10 @@ export function PluginDataGrid({
         </div>
       )}
 
-      <div ref={scrollRef} className="relative h-full w-full min-h-0 flex-1 overflow-auto">
+      <div
+        ref={scrollRef}
+        className="relative h-full w-full min-h-0 flex-1 overflow-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-corner]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20 hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/40"
+      >
         {columns.length === 0 ? (
           <div className="flex h-full w-full items-center justify-center p-6 text-xs text-muted-foreground">
             {emptyMessage}
