@@ -185,6 +185,8 @@ function collectKnownGroupPaths(customGroups: readonly string[], hosts: readonly
   return known;
 }
 
+const MAX_LISTED_GROUPS = 20;
+
 /**
  * Explain an empty result caused by the group filter, so an agent can tell a
  * mistyped group from an empty one. Returns undefined when the group has hosts
@@ -203,7 +205,12 @@ function describeEmptyGroupResult(
   if (caseMatch) {
     return `No group "${group}". Did you mean "${caseMatch}"? Group names are case-sensitive.`;
   }
-  return `No group "${group}". Use vault_groups_list to see group names.`;
+  // List the names here: vault_groups_list returns only saved groups, not paths used only by hosts.
+  if (known.size === 0) return `No group "${group}". The vault has no groups.`;
+  const names = [...known].sort();
+  const shown = names.slice(0, MAX_LISTED_GROUPS);
+  const count = shown.length < names.length ? ` (${shown.length} of ${names.length})` : '';
+  return `No group "${group}". Known groups${count}: ${shown.map((name) => `"${name}"`).join(', ')}.`;
 }
 
 /** Every term must appear (case-insensitive) in label, hostname, username, or tags. Group is deliberately excluded. */

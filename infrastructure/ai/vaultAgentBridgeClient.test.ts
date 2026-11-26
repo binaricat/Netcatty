@@ -579,12 +579,25 @@ describe('handleVaultAgentOp vault hosts', () => {
         );
       });
 
-      it('points to vault_groups_list for an unknown group', async () => {
+      it('lists known group names for an unknown group, including groups that exist only through hosts', async () => {
+        // No saved groups: every name comes from host paths (vault_groups_list would return none).
+        const known = '"prod", "prod/db", "prod/web", "production-old"';
         const result = await list({ group: 'prd' });
         assert.deepEqual(result.hosts, []);
-        assert.equal(result.note, 'No group "prd". Use vault_groups_list to see group names.');
+        assert.equal(result.note, `No group "prd". Known groups: ${known}.`);
         // A path-boundary near miss is still unknown, not a subgroup match.
-        assert.equal((await list({ group: 'prod/we' })).note, 'No group "prod/we". Use vault_groups_list to see group names.');
+        assert.equal((await list({ group: 'prod/we' })).note, `No group "prod/we". Known groups: ${known}.`);
+      });
+
+      it('caps the listed group names and says when the vault has none', async () => {
+        const many = Array.from({ length: 25 }, (_, index) => `g${String(index).padStart(2, '0')}`);
+        const result = await handleVaultAgentOp('host.list', { group: 'zzz' }, createDeps({ hosts: [], customGroups: many }));
+        const note = (result as { note?: string }).note ?? '';
+        assert.match(note, /^No group "zzz"\. Known groups \(20 of 25\): "g00", /);
+        assert.equal(note.includes('"g19"'), true);
+        assert.equal(note.includes('"g20"'), false);
+        const empty = await handleVaultAgentOp('host.list', { group: 'zzz' }, createDeps({ hosts: [] }));
+        assert.equal((empty as { note?: string }).note, 'No group "zzz". The vault has no groups.');
       });
 
       it('says when a saved group has no hosts', async () => {
@@ -605,7 +618,7 @@ describe('handleVaultAgentOp vault hosts', () => {
       it('still explains an unknown group when a query is also given', async () => {
         assert.equal(
           (await list({ group: 'prd', query: 'root' })).note,
-          'No group "prd". Use vault_groups_list to see group names.',
+          'No group "prd". Known groups: "prod", "prod/db", "prod/web", "production-old".',
         );
       });
     });
