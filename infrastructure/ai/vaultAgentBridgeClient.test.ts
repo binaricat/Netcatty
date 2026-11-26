@@ -1913,6 +1913,27 @@ describe('handleVaultAgentOp vault management gaps', () => {
     assert.equal(JSON.stringify(result).includes('hidden'), false);
   });
 
+  it('host.get reports where host values come from', async () => {
+    const groupedHost: Host = { ...host, group: 'prod', backspaceBehavior: 'ctrl-h' };
+    const deps = createDeps({
+      hosts: [groupedHost],
+      groupConfigs: [{ path: 'prod', charset: 'GBK' }],
+    });
+    deps.resolveEffectiveHost = (entry) => ({ ...entry, charset: entry.charset ?? 'GBK' });
+
+    const result = await handleVaultAgentOp('host.get', { hostId: 'host-1' }, deps) as {
+      ok: boolean;
+      host?: Record<string, unknown>;
+      valueSources?: Record<string, string>;
+    };
+
+    assert.equal(result.ok, true);
+    assert.equal(result.host?.charset, 'GBK');
+    assert.equal(result.valueSources?.charset, 'group:prod');
+    assert.equal(result.valueSources?.backspaceBehavior, 'host');
+    assert.equal(result.valueSources?.proxy, 'none');
+  });
+
   it('updates connection settings, returns warnings and accepts resetFields alone', async () => {
     const deps = createDeps({ hosts: [{ ...host, charset: 'GBK' }] });
 

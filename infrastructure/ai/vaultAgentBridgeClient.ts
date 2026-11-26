@@ -45,6 +45,7 @@ import {
   parseVaultHostDraftsInput,
 } from '../../domain/vaultHostCreate';
 import { VAULT_HOST_CONNECTION_SETTING_FIELDS } from '../../domain/vaultHostConnectionSettings';
+import { resolveHostValueSources } from '../../domain/hostValueSources';
 import {
   applyVaultHostImport,
   detectVaultImportFormat,
@@ -711,7 +712,12 @@ export async function handleVaultAgentOp(
       const hostId = String(params.hostId || '');
       const host = deps.getHosts().find((entry) => entry.id === hostId);
       if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
-      return { ok: true, host: sanitizeHostForAgent(deps.resolveEffectiveHost(host)) };
+      const effectiveHost = deps.resolveEffectiveHost(host);
+      return {
+        ok: true,
+        host: sanitizeHostForAgent(effectiveHost),
+        valueSources: resolveHostValueSources(host, effectiveHost, deps.getGroupConfigs()),
+      };
     }
     case 'host.list': {
       // Filters are optional: anything missing or not a string means "no filter".
