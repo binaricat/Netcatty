@@ -25,6 +25,7 @@ const {
 
 const { assertBrowserOnlyPlugin } = require("../../domain/pluginRuntimePolicy.cjs");
 const { assertCatalogManifest } = require("./catalogPolicy.cjs");
+const { readContainedFile } = require("./pluginProtocol.cjs");
 
 const INSTALL_METADATA_FILE = "install.json";
 const ARCHIVE_SNAPSHOT_FILE = "package.ncpkg";
@@ -66,7 +67,8 @@ async function syncDirectoryTree(directory) {
   await syncDirectory(directory);
 }
 
-async function copyImmutableArchive(sourcePath, destinationPath, maxBytes) {
+async function copyImmutableArchive(sourcePath, destinationPath, maxBytes, options = {}) {
+  const syncDestination = options.sync !== false;
   const sourcePathStats = await lstat(sourcePath);
   if (!sourcePathStats.isFile() || sourcePathStats.isSymbolicLink()) {
     throw new Error("Plugin package source must be a regular non-symbolic file");
@@ -104,7 +106,7 @@ async function copyImmutableArchive(sourcePath, destinationPath, maxBytes) {
     ) {
       throw new Error("Plugin package source changed while it was staged");
     }
-    await destination.sync();
+    if (syncDestination) await destination.sync();
     return { bytes: position, sha256: sha256.digest("hex") };
   } finally {
     await destination?.close();
@@ -151,6 +153,8 @@ class PackageStore {
     this.logger = options.logger ?? console;
     this.syncDirectory = options.syncDirectory ?? syncDirectory;
     this.verifiedArchives = new Map();
+    this.pendingArchives = new Map();
+    this.pendingPreparations = new Map();
   }
 
   async initialize() {
@@ -328,6 +332,7 @@ class PackageStore {
         archiveSha256: snapshot.sha256,
         contentSha256: validation.contentSha256,
         manifest,
+        ...(validation.fileHashes ? { fileHashes: validation.fileHashes } : {}),
       }));
       return this.database.getActivePlugin(pluginId);
     } finally {
@@ -387,6 +392,7 @@ class PackageStore {
       }
       await rm(stagedPath, { recursive: true, force: true });
     }
+    const verifiedInRecover = new Set();
     const pluginDirectories = await readdir(this.paths.packages, { withFileTypes: true });
     for (const pluginEntry of pluginDirectories) {
       if (!pluginEntry.isDirectory()) continue;
@@ -417,6 +423,7 @@ class PackageStore {
               path.join(versionDirectory, PACKAGE_DIRECTORY),
             ),
           });
+          verifiedInRecover.add(`${metadata.pluginId}\0${metadata.version}\0${metadata.archiveSha256}`);
           if (!committedVersion) {
             const packageDirectory = path.join(versionDirectory, PACKAGE_DIRECTORY);
             this.database.installVersion({
@@ -453,6 +460,14 @@ class PackageStore {
     }
     for (const plugin of this.database.listPlugins()) {
       if (!plugin.packageRelativePath) continue;
+      if (verifiedInRecover.has(`${plugin.id}\0${plugin.activeVersion}\0${plugin.archiveSha256}`)) {
+        try {
+          this.resolvePackageRoot(plugin);
+          continue;
+        } catch {
+          // Fall through to full preparePackageRoot to record failure state.
+        }
+      }
       try {
         await this.preparePackageRoot(plugin);
       } catch (error) {
@@ -494,57 +509,73 @@ class PackageStore {
     const key = this.#versionKey(identity.pluginId, identity.version);
     const cached = this.verifiedArchives.get(key);
     if (options.refresh !== true && cached?.archiveSha256 === identity.archiveSha256) return cached;
-
-    const pluginCli = await loadPluginCli();
-    const versionDirectory = resolveInstalledVersionDirectory(
-      this.paths,
-      identity.pluginId,
-      identity.version,
-    );
-    const metadata = validateInstallMetadata(JSON.parse(await readFile(
-      path.join(versionDirectory, INSTALL_METADATA_FILE),
-      "utf8",
-    )));
-    if (
-      metadata.pluginId !== identity.pluginId
-      || metadata.version !== identity.version
-      || metadata.archiveSha256 !== identity.archiveSha256
-    ) {
-      throw new Error("Plugin install metadata does not match its database record");
+    const inflightKey = `${key}\0${identity.archiveSha256}`;
+    if (options.refresh !== true && this.pendingArchives.has(inflightKey)) {
+      return this.pendingArchives.get(inflightKey);
     }
 
-    const verificationDirectory = path.join(this.paths.staging, `verify-${randomUUID()}`);
-    const verificationSnapshot = path.join(verificationDirectory, ARCHIVE_SNAPSHOT_FILE);
-    await mkdir(verificationDirectory, { recursive: false, mode: 0o700 });
-    try {
-      const snapshot = await copyImmutableArchive(
-        path.join(versionDirectory, ARCHIVE_SNAPSHOT_FILE),
-        verificationSnapshot,
-        pluginCli.PACKAGE_LIMITS.archiveBytes,
+    const task = (async () => {
+      const pluginCli = await loadPluginCli();
+      const versionDirectory = resolveInstalledVersionDirectory(
+        this.paths,
+        identity.pluginId,
+        identity.version,
       );
-      if (snapshot.sha256 !== identity.archiveSha256) {
-        throw new Error("Retained plugin archive hash does not match its database record");
-      }
-      const validation = await pluginCli.validatePluginPackage(verificationSnapshot);
-      if (validation.contentSha256 !== metadata.contentSha256) {
-        throw new Error("Retained plugin archive content does not match install metadata");
-      }
+      const metadata = validateInstallMetadata(JSON.parse(await readFile(
+        path.join(versionDirectory, INSTALL_METADATA_FILE),
+        "utf8",
+      )));
       if (
-        validation.manifest.id !== identity.pluginId
-        || validation.manifest.version !== identity.version
+        metadata.pluginId !== identity.pluginId
+        || metadata.version !== identity.version
+        || metadata.archiveSha256 !== identity.archiveSha256
       ) {
-        throw new Error("Retained plugin archive identity does not match its database record");
+        throw new Error("Plugin install metadata does not match its database record");
       }
-      const verified = Object.freeze({
-        archiveSha256: identity.archiveSha256,
-        contentSha256: validation.contentSha256,
-        manifest: validation.manifest,
-      });
-      this.verifiedArchives.set(key, verified);
-      return verified;
-    } finally {
-      await rm(verificationDirectory, { recursive: true, force: true });
+
+      const verificationDirectory = path.join(this.paths.staging, `verify-${randomUUID()}`);
+      const verificationSnapshot = path.join(verificationDirectory, ARCHIVE_SNAPSHOT_FILE);
+      await mkdir(verificationDirectory, { recursive: false, mode: 0o700 });
+      try {
+        const snapshot = await copyImmutableArchive(
+          path.join(versionDirectory, ARCHIVE_SNAPSHOT_FILE),
+          verificationSnapshot,
+          pluginCli.PACKAGE_LIMITS.archiveBytes,
+          { sync: false },
+        );
+        if (snapshot.sha256 !== identity.archiveSha256) {
+          throw new Error("Retained plugin archive hash does not match its database record");
+        }
+        const validation = await pluginCli.validatePluginPackage(verificationSnapshot);
+        if (validation.contentSha256 !== metadata.contentSha256) {
+          throw new Error("Retained plugin archive content does not match install metadata");
+        }
+        if (
+          validation.manifest.id !== identity.pluginId
+          || validation.manifest.version !== identity.version
+        ) {
+          throw new Error("Retained plugin archive identity does not match its database record");
+        }
+        const verified = Object.freeze({
+          archiveSha256: identity.archiveSha256,
+          contentSha256: validation.contentSha256,
+          manifest: validation.manifest,
+          ...(validation.fileHashes ? { fileHashes: validation.fileHashes } : {}),
+        });
+        this.verifiedArchives.set(key, verified);
+        return verified;
+      } finally {
+        await rm(verificationDirectory, { recursive: true, force: true });
+      }
+    })();
+
+    if (options.refresh !== true) {
+      this.pendingArchives.set(inflightKey, task);
+      task.finally(() => {
+        if (this.pendingArchives.get(inflightKey) === task) this.pendingArchives.delete(inflightKey);
+      }).catch(() => {});
     }
+    return task;
   }
 
   async verifyInstalledVersion(record, options = {}) {
@@ -577,21 +608,64 @@ class PackageStore {
   }
 
   async preparePackageRoot(plugin) {
-    try {
-      await this.verifyInstalledVersion(plugin);
-      return this.resolvePackageRoot(plugin);
-    } catch (error) {
+    const identity = this.#recordIdentity(plugin);
+    const inflightKey = `${identity.pluginId}\0${identity.version}\0${identity.archiveSha256}`;
+    if (this.pendingPreparations.has(inflightKey)) {
+      return this.pendingPreparations.get(inflightKey);
+    }
+    const task = (async () => {
+      try {
+        await this.verifyInstalledVersion(plugin);
+        return this.resolvePackageRoot(plugin);
+      } catch (error) {
+        const active = this.database.getActivePlugin(identity.pluginId);
+        if (active?.activeVersion === identity.version) {
+          this.database.setEnabled(identity.pluginId, false);
+          this.database.setRuntimeState(identity.pluginId, "error", {
+            pluginVersion: identity.version,
+            error: `Installed package integrity check failed: ${error?.message ?? String(error)}`,
+          });
+        }
+        throw error;
+      }
+    })();
+    this.pendingPreparations.set(inflightKey, task);
+    task.finally(() => {
+      if (this.pendingPreparations.get(inflightKey) === task) {
+        this.pendingPreparations.delete(inflightKey);
+      }
+    }).catch(() => {});
+    return task;
+  }
+
+  /**
+   * Reads a single contained package file and cryptographically verifies its
+   * exact SHA-256 digest against the retained archive's verified file manifest.
+   * Avoids re-hashing every file in the package directory on concurrent asset loads.
+   */
+  async readVerifiedPackageFile(plugin, segments, maxBytes = Infinity) {
+    const relativePath = segments.join("/");
+    const expected = await this.#loadVerifiedArchive(plugin);
+    if (!expected.fileHashes || !Object.hasOwn(expected.fileHashes, relativePath)) {
+      const root = await this.preparePackageRoot(plugin);
+      return readContainedFile(root, segments, maxBytes);
+    }
+    const root = this.resolvePackageRoot(plugin);
+    const file = await readContainedFile(root, segments, maxBytes);
+    const actualSha256 = createHash("sha256").update(file.body).digest("hex");
+    if (actualSha256 !== expected.fileHashes[relativePath]) {
       const identity = this.#recordIdentity(plugin);
       const active = this.database.getActivePlugin(identity.pluginId);
       if (active?.activeVersion === identity.version) {
         this.database.setEnabled(identity.pluginId, false);
         this.database.setRuntimeState(identity.pluginId, "error", {
           pluginVersion: identity.version,
-          error: `Installed package integrity check failed: ${error?.message ?? String(error)}`,
+          error: `Installed package integrity check failed: Installed plugin file does not match the retained package archive (${relativePath})`,
         });
       }
-      throw error;
+      throw new Error("Installed plugin files do not match the retained package archive");
     }
+    return file;
   }
 
   async clearUninstalledPrivateFiles(pluginId) {

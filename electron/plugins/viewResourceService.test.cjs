@@ -49,3 +49,66 @@ test('view images cache decoded results by plugin version/hash and never cache t
   assert.equal(attempts, 2);
   resources.dispose();
 });
+
+test('view images persist validated PNGs to disk cache and recover cleanly from corrupt cache files', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'netcatty-view-image-disk-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const root = path.join(directory, 'package');
+  const cacheDir = path.join(directory, 'image-cache');
+  await fs.mkdir(root);
+  const pngHeader = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
+  ]);
+  await fs.writeFile(path.join(root, 'db.png'), pngHeader);
+  const plugin = { id: 'com.test.db', activeVersion: '0.3.0', archiveSha256: 'a'.repeat(64) };
+  let rasterizeCalls = 0;
+  const rasterizeIcon = async () => {
+    rasterizeCalls += 1;
+    return pngHeader;
+  };
+  const firstResources = new PluginViewResources({
+    electron: {},
+    packageStore: { preparePackageRoot: async () => root },
+    rasterizeIcon,
+    cacheDir,
+  });
+  const cold = await firstResources.image(plugin, 'db.png');
+  assert.equal(rasterizeCalls, 1);
+  // Wait briefly for best-effort atomic disk cache write.
+  for (let i = 0; i < 40; i += 1) {
+    const files = await fs.readdir(cacheDir).catch(() => []);
+    if (files.some((f) => f.endsWith('.png') && !f.startsWith('.tmp-'))) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  firstResources.dispose();
+
+  // Second instance (simulating app restart) hits disk cache with 0 rasterize calls.
+  const secondResources = new PluginViewResources({
+    electron: {},
+    packageStore: { preparePackageRoot: async () => { throw new Error('should not touch package on disk hit'); } },
+    rasterizeIcon,
+    cacheDir,
+  });
+  const warm = await secondResources.image(plugin, 'db.png');
+  assert.equal(warm.url, cold.url);
+  assert.equal(rasterizeCalls, 1);
+  secondResources.dispose();
+
+  // Corrupt the cached PNG on disk -> third instance rejects corrupt bytes and re-rasterizes cleanly.
+  const cachedFiles = (await fs.readdir(cacheDir)).filter((f) => f.endsWith('.png'));
+  assert.equal(cachedFiles.length, 1);
+  await fs.writeFile(path.join(cacheDir, cachedFiles[0]), Buffer.from('not-a-png'));
+  const thirdResources = new PluginViewResources({
+    electron: {},
+    packageStore: { preparePackageRoot: async () => root },
+    rasterizeIcon,
+    cacheDir,
+  });
+  const recovered = await thirdResources.image(plugin, 'db.png');
+  assert.equal(recovered.url, cold.url);
+  assert.equal(rasterizeCalls, 2);
+  thirdResources.dispose();
+});

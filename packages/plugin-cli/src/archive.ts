@@ -73,6 +73,7 @@ export interface PackageValidationResult {
   readonly fileCount: number;
   readonly uncompressedBytes: number;
   readonly contentSha256: string;
+  readonly fileHashes?: Readonly<Record<string, string>>;
 }
 
 export type PluginDirectoryValidationResult = PackageValidationResult;
@@ -501,6 +502,7 @@ export async function validatePluginDirectory(
     fileCount: files.length,
     uncompressedBytes: files.reduce((sum, file) => sum + file.size, 0),
     contentSha256: computePackageContentSha256(files),
+    fileHashes: Object.freeze(Object.fromEntries(files.map((file) => [file.packagePath, file.sha256]))),
   };
 }
 
@@ -797,7 +799,10 @@ async function inspectPluginPackage(
       executable: declaredCompanions.has(packagePath),
     })),
   );
-  return { manifest, fileCount: entries.size, uncompressedBytes: totalBytes, contentSha256 };
+  const fileHashes = Object.freeze(
+    Object.fromEntries([...entries].map(([packagePath, entry]) => [packagePath, entry.sha256])),
+  );
+  return { manifest, fileCount: entries.size, uncompressedBytes: totalBytes, contentSha256, fileHashes };
   } finally { zipFile.close(); }
 }
 

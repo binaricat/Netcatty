@@ -181,7 +181,8 @@ const RemoteSlottedWidgetElement = memo(function RemoteSlottedWidgetElement({ no
 });
 
 const resolvedImageCache = new WeakMap<(path: string) => Promise<string>, Map<string, string>>();
-const IMAGE_RETRY_DELAYS_MS = [200, 600] as const;
+const IMAGE_RETRY_DELAYS_MS = [150, 400, 1000] as const;
+const TRANSPARENT_PLACEHOLDER_SRC = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
 function getCachedImageUrl(loader: ((path: string) => Promise<string>) | undefined, imagePath: string | undefined): string | undefined {
   if (!loader || !imagePath) return undefined;
@@ -236,7 +237,15 @@ const RemoteImageElement = memo(function RemoteImageElement({ node }: { node: Re
     };
   }, [imagePath, loadImage]);
   const props = buildRemoteElementProps(node);
-  props.src = imageUrl;
+  if (imageUrl) {
+    props.src = imageUrl;
+  } else {
+    // Use a transparent 1x1 placeholder while loading so Chromium never flashes
+    // a broken-image icon or raw alt text before the rasterized asset arrives.
+    props.src = TRANSPARENT_PLACEHOLDER_SRC;
+    props.alt = '';
+    props['data-plugin-image-loading'] = 'true';
+  }
   return React.createElement('img', props);
 });
 
@@ -329,17 +338,22 @@ function readSelectionRange(
 
 /** Host-owned DOM, kept inside a closed shadow root and a clipped stacking context. */
 export function PluginRemoteSurface({ tree, css, onEvent, settled = true, loadImage, depth = 0 }: { depth?: number; tree: unknown; css: string; settled?: boolean; loadImage?(path: string): Promise<string>; onEvent(event: PluginSurfaceEvent): void }) {
-  const checked = useMemo(() => {
+  const checkedTree = useMemo(() => {
     try {
       validatePluginRemoteTree(tree);
-      return { tree: tree as { children: RemoteNode[] }, css: validatePluginStylesheet(css) };
+      return tree as { children: RemoteNode[] };
     } catch { return null; }
-  }, [tree, css]);
-  if (!checked) return <p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>;
+  }, [tree]);
+  const checkedCss = useMemo(() => {
+    try {
+      return validatePluginStylesheet(css);
+    } catch { return null; }
+  }, [css]);
+  if (!checkedTree || checkedCss === null) return <p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>;
   return (
     <LazyLoadBoundary name="Plugin view" fallback={<p role="alert" className="p-4 text-sm text-destructive">Unable to display plugin view.</p>}>
       <ResourceLoader.Provider value={loadImage}>
-        <ValidatedPluginRemoteSurface tree={checked.tree} css={checked.css} onEvent={onEvent} settled={settled} depth={depth} />
+        <ValidatedPluginRemoteSurface tree={checkedTree} css={checkedCss} onEvent={onEvent} settled={settled} depth={depth} />
       </ResourceLoader.Provider>
     </LazyLoadBoundary>
   );
