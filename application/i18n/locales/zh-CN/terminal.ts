@@ -14,6 +14,7 @@ export const zhCNTerminalMessages: Messages = {
   'terminal.directory.unavailable': '此会话暂不支持目录导航。',
   'terminal.directory.integrationUnavailable': 'PowerShell 目录集成未就绪，启动参数或执行策略可能阻止了加载。',
   'terminal.directory.cmdIntegrationUnavailable': '正在等待原 CMD 会话报告当前目录。',
+  'terminal.directory.gitBashIntegrationUnavailable': '正在等待原 Git Bash 会话中的可访问目录。',
   'terminal.directory.nonFilesystem': '当前 PowerShell 位置不是文件系统目录。',
   'terminal.directory.accessDenied': '没有权限列出此目录。',
   'terminal.directory.busy': '请等待终端回到空命令提示符。',

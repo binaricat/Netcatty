@@ -3,7 +3,8 @@ import { resolveInteractiveTerminalCdIntent } from './sessionRestore';
 import { isAbsoluteDirectoryPath, joinDirectoryPath, labelDirectoryPath, parentDirectoryPath, type DirectoryPathFlavor } from './directoryPath';
 
 export type DirectoryEntry = { name: string; path: string; hidden: boolean };
-export type DirectoryPickerErrorCode = 'unavailable' | 'unknown' | 'busy' | 'readFailed' | 'accessDenied' | 'changeFailed' | 'unsupportedPath' | 'integrationUnavailable' | 'cmdIntegrationUnavailable' | 'nonFilesystem';
+export type WindowsDirectoryShell = 'powershell' | 'cmd' | 'git-bash';
+export type DirectoryPickerErrorCode = 'unavailable' | 'unknown' | 'busy' | 'readFailed' | 'accessDenied' | 'changeFailed' | 'unsupportedPath' | 'integrationUnavailable' | 'cmdIntegrationUnavailable' | 'gitBashIntegrationUnavailable' | 'nonFilesystem';
 
 export class DirectoryPickerError extends Error {
   constructor(public readonly code: DirectoryPickerErrorCode) { super(code); }
@@ -38,7 +39,7 @@ export const COMPLETE_DIRECTORY_CAPABILITIES: DirectoryCapabilities = Object.fre
 });
 
 /** A shell adapter constructs input for the original interactive shell. */
-export function directoryChangeCommand(path: string, shell: 'posix' | 'powershell' | 'cmd', flavor: DirectoryPathFlavor): string | null {
+export function directoryChangeCommand(path: string, shell: 'posix' | WindowsDirectoryShell, flavor: DirectoryPathFlavor): string | null {
   if (!isDirectoryPath(path, flavor)) return null;
   if (shell === 'cmd') {
     if (flavor !== 'win32' || !/^[a-z]:[\\/]/i.test(path) || /[%!]/.test(path)) return null;
@@ -49,6 +50,11 @@ export function directoryChangeCommand(path: string, shell: 'posix' | 'powershel
   // PowerShell recognizes smart single quotes as delimiters too. Doubling
   // only ASCII apostrophes would let a filename terminate the literal.
   if (shell === 'powershell') return `Microsoft.PowerShell.Management\\Set-Location -LiteralPath '${path.replace(/['\u2018\u2019\u201a\u201b]/g, quote => quote + quote)}'`;
+  if (shell === 'git-bash') {
+    if (flavor !== 'win32' || !/^[a-z]:[\\/]/i.test(path)) return null;
+    const target = path.replace(/\\/g, '/').replace(/'/g, "'\\''");
+    return `\\builtin cd -- '${target}'`;
+  }
   return flavor === 'posix' ? resolveInteractiveTerminalCdIntent(path)?.command ?? null : null;
 }
 

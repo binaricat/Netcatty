@@ -14,6 +14,7 @@ export const ruTerminalMessages: Messages = {
   'terminal.directory.unavailable': 'Навигация по каталогам недоступна для этого сеанса.',
   'terminal.directory.integrationUnavailable': 'Интеграция каталогов PowerShell не готова. Проверьте параметры запуска и политику выполнения.',
   'terminal.directory.cmdIntegrationUnavailable': 'Ожидание данных о каталоге от исходного сеанса командной строки.',
+  'terminal.directory.gitBashIntegrationUnavailable': 'Ожидание доступного каталога исходного сеанса Git Bash.',
   'terminal.directory.nonFilesystem': 'Текущее расположение PowerShell не является каталогом файловой системы.',
   'terminal.directory.accessDenied': 'Нет разрешения на просмотр содержимого этого каталога.',
   'terminal.directory.busy': 'Дождитесь пустой командной строки.',
