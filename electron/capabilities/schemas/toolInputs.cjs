@@ -145,7 +145,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     os: { type: "string", optional: true, description: "Operating system override: auto (default), linux, windows, macos, freebsd, or unknown. Use auto to use detected system information; network device mode is separate." },
     identityId: { type: "string", optional: true, description: "Reusable identity ID from vault_identities_list. Empty string detaches the identity." },
     jumpHostIds: { type: "string", optional: true, description: "JSON array of vault host IDs in jump order. Empty array clears the chain." },
-    proxyProfileId: { type: "string", optional: true, description: "Reusable proxy ID from vault_proxy_profiles_list. Empty string clears it." },
+    proxyProfileId: { type: "string", optional: true, description: "Reusable proxy ID from vault_proxy_profiles_list. Empty string removes it so the group or global default applies." },
     startupCommand: { type: "string", optional: true, description: "Command to run after connecting. Empty string clears it." },
     startupCommandRunMode: { type: "string", optional: true, description: "paste or lineDelay." },
     environmentVariables: { type: "string", optional: true, description: "JSON object or array of {name,value} entries. Empty object clears them." },

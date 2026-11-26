@@ -817,7 +817,7 @@
       "proxyProfileId": {
         "type": "string",
         "optional": true,
-        "description": "Reusable proxy ID from vault_proxy_profiles_list. Empty string clears it."
+        "description": "Reusable proxy ID from vault_proxy_profiles_list. Empty string removes it so the group or global default applies."
       },
       "startupCommand": {
         "type": "string",
