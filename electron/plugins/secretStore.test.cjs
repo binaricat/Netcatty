@@ -571,3 +571,18 @@ test("live provider backfill does not resurrect explicit unbind tombstones", (co
   assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), undefined);
   database.close();
 });
+
+test("getPlaintext reads only the calling plugin's own encrypted secrets and never leaks across plugins", (context) => {
+  const database = createDatabase(context);
+  const store = new PluginSecretStore({
+    database,
+    safeStorage: fakeSafeStorage(),
+  });
+  store.set("com.example.db", "conn:pg:password", "pg-secret-123");
+  assert.equal(store.getPlaintext("com.example.db", "conn:pg:password"), "pg-secret-123");
+  assert.equal(store.getPlaintext("com.example.db", "conn:missing"), undefined);
+  assert.equal(store.getPlaintext("com.example.other", "conn:pg:password"), undefined);
+  store.delete("com.example.db", "conn:pg:password");
+  assert.equal(store.getPlaintext("com.example.db", "conn:pg:password"), undefined);
+  database.close();
+});

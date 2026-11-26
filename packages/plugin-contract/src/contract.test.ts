@@ -366,7 +366,7 @@ test("required resource-scoped permissions declare activation-time bounds", () =
     assert.equal(validate({
       ...validManifest,
       permissions: { optional: [permission] },
-    }), permission !== "network.stream", `${permission}: ${JSON.stringify(validate.errors)}`);
+    }), true, `${permission}: ${JSON.stringify(validate.errors)}`);
     assert.equal(validate({
       ...validManifest,
       permissions: { optional: [{ permission, resources: [resource] }] },

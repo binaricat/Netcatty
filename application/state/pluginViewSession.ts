@@ -38,14 +38,23 @@ export class PluginViewSessions {
     void bridge.openHostDrawnPluginView({ ...request, instanceId: id }).then(() => {
       if (disposed) void bridge.closeHostDrawnPluginView?.(id).catch(() => {});
     }).catch(() => dispose(true));
+    const imageCache = new Map<string, Promise<string>>();
     return {
       viewId: request.viewId,
       scope: request.scopeId,
-      image: async (path: string) => {
-        if (disposed || !bridge.getPluginViewResource) throw new Error('Plugin image unavailable');
-        const result = await bridge.getPluginViewResource({ instanceId: id, path });
-        if (disposed) throw new Error('Plugin view closed');
-        return result.url;
+      image: (path: string) => {
+        if (disposed || !bridge.getPluginViewResource) return Promise.reject(new Error('Plugin image unavailable'));
+        const existing = imageCache.get(path);
+        if (existing) return existing;
+        const pending = bridge.getPluginViewResource({ instanceId: id, path }).then((result) => {
+          if (disposed) throw new Error('Plugin view closed');
+          return result.url;
+        }).catch((error) => {
+          if (imageCache.get(path) === pending) imageCache.delete(path);
+          throw error;
+        });
+        imageCache.set(path, pending);
+        return pending;
       },
       get idle() { return users === 0; },
       getSnapshot: () => state,

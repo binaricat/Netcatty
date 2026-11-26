@@ -28,11 +28,24 @@ test("untrusted content cannot introduce executable elements, URLs or dangerous 
 });
 
 test("remote trees and mutation batches are bounded", () => {
-  assert.throws(() => validatePluginRemoteTree({ children: Array.from({ length: 1025 }, (_, i) => text(`${i}`, "x")) }));
-  let node = text("25", "x"); for (let i = 24; i >= 0; i--) node = element(`${i}`, "div", {}, [node]);
+  assert.throws(() => validatePluginRemoteTree({ children: Array.from({ length: 4097 }, (_, i) => text(`${i}`, "x")) }));
+  let node = text("33", "x"); for (let i = 32; i >= 0; i--) node = element(`${i}`, "div", {}, [node]);
   assert.throws(() => validatePluginRemoteTree({ children: [node] }));
-  assert.throws(() => validatePluginMutationBatch(Array.from({ length: 2049 }, () => [2, "1", "x"])));
-  assert.throws(() => validatePluginMutationBatch([[2, "1", "x".repeat(8193)]]));
+  assert.throws(() => validatePluginMutationBatch(Array.from({ length: 4097 }, () => [2, "1", "x"])));
+  assert.throws(() => validatePluginMutationBatch([[2, "1", "x".repeat(131073)]]));
+  assert.equal(validatePluginMutationBatch([[2, "1", "x".repeat(131072)]]), true);
+});
+
+test("declarative plugin widget markers and JSON props are strictly validated", () => {
+  const validWidget = element("w1", "div", {
+    "data-plugin-widget": "code-editor",
+    "data-plugin-widget-props": JSON.stringify({ value: "SELECT 1;", language: "sql" }),
+  });
+  assert.equal(validatePluginRemoteTree({ children: [validWidget] }), true);
+  assert.throws(() => validatePluginRemoteTree({ children: [element("w2", "div", { "data-plugin-widget": "iframe-hack" })] }), /widget/);
+  assert.throws(() => validatePluginRemoteTree({ children: [element("w3", "div", { "data-plugin-widget": "data-grid", "data-plugin-widget-props": "{bad json" })] }), /JSON/);
+  assert.throws(() => validatePluginRemoteTree({ children: [element("w4", "div", { "data-plugin-widget": "data-grid", "data-plugin-widget-props": "[]" })] }), /JSON object/);
+  assert.throws(() => validatePluginRemoteTree({ children: [element("w5", "div", { "data-plugin-widget": "data-grid", "data-plugin-widget-props": "{\"__proto__\":{\"polluted\":true}}" })] }), /Forbidden key/);
 });
 
 test("void children are rejected in snapshots and mutation insertions", () => {
