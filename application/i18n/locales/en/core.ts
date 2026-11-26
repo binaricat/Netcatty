@@ -98,6 +98,7 @@ export const enCoreMessages: Messages = {
   'common.apply': 'Apply',
   'common.use': 'Use',
   'common.useGlobal': 'Use global',
+  'common.useGroup': 'Use group',
   'common.saveChanges': 'Save Changes',
   'common.advanced': 'Advanced',
   'common.left': 'Left',

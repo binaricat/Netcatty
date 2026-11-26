@@ -89,6 +89,7 @@ export const zhCNCoreMessages: Messages = {
   'common.apply': '应用',
   'common.use': '使用',
   'common.useGlobal': '跟随全局',
+  'common.useGroup': '跟随分组',
   'common.left': '左侧',
   'common.right': '右侧',
   'common.more': '更多',
