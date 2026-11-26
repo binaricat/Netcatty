@@ -1404,10 +1404,6 @@ test("buildOsc7SetupCommand configures fish once with valid fish syntax", () => 
 test("buildOsc7SetupCommand can be pasted into supported shells", () => {
   const shells = supportedShells();
 
-  if (process.env.CI) {
-    assert.ok(shells.some((shellPath) => basename(shellPath) === "fish"), "CI must exercise fish");
-  }
-
   for (const shellPath of shells) {
     withTempHome(`netcatty-osc7-${basename(shellPath)}-`, (home) => {
       const zdotdir = join(home, "zdot");

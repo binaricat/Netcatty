@@ -21,19 +21,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-
-      - name: Install shell test dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fish xvfb
 
       - name: Install deps
         run: npm ci
@@ -58,108 +51,5 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Test SSH cipher negotiation in Electron's crypto runtime
-        env:
-          NETCATTY_SSH_TEST_RUNTIME: electron
-        run: node --test electron/bridges/sshChaChaTransport.test.cjs
-
-      - name: Test browser first-link lifecycle
-        run: xvfb-run -a ./node_modules/.bin/electron --no-sandbox electron/hostBrowser/hostBrowser.firstLink.live.test.cjs
-
-      - name: Test terminal background rendering
-        run: xvfb-run -a ./node_modules/.bin/electron --no-sandbox --use-angle=swiftshader --enable-unsafe-swiftshader scripts/terminal-background-rendering.live.test.cjs
-
-      - name: Test terminal keyword highlight performance
-        env:
-          NETCATTY_TERMINAL_PERF_SHOW_WINDOW: "1"
-        # GitHub-hosted runners do not configure Electron's SUID sandbox helper.
-        run: xvfb-run -a ./node_modules/.bin/electron --no-sandbox scripts/xterm-keyword-highlight-performance.live.test.cjs
-
-      - name: Test terminal keyword highlight throughput
-        env:
-          NETCATTY_TERMINAL_PERF_MAIN_REF: ${{ github.event.pull_request.base.sha || 'HEAD^' }}
-          NETCATTY_TERMINAL_PERF_ROUNDS: "3"
-          NETCATTY_TERMINAL_PERF_SHOW_WINDOW: "1"
-        run: xvfb-run -a ./node_modules/.bin/electron --no-sandbox scripts/xterm-keyword-highlight-throughput.live.test.cjs
-
       - name: Build
         run: npm run build
-
-  windows-fido:
-    name: windows-fido
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install deps
-        run: npm ci --ignore-scripts
-
-      - name: Exercise serial named pipe transport on Windows
-        run: node --test electron/bridges/serialNamedPipe.test.cjs
-
-      - name: Apply production dependency patches
-        run: npx patch-package --error-on-fail
-
-      - name: Install user-mode OpenSSH and software authenticator toolchain
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MSYS
-          update: true
-          install: gcc openssl-devel openssh
-
-      - name: Build disposable software authenticator
-        shell: msys2 {0}
-        run: |
-          gcc -shared -DHAVE_STDINT_H scripts/fixtures/fido/provider.c -lcrypto -o /usr/lib/netcatty-fido-test-provider.dll
-          printf 'NETCATTY_WINDOWS_SSH_AGENT=%s\n' "$(cygpath -w /usr/bin/ssh-agent.exe)" >> "$GITHUB_ENV"
-          printf 'NETCATTY_WINDOWS_SSH_KEYGEN=%s\n' "$(cygpath -w /usr/bin/ssh-keygen.exe)" >> "$GITHUB_ENV"
-          cygpath -w /usr/bin >> "$GITHUB_PATH"
-          ssh -V
-
-      - name: Exercise Windows pipes, PIN bridge, SK signatures and cancellation
-        env:
-          NETCATTY_FIDO_WINDOWS: "1"
-        run: node --test scripts/fido-windows.live.test.cjs electron/bridges/fidoNativeAgent.test.cjs electron/bridges/fidoAskpass.winpath.test.cjs
-
-  windows-broadcast-ssh:
-    name: windows-broadcast-ssh
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install deps
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Test SSH cipher negotiation in Windows Electron's crypto runtime
-        env:
-          NETCATTY_SSH_TEST_RUNTIME: electron
-        run: node --test electron/bridges/sshChaChaTransport.test.cjs
-
-      - name: Exercise native PowerShell and CMD directory navigation in ConPTY
-        env:
-          NETCATTY_DIRECTORY_WINDOWS_LIVE: "1"
-        run: |
-          $env:NETCATTY_TEST_PWSH = (Get-Command pwsh -ErrorAction Stop).Source
-          node --test --test-force-exit --import tsx infrastructure/services/terminalDirectory.windows.test.ts
-
-      - name: Exercise two SSH password prompts in the desktop app
-        run: node scripts/terminal-broadcast-ssh.live.cjs

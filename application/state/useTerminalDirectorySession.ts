@@ -7,7 +7,7 @@ import { createTerminalDirectoryController } from './terminalDirectoryController
 import { registerTerminalDirectory } from './terminalDirectoryRegistry';
 import { directoryChangeCommand, COMPLETE_DIRECTORY_CAPABILITIES, type WindowsDirectoryShell } from '../../domain/directoryPicker';
 import type { DirectoryPathFlavor } from '../../domain/directoryPath';
-import { isDiscoveredGitBash } from '../../lib/localShell.cjs';
+import { isDiscoveredGitBash } from '../../lib/localShell';
 
 export function useTerminalDirectorySession(options: {
   sessionId: string;
