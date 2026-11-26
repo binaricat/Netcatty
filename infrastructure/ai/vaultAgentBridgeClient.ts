@@ -925,6 +925,7 @@ export async function handleVaultAgentOp(
             managedSources: deps.getManagedSources(),
             identities: deps.identities,
             proxyProfiles: deps.proxyProfiles,
+            keys: deps.keys,
           },
         );
         if (!updated.ok) return updated;

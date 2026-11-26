@@ -166,7 +166,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     sshAuthReadyTimeoutSeconds: { type: "number", optional: true, description: "Login timeout in seconds (1-3600, default 120)." },
     sftpFileProtocol: { type: "string", optional: true, description: "auto, sftp, or scp. scp turns sftpSudo off." },
     sftpEncoding: { type: "string", optional: true, description: "Remote filename encoding: auto, utf-8, or gb18030." },
-    resetFields: { type: "string", optional: true, description: "JSON array or comma-separated fields to remove from the host so the group or default value applies: port, proxy, jumpHostIds, startupCommand, startupCommandRunMode, environmentVariables, the Mosh and ET fields, sftpSudo (turns sudo off), and the connection settings above. Not credentials or protocol." },
+    resetFields: { type: "string", optional: true, description: "JSON array or comma-separated fields to remove from the host so the group or default value applies: port, proxy, jumpHostIds, startupCommand, startupCommandRunMode, environmentVariables, moshEnabled, moshServerPath, etEnabled, etPort, deviceType, backspaceBehavior, charset, keepaliveOverride, keepaliveInterval, keepaliveCountMax, sshTcpConnectTimeoutSeconds, sshAuthReadyTimeoutSeconds, sftpSudo (turns sudo off), sftpFileProtocol, sftpEncoding." },
     serialConfig: { type: "string", optional: true, description: "JSON object for serial connections: path, baudRate, and optional dataBits, stopBits, parity, flowControl, localEcho, lineMode, backspaceBehavior (default or ctrl-h), byteOrientedBackspace (boolean, default false; enable only for devices that delete bytes rather than characters). Existing backspaceBehavior and byteOrientedBackspace are preserved when omitted." },
   },
   "vault.host.delete": {

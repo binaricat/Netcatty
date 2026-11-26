@@ -1,4 +1,4 @@
-import type { GroupConfig, Host, HostProtocol, Identity, ManagedSource, ProxyProfile } from './models';
+import type { GroupConfig, Host, HostProtocol, Identity, ManagedSource, ProxyProfile, SSHKey } from './models';
 import { sanitizeHost } from './host';
 import { isPluginHostProtocol } from './pluginConnection';
 import {
@@ -85,6 +85,7 @@ export interface VaultHostUpdateOptions {
   managedSources?: ManagedSource[];
   identities?: Identity[];
   proxyProfiles?: ProxyProfile[];
+  keys?: SSHKey[];
 }
 
 export interface VaultHostCreateIssue {
@@ -413,7 +414,10 @@ export function applyVaultHostUpdate(
   if (!provided) return { ok: false, error: 'At least one host field is required.' };
 
   const current = existingHosts[hostIndex];
-  const reset = applyVaultHostResetFields({ ...current }, source);
+  const requestedProtocol = protocol.provided && typeof protocol.value === 'string'
+    ? (protocol.value.trim().toLowerCase() === 'serial' ? 'serial' : normalizeProtocol(protocol.value))
+    : undefined;
+  const reset = applyVaultHostResetFields({ ...current }, source, requestedProtocol ?? current.protocol);
   if ('error' in reset) return { ok: false, error: reset.error };
   let updated: Host = reset.host;
 
@@ -834,6 +838,8 @@ export function applyVaultHostUpdate(
   const connectionSettings = applyVaultHostConnectionSettings(updated, source, {
     resolveEffectiveHost: options.resolveEffectiveHost,
     identities: options.identities,
+    keys: options.keys,
+    resetFields: reset.fields,
   });
   if ('error' in connectionSettings) return { ok: false, error: connectionSettings.error };
   updated = connectionSettings.host;

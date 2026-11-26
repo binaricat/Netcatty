@@ -1,6 +1,6 @@
-import type { Host, HostAuthMethod, Identity } from './models';
+import type { Host, HostAuthMethod, Identity, SSHKey } from './models';
 import { isPluginHostProtocol } from './pluginConnection';
-import { applyHostAuthMethodSelection, resolveHostAuthMethodSelection } from './sshAuth';
+import { applyHostAuthMethodSelection, hasRequiredHostAuthCredential, resolveHostAuth } from './sshAuth';
 import { MAX_SSH_CONNECTION_TIMEOUT_SECONDS } from './sshConnectionTimeouts';
 
 /**
@@ -140,6 +140,7 @@ export function parseVaultHostResetFields(raw: unknown): { ok: true; fields: str
 export function applyVaultHostResetFields(
   host: Host,
   source: Record<string, unknown>,
+  targetProtocol: Host['protocol'] = host.protocol,
 ): { ok: true; host: Host; fields: string[] } | Failure {
   if (!hasOwn(source, 'resetFields')) return { ok: true, host, fields: [] };
   const parsed = parseVaultHostResetFields(source.resetFields);
@@ -149,7 +150,7 @@ export function applyVaultHostResetFields(
     const conflict = conflicts.find((key) => hasOwn(source, key));
     if (conflict) return { ok: false, error: `${conflict} cannot be set and reset in the same update.` };
   }
-  if (parsed.fields.includes('port') && host.protocol === 'serial') {
+  if (parsed.fields.includes('port') && targetProtocol === 'serial') {
     return { ok: false, error: 'port cannot be reset on a serial host; change serialConfig.baudRate instead.' };
   }
   const next = { ...host } as Record<string, unknown>;
@@ -182,6 +183,9 @@ const PLUGIN_HOST_DROPPED_FIELDS = [
 export interface VaultHostConnectionSettingsOptions {
   resolveEffectiveHost?: (host: Host) => Host;
   identities?: Identity[];
+  keys?: SSHKey[];
+  /** Fields removed by resetFields in this update. */
+  resetFields?: readonly string[];
 }
 
 /**
@@ -210,13 +214,16 @@ export function applyVaultHostConnectionSettings(
     if (dropped) return { ok: false, error: `${dropped} does not apply to plugin hosts.` };
   }
 
+  const networkModeAllowed = isPlainSsh || protocol === 'serial';
   if (hasOwn(source, 'deviceType')) {
     const deviceType = parseEnumInput(source.deviceType, ['general', 'network'] as const);
     if (!deviceType) return { ok: false, error: 'deviceType must be general or network.' };
-    if (deviceType === 'network' && !isPlainSsh && protocol !== 'serial') {
+    if (deviceType === 'network' && !networkModeAllowed) {
       return { ok: false, error: 'deviceType network only applies to SSH hosts without Mosh or ET, and to serial hosts.' };
     }
     updated.deviceType = deviceType;
+  } else if (options.resetFields?.includes('deviceType') && effective.deviceType === 'network' && !networkModeAllowed) {
+    return { ok: false, error: 'Resetting deviceType would inherit network mode, which only applies to SSH hosts without Mosh or ET, and to serial hosts.' };
   }
 
   if (hasOwn(source, 'sshInputCompatibility')) {
@@ -301,27 +308,26 @@ export function applyVaultHostConnectionSettings(
     if (conflict) {
       return { ok: false, error: `authMethod cannot be combined with ${conflict}. Change the login method and the credentials in separate updates.` };
     }
-    // Compare with the method that applies today, including group and identity
-    // values, like applyEffectiveHostAuthMethodSelection in Host Details.
-    const beforeAuth = options.resolveEffectiveHost?.(updated) ?? updated;
-    const identity = beforeAuth.identityId
-      ? options.identities?.find((item) => item.id === beforeAuth.identityId)
-      : undefined;
-    const effectiveMethod = identity?.authMethod ?? resolveHostAuthMethodSelection(beforeAuth);
-    const effectiveUsername = identity?.username || beforeAuth.username;
-    if (authMethod !== effectiveMethod) {
-      const selected = applyHostAuthMethodSelection(updated, authMethod, effectiveMethod);
-      updated = !selected.username?.trim() && effectiveUsername?.trim()
-        ? { ...selected, username: effectiveUsername }
+    // Compare with the method that applies today, resolved like Host Details
+    // (group, identity and key catalog), as applyEffectiveHostAuthMethodSelection does.
+    const keys = options.keys ?? [];
+    const identities = options.identities ?? [];
+    const beforeAuth = resolveHostAuth({
+      host: options.resolveEffectiveHost?.(updated) ?? updated,
+      keys,
+      identities,
+    });
+    if (authMethod !== beforeAuth.authMethod) {
+      const selected = applyHostAuthMethodSelection(updated, authMethod, beforeAuth.authMethod);
+      updated = !selected.username?.trim() && beforeAuth.username?.trim()
+        ? { ...selected, username: beforeAuth.username }
         : selected;
       const after = options.resolveEffectiveHost?.(updated) ?? updated;
-      if (
-        (authMethod === 'key' || authMethod === 'certificate')
-        && !after.identityId
-        && !after.identityFileId
-        && !after.identityFilePaths?.some((path) => path.trim())
-      ) {
-        warnings.push(`No ${authMethod === 'key' ? 'key' : 'certificate'} is selected for this host. Choose one in Host Details before connecting.`);
+      if ((authMethod === 'key' || authMethod === 'certificate')
+        && !hasRequiredHostAuthCredential({ host: { ...after, protocol: 'ssh' }, keys, identities })) {
+        warnings.push(authMethod === 'key'
+          ? 'No key is selected for this host. Choose one in Host Details before connecting.'
+          : 'No certificate is selected for this host. Choose a key with a certificate in Host Details before connecting.');
       }
       if (authMethod === 'password' && !after.identityId && !after.password) {
         warnings.push('No password is saved for this host. Netcatty will ask for it when connecting.');

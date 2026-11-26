@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { GroupConfig, Host, ProxyProfile } from './models.ts';
+import type { GroupConfig, Host, ProxyProfile, SSHKey } from './models.ts';
 import { applyGroupDefaults } from './groupConfig.ts';
 import { applyVaultHostUpdate, type VaultHostUpdatePatch } from './vaultHostCreate.ts';
 import { normalizeAgentCharset, parseVaultHostResetFields } from './vaultHostConnectionSettings.ts';
@@ -200,6 +200,52 @@ test('vault host update keeps a port reset when the protocol is also sent', () =
   const result = expectOk(update(makeHost({ port: 22 }), { protocol: 'ssh', resetFields: ['port'] }));
   assert.equal(result.updatedHost.port, undefined);
   assert.equal(applyGroupDefaults(result.updatedHost, { port: 2200 }).port, 2200);
+});
+
+const plainKey = { id: 'key-1', label: 'key', type: 'ED25519', privateKey: 'k', created: 1 } as unknown as SSHKey;
+const certificateKey = { ...plainKey, id: 'cert-1', certificate: 'ssh-ed25519-cert-v01@openssh.com AAAA', category: 'certificate' } as unknown as SSHKey;
+
+test('vault host update resolves the current certificate login through the key catalog', () => {
+  const migrated = makeHost({ authMethod: undefined, identityFileId: certificateKey.id });
+  const result = expectOk(updateWith(migrated, { authMethod: 'certificate' }, { keys: [certificateKey] }));
+  assert.equal(result.updatedHost.identityFileId, certificateKey.id, 'the certificate stays selected');
+  assert.deepEqual(result.warnings, []);
+});
+
+test('vault host update warns when the new method has no usable credential', () => {
+  const inheritsPlainKey = groupResolver({ identityFileId: plainKey.id });
+  const result = expectOk(updateWith(makeHost({ group: 'prod' }), { authMethod: 'certificate' }, {
+    resolveEffectiveHost: inheritsPlainKey,
+    keys: [plainKey],
+  }));
+  assert.match(result.warnings.join('\n'), /No certificate is selected/);
+});
+
+test('vault host update checks a port reset against the requested protocol', () => {
+  const serial = makeHost({ protocol: 'serial', hostname: '/dev/ttyUSB0', port: 9600, serialConfig: { path: '/dev/ttyUSB0', baudRate: 9600 } });
+  const toSsh = expectOk(update(serial, { protocol: 'ssh', hostname: 'router.example.com', resetFields: ['port'] }));
+  assert.equal(toSsh.updatedHost.port, undefined);
+
+  const toSerial = update(makeHost({ port: 2222 }), {
+    protocol: 'serial',
+    serialConfig: { path: '/dev/ttyUSB0', baudRate: 9600 },
+    resetFields: ['port'],
+  });
+  assert.equal(toSerial.ok, false);
+  if (!toSerial.ok) assert.match(toSerial.error, /cannot be reset on a serial host/);
+});
+
+test('vault host update does not re-inherit network mode on transports that do not support it', () => {
+  const result = updateWith(makeHost({ group: 'prod', protocol: 'telnet', port: 23, deviceType: 'general' }), { resetFields: ['deviceType'] }, {
+    resolveEffectiveHost: groupResolver({ deviceType: 'network' }),
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /Resetting deviceType would inherit network mode/);
+
+  const ssh = expectOk(updateWith(makeHost({ group: 'prod', deviceType: 'general' }), { resetFields: ['deviceType'] }, {
+    resolveEffectiveHost: groupResolver({ deviceType: 'network' }),
+  }));
+  assert.equal(ssh.updatedHost.deviceType, undefined);
 });
 
 test('vault host update resetFields lets group values apply again', () => {
