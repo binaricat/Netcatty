@@ -60,6 +60,36 @@ test('resolveSessionTabTitle disables dynamic titles in off mode', () => {
   );
 });
 
+test('resolveSessionTabTitle ignores live prompt host in off mode', () => {
+  assert.equal(
+    resolveSessionTabTitle(
+      { hostLabel: '192.0.2.10', promptHostname: 'ubuntu', dynamicTitle: 'root@ubuntu:~' },
+      'off',
+    ),
+    '192.0.2.10',
+  );
+  assert.equal(
+    resolveSessionTabTitle({ hostLabel: '', promptHostname: 'ubuntu' }, 'off'),
+    '',
+  );
+});
+
+test('resolveSessionTabTitle keeps customName ahead of live titles in off mode', () => {
+  assert.equal(
+    resolveSessionTabTitle(
+      {
+        customName: 'Prod deploy',
+        hostLabel: '192.0.2.10',
+        promptHostname: 'ubuntu',
+        dynamicTitle: 'claude: refactor auth',
+        codingCliProviderId: 'claude',
+      },
+      'off',
+    ),
+    'Prod deploy',
+  );
+});
+
 test('resolveSessionTabTitle falls back to connection label when dynamic title is empty', () => {
   assert.equal(
     resolveSessionTabTitle({ hostLabel: 'web-01', dynamicTitle: '   ' }),
