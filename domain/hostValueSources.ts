@@ -77,6 +77,13 @@ export function resolveHostValueSources(
     if (group) sources[field] = `group:${group.path}`;
   }
 
+  // resolveHostAuth logs in with the identity's username and method, so
+  // report them from wherever the identity comes from.
+  if (effectiveHost.identityId && sources.identityId) {
+    sources.username = sources.identityId;
+    sources.authMethod = sources.identityId;
+  }
+
   const proxySource = resolveProxySource(host, effectiveHost, ancestors);
   if (proxySource) sources.proxy = proxySource;
   if (host.keepaliveOverride === true) sources.keepalive = 'host';

@@ -39,6 +39,18 @@ test('valueSources treats empty strings like applyGroupDefaults does', () => {
   assert.equal(sources.identityId, 'host', 'empty identityId is an explicit host choice');
 });
 
+test('valueSources reports username and auth method from the identity that applies', () => {
+  const configs: GroupConfig[] = [
+    { path: 'prod', username: 'deploy' },
+    { path: 'prod/web', identityId: 'identity-1', username: 'svc', authMethod: 'key' },
+  ];
+  const sources = sourcesFor(makeHost({ group: 'prod/web/app', username: 'root' }), configs);
+
+  assert.equal(sources.identityId, 'group:prod/web');
+  assert.equal(sources.username, 'group:prod/web');
+  assert.equal(sources.authMethod, 'group:prod/web');
+});
+
 test('valueSources reports every proxy source', () => {
   const configs: GroupConfig[] = [{ path: 'prod', proxyProfileId: 'group-proxy' }];
   const groupOneOff: GroupConfig[] = [{ path: 'prod', proxyConfig: { type: 'http', host: 'gw.example.com', port: 3128 } }];
