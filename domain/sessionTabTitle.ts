@@ -134,6 +134,30 @@ export const resolveCodingCliProviderIconUpdate = ({
   return nextProviderId;
 };
 
+const shellTitleHostname = (title: string): string | undefined => {
+  // A title is not a prompt: require an anchored identity plus cwd/port evidence,
+  // so program titles, email addresses, and URIs do not become host reports.
+  const match = /^[a-z0-9_.+-]+@(\[[^\]\s]+\]|[a-z0-9][a-z0-9_.-]*):\s*(.*)$/iu.exec(title);
+  if (!match) return undefined;
+  const [, hostname, suffix] = match;
+  const isPath = /^(?:~(?:\/|$)|\/)/u.test(suffix);
+  const isPort = /^\d{1,5}$/u.test(suffix) && Number(suffix) > 0 && Number(suffix) <= 65_535;
+  if (!isPath && !isPort) return undefined;
+  if (hostname.startsWith('[')) {
+    try {
+      // Validate IPv6 brackets only; do not use URL canonicalization to infer
+      // aliases or compressed/expanded address equivalence.
+      new URL(`http://${hostname}/`);
+    } catch {
+      return undefined;
+    }
+  }
+  return hostname;
+};
+
+const titleHostnameKey = (hostname: string): string =>
+  hostname.replace(/^\[(.*)\]$/u, '$1').replace(/\.$/u, '').toLowerCase();
+
 /**
  * Resolve the label shown on session tabs and pane headers.
  * Live prompt and Shell titles require all mode; agent mode permits Agent titles only.
@@ -155,5 +179,13 @@ export const resolveSessionTabTitle = (
   if (dynamicTabTitleMode !== 'all') {
     return connectionLabel;
   }
-  return session.promptHostname?.trim() || dynamicTitle || connectionLabel;
+  const promptHostname = session.promptHostname?.trim();
+  if (!dynamicTitle) return promptHostname || connectionLabel;
+  if (promptHostname) {
+    const reportedHost = shellTitleHostname(dynamicTitle);
+    if (reportedHost && titleHostnameKey(reportedHost) !== titleHostnameKey(promptHostname)) {
+      return promptHostname;
+    }
+  }
+  return dynamicTitle;
 };

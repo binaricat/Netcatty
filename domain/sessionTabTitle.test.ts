@@ -362,3 +362,183 @@ test('buildMergedWorkspaceTitleFromSessions recomputes from live membership', ()
     '01/02',
   );
 });
+
+// External review examples: the expected field is part of the contract, not
+// computed by resolveSessionTabTitle or another display-title helper.
+const reviewedAllTitleCases = [
+  {
+    name: 'same-host shell title retains username and cwd',
+    session: { hostLabel: 'Production', promptHostname: 'web01', dynamicTitle: 'ubuntu@web01: ~/app' },
+    expectedField: 'dynamicTitle',
+  },
+  {
+    name: 'old shell host gives way to the current prompt host',
+    session: { hostLabel: 'Database entry', promptHostname: 'db02', dynamicTitle: 'ubuntu@web01: ~/app' },
+    expectedField: 'promptHostname',
+  },
+  {
+    name: 'JumpServer transport title gives way to the target prompt host',
+    session: { hostLabel: 'Jump fleet', promptHostname: 'target-01', dynamicTitle: 'user@jumpssh:2222' },
+    expectedField: 'promptHostname',
+  },
+  {
+    name: 'program title retains its document context',
+    session: { hostLabel: 'Editor server', promptHostname: 'web01', dynamicTitle: 'vim README.md' },
+    expectedField: 'dynamicTitle',
+  },
+] as const;
+
+for (const { name, session, expectedField } of reviewedAllTitleCases) {
+  test(`all title policy review: ${name}`, () => {
+    assert.equal(resolveSessionTabTitle(session, 'all'), session[expectedField]);
+  });
+}
+
+test('all title policy compares shell hostnames case-insensitively without rewriting the title', () => {
+  const session = { hostLabel: 'Production', promptHostname: 'web01', dynamicTitle: 'ubuntu@WEB01: ~/app' };
+  assert.equal(resolveSessionTabTitle(session, 'all'), session.dynamicTitle);
+});
+
+test('all title policy ignores one FQDN trailing dot only when comparing host identity', () => {
+  for (const session of [
+    { hostLabel: 'Production', promptHostname: 'WEB01.EXAMPLE.TEST', dynamicTitle: 'ubuntu@web01.example.test.: ~/app' },
+    { hostLabel: 'Production', promptHostname: 'web01.example.test.', dynamicTitle: 'ubuntu@WEB01.EXAMPLE.TEST: /srv' },
+  ]) {
+    assert.equal(resolveSessionTabTitle(session, 'all'), session.dynamicTitle);
+  }
+});
+
+test('all title policy equates bracketed IPv6 title hosts with the same literal prompt address', () => {
+  const session = {
+    hostLabel: 'IPv6 production', promptHostname: '2001:DB8::A', dynamicTitle: 'root@[2001:db8::a]: ~/app',
+  };
+  assert.equal(resolveSessionTabTitle(session, 'all'), session.dynamicTitle);
+});
+
+test('all title policy rejects a clearly different bracketed IPv6 title host', () => {
+  const session = {
+    hostLabel: 'IPv6 production', promptHostname: '2001:db8::b', dynamicTitle: 'root@[2001:db8::a]: /srv',
+  };
+  assert.equal(resolveSessionTabTitle(session, 'all'), session.promptHostname);
+});
+
+test('all title policy does not treat embedded email or URI text as a shell host report', () => {
+  for (const dynamicTitle of [
+    'vim maintainer@old.example.test:notes.txt',
+    'Issue for maintainer@old.example.test',
+    'https://maintainer@old.example.test/docs',
+    'mailto:maintainer@old.example.test',
+  ]) {
+    const session = { hostLabel: 'Production', promptHostname: 'web01', dynamicTitle };
+    assert.equal(resolveSessionTabTitle(session, 'all'), session.dynamicTitle);
+  }
+});
+
+test('reviewed shell and program titles remain disabled in default off and agent modes', () => {
+  for (const { session } of reviewedAllTitleCases) {
+    for (const mode of [undefined, 'off', 'agent'] as const) {
+      assert.equal(resolveSessionTabTitle(session, mode), session.hostLabel);
+    }
+  }
+});
+
+test('manual names stay authoritative for every reviewed title and mode', () => {
+  for (const example of reviewedAllTitleCases) {
+    const session = { ...example.session, customName: 'Operator production tab' };
+    for (const mode of [undefined, 'off', 'agent', 'all'] as const) {
+      assert.equal(resolveSessionTabTitle(session, mode), session.customName);
+    }
+  }
+});
+
+test('active Agent titles retain priority over reviewed prompt identities only in enabled modes', () => {
+  for (const example of reviewedAllTitleCases) {
+    const session = { ...example.session, codingCliProviderId: 'claude' as const, dynamicTitle: 'claude: deploy' };
+    for (const mode of [undefined, 'agent', 'all'] as const) {
+      assert.equal(resolveSessionTabTitle(session, mode), session.dynamicTitle);
+    }
+    assert.equal(resolveSessionTabTitle(session, 'off'), session.hostLabel);
+  }
+});
+
+const reviewedWorkspaceSessions = reviewedAllTitleCases.map(({ session }, index) => ({
+  ...session, id: `review-pane-${index}`, hostId: `review-host-${index}`,
+}));
+const reviewedWorkspaceLabels = reviewedAllTitleCases.map(({ session, expectedField }) => session[expectedField]);
+
+test('auto workspace titles apply the reviewed all policy to the focused pane', () => {
+  for (let index = 0; index < reviewedWorkspaceSessions.length; index += 1) {
+    const session = reviewedWorkspaceSessions[index];
+    const workspace = { title: DEFAULT_WORKSPACE_TITLE, autoTitle: true, focusedSessionId: session.id };
+    assert.equal(
+      resolveWorkspaceTabLabel(workspace, reviewedWorkspaceSessions, 'all'),
+      `${reviewedWorkspaceLabels[index]} +${reviewedWorkspaceSessions.length - 1}`,
+    );
+    for (const mode of [undefined, 'off', 'agent'] as const) {
+      assert.equal(
+        resolveWorkspaceTabLabel(workspace, reviewedWorkspaceSessions, mode),
+        `${session.hostLabel} +${reviewedWorkspaceSessions.length - 1}`,
+      );
+    }
+  }
+});
+
+test('generated workspace display titles apply the reviewed policy without changing stored names', () => {
+  const workspace = {
+    title: reviewedWorkspaceSessions.map(session => session.hostLabel).join('/'),
+    autoTitle: false, generatedTitle: true, focusedSessionId: reviewedWorkspaceSessions[0].id,
+  };
+  const storedTitle = workspace.title;
+  assert.equal(
+    resolveWorkspaceTabLabel(workspace, reviewedWorkspaceSessions, 'all'),
+    reviewedWorkspaceLabels.join('/'),
+  );
+  for (const mode of [undefined, 'off', 'agent'] as const) {
+    assert.equal(resolveWorkspaceTabLabel(workspace, reviewedWorkspaceSessions, mode), storedTitle);
+  }
+  assert.equal(workspace.title, storedTitle);
+});
+
+test('all title policy preserves bare emails and suffixes without shell or port evidence', () => {
+  for (const dynamicTitle of [
+    'maintainer@old.example.test',
+    'ubuntu@old.example.test: notes.txt',
+    'ubuntu@old.example.test:0',
+    'ubuntu@old.example.test:65536',
+    'ubuntu@old.example.test:999999',
+    'ubuntu@old.example.test:22garbage',
+  ]) {
+    const session = { hostLabel: 'Production', promptHostname: 'web01', dynamicTitle };
+    assert.equal(resolveSessionTabTitle(session, 'all'), session.dynamicTitle);
+  }
+});
+
+test('all title policy recognizes legal endpoint port boundaries', () => {
+  for (const port of [1, 65_535]) {
+    const session = { hostLabel: 'Jump fleet', promptHostname: 'target', dynamicTitle: `ubuntu@jump:${port}` };
+    assert.equal(resolveSessionTabTitle(session, 'all'), session.promptHostname);
+  }
+});
+
+test('all title policy does not infer short names or matching first labels as aliases', () => {
+  for (const reportedHost of ['web', 'web.dev.example']) {
+    const session = {
+      hostLabel: 'Production', promptHostname: 'web.prod.example', dynamicTitle: `root@${reportedHost}: /srv`,
+    };
+    assert.equal(resolveSessionTabTitle(session, 'all'), session.promptHostname);
+  }
+});
+
+test('all title policy preserves titles with invalid bracketed host addresses', () => {
+  for (const reportedHost of ['not-ip', '2001:db8:::1']) {
+    const session = { hostLabel: 'Production', promptHostname: 'web01', dynamicTitle: `root@[${reportedHost}]: ~/app` };
+    assert.equal(resolveSessionTabTitle(session, 'all'), session.dynamicTitle);
+  }
+});
+
+test('explicit workspace names ignore all reviewed live title shapes', () => {
+  const workspace = { title: 'Operator layout', autoTitle: false, generatedTitle: false };
+  for (const mode of [undefined, 'off', 'agent', 'all'] as const) {
+    assert.equal(resolveWorkspaceTabLabel(workspace, reviewedWorkspaceSessions, mode), workspace.title);
+  }
+});
