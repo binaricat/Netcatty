@@ -824,7 +824,7 @@
       "charset": {
         "type": "string",
         "optional": true,
-        "description": "Terminal text encoding name such as UTF-8, GBK, or ISO-8859-1. Use resetFields [\"charset\"] to inherit."
+        "description": "Terminal text encoding: UTF-8 or GB18030 (GBK and GB2312 are saved as GB18030), the same choices as Host Details. Use resetFields [\"charset\"] to inherit."
       },
       "keepaliveOverride": {
         "type": "string",

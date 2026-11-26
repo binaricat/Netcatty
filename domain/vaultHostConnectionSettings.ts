@@ -64,7 +64,22 @@ const RESET_CONFLICT_KEYS: Record<string, readonly string[]> = {
 const AUTH_METHOD_CONFLICT_KEYS = ['password', 'keyPath', 'keypath', 'identityId', 'passphrase'] as const;
 
 const AUTH_METHODS: readonly HostAuthMethod[] = ['auto', 'password', 'key', 'certificate'];
-const CHARSET_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,63}$/;
+/**
+ * Terminal encodings Host Details offers (TerminalEncodingSelect). GBK-family
+ * names are accepted because the terminal bridge decodes them as GB18030.
+ */
+const CHARSET_ALIASES: Record<string, 'UTF-8' | 'GB18030'> = {
+  utf8: 'UTF-8',
+  gb18030: 'GB18030',
+  gbk: 'GB18030',
+  gb2312: 'GB18030',
+  cp936: 'GB18030',
+};
+
+/** Normalize an agent-provided charset to a Host Details encoding, or undefined if unsupported. */
+export const normalizeAgentCharset = (raw: unknown): 'UTF-8' | 'GB18030' | undefined => (
+  typeof raw === 'string' ? CHARSET_ALIASES[raw.trim().toLowerCase().replace(/[^a-z0-9]/g, '')] : undefined
+);
 
 type Failure = { ok: false; error: string };
 
@@ -185,9 +200,9 @@ export function applyVaultHostConnectionSettings(
   }
 
   if (hasOwn(source, 'charset')) {
-    const charset = typeof source.charset === 'string' ? source.charset.trim() : '';
-    if (!CHARSET_PATTERN.test(charset)) {
-      return { ok: false, error: 'charset must be an encoding name such as UTF-8, GBK, or ISO-8859-1. Use resetFields ["charset"] to inherit.' };
+    const charset = normalizeAgentCharset(source.charset);
+    if (!charset) {
+      return { ok: false, error: 'charset must be UTF-8 or GB18030 (GBK and GB2312 are saved as GB18030). Use resetFields ["charset"] to inherit.' };
     }
     updated.charset = charset;
   }

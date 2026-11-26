@@ -158,7 +158,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     deviceType: { type: "string", optional: true, description: "general or network. network marks SSH/serial network equipment: commands are sent as-is without shell wrapping and exit codes are unavailable." },
     sshInputCompatibility: { type: "string", optional: true, description: "true or false. SSH only. Sends IME text and short pastes character by character for servers that drop multi-character input. Takes effect after reconnecting." },
     backspaceBehavior: { type: "string", optional: true, description: "ctrl-h makes Backspace send Ctrl+H instead of DEL. Use resetFields [\"backspaceBehavior\"] to go back to the default or group value." },
-    charset: { type: "string", optional: true, description: "Terminal text encoding name such as UTF-8, GBK, or ISO-8859-1. Use resetFields [\"charset\"] to inherit." },
+    charset: { type: "string", optional: true, description: "Terminal text encoding: UTF-8 or GB18030 (GBK and GB2312 are saved as GB18030), the same choices as Host Details. Use resetFields [\"charset\"] to inherit." },
     keepaliveOverride: { type: "string", optional: true, description: "true uses this host's keepalive settings; false returns to the global keepalive settings." },
     keepaliveInterval: { type: "number", optional: true, description: "Seconds between SSH keepalive packets, 0-3600 (0 disables). Also turns keepaliveOverride on." },
     keepaliveCountMax: { type: "number", optional: true, description: "Unanswered keepalives before disconnecting, 1-100. Also turns keepaliveOverride on." },

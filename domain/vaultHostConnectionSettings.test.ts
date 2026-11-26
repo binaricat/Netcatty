@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import type { GroupConfig, Host, ProxyProfile } from './models.ts';
 import { applyGroupDefaults } from './groupConfig.ts';
 import { applyVaultHostUpdate, type VaultHostUpdatePatch } from './vaultHostCreate.ts';
-import { parseVaultHostResetFields } from './vaultHostConnectionSettings.ts';
+import { normalizeAgentCharset, parseVaultHostResetFields } from './vaultHostConnectionSettings.ts';
 
 const makeHost = (overrides: Partial<Host> = {}): Host => ({
   id: 'host-1', label: 'host', hostname: 'host.example.com', username: 'root', tags: [], os: 'linux',
@@ -30,7 +30,7 @@ test('vault host update sets network device connection settings', () => {
     keepaliveInterval: '15',
   }));
   assert.equal(result.updatedHost.deviceType, 'network');
-  assert.equal(result.updatedHost.charset, 'GBK');
+  assert.equal(result.updatedHost.charset, 'GB18030', 'GBK is saved as GB18030 like Host Details');
   assert.equal(result.updatedHost.backspaceBehavior, 'ctrl-h');
   assert.equal(result.updatedHost.keepaliveInterval, 15);
   assert.equal(result.updatedHost.keepaliveOverride, true);
@@ -72,8 +72,10 @@ test('vault host update rejects invalid connection settings', () => {
     { patch: { sshInputCompatibility: 'maybe' }, error: /sshInputCompatibility must be true or false/i },
     { host: makeHost({ protocol: 'telnet', port: 23 }), patch: { sshInputCompatibility: true }, error: /only applies to SSH/i },
     { patch: { backspaceBehavior: 'default' }, error: /backspaceBehavior must be ctrl-h/i },
-    { patch: { charset: '' }, error: /charset must be an encoding name/i },
-    { patch: { charset: 'UTF-8\nInjected' }, error: /charset must be an encoding name/i },
+    { patch: { charset: '' }, error: /charset must be UTF-8 or GB18030/i },
+    { patch: { charset: 'UTF-8\nInjected' }, error: /charset must be UTF-8 or GB18030/i },
+    { patch: { charset: 'Big5' }, error: /charset must be UTF-8 or GB18030/i },
+    { patch: { charset: 42 }, error: /charset must be UTF-8 or GB18030/i },
     { patch: { keepaliveOverride: 'sometimes' }, error: /keepaliveOverride must be true or false/i },
     { patch: { keepaliveOverride: false, keepaliveInterval: 10 }, error: /cannot be combined/i },
     { patch: { keepaliveInterval: 3601 }, error: /keepaliveInterval must be an integer between 0 and 3600/i },
@@ -198,6 +200,16 @@ test('vault host update rejects unsafe or conflicting resetFields', () => {
 test('vault host update accepts resetFields as the only field', () => {
   const result = expectOk(update(makeHost({ charset: 'GBK' }), { resetFields: ['charset'] }));
   assert.equal(result.updatedHost.charset, undefined);
+});
+
+test('normalizeAgentCharset maps names to the Host Details encodings', () => {
+  for (const [input, expected] of [
+    ['UTF-8', 'UTF-8'], ['utf8', 'UTF-8'], [' Utf_8 ', 'UTF-8'],
+    ['GB18030', 'GB18030'], ['gbk', 'GB18030'], ['GB2312', 'GB18030'], ['cp936', 'GB18030'],
+    ['Big5', undefined], ['ISO-8859-1', undefined], ['', undefined],
+  ] as const) {
+    assert.equal(normalizeAgentCharset(input), expected, input);
+  }
 });
 
 test('parseVaultHostResetFields accepts arrays, JSON and comma-separated names without duplicates', () => {
