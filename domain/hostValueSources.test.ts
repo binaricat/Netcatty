@@ -78,6 +78,22 @@ test('valueSources ignores a deleted identity for username and auth method', () 
   assert.equal(withIdentity.username, 'group:prod');
 });
 
+test('valueSources stops at a child group that blocks the parent proxy', () => {
+  const configs: GroupConfig[] = [
+    { path: 'prod', proxyProfileId: 'global-proxy' },
+    { path: 'prod/web', proxyProfileId: '' },
+  ];
+  assert.equal(sourcesFor(makeHost({ group: 'prod/web' }), configs, 'global-proxy').proxy, 'global-default');
+  assert.equal(sourcesFor(makeHost({ group: 'prod/web' }), configs).proxy, undefined);
+});
+
+test('valueSources keeps Telnet usernames on their own source', () => {
+  const configs: GroupConfig[] = [{ path: 'prod', identityId: 'identity-1', username: 'svc' }];
+  const host = makeHost({ group: 'prod', protocol: 'telnet', port: 23, username: 'root' });
+  const sources = sourcesFor(host, configs);
+  assert.equal(sources.username, 'host');
+});
+
 test('valueSources reports every proxy source', () => {
   const configs: GroupConfig[] = [{ path: 'prod', proxyProfileId: 'group-proxy' }];
   const groupOneOff: GroupConfig[] = [{ path: 'prod', proxyConfig: { type: 'http', host: 'gw.example.com', port: 3128 } }];

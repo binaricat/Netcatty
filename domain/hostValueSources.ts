@@ -79,9 +79,13 @@ export function resolveHostValueSources(
     if (group && sameValue(group[key], effectiveValue)) sources[field] = `group:${group.path}`;
   }
 
-  // resolveHostAuth logs in with the identity's username and method when the
+  // SSH logins (resolveHostAuth) use the identity's username and method when the
   // identity still exists, so report them from wherever the identity comes from.
-  const identityApplies = Boolean(effectiveHost.identityId)
+  // Telnet uses telnetIdentityId instead.
+  const protocol = effectiveHost.protocol;
+  const usesSshLogin = protocol === undefined || protocol === 'ssh' || protocol === 'mosh' || protocol === 'et';
+  const identityApplies = usesSshLogin
+    && Boolean(effectiveHost.identityId)
     && (!identities || identities.some((identity) => identity.id === effectiveHost.identityId));
   if (identityApplies && sources.identityId) {
     sources.username = sources.identityId;
@@ -97,12 +101,15 @@ export function resolveHostValueSources(
 function resolveProxySource(host: Host, effectiveHost: Host, ancestors: GroupConfig[]): HostValueSource | undefined {
   if (host.directProxy === true) return 'direct';
   if (host.proxyProfileId || host.proxyConfig !== undefined) return 'host';
-  const group = ancestors.find((config) => (
+  // The nearest group with a proxy setting decides, like resolveGroupDefaults;
+  // an empty proxyProfileId there blocks parent proxies.
+  const group = ancestors.find((config) => config.proxyProfileId !== undefined || config.proxyConfig !== undefined);
+  const groupApplies = group && (
     effectiveHost.proxyProfileId
-      ? config.proxyProfileId === effectiveHost.proxyProfileId
-      : config.proxyConfig !== undefined && sameValue(config.proxyConfig, effectiveHost.proxyConfig)
-  ));
-  if (group) return `group:${group.path}`;
+      ? group.proxyProfileId === effectiveHost.proxyProfileId
+      : group.proxyConfig !== undefined && sameValue(group.proxyConfig, effectiveHost.proxyConfig)
+  );
+  if (group && groupApplies) return `group:${group.path}`;
   if (effectiveHost.proxyProfileId || effectiveHost.proxyConfig) return 'global-default';
   return undefined;
 }
