@@ -168,7 +168,7 @@ function SidePanelPaneHost({
           <span className="text-[11px] font-medium truncate flex-1">{label}</span>
           <button
             type="button"
-            className="h-5 w-5 grid place-items-center rounded-sm opacity-70 hover:opacity-100 hover:bg-white/10"
+            className="h-5 w-5 shrink-0 grid place-items-center rounded-sm opacity-70 hover:opacity-100 hover:bg-white/10"
             aria-label={`${closePaneLabel}: ${label}`}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => {
