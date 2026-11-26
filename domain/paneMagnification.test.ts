@@ -9,7 +9,6 @@ import {
   resolvePaneMagnificationCandidate,
   resolvePaneMagnificationLayoutGeometry,
   resolvePaneMagnificationStyle,
-  resolveMagnifiedChromeBorderWidth,
   resolveTwoPaneMagnificationStyle,
   snapCssRectToDevicePixels,
   type PaneMagnificationController,
@@ -99,15 +98,6 @@ test('magnification overlays the original layout without changing its rect', () 
     height: '876px',
     zIndex: 50,
   });
-});
-
-test('magnified chrome uses a 2px accent stroke only below 1.5 device pixels', () => {
-  assert.equal(resolveMagnifiedChromeBorderWidth(1), 2);
-  assert.equal(resolveMagnifiedChromeBorderWidth(1.2), 2);
-  assert.equal(resolveMagnifiedChromeBorderWidth(1.49), 2);
-  assert.equal(resolveMagnifiedChromeBorderWidth(1.5), 1);
-  assert.equal(resolveMagnifiedChromeBorderWidth(2), 1);
-  assert.equal(resolveMagnifiedChromeBorderWidth(0), 1);
 });
 
 test('magnified surface bounds snap to the device-pixel grid after the 12px inset', () => {

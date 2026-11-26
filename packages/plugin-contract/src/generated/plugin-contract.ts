@@ -83,10 +83,15 @@ export type ByteStreamConnectionDescriptor = {
   inputStreamId: StreamId;
   outputStreamId: StreamId;
   windowBytes: 65536;
+  hostBindingToken?: string;
 };
 
 export type ByteStreamConnectRequest = {
   endpoint: ByteStreamEndpoint;
+  allowLocal?: boolean;
+  allowSelfSigned?: boolean;
+  caPem?: string;
+  servername?: string;
 };
 
 export type ByteStreamEndpoint = string;
@@ -97,7 +102,22 @@ export type ByteStreamHandleRequest = {
   handleId: string;
 };
 
-export type ByteStreamLimits = {"connectionsPerRuntime":4,"connectionsTotal":64,"chunkBytes":65536,"bufferBytes":65536,"connectionBytes":8388608,"connectMs":10000,"idleMs":30000,"lifetimeMs":120000};
+export type ByteStreamLimits = {"connectionsPerRuntime":24,"connectionsTotal":128,"chunkBytes":65536,"bufferBytes":65536,"connectionBytes":536870912,"connectMs":10000,"idleMs":1800000,"lifetimeMs":28800000};
+
+export type ByteStreamUpgradeTlsRequest = {
+  handleId: string;
+  servername?: string;
+  allowSelfSigned?: boolean;
+  caPem?: string;
+};
+
+export type ByteStreamUpgradeTlsResult = {
+  upgraded: true;
+  authorized: boolean;
+  protocol?: string;
+  fingerprint256?: string;
+  subject?: string;
+};
 
 export type CommandContribution = {
   id: ContributionId;
@@ -196,15 +216,39 @@ export type FeatureId = string;
 
 export type FilesystemDirectoryEnumerationFeature = "filesystem.directory-enumeration";
 
-export type HostByteStreamConnectRequest = {
+export type HostByteStreamConfirmRequest = {
+  kind: "network.stream.confirm";
+  endpoint: ByteStreamEndpoint;
+  host: string;
+  port: number;
+  transport: "tcp" | "tls";
+  isLocal: boolean;
+};
+
+export type HostByteStreamConnectRequest = ({
   target: VaultHostRef;
   expectedRevision: string;
   endpoint: ByteStreamEndpoint;
-};
+  durable?: boolean;
+}) | ({
+  hostBindingToken: string;
+  endpoint: ByteStreamEndpoint;
+});
 
 export type HostByteStreamFeature = "network.host-byte-streams";
 
-export type HostByteStreamLimits = {"connectionsPerRuntime":4,"connectionsTotal":64,"chunkBytes":65536,"bufferBytes":65536,"connectionBytes":67108864,"connectMs":120000,"idleMs":300000,"lifetimeMs":1800000};
+export type HostByteStreamLimits = {"connectionsPerRuntime":24,"connectionsTotal":128,"chunkBytes":65536,"bufferBytes":65536,"connectionBytes":536870912,"connectMs":120000,"idleMs":1800000,"lifetimeMs":28800000};
+
+export type HostByteStreamTlsConfirmRequest = {
+  kind: "network.stream.tlsConfirm";
+  endpoint: ByteStreamEndpoint;
+  servername?: string;
+  fingerprint256: string;
+  subject: string;
+  issuer: string;
+  validTo: string;
+  reason: string;
+};
 
 export type HostClipboardReadRequest = {
   kind: "clipboard.read";
@@ -219,7 +263,7 @@ export type HostClipboardWriteRequest = {
 
 export type HostDrawnViewEvent = {
   nodeId: string;
-  type: "click" | "input" | "change" | "keydown" | "keyup" | "focusin" | "focusout" | "compositionstart" | "compositionupdate" | "compositionend" | "dismiss" | "submit" | "reset";
+  type: "click" | "input" | "change" | "keydown" | "keyup" | "focusin" | "focusout" | "compositionstart" | "compositionupdate" | "compositionend" | "dismiss" | "submit" | "reset" | "dblclick" | "contextmenu" | "scroll" | "widget";
   value?: string;
   checked?: boolean;
   eventId?: number;
@@ -230,6 +274,16 @@ export type HostDrawnViewEvent = {
   altKey?: boolean;
   shiftKey?: boolean;
   values?: Array<string>;
+  x?: number;
+  y?: number;
+  scrollTop?: number;
+  scrollLeft?: number;
+  clientHeight?: number;
+  clientWidth?: number;
+  selectionStart?: number;
+  selectionEnd?: number;
+  widgetEvent?: string;
+  detail?: JsonValue;
 };
 
 export type HostDrawnViewMessage = ({
@@ -261,6 +315,30 @@ export type HostDrawnViewOpenRequest = {
 
 export type HostDrawnViewsFeature = "views.host-drawn";
 
+export type HostFileDialogFilter = {
+  name: string;
+  extensions: Array<string>;
+};
+
+export type HostFileHandleCloseRequest = {
+  handleId: string;
+};
+
+export type HostFileHandleReadRequest = {
+  handleId: string;
+  offset?: number;
+  length?: number;
+  encoding?: "base64" | "utf8";
+};
+
+export type HostFileHandleWriteRequest = {
+  handleId: string;
+  data: string;
+  encoding?: "base64" | "utf8";
+  mode?: "replace" | "append";
+  commit?: boolean;
+};
+
 export type HostInputRequest = {
   kind: "input";
   title: string;
@@ -276,7 +354,7 @@ export type HostInteractionEvent = (HostInteractionPrompt) | (HostInteractionClo
 
 export type HostInteractionFeature = "host.interactions";
 
-export type HostInteractionLimits = {"textBytes":4096,"requestBytes":65536,"items":100,"pendingPerRuntime":1,"pendingTotal":8,"requestsPerMinute":10,"timeoutMs":60000};
+export type HostInteractionLimits = {"textBytes":4096,"clipboardBytes":4194304,"requestBytes":4259840,"items":100,"pendingPerRuntime":1,"pendingTotal":8,"requestsPerMinute":60,"timeoutMs":60000,"fileMaxBytes":67108864};
 
 export type HostInteractionPrompt = {
   permissionMode?: "allow" | "ask" | "deny";
@@ -293,6 +371,8 @@ export type HostInteractionPrompt = {
   terminalLabel?: string;
   vaultTarget?: VaultHostLocalTarget;
   reviewedDraft?: (VaultHostCreateFields) | (VaultHostEditFields);
+  durableHostId?: string;
+  autoCommit?: boolean;
 };
 
 export type HostInteractionReceipt = (boolean) | ({
@@ -309,6 +389,7 @@ export type HostInteractionResponse = {
   resources?: VaultHostSelectedResources;
   draft?: (VaultHostCreateFields) | (VaultHostEditFields);
   scriptsRun?: boolean;
+  remember?: boolean;
 };
 
 export type HostInteractionResult = ({
@@ -316,7 +397,18 @@ export type HostInteractionResult = ({
 }) | ({
   cancelled: false;
   value: (string) | (true) | (SharedTerminalSelection);
-}) | (VaultHostSelectedResult) | (VaultHostActionAccepted) | (ByteStreamConnectionDescriptor);
+}) | (VaultHostSelectedResult) | (VaultHostActionAccepted) | (ByteStreamConnectionDescriptor) | ({
+  cancelled: false;
+  approved: true;
+  remember?: boolean;
+});
+
+export type HostOpenFileRequest = {
+  title?: string;
+  filters?: Array<HostFileDialogFilter>;
+  readAs?: "bytes" | "utf8";
+  maxBytes?: number;
+};
 
 export type HostQuickPickItem = {
   id: string;
@@ -328,6 +420,15 @@ export type HostQuickPickRequest = {
   kind: "quickPick";
   title: string;
   items: Array<HostQuickPickItem>;
+};
+
+export type HostSaveFileRequest = {
+  title?: string;
+  defaultName?: string;
+  filters?: Array<HostFileDialogFilter>;
+  data?: string;
+  encoding?: "base64" | "utf8";
+  deferredWrite?: boolean;
 };
 
 export type HostSingleLineInputText = string;
@@ -562,7 +663,7 @@ export type PermissionDecision = ({
   decision: "deny" | "cancel";
 });
 
-export type PermissionDeclaration = Exclude<PluginPermission, "network.stream"> | PermissionResourceDeclaration;
+export type PermissionDeclaration = PluginPermission | PermissionResourceDeclaration;
 
 export type PermissionGrantScope = "once" | "session" | "application" | "always";
 
@@ -1288,7 +1389,7 @@ export type RpcFailure = {
 
 export type RpcId = (string) | (SafeUnsignedInteger);
 
-export type RpcLimits = {"maxJsonBytes":1048576};
+export type RpcLimits = {"maxJsonBytes":8388608};
 
 export type RpcMessage = (RpcRequest) | (RpcNotification) | (RpcSuccess) | (RpcFailure) | (RpcCancel) | (RpcProgressNotification) | (RuntimeInitializeRequest) | (TerminalInterceptorAttachmentRequest);
 
@@ -1760,11 +1861,20 @@ export type VaultHostActionRequest = ({
   expectedRevision: string;
   endpoint: ByteStreamEndpoint;
   kind: "network.stream.connectViaHost";
-});
+  durable?: boolean;
+}) | ({
+  kind: "network.stream.connectViaHost";
+  hostBindingToken: string;
+  endpoint: ByteStreamEndpoint;
+}) | (HostByteStreamConfirmRequest) | (HostByteStreamTlsConfirmRequest);
 
 export type VaultHostActionResult = ({
   cancelled: true;
 }) | (VaultHostActionAccepted);
+
+export type VaultHostBindingRevokeParams = {
+  hostBindingToken: string;
+};
 
 export type VaultHostConnectParams = {
   target: VaultHostRef;

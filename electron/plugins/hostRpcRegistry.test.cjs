@@ -308,3 +308,30 @@ test("reserved lifecycle and transport methods cannot be claimed as host capabil
   }
   assert.equal(assertHostMethod("commands.execute"), "commands.execute");
 });
+
+test("storage.keys supports optional prefix filtering and rejects unknown parameters", async () => {
+  const { createDefaultPluginHostRpcRegistry } = require("./hostRpcRegistry.cjs");
+  const registry = createDefaultPluginHostRpcRegistry({
+    assertStorageParams: (params) => params,
+    database: {
+      listKeys: () => ["conn:1", "conn:2", "history:1", "draft:tab1"],
+      getValue: () => undefined,
+      setValue() {},
+      deleteValue() {},
+    },
+  });
+  const routes = registry.createRoutes(identity());
+  const transport = { signal: AbortSignal.timeout(100) };
+  assert.deepEqual(
+    await routes.requestHandlers["storage.keys"]({}, transport),
+    { keys: ["conn:1", "conn:2", "history:1", "draft:tab1"] },
+  );
+  assert.deepEqual(
+    await routes.requestHandlers["storage.keys"]({ prefix: "conn:" }, transport),
+    { keys: ["conn:1", "conn:2"] },
+  );
+  await assert.rejects(
+    routes.requestHandlers["storage.keys"]({ unknown: true }, transport),
+    /only accepts an optional prefix/,
+  );
+});

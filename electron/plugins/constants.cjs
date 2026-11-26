@@ -9,11 +9,11 @@ const PLUGIN_UTILITY_TERMINATION_GRACE_MS = 500;
 const PLUGIN_UTILITY_FORCE_EXIT_TIMEOUT_MS = 1_000;
 const PLUGIN_RPC_DEFAULT_TIMEOUT_MS = 30_000;
 const PLUGIN_RPC_MAX_PENDING = 256;
-const PLUGIN_RPC_MAX_JSON_BYTES = 1024 * 1024;
+const PLUGIN_RPC_MAX_JSON_BYTES = 8 * 1024 * 1024;
 // Broker payloads live inside the control-plane JSON envelope. Reserve enough
 // room for worst-case JSON string escaping (six wire bytes per raw byte),
 // headers, paths, correlation fields, and future compatible metadata.
-const PLUGIN_RPC_MAX_RAW_BYTES = Math.floor(PLUGIN_RPC_MAX_JSON_BYTES / 8);
+const PLUGIN_RPC_MAX_RAW_BYTES = 128 * 1024;
 const PLUGIN_STREAM_MAX_FRAME_JSON_BYTES = 24 * 1024 * 1024;
 const PLUGIN_CRASH_WINDOW_MS = 5 * 60_000;
 const PLUGIN_CRASH_QUARANTINE_THRESHOLD = 3;

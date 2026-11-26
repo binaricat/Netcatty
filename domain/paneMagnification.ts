@@ -92,10 +92,6 @@ export function getPaneMagnificationShortcutLabel(
   return (hotkeyScheme === 'mac' ? binding?.mac : binding?.pc)?.replace(/ \+ /g, '+') ?? '';
 }
 
-export function resolveMagnifiedChromeBorderWidth(devicePixelRatio = 1): number {
-  return devicePixelRatio > 0 && devicePixelRatio < 1.5 ? 2 : 1;
-}
-
 export function snapCssRectToDevicePixels(
   left: number,
   top: number,

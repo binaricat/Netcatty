@@ -294,6 +294,25 @@ export const sdkRuntimeModelCache = createSdkRuntimeModelCache();
 export type RuntimeModelWarnings = Record<string, { cacheKey: string; message: string }>;
 
 /**
+ * Whether a per-agent catalog warning should surface in the composer banner.
+ *
+ * A warning the user explicitly dismissed stays hidden for its cache key until
+ * a clean catalog is observed (the caller then drops the key from
+ * `dismissedKeys`). A warning belonging to a different cache key is never
+ * shown — config/agent switches must not inherit a stale dismissal.
+ */
+export function isModelCatalogWarningVisible(
+  warning: { cacheKey: string; message: string } | undefined,
+  cacheKey: string | undefined,
+  dismissedKeys: ReadonlySet<string>,
+): string | undefined {
+  if (!warning || !cacheKey) return undefined;
+  if (warning.cacheKey !== cacheKey) return undefined;
+  if (dismissedKeys.has(cacheKey)) return undefined;
+  return warning.message;
+}
+
+/**
  * Make the per-agent catalog warning banner match a catalog result. Used both
  * for cache reads and after a refresh settles: a refresh that coalesced onto
  * another panel's in-flight load never runs its own loader callback, so

@@ -334,3 +334,29 @@ test("networkBroker.validate preserves credentialLease for registry dispatch", (
   assert.equal(validated.authorization.scheme, "Basic");
   assert.equal(validated.authorization.username, "alice");
 });
+
+test("secrets.getPlaintext reads only the calling plugin's own encrypted secrets and checks runtime liveness", async () => {
+  const store = new Map([["com.example.db\0conn:pg", "s3cr3t-pg-pass"]]);
+  const requests = createRegistrations({
+    getPlaintext(pluginId, key) {
+      return store.get(`${pluginId}\0${key}`);
+    },
+    getReference() { return null; },
+    set() { return { kind: "secret", id: "0".repeat(32), key: "k" }; },
+    delete() {},
+  });
+  const ownCtx = { pluginId: "com.example.db", async assertActive() {} };
+  const otherCtx = { pluginId: "com.example.other", async assertActive() {} };
+  assert.deepEqual(
+    await requests.get("secrets.getPlaintext")({ key: "conn:pg" }, ownCtx),
+    { found: true, value: "s3cr3t-pg-pass" },
+  );
+  assert.deepEqual(
+    await requests.get("secrets.getPlaintext")({ key: "conn:pg" }, otherCtx),
+    { found: false },
+  );
+  await assert.rejects(
+    requests.get("secrets.getPlaintext")({ key: "conn:pg" }, { pluginId: "com.example.db", async assertActive() { throw new Error("inactive"); } }),
+    /inactive/,
+  );
+});

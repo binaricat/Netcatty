@@ -4,6 +4,7 @@ export const terminalLayerAreEqual = (
   prev: Record<string, unknown>,
   next: Record<string, unknown>,
 ): boolean => (
+  prev.isVaultInitialized === next.isVaultInitialized &&
   prev.hosts === next.hosts &&
   prev.customGroups === next.customGroups &&
   prev.groupConfigs === next.groupConfigs &&

@@ -222,6 +222,7 @@ function createPluginHostService(options) {
     interactionService = new PluginHostInteractionService({
       database, permissionEngine, quotaManager,
       clipboard: options.electron.clipboard,
+      dialog: options.electron.dialog,
       getWindow: options.getInteractionWindow,
       isLocked: options.isAppLocked,
       subscribeLock: options.subscribeAppLock,
@@ -327,7 +328,7 @@ function createPluginHostService(options) {
       },
       utilityModuleMappings: options.utilityModuleMappings ?? createUtilityModuleMappings(moduleResources),
     });
-    byteStreamService = new PluginByteStreamService({ database, permissionEngine, quotaManager, runtimeSupervisor });
+    byteStreamService = new PluginByteStreamService({ database, permissionEngine, quotaManager, runtimeSupervisor, interactionService });
     byteStreamService.register(rpcRegistry);
     aiHostAdapter = options.pluginAIHostAdapter ?? new PluginAITrustedHostAdapter({
       getWindow: options.getInteractionWindow ?? (() => null),

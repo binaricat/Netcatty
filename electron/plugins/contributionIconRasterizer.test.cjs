@@ -6,6 +6,7 @@ const test = require("node:test");
 const {
   browserRasterizeExpression,
   createIsolatedContributionIconRasterizer,
+  createPooledContributionIconRasterizer,
 } = require("./contributionIconRasterizer.cjs");
 
 test("viewBox-only SVG icons receive an explicit isolated raster viewport", () => {
@@ -95,4 +96,53 @@ test("timed-out contribution icon rasterizers always destroy their isolated wind
     maxEdge: 64,
   }), /timed out/);
   assert.equal(destroyed, true);
+});
+
+test("pooled contribution icon rasterizer reuses one sandboxed window across bursts, destroys on error and dispose", async () => {
+  let created = 0;
+  let destroyed = 0;
+  let failNext = false;
+  class BrowserWindowStub {
+    constructor(options) {
+      created += 1;
+      assert.equal(options.webPreferences.sandbox, true);
+      assert.equal(options.webPreferences.spellcheck, false);
+      assert.equal(options.webPreferences.nodeIntegration, false);
+      this._destroyed = false;
+      this.webContents = {
+        session: { webRequest: { onBeforeRequest() {} } },
+        async executeJavaScript() {
+          if (failNext) {
+            failNext = false;
+            throw new Error("transient decode failure");
+          }
+          return `data:image/png;base64,${Buffer.from("pooled-png").toString("base64")}`;
+        },
+      };
+    }
+    async loadURL() {}
+    removeMenu() {}
+    isDestroyed() { return this._destroyed; }
+    destroy() { this._destroyed = true; destroyed += 1; }
+  }
+  const rasterize = createPooledContributionIconRasterizer({
+    BrowserWindow: BrowserWindowStub,
+    idleMs: 10_000,
+  });
+  const payload = { body: Buffer.from("img"), mimeType: "image/png", width: 16, height: 16, maxEdge: 64 };
+  const [a, b, c] = await Promise.all([rasterize(payload), rasterize(payload), rasterize(payload)]);
+  assert.deepEqual(a, Buffer.from("pooled-png"));
+  assert.deepEqual(b, Buffer.from("pooled-png"));
+  assert.deepEqual(c, Buffer.from("pooled-png"));
+  assert.equal(created, 1);
+  assert.equal(destroyed, 0);
+
+  failNext = true;
+  await assert.rejects(rasterize(payload), /transient decode failure/);
+  assert.equal(destroyed, 1);
+
+  assert.deepEqual(await rasterize(payload), Buffer.from("pooled-png"));
+  assert.equal(created, 2);
+  rasterize.dispose();
+  assert.equal(destroyed, 2);
 });

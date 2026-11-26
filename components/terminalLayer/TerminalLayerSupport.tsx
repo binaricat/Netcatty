@@ -53,7 +53,6 @@ import type { TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePane
 import type { SidePanelTool } from '../../domain/sidePanelLayout';
 import {
   PANE_MAGNIFICATION_DURATION_MS,
-  resolveMagnifiedChromeBorderWidth,
   resolvePaneMagnificationLayoutGeometry,
   resolvePaneMagnificationStyle,
   type PaneMagnificationController,
@@ -683,6 +682,7 @@ export const AIChatPanelsHost = memo(AIChatPanelsHostInner, aiChatPanelsHostAreE
 AIChatPanelsHost.displayName = 'AIChatPanelsHost';
 
 export interface TerminalLayerProps {
+  isVaultInitialized?: boolean;
   hosts: Host[];
   portForwardingRules?: import('../../domain/models').PortForwardingRule[];
   customGroups: string[];
@@ -822,6 +822,7 @@ interface TerminalPaneProps {
   splitVerticalHandlersRef: React.MutableRefObject<Map<string, () => void>>;
   resolveSessionAppearance: (hostScope: TerminalAppearanceHostScope) => ResolvedAppearance;
   hostMap: Map<string, Host>;
+  isVaultInitialized?: boolean;
   keys: SSHKey[];
   identities: Identity[];
   snippets: Snippet[];
@@ -961,6 +962,7 @@ const terminalPanePropsAreEqual = (
   prev.splitHorizontalHandlersRef === next.splitHorizontalHandlersRef &&
   prev.splitVerticalHandlersRef === next.splitVerticalHandlersRef &&
   getPaneAppearanceThemeId(prev) === getPaneAppearanceThemeId(next) &&
+  prev.isVaultInitialized === next.isVaultInitialized &&
   prev.keys === next.keys &&
   prev.identities === next.identities &&
   prev.snippets === next.snippets &&
@@ -1253,6 +1255,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   splitVerticalHandlersRef,
   resolveSessionAppearance,
   hostMap,
+  isVaultInitialized,
   keys,
   identities,
   snippets,
@@ -1643,14 +1646,14 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",
         isVisible && "z-10",
-        isMagnified && magnifiedSurfaceBounds && "overflow-hidden rounded-md border shadow-2xl",
+        magnifiedSurfaceBounds && "overflow-hidden rounded-md shadow-2xl",
       )}
       style={{
         ...style,
-        borderColor: isMagnified && magnifiedSurfaceBounds ? sessionAppearanceTheme.colors.cursor : undefined,
-        borderWidth: isMagnified && magnifiedSurfaceBounds
-          ? resolveMagnifiedChromeBorderWidth(magnifiedDevicePixelRatio)
+        outline: magnifiedSurfaceBounds
+          ? `1px solid ${sessionAppearanceTheme.colors.cursor}`
           : undefined,
+        outlineOffset: magnifiedSurfaceBounds ? -1 : undefined,
       }}
       tabIndex={-1}
       onClick={handlePaneClick}
@@ -1680,6 +1683,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         sessionId={session.id}
         workspaceId={session.workspaceId}
         restoreState={session.restoreState}
+        vaultInitializedOverride={isVaultInitialized}
         pendingInitialCwd={session.pendingInitialCwd}
         shellType={session.shellType}
         lastCwd={session.lastCwd}
@@ -1776,6 +1780,7 @@ interface TerminalPanesHostProps {
   splitVerticalHandlersRef: React.MutableRefObject<Map<string, () => void>>;
   resolveSessionAppearance: (hostScope: TerminalAppearanceHostScope) => ResolvedAppearance;
   hostMap: Map<string, Host>;
+  isVaultInitialized?: boolean;
   keys: SSHKey[];
   identities: Identity[];
   snippets: Snippet[];
@@ -1871,6 +1876,7 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.splitVerticalHandlersRef !== next.splitVerticalHandlersRef) return false;
   if (prev.resolveSessionAppearance !== next.resolveSessionAppearance) return false;
   if (prev.hostMap !== next.hostMap) return false;
+  if (prev.isVaultInitialized !== next.isVaultInitialized) return false;
   if (prev.keys !== next.keys) return false;
   if (prev.identities !== next.identities) return false;
   if (prev.snippets !== next.snippets) return false;
