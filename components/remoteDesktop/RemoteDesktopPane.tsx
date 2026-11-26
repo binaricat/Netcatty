@@ -92,6 +92,7 @@ import { useRemoteDesktopRecorder } from './useRemoteDesktopRecorder';
 import { VncCanvasView, type VncCapabilities } from './VncCanvasView';
 import type { RemoteDesktopSpecialKeyId } from './vncKeymap';
 
+const SHOW_REMOTE_DESKTOP_RECORDING_BUTTON = false;
 const EMPTY_FINALIZE_LOG = () => '';
 
 export interface RemoteDesktopPaneProps {
@@ -1548,7 +1549,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         isRecording={recorder.isRecording}
         recordingElapsedLabel={recorder.formattedElapsed}
         recordingSupported={recorder.isSupported}
-        onToggleRecording={handleToggleRecordingClick}
+        onToggleRecording={SHOW_REMOTE_DESKTOP_RECORDING_BUTTON ? handleToggleRecordingClick : undefined}
         quality={quality}
         onChangeQuality={handleChangeQuality}
         viewOnly={viewOnly}
