@@ -654,7 +654,7 @@
     "toolName": "vault_hosts_update",
     "rpcMethod": "vault/hosts/update",
     "localExecution": false,
-    "description": "Update selected fields on an existing vault host. Use vault_hosts_list first to resolve the hostId. Update only fields the user requested. Use vault_hosts_list first to resolve hostId. Empty group, tags, notes, password, keyPath, or passphrase values clear those fields or saved credentials. Use resetFields to make a host inherit a group value again instead of writing the inherited value onto the host. Report any warnings in the response to the user.",
+    "description": "Update selected fields on an existing vault host. Use vault_hosts_list first to resolve the hostId. Update only fields the user requested. Use vault_hosts_list first to resolve hostId. Empty group, tags, notes, password, keyPath, or passphrase values clear those fields or saved credentials. Use resetFields to inherit a group value instead of copying it. Report any warnings to the user.",
     "inputShape": {
       "hostId": {
         "type": "string",
@@ -804,62 +804,62 @@
       "authMethod": {
         "type": "string",
         "optional": true,
-        "description": "Login method for SSH, Mosh, and Eternal Terminal hosts: auto, password, key, or certificate. Uses the same rules as Host Details: switching to another method detaches a reusable identity and the selected key but keeps a saved password. Cannot be combined with password, keyPath, identityId, or passphrase; pick the key or password in Host Details. The response lists warnings when the host has no key or password for the new method."
+        "description": "auto, password, key, or certificate. SSH, Mosh, and ET hosts only. Switching methods detaches the identity and selected key like Host Details. Cannot be combined with password, keyPath, identityId, or passphrase."
       },
       "deviceType": {
         "type": "string",
         "optional": true,
-        "description": "general or network. network marks SSH/serial network equipment: commands are sent as-is without shell wrapping and exit codes are unavailable."
+        "description": "general or network. network sends commands without shell wrapping."
       },
       "sshInputCompatibility": {
         "type": "string",
         "optional": true,
-        "description": "true or false. SSH only. Sends IME text and short pastes character by character for servers that drop multi-character input. Takes effect after reconnecting."
+        "description": "true or false. SSH only. Sends IME text and short pastes character by character; applies after reconnecting."
       },
       "backspaceBehavior": {
         "type": "string",
         "optional": true,
-        "description": "ctrl-h makes Backspace send Ctrl+H instead of DEL. Use resetFields [\"backspaceBehavior\"] to go back to the default or group value."
+        "description": "ctrl-h sends Ctrl+H for Backspace."
       },
       "charset": {
         "type": "string",
         "optional": true,
-        "description": "Terminal text encoding: UTF-8 or GB18030 (GBK and GB2312 are saved as GB18030), the same choices as Host Details. Use resetFields [\"charset\"] to inherit."
+        "description": "UTF-8 or GB18030. GBK and GB2312 are saved as GB18030."
       },
       "keepaliveOverride": {
         "type": "string",
         "optional": true,
-        "description": "true uses this host's keepalive settings; false returns to the global keepalive settings."
+        "description": "true uses this host's keepalive settings; false uses the global ones."
       },
       "keepaliveInterval": {
         "type": "number",
         "optional": true,
-        "description": "Seconds between SSH keepalive packets, 0-3600 (0 disables). Also turns keepaliveOverride on."
+        "description": "Seconds between keepalives (0-3600, 0 disables). Turns keepaliveOverride on."
       },
       "keepaliveCountMax": {
         "type": "number",
         "optional": true,
-        "description": "Unanswered keepalives before disconnecting, 1-100. Also turns keepaliveOverride on."
+        "description": "Missed keepalives before disconnecting (1-100). Turns keepaliveOverride on."
       },
       "sshTcpConnectTimeoutSeconds": {
         "type": "number",
         "optional": true,
-        "description": "Seconds to wait for the network connection, 1-3600 (default 20). Use resetFields to return to the default."
+        "description": "TCP connect timeout in seconds (1-3600, default 20)."
       },
       "sshAuthReadyTimeoutSeconds": {
         "type": "number",
         "optional": true,
-        "description": "Seconds to wait for login to finish, 1-3600 (default 120). Use resetFields to return to the default."
+        "description": "Login timeout in seconds (1-3600, default 120)."
       },
       "sftpSudo": {
         "type": "string",
         "optional": true,
-        "description": "true or false. Run SFTP file operations with sudo."
+        "description": "true or false. Runs SFTP operations with sudo."
       },
       "sftpFileProtocol": {
         "type": "string",
         "optional": true,
-        "description": "File transfer protocol: auto, sftp, or scp (for servers without the SFTP subsystem)."
+        "description": "auto, sftp, or scp."
       },
       "sftpEncoding": {
         "type": "string",
@@ -869,7 +869,7 @@
       "resetFields": {
         "type": "string",
         "optional": true,
-        "description": "JSON array or comma-separated names whose host-level value is removed so the group value, or the global/app default, applies again: port, proxy, jumpHostIds, startupCommand, startupCommandRunMode, environmentVariables, moshEnabled, moshServerPath, etEnabled, etPort, deviceType, backspaceBehavior, charset, keepaliveOverride, keepaliveInterval, keepaliveCountMax, sshTcpConnectTimeoutSeconds, sshAuthReadyTimeoutSeconds, sftpSudo, sftpFileProtocol, sftpEncoding. A field cannot be set and reset in the same update. Credentials cannot be reset here."
+        "description": "JSON array or comma-separated fields to remove from the host so the group or default value applies: port, proxy, jumpHostIds, startupCommand, startupCommandRunMode, environmentVariables, the Mosh and ET fields, and the connection settings above. Not credentials or protocol."
       },
       "serialConfig": {
         "type": "string",
