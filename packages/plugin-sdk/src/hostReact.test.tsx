@@ -432,7 +432,7 @@ test('hostReact widgets and extended surface events round-trip cleanly through h
   }
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, writable: true, value: true });
 
-  const { default: React, act } = await import('react');
+  const { act } = await import('react');
   const { remoteId } = await import('@remote-dom/core/elements');
   const {
     registerHostReactView,

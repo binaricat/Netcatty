@@ -340,13 +340,21 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
         });
         if (!hasOpenHostModal) {
           const inPluginSurface = Boolean(target?.closest?.('[data-plugin-remote-surface]'));
-          const activeFullBleedSurface = inPluginSurface || Array.from(
+          const visibleFullBleedSurfaces = Array.from(
             document.querySelectorAll<HTMLElement>('[data-plugin-chrome="full-bleed"] [data-plugin-remote-surface]'),
-          ).some((el) => {
+          ).filter((el) => {
             const r = el.getBoundingClientRect();
             return r.width > 0 && r.height > 0;
           });
-          if (activeFullBleedSurface) {
+          const active = document.activeElement;
+          const focusInsideHostChrome = Boolean(
+            active
+            && active !== document.body
+            && active !== document.documentElement
+            && !visibleFullBleedSurfaces.some((el) => el.contains(active))
+            && !active.closest?.('[data-plugin-view-slot]'),
+          );
+          if (inPluginSurface || (visibleFullBleedSurfaces.length > 0 && !focusInsideHostChrome)) {
             return;
           }
         }

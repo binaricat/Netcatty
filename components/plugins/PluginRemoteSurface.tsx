@@ -96,24 +96,25 @@ const RemotePopoverElement = memo(function RemotePopoverElement({ node, settled 
 });
 
 const RemoteSplitPaneElement = memo(function RemoteSplitPaneElement({ node, settled }: { node: RemoteElementNode; settled: boolean }): React.ReactNode {
-  const surface = useContext(SurfaceContext);
+  const { onEvent } = useContext(SurfaceContext);
+  const rawWidgetProps = node.attributes['data-plugin-widget-props'];
   const parsed = useMemo(
-    () => parseWidgetPropsJson<PluginSplitPaneWidgetProps>(node.attributes['data-plugin-widget-props']),
-    [node.attributes['data-plugin-widget-props']],
+    () => parseWidgetPropsJson<PluginSplitPaneWidgetProps>(rawWidgetProps),
+    [rawWidgetProps],
   );
   const elementChildren = node.children.filter((child) => child.type === 1 || (child.type === 3 && child.data.length > 0));
   const firstChild = elementChildren[0] ? renderRemoteNode(elementChildren[0], settled) : null;
   const secondChild = elementChildren[1] ? renderRemoteNode(elementChildren[1], settled) : null;
   const emit = useCallback(
     (widgetEvent: string, detail?: Record<string, unknown>) => {
-      surface.onEvent({
+      onEvent({
         nodeId: node.id,
         type: 'widget',
         widgetEvent,
         detail: detail as PluginSurfaceEvent['detail'],
       });
     },
-    [surface.onEvent, node.id],
+    [onEvent, node.id],
   );
   return (
     <PluginSplitPane
@@ -129,18 +130,18 @@ const RemoteSplitPaneElement = memo(function RemoteSplitPaneElement({ node, sett
 });
 
 const RemoteSlottedWidgetElement = memo(function RemoteSlottedWidgetElement({ node, kind }: { node: RemoteElementNode; kind: SlottedWidgetKind }): React.ReactNode {
-  const surface = useContext(SurfaceContext);
+  const { onEvent, shadowHost } = useContext(SurfaceContext);
   const slotName = `nc-widget-${node.id}`;
   const emit = useCallback(
     (widgetEvent: string, detail?: Record<string, unknown>) => {
-      surface.onEvent({
+      onEvent({
         nodeId: node.id,
         type: 'widget',
         widgetEvent,
         detail: detail as PluginSurfaceEvent['detail'],
       });
     },
-    [surface.onEvent, node.id],
+    [onEvent, node.id],
   );
 
   const wrapperProps = buildRemoteElementProps(node);
@@ -160,7 +161,7 @@ const RemoteSlottedWidgetElement = memo(function RemoteSlottedWidgetElement({ no
         wrapperProps,
         React.createElement('slot', { name: slotName, style: { display: 'contents' } }),
       )}
-      {surface.shadowHost && createPortal(
+      {shadowHost && createPortal(
         <div
           slot={slotName}
           data-plugin-widget-host={kind}
@@ -173,7 +174,7 @@ const RemoteSlottedWidgetElement = memo(function RemoteSlottedWidgetElement({ no
             onWidgetEvent={emit}
           />
         </div>,
-        surface.shadowHost,
+        shadowHost,
       )}
     </>
   );

@@ -330,9 +330,7 @@ class PluginByteStreamBroker {
         highWaterMark: LIMITS.bufferBytes,
         ...(effectiveServername ? { servername: effectiveServername } : {}),
         ...(caPem ? { ca: caPem } : {}),
-        ...(effectiveServername
-          ? { checkServerIdentity: (_name, certificate) => tls.checkServerIdentity(effectiveServername, certificate) }
-          : {}),
+        checkServerIdentity: (_name, certificate) => tls.checkServerIdentity(effectiveServername ?? state.host, certificate),
       };
       this.assertCommit(state, context);
       const tlsSocket = this.connectTls(tlsParams);
@@ -359,21 +357,30 @@ class PluginByteStreamBroker {
 
       clearTimeout(upgradeTimer);
       upgradeTimer = null;
-      await this.active(state, context);
+      // Keep error/close guarded while awaiting interactive TLS cert verification
+      // so a peer reset during confirmation cannot emit an unhandled socket error.
+      const onPendingTlsError = () => this.finish(state, failure("unavailable", "Byte stream transport failed"));
+      const onPendingTlsClose = () => this.finish(state, failure("unavailable", "Byte stream closed during TLS verification"));
+      tlsSocket.on("error", onPendingTlsError);
+      tlsSocket.on("close", onPendingTlsClose);
+      try {
+        await this.active(state, context);
 
-      if (!tlsSocket.authorized) {
-        if (!allowSelfSigned) {
-          tlsSocket.destroy();
-          throw failure("permissionDenied", "Byte stream TLS validation failed");
-        }
-        try {
+        if (!tlsSocket.authorized) {
+          if (!allowSelfSigned) {
+            throw failure("permissionDenied", "Byte stream TLS validation failed");
+          }
           await this.#verifyUntrustedTlsSocket(tlsSocket, state, context, effectiveServername);
-        } catch (err) {
-          tlsSocket.destroy();
-          throw err;
         }
+      } catch (err) {
+        tlsSocket.off("error", onPendingTlsError);
+        tlsSocket.off("close", onPendingTlsClose);
+        tlsSocket.destroy();
+        throw err;
       }
 
+      tlsSocket.off("error", onPendingTlsError);
+      tlsSocket.off("close", onPendingTlsClose);
       rawSocket.off("error", ignoreRawError);
       state.socket = tlsSocket;
       state.isTls = true;
