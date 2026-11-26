@@ -11,6 +11,7 @@ const { listMcpTools } = require("../capabilities/codegen/toolSurfaces.cjs");
 const {
   CORE_MCP_TOOL_NAMES,
   DEFERRED_MCP_TOOLSETS,
+  LOADABLE_MCP_TOOLSET_NAMES,
   MCP_TOOL_LOADER_NAME,
   buildProgressiveMcpCatalog,
   registerProgressiveMcpTools,
@@ -152,5 +153,20 @@ test("MCP clients receive the updated tool list without reconnecting", async () 
     assert.equal(updated.tools.some(tool => tool.name === "read_attachment"), true);
   } finally {
     await client.close();
+  }
+});
+
+test("the loader description names every toolset", () => {
+  const server = createFakeServer();
+  let description = "";
+  const register = server.tool.bind(server);
+  server.tool = (name, desc, ...rest) => {
+    if (name === MCP_TOOL_LOADER_NAME) description = desc;
+    return register(name, desc, ...rest);
+  };
+  registerProgressiveMcpTools(server, createDeps());
+  assert.ok(description, "loader registered");
+  for (const toolset of LOADABLE_MCP_TOOLSET_NAMES) {
+    assert.match(description, new RegExp(`\\b${toolset}\\b`), toolset);
   }
 });
