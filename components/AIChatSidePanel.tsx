@@ -85,6 +85,7 @@ import { getAgentRuntime } from '../infrastructure/ai/harness/globalAgentRuntime
 import { useAIPermissionGrantsState } from '../application/state/useAIPermissionGrantsState';
 import { useConversationExport } from './ai/hooks/useConversationExport';
 import { useAgentContextUsage } from '../application/state/useAgentCompactionUi';
+import { useModelCatalogWarningDismissal } from '../application/state/useModelCatalogWarningDismissal';
 import type { AIChatSidePanelProps } from './AIChatSidePanel.types';
 import {
   buildCursorListModelsAgentEnv,
@@ -362,10 +363,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const [isUndoingLastTurn, setIsUndoingLastTurn] = useState(false);
   const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, { cacheKey: string; models: AgentModelPreset[]; catalogUnavailable: boolean }>>({});
   const [runtimeModelWarnings, setRuntimeModelWarnings] = useState<Record<string, { cacheKey: string; message: string }>>({});
-  // Cache keys whose catalog warning banner the user explicitly dismissed.
-  // Keyed by cacheKey (not agent id) so a config/agent switch re-arms the
-  // banner, and cleared on a clean catalog so a later failure warns again.
-  const [dismissedModelCatalogKeys, setDismissedModelCatalogKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const {
+    dismissedKeys: dismissedModelCatalogKeys,
+    dismissWarning: dismissModelCatalogWarning,
+    rearmWarning: rearmModelCatalogWarning,
+  } = useModelCatalogWarningDismissal();
   // Tracks SDK runtime model catalogs currently loading (per agent scope);
   // the composer shows the loading row alongside the build-time presets and
   // the live catalog replaces them when it arrives.
@@ -1360,12 +1362,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       // A clean catalog re-arms a banner the user previously dismissed, so a
       // later failure for the same config is visible again.
       if (catalog && !catalog.warning) {
-        setDismissedModelCatalogKeys((current) => {
-          if (!current.has(target.cacheKey)) return current;
-          const next = new Set(current);
-          next.delete(target.cacheKey);
-          return next;
-        });
+        rearmModelCatalogWarning(target.cacheKey);
       }
       return catalog;
     }).catch((err) => {
@@ -1382,7 +1379,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       }
       return null;
     });
-  }, [t, buildExternalAgentRuntimeModelTarget]);
+  }, [t, buildExternalAgentRuntimeModelTarget, rearmModelCatalogWarning]);
 
   useEffect(() => {
     if (!isVisible) return;
@@ -1405,6 +1402,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         Boolean(cached.warning),
         t('ai.chat.modelCatalogWarning'),
       ));
+      if (!cached.warning) {
+        rearmModelCatalogWarning(target.cacheKey);
+      }
     }
 
     // Respect renderer TTL / in-flight coalescing for all SDK agents including
@@ -1485,6 +1485,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     buildExternalAgentRuntimeModelTarget,
     loadSdkRuntimeModelCatalog,
     applySdkRuntimeModelCatalog,
+    rearmModelCatalogWarning,
     t,
   ]);
 
@@ -1641,16 +1642,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   ]);
 
   // Hide the composer warning banner for this config until a clean catalog
-  // re-arms it (see dismissedModelCatalogKeys). The underlying warning state
-  // is left intact so cache reads / other panels keep their own bookkeeping.
+  // re-arms it. The underlying warning stays active so the model picker keeps
+  // its manual refresh action.
   const handleDismissModelCatalogWarning = useCallback(() => {
     const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
-    if (!target) return;
-    setDismissedModelCatalogKeys((current) => {
-      if (current.has(target.cacheKey)) return current;
-      return new Set(current).add(target.cacheKey);
-    });
-  }, [currentAgentConfig, buildExternalAgentRuntimeModelTarget]);
+    dismissModelCatalogWarning(target?.cacheKey);
+  }, [currentAgentConfig, buildExternalAgentRuntimeModelTarget, dismissModelCatalogWarning]);
 
   const selectedCattyThinking = agentThinkingMap.catty;
   const handleCattyThinkingSelect = useCallback((level: string) => {
@@ -2539,12 +2536,20 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         providerDisplayName={providerDisplayName}
         modelDisplayName={modelDisplayName}
         modelCatalogWarning={!hasCodexCustomConfig
-          ? isModelCatalogWarningVisible(
-            runtimeModelWarnings[currentAgentId],
-            buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey,
-            dismissedModelCatalogKeys,
-          )
+          && runtimeModelWarnings[currentAgentId]
+          && runtimeModelWarnings[currentAgentId].cacheKey === buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey
+          ? runtimeModelWarnings[currentAgentId].message
           : undefined}
+        modelCatalogWarningDismissed={!hasCodexCustomConfig
+          && Boolean(
+            runtimeModelWarnings[currentAgentId]
+            && runtimeModelWarnings[currentAgentId].cacheKey === buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey
+            && !isModelCatalogWarningVisible(
+              runtimeModelWarnings[currentAgentId],
+              buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey,
+              dismissedModelCatalogKeys,
+            ),
+          )}
         handleModelCatalogDismiss={handleDismissModelCatalogWarning}
         modelCatalogLoading={
           !hasCodexCustomConfig

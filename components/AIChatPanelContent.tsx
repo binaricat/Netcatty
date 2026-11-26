@@ -87,6 +87,8 @@ interface AIChatPanelContentProps {
   providerDisplayName?: string;
   modelDisplayName?: string;
   modelCatalogWarning?: string;
+  /** Whether the composer warning banner itself was dismissed (picker still sees raw warning). */
+  modelCatalogWarningDismissed?: boolean;
   /** Live SDK model catalog is loading (no built-in presets to show yet). */
   modelCatalogLoading?: boolean;
   /** Provenance of the active model list, rendered as the picker status chip. */
@@ -186,6 +188,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   providerDisplayName,
   modelDisplayName,
   modelCatalogWarning,
+  modelCatalogWarningDismissed = false,
   modelCatalogLoading = false,
   modelCatalogSource,
   modelCatalogFetchedAt,
@@ -424,7 +427,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   <div role="status" className="mx-3 mb-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-4 text-amber-600 dark:text-amber-400">
                     {steerWarning}
                   </div>
-                ) : modelCatalogWarning ? (
+                ) : modelCatalogWarning && !modelCatalogWarningDismissed ? (
                   <div role="status" className="mx-3 mb-1.5 flex items-center gap-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-4 text-amber-600 dark:text-amber-400">
                     <span className="min-w-0 flex-1">{modelCatalogWarning}</span>
                     {handleModelCatalogRetry && (
