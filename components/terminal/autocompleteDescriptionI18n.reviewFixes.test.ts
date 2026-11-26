@@ -46,9 +46,11 @@ Object.defineProperty(globalThis, "localStorage", {
 Object.defineProperty(globalThis, "window", {
   value: {
     netcatty: {
-      listFigSpecs: async () => ["su", "readlink", "date", "base64", "cp"],
+      listFigSpecs: async () => ["su", "readlink", "date", "base64", "cp", "kubectl", "make"],
       loadFigSpec: async (name: string, hostOs?: string) =>
-        name === "cp" ? loadFigSpec(electronDir, name, hostOs) : byPlatform[hostOs ?? "linux"]?.[name] ?? null,
+        ["cp", "kubectl", "make"].includes(name)
+          ? loadFigSpec(electronDir, name, hostOs)
+          : byPlatform[hostOs ?? "linux"]?.[name] ?? null,
     },
   },
   configurable: true,
@@ -174,6 +176,24 @@ test("both cp platform specs have complete Simplified and Traditional Chinese de
       assert.deepEqual(missing, [], `cp (${os}): missing ${locale} translations`);
     }
   }
+});
+
+test("command-name suggestions use the generated Chinese descriptions", async () => {
+  const kubectlCn = await suggestions("kubec", "linux", "zh-CN");
+  assert.equal(
+    kubectlCn.find((item) => item.displayText === "kubectl")?.description,
+    "Kubernetes 命令行工具",
+  );
+  const kubectlTw = await suggestions("kubec", "linux", "zh-TW");
+  assert.equal(
+    kubectlTw.find((item) => item.displayText === "kubectl")?.description,
+    "Kubernetes 命令列工具",
+  );
+  const makeCn = await suggestions("mak", "linux", "zh-CN");
+  assert.equal(
+    makeCn.find((item) => item.displayText === "make")?.description,
+    "构建自动化工具",
+  );
 });
 
 test("macOS date falls back to the bundled spec and keeps its original option semantics", async () => {
