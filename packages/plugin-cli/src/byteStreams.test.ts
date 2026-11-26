@@ -12,7 +12,8 @@ test("byte stream packages require negotiated features and exact resources in op
   for (const resources of [["*"], ["tcp://*:3306"], ["tcp://host:3306/"], ["udp://host:3306"], ["https://host"]]) {
     assert.equal(validateManifestValue({ ...manifest, permissions: { required: ["commands", "views"], optional: [{ permission: "network.stream", resources }] } }).valid, false);
   }
-  assert.equal(validateManifestValue({ ...manifest, permissions: { required: ["commands", "views"], optional: ["network.stream"] } }).valid, false);
+  assert.equal(validateManifestValue({ ...manifest, permissions: { required: ["commands", "views"], optional: ["network.stream"] } }).valid, true);
+  assert.equal(validateManifestValue({ ...manifest, permissions: { required: ["commands", "views", "network.stream"] } }).valid, false);
   assert.equal(checkPluginCompatibility(manifest, { netcattyVersion: "1.0.0", features: [] }).compatible, false);
   assert.equal(checkPluginCompatibility(manifest, { netcattyVersion: "1.0.0", features: ["network.byte-streams"] }).compatible, true);
 });

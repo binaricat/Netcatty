@@ -3,13 +3,14 @@
 const { PluginRpcError, RPC_ERRORS } = require("./rpcRouter.cjs");
 
 const DEFAULT_QUOTAS = Object.freeze({
-  messageBurst: 512,
-  messagesPerSecond: 256,
-  concurrentCapabilities: 32,
-  capabilityBurst: 120,
-  capabilitiesPerMinute: 600,
+  messageBurst: 1024,
+  messagesPerSecond: 512,
+  concurrentCapabilities: 64,
+  capabilityBurst: 240,
+  capabilitiesPerMinute: 2400,
   logWritesPerMinute: 240,
-  bytesPerMinute: 32 * 1024 * 1024,
+  bytesPerMinute: 128 * 1024 * 1024,
+  streamBytesPerMinute: 512 * 1024 * 1024,
   memoryBytes: 256 * 1024 * 1024,
   cpuPercent: 80,
   sustainedCpuSamples: 3,
@@ -44,7 +45,12 @@ class TokenBucket {
 class PluginQuotaManager {
   constructor(options = {}) {
     this.clock = options.clock ?? (() => Date.now());
-    this.quotas = Object.freeze({ ...DEFAULT_QUOTAS, ...(options.quotas ?? {}) });
+    this.quotas = Object.freeze({
+      ...DEFAULT_QUOTAS,
+      ...(options.quotas ?? {}),
+      streamBytesPerMinute: options.quotas?.streamBytesPerMinute
+        ?? (options.quotas?.bytesPerMinute ?? DEFAULT_QUOTAS.streamBytesPerMinute),
+    });
     this.getProcessMetrics = options.getProcessMetrics ?? null;
     this.onViolation = options.onViolation ?? (() => {});
     this.setInterval = options.setInterval ?? setInterval;
@@ -124,7 +130,10 @@ class PluginQuotaManager {
       this.byteWindows.set(key, window);
     }
     window.bytes += byteLength;
-    if (window.bytes > this.quotas.bytesPerMinute) {
+    const limit = category === "network.stream"
+      ? this.quotas.streamBytesPerMinute
+      : this.quotas.bytesPerMinute;
+    if (window.bytes > limit) {
       throw quotaError(`Plugin ${category} byte quota exceeded`);
     }
   }

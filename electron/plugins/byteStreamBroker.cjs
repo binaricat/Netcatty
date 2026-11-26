@@ -10,9 +10,24 @@ const { PluginRpcError, RPC_ERRORS, raceWithAbort } = require("./rpcRouter.cjs")
 
 const HOST_LIMITS = Object.freeze(require("./generated/plugin-contract.schema.json").$defs.HostByteStreamLimits.const);
 const LIMITS = Object.freeze(require("./generated/plugin-contract.schema.json").$defs.ByteStreamLimits.const);
-const { canonicalizeStreamEndpoint, isLocalControlAddress } = require("./byteStreamEndpoint.cjs");
+const {
+  canonicalizeStreamEndpoint,
+  getNetcattyInternalControlPorts,
+  isLocalControlAddress,
+  isLoopbackAddress,
+  isUnconditionallyBlockedAddress,
+} = require("./byteStreamEndpoint.cjs");
 
 function failure(code, message) { return new PluginRpcError(RPC_ERRORS[code], message); }
+
+function formatCertDistinguishedName(value) {
+  if (!value || typeof value !== "object") return "";
+  return Object.entries(value)
+    .filter(([, v]) => typeof v === "string" || Array.isArray(v))
+    .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(",") : v}`)
+    .join(", ")
+    .slice(0, 512);
+}
 
 class PluginByteStreamBroker {
   constructor(options) {
@@ -22,10 +37,17 @@ class PluginByteStreamBroker {
     this.lookup = options.lookup ?? dns.lookup;
     this.connectSocket = options.connectSocket ?? ((params) => net.createConnection(params));
     this.connectTls = options.connectTls ?? ((params) => tls.connect(params));
-    // Only a host test harness can opt a specific loopback endpoint in. The
-    // production default excludes all loopback/link-local control surfaces.
+    // Only a host test harness can opt a specific loopback endpoint in without
+    // interactive user confirmation. Production always blocks internal ports.
     this.testLocalEndpoints = new Set(options.testLocalEndpoints ?? []);
     this.isControlEndpoint = options.isControlEndpoint ?? (() => false);
+    this.isInternalControlPort = options.isInternalControlPort ?? ((address, port) => (
+      (isLoopbackAddress(address) || this.isControlEndpoint(address, port))
+      && getNetcattyInternalControlPorts().has(port)
+    ));
+    this.confirmTlsCert = options.confirmTlsCert ?? null;
+    this.isTrustedTlsCert = options.isTrustedTlsCert ?? (() => false);
+    this.rememberTlsCert = options.rememberTlsCert ?? (() => {});
     this.connections = new Map();
     this.closeListeners = new Set();
     this.closed = false;
@@ -91,7 +113,62 @@ class PluginByteStreamBroker {
     context.assertCommit?.();
   }
 
-  async connect(endpoint, context, hostTransport) {
+  #attachSocketLifecycle(state, socket) {
+    const onError = () => this.finish(state, failure("unavailable", "Byte stream transport failed"));
+    const onClose = () => {
+      if (!state.eof) this.finish(state, failure("unavailable", "Byte stream transport closed"));
+    };
+    const onEnd = () => { state.eof = true; };
+    state.socketListeners = { socket, onError, onClose, onEnd };
+    socket.on("error", onError);
+    socket.on("close", onClose);
+    socket.on("end", onEnd);
+  }
+
+  #detachSocketLifecycle(state) {
+    const prev = state.socketListeners;
+    if (!prev) return;
+    prev.socket.off("error", prev.onError);
+    prev.socket.off("close", prev.onClose);
+    prev.socket.off("end", prev.onEnd);
+    state.socketListeners = null;
+  }
+
+  async #verifyUntrustedTlsSocket(socket, state, context, servername) {
+    const cert = typeof socket.getPeerCertificate === "function" ? socket.getPeerCertificate(false) : null;
+    const fingerprint256 = typeof cert?.fingerprint256 === "string" ? cert.fingerprint256 : "";
+    if (!fingerprint256) {
+      throw failure("permissionDenied", "TLS server did not present a verifiable certificate");
+    }
+    if (this.isTrustedTlsCert(state.pluginId, state.endpoint, fingerprint256)) {
+      return;
+    }
+    if (typeof this.confirmTlsCert !== "function") {
+      throw failure("permissionDenied", "Untrusted TLS certificate requires explicit user confirmation");
+    }
+    const certInfo = Object.freeze({
+      endpoint: state.endpoint,
+      ...(servername ? { servername } : {}),
+      fingerprint256,
+      subject: formatCertDistinguishedName(cert.subject),
+      issuer: formatCertDistinguishedName(cert.issuer),
+      validTo: typeof cert.valid_to === "string" ? cert.valid_to.slice(0, 128) : "",
+      reason: String(socket.authorizationError || "UNTRUSTED_CERT").slice(0, 256),
+    });
+    const decision = await raceWithAbort(
+      Promise.resolve(this.confirmTlsCert(certInfo, state, context)),
+      state.controller.signal,
+    );
+    await this.active(state, context);
+    if (!decision?.approved) {
+      throw failure("permissionDenied", "TLS certificate was rejected by user");
+    }
+    if (decision.remember === true) {
+      this.rememberTlsCert(state.pluginId, state.endpoint, fingerprint256);
+    }
+  }
+
+  async connect(endpoint, context, hostTransport, connectOptions = {}) {
     let target;
     try { target = canonicalizeStreamEndpoint(endpoint); }
     catch { throw failure("invalidArgument", "Byte stream endpoint is invalid"); }
@@ -99,17 +176,28 @@ class PluginByteStreamBroker {
     if (!context.runtimeId || !context.pluginId || typeof context.assertActive !== "function") {
       throw failure("unauthenticated", "Byte streams require a host runtime identity");
     }
+    const activeLimits = hostTransport ? HOST_LIMITS : LIMITS;
     const count = [...this.connections.values()].filter((state) => state.runtimeId === context.runtimeId).length;
-    if (count >= LIMITS.connectionsPerRuntime || this.connections.size >= LIMITS.connectionsTotal) {
+    if (count >= activeLimits.connectionsPerRuntime || this.connections.size >= activeLimits.connectionsTotal) {
       throw failure("resourceExhausted", "Byte stream connection limit exceeded");
     }
+    const {
+      localApproved = false,
+      skipPermissionAuthorize = false,
+      allowSelfSigned = false,
+      caPem,
+      servername,
+    } = connectOptions;
     const state = {
       ...target, permission: hostTransport ? "network.hostStream" : "network.stream",
-      limits: hostTransport ? HOST_LIMITS : LIMITS,
+      limits: activeLimits,
       id: randomUUID(), pluginId: context.pluginId, runtimeId: context.runtimeId,
       controller: new AbortController(), bytesRead: 0, bytesWritten: 0,
       sourceOwner: context.sourceOwner, sourceId: context.sourceId,
       closed: false, reading: false, writing: false, socket: null,
+      socketListeners: null,
+      isTls: target.transport === "tls",
+      upgrading: false, upgradeDone: null, suspendRead: null,
     };
     this.connections.set(state.id, state);
     const onAbort = () => this.finish(state, failure("cancelled", "Byte stream connection cancelled"));
@@ -117,16 +205,19 @@ class PluginByteStreamBroker {
     try {
       await this.active(state, context);
       this.assertCommit(state, context);
-      if (!hostTransport) await raceWithAbort(Promise.resolve(this.permissionEngine.authorize({ ...context, signal: state.controller.signal }, {
-        permission: "network.stream", resources: [target.endpoint],
-        reason: `Open byte stream to ${target.endpoint}`,
-        operationId: `network.stream:${target.endpoint}`,
-        validateBeforeGrant: () => this.assertCommit(state, context),
-      })), state.controller.signal);
+      if (!hostTransport && !skipPermissionAuthorize) {
+        await raceWithAbort(Promise.resolve(this.permissionEngine.authorize({ ...context, signal: state.controller.signal }, {
+          permission: "network.stream", resources: [target.endpoint],
+          reason: `Open byte stream to ${target.endpoint}`,
+          operationId: `network.stream:${target.endpoint}`,
+          validateBeforeGrant: () => this.assertCommit(state, context),
+        })), state.controller.signal);
+      }
       await this.active(state, context);
       state.connectTimer = setTimeout(() => this.finish(state,
         failure("deadlineExceeded", "Byte stream connect timeout")), state.limits.connectMs);
       let socket;
+      const effectiveServername = servername ?? (net.isIP(target.host) ? undefined : target.host);
       if (hostTransport) {
         socket = await raceWithAbort(hostTransport.open(state.controller.signal), state.controller.signal);
       } else {
@@ -143,11 +234,17 @@ class PluginByteStreamBroker {
           if (![4, 6].includes(peer.family) || net.isIP(peer.address) !== peer.family) {
             throw failure("unavailable", "Byte stream resolver returned an invalid address");
           }
-          const local = isLocalControlAddress(peer.address);
-          const allowedTestPeer = this.testLocalEndpoints.has(target.endpoint)
-            && !this.isControlEndpoint(peer.address, target.port);
-          if ((local && !allowedTestPeer) || (!local && this.isControlEndpoint(peer.address, target.port))) {
+          // Always block link-local/metadata/multicast and Netcatty's own internal ports.
+          if (isUnconditionallyBlockedAddress(peer.address) || this.isInternalControlPort(peer.address, target.port)) {
             throw failure("permissionDenied", "Byte streams cannot reach local or application control endpoints");
+          }
+          if (!localApproved) {
+            const local = isLocalControlAddress(peer.address);
+            const allowedTestPeer = this.testLocalEndpoints.has(target.endpoint)
+              && !this.isControlEndpoint(peer.address, target.port);
+            if ((local && !allowedTestPeer) || (!local && this.isControlEndpoint(peer.address, target.port))) {
+              throw failure("permissionDenied", "Byte streams cannot reach local or application control endpoints");
+            }
           }
         }
         const peer = addresses[0];
@@ -157,9 +254,10 @@ class PluginByteStreamBroker {
         };
         if (target.transport === "tls") {
           Object.assign(params, {
-            rejectUnauthorized: true, minVersion: "TLSv1.2",
-            ...(net.isIP(target.host) ? {} : { servername: target.host }),
-            checkServerIdentity: (_name, certificate) => tls.checkServerIdentity(target.host, certificate),
+            rejectUnauthorized: !allowSelfSigned, minVersion: "TLSv1.2",
+            ...(effectiveServername ? { servername: effectiveServername } : {}),
+            ...(caPem ? { ca: caPem } : {}),
+            checkServerIdentity: (_name, certificate) => tls.checkServerIdentity(effectiveServername ?? target.host, certificate),
           });
         }
         this.assertCommit(state, context);
@@ -167,20 +265,17 @@ class PluginByteStreamBroker {
       }
       state.socket = socket;
       if (state.closed) { socket.destroy(); throw state.error ?? failure("cancelled", "Byte stream connection cancelled"); }
-      socket.on("error", () => this.finish(state, failure("unavailable", "Byte stream transport failed")));
-      // Preserve one EOF observation for a delayed consumer. This reservation
-      // still counts toward quotas and expires on the existing idle/life timer.
-      socket.on("close", () => {
-        if (!state.eof) this.finish(state, failure("unavailable", "Byte stream transport closed"));
-      });
-      socket.on("end", () => { state.eof = true; });
+      this.#attachSocketLifecycle(state, socket);
       socket.pause();
       if (!hostTransport) await raceWithAbort(new Promise((resolve) => socket.once(
         target.transport === "tls" ? "secureConnect" : "connect", resolve,
       )), state.controller.signal);
       await this.active(state, context);
       if (target.transport === "tls" && !socket.authorized) {
-        throw failure("permissionDenied", "Byte stream TLS validation failed");
+        if (!allowSelfSigned) {
+          throw failure("permissionDenied", "Byte stream TLS validation failed");
+        }
+        await this.#verifyUntrustedTlsSocket(socket, state, context, effectiveServername);
       }
       clearTimeout(state.connectTimer);
       state.lifetimeTimer = setTimeout(() => this.finish(state,
@@ -195,6 +290,121 @@ class PluginByteStreamBroker {
       throw error;
     } finally {
       context.signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  async upgradeTls(id, options, context) {
+    const state = this.get(id, context);
+    if (state.isTls) throw failure("failedPrecondition", "Byte stream is already encrypted with TLS");
+    if (state.upgrading) throw failure("failedPrecondition", "Byte stream TLS upgrade is already in progress");
+    if (state.writing) throw failure("failedPrecondition", "Cannot upgrade TLS while a write is pending");
+    const allowSelfSigned = options?.allowSelfSigned === true;
+    const caPem = options?.caPem;
+    const effectiveServername = options?.servername ?? (net.isIP(state.host) ? undefined : state.host);
+    state.upgrading = true;
+    let releaseUpgrade;
+    state.upgradeDone = new Promise((resolve) => { releaseUpgrade = resolve; });
+    const onAbort = () => this.finish(state, failure("cancelled", "Byte stream TLS upgrade cancelled"));
+    context.signal?.addEventListener("abort", onAbort, { once: true });
+    let upgradeTimer;
+    try {
+      await this.active(state, context);
+      // Pause any active read() waiting on the plaintext socket without closing it.
+      if (state.suspendRead) {
+        state.suspendRead();
+        state.suspendRead = null;
+      }
+      const rawSocket = state.socket;
+      if (!rawSocket || rawSocket.destroyed) {
+        throw failure("unavailable", "Byte stream socket is closed");
+      }
+      this.#detachSocketLifecycle(state);
+      const ignoreRawError = () => {};
+      rawSocket.on("error", ignoreRawError);
+      rawSocket.pause();
+
+      const tlsParams = {
+        socket: rawSocket,
+        minVersion: "TLSv1.2",
+        rejectUnauthorized: !allowSelfSigned,
+        highWaterMark: LIMITS.bufferBytes,
+        ...(effectiveServername ? { servername: effectiveServername } : {}),
+        ...(caPem ? { ca: caPem } : {}),
+        ...(effectiveServername
+          ? { checkServerIdentity: (_name, certificate) => tls.checkServerIdentity(effectiveServername, certificate) }
+          : {}),
+      };
+      this.assertCommit(state, context);
+      const tlsSocket = this.connectTls(tlsParams);
+      tlsSocket.pause();
+      upgradeTimer = setTimeout(() => {
+        tlsSocket.destroy();
+        this.finish(state, failure("deadlineExceeded", "Byte stream TLS upgrade timeout"));
+      }, state.limits.connectMs);
+      upgradeTimer.unref?.();
+
+      await raceWithAbort(new Promise((resolve, reject) => {
+        const cleanup = () => {
+          tlsSocket.off("secureConnect", onSecure);
+          tlsSocket.off("error", onError);
+          tlsSocket.off("close", onClose);
+        };
+        const onSecure = () => { cleanup(); resolve(); };
+        const onError = (err) => { cleanup(); reject(err); };
+        const onClose = () => { cleanup(); reject(failure("unavailable", "Byte stream closed during TLS upgrade")); };
+        tlsSocket.once("secureConnect", onSecure);
+        tlsSocket.once("error", onError);
+        tlsSocket.once("close", onClose);
+      }), state.controller.signal);
+
+      clearTimeout(upgradeTimer);
+      upgradeTimer = null;
+      await this.active(state, context);
+
+      if (!tlsSocket.authorized) {
+        if (!allowSelfSigned) {
+          tlsSocket.destroy();
+          throw failure("permissionDenied", "Byte stream TLS validation failed");
+        }
+        try {
+          await this.#verifyUntrustedTlsSocket(tlsSocket, state, context, effectiveServername);
+        } catch (err) {
+          tlsSocket.destroy();
+          throw err;
+        }
+      }
+
+      rawSocket.off("error", ignoreRawError);
+      state.socket = tlsSocket;
+      state.isTls = true;
+      this.#attachSocketLifecycle(state, tlsSocket);
+      this.touch(state);
+      this.assertCommit(state, context);
+      this.record(state, "upgradeTls");
+
+      const cert = typeof tlsSocket.getPeerCertificate === "function" ? tlsSocket.getPeerCertificate(false) : null;
+      const protocol = typeof tlsSocket.getProtocol === "function" ? tlsSocket.getProtocol() : undefined;
+      const fingerprint256 = typeof cert?.fingerprint256 === "string" ? cert.fingerprint256 : undefined;
+      const subject = cert?.subject ? formatCertDistinguishedName(cert.subject) : undefined;
+      return Object.freeze({
+        upgraded: true,
+        authorized: Boolean(tlsSocket.authorized),
+        ...(protocol ? { protocol } : {}),
+        ...(fingerprint256 ? { fingerprint256 } : {}),
+        ...(subject ? { subject } : {}),
+      });
+    } catch (error) {
+      clearTimeout(upgradeTimer);
+      const rpcError = error instanceof PluginRpcError
+        ? error
+        : failure("unavailable", "Byte stream TLS upgrade failed");
+      this.finish(state, rpcError);
+      throw rpcError;
+    } finally {
+      context.signal?.removeEventListener("abort", onAbort);
+      state.upgrading = false;
+      state.upgradeDone = null;
+      releaseUpgrade();
     }
   }
 
@@ -226,24 +436,32 @@ class PluginByteStreamBroker {
       await this.active(state, context);
       while (true) {
         this.assertCommit(state, context);
-        const available = state.socket.readableLength;
-        const bytes = state.socket.read(Math.min(available || LIMITS.chunkBytes, LIMITS.chunkBytes));
+        if (state.upgrading && state.upgradeDone) {
+          await raceWithAbort(state.upgradeDone, state.controller.signal);
+          await this.active(state, context);
+          continue;
+        }
+        const socket = state.socket;
+        const available = socket.readableLength;
+        const bytes = socket.read(Math.min(available || LIMITS.chunkBytes, LIMITS.chunkBytes));
         if (bytes !== null) {
           this.charge(state, "bytesRead", bytes.byteLength);
           await this.active(state, context);
           this.assertCommit(state, context);
           return new Uint8Array(bytes);
         }
-        if (state.eof || state.socket.readableEnded) { this.finish(state); return null; }
+        if (state.eof || socket.readableEnded) { this.finish(state); return null; }
         await raceWithAbort(new Promise((resolve) => {
           const readable = () => {
-            state.socket.off("end", readable);
-            state.socket.off("readable", readable);
+            if (state.suspendRead === readable) state.suspendRead = null;
+            socket.off("end", readable);
+            socket.off("readable", readable);
             state.controller.signal.removeEventListener("abort", readable);
             resolve();
           };
-          state.socket.once("readable", readable);
-          state.socket.once("end", readable);
+          state.suspendRead = readable;
+          socket.once("readable", readable);
+          socket.once("end", readable);
           // Remove listeners even when cancellation wins the race.
           state.controller.signal.addEventListener("abort", readable, { once: true });
         }), state.controller.signal);
@@ -253,6 +471,7 @@ class PluginByteStreamBroker {
       this.finish(state, error);
       throw error;
     } finally {
+      state.suspendRead = null;
       context.signal?.removeEventListener("abort", onAbort);
       state.reading = false;
     }
@@ -260,6 +479,7 @@ class PluginByteStreamBroker {
 
   async write(id, bytes, context) {
     const state = this.get(id, context);
+    if (state.upgrading) throw failure("failedPrecondition", "Cannot write while TLS upgrade is in progress");
     if (!(bytes instanceof Uint8Array) || bytes.byteLength < 1 || bytes.byteLength > LIMITS.chunkBytes) {
       throw failure("invalidArgument", "Byte stream chunk size is invalid");
     }
@@ -302,4 +522,4 @@ class PluginByteStreamBroker {
   }
 }
 
-module.exports = { LIMITS, PluginByteStreamBroker, canonicalizeStreamEndpoint, isLocalControlAddress };
+module.exports = { LIMITS, HOST_LIMITS, PluginByteStreamBroker, canonicalizeStreamEndpoint, isLocalControlAddress };

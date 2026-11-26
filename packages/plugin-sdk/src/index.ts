@@ -72,11 +72,15 @@ export interface PluginKeyValueStore {
   get<T extends JsonValue>(key: string): Promise<T | undefined>;
   set(key: string, value: JsonValue): Promise<void>;
   delete(key: string): Promise<void>;
-  keys(): Promise<readonly string[]>;
+  keys(options?: Readonly<{ prefix?: string }>): Promise<readonly string[]>;
 }
 
 export interface PluginSecretStore {
   get(key: string): Promise<SecretRef | undefined>;
+  /** Reads plaintext of a secret previously stored by this plugin in its own encrypted namespace. */
+  getPlaintext(key: string): Promise<string | undefined>;
+  /** Alias for getPlaintext(key); strictly scoped to this plugin's own secrets, never Netcatty Vault credentials. */
+  readOwn(key: string): Promise<string | undefined>;
   set(key: string, value: string): Promise<SecretRef>;
   delete(key: string): Promise<void>;
 }
@@ -110,10 +114,68 @@ export interface PluginCommands {
   executeCommand<T extends JsonValue = JsonValue>(commandId: string, args?: JsonValue): Promise<T>;
 }
 
+export interface PluginFileDialogFilter {
+  readonly name: string;
+  readonly extensions: readonly string[];
+}
+
+export interface PluginOpenFileOptions {
+  readonly title?: string;
+  readonly filters?: readonly PluginFileDialogFilter[];
+  readonly readAs?: "bytes" | "utf8";
+  readonly maxBytes?: number;
+}
+
+export type PluginOpenFileResult<TData extends Uint8Array | string = Uint8Array | string> =
+  | Readonly<{ cancelled: true }>
+  | Readonly<{
+      cancelled: false;
+      name: string;
+      size: number;
+      handleId: string;
+      data: TData;
+    }>;
+
+export interface PluginSaveFileOptions {
+  readonly title?: string;
+  readonly defaultName?: string;
+  readonly filters?: readonly PluginFileDialogFilter[];
+  readonly data: Uint8Array | ArrayBuffer | string;
+  readonly encoding?: "base64" | "utf8";
+}
+
+export type PluginSaveFileResult =
+  | Readonly<{ cancelled: true }>
+  | Readonly<{
+      cancelled: false;
+      name: string;
+      size: number;
+      handleId: string;
+    }>;
+
+export interface PluginFileHandleWriteResult {
+  readonly bytesWritten: number;
+  readonly totalSize: number;
+}
+
 export interface PluginHostUI {
   quickPick(title: string, items: readonly import("@netcatty/plugin-contract").HostQuickPickItem[]): Promise<string | undefined>;
   /** Single-line text. The host rejects CR/LF in initial values and submitted responses. */
   input(title: string, initialValue?: string): Promise<string | undefined>;
+  /** Opens a native OS file picker and returns contents + a revocable per-runtime file handle. */
+  openFile(options?: PluginOpenFileOptions & Readonly<{ readAs: "utf8" }>): Promise<PluginOpenFileResult<string>>;
+  openFile(options?: PluginOpenFileOptions & Readonly<{ readAs?: "bytes" }>): Promise<PluginOpenFileResult<Uint8Array>>;
+  openFile(options?: PluginOpenFileOptions): Promise<PluginOpenFileResult>;
+  /** Opens a native OS save dialog and writes atomically, returning a revocable per-runtime file handle. */
+  saveFile(options: PluginSaveFileOptions): Promise<PluginSaveFileResult>;
+  /** Reads from a previously user-picked file handle without re-prompting. */
+  readFileHandle(handleId: string, options: Readonly<{ readAs: "utf8" }>): Promise<string>;
+  readFileHandle(handleId: string, options?: Readonly<{ readAs?: "bytes" }>): Promise<Uint8Array>;
+  readFileHandle(handleId: string, options?: Readonly<{ readAs?: "bytes" | "utf8" }>): Promise<Uint8Array | string>;
+  /** Atomically writes back to a previously user-picked file handle without re-prompting. */
+  writeFileHandle(handleId: string, data: Uint8Array | ArrayBuffer | string, options?: Readonly<{ encoding?: "base64" | "utf8" }>): Promise<PluginFileHandleWriteResult>;
+  /** Releases a user-picked file handle. */
+  closeFileHandle(handleId: string): Promise<void>;
 }
 
 /** Saved-host selection does not grant editing, connecting or session access.
@@ -124,6 +186,8 @@ export interface PluginVault {
   /** Managed SSH-config drafts require the full Vault host editor. */
   requestHostDraft(params: import("@netcatty/plugin-contract").VaultHostDraftParams): Promise<import("@netcatty/plugin-contract").VaultHostActionResult>;
   requestConnect(params: import("@netcatty/plugin-contract").VaultHostConnectParams): Promise<import("@netcatty/plugin-contract").VaultHostActionResult>;
+  /** Revokes a previously remembered durable SSH tunnel binding token. */
+  revokeHostBinding(hostBindingToken: string): Promise<Readonly<{ revoked: boolean }>>;
 }
 
 export interface PluginClipboard {
@@ -701,10 +765,20 @@ export interface PluginAgentClient {
   closeChat(params: import("@netcatty/plugin-contract").PluginAgentChatRef): Promise<import("@netcatty/plugin-contract").PluginAIBooleanResult>;
 }
 
+export interface PluginByteStreamUpgradeTlsOptions {
+  readonly servername?: string;
+  readonly allowSelfSigned?: boolean;
+  readonly caPem?: string;
+}
+
 export interface PluginByteConnection extends Disposable {
   readonly endpoint: string;
+  /** Present when connectViaHost created or reused a durable SSH tunnel binding. */
+  readonly hostBindingToken?: string;
   readonly readable: PluginReadableByteStream;
   readonly writable: PluginWritableByteStream;
+  /** Performs an in-band STARTTLS upgrade on an open plaintext byte stream. */
+  upgradeTls(options?: PluginByteStreamUpgradeTlsOptions): Promise<import("@netcatty/plugin-contract").ByteStreamUpgradeTlsResult>;
   /** Closes both directions. Repeated calls on this handle are harmless. */
   close(): Promise<void>;
 }
@@ -985,7 +1059,7 @@ export function throwIfCancellationRequested(token: CancellationToken): void {
 }
 
 export { PLUGIN_NETWORK_CREDENTIAL_LEASE_FEATURE } from "@netcatty/plugin-contract";
-export { PLUGIN_BYTE_STREAM_FEATURE, PLUGIN_BYTE_STREAM_LIMITS } from "@netcatty/plugin-contract";
+export { PLUGIN_BYTE_STREAM_FEATURE, PLUGIN_HOST_BYTE_STREAM_FEATURE, PLUGIN_BYTE_STREAM_LIMITS } from "@netcatty/plugin-contract";
 export { PLUGIN_AI_MODEL_INVOCATION_FEATURE, PLUGIN_SELECTED_CONTEXT_FEATURE } from "@netcatty/plugin-contract";
 
 export { PLUGIN_HOST_INTERACTION_FEATURE } from "@netcatty/plugin-contract";

@@ -347,6 +347,50 @@ function createEmitter() {
   };
 }
 
+const FILE_CHUNK_BYTES = 2 * 1024 * 1024;
+const FILE_DIALOG_DEADLINE_MS = 300_000;
+
+function bytesToBase64(bytes) {
+  if (typeof Buffer === "function") return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
+  let binary = "";
+  const step = 0x8000;
+  for (let offset = 0; offset < bytes.byteLength; offset += step) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + step));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(encoded) {
+  if (typeof Buffer === "function") {
+    const buf = Buffer.from(encoded, "base64");
+    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  }
+  const binary = atob(encoded);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+function concatUint8Arrays(chunks, totalBytes) {
+  const out = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+function toBytes(data, encoding) {
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (typeof data === "string") {
+    if (encoding === "base64") return base64ToBytes(data);
+    return new TextEncoder().encode(data);
+  }
+  throw new PluginError("invalid_argument", "File data must be a Uint8Array, ArrayBuffer, or string");
+}
+
 function createPluginContext(config, client, runtimeApi) {
   const subscriptions = new DisposableStore();
   const storage = {
@@ -356,11 +400,18 @@ function createPluginContext(config, client, runtimeApi) {
       .then(() => undefined),
     delete: (key) => client.request("storage.delete", { key: assertStorageKey(key) })
       .then(() => undefined),
-    keys: () => client.request("storage.keys", {}).then((result) => result?.keys ?? []),
+    keys: (options) => client.request(
+      "storage.keys",
+      options?.prefix !== undefined ? { prefix: options.prefix } : {},
+    ).then((result) => result?.keys ?? []),
   };
+  const readOwnSecret = (key) => client.request("secrets.getPlaintext", { key: assertStorageKey(key) })
+    .then((result) => result?.found ? result.value : undefined);
   const secrets = {
     get: (key) => client.request("secrets.get", { key: assertStorageKey(key) })
       .then((result) => result?.found ? result.secret : undefined),
+    getPlaintext: readOwnSecret,
+    readOwn: readOwnSecret,
     set: (key, value) => client.request("secrets.set", {
       key: assertStorageKey(key),
       value,
@@ -378,13 +429,113 @@ function createPluginContext(config, client, runtimeApi) {
   };
   const interact = (params) => client.request("ui.interact", params, { deadlineMs: PLUGIN_HOST_INTERACTION_LIMITS.timeoutMs })
     .then((result) => result.cancelled ? undefined : result.value);
+  const readFileHandleAll = async (handleId, options = {}) => {
+    const chunks = [];
+    let offset = 0;
+    let total = 0;
+    while (true) {
+      const page = await client.request("ui.readFileHandle", {
+        handleId,
+        offset,
+        length: FILE_CHUNK_BYTES,
+        encoding: "base64",
+      }, { deadlineMs: 60_000 });
+      const bytes = page.bytesRead > 0 ? base64ToBytes(page.data) : new Uint8Array(0);
+      if (bytes.byteLength > 0) {
+        chunks.push(bytes);
+        offset += bytes.byteLength;
+        total += bytes.byteLength;
+      }
+      if (page.eof || page.bytesRead === 0) break;
+    }
+    const merged = concatUint8Arrays(chunks, total);
+    return options?.readAs === "utf8" ? new TextDecoder().decode(merged) : merged;
+  };
+  const writeFileHandleAll = async (handleId, data, options = {}) => {
+    const bytes = toBytes(data, options?.encoding);
+    if (bytes.byteLength === 0) {
+      return client.request("ui.writeFileHandle", {
+        handleId, data: "", encoding: "base64", mode: "replace", commit: true,
+      }, { deadlineMs: 60_000 });
+    }
+    let lastResult;
+    for (let offset = 0; offset < bytes.byteLength; offset += FILE_CHUNK_BYTES) {
+      const end = Math.min(offset + FILE_CHUNK_BYTES, bytes.byteLength);
+      const slice = bytes.subarray(offset, end);
+      lastResult = await client.request("ui.writeFileHandle", {
+        handleId,
+        data: bytesToBase64(slice),
+        encoding: "base64",
+        mode: offset === 0 ? "replace" : "append",
+        commit: end >= bytes.byteLength,
+      }, { deadlineMs: 60_000 });
+    }
+    return { bytesWritten: bytes.byteLength, totalSize: lastResult?.totalSize ?? bytes.byteLength };
+  };
   const ui = {
     quickPick: (title, items) => interact({ kind: "quickPick", title, items }),
     input: (title, initialValue) => interact({ kind: "input", title, ...(initialValue === undefined ? {} : { initialValue }) }),
+    openFile: async (options = {}) => {
+      const result = await client.request("ui.openFile", {
+        ...(options?.title === undefined ? {} : { title: options.title }),
+        ...(options?.filters === undefined ? {} : { filters: options.filters }),
+        ...(options?.readAs === undefined ? {} : { readAs: options.readAs }),
+        ...(options?.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
+      }, { deadlineMs: FILE_DIALOG_DEADLINE_MS });
+      if (result?.cancelled) return { cancelled: true };
+      let data;
+      if (result.streamed) {
+        data = await readFileHandleAll(result.handleId, { readAs: options?.readAs });
+      } else if (options?.readAs === "utf8") {
+        data = result.encoding === "utf8" ? result.data : new TextDecoder().decode(base64ToBytes(result.data ?? ""));
+      } else {
+        data = result.encoding === "base64" ? base64ToBytes(result.data ?? "") : new TextEncoder().encode(result.data ?? "");
+      }
+      return {
+        cancelled: false,
+        name: result.name,
+        size: result.size,
+        handleId: result.handleId,
+        data,
+      };
+    },
+    saveFile: async (options = {}) => {
+      const bytes = options?.data === undefined ? new Uint8Array(0) : toBytes(options.data, options.encoding);
+      const baseReq = {
+        ...(options?.title === undefined ? {} : { title: options.title }),
+        ...(options?.defaultName === undefined ? {} : { defaultName: options.defaultName }),
+        ...(options?.filters === undefined ? {} : { filters: options.filters }),
+      };
+      if (bytes.byteLength <= FILE_CHUNK_BYTES) {
+        return client.request("ui.saveFile", {
+          ...baseReq,
+          data: bytesToBase64(bytes),
+          encoding: "base64",
+        }, { deadlineMs: FILE_DIALOG_DEADLINE_MS });
+      }
+      const opened = await client.request("ui.saveFile", {
+        ...baseReq,
+        deferredWrite: true,
+      }, { deadlineMs: FILE_DIALOG_DEADLINE_MS });
+      if (opened?.cancelled) return { cancelled: true };
+      const written = await writeFileHandleAll(opened.handleId, bytes);
+      return {
+        cancelled: false,
+        name: opened.name,
+        size: written.totalSize,
+        handleId: opened.handleId,
+      };
+    },
+    readFileHandle: readFileHandleAll,
+    writeFileHandle: writeFileHandleAll,
+    closeFileHandle: (handleId) => client.request("ui.closeFileHandle", { handleId }).then(() => undefined),
   };
-  const vault = Object.fromEntries(["selectHosts", "requestHostDraft", "requestConnect"].map((method) => [
-    method, (params) => client.request(`vault.${method}`, params, { deadlineMs: PLUGIN_HOST_INTERACTION_LIMITS.timeoutMs }),
-  ]));
+  const vault = {
+    ...Object.fromEntries(["selectHosts", "requestHostDraft", "requestConnect"].map((method) => [
+      method, (params) => client.request(`vault.${method}`, params, { deadlineMs: PLUGIN_HOST_INTERACTION_LIMITS.timeoutMs }),
+    ])),
+    revokeHostBinding: (hostBindingToken) => client.request("vault.revokeHostBinding", { hostBindingToken }),
+  };
   const clipboard = {
     readText: (title) => interact({ kind: "clipboard.read", title }),
     writeText: (text, title) => interact({ kind: "clipboard.write", title, text }).then((value) => value === true),

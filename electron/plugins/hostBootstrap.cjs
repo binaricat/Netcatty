@@ -1,11 +1,8 @@
 "use strict";
 
-const { isPluginDevelopmentEnabled } = require("./constants.cjs");
-
 function startPluginHost(options) {
-  // The plugin platform is not shipping in this release. Keep its data
-  // untouched and allow existing developer workflows to opt in as before.
-  if (!isPluginDevelopmentEnabled(options.env)) return null;
+  // TODO(revert): temporarily enabled by default for database plugin development
+  if (options.env?.NETCATTY_PLUGIN_DEV === "0") return null;
 
   const reportFailure = (message, error) => {
     try { options.logger?.error?.(message, error); } catch {}

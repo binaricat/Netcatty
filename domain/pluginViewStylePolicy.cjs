@@ -2,8 +2,8 @@
 
 // Plugin styles are untrusted: they are never inserted before this check.
 const cssTree = require("css-tree");
-const MAX_CSS_LENGTH = 64 * 1024;
-const MAX_AST_NODES = 20_000;
+const MAX_CSS_LENGTH = 128 * 1024;
+const MAX_AST_NODES = 40_000;
 const ALLOWED_AT_RULES = new Set(["media", "supports", "container", "keyframes", "-webkit-keyframes", "layer"]);
 const ALLOWED_FUNCTIONS = new Set([
   "var", "calc", "min", "max", "clamp", "abs", "sign", "round", "mod", "rem", "hypot", "pow", "sqrt", "log", "exp", "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
@@ -14,7 +14,18 @@ const ALLOWED_FUNCTIONS = new Set([
   "cubic-bezier", "steps", "linear", "minmax", "repeat", "fit-content", "env", "counter", "counters", "symbols",
 ]);
 const DENIED_PROPERTIES = new Set(["behavior", "-moz-binding", "-webkit-app-region", "app-region"]);
-const HOST_TOKENS = new Set(["--background", "--foreground", "--muted", "--muted-foreground", "--border", "--primary", "--primary-foreground"]);
+const HOST_TOKENS = new Set([
+  "--background", "--foreground",
+  "--card", "--card-foreground",
+  "--popover", "--popover-foreground",
+  "--primary", "--primary-foreground",
+  "--secondary", "--secondary-foreground",
+  "--muted", "--muted-foreground",
+  "--accent", "--accent-foreground",
+  "--destructive", "--destructive-foreground",
+  "--border", "--input", "--ring",
+  "--radius", "--font-sans", "--font-mono",
+]);
 const decode = (name) => cssTree.ident.decode(name).toLowerCase();
 
 /** Returns canonical CSS only if every construct is safe for a clipped shadow root. */

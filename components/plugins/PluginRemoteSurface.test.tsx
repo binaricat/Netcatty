@@ -31,7 +31,7 @@ test('plugin surface forwards its own input and contains malformed updates and r
     assert.deepEqual(events, [{ nodeId: '2', type: 'click' }]);
     const input = captured!.querySelector('input')!; input.value = 'typed';
     await act(async () => { input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); });
-    assert.deepEqual(events.at(-1), { nodeId: '4', type: 'input', value: 'typed' });
+    assert.deepEqual(events.at(-1), { nodeId: '4', type: 'input', value: 'typed', selectionStart: 5, selectionEnd: 5 });
     await act(async () => { document.getElementById('host')!.dispatchEvent(new dom.window.Event('input', { bubbles: true })); });
     assert.equal(events.length, 2);
     await act(async () => { root.render(<PluginRemoteSurface tree={tree} css="@import 'https://bad.example/x';" onEvent={() => {}} />); });
@@ -248,6 +248,222 @@ test('PluginRemoteSurface avoids JSON/form hook work on text and plain elements 
   } finally {
     JSON.stringify = origStringify;
     JSON.parse = origParse;
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key); }
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
+
+test('PluginRemoteSurface forwards dblclick, contextmenu, throttled scroll, cursor popover, and host-rendered widgets', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'PointerEvent', 'ShadowRoot']) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    const val = key === 'window' ? dom.window : key === 'PointerEvent' ? dom.window.MouseEvent : dom.window[key as keyof typeof dom.window];
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: val });
+  }
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, writable: true, value: true });
+  Object.assign(dom.window, {
+    ResizeObserver: class {
+      private cb: (entries: unknown[]) => void;
+      constructor(cb: (entries: unknown[]) => void) { this.cb = cb; }
+      observe(target: Element) {
+        this.cb([{ target, borderBoxSize: [{ inlineSize: 800, blockSize: 600 }], contentRect: { width: 800, height: 600 } }]);
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+    PointerEvent: dom.window.MouseEvent,
+  });
+  dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
+    x: 100, y: 50, width: 800, height: 600, top: 50, left: 100, right: 900, bottom: 650, toJSON() {},
+  });
+
+  const shadows: ShadowRoot[] = [];
+  const nativeAttach = dom.window.Element.prototype.attachShadow;
+  dom.window.Element.prototype.attachShadow = function (options) {
+    const s = nativeAttach.call(this, options);
+    shadows.push(s as unknown as ShadowRoot);
+    return s;
+  };
+
+  const { act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { PluginRemoteSurface } = await import('./PluginRemoteSurface');
+
+  const events: Array<Record<string, unknown>> = [];
+  const gridProps = {
+    columns: [
+      { name: 'id', type: 'int4', primaryKey: true },
+      { name: 'name', type: 'varchar', nullable: true },
+    ],
+    rows: [
+      { id: 1, name: 'Alice' },
+      { id: 2, name: null },
+    ],
+    dirtyCells: { '0:name': 'Alicia' },
+    editable: true,
+  };
+  const erProps = {
+    tables: [
+      { name: 'users', columns: [{ name: 'id', type: 'int', isPk: true }] },
+      { name: 'orders', columns: [{ name: 'id', type: 'int', isPk: true }, { name: 'user_id', type: 'int', isFk: true }] },
+    ],
+    relations: [{ fromTable: 'orders', fromColumn: 'user_id', toTable: 'users', toColumn: 'id' }],
+  };
+  const tree = {
+    children: [
+      {
+        id: 'scroller',
+        type: 1,
+        element: 'div',
+        attributes: { class: 'list' },
+        children: [{ id: 'item', type: 1, element: 'button', attributes: { type: 'button' }, children: [{ id: 'it', type: 3, data: 'Row' }] }],
+      },
+      {
+        id: 'ctx-popover',
+        type: 1,
+        element: 'div',
+        attributes: {
+          'data-plugin-popover': 'true',
+          'data-plugin-anchor-x': '120',
+          'data-plugin-anchor-y': '80',
+          'data-plugin-popover-width': '260',
+          'data-plugin-popover-max-height': '320',
+          open: '',
+        },
+        children: [{ id: 'pop-item', type: 1, element: 'span', attributes: {}, children: [{ id: 'pt', type: 3, data: 'Menu' }] }],
+      },
+      {
+        id: 'split',
+        type: 1,
+        element: 'div',
+        attributes: {
+          'data-plugin-widget': 'split-pane',
+          'data-plugin-widget-props': JSON.stringify({ direction: 'horizontal', initialSize: 220, minSize: 120, maxSize: 400 }),
+        },
+        children: [
+          { id: 'pane-a', type: 1, element: 'div', attributes: {}, children: [{ id: 'pa', type: 3, data: 'Left' }] },
+          { id: 'pane-b', type: 1, element: 'div', attributes: {}, children: [{ id: 'pb', type: 3, data: 'Right' }] },
+        ],
+      },
+      {
+        id: 'grid',
+        type: 1,
+        element: 'div',
+        attributes: { 'data-plugin-widget': 'data-grid', 'data-plugin-widget-props': JSON.stringify(gridProps) },
+        children: [],
+      },
+      {
+        id: 'er',
+        type: 1,
+        element: 'div',
+        attributes: { 'data-plugin-widget': 'er-canvas', 'data-plugin-widget-props': JSON.stringify(erProps) },
+        children: [],
+      },
+    ],
+  };
+
+  const root = createRoot(document.getElementById('root')!);
+  try {
+    await act(async () => {
+      root.render(<PluginRemoteSurface tree={tree} css="" onEvent={(e) => events.push(e as unknown as Record<string, unknown>)} />);
+    });
+
+    const mainShadow = shadows[0];
+    assert.ok(mainShadow, 'main shadow mounted');
+
+    // 1. dblclick & contextmenu with surface-relative coordinates + preventDefault
+    const btn = mainShadow.querySelector('button')!;
+    const ctxEvent = new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 250, clientY: 170 });
+    await act(async () => {
+      btn.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: 180, clientY: 90 }));
+      btn.dispatchEvent(ctxEvent);
+    });
+    assert.equal(ctxEvent.defaultPrevented, true, 'contextmenu must call preventDefault');
+    assert.deepEqual(events[0], { nodeId: 'item', type: 'dblclick', x: 80, y: 40 });
+    assert.deepEqual(events[1], { nodeId: 'item', type: 'contextmenu', x: 150, y: 120 });
+
+    // 2. throttled scroll
+    const scroller = mainShadow.querySelector('.list') as HTMLElement;
+    scroller.scrollTop = 140;
+    scroller.scrollLeft = 20;
+    await act(async () => {
+      scroller.dispatchEvent(new dom.window.Event('scroll', { bubbles: false }));
+      await new Promise((resolve) => setTimeout(resolve, 90));
+    });
+    const scrollEvt = events.find((e) => e.type === 'scroll');
+    assert.ok(scrollEvt, 'scroll event emitted');
+    assert.equal(scrollEvt!.scrollTop, 140);
+    assert.equal(scrollEvt!.scrollLeft, 20);
+
+    // 3. cursor-anchored popover positioned within surface bounds with custom width & maxHeight
+    const popoverEl = document.querySelector('[data-plugin-view-popover]') as HTMLElement | null;
+    assert.ok(popoverEl, 'cursor-anchored popover rendered');
+    assert.equal(popoverEl!.style.width, '260px');
+    assert.equal(popoverEl!.style.maxHeight, '320px');
+    assert.equal(popoverEl!.style.left, '220px'); // surface.left (100) + anchorX (120)
+
+    // 4. SplitPane rendered inside shadow root with two panes and drag handle
+    const splitEl = mainShadow.querySelector('[data-plugin-widget="split-pane"]') as HTMLElement | null;
+    assert.ok(splitEl, 'split-pane rendered in shadow root');
+    assert.equal(splitEl!.querySelectorAll('[data-split-pane]').length, 2);
+    const handle = splitEl!.querySelector('[data-split-handle]') as HTMLElement;
+    await act(async () => {
+      handle.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, clientX: 220 }));
+      dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 280 }));
+      dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 280 }));
+    });
+    assert.deepEqual(
+      events.find((e) => e.nodeId === 'split' && e.widgetEvent === 'resizeEnd'),
+      { nodeId: 'split', type: 'widget', widgetEvent: 'resizeEnd', detail: { size: 280, collapsed: false } },
+    );
+
+    // 5. DataGrid slotted in Light DOM: renders dirty cell, NULL pill, inline edit & sort
+    const gridHost = document.querySelector('[data-plugin-widget-host="data-grid"]') as HTMLElement | null;
+    assert.ok(gridHost, 'data-grid slotted in shadow host Light DOM');
+    assert.ok(gridHost!.textContent?.includes('Alicia'), 'dirty cell value rendered');
+    assert.ok(gridHost!.textContent?.includes('NULL'), 'NULL pill rendered');
+    const nameHeaderBtn = gridHost!.querySelector('[data-col-name="name"] button') as HTMLButtonElement;
+    await act(async () => { nameHeaderBtn.click(); });
+    assert.deepEqual(
+      events.find((e) => e.nodeId === 'grid' && e.widgetEvent === 'sortChange'),
+      { nodeId: 'grid', type: 'widget', widgetEvent: 'sortChange', detail: { column: 'name', direction: 'asc' } },
+    );
+    const cell = gridHost!.querySelector('[role="gridcell"][data-row-index="0"][data-col-name="name"]') as HTMLElement;
+    await act(async () => {
+      cell.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
+    });
+    const editorInput = cell.querySelector('input') as HTMLInputElement;
+    assert.ok(editorInput, 'double-click opens inline cell editor');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(editorInput, 'Bob');
+      editorInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      editorInput.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    assert.deepEqual(
+      events.find((e) => e.nodeId === 'grid' && e.widgetEvent === 'cellEdit'),
+      { nodeId: 'grid', type: 'widget', widgetEvent: 'cellEdit', detail: { rowIndex: 0, colName: 'name', value: 'Bob', isNull: false } },
+    );
+
+    // 6. ER Canvas slotted in Light DOM: renders tables + FK curve + emits tableClick
+    const erHost = document.querySelector('[data-plugin-widget-host="er-canvas"]') as HTMLElement | null;
+    assert.ok(erHost, 'er-canvas slotted in shadow host Light DOM');
+    const usersCard = erHost!.querySelector('[data-er-table="users"]') as Element | null;
+    assert.ok(usersCard, 'users table card rendered');
+    await act(async () => {
+      usersCard!.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+      dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+    });
+    assert.deepEqual(
+      events.find((e) => e.nodeId === 'er' && e.widgetEvent === 'tableClick'),
+      { nodeId: 'er', type: 'widget', widgetEvent: 'tableClick', detail: { table: 'users' } },
+    );
+  } finally {
     await act(async () => root.unmount());
     dom.window.close();
     for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key); }
