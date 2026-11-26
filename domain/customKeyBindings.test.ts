@@ -63,6 +63,41 @@ test('unrelated custom shortcuts leave reopen defaults intact', () => {
   assert.equal(shortcut('\u2318 + Shift + T', bindings, true), 'reopenClosedTab');
 });
 
+for (const [id, key] of [['copy', 'C'], ['paste', 'V']]) {
+  test(`recording the terminal ${id} default preserves the SFTP default`, () => {
+    const chord = `\u2318 + ${key}`;
+    const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+      [id]: { mac: chord },
+    });
+
+    assert.equal(bindings.find(binding => binding.id === id)?.mac, chord);
+    assert.equal(bindings.find(binding => binding.id === `sftp-${id}`)?.mac, chord);
+  });
+}
+
+test('custom SFTP chords preserve conflicting app-level defaults on both schemes', () => {
+  const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+    'sftp-copy': { mac: '\u2318 + Shift + T', pc: 'Ctrl + Shift + T' },
+  });
+
+  for (const id of ['sftp-copy', 'reopen-closed-tab']) {
+    assert.equal(bindings.find(binding => binding.id === id)?.mac, '\u2318 + Shift + T');
+    assert.equal(bindings.find(binding => binding.id === id)?.pc, 'Ctrl + Shift + T');
+  }
+});
+
+test('custom SFTP chords still evict conflicting defaults within SFTP', () => {
+  const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+    'sftp-copy': { mac: '\u2318 + V', pc: 'Ctrl + V' },
+  });
+
+  assert.equal(bindings.find(binding => binding.id === 'sftp-copy')?.mac, '\u2318 + V');
+  assert.equal(bindings.find(binding => binding.id === 'sftp-copy')?.pc, 'Ctrl + V');
+  assert.equal(bindings.find(binding => binding.id === 'sftp-paste')?.mac, 'Disabled');
+  assert.equal(bindings.find(binding => binding.id === 'sftp-paste')?.pc, 'Disabled');
+  assert.equal(bindings.find(binding => binding.id === 'paste')?.mac, '\u2318 + V');
+});
+
 test('conflicting custom shortcuts remain while uncustomized defaults are evicted', () => {
   const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
     'open-local': { pc: 'Ctrl + Shift + T' },

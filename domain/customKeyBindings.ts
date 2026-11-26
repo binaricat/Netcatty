@@ -15,13 +15,18 @@ export const resolveKeyBindings = (
   });
 
   for (const scheme of ['mac', 'pc'] as const) {
-    const customChords = new Set(merged
-      .filter(binding => customKeyBindings[binding.id]?.[scheme] != null && binding[scheme] !== 'Disabled')
-      .map(binding => binding[scheme]));
+    const customChords = { sftp: new Set<string>(), app: new Set<string>() };
+    for (const binding of merged) {
+      if (customKeyBindings[binding.id]?.[scheme] != null && binding[scheme] !== 'Disabled') {
+        customChords[binding.category === 'sftp' ? 'sftp' : 'app'].add(binding[scheme]);
+      }
+    }
 
-    // Custom shortcuts win over defaults; conflicts between custom shortcuts remain unchanged.
+    // SFTP has its own input context; all other categories share the app-level handler.
+    // Custom shortcuts win over defaults in that context; custom conflicts remain unchanged.
     merged = merged.map(binding => (
-      customKeyBindings[binding.id]?.[scheme] == null && customChords.has(binding[scheme])
+      customKeyBindings[binding.id]?.[scheme] == null &&
+      customChords[binding.category === 'sftp' ? 'sftp' : 'app'].has(binding[scheme])
         ? { ...binding, [scheme]: 'Disabled' }
         : binding
     ));
