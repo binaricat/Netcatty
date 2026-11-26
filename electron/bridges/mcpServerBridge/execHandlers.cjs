@@ -236,35 +236,40 @@ function createExecHandlerApi(ctx) {
      * Mirrors handleExec's transport order; used by terminal_execute_bulk to
      * validate every target before any command is sent.
      */
+    /**
+     * Shell-aware command safety for a preflight. With probe:false nothing may touch
+     * the remote host yet (no approval has been given): use the shell kind only if it
+     * is already known, otherwise the shell-independent patterns. The authoritative
+     * check re-runs after approval, and again when the command is sent.
+     */
+    async function checkPreflightShellCommand({ session, sessionId, command, chatSessionId }, probe) {
+      let safety;
+      if (probe) {
+        const probed = await ensureSessionShellKindForExec(session, {
+          trackForCancellation: activePtyExecs,
+          chatSessionId,
+        });
+        if (!probed.ok) return probed;
+        safety = checkCommandSafetyForShell(command, resolveSessionBlocklistShellKind(session));
+      } else {
+        const knownKind = resolveSessionBlocklistShellKind(session);
+        safety = knownKind
+          ? checkCommandSafetyForShell(command, knownKind)
+          : checkCommandSafetyCommonOnly(command);
+      }
+      if (safety.blocked) {
+        debugLog("preflight:blocklisted", { sessionId, matchedPattern: safety.matchedPattern });
+        return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+      }
+      return { ok: true };
+    }
+
     async function preflightExec(params, { probe = true } = {}) {
       const resolved = resolveExecContext(params);
       if (!resolved.ok) return resolved;
-      const { session, sessionId, command, chatSessionId, isNetworkDevice, sshClient, ptyStream } = resolved.context;
+      const { session, isNetworkDevice, sshClient, ptyStream } = resolved.context;
       const hasWritablePty = Boolean(ptyStream && typeof ptyStream.write === "function");
-      const checkShellCommand = async () => {
-        let safety;
-        if (probe) {
-          const probed = await ensureSessionShellKindForExec(session, {
-            trackForCancellation: activePtyExecs,
-            chatSessionId,
-          });
-          if (!probed.ok) return probed;
-          safety = checkCommandSafetyForShell(command, resolveSessionBlocklistShellKind(session));
-        } else {
-          // Nothing may touch the remote host yet (no approval has been given): use the
-          // shell kind only if it is already known, otherwise the shell-independent
-          // patterns. The authoritative check re-runs after approval, and again at exec.
-          const knownKind = resolveSessionBlocklistShellKind(session);
-          safety = knownKind
-            ? checkCommandSafetyForShell(command, knownKind)
-            : checkCommandSafetyCommonOnly(command);
-        }
-        if (safety.blocked) {
-          debugLog("preflightExec:blocklisted", { sessionId, matchedPattern: safety.matchedPattern });
-          return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-        }
-        return { ok: true };
-      };
+      const checkShellCommand = () => checkPreflightShellCommand(resolved.context, probe);
 
       if (isNetworkDevice && hasWritablePty) return { ok: true };
       if (hasWritablePty) return checkShellCommand();
@@ -281,6 +286,25 @@ function createExecHandlerApi(ctx) {
         return { ok: true };
       }
       return { ok: false, error: "Session does not support command execution" };
+    }
+
+    /**
+     * Side-effect-free (apart from the cached shell-kind probe handleJobStart also
+     * runs) check that handleJobStart would accept this command on this session.
+     * Mirrors handleJobStart's refusals; used by terminal_start_bulk to validate
+     * every target before any job is started.
+     */
+    async function preflightJobStart(params, { probe = true } = {}) {
+      const resolved = resolveExecContext(params);
+      if (!resolved.ok) return resolved;
+      const { isNetworkDevice, sessionProtocol, ptyStream } = resolved.context;
+      if (isNetworkDevice || sessionProtocol === "serial") {
+        return { ok: false, error: "Background execution currently supports shell-backed PTY sessions only." };
+      }
+      if (!ptyStream || typeof ptyStream.write !== "function") {
+        return { ok: false, error: "Background execution requires a writable PTY-backed terminal session." };
+      }
+      return checkPreflightShellCommand(resolved.context, probe);
     }
 
     function handleJobStart(params, executionContext = {}) {
@@ -563,6 +587,7 @@ function createExecHandlerApi(ctx) {
     return {
       resolveExecContext,
       preflightExec,
+      preflightJobStart,
       handleExec,
       handleJobStart,
       getScopedJob,

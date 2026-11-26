@@ -30,6 +30,9 @@ const MCP_BRIDGE_BUILTIN_CAPABILITY_IDS = [
   "terminal.start",
   "terminal.poll",
   "terminal.stop",
+  "terminal.startBulk",
+  "terminal.pollBulk",
+  "terminal.stopBulk",
 ];
 
 test("buildBuiltinRpcHandlerRegistry maps catalog builtin rpcMethod to handlers", () => {

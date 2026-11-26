@@ -37,7 +37,7 @@ function labelPart(sessionId, label) {
  * @param {{ command?: unknown, sessionIds?: unknown, tailLines?: unknown }} params
  * @returns {{ ok: true, command: string, sessionIds: string[], tailLines: number } | { ok: false, error: string }}
  */
-function parseBulkExecParams(params = {}) {
+function parseBulkExecParams(params = {}, { singleTool = "terminal_execute" } = {}) {
   const command = params?.command;
   if (typeof command !== "string" || !command.trim()) {
     return { ok: false, error: "Invalid command" };
@@ -56,7 +56,7 @@ function parseBulkExecParams(params = {}) {
     return { ok: false, error: shapeError };
   }
   if (rawIds.length < MIN_BULK_TARGETS) {
-    return { ok: false, error: `${shapeError}. Use terminal_execute to run a command on a single session` };
+    return { ok: false, error: `${shapeError}. Use ${singleTool} to run a command on a single session` };
   }
   if (rawIds.length > MAX_BULK_TARGETS) {
     return { ok: false, error: shapeError };
@@ -285,9 +285,11 @@ function groupBulkResults(entries, options = {}) {
 }
 
 /**
- * @param {object} deps injected by mcpServerBridge (keeps this module testable)
+ * Local, side-effect-free target checks shared by the bulk tools, in the same order
+ * as a single command: scope, closing, busy, pending claim, existence, connected.
+ * @param {object} deps the same deps the bulk handlers receive
  */
-function createExecBulkHandler(deps) {
+function createBulkTargetGuards(deps) {
   const {
     getSessions,
     getSessionMeta,
@@ -295,22 +297,6 @@ function createExecBulkHandler(deps) {
     closingTerminalSessions,
     getSessionBusyError,
     pendingSessionWriteApprovals,
-    getActiveChatExecution,
-    beginChatExecution,
-    isChatSessionCancelled,
-    preflightMainExec,
-    preflightWorkerExec,
-    execOnSession,
-    requestApproval,
-    sessionIdleManager,
-    getCommandTimeoutMs,
-    getLivePermission,
-    cancelExecsForChat,
-    USER_DENIED_MESSAGE,
-    CHAT_SESSION_CANCELLED_MESSAGE,
-    debugLog = () => {},
-    setTimeoutFn = setTimeout,
-    clearTimeoutFn = clearTimeout,
   } = deps;
 
   function resolveLabel(sessionId, chatSessionId) {
@@ -340,6 +326,36 @@ function createExecBulkHandler(deps) {
     if (!hasMainSession && meta.connected === false) return fail(`Session "${sessionId}" is not connected.`);
     return null;
   }
+
+  return { resolveLabel, checkTargetSync };
+}
+
+/**
+ * @param {object} deps injected by mcpServerBridge (keeps this module testable)
+ */
+function createExecBulkHandler(deps) {
+  const {
+    getSessions,
+    pendingSessionWriteApprovals,
+    getActiveChatExecution,
+    beginChatExecution,
+    isChatSessionCancelled,
+    preflightMainExec,
+    preflightWorkerExec,
+    execOnSession,
+    requestApproval,
+    sessionIdleManager,
+    getCommandTimeoutMs,
+    getLivePermission,
+    cancelExecsForChat,
+    USER_DENIED_MESSAGE,
+    CHAT_SESSION_CANCELLED_MESSAGE,
+    debugLog = () => {},
+    setTimeoutFn = setTimeout,
+    clearTimeoutFn = clearTimeout,
+  } = deps;
+
+  const { resolveLabel, checkTargetSync } = createBulkTargetGuards(deps);
 
   /**
    * Transport + command-safety checks. With probe:false nothing may touch the remote host
@@ -589,9 +605,11 @@ module.exports = {
   MAX_TAIL_LINES,
   MIN_BULK_TARGETS,
   classifyHostResult,
+  createBulkTargetGuards,
   createExecBulkHandler,
   formatPreflightFailure,
   groupBulkResults,
+  labelPart,
   parseBulkExecParams,
   splitGroupBudget,
   tailText,
