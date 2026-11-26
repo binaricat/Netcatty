@@ -86,7 +86,8 @@ type Failure = { ok: false; error: string };
 
 const hasOwn = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 
-const parseBooleanInput = (raw: unknown): boolean | undefined => {
+/** Parse agent booleans: true/false, 1/0 and yes/no, as booleans or strings. */
+export const parseBoolean = (raw: unknown): boolean | undefined => {
   if (typeof raw === 'boolean') return raw;
   if (typeof raw !== 'string') return undefined;
   const normalized = raw.trim().toLowerCase();
@@ -227,7 +228,7 @@ export function applyVaultHostConnectionSettings(
   }
 
   if (hasOwn(source, 'sshInputCompatibility')) {
-    const value = parseBooleanInput(source.sshInputCompatibility);
+    const value = parseBoolean(source.sshInputCompatibility);
     if (value === undefined) return { ok: false, error: 'sshInputCompatibility must be true or false.' };
     if (!isPlainSsh) return { ok: false, error: 'sshInputCompatibility only applies to SSH hosts without Mosh or ET.' };
     updated.sshInputCompatibility = value;
@@ -249,7 +250,7 @@ export function applyVaultHostConnectionSettings(
   }
 
   const keepaliveOverrideProvided = hasOwn(source, 'keepaliveOverride');
-  const keepaliveOverride = keepaliveOverrideProvided ? parseBooleanInput(source.keepaliveOverride) : undefined;
+  const keepaliveOverride = keepaliveOverrideProvided ? parseBoolean(source.keepaliveOverride) : undefined;
   if (keepaliveOverrideProvided && keepaliveOverride === undefined) {
     return { ok: false, error: 'keepaliveOverride must be true or false.' };
   }
