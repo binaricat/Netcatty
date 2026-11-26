@@ -6,10 +6,130 @@ import {
   nextCustomKeyBindingsSyncVersion,
   parseCustomKeyBindingsStorageRecord,
   resetCustomKeyBinding,
+  resolveKeyBindings,
   serializeCustomKeyBindingsStorageRecord,
   shouldApplyIncomingCustomKeyBindingsRecord,
   updateCustomKeyBinding,
 } from './customKeyBindings.ts';
+import { DEFAULT_KEY_BINDINGS, keyStringToKeyboardEvent } from './models/keyBindings.ts';
+import { checkAppShortcut } from '../application/state/useGlobalHotkeys.ts';
+
+function shortcut(key: string, bindings = DEFAULT_KEY_BINDINGS, isMac = false) {
+  const event = keyStringToKeyboardEvent(key);
+  assert.ok(event);
+  return checkAppShortcut(event, bindings, isMac)?.action ?? null;
+}
+
+test('resolving defaults preserves reopen, new tab, and local terminal shortcuts', () => {
+  const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {});
+
+  assert.deepEqual(bindings, DEFAULT_KEY_BINDINGS);
+  assert.equal(shortcut('Ctrl + Shift + T', bindings), 'reopenClosedTab');
+  assert.equal(shortcut('\u2318 + Shift + T', bindings, true), 'reopenClosedTab');
+  assert.equal(shortcut('Ctrl + T', bindings), 'newTab');
+  assert.equal(shortcut('\u2318 + L', bindings, true), 'openLocal');
+});
+
+test('custom PC open-local evicts the conflicting reopen default only on PC', () => {
+  const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+    'open-local': { pc: 'Ctrl + Shift + T' },
+  });
+
+  assert.equal(bindings.find(binding => binding.id === 'open-local')?.pc, 'Ctrl + Shift + T');
+  assert.equal(bindings.find(binding => binding.id === 'reopen-closed-tab')?.pc, 'Disabled');
+  assert.equal(shortcut('Ctrl + Shift + T', bindings), 'openLocal');
+  assert.equal(shortcut('\u2318 + Shift + T', bindings, true), 'reopenClosedTab');
+});
+
+test('custom macOS open-local evicts the conflicting reopen default only on macOS', () => {
+  const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+    'open-local': { mac: '\u2318 + Shift + T' },
+  });
+
+  assert.equal(bindings.find(binding => binding.id === 'open-local')?.mac, '\u2318 + Shift + T');
+  assert.equal(bindings.find(binding => binding.id === 'reopen-closed-tab')?.mac, 'Disabled');
+  assert.equal(shortcut('\u2318 + Shift + T', bindings, true), 'openLocal');
+  assert.equal(bindings.find(binding => binding.id === 'reopen-closed-tab')?.pc, 'Ctrl + Shift + T');
+  assert.equal(shortcut('Ctrl + Shift + T', bindings), 'reopenClosedTab');
+});
+
+test('unrelated custom shortcuts leave reopen defaults intact', () => {
+  const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+    'open-local': { pc: 'Ctrl + L' },
+  });
+
+  assert.equal(shortcut('Ctrl + L', bindings), 'openLocal');
+  assert.equal(shortcut('Ctrl + Shift + T', bindings), 'reopenClosedTab');
+  assert.equal(shortcut('\u2318 + Shift + T', bindings, true), 'reopenClosedTab');
+});
+
+for (const [id, key] of [['copy', 'C'], ['paste', 'V']]) {
+  test(`recording the terminal ${id} default preserves the SFTP default`, () => {
+    const chord = `\u2318 + ${key}`;
+    const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+      [id]: { mac: chord },
+    });
+
+    assert.equal(bindings.find(binding => binding.id === id)?.mac, chord);
+    assert.equal(bindings.find(binding => binding.id === `sftp-${id}`)?.mac, chord);
+  });
+}
+
+test('custom SFTP chords preserve conflicting app-level defaults on both schemes', () => {
+  const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+    'sftp-copy': { mac: '\u2318 + Shift + T', pc: 'Ctrl + Shift + T' },
+  });
+
+  for (const id of ['sftp-copy', 'reopen-closed-tab']) {
+    assert.equal(bindings.find(binding => binding.id === id)?.mac, '\u2318 + Shift + T');
+    assert.equal(bindings.find(binding => binding.id === id)?.pc, 'Ctrl + Shift + T');
+  }
+});
+
+test('custom SFTP chords still evict conflicting defaults within SFTP', () => {
+  const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+    'sftp-copy': { mac: '\u2318 + V', pc: 'Ctrl + V' },
+  });
+
+  assert.equal(bindings.find(binding => binding.id === 'sftp-copy')?.mac, '\u2318 + V');
+  assert.equal(bindings.find(binding => binding.id === 'sftp-copy')?.pc, 'Ctrl + V');
+  assert.equal(bindings.find(binding => binding.id === 'sftp-paste')?.mac, 'Disabled');
+  assert.equal(bindings.find(binding => binding.id === 'sftp-paste')?.pc, 'Disabled');
+  assert.equal(bindings.find(binding => binding.id === 'paste')?.mac, '\u2318 + V');
+});
+
+test('conflicting custom shortcuts remain while uncustomized defaults are evicted', () => {
+  const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+    'open-local': { pc: 'Ctrl + Shift + T' },
+    'open-hosts': { pc: 'Ctrl + Shift + T' },
+  });
+
+  assert.equal(bindings.find(binding => binding.id === 'open-local')?.pc, 'Ctrl + Shift + T');
+  assert.equal(bindings.find(binding => binding.id === 'open-hosts')?.pc, 'Ctrl + Shift + T');
+  assert.equal(bindings.find(binding => binding.id === 'reopen-closed-tab')?.pc, 'Disabled');
+});
+
+test('an explicitly customized reopen binding retains its conflicting chord', () => {
+  const bindings = resolveKeyBindings(DEFAULT_KEY_BINDINGS, {
+    'open-local': { pc: 'Ctrl + Shift + T' },
+    'reopen-closed-tab': { pc: 'Ctrl + Shift + T' },
+  });
+
+  assert.equal(bindings.find(binding => binding.id === 'open-local')?.pc, 'Ctrl + Shift + T');
+  assert.equal(bindings.find(binding => binding.id === 'reopen-closed-tab')?.pc, 'Ctrl + Shift + T');
+});
+
+test('resolving conflicts does not mutate defaults or custom overrides', () => {
+  const defaults = structuredClone(DEFAULT_KEY_BINDINGS);
+  const custom = { 'open-local': { pc: 'Ctrl + Shift + T', mac: 'Disabled' } };
+  const originalCustom = structuredClone(custom);
+
+  const bindings = resolveKeyBindings(defaults, custom);
+
+  assert.equal(bindings.find(binding => binding.id === 'open-local')?.mac, 'Disabled');
+  assert.deepEqual(defaults, DEFAULT_KEY_BINDINGS);
+  assert.deepEqual(custom, originalCustom);
+});
 
 test('parses legacy stored custom key bindings without sync metadata', () => {
   const parsed = parseCustomKeyBindingsStorageRecord('{"open":{"mac":"Cmd+K"}}');
