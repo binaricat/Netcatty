@@ -150,6 +150,7 @@ export default defineConfig(() => {
         commonjsOptions: {
           include: [
             /node_modules/,
+            /lib\/localShell\.cjs$/,
             /domain\/(?:sshPublicKey|singleChannelSshBanner|terminalPromptSecurity|totpPrompt)\.shared\.cjs$/,
             /domain\/systemManager\/containerRuntime\.shared\.cjs$/,
             /domain\/plugin(?:RuntimePolicy|PermissionDescriptions|ThemePack|RemoteTreePolicy|ViewStylePolicy|GitHubRepository)\.cjs$/,
