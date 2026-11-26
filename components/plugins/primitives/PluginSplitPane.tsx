@@ -54,7 +54,7 @@ export function PluginSplitPane({
     const startCoord = isHorizontal ? event.clientX : event.clientY;
     const startSize = collapsed ? minSize : sizeRef.current;
     setDragging(true);
-    try { target.setPointerCapture(event.pointerId); } catch {}
+    try { target.setPointerCapture(event.pointerId); } catch { /* pointer capture unsupported */ }
 
     let latestSize = startSize;
     let latestCollapsed = collapsed;
@@ -80,7 +80,7 @@ export function PluginSplitPane({
 
     const onUp = () => {
       setDragging(false);
-      try { target.releasePointerCapture(event.pointerId); } catch {}
+      try { target.releasePointerCapture(event.pointerId); } catch { /* pointer already released */ }
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);

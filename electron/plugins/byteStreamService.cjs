@@ -1,6 +1,7 @@
 "use strict";
 
 const { randomUUID } = require("node:crypto");
+const net = require("node:net");
 const os = require("node:os");
 const {
   canonicalizeStreamEndpoint,
@@ -51,6 +52,12 @@ function isOwnMachineAddress(address) {
   const normalized = normalizeStreamAddress(address);
   return normalized !== null && Object.values(os.networkInterfaces()).flat()
     .some((item) => item?.address && normalizeStreamAddress(item.address) === normalized);
+}
+
+function isLocalHostLiteral(host) {
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (!net.isIP(host)) return false;
+  return isLocalControlAddress(host) || isOwnMachineAddress(host);
 }
 
 class PluginByteStreamService {
@@ -144,14 +151,22 @@ class PluginByteStreamService {
     return Array.isArray(list) ? list : [];
   }
 
-  isDynamicEndpointRemembered(pluginId, endpoint) {
-    return this.listDynamicEndpoints(pluginId).includes(endpoint);
+  #rememberKey(endpoint, localAllowed = false) {
+    return localAllowed ? `${endpoint}#local` : endpoint;
   }
 
-  rememberDynamicEndpoint(pluginId, endpoint) {
+  isDynamicEndpointRemembered(pluginId, endpoint, localAllowed = false) {
+    const list = this.listDynamicEndpoints(pluginId);
+    if (localAllowed) {
+      return list.includes(this.#rememberKey(endpoint, true));
+    }
+    return list.includes(endpoint) || list.includes(this.#rememberKey(endpoint, true));
+  }
+
+  rememberDynamicEndpoint(pluginId, endpoint, localAllowed = false) {
     const key = this.#endpointPrefKey(pluginId);
     const current = new Set(this.listDynamicEndpoints(pluginId));
-    current.add(endpoint);
+    current.add(this.#rememberKey(endpoint, localAllowed));
     const next = [...current].slice(-256);
     this.memoryEndpoints.set(key, next);
     this.#writePref(key, next);
@@ -159,7 +174,8 @@ class PluginByteStreamService {
 
   revokeDynamicEndpoint(pluginId, endpoint) {
     const key = this.#endpointPrefKey(pluginId);
-    const next = this.listDynamicEndpoints(pluginId).filter((item) => item !== endpoint);
+    const localKey = this.#rememberKey(endpoint, true);
+    const next = this.listDynamicEndpoints(pluginId).filter((item) => item !== endpoint && item !== localKey);
     this.memoryEndpoints.set(key, next);
     if (next.length === 0) this.#deletePref(key);
     else this.#writePref(key, next);
@@ -199,10 +215,8 @@ class PluginByteStreamService {
     this.#writePref(certKey, certs);
   }
 
-  async #confirmDynamicEndpoint(target, context) {
-    const isLocal = target.host === "localhost"
-      || isLocalControlAddress(target.host)
-      || isOwnMachineAddress(target.host);
+  async #confirmDynamicEndpoint(target, context, localRequested = false) {
+    const isLocal = localRequested || isLocalHostLiteral(target.host);
     if (this.interactionService?.owner) {
       const result = await this.interactionService.request({
         kind: "network.stream.confirm",
@@ -216,7 +230,7 @@ class PluginByteStreamService {
         throw new PluginRpcError(RPC_ERRORS.cancelled, "Byte stream connection cancelled");
       }
       if (result.remember === true) {
-        this.rememberDynamicEndpoint(context.pluginId, target.endpoint);
+        this.rememberDynamicEndpoint(context.pluginId, target.endpoint, isLocal);
       }
       return;
     }
@@ -284,6 +298,7 @@ class PluginByteStreamService {
       try { target = canonicalizeStreamEndpoint(params.endpoint); }
       catch { throw new PluginRpcError(RPC_ERRORS.invalidArgument, "Byte stream endpoint is invalid"); }
       const { declared, staticMatch } = manifestStreamDeclaration(context.manifest, target.endpoint);
+      const isLocalTarget = params.allowLocal === true || isLocalHostLiteral(target.host);
       const isDynamic = !staticMatch || params.allowLocal === true;
       const connectOptions = {
         allowSelfSigned: params.allowSelfSigned === true,
@@ -295,11 +310,11 @@ class PluginByteStreamService {
         if (mode === "deny") {
           throw new PluginRpcError(RPC_ERRORS.permissionDenied, "Plugin permission is disabled: network.stream");
         }
-        if (!this.isDynamicEndpointRemembered(context.pluginId, target.endpoint)) {
-          await this.#confirmDynamicEndpoint(target, context);
+        if (!this.isDynamicEndpointRemembered(context.pluginId, target.endpoint, isLocalTarget)) {
+          await this.#confirmDynamicEndpoint(target, context, isLocalTarget);
         }
         await context.assertActive();
-        connectOptions.localApproved = true;
+        connectOptions.localApproved = isLocalTarget;
         connectOptions.skipPermissionAuthorize = true;
       }
       return this.connect(target.endpoint, context, undefined, connectOptions);

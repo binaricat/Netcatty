@@ -255,14 +255,14 @@ export default function PluginCodeEditorInner({
     if (changeTimerRef.current) clearTimeout(changeTimerRef.current);
     if (selectionTimerRef.current) clearTimeout(selectionTimerRef.current);
     for (const d of disposablesRef.current.splice(0)) {
-      try { d.dispose(); } catch {}
+      try { d.dispose(); } catch { /* ignore already-disposed Monaco resources */ }
     }
     editorRef.current = null;
   }, []);
 
   const handleMount: OnMount = useCallback((editor, monacoInstance) => {
     for (const d of disposablesRef.current.splice(0)) {
-      try { d.dispose(); } catch {}
+      try { d.dispose(); } catch { /* ignore already-disposed Monaco resources */ }
     }
     editorRef.current = editor;
     monacoRef.current = monacoInstance;

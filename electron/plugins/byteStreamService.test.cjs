@@ -129,3 +129,74 @@ test("a stream opened after runtime release is cancelled before attach can succe
   assert.equal(f.service.records.size, 0);
   assert.equal(f.service.broker.connections.size, 0);
 });
+
+test("dynamic remote endpoint approval cannot escalate via DNS rebinding to loopback or skip allowLocal confirmation", async (t) => {
+  const prompts = [];
+  let dialed = 0;
+  const identity = {
+    pluginId: "com.netcatty.stream-rebinding-test",
+    pluginVersion: "0.1.0",
+    runtimeId: "runtime-rebind",
+    runtimeKind: "browser",
+    sourceOwner: "opaque-rebind",
+    sourceId: "rebind-src",
+    securityPrincipal: "host-principal",
+    manifest: {
+      features: { required: ["network.byte-streams"] },
+      permissions: { required: ["network.stream"] },
+    },
+  };
+  const registry = new PluginHostRpcRegistry();
+  const service = new PluginByteStreamService({
+    database: {
+      getActivePlugin: () => ({ enabled: true, source: { id: "rebind-src" } }),
+      getRetainedPluginSource: () => ({ id: "rebind-src" }),
+      privateOwner: () => "opaque-rebind",
+      publicPluginId: (owner) => owner === "opaque-rebind" ? identity.pluginId : null,
+      recordSecurityAudit() {},
+    },
+    permissionEngine: {
+      getMode: () => "allow",
+      onDidRevoke: () => ({ dispose() {} }),
+      authorize: async () => {},
+    },
+    interactionService: {
+      owner: { id: 1 },
+      request: async (params) => {
+        prompts.push(params);
+        return { cancelled: false, approved: true, remember: true };
+      },
+    },
+    runtimeSupervisor: {
+      getRuntimeIdentity: () => identity,
+      openStream: async () => ({ write: async () => {}, end() {}, cancel() {} }),
+    },
+  });
+  t.after(() => service.shutdown());
+  service.broker.lookup = async () => [{ address: "127.0.0.1", family: 4 }];
+  service.broker.connectSocket = () => {
+    dialed += 1;
+    throw new Error("synthetic dialer reached");
+  };
+  service.register(registry);
+  const routes = registry.createRoutes({ ...identity, assertCurrent() {} });
+  const call = (method, params) => routes.requestHandlers[method](params, { signal: new AbortController().signal });
+
+  // Without allowLocal, approving a remote hostname must NOT grant localApproved, so DNS -> 127.0.0.1 is blocked.
+  await assert.rejects(
+    call("network.stream.connect", { endpoint: "tcp://rebind.example:5432" }),
+    /control endpoints/u,
+  );
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].isLocal, false);
+  assert.equal(dialed, 0);
+
+  // Even though the remote endpoint was remembered above, requesting allowLocal: true must re-prompt with isLocal: true.
+  await assert.rejects(
+    call("network.stream.connect", { endpoint: "tcp://rebind.example:5432", allowLocal: true }),
+    /synthetic dialer reached/u,
+  );
+  assert.equal(prompts.length, 2);
+  assert.equal(prompts[1].isLocal, true);
+  assert.equal(dialed, 1);
+});
