@@ -85,3 +85,25 @@ test('RemoteDesktopArtifactCard renders user-preempted and error states distinct
   assert.match(errorHtml, /Remote screen capture failed/);
   assert.match(errorHtml, /border-destructive/);
 });
+
+test('RemoteDesktopArtifactCard forwards Radix TooltipTrigger DOM props to the root element', () => {
+  const html = renderToStaticMarkup(
+    <I18nProvider locale="en">
+      <RemoteDesktopArtifactCard
+        artifact={{
+          kind: 'remoteDesktop.act',
+          sessionId: 'rdp-1',
+          summary: 'Click (100, 200)',
+          completedActions: 1,
+          totalActions: 1,
+          actionVisualKind: 'click',
+        }}
+        data-state="closed"
+        aria-describedby="tooltip-1"
+      />
+    </I18nProvider>,
+  );
+
+  assert.match(html, /data-state="closed"/);
+  assert.match(html, /aria-describedby="tooltip-1"/);
+});

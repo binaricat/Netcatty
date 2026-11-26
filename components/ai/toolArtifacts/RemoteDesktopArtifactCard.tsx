@@ -20,7 +20,7 @@ import type {
   RemoteDesktopToolArtifact,
 } from './remoteDesktopToolArtifact';
 
-interface RemoteDesktopArtifactCardProps {
+interface RemoteDesktopArtifactCardProps extends React.HTMLAttributes<HTMLDivElement> {
   artifact: RemoteDesktopToolArtifact;
   onOpenImagePreview?: (src: string, name: string) => void;
   className?: string;
@@ -68,6 +68,7 @@ export const RemoteDesktopArtifactCard = React.forwardRef<HTMLDivElement, Remote
   artifact,
   onOpenImagePreview,
   className,
+  ...props
 }, ref) => {
   const { t } = useI18n();
 
@@ -81,6 +82,7 @@ export const RemoteDesktopArtifactCard = React.forwardRef<HTMLDivElement, Remote
 
     return (
       <div
+        {...props}
         ref={ref}
         className={cn(
           'flex w-full items-center gap-2.5 rounded-md border px-2.5 py-2',
@@ -132,6 +134,7 @@ export const RemoteDesktopArtifactCard = React.forwardRef<HTMLDivElement, Remote
 
     return (
       <div
+        {...props}
         ref={ref}
         className={cn(
           'flex w-full items-center gap-2.5 rounded-md border border-border/25 bg-muted/10 px-2.5 py-2',
@@ -192,6 +195,7 @@ export const RemoteDesktopArtifactCard = React.forwardRef<HTMLDivElement, Remote
 
   return (
     <div
+      {...props}
       ref={ref}
       className={cn(
         'flex w-full items-center gap-2.5 rounded-md border border-border/25 bg-muted/10 px-2.5 py-2',
