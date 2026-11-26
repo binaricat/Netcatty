@@ -1,4 +1,34 @@
-import { CustomKeyBindings } from './models';
+import { CustomKeyBindings, KeyBinding } from './models';
+
+export const resolveKeyBindings = (
+  defaults: readonly KeyBinding[],
+  customKeyBindings: CustomKeyBindings,
+): KeyBinding[] => {
+  let merged = defaults.map(binding => {
+    const custom = customKeyBindings[binding.id];
+    if (!custom) return binding;
+    return {
+      ...binding,
+      mac: custom.mac ?? binding.mac,
+      pc: custom.pc ?? binding.pc,
+    };
+  });
+
+  for (const scheme of ['mac', 'pc'] as const) {
+    const customChords = new Set(merged
+      .filter(binding => customKeyBindings[binding.id]?.[scheme] != null && binding[scheme] !== 'Disabled')
+      .map(binding => binding[scheme]));
+
+    // Custom shortcuts win over defaults; conflicts between custom shortcuts remain unchanged.
+    merged = merged.map(binding => (
+      customKeyBindings[binding.id]?.[scheme] == null && customChords.has(binding[scheme])
+        ? { ...binding, [scheme]: 'Disabled' }
+        : binding
+    ));
+  }
+
+  return merged;
+};
 
 const SYNC_VERSION_FIELD = '__netcattySyncVersion';
 const SYNC_ORIGIN_FIELD = '__netcattySyncOrigin';
