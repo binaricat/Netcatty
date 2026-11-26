@@ -379,9 +379,14 @@ export function textToVncKeysymSequence(text: string): number[] {
 export type RemoteDesktopSpecialKeyId =
   | 'ctrl-alt-del'
   | 'win'
+  | 'win-r'
+  | 'win-d'
+  | 'win-l'
+  | 'win-e'
   | 'alt-tab'
   | 'alt-f4'
   | 'ctrl-shift-esc'
+  | 'print-screen'
   | 'cmd-space'
   | 'ctrl-alt-f1'
   | 'ctrl-alt-f2'
@@ -394,9 +399,14 @@ export type RemoteDesktopSpecialKeyId =
 export const VNC_SPECIAL_CHORDS: Record<RemoteDesktopSpecialKeyId, readonly number[]> = {
   'ctrl-alt-del': [X11_KEYSYM.Control_L, X11_KEYSYM.Alt_L, X11_KEYSYM.Delete],
   win: [X11_KEYSYM.Super_L],
+  'win-r': [X11_KEYSYM.Super_L, 0x0072],
+  'win-d': [X11_KEYSYM.Super_L, 0x0064],
+  'win-l': [X11_KEYSYM.Super_L, 0x006c],
+  'win-e': [X11_KEYSYM.Super_L, 0x0065],
   'alt-tab': [X11_KEYSYM.Alt_L, X11_KEYSYM.Tab],
   'alt-f4': [X11_KEYSYM.Alt_L, X11_KEYSYM.F4],
   'ctrl-shift-esc': [X11_KEYSYM.Control_L, X11_KEYSYM.Shift_L, X11_KEYSYM.Escape],
+  'print-screen': [X11_KEYSYM.Print],
   'cmd-space': [X11_KEYSYM.Super_L, X11_KEYSYM.Space],
   'ctrl-alt-f1': [X11_KEYSYM.Control_L, X11_KEYSYM.Alt_L, X11_KEYSYM.F1],
   'ctrl-alt-f2': [X11_KEYSYM.Control_L, X11_KEYSYM.Alt_L, X11_KEYSYM.F2],

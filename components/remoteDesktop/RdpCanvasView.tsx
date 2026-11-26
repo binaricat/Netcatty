@@ -83,6 +83,8 @@ export interface RdpCanvasViewProps {
   fallbackDisableCredSsp: boolean;
   isVisible: boolean;
   displayMode: RemoteDesktopDisplayMode;
+  highDpi?: boolean;
+  mapCmdToCtrl?: boolean;
   viewOnly: boolean;
   clipboardSyncEnabled: boolean;
   audioMuted: boolean;
@@ -121,6 +123,8 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       fallbackDisableCredSsp,
       isVisible,
       displayMode,
+      highDpi = true,
+      mapCmdToCtrl = false,
       viewOnly,
       clipboardSyncEnabled,
       audioMuted,
@@ -214,6 +218,8 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       isVisible,
       keyboardGrabActive,
       displayMode,
+      highDpi,
+      mapCmdToCtrl,
     });
     propsRef.current = {
       viewOnly,
@@ -221,6 +227,8 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       isVisible,
       keyboardGrabActive,
       displayMode,
+      highDpi,
+      mapCmdToCtrl,
     };
 
     // Sync user mute / volume to audio player
@@ -470,6 +478,31 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       }
     }, [emitClipboardTransfer]);
 
+    const focusInput = useCallback(() => {
+      imeInputRef.current?.focus({ preventScroll: true });
+    }, []);
+
+    // Sync local clipboard to remote when focused or manually requested
+    const syncLocalClipboardToRdp = useCallback(async (force = false) => {
+      if ((!force && !propsRef.current.clipboardSyncEnabled) || propsRef.current.viewOnly) return;
+      const session = sessionRef.current;
+      const mod = modRef.current;
+      if (!session || !mod) return;
+      try {
+        const text = await navigator.clipboard?.readText();
+        if (text && (force || text !== lastRemoteClipboardTextRef.current)) {
+          lastRemoteClipboardTextRef.current = text;
+          const data = new mod.ClipboardData();
+          data.addText('text/plain', text);
+          await session.onClipboardPaste(data);
+        }
+      } catch {
+        // Clipboard permission or empty
+      }
+    }, []);
+
+    const syncClipboardNow = useCallback(() => syncLocalClipboardToRdp(true), [syncLocalClipboardToRdp]);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -480,6 +513,8 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         captureFrame,
         getCanvasRect,
         getCaptureStream,
+        focusInput,
+        syncClipboardNow,
         downloadRemoteClipboardFile,
         uploadLocalClipboardFiles,
       }),
@@ -487,10 +522,12 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         captureFrame,
         captureScreenshot,
         downloadRemoteClipboardFile,
+        focusInput,
         getCanvasRect,
         getCaptureStream,
         releaseAllInputs,
         sendSpecialKey,
+        syncClipboardNow,
         typeText,
         uploadLocalClipboardFiles,
       ],
@@ -502,25 +539,6 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         releaseAllInputs();
       }
     }, [isVisible, releaseAllInputs]);
-
-    // Sync local clipboard to remote when focused
-    const syncLocalClipboardToRdp = useCallback(async () => {
-      if (!propsRef.current.clipboardSyncEnabled || propsRef.current.viewOnly) return;
-      const session = sessionRef.current;
-      const mod = modRef.current;
-      if (!session || !mod) return;
-      try {
-        const text = await navigator.clipboard?.readText();
-        if (text && text !== lastRemoteClipboardTextRef.current) {
-          lastRemoteClipboardTextRef.current = text;
-          const data = new mod.ClipboardData();
-          data.addText('text/plain', text);
-          await session.onClipboardPaste(data);
-        }
-      } catch {
-        // Clipboard permission or empty
-      }
-    }, []);
 
     // Connect IronRDP WASM session
     useEffect(() => {
@@ -540,12 +558,19 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         modRef.current = mod;
 
         const containerRect = containerRef.current?.getBoundingClientRect();
+        const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+        const effectiveDpr = propsRef.current.highDpi ? Math.min(2, Math.max(1, rawDpr)) : 1;
+        const scaleFactor = propsRef.current.highDpi
+          ? Math.min(500, Math.max(100, Math.round(effectiveDpr * 100)))
+          : 100;
+        const cssW = Math.max(640, Math.floor(containerRect?.width || rdpConfig.width || 1280));
+        const cssH = Math.max(480, Math.floor(containerRect?.height || rdpConfig.height || 800));
         const initW = rdpConfig.resolutionMode === 'fixed'
           ? Math.max(640, rdpConfig.width || 1920)
-          : Math.max(640, Math.floor(containerRect?.width || rdpConfig.width || 1280));
+          : Math.min(3840, Math.max(640, Math.floor(cssW * effectiveDpr)));
         const initH = rdpConfig.resolutionMode === 'fixed'
           ? Math.max(480, rdpConfig.height || 1080)
-          : Math.max(480, Math.floor(containerRect?.height || rdpConfig.height || 800));
+          : Math.min(2160, Math.max(480, Math.floor(cssH * effectiveDpr)));
         // Even dimensions help EGFX / H.264 / ClearCodec alignment
         const alignedW = initW - (initW % 2);
         const alignedH = initH - (initH % 2);
@@ -592,12 +617,9 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
           builder.serverDomain(cleanDomain);
         }
 
-        const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-        const scaleFactor = Math.min(500, Math.max(100, Math.round(dpr * 100)));
-
         builder
           .extension(new mod.Extension('display_control', true))
-          .extension(new mod.Extension('desktop_scale_factor', scaleFactor))
+          .extension(new mod.Extension('desktop_scale_factor', rdpConfig.resolutionMode === 'fixed' ? 100 : scaleFactor))
           .extension(new mod.Extension('color_depth', rdpConfig.colorDepth || 32))
           .extension(new mod.Extension('enable_credssp', enableCredSsp))
           .extension(new mod.Extension('enable_standard_rdp_security', enableStandardRdp))
@@ -1108,29 +1130,34 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
           timerId = null;
           if (!propsRef.current.isVisible || !sessionRef.current) return;
           const rect = container.getBoundingClientRect();
-          const rawW = Math.max(320, Math.floor(rect.width));
-          const rawH = Math.max(240, Math.floor(rect.height));
+          const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+          const effectiveDpr = propsRef.current.highDpi ? Math.min(2, Math.max(1, rawDpr)) : 1;
+          const scaleFactor = propsRef.current.highDpi
+            ? Math.min(500, Math.max(100, Math.round(effectiveDpr * 100)))
+            : 100;
+          const rawW = Math.min(3840, Math.max(320, Math.floor(rect.width * effectiveDpr)));
+          const rawH = Math.min(2160, Math.max(240, Math.floor(rect.height * effectiveDpr)));
           const targetW = rawW - (rawW % 2);
           const targetH = rawH - (rawH % 2);
           if (Math.abs(targetW - remoteSize.width) > 8 || Math.abs(targetH - remoteSize.height) > 8) {
-            const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-            const scaleFactor = Math.min(500, Math.max(100, Math.round(dpr * 100)));
             try {
               sessionRef.current.resize(targetW, targetH, scaleFactor);
               setRemoteSize({ width: targetW, height: targetH });
               callbacksRef.current.onDesktopResize({ width: targetW, height: targetH });
             } catch { /* ignore */ }
           }
-        }, 250);
+        }, 200);
       };
 
       const observer = new ResizeObserver(scheduleResize);
       observer.observe(container);
+      // Trigger immediately when switching into dynamic mode or toggling HiDPI
+      scheduleResize();
       return () => {
         observer.disconnect();
         if (timerId !== null) window.clearTimeout(timerId);
       };
-    }, [displayMode, remoteSize.height, remoteSize.width]);
+    }, [displayMode, highDpi, remoteSize.height, remoteSize.width]);
 
     // Keep cached canvas DOMRect in sync so high-frequency pointer moves avoid forced layout reads
     useEffect(() => {
@@ -1272,11 +1299,24 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         if (propsRef.current.viewOnly) return;
         if (e.nativeEvent.isComposing || e.key === 'Process') return;
 
-        if (!propsRef.current.keyboardGrabActive && (e.metaKey || (e.ctrlKey && e.shiftKey))) {
+        const mapCmd = propsRef.current.mapCmdToCtrl;
+        const isCmdMappedKey = mapCmd && (e.code === 'MetaLeft' || e.code === 'MetaRight' || e.metaKey);
+
+        if (!propsRef.current.keyboardGrabActive && !isCmdMappedKey && (e.metaKey || (e.ctrlKey && e.shiftKey))) {
           return;
         }
+        // When Cmd->Ctrl mapping is on (without keyboard grab), keep core app window/tab shortcuts local
+        if (!propsRef.current.keyboardGrabActive && isCmdMappedKey && e.metaKey) {
+          const code = e.code;
+          if (code === 'KeyW' || code === 'KeyQ' || code === 'KeyT' || code === 'KeyN' || code === 'Comma' || code === 'KeyK') {
+            return;
+          }
+        }
 
-        const scancode = domCodeToRdpScancode(e.code);
+        const effectiveCode = mapCmd && (e.code === 'MetaLeft' || e.code === 'MetaRight')
+          ? 'ControlLeft'
+          : e.code;
+        const scancode = domCodeToRdpScancode(effectiveCode);
         if (scancode === null) return;
         e.preventDefault();
         if (propsRef.current.keyboardGrabActive) {
@@ -1300,7 +1340,10 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
           lastAltRightUpRef.current = now;
         }
         if (propsRef.current.viewOnly) return;
-        const scancode = domCodeToRdpScancode(e.code);
+        const effectiveCode = propsRef.current.mapCmdToCtrl && (e.code === 'MetaLeft' || e.code === 'MetaRight')
+          ? 'ControlLeft'
+          : e.code;
+        const scancode = domCodeToRdpScancode(effectiveCode);
         if (scancode === null) return;
         e.preventDefault();
         applyDeviceEvents((mod) => [mod.DeviceEvent.keyReleased(scancode)]);

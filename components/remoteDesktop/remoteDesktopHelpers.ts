@@ -73,6 +73,8 @@ export interface RemoteDesktopCanvasHandle {
   ) => Promise<RemoteDesktopProviderFrame | null> | RemoteDesktopProviderFrame | null;
   getCanvasRect?: () => DOMRect | null;
   getCaptureStream?: (fps: number, includeAudio?: boolean) => MediaStream | null;
+  focusInput?: () => void;
+  syncClipboardNow?: () => Promise<void> | void;
   requestRefresh?: () => void;
   downloadRemoteClipboardFile?: (fileIndex: number) => Promise<void>;
   uploadLocalClipboardFiles?: (files: FileList | File[]) => Promise<void>;

@@ -66,6 +66,7 @@ export interface VncCanvasViewProps {
     name?: string;
     securityName?: string;
     encrypted?: boolean;
+    supportsDynamicResize?: boolean;
   }) => void;
   onDesktopResize: (size: { width: number; height: number }) => void;
   onDesktopName?: (name: string) => void;
@@ -310,6 +311,26 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       }
     }, []);
 
+    const focusInput = useCallback(() => {
+      imeInputRef.current?.focus({ preventScroll: true });
+    }, []);
+
+    // Sync local clipboard to VNC server on focus or manual request
+    const syncLocalClipboardToServer = useCallback((force = false) => {
+      if ((!force && !propsRef.current.clipboardSyncEnabled) || propsRef.current.viewOnly) return;
+      void navigator.clipboard
+        ?.readText()
+        .then((text) => {
+          if (text && (force || text !== lastRemoteClipboardRef.current)) {
+            lastRemoteClipboardRef.current = text;
+            sendBinary(buildClipboardFrame(text));
+          }
+        })
+        .catch(() => {});
+    }, [sendBinary]);
+
+    const syncClipboardNow = useCallback(() => syncLocalClipboardToServer(true), [syncLocalClipboardToServer]);
+
     const requestRefresh = useCallback(() => {
       sendBinary(buildRefreshFrame(false));
     }, [sendBinary]);
@@ -324,16 +345,20 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
         captureFrame,
         getCanvasRect,
         getCaptureStream,
+        focusInput,
+        syncClipboardNow,
         requestRefresh,
       }),
       [
         captureFrame,
         captureScreenshot,
+        focusInput,
         getCanvasRect,
         getCaptureStream,
         releaseAllInputs,
         requestRefresh,
         sendSpecialKey,
+        syncClipboardNow,
         typeText,
       ],
     );
@@ -427,6 +452,7 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
                 name: info.name,
                 securityName: secName,
                 encrypted,
+                supportsDynamicResize: Boolean(info.supports?.extendedDesktopSize),
               });
               if (!propsRef.current.isVisible) {
                 ws.send(buildPauseFrame(true));
@@ -679,20 +705,6 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       };
     }, [displayMode, remoteSize.height, remoteSize.width, sendBinary]);
 
-    // Sync local clipboard to VNC server on focus when enabled
-    const syncLocalClipboardToServer = useCallback(() => {
-      if (!propsRef.current.clipboardSyncEnabled || propsRef.current.viewOnly) return;
-      void navigator.clipboard
-        ?.readText()
-        .then((text) => {
-          if (text && text !== lastRemoteClipboardRef.current) {
-            lastRemoteClipboardRef.current = text;
-            sendBinary(buildClipboardFrame(text));
-          }
-        })
-        .catch(() => {});
-    }, [sendBinary]);
-
     const mapPointerCoords = useCallback((clientX: number, clientY: number, forceMeasure = false) => {
       const canvas = canvasRef.current;
       if (!canvas) return { x: 0, y: 0 };
@@ -923,7 +935,7 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
-          onFocus={syncLocalClipboardToServer}
+          onFocus={() => syncLocalClipboardToServer(false)}
           onBlur={releaseAllInputs}
           onKeyDown={handleKeyDown}
           onKeyUp={handleKeyUp}

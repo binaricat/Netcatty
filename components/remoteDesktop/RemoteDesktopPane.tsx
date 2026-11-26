@@ -203,6 +203,11 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     return spec.vncConfig?.scalingMode ?? 'fit';
   });
   const [quality, setQuality] = useState<RemoteDesktopQualityPreset>('auto');
+  const [highDpi, setHighDpi] = useState<boolean>(true);
+  const [mapCmdToCtrl, setMapCmdToCtrl] = useState<boolean>(() => (
+    isRdp && typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || navigator.userAgent || '')
+  ));
+  const [supportsDynamicResize, setSupportsDynamicResize] = useState<boolean>(isRdp);
   const [viewOnly, setViewOnly] = useState<boolean>(() => !isRdp && Boolean(spec.vncConfig?.viewOnly));
   const [clipboardSyncEnabled, setClipboardSyncEnabled] = useState<boolean>(() => (
     isRdp ? (spec.rdpConfig?.clipboardSync ?? true) : (spec.vncConfig?.clipboardSync ?? true)
@@ -845,11 +850,32 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   }, []);
 
   const handleToggleKeyboardGrab = useCallback(() => {
-    applyKeyboardGrab(!keyboardGrabActive);
+    const next = !keyboardGrabActive;
+    applyKeyboardGrab(next);
+    if (next) {
+      canvasHandleRef.current?.focusInput?.();
+    }
   }, [applyKeyboardGrab, keyboardGrabActive]);
 
   const handleSendSpecialKey = useCallback((id: RemoteDesktopSpecialKeyId) => {
     canvasHandleRef.current?.sendSpecialKey(id);
+    canvasHandleRef.current?.focusInput?.();
+  }, []);
+
+  const handleRefreshScreen = useCallback(() => {
+    canvasHandleRef.current?.requestRefresh?.();
+  }, []);
+
+  const handleSyncClipboardNow = useCallback(() => {
+    void canvasHandleRef.current?.syncClipboardNow?.();
+    toast.success(tr(t, 'remoteDesktop.clipboard.pushed', 'Local clipboard synced to remote'));
+  }, [t]);
+
+  const handleToggleClipboardSync = useCallback((enabled: boolean) => {
+    setClipboardSyncEnabled(enabled);
+    if (enabled) {
+      void canvasHandleRef.current?.syncClipboardNow?.();
+    }
   }, []);
 
   const handleTypeClipboardClick = useCallback(() => {
@@ -904,10 +930,11 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   }, [handleOpenSystemClient]);
 
   const handleVncConnected = useCallback(
-    (info: { width: number; height: number; name?: string; encrypted?: boolean }) => {
+    (info: { width: number; height: number; name?: string; encrypted?: boolean; supportsDynamicResize?: boolean }) => {
       setResolution({ width: info.width, height: info.height });
       if (info.name) setDesktopTitle(info.name);
       setEncrypted(Boolean(info.encrypted));
+      setSupportsDynamicResize(Boolean(info.supportsDynamicResize));
       setStageMessage('Desktop connected');
       updateStatus('connected');
     },
@@ -983,13 +1010,19 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         onTypeClipboard={handleTypeClipboardClick}
         displayMode={displayMode}
         onChangeDisplayMode={setDisplayMode}
+        supportsDynamicResize={isRdp || supportsDynamicResize}
+        highDpi={highDpi}
+        onToggleHighDpi={isRdp ? setHighDpi : undefined}
+        mapCmdToCtrl={mapCmdToCtrl}
+        onToggleMapCmdToCtrl={isRdp ? setMapCmdToCtrl : undefined}
         audioEnabled={isRdp && Boolean(spec.rdpConfig?.audioEnabled)}
         audioMuted={audioMuted}
         audioVolume={audioVolume}
         onToggleAudioMute={handleToggleAudioMute}
         onChangeAudioVolume={handleChangeAudioVolume}
         clipboardSyncEnabled={clipboardSyncEnabled}
-        onToggleClipboardSync={setClipboardSyncEnabled}
+        onToggleClipboardSync={handleToggleClipboardSync}
+        onSyncClipboardNow={handleSyncClipboardNow}
         remoteClipboardFiles={remoteClipboardFiles}
         clipboardFileTransferStatus={clipboardFileTransferStatus}
         clipboardTransfer={clipboardTransfer}
@@ -1015,6 +1048,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         onChangeQuality={setQuality}
         viewOnly={viewOnly}
         onToggleViewOnly={setViewOnly}
+        onRefreshScreen={!isRdp ? handleRefreshScreen : undefined}
         onScreenshotCopy={handleScreenshotCopyClick}
         onScreenshotSave={handleScreenshotSaveClick}
         onToggleFullscreen={handleToggleFullscreen}
@@ -1094,6 +1128,8 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
             fallbackDisableCredSsp={fallbackDisableCredSsp}
             isVisible={isVisible}
             displayMode={displayMode}
+            highDpi={highDpi}
+            mapCmdToCtrl={mapCmdToCtrl}
             viewOnly={viewOnly}
             clipboardSyncEnabled={clipboardSyncEnabled}
             audioMuted={audioMuted}
