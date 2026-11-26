@@ -1,6 +1,12 @@
 import { hostRestrictsExtraSshChannels } from "../../domain/host";
 import { useEffect, useRef, useState } from "react";
 import { buildHostConnectionTestPlan } from "../../domain/hostConnectionTest";
+import {
+  hasCompanionRdp,
+  hasCompanionVnc,
+  isRemoteDesktopProtocol,
+  resolveRemoteDesktopConnectionSpec,
+} from "../../domain/remoteDesktop";
 import { resolveEffectiveTerminalHost } from "../../domain/terminalHostResolution";
 import { getEffectiveKnownHosts } from "../../infrastructure/syncHelpers";
 import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
@@ -17,7 +23,10 @@ import {
   publishMonitorSnapshot,
   publishMonitorUnavailable,
 } from "./monitorRuntimeStore";
-import type { MonitorPanelDemand } from "../../domain/monitorRuntime";
+import type {
+  MonitorPanelDemand,
+  MonitorRemoteDesktopProbeOptions,
+} from "../../domain/monitorRuntime";
 
 /** Root lifetime, independent of Vault navigation. No runtime state is persisted. */
 export function useMonitorRuntime() {
@@ -91,8 +100,38 @@ export function useMonitorRuntime() {
               interval: panel.interval,
               hosts: panel.hostIds.map((id) => {
                 const host = hosts.find((h) => h.id === id);
+                if (!host) return { id };
+                if (isRemoteDesktopProtocol(host.protocol)) {
+                  const plan = buildHostConnectionTestPlan({
+                    host,
+                    hosts,
+                    keys,
+                    identities,
+                    groupConfigs,
+                    proxyProfiles,
+                    knownHosts: getEffectiveKnownHosts(knownHosts) ?? [],
+                    terminalSettings,
+                    sessionId: `monitor-probe-${id}`,
+                    bootEpoch: 0,
+                  });
+                  if (!plan.ok || plan.kind !== "remote-desktop") {
+                    return { id, status: "error" as const };
+                  }
+                  return {
+                    id,
+                    kind: "probe" as const,
+                    probe: {
+                      protocol: plan.options.protocol,
+                      hostname: plan.options.hostname,
+                      port: plan.options.port,
+                      proxy: plan.options.proxy,
+                      jumpHosts: plan.options.jumpHosts,
+                      bannerCheck: true,
+                      timeoutMs: 5000,
+                    },
+                  };
+                }
                 if (
-                  !host ||
                   (host.protocol && host.protocol !== "ssh") ||
                   hostRestrictsExtraSshChannels(host)
                 )
@@ -117,17 +156,35 @@ export function useMonitorRuntime() {
                     ? { ...credentials.current.get(id), authMethod: "password" }
                     : null,
                 });
-                if (!plan.ok) return { id, status: "error" as const };
+                if (!plan.ok || plan.kind !== "ssh") return { id, status: "error" as const };
                 if (plan.needsCredentialReentry)
                   return { id, status: "login" as const };
+                const companionProbes: MonitorRemoteDesktopProbeOptions[] = [];
+                for (const proto of ["rdp", "vnc"] as const) {
+                  const enabled = proto === "rdp" ? hasCompanionRdp(effective) : hasCompanionVnc(effective);
+                  if (!enabled) continue;
+                  const spec = resolveRemoteDesktopConnectionSpec(effective, proto, identities);
+                  companionProbes.push({
+                    protocol: proto,
+                    hostname: spec.hostname,
+                    port: spec.port,
+                    tunnelViaHostSsh: spec.tunnelViaHostSsh,
+                    tunnelTargetHost: spec.tunnelTargetHost,
+                    proxy: spec.tunnelViaHostSsh ? undefined : plan.options.proxy,
+                    bannerCheck: true,
+                    timeoutMs: 5000,
+                  });
+                }
                 return {
                   id,
+                  kind: "ssh" as const,
                   options: {
                     ...plan.options,
                     singleChannelSsh: hostRestrictsExtraSshChannels(effective),
                     sshAuthReadyTimeoutMs: 120000,
                     agentForwarding: effective.agentForwarding,
                   },
+                  ...(companionProbes.length > 0 ? { companionProbes } : {}),
                 };
               }),
             }));

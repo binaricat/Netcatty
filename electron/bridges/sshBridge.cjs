@@ -1410,6 +1410,7 @@ function registerOwnedAuthResponseHandler(ipcMain, terminalWorkerManager, channe
 
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
+  const ensureMacLanAccess = options.ensureMacLocalNetworkAccess || ensureMacLocalNetworkAccess;
   const trackedMonitorOwners = new WeakSet();
   for (const [channel, handler] of Object.entries(monitorHandlers)) {
     ipcMain.handle(channel, (event, payload) => {
@@ -1422,9 +1423,58 @@ function registerHandlers(ipcMain, options = {}) {
           } else monitorService.removeOwner(owner);
         });
       }
-      return terminalWorkerManager
-        ? terminalWorkerManager.request(channel, payload, { webContentsId: owner })
-        : handler(event, payload);
+      if (terminalWorkerManager) {
+        if (channel === "netcatty:monitor:update" && Array.isArray(payload)) {
+          return (async () => {
+            // macOS TN3179: probe LAN access from the main process for all SSH and
+            // RDP/VNC probe targets before forwarding the demand to utilityProcess.
+            const uniqueTargets = new Map();
+            const collectTarget = (target) => {
+              if (!target || typeof target !== "object") return;
+              const firstHop = target.proxy?.host || target.proxy?.hostname
+                || target.jumpHosts?.[0]?.hostname
+                || target.hostname || target.host || "";
+              const key = String(firstHop).trim().toLowerCase();
+              if (key && !uniqueTargets.has(key)) {
+                uniqueTargets.set(key, target);
+              }
+            };
+            for (const panel of payload) {
+              if (!panel || !Array.isArray(panel.hosts)) continue;
+              for (const host of panel.hosts) {
+                if (host?.options) collectTarget(host.options);
+                if (host?.probe) collectTarget(host.probe);
+              }
+            }
+            if (uniqueTargets.size > 0) {
+              await Promise.allSettled(
+                [...uniqueTargets.values()].map((target) => ensureMacLanAccess(target)),
+              );
+            }
+            const workerPayload = payload.map((panel) => {
+              if (!panel || !Array.isArray(panel.hosts)) return panel;
+              return {
+                ...panel,
+                hosts: panel.hosts.map((host) => {
+                  if (!host || typeof host !== "object") return host;
+                  return {
+                    ...host,
+                    ...(host.options && typeof host.options === "object"
+                      ? { options: { ...host.options, _macLocalNetworkMainProbed: true } }
+                      : {}),
+                    ...(host.probe && typeof host.probe === "object"
+                      ? { probe: { ...host.probe, _macLocalNetworkMainProbed: true } }
+                      : {}),
+                  };
+                }),
+              };
+            });
+            return terminalWorkerManager.request(channel, workerPayload, { webContentsId: owner });
+          })();
+        }
+        return terminalWorkerManager.request(channel, payload, { webContentsId: owner });
+      }
+      return handler(event, payload);
     });
   }
 

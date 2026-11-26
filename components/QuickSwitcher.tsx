@@ -12,11 +12,19 @@ import {
 } from "lucide-react";
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
+import { RdpProtocolIcon, VncProtocolIcon } from "./icons/RemoteDesktopIcons";
 import { Host, TerminalSession, TerminalSettings, Workspace } from "../types";
 import { KeyBinding } from "../domain/models";
 import type { PaneMagnificationState } from "../domain/paneMagnification";
 import { isSwitcherQuickConnectInput } from "../domain/quickConnect";
+import {
+  hasCompanionRdp,
+  hasCompanionVnc,
+  isRdpProtocol,
+  isVncProtocol,
+} from "../domain/remoteDesktop";
 import { matchesSearchQuery } from "../domain/searchMatcher";
+import { getProtocolBadgeClass } from "./protocolVisuals";
 import { buildQuickSwitcherShells, useDiscoveredShells, getShellIconPath, isMonochromeShellIcon } from "../lib/useDiscoveredShells";
 import { usePluginContributions } from "../application/state/usePluginContributions";
 import { requestOpenPluginView } from "./plugins/PluginContributionHost";
@@ -606,6 +614,12 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
               const rowClass = `flex h-full min-h-0 items-center gap-3 overflow-hidden px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`;
 
               if (item.type === "quick-connect") {
+                const lowerInput = (item.quickConnectInput || "").toLowerCase();
+                const qcProto = lowerInput.startsWith("rdp://")
+                  ? "rdp"
+                  : lowerInput.startsWith("vnc://")
+                    ? "vnc"
+                    : null;
                 return (
                   <div
                     className={rowClass}
@@ -615,6 +629,14 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                       <Zap className="h-3 w-3" fill="currentColor" />
                     </div>
                     <span className="min-w-0 truncate text-sm font-medium">{item.title}</span>
+                    {qcProto && (
+                      <span
+                        className={`ml-auto inline-flex items-center gap-1 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass(qcProto)}`}
+                      >
+                        {qcProto === "rdp" ? <RdpProtocolIcon size={10} /> : <VncProtocolIcon size={10} />}
+                        {qcProto.toUpperCase()}
+                      </span>
+                    )}
                   </div>
                 );
               }
@@ -633,6 +655,38 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                         size="sm"
                       />
                       <span className="truncate text-sm font-medium">{host.label}</span>
+                      {isRdpProtocol(host.protocol) && (
+                        <span
+                          className={`inline-flex items-center gap-0.5 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass("rdp")}`}
+                        >
+                          <RdpProtocolIcon size={10} />
+                          RDP
+                        </span>
+                      )}
+                      {isVncProtocol(host.protocol) && (
+                        <span
+                          className={`inline-flex items-center gap-0.5 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass("vnc")}`}
+                        >
+                          <VncProtocolIcon size={10} />
+                          VNC
+                        </span>
+                      )}
+                      {hasCompanionRdp(host) && (
+                        <span
+                          className={`inline-flex items-center gap-0.5 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass("rdp")}`}
+                        >
+                          <RdpProtocolIcon size={10} />
+                          +RDP
+                        </span>
+                      )}
+                      {hasCompanionVnc(host) && (
+                        <span
+                          className={`inline-flex items-center gap-0.5 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass("vnc")}`}
+                        >
+                          <VncProtocolIcon size={10} />
+                          +VNC
+                        </span>
+                      )}
                     </div>
                     <div className="ml-3 max-w-[12rem] shrink-0 truncate text-[11px] text-muted-foreground">
                       {host.group ? `Personal / ${host.group}` : "Personal"}
@@ -676,6 +730,8 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                   );
                 }
                 const session = item.data as TerminalSession | undefined;
+                const sessionIsRdp = isRdpProtocol(session?.protocol);
+                const sessionIsVnc = isVncProtocol(session?.protocol);
                 return (
                   <div
                     className={rowClass}
@@ -684,12 +740,42 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                       onClose();
                     }}
                   >
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground">
-                      <TerminalSquare size={16} />
+                    <div
+                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${
+                        sessionIsRdp
+                          ? "bg-blue-500/12 text-blue-500"
+                          : sessionIsVnc
+                            ? "bg-teal-500/12 text-teal-500"
+                            : "text-muted-foreground"
+                      }`}
+                    >
+                      {sessionIsRdp ? (
+                        <RdpProtocolIcon size={15} />
+                      ) : sessionIsVnc ? (
+                        <VncProtocolIcon size={15} />
+                      ) : (
+                        <TerminalSquare size={16} />
+                      )}
                     </div>
                     <span className="min-w-0 truncate text-sm font-medium">
                       {session?.hostLabel ?? item.id}
                     </span>
+                    {sessionIsRdp && (
+                      <span
+                        className={`ml-auto inline-flex items-center gap-0.5 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass("rdp")}`}
+                      >
+                        <RdpProtocolIcon size={10} />
+                        RDP
+                      </span>
+                    )}
+                    {sessionIsVnc && (
+                      <span
+                        className={`ml-auto inline-flex items-center gap-0.5 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass("vnc")}`}
+                      >
+                        <VncProtocolIcon size={10} />
+                        VNC
+                      </span>
+                    )}
                   </div>
                 );
               }

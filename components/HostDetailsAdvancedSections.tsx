@@ -1,5 +1,6 @@
 import { getHostOsSelection, HOST_OS_SELECTIONS, resolveHostOs } from '../domain/host';
 import { applyGroupDefaults } from "../domain/groupConfig";
+import { isRemoteDesktopProtocol } from "../domain/remoteDesktop";
 import React from "react";
 import { AlertTriangle, ChevronDown, Forward, Globe, HeartPulse, KeyRound, Link2, Palette, Plus, Router, ShieldAlert, TerminalSquare, Timer, Wifi, X, Variable } from "lucide-react";
 import { customThemeStore } from "../application/state/customThemeStore";
@@ -37,7 +38,11 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
   form,
   setForm,
   update,
+  activeProtocolTab,
+  isCurrentTabEnabled = true,
   effectiveThemeId,
+  effectiveTelnetThemeId,
+  onOpenTelnetThemeSelect,
   hasEffectiveThemeOverride,
   effectiveFontSize,
   hasEffectiveFontSizeOverride,
@@ -74,34 +79,57 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
     && !effectiveConnectionHost.moshEnabled
     && !effectiveConnectionHost.etEnabled;
   const effectiveX11Forwarding = !!effectiveConnectionHost.x11Forwarding;
+  const viewedProtocol: "ssh" | "rdp" | "vnc" | "telnet" =
+    activeProtocolTab
+    ?? (isRemoteDesktopProtocol(form.protocol)
+      ? form.protocol
+      : form.protocol === "telnet"
+        ? "telnet"
+        : "ssh");
+  const showTabSections = isCurrentTabEnabled !== false;
+  const isSshView = showTabSections && viewedProtocol === "ssh";
+  const isTelnetView = showTabSections && viewedProtocol === "telnet";
+  const isRemoteDesktopView = showTabSections && (viewedProtocol === "rdp" || viewedProtocol === "vnc");
+  const isCompanionTelnetTheme = isTelnetView && form.protocol !== "telnet" && Boolean(onOpenTelnetThemeSelect);
+  const displayedThemeId = isCompanionTelnetTheme && effectiveTelnetThemeId
+    ? effectiveTelnetThemeId
+    : effectiveThemeId;
 
   return (
   <>
+        {(isSshView || isTelnetView) && (
+        <>
         <HostDetailsSection
           icon={<Palette size={14} className="text-muted-foreground" />}
           title={t("hostDetails.section.appearance")}
         >
 
-          {/* SSH Theme Selection */}
+          {/* Terminal Theme Selection (SSH or Telnet) */}
           <div className="flex w-full items-center gap-1 rounded-lg bg-secondary/50 p-2 transition-colors hover:bg-secondary">
             <button
               type="button"
               className="flex min-w-0 flex-1 items-center gap-3 text-left"
-              onClick={() => setActiveSubPanel("theme-select")}
+              onClick={() => {
+                if (isCompanionTelnetTheme && onOpenTelnetThemeSelect) {
+                  onOpenTelnetThemeSelect();
+                } else {
+                  setActiveSubPanel("theme-select");
+                }
+              }}
             >
               <div
                 className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden shrink-0"
                 style={{
                   backgroundColor:
-                    customThemeStore.getThemeById(effectiveThemeId)?.colors.background || "#100F0F",
+                    customThemeStore.getThemeById(displayedThemeId)?.colors.background || "#100F0F",
                   color:
-                    customThemeStore.getThemeById(effectiveThemeId)?.colors.foreground || "#CECDC3",
+                    customThemeStore.getThemeById(displayedThemeId)?.colors.foreground || "#CECDC3",
                 }}
               >
                 <div className="p-0.5">
                   <div
                     style={{
-                      color: customThemeStore.getThemeById(effectiveThemeId)?.colors.green,
+                      color: customThemeStore.getThemeById(displayedThemeId)?.colors.green,
                     }}
                   >
                     $
@@ -109,10 +137,10 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                 </div>
               </div>
               <span className="text-sm flex-1 truncate">
-                {customThemeStore.getThemeById(effectiveThemeId)?.name || "Flexoki Dark"}
+                {customThemeStore.getThemeById(displayedThemeId)?.name || "Flexoki Dark"}
               </span>
             </button>
-            {hasEffectiveThemeOverride && (
+            {!isCompanionTelnetTheme && hasEffectiveThemeOverride && (
               <HostDetailsOverrideReset
                 label={t("common.useGlobal")}
                 onClick={(event) => {
@@ -191,6 +219,8 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
           </HostDetailsSettingRow>
         </HostDetailsSection>
 
+        {isSshView && (
+        <>
         <HostDetailsSection
           icon={<Wifi size={14} className="text-muted-foreground" />}
           title={t("hostDetails.section.mosh")}
@@ -361,13 +391,15 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             />
           </HostDetailsSection>
         )}
+        </>
+        )}
 
-        {(!form.protocol || ['ssh', 'telnet', 'mosh', 'et'].includes(form.protocol)) && (
+        {(isSshView || isTelnetView) && (
         <HostDetailsSection
           icon={<Router size={14} className="text-muted-foreground" />}
           title={t("hostDetails.section.deviceType")}
         >
-          {(!form.protocol || form.protocol === 'ssh') && !form.moshEnabled && !form.etEnabled && (<>
+          {isSshView && !form.moshEnabled && !form.etEnabled && (<>
             <ToggleRow
               label={t("hostDetails.deviceType")}
               hint={t("hostDetails.deviceType.desc")}
@@ -419,6 +451,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
         )}
 
         {/* SSH Algorithms */}
+        {isSshView && (
         <HostDetailsSection
           icon={<ShieldAlert size={14} className="text-muted-foreground" />}
           title={t("hostDetails.section.sshAlgorithms")}
@@ -473,6 +506,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             t={t}
           />
         </HostDetailsSection>
+        )}
 
         {/* Terminal Behavior — input/output key mappings (backspace, etc.) */}
         <HostDetailsSection
@@ -485,7 +519,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             enabled={!!form.showLineTimestamps}
             onToggle={() => update("showLineTimestamps", !form.showLineTimestamps)}
           />
-          {(form.protocol === undefined || form.protocol === "ssh") && !form.moshEnabled && !form.etEnabled && (
+          {isSshView && !form.moshEnabled && !form.etEnabled && (
             <>
               <ToggleRow
                 label={t("hostDetails.sshInputCompatibility")}
@@ -515,6 +549,8 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
         </HostDetailsSection>
 
         {/* Per-host keepalive override */}
+        {isSshView && (
+        <>
         <HostDetailsSection
           icon={<HeartPulse size={14} className="text-muted-foreground" />}
           title={t("hostDetails.section.keepalive")}
@@ -616,8 +652,13 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             />
           </HostDetailsSettingRow>
         </HostDetailsSection>
+        </>
+        )}
+        </>
+        )}
 
         {/* Proxy via Hosts (Jump Hosts / ProxyJump) */}
+        {(isSshView || isRemoteDesktopView) && (
         <HostDetailsSection
           icon={<Link2 size={14} className="text-muted-foreground" />}
           title={t("hostDetails.jumpHosts")}
@@ -695,8 +736,10 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             </Button>
           )}
         </HostDetailsSection>
+        )}
 
         {/* Proxy Configuration */}
+        {showTabSections && (
         <HostDetailsSection
           icon={<Globe size={14} className="text-muted-foreground" />}
           title={t("hostDetails.proxy")}
@@ -775,8 +818,12 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             </Button>
           )}
         </HostDetailsSection>
+        )}
 
         {/* Environment Variables */}
+        {(isSshView || isTelnetView) && (
+        <>
+        {isSshView && (
         <HostDetailsSection
           icon={<Variable size={14} className="text-muted-foreground" />}
           title={t("hostDetails.envVars")}
@@ -813,6 +860,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             </Button>
           )}
         </HostDetailsSection>
+        )}
 
         {/* Startup Command */}
         <HostDetailsSection
@@ -848,6 +896,8 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
             </Select>
           </HostDetailsSettingRow>
         </HostDetailsSection>
+        </>
+        )}
   </>
   );
 };

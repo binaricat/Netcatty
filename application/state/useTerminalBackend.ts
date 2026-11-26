@@ -1,5 +1,9 @@
 import { useCallback, useMemo } from "react";
 import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
+import type {
+  RemoteDesktopProbeResult,
+  RemoteDesktopTestOptions,
+} from "../../domain/hostConnectionTest";
 import type { TerminalSessionExitEvent } from "./resolveTerminalSessionExitIntent";
 
 type PluginConnectionStartOptions = NetcattyPluginConnectionStartRequest & {
@@ -143,6 +147,37 @@ export const useTerminalBackend = () => {
     const bridge = netcattyBridge.get();
     if (!bridge?.cancelTestConnection) return { success: false, error: "cancelTestConnection unavailable" };
     return bridge.cancelTestConnection(sessionId);
+  }, []);
+
+  const testRemoteDesktopConnection = useCallback(
+    async (options: RemoteDesktopTestOptions): Promise<RemoteDesktopProbeResult> => {
+      const bridge = netcattyBridge.get() as
+        | (NetcattyBridge & {
+            remoteDesktop?: {
+              testConnection?: (opts: RemoteDesktopTestOptions) => Promise<RemoteDesktopProbeResult>;
+            };
+          })
+        | undefined;
+      if (!bridge?.remoteDesktop?.testConnection) {
+        throw new Error("remoteDesktop.testConnection unavailable");
+      }
+      return bridge.remoteDesktop.testConnection(options);
+    },
+    [],
+  );
+
+  const cancelRemoteDesktopTestConnection = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get() as
+      | (NetcattyBridge & {
+          remoteDesktop?: {
+            cancelTestConnection?: (id: string) => Promise<{ ok: boolean }>;
+          };
+        })
+      | undefined;
+    if (!bridge?.remoteDesktop?.cancelTestConnection) {
+      return { ok: false };
+    }
+    return bridge.remoteDesktop.cancelTestConnection(sessionId);
   }, []);
 
   const startTelnetSession = useCallback(async (options: Parameters<NonNullable<NetcattyBridge["startTelnetSession"]>>[0]) => {
@@ -610,6 +645,8 @@ export const useTerminalBackend = () => {
         startSSHSession,
         testConnection,
         cancelTestConnection,
+        testRemoteDesktopConnection,
+        cancelRemoteDesktopTestConnection,
         startTelnetSession,
         startMoshSession,
         startEtSession,
@@ -697,6 +734,8 @@ export const useTerminalBackend = () => {
       startSSHSession,
       testConnection,
       cancelTestConnection,
+      testRemoteDesktopConnection,
+      cancelRemoteDesktopTestConnection,
       startTelnetSession,
       startMoshSession,
       startEtSession,

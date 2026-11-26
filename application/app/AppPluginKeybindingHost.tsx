@@ -1,6 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 
 import { PluginContributionHost } from '../../components/plugins/PluginContributionHost';
+import {
+  isRemoteDesktopGrabReleaseChord,
+  isTargetInsideRemoteDesktopCapture,
+} from '../../components/remoteDesktop/remoteDesktopHelpers';
 import type { TerminalSession, Workspace } from '../../types';
 import { useActiveTabId } from '../state/activeTabStore';
 import { resolveActivePluginKeybindingContext } from '../state/pluginContributionContexts';
@@ -25,6 +29,21 @@ export function AppPluginKeybindingHost({
   workspaces: Workspace[];
 }) {
   const activeTabId = useActiveTabId();
+
+  // Short-circuit plugin keybindings when keyboard focus is inside an active
+  // remote desktop capture surface (except for the grab-release chord).
+  useEffect(() => {
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      if (!isTargetInsideRemoteDesktopCapture(event.target, event.composedPath?.bind(event))) {
+        return;
+      }
+      if (isRemoteDesktopGrabReleaseChord(event)) return;
+      event.preventDefault();
+    };
+    document.addEventListener('keydown', onDocumentKeyDown);
+    return () => document.removeEventListener('keydown', onDocumentKeyDown);
+  }, []);
+
   const keybindingContext = useMemo(() => {
     // AI chat recency drives the workspace anchor fallback (#4098 phase 2).
     // Read without subscribing: keybinding context is best-effort and refreshes

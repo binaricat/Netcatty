@@ -1,0 +1,212 @@
+diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
+index e30d77e..67808ed 100644
+--- a/crates/ironrdp-web/src/session.rs
++++ b/crates/ironrdp-web/src/session.rs
+@@ -1,6 +1,8 @@
+-use core::cell::RefCell;
++use core::cell::{Cell, RefCell};
+ use core::net::{Ipv4Addr, SocketAddrV4};
+ use core::num::NonZeroU32;
++use core::pin::Pin;
++use core::task::{Context, Poll};
+ use core::time::Duration;
+ use std::borrow::Cow;
+ use std::rc::Rc;
+@@ -17,10 +19,10 @@ use anyhow::Context as _;
+ use base64::Engine as _;
+ use futures_channel::mpsc;
+ use futures_util::io::{ReadHalf, WriteHalf};
+-use futures_util::{AsyncWriteExt as _, FutureExt as _, StreamExt as _, select};
++use futures_util::{AsyncWriteExt as _, FutureExt as _, Stream, StreamExt as _, select};
+ use gloo_net::websocket;
+ use gloo_net::websocket::futures::WebSocket;
+-use gloo_timers::future::IntervalStream;
++use gloo_timers::future::{IntervalStream, TimeoutFuture};
+ use iron_remote_desktop::{CursorStyle, DesktopSize, Extension, IronErrorKind};
+ use ironrdp::cliprdr::CliprdrClient;
+ use ironrdp::cliprdr::backend::ClipboardMessage;
+@@ -32,6 +34,7 @@ use ironrdp::displaycontrol::client::DisplayControlClient;
+ use ironrdp::displaycontrol::pdu::DeviceScaleFactor;
+ use ironrdp::dvc::DrdynvcClient;
+ use ironrdp::graphics::image_processing::PixelFormat;
++use ironrdp::pdu::geometry::InclusiveRectangle;
+ use ironrdp::pdu::input::fast_path::FastPathInputEvent;
+ use ironrdp::pdu::rdp::capability_sets::{BitmapCodecs, client_codecs_capabilities};
+ use ironrdp::pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
+@@ -998,6 +1001,80 @@ impl Session {
+     }
+ }
+ 
++/// Minimum interval (ms) between canvas blits. Graphics updates are coalesced
++/// into a single dirty bounding rectangle and flushed at most this often.
++const DRAW_INTERVAL_MS: u32 = 16;
++
++/// Maximum number of RDP frames processed before cooperatively yielding back
++/// to the browser event loop so DOM keyboard/mouse events are never starved.
++const MAX_FRAMES_PER_YIELD: u32 = 16;
++
++/// One-shot timer that gives a coalesced dirty region a paint deadline without
++/// waking an idle session every 16ms.
++struct PaintTicker {
++    delay: u32,
++    armed: Rc<Cell<bool>>,
++    deadline: Option<TimeoutFuture>,
++}
++
++/// Handle used to arm a [`PaintTicker`] from inside the session loop while the
++/// ticker itself is borrowed by `select!`.
++#[derive(Clone)]
++struct PaintTrigger(Rc<Cell<bool>>);
++
++impl PaintTrigger {
++    fn trigger(&self) {
++        self.0.set(true);
++    }
++}
++
++impl PaintTicker {
++    fn new(delay: u32) -> (Self, PaintTrigger) {
++        let armed = Rc::new(Cell::new(false));
++        let trigger = PaintTrigger(Rc::clone(&armed));
++        let this = Self {
++            delay,
++            armed,
++            deadline: None,
++        };
++        (this, trigger)
++    }
++}
++
++impl Stream for PaintTicker {
++    type Item = ();
++
++    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<()>> {
++        let this = self.get_mut();
++
++        if !this.armed.get() {
++            this.deadline = None;
++            return Poll::Pending;
++        }
++
++        let deadline = this.deadline.get_or_insert_with(|| TimeoutFuture::new(this.delay));
++
++        match Pin::new(deadline).poll(cx) {
++            Poll::Ready(()) => {
++                this.deadline = None;
++                this.armed.set(false);
++                Poll::Ready(Some(()))
++            }
++            Poll::Pending => Poll::Pending,
++        }
++    }
++}
++
++/// Smallest inclusive rectangle containing both `a` and `b`.
++fn union_rect(a: InclusiveRectangle, b: InclusiveRectangle) -> InclusiveRectangle {
++    InclusiveRectangle {
++        left: a.left.min(b.left),
++        top: a.top.min(b.top),
++        right: a.right.max(b.right),
++        bottom: a.bottom.max(b.bottom),
++    }
++}
++
+ impl iron_remote_desktop::Session for Session {
+     type SessionTerminationInfo = SessionTerminationInfo;
+     type InputTransaction = InputTransaction;
+@@ -1076,9 +1153,30 @@ impl iron_remote_desktop::Session for Session {
+         // Timer interval for driving clipboard lock timeouts (5 second interval)
+         let mut cleanup_interval = IntervalStream::new(5_000).fuse();
+ 
++        // Coalesce graphics updates into a single dirty region painted at most
++        // every DRAW_INTERVAL_MS and yield cooperatively every
++        // MAX_FRAMES_PER_YIELD frames so rapid remote screen updates never
++        // starve browser keyboard/mouse input handlers.
++        let (mut paint_ticker, paint_trigger) = PaintTicker::new(DRAW_INTERVAL_MS);
++        let mut pending_dirty: Option<InclusiveRectangle> = None;
++        let mut frames_since_yield: u32 = 0;
++
++        macro_rules! flush_pending_draw {
++            () => {
++                if let Some(region) = pending_dirty.take() {
++                    let region = extract_partial_image(&image, region, &mut draw_buffer);
++                    gui.draw(draw_buffer.filled_mut(), region)
++                        .context("draw updated region")?;
++                    draw_buffer.clear();
++                }
++            };
++        }
++
+         let disconnect_reason = 'outer: loop {
+             let outputs = select! {
+                 frame = framed.read_pdu().fuse() => {
++                    frames_since_yield = frames_since_yield.saturating_add(1);
++
+                     let (action, payload) = frame.context("read frame")?;
+                     trace!(?action, frame_length = payload.len(), "Frame received");
+ 
+@@ -1277,6 +1375,10 @@ impl iron_remote_desktop::Session for Session {
+                         }
+                     }
+                 }
++                _ = paint_ticker.next().fuse() => {
++                    flush_pending_draw!();
++                    Vec::new()
++                }
+                 _ = cleanup_interval.next() => {
+                     // Drive clipboard lock timeout cleanup
+                     if let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() {
+@@ -1305,6 +1407,11 @@ impl iron_remote_desktop::Session for Session {
+             // so `gui.draw` never blits post-reset regions onto stale canvas bounds; only the
+             // size decision (`canvas_resize`) is unit-tested, not the loop placement.
+             // Check dynamic resize against an EGFX-capable server when changing this loop.
++            // If EGFX ResetGraphics resized the framebuffer without DeactivateAll,
++            // discard any dirty rect queued against the previous dimensions.
++            if (image.width(), image.height()) != framebuffer_size {
++                pending_dirty = None;
++            }
+             sync_canvas(&mut gui, &image, &mut framebuffer_size)?;
+ 
+             for out in outputs {
+@@ -1315,10 +1422,13 @@ impl iron_remote_desktop::Session for Session {
+                             .context("Send frame to writer task")?;
+                     }
+                     ActiveStageOutput::GraphicsUpdate(region) => {
+-                        let region = extract_partial_image(&image, region, &mut draw_buffer);
+-                        gui.draw(draw_buffer.filled_mut(), region)
+-                            .context("draw updated region")?;
+-                        draw_buffer.clear();
++                        // Coalesce into a union dirty region; pixels are read from
++                        // `image` when flushed so the latest state is painted.
++                        pending_dirty = Some(match pending_dirty {
++                            Some(pending) => union_rect(pending, region),
++                            None => region,
++                        });
++                        paint_trigger.trigger();
+                     }
+                     ActiveStageOutput::PointerDefault => {
+                         self.set_cursor_style(CursorStyle::Default)?;
+@@ -1461,6 +1571,7 @@ impl iron_remote_desktop::Session for Session {
+                                 drop(image);
+                                 ensure_framebuffer_allocatable(desktop_size)?;
+                                 image = DecodedImage::new(PixelFormat::RgbA32, desktop_size.width, desktop_size.height);
++                                pending_dirty = None;
+                                 sync_canvas(&mut gui, &image, &mut framebuffer_size)?;
+                                 if !active_stage.reactivate(
+                                     connection_activation.io_channel_id(),
+@@ -1511,6 +1622,15 @@ impl iron_remote_desktop::Session for Session {
+                     ActiveStageOutput::Terminate(reason) => break 'outer reason,
+                 }
+             }
++
++            // Cooperatively yield to the browser event loop at least every
++            // MAX_FRAMES_PER_YIELD frames so DOM input handlers, WebSocket
++            // delivery and paint timers stay responsive under heavy updates.
++            if frames_since_yield >= MAX_FRAMES_PER_YIELD {
++                frames_since_yield = 0;
++                flush_pending_draw!();
++                TimeoutFuture::new(0).await;
++            }
+         };
+ 
+         info!(%disconnect_reason, "RDP session terminated");

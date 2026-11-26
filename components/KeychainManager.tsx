@@ -468,6 +468,7 @@ echo $3 >> "$FILE"`);
       id: draftIdentity.id || crypto.randomUUID(),
       label: draftIdentity.label.trim(),
       username: draftIdentity.username.trim(),
+      ...(draftIdentity.domain?.trim() ? { domain: draftIdentity.domain.trim() } : {}),
       authMethod: draftIdentity.authMethod || "password",
       password: draftIdentity.password,
       keyId: draftIdentity.keyId,

@@ -78,6 +78,8 @@ export function buildSystemPrompt(context: SystemPromptContext): string {
 
 10. **Network device sessions.** Sessions with \`protocol: serial\` (shell: raw) or \`deviceType: network\` (SSH-connected network equipment) are connected to network devices or embedded systems. They do NOT run a standard shell (bash/zsh/etc). Commands are sent as-is without shell wrapping. Do not use shell syntax (pipes, redirects, environment variables, subshells). Use the device's native CLI commands (e.g. Cisco IOS, Huawei VRP, Juniper JunOS). Exit codes are unavailable. Consider disabling pagination first (\`screen-length 0 temporary\` for Huawei, \`terminal length 0\` for Cisco). SFTP is not available for serial sessions.
 
+11. **Remote desktop sessions (VNC / RDP).** Sessions with \`protocol: vnc\` or \`protocol: rdp\` are graphical remote desktops without a text PTY — do not call \`terminal_execute\` or \`terminal_read_context\` on them. Use \`remote_desktop_read_screen\` to inspect the live screen read-only. Start with a full-screen capture at \`standard\` quality; if an error dialog, traceback, or log window has small text, call \`remote_desktop_read_screen\` again with \`cropX\`, \`cropY\`, \`cropWidth\`, \`cropHeight\` (0–1000 normalized permille coordinates) and \`quality: "high"\` to zoom in at 1:1 native pixel resolution. When a companion SSH session for the same host is also open in your workspace, correlate visual errors on the desktop with SSH diagnostics and commands.
+
 ## Current Scope
 
 ${scopeDescription}
@@ -177,6 +179,7 @@ function buildPermissionRules(
       return [
         'You are in **observer** mode. You may only perform read-only operations:',
         '- Getting workspace and session info (`workspace_get_info`, `workspace_get_session_info`)',
+        '- Reading remote desktop screens (`remote_desktop_read_screen`) when a VNC/RDP session is in scope',
         '- Fetching URLs (`url_fetch`)',
         '- Searching the web (`web_search`)',
         '',

@@ -1046,3 +1046,72 @@ test("a moved pane tree (#4037) roundtrips through the restore snapshot", () => 
     ? collectSessionIds(restored.root.children[0]).join(",")
     : "", "s3,s1");
 });
+
+test("sessionRestore preserves vnc and rdp sessions with sanitized configs and companion flag", () => {
+  const payload = buildSessionRestorePayload({
+    sessions: [
+      {
+        ...session("rdp-1"),
+        protocol: "rdp",
+        port: 3389,
+        username: "Administrator",
+        rdpConfig: {
+          port: 3389,
+          domain: "CORP",
+          resolutionMode: "dynamic",
+          audioEnabled: true,
+          password: "must-be-stripped",
+        } as TerminalSession["rdpConfig"],
+      },
+      {
+        ...session("vnc-1"),
+        protocol: "vnc",
+        port: 5901,
+        username: "",
+        remoteDesktopCompanion: true,
+        vncConfig: {
+          enabled: true,
+          port: 5901,
+          scalingMode: "fit",
+          viewOnly: true,
+          password: "must-be-stripped",
+        } as TerminalSession["vncConfig"],
+      },
+    ],
+    workspaces: [],
+    tabOrder: ["rdp-1", "vnc-1"],
+    activeTabId: "rdp-1",
+    now: 500,
+  });
+
+  const roundtripped = sanitizeSessionRestorePayload(JSON.parse(JSON.stringify(payload)));
+  assert.equal(roundtripped.sessions.length, 2);
+  assert.equal(roundtripped.sessions[0].protocol, "rdp");
+  assert.deepEqual(roundtripped.sessions[0].rdpConfig, {
+    port: 3389,
+    domain: "CORP",
+    resolutionMode: "dynamic",
+    audioEnabled: true,
+  });
+  assert.equal("password" in (roundtripped.sessions[0].rdpConfig ?? {}), false);
+
+  assert.equal(roundtripped.sessions[1].protocol, "vnc");
+  assert.equal(roundtripped.sessions[1].username, "");
+  assert.equal(roundtripped.sessions[1].remoteDesktopCompanion, true);
+  assert.deepEqual(roundtripped.sessions[1].vncConfig, {
+    enabled: true,
+    port: 5901,
+    scalingMode: "fit",
+    viewOnly: true,
+  });
+  assert.equal("password" in (roundtripped.sessions[1].vncConfig ?? {}), false);
+
+  assert.equal(
+    shouldAttemptRestoreCwd({
+      enabled: true,
+      session: { ...roundtripped.sessions[0], lastCwd: "/home/admin" },
+      isNetworkDevice: false,
+    }),
+    false,
+  );
+});

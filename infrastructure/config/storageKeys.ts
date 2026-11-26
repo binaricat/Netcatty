@@ -363,3 +363,14 @@ export const STORAGE_KEY_MONITOR_HIDDEN_COLUMNS = "netcatty_monitor_hidden_colum
 
 // Preferred application for saved terminal logs (independent of SFTP associations).
 export const STORAGE_KEY_SESSION_LOG_APPLICATION = "netcatty.sessionLogApplication";
+
+// Remote Desktop (VNC / RDP) TOFU pinned TLS certificates (SHA-256 fingerprints).
+export const STORAGE_KEY_KNOWN_REMOTE_DESKTOP_CERTS = 'netcatty_known_remote_desktop_certs_v1';
+export const KNOWN_REMOTE_DESKTOP_CERTS = STORAGE_KEY_KNOWN_REMOTE_DESKTOP_CERTS;
+
+// Remote Desktop Session Recordings (device-local settings)
+export const STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD = 'netcatty_remote_desktop_auto_record_v1';
+export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS = 'netcatty_remote_desktop_recording_fps_v1';
+export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO = 'netcatty_remote_desktop_recording_include_audio_v1';
+export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB = 'netcatty_remote_desktop_recording_max_mb_v1';
+export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS = 'netcatty_remote_desktop_recording_retention_days_v1';

@@ -169,6 +169,16 @@ try {
         codeCache: true,
       },
     },
+    {
+      scheme: "netcatty-media",
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        stream: true,
+      },
+    },
   ]);
 } catch (err) {
   console.warn("[Main] Failed to register custom scheme privileges:", err);
@@ -471,6 +481,26 @@ function registerAppProtocol() {
     });
   } catch (err) {
     console.error("[Main] Failed to register app:// protocol handler:", err);
+  }
+}
+
+function registerMediaProtocol() {
+  if (!protocol?.handle) return;
+
+  try {
+    const recordingsModule = require("./bridges/remoteDesktopRecordingsBridge.cjs");
+    const recordingsBridge = recordingsModule.init({
+      app,
+      userDataDir: app.getPath("userData"),
+      electronModule,
+      shell,
+      BrowserWindow,
+    });
+    protocol.handle("netcatty-media", (request) => (
+      recordingsBridge.handleMediaProtocolRequest(request)
+    ));
+  } catch (err) {
+    console.error("[Main] Failed to register netcatty-media:// protocol handler:", err);
   }
 }
 
@@ -1359,6 +1389,7 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     perfTrace.mark("main:when-ready");
     registerAppProtocol();
+    registerMediaProtocol();
     const initialSshDeepLinkPreference = applyInitialSshDeepLinkPreference({
       enabled: sshDeepLinkEnabled,
       applyPreference: (enabled) => applySshProtocolClientPreference({ app, enabled, isDev }),

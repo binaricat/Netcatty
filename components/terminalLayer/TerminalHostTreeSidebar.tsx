@@ -124,6 +124,8 @@ interface TerminalHostTreeSidebarProps {
   resolvedPreviewTheme: TerminalTheme;
   activeHostId?: string | null;
   onConnect: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: 'vnc' | 'rdp') => void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: 'vnc' | 'rdp') => void;
   onNewHost?: (defaultGroup?: string) => void;
   onEditHost?: (host: Host) => void;
   onCreateLocalTerminal?: () => void;
@@ -325,6 +327,8 @@ type HostTreeFlatRowProps = {
   isInlineEditing: boolean;
   inlineEditInitialName?: string;
   onConnect: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: 'vnc' | 'rdp') => void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: 'vnc' | 'rdp') => void;
   onNewHost?: (defaultGroup?: string) => void;
   onEditHost?: (host: Host) => void;
   onTogglePath: (path: string) => void;
@@ -347,6 +351,8 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
   isInlineEditing,
   inlineEditInitialName,
   onConnect,
+  onConnectRemoteDesktop,
+  onOpenSystemRemoteDesktop,
   onNewHost,
   onEditHost,
   onTogglePath,
@@ -480,6 +486,8 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
             <HostTreeHostContextMenuContent
               host={row.host}
               onConnect={onConnect}
+              onConnectRemoteDesktop={onConnectRemoteDesktop}
+              onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
               onEditHost={onEditHost}
               onRenameHost={menuActions.onRenameHost}
               onDuplicateHost={menuActions.onDuplicateHost}
@@ -648,6 +656,8 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
   if (prev.onDropToRow !== next.onDropToRow) return false;
   if (prev.onTogglePath !== next.onTogglePath) return false;
   if (prev.onConnect !== next.onConnect) return false;
+  if (prev.onConnectRemoteDesktop !== next.onConnectRemoteDesktop) return false;
+  if (prev.onOpenSystemRemoteDesktop !== next.onOpenSystemRemoteDesktop) return false;
   if (prev.activeHostId === next.activeHostId) return true;
   if (prev.row.kind === 'host') {
     return prev.row.host.id !== prev.activeHostId && prev.row.host.id !== next.activeHostId;
@@ -668,6 +678,8 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
   resolvedPreviewTheme,
   activeHostId,
   onConnect,
+  onConnectRemoteDesktop,
+  onOpenSystemRemoteDesktop,
   onNewHost,
   onEditHost,
   onCreateLocalTerminal,
@@ -941,6 +953,8 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
             : undefined
       }
       onConnect={onConnect}
+      onConnectRemoteDesktop={onConnectRemoteDesktop}
+      onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
       onNewHost={onNewHost}
       onEditHost={onEditHost}
       onTogglePath={togglePath}
@@ -966,6 +980,8 @@ const TerminalHostTreeSidebarInner: React.FC<TerminalHostTreeSidebarProps> = ({
     isRowDragOver,
     menuActions,
     onConnect,
+    onConnectRemoteDesktop,
+    onOpenSystemRemoteDesktop,
     onNewHost,
     onEditHost,
     treeExpandAll,

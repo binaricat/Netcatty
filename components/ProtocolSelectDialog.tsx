@@ -1,8 +1,13 @@
 import { Plug } from "lucide-react";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { formatHostPort } from "../domain/host";
 import { isPluginHostProtocol } from "../domain/pluginConnection";
+import {
+  DEFAULT_RDP_PORT,
+  DEFAULT_VNC_PORT,
+  resolveHostDefaultConnectProtocol,
+} from "../domain/remoteDesktop";
 import { cn } from "../lib/utils";
 import { Host, HostProtocol } from "../types";
 import {
@@ -27,7 +32,7 @@ interface ProtocolOption {
 
 interface ProtocolSelectDialogProps {
   host: Host;
-  onSelect: (protocol: HostProtocol, port: number) => void;
+  onSelect: (protocol: HostProtocol, port: number, rememberDefault?: boolean) => void;
   onCancel: () => void;
 }
 
@@ -60,7 +65,7 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
       const sshConfig = host.protocols?.find((p) => p.protocol === "ssh");
       options.push({
         protocol: "ssh",
-        port: sshConfig?.port || host.port || 22,
+        port: sshConfig?.port || (host.protocol === "telnet" ? 22 : host.port) || 22,
         label: "SSH",
         description: `ssh ${host.hostname}`,
         enabled: true,
@@ -88,6 +93,36 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
       });
     }
 
+    if (host.protocol === "rdp" || host.rdpConfig?.enabled) {
+      const rdpPort =
+        host.protocol === "rdp"
+          ? host.port || host.rdpConfig?.port || DEFAULT_RDP_PORT
+          : host.rdpConfig?.port || DEFAULT_RDP_PORT;
+      const viaSsh = host.protocol !== "rdp" && host.rdpConfig?.tunnelViaHostSsh === true;
+      options.push({
+        protocol: "rdp",
+        port: rdpPort,
+        label: "RDP",
+        description: viaSsh ? `rdp ${host.hostname} · via SSH` : `rdp ${host.hostname}`,
+        enabled: true,
+      });
+    }
+
+    if (host.protocol === "vnc" || host.vncConfig?.enabled) {
+      const vncPort =
+        host.protocol === "vnc"
+          ? host.port || host.vncConfig?.port || DEFAULT_VNC_PORT
+          : host.vncConfig?.port || DEFAULT_VNC_PORT;
+      const viaSsh = host.protocol !== "vnc" && host.vncConfig?.tunnelViaHostSsh === true;
+      options.push({
+        protocol: "vnc",
+        port: vncPort,
+        label: "VNC",
+        description: viaSsh ? `vnc ${host.hostname} · via SSH` : `vnc ${host.hostname}`,
+        enabled: true,
+      });
+    }
+
     if (
       host.telnetEnabled ||
       host.protocol === "telnet" ||
@@ -96,7 +131,7 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
       const telnetConfig = host.protocols?.find((p) => p.protocol === "telnet");
       options.push({
         protocol: "telnet",
-        port: telnetConfig?.port || host.telnetPort || 23,
+        port: telnetConfig?.port || host.telnetPort || (host.protocol === "telnet" ? host.port : undefined) || 23,
         label: "Telnet",
         description: `telnet ${host.hostname}`,
         enabled: true,
@@ -114,9 +149,20 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
     return initial as Record<HostProtocol, number>;
   });
 
-  const [selectedProtocol, setSelectedProtocol] = useState<HostProtocol>(
-    protocolOptions[0]?.protocol || "ssh",
-  );
+  const [selectedProtocol, setSelectedProtocol] = useState<HostProtocol>(() => {
+    if (isPluginHostProtocol(host.protocol)) {
+      return protocolOptions[0]?.protocol || host.protocol;
+    }
+    const defaultProto = resolveHostDefaultConnectProtocol(host);
+    if (protocolOptions.some((opt) => opt.protocol === defaultProto)) {
+      return defaultProto;
+    }
+    return protocolOptions[0]?.protocol || "ssh";
+  });
+  const [rememberDefault, setRememberDefault] = useState(false);
+
+  const canRememberDefault =
+    !isPluginHostProtocol(host.protocol) && protocolOptions.length >= 2;
 
   const handlePortChange = (protocol: HostProtocol, value: string) => {
     const port = parseInt(value, 10);
@@ -126,8 +172,28 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
   };
 
   const handleContinue = () => {
-    onSelect(selectedProtocol, ports[selectedProtocol] || 22);
+    const fallbackPort =
+      protocolOptions.find((opt) => opt.protocol === selectedProtocol)?.port || 22;
+    onSelect(selectedProtocol, ports[selectedProtocol] || fallbackPort, rememberDefault);
   };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      } else if (event.key === "Enter" && !event.isComposing) {
+        const target = event.target as HTMLElement | null;
+        if (target?.tagName === "BUTTON") return;
+        event.preventDefault();
+        const fallbackPort =
+          protocolOptions.find((opt) => opt.protocol === selectedProtocol)?.port || 22;
+        onSelect(selectedProtocol, ports[selectedProtocol] || fallbackPort, rememberDefault);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onCancel, onSelect, ports, protocolOptions, rememberDefault, selectedProtocol]);
 
   const hostEndpoint = isPluginHostProtocol(selectedProtocol)
     ? host.hostname
@@ -236,6 +302,20 @@ const ProtocolSelectDialog: React.FC<ProtocolSelectDialogProps> = ({
             </div>
           </div>
         </div>
+
+        {canRememberDefault && (
+          <div className="px-6 pb-3">
+            <label className="inline-flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={rememberDefault}
+                onChange={(e) => setRememberDefault(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border border-border accent-primary cursor-pointer"
+              />
+              <span>{t("protocolSelect.rememberDefault")}</span>
+            </label>
+          </div>
+        )}
 
         <div className="px-6 py-4 border-t border-border/50 flex items-center justify-between">
           <Button variant="secondary" onClick={onCancel}>

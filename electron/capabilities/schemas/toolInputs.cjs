@@ -418,6 +418,14 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     startLine: { type: "number", optional: true, description: "Zero-based terminal buffer line to start from when range is lines." },
     maxLines: { type: "number", optional: true, description: "Maximum terminal rows to return. Defaults to 80, capped at 300." },
   },
+  "harness.remote_desktop.read_screen": {
+    sessionId: { type: "string", optional: true, description: "Remote desktop (VNC/RDP) session ID. Optional when the current AI scope contains only one remote desktop session." },
+    quality: { type: "string", optional: true, description: "Capture quality preset: standard (default, up to 1280px max edge) or high (up to 1920px max edge for dense text)." },
+    cropX: { type: "number", optional: true, description: "Optional crop left edge in 0-1000 normalized permille coordinates of the full desktop width." },
+    cropY: { type: "number", optional: true, description: "Optional crop top edge in 0-1000 normalized permille coordinates of the full desktop height." },
+    cropWidth: { type: "number", optional: true, description: "Optional crop width in 1-1000 normalized permille coordinates. Must be provided together with cropX, cropY, and cropHeight." },
+    cropHeight: { type: "number", optional: true, description: "Optional crop height in 1-1000 normalized permille coordinates. Must be provided together with cropX, cropY, and cropWidth." },
+  },
   "harness.web.search": {
     query: { type: "string", description: "The search query to look up on the web." },
     maxResults: { type: "number", optional: true, description: "Maximum number of search results to return." },
@@ -474,6 +482,8 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
     "Returns full Netcatty automation script syntax reference (nct API, triggers, host targeting). Read before authoring scripts.",
   "vault.host.connectScripts.set":
     "Sets per-host onConnect script queue order. Global and matching dynamic-group scripts run first automatically.",
+  "harness.remote_desktop.read_screen":
+    "Use this for graphical VNC or RDP sessions (which have no text PTY). Start with a full-screen standard capture; if small dialog or log text is hard to read, re-call with cropX/cropY/cropWidth/cropHeight (0-1000 permille coordinates) and quality=\"high\" for a crisp 1:1 native-pixel zoom.",
 });
 
 module.exports = {

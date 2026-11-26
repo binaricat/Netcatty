@@ -1,4 +1,4 @@
-import type { TerminalSettings } from "../../domain/models";
+import type { Host, TerminalSettings } from "../../domain/models";
 import { normalizeSshAutoReconnectInterval } from "../../domain/models/terminal";
 import type { TerminalSessionExitEvent } from "./resolveTerminalSessionExitIntent";
 
@@ -11,7 +11,7 @@ export function getTerminalAutoReconnectDelayMs(
 }
 
 type AutoReconnectHost = {
-  protocol?: "ssh" | "telnet" | "local" | "serial" | "mosh" | "et";
+  protocol?: Host["protocol"];
   hostname?: string;
   moshEnabled?: boolean;
   etEnabled?: boolean;

@@ -12,6 +12,12 @@ export function getVaultImportPickerMode(
   directory: boolean;
   multiple: boolean;
 } {
+  if (format === "rdp") {
+    return {
+      directory: false,
+      multiple: true,
+    };
+  }
   const isBatchFolder = (format === "securecrt" || format === "finalshell")
     && source === "folder";
   return {
@@ -25,7 +31,7 @@ export function selectVaultImportFiles(
   files: ArrayLike<File>,
 ): File[] {
   const selected = Array.from(files);
-  return format === "securecrt" || format === "finalshell"
+  return format === "securecrt" || format === "finalshell" || format === "rdp"
     ? selected
     : selected.slice(0, 1);
 }

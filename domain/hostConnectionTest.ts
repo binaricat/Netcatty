@@ -10,14 +10,69 @@ import {
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from "./credentials";
 import { connectionTotpFields } from "./totpConfig";
 import { resolveEffectiveTerminalHost, resolveTerminalChainHosts } from "./terminalHostResolution";
+import {
+  isRemoteDesktopProtocol,
+  resolveRemoteDesktopConnectionSpec,
+  type RemoteDesktopProtocol,
+} from "./remoteDesktop";
 
 /** Test-mode connection timeouts — a probe should fail fast, not wait out the
  * terminal's full keep-alive/auth window. */
 const TEST_TCP_CONNECT_TIMEOUT_MS = 8000;
 const TEST_AUTH_READY_TIMEOUT_MS = 15000;
+const TEST_REMOTE_DESKTOP_HANDSHAKE_TIMEOUT_MS = 8000;
 /** Slack added on top of the bridge timeouts so the main process reports its
  * own (more specific) timeout error before the renderer safety net fires. */
 const TEST_DEADLINE_GRACE_MS = 2000;
+
+export type RemoteDesktopProbeCertInfo = {
+  fingerprintSha256: string;
+  subject?: string;
+  issuer?: string;
+  validFrom?: string;
+  validTo?: string;
+  trustStatus: "trusted" | "first-seen" | "changed";
+};
+
+export type RemoteDesktopProbeResult = {
+  ok: boolean;
+  protocol: RemoteDesktopProtocol;
+  host: string;
+  port: number;
+  rttMs: number | null;
+  bannerVerified?: boolean;
+  bannerDetail?: string;
+  rdpSecurity?: "rdp" | "tls" | "nla" | "rdstls" | "nla-ext";
+  rfbVersion?: string;
+  vncSecurityTypes?: Array<{ id: number; name: string }>;
+  tlsVersion?: string;
+  tlsCipher?: string;
+  cert?: RemoteDesktopProbeCertInfo;
+  error?: string;
+  checkedAt: number;
+};
+
+export type RemoteDesktopTestOptions = {
+  sessionId: string;
+  protocol: RemoteDesktopProtocol;
+  hostname: string;
+  port: number;
+  label?: string;
+  hostId?: string;
+  securityMode?: "auto" | "nla" | "tls" | "rdp" | "tls-legacy";
+  allowLegacyTls?: boolean;
+  loadBalanceInfo?: string;
+  knownCertFingerprints?: string[];
+  connectTimeoutMs?: number;
+  handshakeTimeoutMs?: number;
+  proxy?: NetcattySSHOptions["proxy"];
+  jumpHosts?: NetcattyJumpHost[];
+  tunnelViaHostSsh?: boolean;
+  tunnelTargetHost?: string;
+  sshTunnelConfig?: Record<string, unknown>;
+  knownHosts?: KnownHost[];
+  verifyHostKeys?: boolean;
+};
 
 type TimeoutCarrier = {
   sshTcpConnectTimeoutMs?: number;
@@ -44,6 +99,21 @@ export const resolveHostConnectionTestDeadlineMs = (
   return chainMs + hopMs(options) + TEST_DEADLINE_GRACE_MS;
 };
 
+export const resolveRemoteDesktopConnectionTestDeadlineMs = (
+  options: Pick<RemoteDesktopTestOptions, "connectTimeoutMs" | "handshakeTimeoutMs" | "jumpHosts" | "tunnelViaHostSsh" | "sshTunnelConfig">,
+): number => {
+  const hopMs = (hop: TimeoutCarrier) =>
+    positiveMs(hop.sshTcpConnectTimeoutMs, TEST_TCP_CONNECT_TIMEOUT_MS)
+    + positiveMs(hop.sshAuthReadyTimeoutMs, TEST_AUTH_READY_TIMEOUT_MS);
+  const chainMs = (options.jumpHosts ?? []).reduce((sum, hop) => sum + hopMs(hop), 0);
+  const companionMs = options.tunnelViaHostSsh && options.sshTunnelConfig
+    ? hopMs(options.sshTunnelConfig as TimeoutCarrier)
+    : 0;
+  const tcpMs = positiveMs(options.connectTimeoutMs, TEST_TCP_CONNECT_TIMEOUT_MS);
+  const handshakeMs = positiveMs(options.handshakeTimeoutMs, TEST_REMOTE_DESKTOP_HANDSHAKE_TIMEOUT_MS);
+  return chainMs + companionMs + tcpMs + handshakeMs + TEST_DEADLINE_GRACE_MS;
+};
+
 /** Build the human-readable progress log line for one chain-progress event,
  * mirroring the terminal's per-hop "Connecting to … / TCP connected / Key
  * exchange complete / Authenticated / …" lines (with the `[hop/total]` prefix
@@ -58,10 +128,22 @@ export const formatConnectionTestProgressLog = (input: {
   const { hop, total, label, phase, error } = input;
   const prefix = total > 1 ? `[${hop}/${total}] ` : "";
   switch (phase) {
+    case "resolving":
+      return `${prefix}Resolving ${label}...`;
     case "connecting":
       return `${prefix}Connecting to ${label}...`;
     case "tcp-connected":
-      return `${prefix}${label} - TCP connected`;
+      return error ? `${prefix}${label} - TCP connected (${error})` : `${prefix}${label} - TCP connected`;
+    case "x224-negotiated":
+      return `${prefix}${label} - RDP X.224 negotiated${error ? ` (${error})` : ""}`;
+    case "tls-handshake":
+      return `${prefix}${label} - TLS handshake`;
+    case "rfb-banner":
+      return `${prefix}${label} - VNC banner${error ? `: ${error}` : ""}`;
+    case "rfb-security":
+      return `${prefix}${label} - VNC security types${error ? `: ${error}` : ""}`;
+    case "probe-complete":
+      return `${prefix}${label} - Probe complete`;
     case "authenticating":
       return `${prefix}${label} - Key exchange complete`;
     case "auth-attempt":
@@ -113,17 +195,28 @@ export type BuildHostConnectionTestOptionsInput = {
   bootEpoch: number;
   /** Re-entered credentials after an undecryptable placeholder was detected. */
   authOverride?: HostConnectionTestAuthOverride | null;
+  /** Explicitly probe SSH, RDP, or VNC (e.g. companion RDP/VNC on an SSH host). */
+  protocolOverride?: "ssh" | "rdp" | "vnc";
+  /** Previously trusted remote desktop TLS SHA-256 fingerprints for TOFU status comparison. */
+  knownRemoteDesktopFingerprints?: string[];
 };
 
 export type HostConnectionTestPlan =
   | {
       ok: true;
+      kind: "ssh";
       options: NetcattySSHOptions;
       /**
        * True when the primary credential is an undecryptable placeholder, so
        * the caller should prompt for re-entry (password/key) before dialing.
        */
       needsCredentialReentry: boolean;
+    }
+  | {
+      ok: true;
+      kind: "remote-desktop";
+      options: RemoteDesktopTestOptions;
+      needsCredentialReentry: false;
     }
   | { ok: false; error: string };
 
@@ -207,6 +300,8 @@ export const buildHostConnectionTestPlan = (
     sessionId,
     bootEpoch,
     authOverride = null,
+    protocolOverride,
+    knownRemoteDesktopFingerprints,
   } = input;
   const settings: HostConnectionTestSettings = {
     verifyHostKeys: true,
@@ -249,6 +344,104 @@ export const buildHostConnectionTestPlan = (
       ok: false,
       error: "Proxy credentials cannot be decrypted on this device. Open host settings and re-enter the proxy password.",
     };
+  }
+
+  const proxyConfig = hasUsableProxyConfig(effectiveHost.proxyConfig)
+    ? resolveProxyConfigAuth(effectiveHost.proxyConfig, identities)
+    : undefined;
+  const jumpHosts = chainHosts.length > 0
+    ? chainHosts.map((chainHost) => buildTestJumpHost(chainHost, keys, identities, settings))
+    : undefined;
+
+  const targetProtocol = protocolOverride
+    ?? (isRemoteDesktopProtocol(effectiveHost.protocol) ? effectiveHost.protocol : "ssh");
+
+  if (targetProtocol === "rdp" || targetProtocol === "vnc") {
+    const spec = resolveRemoteDesktopConnectionSpec(effectiveHost, targetProtocol, identities);
+    if (!spec.hostname) {
+      return {
+        ok: false,
+        error: "Remote desktop hostname is required.",
+      };
+    }
+
+    let sshTunnelConfig: Record<string, unknown> | undefined;
+    if (spec.tunnelViaHostSsh) {
+      const key = resolvedAuth.key;
+      const effectiveUsername = resolvedAuth.username || "root";
+      const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);
+      const effectivePassphrase = sanitizeCredentialValue(resolvedAuth.passphrase);
+      const authMethod: Host["authMethod"] =
+        resolvedAuth.authMethod === "auto" && effectivePassword && !key
+          ? "password"
+          : resolvedAuth.authMethod;
+      const allowsLocalIdentityFallback = !resolvedAuth.keyId;
+      const targetReferenceKeyPath = key?.source === "reference" ? key.filePath : undefined;
+      const targetIdentityFilePaths = authMethod === "password"
+        ? undefined
+        : targetReferenceKeyPath
+          ? [targetReferenceKeyPath]
+          : allowsLocalIdentityFallback
+            ? effectiveHost.identityFilePaths
+            : undefined;
+      const agentAuth = resolveBridgeSshAgentAuth(effectiveHost, key, authMethod);
+
+      sshTunnelConfig = {
+        hostname: spec.hostHostname,
+        hostId: effectiveHost.id,
+        label: effectiveHost.label,
+        port: effectiveHost.port || 22,
+        username: effectiveUsername,
+        authMethod,
+        password: effectivePassword,
+        ...connectionTotpFields(effectiveHost),
+        privateKey: key?.source === "reference" ? undefined : sanitizeCredentialValue(key?.privateKey),
+        certificate: key?.certificate,
+        passphrase: key ? (effectivePassphrase || sanitizeCredentialValue(key.passphrase)) : undefined,
+        keyId: key?.id,
+        identityFilePaths: targetIdentityFilePaths,
+        ...agentAuth,
+        legacyAlgorithms: effectiveHost.legacyAlgorithms,
+        skipEcdsaHostKey: effectiveHost.skipEcdsaHostKey,
+        algorithmOverrides: effectiveHost.algorithms,
+        verifyHostKeys: settings.verifyHostKeys,
+        proxy: proxyConfig,
+        jumpHosts,
+        knownHosts,
+        sshTcpConnectTimeoutMs: TEST_TCP_CONNECT_TIMEOUT_MS,
+        sshAuthReadyTimeoutMs: TEST_AUTH_READY_TIMEOUT_MS,
+      };
+    }
+
+    // Zero-credential guarantee: RDP/VNC username/password/domain are NEVER included.
+    const rdOptions: RemoteDesktopTestOptions = {
+      sessionId,
+      protocol: targetProtocol,
+      hostname: spec.hostname,
+      port: spec.port,
+      label: spec.label,
+      hostId: effectiveHost.id,
+      ...(targetProtocol === "rdp" && spec.rdpConfig?.securityMode
+        ? { securityMode: spec.rdpConfig.securityMode }
+        : {}),
+      ...(targetProtocol === "rdp" && spec.rdpConfig?.loadBalanceInfo
+        ? { loadBalanceInfo: spec.rdpConfig.loadBalanceInfo }
+        : {}),
+      ...(Array.isArray(knownRemoteDesktopFingerprints) && knownRemoteDesktopFingerprints.length > 0
+        ? { knownCertFingerprints: knownRemoteDesktopFingerprints }
+        : {}),
+      connectTimeoutMs: TEST_TCP_CONNECT_TIMEOUT_MS,
+      handshakeTimeoutMs: TEST_REMOTE_DESKTOP_HANDSHAKE_TIMEOUT_MS,
+      proxy: proxyConfig,
+      jumpHosts: spec.tunnelViaHostSsh ? undefined : jumpHosts,
+      tunnelViaHostSsh: spec.tunnelViaHostSsh,
+      tunnelTargetHost: spec.tunnelTargetHost,
+      ...(sshTunnelConfig ? { sshTunnelConfig } : {}),
+      knownHosts,
+      verifyHostKeys: settings.verifyHostKeys,
+    };
+
+    return { ok: true, kind: "remote-desktop", options: rdOptions, needsCredentialReentry: false };
   }
 
   const key = resolvedAuth.key;
@@ -296,9 +489,6 @@ export const buildHostConnectionTestPlan = (
     );
 
   const keepalive = resolveHostKeepalive(effectiveHost, settings);
-  const proxyConfig = hasUsableProxyConfig(effectiveHost.proxyConfig)
-    ? resolveProxyConfigAuth(effectiveHost.proxyConfig, identities)
-    : undefined;
 
   const options: NetcattySSHOptions = {
     sessionId,
@@ -322,9 +512,7 @@ export const buildHostConnectionTestPlan = (
     algorithmOverrides: effectiveHost.algorithms,
     charset: effectiveHost.charset,
     proxy: proxyConfig,
-    jumpHosts: chainHosts.length > 0
-      ? chainHosts.map((chainHost) => buildTestJumpHost(chainHost, keys, identities, settings))
-      : undefined,
+    jumpHosts,
     keepaliveInterval: keepalive.interval,
     keepaliveCountMax: keepalive.countMax,
     sshTcpConnectTimeoutMs: TEST_TCP_CONNECT_TIMEOUT_MS,
@@ -336,5 +524,5 @@ export const buildHostConnectionTestPlan = (
     knownHosts,
   };
 
-  return { ok: true, options, needsCredentialReentry };
+  return { ok: true, kind: "ssh", options, needsCredentialReentry };
 };

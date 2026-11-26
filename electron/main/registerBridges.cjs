@@ -668,6 +668,45 @@ function createBridgeRegistrar(context) {
     });
     transferBridge.registerHandlers(ipcMain, { terminalWorkerManager });
     portForwardingBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+    const remoteDesktopBridge = require("../bridges/remoteDesktopBridge.cjs");
+    const remoteDesktopMainOs = remoteDesktopBridge.registerHandlers(ipcMain, {
+      terminalWorkerManager,
+      electronModule,
+      tempDirBridge,
+      portForwardingBridge,
+      registerOsHandlers: true,
+    });
+    const remoteDesktopRecordingsModule = require("../bridges/remoteDesktopRecordingsBridge.cjs");
+    const remoteDesktopRecordingsBridge = remoteDesktopRecordingsModule.init({
+      app,
+      userDataDir,
+      electronModule,
+      shell,
+      BrowserWindow,
+    });
+    remoteDesktopRecordingsBridge.registerHandlers(ipcMain);
+    void remoteDesktopRecordingsBridge.runGc({ purgeAllInactiveParts: true }).catch(() => {});
+    require("../plugins/shutdownCoordinator.cjs").registerPluginShutdown(async () => {
+      try {
+        await remoteDesktopRecordingsBridge.cleanupAll();
+      } catch (error) {
+        console.warn("[Recordings] Shutdown cleanup failed:", error?.message || error);
+      }
+      try {
+        if (terminalWorkerManager) {
+          await terminalWorkerManager.request("netcatty:remote-desktop:stopAll", {}, {});
+        } else {
+          await remoteDesktopBridge.stopAll();
+        }
+      } catch (error) {
+        console.warn("[RemoteDesktop] Shutdown cleanup failed:", error?.message || error);
+      }
+      try {
+        await remoteDesktopMainOs?.cleanupMainOsResources?.();
+      } catch {
+        // ignore
+      }
+    });
     if (electronModule.WebContentsView && electronModule.session?.fromPartition) {
       const { createHostBrowserManager } = require("../hostBrowser/hostBrowserManager.cjs");
       const hostBrowserManager = createHostBrowserManager({

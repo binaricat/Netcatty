@@ -50,7 +50,7 @@ export function HostDetailsSection({
   action?: React.ReactNode;
 }) {
   return (
-    <Card className={cn("p-3 space-y-3 bg-card border-border/80 shadow-sm", className)}>
+    <Card className={cn("p-3.5 space-y-2.5 bg-card border-border/60 shadow-none rounded-xl", className)}>
       <div className="flex min-h-5 items-center gap-1.5">
         <span className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground [&>img]:block [&>img]:h-4 [&>img]:w-4 [&>img]:object-contain [&>svg]:block [&>svg]:h-4 [&>svg]:w-4">
           {icon}
@@ -67,11 +67,13 @@ export function HostDetailsSection({
 }
 
 export function HostDetailsSettingRow({
+  icon,
   label,
   hint,
   children,
   className,
 }: {
+  icon?: React.ReactNode;
   label: React.ReactNode;
   hint?: React.ReactNode;
   children: React.ReactNode;
@@ -80,12 +82,17 @@ export function HostDetailsSettingRow({
   return (
     <div
       className={cn(
-        // Fixed height so switch / select / input rows stay aligned.
-        "flex h-12 items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/40 px-3",
+        // Unified flat transparent setting row across the entire host form.
+        "flex h-10 items-center justify-between gap-3 bg-transparent px-1",
         className,
       )}
     >
-      <div className="flex min-h-5 min-w-0 items-center gap-1.5">
+      <div className="flex min-h-5 min-w-0 items-center gap-2">
+        {icon && (
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground [&>svg]:h-3.5 [&>svg]:w-3.5">
+            {icon}
+          </span>
+        )}
         <span className="truncate text-sm font-medium leading-5 text-foreground">{label}</span>
         {hint && <HostDetailsHelp>{hint}</HostDetailsHelp>}
       </div>

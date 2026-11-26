@@ -7,8 +7,16 @@ import {
   buildHostConnectionTestPlan,
   formatConnectionTestProgressLog,
   resolveHostConnectionTestDeadlineMs,
+  resolveRemoteDesktopConnectionTestDeadlineMs,
   type HostConnectionTestAuthOverride,
+  type RemoteDesktopProbeResult,
 } from "../../domain/hostConnectionTest";
+import {
+  isRemoteDesktopProtocol,
+  resolveRemoteDesktopConnectionSpec,
+} from "../../domain/remoteDesktop";
+import { resolveEffectiveTerminalHost } from "../../domain/terminalHostResolution";
+import { getKnownRemoteDesktopFingerprints } from "../../components/remoteDesktop/knownRemoteDesktopCerts";
 import { useTerminalBackend } from "./useTerminalBackend";
 
 export type ChainProgress = {
@@ -36,6 +44,8 @@ export type HostConnectionTestState = {
   timeLeft: number;
   isAwaitingUserInput: boolean;
   isCancelling: boolean;
+  probeResult: RemoteDesktopProbeResult | null;
+  activeProtocol: "ssh" | "rdp" | "vnc";
 };
 
 export type HostConnectionTestInput = {
@@ -76,8 +86,14 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
   const [timeLeft, setTimeLeft] = useState(0);
   const [isAwaitingUserInput, setIsAwaitingUserInput] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [probeResult, setProbeResult] = useState<RemoteDesktopProbeResult | null>(null);
+  const [activeProtocol, setActiveProtocol] = useState<"ssh" | "rdp" | "vnc">(
+    isRemoteDesktopProtocol(host.protocol) ? host.protocol : "ssh",
+  );
 
   const sessionIdRef = useRef<string | null>(null);
+  const activeKindRef = useRef<"ssh" | "remote-desktop">("ssh");
+  const lastProtocolOverrideRef = useRef<"ssh" | "rdp" | "vnc" | undefined>(undefined);
   const bootEpochRef = useRef(0);
   const pendingHostKeyRequestIdRef = useRef<string | null>(null);
   const disposedRef = useRef(false);
@@ -95,14 +111,20 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
     setIsAwaitingUserInput(false);
     setIsCancelling(false);
     setTimeLeft(0);
+    setProbeResult(null);
     pendingHostKeyRequestIdRef.current = null;
   }, []);
 
   const clearSession = useCallback(() => {
     const sessionId = sessionIdRef.current;
+    const kind = activeKindRef.current;
     sessionIdRef.current = null;
     if (sessionId && !disposedRef.current) {
-      void backend.cancelTestConnection(sessionId).catch(() => {});
+      if (kind === "remote-desktop") {
+        void backend.cancelRemoteDesktopTestConnection(sessionId).catch(() => {});
+      } else {
+        void backend.cancelTestConnection(sessionId).catch(() => {});
+      }
     }
   }, [backend]);
 
@@ -179,9 +201,35 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
   }, [hostKeyVerification, respondHostKey]);
 
   const startTest = useCallback(
-    async (authOverride?: HostConnectionTestAuthOverride | null) => {
+    async (
+      authOverride?: HostConnectionTestAuthOverride | null,
+      protocolOverride?: "ssh" | "rdp" | "vnc",
+    ) => {
       clearSession();
       resetState();
+
+      lastProtocolOverrideRef.current = protocolOverride;
+      const targetProtocol: "ssh" | "rdp" | "vnc" =
+        protocolOverride ?? (isRemoteDesktopProtocol(host.protocol) ? host.protocol : "ssh");
+      setActiveProtocol(targetProtocol);
+
+      let knownRemoteDesktopFingerprints: string[] | undefined;
+      if (targetProtocol === "rdp" || targetProtocol === "vnc") {
+        const effective = resolveEffectiveTerminalHost({
+          host,
+          groupConfigs,
+          proxyProfiles,
+        });
+        const spec = resolveRemoteDesktopConnectionSpec(effective, targetProtocol, identities);
+        const certHost = spec.hostHostname || spec.hostname;
+        if (certHost) {
+          knownRemoteDesktopFingerprints = getKnownRemoteDesktopFingerprints(
+            targetProtocol,
+            certHost,
+            spec.port,
+          );
+        }
+      }
 
       const sessionId = crypto.randomUUID();
       const bootEpoch = (bootEpochRef.current += 1);
@@ -205,14 +253,43 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
         sessionId,
         bootEpoch,
         authOverride,
+        protocolOverride,
+        knownRemoteDesktopFingerprints,
       });
 
-      if (!plan.ok) {
+      if (plan.ok === false) {
         setError(plan.error);
         setStatus("disconnected");
         return;
       }
 
+      if (plan.kind === "remote-desktop") {
+        activeKindRef.current = "remote-desktop";
+        deadlineMsRef.current = resolveRemoteDesktopConnectionTestDeadlineMs(plan.options);
+        setStatus("connecting");
+        setIsAwaitingUserInput(false);
+
+        try {
+          const result = await backend.testRemoteDesktopConnection(plan.options);
+          if (disposedRef.current || sessionIdRef.current !== sessionId) return;
+          setProbeResult(result);
+          setChainProgress(null);
+          if (result.ok) {
+            setProgressValue(100);
+            setStatus("connected");
+          } else {
+            setError(result.error || "Connection test failed");
+            setStatus("disconnected");
+          }
+        } catch (err) {
+          if (disposedRef.current || sessionIdRef.current !== sessionId) return;
+          setError(messageOf(err));
+          setStatus("disconnected");
+        }
+        return;
+      }
+
+      activeKindRef.current = "ssh";
       if (plan.needsCredentialReentry) {
         setNeedsAuth(true);
         setStatus("connecting");
@@ -249,6 +326,19 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
       terminalSettings,
     ],
   );
+
+  const markProbeCertTrusted = useCallback(() => {
+    setProbeResult((prev) => {
+      if (!prev || !prev.cert) return prev;
+      return {
+        ...prev,
+        cert: {
+          ...prev.cert,
+          trustStatus: "trusted",
+        },
+      };
+    });
+  }, []);
 
   const submitAuth = useCallback(
     (auth: HostConnectionTestAuthOverride) => {
@@ -317,11 +407,14 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
       timeLeft,
       isAwaitingUserInput,
       isCancelling,
+      probeResult,
+      activeProtocol,
     } satisfies HostConnectionTestState,
     startTest,
     submitAuth,
     cancelTest,
-    retry: () => void startTest(),
+    retry: () => void startTest(undefined, lastProtocolOverrideRef.current),
+    markProbeCertTrusted,
     handleHostKeyContinue,
     handleHostKeyAddAndContinue,
     handleHostKeyClose,

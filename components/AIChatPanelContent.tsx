@@ -26,6 +26,7 @@ type TerminalSessionSummary = {
   hostname: string;
   label: string;
   connected: boolean;
+  protocol?: string;
 };
 
 interface AIChatPanelContentProps {
@@ -56,6 +57,7 @@ interface AIChatPanelContentProps {
   inputValue: string;
   setInputValue: (value: string) => void;
   handleSend: (textOverride?: string) => void;
+  handleSendQuickPrompt?: (promptText: string) => void;
   handleCompact: () => void;
   /** Rename a chat by id (history drawer edit affordance). Panel action, never agent content. */
   onRenameSession?: (sessionId: string, title: string) => void;
@@ -158,6 +160,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   inputValue,
   setInputValue,
   handleSend,
+  handleSendQuickPrompt,
   handleCompact,
   onRenameSession,
   onRenameActiveChat,
@@ -223,6 +226,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
       hostname: session.hostname,
       label: session.label,
       connected: session.connected,
+      protocol: session.protocol,
     })),
     [terminalSessions],
   );
@@ -443,6 +447,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   value={inputValue}
                   onChange={setInputValue}
                   onSend={handleSend}
+                  onSendQuickPrompt={handleSendQuickPrompt}
                   onCompact={handleCompact}
                   onRenameSession={onRenameActiveChat}
                   onListChats={onListChats}

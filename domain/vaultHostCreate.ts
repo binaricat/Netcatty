@@ -6,8 +6,12 @@ import {
   findVaultGroupConfigJumpReference,
 } from './vaultJumpGraph';
 
+import { sanitizeRdpConfig, sanitizeVncConfig } from './remoteDesktop';
+
 const DEFAULT_SSH_PORT = 22;
 const DEFAULT_TELNET_PORT = 23;
+const DEFAULT_RDP_PORT = 3389;
+const DEFAULT_VNC_PORT = 5900;
 const UNSAFE_SSH_CONFIG_VALUE = /[\r\n\0]/;
 const HOSTNAME_WHITESPACE = /\s/;
 const UNSAFE_SSH_JUMP_HOSTNAME = /[\s,@#]/;
@@ -42,6 +46,8 @@ export interface VaultHostDraft {
   notes?: unknown;
   protocol?: unknown;
   os?: unknown;
+  rdpConfig?: unknown;
+  vncConfig?: unknown;
 }
 
 export interface VaultHostUpdatePatch extends VaultHostDraft {
@@ -91,6 +97,8 @@ const normalizeProtocol = (raw: unknown): VaultHostDraftProtocol | undefined => 
   if (value === 'ssh' || value === 'ssh2') return 'ssh';
   if (value === 'telnet') return 'telnet';
   if (value === 'local') return 'local';
+  if (value === 'rdp') return 'rdp';
+  if (value === 'vnc') return 'vnc';
   return undefined;
 };
 
@@ -115,8 +123,12 @@ const parsePort = (raw: unknown): number | undefined => {
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : undefined;
 };
 
-const defaultPortForProtocol = (protocol: HostProtocol | undefined): number =>
-  protocol === 'telnet' ? DEFAULT_TELNET_PORT : DEFAULT_SSH_PORT;
+const defaultPortForProtocol = (protocol: HostProtocol | undefined): number => {
+  if (protocol === 'telnet') return DEFAULT_TELNET_PORT;
+  if (protocol === 'rdp') return DEFAULT_RDP_PORT;
+  if (protocol === 'vnc') return DEFAULT_VNC_PORT;
+  return DEFAULT_SSH_PORT;
+};
 
 const supportsSshJump = (host: Host): boolean =>
   host.protocol === undefined || host.protocol === 'ssh';
@@ -240,7 +252,7 @@ export function buildVaultHostFromDraft(
     && draft.protocol !== null
     && !(typeof draft.protocol === 'string' && !draft.protocol.trim());
   if (hasProtocolInput && parsedProtocol === undefined) {
-    return { ok: false, error: 'protocol must be ssh, telnet, or local.' };
+    return { ok: false, error: 'protocol must be ssh, telnet, local, rdp, or vnc.' };
   }
   const protocol = parsedProtocol ?? 'ssh';
   const parsedOs = normalizeOs(draft.os);
@@ -250,7 +262,9 @@ export function buildVaultHostFromDraft(
   if (hasOsInput && parsedOs === undefined) {
     return { ok: false, error: 'os must be auto, linux, windows, macos, freebsd, or unknown.' };
   }
-  const os = parsedOs === 'windows' || parsedOs === 'macos' ? parsedOs : 'linux';
+  const os = parsedOs === 'windows' || parsedOs === 'macos'
+    ? parsedOs
+    : (!parsedOs && protocol === 'rdp' ? 'windows' : 'linux');
   const parsedPort = parsePort(draft.port);
   const hasPortInput = draft.port !== undefined
     && draft.port !== null
@@ -312,7 +326,10 @@ export function buildVaultHostFromDraft(
     return { ok: false, error: 'notes must be a string.' };
   }
   const notes = typeof draft.notes === 'string' && draft.notes.trim() ? draft.notes.trim() : undefined;
+  const rdpConfig = sanitizeRdpConfig(draft.rdpConfig);
+  const vncConfig = sanitizeVncConfig(draft.vncConfig);
   const now = Date.now();
+  const isRemoteDesktop = protocol === 'rdp' || protocol === 'vnc';
 
   return {
     ok: true,
@@ -327,7 +344,7 @@ export function buildVaultHostFromDraft(
       group: normalizeGroupPath(draft.group),
       tags: tags.tags,
       os,
-      osOverride: parsedOs ?? 'auto',
+      osOverride: parsedOs ?? (protocol === 'rdp' ? 'windows' : 'auto'),
       protocol,
       sshInputCompatibility: false,
       createdAt: now,
@@ -338,7 +355,14 @@ export function buildVaultHostFromDraft(
           authPolicyVersion: 1 as const,
           useSshAgent: false,
         }
-        : {}),
+        : isRemoteDesktop && password
+          ? {
+            authMethod: 'password' as const,
+            authPolicyVersion: 1 as const,
+          }
+          : {}),
+      ...(rdpConfig ? { rdpConfig } : {}),
+      ...(vncConfig ? { vncConfig } : {}),
       ...(notes ? { notes } : {}),
     },
   };
@@ -383,9 +407,11 @@ export function applyVaultHostUpdate(
   const etEnabled = firstProvided(source, ['etEnabled']);
   const etPort = firstProvided(source, ['etPort']);
   const serialConfig = firstProvided(source, ['serialConfig']);
+  const rdpConfig = firstProvided(source, ['rdpConfig']);
+  const vncConfig = firstProvided(source, ['vncConfig']);
   const provided = [label, hostname, port, username, password, savePassword, keyPath, group, tags, notes, protocol, os,
     identityId, jumpHostIds, proxyProfileId, startupCommand, startupCommandRunMode, environmentVariables,
-    moshEnabled, moshServerPath, etEnabled, etPort, serialConfig]
+    moshEnabled, moshServerPath, etEnabled, etPort, serialConfig, rdpConfig, vncConfig]
     .some((entry) => entry.provided);
   if (!provided) return { ok: false, error: 'At least one host field is required.' };
 
@@ -433,7 +459,7 @@ export function applyVaultHostUpdate(
     const rawProtocol = typeof protocol.value === 'string' ? protocol.value.trim().toLowerCase() : '';
     const nextProtocol = rawProtocol === 'serial' ? 'serial' : normalizeProtocol(protocol.value);
     if (!nextProtocol) {
-      return { ok: false, error: 'protocol must be ssh, telnet, local, or serial.' };
+      return { ok: false, error: 'protocol must be ssh, telnet, local, serial, rdp, or vnc.' };
     }
     if (current.protocol === 'serial' && nextProtocol !== 'serial' && !hostname.provided) {
       return { ok: false, error: 'hostname is required when changing a serial host to a network protocol.' };
@@ -617,6 +643,12 @@ export function applyVaultHostUpdate(
       ...(backspaceBehavior !== undefined ? { backspaceBehavior: backspaceBehavior as 'default' | 'ctrl-h' } : {}),
       ...(byteOrientedBackspace !== undefined ? { byteOrientedBackspace } : {}),
     };
+  }
+  if (rdpConfig.provided) {
+    updated.rdpConfig = sanitizeRdpConfig(rdpConfig.value);
+  }
+  if (vncConfig.provided) {
+    updated.vncConfig = sanitizeVncConfig(vncConfig.value);
   }
   if (updated.protocol === 'serial' && updated.serialConfig) {
     if (serialConfig.provided && hostname.provided && updated.hostname !== updated.serialConfig.path) {

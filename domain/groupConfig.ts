@@ -228,6 +228,15 @@ const SSH_ONLY_TRANSPORT_KEYS = new Set<keyof GroupConfig>([
   'backspaceBehavior',
 ]);
 
+// VNC/RDP hosts inherit network routing (SSH jump chains and proxies) from
+// their group, but skip SSH-specific credentials, ports, startup commands,
+// device type, charset, and terminal appearance overrides.
+const REMOTE_DESKTOP_INHERITABLE_KEYS = new Set<keyof GroupConfig>([
+  'hostChain',
+  'proxyProfileId',
+  'proxyConfig',
+]);
+
 /**
  * Apply group defaults to a host. Only fills in fields the host doesn't already have.
  * Returns a new host object — does NOT mutate the original.
@@ -279,6 +288,7 @@ export function applyGroupDefaults(
   // local CMD/PowerShell/POSIX shell be treated as a network-device CLI
   // (no normal autocomplete, network semantics for AI/command execution).
   const isLocalShellHost = host.protocol === 'local';
+  const isRemoteDesktopHost = host.protocol === 'vnc' || host.protocol === 'rdp';
   // X11 forwarding only applies to plain SSH. Use the host value when it is
   // set, otherwise the group transport, so a group Mosh/ET/Telnet default
   // does not also turn X11 on.
@@ -288,6 +298,7 @@ export function applyGroupDefaults(
     && !(host.etEnabled ?? groupDefaults.etEnabled);
 
   for (const key of INHERITABLE_KEYS) {
+    if (isRemoteDesktopHost && !REMOTE_DESKTOP_INHERITABLE_KEYS.has(key)) continue;
     if (shouldSkipGroupSshCredentialBundle && SSH_CREDENTIAL_KEYS.has(key)) continue;
     if (isSerialHost && SSH_CREDENTIAL_KEYS.has(key)) continue;
     if (isLocalShellHost && (SSH_CREDENTIAL_KEYS.has(key) || SSH_ONLY_TRANSPORT_KEYS.has(key) || key === 'startupCommand' || key === 'deviceType')) continue;

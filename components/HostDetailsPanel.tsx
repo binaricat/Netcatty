@@ -1,14 +1,10 @@
 import {
   Check,
-  Eye,
-  EyeOff,
   FileText,
   FolderPlus,
   PlugZap,
-  Plus,
   Settings2,
   Tag,
-  X,
 } from "lucide-react";
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
@@ -25,7 +21,6 @@ import {
 } from "../domain/proxyProfiles";
 import { hasRequiredHostAuthCredential, resolveHostAuth, resolveHostAuthMethodForPersistence } from "../domain/sshAuth";
 import { canServeAsSshJumpHost } from "../domain/terminalProtocol";
-import { customThemeStore } from "../application/state/customThemeStore";
 import {
   hasHostFontSizeOverride,
   hasHostThemeOverride,
@@ -47,7 +42,6 @@ import { detachEffectiveHostIdentity, HostDetailsConnectionSections } from "./Ho
 import type { HostTotpFlushResult } from "./HostTotpFields";
 import {
   LINUX_DISTRO_OPTION_IDS,
-  parseOptionalPortInput,
   resolveDetailsTelnetPassword,
   resolveDetailsTelnetPort,
   resolveDetailsTelnetUsername,
@@ -63,7 +57,6 @@ import {
   resolveDisplayProxyProfileId,
 } from "./HostDetailsPanel.helpers";
 export { parseOptionalPortInput } from "./HostDetailsPanel.helpers";
-import { TerminalEncodingSelect } from "./TerminalEncodingSelect";
 import { Button } from "./ui/button";
 import { Combobox, ComboboxOption, MultiCombobox } from "./ui/combobox";
 import { Input } from "./ui/input";
@@ -86,9 +79,25 @@ import {
   sanitizePluginConnection,
   stripBuiltInConnectionFieldsForPluginHost,
 } from "../domain/pluginConnection";
+import {
+  applyHostDefaultConnectProtocol,
+  DEFAULT_RDP_CONFIG,
+  DEFAULT_RDP_PORT,
+  DEFAULT_VNC_CONFIG,
+  DEFAULT_VNC_PORT,
+  getHostEnabledProtocols,
+  isRemoteDesktopProtocol,
+  resolveHostDefaultConnectProtocol,
+  sanitizeRdpConfig,
+  sanitizeVncConfig,
+  shouldPromptHostProtocolOnConnect,
+} from "../domain/remoteDesktop";
 import { PluginConnectionSection } from "./PluginConnectionSection";
 import { useHostConnectionTest } from "../application/state/useHostConnectionTest";
 import { HostConnectionTestDialog } from "./host-details/HostConnectionTestDialog";
+import { RemoteDesktopOptionsSection } from "./host-details/RemoteDesktopOptionsSection";
+
+type EditableHostProtocol = "ssh" | "rdp" | "vnc" | "telnet";
 
 type CredentialType = "sshid" | "key" | "certificate" | "localKeyFile" | null;
 type SubPanel =
@@ -102,8 +111,10 @@ type SubPanel =
 
 interface HostDetailsPanelProps {
   initialData?: Host | null;
+  initialProtocol?: "ssh" | "rdp" | "vnc";
   availableKeys: SSHKey[];
   identities: Identity[];
+  onCreateIdentity?: (identity: Identity) => void;
   proxyProfiles?: ProxyProfile[];
   groups: string[];
   managedSources?: ManagedSource[];
@@ -133,8 +144,10 @@ type HostDetailsPanelPropsWithResize = HostDetailsPanelProps & AsidePanelResizeP
 
 const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   initialData,
+  initialProtocol,
   availableKeys,
   identities,
+  onCreateIdentity,
   proxyProfiles = [],
   groups,
   managedSources = [],
@@ -175,9 +188,46 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   const baselineHydratedRef = useRef(snippets.length > 0);
   const openingQueueIdsRef = useRef<string[]>([]);
   const [form, setForm] = useState<Host>(
-    () =>
-      (initialData ? normalizePrimaryTelnetState(initialData) : null) ||
-      ({
+    () => {
+      if (initialData) return normalizePrimaryTelnetState(initialData);
+      const startProto = initialProtocol ?? "ssh";
+      if (startProto === "rdp") {
+        return {
+          id: crypto.randomUUID(),
+          label: "",
+          hostname: "",
+          port: DEFAULT_RDP_PORT,
+          username: "",
+          protocol: "rdp",
+          tags: [],
+          os: "windows",
+          authMethod: "password",
+          authPolicyVersion: 1,
+          distroMode: "auto",
+          rdpConfig: { ...DEFAULT_RDP_CONFIG },
+          createdAt: Date.now(),
+          group: defaultGroup || undefined,
+        } as Host;
+      }
+      if (startProto === "vnc") {
+        return {
+          id: crypto.randomUUID(),
+          label: "",
+          hostname: "",
+          port: DEFAULT_VNC_PORT,
+          username: "",
+          protocol: "vnc",
+          tags: [],
+          os: "linux",
+          authMethod: "password",
+          authPolicyVersion: 1,
+          distroMode: "auto",
+          vncConfig: { ...DEFAULT_VNC_CONFIG },
+          createdAt: Date.now(),
+          group: defaultGroup || undefined,
+        } as Host;
+      }
+      return {
         id: crypto.randomUUID(),
         label: "",
         hostname: "",
@@ -193,7 +243,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         distroMode: "auto",
         createdAt: Date.now(),
         group: defaultGroup || undefined, // Pre-fill with current navigation group
-      } as Host),
+      } as Host;
+    },
   );
 
   const [activeSubPanel, setActiveSubPanel] = useState<SubPanel>("none");
@@ -206,6 +257,13 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
 
   const [showPassword, setShowPassword] = useState(false);
   const [showTelnetPassword, setShowTelnetPassword] = useState(false);
+  const [companionCredentialDrafts, setCompanionCredentialDrafts] = useState<{
+    rdp?: { username: string; password: string };
+    vnc?: { username: string; password: string };
+  }>({});
+  const [activeProtocolTab, setActiveProtocolTab] = useState<EditableHostProtocol>(() =>
+    resolveHostDefaultConnectProtocol(initialData ? normalizePrimaryTelnetState(initialData) : { protocol: initialProtocol ?? "ssh" }),
+  );
   const [showAlgorithmOverrides, setShowAlgorithmOverrides] = useState(false);
   const [showNotesEditor, setShowNotesEditor] = useState(() => Boolean(initialData?.notes?.trim()));
   const [pluginConnectionValid, setPluginConnectionValid] = useState(true);
@@ -234,7 +292,11 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
 
   const handleStartTest = () => {
     setTestOpen(true);
-    void hostConnectionTest.startTest();
+    const protocolOverride =
+      isCurrentTabEnabled && (activeProtocolTab === "rdp" || activeProtocolTab === "vnc")
+        ? activeProtocolTab
+        : undefined;
+    void hostConnectionTest.startTest(undefined, protocolOverride);
   };
 
   const handleCloseTest = () => {
@@ -326,6 +388,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     setPendingReferenceKeyPath(null);
     setShowPassword(false);
     setShowTelnetPassword(false);
+    setActiveProtocolTab(resolveHostDefaultConnectProtocol(normalized));
     setShowNotesEditor(Boolean(normalized.notes?.trim()));
     // Reset only when opening a different host — not when snippets list updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -545,21 +608,295 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     });
   };
   const pluginProtocolActive = isPluginHostProtocol(form.protocol);
+  const isRemoteDesktopPrimary = isRemoteDesktopProtocol(form.protocol);
   const hasHostname = form.hostname.trim().length > 0;
   const canSaveHost = pluginProtocolActive
     ? pluginConnectionValid && Boolean(sanitizePluginConnection(form.pluginConnection, form.protocol))
     : hasHostname;
 
+  const enabledProtocols: Record<EditableHostProtocol, boolean> = useMemo(() => {
+    const list = getHostEnabledProtocols(form);
+    return {
+      ssh: list.includes("ssh"),
+      rdp: list.includes("rdp"),
+      vnc: list.includes("vnc"),
+      telnet: list.includes("telnet"),
+    };
+  }, [form]);
+  const enabledProtocolCount = (["ssh", "rdp", "vnc", "telnet"] as const).filter(
+    (proto) => enabledProtocols[proto],
+  ).length;
+  const isCurrentTabEnabled = enabledProtocols[activeProtocolTab];
+  const defaultConnectProtocol = resolveHostDefaultConnectProtocol(form);
+  const effectiveConnectBehavior: "ask" | EditableHostProtocol =
+    enabledProtocolCount >= 2 && shouldPromptHostProtocolOnConnect(form)
+      ? "ask"
+      : defaultConnectProtocol;
+
+  const handleSwitchOnlyProtocol = useCallback(
+    (nextProtocol: EditableHostProtocol) => {
+      setActiveProtocolTab(nextProtocol);
+      setForm((prev) => {
+        const nextPort = resolvePrimaryProtocolSwitchPort(
+          prev.port,
+          nextProtocol,
+          Boolean(effectiveGroupDefaults?.telnetPort),
+          Boolean(effectiveGroupDefaults?.port),
+        );
+        const isFreshHost = !initialData;
+        if (nextProtocol === "rdp") {
+          return {
+            ...prev,
+            protocol: "rdp",
+            port: prev.rdpConfig?.port ?? nextPort ?? DEFAULT_RDP_PORT,
+            os: isFreshHost && prev.os === "linux" ? "windows" : prev.os,
+            username: isFreshHost && prev.username === "root" ? "" : (prev.username ?? ""),
+            authMethod: "password",
+            moshEnabled: false,
+            etEnabled: false,
+            telnetEnabled: false,
+            vncConfig: undefined,
+            rdpConfig: {
+              ...DEFAULT_RDP_CONFIG,
+              ...(prev.rdpConfig ?? {}),
+              enabled: undefined,
+              defaultConnect: undefined,
+              tunnelViaHostSsh: undefined,
+              tunnelTargetHost: undefined,
+            },
+          };
+        }
+        if (nextProtocol === "vnc") {
+          return {
+            ...prev,
+            protocol: "vnc",
+            port: prev.vncConfig?.port ?? nextPort ?? DEFAULT_VNC_PORT,
+            username: isFreshHost && prev.username === "root" ? "" : (prev.username ?? ""),
+            authMethod: "password",
+            moshEnabled: false,
+            etEnabled: false,
+            telnetEnabled: false,
+            rdpConfig: undefined,
+            vncConfig: {
+              ...DEFAULT_VNC_CONFIG,
+              ...(prev.vncConfig ?? {}),
+              enabled: undefined,
+              defaultConnect: undefined,
+              tunnelViaHostSsh: undefined,
+              tunnelTargetHost: undefined,
+            },
+          };
+        }
+        if (nextProtocol === "telnet") {
+          return {
+            ...prev,
+            protocol: "telnet",
+            port: nextPort,
+            telnetPort: prev.telnetPort ?? nextPort,
+            telnetEnabled: true,
+            moshEnabled: false,
+            etEnabled: false,
+            rdpConfig: undefined,
+            vncConfig: undefined,
+          };
+        }
+        return {
+          ...prev,
+          protocol: "ssh",
+          port: nextPort,
+          telnetEnabled: false,
+          rdpConfig: undefined,
+          vncConfig: undefined,
+          username: isFreshHost && !prev.username && !effectiveGroupDefaults?.username ? "root" : (prev.username ?? ""),
+        };
+      });
+    },
+    [effectiveGroupDefaults?.port, effectiveGroupDefaults?.telnetPort, effectiveGroupDefaults?.username, initialData],
+  );
+
+  const handleSelectProtocolTab = useCallback(
+    (tab: EditableHostProtocol) => {
+      setActiveProtocolTab(tab);
+    },
+    [],
+  );
+
+  const handleEnableSecondaryProtocol = useCallback(
+    (proto: EditableHostProtocol) => {
+      setActiveProtocolTab(proto);
+      setForm((prev) => {
+        const hasSsh = !prev.protocol || prev.protocol === "ssh" || prev.protocol === "mosh" || prev.protocol === "et";
+        if (hasSsh) {
+          if (proto === "vnc") {
+            return {
+              ...prev,
+              vncConfig: {
+                ...DEFAULT_VNC_CONFIG,
+                ...(prev.vncConfig ?? {}),
+                enabled: true,
+                port: prev.vncConfig?.port ?? DEFAULT_VNC_PORT,
+                tunnelViaHostSsh: prev.vncConfig?.tunnelViaHostSsh ?? true,
+                useHostCredentials: prev.vncConfig?.identityId ? false : (prev.vncConfig?.useHostCredentials ?? true),
+              },
+            };
+          }
+          if (proto === "rdp") {
+            return {
+              ...prev,
+              rdpConfig: {
+                ...DEFAULT_RDP_CONFIG,
+                ...(prev.rdpConfig ?? {}),
+                enabled: true,
+                port: prev.rdpConfig?.port ?? DEFAULT_RDP_PORT,
+                tunnelViaHostSsh: prev.rdpConfig?.tunnelViaHostSsh ?? true,
+                useHostCredentials: prev.rdpConfig?.identityId ? false : (prev.rdpConfig?.useHostCredentials ?? true),
+              },
+            };
+          }
+          if (proto === "telnet") {
+            return {
+              ...prev,
+              telnetEnabled: true,
+            };
+          }
+        }
+        // Adding SSH to a standalone RDP/VNC/Telnet host: promote host.protocol to SSH
+        // while keeping the existing protocol enabled (and default for RDP/VNC).
+        if (proto === "ssh") {
+          if (prev.protocol === "rdp") {
+            return {
+              ...prev,
+              protocol: "ssh",
+              port: effectiveGroupDefaults?.port ? undefined : 22,
+              username: prev.username || (effectiveGroupDefaults?.username ? "" : "root"),
+              rdpConfig: {
+                ...DEFAULT_RDP_CONFIG,
+                ...(prev.rdpConfig ?? {}),
+                enabled: true,
+                defaultConnect: true,
+                port: prev.port ?? prev.rdpConfig?.port ?? DEFAULT_RDP_PORT,
+                tunnelViaHostSsh: true,
+                useHostCredentials: prev.identityId ? false : true,
+                ...(prev.identityId ? { identityId: prev.identityId } : {}),
+              },
+            };
+          }
+          if (prev.protocol === "vnc") {
+            return {
+              ...prev,
+              protocol: "ssh",
+              port: effectiveGroupDefaults?.port ? undefined : 22,
+              username: prev.username || (effectiveGroupDefaults?.username ? "" : "root"),
+              vncConfig: {
+                ...DEFAULT_VNC_CONFIG,
+                ...(prev.vncConfig ?? {}),
+                enabled: true,
+                defaultConnect: true,
+                port: prev.port ?? prev.vncConfig?.port ?? DEFAULT_VNC_PORT,
+                tunnelViaHostSsh: true,
+                useHostCredentials: prev.identityId ? false : true,
+                ...(prev.identityId ? { identityId: prev.identityId } : {}),
+              },
+            };
+          }
+          if (prev.protocol === "telnet") {
+            return {
+              ...prev,
+              protocol: "ssh",
+              port: effectiveGroupDefaults?.port ? undefined : 22,
+              telnetPort: prev.telnetPort ?? prev.port ?? 23,
+              telnetEnabled: true,
+              username: prev.username || (effectiveGroupDefaults?.username ? "" : "root"),
+            };
+          }
+        }
+        return prev;
+      });
+    },
+    [effectiveGroupDefaults?.port, effectiveGroupDefaults?.username],
+  );
+
+  const handleSetDefaultProtocol = useCallback((proto: EditableHostProtocol) => {
+    setForm((prev) => applyHostDefaultConnectProtocol(prev, proto));
+  }, []);
+
+  const handleSetConnectBehavior = useCallback((choice: "ask" | EditableHostProtocol) => {
+    if (choice === "ask") {
+      setForm((prev) => ({
+        ...prev,
+        connectProtocolBehavior: "ask",
+      }));
+      return;
+    }
+    setForm((prev) => applyHostDefaultConnectProtocol(prev, choice));
+  }, []);
+
+  const handleRemoveProtocol = useCallback(
+    (proto: EditableHostProtocol) => {
+      if (enabledProtocolCount <= 1) return;
+      const clearAskIfSingle = enabledProtocolCount <= 2
+        ? { connectProtocolBehavior: undefined }
+        : {};
+      if (proto === "vnc") {
+        setForm((prev) => ({ ...prev, ...clearAskIfSingle, vncConfig: undefined }));
+        setActiveProtocolTab("ssh");
+        return;
+      }
+      if (proto === "rdp") {
+        setForm((prev) => ({ ...prev, ...clearAskIfSingle, rdpConfig: undefined }));
+        setActiveProtocolTab("ssh");
+        return;
+      }
+      if (proto === "telnet") {
+        setForm((prev) => {
+          const savedSshPort = prev.protocols?.find((p) => p.protocol === "ssh")?.port;
+          const remainingProtocols = prev.protocols?.filter((p) => p.protocol !== "telnet" && p.protocol !== "ssh");
+          return {
+            ...prev,
+            ...clearAskIfSingle,
+            telnetEnabled: false,
+            ...(prev.protocol === "telnet"
+              ? { protocol: "ssh", ...(savedSshPort ? { port: savedSshPort } : {}) }
+              : {}),
+            ...(prev.protocols ? { protocols: remainingProtocols && remainingProtocols.length > 0 ? remainingProtocols : undefined } : {}),
+          };
+        });
+        setActiveProtocolTab("ssh");
+        return;
+      }
+      if (proto === "ssh") {
+        // Promote remaining enabled protocol to standalone primary
+        const nextPrimary: EditableHostProtocol =
+          form.rdpConfig?.enabled && form.rdpConfig?.defaultConnect
+            ? "rdp"
+            : form.vncConfig?.enabled && form.vncConfig?.defaultConnect
+              ? "vnc"
+              : form.rdpConfig?.enabled
+                ? "rdp"
+                : form.vncConfig?.enabled
+                  ? "vnc"
+                  : "telnet";
+        handleSwitchOnlyProtocol(nextPrimary);
+        setForm((prev) => ({
+          ...prev,
+          connectProtocolBehavior: undefined,
+          protocols: prev.protocols?.filter((p) => p.protocol !== "ssh"),
+        }));
+      }
+    },
+    [enabledProtocolCount, form.rdpConfig?.defaultConnect, form.rdpConfig?.enabled, form.vncConfig?.defaultConnect, form.vncConfig?.enabled, handleSwitchOnlyProtocol],
+  );
+
   const handleSubmit = async () => {
     if (savingHostRef.current) return;
     savingHostRef.current = true;
     try {
-    const flushed = await totpFlushRef.current?.();
+    const flushed = isRemoteDesktopPrimary ? undefined : await totpFlushRef.current?.();
     if (flushed && !flushed.ok) return;
     const hostname = form.hostname.trim()
       || (pluginProtocolActive ? form.label.trim() || form.pluginConnection?.providerId || "plugin" : "");
     if (!hostname || !canSaveHost) return;
-    if (!pluginProtocolActive && !hasRequiredHostAuthCredential({ host: effectiveAuthHost, keys: availableKeys, identities })) {
+    if (!pluginProtocolActive && !isRemoteDesktopPrimary && !hasRequiredHostAuthCredential({ host: effectiveAuthHost, keys: availableKeys, identities })) {
       toast.error(t("hostDetails.auth.credentialRequired"));
       return;
     }
@@ -633,6 +970,99 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
       const pluginConnection = sanitizePluginConnection(cleaned.pluginConnection, cleaned.protocol);
       if (!pluginConnection) return;
       cleaned = stripBuiltInConnectionFieldsForPluginHost({ ...cleaned, pluginConnection });
+    }
+    if (isRemoteDesktopPrimary) {
+      const sanitizedRdp = cleaned.protocol === "rdp"
+        ? sanitizeRdpConfig({
+            ...(cleaned.rdpConfig ?? {}),
+            port: finalPort ?? DEFAULT_RDP_PORT,
+            enabled: undefined,
+            tunnelViaHostSsh: undefined,
+            tunnelTargetHost: undefined,
+          })
+        : undefined;
+      const sanitizedVnc = cleaned.protocol === "vnc"
+        ? sanitizeVncConfig({
+            ...(cleaned.vncConfig ?? {}),
+            port: finalPort ?? DEFAULT_VNC_PORT,
+            enabled: undefined,
+            tunnelViaHostSsh: undefined,
+            tunnelTargetHost: undefined,
+          })
+        : undefined;
+      const hasInlinePassword = !cleaned.identityId && typeof cleaned.password === "string" && cleaned.password.length > 0;
+      cleaned = {
+        ...cleaned,
+        username: typeof cleaned.username === "string" ? cleaned.username.trim() : "",
+        tags: Array.isArray(cleaned.tags) ? cleaned.tags : [],
+        os: cleaned.os || (cleaned.protocol === "rdp" ? "windows" : "linux"),
+        port: finalPort ?? (cleaned.protocol === "rdp" ? DEFAULT_RDP_PORT : DEFAULT_VNC_PORT),
+        authMethod: hasInlinePassword || cleaned.identityId ? "password" : undefined,
+        authPolicyVersion: 1,
+        identityFileId: undefined,
+        identityFilePaths: undefined,
+        password: cleaned.identityId || cleaned.savePassword === false ? undefined : cleaned.password,
+        rdpConfig: sanitizedRdp,
+        vncConfig: sanitizedVnc,
+        moshEnabled: undefined,
+        etEnabled: undefined,
+        telnetEnabled: undefined,
+      };
+    } else if (!pluginProtocolActive) {
+      let nextRdpConfig = cleaned.rdpConfig?.enabled ? sanitizeRdpConfig(cleaned.rdpConfig) : undefined;
+      let nextVncConfig = cleaned.vncConfig?.enabled ? sanitizeVncConfig(cleaned.vncConfig) : undefined;
+      const rdpDraft = companionCredentialDrafts.rdp;
+      if (
+        nextRdpConfig &&
+        onCreateIdentity &&
+        rdpDraft &&
+        rdpDraft.password.length > 0
+      ) {
+        const identity: Identity = {
+          id: crypto.randomUUID(),
+          label: `${finalLabel} RDP`,
+          username: rdpDraft.username.trim(),
+          ...(nextRdpConfig.domain ? { domain: nextRdpConfig.domain } : {}),
+          authMethod: "password",
+          password: rdpDraft.password,
+          created: Date.now(),
+        };
+        onCreateIdentity(identity);
+        nextRdpConfig = {
+          ...nextRdpConfig,
+          useHostCredentials: false,
+          identityId: identity.id,
+          username: undefined,
+        };
+      }
+      const vncDraft = companionCredentialDrafts.vnc;
+      if (
+        nextVncConfig &&
+        onCreateIdentity &&
+        vncDraft &&
+        vncDraft.password.length > 0
+      ) {
+        const identity: Identity = {
+          id: crypto.randomUUID(),
+          label: `${finalLabel} VNC`,
+          username: vncDraft.username.trim(),
+          authMethod: "password",
+          password: vncDraft.password,
+          created: Date.now(),
+        };
+        onCreateIdentity(identity);
+        nextVncConfig = {
+          ...nextVncConfig,
+          useHostCredentials: false,
+          identityId: identity.id,
+          username: undefined,
+        };
+      }
+      cleaned = {
+        ...cleaned,
+        rdpConfig: nextRdpConfig,
+        vncConfig: nextVncConfig,
+      };
     }
     cleaned = prepareTelnetCredentialsForSave(normalizePrimaryTelnetState(cleaned));
     if (
@@ -866,6 +1296,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         password: undefined,
         identityFileId: undefined,
         identityFilePaths: undefined,
+        ...(prev.protocol === "rdp" && identity.domain
+          ? { rdpConfig: { ...(prev.rdpConfig ?? {}), domain: identity.domain } }
+          : {}),
       }));
       setPendingReferenceKeyPath(null);
       setSelectedCredentialType(null);
@@ -1110,7 +1543,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           />
 
           <div className="flex items-center gap-2">
-            <div className="h-10 w-10 rounded-lg bg-secondary/80 flex items-center justify-center shrink-0">
+            <div className="h-10 w-10 rounded-lg border border-border/60 bg-transparent flex items-center justify-center shrink-0">
               <FolderPlus size={16} className="text-muted-foreground" />
             </div>
             <Combobox
@@ -1133,7 +1566,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="h-10 w-10 rounded-lg bg-secondary/80 flex items-center justify-center shrink-0">
+            <div className="h-10 w-10 rounded-lg border border-border/60 bg-transparent flex items-center justify-center shrink-0">
               <Tag size={16} className="text-muted-foreground" />
             </div>
             <MultiCombobox
@@ -1192,9 +1625,46 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           distroOptions={distroOptions}
           effectiveFormDistro={effectiveFormDistro}
           getDistroOptionLabel={getDistroOptionLabel}
+          onSelectPrimaryProtocol={handleSwitchOnlyProtocol}
+          activeProtocolTab={activeProtocolTab}
+          enabledProtocols={enabledProtocols}
+          defaultConnectProtocol={defaultConnectProtocol}
+          effectiveConnectBehavior={effectiveConnectBehavior}
+          onSelectProtocolTab={handleSelectProtocolTab}
+          onEnableSecondaryProtocol={handleEnableSecondaryProtocol}
+          onSwitchOnlyProtocol={handleSwitchOnlyProtocol}
+          onSetDefaultProtocol={handleSetDefaultProtocol}
+          onSetConnectBehavior={handleSetConnectBehavior}
+          onRemoveProtocol={handleRemoveProtocol}
+          onCreateIdentity={onCreateIdentity}
+          companionCredentialDrafts={companionCredentialDrafts}
+          onCompanionCredentialDraftChange={(proto: "rdp" | "vnc", draft: { username: string; password: string } | undefined) => {
+            setCompanionCredentialDrafts((prev) => ({
+              ...prev,
+              [proto]: draft,
+            }));
+          }}
+          effectiveTelnetPort={effectiveTelnetPort}
+          effectiveTelnetUsername={effectiveTelnetUsername}
+          effectiveTelnetPassword={effectiveTelnetPassword}
+          effectiveTelnetThemeId={effectiveTelnetThemeId}
+          telnetIdentityOptions={telnetIdentityOptions}
+          selectedTelnetIdentity={selectedTelnetIdentity}
+          updateTelnetIdentity={updateTelnetIdentity}
+          showTelnetPassword={showTelnetPassword}
+          setShowTelnetPassword={setShowTelnetPassword}
+          onOpenTelnetThemeSelect={() => setActiveSubPanel("telnet-theme-select")}
         /> : null}
 
-        {onSnippetsChange ? (
+        {isRemoteDesktopPrimary && isCurrentTabEnabled && (activeProtocolTab === "rdp" || activeProtocolTab === "vnc") ? (
+          <RemoteDesktopOptionsSection
+            form={form}
+            setForm={setForm}
+            t={t}
+          />
+        ) : null}
+
+        {onSnippetsChange && isCurrentTabEnabled && (activeProtocolTab === "ssh" || activeProtocolTab === "telnet") ? (
           <HostDetailsScriptsSection
             host={form}
             onHostChange={setForm}
@@ -1235,7 +1705,11 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           form={form}
           setForm={setForm}
           update={update}
+          activeProtocolTab={activeProtocolTab}
+          isCurrentTabEnabled={isCurrentTabEnabled}
           effectiveThemeId={effectiveThemeId}
+          effectiveTelnetThemeId={effectiveTelnetThemeId}
+          onOpenTelnetThemeSelect={() => setActiveSubPanel("telnet-theme-select")}
           hasEffectiveThemeOverride={hasEffectiveThemeOverride}
           effectiveFontSize={effectiveFontSize}
           hasEffectiveFontSizeOverride={hasEffectiveFontSizeOverride}
@@ -1255,158 +1729,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           proxyInherited={proxyInherited}
           clearProxyConfig={clearProxyConfig}
         />
-
-        <div className="flex items-center gap-3 py-2">
-          <div className="flex-1 h-px bg-border/60" />
-          <span className="text-xs text-muted-foreground">{t("hostDetails.otherProtocols")}</span>
-          <div className="flex-1 h-px bg-border/60" />
-        </div>
-
-        {form.telnetEnabled || form.protocol === "telnet" ? (
-          <HostDetailsSection
-            icon={<Plus size={14} className="text-muted-foreground" />}
-            title="Telnet"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex-1 min-w-0 h-10 flex items-center gap-2 bg-secondary/70 border border-border/70 rounded-md px-3">
-                <span className="text-xs text-muted-foreground">{t("hostDetails.telnetOn")}</span>
-                <div className="ml-auto w-1/2 min-w-0 flex items-center gap-2 justify-end">
-	                  <Input
-	                    type="number"
-	                    value={effectiveTelnetPort}
-	                    onChange={(e) => update("telnetPort", parseOptionalPortInput(e.target.value))}
-	                    className="h-8 flex-1 min-w-0 text-center"
-	                  />
-                  <span className="text-xs text-muted-foreground">{t("hostDetails.port")}</span>
-                </div>
-              </div>
-              {form.protocol !== "telnet" && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                  onClick={() => update("telnetEnabled", false)}
-                >
-                  <X size={14} />
-                </Button>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-muted-foreground">{t("hostDetails.telnet.setDefault")}</span>
-              <Switch
-                checked={form.protocol === "telnet"}
-                onCheckedChange={(checked) => {
-                  const nextProtocol = checked ? "telnet" : "ssh";
-                  setForm((prev) => ({
-                    ...prev,
-                    protocol: nextProtocol,
-                    port: resolvePrimaryProtocolSwitchPort(
-                      prev.port,
-                      nextProtocol,
-                      Boolean(groupDefaults?.telnetPort),
-                      Boolean(groupDefaults?.port),
-                    ),
-                  }));
-                }}
-              />
-            </div>
-
-            <p className="text-xs font-semibold">{t("hostDetails.telnet.credentials")}</p>
-            {identities.length > 0 && (
-              <Combobox
-                options={telnetIdentityOptions}
-                value={form.telnetIdentityId || ""}
-                onValueChange={updateTelnetIdentity}
-                placeholder={t("hostDetails.telnet.identity.placeholder")}
-                emptyText={t("common.noResultsFound")}
-                className="w-full"
-              />
-            )}
-            {form.telnetIdentityId ? (
-              <div className="text-xs text-muted-foreground">
-                {selectedTelnetIdentity
-                  ? `${selectedTelnetIdentity.username} - ${selectedTelnetIdentity.label}`
-                  : t("hostDetails.identity.missing")}
-              </div>
-            ) : (
-              <>
-                <Input
-                  placeholder={t("hostDetails.telnet.username")}
-                  value={effectiveTelnetUsername}
-                  onChange={(e) =>
-                    update("telnetUsername" as keyof Host, e.target.value)
-                  }
-                  className="h-10"
-                />
-                <div className="relative">
-                  <Input
-                    placeholder={t("hostDetails.telnet.password")}
-                    type={showTelnetPassword ? "text" : "password"}
-                    value={effectiveTelnetPassword}
-                    onChange={(e) =>
-                      update("telnetPassword" as keyof Host, e.target.value)
-                    }
-                    className="h-10 pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowTelnetPassword(!showTelnetPassword)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {showTelnetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-              </>
-            )}
-
-            <TerminalEncodingSelect
-              value={form.charset}
-              inheritedValue={effectiveGroupDefaults?.charset}
-              onValueChange={(value) => update("charset", value)}
-            />
-
-            <button
-              type="button"
-              className="w-full flex items-center gap-3 p-2 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors text-left"
-              onClick={() => setActiveSubPanel("telnet-theme-select")}
-            >
-              <div
-                className="w-12 h-8 rounded-md border border-border/60 flex items-center justify-center text-[6px] font-mono overflow-hidden"
-                style={{
-                  backgroundColor:
-                    customThemeStore.getThemeById(effectiveTelnetThemeId)?.colors.background || "#100F0F",
-                  color:
-                    customThemeStore.getThemeById(effectiveTelnetThemeId)?.colors.foreground || "#CECDC3",
-                }}
-              >
-                <div className="p-0.5">
-                  <div
-                    style={{
-                      color: customThemeStore.getThemeById(effectiveTelnetThemeId)?.colors.green,
-                    }}
-                  >
-                    $
-                  </div>
-                </div>
-              </div>
-              <span className="text-sm flex-1">
-                {customThemeStore.getThemeById(effectiveTelnetThemeId)?.name || "Flexoki Dark"}
-              </span>
-            </button>
-          </HostDetailsSection>
-        ) : (
-          <Button
-            variant="ghost"
-            className="w-full h-10 justify-start gap-2 border border-dashed border-border/60"
-            onClick={() => {
-              update("telnetEnabled", true);
-            }}
-          >
-            <Plus size={14} />
-            {t("hostDetails.telnet.add")}
-          </Button>
-        )}
       </AsidePanelContent>
       <AsidePanelFooter>
         <Button

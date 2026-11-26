@@ -772,3 +772,105 @@ test('a completed GPU probe reaches incremental snapshots before the next CPU sa
   assert.equal(f.service.snapshot(event(1),caughtUp).hosts.h.stats,undefined,'unchanged GPU data is not repeatedly sent');
  } finally {f.service.dispose();}
 });
+
+test("standalone RDP/VNC probe mode runs outside SSH pool, enforces >=5s cadence, recovers offline->live on retry, and supports companion probes", async () => {
+  let probeCalls = 0;
+  let now = 50_000;
+  let failProbe = true;
+  const companionSeen = [];
+  const f = fixture({
+    now: () => now,
+    probeRemoteDesktop: async (opts, deps) => {
+      probeCalls += 1;
+      if (deps?.sshConn) {
+        companionSeen.push({ protocol: opts.protocol, port: opts.port });
+        return {
+          ok: true,
+          reachable: true,
+          protocol: opts.protocol,
+          port: opts.port,
+          rttMs: 6,
+          bannerVerified: true,
+          bannerDetail: opts.protocol === "rdp" ? "RDP (NLA / CredSSP)" : "RFB 3.8",
+          checkedAt: now,
+        };
+      }
+      if (failProbe) {
+        return {
+          ok: false,
+          reachable: false,
+          protocol: opts.protocol,
+          port: opts.port,
+          rttMs: null,
+          bannerVerified: false,
+          error: "ECONNREFUSED",
+          checkedAt: now,
+        };
+      }
+      return {
+        ok: true,
+        reachable: true,
+        protocol: opts.protocol,
+        port: opts.port,
+        rttMs: 18,
+        bannerVerified: true,
+        bannerDetail: "RDP (NLA / CredSSP)",
+        checkedAt: now,
+      };
+    },
+  });
+
+  try {
+    f.service.reconcile(event(1), [{
+      id: "mixed",
+      runId: "r1",
+      interval: 1, // Probe must clamp to >= 5s!
+      hosts: [
+        {
+          id: "rdp-1",
+          kind: "probe",
+          probe: { protocol: "rdp", hostname: "win.lan", port: 3389, bannerCheck: true },
+        },
+        {
+          id: "ssh-comp",
+          kind: "ssh",
+          options,
+          companionProbes: [
+            { protocol: "vnc", hostname: "127.0.0.1", port: 5900, tunnelViaHostSsh: true },
+          ],
+        },
+      ],
+    }]);
+
+    await until(() => f.service.snapshot(event(1)).hosts["rdp-1"]?.status === "offline");
+    await until(() => companionSeen.length === 1);
+
+    const snap1 = f.service.snapshot(event(1));
+    assert.equal(snap1.hosts["rdp-1"].mode, "probe");
+    assert.equal(snap1.hosts["rdp-1"].status, "offline");
+    assert.equal(snap1.hosts["rdp-1"].probe.reachable, false);
+    assert.equal(snap1.hosts["rdp-1"].points.at(-1).latencyMs, null);
+    // Clamped 5s * 2^1 failure backoff = 10000ms
+    const probeTimer = f.timers.find((t) => !t.cancelled && t.ms === 10_000);
+    assert.ok(probeTimer, "probe must enforce minimum 5s cadence with exponential backoff");
+    // Companion probe attached to SSH host using pooled SSH conn
+    assert.equal(snap1.hosts["ssh-comp"].status, "live");
+    assert.equal(snap1.hosts["ssh-comp"].companionProbes.vnc.reachable, true);
+    assert.equal(snap1.hosts["ssh-comp"].companionProbes.vnc.rttMs, 6);
+
+    // Retry immediately re-probes and transitions offline -> live while preserving historyId
+    const prevHistoryId = snap1.hosts["rdp-1"].historyId;
+    failProbe = false;
+    now += 2000;
+    f.service.retry(event(1), "rdp-1");
+    await until(() => f.service.snapshot(event(1)).hosts["rdp-1"]?.status === "live");
+    const snap2 = f.service.snapshot(event(1));
+    assert.equal(snap2.hosts["rdp-1"].historyId, prevHistoryId);
+    assert.equal(snap2.hosts["rdp-1"].probe.reachable, true);
+    assert.equal(snap2.hosts["rdp-1"].probe.rttMs, 18);
+    assert.equal(snap2.hosts["rdp-1"].points.at(-1).latencyMs, 18);
+    assert.ok(probeCalls >= 3);
+  } finally {
+    f.service.dispose();
+  }
+});

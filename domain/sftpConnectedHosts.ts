@@ -31,6 +31,7 @@ const isReusableSftpSourceSession = (session: SftpPickerSessionFields): boolean 
   if (session.moshEnabled || session.etEnabled) return false;
   const protocol = session.protocol;
   if (protocol === "serial" || protocol === "local" || protocol === "telnet"
+    || protocol === "vnc" || protocol === "rdp"
     || isPluginHostProtocol(protocol)) return false;
   // Missing protocol defaults to SSH (same as host picker filtering).
   return true;
@@ -113,7 +114,7 @@ export const listSftpConnectedHosts = (
     if (!isReusableSftpSourceSession(session)) continue;
     const host = hostsById.get(session.hostId);
     if (!host) continue;
-    if (host.protocol === "serial" || isPluginHostProtocol(host.protocol)) continue;
+    if (host.protocol === "serial" || host.protocol === "vnc" || host.protocol === "rdp" || isPluginHostProtocol(host.protocol)) continue;
     // Use session transport flags only. Vault hosts may still have mosh/et
     // defaults while the live terminal was opened as plain SSH (e.g. ssh://).
     // Do not filter sftpSudo here — picker display only; reuse is stripped later.
@@ -166,7 +167,7 @@ export const resolveSftpTransferSourceSessionId = (
     if (!isReusableSftpSourceSession(session)) continue;
     const vaultHost = hostsById.get(session.hostId);
     if (!vaultHost) continue;
-    if (vaultHost.protocol === "serial" || isPluginHostProtocol(vaultHost.protocol)) continue;
+    if (vaultHost.protocol === "serial" || vaultHost.protocol === "vnc" || vaultHost.protocol === "rdp" || isPluginHostProtocol(vaultHost.protocol)) continue;
     const liveHost = hostForLiveSession(vaultHost, session);
     if (host && !sftpHostEndpointsEqual(liveHost, host)) continue;
     lastMatch = session.id;

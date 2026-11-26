@@ -86,9 +86,9 @@ test("parseJmsDeepLink returns null for bad base64 or JSON", () => {
 test("parseJmsDeepLink still parses unsupported protocols", () => {
   const target = parseJmsDeepLink(encodePayload({
     ...validPayload,
-    protocol: "rdp",
+    protocol: "mysql",
   }));
-  assert.equal(target?.protocol, "rdp");
+  assert.equal(target?.protocol, "mysql");
   assert.equal(target?.hostname, "gw.example.com");
 });
 
@@ -125,11 +125,15 @@ test("parseJmsDeepLink uses name or hostname for label", () => {
   assert.equal(fromHostname?.label, "gw.example.com");
 });
 
-test("isSupportedJmsProtocol accepts ssh, sftp, and telnet", () => {
+test("isSupportedJmsProtocol accepts ssh, sftp, telnet, rdp, and vnc", () => {
   assert.equal(isSupportedJmsProtocol("ssh"), true);
   assert.equal(isSupportedJmsProtocol("SFTP"), true);
   assert.equal(isSupportedJmsProtocol("telnet"), true);
-  assert.equal(isSupportedJmsProtocol("rdp"), false);
+  assert.equal(isSupportedJmsProtocol("rdp"), true);
+  assert.equal(isSupportedJmsProtocol("RDP"), true);
+  assert.equal(isSupportedJmsProtocol("vnc"), true);
+  assert.equal(isSupportedJmsProtocol("VNC"), true);
+  assert.equal(isSupportedJmsProtocol("mysql"), false);
 });
 
 test("buildJmsDeepLinkEphemeralHost builds password ssh host with mosh and et disabled", () => {
@@ -183,27 +187,114 @@ test("buildJmsDeepLinkEphemeralHost keeps telnet payloads on the JumpServer ssh 
   assert.equal(host.ephemeral, true);
 });
 
-test("parseJmsDeepLinkResult reports unsupported_protocol for JumpServer v4 RDP payload without endpoint or token", () => {
-  assert.deepEqual(
-    parseJmsDeepLinkResult(encodePayload({
-      version: 2,
-      protocol: "rdp",
-      name: "admin@windows-host",
-      file: { name: "admin@windows-host.rdp", content: "full address:s:10.0.0.10:3389" },
-    })),
-    { ok: false, reason: "unsupported_protocol", protocol: "rdp" },
-  );
+test("parseJmsDeepLinkResult parses JumpServer v4 embedded .rdp file payload and preserves raw content", () => {
+  const rawRdpContent = [
+    "full address:s:razor.example.com:33890",
+    "username:s:alice|550e8400-e29b-41d4-a716-446655440000",
+    "use redirection server name:i:0",
+    "loadbalanceinfo:s:tsv://MS Terminal Services Plugin.1.Desktop",
+    "desktopwidth:i:1920",
+    "desktopheight:i:1080",
+    "redirectclipboard:i:1",
+    "audiomode:i:0",
+  ].join("\r\n");
+
+  const result = parseJmsDeepLinkResult(encodePayload({
+    version: 2,
+    protocol: "rdp",
+    name: "admin@windows-host",
+    token: { id: "tok-1", value: "one-time-secret" },
+    file: { name: "admin@windows-host.rdp", content: rawRdpContent },
+  }));
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.target.protocol, "rdp");
+  assert.equal(result.target.hostname, "razor.example.com");
+  assert.equal(result.target.port, 33890);
+  assert.equal(result.target.username, "alice|550e8400-e29b-41d4-a716-446655440000");
+  assert.equal(result.target.password, "one-time-secret");
+  assert.equal(result.target.label, "admin@windows-host");
+  assert.equal(result.target.rawRdpFileContent, rawRdpContent);
+  assert.equal(result.target.rawRdpFileName, "admin@windows-host.rdp");
+  assert.equal(result.target.rdpConfig?.loadBalanceInfo, "tsv://MS Terminal Services Plugin.1.Desktop");
+  assert.equal(result.target.rdpConfig?.width, 1920);
+  assert.equal(result.target.rdpConfig?.audioEnabled, true);
+
+  const host = buildJmsDeepLinkEphemeralHost(result.target, { id: "ephemeral-rdp", now: 789 });
+  assert.equal(host.protocol, "rdp");
+  assert.equal(host.os, "windows");
+  assert.equal(host.ephemeral, true);
+  assert.equal(host.savePassword, false);
+  assert.equal(host.username, "alice|550e8400-e29b-41d4-a716-446655440000");
+  assert.equal(host.password, "one-time-secret");
+  assert.equal(host.authMethod, "password");
+  assert.equal(host.rdpConfig?.loadBalanceInfo, "tsv://MS Terminal Services Plugin.1.Desktop");
+  assert.equal("password" in (host.rdpConfig ?? {}), false);
+});
+
+test("parseJmsDeepLinkResult accepts JumpServer v4 embedded .rdp without token password and rejects empty RDP payload", () => {
+  const withoutToken = parseJmsDeepLinkResult(encodePayload({
+    version: 2,
+    protocol: "rdp",
+    name: "win-prompt",
+    file: { name: "win-prompt.rdp", content: "full address:s:10.0.0.10:3389\r\nusername:s:alice|uuid" },
+  }));
+  assert.equal(withoutToken.ok, true);
+  if (withoutToken.ok) {
+    assert.equal(withoutToken.target.password, "");
+    const host = buildJmsDeepLinkEphemeralHost(withoutToken.target, { id: "ephemeral-rdp-2", now: 1 });
+    assert.equal(host.password, undefined);
+    assert.equal(host.username, "alice|uuid");
+  }
 
   assert.deepEqual(
-    parseJmsDeepLinkResult(encodePayload({
-      protocol: "  RDP  ",
-    })),
-    { ok: false, reason: "unsupported_protocol", protocol: "rdp" },
+    parseJmsDeepLinkResult(encodePayload({ protocol: "  RDP  " })),
+    { ok: false, reason: "invalid" },
   );
 });
 
-test("parseJmsDeepLinkResult reports unsupported_protocol for vnc, database, and k8s payloads without endpoint or token", () => {
-  for (const protocol of ["vnc", "mysql", "postgresql", "k8s"]) {
+test("parseJmsDeepLinkResult supports endpoint+token payloads for rdp and vnc", () => {
+  const rdpResult = parseJmsDeepLinkResult(encodePayload({
+    protocol: "rdp",
+    token: { id: "rdp-tok", value: "rdp-secret" },
+    endpoint: { host: "gw.example.com", rdp_port: 33890 },
+    asset: { name: "Win Asset" },
+  }));
+  assert.equal(rdpResult.ok, true);
+  if (rdpResult.ok) {
+    assert.equal(rdpResult.target.port, 33890);
+    assert.equal(rdpResult.target.username, "JMS-rdp-tok");
+    assert.equal(rdpResult.target.password, "rdp-secret");
+    const host = buildJmsDeepLinkEphemeralHost(rdpResult.target, { id: "ep-rdp", now: 2 });
+    assert.equal(host.protocol, "rdp");
+    assert.equal(host.os, "windows");
+    assert.equal(host.port, 33890);
+  }
+
+  const vncResult = parseJmsDeepLinkResult(encodePayload({
+    protocol: "vnc",
+    token: { id: "vnc-tok", value: "vnc-secret" },
+    endpoint: { host: "gw.example.com", port: 5900 },
+    asset: { name: "Linux Desktop" },
+  }));
+  assert.equal(vncResult.ok, true);
+  if (vncResult.ok) {
+    assert.equal(vncResult.target.protocol, "vnc");
+    assert.equal(vncResult.target.port, 5900);
+    assert.equal(vncResult.target.username, "JMS-vnc-tok");
+    const host = buildJmsDeepLinkEphemeralHost(vncResult.target, { id: "ep-vnc", now: 3 });
+    assert.equal(host.protocol, "vnc");
+    assert.equal(host.port, 5900);
+    assert.equal(host.ephemeral, true);
+    assert.equal(host.savePassword, false);
+    assert.equal(host.password, "vnc-secret");
+    assert.equal(host.authMethod, "password");
+  }
+});
+
+test("parseJmsDeepLinkResult reports unsupported_protocol for database and k8s payloads without endpoint or token", () => {
+  for (const protocol of ["mysql", "postgresql", "k8s"]) {
     assert.deepEqual(
       parseJmsDeepLinkResult(encodePayload({ protocol })),
       { ok: false, reason: "unsupported_protocol", protocol },

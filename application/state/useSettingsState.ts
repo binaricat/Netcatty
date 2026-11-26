@@ -62,6 +62,11 @@ import {
   STORAGE_KEY_SESSION_LOGS_DIR,
   STORAGE_KEY_SESSION_LOGS_FORMAT,
   STORAGE_KEY_SESSION_LOGS_TIMESTAMPS_ENABLED,
+  STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB,
+  STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS,
   STORAGE_KEY_SSH_DEBUG_LOGS_ENABLED,
   STORAGE_KEY_SSH_DEEP_LINK_ENABLED,
   STORAGE_KEY_JMS_DEEP_LINK_ENABLED,
@@ -171,7 +176,33 @@ import {
 } from '../../domain/startupLanding';
 import { resolveRestorePreviousSessionSetting, resolveRestoreTerminalCwdSetting } from './sessionRestoreSettings';
 import { sessionRestoreStorage } from './sessionRestoreStorage';
-import { useSettingsStorageSync } from './settingsStorageSync';
+import {
+  DEFAULT_JUMPSERVER_RDP_LAUNCH_MODE,
+  DEFAULT_REMOTE_DESKTOP_AUTO_RECORD,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_FPS,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_MAX_MB,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS,
+  isJumpServerRdpLaunchMode,
+  normalizeRemoteDesktopRecordingFps,
+  normalizeRemoteDesktopRecordingMaxMb,
+  normalizeRemoteDesktopRecordingRetentionDays,
+  STORAGE_KEY_JUMPSERVER_RDP_LAUNCH_MODE,
+  useSettingsStorageSync,
+  type JumpServerRdpLaunchMode,
+  type RemoteDesktopRecordingFps,
+} from './settingsStorageSync';
+export {
+  DEFAULT_JUMPSERVER_RDP_LAUNCH_MODE,
+  DEFAULT_REMOTE_DESKTOP_AUTO_RECORD,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_FPS,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_MAX_MB,
+  DEFAULT_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS,
+  STORAGE_KEY_JUMPSERVER_RDP_LAUNCH_MODE,
+  type JumpServerRdpLaunchMode,
+  type RemoteDesktopRecordingFps,
+};
 import { useSettingsIpcSync } from './settingsIpcSync';
 import { TERMINAL_THEME_AUTO } from '../../domain/terminalAppearance';
 import { customThemeStore, useCustomThemes } from '../state/customThemeStore';
@@ -532,6 +563,35 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     const stored = readStoredString(STORAGE_KEY_SESSION_LOGS_TIMESTAMPS_ENABLED);
     return stored === 'true' ? true : DEFAULT_SESSION_LOGS_TIMESTAMPS_ENABLED;
   });
+  // Remote Desktop Session Recordings Settings (device-local)
+  const [remoteDesktopAutoRecord, setRemoteDesktopAutoRecordState] = useState<boolean>(() => {
+    const stored = readStoredString(STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD);
+    if (stored === null) return DEFAULT_REMOTE_DESKTOP_AUTO_RECORD;
+    return stored === 'true';
+  });
+  const [remoteDesktopRecordingFps, setRemoteDesktopRecordingFpsState] = useState<RemoteDesktopRecordingFps>(() => {
+    const stored = readStoredString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS);
+    return stored === null
+      ? DEFAULT_REMOTE_DESKTOP_RECORDING_FPS
+      : normalizeRemoteDesktopRecordingFps(stored);
+  });
+  const [remoteDesktopRecordingIncludeAudio, setRemoteDesktopRecordingIncludeAudioState] = useState<boolean>(() => {
+    const stored = readStoredString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO);
+    if (stored === null) return DEFAULT_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO;
+    return stored === 'true';
+  });
+  const [remoteDesktopRecordingMaxMb, setRemoteDesktopRecordingMaxMbState] = useState<number>(() => {
+    const stored = readStoredString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB);
+    return stored === null
+      ? DEFAULT_REMOTE_DESKTOP_RECORDING_MAX_MB
+      : normalizeRemoteDesktopRecordingMaxMb(stored);
+  });
+  const [remoteDesktopRecordingRetentionDays, setRemoteDesktopRecordingRetentionDaysState] = useState<number>(() => {
+    const stored = readStoredString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS);
+    return stored === null
+      ? DEFAULT_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS
+      : normalizeRemoteDesktopRecordingRetentionDays(stored);
+  });
   const [sshDebugLogsEnabled, setSshDebugLogsEnabled] = useState<boolean>(() => {
     const stored = readStoredString(STORAGE_KEY_SSH_DEBUG_LOGS_ENABLED);
     return stored === 'true' ? true : DEFAULT_SSH_DEBUG_LOGS_ENABLED;
@@ -543,6 +603,10 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   const [jmsDeepLinkEnabled, setJmsDeepLinkEnabledState] = useState<boolean>(() => {
     const stored = localStorageAdapter.readBoolean(STORAGE_KEY_JMS_DEEP_LINK_ENABLED);
     return stored ?? DEFAULT_JMS_DEEP_LINK_ENABLED;
+  });
+  const [jumpServerRdpLaunchMode, setJumpServerRdpLaunchModeState] = useState<JumpServerRdpLaunchMode>(() => {
+    const stored = readStoredString(STORAGE_KEY_JUMPSERVER_RDP_LAUNCH_MODE);
+    return isJumpServerRdpLaunchMode(stored) ? stored : DEFAULT_JUMPSERVER_RDP_LAUNCH_MODE;
   });
   const [explorerContextMenuEnabled, setExplorerContextMenuEnabledState] = useState<boolean>(() => {
     const stored = localStorageAdapter.readBoolean(STORAGE_KEY_EXPLORER_CONTEXT_MENU_ENABLED);
@@ -1055,10 +1119,38 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     if (storedSshDebugLogsEnabled === 'true' || storedSshDebugLogsEnabled === 'false') {
       setSshDebugLogsEnabled(storedSshDebugLogsEnabled === 'true');
     }
+    const storedRdAutoRecord = readStoredString(STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD);
+    setRemoteDesktopAutoRecordState(
+      storedRdAutoRecord === null ? DEFAULT_REMOTE_DESKTOP_AUTO_RECORD : storedRdAutoRecord === 'true',
+    );
+    const storedRdFps = readStoredString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS);
+    setRemoteDesktopRecordingFpsState(
+      storedRdFps === null ? DEFAULT_REMOTE_DESKTOP_RECORDING_FPS : normalizeRemoteDesktopRecordingFps(storedRdFps),
+    );
+    const storedRdAudio = readStoredString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO);
+    setRemoteDesktopRecordingIncludeAudioState(
+      storedRdAudio === null ? DEFAULT_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO : storedRdAudio === 'true',
+    );
+    const storedRdMaxMb = readStoredString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB);
+    setRemoteDesktopRecordingMaxMbState(
+      storedRdMaxMb === null ? DEFAULT_REMOTE_DESKTOP_RECORDING_MAX_MB : normalizeRemoteDesktopRecordingMaxMb(storedRdMaxMb),
+    );
+    const storedRdRetention = readStoredString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS);
+    setRemoteDesktopRecordingRetentionDaysState(
+      storedRdRetention === null
+        ? DEFAULT_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS
+        : normalizeRemoteDesktopRecordingRetentionDays(storedRdRetention),
+    );
     const storedSshDeepLinkEnabled = localStorageAdapter.readBoolean(STORAGE_KEY_SSH_DEEP_LINK_ENABLED);
     applyIncomingSshDeepLinkEnabled(storedSshDeepLinkEnabled ?? DEFAULT_SSH_DEEP_LINK_ENABLED);
     const storedJmsDeepLinkEnabled = localStorageAdapter.readBoolean(STORAGE_KEY_JMS_DEEP_LINK_ENABLED);
     applyIncomingJmsDeepLinkEnabled(storedJmsDeepLinkEnabled ?? DEFAULT_JMS_DEEP_LINK_ENABLED);
+    const storedJumpServerRdpLaunchMode = readStoredString(STORAGE_KEY_JUMPSERVER_RDP_LAUNCH_MODE);
+    setJumpServerRdpLaunchModeState(
+      isJumpServerRdpLaunchMode(storedJumpServerRdpLaunchMode)
+        ? storedJumpServerRdpLaunchMode
+        : DEFAULT_JUMPSERVER_RDP_LAUNCH_MODE,
+    );
     const storedExplorerContextMenuEnabled = localStorageAdapter.readBoolean(STORAGE_KEY_EXPLORER_CONTEXT_MENU_ENABLED);
     applyIncomingExplorerContextMenuEnabled(storedExplorerContextMenuEnabled ?? DEFAULT_EXPLORER_CONTEXT_MENU_ENABLED);
 
@@ -1283,6 +1375,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setSshDebugLogsEnabled,
     setSshDeepLinkEnabledState: applyIncomingSshDeepLinkEnabled,
     setJmsDeepLinkEnabledState: applyIncomingJmsDeepLinkEnabled,
+    setJumpServerRdpLaunchModeState,
     setExplorerContextMenuEnabledState: applyIncomingExplorerContextMenuEnabled,
     setHotkeyScheme,
     applyIncomingCustomKeyBindings,
@@ -1396,7 +1489,9 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles,
     sftpUseCompressedUpload, sftpSkipUnchanged, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
     showRecentHosts, hostClickBehavior, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, localShellSidePanelAutoOpen, localShellSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, showTabNumberBadges, disableTerminalFontZoom, restorePreviousSession, restoreTerminalCwd, startupLanding,
-    editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, explorerContextMenuEnabled,
+    editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled,
+    remoteDesktopAutoRecord, remoteDesktopRecordingFps, remoteDesktopRecordingIncludeAudio, remoteDesktopRecordingMaxMb, remoteDesktopRecordingRetentionDays,
+    sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, jumpServerRdpLaunchMode, explorerContextMenuEnabled,
     globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, windowBackgroundBlur, appIconVariant,
     setTheme, setLightUiThemeId, setDarkUiThemeId, setAccentMode,
     applyIncomingCustomAccent,
@@ -1406,7 +1501,9 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setSftpDoubleClickBehavior, setSftpAutoSync, setSftpShowHiddenFiles,
     setSftpUseCompressedUpload, setSftpSkipUnchanged, setSftpAutoOpenSidebar, setSftpFollowTerminalCwd, setSftpDefaultViewMode,
     setShowRecentHostsState, setHostClickBehaviorState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setTerminalSidePanelAutoOpenState, setTerminalSidePanelAutoOpenTabState, setLocalShellSidePanelAutoOpenState, setLocalShellSidePanelAutoOpenTabState, setShellOnlyTabNumberShortcutsState, setShowTabNumberBadgesState, setDisableTerminalFontZoomState, setRestorePreviousSessionState, setRestoreTerminalCwdState, setStartupLandingState,
-    setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled, setSshDebugLogsEnabled, setSshDeepLinkEnabledState: applyIncomingSshDeepLinkEnabled, setJmsDeepLinkEnabledState: applyIncomingJmsDeepLinkEnabled, setExplorerContextMenuEnabledState: applyIncomingExplorerContextMenuEnabled,
+    setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled,
+    setRemoteDesktopAutoRecordState, setRemoteDesktopRecordingFpsState, setRemoteDesktopRecordingIncludeAudioState, setRemoteDesktopRecordingMaxMbState, setRemoteDesktopRecordingRetentionDaysState,
+    setSshDebugLogsEnabled, setSshDeepLinkEnabledState: applyIncomingSshDeepLinkEnabled, setJmsDeepLinkEnabledState: applyIncomingJmsDeepLinkEnabled, setJumpServerRdpLaunchModeState, setExplorerContextMenuEnabledState: applyIncomingExplorerContextMenuEnabled,
     setGlobalHotkeyEnabled, setWindowOpacity: applyIncomingWindowOpacity, setWindowBackgroundBlur, setAppIconVariant, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
     setSftpTransferConcurrencyState, setSshTransportIdleTtlMsState,
     applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings,
@@ -1713,6 +1810,59 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     notifySettingsChanged(STORAGE_KEY_SESSION_LOGS_TIMESTAMPS_ENABLED, sessionLogsTimestampsEnabled);
   }, [sessionLogsTimestampsEnabled, notifySettingsChanged]);
 
+  // Persist Remote Desktop Recordings settings (device-local)
+  const setRemoteDesktopAutoRecord = useCallback((enabled: boolean) => {
+    setRemoteDesktopAutoRecordState(Boolean(enabled));
+  }, []);
+  const setRemoteDesktopRecordingFps = useCallback((fps: RemoteDesktopRecordingFps) => {
+    setRemoteDesktopRecordingFpsState(normalizeRemoteDesktopRecordingFps(fps));
+  }, []);
+  const setRemoteDesktopRecordingIncludeAudio = useCallback((enabled: boolean) => {
+    setRemoteDesktopRecordingIncludeAudioState(Boolean(enabled));
+  }, []);
+  const setRemoteDesktopRecordingMaxMb = useCallback((maxMb: number) => {
+    setRemoteDesktopRecordingMaxMbState(normalizeRemoteDesktopRecordingMaxMb(maxMb));
+  }, []);
+  const setRemoteDesktopRecordingRetentionDays = useCallback((days: number) => {
+    setRemoteDesktopRecordingRetentionDaysState(normalizeRemoteDesktopRecordingRetentionDays(days));
+  }, []);
+
+  useEffect(() => {
+    localStorageAdapter.writeString(STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD, remoteDesktopAutoRecord ? 'true' : 'false');
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_REMOTE_DESKTOP_AUTO_RECORD, remoteDesktopAutoRecord);
+  }, [remoteDesktopAutoRecord, notifySettingsChanged]);
+
+  useEffect(() => {
+    localStorageAdapter.writeString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS, String(remoteDesktopRecordingFps));
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS, remoteDesktopRecordingFps);
+  }, [remoteDesktopRecordingFps, notifySettingsChanged]);
+
+  useEffect(() => {
+    localStorageAdapter.writeString(
+      STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO,
+      remoteDesktopRecordingIncludeAudio ? 'true' : 'false',
+    );
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO, remoteDesktopRecordingIncludeAudio);
+  }, [remoteDesktopRecordingIncludeAudio, notifySettingsChanged]);
+
+  useEffect(() => {
+    localStorageAdapter.writeString(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB, String(remoteDesktopRecordingMaxMb));
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB, remoteDesktopRecordingMaxMb);
+  }, [remoteDesktopRecordingMaxMb, notifySettingsChanged]);
+
+  useEffect(() => {
+    localStorageAdapter.writeString(
+      STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS,
+      String(remoteDesktopRecordingRetentionDays),
+    );
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS, remoteDesktopRecordingRetentionDays);
+  }, [remoteDesktopRecordingRetentionDays, notifySettingsChanged]);
+
   useEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_SSH_DEBUG_LOGS_ENABLED, sshDebugLogsEnabled ? 'true' : 'false');
     if (!persistMountedRef.current) return;
@@ -1838,6 +1988,17 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_JMS_DEEP_LINK_ENABLED, jmsDeepLinkEnabled);
   }, [jmsDeepLinkEnabled, notifySettingsChanged]);
+
+  const setJumpServerRdpLaunchMode = useCallback((mode: JumpServerRdpLaunchMode) => {
+    if (!isJumpServerRdpLaunchMode(mode)) return;
+    setJumpServerRdpLaunchModeState(mode);
+  }, []);
+
+  useEffect(() => {
+    localStorageAdapter.writeString(STORAGE_KEY_JUMPSERVER_RDP_LAUNCH_MODE, jumpServerRdpLaunchMode);
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_JUMPSERVER_RDP_LAUNCH_MODE, jumpServerRdpLaunchMode);
+  }, [jumpServerRdpLaunchMode, notifySettingsChanged]);
 
   useEffect(() => {
     explorerContextMenuEnabledRef.current = explorerContextMenuEnabled;
@@ -2266,12 +2427,25 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setSessionLogsFormat,
     sessionLogsTimestampsEnabled,
     setSessionLogsTimestampsEnabled,
+    // Remote Desktop Recordings
+    remoteDesktopAutoRecord,
+    setRemoteDesktopAutoRecord,
+    remoteDesktopRecordingFps,
+    setRemoteDesktopRecordingFps,
+    remoteDesktopRecordingIncludeAudio,
+    setRemoteDesktopRecordingIncludeAudio,
+    remoteDesktopRecordingMaxMb,
+    setRemoteDesktopRecordingMaxMb,
+    remoteDesktopRecordingRetentionDays,
+    setRemoteDesktopRecordingRetentionDays,
     sshDebugLogsEnabled,
     setSshDebugLogsEnabled,
     sshDeepLinkEnabled,
     setSshDeepLinkEnabled,
     jmsDeepLinkEnabled,
     setJmsDeepLinkEnabled,
+    jumpServerRdpLaunchMode,
+    setJumpServerRdpLaunchMode,
     explorerContextMenuEnabled,
     setExplorerContextMenuEnabled,
     explorerContextMenuSupported,
@@ -2314,7 +2488,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
       customKeyBindings, editorWordWrap,
       sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpSkipUnchanged, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
       showRecentHosts, hostClickBehavior, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, localShellSidePanelAutoOpen, localShellSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, showTabNumberBadges, disableTerminalFontZoom, globalDefaultProxyProfileId,
-      customThemes, workspaceFocusStyle, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, explorerContextMenuEnabled,
+      customThemes, workspaceFocusStyle, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, jumpServerRdpLaunchMode, explorerContextMenuEnabled,
     ]),
   };
 };

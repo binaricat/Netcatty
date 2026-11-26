@@ -143,3 +143,33 @@ test("switcher quick connect accepts only address-like input", () => {
   assert.equal(isSwitcherQuickConnectInput("core switch"), false);
   assert.equal(isSwitcherQuickConnectInput("host:99999"), false);
 });
+
+test("quick connect parses rdp:// and vnc:// URIs with domain, display port, IPv6, and JumpServer pipe user", () => {
+  assert.deepEqual(parseQuickConnectInput("rdp://CORP\\Administrator@10.0.0.5:3390"), {
+    protocol: "rdp",
+    hostname: "10.0.0.5",
+    username: "Administrator",
+    domain: "CORP",
+    port: 3390,
+  });
+  assert.deepEqual(parseQuickConnectInput("rdp://alice|uuid-123@razor.example.com:33890"), {
+    protocol: "rdp",
+    hostname: "razor.example.com",
+    username: "alice|uuid-123",
+    port: 33890,
+  });
+  assert.deepEqual(parseQuickConnectInput("vnc://10.0.0.9:1"), {
+    protocol: "vnc",
+    hostname: "10.0.0.9",
+    username: undefined,
+    port: 5901,
+  });
+  assert.deepEqual(parseQuickConnectInput("vnc://alice@[2001:db8::1]:5902"), {
+    protocol: "vnc",
+    hostname: "2001:db8::1",
+    username: "alice",
+    port: 5902,
+  });
+  assert.equal(isSwitcherQuickConnectInput("rdp://win-box"), true);
+  assert.equal(isSwitcherQuickConnectInput("vnc://mac-mini"), true);
+});

@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { I18nProvider } from "../../application/i18n/I18nProvider";
 import { writeMonitorPanels } from "../../application/state/monitorPanelsStorage";
+import { monitorActions, publishMonitorSnapshot } from "../../application/state/monitorRuntimeStore";
 import type { Host } from "../../domain/models";
 import type { MonitorPoint } from "../../domain/monitorRuntime";
 import { MonitorPanels, MonitorTrend } from "./MonitorPanels";
@@ -240,4 +241,265 @@ test("disk capacity and I/O columns share system-first order and isolate the phy
   assert.match(rows[2].textContent!, /Read 2.0 MB\/s.*Write 4.0 KB\/s/);
   const total = document.querySelector("[data-monitor-disk-io-total]")!;
   assert.match(total.textContent!, /Total.*Read 5.0 MB\/s.*Write 2.0 GB\/s/);
+});
+
+test("standalone RDP/VNC hosts render reachability & RTT trend without CPU/RAM gauges, bypass SSH login modal on retry, and SSH+companion shows desktop pills", async (t) => {
+  const dom = new JSDOM("<div id='root'></div>", { url: "http://localhost/" });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "clientWidth", { configurable: true, value: 1280 });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "clientHeight", { configurable: true, value: 800 });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "offsetWidth", { configurable: true, value: 1280 });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "offsetHeight", { configurable: true, value: 800 });
+  dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
+    x: 0, y: 0, top: 0, left: 0, right: 1280, bottom: 800, width: 1280, height: 800, toJSON: () => ({}),
+  });
+  const raf = (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 0) as unknown as number;
+  const caf = (id: number) => clearTimeout(id);
+  class MockResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Object.defineProperty(dom.window, "requestAnimationFrame", { configurable: true, writable: true, value: raf });
+  Object.defineProperty(dom.window, "cancelAnimationFrame", { configurable: true, writable: true, value: caf });
+  Object.defineProperty(dom.window, "ResizeObserver", { configurable: true, writable: true, value: MockResizeObserver });
+  const storage = new Map<string, string>();
+  const mockLocalStorage = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+    clear: () => storage.clear(),
+    key: () => null,
+    length: 0,
+  };
+  const globals: Record<string, unknown> = {
+    window: dom.window,
+    document: dom.window.document,
+    HTMLElement: dom.window.HTMLElement,
+    Node: dom.window.Node,
+    SVGElement: dom.window.SVGElement,
+    localStorage: mockLocalStorage,
+    ResizeObserver: MockResizeObserver,
+    requestAnimationFrame: raf,
+    cancelAnimationFrame: caf,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  const originals = Object.fromEntries(
+    Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
+  );
+  for (const [key, value] of Object.entries(globals)) {
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  }
+
+  const ts = Date.now();
+  const rdpHost: Host = {
+    id: "rdp-win",
+    label: "Win Desktop",
+    hostname: "win.lan",
+    username: "admin",
+    port: 3389,
+    os: "windows",
+    protocol: "rdp",
+    tags: [],
+    createdAt: 1,
+  };
+  const sshHost: Host = {
+    id: "ssh-comp",
+    label: "Linux Workstation",
+    hostname: "linux.lan",
+    username: "dev",
+    port: 22,
+    os: "linux",
+    protocol: "ssh",
+    vncConfig: { enabled: true, port: 5900, tunnelViaHostSsh: true },
+    tags: [],
+    createdAt: 1,
+  };
+
+  const retried: Array<{ id: string; creds?: unknown }> = [];
+  const origRetry = monitorActions.retry;
+  monitorActions.retry = (id, creds) => {
+    retried.push({ id, creds });
+  };
+
+  const root = createRoot(dom.window.document.getElementById("root")!);
+  t.after(async () => {
+    monitorActions.retry = origRetry;
+    await act(async () => root.unmount());
+    publishMonitorSnapshot({
+      historyMode: "replace",
+      runtimeId: "reset",
+      epoch: 99,
+      takenAt: ts + 10_000,
+      running: [],
+      startedAt: {},
+      count: 0,
+      hostCount: 0,
+      activeSessions: [],
+      hosts: {},
+    });
+    for (const key of Object.keys(globals)) {
+      const descriptor = originals[key];
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    dom.window.close();
+  });
+
+  publishMonitorSnapshot({
+    historyMode: "replace",
+    runtimeId: "probe-test",
+    epoch: 1,
+    takenAt: ts,
+    running: ["p-rd"],
+    startedAt: { "p-rd": ts - 10_000 },
+    count: 1,
+    hostCount: 2,
+    activeSessions: [],
+    hosts: {
+      "rdp-win": {
+        historyId: "h-rdp",
+        mode: "probe",
+        status: "live",
+        at: ts,
+        statsAt: ts,
+        probe: {
+          protocol: "rdp",
+          port: 3389,
+          reachable: true,
+          rttMs: 24,
+          bannerVerified: true,
+          bannerDetail: "RDP (NLA / CredSSP)",
+          checkedAt: ts,
+        },
+        points: [
+          { at: ts - 5000, cpu: null, memory: null, disk: null, rx: null, tx: null, latencyMs: 22 },
+          { at: ts, cpu: null, memory: null, disk: null, rx: null, tx: null, latencyMs: 24 },
+        ],
+      },
+      "ssh-comp": {
+        historyId: "h-ssh",
+        mode: "ssh",
+        status: "live",
+        at: ts,
+        statsAt: ts,
+        stats: {
+          cpu: 30,
+          cpuCores: 4,
+          cpuPerCore: [],
+          memTotal: 1000,
+          memUsed: 400,
+          memFree: 600,
+          memBuffers: 0,
+          memCached: 0,
+          swapTotal: 0,
+          swapUsed: 0,
+          topProcesses: [],
+          diskPercent: 20,
+          diskUsed: 20,
+          diskTotal: 100,
+          disks: [],
+          netRxSpeed: 0,
+          netTxSpeed: 0,
+          latencyMs: 5,
+          netInterfaces: [],
+        },
+        companionProbes: {
+          vnc: {
+            protocol: "vnc",
+            port: 5900,
+            reachable: true,
+            rttMs: 7,
+            bannerVerified: true,
+            bannerDetail: "RFB 3.8",
+            checkedAt: ts,
+            tunnelViaHostSsh: true,
+          },
+        },
+        points: [
+          { at: ts, cpu: 30, memory: 40, disk: 20, rx: 0, tx: 0 },
+        ],
+      },
+    },
+  });
+
+  // Charts view
+  writeMonitorPanels([{
+    id: "p-rd",
+    name: "Mixed",
+    description: "",
+    hostIds: ["rdp-win", "ssh-comp"],
+    view: "charts",
+    interval: 5,
+    range: 15,
+    sort: "manual",
+  }]);
+  await act(async () => {
+    root.render(
+      <I18nProvider locale="en">
+        <MonitorPanels hosts={[rdpHost, sshHost]} customGroups={[]} onConnect={() => {}} />
+      </I18nProvider>,
+    );
+  });
+
+  const chartsDoc = dom.window.document;
+  const rdpCard = chartsDoc.querySelector('[data-monitor-host="rdp-win"]')!;
+  assert.ok(rdpCard);
+  assert.equal(rdpCard.getAttribute("data-monitor-card-mode"), "probe");
+  assert.match(rdpCard.querySelector("[data-monitor-probe-rtt]")!.textContent!, /24 ms/);
+  assert.ok(rdpCard.textContent!.includes("RDP (NLA / CredSSP)"));
+  assert.ok(rdpCard.textContent!.includes("Online"));
+  assert.ok(rdpCard.querySelector('[data-monitor-trend="latencyMs"]'));
+  assert.equal(rdpCard.querySelector('[data-monitor-trend="cpu"]'), null);
+  assert.equal(rdpCard.querySelector('[data-monitor-trend="memory"]'), null);
+  assert.match(
+    rdpCard.querySelector('[data-monitor-terminal="rdp-win"]')!.getAttribute("aria-label")!,
+    /Open RDP/,
+  );
+
+  const sshCard = chartsDoc.querySelector('[data-monitor-host="ssh-comp"]')!;
+  assert.ok(sshCard.querySelector('[data-monitor-trend="cpu"]'));
+  const compPill = sshCard.querySelector('[data-monitor-companion-pill="vnc"]')!;
+  assert.ok(compPill);
+  assert.match(compPill.textContent!, /VNC :5900.*7 ms/);
+
+  // Click RDP card to open detail panel and click "Check now" — must call monitorActions.retry without opening SSH login dialog
+  await act(async () => {
+    (rdpCard.querySelector("button") as HTMLButtonElement).click();
+  });
+  const detailPanel = chartsDoc.querySelector('[data-section="vault-monitor-detail"]')!;
+  assert.ok(detailPanel);
+  assert.ok(detailPanel.querySelector("[data-monitor-probe-detail]"));
+  const checkNowBtn = [...detailPanel.querySelectorAll("button")].find(
+    (b) => b.textContent?.includes("Check now"),
+  );
+  assert.ok(checkNowBtn);
+  await act(async () => {
+    checkNowBtn.click();
+  });
+  assert.deepEqual(retried, [{ id: "rdp-win", creds: undefined }]);
+  assert.equal(chartsDoc.querySelector("#monitor-login-password"), null);
+
+  // List view preserves columns with muted "—" placeholders for probe hosts
+  writeMonitorPanels([{
+    id: "p-rd",
+    name: "Mixed",
+    description: "",
+    hostIds: ["rdp-win", "ssh-comp"],
+    view: "list",
+    interval: 5,
+    range: 15,
+    sort: "manual",
+  }]);
+  await act(async () => {
+    root.render(
+      <I18nProvider locale="en">
+        <MonitorPanels hosts={[rdpHost, sshHost]} customGroups={[]} onConnect={() => {}} />
+      </I18nProvider>,
+    );
+  });
+  const rdpRow = chartsDoc.querySelector('tr[data-monitor-host="rdp-win"]')!;
+  assert.ok(rdpRow);
+  assert.equal(rdpRow.querySelectorAll('[data-monitor-probe-na="true"]').length, 5);
+  assert.ok(rdpRow.textContent!.includes("Online"));
+  assert.ok(rdpRow.textContent!.includes("RDP (NLA / CredSSP)"));
 });

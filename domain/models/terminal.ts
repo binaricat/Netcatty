@@ -1,4 +1,11 @@
-import type { HostProtocol, PluginConnectionConfig, SerialConfig, Snippet } from './connection';
+import type {
+  HostProtocol,
+  PluginConnectionConfig,
+  RdpConfig,
+  SerialConfig,
+  Snippet,
+  VncConfig,
+} from './connection';
 import type { CodingCliProviderId } from '../codingCliProviders';
 import {
   normalizeHibernateHiddenTabsDelaySec,
@@ -720,6 +727,10 @@ export interface TerminalSession {
   charset?: string; // Connection-time charset override (e.g. for quick-connect serial)
   // Serial-specific connection settings
   serialConfig?: SerialConfig;
+  // Remote desktop (VNC / RDP) session configuration & companion marker
+  vncConfig?: VncConfig;
+  rdpConfig?: RdpConfig;
+  remoteDesktopCompanion?: boolean;
   localShell?: string;       // Shell command for local terminals (from discovery)
   localShellArgs?: string[]; // Shell args for local terminals (from discovery)
   localShellName?: string;   // Display name for local shell (e.g., "Zsh", "Ubuntu (WSL)")

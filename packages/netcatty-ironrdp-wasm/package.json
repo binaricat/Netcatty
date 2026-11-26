@@ -1,0 +1,36 @@
+{
+  "name": "@netcatty/ironrdp-wasm",
+  "version": "0.1.0-ironrdp.293cb4be",
+  "private": true,
+  "description": "Self-contained patched IronRDP WebAssembly build for Netcatty (Devolutions/IronRDP)",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "main": "./ironrdp_web.js",
+  "module": "./ironrdp_web.js",
+  "types": "./ironrdp_web.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./ironrdp_web.d.ts",
+      "import": "./ironrdp_web.js"
+    },
+    "./ironrdp_web_bg.wasm": "./ironrdp_web_bg.wasm"
+  },
+  "files": [
+    "ironrdp_web.js",
+    "ironrdp_web.d.ts",
+    "ironrdp_web_bg.wasm",
+    "ironrdp_web_bg.wasm.d.ts",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "README.md"
+  ],
+  "ironrdp": {
+    "repository": "https://github.com/Devolutions/IronRDP",
+    "commit": "293cb4bee90baddfd7b8ea08d2f46e31947a3888",
+    "patches": [
+      "0001-session-responsiveness.patch",
+      "0002-load-balance-info-and-shell.patch"
+    ]
+  }
+}

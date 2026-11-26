@@ -2384,6 +2384,95 @@ function createPreloadApi(ctx) {
     ipcRenderer.on("netcatty:script:session-input", handler);
     return () => ipcRenderer.removeListener("netcatty:script:session-input", handler);
   },
+  // Remote Desktop (VNC / RDP)
+  startRemoteDesktopSession: (options) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:start", options),
+  stopRemoteDesktopSession: (sessionId) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:stop", { sessionId }),
+  respondRemoteDesktopCertDecision: (requestId, decision) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:cert-decision", {
+      requestId,
+      ...(typeof decision === "string" ? { decision } : decision),
+    }),
+  setRemoteDesktopKeyboardGrab: (active) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:set-keyboard-grab", { active: Boolean(active) }),
+  saveRemoteDesktopClipboardFile: (options) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:save-clipboard-file", options),
+  openRemoteDesktopSystemClient: (options) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:open-system-client", options),
+  stopRemoteDesktopSystemTunnel: (tunnelId) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:stop-system-tunnel", { tunnelId }),
+  testRemoteDesktopConnection: (options) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:test", options),
+  cancelRemoteDesktopTestConnection: (sessionId) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:test:cancel", { sessionId }),
+  onRemoteDesktopCertVerify: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:remote-desktop:cert-verify", handler);
+    return () => ipcRenderer.removeListener("netcatty:remote-desktop:cert-verify", handler);
+  },
+  onRemoteDesktopStatus: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:remote-desktop:status", handler);
+    return () => ipcRenderer.removeListener("netcatty:remote-desktop:status", handler);
+  },
+  onRemoteDesktopKeyboardGrabChanged: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:remote-desktop:keyboard-grab-changed", handler);
+    return () => ipcRenderer.removeListener("netcatty:remote-desktop:keyboard-grab-changed", handler);
+  },
+  remoteDesktop: {
+    start: (options) => ipcRenderer.invoke("netcatty:remote-desktop:start", options),
+    stop: (sessionId) => ipcRenderer.invoke("netcatty:remote-desktop:stop", { sessionId }),
+    testConnection: (options) => ipcRenderer.invoke("netcatty:remote-desktop:test", options),
+    cancelTestConnection: (sessionId) =>
+      ipcRenderer.invoke("netcatty:remote-desktop:test:cancel", { sessionId }),
+    respondCertDecision: (requestId, decision) =>
+      ipcRenderer.invoke("netcatty:remote-desktop:cert-decision", {
+        requestId,
+        ...(typeof decision === "string" ? { decision } : decision),
+      }),
+    setKeyboardGrab: (active) =>
+      ipcRenderer.invoke("netcatty:remote-desktop:set-keyboard-grab", { active: Boolean(active) }),
+    saveClipboardFile: (options) =>
+      ipcRenderer.invoke("netcatty:remote-desktop:save-clipboard-file", options),
+    openSystemClient: (options) =>
+      ipcRenderer.invoke("netcatty:remote-desktop:open-system-client", options),
+    stopSystemTunnel: (tunnelId) =>
+      ipcRenderer.invoke("netcatty:remote-desktop:stop-system-tunnel", { tunnelId }),
+    onCertVerify: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on("netcatty:remote-desktop:cert-verify", handler);
+      return () => ipcRenderer.removeListener("netcatty:remote-desktop:cert-verify", handler);
+    },
+    onStatus: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on("netcatty:remote-desktop:status", handler);
+      return () => ipcRenderer.removeListener("netcatty:remote-desktop:status", handler);
+    },
+    onKeyboardGrabChanged: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on("netcatty:remote-desktop:keyboard-grab-changed", handler);
+      return () => ipcRenderer.removeListener("netcatty:remote-desktop:keyboard-grab-changed", handler);
+    },
+  },
+  remoteDesktopRecordings: {
+    begin: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:begin", options),
+    append: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:append", options),
+    finish: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:finish", options),
+    abort: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:abort", options),
+    getPlaybackUrl: (options) =>
+      ipcRenderer.invoke("netcatty:remote-desktop-recording:get-playback-url", options),
+    export: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:export", options),
+    delete: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:delete", options),
+    deleteMany: (options) =>
+      ipcRenderer.invoke("netcatty:remote-desktop-recording:delete-many", options),
+    clearAll: (options) =>
+      ipcRenderer.invoke("netcatty:remote-desktop-recording:clear-all", options ?? {}),
+    getStats: () => ipcRenderer.invoke("netcatty:remote-desktop-recording:stats"),
+    openFolder: () => ipcRenderer.invoke("netcatty:remote-desktop-recording:open-folder"),
+    runGc: (options) => ipcRenderer.invoke("netcatty:remote-desktop-recording:gc", options),
+  },
     };
   }
 }

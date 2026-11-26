@@ -51,6 +51,7 @@ export type SessionSnapshotActions = Pick<
   | 'createLocalTerminal'
   | 'createSerialSession'
   | 'connectToHost'
+  | 'connectToHostRemoteDesktop'
   | 'updateSessionStatus'
   | 'updateSessionFontSize'
   | 'clearSessionFontSizeOverride'

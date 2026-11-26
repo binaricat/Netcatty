@@ -464,3 +464,83 @@ test('pruneStaleToolContext redacts commands in old terminal placeholders', () =
   assert.doesNotMatch(serialized, /swordfish/);
   assert.match(serialized, /REDACTED/);
 });
+
+test('pruneStaleToolContext unconditionally enforces rolling 2-frame cap on remote screen images', () => {
+  const nativeScreenResult = (callId: string, capturedAt: number, data: string): ModelMessage[] => [
+    {
+      role: 'assistant',
+      content: [{
+        type: 'tool-call',
+        toolCallId: callId,
+        toolName: 'remote_desktop_read_screen',
+        input: { sessionId: 'rdp-1' },
+      }],
+    },
+    {
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: callId,
+        toolName: 'remote_desktop_read_screen',
+        output: {
+          type: 'content',
+          value: [
+            {
+              type: 'text',
+              text: JSON.stringify({ ok: true, sessionId: 'rdp-1', capturedAt }),
+            },
+            {
+              type: 'file',
+              mediaType: 'image/jpeg',
+              data: { type: 'data', data },
+              filename: 'remote-screen.jpg',
+            },
+          ],
+        },
+      }],
+    } as unknown as ModelMessage,
+  ];
+
+  const syntheticScreenUser = (capturedAt: number, data: string): ModelMessage => ({
+    role: 'user',
+    content: [
+      {
+        type: 'text',
+        text: `[Captured remote desktop frame: sessionId=rdp-1, protocol=rdp, resolution=1280x720, capturedAt=${capturedAt}]`,
+      },
+      {
+        type: 'file',
+        data,
+        mediaType: 'image/jpeg',
+        filename: 'remote-screen.jpg',
+      },
+    ],
+  });
+
+  const messages: ModelMessage[] = [
+    // Normal user-attached image must NOT be pruned by the rolling screen-read cap.
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'check this user screenshot' },
+        { type: 'file', data: 'USER_UPLOAD_KEEP', mediaType: 'image/png', filename: 'manual.png' },
+      ],
+    },
+    ...nativeScreenResult('s1', 1001, 'FRAME_ONE_DROP'),
+    syntheticScreenUser(1002, 'FRAME_TWO_DROP'),
+    ...nativeScreenResult('s3', 1003, 'FRAME_THREE_KEEP'),
+    syntheticScreenUser(1004, 'FRAME_FOUR_KEEP'),
+  ];
+
+  // Note: underBudgetPressure is FALSE — rolling 2-frame cap runs unconditionally.
+  const result = pruneStaleToolContext(messages);
+  assert.equal(result.didAdjust, true);
+  const serialized = JSON.stringify(result.messages);
+  assert.match(serialized, /USER_UPLOAD_KEEP/);
+  assert.doesNotMatch(serialized, /FRAME_ONE_DROP/);
+  assert.doesNotMatch(serialized, /FRAME_TWO_DROP/);
+  assert.match(serialized, /earlier remote desktop screenshot omitted: sessionId=rdp-1, capturedAt=1001/);
+  assert.match(serialized, /earlier remote desktop screenshot omitted: sessionId=rdp-1, capturedAt=1002/);
+  assert.match(serialized, /FRAME_THREE_KEEP/);
+  assert.match(serialized, /FRAME_FOUR_KEEP/);
+});

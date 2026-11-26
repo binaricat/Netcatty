@@ -9,6 +9,25 @@ import { getAvailablePaneMagnificationController } from '../../domain/paneMagnif
 import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
 import { isPluginHostProtocol } from '../../domain/pluginConnection';
+import {
+  applyHostDefaultConnectProtocol,
+  buildHostForProtocolOverride,
+  isRemoteDesktopProtocol,
+  resolveRemoteDesktopConnectionSpec,
+  shouldPromptHostProtocolOnConnect,
+  type RemoteDesktopProtocol,
+} from '../../domain/remoteDesktop';
+import { resolveTerminalChainHosts } from '../../domain/terminalHostResolution';
+import { selectConnectionLogForTerminalDataCapture } from '../../domain/connectionLog';
+import {
+  buildSystemRemoteDesktopPayload,
+  isRemoteDesktopGrabReleaseChord,
+  isTargetInsideRemoteDesktopCapture,
+} from '../../components/remoteDesktop/remoteDesktopHelpers';
+import {
+  getConnectionLogsActions,
+  getConnectionLogsSnapshot,
+} from '../state/connectionLogsStore';
 import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
 import { getSettingsChromeSnapshot } from '../state/settingsChromeStore';
 import { isHostTreeWorkTabSurface } from './workTabSurface';
@@ -253,6 +272,13 @@ export function flushQueuedTrayPanelConnectHostsImpl(getCtx: AppContextGetter) {
 export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: KeyboardEvent) {
   const { HOTKEY_DEBUG, closeTabKeyStr, executeHotkeyAction, hotkeyScheme, keyBindings, matchesKeyBinding } = getCtx();
 {
+    if (
+      isTargetInsideRemoteDesktopCapture(e.target, e.composedPath?.bind(e))
+      && !isRemoteDesktopGrabReleaseChord(e)
+    ) {
+      return;
+    }
+
     const isMac = hotkeyScheme === 'mac';
     const target = e.target as HTMLElement;
     const isCloseTabHotkey = closeTabKeyStr ? matchesKeyBinding(e, closeTabKeyStr, isMac) : false;
@@ -856,6 +882,40 @@ export function collectBatchBusyProbeSessionIds(
   return sessionIdsToProbe;
 }
 
+/**
+ * Stamp `endTime` on open RDP/VNC `ConnectionLog` entries when remote desktop
+ * sessions close so they do not stay stuck at "Ongoing" in Connection Logs.
+ */
+export function stampRemoteDesktopSessionEndTimes(
+  getCtx: AppContextGetter,
+  closingSessionIds: readonly string[],
+): number {
+  if (!closingSessionIds.length) return 0;
+  const ctx = getCtx();
+  const sessionsList: TerminalSession[] = Array.isArray(ctx.sessions) ? ctx.sessions : [];
+  const logs = Array.isArray(ctx.connectionLogs)
+    ? ctx.connectionLogs
+    : [...getConnectionLogsSnapshot().connectionLogs];
+  const updateLog = ctx.updateConnectionLog ?? getConnectionLogsActions()?.updateConnectionLog;
+  if (!updateLog || logs.length === 0) return 0;
+
+  let stamped = 0;
+  const now = Date.now();
+  for (const sessionId of new Set(closingSessionIds)) {
+    const session = sessionsList.find((candidate) => candidate.id === sessionId);
+    const matchingLog = selectConnectionLogForTerminalDataCapture(logs, {
+      sessionId,
+      hostname: session?.hostname,
+    });
+    if (!matchingLog || matchingLog.endTime) continue;
+    const protocol = session?.protocol ?? matchingLog.protocol;
+    if (!isRemoteDesktopProtocol(protocol)) continue;
+    void Promise.resolve(updateLog(matchingLog.id, { endTime: now })).catch(() => {});
+    stamped += 1;
+  }
+  return stamped;
+}
+
 export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: string[]) {
   const {
     closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace,
@@ -893,6 +953,12 @@ export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: st
       sessions.some((session) => session.workspaceId === id && keepTabIds.has(session.id))
     ));
     const standaloneSessionIds = effectiveRegularIds.filter((id) => sessions.some((session) => session.id === id));
+    const workspaceSessionIds = effectiveRegularIds.flatMap((id) => (
+      workspaces.some((workspace) => workspace.id === id)
+        ? sessions.filter((session) => session.workspaceId === id).map((session) => session.id)
+        : []
+    ));
+    stampRemoteDesktopSessionEndTimes(getCtx, [...standaloneSessionIds, ...workspaceSessionIds]);
     if (standaloneSessionIds.length) closeSessions(standaloneSessionIds);
     for (const id of effectiveRegularIds) {
       if (workspaces.some((workspace) => workspace.id === id)) closeWorkspace(id);
@@ -986,13 +1052,19 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
             switch (intent.kind) {
               case 'closeSingleTab': {
                 const ok = await confirmIfBusyLocalTerminal([intent.sessionId]);
-                if (ok) closeSession(intent.sessionId);
+                if (ok) {
+                  stampRemoteDesktopSessionEndTimes(getCtx, [intent.sessionId]);
+                  closeSession(intent.sessionId);
+                }
                 return;
               }
               case 'closeWorkspace': {
                 const ids = sessions.filter((s) => s.workspaceId === intent.workspaceId).map((s) => s.id);
                 const ok = await confirmIfBusyLocalTerminal(ids);
-                if (ok) closeWorkspace(intent.workspaceId);
+                if (ok) {
+                  stampRemoteDesktopSessionEndTimes(getCtx, ids);
+                  closeWorkspace(intent.workspaceId);
+                }
                 return;
               }
               case 'noop':
@@ -1028,6 +1100,7 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
               if (focusedId) {
                 const ok = await confirmIfBusyLocalTerminal([focusedId]);
                 if (ok) {
+                  stampRemoteDesktopSessionEndTimes(getCtx, [focusedId]);
                   // The pane shortcut closes the tab when only one pane remains.
                   if (aliveIds.length === 1) closeWorkspace(workspace.id);
                   else closeSession(focusedId);
@@ -1036,7 +1109,10 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
             } else if (session) {
               // Standalone session tab — close the session
               const ok = await confirmIfBusyLocalTerminal([session.id]);
-              if (ok) closeSession(session.id);
+              if (ok) {
+                stampRemoteDesktopSessionEndTimes(getCtx, [session.id]);
+                closeSession(session.id);
+              }
             }
           } finally {
             closeTabInFlightRef.current = false;
@@ -1340,7 +1416,11 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host, hi
       // Local-shell vault hosts carry no SSH credentials, so log the system
       // user like local terminals do (see handleCreateLocalTerminalImpl)
       // instead of 'root' or an inherited group SSH username.
-      username: protocol === 'local' ? username : (resolvedAuth.username || 'root'),
+      username: protocol === 'local'
+        ? username
+        : isRemoteDesktopProtocol(protocol)
+          ? (effectiveHost.username || '')
+          : (resolvedAuth.username || 'root'),
       protocol,
       ...getLogHostVisualSnapshot(effectiveHost),
       startTime: Date.now(),
@@ -1349,6 +1429,85 @@ export function handleConnectToHostImpl(getCtx: AppContextGetter, host: Host, hi
       saved: false,
     });
     return sessionId;
+  }
+}
+
+export function handleConnectRemoteDesktopImpl(
+  getCtx: AppContextGetter,
+  host: Host,
+  protocol: RemoteDesktopProtocol,
+  options?: { splitFromSessionId?: string },
+) {
+  const { addConnectionLog, connectToHostRemoteDesktop, identities, resolveEffectiveHost, systemInfoRef } = getCtx();
+  const effectiveHost = resolveEffectiveHost(host);
+  const spec = resolveRemoteDesktopConnectionSpec(effectiveHost, protocol, identities ?? []);
+  const sessionId = connectToHostRemoteDesktop(effectiveHost, protocol, options);
+  if (!sessionId) return null;
+  const { username: localUsername, hostname: localHostname } = systemInfoRef.current;
+  addConnectionLog({
+    sessionId,
+    hostId: host.id,
+    hostLabel: spec.isCompanion ? `${spec.label} (${protocol.toUpperCase()})` : spec.label,
+    hostname: spec.hostHostname,
+    username: spec.username,
+    protocol,
+    ...getLogHostVisualSnapshot(effectiveHost),
+    startTime: Date.now(),
+    localUsername,
+    localHostname,
+    saved: false,
+  });
+  return sessionId;
+}
+
+export async function handleOpenSystemRemoteDesktopImpl(
+  getCtx: AppContextGetter,
+  host: Host,
+  protocol: RemoteDesktopProtocol,
+  rawRdpContent?: string,
+) {
+  const {
+    groupConfigs,
+    hosts,
+    identities,
+    keys,
+    knownHosts,
+    netcattyBridge,
+    proxyProfiles,
+    resolveEffectiveHost,
+    toast,
+  } = getCtx();
+  const rdBridge = netcattyBridge.get()?.remoteDesktop;
+  if (!rdBridge?.openSystemClient) {
+    toast?.error?.('System remote desktop launch is unavailable');
+    return { ok: false };
+  }
+  const effectiveHost = resolveEffectiveHost(host);
+  const chainHosts = resolveTerminalChainHosts({
+    host: effectiveHost,
+    hosts: hosts ?? [],
+    groupConfigs: groupConfigs ?? [],
+    proxyProfiles: proxyProfiles ?? [],
+  });
+  const payload = buildSystemRemoteDesktopPayload({
+    host: effectiveHost,
+    protocol,
+    chainHosts,
+    keys: keys ?? [],
+    identities: identities ?? [],
+    knownHosts: knownHosts ?? [],
+    rawRdpContent,
+  });
+  try {
+    const result = await rdBridge.openSystemClient(payload);
+    if (!result?.ok) {
+      toast?.error?.(result?.error || 'Failed to open system remote desktop client');
+    }
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to open system remote desktop client';
+    toast?.error?.(message);
+    return { ok: false, error: message };
   }
 }
 
@@ -1388,10 +1547,16 @@ export async function handleTerminalDataCaptureImpl(getCtx: AppContextGetter, se
       // The IndexedDB replay write commits asynchronously. Waiting here keeps
       // a crash during session teardown from dropping the newest capture any
       // more often than the old synchronous localStorage write.
-      await updateConnectionLog(matchingLog.id, {
-        endTime: Date.now(),
-        terminalData: data,
-      });
+      const isRemoteDesktopLog = isRemoteDesktopProtocol(session?.protocol ?? matchingLog.protocol);
+      await updateConnectionLog(
+        matchingLog.id,
+        isRemoteDesktopLog && !data
+          ? { endTime: Date.now() }
+          : {
+              endTime: Date.now(),
+              terminalData: data,
+            },
+      );
       if (IS_DEV) console.log('[handleTerminalDataCapture] Updated log with terminalData');
 
       // Auto-save is now handled by real-time streaming in the main process
@@ -1413,8 +1578,7 @@ export function hasMultipleProtocolsImpl(getCtx: AppContextGetter, host: Host) {
     // SSH/Telnet pickers driven by an inherited group Telnet flag. Hosts
     // without an explicit protocol are legacy SSH entries.
     const effective = resolveEffectiveHost(host);
-    const effectiveProtocol = effective.protocol ?? 'ssh';
-    return effectiveProtocol === 'ssh' && Boolean(effective.telnetEnabled);
+    return shouldPromptHostProtocolOnConnect(effective);
   }
 }
 
@@ -1431,18 +1595,40 @@ export function handleHostConnectWithProtocolCheckImpl(getCtx: AppContextGetter,
   }
 }
 
-export function handleProtocolSelectImpl(getCtx: AppContextGetter, protocol: HostProtocol, port: number) {
-  const { handleConnectToHost, protocolSelectHost, setProtocolSelectHost } = getCtx();
+export function handleProtocolSelectImpl(
+  getCtx: AppContextGetter,
+  protocol: HostProtocol,
+  port: number,
+  rememberDefault?: boolean,
+) {
+  const {
+    handleConnectToHost,
+    handleConnectRemoteDesktop,
+    protocolSelectHost,
+    setProtocolSelectHost,
+    updateHosts,
+  } = getCtx();
 {
     if (protocolSelectHost) {
-      const hostWithProtocol: Host = {
-        ...protocolSelectHost,
-        protocol: (protocol === 'mosh' || protocol === 'et') ? 'ssh' : protocol,
-        port,
-        moshEnabled: protocol === 'mosh',
-        etEnabled: protocol === 'et',
-      };
-      handleConnectToHost(hostWithProtocol);
+      if (
+        rememberDefault &&
+        typeof updateHosts === 'function' &&
+        (protocol === 'ssh' || protocol === 'mosh' || protocol === 'et' || protocol === 'rdp' || protocol === 'vnc' || protocol === 'telnet')
+      ) {
+        updateHosts((prev: Host[]) =>
+          prev.map((h) =>
+            h.id === protocolSelectHost.id
+              ? applyHostDefaultConnectProtocol(h, protocol)
+              : h,
+          ),
+        );
+      }
+      const dispatch = buildHostForProtocolOverride(protocolSelectHost, protocol, port);
+      if (dispatch.mode === 'remoteDesktop' && typeof handleConnectRemoteDesktop === 'function') {
+        handleConnectRemoteDesktop(dispatch.host, dispatch.protocol);
+      } else {
+        handleConnectToHost(dispatch.host);
+      }
       setProtocolSelectHost(null);
     }
   }

@@ -106,3 +106,107 @@ test("connection test countdown follows the probe timeouts and invalidates the a
   assert.equal(current().state.status, "disconnected");
   assert.equal(current().state.error, "Connection timed out. Please try again.");
 });
+
+test("remote desktop host connection test routes to remoteDesktop.testConnection, surfaces probeResult, and cancels cleanly", async (t) => {
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+
+  const rdpHost: Host = {
+    id: "rdp-1",
+    label: "Windows Box",
+    hostname: "win.example.test",
+    port: 3389,
+    username: "admin",
+    password: "DO_NOT_SEND_PASSWORD",
+    tags: [],
+    os: "windows",
+    protocol: "rdp",
+  };
+
+  let receivedOptions: Record<string, unknown> | null = null;
+  const cancelledIds: string[] = [];
+  const bridge = {
+    remoteDesktop: {
+      testConnection: async (opts: Record<string, unknown>) => {
+        receivedOptions = opts;
+        return {
+          ok: true,
+          protocol: "rdp",
+          host: "win.example.test",
+          port: 3389,
+          rttMs: 14,
+          bannerVerified: true,
+          rdpSecurity: "nla",
+          tlsVersion: "TLSv1.3",
+          cert: {
+            fingerprintSha256: "AA:BB:CC",
+            subject: "CN=win.example.test",
+            trustStatus: "first-seen",
+          },
+          checkedAt: Date.now(),
+        };
+      },
+      cancelTestConnection: async (id: string) => {
+        cancelledIds.push(id);
+        return { ok: true };
+      },
+    },
+    onChainProgress: () => () => {},
+    onHostKeyVerification: () => () => {},
+    respondHostKeyVerification: async () => ({ success: true }),
+  };
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    writable: true,
+    value: { netcatty: bridge },
+  });
+
+  let api: HookApi | null = null;
+  let renderer: ReactTestRenderer | null = null;
+  const Probe = () => {
+    api = useHostConnectionTest({ host: rdpHost, hosts: [rdpHost], keys: [] });
+    return null;
+  };
+  const current = () => {
+    assert.ok(api);
+    return api;
+  };
+
+  t.after(async () => {
+    await act(async () => {
+      renderer?.unmount();
+    });
+    if (previousWindowDescriptor) Object.defineProperty(globalThis, "window", previousWindowDescriptor);
+    else delete (globalThis as { window?: unknown }).window;
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  });
+
+  await act(async () => {
+    renderer = create(React.createElement(Probe));
+  });
+  await act(async () => {
+    await current().startTest();
+  });
+
+  assert.ok(receivedOptions);
+  assert.equal((receivedOptions as { protocol: string }).protocol, "rdp");
+  assert.ok(!JSON.stringify(receivedOptions).includes("DO_NOT_SEND_PASSWORD"));
+  assert.equal(current().state.status, "connected");
+  assert.equal(current().state.activeProtocol, "rdp");
+  assert.equal(current().state.probeResult?.rttMs, 14);
+  assert.equal(current().state.probeResult?.cert?.trustStatus, "first-seen");
+
+  await act(async () => {
+    current().markProbeCertTrusted();
+  });
+  assert.equal(current().state.probeResult?.cert?.trustStatus, "trusted");
+
+  await act(async () => {
+    current().cancelTest();
+  });
+  assert.equal(current().state.status, "idle");
+  assert.equal(cancelledIds.length, 1);
+});

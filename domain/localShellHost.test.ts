@@ -89,6 +89,64 @@ test('getVaultHostRowSubtitle keeps user@host for remote hosts', () => {
   );
 });
 
+test('getVaultHostRowSubtitle formats RDP and VNC subtitles cleanly without stray leading @', () => {
+  assert.equal(
+    getVaultHostRowSubtitle({
+      protocol: 'rdp',
+      username: 'Administrator',
+      hostname: '10.0.0.5',
+      port: 3389,
+      rdpConfig: { domain: 'CORP' },
+    }),
+    'CORP\\Administrator@10.0.0.5',
+  );
+  assert.equal(
+    getVaultHostRowSubtitle({
+      protocol: 'rdp',
+      username: 'alice|token-uuid',
+      hostname: 'razor.example.com',
+      port: 33890,
+    }),
+    'alice|token-uuid@razor.example.com:33890',
+  );
+  assert.equal(
+    getVaultHostRowSubtitle({
+      protocol: 'rdp',
+      username: '',
+      hostname: '10.0.0.5',
+      port: 3389,
+    }),
+    '10.0.0.5',
+  );
+  assert.equal(
+    getVaultHostRowSubtitle({
+      protocol: 'vnc',
+      username: '',
+      hostname: '10.0.0.9',
+      port: 5900,
+    }),
+    '10.0.0.9',
+  );
+  assert.equal(
+    getVaultHostRowSubtitle({
+      protocol: 'vnc',
+      username: '',
+      hostname: '10.0.0.9',
+      port: 5901,
+    }),
+    '10.0.0.9:5901',
+  );
+  assert.equal(
+    getVaultHostRowSubtitle({
+      protocol: 'vnc',
+      username: 'alice',
+      hostname: 'mac-mini.local',
+      port: 5900,
+    }),
+    'alice@mac-mini.local',
+  );
+});
+
 test('getLocalShellHostSubtitle ignores whitespace-only names and allows a fallback', () => {
   assert.equal(getLocalShellHostSubtitle({ protocol: 'local', localShellName: '  ' }), 'Local Shell');
   assert.equal(

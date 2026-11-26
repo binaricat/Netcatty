@@ -22,6 +22,11 @@ import {
 import { createPromptHostnameSessionSignalController } from '../application/state/promptHostnameSessionSignalController';
 import { collectSessionIds } from '../domain/workspace';
 import { isPluginHostProtocol } from '../domain/pluginConnection';
+import {
+  isRemoteDesktopProtocol,
+  sanitizeRdpConfig,
+  sanitizeVncConfig,
+} from '../domain/remoteDesktop';
 import { isSameSftpHostSelection } from '../domain/sftpTerminalIdentity';
 
 import { cn, normalizeLineEndings } from '../lib/utils';
@@ -147,12 +152,18 @@ import {
 import { isSidePanelDockPosition } from '../domain/sidePanelLayout';
 
 import {
+  dispatchAddRemoteScreenToAI,
+  type RemoteDesktopScreenshotDraftPayload,
+} from './ai/remoteDesktopAiDraft';
+import {
   AIChatPanelsHost,
   AISidePanelStateRoot,
   AIStateMaintenanceHost,
   AIStateProvider,
   ChunkedEscapeFilter,
   clearHostTreePreviewVars,
+  enqueuePendingRemoteScreenForAI,
+  publishRemoteDesktopLayerBridge,
   TerminalPanesHost,
   clearTerminalPreviewVars,
   clearTopTabsPreviewVars,
@@ -263,6 +274,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onCopySessionToNewWindow,
   onSplitSession,
   onConnectToHost,
+  onConnectRemoteDesktop,
   onCreateLocalTerminal,
   isBroadcastEnabled,
   onToggleBroadcast,
@@ -1303,6 +1315,38 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sessionHostsMap = useMemo(() => {
     const map = new Map<string, Host>();
     for (const session of sessions) {
+      if (session.remoteDesktopCompanion === true && isRemoteDesktopProtocol(session.protocol)) {
+        const vaultHost = hosts.find((candidate) => candidate.id === session.hostId);
+        if (vaultHost) {
+          const effectiveVaultHost = resolveEffectiveTerminalHost({
+            host: vaultHost,
+            groupConfigs,
+            proxyProfiles,
+            validProxyProfileIds: proxyProfileIdSet,
+            defaultLocalShell,
+          });
+          const mergedRdp = session.protocol === 'rdp'
+            ? sanitizeRdpConfig({
+                ...(effectiveVaultHost.rdpConfig ?? {}),
+                ...(session.rdpConfig ?? {}),
+                ...(session.port ? { port: session.port } : {}),
+              })
+            : undefined;
+          const mergedVnc = session.protocol === 'vnc'
+            ? sanitizeVncConfig({
+                ...(effectiveVaultHost.vncConfig ?? {}),
+                ...(session.vncConfig ?? {}),
+                ...(session.port ? { port: session.port } : {}),
+              })
+            : undefined;
+          map.set(session.id, {
+            ...effectiveVaultHost,
+            ...(mergedRdp ? { rdpConfig: mergedRdp } : {}),
+            ...(mergedVnc ? { vncConfig: mergedVnc } : {}),
+          });
+          continue;
+        }
+      }
       const hostForSession = resolveTerminalSessionHost({
         session,
         hosts,
@@ -1314,7 +1358,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       map.set(session.id, applySessionFontSizeToHost(hostForSession, session));
     }
     return map;
-  }, [sessions, hosts, groupConfigs, proxyProfiles, defaultLocalShell]);
+  }, [sessions, hosts, groupConfigs, proxyProfiles, proxyProfileIdSet, defaultLocalShell]);
   const resolvedSessionHostIds = useMemo(() => {
     const ids = new Set<string>();
     for (const session of sessions) {
@@ -1356,7 +1400,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         && (passwordBypass || !isTerminalSensitiveInputActive(target.sessionId)));
     }
     const targetSessionIds = resolveTerminalBroadcastTargetIds({
-      sessions: sessionsRef.current,
+      sessions: sessionsRef.current.filter((session) => !isRemoteDesktopProtocol(session.protocol)),
       sourceSessionId,
       globalBroadcastEnabled: isGlobalBroadcastEnabled,
       directTargetSessionIds: options?.kittyKeyboardTargetSessionIds,
@@ -2261,6 +2305,34 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSwitchSidePanelTab('ai');
   }, [handleSwitchSidePanelTab]);
 
+  const handleAddRemoteScreenToAI = useCallback(
+    (sourceSessionId: string, payload: RemoteDesktopScreenshotDraftPayload | null) => {
+      const ws = activeWorkspaceRef.current;
+      if (ws && ws.focusedSessionId !== sourceSessionId) {
+        onSetWorkspaceFocusedSessionRef.current?.(ws.id, sourceSessionId);
+      }
+      if (payload) {
+        const enriched: RemoteDesktopScreenshotDraftPayload = {
+          ...payload,
+          workspaceId: payload.workspaceId ?? ws?.id,
+        };
+        enqueuePendingRemoteScreenForAI(enriched);
+        handleSwitchSidePanelTab('ai');
+        dispatchAddRemoteScreenToAI(enriched);
+        return;
+      }
+      handleSwitchSidePanelTab('ai');
+    },
+    [handleSwitchSidePanelTab],
+  );
+
+  useEffect(() => {
+    publishRemoteDesktopLayerBridge({
+      sidePanelOpenTabs,
+      onAddRemoteScreenToAI: handleAddRemoteScreenToAI,
+    });
+  }, [handleAddRemoteScreenToAI, sidePanelOpenTabs]);
+
   const handlePendingTerminalSelectionConsumed = useCallback((requestId: string) => {
     setPendingTerminalSelectionForAI((current) => (
       current?.requestId === requestId ? null : current
@@ -2593,7 +2665,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     if (composeSendToAll && (broadcastPasswordBypass || !focusedSensitive)) {
       const allSessionIds = sessionsRef.current
-        .filter((session) => session.workspaceId === activeWorkspace.id)
+        .filter((session) => session.workspaceId === activeWorkspace.id && !isRemoteDesktopProtocol(session.protocol))
         .map((session) => session.id);
       for (const sid of allSessionIds) {
         const recipientSensitive = isTerminalSensitiveInputActive(sid);
@@ -2631,7 +2703,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         }
       }
     } else {
-      const workspaceSessions = sessionsRef.current.filter((session) => session.workspaceId === activeWorkspace.id);
+      const workspaceSessions = sessionsRef.current.filter(
+        (session) => session.workspaceId === activeWorkspace.id && !isRemoteDesktopProtocol(session.protocol),
+      );
       const validFocusedId = focusedSessionId && workspaceSessions.some((session) => session.id === focusedSessionId)
         ? focusedSessionId
         : undefined;
@@ -2818,6 +2892,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onAddSessionToWorkspace,
     onMoveWorkspacePane,
     onConnectToHost,
+    onConnectRemoteDesktop,
     onCreateLocalTerminal,
     onCreateWorkspaceFromSessions,
     onHotkeyAction,

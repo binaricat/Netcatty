@@ -1,11 +1,26 @@
-import { Copy, FileSymlink, Files, Folder, FolderOpen, Globe2, Monitor, Pencil, Plus, Server, Settings2 } from 'lucide-react';
+import { Copy, FileSymlink, Files, Folder, FolderOpen, Globe2, Monitor, Pencil, Plus, Server, Settings2, Shield } from 'lucide-react';
 import React from 'react';
+import {
+  RdpProtocolIcon,
+  SystemRdpClientIcon,
+  SystemVncClientIcon,
+  VncProtocolIcon,
+} from '../icons/RemoteDesktopIcons';
 
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { requestOpenDualPaneSftp } from '../../application/state/sftp/sftpDualPaneOpenStore';
 import { useSettingsChromeStore } from '../../application/state/settingsChromeStore';
 import { sanitizeHost } from '../../domain/host';
 import { isPluginHostProtocol } from '../../domain/pluginConnection';
+import {
+  buildHostForProtocolOverride,
+  getAvailableRemoteDesktopProtocols,
+  hasCompanionRdp,
+  hasCompanionVnc,
+  resolveHostDefaultConnectProtocol,
+  shouldPromptHostProtocolOnConnect,
+  type RemoteDesktopProtocol,
+} from '../../domain/remoteDesktop';
 import { canOpenDualPaneSftp } from '../../domain/sftpDualPaneOpen';
 import type { Host } from '../../types';
 import { ContextMenuContent, ContextMenuItem, ContextMenuShortcut } from '../ui/context-menu';
@@ -14,6 +29,8 @@ import { PluginContributionIcon } from '../plugins/PluginContributionIcon';
 
 export interface HostTreeHostContextMenuHandlers {
   onConnect: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
   onOpenBrowser?: (host: Host) => void;
   onEditHost?: (host: Host) => void;
   onRenameHost?: (host: Host) => void;
@@ -34,6 +51,71 @@ export const OpenDualPaneSftpMenuItem: React.FC<{ host: Host }> = ({ host }) => 
   );
 };
 
+export const CompanionRemoteDesktopMenuItems: React.FC<{
+  host: Host;
+  onConnect?: (host: Host) => void;
+  onConnectRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
+}> = ({ host, onConnect, onConnectRemoteDesktop }) => {
+  const { t } = useI18n();
+  const showRdp = Boolean(onConnectRemoteDesktop) && hasCompanionRdp(host);
+  const showVnc = Boolean(onConnectRemoteDesktop) && hasCompanionVnc(host);
+  const defaultProto = resolveHostDefaultConnectProtocol(host);
+  const promptsOnConnect = shouldPromptHostProtocolOnConnect(host);
+  const showDirectSsh =
+    Boolean(onConnect) &&
+    (showRdp || showVnc) &&
+    (promptsOnConnect || defaultProto !== 'ssh');
+  if (!showRdp && !showVnc && !showDirectSsh) return null;
+  return (
+    <>
+      {showDirectSsh && onConnect && (
+        <ContextMenuItem
+          onClick={() => {
+            const dispatch = buildHostForProtocolOverride(host, 'ssh', host.port || 22);
+            onConnect({ ...dispatch.host, connectProtocolBehavior: 'default' });
+          }}
+        >
+          <Shield className="mr-2 h-4 w-4 text-sky-500" /> {t('vault.hosts.connectSsh')}
+        </ContextMenuItem>
+      )}
+      {showRdp && onConnectRemoteDesktop && (promptsOnConnect || defaultProto !== 'rdp') && (
+        <ContextMenuItem onClick={() => onConnectRemoteDesktop(host, 'rdp')}>
+          <RdpProtocolIcon size={15} className="mr-2 text-blue-500" /> {t('vault.hosts.connectRdp')}
+        </ContextMenuItem>
+      )}
+      {showVnc && onConnectRemoteDesktop && (promptsOnConnect || defaultProto !== 'vnc') && (
+        <ContextMenuItem onClick={() => onConnectRemoteDesktop(host, 'vnc')}>
+          <VncProtocolIcon size={15} className="mr-2 text-teal-500" /> {t('vault.hosts.connectVnc')}
+        </ContextMenuItem>
+      )}
+    </>
+  );
+};
+
+export const OpenSystemRemoteDesktopMenuItems: React.FC<{
+  host: Host;
+  onOpenSystemRemoteDesktop?: (host: Host, protocol: RemoteDesktopProtocol) => void;
+}> = ({ host, onOpenSystemRemoteDesktop }) => {
+  const { t } = useI18n();
+  if (!onOpenSystemRemoteDesktop) return null;
+  const protocols = getAvailableRemoteDesktopProtocols(host);
+  if (protocols.length === 0) return null;
+  return (
+    <>
+      {protocols.includes('rdp') && (
+        <ContextMenuItem onClick={() => onOpenSystemRemoteDesktop(host, 'rdp')}>
+          <SystemRdpClientIcon size={15} className="mr-2 text-blue-500/85" /> {t('vault.hosts.openInSystemRdp')}
+        </ContextMenuItem>
+      )}
+      {protocols.includes('vnc') && (
+        <ContextMenuItem onClick={() => onOpenSystemRemoteDesktop(host, 'vnc')}>
+          <SystemVncClientIcon size={15} className="mr-2 text-teal-500/85" /> {t('vault.hosts.openInSystemVnc')}
+        </ContextMenuItem>
+      )}
+    </>
+  );
+};
+
 export const OpenHostBrowserMenuItem: React.FC<{ host: Host; onOpenBrowser?: (host: Host) => void }> = ({ host, onOpenBrowser }) => {
   const { t } = useI18n();
   if (!onOpenBrowser || (host.protocol && !['ssh', 'mosh', 'local'].includes(host.protocol))) return null;
@@ -45,6 +127,8 @@ export const HostTreeHostContextMenuContent: React.FC<
 > = ({
   host,
   onConnect,
+  onConnectRemoteDesktop,
+  onOpenSystemRemoteDesktop,
   onOpenBrowser,
   onEditHost,
   onRenameHost,
@@ -73,7 +157,16 @@ export const HostTreeHostContextMenuContent: React.FC<
         <Monitor className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
       </ContextMenuItem>
       <OpenDualPaneSftpMenuItem host={safeHost} />
+      <CompanionRemoteDesktopMenuItems
+        host={safeHost}
+        onConnect={onConnect}
+        onConnectRemoteDesktop={onConnectRemoteDesktop}
+      />
       <OpenHostBrowserMenuItem host={safeHost} onOpenBrowser={onOpenBrowser} />
+      <OpenSystemRemoteDesktopMenuItems
+        host={safeHost}
+        onOpenSystemRemoteDesktop={onOpenSystemRemoteDesktop}
+      />
       {onEditHost && (
         <ContextMenuItem onClick={() => onEditHost(host)}>
           <Settings2 className="mr-2 h-4 w-4" /> {t('terminal.layer.hostTree.editHost')}
