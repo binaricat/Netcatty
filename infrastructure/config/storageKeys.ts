@@ -149,6 +149,7 @@ export const STORAGE_KEY_SFTP_TRANSFER_CENTER = 'netcatty_sftp_transfer_center_v
 export const STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR = 'netcatty_sftp_auto_open_sidebar_v1';
 export const STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD = 'netcatty_sftp_follow_terminal_cwd_v1';
 export const STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE = 'netcatty_sftp_default_view_mode_v1';
+export const STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR = 'netcatty_sftp_tree_double_click_behavior_v1';
 /** Compact vs comfortable SFTP file-list row density. */
 export const STORAGE_KEY_SFTP_LIST_DENSITY = 'netcatty_sftp_list_density_v1';
 export const STORAGE_KEY_SFTP_HOST_VIEW_MODES = 'netcatty_sftp_host_view_modes_v1';

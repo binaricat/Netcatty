@@ -191,6 +191,10 @@ export const zhCNTerminalMessages: Messages = {
   'settings.sftp.defaultViewMode.listDesc': '以平面列表显示当前目录的文件',
   'settings.sftp.defaultViewMode.tree': '树形视图',
   'settings.sftp.defaultViewMode.treeDesc': '以层级树形结构显示文件',
+  'settings.sftp.treeFolderDoubleClick': '树形视图双击文件夹',
+  'settings.sftp.treeFolderDoubleClick.desc': '选择在 SFTP 树形视图中双击文件夹时的操作。点击左侧箭头始终在原处展开或折叠。',
+  'settings.sftp.treeFolderDoubleClick.navigate': '进入目录',
+  'settings.sftp.treeFolderDoubleClick.expand': '原地展开／折叠',
 
   'sftp.autoSync.success': '文件已同步到远程：{fileName}',
   'sftp.autoSync.error': '同步文件失败：{error}',

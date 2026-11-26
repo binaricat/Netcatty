@@ -2,6 +2,7 @@ import type { SftpFileEntry } from '../../types';
 import type { SftpPane } from '../../application/state/sftp/types';
 import type { SftpTransferSource } from './SftpContext';
 import type { UseSftpPaneSortingResult } from '../../application/state/sftp/useSftpPaneSorting';
+import type { SftpTreeFolderDoubleClickBehavior } from '../../domain/sftpTreeFolderDoubleClick';
 
 export interface SftpPaneTreeViewProps {
   pane: SftpPane;
@@ -38,4 +39,5 @@ export interface SftpPaneTreeViewProps {
   onCdInTerminal?: (dirPath: string) => void;
   sorting: UseSftpPaneSortingResult;
   reloadRequest: { token: number; paths?: string[]; full?: boolean };
+  folderDoubleClickBehavior?: SftpTreeFolderDoubleClickBehavior;
 }

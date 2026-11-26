@@ -627,6 +627,10 @@ export const ruVaultMessages: Messages = {
   'settings.sftp.defaultViewMode.listDesc': 'Показывать файлы в виде плоского списка для текущего каталога',
   'settings.sftp.defaultViewMode.tree': 'Дерево',
   'settings.sftp.defaultViewMode.treeDesc': 'Показывать файлы в иерархической древовидной структуре',
+  'settings.sftp.treeFolderDoubleClick': 'Двойной щелчок по папке в дереве',
+  'settings.sftp.treeFolderDoubleClick.desc': 'Выберите действие при двойном щелчке по папке в режиме дерева SFTP. Щелчок по стрелке всегда раскрывает или сворачивает папку на месте.',
+  'settings.sftp.treeFolderDoubleClick.navigate': 'Перейти в каталог',
+  'settings.sftp.treeFolderDoubleClick.expand': 'Раскрыть или свернуть на месте',
 
   'sftp.autoSync.success': 'Файл синхронизирован с удалённым сервером: {fileName}',
   'sftp.autoSync.error': 'Не удалось синхронизировать файл: {error}',

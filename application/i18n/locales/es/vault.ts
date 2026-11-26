@@ -584,6 +584,10 @@ export const esVaultMessages: Messages = {
   'settings.sftp.defaultViewMode.listDesc': 'Muestra los archivos en una lista plana del directorio actual',
   'settings.sftp.defaultViewMode.tree': 'Vista de árbol',
   'settings.sftp.defaultViewMode.treeDesc': 'Muestra los archivos en una estructura de árbol jerárquica',
+  'settings.sftp.treeFolderDoubleClick': 'Doble clic en carpetas (vista de árbol)',
+  'settings.sftp.treeFolderDoubleClick.desc': 'Elige qué ocurre al hacer doble clic en una carpeta en la vista de árbol de SFTP. Hacer clic en la flecha siempre expande o contrae en su lugar.',
+  'settings.sftp.treeFolderDoubleClick.navigate': 'Entrar en el directorio',
+  'settings.sftp.treeFolderDoubleClick.expand': 'Expandir o contraer en su lugar',
 
   'sftp.autoSync.success': 'Archivo sincronizado con el remoto: {fileName}',
   'sftp.autoSync.error': 'No se pudo sincronizar el archivo: {error}',

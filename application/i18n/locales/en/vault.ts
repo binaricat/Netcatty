@@ -584,6 +584,10 @@ export const enVaultMessages: Messages = {
   'settings.sftp.defaultViewMode.listDesc': 'Display files in a flat list for the current directory',
   'settings.sftp.defaultViewMode.tree': 'Tree View',
   'settings.sftp.defaultViewMode.treeDesc': 'Display files in a hierarchical tree structure',
+  'settings.sftp.treeFolderDoubleClick': 'Tree view folder double-click',
+  'settings.sftp.treeFolderDoubleClick.desc': 'Choose what happens when double-clicking a folder in SFTP Tree View. Clicking the chevron always expands or collapses in place.',
+  'settings.sftp.treeFolderDoubleClick.navigate': 'Enter directory',
+  'settings.sftp.treeFolderDoubleClick.expand': 'Expand or collapse in place',
 
   'sftp.autoSync.success': 'File synced to remote: {fileName}',
   'sftp.autoSync.error': 'Failed to sync file: {error}',

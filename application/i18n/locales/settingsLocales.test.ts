@@ -285,3 +285,22 @@ test("localized vault messages include interactive authentication labels", () =>
     assert.deepEqual(missing, [], `${locale.name} is missing interactive authentication labels`);
   }
 });
+
+test("localized settings include SFTP tree folder double-click labels across all locales", () => {
+  const keys = [
+    "settings.sftp.treeFolderDoubleClick",
+    "settings.sftp.treeFolderDoubleClick.desc",
+    "settings.sftp.treeFolderDoubleClick.navigate",
+    "settings.sftp.treeFolderDoubleClick.expand",
+  ];
+
+  for (const locale of ALL_SETTINGS_LOCALES) {
+    const missing = keys.filter((key) => !locale.messages[key]);
+    assert.deepEqual(missing, [], `${locale.name} is missing SFTP tree folder double-click labels`);
+    if (locale.name !== "en") {
+      for (const key of keys) {
+        assert.notEqual(locale.messages[key], en[key], `${locale.name}: ${key} should be translated`);
+      }
+    }
+  }
+});
