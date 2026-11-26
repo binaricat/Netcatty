@@ -10,6 +10,8 @@ configuration UI.
 - `opencode-go.svg` — OpenCode product mark, based on the official favicon and
   kept in full color. Brand logos remain the property of their respective
   owners.
+- `martllm.svg` — MartLLM product mark, from the official MartLLM brand kit,
+  drawn with `currentColor` for monochrome UI display.
 
 ## From [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Xiaomi_logo_(2021-).svg)
 

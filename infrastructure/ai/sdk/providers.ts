@@ -732,6 +732,8 @@ export function resolveProviderEndpoint(
     }
   } else if (config.providerId === 'openrouter') {
     baseURL = baseURL || 'https://openrouter.ai/api/v1';
+  } else if (config.providerId === 'martllm') {
+    baseURL = baseURL || 'https://api.martllm.com/v1';
   }
   // @ai-sdk/anthropic expects baseURL to include /v1 (then appends /messages).
   // Bare Claude Code style hosts get /v1 so chat matches probe/discovery.

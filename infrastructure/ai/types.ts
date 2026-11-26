@@ -18,6 +18,7 @@ export type AIProviderId =
   | 'zhipu'
   | 'doubao'
   | 'mimo'
+  | 'martllm'
   | 'custom';
 
 /**
@@ -627,6 +628,7 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
       'mimo-v2.5',
     ],
   },
+  martllm: { name: 'MartLLM', defaultBaseURL: 'https://api.martllm.com/v1', modelsEndpoint: '/models' },
   custom: { name: 'Custom', defaultBaseURL: '' },
 };
 

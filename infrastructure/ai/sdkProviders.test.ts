@@ -97,6 +97,23 @@ test("resolveProviderEndpoint keeps an explicit openrouter baseURL untouched", (
   assert.equal(result.baseURL, "https://proxy.example/v1");
 });
 
+test("resolveProviderEndpoint applies the martllm URL fallback and keeps an explicit baseURL", () => {
+  for (const style of ["openai", "anthropic"] as const) {
+    const result = resolveProviderEndpoint(
+      { id: "p", providerId: "martllm", name: "MartLLM", enabled: true },
+      style,
+      "sk-test",
+    );
+    assert.equal(result.baseURL, "https://api.martllm.com/v1", `style=${style} should still hit api.martllm.com`);
+  }
+  const explicit = resolveProviderEndpoint(
+    { id: "p", providerId: "martllm", name: "MartLLM", enabled: true, baseURL: "https://proxy.example/v1" },
+    "openai",
+    "sk-test",
+  );
+  assert.equal(explicit.baseURL, "https://proxy.example/v1");
+});
+
 test("resolveProviderEndpoint routes OpenCode Go models to their native gateway prefix", () => {
   const base = {
     id: "ocg",

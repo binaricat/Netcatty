@@ -293,6 +293,7 @@ export const SETTINGS_ICON_PATHS: Record<SettingsIconId, string> = {
   zhipu: "/ai/providers/zhipu.svg",
   doubao: "/ai/providers/doubao.svg",
   mimo: "/ai/providers/xiaomi.svg",
+  martllm: "/ai/providers/martllm.svg",
   custom: "/ai/providers/custom.svg",
 };
 
@@ -313,6 +314,7 @@ export const SETTINGS_ICON_COLORS: Record<SettingsIconId, string> = {
   zhipu: "bg-[#3859FF]",
   doubao: "bg-[#0066FF]",
   mimo: "bg-[#FF6900]",
+  martllm: "bg-zinc-900",
   custom: "bg-zinc-600",
 };
 
@@ -346,6 +348,7 @@ export const BUILTIN_PROVIDER_ICONS: BuiltinProviderIcon[] = [
   { id: "google", label: "Google", name: "Google", path: "/ai/providers/google.svg", bgColor: "bg-blue-600" },
   { id: "ollama", label: "Ollama", name: "Ollama", path: "/ai/providers/ollama.svg", bgColor: "bg-purple-600" },
   { id: "openrouter", label: "OpenRouter", name: "OpenRouter", path: "/ai/providers/openrouter.svg", bgColor: "bg-pink-600" },
+  { id: "martllm", label: "MartLLM", name: "MartLLM", path: "/ai/providers/martllm.svg", bgColor: "bg-zinc-900" },
   { id: "deepseek", label: "DeepSeek", name: "DeepSeek", path: "/ai/providers/deepseek.svg", bgColor: "bg-[#4D6BFE]" },
   { id: "moonshot", label: "Moonshot", name: "Moonshot", path: "/ai/providers/moonshot.svg", bgColor: "bg-zinc-800" },
   { id: "kimi", label: "Kimi", name: "Kimi", path: "/ai/providers/kimi.svg", bgColor: "bg-zinc-800" },

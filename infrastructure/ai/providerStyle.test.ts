@@ -17,7 +17,7 @@ test("resolveProviderStyle falls back to providerId for google", () => {
 });
 
 test("resolveProviderStyle treats every other providerId as the OpenAI-compatible family", () => {
-  for (const providerId of ["openai", "ollama", "openrouter", "opencode-go", "qwen", "deepseek", "kimi", "zhipu", "doubao", "mimo", "custom"] as const) {
+  for (const providerId of ["openai", "ollama", "openrouter", "opencode-go", "qwen", "deepseek", "kimi", "zhipu", "doubao", "mimo", "martllm", "custom"] as const) {
     assert.equal(resolveProviderStyle({ providerId }), "openai", `expected openai for ${providerId}`);
   }
 });
@@ -69,6 +69,13 @@ test("openrouter keeps dynamic model discovery instead of a static preset list",
   assert.equal(PROVIDER_PRESETS.openrouter.defaultBaseURL, "https://openrouter.ai/api/v1");
   assert.equal(PROVIDER_PRESETS.openrouter.modelsEndpoint, "/models");
   assert.equal(PROVIDER_PRESETS.openrouter.defaultModels, undefined);
+});
+
+test("martllm keeps dynamic model discovery on its OpenAI-compatible base URL", () => {
+  assert.equal(PROVIDER_PRESETS.martllm.defaultBaseURL, "https://api.martllm.com/v1");
+  assert.equal(PROVIDER_PRESETS.martllm.modelsEndpoint, "/models");
+  assert.equal(PROVIDER_PRESETS.martllm.defaultModels, undefined);
+  assert.equal(resolveProviderDiscoveryStyle({ providerId: "martllm" }), "openai");
 });
 
 test("domestic provider presets expose provider-specific model suggestions", () => {
