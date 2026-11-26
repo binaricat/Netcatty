@@ -759,12 +759,12 @@
       "proxyProfileId": {
         "type": "string",
         "optional": true,
-        "description": "Reusable proxy ID from vault_proxy_profiles_list. Replaces any host proxy and the direct choice. Empty string removes the host's proxy settings so the group proxy or the global default proxy applies again."
+        "description": "Reusable proxy ID from vault_proxy_profiles_list. Replaces a direct choice. Empty string removes the host proxy so the group or global default applies."
       },
       "directProxy": {
         "type": "string",
         "optional": true,
-        "description": "true connects directly, ignoring host, group, and global default proxies. false removes the direct choice so inherited proxies apply again. Cannot be combined with a proxyProfileId."
+        "description": "true connects without any proxy; false removes that choice. Cannot be combined with proxyProfileId."
       },
       "startupCommand": {
         "type": "string",
