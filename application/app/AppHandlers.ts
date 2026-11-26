@@ -357,6 +357,34 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
       if (binding.category === 'sftp') {
         continue;
       }
+      if (binding.action === 'commandPalette') {
+        const hasOpenHostModal = Array.from(
+          document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]:not([data-plugin-dialog])'),
+        ).some((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        });
+        if (!hasOpenHostModal) {
+          const inPluginSurface = Boolean(target?.closest?.('[data-plugin-remote-surface]'));
+          const visibleFullBleedSurfaces = Array.from(
+            document.querySelectorAll<HTMLElement>('[data-plugin-chrome="full-bleed"] [data-plugin-remote-surface]'),
+          ).filter((el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+          });
+          const active = document.activeElement;
+          const focusInsideHostChrome = Boolean(
+            active
+            && active !== document.body
+            && active !== document.documentElement
+            && !visibleFullBleedSurfaces.some((el) => el.contains(active))
+            && !active.closest?.('[data-plugin-view-slot]'),
+          );
+          if (inPluginSurface || (visibleFullBleedSurfaces.length > 0 && !focusInsideHostChrome)) {
+            return;
+          }
+        }
+      }
       if (TERMINAL_PASSTHROUGH_ACTIONS.has(binding.action)) {
         if (isTerminalElement) {
           return;

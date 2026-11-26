@@ -293,3 +293,70 @@ test('native CMD lists and changes directories through the original ConPTY sessi
     await controller.change(fixture, signal, () => {});
   } finally { execFileSync('subst.exe', [drive, '/d']); }
 });
+
+test('Git Bash ConPTY lists and changes directories in the original shell', { skip: !enabled, timeout: 60000 }, async t => {
+  const { discoverShells } = require('../../electron/bridges/shellDiscovery.cjs');
+  const gitBash = discoverShells().find((shell: { id: string }) => shell.id === 'git-bash');
+  if (!gitBash) return t.skip('Git for Windows is required');
+  const { prepareGitBashDirectoryIntegration } = require('../../electron/bridges/gitBashDirectoryIntegration.cjs');
+  const tempDir = require('../../electron/bridges/tempDirBridge.cjs');
+  const pty = require('node-pty') as typeof import('node-pty');
+  tempDir.ensureTempDir();
+  const fixture = fs.realpathSync.native(fs.mkdtempSync(tempDir.getTempFilePath('git-bash-directory-')));
+  const name = "space ' [$]`;&!% \u4e2d\u6587";
+  const target = path.join(fixture, name);
+  fs.mkdirSync(target);
+  const plan = prepareGitBashDirectoryIntegration(gitBash.command, gitBash.args, process.env, gitBash.command);
+  assert.ok(plan);
+  const proc = pty.spawn(gitBash.command, gitBash.args, {
+    cwd: fixture, env: { ...process.env, TERM: 'xterm-256color' }, cols: 140, rows: 40, useConptyDll: true,
+  });
+  const exited = new Promise<void>(resolve => { proc.onExit(() => resolve()); });
+  t.after(async () => {
+    try { proc.kill(); } catch { /* The shell may already have exited. */ }
+    await exited;
+    fs.rmSync(fixture, { recursive: true, force: true });
+  });
+  plan.reader.setProcessId(proc.pid);
+  let output = '';
+  proc.onData(data => { output += data; });
+  const send = (data: string) => { plan.reader.invalidate(); proc.write(data); };
+  const io = createTerminalDirectoryIO({
+    getSessionPwd: () => plan.reader.read(),
+    listLocalDir: async (value: string) => fs.readdirSync(value, { withFileTypes: true }).map(entry => ({
+      name: entry.name, type: entry.isDirectory() ? 'directory' : 'file',
+    })),
+    realpathLocal: async (value: string) => fs.realpathSync.native(value),
+    writeToSession: (_id: string, data: string) => send(data),
+  } as unknown as NetcattyBridge, 'git-bash', { local: true, hostname: '', username: '', pathFlavor: 'win32', windowsShell: 'git-bash' });
+  const waitFor = async (check: () => boolean | Promise<boolean>) => {
+    const deadline = Date.now() + 12000;
+    while (Date.now() < deadline) {
+      if (await check()) return;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.fail(output.slice(-2000));
+  };
+  const at = (value: string) => async () => sameDirectoryPath(await io.cwd().catch(() => ''), value, 'win32');
+  await waitFor(() => output.includes('$ '));
+  await waitFor(at(fixture));
+  assert.deepEqual((await io.list(fixture)).entries.map(entry => entry.name), [name]);
+  const controller = createTerminalDirectoryController({ sessionId: 'git-bash', io,
+    target: { authority: 'local:' + proc.pid, pathFlavor: 'win32' }, publish: () => {},
+    isCurrent: () => true, isReady: () => true,
+    buildChangeCommand: value => directoryChangeCommand(value, 'git-bash', 'win32'),
+  });
+  t.after(() => controller.dispose());
+  const signal = new AbortController().signal;
+  await controller.change(target, signal, () => {});
+  await waitFor(at(target));
+  await controller.change(fixture, signal, () => {});
+  await waitFor(at(fixture));
+  const nestedStart = output.length;
+  send("PS1='NETCATTY-NESTED> ' bash --noprofile --norc -i\r");
+  await waitFor(() => output.slice(nestedStart).endsWith('NETCATTY-NESTED> '));
+  await assert.rejects(io.list(fixture), { code: 'gitBashIntegrationUnavailable' });
+  send('exit\r');
+  await waitFor(at(fixture));
+  send('exit\r');
+});

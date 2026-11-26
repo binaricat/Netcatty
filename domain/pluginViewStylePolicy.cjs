@@ -2,8 +2,8 @@
 
 // Plugin styles are untrusted: they are never inserted before this check.
 const cssTree = require("css-tree");
-const MAX_CSS_LENGTH = 64 * 1024;
-const MAX_AST_NODES = 20_000;
+const MAX_CSS_LENGTH = 128 * 1024;
+const MAX_AST_NODES = 40_000;
 const ALLOWED_AT_RULES = new Set(["media", "supports", "container", "keyframes", "-webkit-keyframes", "layer"]);
 const ALLOWED_FUNCTIONS = new Set([
   "var", "calc", "min", "max", "clamp", "abs", "sign", "round", "mod", "rem", "hypot", "pow", "sqrt", "log", "exp", "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
@@ -14,12 +14,48 @@ const ALLOWED_FUNCTIONS = new Set([
   "cubic-bezier", "steps", "linear", "minmax", "repeat", "fit-content", "env", "counter", "counters", "symbols",
 ]);
 const DENIED_PROPERTIES = new Set(["behavior", "-moz-binding", "-webkit-app-region", "app-region"]);
-const HOST_TOKENS = new Set(["--background", "--foreground", "--muted", "--muted-foreground", "--border", "--primary", "--primary-foreground"]);
+const HOST_TOKENS = new Set([
+  "--background", "--foreground",
+  "--card", "--card-foreground",
+  "--popover", "--popover-foreground",
+  "--primary", "--primary-foreground",
+  "--secondary", "--secondary-foreground",
+  "--muted", "--muted-foreground",
+  "--accent", "--accent-foreground",
+  "--destructive", "--destructive-foreground",
+  "--border", "--input", "--ring",
+  "--radius", "--font-sans", "--font-mono",
+]);
 const decode = (name) => cssTree.ident.decode(name).toLowerCase();
+const MAX_STYLESHEET_CACHE_ENTRIES = 32;
+const MAX_INLINE_STYLE_CACHE_ENTRIES = 256;
+const validatedStylesheetCache = new Map();
+const validatedInlineStyleCache = new Map();
+
+function getCachedCss(cache, source) {
+  if (!cache.has(source)) return undefined;
+  const value = cache.get(source);
+  cache.delete(source);
+  cache.set(source, value);
+  return value;
+}
+
+function setCachedCss(cache, limit, source, value) {
+  if (cache.has(source)) cache.delete(source);
+  while (cache.size >= limit) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+  cache.set(source, value);
+}
 
 /** Returns canonical CSS only if every construct is safe for a clipped shadow root. */
 function validatePluginCss(source, context = "stylesheet") {
   if (typeof source !== "string" || source.length > MAX_CSS_LENGTH || source.includes("\0")) throw new TypeError("Invalid plugin stylesheet");
+  const cache = context === "stylesheet" ? validatedStylesheetCache : validatedInlineStyleCache;
+  const cached = getCachedCss(cache, source);
+  if (cached !== undefined) return cached;
   let ast;
   try { ast = cssTree.parse(source, { context, parseCustomProperty: true, positions: false }); }
   catch { throw new TypeError("Invalid plugin stylesheet"); }
@@ -49,7 +85,9 @@ function validatePluginCss(source, context = "stylesheet") {
       }
     }
   });
-  return cssTree.generate(ast);
+  const canonical = cssTree.generate(ast);
+  setCachedCss(cache, context === "stylesheet" ? MAX_STYLESHEET_CACHE_ENTRIES : MAX_INLINE_STYLE_CACHE_ENTRIES, source, canonical);
+  return canonical;
 }
 
 function validatePluginStylesheet(source) { return validatePluginCss(source); }

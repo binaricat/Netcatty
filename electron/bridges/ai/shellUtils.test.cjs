@@ -454,6 +454,42 @@ test("Powerline recognition preserves existing idle prompt recognition", () => {
   assert.equal(extractTrailingIdlePrompt(twoLinePrompt), twoLinePrompt);
 });
 
+test("isDefaultPosixPromptLine matches short decorative prefixes and keeps the full prompt", () => {
+  for (const prompt of [
+    "root@testhost:~# ",
+    " root@testhost \uE0B0 ~ \uE0B0 ",
+    "\u26A1 root@testhost:~# ",
+    "\u26A1 root@testhost:~#",
+    " \u26A1 root@testhost:~# ",
+    "\u26A1\uFE0F root@testhost:~# ",
+    "\u26A1\uFE0E root@testhost:~# ",
+    " \u26A1 root@testhost \uE0B0 ~ \uE0B0 ",
+    "(venv) \u26A1 root@testhost:~# ",
+    "\u26A1\u26A1\u26A1\u26A1 root@testhost:~# ",
+    "\u{1F680}\u{1F680}\u{1F680}\u{1F680} root@testhost:~# ",
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(prompt), true, prompt);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${prompt}`), prompt, prompt);
+  }
+});
+
+test("decorative prefix recognition rejects pending input and non-decorative prefixes", () => {
+  for (const line of [
+    "\u26A1 root@testhost:~# echo hi",
+    " \u26A1 root@testhost \uE0B0 ~ \uE0B0  ls",
+    "OK root@testhost:~# ",
+    "yes root@testhost:~# ",
+    "git:(main) root@testhost:~# ",
+    "\u26A1\u26A1\u26A1\u26A1\u26A1 root@testhost:~# ",
+    "\u{1F680}\u{1F680}\u{1F680}\u{1F680}\u{1F680} root@testhost:~# ",
+    ...["\u00E9", "\u4E2D", "\u0661", "_", "@", ":", "#", "$", "\\", "/", ">", "[", "]", "(", ")", "."]
+      .map(prefix => `${prefix} root@testhost:~# `),
+  ]) {
+    assert.equal(isDefaultPosixPromptLine(line), false, line);
+    assert.equal(extractTrailingIdlePrompt(`welcome\r\n${line}`), "", line);
+  }
+});
+
 test("trackSessionIdlePrompt and getFreshIdlePrompt accept a Powerlevel10k ❯ prompt", () => {
   const session = {};
   trackSessionIdlePrompt(session, "Last login...\r\n~ ❯ ");

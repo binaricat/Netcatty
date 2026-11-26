@@ -8,7 +8,7 @@ Context Chips 位于终端撰写栏的快捷命令与输入区之间，为当前
 
 | 功能 | 当前范围 | 文档 |
 | --- | --- | --- |
-| Directory Picker | 目录展示、当前层搜索、父级／子目录导航；POSIX 与 Windows PowerShell 适配 | [功能规格](directory-picker.md) · [跨平台设计](directory-picker-cross-platform.md) · [开发计划](directory-picker-follow-up.md) |
+| Directory Picker | 目录展示、当前层搜索和导航，覆盖 POSIX、PowerShell、CMD 和 Git Bash | [功能规格](directory-picker.md) · [跨平台设计](directory-picker-cross-platform.md) · [开发计划](directory-picker-follow-up.md) |
 | Git Branch | 后续接入仓库识别、分支读取与切换 | [Git Branch](git-branch.md) |
 | Git Changes | 后续接入变更统计与详情入口 | [Git Changes](git-changes.md) |
 | Node Version | 后续接入当前 shell 的运行时与版本管理器 | [Node Version](node-version.md) |

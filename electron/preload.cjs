@@ -493,11 +493,11 @@ ipcRenderer.on("netcatty:exit", (_event, payload) => {
 
 // Chain progress events (for jump host connections)
 ipcRenderer.on("netcatty:chain:progress", (_event, payload) => {
-  const { sessionId, hop, total, label, status, error } = payload;
+  const { sessionId, hop, total, label, status, error, address } = payload;
   // Notify all registered chain progress listeners
   chainProgressListeners.forEach((cb) => {
     try {
-      cb(sessionId, hop, total, label, status, error);
+      cb(sessionId, hop, total, label, status, error, address);
     } catch (err) {
       console.error("Chain progress callback failed", err);
     }

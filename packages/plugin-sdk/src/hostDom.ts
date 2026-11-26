@@ -104,9 +104,30 @@ function subscribeControlPropertyMutations(container: HTMLElement, onMutation: (
   };
 }
 
+const MAX_PLUGIN_CSS_LENGTH = 131072;
+const MAX_PLUGIN_EVENT_VALUE_LENGTH = 131072;
+
+function matchShortcutFromKeyEvent(event: HostDrawnViewEvent, isTextControl: boolean): string | null {
+  const key = event.key ?? '';
+  if (key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey) return 'escape';
+  const mod = Boolean(event.metaKey || event.ctrlKey);
+  if (!mod || event.altKey) return null;
+  const lower = key.toLowerCase();
+  if (lower === 'k' && !event.shiftKey) return 'mod+k';
+  if (lower === 's' && !event.shiftKey) return 'mod+s';
+  if (lower === 't' && !event.shiftKey) return 'mod+t';
+  if (lower === 'w' && !event.shiftKey) return 'mod+w';
+  if (!isTextControl) {
+    if (lower === 'z' && event.shiftKey) return 'mod+shift+z';
+    if (lower === 'z' && !event.shiftKey) return 'mod+z';
+    if (lower === 'y' && event.ctrlKey && !event.metaKey && !event.shiftKey) return 'mod+shift+z';
+  }
+  return null;
+}
+
 /** Build ordinary DOM in the isolated runtime; only validated data reaches the visible host. */
 export function registerHostDomView(views: PluginViews, viewId: string, mount: (container: HTMLElement, stateScope: string) => (() => void) | void, css = ''): Disposable {
-  if (css.length > 65536) throw new TypeError('Plugin CSS exceeds the view limit');
+  if (css.length > MAX_PLUGIN_CSS_LENGTH) throw new TypeError('Plugin CSS exceeds the view limit');
   type View = {
     container: HTMLDivElement;
     unmount: () => void;
@@ -142,8 +163,59 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
     view.syncElementIndex();
     const element = view.elementsById.get(event.nodeId);
     if (!element || !(element instanceof HTMLElement)) return;
-    if (event.type === 'dismiss') { element.dispatchEvent(new Event('netcatty-dismiss')); return; }
-    if (event.type === 'click') {
+    const eventType = event.type;
+    if (eventType === 'dismiss') { element.dispatchEvent(new Event('netcatty-dismiss')); return; }
+    if (eventType === 'widget') {
+      const widgetEvent = new CustomEvent('netcatty-widget-event', {
+        bubbles: false,
+        cancelable: true,
+        detail: { widgetEvent: event.widgetEvent, detail: event.detail },
+      });
+      element.dispatchEvent(widgetEvent);
+      if (!widgetEvent.defaultPrevented && event.widgetEvent === 'shortcut' && event.detail && typeof event.detail === 'object' && !Array.isArray(event.detail)) {
+        const shortcut = (event.detail as Record<string, unknown>).shortcut;
+        if (typeof shortcut === 'string') {
+          element.dispatchEvent(new CustomEvent('netcatty-shortcut', { bubbles: true, detail: { shortcut } }));
+        }
+      }
+      return;
+    }
+    if (eventType === 'dblclick') {
+      element.dispatchEvent(new MouseEvent('dblclick', {
+        bubbles: true,
+        cancelable: true,
+        clientX: event.x ?? 0,
+        clientY: event.y ?? 0,
+      }));
+      return;
+    }
+    if (eventType === 'contextmenu') {
+      element.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: event.x ?? 0,
+        clientY: event.y ?? 0,
+      }));
+      return;
+    }
+    if (eventType === 'scroll') {
+      try {
+        if (typeof event.scrollTop === 'number') element.scrollTop = event.scrollTop;
+        if (typeof event.scrollLeft === 'number') element.scrollLeft = event.scrollLeft;
+      } catch { /* scroll properties may be read-only in synthetic DOM */ }
+      element.dispatchEvent(new CustomEvent('scroll', {
+        bubbles: false,
+        detail: {
+          scrollTop: event.scrollTop ?? 0,
+          scrollLeft: event.scrollLeft ?? 0,
+          clientHeight: event.clientHeight ?? 0,
+          clientWidth: event.clientWidth ?? 0,
+        },
+      }));
+      return;
+    }
+    if (eventType === 'click') {
       // The host already performed native checkbox/label behavior. Reproduce it
       // once for React's click-based change handler, without a second toggle.
       if (element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type) && event.checked !== undefined) {
@@ -160,26 +232,41 @@ export function registerHostDomView(views: PluginViews, viewId: string, mount: (
       }
       return;
     }
-    if (event.type === 'reset' && element instanceof HTMLFormElement) { element.reset(); return; }
-    if (event.type === 'submit') { const action = new Event(event.type, { bubbles: true, cancelable: true }); action.preventDefault(); element.dispatchEvent(action); return; }
-    if (event.type === 'keydown' || event.type === 'keyup') {
-      element.dispatchEvent(new KeyboardEvent(event.type, { key: event.key ?? '', ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey, bubbles: true, cancelable: true })); return;
+    if (eventType === 'reset' && element instanceof HTMLFormElement) { element.reset(); return; }
+    if (eventType === 'submit') { const action = new Event(eventType, { bubbles: true, cancelable: true }); action.preventDefault(); element.dispatchEvent(action); return; }
+    if (eventType === 'keydown' || eventType === 'keyup') {
+      const isTextControl = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+      if (isTextControl && typeof event.selectionStart === 'number' && typeof event.selectionEnd === 'number') {
+        try { element.setSelectionRange(event.selectionStart, event.selectionEnd); } catch { /* selection unsupported for input type */ }
+      }
+      element.dispatchEvent(new KeyboardEvent(eventType, { key: event.key ?? '', ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, shiftKey: event.shiftKey, bubbles: true, cancelable: true }));
+      if (eventType === 'keydown') {
+        const shortcut = matchShortcutFromKeyEvent(event, isTextControl);
+        if (shortcut) {
+          element.dispatchEvent(new CustomEvent('netcatty-shortcut', { bubbles: true, detail: { shortcut } }));
+        }
+      }
+      return;
     }
-    if (event.type.startsWith('composition')) { element.dispatchEvent(new CompositionEvent(event.type, { data: event.data ?? '', bubbles: true })); return; }
-    if (event.type === 'focusin' || event.type === 'focusout') { element.dispatchEvent(new FocusEvent(event.type, { bubbles: true })); return; }
+    if (eventType.startsWith('composition')) { element.dispatchEvent(new CompositionEvent(eventType, { data: event.data ?? '', bubbles: true })); return; }
+    if (eventType === 'focusin' || eventType === 'focusout') { element.dispatchEvent(new FocusEvent(eventType, { bubbles: true })); return; }
     if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
       if (element instanceof HTMLSelectElement && element.multiple && event.values) {
         for (const option of element.options) option.selected = event.values.includes(option.value);
       }
-      if (!(element instanceof HTMLSelectElement && element.multiple) && event.value !== undefined && event.value.length <= 8192) {
+      if (!(element instanceof HTMLSelectElement && element.multiple) && event.value !== undefined && event.value.length <= MAX_PLUGIN_EVENT_VALUE_LENGTH) {
         const prototype = element instanceof HTMLInputElement ? HTMLInputElement.prototype
           : element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLSelectElement.prototype;
         Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(element, event.value);
       }
+      if ((element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+        && typeof event.selectionStart === 'number' && typeof event.selectionEnd === 'number') {
+        try { element.setSelectionRange(event.selectionStart, event.selectionEnd); } catch { /* selection unsupported for input type */ }
+      }
       if (element instanceof HTMLInputElement && typeof event.checked === 'boolean') {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked')?.set?.call(element, event.checked);
       }
-      element.dispatchEvent(new Event(event.type, { bubbles: true, cancelable: true }));
+      element.dispatchEvent(new Event(eventType, { bubbles: true, cancelable: true }));
     }
   };
   const subscription = views.onDidReceiveMessage(viewId, (message) => {

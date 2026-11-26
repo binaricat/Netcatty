@@ -383,6 +383,7 @@ const WORKSPACE_CTX_KEYS = [
   'splitVerticalHandlersRef',
   'resolveSessionAppearance',
   'hostMap',
+  'isVaultInitialized',
   'keys',
   'identities',
   'snippets',

@@ -107,13 +107,17 @@ class HostDrawnViewHost {
     const { plugin } = this.contributions.assertViewActivationCurrent(instance.activation, { context: instance.context });
     instance.resources ??= new Map();
     if (instance.resources.has(resource)) return instance.resources.get(resource);
-    if (instance.resources.size >= 32) throw new Error("Plugin image limit exceeded");
+    if (instance.resources.size >= 128) throw new Error("Plugin image limit exceeded");
     const pending = this.resources.image(plugin, resource).then((result) => {
       if (this.isLocked() || this.instances.get(id) !== instance) throw new Error("Plugin view closed");
       this.contributions.assertViewActivationCurrent(instance.activation, { context: instance.context });
-      instance.resourceBytes = (instance.resourceBytes ?? 0) + result.url.length;
-      if (instance.resourceBytes > 8 * 1024 * 1024) throw new Error("Plugin image budget exceeded");
+      const nextBytes = (instance.resourceBytes ?? 0) + result.url.length;
+      if (nextBytes > 24 * 1024 * 1024) throw new Error("Plugin image budget exceeded");
+      instance.resourceBytes = nextBytes;
       return result;
+    }).catch((error) => {
+      if (instance.resources?.get(resource) === pending) instance.resources.delete(resource);
+      throw error;
     });
     instance.resources.set(resource, pending);
     return pending;
@@ -121,6 +125,12 @@ class HostDrawnViewHost {
   async event(id, event, sender) {
     const instance = this.owned(id, sender);
     if (this.isLocked() || !validateEvent(event)) throw new TypeError("Invalid plugin view event");
+    if (event.detail !== undefined) {
+      let detailBytes = 0;
+      try { detailBytes = Buffer.byteLength(JSON.stringify(event.detail), "utf8"); }
+      catch { throw new TypeError("Invalid plugin view event detail"); }
+      if (detailBytes > 256 * 1024) throw new TypeError("Plugin view event detail exceeds limits");
+    }
     this.contributions.assertViewActivationCurrent(instance.activation, { context: instance.context });
     await this.contributions.runtimeSupervisor.notify(instance.pluginId, "plugin.view.message", { viewId: instance.viewId,
       message: { kind: "host-ui.event", instanceId: id, event } }, { expectedIdentity: instance.identity });
@@ -144,6 +154,7 @@ class HostDrawnViewHost {
     this.closed = true; for (const opening of this.opening.values()) opening.cancelled = true;
     await Promise.all([...this.instances.keys()].map((id) => this.close(id, undefined, "shutdown")));
     this.messageSubscription?.dispose(); this.changeSubscription?.dispose(); this.unsubscribeLock?.();
+    this.resources?.dispose?.();
   }
 }
 module.exports = { HostDrawnViewHost };

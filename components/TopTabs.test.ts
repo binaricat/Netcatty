@@ -80,7 +80,7 @@ test("host tree tab gutter style animates only when host tree transitions and yi
   });
 });
 
-test("workspace tabs resolve generated labels from live prompt hosts", () => {
+test("workspace tabs resolve generated labels from live prompt hosts in all mode", () => {
   const sessions = [
     topTabSession("s1", "h1", { customName: "", promptHostname: "" }),
     topTabSession("s2", "h2", { customName: "", promptHostname: "" }),
@@ -95,12 +95,36 @@ test("workspace tabs resolve generated labels from live prompt hosts", () => {
   publishSessionPromptHost("s1", "target-a");
   publishSessionPromptHost("s2", "target-b");
   assert.equal(
-    resolveWorkspaceTopTabLabel(workspace, sessions),
+    resolveWorkspaceTopTabLabel(workspace, sessions, "all"),
     "target-a/target-b",
   );
 
   sessionPresentationStore.clearSession("s1");
   sessionPresentationStore.clearSession("s2");
+});
+
+test("generated workspace tabs keep saved names in disabled and agent-only modes", (t) => {
+  const sessions = [
+    topTabSession("mode-s1", "h1", { hostLabel: "Production" }),
+    topTabSession("mode-s2", "h2", { hostLabel: "Database" }),
+  ];
+  t.after(() => sessions.forEach((session) => sessionPresentationStore.clearSession(session.id)));
+  const savedTitle = sessions.map((session) => session.hostLabel).join("/");
+  const workspace = { title: savedTitle, autoTitle: false, generatedTitle: true, focusedSessionId: "mode-s1" };
+  publishSessionPromptHost("mode-s1", "vm-prod");
+  publishSessionPromptHost("mode-s2", "db-prod");
+  for (const mode of [undefined, "off", "agent"] as const) {
+    assert.equal(resolveWorkspaceTopTabLabel(workspace, sessions, mode), savedTitle, String(mode));
+  }
+});
+
+test("auto workspace tabs apply presentation with the current mode", (t) => {
+  const session = topTabSession("auto-mode", "h1", { hostLabel: "Production" });
+  t.after(() => sessionPresentationStore.clearSession(session.id));
+  const workspace = { title: "Workspace", autoTitle: true, focusedSessionId: session.id };
+  publishSessionPromptHost(session.id, "vm-prod");
+  assert.equal(resolveWorkspaceTopTabLabel(workspace, [session], "off"), session.hostLabel);
+  assert.equal(resolveWorkspaceTopTabLabel(workspace, [session], "all"), "vm-prod");
 });
 
 test("workspace tabs keep explicit names ahead of live prompt hosts", () => {

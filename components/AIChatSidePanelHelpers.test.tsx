@@ -17,6 +17,7 @@ import {
   normalizeSdkRuntimeModelPresets,
   resolveSdkRuntimeCatalogDefaultModelId,
   reconcileRuntimeModelWarning,
+  isModelCatalogWarningVisible,
   toSdkRuntimeModelCatalog,
   shouldAdoptSdkCurrentModel,
   shouldLoadSdkRuntimeModels,
@@ -683,6 +684,26 @@ test('reconcileRuntimeModelWarning clears only the banner that belongs to this c
   assert.deepEqual(reconcileRuntimeModelWarning(current, 'copilot', 'k1', false, 'warn'), {});
   // A banner that belongs to another cache key (another profile) is not ours to clear.
   assert.equal(reconcileRuntimeModelWarning(current, 'copilot', 'k2', false, 'warn'), current);
+});
+
+test('isModelCatalogWarningVisible shows a matching, non-dismissed banner', () => {
+  const warning = { cacheKey: 'k1', message: 'cannot load models' };
+  assert.equal(isModelCatalogWarningVisible(warning, 'k1', new Set()), 'cannot load models');
+});
+
+test('isModelCatalogWarningVisible hides a dismissed cache key but re-arms on a new key', () => {
+  const warning = { cacheKey: 'k1', message: 'cannot load models' };
+  const dismissed = new Set(['k1']);
+  assert.equal(isModelCatalogWarningVisible(warning, 'k1', dismissed), undefined);
+  // A config/agent switch produces a different cache key, which is not dismissed.
+  assert.equal(isModelCatalogWarningVisible({ cacheKey: 'k2', message: 'again' }, 'k2', dismissed), 'again');
+});
+
+test('isModelCatalogWarningVisible never shows a warning for another cache key or without a target', () => {
+  const warning = { cacheKey: 'k1', message: 'cannot load models' };
+  assert.equal(isModelCatalogWarningVisible(warning, 'k2', new Set()), undefined);
+  assert.equal(isModelCatalogWarningVisible(warning, undefined, new Set()), undefined);
+  assert.equal(isModelCatalogWarningVisible(undefined, 'k1', new Set()), undefined);
 });
 
 test('cacheOnly hydration in AIChatSidePanel reconciles cached refresh warnings before applying persisted models', () => {

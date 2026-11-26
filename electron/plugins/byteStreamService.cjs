@@ -1,8 +1,13 @@
 "use strict";
 
 const { randomUUID } = require("node:crypto");
+const net = require("node:net");
 const os = require("node:os");
-const { normalizeStreamAddress } = require("./byteStreamEndpoint.cjs");
+const {
+  canonicalizeStreamEndpoint,
+  isLocalControlAddress,
+  normalizeStreamAddress,
+} = require("./byteStreamEndpoint.cjs");
 const { PluginByteStreamBroker, LIMITS } = require("./byteStreamBroker.cjs");
 const { PluginRpcError, RPC_ERRORS } = require("./rpcRouter.cjs");
 const { createDefinitionValidator } = require("./contractValidator.cjs");
@@ -17,22 +22,69 @@ function validator(name) {
   };
 }
 
+function manifestStreamDeclaration(manifest, canonicalEndpoint) {
+  const declarations = [
+    ...(manifest?.permissions?.required ?? []),
+    ...(manifest?.permissions?.optional ?? []),
+  ];
+  let declared = false;
+  let staticMatch = false;
+  for (const item of declarations) {
+    if (item === "network.stream") {
+      declared = true;
+    } else if (item && typeof item === "object" && item.permission === "network.stream") {
+      declared = true;
+      if (Array.isArray(item.resources)) {
+        for (const resource of item.resources) {
+          try {
+            if (canonicalizeStreamEndpoint(resource).endpoint === canonicalEndpoint) {
+              staticMatch = true;
+            }
+          } catch { /* ignore invalid entry */ }
+        }
+      }
+    }
+  }
+  return { declared, staticMatch };
+}
+
+function isOwnMachineAddress(address) {
+  const normalized = normalizeStreamAddress(address);
+  return normalized !== null && Object.values(os.networkInterfaces()).flat()
+    .some((item) => item?.address && normalizeStreamAddress(item.address) === normalized);
+}
+
+function isLocalHostLiteral(host) {
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (!net.isIP(host)) return false;
+  return isLocalControlAddress(host) || isOwnMachineAddress(host);
+}
+
 class PluginByteStreamService {
   constructor(options) {
     this.database = options.database;
+    this.permissionEngine = options.permissionEngine;
     this.runtimeSupervisor = options.runtimeSupervisor;
+    this.interactionService = options.interactionService ?? null;
     this.records = new Map();
     this.closedHandles = new Map();
+    this.memoryEndpoints = new Map();
+    this.memoryTrustedCerts = new Map();
     this.closed = false;
     this.broker = new PluginByteStreamBroker({
       permissionEngine: options.permissionEngine,
       quotaManager: options.quotaManager,
       // The public host service never forwards transport fixture overrides.
-      isControlEndpoint: (address) => {
-        const normalized = normalizeStreamAddress(address);
-        return normalized !== null && Object.values(os.networkInterfaces()).flat()
-          .some((item) => item?.address && normalizeStreamAddress(item.address) === normalized);
-      },
+      isControlEndpoint: (address) => isOwnMachineAddress(address),
+      isTrustedTlsCert: (pluginId, endpoint, fingerprint256) => (
+        this.isTrustedTlsCert(pluginId, endpoint, fingerprint256)
+      ),
+      rememberTlsCert: (pluginId, endpoint, fingerprint256) => (
+        this.rememberTrustedTlsCert(pluginId, endpoint, fingerprint256)
+      ),
+      confirmTlsCert: async (certInfo, _state, context) => (
+        this.#confirmTlsCert(certInfo, context)
+      ),
       audit: (pluginId, operation, fields, state) => {
         if (this.sourceMatches(state)) this.database.recordSecurityAudit(pluginId, operation, fields);
       },
@@ -40,6 +92,170 @@ class PluginByteStreamService {
     this.brokerClose = this.broker.onDidClose((state, reason) => {
       if (reason) this.closeRecord(this.records.get(state.id), reason);
     });
+    this.revocation = this.permissionEngine?.onDidRevoke?.((event) => {
+      if (event.permission === undefined || event.permission === "network.stream") {
+        if (event.resource) {
+          this.revokeDynamicEndpoint(event.pluginId, event.resource);
+        } else {
+          this.clearRememberedEndpoints(event.pluginId);
+        }
+      }
+    }) ?? { dispose() {} };
+  }
+
+  #ownerKey(pluginId) {
+    return typeof this.database?.privateOwner === "function"
+      ? this.database.privateOwner(pluginId)
+      : pluginId;
+  }
+
+  #readPref(key, fallback) {
+    if (this.database?.db) {
+      try {
+        const row = this.database.db.prepare("SELECT value_json FROM plugin_host_preferences WHERE key = ?").get(key);
+        if (row?.value_json) return JSON.parse(row.value_json);
+      } catch { /* fall through */ }
+    }
+    return fallback;
+  }
+
+  #writePref(key, value) {
+    if (this.database?.db) {
+      try {
+        this.database.db.prepare(
+          "INSERT INTO plugin_host_preferences(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at",
+        ).run(key, JSON.stringify(value), Date.now());
+      } catch { /* ignore when mock db */ }
+    }
+  }
+
+  #deletePref(key) {
+    if (this.database?.db) {
+      try {
+        this.database.db.prepare("DELETE FROM plugin_host_preferences WHERE key = ?").run(key);
+      } catch { /* ignore when mock db */ }
+    }
+  }
+
+  #endpointPrefKey(pluginId) {
+    return `permission:${this.#ownerKey(pluginId)}:stream-endpoints`;
+  }
+
+  #tlsCertPrefKey(pluginId) {
+    return `permission:${this.#ownerKey(pluginId)}:stream-tls-certs`;
+  }
+
+  listDynamicEndpoints(pluginId) {
+    const key = this.#endpointPrefKey(pluginId);
+    const list = this.#readPref(key, this.memoryEndpoints.get(key) ?? []);
+    return Array.isArray(list) ? list : [];
+  }
+
+  #rememberKey(endpoint, localAllowed = false) {
+    return localAllowed ? `${endpoint}#local` : endpoint;
+  }
+
+  isDynamicEndpointRemembered(pluginId, endpoint, localAllowed = false) {
+    const list = this.listDynamicEndpoints(pluginId);
+    if (localAllowed) {
+      return list.includes(this.#rememberKey(endpoint, true));
+    }
+    return list.includes(endpoint) || list.includes(this.#rememberKey(endpoint, true));
+  }
+
+  rememberDynamicEndpoint(pluginId, endpoint, localAllowed = false) {
+    const key = this.#endpointPrefKey(pluginId);
+    const current = new Set(this.listDynamicEndpoints(pluginId));
+    current.add(this.#rememberKey(endpoint, localAllowed));
+    const next = [...current].slice(-256);
+    this.memoryEndpoints.set(key, next);
+    this.#writePref(key, next);
+  }
+
+  revokeDynamicEndpoint(pluginId, endpoint) {
+    const key = this.#endpointPrefKey(pluginId);
+    const localKey = this.#rememberKey(endpoint, true);
+    const next = this.listDynamicEndpoints(pluginId).filter((item) => item !== endpoint && item !== localKey);
+    this.memoryEndpoints.set(key, next);
+    if (next.length === 0) this.#deletePref(key);
+    else this.#writePref(key, next);
+    // Also revoke remembered certs for that endpoint.
+    const certKey = this.#tlsCertPrefKey(pluginId);
+    const certs = { ...this.#readPref(certKey, this.memoryTrustedCerts.get(certKey) ?? {}) };
+    if (endpoint in certs) {
+      delete certs[endpoint];
+      this.memoryTrustedCerts.set(certKey, certs);
+      if (Object.keys(certs).length === 0) this.#deletePref(certKey);
+      else this.#writePref(certKey, certs);
+    }
+  }
+
+  clearRememberedEndpoints(pluginId) {
+    const key = this.#endpointPrefKey(pluginId);
+    const certKey = this.#tlsCertPrefKey(pluginId);
+    this.memoryEndpoints.delete(key);
+    this.memoryTrustedCerts.delete(certKey);
+    this.#deletePref(key);
+    this.#deletePref(certKey);
+  }
+
+  isTrustedTlsCert(pluginId, endpoint, fingerprint256) {
+    const certKey = this.#tlsCertPrefKey(pluginId);
+    const certs = this.#readPref(certKey, this.memoryTrustedCerts.get(certKey) ?? {});
+    return Array.isArray(certs?.[endpoint]) && certs[endpoint].includes(fingerprint256);
+  }
+
+  rememberTrustedTlsCert(pluginId, endpoint, fingerprint256) {
+    const certKey = this.#tlsCertPrefKey(pluginId);
+    const certs = { ...this.#readPref(certKey, this.memoryTrustedCerts.get(certKey) ?? {}) };
+    const existing = new Set(Array.isArray(certs[endpoint]) ? certs[endpoint] : []);
+    existing.add(fingerprint256);
+    certs[endpoint] = [...existing].slice(-16);
+    this.memoryTrustedCerts.set(certKey, certs);
+    this.#writePref(certKey, certs);
+  }
+
+  async #confirmDynamicEndpoint(target, context, localRequested = false) {
+    const isLocal = localRequested || isLocalHostLiteral(target.host);
+    if (this.interactionService?.owner) {
+      const result = await this.interactionService.request({
+        kind: "network.stream.confirm",
+        endpoint: target.endpoint,
+        host: target.host,
+        port: target.port,
+        transport: target.transport,
+        isLocal,
+      }, context);
+      if (result?.cancelled || !result?.approved) {
+        throw new PluginRpcError(RPC_ERRORS.cancelled, "Byte stream connection cancelled");
+      }
+      if (result.remember === true) {
+        this.rememberDynamicEndpoint(context.pluginId, target.endpoint, isLocal);
+      }
+      return;
+    }
+    // Non-interactive / headless test fallback: defer to permissionEngine hook.
+    await this.permissionEngine.authorize({ ...context, signal: context.signal }, {
+      permission: "network.stream",
+      resources: [target.endpoint],
+      reason: `Open byte stream to ${target.endpoint}`,
+      operationId: `network.stream:${target.endpoint}`,
+      validateBeforeGrant: () => context.assertCommit?.(),
+    });
+  }
+
+  async #confirmTlsCert(certInfo, context) {
+    if (this.interactionService?.owner) {
+      const result = await this.interactionService.request({
+        kind: "network.stream.tlsConfirm",
+        ...certInfo,
+      }, context);
+      if (result?.cancelled || !result?.approved) {
+        return { approved: false };
+      }
+      return { approved: true, remember: result.remember === true };
+    }
+    return { approved: false };
   }
 
   sourceMatches(identity) {
@@ -73,13 +289,47 @@ class PluginByteStreamService {
 
   register(registry) {
     // These routes own authorization: connect authenticates before the broker
-    // obtains its exact endpoint grant; attach/close prove handle ownership.
+    // obtains its exact endpoint grant; attach/close/upgradeTls prove handle ownership.
     // The registry public flag skips only the generic permission middleware.
     // Runtime authentication and quota middleware still apply to every call.
-    registry.registerRequest("network.stream.connect", async ({ endpoint }, caller) => {
+    registry.registerRequest("network.stream.connect", async (params, caller) => {
       const context = await this.authenticate(caller);
-      return this.connect(endpoint, context);
+      let target;
+      try { target = canonicalizeStreamEndpoint(params.endpoint); }
+      catch { throw new PluginRpcError(RPC_ERRORS.invalidArgument, "Byte stream endpoint is invalid"); }
+      const { declared, staticMatch } = manifestStreamDeclaration(context.manifest, target.endpoint);
+      const isLocalTarget = params.allowLocal === true || isLocalHostLiteral(target.host);
+      const isDynamic = !staticMatch || params.allowLocal === true;
+      const connectOptions = {
+        allowSelfSigned: params.allowSelfSigned === true,
+        ...(params.caPem === undefined ? {} : { caPem: params.caPem }),
+        ...(params.servername === undefined ? {} : { servername: params.servername }),
+      };
+      if (isDynamic && declared) {
+        const mode = this.permissionEngine.getMode?.(context, "network.stream") ?? "allow";
+        if (mode === "deny") {
+          throw new PluginRpcError(RPC_ERRORS.permissionDenied, "Plugin permission is disabled: network.stream");
+        }
+        if (!this.isDynamicEndpointRemembered(context.pluginId, target.endpoint, isLocalTarget)) {
+          await this.#confirmDynamicEndpoint(target, context, isLocalTarget);
+        }
+        await context.assertActive();
+        connectOptions.localApproved = isLocalTarget;
+        connectOptions.skipPermissionAuthorize = true;
+      }
+      return this.connect(target.endpoint, context, undefined, connectOptions);
     }, { validateParams: validator("ByteStreamConnectRequest"), metadata: { capability: "network.stream", mutating: true, public: true } });
+
+    registry.registerRequest("network.stream.upgradeTls", async ({ handleId, servername, allowSelfSigned, caPem }, caller) => {
+      const context = await this.authenticate(caller);
+      const record = this.get(handleId, context);
+      return this.broker.upgradeTls(handleId, {
+        ...(servername === undefined ? {} : { servername }),
+        allowSelfSigned: allowSelfSigned === true,
+        ...(caPem === undefined ? {} : { caPem }),
+      }, record.context);
+    }, { validateParams: validator("ByteStreamUpgradeTlsRequest"), metadata: { capability: "network.stream", mutating: true, public: true } });
+
     registry.registerRequest("network.stream.attach", async ({ handleId }, caller) => {
       const context = await this.authenticate(caller);
       const record = this.get(handleId, context);
@@ -130,8 +380,8 @@ class PluginByteStreamService {
     });
   }
 
-  async connect(endpoint, context, hostTransport) {
-    const handle = await this.broker.connect(endpoint, context, hostTransport);
+  async connect(endpoint, context, hostTransport, connectOptions) {
+    const handle = await this.broker.connect(endpoint, context, hostTransport, connectOptions);
     try {
       context.assertCommit();
       this.broker.get(handle.handleId, context);
@@ -208,6 +458,7 @@ class PluginByteStreamService {
     for (const record of this.records.values()) this.closeRecord(record);
     this.broker.shutdown();
     this.brokerClose.dispose();
+    this.revocation.dispose();
     this.streamRegistration?.dispose();
     this.closedHandles.clear();
   }

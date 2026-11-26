@@ -1,4 +1,4 @@
-import { DirectoryPickerError, directoryEntries, isDirectoryPath } from '../../domain/directoryPicker';
+import { DirectoryPickerError, directoryEntries, isDirectoryPath, type WindowsDirectoryShell } from '../../domain/directoryPicker';
 import { shouldProbeSessionCwd } from '../../domain/host';
 import { sameDirectoryPath, type DirectoryPathFlavor } from '../../domain/directoryPath';
 
@@ -14,13 +14,16 @@ export interface TerminalDirectoryIO {
 /** Uses the exact authenticated terminal transport; never dials another host. */
 export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: string,
   endpoint: { local: boolean; hostname: string; username: string; port?: number; encoding?: import('../../types').SftpFilenameEncoding;
-    pathFlavor?: DirectoryPathFlavor; windowsShell?: 'powershell' | 'cmd' },
+    pathFlavor?: DirectoryPathFlavor; windowsShell?: WindowsDirectoryShell },
   isCurrent: () => boolean = () => true,
 ): TerminalDirectoryIO {
   const check = (signal?: AbortSignal) => { if (!isCurrent() || signal?.aborted) throw new DirectoryPickerError('unavailable'); };
   const flavor = endpoint.pathFlavor ?? 'posix';
   const nativeWindows = endpoint.local && flavor === 'win32';
   const windowsShell = endpoint.windowsShell ?? 'powershell';
+  const integrationError = {
+    powershell: 'integrationUnavailable', cmd: 'cmdIntegrationUnavailable', 'git-bash': 'gitBashIntegrationUnavailable',
+  } as const;
   let lastNativeRevision = 0;
   let submittedNativeRevision = -1;
   const valid = (path: string | null | undefined): path is string => isDirectoryPath(path, flavor);
@@ -32,7 +35,7 @@ export function createTerminalDirectoryIO(bridge: NetcattyBridge, sessionId: str
     check();
     const state = result?.directoryState;
     if (!state || state.shellKind !== windowsShell || state.pathFlavor !== 'win32') {
-      throw new DirectoryPickerError(windowsShell === 'cmd' ? 'cmdIntegrationUnavailable' : 'integrationUnavailable');
+      throw new DirectoryPickerError(integrationError[windowsShell]);
     }
     if (state.provider !== 'FileSystem') throw new DirectoryPickerError('nonFilesystem');
     if (!result.success || !valid(result.cwd) || !Number.isSafeInteger(state.revision)

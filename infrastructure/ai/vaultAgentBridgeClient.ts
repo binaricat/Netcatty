@@ -8,6 +8,7 @@ import {
 import { normalizeTerminalContextRange } from "../../domain/terminalContextRead";
 import { resolveHostOs } from '../../domain/host';
 import { isSavedVaultHost } from '../../domain/ephemeralHosts';
+import { normalizeGroupTargetPath } from '../../domain/hostGroupPathMutations';
 import type { GroupConfig, Host, Identity, KnownHost, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
 import type { RememberImportedKeyPassphraseResult } from '../../application/defaultKeyPassphrases';
 import {
@@ -164,11 +165,58 @@ function summarizeHostForList(host: Host) {
 
 type HostListSummary = ReturnType<typeof summarizeHostForList>;
 
-/** Empty filter matches everything. Matches the group itself or any subgroup, on a path boundary. */
+/**
+ * Empty filter matches everything. Matches the group itself or any subgroup, on a path boundary.
+ * `group` is already normalized; the stored path is normalized the same way because hosts can
+ * carry noncanonical paths (e.g. "prod / web" saved verbatim from Host Details).
+ */
 function hostMatchesGroupFilter(host: HostListSummary, group: string): boolean {
   if (!group) return true;
-  const hostGroup = host.group ?? '';
+  const hostGroup = typeof host.group === 'string' ? normalizeGroupTargetPath(host.group) : '';
   return hostGroup === group || hostGroup.startsWith(`${group}/`);
+}
+
+/** Every known group path: saved groups plus every host's group and its parent paths. */
+function collectKnownGroupPaths(customGroups: readonly string[], hosts: readonly HostListSummary[]): Set<string> {
+  const known = new Set<string>();
+  const addWithParents = (raw: unknown) => {
+    if (typeof raw !== 'string') return;
+    const path = normalizeGroupTargetPath(raw);
+    if (!path) return;
+    const parts = path.split('/');
+    for (let i = 1; i <= parts.length; i++) known.add(parts.slice(0, i).join('/'));
+  };
+  customGroups.forEach(addWithParents);
+  hosts.forEach((host) => addWithParents(host.group));
+  return known;
+}
+
+const MAX_LISTED_GROUPS = 20;
+
+/**
+ * Explain an empty result caused by the group filter, so an agent can tell a
+ * mistyped group from an empty one. Returns undefined when the group has hosts
+ * (an empty result then comes from the query, which is self-explanatory).
+ */
+function describeEmptyGroupResult(
+  group: string,
+  allHosts: readonly HostListSummary[],
+  customGroups: readonly string[],
+): string | undefined {
+  if (allHosts.some((host) => hostMatchesGroupFilter(host, group))) return undefined;
+  const known = collectKnownGroupPaths(customGroups, allHosts);
+  if (known.has(group)) return `Group "${group}" exists but has no hosts.`;
+  const lowered = group.toLocaleLowerCase();
+  const caseMatch = [...known].sort().find((path) => path.toLocaleLowerCase() === lowered);
+  if (caseMatch) {
+    return `No group "${group}". Did you mean "${caseMatch}"? Group names are case-sensitive.`;
+  }
+  // List the names here: vault_groups_list returns only saved groups, not paths used only by hosts.
+  if (known.size === 0) return `No group "${group}". The vault has no groups.`;
+  const names = [...known].sort();
+  const shown = names.slice(0, MAX_LISTED_GROUPS);
+  const count = shown.length < names.length ? ` (${shown.length} of ${names.length})` : '';
+  return `No group "${group}". Known groups${count}: ${shown.map((name) => `"${name}"`).join(', ')}.`;
 }
 
 /** Every term must appear (case-insensitive) in label, hostname, username, or tags. Group is deliberately excluded. */
@@ -725,11 +773,17 @@ export async function handleVaultAgentOp(
       const queryTerms = typeof rawQuery === 'string'
         ? rawQuery.toLowerCase().split(/\s+/).filter(Boolean)
         : [];
-      const group = typeof rawGroup === 'string' ? rawGroup.trim().replace(/\/+$/, '') : '';
-      const hosts = deps
+      // Same normalization as saved group paths: "/prod", "prod / web", "prod\web" all work.
+      const group = typeof rawGroup === 'string' ? normalizeGroupTargetPath(rawGroup) : '';
+      const allHosts = deps
         .getHosts()
-        .map((host) => summarizeHostForList(deps.resolveEffectiveHost(host)))
+        .map((host) => summarizeHostForList(deps.resolveEffectiveHost(host)));
+      const hosts = allHosts
         .filter((host) => hostMatchesGroupFilter(host, group) && hostMatchesQueryTerms(host, queryTerms));
+      if (group && hosts.length === 0) {
+        const note = describeEmptyGroupResult(group, allHosts, deps.getCustomGroups());
+        if (note) return { ok: true, hosts, note };
+      }
       return { ok: true, hosts };
     }
     case 'host.open': {

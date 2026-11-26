@@ -1969,6 +1969,37 @@ function checkWorkerExecSafety(sessionId, command, chatSessionId) {
  * the worker to run every other deterministic check (transport, shell kind, shell-aware
  * blocklist, unsupported local shell, busy background job) without sending anything.
  */
+/**
+ * No-send check that handleWorkerJobStart would accept this command, for
+ * terminal_start_bulk. Same main-side safety check as a real worker start, then the
+ * worker's job-start precheck (busy, local shell, network/serial, writable PTY,
+ * shell-aware blocklist) without creating a job.
+ */
+async function preflightWorkerJobStart(params = {}, { probe = true } = {}) {
+  const { sessionId, command, chatSessionId } = params;
+  if (!terminalWorkerManager?.request) return { ok: false, error: "Session not found" };
+  const blocked = checkWorkerExecSafety(sessionId, command, chatSessionId || null);
+  if (blocked) return { ok: false, error: blocked };
+  try {
+    const result = await terminalWorkerManager.request("netcatty:ai:jobStart", {
+      sessionId,
+      command,
+      chatSessionId: chatSessionId || null,
+      commandTimeoutMs,
+      sessionMeta: getSessionMeta(sessionId, chatSessionId || null) || {},
+      commandBlocklist,
+      precheck: true,
+      // Before approval the worker must not open any channel to the host.
+      ...(probe ? {} : { probe: false }),
+    }, {});
+    return result && result.ok === false
+      ? { ok: false, error: result.error || "Session does not support background execution" }
+      : { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
 async function preflightWorkerExec(params = {}, { probe = true } = {}) {
   const { sessionId, command, chatSessionId } = params;
   if (!terminalWorkerManager?.request) return { ok: false, error: "Session not found" };
@@ -2438,6 +2469,13 @@ function getBuiltinRpcHandlerRegistry() {
       "terminal.start": handleJobStart,
       "terminal.poll": handleJobPoll,
       "terminal.stop": handleJobStop,
+      // terminal_start_bulk is intercepted in dispatchCore like terminal_execute_bulk.
+      "terminal.startBulk": () => ({
+        ok: false,
+        error: "terminal_start_bulk must be dispatched through the bulk job starter.",
+      }),
+      "terminal.pollBulk": (params) => jobBulkHandler.poll(params),
+      "terminal.stopBulk": (params) => jobBulkHandler.stop(params),
     });
   }
   return builtinRpcHandlerRegistry;
@@ -2490,6 +2528,12 @@ async function dispatchCore(method, params, approvalContext = {}) {
     // Plugin-delegated agents never get fan-out execution.
     if (delegated) return { ok: false, error: "terminal_execute_bulk is not available to this client." };
     return execBulkHandler.run(params, approvalContext, permission);
+  }
+
+  if (capability?.id === "terminal.startBulk" || capability?.id === "terminal.pollBulk" || capability?.id === "terminal.stopBulk") {
+    // Plugin-delegated agents never get fan-out execution.
+    if (delegated) return { ok: false, error: `${capability.surfaces?.builtin?.mcpTool || method} is not available to this client.` };
+    if (capability.id === "terminal.startBulk") return jobBulkHandler.start(params, approvalContext, permission);
   }
 
   // Validate session scope *first* so out-of-scope callers cannot infer the
@@ -2834,6 +2878,7 @@ const execHandlerApi = createExecHandlerApi({
 const {
   resolveExecContext,
   preflightExec,
+  preflightJobStart,
   handleExec,
   handleJobStart,
   getScopedJob,
@@ -2880,6 +2925,40 @@ const execBulkHandler = createExecBulkHandler({
   USER_DENIED_MESSAGE,
   CHAT_SESSION_CANCELLED_MESSAGE,
   debugLog,
+});
+// terminal_start_bulk / terminal_poll_bulk / terminal_stop_bulk: background jobs on many sessions.
+const { createJobBulkHandler } = require("./mcpServerBridge/jobBulk.cjs");
+const jobBulkHandler = createJobBulkHandler({
+  getSessions: () => sessions,
+  getSessionMeta,
+  validateSessionScope,
+  closingTerminalSessions,
+  getSessionBusyError,
+  pendingSessionWriteApprovals,
+  isChatSessionCancelled,
+  preflightMainJobStart: preflightJobStart,
+  preflightWorkerJobStart,
+  // Mirrors dispatchCore: sessions not in the main-process map live in the terminal worker.
+  startJobOnSession: (params, beforeExecute) => (sessions?.get?.(params.sessionId)
+    ? handleJobStart(params, { beforeExecute })
+    : handleWorkerJobStart(params, beforeExecute)),
+  pollJob: (params) => (workerBackgroundJobs.has(params.jobId)
+    ? handleWorkerJobPoll(params)
+    : handleJobPoll(params)),
+  stopJob: (params) => (workerBackgroundJobs.has(params.jobId)
+    ? handleWorkerJobStop(params)
+    : handleJobStop(params)),
+  requestApproval: requestApprovalFromRenderer,
+  sessionIdleManager,
+  getLivePermission: (params) => evaluateRpcPermission({
+    rpcMethod: "netcatty/jobStartBulk",
+    surface: CAPABILITY_SURFACES.BUILTIN,
+    permissionMode,
+    params,
+    context: { chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId) },
+  }),
+  USER_DENIED_MESSAGE,
+  CHAT_SESSION_CANCELLED_MESSAGE,
 });
 const { createConfigAndCleanupApi } = require("./mcpServerBridge/configAndCleanup.cjs");
 const configAndCleanupApi = createConfigAndCleanupApi({

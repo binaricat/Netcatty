@@ -63,6 +63,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     splitVerticalHandlersRef,
     resolveSessionAppearance,
     hostMap,
+    isVaultInitialized,
     keys,
     identities,
     snippets,
@@ -233,6 +234,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           splitVerticalHandlersRef={splitVerticalHandlersRef}
           resolveSessionAppearance={resolveSessionAppearance}
           hostMap={hostMap}
+          isVaultInitialized={isVaultInitialized}
           keys={keys}
           identities={identities}
           snippets={snippets}

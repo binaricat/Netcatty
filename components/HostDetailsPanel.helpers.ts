@@ -244,7 +244,7 @@ export const nextFormAfterClearHostChain = (
     groupDefaults
     && applyGroupDefaults({ ...prev, hostChain: undefined }, groupDefaults).hostChain?.hostIds?.length,
   );
-  if (prev.hostChain === undefined || groupWouldRestore) {
+  if (prev.hostChain === undefined || (groupWouldRestore && prev.hostChain.hostIds?.length)) {
     return { ...prev, hostChain: { hostIds: [] } };
   }
   const { hostChain: _hostChain, ...rest } = prev;

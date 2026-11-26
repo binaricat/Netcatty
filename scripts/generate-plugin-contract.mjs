@@ -22,7 +22,7 @@ const electronBundlePath = path.join(
 );
 const checkOnly = process.argv.includes("--check");
 const typescriptTypeOverrides = new Map([
-  ["PermissionDeclaration", 'Exclude<PluginPermission, "network.stream"> | PermissionResourceDeclaration'],
+  ["PermissionDeclaration", "PluginPermission | PermissionResourceDeclaration"],
   [
     "ActivationEvent",
     '"onStartupFinished" | `onCommand:${ContributionId}` | `onView:${ContributionId}` | `onProvider:${ContributionId}`',

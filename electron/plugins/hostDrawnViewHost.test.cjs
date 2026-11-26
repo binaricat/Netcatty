@@ -61,6 +61,7 @@ test("package resources require the same window and survive no close or revocati
   await assert.rejects(pending, /closed/); await assert.rejects(duplicate, /closed/);
   await f.host.shutdown();
 });
+
 test("disable and owner navigation invalidate every retained view", async () => {
   for (const reason of ['plugin-disabled', 'runtime-stopped', 'runtime-error', 'runtime-quarantined']) {
     const f = fixture(); await open(f); f.change({ reason, pluginId: 'com.test.plugin' });
@@ -69,10 +70,42 @@ test("disable and owner navigation invalidate every retained view", async () => 
   const f = fixture(); await open(f); f.sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
   assert.equal(f.host.instances.size, 0); await f.host.shutdown();
 });
+
 test("updates are rate limited and resource caches are bounded", async () => {
   const f = fixture({ image: async () => ({ url: 'data:image/png;base64,AAAA' }) }); await open(f);
-  for (let i = 0; i < 32; i++) await f.host.resource('instance-1', `image-${i}.png`, f.sender);
+  for (let i = 0; i < 128; i++) await f.host.resource('instance-1', `image-${i}.png`, f.sender);
   await assert.rejects(f.host.resource('instance-1', 'extra.png', f.sender), /limit/);
   for (let i = 1; i <= 121; i++) f.message({ ...update(i), mutations: [] });
   assert.equal(f.host.instances.size, 0); await f.host.shutdown();
+});
+
+test("extended surface and widget events validate schema and bound detail payload size", async () => {
+  const f = fixture(); await open(f);
+  await f.host.event("instance-1", { nodeId: "1", type: "contextmenu", x: 42, y: 84 }, f.sender);
+  await f.host.event("instance-1", { nodeId: "1", type: "dblclick", x: 10, y: 20 }, f.sender);
+  await f.host.event("instance-1", { nodeId: "1", type: "scroll", scrollTop: 100, scrollLeft: 0, clientHeight: 400, clientWidth: 600 }, f.sender);
+  await f.host.event("instance-1", { nodeId: "1", type: "widget", widgetEvent: "execute", detail: { value: "SELECT 1;", currentStatement: "SELECT 1" } }, f.sender);
+  assert.equal(f.notifications.at(-1)[2].message.event.widgetEvent, "execute");
+  await assert.rejects(
+    f.host.event("instance-1", { nodeId: "1", type: "widget", widgetEvent: "change", detail: { value: "x".repeat(260 * 1024) } }, f.sender),
+    /exceeds limits/,
+  );
+  await f.host.shutdown();
+});
+
+test("transient resource decode failures are evicted so retries can succeed", async () => {
+  let calls = 0;
+  const f = fixture({
+    image: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("temporary decode failure");
+      return { url: "data:image/png;base64,AAAA" };
+    },
+  });
+  await open(f);
+  await assert.rejects(f.host.resource("instance-1", "icon.png", f.sender), /temporary decode failure/);
+  const recovered = await f.host.resource("instance-1", "icon.png", f.sender);
+  assert.equal(recovered.url, "data:image/png;base64,AAAA");
+  assert.equal(calls, 2);
+  await f.host.shutdown();
 });

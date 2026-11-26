@@ -64,7 +64,7 @@ import { PersistentSidePanelPortal, SidePanelMountedContent } from './terminalLa
 import { usePluginTerminalSidebar } from '../../application/state/usePluginTerminalSidebar';
 import { PluginTerminalSidebarPageHost } from '../plugins/PluginTerminalSidebar';
 import { PluginContributionIcon } from '../plugins/PluginContributionIcon';
-import { getPaneMagnificationShortcutLabel, resolveMagnifiedChromeBorderWidth } from '../../domain/paneMagnification';
+import { getPaneMagnificationShortcutLabel } from '../../domain/paneMagnification';
 import { isRemoteDesktopProtocol } from '../../domain/remoteDesktop';
 
 const MemoizedSidePanelMountedContent = memo(
@@ -169,7 +169,7 @@ function SidePanelPaneHost({
           <span className="text-[11px] font-medium truncate flex-1">{label}</span>
           <button
             type="button"
-            className="h-5 w-5 grid place-items-center rounded-sm opacity-70 hover:opacity-100 hover:bg-white/10"
+            className="h-5 w-5 shrink-0 grid place-items-center rounded-sm opacity-70 hover:opacity-100 hover:bg-white/10"
             aria-label={`${closePaneLabel}: ${label}`}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => {
@@ -1583,12 +1583,10 @@ function TerminalLayerSidePanelInner({ ctx, pluginSidebar }: { ctx: SidePanelCon
           data-section="pane-magnification-backdrop"
         />
         <div
-          className="absolute inset-3 flex flex-col overflow-hidden rounded-md border bg-background shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+          className="absolute inset-3 flex flex-col overflow-hidden rounded-md bg-background shadow-2xl animate-in fade-in zoom-in-95 duration-150"
           style={{
-            borderColor: sidePanelTheme.accent,
-            borderWidth: resolveMagnifiedChromeBorderWidth(
-              typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1),
-            ),
+            outline: `1px solid ${sidePanelTheme.accent}`,
+            outlineOffset: -1,
             backgroundColor: sidePanelTheme.termBg,
             color: sidePanelTheme.termFg,
           }}

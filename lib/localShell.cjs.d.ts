@@ -8,6 +8,7 @@ declare module "./localShell.cjs" {
     platformLike?: string,
   ): SharedLocalShellType;
   export function isWindowsAppExecutionAliasPath(filePath: string): boolean;
+  export function isDiscoveredGitBash(shell?: string, discoveredCommand?: string): boolean;
 }
 
 declare module "@/lib/localShell.cjs" {
@@ -17,4 +18,5 @@ declare module "@/lib/localShell.cjs" {
     platformLike?: string,
   ): SharedLocalShellType;
   export function isWindowsAppExecutionAliasPath(filePath: string): boolean;
+  export function isDiscoveredGitBash(shell?: string, discoveredCommand?: string): boolean;
 }

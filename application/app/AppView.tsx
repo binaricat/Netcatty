@@ -281,7 +281,7 @@ function AppViewInner({ domains }: AppViewProps) {
     handleEndSessionDrag, handleFollowAppTerminalThemeChange, handleHostConnectWithProtocolCheck, handleHotkeyAction, handleKeyboardInteractiveCancel, handleKeyboardInteractiveSubmit,
     handleOpenHostFromVaultNote, handleOpenQuickSwitcher, handleOpenSettings, handleOpenVaultHostFromChat, handleOpenVaultNoteFromChat, handleOpenVaultSectionFromChat, handleOpenVaultSnippetFromChat, handleRootContextMenu, handlePassphraseCancel, handlePassphraseSkip, handlePassphraseSubmit, handleFidoPromptSubmit, handleFidoPromptCancel, handleProtocolSelect,
     handleRequestCloseEditorTabRef, handleSessionStatusChange, handleSyncNowManual, handleTerminalDataCapture, handleUpdateHostFromTerminal,
-    hostById, hosts, terminalHosts, updateTerminalHosts, hotkeyScheme, identities, importOrReuseKey, isBroadcastEnabled, isComposeSendToAll, onToggleComposeSendTarget, isGlobalBroadcastEnabled, isGlobalComposeSendToAll, onToggleGlobalBroadcast, onToggleGlobalComposeSendTarget, canUseGlobalBroadcast, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen,
+    hostById, hosts, terminalHosts, updateTerminalHosts, hotkeyScheme, identities, importOrReuseKey, isVaultInitialized, isBroadcastEnabled, isComposeSendToAll, onToggleComposeSendTarget, isGlobalBroadcastEnabled, isGlobalComposeSendToAll, onToggleGlobalBroadcast, onToggleGlobalComposeSendTarget, canUseGlobalBroadcast, isCreateWorkspaceOpen, isMacClient, isQuickSwitcherOpen,
     keyBindings, keyboardInteractiveQueue, keys, logViews, managedSources, navigateToSection, openLogView, openNoteRequest, orderedTabsWithEditors, orphanSessions,
     passphraseQueue, fidoPromptQueue, protocolSelectHost, proxyProfiles, portForwardingRules, removeSessionFromWorkspace, reorderWorkTabs, reorderWorkspaceSessions,
     resolveEmptyVaultConflict, resolveSessionAppearance, runSnippet, sessionLogsDir, sessionLogsEnabled, sessionLogsFormat, sessionLogsTimestampsEnabled, sessionRenameTarget, sshDebugLogsEnabled,
@@ -738,6 +738,7 @@ function AppViewInner({ domains }: AppViewProps) {
         />
 
         <TerminalLayerMount
+          isVaultInitialized={isVaultInitialized}
           hosts={terminalHosts}
           portForwardingRules={portForwardingRules}
           customGroups={customGroups}

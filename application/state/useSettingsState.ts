@@ -11,7 +11,7 @@ import {
   publishTerminalSettingsSnapshot,
   registerTerminalSettingsActions,
 } from './terminalSettingsStore';
-import { SyncConfig, TerminalSettings, HotkeyScheme, CustomKeyBindings, DEFAULT_KEY_BINDINGS, KeyBinding, UILanguage, SessionLogFormat, normalizeTerminalSettings } from '../../domain/models';
+import { SyncConfig, TerminalSettings, HotkeyScheme, CustomKeyBindings, DEFAULT_KEY_BINDINGS, UILanguage, SessionLogFormat, normalizeTerminalSettings } from '../../domain/models';
 import {
   normalizeAppLockTimeoutMinutes,
   type AppLockSettings,
@@ -102,6 +102,7 @@ import {
   nextCustomKeyBindingsSyncVersion,
   parseCustomKeyBindingsStorageRecord,
   resetCustomKeyBinding,
+  resolveKeyBindings,
   serializeCustomKeyBindingsStorageRecord,
   shouldApplyIncomingCustomKeyBindingsRecord,
   updateCustomKeyBinding as updateCustomKeyBindingRecord,
@@ -2100,17 +2101,10 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   }, []);
 
   // Get merged key bindings (defaults + custom overrides)
-  const keyBindings = useMemo((): KeyBinding[] => {
-    return DEFAULT_KEY_BINDINGS.map(binding => {
-      const custom = customKeyBindings[binding.id];
-      if (!custom) return binding;
-      return {
-        ...binding,
-        mac: custom.mac ?? binding.mac,
-        pc: custom.pc ?? binding.pc,
-      };
-    });
-  }, [customKeyBindings]);
+  const keyBindings = useMemo(
+    () => resolveKeyBindings(DEFAULT_KEY_BINDINGS, customKeyBindings),
+    [customKeyBindings],
+  );
 
   // Update a single key binding
   const updateKeyBinding = useCallback((bindingId: string, scheme: 'mac' | 'pc', newKey: string) => {

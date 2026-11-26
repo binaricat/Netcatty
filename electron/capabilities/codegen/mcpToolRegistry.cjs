@@ -247,7 +247,9 @@ function createToolHandler(toolDef, deps) {
       return { content };
     }
 
-    if (policy?.write) {
+    // Writes that must stay available in observer mode (stops) declare it in the
+    // catalog; the bridge enforces the same policy again.
+    if (policy?.write && !policy.bypassesObserverBlock) {
       const guardErr = guardWriteOperation("", { skipBlocklist: true });
       if (guardErr) {
         return { content: [{ type: "text", text: `Error: ${guardErr}` }], isError: true };

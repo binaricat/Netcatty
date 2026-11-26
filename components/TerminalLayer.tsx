@@ -203,6 +203,7 @@ function buildScriptSessionMeta(
 }
 
 const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
+  isVaultInitialized,
   hosts,
   portForwardingRules = [],
   customGroups,
@@ -2876,6 +2877,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onToggleGlobalComposeSendTarget,
     canUseGlobalBroadcast,
     isComposeBarOpen,
+    isVaultInitialized,
     keyBindings,
     keys,
     knownHosts,

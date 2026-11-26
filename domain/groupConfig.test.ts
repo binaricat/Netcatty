@@ -63,6 +63,13 @@ test("applyGroupDefaults lets host device type override group device type", () =
   assert.equal(result.deviceType, "general");
 });
 
+test("applyGroupDefaults preserves explicit DEL over group Ctrl-H after persistence", () => {
+  const groupDefaults: Partial<GroupConfig> = { backspaceBehavior: "ctrl-h" };
+  const saved: Host = JSON.parse(JSON.stringify(host({ backspaceBehavior: "default" })));
+  assert.equal(applyGroupDefaults(saved, groupDefaults).backspaceBehavior, "default");
+  assert.equal(applyGroupDefaults(host(), groupDefaults).backspaceBehavior, "ctrl-h");
+});
+
 test("applyGroupDefaults skips remote-only device type for local shell hosts", () => {
   const result = applyGroupDefaults(host({ protocol: "local" }), { deviceType: "network" });
 

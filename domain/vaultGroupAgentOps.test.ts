@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Host, ManagedSource, ProxyProfile } from './models';
+import { applyGroupDefaults, resolveGroupDefaults } from './groupConfig';
 import { deleteGroup, upsertGroup } from './vaultGroupAgentOps';
 
 const hosts: Host[] = [
@@ -23,6 +24,27 @@ describe('vaultGroupAgentOps', () => {
     assert.equal(result.state.hosts[0]?.group, 'production/web');
     assert.equal(result.state.managedSources[0]?.groupName, 'production/web');
     assert.equal(result.config?.username, 'deploy');
+  });
+
+  it('clearing a child group proxy lets the parent group proxy apply, like Group Details', () => {
+    const result = upsertGroup({
+      groups: ['prod', 'prod/web'],
+      configs: [
+        { path: 'prod', proxyConfig: { type: 'http', host: 'parent-gw.test', port: 3128 } },
+        { path: 'prod/web', proxyProfileId: 'proxy-1' },
+      ],
+      hosts,
+      managedSources: [],
+    }, 'prod/web', '{"proxyProfileId":""}', [], proxyProfiles);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.config?.proxyProfileId, undefined);
+    assert.equal(result.config?.proxyConfig, undefined);
+    const proxyOptions = { validProxyProfileIds: new Set(['proxy-1']), globalProxyProfileId: '' };
+    const effective = applyGroupDefaults(
+      hosts[0], resolveGroupDefaults('prod/web', result.state.configs, proxyOptions), proxyOptions,
+    );
+    assert.equal(effective.proxyConfig?.host, 'parent-gw.test');
   });
 
   it('rejects missing identities, proxy profiles, and jump hosts', () => {

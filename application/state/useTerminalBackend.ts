@@ -454,7 +454,7 @@ export const useTerminalBackend = () => {
     return bridge.getTelnetEchoMode(sessionId);
   }, []);
 
-  const onChainProgress = useCallback((cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void) => {
+  const onChainProgress = useCallback((cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string, address?: string) => void) => {
     const bridge = netcattyBridge.get();
     return bridge?.onChainProgress?.(cb);
   }, []);

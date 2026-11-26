@@ -15,13 +15,27 @@ export function PluginHostActionHost() {
   const request = entry.prompt.request;
   const selection = request.kind === 'vault.selectHosts';
   const stream = request.kind === 'network.stream.connectViaHost';
+  const directStreamConfirm = request.kind === 'network.stream.confirm';
+  const tlsConfirm = request.kind === 'network.stream.tlsConfirm';
   const connection = request.kind === 'vault.requestConnect' || stream;
   const effective = entry.host ? applyGroupDefaults(entry.host, entry.host.group ? resolveGroupDefaults(entry.host.group, entry.groups) : {}) : undefined;
   const protocol = effective ? resolveEffectiveTerminalProtocol(effective) : undefined;
+  const dialogTitle = selection
+    ? t('plugins.hostActions.select')
+    : directStreamConfirm
+      ? 'Confirm Network Connection'
+      : tlsConfirm
+        ? 'Verify TLS Certificate'
+        : connection
+          ? t('plugins.hostActions.connect')
+          : entry.host
+            ? t('plugins.hostActions.edit')
+            : t('plugins.hostActions.create');
+
   return <Dialog open onOpenChange={(open) => { if (!open) void state.respond('cancel'); }}>
     <DialogContent className={selection ? 'max-w-md h-[min(85vh,640px)] flex flex-col p-0 gap-0 overflow-hidden' : 'sm:max-w-[560px] max-h-[85vh] overflow-y-auto'} hideCloseButton>
       <DialogHeader className={selection ? 'px-4 pt-4 pb-2 shrink-0 border-b border-border/60' : undefined}>
-        <DialogTitle>{t(selection ? 'plugins.hostActions.select' : connection ? 'plugins.hostActions.connect' : entry.host ? 'plugins.hostActions.edit' : 'plugins.hostActions.create')}</DialogTitle>
+        <DialogTitle>{dialogTitle}</DialogTitle>
         <DialogDescription className="break-all">{entry.prompt.pluginId} · {entry.prompt.pluginVersion}</DialogDescription>
       </DialogHeader>
       {selection ? <>
@@ -29,17 +43,89 @@ export function PluginHostActionHost() {
         <p className="px-4 pt-2 text-sm font-medium break-words">{request.title}</p>
         {state.selectedIds.length > 50 && <p role="alert" className="px-4 text-sm text-destructive">{t('plugins.hostActions.selectionLimit')}</p>}
         <SelectHostPanelContent hosts={entry.candidates} customGroups={entry.customGroups} selectedHostIds={state.selectedIds} multiSelect className="flex-1 min-h-0" confirmDisabled={state.busy || state.selectedIds.length > 50} onSelect={(host) => state.setSelectedIds((ids) => ids.includes(host.id) ? ids.filter((id) => id !== host.id) : [...ids, host.id])} onSelectionChange={state.setSelectedIds} onConfirm={() => { if (!state.busy && state.selectedIds.length <= 50) void state.respond('submit'); }} />
-      </> : connection && effective ? <>
+      </> : directStreamConfirm ? <div className="space-y-3">
+        <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-1">
+          <p className="text-xs text-muted-foreground">Destination Endpoint</p>
+          <p className="font-mono text-sm font-medium break-all">{request.endpoint}</p>
+          <p className="text-xs text-muted-foreground">
+            {request.transport.toUpperCase()} · {request.host}:{request.port}
+            {request.isLocal ? ' · Local / Private Network' : ''}
+          </p>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          This plugin is requesting a direct {request.transport.toUpperCase()} connection to this endpoint. Netcatty&apos;s internal control ports remain blocked.
+        </p>
+        <label className="flex items-center gap-2 text-sm select-none cursor-pointer">
+          <input
+            type="checkbox"
+            checked={state.remember}
+            disabled={state.busy}
+            onChange={(event) => state.setRemember(event.target.checked)}
+          />
+          <span>Remember for this endpoint</span>
+        </label>
+      </div> : tlsConfirm ? <div className="space-y-3">
+        <p className="text-sm text-amber-600 dark:text-amber-400 font-medium">
+          The server certificate could not be verified ({request.reason}).
+        </p>
+        <div className="rounded-md border border-border/60 bg-muted/30 p-3 space-y-1.5 text-xs">
+          <div>
+            <span className="text-muted-foreground">Endpoint: </span>
+            <span className="font-mono break-all">{request.endpoint}</span>
+          </div>
+          {request.subject && <div>
+            <span className="text-muted-foreground">Subject: </span>
+            <span className="font-mono break-all">{request.subject}</span>
+          </div>}
+          {request.issuer && <div>
+            <span className="text-muted-foreground">Issuer: </span>
+            <span className="font-mono break-all">{request.issuer}</span>
+          </div>}
+          {request.validTo && <div>
+            <span className="text-muted-foreground">Valid Until: </span>
+            <span className="font-mono">{request.validTo}</span>
+          </div>}
+          <div>
+            <span className="text-muted-foreground">SHA-256 Fingerprint: </span>
+            <code className="block mt-1 font-mono text-[11px] break-all rounded bg-background/60 p-1.5 border border-border/40">
+              {request.fingerprint256}
+            </code>
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-sm select-none cursor-pointer">
+          <input
+            type="checkbox"
+            checked={state.remember}
+            disabled={state.busy}
+            onChange={(event) => state.setRemember(event.target.checked)}
+          />
+          <span>Trust &amp; remember this certificate fingerprint</span>
+        </label>
+      </div> : connection && effective ? <>
         <p className="break-all text-sm font-medium">{effective.label}</p>
         <p className="break-all text-sm">{protocol !== 'local' && effective.username ? `${effective.username}@` : ''}{effective.hostname}{protocol !== 'local' && effective.port ? `:${effective.port}` : ''} ({protocol})</p>
         {protocol === 'local' && <p className="text-sm font-medium" role="note">{t('plugins.hostActions.localExecution')}</p>}
-        {stream ? <><p className="text-sm font-medium break-all">{request.endpoint}</p><p className="text-sm">{t('plugins.hostActions.streamNote')}</p></> : <>
+        {stream ? <>
+          <p className="text-sm font-medium break-all">{request.endpoint}</p>
+          <p className="text-sm">{t('plugins.hostActions.streamNote')}</p>
+          <label className="flex items-center gap-2 text-sm select-none cursor-pointer pt-1">
+            <input
+              type="checkbox"
+              checked={state.remember}
+              disabled={state.busy}
+              onChange={(event) => state.setRemember(event.target.checked)}
+            />
+            <span>Remember this SSH tunnel binding</span>
+          </label>
+        </> : <>
         <p className="text-sm" role="note">{t(entry.scriptsRun ? 'plugins.hostActions.scriptsRun' : 'plugins.hostActions.noScripts')}</p>
         <p className="text-xs text-muted-foreground">{t('plugins.hostActions.connectionNote')}</p></>}
       </> : request.kind === 'vault.requestHostDraft' ? <PluginHostDraftPreview key={entry.prompt.requestId} before={entry.host} draft={request.draft} managedSources={entry.managedSources} busy={state.busy} onConfirm={(draft) => void state.respond('submit', draft)} /> : null}
       {state.error && <p role="alert" className="text-sm text-destructive">{t('plugins.hostActions.failed')}</p>}
       <DialogFooter className={selection ? 'p-3 border-t' : undefined}>
         <Button variant="outline" disabled={state.busy} onClick={() => void state.respond('cancel')}>{t('common.cancel')}</Button>
+        {directStreamConfirm && <Button disabled={state.busy} onClick={() => void state.respond('submit')}>{t('common.connect')}</Button>}
+        {tlsConfirm && <Button disabled={state.busy} onClick={() => void state.respond('submit')}>Trust &amp; Continue</Button>}
         {connection && <Button disabled={state.busy || (stream && protocol !== 'ssh')} onClick={() => void state.respond('submit')}>{t('common.connect')}</Button>}
       </DialogFooter>
     </DialogContent>
