@@ -47,6 +47,7 @@ const navigatorPlatform = typeof navigator !== 'undefined' ? navigator.platform 
 const EMPTY_VAULT_NOTES: never[] = [];
 const EMPTY_VAULT_HOSTS: never[] = [];
 const EMPTY_VAULT_SNIPPETS: never[] = [];
+const EMPTY_ARRAY: never[] = [];
 const subscribeShellHistoryNoop = () => () => {};
 
 function useSidePanelLiveSnapshotForTab(tabId: string, subscribe: boolean) {
@@ -337,10 +338,42 @@ function SidePanelSystemSlotInner({
     );
 
   const {
+    effectiveHosts,
+    hosts,
+    identities,
+    keys,
+    knownHosts,
     refocusActiveTerminalSession,
+    sftpAuthHostBySessionId,
     snippets,
     terminalSettings,
   } = ctx;
+  const authHosts = sftpAuthHostBySessionId as Map<string, Host> | undefined;
+  const authHost = systemSession ? (authHosts?.get(systemSession.id) ?? null) : null;
+  const portForwardingContext = React.useMemo(
+    () => ({
+      session: systemSession,
+      sessionHost: systemHost,
+      authHost,
+      vaultHosts: (hosts ?? EMPTY_VAULT_HOSTS) as Host[],
+      effectiveHosts: (effectiveHosts ?? EMPTY_VAULT_HOSTS) as Host[],
+      keys: (keys ?? EMPTY_ARRAY) as import('../../domain/models').SSHKey[],
+      identities: (identities ?? EMPTY_ARRAY) as import('../../domain/models').Identity[],
+      knownHosts: (knownHosts ?? EMPTY_ARRAY) as import('../../domain/models').KnownHost[],
+      terminalSettings,
+    }),
+    [
+      authHost,
+      effectiveHosts,
+      hosts,
+      identities,
+      keys,
+      knownHosts,
+      systemHost,
+      systemSession,
+      terminalSettings,
+    ],
+  );
 
   return (
     <div className={sidePanelHiddenPanelClassName(!isVisible)}>
@@ -353,6 +386,7 @@ function SidePanelSystemSlotInner({
         terminalSettings={terminalSettings}
         snippets={snippets}
         onRequestTerminalFocus={refocusActiveTerminalSession}
+        portForwardingContext={portForwardingContext}
       />
     </div>
   );

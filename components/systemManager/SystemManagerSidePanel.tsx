@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { SYSTEM_MANAGER_TAB_LAYOUT_DEFAULTS } from '../../application/state/systemManagerTabLayout';
+import type { QuickPortForwardingContext } from '../../application/state/useQuickPortForwarding';
 import { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
 import { useTerminalBackend } from '../../application/state/useTerminalBackend';
 import { remoteSoftwareRequiresSingleChannel } from '@/domain/singleChannelSshBanner.shared.cjs';
@@ -69,6 +70,8 @@ interface SystemManagerSidePanelProps {
   terminalSettings: TerminalSettings;
   snippets: Snippet[];
   onRequestTerminalFocus?: () => void;
+  /** Optional context enabling one-click SSH port forwarding from the Ports tab. */
+  portForwardingContext?: QuickPortForwardingContext;
 }
 
 export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
@@ -79,6 +82,7 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   terminalSettings,
   snippets,
   onRequestTerminalFocus,
+  portForwardingContext,
 }: SystemManagerSidePanelProps) {
   const { t } = useI18n();
   const backend = useSystemManagerBackend();
@@ -568,6 +572,7 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
               backend={backend}
               refreshIntervalSec={terminalSettings.systemManagerProcessRefreshInterval}
               allowMutations={allowMutations}
+              portForwardingContext={portForwardingContext}
             />
           </div>
         ) : null}
