@@ -1,5 +1,6 @@
 import type { GroupConfig, Host, HostProtocol, Identity, ManagedSource, ProxyProfile } from './models';
 import { sanitizeHost } from './host';
+import { isPluginHostProtocol } from './pluginConnection';
 import type { HostOsSelection } from './models/connection';
 import {
   findIntroducedVaultJumpGraphIssue,
@@ -513,6 +514,11 @@ export function applyVaultHostUpdate(
   const nextDirectProxy = directProxy.provided ? parseBoolean(directProxy.value) : undefined;
   if (directProxy.provided && nextDirectProxy === undefined) {
     return { ok: false, error: 'directProxy must be true or false.' };
+  }
+  // Plugin hosts drop built-in proxy settings on save, but not directProxy, so
+  // a stored value would silently force a direct connection after converting back.
+  if (directProxy.provided && isPluginHostProtocol(updated.protocol)) {
+    return { ok: false, error: 'directProxy does not apply to plugin hosts.' };
   }
   if (proxyProfileId.provided) {
     if (typeof proxyProfileId.value !== 'string') return { ok: false, error: 'proxyProfileId must be a string.' };

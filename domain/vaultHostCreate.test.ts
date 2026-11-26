@@ -792,6 +792,11 @@ test('applyVaultHostUpdate rejects invalid or conflicting directProxy values', (
     assert.equal(result.ok, false, JSON.stringify(entry.patch));
     if (!result.ok) assert.match(result.error, entry.error);
   }
+  for (const directProxy of [true, false]) {
+    const result = updateProxy(proxyUpdateHost({ protocol: 'plugin:com.example.transport.connection' }), { directProxy });
+    assert.equal(result.ok, false, `plugin host directProxy ${directProxy}`);
+    if (!result.ok) assert.match(result.error, /does not apply to plugin hosts/i);
+  }
 });
 
 test('applyVaultHostUpdate accepts directProxy as the only changed field', () => {
