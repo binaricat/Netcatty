@@ -376,7 +376,12 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
 
   const sendProgress = (hop, total, label, status, error) => {
     if (!sender.isDestroyed()) {
-      sender.send("netcatty:chain:progress", { sessionId, hop, total, label, status, error });
+      const jump = jumpHosts[hop - 1];
+      sender.send("netcatty:chain:progress", {
+        sessionId, hop, total, label, status, error,
+        hostname: jump.hostname,
+        port: jump.port || 22,
+      });
     }
   };
 

@@ -313,3 +313,41 @@ test("re-auth dialog offers saved password identities from the vault (#3475)", (
 
   assert.equal(withoutIdentities.includes("Use saved identity"), false);
 });
+
+for (const [hop, label, hostname, port] of [
+  [1, "Bastion", "bastion.example.com", 2222],
+  [2, "Prod DB", "192.168.1.10", 22],
+  [1, "IPv6 Bastion", "2001:db8::1", 22],
+] as const) {
+  test(`chain dialog shows hop ${hop} label and address for ${label}`, () => {
+    const markup = renderDialog({
+      host: { ...host, label: "Prod DB", hostname: "192.168.1.10" },
+      chainProgress: {
+        currentHop: hop,
+        totalHops: 2,
+        currentHostLabel: label,
+        currentHostname: hostname,
+        currentPort: port,
+      },
+    });
+
+    assert.ok(markup.includes(`Chain ${hop} of 2`));
+    assert.ok(markup.includes(label));
+    const address = hostname.includes(":") ? `[${hostname}]:${port}` : `${hostname}:${port}`;
+    assert.ok(markup.includes(`SSH ${address}`));
+    if (hop === 1) assert.equal(markup.includes("SSH 192.168.1.10:22"), false);
+  });
+}
+
+test("chain dialog falls back to the target address for legacy progress events", () => {
+  const markup = renderDialog({
+    chainProgress: { currentHop: 1, totalHops: 2, currentHostLabel: "Bastion" },
+  });
+  assert.ok(markup.includes("SSH 10.2.0.32:22"));
+});
+
+test("direct dialog keeps the host label and address", () => {
+  const markup = renderDialog({ host: { ...host, label: "Prod DB" } });
+  assert.ok(markup.includes("Prod DB"));
+  assert.ok(markup.includes("SSH 10.2.0.32:22"));
+});

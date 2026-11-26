@@ -1969,3 +1969,28 @@ test('real OpenWrt ash hides wrapped input and preserves output with priming (#3
     client.end();
   }
 });
+
+test("chain progress keeps six callback arguments and adds only the hop address", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    let legacyReceived;
+    preload.api.onChainProgress((...args) => received.push(args));
+    preload.api.onChainProgress((sessionId, hop, total, label, status, error) => {
+      legacyReceived = [sessionId, hop, total, label, status, error];
+    });
+    const payload = {
+      sessionId: "session-1", hop: 1, total: 2, label: "Bastion", status: "connecting",
+      hostname: "bastion.example.com", port: 2222, unrelated: "must not be forwarded",
+    };
+    preload.handlers.get("netcatty:chain:progress")({}, payload);
+    const firstSix = ["session-1", 1, 2, "Bastion", "connecting", undefined];
+    assert.deepEqual(legacyReceived, firstSix);
+    assert.deepEqual(received[0], [...firstSix, { hostname: "bastion.example.com", port: 2222 }]);
+    const { hostname, port, ...legacyPayload } = payload;
+    preload.handlers.get("netcatty:chain:progress")({}, legacyPayload);
+    assert.deepEqual(received[1], [...firstSix, undefined]);
+  } finally {
+    preload.cleanup();
+  }
+});

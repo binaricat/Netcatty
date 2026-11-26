@@ -310,8 +310,8 @@ declare global {
     onLanguageChanged?(cb: (language: string) => void): () => void;
 
     // Chain progress listener for jump host connections
-    // Callback receives: (sessionId: string, currentHop: number, totalHops: number, hostLabel: string, status: string, error?: string)
-    onChainProgress?(cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void): () => void;
+    // Callback receives: (sessionId: string, currentHop: number, totalHops: number, hostLabel: string, status: string, error?: string, address?: { hostname: string; port?: number })
+    onChainProgress?(cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string, address?: { hostname: string; port?: number }) => void): () => void;
 
     // Fired when a requested SSH connection reuse cannot be honored and the
     // session falls back to a regular fresh connection.

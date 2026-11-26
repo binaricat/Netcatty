@@ -642,12 +642,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         totalHops,
         currentHostLabel:
           jumpHosts[0]?.label || jumpHosts[0]?.hostname || ctx.host.hostname,
+        currentHostname: jumpHosts[0]?.hostname,
+        currentPort: jumpHosts[0]?.port || 22,
         connectionPhase: 'connecting',
       });
     }
 
     {
-      const unsub = ctx.terminalBackend.onChainProgress((sid, hop, total, label, status, error) => {
+      const unsub = ctx.terminalBackend.onChainProgress((sid, hop, total, label, status, error, address) => {
         // P1: Only process events for this session
         if (sid !== ctx.sessionId) return;
         // Disconnect/reconnect can leave two SSH starts sharing this UI
@@ -660,6 +662,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
             currentHop: hop,
             totalHops: total,
             currentHostLabel: label,
+            currentHostname: address?.hostname,
+            currentPort: address?.port,
             connectionPhase: status,
           });
         }

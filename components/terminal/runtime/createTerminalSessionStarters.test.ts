@@ -4394,3 +4394,52 @@ test("startSSH sends local identity file paths with saved passwords for key auth
   assert.equal(capturedOptions.password, "saved-password");
   assert.deepEqual(capturedOptions.identityFilePaths, ["/Users/alice/.ssh/id_ed25519"]);
 });
+
+test("startSSH seeds the bastion address and tracks per-hop labels and addresses", async () => {
+  const states: unknown[] = [];
+  let logs: string[] = [];
+  let listener: Parameters<NonNullable<NetcattyBridge["onChainProgress"]>>[0] = noop;
+  const ctx = createStarterContext({
+    host: {
+      id: "host-1", label: "Prod DB", hostname: "192.168.1.10", username: "alice",
+      password: "secret", hostChain: { hostIds: ["jump-1"] },
+    },
+    resolvedChainHosts: [{
+      id: "jump-1", label: "Bastion", hostname: "bastion.example.com", port: 2222,
+      username: "alice", password: "secret",
+    }],
+    terminalBackend: createMockTerminalBackend({
+      onChainProgress: (cb: typeof listener) => { listener = cb; return noop; },
+      startSSHSession: async (options: { hostLabel: string }) => {
+        assert.equal(options.hostLabel, "Prod DB");
+        assert.deepEqual(states.at(-1), {
+          currentHop: 1, totalHops: 2, currentHostLabel: "Bastion",
+          currentHostname: "bastion.example.com", currentPort: 2222, connectionPhase: "connecting",
+        });
+        listener("session-1", 1, 2, "Bastion", "connecting", undefined,
+          { hostname: "bastion.example.com", port: 2222 });
+        listener("session-1", 2, 2, "Prod DB", "connecting", undefined,
+          { hostname: "192.168.1.10", port: 22 });
+        return "ssh-session";
+      },
+    }),
+    setChainProgress: (state: unknown) => { states.push(state); },
+    setProgressLogs: (update: string[] | ((prev: string[]) => string[])) => {
+      logs = typeof update === "function" ? update(logs) : update;
+    },
+  });
+
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+
+  const hopStates = states.filter((state) => state !== null);
+  assert.deepEqual(hopStates[1], {
+    currentHop: 1, totalHops: 2, currentHostLabel: "Bastion",
+    currentHostname: "bastion.example.com", currentPort: 2222, connectionPhase: "connecting",
+  });
+  assert.deepEqual(hopStates[2], {
+    currentHop: 2, totalHops: 2, currentHostLabel: "Prod DB",
+    currentHostname: "192.168.1.10", currentPort: 22, connectionPhase: "connecting",
+  });
+  assert.ok(logs.includes("[2/2] Connecting to Prod DB..."));
+  assert.equal(logs.includes("[2/2] Connecting to 192.168.1.10..."), false);
+});

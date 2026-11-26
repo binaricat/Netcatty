@@ -170,6 +170,16 @@ test("jump-host chain connections verify hop host keys against known hosts", asy
     "session-1",
   );
 
+  const progress = sender.sent.filter((message) => message.channel === "netcatty:chain:progress");
+  assert.ok(progress.length > 0);
+  for (const { payload } of progress) {
+    assert.equal(payload.label, "Bastion");
+    assert.equal(payload.hostname, "bastion.example.com");
+    assert.equal(payload.port, 22);
+    assert.equal(payload.hop, 1);
+    assert.equal(payload.total, 2);
+  }
+
   assert.equal(MockSSHClient.instances.length, 1);
   const connectOpts = MockSSHClient.instances[0].connectOpts;
   assert.equal(connectOpts.timeout, 45_000);

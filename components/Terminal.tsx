@@ -1020,6 +1020,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     currentHop: number;
     totalHops: number;
     currentHostLabel: string;
+    currentHostname?: string;
+    currentPort?: number;
     connectionPhase: string;
   } | null>(null);
   const [isConnectionAwaitingUserInput, setIsConnectionAwaitingUserInput] = useState(false);

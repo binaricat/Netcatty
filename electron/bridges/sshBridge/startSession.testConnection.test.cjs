@@ -400,3 +400,36 @@ test("monitor authentication returns a pooled transport without a shell, termina
   assert.equal(sent.some(e => e.channel === "netcatty:test:result" || e.channel === "netcatty:exit"), false);
   require("../sshConnectionPool.cjs").discardTransport(result.transport);
 });
+
+for (const [path, extra, expectedLabel] of [
+  ["direct", { hostLabel: "Prod DB", label: "Old label" }, "Prod DB"],
+  ["direct label fallback", { label: "Prod DB" }, "Prod DB"],
+  ["direct hostname fallback", {}, "192.168.1.10"],
+  ["proxy", { hostLabel: "Prod DB", proxy: { type: "socks5", host: "proxy.example.com", port: 1080 } }, "Prod DB"],
+  ["chain", { hostLabel: "Prod DB", jumpHosts: [{ hostname: "bastion.example.com", label: "Bastion" }] }, "Prod DB"],
+]) {
+  test(`${path} progress uses the target label and address on every event`, async () => {
+    const { api, sent, sender } = createHarness({
+      onConnect: (conn) => queueMicrotask(() => {
+        conn.emit("connect");
+        conn.emit("handshake");
+        conn.emit("ready");
+      }),
+      chainDial: async () => ({ socket: new EventEmitter(), connections: [] }),
+      ctxOverrides: { createProxySocket: async () => new EventEmitter() },
+    });
+    await api.startSSHSession({ sender }, {
+      ...baseOptions(), hostname: "192.168.1.10", port: undefined, ...extra,
+    });
+    const progress = sent.filter(({ channel }) => channel === "netcatty:chain:progress").map(({ payload }) => payload);
+    assert.ok(progress.some(({ status }) => status === "connecting"));
+    assert.ok(progress.some(({ status }) => status === "authenticated"));
+    for (const event of progress) {
+      assert.equal(event.label, expectedLabel);
+      assert.equal(event.hostname, "192.168.1.10");
+      assert.equal(event.port, 22);
+      assert.equal(event.hop, path === "chain" ? 2 : 1);
+      assert.equal(event.total, path === "chain" ? 2 : 1);
+    }
+  });
+}

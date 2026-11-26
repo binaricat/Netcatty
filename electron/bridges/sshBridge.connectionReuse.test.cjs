@@ -830,6 +830,7 @@ test("Copy Tab reuses the source connection instead of dialing fresh", async (t)
     {
       sessionId: "copy",
       hostname: "10.0.0.1",
+      hostLabel: "Prod DB",
       username: "alice",
       port: 22,
       sourceSessionId: "source",
@@ -850,6 +851,11 @@ test("Copy Tab reuses the source connection instead of dialing fresh", async (t)
   // A 'connected' progress event was emitted for the renderer.
   const progress = sender.sent.filter((m) => m.channel === "netcatty:chain:progress");
   assert.ok(progress.some((m) => m.payload.status === "connected"));
+  for (const { payload } of progress) {
+    assert.equal(payload.label, "Prod DB");
+    assert.equal(payload.hostname, "10.0.0.1");
+    assert.equal(payload.port, 22);
+  }
   assert.equal(getConnectionReuseFallbackEvents(sender).length, 0, "successful reuse should not emit fallback");
 });
 

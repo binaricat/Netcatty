@@ -95,7 +95,7 @@ export type TerminalBackendApi = {
     error?: string;
   }>;
   onChainProgress: (
-    cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string) => void,
+    cb: (sessionId: string, hop: number, total: number, label: string, status: string, error?: string, address?: { hostname: string; port?: number }) => void,
   ) => (() => void) | undefined;
   onConnectionReuseFallback?: (
     cb: (sessionId: string, sourceSessionId?: string) => void,
@@ -126,6 +126,8 @@ type ChainProgressState = {
   currentHop: number;
   totalHops: number;
   currentHostLabel: string;
+  currentHostname?: string;
+  currentPort?: number;
   connectionPhase: string;
 } | null;
 

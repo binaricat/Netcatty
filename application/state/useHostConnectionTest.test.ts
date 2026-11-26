@@ -106,3 +106,69 @@ test("connection test countdown follows the probe timeouts and invalidates the a
   assert.equal(current().state.status, "disconnected");
   assert.equal(current().state.error, "Connection timed out. Please try again.");
 });
+
+test("connection test seeds the bastion address and tracks the final host label", async (t) => {
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+  let listener: Parameters<NonNullable<NetcattyBridge["onChainProgress"]>>[0] = () => {};
+  let sessionId = "";
+  const bridge = {
+    testConnection: (options: { sessionId: string; hostLabel?: string }) => {
+      sessionId = options.sessionId;
+      assert.equal(options.hostLabel, "Prod DB");
+      return new Promise(() => {});
+    },
+    cancelTestConnection: async () => ({ success: true }),
+    onChainProgress: (cb: typeof listener) => { listener = cb; return () => {}; },
+    onHostKeyVerification: () => () => {},
+  };
+  Object.defineProperty(globalThis, "window", {
+    configurable: true, writable: true, value: { netcatty: bridge },
+  });
+  const target: Host = {
+    ...targetHost, label: "Prod DB", hostname: "192.168.1.10", hostChain: { hostIds: ["jump-1"] },
+  };
+  const bastion: Host = {
+    ...targetHost, id: "jump-1", label: "Bastion", hostname: "bastion.example.com", port: 2222,
+  };
+  let api: HookApi | null = null;
+  let renderer: ReactTestRenderer | null = null;
+  const Probe = () => {
+    api = useHostConnectionTest({ host: target, hosts: [target, bastion], keys: [] });
+    return null;
+  };
+  const current = () => { assert.ok(api); return api; };
+  t.after(async () => {
+    await act(async () => { renderer?.unmount(); });
+    if (previousWindowDescriptor) Object.defineProperty(globalThis, "window", previousWindowDescriptor);
+    else delete (globalThis as { window?: unknown }).window;
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  });
+  await act(async () => { renderer = create(React.createElement(Probe)); });
+  await act(async () => { void current().startTest(); });
+  const firstHop = {
+    currentHop: 1, totalHops: 2, currentHostLabel: "Bastion",
+    currentHostname: "bastion.example.com", currentPort: 2222, connectionPhase: "connecting",
+  };
+  assert.deepEqual(current().state.chainProgress, firstHop);
+  await act(async () => {
+    listener(sessionId, 1, 2, "Bastion", "connecting", undefined,
+      { hostname: "bastion.example.com", port: 2222 });
+  });
+  assert.deepEqual(current().state.chainProgress, firstHop);
+  await act(async () => {
+    listener(sessionId, 2, 2, "Prod DB", "connecting", undefined,
+      { hostname: "192.168.1.10", port: 22 });
+  });
+  assert.deepEqual(current().state.chainProgress, {
+    currentHop: 2, totalHops: 2, currentHostLabel: "Prod DB",
+    currentHostname: "192.168.1.10", currentPort: 22, connectionPhase: "connecting",
+  });
+  assert.ok(current().state.progressLogs.includes("[2/2] Connecting to Prod DB..."));
+  assert.equal(current().state.progressLogs.includes("[2/2] Connecting to 192.168.1.10..."), false);
+  await act(async () => { listener(sessionId, 2, 2, "Prod DB", "authenticating"); });
+  assert.equal(current().state.chainProgress?.currentHostname, undefined);
+  assert.equal(current().state.chainProgress?.currentPort, undefined);
+});

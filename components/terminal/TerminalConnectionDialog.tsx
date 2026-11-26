@@ -28,6 +28,8 @@ export interface ChainProgress {
     currentHop: number;
     totalHops: number;
     currentHostLabel: string;
+    currentHostname?: string;
+    currentPort?: number;
 }
 
 export interface TerminalConnectionDialogProps {
@@ -304,7 +306,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
                                         className="text-[10px] font-mono truncate"
                                         style={{ color: 'color-mix(in srgb, var(--terminal-ui-fg, var(--foreground)) 58%, transparent)' }}
                                     >
-                                        {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? formatHostPort(host.hostname, protocolInfo.port) : host.hostname}
+                                        {t(protocolInfo.i18nKey)} {protocolInfo.showPort ? formatHostPort(chainProgress.currentHostname || host.hostname, chainProgress.currentPort || protocolInfo.port) : (chainProgress.currentHostname || host.hostname)}
                                     </div>
                                 </>
                             ) : (
