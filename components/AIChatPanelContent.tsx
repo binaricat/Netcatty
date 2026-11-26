@@ -1,5 +1,5 @@
 import React, { type Dispatch, type SetStateAction } from 'react';
-import { History, Plus, Undo2 } from 'lucide-react';
+import { History, Plus, Undo2, X } from 'lucide-react';
 import type { AIPermissionMode, AISession, ChatMessage, DiscoveredAgent, ExternalAgentConfig, AgentModelPreset, ProviderConfig, UploadedFile } from '../infrastructure/ai/types';
 import type { Host, VaultNote } from '../types';
 import type { UserSkillOption } from './ai/userSkillsState';
@@ -95,6 +95,8 @@ interface AIChatPanelContentProps {
   modelCatalogFetchedAt?: string;
   /** Retry a failed SDK model catalog load from the warning banner. */
   handleModelCatalogRetry?: () => void;
+  /** Dismiss the warning banner for this agent config until a clean catalog re-arms it. */
+  handleModelCatalogDismiss?: () => void;
   handleModelPickerOpen?: () => void;
   agentModelPresets: AgentModelPreset[];
   /** Suppress the composer picker's "use custom model" action (locked model). */
@@ -174,6 +176,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   handleSteer,
   handleStop,
   handleModelCatalogRetry,
+  handleModelCatalogDismiss,
   handleModelPickerOpen,
   canSteer,
   isSteering,
@@ -430,6 +433,17 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                         className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-amber-600 underline-offset-2 transition-colors hover:bg-amber-500/10 hover:text-amber-500 hover:underline cursor-pointer dark:text-amber-400 dark:hover:text-amber-300"
                       >
                         {t('ai.chat.modelCatalogRetry')}
+                      </button>
+                    )}
+                    {handleModelCatalogDismiss && (
+                      <button
+                        type="button"
+                        aria-label={t('common.close')}
+                        title={t('common.close')}
+                        onClick={handleModelCatalogDismiss}
+                        className="shrink-0 rounded p-0.5 text-amber-600/70 transition-colors hover:bg-amber-500/10 hover:text-amber-600 cursor-pointer dark:text-amber-400/70 dark:hover:text-amber-300"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
                     )}
                   </div>
