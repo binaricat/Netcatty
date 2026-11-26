@@ -1,6 +1,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp, ArrowUpDown, KeyRound, Loader2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ArrowUpRight, KeyRound, Link2, Loader2 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { matchWorkbenchShortcut } from './shortcuts';
 import type {
   PluginDataGridColumn,
   PluginDataGridRow,
@@ -45,6 +46,7 @@ function isNumericColumn(col: PluginDataGridColumn, value: unknown): boolean {
 export function PluginDataGrid({
   columns = [],
   rows = [],
+  hiddenColumns,
   dirtyCells,
   deletedRowIndices,
   insertedRows = [],
@@ -70,6 +72,11 @@ export function PluginDataGrid({
 
   const deletedSet = useMemo(() => new Set(deletedRowIndices ?? []), [deletedRowIndices]);
   const selectedSet = useMemo(() => new Set(selectedRowIndices ?? []), [selectedRowIndices]);
+  const hiddenSet = useMemo(() => new Set(hiddenColumns ?? []), [hiddenColumns]);
+  const visibleCols = useMemo(
+    () => columns.map((col, origIndex) => ({ col, origIndex })).filter(({ col }) => !hiddenSet.has(col.name)),
+    [columns, hiddenSet],
+  );
   const totalRows = rows.length + insertedRows.length;
 
   const getColWidth = useCallback((col: PluginDataGridColumn): number => {
@@ -91,16 +98,16 @@ export function PluginDataGrid({
 
   const colVirtualizer = useVirtualizer({
     horizontal: true,
-    count: columns.length,
+    count: visibleCols.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => (columns[index] ? getColWidth(columns[index]) : DEFAULT_COL_WIDTH),
+    estimateSize: (index) => (visibleCols[index] ? getColWidth(visibleCols[index].col) : DEFAULT_COL_WIDTH),
     overscan: 4,
     initialRect: { width: 960, height: 420 },
   });
 
   useEffect(() => {
     colVirtualizer.measure();
-  }, [colWidths, columns, colVirtualizer]);
+  }, [colWidths, visibleCols, colVirtualizer]);
 
   useEffect(() => {
     if (editingCell) {
@@ -125,11 +132,11 @@ export function PluginDataGrid({
     return null;
   }, [rows, insertedRows]);
 
-  const getEffectiveValue = useCallback((rowIndex: number, col: PluginDataGridColumn, colIndex: number) => {
+  const getEffectiveValue = useCallback((rowIndex: number, col: PluginDataGridColumn, origColIndex: number) => {
     const dirtyKey = `${rowIndex}:${col.name}`;
     const isDirty = Boolean(dirtyCells && Object.prototype.hasOwnProperty.call(dirtyCells, dirtyKey));
     const entry = getRowAt(rowIndex);
-    const rawValue = entry ? readCellValue(entry.row, col, colIndex) : undefined;
+    const rawValue = entry ? readCellValue(entry.row, col, origColIndex) : undefined;
     return {
       value: isDirty ? dirtyCells![dirtyKey] : rawValue,
       isDirty,
@@ -147,19 +154,19 @@ export function PluginDataGrid({
     });
   }, [onWidgetEvent]);
 
-  const beginEdit = useCallback((rowIndex: number, colIndex: number) => {
+  const beginEdit = useCallback((rowIndex: number, visibleColIndex: number) => {
     if (!editable || deletedSet.has(rowIndex)) return;
-    const col = columns[colIndex];
-    if (!col) return;
-    const { value } = getEffectiveValue(rowIndex, col, colIndex);
-    setActiveCell({ rowIndex, colIndex });
+    const entry = visibleCols[visibleColIndex];
+    if (!entry) return;
+    const { value } = getEffectiveValue(rowIndex, entry.col, entry.origIndex);
+    setActiveCell({ rowIndex, colIndex: visibleColIndex });
     setEditingCell({
       rowIndex,
-      colIndex,
-      colName: col.name,
+      colIndex: visibleColIndex,
+      colName: entry.col.name,
       draft: value === null || value === undefined ? '' : formatCellDisplay(value),
     });
-  }, [editable, deletedSet, columns, getEffectiveValue]);
+  }, [editable, deletedSet, visibleCols, getEffectiveValue]);
 
   const toggleRowSelection = useCallback((rowIndex: number, shiftKey: boolean) => {
     const next = new Set(selectedSet);
@@ -225,9 +232,78 @@ export function PluginDataGrid({
     onWidgetEvent('cellContextMenu', { rowIndex, colName, x, y });
   }, [onWidgetEvent]);
 
+  const copySelectionOrActiveCell = useCallback(() => {
+    const selectedIndices = [...selectedSet].sort((a, b) => a - b);
+    if (selectedIndices.length > 0 && visibleCols.length > 0) {
+      const text = selectedIndices
+        .map((rowIdx) => visibleCols.map(({ col, origIndex }) => {
+          const { value } = getEffectiveValue(rowIdx, col, origIndex);
+          return value === null || value === undefined ? 'NULL' : formatCellDisplay(value);
+        }).join('\t'))
+        .join('\n');
+      try { void navigator.clipboard?.writeText?.(text)?.catch?.(() => {}); } catch {}
+      onWidgetEvent('cellCopy', {
+        text,
+        rowIndex: activeCell?.rowIndex ?? selectedIndices[0],
+        colName: activeCell ? visibleCols[activeCell.colIndex]?.col.name ?? null : null,
+        rowIndices: selectedIndices,
+      });
+      return true;
+    }
+    if (activeCell) {
+      const entry = visibleCols[activeCell.colIndex];
+      if (!entry) return false;
+      const { value } = getEffectiveValue(activeCell.rowIndex, entry.col, entry.origIndex);
+      const text = value === null || value === undefined ? 'NULL' : formatCellDisplay(value);
+      try { void navigator.clipboard?.writeText?.(text)?.catch?.(() => {}); } catch {}
+      onWidgetEvent('cellCopy', {
+        text,
+        rowIndex: activeCell.rowIndex,
+        colName: entry.col.name,
+        rowIndices: [activeCell.rowIndex],
+      });
+      return true;
+    }
+    return false;
+  }, [selectedSet, visibleCols, activeCell, getEffectiveValue, onWidgetEvent]);
+
   const handleGridKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (editingCell || !activeCell || columns.length === 0 || totalRows === 0) return;
+    const mod = event.metaKey || event.ctrlKey;
+
+    // While editing an inline cell input, only forward Cmd/Ctrl+K and Cmd/Ctrl+S.
+    if (editingCell) {
+      const shortcut = matchWorkbenchShortcut(event, { includeUndoRedo: false });
+      if (shortcut === 'mod+k' || shortcut === 'mod+s') {
+        event.preventDefault();
+        event.stopPropagation();
+        onWidgetEvent('shortcut', { shortcut });
+      }
+      return;
+    }
+
+    // Global workbench shortcuts + grid Undo/Redo
+    const shortcut = matchWorkbenchShortcut(event, { includeUndoRedo: true });
+    if (shortcut) {
+      if (shortcut !== 'escape') {
+        event.preventDefault();
+      }
+      event.stopPropagation();
+      onWidgetEvent('shortcut', { shortcut });
+      return;
+    }
+
+    // Cmd/Ctrl+C copies active cell or selected rows
+    if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c') {
+      if (copySelectionOrActiveCell()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
+
+    if (!activeCell || visibleCols.length === 0 || totalRows === 0) return;
     const { rowIndex, colIndex } = activeCell;
+
     if (event.key === 'ArrowDown' && rowIndex + 1 < totalRows) {
       event.preventDefault();
       setActiveCell({ rowIndex: rowIndex + 1, colIndex });
@@ -236,7 +312,7 @@ export function PluginDataGrid({
       event.preventDefault();
       setActiveCell({ rowIndex: rowIndex - 1, colIndex });
       rowVirtualizer.scrollToIndex(rowIndex - 1);
-    } else if (event.key === 'ArrowRight' && colIndex + 1 < columns.length) {
+    } else if (event.key === 'ArrowRight' && colIndex + 1 < visibleCols.length) {
       event.preventDefault();
       setActiveCell({ rowIndex, colIndex: colIndex + 1 });
       colVirtualizer.scrollToIndex(colIndex + 1);
@@ -244,11 +320,34 @@ export function PluginDataGrid({
       event.preventDefault();
       setActiveCell({ rowIndex, colIndex: colIndex - 1 });
       colVirtualizer.scrollToIndex(colIndex - 1);
-    } else if (event.key === 'Enter' && editable) {
+    } else if ((event.key === 'Enter' || event.key === 'F2') && editable) {
       event.preventDefault();
       beginEdit(rowIndex, colIndex);
+    } else if ((event.key === 'Delete' || event.key === 'Backspace') && editable && !deletedSet.has(rowIndex)) {
+      const entry = visibleCols[colIndex];
+      if (entry && entry.col.nullable !== false) {
+        event.preventDefault();
+        onWidgetEvent('cellEdit', {
+          rowIndex,
+          colName: entry.col.name,
+          value: null,
+          isNull: true,
+        });
+      }
     }
-  }, [editingCell, activeCell, columns.length, totalRows, rowVirtualizer, colVirtualizer, editable, beginEdit]);
+  }, [
+    editingCell,
+    activeCell,
+    visibleCols,
+    totalRows,
+    rowVirtualizer,
+    colVirtualizer,
+    editable,
+    deletedSet,
+    beginEdit,
+    copySelectionOrActiveCell,
+    onWidgetEvent,
+  ]);
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const virtualCols = colVirtualizer.getVirtualItems();
@@ -272,11 +371,8 @@ export function PluginDataGrid({
         </div>
       )}
 
-      <div
-        ref={scrollRef}
-        className="relative h-full w-full min-h-0 flex-1 overflow-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-corner]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/20 hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/40"
-      >
-        {columns.length === 0 ? (
+      <div ref={scrollRef} className="relative h-full w-full min-h-0 flex-1 overflow-auto">
+        {visibleCols.length === 0 ? (
           <div className="flex h-full w-full items-center justify-center p-6 text-xs text-muted-foreground">
             {emptyMessage}
           </div>
@@ -304,8 +400,9 @@ export function PluginDataGrid({
 
               <div className="relative flex-1" style={{ height: HEADER_HEIGHT }}>
                 {virtualCols.map((vCol) => {
-                  const col = columns[vCol.index];
-                  if (!col) return null;
+                  const colEntry = visibleCols[vCol.index];
+                  if (!colEntry) return null;
+                  const { col } = colEntry;
                   const isSorted = sort?.column === col.name;
                   const sortable = col.sortable !== false;
                   return (
@@ -324,10 +421,15 @@ export function PluginDataGrid({
                         disabled={!sortable}
                         onClick={() => handleSortClick(col)}
                         className={`flex min-w-0 flex-1 items-center gap-1.5 text-left ${sortable ? 'cursor-pointer hover:text-primary' : 'cursor-default'}`}
-                        title={col.type ? `${col.name} (${col.type})` : col.name}
+                        title={col.foreignKey
+                          ? `${col.name}${col.type ? ` (${col.type})` : ''} -> ${col.foreignKey.schema ? `${col.foreignKey.schema}.` : ''}${col.foreignKey.table}.${col.foreignKey.column}`
+                          : col.type ? `${col.name} (${col.type})` : col.name}
                       >
                         {col.primaryKey && (
                           <KeyRound size={11} className="shrink-0 text-amber-500" aria-label="Primary key" />
+                        )}
+                        {col.foreignKey && (
+                          <Link2 size={11} className="shrink-0 text-blue-500" aria-label="Foreign key" />
                         )}
                         <span className="truncate font-medium">{col.name}</span>
                         {col.type && (
@@ -399,7 +501,7 @@ export function PluginDataGrid({
                       <div
                         className="sticky left-0 z-10 flex shrink-0 items-center justify-between border-r border-border/70 bg-background px-2 font-mono text-[10px] tabular-nums text-muted-foreground"
                         style={{ width: GUTTER_WIDTH, height: ROW_HEIGHT }}
-                        onContextMenu={(e) => handleCellContextMenu(e, rowIndex, columns[0]?.name ?? '')}
+                        onContextMenu={(e) => handleCellContextMenu(e, rowIndex, visibleCols[0]?.col.name ?? '')}
                       >
                         <input
                           type="checkbox"
@@ -420,14 +522,16 @@ export function PluginDataGrid({
                       {/* Virtualized Cells */}
                       <div className="relative z-0 flex-1 overflow-hidden" style={{ height: ROW_HEIGHT }}>
                         {virtualCols.map((vCol) => {
-                          const colIndex = vCol.index;
-                          const col = columns[colIndex];
-                          if (!col) return null;
-                          const { value, isDirty } = getEffectiveValue(rowIndex, col, colIndex);
-                          const isEditing = editingCell?.rowIndex === rowIndex && editingCell?.colIndex === colIndex;
-                          const isActive = activeCell?.rowIndex === rowIndex && activeCell?.colIndex === colIndex;
+                          const visibleColIndex = vCol.index;
+                          const colEntry = visibleCols[visibleColIndex];
+                          if (!colEntry) return null;
+                          const { col, origIndex } = colEntry;
+                          const { value, isDirty } = getEffectiveValue(rowIndex, col, origIndex);
+                          const isEditing = editingCell?.rowIndex === rowIndex && editingCell?.colIndex === visibleColIndex;
+                          const isActive = activeCell?.rowIndex === rowIndex && activeCell?.colIndex === visibleColIndex;
                           const isNull = value === null || value === undefined;
                           const numeric = !isNull && isNumericColumn(col, value);
+                          const fk = col.foreignKey;
 
                           return (
                             <div
@@ -436,21 +540,31 @@ export function PluginDataGrid({
                               data-row-index={rowIndex}
                               data-col-name={col.name}
                               data-dirty={isDirty ? 'true' : undefined}
-                              className={`absolute top-0 bottom-0 flex items-center border-r border-border/50 px-2.5 font-mono text-[12px] tabular-nums overflow-hidden ${
+                              className={`group/cell absolute top-0 bottom-0 flex items-center gap-1 border-r border-border/50 px-2.5 font-mono text-[12px] tabular-nums overflow-hidden ${
                                 isDirty ? 'bg-amber-500/15 ring-1 ring-inset ring-amber-500/50' : ''
                               } ${isActive ? 'ring-2 ring-inset ring-primary z-[5]' : ''} ${
                                 numeric ? 'justify-end' : 'justify-start'
                               }`}
                               style={{ left: vCol.start, width: vCol.size }}
                               onClick={() => {
-                                setActiveCell({ rowIndex, colIndex });
+                                setActiveCell({ rowIndex, colIndex: visibleColIndex });
                                 onWidgetEvent('cellSelect', {
                                   rowIndex,
                                   colName: col.name,
                                   value: value === undefined ? null : value,
                                 });
                               }}
-                              onDoubleClick={() => beginEdit(rowIndex, colIndex)}
+                              onDoubleClick={() => {
+                                if (editable && !isDeleted) {
+                                  beginEdit(rowIndex, visibleColIndex);
+                                } else {
+                                  onWidgetEvent('cellDoubleClick', {
+                                    rowIndex,
+                                    colName: col.name,
+                                    value: value === undefined ? null : value,
+                                  });
+                                }
+                              }}
                               onContextMenu={(e) => handleCellContextMenu(e, rowIndex, col.name)}
                             >
                               {isEditing ? (
@@ -465,6 +579,13 @@ export function PluginDataGrid({
                                     value={editingCell.draft}
                                     onChange={(e) => setEditingCell({ ...editingCell, draft: e.target.value })}
                                     onKeyDown={(e) => {
+                                      const sc = matchWorkbenchShortcut(e, { includeUndoRedo: false });
+                                      if (sc === 'mod+k' || sc === 'mod+s') {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        onWidgetEvent('shortcut', { shortcut: sc });
+                                        return;
+                                      }
                                       e.stopPropagation();
                                       if (e.key === 'Enter') {
                                         e.preventDefault();
@@ -475,14 +596,13 @@ export function PluginDataGrid({
                                       } else if (e.key === 'Tab') {
                                         e.preventDefault();
                                         commitEdit(editingCell, false);
-                                        const nextCol = e.shiftKey ? colIndex - 1 : colIndex + 1;
-                                        if (nextCol >= 0 && nextCol < columns.length) {
+                                        const nextCol = e.shiftKey ? visibleColIndex - 1 : visibleColIndex + 1;
+                                        if (nextCol >= 0 && nextCol < visibleCols.length) {
                                           beginEdit(rowIndex, nextCol);
                                         }
                                       }
                                     }}
                                     onBlur={() => {
-                                      // Delay slightly so clicking the inline NULL button wins over blur.
                                       const snapshot = editingCell;
                                       setTimeout(() => {
                                         setEditingCell((curr) => {
@@ -533,6 +653,28 @@ export function PluginDataGrid({
                                 <span className="truncate" title={formatCellDisplay(value)}>
                                   {formatCellDisplay(value)}
                                 </span>
+                              )}
+                              {!isEditing && !isNull && fk && (
+                                <button
+                                  type="button"
+                                  data-fk-jump=""
+                                  aria-label={`Jump to ${fk.schema ? `${fk.schema}.` : ''}${fk.table}.${fk.column}`}
+                                  title={`Jump to ${fk.schema ? `${fk.schema}.` : ''}${fk.table}.${fk.column} = ${formatCellDisplay(value)}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onWidgetEvent('fkJump', {
+                                      rowIndex,
+                                      colName: col.name,
+                                      value,
+                                      targetTable: fk.table,
+                                      targetColumn: fk.column,
+                                      ...(fk.schema ? { targetSchema: fk.schema } : {}),
+                                    });
+                                  }}
+                                  className="ml-auto shrink-0 inline-flex h-4 w-4 items-center justify-center rounded text-blue-500 opacity-0 transition-opacity hover:bg-blue-500/15 group-hover/cell:opacity-100 focus:opacity-100"
+                                >
+                                  <ArrowUpRight size={11} />
+                                </button>
                               )}
                             </div>
                           );

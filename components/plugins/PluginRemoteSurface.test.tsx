@@ -470,3 +470,180 @@ test('PluginRemoteSurface forwards dblclick, contextmenu, throttled scroll, curs
     Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   }
 });
+
+test('PluginDataGrid FK jump, hiddenColumns, keyboard shortcuts, and PluginErCanvas double-click + SVG export', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+  for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'PointerEvent', 'ShadowRoot']) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    const val = key === 'window' ? dom.window : key === 'PointerEvent' ? dom.window.MouseEvent : dom.window[key as keyof typeof dom.window];
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: val });
+  }
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, writable: true, value: true });
+  Object.assign(dom.window, {
+    ResizeObserver: class {
+      private cb: (entries: unknown[]) => void;
+      constructor(cb: (entries: unknown[]) => void) { this.cb = cb; }
+      observe(target: Element) {
+        this.cb([{ target, borderBoxSize: [{ inlineSize: 800, blockSize: 600 }], contentRect: { width: 800, height: 600 } }]);
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+    PointerEvent: dom.window.MouseEvent,
+  });
+  dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
+    x: 0, y: 0, width: 800, height: 600, top: 0, left: 0, right: 800, bottom: 600, toJSON() {},
+  });
+
+  const shadows: ShadowRoot[] = [];
+  const nativeAttach = dom.window.Element.prototype.attachShadow;
+  dom.window.Element.prototype.attachShadow = function (options) {
+    const s = nativeAttach.call(this, options);
+    shadows.push(s as unknown as ShadowRoot);
+    return s;
+  };
+
+  const { act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { PluginRemoteSurface } = await import('./PluginRemoteSurface');
+
+  const events: Array<Record<string, unknown>> = [];
+  const gridProps = {
+    columns: [
+      { name: 'id', type: 'int4', primaryKey: true },
+      { name: 'customer_id', type: 'int4', foreignKey: { table: 'customers', column: 'id', schema: 'public' } },
+      { name: 'secret_col', type: 'text' },
+    ],
+    hiddenColumns: ['secret_col'],
+    rows: [[10, 42, 'hidden-val']],
+    editable: true,
+  };
+  const roGridProps = {
+    columns: [{ name: 'id', type: 'int4' }],
+    rows: [{ id: 99 }],
+    editable: false,
+  };
+  const erProps = {
+    tables: [
+      { name: 'customers', schema: 'public', columns: [{ name: 'id', type: 'integer', isPk: true }, { name: 'created_at', type: 'timestamp with time zone' }] },
+      { name: 'orders', schema: 'public', columns: [{ name: 'id', type: 'integer', isPk: true }, { name: 'customer_id', type: 'integer', isFk: true }] },
+    ],
+    relations: [{ fromTable: 'public.orders', fromColumn: 'customer_id', toTable: 'public.customers', toColumn: 'id', onDelete: 'CASCADE' }],
+  };
+  const tree = {
+    children: [
+      { id: 'surface-btn', type: 1, element: 'button', attributes: { type: 'button' }, children: [{ id: 'sbt', type: 3, data: 'Btn' }] },
+      { id: 'grid', type: 1, element: 'div', attributes: { 'data-plugin-widget': 'data-grid', 'data-plugin-widget-props': JSON.stringify(gridProps) }, children: [] },
+      { id: 'ro-grid', type: 1, element: 'div', attributes: { 'data-plugin-widget': 'data-grid', 'data-plugin-widget-props': JSON.stringify(roGridProps) }, children: [] },
+      { id: 'er', type: 1, element: 'div', attributes: { 'data-plugin-widget': 'er-canvas', 'data-plugin-widget-props': JSON.stringify(erProps) }, children: [] },
+    ],
+  };
+
+  const root = createRoot(document.getElementById('root')!);
+  try {
+    await act(async () => {
+      root.render(<PluginRemoteSurface tree={tree} css="" onEvent={(e) => events.push(e as unknown as Record<string, unknown>)} />);
+    });
+
+    // Shadow surface prevents default on Cmd+K / Cmd+S
+    const btn = shadows[0].querySelector('button')!;
+    const modK = new dom.window.KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
+    await act(async () => { btn.dispatchEvent(modK); });
+    assert.equal(modK.defaultPrevented, true, 'Cmd+K inside shadow surface must preventDefault');
+
+    // DataGrid: hiddenColumns excludes secret_col while preserving values
+    const gridHost = document.querySelector('[data-plugin-widget-node="grid"]') as HTMLElement;
+    assert.equal(gridHost.querySelector('[data-col-name="secret_col"]'), null, 'hidden column must not render');
+    const fkCell = gridHost.querySelector('[role="gridcell"][data-row-index="0"][data-col-name="customer_id"]') as HTMLElement;
+    assert.ok(fkCell, 'customer_id FK cell rendered');
+    const jumpBtn = fkCell.querySelector('[data-fk-jump]') as HTMLButtonElement;
+    assert.ok(jumpBtn, 'FK jump button rendered');
+    await act(async () => { jumpBtn.click(); });
+    assert.deepEqual(
+      events.find((e) => e.nodeId === 'grid' && e.widgetEvent === 'fkJump'),
+      { nodeId: 'grid', type: 'widget', widgetEvent: 'fkJump', detail: { rowIndex: 0, colName: 'customer_id', value: 42, targetTable: 'customers', targetColumn: 'id', targetSchema: 'public' } },
+    );
+
+    // Select FK cell then press Cmd+C -> cellCopy, Delete -> cellEdit NULL, Cmd+Z -> shortcut mod+z
+    await act(async () => { fkCell.click(); });
+    const gridRoot = gridHost.querySelector('[data-plugin-data-grid]') as HTMLElement;
+    await act(async () => {
+      gridRoot.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'c', metaKey: true, bubbles: true, cancelable: true }));
+      gridRoot.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
+      gridRoot.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true }));
+    });
+    assert.deepEqual(
+      events.find((e) => e.nodeId === 'grid' && e.widgetEvent === 'cellCopy'),
+      { nodeId: 'grid', type: 'widget', widgetEvent: 'cellCopy', detail: { text: '42', rowIndex: 0, colName: 'customer_id', rowIndices: [0] } },
+    );
+    assert.deepEqual(
+      events.find((e) => e.nodeId === 'grid' && e.widgetEvent === 'cellEdit'),
+      { nodeId: 'grid', type: 'widget', widgetEvent: 'cellEdit', detail: { rowIndex: 0, colName: 'customer_id', value: null, isNull: true } },
+    );
+    assert.deepEqual(
+      events.find((e) => e.nodeId === 'grid' && e.widgetEvent === 'shortcut'),
+      { nodeId: 'grid', type: 'widget', widgetEvent: 'shortcut', detail: { shortcut: 'mod+z' } },
+    );
+
+    // Non-editable grid double-click emits cellDoubleClick
+    const roHost = document.querySelector('[data-plugin-widget-node="ro-grid"]') as HTMLElement;
+    const roCell = roHost.querySelector('[role="gridcell"][data-row-index="0"][data-col-name="id"]') as HTMLElement;
+    await act(async () => { roCell.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true })); });
+    assert.deepEqual(
+      events.find((e) => e.nodeId === 'ro-grid' && e.widgetEvent === 'cellDoubleClick'),
+      { nodeId: 'ro-grid', type: 'widget', widgetEvent: 'cellDoubleClick', detail: { rowIndex: 0, colName: 'id', value: 99 } },
+    );
+
+    // ER Canvas: abbreviated type, tableDoubleClick, Export SVG
+    const erHost = document.querySelector('[data-plugin-widget-node="er"]') as HTMLElement;
+    assert.ok(erHost.textContent?.includes('timestamptz'), 'verbose PG timestamp abbreviated to timestamptz');
+    const ordersCard = erHost.querySelector('[data-er-table="orders"]') as Element;
+    await act(async () => { ordersCard.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true })); });
+    assert.deepEqual(
+      events.find((e) => e.nodeId === 'er' && e.widgetEvent === 'tableDoubleClick'),
+      { nodeId: 'er', type: 'widget', widgetEvent: 'tableDoubleClick', detail: { table: 'orders', schema: 'public' } },
+    );
+    const exportBtn = erHost.querySelector('[data-er-export-svg]') as HTMLButtonElement;
+    await act(async () => { exportBtn.click(); });
+    const exportEvt = events.find((e) => e.nodeId === 'er' && e.widgetEvent === 'exportSvg');
+    assert.ok(exportEvt, 'exportSvg event emitted');
+    assert.match(String((exportEvt!.detail as { svg: string }).svg), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+
+    // Host global hotkey handler yields Cmd+K (commandPalette) to active plugin surface while keeping Cmd+J (quickSwitch)
+    const { handleGlobalHotkeyKeyDownImpl } = await import('../../application/app/AppHandlers');
+    const { matchesKeyBinding } = await import('../../domain/models');
+    const { DEFAULT_KEY_BINDINGS } = await import('../../domain/models/keyBindings');
+    const hostActions: string[] = [];
+    const onGlobalKey = (event: KeyboardEvent) => handleGlobalHotkeyKeyDownImpl(() => ({
+      HOTKEY_DEBUG: false,
+      closeTabKeyStr: '⌘ + W',
+      hotkeyScheme: 'mac',
+      keyBindings: DEFAULT_KEY_BINDINGS,
+      matchesKeyBinding,
+      executeHotkeyAction: (action: string) => hostActions.push(action),
+    }), event);
+    dom.window.addEventListener('keydown', onGlobalKey as unknown as EventListener, true);
+    try {
+      await act(async () => {
+        gridRoot.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'k', code: 'KeyK', metaKey: true, bubbles: true, cancelable: true }));
+      });
+      assert.deepEqual(hostActions, [], 'host commandPalette must not hijack Cmd+K inside plugin surface');
+      assert.ok(
+        events.some((e) => e.nodeId === 'grid' && e.widgetEvent === 'shortcut' && (e.detail as { shortcut?: string })?.shortcut === 'mod+k'),
+        'Cmd+K reaches plugin DataGrid as mod+k shortcut',
+      );
+      await act(async () => {
+        gridRoot.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', metaKey: true, bubbles: true, cancelable: true }));
+      });
+      assert.deepEqual(hostActions, ['quickSwitch'], 'Cmd+J still opens Netcatty Quick Switcher');
+    } finally {
+      dom.window.removeEventListener('keydown', onGlobalKey as unknown as EventListener, true);
+    }
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, value] of saved) { if (value) Object.defineProperty(globalThis, key, value); else Reflect.deleteProperty(globalThis, key); }
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});

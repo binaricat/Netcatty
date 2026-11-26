@@ -10,6 +10,34 @@ export function registerHostReactView(views: PluginViews, viewId: string, render
   }, css);
 }
 
+export type PluginWorkbenchShortcut =
+  | 'mod+k'
+  | 'mod+s'
+  | 'mod+t'
+  | 'mod+w'
+  | 'mod+z'
+  | 'mod+shift+z'
+  | 'escape';
+
+/**
+ * Subscribe to normalized global workbench shortcuts forwarded from both the
+ * Shadow DOM surface and slotted host-rendered widgets (CodeEditor, DataGrid, ErCanvas).
+ */
+export function usePluginShortcuts(handler: (shortcut: PluginWorkbenchShortcut) => void): void {
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const shortcut = (event as CustomEvent<{ shortcut?: PluginWorkbenchShortcut }>).detail?.shortcut;
+      if (typeof shortcut === 'string') {
+        handlerRef.current(shortcut);
+      }
+    };
+    document.addEventListener('netcatty-shortcut', listener);
+    return () => document.removeEventListener('netcatty-shortcut', listener);
+  }, []);
+}
+
 export interface PluginPopoverProps {
   anchor?: string;
   anchorX?: number;
@@ -58,7 +86,7 @@ type WidgetEventDetail = { widgetEvent?: string; detail?: Record<string, unknown
 
 function useWidgetEventBridge(
   ref: React.RefObject<HTMLElement | null>,
-  handler: (widgetEvent: string, detail: Record<string, unknown>) => void,
+  handler: (widgetEvent: string, detail: Record<string, unknown>) => boolean | void,
 ) {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
@@ -68,7 +96,9 @@ function useWidgetEventBridge(
     const listener = (event: Event) => {
       const payload = (event as CustomEvent<WidgetEventDetail>).detail;
       if (!payload || typeof payload.widgetEvent !== 'string') return;
-      handlerRef.current(payload.widgetEvent, payload.detail ?? {});
+      if (handlerRef.current(payload.widgetEvent, payload.detail ?? {}) === true) {
+        event.preventDefault();
+      }
     };
     node.addEventListener('netcatty-widget-event', listener);
     return () => node.removeEventListener('netcatty-widget-event', listener);
@@ -124,6 +154,7 @@ export interface PluginCodeEditorProps {
   onSelection?: (detail: { selectionStart: number; selectionEnd: number; selectedText: string }) => void;
   onExecute?: (detail: { value: string; selectedText: string; currentStatement: string }) => void;
   onFormat?: (detail: { value: string }) => void;
+  onShortcut?: (detail: { shortcut: PluginWorkbenchShortcut }) => void;
 }
 
 /** Host-rendered Monaco code editor with local zero-IPC schema completion. */
@@ -144,6 +175,7 @@ export function PluginCodeEditor({
   onSelection,
   onExecute,
   onFormat,
+  onShortcut,
 }: PluginCodeEditorProps) {
   const ref = useRef<HTMLElement>(null);
   useWidgetEventBridge(ref, (eventName, detail) => {
@@ -151,6 +183,7 @@ export function PluginCodeEditor({
     else if (eventName === 'selection') onSelection?.(detail as { selectionStart: number; selectionEnd: number; selectedText: string });
     else if (eventName === 'execute') onExecute?.(detail as { value: string; selectedText: string; currentStatement: string });
     else if (eventName === 'format') onFormat?.(detail as { value: string });
+    else if (eventName === 'shortcut' && onShortcut) { onShortcut(detail as { shortcut: PluginWorkbenchShortcut }); return true; }
   });
   const serialized = useMemo(
     () => JSON.stringify({
@@ -176,6 +209,12 @@ export function PluginCodeEditor({
   });
 }
 
+export interface PluginDataGridForeignKey {
+  table: string;
+  column: string;
+  schema?: string;
+}
+
 export interface PluginDataGridColumn {
   name: string;
   type?: string;
@@ -183,6 +222,7 @@ export interface PluginDataGridColumn {
   nullable?: boolean;
   width?: number;
   sortable?: boolean;
+  foreignKey?: PluginDataGridForeignKey;
 }
 
 export interface PluginDataGridSort {
@@ -195,6 +235,7 @@ export type PluginDataGridRow = Record<string, unknown> | unknown[];
 export interface PluginDataGridProps {
   columns: PluginDataGridColumn[];
   rows: PluginDataGridRow[];
+  hiddenColumns?: string[];
   rowKeyField?: string;
   dirtyCells?: Record<string, unknown>;
   deletedRowIndices?: number[];
@@ -207,16 +248,21 @@ export interface PluginDataGridProps {
   className?: string;
   style?: CSSProperties;
   onCellSelect?: (detail: { rowIndex: number; colName: string; value: unknown }) => void;
+  onCellDoubleClick?: (detail: { rowIndex: number; colName: string; value: unknown }) => void;
   onCellEdit?: (detail: { rowIndex: number; colName: string; value: unknown; isNull: boolean }) => void;
   onCellContextMenu?: (detail: { rowIndex: number; colName: string; x: number; y: number }) => void;
+  onCellCopy?: (detail: { text: string; rowIndex: number | null; colName: string | null; rowIndices: number[] }) => void;
+  onFkJump?: (detail: { rowIndex: number; colName: string; value: unknown; targetTable: string; targetColumn: string; targetSchema?: string }) => void;
   onSortChange?: (detail: { column: string; direction: 'asc' | 'desc' }) => void;
   onRowSelect?: (detail: { selectedRowIndices: number[] }) => void;
+  onShortcut?: (detail: { shortcut: PluginWorkbenchShortcut }) => void;
 }
 
 /** Host-rendered virtualized editable data grid powered by @tanstack/react-virtual. */
 export function PluginDataGrid({
   columns,
   rows,
+  hiddenColumns,
   rowKeyField,
   dirtyCells,
   deletedRowIndices,
@@ -229,23 +275,32 @@ export function PluginDataGrid({
   className,
   style,
   onCellSelect,
+  onCellDoubleClick,
   onCellEdit,
   onCellContextMenu,
+  onCellCopy,
+  onFkJump,
   onSortChange,
   onRowSelect,
+  onShortcut,
 }: PluginDataGridProps) {
   const ref = useRef<HTMLElement>(null);
   useWidgetEventBridge(ref, (eventName, detail) => {
     if (eventName === 'cellSelect') onCellSelect?.(detail as { rowIndex: number; colName: string; value: unknown });
+    else if (eventName === 'cellDoubleClick') onCellDoubleClick?.(detail as { rowIndex: number; colName: string; value: unknown });
     else if (eventName === 'cellEdit') onCellEdit?.(detail as { rowIndex: number; colName: string; value: unknown; isNull: boolean });
     else if (eventName === 'cellContextMenu') onCellContextMenu?.(detail as { rowIndex: number; colName: string; x: number; y: number });
+    else if (eventName === 'cellCopy') onCellCopy?.(detail as { text: string; rowIndex: number | null; colName: string | null; rowIndices: number[] });
+    else if (eventName === 'fkJump') onFkJump?.(detail as { rowIndex: number; colName: string; value: unknown; targetTable: string; targetColumn: string; targetSchema?: string });
     else if (eventName === 'sortChange') onSortChange?.(detail as { column: string; direction: 'asc' | 'desc' });
     else if (eventName === 'rowSelect') onRowSelect?.(detail as { selectedRowIndices: number[] });
+    else if (eventName === 'shortcut' && onShortcut) { onShortcut(detail as { shortcut: PluginWorkbenchShortcut }); return true; }
   });
   const serialized = useMemo(
     () => JSON.stringify({
       columns,
       rows,
+      ...(hiddenColumns !== undefined ? { hiddenColumns } : {}),
       ...(rowKeyField !== undefined ? { rowKeyField } : {}),
       ...(dirtyCells !== undefined ? { dirtyCells } : {}),
       ...(deletedRowIndices !== undefined ? { deletedRowIndices } : {}),
@@ -256,7 +311,7 @@ export function PluginDataGrid({
       ...(loading !== undefined ? { loading } : {}),
       ...(emptyMessage !== undefined ? { emptyMessage } : {}),
     }),
-    [columns, rows, rowKeyField, dirtyCells, deletedRowIndices, insertedRows, selectedRowIndices, sort, editable, loading, emptyMessage],
+    [columns, rows, hiddenColumns, rowKeyField, dirtyCells, deletedRowIndices, insertedRows, selectedRowIndices, sort, editable, loading, emptyMessage],
   );
   return createElement('div', {
     ref,
@@ -343,6 +398,8 @@ export interface PluginErRelation {
   toTable: string;
   toColumn: string;
   name?: string;
+  onDelete?: string;
+  onUpdate?: string;
 }
 
 export interface PluginErCanvasProps {
@@ -351,6 +408,9 @@ export interface PluginErCanvasProps {
   className?: string;
   style?: CSSProperties;
   onTableClick?: (detail: { table: string; schema?: string }) => void;
+  onTableDoubleClick?: (detail: { table: string; schema?: string }) => void;
+  onExportSvg?: (detail: { svg: string }) => void;
+  onShortcut?: (detail: { shortcut: PluginWorkbenchShortcut }) => void;
 }
 
 /** Host-rendered interactive pan/zoom SVG ER diagram canvas. */
@@ -360,10 +420,16 @@ export function PluginErCanvas({
   className,
   style,
   onTableClick,
+  onTableDoubleClick,
+  onExportSvg,
+  onShortcut,
 }: PluginErCanvasProps) {
   const ref = useRef<HTMLElement>(null);
   useWidgetEventBridge(ref, (eventName, detail) => {
     if (eventName === 'tableClick') onTableClick?.(detail as { table: string; schema?: string });
+    else if (eventName === 'tableDoubleClick') onTableDoubleClick?.(detail as { table: string; schema?: string });
+    else if (eventName === 'exportSvg') onExportSvg?.(detail as { svg: string });
+    else if (eventName === 'shortcut' && onShortcut) { onShortcut(detail as { shortcut: PluginWorkbenchShortcut }); return true; }
   });
   const serialized = useMemo(
     () => JSON.stringify({ tables, relations }),
