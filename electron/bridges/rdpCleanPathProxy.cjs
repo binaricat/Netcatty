@@ -598,20 +598,78 @@ function waitForFirstWsMessage(ws, timeoutMs = 15_000) {
   });
 }
 
-function upgradeToTls(socket, { host, allowLegacyTls = false, timeoutMs = 15_000 }) {
+// Windows 10/11/Server default self-signed RDP certificates set Key Usage to
+// `keyEncipherment` only (no `digitalSignature`). Electron's BoringSSL rejects
+// TLS 1.3 and TLS 1.2 ECDHE handshakes against such certs with
+// `KEY_USAGE_BIT_INCORRECT`, whereas TLS 1.2 RSA key exchange (`kRSA`) matches
+// the `keyEncipherment` bit cleanly.
+const WINDOWS_RDP_KRSA_CIPHERS =
+  "AES256-GCM-SHA384:AES128-GCM-SHA256:AES256-SHA256:AES128-SHA256:AES256-SHA:AES128-SHA";
+
+function isBoringSslKeyUsageError(err) {
+  if (!err) return false;
+  if (typeof err.reason === "string" && /KEY_USAGE_BIT_INCORRECT/i.test(err.reason)) {
+    return true;
+  }
+  const msg = typeof err.message === "string" ? err.message : String(err);
+  return /KEY_USAGE_BIT_INCORRECT/i.test(msg);
+}
+
+function connectTlsWithCipherFallback(baseOpts, allowLegacyTls, preferRsaKeyExchange) {
+  if (preferRsaKeyExchange) {
+    return tls.connect({
+      ...baseOpts,
+      minVersion: allowLegacyTls ? "TLSv1" : "TLSv1.2",
+      maxVersion: "TLSv1.2",
+      ciphers: WINDOWS_RDP_KRSA_CIPHERS,
+    });
+  }
+  if (!allowLegacyTls) {
+    return tls.connect({
+      ...baseOpts,
+      minVersion: "TLSv1.2",
+    });
+  }
+  try {
+    return tls.connect({
+      ...baseOpts,
+      minVersion: "TLSv1",
+      ciphers: "DEFAULT:@SECLEVEL=0",
+    });
+  } catch (err) {
+    // BoringSSL does not support OpenSSL's `@SECLEVEL=0` cipher directive.
+    if (err?.code === "ERR_SSL_INVALID_COMMAND" || /INVALID_COMMAND/i.test(err?.message || "")) {
+      return tls.connect({
+        ...baseOpts,
+        minVersion: "TLSv1",
+        ciphers: "ALL:!aNULL:!eNULL",
+      });
+    }
+    throw err;
+  }
+}
+
+function upgradeToTls(
+  socket,
+  { host, allowLegacyTls = false, preferRsaKeyExchange = false, timeoutMs = 15_000 },
+) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let timer = null;
 
-    const tlsOpts = {
+    const baseOpts = {
       socket,
       rejectUnauthorized: false,
-      minVersion: allowLegacyTls ? "TLSv1" : "TLSv1.2",
-      ...(allowLegacyTls ? { ciphers: "DEFAULT:@SECLEVEL=0" } : {}),
       ...(host && net.isIP(host) === 0 ? { servername: host } : {}),
     };
 
-    const tlsSocket = tls.connect(tlsOpts);
+    let tlsSocket;
+    try {
+      tlsSocket = connectTlsWithCipherFallback(baseOpts, allowLegacyTls, preferRsaKeyExchange);
+    } catch (err) {
+      reject(err);
+      return;
+    }
 
     const cleanup = () => {
       if (timer) {
@@ -738,46 +796,53 @@ async function handleRdpCleanPathConnection(options) {
       throw err;
     }
 
-    // 2. Dial upstream RDP target via the unified dialer (direct / proxy / SSH chain / companion SSH).
-    onStatus?.("dialing");
-    try {
-      upstream = await dial();
-    } catch (err) {
-      const code = err?.code === "ENOTFOUND" || err?.code === "EAI_AGAIN"
-        ? DNS_RESOLUTION_FAILED_ERROR_CODE
-        : TARGET_UNREACHABLE_ERROR_CODE;
-      sendErrorPdu({ errorCode: code });
-      cleanup();
-      throw err;
-    }
-
-    if (signal?.aborted || ws.readyState !== 1) {
-      cleanup();
-      return;
-    }
-
-    const rawStream = upstream.stream;
-    activeSocket = rawStream;
-    rawStream.setNoDelay?.(true);
-
-    // 3. Forward optional preconnection blob and X.224 Connection Request PDU.
-    onStatus?.("negotiating");
-    if (request.preconnectionBlob) {
-      if (request.x224ConnectionPdu) {
-        rawStream.write(Buffer.from(request.preconnectionBlob, "utf8"));
-      } else {
-        rawStream.write(encodePreconnectionPduV2(request.preconnectionBlob));
+    // 2 & 3. Dial upstream RDP target and perform X.224 Connection Request/Confirm.
+    const dialAndNegotiate = async () => {
+      onStatus?.("dialing");
+      let dialed;
+      try {
+        dialed = await dial();
+      } catch (err) {
+        const code = err?.code === "ENOTFOUND" || err?.code === "EAI_AGAIN"
+          ? DNS_RESOLUTION_FAILED_ERROR_CODE
+          : TARGET_UNREACHABLE_ERROR_CODE;
+        sendErrorPdu({ errorCode: code });
+        cleanup();
+        throw err;
       }
-    }
 
-    let x224Confirm = null;
-    let negotiation = { isConfirm: true, requiresTls: true, selectedProtocol: 1, failureCode: null };
+      upstream = dialed;
+      if (signal?.aborted || ws.readyState !== 1) {
+        cleanup();
+        return null;
+      }
 
-    if (request.x224ConnectionPdu && request.x224ConnectionPdu.length > 0) {
-      rawStream.write(request.x224ConnectionPdu);
-      x224Confirm = await readTpktPacket(rawStream, handshakeTimeoutMs);
-      negotiation = parseX224ConfirmNegotiation(x224Confirm);
-    }
+      const stream = dialed.stream;
+      activeSocket = stream;
+      stream.setNoDelay?.(true);
+
+      onStatus?.("negotiating");
+      if (request.preconnectionBlob) {
+        if (request.x224ConnectionPdu) {
+          stream.write(Buffer.from(request.preconnectionBlob, "utf8"));
+        } else {
+          stream.write(encodePreconnectionPduV2(request.preconnectionBlob));
+        }
+      }
+
+      let confirm = null;
+      let neg = { isConfirm: true, requiresTls: true, selectedProtocol: 1, failureCode: null };
+      if (request.x224ConnectionPdu && request.x224ConnectionPdu.length > 0) {
+        stream.write(request.x224ConnectionPdu);
+        confirm = await readTpktPacket(stream, handshakeTimeoutMs);
+        neg = parseX224ConfirmNegotiation(confirm);
+      }
+      return { rawStream: stream, x224Confirm: confirm, negotiation: neg };
+    };
+
+    let negotiated = await dialAndNegotiate();
+    if (!negotiated) return;
+    let { rawStream, x224Confirm, negotiation } = negotiated;
 
     if (signal?.aborted || ws.readyState !== 1) {
       cleanup();
@@ -802,7 +867,10 @@ async function handleRdpCleanPathConnection(options) {
       return;
     }
 
-    // 4. Upgrade to TLS using Node built-in OpenSSL `tls` (if negotiated).
+    // 4. Upgrade to TLS using Node built-in TLS (if negotiated).
+    // On Electron (BoringSSL), Windows default self-signed RDP certs only carry
+    // `keyEncipherment` (no `digitalSignature`), causing TLS 1.3 / ECDHE to fail
+    // with KEY_USAGE_BIT_INCORRECT. Automatically redial once with TLS 1.2 kRSA.
     if (negotiation.requiresTls) {
       onStatus?.("tls-handshake");
       let tlsSocket;
@@ -813,9 +881,45 @@ async function handleRdpCleanPathConnection(options) {
           timeoutMs: handshakeTimeoutMs,
         });
       } catch (err) {
-        sendErrorPdu({ errorCode: TLS_HANDSHAKE_FAILED_ERROR_CODE });
-        cleanup();
-        throw err;
+        if (isBoringSslKeyUsageError(err) && !signal?.aborted && ws.readyState === 1) {
+          try { rawStream?.destroy?.(); } catch { /* ignore */ }
+          try { upstream?.cleanup?.(); } catch { /* ignore */ }
+          upstream = null;
+          activeSocket = null;
+          negotiated = await dialAndNegotiate();
+          if (!negotiated) return;
+          ({ rawStream, x224Confirm, negotiation } = negotiated);
+          if (negotiation.failureCode !== null) {
+            const serverAddr = upstream.serverAddr
+              || (rawStream.remoteAddress ? `${rawStream.remoteAddress}:${rawStream.remotePort || port}` : `${host}:${port}`);
+            ws.send(
+              encodeRDCleanPathResponse({
+                x224ConnectionPdu: x224Confirm,
+                serverCertChain: [],
+                serverAddr,
+              }),
+              { binary: true },
+            );
+            cleanup();
+            return;
+          }
+          try {
+            tlsSocket = await upgradeToTls(rawStream, {
+              host,
+              allowLegacyTls,
+              preferRsaKeyExchange: true,
+              timeoutMs: handshakeTimeoutMs,
+            });
+          } catch (retryErr) {
+            sendErrorPdu({ errorCode: TLS_HANDSHAKE_FAILED_ERROR_CODE });
+            cleanup();
+            throw retryErr;
+          }
+        } else {
+          sendErrorPdu({ errorCode: TLS_HANDSHAKE_FAILED_ERROR_CODE });
+          cleanup();
+          throw err;
+        }
       }
       activeSocket = tlsSocket;
 
@@ -939,6 +1043,8 @@ module.exports = {
   computeCertSha256Fingerprint,
   formatDistinguishedName,
   extractPeerCertInfo,
+  WINDOWS_RDP_KRSA_CIPHERS,
+  isBoringSslKeyUsageError,
   readTpktPacket,
   parseX224ConfirmNegotiation,
   upgradeToTls,

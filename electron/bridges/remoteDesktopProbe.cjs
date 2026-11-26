@@ -19,6 +19,7 @@ const {
   parseX224ConfirmNegotiation,
   upgradeToTls,
   extractPeerCertInfo,
+  isBoringSslKeyUsageError,
 } = require("./rdpCleanPathProxy.cjs");
 const { createProxySocket } = require("./proxyUtils.cjs");
 const { openBoundedForwardOutCallback } = require("./boundedSshChannelOpen.cjs");
@@ -345,6 +346,7 @@ async function probeRdpStream(stream, options = {}) {
       tlsSocket = await upgradeToTls(stream, {
         host,
         allowLegacyTls: allowLegacyTls === true || securityMode === "tls-legacy",
+        preferRsaKeyExchange: options.preferRsaKeyExchange === true,
         timeoutMs,
       });
       if (signal?.aborted) throw makeAbortError();
@@ -854,15 +856,16 @@ async function probeRemoteDesktop(options = {}, deps = {}) {
     if (signal?.aborted) throw makeAbortError();
     onPhase?.("resolving");
 
-    const dialStart = clock();
-    if (typeof deps.dial === "function") {
-      upstream = await deps.dial();
-    } else if (mode === "heartbeat") {
-      upstream = await dialMonitorProbeStream(
-        { ...options, protocol, hostname: host, port, timeoutMs: tcpTimeoutMs },
-        { sshConn: deps.sshConn, signal, sshPool: deps.sshPool, proxyDialer: deps.proxyDialer },
-      );
-    } else {
+    const dialUpstream = async () => {
+      if (typeof deps.dial === "function") {
+        return deps.dial();
+      }
+      if (mode === "heartbeat") {
+        return dialMonitorProbeStream(
+          { ...options, protocol, hostname: host, port, timeoutMs: tcpTimeoutMs },
+          { sshConn: deps.sshConn, signal, sshPool: deps.sshPool, proxyDialer: deps.proxyDialer },
+        );
+      }
       const { defaultDialRemoteDesktop } = require("./remoteDesktopBridge.cjs");
       // Strip any RDP/VNC credentials before passing to dialer; only SSH tunnel/jump creds survive.
       const sanitizedConfig = {
@@ -875,8 +878,11 @@ async function probeRemoteDesktop(options = {}, deps = {}) {
         password: undefined,
         domain: undefined,
       };
-      upstream = await defaultDialRemoteDesktop(deps.event, sanitizedConfig, options.sessionId || `probe-${now()}`);
-    }
+      return defaultDialRemoteDesktop(deps.event, sanitizedConfig, options.sessionId || `probe-${now()}`);
+    };
+
+    const dialStart = clock();
+    upstream = await dialUpstream();
 
     rttMs = Math.max(0, Math.round(clock() - dialStart));
     if (signal?.aborted) throw makeAbortError();
@@ -898,11 +904,14 @@ async function probeRemoteDesktop(options = {}, deps = {}) {
     }
 
     try {
-      const handshake = protocol === "rdp"
-        ? await probeRdpStream(upstream.stream, {
-            host: options.tunnelViaHostSsh && options.sshTunnelConfig?.hostname
-              ? options.sshTunnelConfig.hostname
-              : host,
+      const rdpHost = options.tunnelViaHostSsh && options.sshTunnelConfig?.hostname
+        ? options.sshTunnelConfig.hostname
+        : host;
+      let handshake;
+      if (protocol === "rdp") {
+        try {
+          handshake = await probeRdpStream(upstream.stream, {
+            host: rdpHost,
             securityMode: options.securityMode || "auto",
             loadBalanceInfo: options.loadBalanceInfo,
             allowLegacyTls: options.allowLegacyTls === true,
@@ -911,18 +920,39 @@ async function probeRemoteDesktop(options = {}, deps = {}) {
             timeoutMs: handshakeTimeoutMs,
             signal,
             onPhase,
-          })
-        : await probeVncStream(upstream.stream, {
-            host: options.tunnelViaHostSsh && options.sshTunnelConfig?.hostname
-              ? options.sshTunnelConfig.hostname
-              : host,
-            knownCertFingerprints: options.knownCertFingerprints,
-            inspectSecurity: mode === "full",
-            inspectVencrypt: mode === "full",
-            timeoutMs: handshakeTimeoutMs,
-            signal,
-            onPhase,
           });
+        } catch (rdpErr) {
+          if (isBoringSslKeyUsageError(rdpErr) && !signal?.aborted) {
+            try { upstream.stream?.destroy?.(); } catch { /* ignore */ }
+            try { upstream.cleanup?.(); } catch { /* ignore */ }
+            upstream = await dialUpstream();
+            handshake = await probeRdpStream(upstream.stream, {
+              host: rdpHost,
+              securityMode: options.securityMode || "auto",
+              loadBalanceInfo: options.loadBalanceInfo,
+              allowLegacyTls: options.allowLegacyTls === true,
+              preferRsaKeyExchange: true,
+              knownCertFingerprints: options.knownCertFingerprints,
+              inspectTls: mode === "full",
+              timeoutMs: handshakeTimeoutMs,
+              signal,
+              onPhase,
+            });
+          } else {
+            throw rdpErr;
+          }
+        }
+      } else {
+        handshake = await probeVncStream(upstream.stream, {
+          host: rdpHost,
+          knownCertFingerprints: options.knownCertFingerprints,
+          inspectSecurity: mode === "full",
+          inspectVencrypt: mode === "full",
+          timeoutMs: handshakeTimeoutMs,
+          signal,
+          onPhase,
+        });
+      }
 
       onPhase?.("probe-complete", { rttMs, ...handshake });
       return {
