@@ -625,8 +625,8 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                     className={rowClass}
                     onClick={() => handleItemSelect(item)}
                   >
-                    <div className="shrink-0 flex items-center justify-center bg-primary text-primary-foreground h-5 w-5 rounded-[5px]">
-                      <Zap className="h-3 w-3" fill="currentColor" />
+                    <div className="shrink-0 flex items-center justify-center bg-primary text-primary-foreground h-6 w-6 rounded-[6px]">
+                      <Zap className="h-3.5 w-3.5" fill="currentColor" />
                     </div>
                     <span className="min-w-0 truncate text-sm font-medium">{item.title}</span>
                     {qcProto && (
@@ -643,6 +643,10 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
 
               if (item.type === "host") {
                 const host = item.data as Host;
+                const isStandaloneRdp = isRdpProtocol(host.protocol);
+                const isStandaloneVnc = isVncProtocol(host.protocol);
+                const companionRdp = !isStandaloneRdp && hasCompanionRdp(host);
+                const companionVnc = !isStandaloneVnc && hasCompanionVnc(host);
                 const hostRow = (
                   <div
                     className={`flex h-full min-h-0 items-center justify-between overflow-hidden px-4 py-2.5 cursor-pointer transition-colors ${getQuickSwitcherRowStateClass(isSelected, isKeyboardNavigating)}`}
@@ -652,10 +656,12 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                       <DistroAvatar
                         host={host}
                         fallback={host.label.slice(0, 2).toUpperCase()}
-                        size="sm"
+                        size="tree"
                       />
                       <span className="truncate text-sm font-medium">{host.label}</span>
-                      {isRdpProtocol(host.protocol) && (
+                    </div>
+                    <div className="ml-3 flex shrink-0 items-center gap-2">
+                      {isStandaloneRdp && (
                         <span
                           className={`inline-flex items-center gap-0.5 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass("rdp")}`}
                         >
@@ -663,7 +669,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                           RDP
                         </span>
                       )}
-                      {isVncProtocol(host.protocol) && (
+                      {isStandaloneVnc && (
                         <span
                           className={`inline-flex items-center gap-0.5 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass("vnc")}`}
                         >
@@ -671,7 +677,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                           VNC
                         </span>
                       )}
-                      {hasCompanionRdp(host) && (
+                      {companionRdp && (
                         <span
                           className={`inline-flex items-center gap-0.5 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass("rdp")}`}
                         >
@@ -679,7 +685,7 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                           +RDP
                         </span>
                       )}
-                      {hasCompanionVnc(host) && (
+                      {companionVnc && (
                         <span
                           className={`inline-flex items-center gap-0.5 shrink-0 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 ${getProtocolBadgeClass("vnc")}`}
                         >
@@ -687,9 +693,9 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                           +VNC
                         </span>
                       )}
-                    </div>
-                    <div className="ml-3 max-w-[12rem] shrink-0 truncate text-[11px] text-muted-foreground">
-                      {host.group ? `Personal / ${host.group}` : "Personal"}
+                      <div className="max-w-[12rem] truncate text-[11px] text-muted-foreground">
+                        {host.group ? `Personal / ${host.group}` : "Personal"}
+                      </div>
                     </div>
                   </div>
                 );

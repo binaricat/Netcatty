@@ -1,9 +1,11 @@
 import type { Host, Identity, KnownHost, SSHKey } from '../../types';
 import {
   resolveRemoteDesktopConnectionSpec,
+  type MonitorLayoutSpec,
   type RemoteDesktopConnectionSpec,
   type RemoteDesktopProtocol,
 } from '../../domain/remoteDesktop';
+import type { RemoteDesktopAction } from '../../domain/remoteDesktopActionCodec';
 import { generateRdpFileContent } from '../../domain/rdpFileParser';
 import { sanitizeCredentialValue } from '../../domain/credentials';
 import { resolveBridgeSshAgentAuth, resolveHostAuth } from '../../domain/sshAuth';
@@ -14,8 +16,12 @@ import {
   type RemoteDesktopBridgeApi,
   type RemoteDesktopCertDecisionValue,
   type RemoteDesktopCertVerifyEvent,
+  type RemoteDesktopLocalDisplay,
   type RemoteDesktopOpenSystemClientOptions,
+  type RemoteDesktopRdpdrDriveConfig,
+  type RemoteDesktopRdpdrRequest,
   type RemoteDesktopStartOptions,
+  type RemoteDesktopStatsEvent,
 } from '../../application/state/useSessionState';
 import { isPluginHostProtocol } from '../../domain/pluginConnection';
 import type {
@@ -30,8 +36,12 @@ export {
   type RemoteDesktopBridgeApi,
   type RemoteDesktopCertDecisionValue,
   type RemoteDesktopCertVerifyEvent,
+  type RemoteDesktopLocalDisplay,
   type RemoteDesktopOpenSystemClientOptions,
+  type RemoteDesktopRdpdrDriveConfig,
+  type RemoteDesktopRdpdrRequest,
   type RemoteDesktopStartOptions,
+  type RemoteDesktopStatsEvent,
 };
 
 export type RemoteDesktopDisplayMode = 'dynamic' | 'fit' | 'actual' | 'stretch';
@@ -78,6 +88,16 @@ export interface RemoteDesktopCanvasHandle {
   requestRefresh?: () => void;
   downloadRemoteClipboardFile?: (fileIndex: number) => Promise<void>;
   uploadLocalClipboardFiles?: (files: FileList | File[]) => Promise<void>;
+  resizeToPreset?: (width: number, height: number) => void;
+  setMonitorLayout?: (monitors: MonitorLayoutSpec[]) => void;
+  addSharedDrive?: (drive: { deviceId: number; name: string }) => void;
+  removeSharedDrive?: (deviceId: number) => void;
+  setQuality?: (quality: RemoteDesktopQualityPreset) => void;
+  sendXvpAction?: (action: 'shutdown' | 'reboot' | 'reset') => void;
+  performAiAction?: (
+    action: RemoteDesktopAction,
+    options?: { signal?: AbortSignal },
+  ) => Promise<void> | void;
 }
 
 /**
@@ -390,6 +410,8 @@ export function buildRemoteDesktopStartPayload(args: {
     readOnly: viewOnly ?? spec.vncConfig?.viewOnly ?? false,
     viewOnly: viewOnly ?? spec.vncConfig?.viewOnly ?? false,
     quality: quality ?? 'auto',
+    vncQuality: spec.vncConfig?.quality,
+    vncCompressionLevel: spec.vncConfig?.compressionLevel,
     securityMode: securityMode ?? spec.rdpConfig?.securityMode ?? 'auto',
     ignoreCertErrors: ignoreCertErrors ?? spec.rdpConfig?.ignoreCertErrors ?? false,
     knownCertFingerprints,

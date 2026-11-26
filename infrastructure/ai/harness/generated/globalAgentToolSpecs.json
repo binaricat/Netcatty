@@ -2417,7 +2417,7 @@
     "toolName": "remote_desktop_read_screen",
     "rpcMethod": "netcatty/readRemoteScreen",
     "localExecution": false,
-    "description": "Capture a read-only screenshot of a connected VNC or RDP remote desktop session in the active AI scope. Use this for graphical VNC or RDP sessions (which have no text PTY). Start with a full-screen standard capture; if small dialog or log text is hard to read, re-call with cropX/cropY/cropWidth/cropHeight (0-1000 permille coordinates) and quality=\"high\" for a crisp 1:1 native-pixel zoom.",
+    "description": "Capture a read-only screenshot of a connected VNC or RDP remote desktop session in the active AI scope. Use this for graphical VNC or RDP sessions (which have no text PTY). Start with a full-screen standard capture; pass grid=\"true\" when you need precise 0-1000 coordinates before clicking with remote_desktop_act. If small dialog or log text is hard to read, re-call with cropX/cropY/cropWidth/cropHeight (0-1000 permille coordinates) and quality=\"high\" for a crisp 1:1 native-pixel zoom.",
     "inputShape": {
       "sessionId": {
         "type": "string",
@@ -2448,6 +2448,11 @@
         "type": "number",
         "optional": true,
         "description": "Optional crop height in 1-1000 normalized permille coordinates. Must be provided together with cropX, cropY, and cropWidth."
+      },
+      "grid": {
+        "type": "string",
+        "optional": true,
+        "description": "Set to true to draw a translucent 0-1000 global coordinate grid overlay on the captured screenshot (useful before clicking with remote_desktop_act). Default false."
       }
     },
     "policy": {

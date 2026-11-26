@@ -18,6 +18,18 @@ import {
   type RemoteDesktopImageMediaType,
 } from '../../remoteDesktop/remoteDesktopSnapshotRegistry';
 import {
+  executeRemoteDesktopActions,
+} from '../../remoteDesktop/remoteDesktopControlRegistry';
+import {
+  appendRemoteDesktopAuditEntry,
+  type RemoteDesktopAuditOutcome,
+} from '../../remoteDesktop/remoteDesktopAuditLog';
+import {
+  findHighRiskRemoteDesktopActions,
+  summarizeRemoteDesktopActions,
+  validateAndNormalizeRemoteDesktopActions,
+} from '../../../domain/remoteDesktopActionCodec';
+import {
   executeTerminalExecute,
   executeWorkspaceGetInfo,
   executeWorkspaceGetSessionInfo,
@@ -189,6 +201,7 @@ function fitCapabilityResultForModel(
   if (
     spec.capabilityId === 'harness.tool_output.read'
     || spec.capabilityId === 'harness.remote_desktop.read_screen'
+    || spec.capabilityId === 'harness.remote_desktop.act'
   ) {
     return result;
   }
@@ -251,12 +264,39 @@ interface LocalExecutionContext {
   toolOutputStore?: ToolOutputStore;
   toolResultDedup?: ToolResultDedup;
   chatSessionId?: string;
+  abortSignal?: AbortSignal;
   remoteDesktopDelivery?: RemoteDesktopToolDeliveryOptions;
 }
 
 function isRemoteDesktopProtocol(protocol?: string): protocol is 'vnc' | 'rdp' {
   const lower = protocol?.toLowerCase();
   return lower === 'vnc' || lower === 'rdp';
+}
+
+function parseOptionalBooleanFlag(value: unknown, defaultValue: boolean): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const lower = value.trim().toLowerCase();
+    if (lower === 'true' || lower === '1' || lower === 'yes') return true;
+    if (lower === 'false' || lower === '0' || lower === 'no') return false;
+  }
+  return defaultValue;
+}
+
+function abortableDelay(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  if (ms <= 0 || abortSignal?.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      abortSignal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    abortSignal?.addEventListener('abort', finish, { once: true });
+  });
 }
 
 async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<unknown> {
@@ -472,6 +512,7 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
         return { ok: false, code: 'INVALID_CROP', error: cropParsed.error };
       }
       const quality = normalizeRemoteDesktopQuality(args.quality);
+      const grid = parseOptionalBooleanFlag(args.grid, false);
       const protocol = session.protocol.toLowerCase() as 'vnc' | 'rdp';
 
       const useDetachedRpc =
@@ -485,6 +526,7 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
           {
             sessionId,
             quality,
+            ...(grid ? { grid: 'true' } : {}),
             ...(cropParsed.crop
               ? {
                   cropX: cropParsed.crop.x,
@@ -513,6 +555,7 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
           naturalWidth: Number(rpcRes.naturalWidth) || 0,
           naturalHeight: Number(rpcRes.naturalHeight) || 0,
           crop: cropParsed.crop,
+          ...(grid ? { grid: true } : {}),
           mediaType: rpcRes.mediaType === 'image/png' ? 'image/png' : 'image/jpeg',
           capturedAt: typeof rpcRes.capturedAt === 'number' ? rpcRes.capturedAt : Date.now(),
           base64Data: rpcRes.base64Data,
@@ -529,6 +572,7 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
           naturalWidth: meta.naturalWidth,
           naturalHeight: meta.naturalHeight,
           ...(meta.crop ? { crop: meta.crop } : {}),
+          ...(meta.grid ? { grid: true } : {}),
           mediaType: meta.mediaType,
           capturedAt: meta.capturedAt,
         };
@@ -537,6 +581,7 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
       const captured = await captureRemoteDesktopFrame(sessionId, {
         quality,
         crop: cropParsed.crop,
+        grid,
         source: 'ai-tool',
       });
       if (captured.ok === false) {
@@ -554,8 +599,189 @@ async function executeLocalCattyCapability(ctx: LocalExecutionContext): Promise<
         naturalWidth: captured.naturalWidth,
         naturalHeight: captured.naturalHeight,
         ...(captured.crop ? { crop: captured.crop } : {}),
+        ...(captured.grid ? { grid: true } : {}),
         mediaType: captured.mediaType,
         capturedAt: captured.capturedAt,
+      };
+    }
+    case 'harness.remote_desktop.act': {
+      const scopeCtx = resolveContext();
+      const sessions = scopeCtx.sessions ?? [];
+      const rdSessions = sessions.filter((entry) => isRemoteDesktopProtocol(entry.protocol));
+      const requestedSessionId = typeof args.sessionId === 'string' && args.sessionId.trim()
+        ? args.sessionId.trim()
+        : undefined;
+      const sessionId = requestedSessionId
+        ?? (rdSessions.length === 1 ? rdSessions[0].sessionId : undefined);
+
+      if (!sessionId) {
+        return {
+          ok: false,
+          code: 'INVALID_SCOPE',
+          error: rdSessions.length === 0
+            ? 'No VNC or RDP remote desktop session is available in the current AI scope.'
+            : 'sessionId is required because the current AI scope contains multiple remote desktop sessions.',
+        };
+      }
+
+      const session = sessions.find((entry) => entry.sessionId === sessionId);
+      if (!session) {
+        return {
+          ok: false,
+          code: 'OUT_OF_SCOPE',
+          error: `Remote desktop session "${sessionId}" is not in the current AI scope.`,
+        };
+      }
+      if (!isRemoteDesktopProtocol(session.protocol)) {
+        return {
+          ok: false,
+          code: 'UNSUPPORTED_PROTOCOL',
+          error: `Session "${sessionId}" is not a VNC/RDP remote desktop session. Use terminal_execute for terminal sessions.`,
+        };
+      }
+      if (!session.connected) {
+        return {
+          ok: false,
+          code: 'SESSION_DISCONNECTED',
+          error: `Remote desktop session "${sessionId}" is disconnected. Ask the user to reconnect it first.`,
+        };
+      }
+
+      const protocol = session.protocol.toLowerCase() as 'vnc' | 'rdp';
+      const parsed = validateAndNormalizeRemoteDesktopActions(args.actions);
+      if (parsed.ok === false) {
+        appendRemoteDesktopAuditEntry({
+          sessionId,
+          chatSessionId,
+          protocol,
+          hostLabel: session.label,
+          hostname: session.hostname,
+          actionCount: 0,
+          completedActions: 0,
+          summary: 'Invalid action payload',
+          actions: [],
+          outcome: 'error',
+          errorCode: 'INVALID_ACTIONS',
+          error: parsed.error,
+        });
+        return { ok: false, code: 'INVALID_ACTIONS', error: parsed.error };
+      }
+
+      const actions = parsed.actions;
+      const summary = summarizeRemoteDesktopActions(actions);
+      const highRiskChords = findHighRiskRemoteDesktopActions(actions).map((match) => match.chord);
+
+      const execResult = await executeRemoteDesktopActions(sessionId, actions, {
+        abortSignal: ctx.abortSignal,
+        chatSessionId,
+      });
+
+      if (execResult.ok === false) {
+        const outcome: RemoteDesktopAuditOutcome =
+          execResult.code === 'USER_PREEMPTED'
+            ? 'preempted'
+            : execResult.code === 'AI_READ_BLOCKED' || execResult.code === 'SESSION_VIEW_ONLY'
+              ? 'blocked'
+              : 'error';
+
+        appendRemoteDesktopAuditEntry({
+          sessionId,
+          chatSessionId,
+          protocol: execResult.protocol ?? protocol,
+          hostLabel: execResult.hostLabel ?? session.label,
+          hostname: execResult.hostname ?? session.hostname,
+          actionCount: execResult.totalActions,
+          completedActions: execResult.completedActions,
+          summary,
+          actions,
+          highRiskChords,
+          outcome,
+          errorCode: execResult.code,
+          error: execResult.error,
+          durationMs: execResult.durationMs,
+        });
+
+        return {
+          ok: false,
+          code: execResult.code,
+          error: execResult.error,
+          sessionId,
+          protocol: execResult.protocol ?? protocol,
+          completedActions: execResult.completedActions,
+          totalActions: execResult.totalActions,
+          durationMs: execResult.durationMs,
+        };
+      }
+
+      const captureAfter = parseOptionalBooleanFlag(args.captureAfter, true);
+      const canCaptureVision = ctx.remoteDesktopDelivery?.modelVisionSupport !== 'no';
+      let captureMeta: Record<string, unknown> = {};
+      let captureId: string | undefined;
+
+      if (captureAfter && canCaptureVision && !ctx.abortSignal?.aborted) {
+        const rawSettle = typeof args.settleMs === 'number' && Number.isFinite(args.settleMs)
+          ? args.settleMs
+          : 350;
+        const settleMs = Math.max(0, Math.min(3000, Math.round(rawSettle)));
+        if (settleMs > 0) {
+          await abortableDelay(settleMs, ctx.abortSignal);
+        }
+        if (!ctx.abortSignal?.aborted) {
+          const quality = normalizeRemoteDesktopQuality(args.quality);
+          const grid = parseOptionalBooleanFlag(args.grid, false);
+          const captured = await captureRemoteDesktopFrame(sessionId, {
+            quality,
+            grid,
+            source: 'ai-tool',
+          });
+          if (captured.ok === false) {
+            captureMeta = {
+              captureError: captured.error,
+              captureErrorCode: captured.code,
+            };
+          } else {
+            captureId = captured.captureId;
+            captureMeta = {
+              captureId: captured.captureId,
+              width: captured.width,
+              height: captured.height,
+              naturalWidth: captured.naturalWidth,
+              naturalHeight: captured.naturalHeight,
+              ...(captured.grid ? { grid: true } : {}),
+              mediaType: captured.mediaType,
+              capturedAt: captured.capturedAt,
+            };
+          }
+        }
+      }
+
+      appendRemoteDesktopAuditEntry({
+        sessionId,
+        chatSessionId,
+        protocol: execResult.protocol ?? protocol,
+        hostLabel: execResult.hostLabel ?? session.label,
+        hostname: execResult.hostname ?? session.hostname,
+        actionCount: execResult.totalActions,
+        completedActions: execResult.completedActions,
+        summary,
+        actions,
+        highRiskChords,
+        outcome: 'ok',
+        durationMs: execResult.durationMs,
+        captureId,
+      });
+
+      return {
+        ok: true,
+        sessionId,
+        protocol: execResult.protocol ?? protocol,
+        hostLabel: execResult.hostLabel ?? session.label,
+        hostname: execResult.hostname ?? session.hostname,
+        completedActions: execResult.completedActions,
+        totalActions: execResult.totalActions,
+        durationMs: execResult.durationMs,
+        summary,
+        ...captureMeta,
       };
     }
     case 'harness.web.search': {
@@ -677,7 +903,9 @@ function createCatalogTool(
   remoteDesktopDelivery?: RemoteDesktopToolDeliveryOptions,
 ) {
   const inputSchema = buildZodObject(spec.inputShape);
-  const isRemoteDesktopReadScreen = spec.capabilityId === 'harness.remote_desktop.read_screen';
+  const supportsRemoteDesktopImageOutput =
+    spec.capabilityId === 'harness.remote_desktop.read_screen'
+    || spec.capabilityId === 'harness.remote_desktop.act';
 
   const catalogTool = tool({
     description: spec.description,
@@ -810,6 +1038,7 @@ function createCatalogTool(
             toolOutputStore,
             toolResultDedup,
             chatSessionId: deps.chatSessionId,
+            abortSignal,
             remoteDesktopDelivery,
           });
           return fitCapabilityResultForModel(
@@ -1044,7 +1273,7 @@ function createCatalogTool(
     },
   });
 
-  if (isRemoteDesktopReadScreen && remoteDesktopDelivery) {
+  if (supportsRemoteDesktopImageOutput && remoteDesktopDelivery) {
     catalogTool.toModelOutput = ({ output }) =>
       buildRemoteDesktopModelOutput(output, remoteDesktopDelivery);
   }
@@ -1133,7 +1362,10 @@ export function createCattyToolsFromCatalog(
       continue;
     }
     if (
-      rawSpec.capabilityId === 'harness.remote_desktop.read_screen'
+      (
+        rawSpec.capabilityId === 'harness.remote_desktop.read_screen'
+        || rawSpec.capabilityId === 'harness.remote_desktop.act'
+      )
       && !hasRemoteDesktopSessionInScope
     ) {
       continue;

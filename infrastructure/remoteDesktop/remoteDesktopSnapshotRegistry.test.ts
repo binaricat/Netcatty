@@ -4,6 +4,8 @@ import {
   captureRemoteDesktopFrame,
   clearCapturedRemoteDesktopFramesForSession,
   computeRemoteDesktopCaptureGeometry,
+  computeRemoteDesktopGridLayout,
+  drawRemoteDesktopCoordinateGrid,
   getCapturedRemoteDesktopFrame,
   hasRemoteDesktopSnapshotProvider,
   isRemoteDesktopAiReadBlocked,
@@ -183,5 +185,106 @@ describe('remoteDesktopSnapshotRegistry', () => {
     assert.equal(smallCrop.outWidth, 480);
     assert.equal(smallCrop.outHeight, 216);
     assert.equal(smallCrop.mediaType, 'image/png');
+  });
+
+  it('computes 0..1000 coordinate grid layout for full-screen and cropped frames with global labels', () => {
+    const full = computeRemoteDesktopGridLayout(1000, 500);
+    assert.deepEqual(
+      full.vertical.map((l) => l.permille),
+      [100, 200, 300, 400, 500, 600, 700, 800, 900],
+    );
+    assert.equal(full.vertical.every((l) => l.major && l.label === String(l.permille)), true);
+    assert.equal(full.vertical[0].pixel, 100);
+    assert.equal(full.horizontal[0].pixel, 50);
+
+    // Cropped region (width/height <= 500) adds 50-unit minor lines and keeps global 0..1000 labels
+    const cropped = computeRemoteDesktopGridLayout(400, 400, {
+      x: 200,
+      y: 300,
+      width: 400,
+      height: 400,
+    });
+    assert.deepEqual(
+      cropped.vertical.map((l) => l.permille),
+      [250, 300, 350, 400, 450, 500, 550],
+    );
+    assert.equal(cropped.vertical[0].major, false);
+    assert.equal(cropped.vertical[0].pixel, 50);
+    assert.equal(cropped.vertical[1].major, true);
+    assert.equal(cropped.vertical[1].label, '300');
+    assert.equal(cropped.vertical[1].pixel, 100);
+
+    assert.deepEqual(
+      cropped.horizontal.map((l) => l.permille),
+      [350, 400, 450, 500, 550, 600, 650],
+    );
+    assert.equal(cropped.horizontal[1].label, '400');
+  });
+
+  it('draws coordinate grid onto an offscreen canvas context and forwards grid flag through captureRemoteDesktopFrame', async () => {
+    const strokes: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+    const labels: string[] = [];
+    let moveX = 0;
+    let moveY = 0;
+    const mockCtx = {
+      save() {},
+      restore() {},
+      setLineDash() {},
+      beginPath() {},
+      moveTo(x: number, y: number) {
+        moveX = x;
+        moveY = y;
+      },
+      lineTo(x: number, y: number) {
+        strokes.push({ x1: moveX, y1: moveY, x2: x, y2: y });
+      },
+      stroke() {},
+      fillRect() {},
+      fillText(text: string) {
+        labels.push(text);
+      },
+      measureText(text: string) {
+        return { width: text.length * 7 };
+      },
+      lineWidth: 1,
+      strokeStyle: '',
+      fillStyle: '',
+      font: '',
+      textBaseline: 'top',
+    } as unknown as CanvasRenderingContext2D;
+
+    drawRemoteDesktopCoordinateGrid(mockCtx, 1000, 600, {
+      x: 200,
+      y: 100,
+      width: 300,
+      height: 300,
+    });
+
+    assert.ok(strokes.length > 0);
+    assert.ok(labels.includes('300'));
+    assert.ok(labels.includes('400'));
+    assert.ok(labels.includes('200'));
+
+    let receivedGridFlag: boolean | undefined;
+    registerRemoteDesktopSnapshotProvider('rdp-grid', (opts) => {
+      receivedGridFlag = opts?.grid;
+      return {
+        base64Data: 'QUJD',
+        mediaType: 'image/jpeg',
+        width: 1280,
+        height: 720,
+        naturalWidth: 1280,
+        naturalHeight: 720,
+        grid: opts?.grid,
+        protocol: 'rdp',
+      };
+    });
+
+    const res = await captureRemoteDesktopFrame('rdp-grid', { grid: true });
+    assert.equal(receivedGridFlag, true);
+    assert.equal(res.ok, true);
+    if (res.ok) {
+      assert.equal(res.grid, true);
+    }
   });
 });

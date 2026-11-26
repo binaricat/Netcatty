@@ -330,7 +330,14 @@ export function useRemoteDesktopRecorder({
                 if (settled) return;
                 settled = true;
                 window.clearTimeout(timeoutId);
-                resolve();
+                try {
+                  run.recorder.removeEventListener?.('stop', done);
+                  run.recorder.removeEventListener?.('error', done);
+                } catch {
+                  // ignore
+                } finally {
+                  resolve();
+                }
               };
               const timeoutId = window.setTimeout(done, STOP_WAIT_TIMEOUT_MS);
               run.recorder.addEventListener('stop', done, { once: true });
@@ -350,6 +357,8 @@ export function useRemoteDesktopRecorder({
             });
           }
 
+          run.recorder.ondataavailable = null;
+          run.recorder.onerror = null;
           stopStreamTracks(run.stream);
           await run.appendChain.catch(() => {});
 
@@ -410,9 +419,13 @@ export function useRemoteDesktopRecorder({
     [getBridge, t],
   );
 
+  const startingRef = useRef(false);
+  const stopRecordingRef = useRef(stopRecording);
+  stopRecordingRef.current = stopRecording;
+
   const startRecording = useCallback(
     async (options?: { silent?: boolean }): Promise<boolean> => {
-      if (activeRunRef.current) return false;
+      if (activeRunRef.current || startingRef.current) return false;
       const meta = latestMetaRef.current;
       if (meta.status !== 'connected') return false;
 
@@ -430,122 +443,137 @@ export function useRemoteDesktopRecorder({
         return false;
       }
 
-      const wantAudio = meta.protocol === 'rdp' && meta.audioEnabled && meta.settings.includeAudio;
-      const stream = canvasHandleRef.current?.getCaptureStream?.(meta.settings.fps, wantAudio) ?? null;
-      if (!stream || stream.getVideoTracks().length === 0) {
-        if (!options?.silent) {
-          toast.error(
-            tr(
-              t,
-              'remoteDesktop.recording.unsupported',
-              'Session recording is not supported in this environment',
-            ),
-          );
-        }
-        return false;
-      }
-
-      const hasAudio = stream.getAudioTracks().length > 0;
-      const mimeType = pickRemoteDesktopRecordingMimeType(hasAudio);
-      const videoBitsPerSecond = resolveRecordingVideoBitsPerSecond(meta.settings.fps);
-
-      let recordingId: string;
+      startingRef.current = true;
       try {
-        const begun = await bridge.begin({
-          mimeType: mimeType || 'video/webm',
-          hostLabel: meta.hostLabel,
-          protocol: meta.protocol,
-        });
-        recordingId = begun.recordingId;
-      } catch {
-        stopStreamTracks(stream);
-        if (!options?.silent) {
-          toast.error(tr(t, 'remoteDesktop.recording.failed', 'Session recording failed'));
-        }
-        return false;
-      }
-
-      let recorder: MediaRecorder;
-      try {
-        const recorderOptions: MediaRecorderOptions = { videoBitsPerSecond };
-        if (mimeType) recorderOptions.mimeType = mimeType;
-        recorder = new MediaRecorder(stream, recorderOptions);
-      } catch {
-        stopStreamTracks(stream);
-        await bridge.abort({ recordingId }).catch(() => {});
-        if (!options?.silent) {
-          toast.error(tr(t, 'remoteDesktop.recording.failed', 'Session recording failed'));
-        }
-        return false;
-      }
-
-      const run: ActiveRecordingRun = {
-        recordingId,
-        mimeType: recorder.mimeType || mimeType || 'video/webm',
-        hasAudio,
-        startedAt: Date.now(),
-        recorder,
-        stream,
-        appendChain: Promise.resolve(),
-        appendError: null,
-        bytesQueued: 0,
-        stopPromise: null,
-        aborted: false,
-        settings: meta.settings,
-      };
-      activeRunRef.current = run;
-
-      recorder.ondataavailable = (ev: BlobEvent) => {
-        if (!ev.data || ev.data.size <= 0 || run.aborted) return;
-        const blob = ev.data;
-        run.bytesQueued += blob.size;
-        run.appendChain = run.appendChain.then(async () => {
-          if (run.aborted) return;
-          try {
-            const buffer = await blob.arrayBuffer();
-            if (run.aborted) return;
-            await bridge.append({
-              recordingId: run.recordingId,
-              chunk: new Uint8Array(buffer),
-            });
-          } catch (err) {
-            run.appendError = err instanceof Error ? err : new Error(String(err));
-            run.aborted = true;
-            void stopRecording({ silent: false });
+        const wantAudio = meta.protocol === 'rdp' && meta.audioEnabled && meta.settings.includeAudio;
+        const stream = canvasHandleRef.current?.getCaptureStream?.(meta.settings.fps, wantAudio) ?? null;
+        if (!stream || stream.getVideoTracks().length === 0) {
+          if (stream) stopStreamTracks(stream);
+          if (!options?.silent) {
+            toast.error(
+              tr(
+                t,
+                'remoteDesktop.recording.unsupported',
+                'Session recording is not supported in this environment',
+              ),
+            );
           }
-        });
-      };
-
-      recorder.onerror = () => {
-        if (!run.appendError) {
-          run.appendError = new Error('MediaRecorder error');
+          return false;
         }
-        run.aborted = true;
-        void stopRecording({ silent: false });
-      };
 
-      try {
-        recorder.start(CHUNK_TIMESLICE_MS);
-      } catch {
-        activeRunRef.current = null;
-        stopStreamTracks(stream);
-        await bridge.abort({ recordingId }).catch(() => {});
+        const hasAudio = stream.getAudioTracks().length > 0;
+        const mimeType = pickRemoteDesktopRecordingMimeType(hasAudio);
+        const videoBitsPerSecond = resolveRecordingVideoBitsPerSecond(meta.settings.fps);
+
+        let recordingId: string;
+        try {
+          const begun = await bridge.begin({
+            mimeType: mimeType || 'video/webm',
+            hostLabel: meta.hostLabel,
+            protocol: meta.protocol,
+          });
+          recordingId = begun.recordingId;
+        } catch {
+          stopStreamTracks(stream);
+          if (!options?.silent) {
+            toast.error(tr(t, 'remoteDesktop.recording.failed', 'Session recording failed'));
+          }
+          return false;
+        }
+
+        // Guard against unmount or disconnect while awaiting bridge.begin()
+        if (!mountedRef.current || latestMetaRef.current.status !== 'connected') {
+          stopStreamTracks(stream);
+          await bridge.abort({ recordingId }).catch(() => {});
+          return false;
+        }
+
+        let recorder: MediaRecorder;
+        try {
+          const recorderOptions: MediaRecorderOptions = { videoBitsPerSecond };
+          if (mimeType) recorderOptions.mimeType = mimeType;
+          recorder = new MediaRecorder(stream, recorderOptions);
+        } catch {
+          stopStreamTracks(stream);
+          await bridge.abort({ recordingId }).catch(() => {});
+          if (!options?.silent) {
+            toast.error(tr(t, 'remoteDesktop.recording.failed', 'Session recording failed'));
+          }
+          return false;
+        }
+
+        const run: ActiveRecordingRun = {
+          recordingId,
+          mimeType: recorder.mimeType || mimeType || 'video/webm',
+          hasAudio,
+          startedAt: Date.now(),
+          recorder,
+          stream,
+          appendChain: Promise.resolve(),
+          appendError: null,
+          bytesQueued: 0,
+          stopPromise: null,
+          aborted: false,
+          settings: meta.settings,
+        };
+        activeRunRef.current = run;
+
+        recorder.ondataavailable = (ev: BlobEvent) => {
+          if (!ev.data || ev.data.size <= 0 || run.aborted) return;
+          const blob = ev.data;
+          run.bytesQueued += blob.size;
+          run.appendChain = run.appendChain.then(async () => {
+            if (run.aborted) return;
+            try {
+              const buffer = await blob.arrayBuffer();
+              if (run.aborted) return;
+              await bridge.append({
+                recordingId: run.recordingId,
+                chunk: new Uint8Array(buffer),
+              });
+            } catch (err) {
+              run.appendError = err instanceof Error ? err : new Error(String(err));
+              run.aborted = true;
+              void stopRecordingRef.current({ silent: false });
+            }
+          });
+        };
+
+        recorder.onerror = () => {
+          if (!run.appendError) {
+            run.appendError = new Error('MediaRecorder error');
+          }
+          run.aborted = true;
+          void stopRecordingRef.current({ silent: false });
+        };
+
+        try {
+          recorder.start(CHUNK_TIMESLICE_MS);
+        } catch {
+          activeRunRef.current = null;
+          recorder.ondataavailable = null;
+          recorder.onerror = null;
+          stopStreamTracks(stream);
+          await bridge.abort({ recordingId }).catch(() => {});
+          if (!options?.silent) {
+            toast.error(tr(t, 'remoteDesktop.recording.failed', 'Session recording failed'));
+          }
+          return false;
+        }
+
+        if (mountedRef.current) {
+          setIsRecording(true);
+          setElapsedMs(0);
+        }
         if (!options?.silent) {
-          toast.error(tr(t, 'remoteDesktop.recording.failed', 'Session recording failed'));
+          toast.info(tr(t, 'remoteDesktop.recording.started', 'Session recording started'));
         }
-        return false;
+        return true;
+      } finally {
+        startingRef.current = false;
       }
-
-      if (mountedRef.current) {
-        setIsRecording(true);
-        setElapsedMs(0);
-      }
-      if (!options?.silent) {
-        toast.info(tr(t, 'remoteDesktop.recording.started', 'Session recording started'));
-      }
-      return true;
     },
-    [canvasHandleRef, getBridge, stopRecording, t],
+    [canvasHandleRef, getBridge, t],
   );
 
   const toggleRecording = useCallback(async () => {
@@ -571,16 +599,16 @@ export function useRemoteDesktopRecorder({
     }
   }, [settings.autoRecord, startRecording, status, stopRecording]);
 
-  // Clean flush/stop on unmount
+  // Clean flush/stop on unmount (uses ref so locale changes never abort active recordings)
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       if (activeRunRef.current) {
-        void stopRecording({ stampEndTime: true, silent: true });
+        void stopRecordingRef.current({ stampEndTime: true, silent: true });
       }
     };
-  }, [stopRecording]);
+  }, []);
 
   return {
     isRecording,

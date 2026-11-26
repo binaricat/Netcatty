@@ -15,6 +15,8 @@ export interface RemoteDesktopCaptureRequest {
   crop?: RemoteDesktopCropRect;
   source?: RemoteDesktopCaptureSource;
   format?: RemoteDesktopImageMediaType;
+  /** When true, draw a translucent 0..1000 global coordinate grid on the offscreen capture canvas. */
+  grid?: boolean;
 }
 
 export interface RemoteDesktopProviderFrame {
@@ -26,6 +28,7 @@ export interface RemoteDesktopProviderFrame {
   naturalWidth: number;
   naturalHeight: number;
   crop?: RemoteDesktopCropRect;
+  grid?: boolean;
   /** Optional tiny preview data URL (e.g. <= 200px) for lightweight UI thumbnails. */
   previewDataUrl?: string;
   protocol?: 'vnc' | 'rdp';
@@ -48,6 +51,7 @@ export interface RemoteDesktopFrameMetadata {
   naturalWidth: number;
   naturalHeight: number;
   crop?: RemoteDesktopCropRect;
+  grid?: boolean;
   mediaType: RemoteDesktopImageMediaType;
   byteLength: number;
   capturedAt: number;
@@ -271,9 +275,180 @@ export function computeRemoteDesktopCaptureGeometry(
   };
 }
 
+export interface RemoteDesktopGridLine {
+  /** Global 0..1000 permille coordinate represented by this line. */
+  permille: number;
+  /** Pixel position along the corresponding axis of the output canvas. */
+  pixel: number;
+  /** Major (every 100 permille) vs subtle minor (every 50 permille on zoomed crops <= 500). */
+  major: boolean;
+  /** Edge label text (global permille value). */
+  label?: string;
+}
+
+export interface RemoteDesktopGridLayout {
+  vertical: RemoteDesktopGridLine[];
+  horizontal: RemoteDesktopGridLine[];
+}
+
+function buildGridAxisLines(
+  viewStart: number,
+  viewSpan: number,
+  outDimension: number,
+  includeMinor: boolean,
+): RemoteDesktopGridLine[] {
+  if (!Number.isFinite(outDimension) || outDimension <= 0 || viewSpan <= 0) {
+    return [];
+  }
+  const viewEnd = viewStart + viewSpan;
+  const step = includeMinor ? 50 : 100;
+  const firstTick = Math.ceil(viewStart / step) * step;
+  const lines: RemoteDesktopGridLine[] = [];
+  let hasMajorLine = false;
+
+  for (let p = firstTick; p < viewEnd; p += step) {
+    if (p <= viewStart) continue;
+    const major = p % 100 === 0;
+    if (major) hasMajorLine = true;
+    const pixel = ((p - viewStart) / viewSpan) * outDimension;
+    lines.push({
+      permille: p,
+      pixel,
+      major,
+      label: major ? String(p) : undefined,
+    });
+  }
+
+  // If a tight crop contains only minor 50-unit lines, label them so global coordinates stay visible.
+  if (!hasMajorLine) {
+    for (const line of lines) {
+      line.label = String(line.permille);
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Pure geometry helper computing global `0..1000` permille grid lines for both
+ * full-screen captures and zoomed crops. When `crop` width or height is <= 500,
+ * subtle 50-unit minor lines are included while preserving global coordinates.
+ */
+export function computeRemoteDesktopGridLayout(
+  outWidth: number,
+  outHeight: number,
+  crop?: RemoteDesktopCropRect,
+): RemoteDesktopGridLayout {
+  const startX = crop ? crop.x : 0;
+  const spanX = crop ? crop.width : 1000;
+  const startY = crop ? crop.y : 0;
+  const spanY = crop ? crop.height : 1000;
+  const minorX = Boolean(crop && crop.width <= 500);
+  const minorY = Boolean(crop && crop.height <= 500);
+
+  return {
+    vertical: buildGridAxisLines(startX, spanX, outWidth, minorX),
+    horizontal: buildGridAxisLines(startY, spanY, outHeight, minorY),
+  };
+}
+
+/**
+ * Draw a translucent `0..1000` permille coordinate grid onto an offscreen
+ * capture canvas context. Never mutates the live user canvas.
+ */
+export function drawRemoteDesktopCoordinateGrid(
+  ctx: CanvasRenderingContext2D,
+  outWidth: number,
+  outHeight: number,
+  crop?: RemoteDesktopCropRect,
+): void {
+  const layout = computeRemoteDesktopGridLayout(outWidth, outHeight, crop);
+  if (layout.vertical.length === 0 && layout.horizontal.length === 0) return;
+
+  ctx.save();
+  try {
+    // 1. Draw lines (dark halo underneath + cyan/white stroke for readability on light & dark desktops)
+    for (const line of layout.vertical) {
+      const x = Math.round(line.pixel) + 0.5;
+      ctx.setLineDash?.(line.major ? [] : [4, 4]);
+      ctx.lineWidth = line.major ? 2.2 : 1.4;
+      ctx.strokeStyle = line.major ? 'rgba(0, 0, 0, 0.45)' : 'rgba(0, 0, 0, 0.30)';
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, outHeight);
+      ctx.stroke();
+
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = line.major ? 'rgba(34, 211, 238, 0.62)' : 'rgba(255, 255, 255, 0.32)';
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, outHeight);
+      ctx.stroke();
+    }
+
+    for (const line of layout.horizontal) {
+      const y = Math.round(line.pixel) + 0.5;
+      ctx.setLineDash?.(line.major ? [] : [4, 4]);
+      ctx.lineWidth = line.major ? 2.2 : 1.4;
+      ctx.strokeStyle = line.major ? 'rgba(0, 0, 0, 0.45)' : 'rgba(0, 0, 0, 0.30)';
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(outWidth, y);
+      ctx.stroke();
+
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = line.major ? 'rgba(34, 211, 238, 0.62)' : 'rgba(255, 255, 255, 0.32)';
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(outWidth, y);
+      ctx.stroke();
+    }
+
+    ctx.setLineDash?.([]);
+
+    // 2. Draw crisp edge coordinate labels along top (X) and left (Y) borders
+    const fontSize = outWidth < 480 || outHeight < 320 ? 10 : 11;
+    ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+    ctx.textBaseline = 'top';
+    const padX = 3;
+    const padY = 2;
+    const badgeHeight = fontSize + padY * 2;
+
+    for (const line of layout.vertical) {
+      if (!line.label) continue;
+      const textWidth = ctx.measureText ? ctx.measureText(line.label).width : line.label.length * (fontSize * 0.62);
+      const badgeWidth = Math.ceil(textWidth + padX * 2);
+      const bx = Math.max(2, Math.min(outWidth - badgeWidth - 2, Math.round(line.pixel - badgeWidth / 2)));
+      const by = 3;
+      ctx.fillStyle = 'rgba(9, 9, 11, 0.78)';
+      ctx.fillRect(bx, by, badgeWidth, badgeHeight);
+      ctx.fillStyle = 'rgba(224, 242, 254, 0.96)';
+      ctx.fillText(line.label, bx + padX, by + padY);
+    }
+
+    for (const line of layout.horizontal) {
+      if (!line.label) continue;
+      const textWidth = ctx.measureText ? ctx.measureText(line.label).width : line.label.length * (fontSize * 0.62);
+      const badgeWidth = Math.ceil(textWidth + padX * 2);
+      const bx = 3;
+      const by = Math.max(
+        badgeHeight + 6,
+        Math.min(outHeight - badgeHeight - 2, Math.round(line.pixel - badgeHeight / 2)),
+      );
+      ctx.fillStyle = 'rgba(9, 9, 11, 0.78)';
+      ctx.fillRect(bx, by, badgeWidth, badgeHeight);
+      ctx.fillStyle = 'rgba(224, 242, 254, 0.96)';
+      ctx.fillText(line.label, bx + padX, by + padY);
+    }
+  } finally {
+    ctx.restore();
+  }
+}
+
 /**
  * Browser helper: crop directly from a live `<canvas>` framebuffer at native
- * resolution before any downscaling, with optional tiny preview thumbnail.
+ * resolution before any downscaling, with optional coordinate grid overlay and
+ * tiny preview thumbnail.
  */
 export function captureFrameFromCanvas(
   canvas: HTMLCanvasElement,
@@ -299,6 +474,10 @@ export function captureFrameFromCanvas(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(canvas, geom.sx, geom.sy, geom.sw, geom.sh, 0, 0, geom.outWidth, geom.outHeight);
+
+  if (options?.grid) {
+    drawRemoteDesktopCoordinateGrid(ctx, geom.outWidth, geom.outHeight, geom.crop);
+  }
 
   const dataUrl = geom.mediaType === 'image/png'
     ? outCanvas.toDataURL('image/png')
@@ -329,6 +508,7 @@ export function captureFrameFromCanvas(
     naturalWidth,
     naturalHeight,
     crop: geom.crop,
+    ...(options?.grid ? { grid: true } : {}),
     previewDataUrl,
     protocol: options?.protocol,
     hostLabel: options?.hostLabel,
@@ -454,6 +634,8 @@ export async function captureRemoteDesktopFrame(
     };
   }
 
+  const gridRequested = options?.grid === true;
+
   let rawFrame: RemoteDesktopProviderFrame | null;
   try {
     rawFrame = await provider({
@@ -461,6 +643,7 @@ export async function captureRemoteDesktopFrame(
       crop: normalized.crop,
       source,
       format: options?.format,
+      grid: gridRequested,
     });
   } catch (err) {
     return {
@@ -500,6 +683,7 @@ export async function captureRemoteDesktopFrame(
     naturalWidth: rawFrame.naturalWidth,
     naturalHeight: rawFrame.naturalHeight,
     ...(rawFrame.crop ?? normalized.crop ? { crop: rawFrame.crop ?? normalized.crop } : {}),
+    ...(rawFrame.grid || gridRequested ? { grid: true } : {}),
     mediaType: rawFrame.mediaType === 'image/png' ? 'image/png' : 'image/jpeg',
     byteLength: estimateBase64ByteLength(base64Data),
     capturedAt,
@@ -579,6 +763,11 @@ export function clearCapturedRemoteDesktopFramesForSession(sessionId: string): n
     }
   }
   return removed;
+}
+
+export function clearRemoteDesktopSessionState(sessionId: string): void {
+  clearCapturedRemoteDesktopFramesForSession(sessionId);
+  aiReadBlockedSessions.delete(sessionId);
 }
 
 export function clearAllCapturedRemoteDesktopFrames(): void {

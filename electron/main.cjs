@@ -1508,10 +1508,12 @@ if (!gotLock) {
         //   - local-fonts: terminal font picker enumeration (this PR)
         //   - clipboard-read / clipboard-sanitized-write: terminal & SFTP
         //     copy-paste flows (navigator.clipboard.{read,write}Text)
+        //   - fullscreen: remote desktop (RDP/VNC) true native fullscreen
         const APP_ALLOWED_PERMISSIONS = new Set([
           "local-fonts",
           "clipboard-read",
           "clipboard-sanitized-write",
+          "fullscreen",
         ]);
 
         defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {

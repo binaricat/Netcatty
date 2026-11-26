@@ -808,7 +808,7 @@ export const ruAiMessages: Messages = {
   "ai.vision.snip.cancel": "Отменить выделение",
   "ai.vision.snip.ariaLabel": "Выделить область экрана удалённого рабочего стола",
   "ai.vision.privacyBlocked": "Чтение экрана ИИ заблокировано для этой сессии.",
-  "ai.vision.viewingScreen": "ИИ просматривает экран",
+  "ai.vision.viewingScreen": "Catty просматривает рабочий стол",
   "ai.vision.askAi": "Спросить ИИ",
   "ai.vision.captureFullAndAsk": "Снимок экрана и вопрос ИИ",
   "ai.vision.snipRegionAndAsk": "Выделить область и спросить ИИ",

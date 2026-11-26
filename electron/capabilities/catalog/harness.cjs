@@ -100,6 +100,25 @@ const HARNESS_CAPABILITIES = [
     },
   },
   {
+    id: "harness.remote_desktop.act",
+    agentKinds: ["sidebar"],
+    domain: "harness",
+    status: CAPABILITY_STATUS.IMPLEMENTED,
+    description: "Perform mouse and keyboard actions on a connected VNC or RDP remote desktop session in the active AI scope.",
+    policy: {
+      write: true,
+      sensitiveRead: false,
+      longRunning: false,
+      requiresChatSession: true,
+      bypassesObserverBlock: false,
+      bypassesApproval: false,
+      bypassesChatCancel: false,
+    },
+    surfaces: {
+      catty: { toolName: "remote_desktop_act" },
+    },
+  },
+  {
     id: "harness.web.search",
     domain: "harness",
     status: CAPABILITY_STATUS.IMPLEMENTED,

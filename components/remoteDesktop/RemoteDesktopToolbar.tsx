@@ -18,8 +18,10 @@ import {
   Eye,
   FileDown,
   FolderOpen,
-  FolderTree,
+  FolderPlus,
   Gauge,
+  HardDrive,
+  History,
   Keyboard,
   Layers,
   Lock,
@@ -29,6 +31,7 @@ import {
   Minimize,
   Monitor,
   MoreHorizontal,
+  MousePointer,
   Pin,
   PinOff,
   Power,
@@ -43,6 +46,7 @@ import {
   Sparkles,
   Square,
   Terminal,
+  Trash2,
   Upload,
   UploadCloud,
   Volume2,
@@ -51,9 +55,22 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import type { RemoteDesktopProtocol } from '../../domain/remoteDesktop';
+import type { RdpMultiMonitorMode } from '../../domain/models/connection';
+import {
+  classifyNetworkQualityTier,
+  formatBandwidthBps,
+  RDP_RESOLUTION_PRESETS,
+  type NetworkQualityTier,
+  type RemoteDesktopProtocol,
+} from '../../domain/remoteDesktop';
+import type { RemoteDesktopSharedFolder } from '../../infrastructure/remoteDesktop/remoteDesktopSharedFolders';
+import {
+  getRemoteDesktopTelemetry,
+  subscribeRemoteDesktopTelemetry,
+} from '../../infrastructure/remoteDesktop/remoteDesktopTelemetryStore';
 import { cn } from '../../lib/utils';
 import {
+  CattyIcon,
   RdpProtocolIcon,
   SshTunnelIcon,
   SystemRdpClientIcon,
@@ -71,10 +88,12 @@ import {
   type RemoteDesktopClipboardTransferState,
   type RemoteDesktopDisplayMode,
   type RemoteDesktopQualityPreset,
+  type RemoteDesktopStatsEvent,
 } from './remoteDesktopHelpers';
 import type { RemoteDesktopSpecialKeyId } from './vncKeymap';
 
 export interface RemoteDesktopToolbarProps {
+  sessionId?: string;
   protocol: RemoteDesktopProtocol;
   hostLabel: string;
   status: 'connecting' | 'connected' | 'disconnected';
@@ -96,6 +115,22 @@ export interface RemoteDesktopToolbarProps {
   onToggleHighDpi?: (enabled: boolean) => void;
   mapCmdToCtrl?: boolean;
   onToggleMapCmdToCtrl?: (enabled: boolean) => void;
+  // Resolution presets & multi-monitor (RDP, and VNC when dynamic resize supported)
+  fixedResolution?: { width: number; height: number } | null;
+  onSelectResolutionPreset?: (width: number, height: number) => void;
+  multiMonitorMode?: RdpMultiMonitorMode;
+  onChangeMultiMonitorMode?: (mode: RdpMultiMonitorMode) => void;
+  monitorCount?: number;
+  localDisplayCount?: number;
+  activeMonitorIndex?: 'all' | number;
+  onSelectActiveMonitor?: (index: 'all' | number) => void;
+  // RDPDR Shared Folders (RDP only, local-only)
+  sharedFolders?: readonly RemoteDesktopSharedFolder[];
+  onAddSharedFolder?: () => void;
+  onRemoveSharedFolder?: (folderId: string) => void;
+  onToggleSharedFolderReadOnly?: (folderId: string, readOnly: boolean) => void;
+  // Real-time network telemetry (RDP & VNC)
+  networkStats?: RemoteDesktopStatsEvent | null;
   // RDP audio
   audioEnabled?: boolean;
   audioMuted?: boolean;
@@ -115,22 +150,28 @@ export interface RemoteDesktopToolbarProps {
   // Companion SFTP
   onOpenSftp?: () => void;
   isSftpOpen?: boolean;
-  // AI Vision
+  // AI Vision & Computer Use
   onAskAiFull?: () => void;
   onAskAiRegion?: () => void;
   onOpenAiChat?: () => void;
   aiReadBlocked?: boolean;
   onToggleAiReadBlocked?: (blocked: boolean) => void;
+  aiAuditCount?: number;
+  onOpenAiAuditLog?: () => void;
   // Session Recording
   isRecording?: boolean;
   recordingElapsedLabel?: string;
   recordingSupported?: boolean;
   onToggleRecording?: () => void;
-  // Quality / view-only
+  // Quality / view-only / VNC extras
   quality: RemoteDesktopQualityPreset;
   onChangeQuality: (quality: RemoteDesktopQualityPreset) => void;
   viewOnly: boolean;
   onToggleViewOnly: (viewOnly: boolean) => void;
+  showRemoteCursor?: boolean;
+  onToggleShowRemoteCursor?: (show: boolean) => void;
+  supportsXvp?: boolean;
+  onSendXvpAction?: (action: 'shutdown' | 'reboot' | 'reset') => void;
   // Actions
   onRefreshScreen?: () => void;
   onScreenshotCopy: () => void;
@@ -305,7 +346,277 @@ const QUALITY_OPTIONS: ReadonlyArray<{
   { id: 'lossless', fallback: 'Lossless', badge: 'Raw' },
 ];
 
+const NETWORK_TIER_META: Readonly<Record<NetworkQualityTier, {
+  bars: number;
+  barClass: string;
+  badgeClass: string;
+  labelKey: string;
+  fallback: string;
+}>> = {
+  excellent: {
+    bars: 4,
+    barClass: 'bg-emerald-500',
+    badgeClass: 'border-emerald-500/30 bg-emerald-500/12 text-emerald-600 dark:text-emerald-400',
+    labelKey: 'remoteDesktop.network.quality.excellent',
+    fallback: 'Excellent',
+  },
+  good: {
+    bars: 3,
+    barClass: 'bg-lime-500',
+    badgeClass: 'border-lime-500/30 bg-lime-500/12 text-lime-600 dark:text-lime-400',
+    labelKey: 'remoteDesktop.network.quality.good',
+    fallback: 'Good',
+  },
+  fair: {
+    bars: 2,
+    barClass: 'bg-amber-500',
+    badgeClass: 'border-amber-500/30 bg-amber-500/12 text-amber-600 dark:text-amber-400',
+    labelKey: 'remoteDesktop.network.quality.fair',
+    fallback: 'Fair',
+  },
+  poor: {
+    bars: 1,
+    barClass: 'bg-rose-500',
+    badgeClass: 'border-rose-500/30 bg-rose-500/12 text-rose-600 dark:text-rose-400',
+    labelKey: 'remoteDesktop.network.quality.poor',
+    fallback: 'Poor',
+  },
+  unknown: {
+    bars: 0,
+    barClass: 'bg-muted-foreground/40',
+    badgeClass: 'border-border/60 bg-muted/50 text-muted-foreground',
+    labelKey: 'remoteDesktop.network.quality.unknown',
+    fallback: 'Measuring',
+  },
+};
+
+const NetworkSignalBars: React.FC<{ tier: NetworkQualityTier }> = ({ tier }) => {
+  const meta = NETWORK_TIER_META[tier];
+  const heights = ['h-1', 'h-1.5', 'h-2', 'h-2.5'];
+  return (
+    <span className="inline-flex items-end gap-[1.5px] h-3" aria-hidden="true">
+      {heights.map((hClass, idx) => (
+        <span
+          key={hClass}
+          className={cn(
+            'w-[2.5px] rounded-[0.5px] transition-colors',
+            hClass,
+            idx < meta.bars ? meta.barClass : 'bg-muted-foreground/25',
+          )}
+        />
+      ))}
+    </span>
+  );
+};
+
+type ToolbarBarDensity = 'wide' | 'compact' | 'narrow';
+
+function resolveBarDensity(width: number): ToolbarBarDensity {
+  if (width < 540) return 'narrow';
+  if (width < 820) return 'compact';
+  return 'wide';
+}
+
+const RemoteDesktopHostFpsLabel = React.memo(({
+  sessionId,
+  fpsProp,
+}: {
+  sessionId?: string;
+  fpsProp?: number;
+}) => {
+  const [liveFps, setLiveFps] = useState<number>(() =>
+    fpsProp !== undefined ? fpsProp : (sessionId ? getRemoteDesktopTelemetry(sessionId).fps : 0),
+  );
+  useEffect(() => {
+    if (fpsProp !== undefined || !sessionId) return undefined;
+    const sync = () => {
+      const next = getRemoteDesktopTelemetry(sessionId).fps;
+      setLiveFps((prev) => (prev === next ? prev : next));
+    };
+    sync();
+    return subscribeRemoteDesktopTelemetry(sessionId, sync);
+  }, [fpsProp, sessionId]);
+
+  const effectiveFps = fpsProp !== undefined ? fpsProp : liveFps;
+  return effectiveFps > 0 ? <> · {Math.round(effectiveFps)} FPS</> : null;
+});
+RemoteDesktopHostFpsLabel.displayName = 'RemoteDesktopHostFpsLabel';
+
+const RemoteDesktopNetworkTelemetryPill = React.memo(({
+  sessionId,
+  protocol,
+  networkStatsProp,
+  fpsProp,
+  resolutionLabel,
+  encrypted,
+  tunneled,
+  narrowMode,
+}: {
+  sessionId?: string;
+  protocol: RemoteDesktopProtocol;
+  networkStatsProp?: RemoteDesktopStatsEvent | null;
+  fpsProp?: number;
+  resolutionLabel: string;
+  encrypted?: boolean;
+  tunneled?: boolean;
+  narrowMode: boolean;
+}) => {
+  const { t } = useI18n();
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const popoverOpenRef = useRef(popoverOpen);
+  popoverOpenRef.current = popoverOpen;
+
+  const [liveTelemetry, setLiveTelemetry] = useState(() =>
+    sessionId ? getRemoteDesktopTelemetry(sessionId) : { networkStats: null, fps: 0 },
+  );
+
+  useEffect(() => {
+    if (!sessionId || networkStatsProp !== undefined) return undefined;
+    const sync = () => {
+      const next = getRemoteDesktopTelemetry(sessionId);
+      setLiveTelemetry((prev) => {
+        if (popoverOpenRef.current) {
+          return prev === next ? prev : next;
+        }
+        // When popover is closed, only re-render if visible pill RTT text or quality tier changed!
+        const prevRtt = typeof prev.networkStats?.rttMs === 'number' && Number.isFinite(prev.networkStats.rttMs)
+          ? Math.max(0, Math.round(prev.networkStats.rttMs))
+          : null;
+        const nextRtt = typeof next.networkStats?.rttMs === 'number' && Number.isFinite(next.networkStats.rttMs)
+          ? Math.max(0, Math.round(next.networkStats.rttMs))
+          : null;
+        if (prevRtt === nextRtt) return prev;
+        return next;
+      });
+    };
+    sync();
+    return subscribeRemoteDesktopTelemetry(sessionId, sync);
+  }, [networkStatsProp, sessionId]);
+
+  // Refresh full bandwidth stats immediately when the user opens the telemetry popover
+  useEffect(() => {
+    if (popoverOpen && sessionId && networkStatsProp === undefined) {
+      setLiveTelemetry(getRemoteDesktopTelemetry(sessionId));
+    }
+  }, [networkStatsProp, popoverOpen, sessionId]);
+
+  const stats = networkStatsProp !== undefined ? networkStatsProp : liveTelemetry.networkStats;
+  const effectiveFps = fpsProp !== undefined ? fpsProp : liveTelemetry.fps;
+  const networkTier = classifyNetworkQualityTier(stats?.rttMs ?? null);
+  const networkTierMeta = NETWORK_TIER_META[networkTier];
+  const rttDisplay = typeof stats?.rttMs === 'number' && Number.isFinite(stats.rttMs)
+    ? `${Math.max(0, Math.round(stats.rttMs))}ms`
+    : '--';
+  const fpsLabel = typeof effectiveFps === 'number' && effectiveFps > 0 ? `${Math.round(effectiveFps)} FPS` : '';
+
+  return (
+    <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-testid="remote-desktop-network-pill"
+          data-quality-tier={networkTier}
+          className="h-7 shrink-0 gap-1.5 rounded-md px-1.5 text-xs font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          title={tr(t, 'remoteDesktop.network.title', 'Connection Telemetry')}
+          aria-label={tr(t, 'remoteDesktop.network.title', 'Connection Telemetry')}
+        >
+          <NetworkSignalBars tier={networkTier} />
+          {!narrowMode && (
+            <span className="font-mono text-[11px] tabular-nums">{rttDisplay}</span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 space-y-2.5 p-3 text-xs">
+        <div className="flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+            <NetworkSignalBars tier={networkTier} />
+            <span>{tr(t, 'remoteDesktop.network.title', 'Connection Telemetry')}</span>
+          </span>
+          <span
+            className={cn(
+              'inline-flex items-center rounded border px-1.5 py-0 text-[10px] font-semibold leading-4',
+              networkTierMeta.badgeClass,
+            )}
+          >
+            {tr(t, networkTierMeta.labelKey, networkTierMeta.fallback)}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5 rounded-md border border-border/60 bg-muted/35 p-2 font-mono text-[11px]">
+          <div>
+            <div className="font-sans text-[10px] text-muted-foreground">
+              {tr(t, 'remoteDesktop.network.latency', 'Latency')}
+            </div>
+            <div className="font-semibold text-foreground">{rttDisplay}</div>
+          </div>
+          <div>
+            <div className="font-sans text-[10px] text-muted-foreground">
+              {tr(t, 'remoteDesktop.network.resolution', 'Resolution')}
+            </div>
+            <div className="font-semibold text-foreground">{resolutionLabel}</div>
+          </div>
+          <div>
+            <div className="font-sans text-[10px] text-muted-foreground">
+              {tr(t, 'remoteDesktop.network.downlink', 'Downlink (RX)')}
+            </div>
+            <div className="text-emerald-600 dark:text-emerald-400">
+              {formatBandwidthBps(stats?.rxBps ?? 0)}
+            </div>
+          </div>
+          <div>
+            <div className="font-sans text-[10px] text-muted-foreground">
+              {tr(t, 'remoteDesktop.network.uplink', 'Uplink (TX)')}
+            </div>
+            <div className="text-sky-600 dark:text-sky-400">
+              {formatBandwidthBps(stats?.txBps ?? 0)}
+            </div>
+          </div>
+          <div>
+            <div className="font-sans text-[10px] text-muted-foreground">
+              {tr(t, 'remoteDesktop.network.totalRx', 'Total RX')}
+            </div>
+            <div className="text-foreground/85">
+              {formatTransferBytes(stats?.totalRxBytes ?? 0)}
+            </div>
+          </div>
+          <div>
+            <div className="font-sans text-[10px] text-muted-foreground">
+              {tr(t, 'remoteDesktop.network.totalTx', 'Total TX')}
+            </div>
+            <div className="text-foreground/85">
+              {formatTransferBytes(stats?.totalTxBytes ?? 0)}
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-1.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 font-mono uppercase">
+            <span>{protocol.toUpperCase()}</span>
+            {fpsLabel && <span>· {fpsLabel}</span>}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            {encrypted && (
+              <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+                <Lock size={10} />
+                <span>{tr(t, 'remoteDesktop.network.tlsEncrypted', 'TLS')}</span>
+              </span>
+            )}
+            {tunneled && (
+              <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+                <SshTunnelIcon size={10} />
+                <span>SSH</span>
+              </span>
+            )}
+          </span>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+});
+RemoteDesktopNetworkTelemetryPill.displayName = 'RemoteDesktopNetworkTelemetryPill';
+
 export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.memo(({
+  sessionId,
   protocol,
   hostLabel,
   status,
@@ -326,6 +637,19 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
   onToggleHighDpi,
   mapCmdToCtrl = false,
   onToggleMapCmdToCtrl,
+  fixedResolution = null,
+  onSelectResolutionPreset,
+  multiMonitorMode = 'single',
+  onChangeMultiMonitorMode,
+  monitorCount = 1,
+  localDisplayCount = 1,
+  activeMonitorIndex = 'all',
+  onSelectActiveMonitor,
+  sharedFolders = [],
+  onAddSharedFolder,
+  onRemoveSharedFolder,
+  onToggleSharedFolderReadOnly,
+  networkStats,
   audioEnabled,
   audioMuted,
   audioVolume = 1,
@@ -340,13 +664,13 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
   onDismissClipboardTransfer,
   onDownloadClipboardFile,
   onUploadLocalClipboardFiles,
-  onOpenSftp,
-  isSftpOpen = false,
   onAskAiFull,
   onAskAiRegion,
   onOpenAiChat,
   aiReadBlocked = false,
   onToggleAiReadBlocked,
+  aiAuditCount = 0,
+  onOpenAiAuditLog,
   isRecording = false,
   recordingElapsedLabel = '00:00',
   recordingSupported = true,
@@ -355,6 +679,10 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
   onChangeQuality,
   viewOnly,
   onToggleViewOnly,
+  showRemoteCursor = true,
+  onToggleShowRemoteCursor,
+  supportsXvp = false,
+  onSendXvpAction,
   onRefreshScreen,
   onScreenshotCopy,
   onScreenshotSave,
@@ -367,27 +695,49 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
   const { t } = useI18n();
   const [pinnedFullscreen, setPinnedFullscreen] = useState(false);
   const [hoverReveal, setHoverReveal] = useState(false);
-  const [barWidth, setBarWidth] = useState(9999);
+  const [barDensity, setBarDensity] = useState<ToolbarBarDensity>('wide');
+  const [customWidthInput, setCustomWidthInput] = useState(() => String(fixedResolution?.width || resolution?.width || 1920));
+  const [customHeightInput, setCustomHeightInput] = useState(() => String(fixedResolution?.height || resolution?.height || 1080));
   const barRef = useRef<HTMLDivElement | null>(null);
   const localFileInputRef = useRef<HTMLInputElement | null>(null);
   const isRdp = protocol === 'rdp';
 
+  const canPickResolution = Boolean(onSelectResolutionPreset && (isRdp || supportsDynamicResize));
+
+  const handleApplyCustomResolution = () => {
+    if (!onSelectResolutionPreset) return;
+    const w = Number.parseInt(customWidthInput, 10);
+    const h = Number.parseInt(customHeightInput, 10);
+    if (!Number.isFinite(w) || !Number.isFinite(h)) return;
+    const clampedW = Math.min(8192, Math.max(200, w));
+    const clampedH = Math.min(8192, Math.max(200, h));
+    setCustomWidthInput(String(clampedW));
+    setCustomHeightInput(String(clampedH));
+    onSelectResolutionPreset(clampedW, clampedH);
+  };
+
   useEffect(() => {
     const el = barRef.current;
     if (!el || isFullscreen || typeof ResizeObserver === 'undefined') return undefined;
-    const measure = () => {
-      const w = el.getBoundingClientRect().width;
-      if (w > 0) setBarWidth(Math.round(w));
+    const applyWidth = (w: number) => {
+      if (w > 0) {
+        const next = resolveBarDensity(w);
+        setBarDensity((prev) => (prev === next ? prev : next));
+      }
     };
-    measure();
-    const observer = new ResizeObserver(measure);
+    applyWidth(el.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      const w = entry?.contentRect?.width ?? el.getBoundingClientRect().width;
+      applyWidth(w);
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, [isFullscreen]);
 
-  // Responsive container breakpoints (work accurately inside narrow split panes!)
-  const compactLabels = !isFullscreen && barWidth < 820;
-  const narrowMode = !isFullscreen && barWidth < 540;
+  // Responsive container breakpoints (discretized into 3 tiers so drag-resizing causes 0 idle re-renders)
+  const compactLabels = !isFullscreen && barDensity !== 'wide';
+  const narrowMode = !isFullscreen && barDensity === 'narrow';
   const specialKeyItems = isRdp ? RDP_SPECIAL_KEY_ITEMS : VNC_SPECIAL_KEY_ITEMS;
 
   const statusDotClass =
@@ -398,7 +748,6 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
         : 'bg-muted-foreground/45';
 
   const resolutionLabel = resolution ? `${resolution.width}×${resolution.height}` : '--';
-  const fpsLabel = typeof fps === 'number' && fps > 0 ? `${Math.round(fps)} FPS` : '';
   const volumePercent = Math.round((audioMuted ? 0 : audioVolume) * 100);
   const activeDisplayOption = DISPLAY_MODE_OPTIONS.find((opt) => opt.id === displayMode);
   const activeDisplayLabel = activeDisplayOption
@@ -457,18 +806,18 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
           </div>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="text-xs">
-          <div className="space-y-1">
+          <div className="space-y-1 text-primary-foreground">
             <div className="flex items-center gap-1.5 font-medium">
-              {isRdp ? <RdpProtocolIcon size={13} className="text-blue-500" /> : <VncProtocolIcon size={13} className="text-teal-500" />}
+              {isRdp ? <RdpProtocolIcon size={13} className="text-primary-foreground" /> : <VncProtocolIcon size={13} className="text-primary-foreground" />}
               <span>{hostLabel}</span>
-              <span className="text-muted-foreground">({protocol.toUpperCase()})</span>
+              <span className="text-primary-foreground/75">({protocol.toUpperCase()})</span>
             </div>
-            <div className="font-mono text-[11px] text-muted-foreground">
+            <div className="font-mono text-[11px] text-primary-foreground/85">
               {statusDetail || status} · {resolutionLabel}
-              {fpsLabel ? ` · ${fpsLabel}` : ''}
+              <RemoteDesktopHostFpsLabel sessionId={sessionId} fpsProp={fps} />
             </div>
             {tunneled && (
-              <div className="flex items-center gap-1 text-emerald-500">
+              <div className="flex items-center gap-1 text-primary-foreground/90">
                 <SshTunnelIcon size={11} />
                 <span>{tr(t, 'remoteDesktop.toolbar.sshTunneled', 'Tunneled over SSH')}</span>
               </div>
@@ -495,7 +844,7 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                   : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
               )}
               onClick={onToggleKeyboardGrab}
-              disabled={viewOnly}
+              disabled={status !== 'connected' || viewOnly}
               aria-label={keyboardGrabActive
                 ? tr(t, 'remoteDesktop.toolbar.keysRemote', 'Keys: Remote')
                 : tr(t, 'remoteDesktop.toolbar.keysLocal', 'Keys: Local')}
@@ -602,6 +951,44 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                   </PopoverClose>
                 ))}
               </div>
+              {supportsXvp && onSendXvpAction && (
+                <>
+                  <div className="my-1 h-px bg-border/60" />
+                  <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium text-muted-foreground">
+                    <Power size={11} className="text-amber-500" />
+                    <span>{tr(t, 'remoteDesktop.xvp.title', 'Remote Power (XVP)')}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 px-2 py-1">
+                    <PopoverClose asChild>
+                      <button
+                        type="button"
+                        className="rounded-md border border-border/60 bg-secondary/40 px-1.5 py-1 text-[10px] font-medium transition-colors hover:bg-accent"
+                        onClick={() => onSendXvpAction('reboot')}
+                      >
+                        {tr(t, 'remoteDesktop.xvp.reboot', 'Reboot')}
+                      </button>
+                    </PopoverClose>
+                    <PopoverClose asChild>
+                      <button
+                        type="button"
+                        className="rounded-md border border-amber-500/35 bg-amber-500/10 px-1.5 py-1 text-[10px] font-medium text-amber-500 transition-colors hover:bg-amber-500/20"
+                        onClick={() => onSendXvpAction('shutdown')}
+                      >
+                        {tr(t, 'remoteDesktop.xvp.shutdown', 'Shutdown')}
+                      </button>
+                    </PopoverClose>
+                    <PopoverClose asChild>
+                      <button
+                        type="button"
+                        className="rounded-md border border-destructive/35 bg-destructive/10 px-1.5 py-1 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/20"
+                        onClick={() => onSendXvpAction('reset')}
+                      >
+                        {tr(t, 'remoteDesktop.xvp.reset', 'Hard Reset')}
+                      </button>
+                    </PopoverClose>
+                  </div>
+                </>
+              )}
             </>
           )}
           <div className="my-1 h-px bg-border/60" />
@@ -615,7 +1002,7 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
         </PopoverContent>
       </Popover>
 
-      {/* Display / Scaling Mode */}
+      {/* Display / Scaling Mode + Resolution Presets + Multi-Monitor */}
       <Popover>
         <PopoverTrigger asChild>
           <Button
@@ -633,40 +1020,128 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
             {!compactLabels && <span>{activeDisplayLabel}</span>}
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-56 p-1.5 text-xs">
-          {DISPLAY_MODE_OPTIONS.map((opt) => {
-            const disabled = opt.id === 'dynamic' && !isRdp && !supportsDynamicResize;
-            return (
-              <PopoverClose key={opt.id} asChild>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => onChangeDisplayMode(opt.id)}
-                  className={cn(
-                    'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent disabled:opacity-45 disabled:pointer-events-none',
-                    displayMode === opt.id && 'bg-accent/70 font-medium text-foreground',
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    {opt.icon}
-                    <span>{tr(t, opt.labelKey, opt.fallback)}</span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    {disabled && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {tr(t, 'remoteDesktop.display.unsupported', 'Unsupported')}
-                      </span>
+        <PopoverContent align="start" className="w-64 p-2 text-xs">
+          <div className="space-y-0.5">
+            {DISPLAY_MODE_OPTIONS.map((opt) => {
+              const disabled = opt.id === 'dynamic' && !isRdp && !supportsDynamicResize;
+              return (
+                <PopoverClose key={opt.id} asChild>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onChangeDisplayMode(opt.id)}
+                    className={cn(
+                      'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted/70 disabled:opacity-45 disabled:pointer-events-none',
+                      displayMode === opt.id && 'bg-primary/15 font-medium text-foreground',
                     )}
-                    {displayMode === opt.id && <Check size={13} className="text-primary" />}
-                  </span>
-                </button>
-              </PopoverClose>
-            );
-          })}
+                  >
+                    <span className="flex items-center gap-2">
+                      {opt.icon}
+                      <span>{tr(t, opt.labelKey, opt.fallback)}</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      {disabled && (
+                        <span className="text-[10px] text-muted-foreground">
+                          {tr(t, 'remoteDesktop.display.unsupported', 'Unsupported')}
+                        </span>
+                      )}
+                      {displayMode === opt.id && <Check size={13} className="text-primary" />}
+                    </span>
+                  </button>
+                </PopoverClose>
+              );
+            })}
+          </div>
+
+          {/* Resolution Presets + Custom W x H */}
+          {canPickResolution && (
+            <>
+              <div className="my-2 h-px bg-border/60" />
+              <div className="space-y-1.5 px-1">
+                <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+                  <span>{tr(t, 'remoteDesktop.display.resolutionPresets', 'Resolution Presets')}</span>
+                  {resolution && (
+                    <span className="font-mono text-[10px] text-muted-foreground/80">{resolutionLabel}</span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  {RDP_RESOLUTION_PRESETS.map((preset) => {
+                    const isActive =
+                      (fixedResolution?.width === preset.width && fixedResolution?.height === preset.height)
+                      || (!fixedResolution && resolution?.width === preset.width && resolution?.height === preset.height);
+                    return (
+                      <PopoverClose key={preset.label} asChild>
+                        <button
+                          type="button"
+                          disabled={status !== 'connected'}
+                          onClick={() => {
+                            setCustomWidthInput(String(preset.width));
+                            setCustomHeightInput(String(preset.height));
+                            onSelectResolutionPreset?.(preset.width, preset.height);
+                          }}
+                          className={cn(
+                            'rounded-md border px-2 py-1 font-mono text-[11px] transition-colors disabled:opacity-45 disabled:pointer-events-none',
+                            isActive
+                              ? 'border-primary/50 bg-primary/12 font-medium text-primary'
+                              : 'border-border/60 bg-secondary/30 text-foreground/85 hover:bg-accent',
+                          )}
+                        >
+                          {preset.label}
+                        </button>
+                      </PopoverClose>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-1 pt-0.5">
+                  <input
+                    type="number"
+                    min={200}
+                    max={8192}
+                    value={customWidthInput}
+                    onChange={(e) => setCustomWidthInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleApplyCustomResolution();
+                    }}
+                    aria-label={tr(t, 'remoteDesktop.display.customWidth', 'Width')}
+                    placeholder="1920"
+                    className="h-6 w-full min-w-0 rounded border border-input bg-background px-1.5 font-mono text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <span className="text-[10px] text-muted-foreground">×</span>
+                  <input
+                    type="number"
+                    min={200}
+                    max={8192}
+                    value={customHeightInput}
+                    onChange={(e) => setCustomHeightInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleApplyCustomResolution();
+                    }}
+                    aria-label={tr(t, 'remoteDesktop.display.customHeight', 'Height')}
+                    placeholder="1080"
+                    className="h-6 w-full min-w-0 rounded border border-input bg-background px-1.5 font-mono text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <PopoverClose asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={status !== 'connected'}
+                      className="h-6 shrink-0 px-2 text-[10px]"
+                      onClick={handleApplyCustomResolution}
+                    >
+                      {tr(t, 'remoteDesktop.display.applyResolution', 'Apply')}
+                    </Button>
+                  </PopoverClose>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* HiDPI Toggle (RDP) */}
           {isRdp && onToggleHighDpi && (
             <>
-              <div className="my-1 h-px bg-border/60" />
-              <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5">
+              <div className="my-2 h-px bg-border/60" />
+              <div className="flex items-center justify-between gap-2 rounded-md px-1.5 py-1">
                 <span className="text-xs font-medium">
                   {tr(t, 'remoteDesktop.display.highDpi', 'Retina HiDPI')}
                 </span>
@@ -674,8 +1149,99 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
               </div>
             </>
           )}
+
+          {/* Multi-Monitor Layout (RDP) */}
+          {isRdp && onChangeMultiMonitorMode && (
+            <>
+              <div className="my-2 h-px bg-border/60" />
+              <div className="space-y-1 px-1">
+                <div className="text-[11px] font-medium text-muted-foreground">
+                  {tr(t, 'remoteDesktop.display.multiMonitor', 'Multi-Monitor Layout')}
+                </div>
+                {(
+                  [
+                    {
+                      id: 'single' as const,
+                      label: tr(t, 'remoteDesktop.display.monitorSingle', 'Single Monitor'),
+                    },
+                    {
+                      id: 'dual' as const,
+                      label: tr(t, 'remoteDesktop.display.monitorDual', 'Dual Side-by-Side'),
+                    },
+                    {
+                      id: 'all-local' as const,
+                      label: localDisplayCount > 1
+                        ? tr(
+                            t,
+                            'remoteDesktop.display.monitorAllLocalCount',
+                            'Match Local Displays ({count})',
+                            { count: localDisplayCount },
+                          )
+                        : tr(t, 'remoteDesktop.display.monitorAllLocal', 'Match Local Displays'),
+                    },
+                  ]
+                ).map((item) => (
+                  <PopoverClose key={item.id} asChild>
+                    <button
+                      type="button"
+                      disabled={status !== 'connected'}
+                      onClick={() => onChangeMultiMonitorMode(item.id)}
+                      className={cn(
+                        'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-[11px] transition-colors hover:bg-accent disabled:opacity-45 disabled:pointer-events-none',
+                        multiMonitorMode === item.id && 'bg-accent/70 font-medium text-foreground',
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Monitor size={12} className="text-muted-foreground" />
+                        <span>{item.label}</span>
+                      </span>
+                      {multiMonitorMode === item.id && <Check size={12} className="text-primary" />}
+                    </button>
+                  </PopoverClose>
+                ))}
+              </div>
+            </>
+          )}
         </PopoverContent>
       </Popover>
+
+      {/* Active Monitor Switcher Pill (RDP Multi-Monitor >1) */}
+      {isRdp && monitorCount > 1 && onSelectActiveMonitor && (
+        <div
+          data-testid="rdp-monitor-switcher"
+          className="inline-flex h-6 shrink-0 items-center rounded-md border border-border/60 bg-muted/40 p-0.5 text-[10px]"
+          role="group"
+          aria-label={tr(t, 'remoteDesktop.display.monitorSwitcher', 'Switch active monitor')}
+        >
+          <button
+            type="button"
+            onClick={() => onSelectActiveMonitor('all')}
+            className={cn(
+              'h-5 rounded px-1.5 font-medium transition-colors cursor-pointer',
+              activeMonitorIndex === 'all'
+                ? 'bg-background text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {tr(t, 'remoteDesktop.display.monitorAll', 'All')}
+          </button>
+          {Array.from({ length: monitorCount }, (_, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => onSelectActiveMonitor(idx)}
+              className={cn(
+                'h-5 min-w-[20px] rounded px-1.5 font-mono font-medium transition-colors cursor-pointer',
+                activeMonitorIndex === idx
+                  ? 'bg-background text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {idx + 1}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="min-w-1 flex-1" />
 
@@ -742,10 +1308,10 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
               </div>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
-              <div className="space-y-0.5">
+              <div className="space-y-0.5 text-primary-foreground">
                 <div className="font-medium">{clipboardTransfer.message}</div>
                 {clipboardTransfer.totalBytes > 0 && (
-                  <div className="font-mono text-[11px] text-muted-foreground">
+                  <div className="font-mono text-[11px] text-primary-foreground/85">
                     {formatTransferBytes(clipboardTransfer.transferredBytes)} / {formatTransferBytes(clipboardTransfer.totalBytes)}
                   </div>
                 )}
@@ -754,34 +1320,124 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
           </Tooltip>
         )}
 
-        {/* Companion SSH SFTP Quick Open (P1-C) */}
-        {!narrowMode && onOpenSftp && (
-          <Tooltip>
-            <TooltipTrigger asChild>
+        {/* Network Quality & Live Telemetry Pill (isolated leaf subscription for 0 toolbar re-renders) */}
+        {status === 'connected' && (sessionId !== undefined || networkStats !== undefined) && (
+          <RemoteDesktopNetworkTelemetryPill
+            sessionId={sessionId}
+            protocol={protocol}
+            networkStatsProp={networkStats}
+            fpsProp={fps}
+            resolutionLabel={resolutionLabel}
+            encrypted={encrypted}
+            tunneled={tunneled}
+            narrowMode={narrowMode}
+          />
+        )}
+
+        {/* Shared Folders (RDPDR) Popover (RDP only) */}
+        {isRdp && onAddSharedFolder && (!narrowMode || sharedFolders.length > 0) && (
+          <Popover>
+            <PopoverTrigger asChild>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                data-testid="remote-desktop-sftp-btn"
-                aria-pressed={isSftpOpen}
+                data-testid="rdp-shared-folders-btn"
                 className={cn(
-                  'h-7 shrink-0 gap-1.5 rounded-md text-xs font-normal transition-colors',
-                  compactLabels ? 'w-7 px-0' : 'px-2',
-                  isSftpOpen
-                    ? 'bg-primary/12 text-primary font-medium hover:bg-primary/18'
+                  'h-7 shrink-0 gap-1 rounded-md px-1.5 text-xs',
+                  sharedFolders.length > 0
+                    ? 'bg-primary/12 text-primary hover:bg-primary/18'
                     : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                 )}
-                onClick={onOpenSftp}
-                aria-label={tr(t, 'remoteDesktop.toolbar.openSftp', 'SFTP')}
+                title={tr(t, 'remoteDesktop.sharedFolders.title', 'Shared Folders (RDPDR)')}
+                aria-label={tr(t, 'remoteDesktop.sharedFolders.title', 'Shared Folders (RDPDR)')}
               >
-                <FolderTree size={13} />
-                {!compactLabels && <span>{tr(t, 'remoteDesktop.toolbar.openSftp', 'SFTP')}</span>}
+                <HardDrive size={13} />
+                {sharedFolders.length > 0 && (
+                  <span className="font-mono text-[11px] font-semibold">{sharedFolders.length}</span>
+                )}
               </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
-              {tr(t, 'remoteDesktop.toolbar.openSftp', 'SFTP')}
-            </TooltipContent>
-          </Tooltip>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-76 space-y-2.5 p-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                  <HardDrive size={13} className="text-blue-500" />
+                  <span>{tr(t, 'remoteDesktop.sharedFolders.title', 'Shared Folders (RDPDR)')}</span>
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-[11px]"
+                  onClick={onAddSharedFolder}
+                >
+                  <FolderPlus size={11} />
+                  <span>{tr(t, 'remoteDesktop.sharedFolders.add', 'Add Folder')}</span>
+                </Button>
+              </div>
+              {sharedFolders.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border/70 bg-muted/25 px-3 py-3 text-center text-[11px] text-muted-foreground">
+                  {tr(
+                    t,
+                    'remoteDesktop.sharedFolders.empty',
+                    'Mount a local folder as a virtual drive on the remote Windows desktop.',
+                  )}
+                </div>
+              ) : (
+                <div className="max-h-48 space-y-1.5 overflow-y-auto">
+                  {sharedFolders.map((folder) => (
+                    <div
+                      key={folder.id}
+                      className="rounded-md border border-border/60 bg-secondary/35 px-2.5 py-2 space-y-1.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium text-foreground" title={folder.name}>
+                            {folder.name}
+                          </div>
+                          <div
+                            className="truncate font-mono text-[10px] text-muted-foreground"
+                            title={folder.path}
+                          >
+                            {folder.path}
+                          </div>
+                        </div>
+                        {onRemoveSharedFolder && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => onRemoveSharedFolder(folder.id)}
+                            aria-label={tr(t, 'remoteDesktop.sharedFolders.remove', 'Remove folder')}
+                            title={tr(t, 'remoteDesktop.sharedFolders.remove', 'Remove folder')}
+                          >
+                            <Trash2 size={11} />
+                          </Button>
+                        )}
+                      </div>
+                      {onToggleSharedFolderReadOnly && (
+                        <div className="flex items-center justify-between border-t border-border/50 pt-1 text-[10px] text-muted-foreground">
+                          <span>{tr(t, 'remoteDesktop.sharedFolders.readOnly', 'Read-only')}</span>
+                          <Switch
+                            checked={folder.readOnly}
+                            onCheckedChange={(ro) => onToggleSharedFolderReadOnly(folder.id, ro)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="border-t border-border/60 pt-2 text-[10px] leading-snug text-muted-foreground">
+                {tr(
+                  t,
+                  'remoteDesktop.sharedFolders.hint',
+                  'Windows: This PC → <Folder> on Netcatty (\\\\tsclient\\<Name>). Local-only, never synced.',
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
         )}
 
         {/* RDP Audio Control */}
@@ -1026,13 +1682,22 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                 <Switch checked={highDpi} onCheckedChange={onToggleHighDpi} />
               </div>
             )}
-            {isRdp && onToggleMapCmdToCtrl && (
+            {onToggleMapCmdToCtrl && (
               <div className="flex items-center justify-between border-t border-border/60 pt-2">
                 <span className="inline-flex items-center gap-1.5 font-medium">
                   <Keyboard size={13} className="text-blue-500" />
                   {tr(t, 'remoteDesktop.toolbar.mapCmdToCtrl', 'Map Cmd → Ctrl')}
                 </span>
                 <Switch checked={mapCmdToCtrl} onCheckedChange={onToggleMapCmdToCtrl} />
+              </div>
+            )}
+            {!isRdp && onToggleShowRemoteCursor && (
+              <div className="flex items-center justify-between border-t border-border/60 pt-2">
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                  <MousePointer size={13} className="text-teal-500" />
+                  {tr(t, 'remoteDesktop.toolbar.showRemoteCursor', 'Show Remote Cursor')}
+                </span>
+                <Switch checked={showRemoteCursor} onCheckedChange={onToggleShowRemoteCursor} />
               </div>
             )}
             {!isRdp && onRefreshScreen && (
@@ -1064,8 +1729,8 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                       key={opt.id}
                       type="button"
                       className={cn(
-                        'flex items-center justify-between rounded-md px-2 py-1 text-left text-[11px] transition-colors hover:bg-accent',
-                        quality === opt.id && 'bg-accent font-medium text-foreground',
+                        'flex items-center justify-between rounded-md px-2 py-1 text-left text-[11px] transition-colors hover:bg-muted/70',
+                        quality === opt.id && 'bg-primary/15 font-medium text-foreground',
                       )}
                       onClick={() => onChangeQuality(opt.id)}
                     >
@@ -1169,8 +1834,8 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                   onClick={onAskAiFull ?? onOpenAiChat}
                   aria-label={tr(t, 'ai.vision.askAi', 'Ask AI')}
                 >
-                  <Sparkles size={13} className="text-primary/85" />
-                  {!compactLabels && <span>{tr(t, 'ai.vision.askAi', 'Ask AI')}</span>}
+                  <CattyIcon size={13} className="text-primary/85" />
+                  {!compactLabels && <span>Catty</span>}
                   {aiReadBlocked && (
                     <ShieldOff size={11} className="text-amber-500" aria-label={tr(t, 'ai.vision.privacyLockOn', 'AI screen reading blocked')} />
                   )}
@@ -1229,6 +1894,26 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                     >
                       <MessageSquare size={13} className="text-emerald-500" />
                       <span>{tr(t, 'ai.vision.openAiChat', 'Open AI assistant')}</span>
+                    </button>
+                  </PopoverClose>
+                )}
+                {onOpenAiAuditLog && (
+                  <PopoverClose asChild>
+                    <button
+                      type="button"
+                      data-testid="remote-desktop-ai-audit-btn"
+                      onClick={onOpenAiAuditLog}
+                      className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                    >
+                      <span className="flex items-center gap-2">
+                        <History size={13} className="text-cyan-500" />
+                        <span>{tr(t, 'remoteDesktop.ai.audit.menuItem', 'Computer Use Audit Log')}</span>
+                      </span>
+                      {aiAuditCount > 0 && (
+                        <span className="rounded-full bg-primary/15 px-1.5 py-0 font-mono text-[10px] font-semibold text-primary">
+                          {aiAuditCount}
+                        </span>
+                      )}
                     </button>
                   </PopoverClose>
                 )}
@@ -1328,7 +2013,11 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                     ? tr(t, 'remoteDesktop.toolbar.keysRemote', 'Keys: Remote')
                     : tr(t, 'remoteDesktop.toolbar.keysLocal', 'Keys: Local')}
                 </span>
-                <Switch checked={keyboardGrabActive} disabled={viewOnly} onCheckedChange={onToggleKeyboardGrab} />
+                <Switch
+                  checked={keyboardGrabActive}
+                  disabled={status !== 'connected' || viewOnly}
+                  onCheckedChange={onToggleKeyboardGrab}
+                />
               </div>
               <div className="flex items-center justify-between rounded-md px-2 py-1">
                 <span className="inline-flex items-center gap-2 font-medium">
@@ -1362,7 +2051,7 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                   <Switch checked={highDpi} onCheckedChange={onToggleHighDpi} />
                 </div>
               )}
-              {isRdp && onToggleMapCmdToCtrl && (
+              {onToggleMapCmdToCtrl && (
                 <div className="flex items-center justify-between rounded-md px-2 py-1">
                   <span className="inline-flex items-center gap-2 font-medium">
                     <Command size={13} className="text-muted-foreground" />
@@ -1371,16 +2060,56 @@ export const RemoteDesktopToolbar: React.FC<RemoteDesktopToolbarProps> = React.m
                   <Switch checked={mapCmdToCtrl} onCheckedChange={onToggleMapCmdToCtrl} />
                 </div>
               )}
+              {!isRdp && onToggleShowRemoteCursor && (
+                <div className="flex items-center justify-between rounded-md px-2 py-1">
+                  <span className="inline-flex items-center gap-2 font-medium">
+                    <MousePointer size={13} className="text-muted-foreground" />
+                    {tr(t, 'remoteDesktop.toolbar.showRemoteCursor', 'Show Remote Cursor')}
+                  </span>
+                  <Switch checked={showRemoteCursor} onCheckedChange={onToggleShowRemoteCursor} />
+                </div>
+              )}
+              {!isRdp && (
+                <div className="space-y-1 rounded-md px-2 py-1">
+                  <div className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
+                    <Sparkles size={11} className="text-amber-500" />
+                    <span>{tr(t, 'remoteDesktop.toolbar.quality', 'Encoding Quality')}</span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1">
+                    {QUALITY_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        className={cn(
+                          'rounded border px-1 py-0.5 text-center text-[10px] transition-colors',
+                          quality === opt.id
+                            ? 'border-primary/60 bg-primary/15 font-medium text-primary'
+                            : 'border-border/60 bg-secondary/40 text-muted-foreground hover:bg-accent hover:text-foreground',
+                        )}
+                        onClick={() => onChangeQuality(opt.id)}
+                      >
+                        {opt.id === 'lossless'
+                          ? 'Raw'
+                          : opt.id === 'medium'
+                            ? 'Med'
+                            : opt.id === 'low'
+                              ? 'Low'
+                              : opt.fallback}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="my-1 h-px bg-border/60" />
-              {onOpenSftp && (
+              {isRdp && onAddSharedFolder && (
                 <PopoverClose asChild>
                   <button
                     type="button"
-                    onClick={onOpenSftp}
+                    onClick={onAddSharedFolder}
                     className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent"
                   >
-                    <FolderTree size={13} className="text-muted-foreground" />
-                    <span>{tr(t, 'remoteDesktop.toolbar.openSftp', 'SFTP')}</span>
+                    <FolderPlus size={13} className="text-muted-foreground" />
+                    <span>{tr(t, 'remoteDesktop.sharedFolders.add', 'Add Folder')}</span>
                   </button>
                 </PopoverClose>
               )}

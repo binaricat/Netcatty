@@ -5,23 +5,16 @@ import { hostCardFocusClassName } from "../../domain/hostClickBehavior";
 import { getVaultHostRowSubtitle } from "../../domain/localShellHost";
 import type { Host } from "../../domain/models";
 import { isPluginHostProtocol } from "../../domain/pluginConnection";
-import {
-  hasCompanionRdp,
-  hasCompanionVnc,
-  isRdpProtocol,
-  isVncProtocol,
-  type RemoteDesktopProtocol,
-} from "../../domain/remoteDesktop";
+import { type RemoteDesktopProtocol } from "../../domain/remoteDesktop";
 import { isVaultHostDraggable } from "../../domain/vaultHostDrag";
 import { HostNotesIndicator } from "../host/HostNotesIndicator";
+import { HostRemoteDesktopIndicators } from "../host/HostRemoteDesktopIndicators";
 import {
   CompanionRemoteDesktopMenuItems,
   OpenDualPaneSftpMenuItem,
   OpenHostBrowserMenuItem,
   OpenSystemRemoteDesktopMenuItems,
 } from "../host/HostTreeContextMenus";
-import { getProtocolBadgeClass } from "../protocolVisuals";
-import { RdpProtocolIcon, VncProtocolIcon } from "../icons/RemoteDesktopIcons";
 
 export type VaultHostCardSection = "pinned" | "recent" | "grouped" | "main";
 
@@ -215,10 +208,6 @@ export const VaultHostCard: React.FC<VaultHostCardProps> = ({
 
   const safeHost = sanitizeHost(host);
   const effectiveDistro = getEffectiveHostDistro(safeHost);
-  const isStandaloneRdp = isRdpProtocol(safeHost.protocol);
-  const isStandaloneVnc = isVncProtocol(safeHost.protocol);
-  const companionRdp = hasCompanionRdp(safeHost);
-  const companionVnc = hasCompanionVnc(safeHost);
   const distroBadge = {
     text: (safeHost.os || "L")[0].toUpperCase(),
     label: effectiveDistro || safeHost.os || "Linux",
@@ -284,70 +273,15 @@ export const VaultHostCard: React.FC<VaultHostCardProps> = ({
             <DistroAvatar host={safeHost} fallback={distroBadge.text} size="lg" />
             <div className="min-w-0 flex flex-col justify-center gap-0.5 flex-1">
               <div className="flex items-center gap-1.5 min-w-0">
+                <HostRemoteDesktopIndicators
+                  host={safeHost}
+                  size={14}
+                  onConnectRemoteDesktop={onConnectRemoteDesktop}
+                />
                 <span className="text-sm font-semibold truncate leading-5 min-w-0">
                   {safeHost.label}
                 </span>
-                {viewMode !== "grid" && (
-                  <>
-                    {isStandaloneRdp && (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0",
-                          getProtocolBadgeClass("rdp"),
-                        )}
-                      >
-                        <RdpProtocolIcon size={10} />
-                        RDP
-                      </span>
-                    )}
-                    {isStandaloneVnc && (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0",
-                          getProtocolBadgeClass("vnc"),
-                        )}
-                      >
-                        <VncProtocolIcon size={10} />
-                        VNC
-                      </span>
-                    )}
-                    {companionRdp && (
-                      <button
-                        type="button"
-                        title={t("vault.hosts.connectRdp")}
-                        className={cn(
-                          "inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 transition-all hover:brightness-110 hover:shadow-sm",
-                          getProtocolBadgeClass("rdp"),
-                        )}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onConnectRemoteDesktop?.(safeHost, "rdp");
-                        }}
-                      >
-                        <RdpProtocolIcon size={10} />
-                        +RDP
-                      </button>
-                    )}
-                    {companionVnc && (
-                      <button
-                        type="button"
-                        title={t("vault.hosts.connectVnc")}
-                        className={cn(
-                          "inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 transition-all hover:brightness-110 hover:shadow-sm",
-                          getProtocolBadgeClass("vnc"),
-                        )}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onConnectRemoteDesktop?.(safeHost, "vnc");
-                        }}
-                      >
-                        <VncProtocolIcon size={10} />
-                        +VNC
-                      </button>
-                    )}
-                    {renderEditButton(host, true)}
-                  </>
-                )}
+                {viewMode !== "grid" && renderEditButton(host, true)}
                 {showManagedBadge && (
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 shrink-0">
                     managed
@@ -359,66 +293,6 @@ export const VaultHostCard: React.FC<VaultHostCardProps> = ({
                 <div className="text-[11px] text-muted-foreground font-mono truncate leading-4 min-w-0 flex-1">
                   {getVaultHostRowSubtitle(safeHost, { localFallback: t("localShell.subtitle") })}
                 </div>
-                {viewMode === "grid" && (isStandaloneRdp || isStandaloneVnc || companionRdp || companionVnc) && (
-                  <div className="flex items-center gap-1 shrink-0">
-                    {isStandaloneRdp && (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-0.5 rounded border px-1 py-0 text-[9.5px] font-semibold leading-[15px] shrink-0",
-                          getProtocolBadgeClass("rdp"),
-                        )}
-                      >
-                        <RdpProtocolIcon size={9} />
-                        RDP
-                      </span>
-                    )}
-                    {isStandaloneVnc && (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-0.5 rounded border px-1 py-0 text-[9.5px] font-semibold leading-[15px] shrink-0",
-                          getProtocolBadgeClass("vnc"),
-                        )}
-                      >
-                        <VncProtocolIcon size={9} />
-                        VNC
-                      </span>
-                    )}
-                    {companionRdp && (
-                      <button
-                        type="button"
-                        title={t("vault.hosts.connectRdp")}
-                        className={cn(
-                          "inline-flex items-center gap-0.5 rounded border px-1 py-0 text-[9.5px] font-semibold leading-[15px] shrink-0 transition-all hover:brightness-110",
-                          getProtocolBadgeClass("rdp"),
-                        )}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onConnectRemoteDesktop?.(safeHost, "rdp");
-                        }}
-                      >
-                        <RdpProtocolIcon size={9} />
-                        +RDP
-                      </button>
-                    )}
-                    {companionVnc && (
-                      <button
-                        type="button"
-                        title={t("vault.hosts.connectVnc")}
-                        className={cn(
-                          "inline-flex items-center gap-0.5 rounded border px-1 py-0 text-[9.5px] font-semibold leading-[15px] shrink-0 transition-all hover:brightness-110",
-                          getProtocolBadgeClass("vnc"),
-                        )}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onConnectRemoteDesktop?.(safeHost, "vnc");
-                        }}
-                      >
-                        <VncProtocolIcon size={9} />
-                        +VNC
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
             </div>
             {viewMode === "grid" && renderEditButton(host)}

@@ -7,6 +7,12 @@ import React, {
   useState,
 } from 'react';
 import {
+  permilleToFramebufferCoord,
+  resolveChordToVncKeysyms,
+  resolveKeyToVncKeysym,
+  type RemoteDesktopAction,
+} from '../../domain/remoteDesktopActionCodec';
+import {
   captureFrameFromCanvas,
   type RemoteDesktopCaptureRequest,
   type RemoteDesktopProviderFrame,
@@ -24,6 +30,7 @@ import {
   isRemoteDesktopGrabReleaseChord,
   type RemoteDesktopCanvasHandle,
   type RemoteDesktopDisplayMode,
+  type RemoteDesktopQualityPreset,
 } from './remoteDesktopHelpers';
 
 // VNC Binary WebSocket Opcodes (must match electron/bridges/remoteDesktopBridge.cjs)
@@ -39,6 +46,7 @@ const S2C = {
   DESKTOP_NAME: 0x09,
   ERROR: 0x0a,
   FRAME_SYNC: 0x0b,
+  CAPABILITIES: 0x0c,
 } as const;
 
 const C2S = {
@@ -49,7 +57,20 @@ const C2S = {
   CLIPBOARD: 0x14,
   REFRESH: 0x15,
   PAUSE: 0x16,
+  SET_ENCODINGS: 0x17,
+  SET_READ_ONLY: 0x18,
+  XVP: 0x19,
 } as const;
+
+export interface VncCapabilities {
+  extendedDesktopSize?: boolean;
+  unicodeClipboard?: boolean;
+  extendedClipboard?: boolean;
+  qemuExtendedKeyEvent?: boolean;
+  continuousUpdates?: boolean;
+  fence?: boolean;
+  xvp?: boolean;
+}
 
 export interface VncCanvasViewProps {
   wsUrl: string;
@@ -58,6 +79,7 @@ export interface VncCanvasViewProps {
   viewOnly: boolean;
   clipboardSyncEnabled: boolean;
   showRemoteCursor: boolean;
+  mapCmdToCtrl?: boolean;
   keyboardGrabActive: boolean;
   onRequestReleaseGrab: () => void;
   onConnected: (info: {
@@ -67,9 +89,12 @@ export interface VncCanvasViewProps {
     securityName?: string;
     encrypted?: boolean;
     supportsDynamicResize?: boolean;
+    supportsXvp?: boolean;
   }) => void;
+  onCapabilitiesChange?: (supports: VncCapabilities) => void;
   onDesktopResize: (size: { width: number; height: number }) => void;
   onDesktopName?: (name: string) => void;
+  onBell?: () => void;
   onFpsChange?: (fps: number) => void;
   onError: (error: { code?: string; message: string; isAuthError?: boolean }) => void;
   onDisconnected: (reason?: string) => void;
@@ -132,6 +157,29 @@ function buildRefreshFrame(incremental: boolean): Uint8Array {
   return new Uint8Array([C2S.REFRESH, incremental ? 1 : 0]);
 }
 
+function buildSetEncodingsFrame(quality: RemoteDesktopQualityPreset): Uint8Array {
+  const bytes = textEncoder.encode(quality);
+  const buf = new Uint8Array(1 + bytes.byteLength);
+  buf[0] = C2S.SET_ENCODINGS;
+  buf.set(bytes, 1);
+  return buf;
+}
+
+function buildSetReadOnlyFrame(readOnly: boolean): Uint8Array {
+  return new Uint8Array([C2S.SET_READ_ONLY, readOnly ? 1 : 0]);
+}
+
+function buildXvpFrame(action: 'shutdown' | 'reboot' | 'reset'): Uint8Array {
+  const bytes = textEncoder.encode(action);
+  const buf = new Uint8Array(1 + bytes.byteLength);
+  buf[0] = C2S.XVP;
+  buf.set(bytes, 1);
+  return buf;
+}
+
+const MAX_CURSOR_CACHE_ENTRIES = 24;
+const MAX_CSS_CURSOR_DIM = 128;
+
 export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, VncCanvasViewProps>(
   function VncCanvasView(
     {
@@ -141,11 +189,14 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       viewOnly,
       clipboardSyncEnabled,
       showRemoteCursor,
+      mapCmdToCtrl = false,
       keyboardGrabActive,
       onRequestReleaseGrab,
       onConnected,
+      onCapabilitiesChange,
       onDesktopResize,
       onDesktopName,
+      onBell,
       onFpsChange,
       onError,
       onDisconnected,
@@ -156,14 +207,17 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
     const cursorCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    const lastCursorCacheRef = useRef<{ key: string; css: string } | null>(null);
+    const cursorCacheRef = useRef<Map<string, string>>(new Map());
+    const lastRemoteCursorCssRef = useRef<string>('default');
     const cachedCanvasRectRef = useRef<DOMRect | null>(null);
     const pendingPointerRef = useRef<{ x: number; y: number } | null>(null);
     const pointerRafRef = useRef<number | null>(null);
     const lastSentPointerRef = useRef<{ x: number; y: number; buttons: number } | null>(null);
+    const wheelAccumRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
     const imeInputRef = useRef<HTMLTextAreaElement | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
-    const supportsRef = useRef<{ extendedDesktopSize?: boolean; qemuExtendedKeyEvent?: boolean }>({});
+    const supportsRef = useRef<VncCapabilities>({});
+    const [dynamicResizeReadySeq, setDynamicResizeReadySeq] = useState(0);
     const pressedKeysRef = useRef<Map<string, { keysym: number; keycode: number | null }>>(new Map());
     const buttonsMaskRef = useRef(0);
     const lastPointerPosRef = useRef({ x: 0, y: 0 });
@@ -173,6 +227,8 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
     const frameCountRef = useRef(0);
     const lastReportedFpsRef = useRef<number | null>(null);
     const [remoteSize, setRemoteSize] = useState<{ width: number; height: number }>({ width: 1280, height: 800 });
+    const remoteSizeRef = useRef(remoteSize);
+    remoteSizeRef.current = remoteSize;
     const [cursorCss, setCursorCss] = useState<string>('default');
 
     const getCanvasContext = useCallback((): CanvasRenderingContext2D | null => {
@@ -190,8 +246,10 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
     // Keep latest callbacks in refs so WS effect never tears down on re-renders.
     const callbacksRef = useRef({
       onConnected,
+      onCapabilitiesChange,
       onDesktopResize,
       onDesktopName,
+      onBell,
       onFpsChange,
       onError,
       onDisconnected,
@@ -199,16 +257,32 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
     });
     callbacksRef.current = {
       onConnected,
+      onCapabilitiesChange,
       onDesktopResize,
       onDesktopName,
+      onBell,
       onFpsChange,
       onError,
       onDisconnected,
       onRequestReleaseGrab,
     };
 
-    const propsRef = useRef({ viewOnly, clipboardSyncEnabled, showRemoteCursor, isVisible, keyboardGrabActive });
-    propsRef.current = { viewOnly, clipboardSyncEnabled, showRemoteCursor, isVisible, keyboardGrabActive };
+    const propsRef = useRef({
+      viewOnly,
+      clipboardSyncEnabled,
+      showRemoteCursor,
+      mapCmdToCtrl,
+      isVisible,
+      keyboardGrabActive,
+    });
+    propsRef.current = {
+      viewOnly,
+      clipboardSyncEnabled,
+      showRemoteCursor,
+      mapCmdToCtrl,
+      isVisible,
+      keyboardGrabActive,
+    };
 
     const sendBinary = useCallback((frame: Uint8Array) => {
       const ws = wsRef.current;
@@ -218,8 +292,8 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
     }, []);
 
     const sendKeyRaw = useCallback(
-      (keysym: number, keycode: number | null, down: boolean) => {
-        if (propsRef.current.viewOnly) return;
+      (keysym: number, keycode: number | null, down: boolean, bypassViewOnly = false) => {
+        if (!bypassViewOnly && propsRef.current.viewOnly) return;
         if (supportsRef.current.qemuExtendedKeyEvent && keycode !== null) {
           sendBinary(buildQemuKeyFrame(keysym, keycode, down));
         } else {
@@ -231,7 +305,8 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
 
     const releaseAllInputs = useCallback(() => {
       for (const entry of pressedKeysRef.current.values()) {
-        sendKeyRaw(entry.keysym, entry.keycode, false);
+        // Always bypass viewOnly when releasing keys that were already pressed.
+        sendKeyRaw(entry.keysym, entry.keycode, false, true);
       }
       pressedKeysRef.current.clear();
       if (buttonsMaskRef.current !== 0) {
@@ -335,6 +410,262 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       sendBinary(buildRefreshFrame(false));
     }, [sendBinary]);
 
+    const resizeToPreset = useCallback(
+      (width: number, height: number) => {
+        if (!supportsRef.current.extendedDesktopSize) return;
+        const targetW = Math.max(320, Math.min(8192, Math.round(width)));
+        const targetH = Math.max(240, Math.min(8192, Math.round(height)));
+        sendBinary(buildResizeFrame(targetW, targetH));
+      },
+      [sendBinary],
+    );
+
+    const setQuality = useCallback(
+      (quality: RemoteDesktopQualityPreset) => {
+        sendBinary(buildSetEncodingsFrame(quality));
+      },
+      [sendBinary],
+    );
+
+    const sendXvpAction = useCallback(
+      (action: 'shutdown' | 'reboot' | 'reset') => {
+        if (propsRef.current.viewOnly) return;
+        if (!supportsRef.current.xvp) return;
+        sendBinary(buildXvpFrame(action));
+      },
+      [sendBinary],
+    );
+
+    const performAiAction = useCallback(
+      async (action: RemoteDesktopAction, options?: { signal?: AbortSignal }): Promise<void> => {
+        const signal = options?.signal;
+        if (signal?.aborted) return;
+        if (propsRef.current.viewOnly) {
+          throw new Error('VNC session is in view-only mode.');
+        }
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          throw new Error('VNC session is not connected.');
+        }
+        const isCancelled = () => Boolean(
+          signal?.aborted
+          || propsRef.current.viewOnly
+          || wsRef.current !== ws
+          || ws.readyState !== WebSocket.OPEN,
+        );
+        const sleep = (ms: number) => new Promise<void>((resolve) => {
+          if (ms <= 0 || isCancelled()) {
+            resolve();
+            return;
+          }
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            window.clearTimeout(timer);
+            signal?.removeEventListener('abort', finish);
+            resolve();
+          };
+          const timer = window.setTimeout(finish, ms);
+          signal?.addEventListener('abort', finish, { once: true });
+        });
+        const canvas = canvasRef.current;
+        const fbW = Math.max(1, canvas?.width || remoteSizeRef.current.width || 1280);
+        const fbH = Math.max(1, canvas?.height || remoteSizeRef.current.height || 800);
+
+        const glidePointerTo = async (targetX: number, targetY: number) => {
+          if (isCancelled()) return;
+          const prev = lastPointerPosRef.current;
+          const dx = targetX - prev.x;
+          const dy = targetY - prev.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 6) {
+            lastPointerPosRef.current = { x: targetX, y: targetY };
+            sendBinary(buildPointerFrame(targetX, targetY, 0));
+            return;
+          }
+          const steps = Math.max(6, Math.min(14, Math.round(dist / 85) + 5));
+          const stepDelay = 14;
+          for (let step = 1; step <= steps; step += 1) {
+            if (isCancelled()) return;
+            const t = step / steps;
+            const eased = 1 - Math.pow(1 - t, 3);
+            const ix = Math.round(prev.x + dx * eased);
+            const iy = Math.round(prev.y + dy * eased);
+            lastPointerPosRef.current = { x: ix, y: iy };
+            sendBinary(buildPointerFrame(ix, iy, 0));
+            if (step < steps) {
+              await sleep(stepDelay);
+            }
+          }
+        };
+
+        switch (action.type) {
+          case 'wait':
+            await sleep(action.ms);
+            return;
+
+          case 'move': {
+            const x = permilleToFramebufferCoord(action.x, fbW);
+            const y = permilleToFramebufferCoord(action.y, fbH);
+            await glidePointerTo(x, y);
+            return;
+          }
+
+          case 'click': {
+            const x = permilleToFramebufferCoord(action.x, fbW);
+            const y = permilleToFramebufferCoord(action.y, fbH);
+            const btnBit = action.button === 'right' ? 4 : action.button === 'middle' ? 2 : 1;
+            const clickCount = action.clickCount ?? 1;
+            await glidePointerTo(x, y);
+            if (isCancelled()) return;
+            const modSyms: number[] = [];
+            for (const mod of action.modifiers ?? []) {
+              const sym = resolveKeyToVncKeysym(mod);
+              if (sym !== null) modSyms.push(sym);
+            }
+            let buttonHeld = false;
+            let modsHeld = false;
+            try {
+              for (const sym of modSyms) {
+                sendBinary(buildKeyFrame(sym, true));
+              }
+              modsHeld = modSyms.length > 0;
+              for (let i = 0; i < clickCount; i += 1) {
+                if (isCancelled()) break;
+                if (i > 0) {
+                  await sleep(45);
+                  if (isCancelled()) break;
+                }
+                sendBinary(buildPointerFrame(x, y, btnBit));
+                buttonHeld = true;
+                await sleep(24);
+                sendBinary(buildPointerFrame(x, y, 0));
+                buttonHeld = false;
+              }
+            } finally {
+              if (buttonHeld) {
+                const pos = lastPointerPosRef.current;
+                sendBinary(buildPointerFrame(pos.x, pos.y, 0));
+              }
+              if (modsHeld) {
+                for (let i = modSyms.length - 1; i >= 0; i -= 1) {
+                  sendBinary(buildKeyFrame(modSyms[i], false));
+                }
+              }
+            }
+            return;
+          }
+
+          case 'drag': {
+            const startX = permilleToFramebufferCoord(action.fromX, fbW);
+            const startY = permilleToFramebufferCoord(action.fromY, fbH);
+            const endX = permilleToFramebufferCoord(action.toX, fbW);
+            const endY = permilleToFramebufferCoord(action.toY, fbH);
+            const btnBit = action.button === 'right' ? 4 : 1;
+            const steps = Math.max(6, Math.min(40, Math.round(action.steps ?? 12)));
+            await glidePointerTo(startX, startY);
+            if (isCancelled()) return;
+            await sleep(20);
+            if (isCancelled()) return;
+            let buttonHeld = false;
+            try {
+              sendBinary(buildPointerFrame(startX, startY, btnBit));
+              buttonHeld = true;
+              for (let step = 1; step <= steps; step += 1) {
+                if (isCancelled()) break;
+                await sleep(16);
+                if (isCancelled()) break;
+                const t = step / steps;
+                const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+                const ix = Math.round(startX + (endX - startX) * eased);
+                const iy = Math.round(startY + (endY - startY) * eased);
+                lastPointerPosRef.current = { x: ix, y: iy };
+                sendBinary(buildPointerFrame(ix, iy, btnBit));
+              }
+              if (!isCancelled()) {
+                await sleep(18);
+              }
+              if (!isCancelled()) {
+                lastPointerPosRef.current = { x: endX, y: endY };
+                sendBinary(buildPointerFrame(endX, endY, 0));
+                buttonHeld = false;
+              }
+            } finally {
+              if (buttonHeld) {
+                const pos = lastPointerPosRef.current;
+                sendBinary(buildPointerFrame(pos.x, pos.y, 0));
+              }
+            }
+            return;
+          }
+
+          case 'scroll': {
+            const x = permilleToFramebufferCoord(action.x, fbW);
+            const y = permilleToFramebufferCoord(action.y, fbH);
+            await glidePointerTo(x, y);
+            if (isCancelled()) return;
+            const dy = action.deltaY ?? 0;
+            const dx = action.deltaX ?? 0;
+            if (dy !== 0) {
+              const bit = dy < 0 ? 8 : 16;
+              const ticks = Math.max(1, Math.min(20, Math.round(Math.abs(dy) / 100) || 1));
+              for (let i = 0; i < ticks; i += 1) {
+                if (isCancelled()) break;
+                if (i > 0) await sleep(18);
+                if (isCancelled()) break;
+                sendBinary(buildPointerFrame(x, y, bit));
+                sendBinary(buildPointerFrame(x, y, 0));
+              }
+            }
+            if (dx !== 0) {
+              const bit = dx < 0 ? 32 : 64;
+              const ticks = Math.max(1, Math.min(20, Math.round(Math.abs(dx) / 100) || 1));
+              for (let i = 0; i < ticks; i += 1) {
+                if (isCancelled()) break;
+                if (i > 0) await sleep(18);
+                if (isCancelled()) break;
+                sendBinary(buildPointerFrame(x, y, bit));
+                sendBinary(buildPointerFrame(x, y, 0));
+              }
+            }
+            return;
+          }
+
+          case 'type': {
+            if (isCancelled()) return;
+            const keysyms = textToVncKeysymSequence(action.text);
+            for (const sym of keysyms) {
+              if (isCancelled()) break;
+              sendBinary(buildKeyFrame(sym, true));
+              sendBinary(buildKeyFrame(sym, false));
+            }
+            return;
+          }
+
+          case 'key': {
+            if (isCancelled()) return;
+            const chord = resolveChordToVncKeysyms(action.key);
+            if (!chord || chord.length === 0) {
+              throw new Error(`Unsupported VNC key chord: ${action.key}`);
+            }
+            for (const sym of chord) {
+              sendBinary(buildKeyFrame(sym, true));
+            }
+            try {
+              await sleep(20);
+            } finally {
+              for (let i = chord.length - 1; i >= 0; i -= 1) {
+                sendBinary(buildKeyFrame(chord[i], false));
+              }
+            }
+            return;
+          }
+        }
+      },
+      [sendBinary],
+    );
+
     useImperativeHandle(
       ref,
       () => ({
@@ -348,6 +679,10 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
         focusInput,
         syncClipboardNow,
         requestRefresh,
+        resizeToPreset,
+        setQuality,
+        sendXvpAction,
+        performAiAction,
       }),
       [
         captureFrame,
@@ -355,9 +690,13 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
         focusInput,
         getCanvasRect,
         getCaptureStream,
+        performAiAction,
         releaseAllInputs,
         requestRefresh,
+        resizeToPreset,
         sendSpecialKey,
+        sendXvpAction,
+        setQuality,
         syncClipboardNow,
         typeText,
       ],
@@ -384,7 +723,30 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       }
     }, [isVisible, releaseAllInputs, sendBinary]);
 
-    // Resize canvas helper preserving previous contents
+    // Sync viewOnly live to backend and release any held inputs when entering view-only mode
+    useEffect(() => {
+      if (viewOnly) {
+        releaseAllInputs();
+      }
+      sendBinary(buildSetReadOnlyFrame(viewOnly));
+    }, [releaseAllInputs, sendBinary, viewOnly]);
+
+    // Sync remote cursor CSS immediately when showRemoteCursor toggles
+    useEffect(() => {
+      setCursorCss(showRemoteCursor ? lastRemoteCursorCssRef.current : 'default');
+    }, [showRemoteCursor]);
+
+    // Sync local clipboard when returning from another OS app while this tab is visible
+    useEffect(() => {
+      if (!isVisible) return undefined;
+      const onWinFocus = () => {
+        syncLocalClipboardToServer(false);
+      };
+      window.addEventListener('focus', onWinFocus);
+      return () => window.removeEventListener('focus', onWinFocus);
+    }, [isVisible, syncLocalClipboardToServer]);
+
+    // Resize canvas helper (clears backing buffer on dimension change)
     const resizeBackingCanvas = useCallback((width: number, height: number) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -400,6 +762,7 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       let disposed = false;
       let reportedError = false;
       let ws: WebSocket | null = null;
+      paintChainRef.current = Promise.resolve();
 
       // Defer WebSocket creation by a macrotask so React StrictMode's synthetic
       // unmount cancels cleanly without consuming the one-time loopback token.
@@ -413,14 +776,33 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       }, 0);
 
       const attachSocketHandlers = (ws: WebSocket) => {
+      let pendingAsyncPaints = 0;
 
-      const enqueuePaint = (fn: () => void | Promise<void>) => {
+      // Fast path: paint synchronous rects (RAW_RGBA / COPY_RECT) directly with zero Promise
+      // allocation whenever no async createImageBitmap decode is in flight, while preserving
+      // strict RFB painter's order whenever a JPEG decode is queued ahead of them.
+      const enqueueSyncPaint = (fn: () => void) => {
+        if (pendingAsyncPaints === 0) {
+          try {
+            fn();
+          } catch {
+            // ignore transient canvas errors
+          }
+          return;
+        }
         paintChainRef.current = paintChainRef.current
-          .then(() => {
-            if (disposed) return;
-            return fn();
-          })
+          .then(() => fn())
           .catch(() => {});
+      };
+
+      const enqueueAsyncPaint = (fn: () => Promise<void>) => {
+        pendingAsyncPaints += 1;
+        paintChainRef.current = paintChainRef.current
+          .then(() => fn())
+          .catch(() => {})
+          .finally(() => {
+            pendingAsyncPaints = Math.max(0, pendingAsyncPaints - 1);
+          });
       };
 
       ws.onmessage = (event) => {
@@ -438,12 +820,16 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
                 height?: number;
                 name?: string;
                 securityName?: string;
-                supports?: { extendedDesktopSize?: boolean; qemuExtendedKeyEvent?: boolean };
+                supports?: VncCapabilities;
               };
-              supportsRef.current = info.supports ?? {};
+              const caps = info.supports ?? {};
+              supportsRef.current = caps;
               const w = Math.max(1, Number(info.width) || 1280);
               const h = Math.max(1, Number(info.height) || 800);
-              resizeBackingCanvas(w, h);
+              enqueueSyncPaint(() => {
+                if (disposed) return;
+                resizeBackingCanvas(w, h);
+              });
               const secName = info.securityName || '';
               const encrypted = /tls|x509|vencrypt|ra2|ard/i.test(secName);
               callbacksRef.current.onConnected({
@@ -452,13 +838,37 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
                 name: info.name,
                 securityName: secName,
                 encrypted,
-                supportsDynamicResize: Boolean(info.supports?.extendedDesktopSize),
+                supportsDynamicResize: Boolean(caps.extendedDesktopSize),
+                supportsXvp: Boolean(caps.xvp),
               });
+              if (caps.extendedDesktopSize) {
+                setDynamicResizeReadySeq((n) => n + 1);
+              }
+              ws.send(buildSetReadOnlyFrame(propsRef.current.viewOnly));
               if (!propsRef.current.isVisible) {
                 ws.send(buildPauseFrame(true));
               }
             } catch {
               // ignore malformed READY
+            }
+            break;
+          }
+
+          case S2C.CAPABILITIES: {
+            try {
+              const msg = JSON.parse(textDecoder.decode(bytes.subarray(1))) as {
+                supports?: VncCapabilities;
+              };
+              if (msg.supports) {
+                const hadDynamic = Boolean(supportsRef.current.extendedDesktopSize);
+                supportsRef.current = { ...supportsRef.current, ...msg.supports };
+                callbacksRef.current.onCapabilitiesChange?.(supportsRef.current);
+                if (!hadDynamic && supportsRef.current.extendedDesktopSize) {
+                  setDynamicResizeReadySeq((n) => n + 1);
+                }
+              }
+            } catch {
+              // ignore malformed CAPABILITIES
             }
             break;
           }
@@ -473,7 +883,8 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
             if (w === 0 || h === 0 || bytes.byteLength < 9 + expectedLen) break;
             // Zero-copy view over the owned WebSocket ArrayBuffer
             const pixelView = new Uint8ClampedArray(event.data, 9, expectedLen);
-            enqueuePaint(() => {
+            enqueueSyncPaint(() => {
+              if (disposed) return;
               const ctx = getCanvasContext();
               if (!ctx) return;
               const imgData = new ImageData(pixelView, w, h);
@@ -491,7 +902,8 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
             const srcX = view.getUint16(9, false);
             const srcY = view.getUint16(11, false);
             if (w === 0 || h === 0) break;
-            enqueuePaint(() => {
+            enqueueSyncPaint(() => {
+              if (disposed) return;
               const canvas = canvasRef.current;
               const ctx = getCanvasContext();
               if (!canvas || !ctx) return;
@@ -509,7 +921,8 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
             if (w === 0 || h === 0) break;
             const jpegBlob = new Blob([bytes.subarray(9)], { type: 'image/jpeg' });
             const bitmapPromise = createImageBitmap(jpegBlob).catch(() => null);
-            enqueuePaint(async () => {
+            // Always run callback so `bitmap.close()` is guaranteed even if disposed mid-decode!
+            enqueueAsyncPaint(async () => {
               const bitmap = await bitmapPromise;
               if (!bitmap) return;
               try {
@@ -526,44 +939,73 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
 
           case S2C.CURSOR: {
             if (bytes.byteLength < 9) break;
-            const hotX = view.getUint16(1, false);
-            const hotY = view.getUint16(3, false);
+            const rawHotX = view.getUint16(1, false);
+            const rawHotY = view.getUint16(3, false);
             const w = view.getUint16(5, false);
             const h = view.getUint16(7, false);
-            if (!propsRef.current.showRemoteCursor) {
-              setCursorCss((prev) => (prev === 'default' ? prev : 'default'));
-              break;
-            }
             if (w === 0 || h === 0) {
-              setCursorCss((prev) => (prev === 'none' ? prev : 'none'));
+              lastRemoteCursorCssRef.current = 'none';
+              if (propsRef.current.showRemoteCursor) {
+                setCursorCss((prev) => (prev === 'none' ? prev : 'none'));
+              }
               break;
             }
             const expectedLen = w * h * 4;
             if (bytes.byteLength < 9 + expectedLen) break;
-            // Fast FNV-1a fingerprint avoids re-encoding identical remote cursor bitmaps
+            // Fast FNV-1a fingerprint + 24-entry LRU cache avoids PNG re-encoding churn
             let hash = 0x811c9dc5;
             for (let i = 9; i < 9 + expectedLen; i += 4) {
               hash ^= bytes[i] ^ (bytes[i + 1] << 8) ^ (bytes[i + 2] << 16) ^ (bytes[i + 3] << 24);
               hash = Math.imul(hash, 0x01000193);
             }
-            const cursorKey = `${w}x${h}:${hotX},${hotY}:${hash >>> 0}`;
-            if (lastCursorCacheRef.current?.key === cursorKey) {
-              const cachedCss = lastCursorCacheRef.current.css;
-              setCursorCss((prev) => (prev === cachedCss ? prev : cachedCss));
+            const cursorKey = `${w}x${h}:${rawHotX},${rawHotY}:${hash >>> 0}`;
+            const cachedCss = cursorCacheRef.current.get(cursorKey);
+            if (cachedCss) {
+              // Refresh LRU recency
+              cursorCacheRef.current.delete(cursorKey);
+              cursorCacheRef.current.set(cursorKey, cachedCss);
+              lastRemoteCursorCssRef.current = cachedCss;
+              if (propsRef.current.showRemoteCursor) {
+                setCursorCss((prev) => (prev === cachedCss ? prev : cachedCss));
+              }
               break;
             }
+            const scale = Math.max(w, h) > MAX_CSS_CURSOR_DIM
+              ? MAX_CSS_CURSOR_DIM / Math.max(w, h)
+              : 1;
+            const outW = Math.max(1, Math.round(w * scale));
+            const outH = Math.max(1, Math.round(h * scale));
+            const hotX = Math.max(0, Math.min(outW - 1, Math.round(rawHotX * scale)));
+            const hotY = Math.max(0, Math.min(outH - 1, Math.round(rawHotY * scale)));
+
             const offscreen = cursorCanvasRef.current ?? document.createElement('canvas');
             cursorCanvasRef.current = offscreen;
-            if (offscreen.width !== w) offscreen.width = w;
-            if (offscreen.height !== h) offscreen.height = h;
+            if (offscreen.width !== outW) offscreen.width = outW;
+            if (offscreen.height !== outH) offscreen.height = outH;
             const offCtx = offscreen.getContext('2d');
             if (offCtx) {
               const imgData = new ImageData(new Uint8ClampedArray(event.data, 9, expectedLen), w, h);
-              offCtx.putImageData(imgData, 0, 0);
+              if (scale === 1) {
+                offCtx.putImageData(imgData, 0, 0);
+              } else {
+                const tmp = document.createElement('canvas');
+                tmp.width = w;
+                tmp.height = h;
+                tmp.getContext('2d')?.putImageData(imgData, 0, 0);
+                offCtx.clearRect(0, 0, outW, outH);
+                offCtx.drawImage(tmp, 0, 0, outW, outH);
+              }
               const url = offscreen.toDataURL('image/png');
               const css = `url("${url}") ${hotX} ${hotY}, auto`;
-              lastCursorCacheRef.current = { key: cursorKey, css };
-              setCursorCss((prev) => (prev === css ? prev : css));
+              if (cursorCacheRef.current.size >= MAX_CURSOR_CACHE_ENTRIES) {
+                const oldestKey = cursorCacheRef.current.keys().next().value;
+                if (oldestKey !== undefined) cursorCacheRef.current.delete(oldestKey);
+              }
+              cursorCacheRef.current.set(cursorKey, css);
+              lastRemoteCursorCssRef.current = css;
+              if (propsRef.current.showRemoteCursor) {
+                setCursorCss((prev) => (prev === css ? prev : css));
+              }
             }
             break;
           }
@@ -573,7 +1015,8 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
             const w = view.getUint16(1, false);
             const h = view.getUint16(3, false);
             if (w > 0 && h > 0) {
-              enqueuePaint(() => {
+              enqueueSyncPaint(() => {
+                if (disposed) return;
                 resizeBackingCanvas(w, h);
               });
             }
@@ -585,6 +1028,11 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
             const text = textDecoder.decode(bytes.subarray(1));
             lastRemoteClipboardRef.current = text;
             void navigator.clipboard?.writeText(text).catch(() => {});
+            break;
+          }
+
+          case S2C.BELL: {
+            callbacksRef.current.onBell?.();
             break;
           }
 
@@ -636,9 +1084,13 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       };
       };
 
+      const cursorCache = cursorCacheRef.current;
       return () => {
         disposed = true;
         window.clearTimeout(connectTimer);
+        paintChainRef.current = Promise.resolve();
+        cursorCache.clear();
+        cursorCanvasRef.current = null;
         if (wsRef.current === ws) {
           wsRef.current = null;
         }
@@ -674,7 +1126,7 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       };
     }, [displayMode, isVisible, remoteSize.height, remoteSize.width]);
 
-    // Debounced dynamic resize when container size changes
+    // Debounced dynamic resize when container size changes (uses remoteSizeRef to prevent resize loops)
     useEffect(() => {
       if (displayMode !== 'dynamic') return undefined;
       const container = containerRef.current;
@@ -685,12 +1137,13 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
         if (timerId !== null) window.clearTimeout(timerId);
         timerId = window.setTimeout(() => {
           timerId = null;
-          if (!propsRef.current.isVisible) return;
+          if (!propsRef.current.isVisible || propsRef.current.viewOnly) return;
           if (!supportsRef.current.extendedDesktopSize) return;
           const rect = container.getBoundingClientRect();
           const targetW = Math.max(320, Math.floor(rect.width));
           const targetH = Math.max(240, Math.floor(rect.height));
-          if (Math.abs(targetW - remoteSize.width) > 8 || Math.abs(targetH - remoteSize.height) > 8) {
+          const cur = remoteSizeRef.current;
+          if (Math.abs(targetW - cur.width) > 8 || Math.abs(targetH - cur.height) > 8) {
             sendBinary(buildResizeFrame(targetW, targetH));
           }
         }, 250);
@@ -703,7 +1156,7 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
         observer.disconnect();
         if (timerId !== null) window.clearTimeout(timerId);
       };
-    }, [displayMode, remoteSize.height, remoteSize.width, sendBinary]);
+    }, [displayMode, dynamicResizeReadySeq, sendBinary]);
 
     const mapPointerCoords = useCallback((clientX: number, clientY: number, forceMeasure = false) => {
       const canvas = canvasRef.current;
@@ -749,6 +1202,14 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
     const handleMouseMove = useCallback(
       (e: React.MouseEvent<HTMLCanvasElement>) => {
         if (propsRef.current.viewOnly) return;
+        // Reconcile button mask against actual DOM `e.buttons` in case release occurred outside canvas
+        const domMask =
+          ((e.buttons & 1) ? 1 : 0)
+          | ((e.buttons & 4) ? 2 : 0)
+          | ((e.buttons & 2) ? 4 : 0);
+        if (buttonsMaskRef.current !== domMask) {
+          buttonsMaskRef.current = domMask;
+        }
         const pos = mapPointerCoords(e.clientX, e.clientY);
         lastPointerPosRef.current = pos;
         pendingPointerRef.current = pos;
@@ -758,6 +1219,19 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       },
       [flushPendingPointerMove, mapPointerCoords],
     );
+
+    // Release stuck mouse buttons if the user drags outside the canvas and releases
+    useEffect(() => {
+      const onWindowMouseUp = () => {
+        if (buttonsMaskRef.current === 0) return;
+        buttonsMaskRef.current = 0;
+        const { x, y } = lastPointerPosRef.current;
+        lastSentPointerRef.current = { x, y, buttons: 0 };
+        sendBinary(buildPointerFrame(x, y, 0));
+      };
+      window.addEventListener('mouseup', onWindowMouseUp);
+      return () => window.removeEventListener('mouseup', onWindowMouseUp);
+    }, [sendBinary]);
 
     const handleMouseDown = useCallback(
       (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -796,25 +1270,53 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       [mapPointerCoords, sendBinary],
     );
 
-    const handleWheel = useCallback(
-      (e: React.WheelEvent<HTMLCanvasElement>) => {
+    const handleWheelNative = useCallback(
+      (e: WheelEvent) => {
         if (propsRef.current.viewOnly) return;
         e.preventDefault();
         flushPendingPointerMove();
         const pos = mapPointerCoords(e.clientX, e.clientY);
         lastPointerPosRef.current = pos;
-        let wheelBit = 0;
+        // Accumulate high-resolution pixel deltas (e.g. macOS trackpads) so 1px inertia events
+        // do not fire full discrete RFB wheel button clicks on every frame.
+        const THRESHOLD_PX = 40;
+        const emitAxisTicks = (delta: number, axis: 'x' | 'y', negBit: number, posBit: number) => {
+          if (delta === 0) return;
+          if (e.deltaMode !== 0) {
+            // Line or page wheel mouse: emit discrete tick directly
+            const bit = delta < 0 ? negBit : posBit;
+            sendBinary(buildPointerFrame(pos.x, pos.y, buttonsMaskRef.current | bit));
+            sendBinary(buildPointerFrame(pos.x, pos.y, buttonsMaskRef.current));
+            return;
+          }
+          const next = wheelAccumRef.current[axis] + delta;
+          const ticks = Math.trunc(next / THRESHOLD_PX);
+          wheelAccumRef.current[axis] = next - ticks * THRESHOLD_PX;
+          if (ticks === 0) return;
+          const bit = ticks < 0 ? negBit : posBit;
+          const count = Math.min(5, Math.abs(ticks));
+          for (let i = 0; i < count; i += 1) {
+            sendBinary(buildPointerFrame(pos.x, pos.y, buttonsMaskRef.current | bit));
+            sendBinary(buildPointerFrame(pos.x, pos.y, buttonsMaskRef.current));
+          }
+        };
         if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
-          wheelBit = e.deltaY < 0 ? 8 : e.deltaY > 0 ? 16 : 0;
+          emitAxisTicks(e.deltaY, 'y', 8, 16);
         } else {
-          wheelBit = e.deltaX < 0 ? 32 : e.deltaX > 0 ? 64 : 0;
+          emitAxisTicks(e.deltaX, 'x', 32, 64);
         }
-        if (wheelBit === 0) return;
-        sendBinary(buildPointerFrame(pos.x, pos.y, buttonsMaskRef.current | wheelBit));
-        sendBinary(buildPointerFrame(pos.x, pos.y, buttonsMaskRef.current));
       },
       [flushPendingPointerMove, mapPointerCoords, sendBinary],
     );
+
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return undefined;
+      canvas.addEventListener('wheel', handleWheelNative, { passive: false });
+      return () => {
+        canvas.removeEventListener('wheel', handleWheelNative);
+      };
+    }, [handleWheelNative]);
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent) => {
@@ -828,18 +1330,28 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
         if (propsRef.current.viewOnly) return;
         if (e.nativeEvent.isComposing || e.key === 'Process') return;
 
+        const mapCmd = propsRef.current.mapCmdToCtrl;
+        const isCmdMappedKey = mapCmd && (e.code === 'MetaLeft' || e.code === 'MetaRight' || e.metaKey);
+
         // When keyboard grab is inactive, let standard app shortcuts (Cmd/Ctrl+W/T/K/1-9, etc.) pass through.
-        if (!propsRef.current.keyboardGrabActive && (e.metaKey || (e.ctrlKey && e.shiftKey))) {
+        if (!propsRef.current.keyboardGrabActive && !isCmdMappedKey && (e.metaKey || (e.ctrlKey && e.shiftKey))) {
           return;
         }
+        if (!propsRef.current.keyboardGrabActive && isCmdMappedKey && e.metaKey) {
+          const code = e.code;
+          if (code === 'KeyW' || code === 'KeyQ' || code === 'KeyT' || code === 'KeyN' || code === 'Comma' || code === 'KeyK') {
+            return;
+          }
+        }
 
-        const keysym = domEventToVncKeysym(e.nativeEvent);
+        const isMetaKey = mapCmd && (e.code === 'MetaLeft' || e.code === 'MetaRight');
+        const keysym = isMetaKey ? 0xffe3 : domEventToVncKeysym(e.nativeEvent);
         if (keysym === null) return;
         e.preventDefault();
         if (propsRef.current.keyboardGrabActive) {
           e.stopPropagation();
         }
-        const keycode = domCodeToQemuKeycode(e.code);
+        const keycode = domCodeToQemuKeycode(isMetaKey ? 'ControlLeft' : e.code);
         pressedKeysRef.current.set(e.code || e.key, { keysym, keycode });
         sendKeyRaw(keysym, keycode, true);
       },
@@ -868,10 +1380,7 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
           sendKeyRaw(tracked.keysym, tracked.keycode, false);
           return;
         }
-        const keysym = domEventToVncKeysym(e.nativeEvent);
-        if (keysym === null) return;
-        e.preventDefault();
-        sendKeyRaw(keysym, domCodeToQemuKeycode(e.code), false);
+        // Only send key-up for keys that were actually pressed while focused on this canvas
       },
       [releaseAllInputs, sendKeyRaw],
     );
@@ -900,6 +1409,7 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
       const base: React.CSSProperties = {
         cursor: showRemoteCursor ? cursorCss : 'default',
         imageRendering: displayMode === 'actual' ? 'pixelated' : 'auto',
+        transform: 'translateZ(0)',
       };
       if (displayMode === 'stretch') {
         return { ...base, width: '100%', height: '100%' };
@@ -953,7 +1463,6 @@ export const VncCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Vn
           onMouseMove={handleMouseMove}
           onMouseDown={handleMouseDown}
           onMouseUp={handleMouseUp}
-          onWheel={handleWheel}
         />
       </div>
     );

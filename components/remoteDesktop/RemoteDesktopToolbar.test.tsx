@@ -40,16 +40,12 @@ function renderToolbar(overrides: Partial<RemoteDesktopToolbarProps> = {}): stri
   );
 }
 
-test('RemoteDesktopToolbar renders SFTP button only when onOpenSftp is wired and highlights when open', () => {
+test('RemoteDesktopToolbar does not expose SFTP button on graphical remote desktop toolbar', () => {
   const withoutSftp = renderToolbar();
   assert.doesNotMatch(withoutSftp, /data-testid="remote-desktop-sftp-btn"/);
 
-  const withSftpClosed = renderToolbar({ onOpenSftp: () => {}, isSftpOpen: false });
-  assert.match(withSftpClosed, /data-testid="remote-desktop-sftp-btn"/);
-  assert.match(withSftpClosed, /aria-pressed="false"/);
-
-  const withSftpOpen = renderToolbar({ onOpenSftp: () => {}, isSftpOpen: true });
-  assert.match(withSftpOpen, /aria-pressed="true"/);
+  const withSftpProp = renderToolbar({ onOpenSftp: () => {}, isSftpOpen: true });
+  assert.doesNotMatch(withSftpProp, /data-testid="remote-desktop-sftp-btn"/);
 });
 
 test('RemoteDesktopToolbar renders live clipboard transfer progress pills for all phases', () => {
@@ -124,4 +120,73 @@ test('RemoteDesktopToolbar renders Ask AI split button, privacy lock badge, and 
   assert.match(html, /data-testid="remote-desktop-record-btn"/);
   assert.match(html, /data-recording="true"/);
   assert.match(html, /02:14/);
+});
+
+test('RemoteDesktopToolbar renders monitor switcher, shared folders badge, and network quality pill', () => {
+  const rdpHtml = renderToolbar({
+    protocol: 'rdp',
+    monitorCount: 2,
+    activeMonitorIndex: 0,
+    onSelectActiveMonitor: () => {},
+    sharedFolders: [
+      { id: 'sf-1', deviceId: 10, name: 'Projects', path: '/Users/dev/Projects', readOnly: false },
+      { id: 'sf-2', deviceId: 11, name: 'Docs', path: '/Users/dev/Docs', readOnly: true },
+    ],
+    onAddSharedFolder: () => {},
+    onRemoveSharedFolder: () => {},
+    onToggleSharedFolderReadOnly: () => {},
+    networkStats: {
+      sessionId: 's1',
+      protocol: 'rdp',
+      rttMs: 18,
+      rxBps: 128000,
+      txBps: 4096,
+      totalRxBytes: 2048000,
+      totalTxBytes: 64000,
+      ts: Date.now(),
+    },
+  });
+
+  assert.match(rdpHtml, /data-testid="rdp-monitor-switcher"/);
+  assert.match(rdpHtml, />All</);
+  assert.match(rdpHtml, />1</);
+  assert.match(rdpHtml, />2</);
+  assert.match(rdpHtml, /data-testid="rdp-shared-folders-btn"/);
+  assert.match(rdpHtml, />2</);
+  assert.match(rdpHtml, /data-testid="remote-desktop-network-pill"/);
+  assert.match(rdpHtml, /data-quality-tier="excellent"/);
+  assert.match(rdpHtml, /18ms/);
+
+  // VNC hides RDP-only monitor switcher & shared folders, keeps network quality pill
+  const vncHtml = renderToolbar({
+    protocol: 'vnc',
+    monitorCount: 2,
+    onSelectActiveMonitor: () => {},
+    onAddSharedFolder: () => {},
+    networkStats: {
+      sessionId: 's2',
+      protocol: 'vnc',
+      rttMs: 245,
+      rxBps: 50000,
+      txBps: 1000,
+      totalRxBytes: 500000,
+      totalTxBytes: 10000,
+      ts: Date.now(),
+    },
+  });
+  assert.doesNotMatch(vncHtml, /data-testid="rdp-monitor-switcher"/);
+  assert.doesNotMatch(vncHtml, /data-testid="rdp-shared-folders-btn"/);
+  assert.match(vncHtml, /data-testid="remote-desktop-network-pill"/);
+  assert.match(vncHtml, /data-quality-tier="poor"/);
+  assert.match(vncHtml, /245ms/);
+});
+
+test('RemoteDesktopToolbar disables Keyboard Grab while connecting', () => {
+  const connectingHtml = renderToolbar({
+    protocol: 'vnc',
+    status: 'connecting',
+    viewOnly: false,
+    keyboardGrabActive: false,
+  });
+  assert.match(connectingHtml, /<button[^>]*disabled=""[^>]*aria-label="Keys: Local"/);
 });

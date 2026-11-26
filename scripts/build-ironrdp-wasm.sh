@@ -113,13 +113,14 @@ run_host_tests() {
     return
   fi
 
-  echo "Running ironrdp-web host unit tests (session::tests)..."
+  echo "Running ironrdp-web host unit tests (drive::tests, session::tests)..."
   (
     cd "${SRC_DIR}"
-    # Run host-compatible session unit tests (load_balance_info, audio/printer
-    # channel attachment, RDCleanPath, file-transfer marshalling). Clipboard JS
-    # bridge tests require wasm32 (`wasm-pack test --node --lib`).
-    cargo test -p ironrdp-web --lib --locked session::tests
+    # Run host-compatible unit tests (RDPDR drive PDU marshalling, multi-monitor
+    # layout validation, load_balance_info, audio/printer/drive channel
+    # attachment, RDCleanPath, file-transfer marshalling). Clipboard JS bridge
+    # tests require wasm32 (`wasm-pack test --node --lib`).
+    cargo test -p ironrdp-web --lib --locked -- drive::tests session::tests
   )
 }
 
@@ -209,7 +210,8 @@ package_output() {
     "commit": "${IRONRDP_COMMIT}",
     "patches": [
       "0001-session-responsiveness.patch",
-      "0002-load-balance-info-and-shell.patch"
+      "0002-load-balance-info-and-shell.patch",
+      "0003-rdpdr-drives-and-multimonitor.patch"
     ]
   }
 }
@@ -225,6 +227,7 @@ Self-contained WebAssembly build of [Devolutions/IronRDP](https://github.com/Dev
 - **Patches applied** (under \`scripts/ironrdp-web-patches/\`):
   1. \`0001-session-responsiveness.patch\` — 16ms dirty-rectangle coalescing (\`PaintTicker\`) and cooperative event-loop yielding every 16 frames so rapid screen updates do not starve DOM keyboard/mouse input.
   2. \`0002-load-balance-info-and-shell.patch\` — Exposes \`load_balance_info\`, \`alternate_shell\`, and \`work_dir\` extensions on \`SessionBuilder\` for JumpServer Razor and RDS Connection Broker routing.
+  3. \`0003-rdpdr-drives-and-multimonitor.patch\` — Adds \`WasmDriveBackend\` for MS-RDPEFS drive redirection (\`rdpdr_drives\`, \`rdpdr_request_callback\`, \`rdpdr_response\`, \`rdpdr_add_drive\`, \`rdpdr_remove_drive\`, composing cleanly with audio and printer redirection) and MS-RDPEDISP multi-monitor layout extensions (\`set_monitor_layout\`, \`display_control_caps_callback\`).
 
 ## Rebuilding
 

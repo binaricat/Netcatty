@@ -5,6 +5,7 @@ import type {
   ProxyConfig,
   RdpColorDepth,
   RdpConfig,
+  RdpMultiMonitorMode,
   RdpResolutionMode,
   RdpSecurityMode,
   VncConfig,
@@ -100,6 +101,10 @@ const clampInt = (value: unknown, min: number, max: number): number | undefined 
 
 const isRdpResolutionMode = (value: unknown): value is RdpResolutionMode => (
   value === 'dynamic' || value === 'fit' || value === 'fixed'
+);
+
+const isRdpMultiMonitorMode = (value: unknown): value is RdpMultiMonitorMode => (
+  value === 'single' || value === 'dual' || value === 'all-local'
 );
 
 const isRdpColorDepth = (value: unknown): value is RdpColorDepth => (
@@ -536,6 +541,7 @@ export const sanitizeRdpConfig = (value: unknown): RdpConfig | undefined => {
   const tunnelTargetHost = readTrimmedString(value.tunnelTargetHost);
   if (tunnelTargetHost !== undefined) out.tunnelTargetHost = tunnelTargetHost;
   if (isRdpResolutionMode(value.resolutionMode)) out.resolutionMode = value.resolutionMode;
+  if (isRdpMultiMonitorMode(value.multiMonitorMode)) out.multiMonitorMode = value.multiMonitorMode;
   const width = clampInt(value.width, 200, 8192);
   if (width !== undefined) out.width = width;
   const height = clampInt(value.height, 200, 8192);
@@ -857,3 +863,296 @@ export const resolveRemoteDesktopConnectionSpec = (
       : { vncConfig: { ...vncConfig!, port } }),
   };
 };
+
+// ============================================================================
+// Display Presets, Multi-Monitor Layouts, Telemetry & Viewport Coordinate Math
+// ============================================================================
+
+export interface RdpResolutionPreset {
+  label: string;
+  width: number;
+  height: number;
+}
+
+export const RDP_RESOLUTION_PRESETS: readonly RdpResolutionPreset[] = [
+  { label: '2560×1440', width: 2560, height: 1440 },
+  { label: '1920×1080', width: 1920, height: 1080 },
+  { label: '1600×900', width: 1600, height: 900 },
+  { label: '1440×900', width: 1440, height: 900 },
+  { label: '1366×768', width: 1366, height: 768 },
+  { label: '1280×800', width: 1280, height: 800 },
+  { label: '1280×720', width: 1280, height: 720 },
+];
+
+export interface MonitorLayoutSpec {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  isPrimary: boolean;
+  scaleFactor: number;
+}
+
+export interface LocalDisplayGeometry {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  scaleFactor?: number;
+  isPrimary?: boolean;
+}
+
+export interface RdpDisplayControlCaps {
+  maxNumMonitors: number;
+  maxMonitorAreaFactorA: number;
+  maxMonitorAreaFactorB: number;
+  maxMonitorArea: number;
+}
+
+export interface ComputeMonitorLayoutOptions {
+  paneWidth: number;
+  paneHeight: number;
+  dpr?: number;
+  highDpi?: boolean;
+  localDisplays?: readonly LocalDisplayGeometry[];
+  maxMonitors?: number;
+}
+
+const RDP_MIN_MONITOR_DIM = 200;
+const RDP_MAX_MONITOR_DIM = 8192;
+
+function alignEvenDimension(raw: number, min = RDP_MIN_MONITOR_DIM, max = RDP_MAX_MONITOR_DIM): number {
+  const safeMin = min % 2 === 0 ? min : min + 1;
+  const safeMax = max % 2 === 0 ? max : max - 1;
+  if (!Number.isFinite(raw)) return safeMin;
+  const clamped = Math.min(safeMax, Math.max(safeMin, Math.floor(raw)));
+  return Math.max(safeMin, clamped - (clamped % 2));
+}
+
+function normalizeScaleFactorPercent(dpr: number | undefined, highDpi: boolean): number {
+  if (!highDpi) return 100;
+  const raw = typeof dpr === 'number' && Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  const effectiveDpr = Math.min(2, Math.max(1, raw));
+  return Math.min(500, Math.max(100, Math.round(effectiveDpr * 100)));
+}
+
+/**
+ * Compute normalized MS-RDPEDISP monitor layout entries with even widths,
+ * non-overlapping adjacent placement, and primary origin at `(0, 0)`.
+ */
+export function computeMonitorLayoutEntries(
+  mode: RdpMultiMonitorMode,
+  options: ComputeMonitorLayoutOptions,
+): MonitorLayoutSpec[] {
+  const highDpi = Boolean(options.highDpi);
+  const effectiveDpr = highDpi ? Math.min(2, Math.max(1, options.dpr || 1)) : 1;
+  const scaleFactor = normalizeScaleFactorPercent(options.dpr, highDpi);
+  const maxMonitors = Math.max(
+    1,
+    Math.min(16, Number.isFinite(options.maxMonitors) ? Math.floor(options.maxMonitors!) : 16),
+  );
+
+  const paneW = Number.isFinite(options.paneWidth) && options.paneWidth > 0 ? options.paneWidth : 1280;
+  const paneH = Number.isFinite(options.paneHeight) && options.paneHeight > 0 ? options.paneHeight : 800;
+
+  const buildSingle = (): MonitorLayoutSpec[] => {
+    const width = alignEvenDimension(Math.min(3840, Math.max(640, paneW * effectiveDpr)), 200, 8192);
+    const height = alignEvenDimension(Math.min(2160, Math.max(480, paneH * effectiveDpr)), 200, 8192);
+    return [{ left: 0, top: 0, width, height, isPrimary: true, scaleFactor }];
+  };
+
+  if (mode === 'single' || maxMonitors <= 1) {
+    return buildSingle();
+  }
+
+  if (mode === 'dual') {
+    const eachWidth = alignEvenDimension(Math.min(2560, Math.max(640, paneW * effectiveDpr)), 200, 4096);
+    const eachHeight = alignEvenDimension(Math.min(2160, Math.max(480, paneH * effectiveDpr)), 200, 2160);
+    return [
+      { left: 0, top: 0, width: eachWidth, height: eachHeight, isPrimary: true, scaleFactor },
+      { left: eachWidth, top: 0, width: eachWidth, height: eachHeight, isPrimary: false, scaleFactor },
+    ];
+  }
+
+  // 'all-local': mirror local display count & proportions with guaranteed
+  // non-overlapping adjacent placement and primary at (0, 0).
+  const validDisplays = (options.localDisplays ?? []).filter(
+    (d) => Number.isFinite(d.width) && d.width > 0 && Number.isFinite(d.height) && d.height > 0,
+  );
+  if (validDisplays.length === 0) {
+    return buildSingle();
+  }
+
+  let primaryIdx = validDisplays.findIndex((d) => d.isPrimary === true);
+  if (primaryIdx === -1) primaryIdx = 0;
+
+  const indexed = validDisplays.map((d, idx) => ({
+    ...d,
+    _isPrimary: idx === primaryIdx,
+  }));
+
+  // Keep primary first when truncating to maxMonitors, then sort visually left-to-right.
+  const limited = indexed.length > maxMonitors
+    ? [
+        indexed[primaryIdx],
+        ...indexed.filter((_, idx) => idx !== primaryIdx).slice(0, maxMonitors - 1),
+      ]
+    : indexed;
+
+  limited.sort((a, b) => (a.left - b.left) || (a.top - b.top));
+
+  // Compute target pixel sizes per display; if total width exceeds 8192, scale down proportionally.
+  const rawEntries = limited.map((d) => {
+    const dpr = highDpi ? Math.min(2, Math.max(1, d.scaleFactor || 1)) : 1;
+    const sf = normalizeScaleFactorPercent(d.scaleFactor, highDpi);
+    return {
+      width: Math.min(3840, Math.max(RDP_MIN_MONITOR_DIM, Math.floor(d.width * dpr))),
+      height: Math.min(2160, Math.max(RDP_MIN_MONITOR_DIM, Math.floor(d.height * dpr))),
+      isPrimary: d._isPrimary,
+      scaleFactor: sf,
+    };
+  });
+
+  const totalRawWidth = rawEntries.reduce((sum, item) => sum + item.width, 0);
+  const shrinkRatio = totalRawWidth > RDP_MAX_MONITOR_DIM ? RDP_MAX_MONITOR_DIM / totalRawWidth : 1;
+
+  let cursorX = 0;
+  const placed: MonitorLayoutSpec[] = rawEntries.map((item) => {
+    const width = alignEvenDimension(item.width * shrinkRatio, RDP_MIN_MONITOR_DIM, RDP_MAX_MONITOR_DIM);
+    const height = alignEvenDimension(item.height * shrinkRatio, RDP_MIN_MONITOR_DIM, RDP_MAX_MONITOR_DIM);
+    const entry: MonitorLayoutSpec = {
+      left: cursorX,
+      top: 0,
+      width,
+      height,
+      isPrimary: item.isPrimary,
+      scaleFactor: item.scaleFactor,
+    };
+    cursorX += width;
+    return entry;
+  });
+
+  const placedPrimary = placed.find((m) => m.isPrimary) ?? placed[0];
+  const originX = placedPrimary.left;
+  const originY = placedPrimary.top;
+
+  return placed.map((m, idx) => ({
+    ...m,
+    left: m.left - originX,
+    top: m.top - originY,
+    isPrimary: m === placedPrimary || (idx === 0 && !placedPrimary),
+  }));
+}
+
+export interface MonitorVirtualRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface MonitorVirtualBounds {
+  minLeft: number;
+  minTop: number;
+  width: number;
+  height: number;
+  monitorRects: MonitorVirtualRect[];
+}
+
+/**
+ * Translate `MonitorLayoutSpec[]` (which may have negative `left`/`top` for
+ * monitors left/above the primary) into framebuffer-space rectangles starting at `(0, 0)`.
+ */
+export function computeMonitorVirtualBounds(
+  monitors: readonly MonitorLayoutSpec[],
+): MonitorVirtualBounds | null {
+  if (!monitors || monitors.length === 0) return null;
+  let minLeft = Infinity;
+  let minTop = Infinity;
+  let maxRight = -Infinity;
+  let maxBottom = -Infinity;
+  for (const mon of monitors) {
+    if (mon.left < minLeft) minLeft = mon.left;
+    if (mon.top < minTop) minTop = mon.top;
+    if (mon.left + mon.width > maxRight) maxRight = mon.left + mon.width;
+    if (mon.top + mon.height > maxBottom) maxBottom = mon.top + mon.height;
+  }
+  const width = Math.max(1, maxRight - minLeft);
+  const height = Math.max(1, maxBottom - minTop);
+  const monitorRects = monitors.map((mon) => ({
+    left: mon.left - minLeft,
+    top: mon.top - minTop,
+    width: mon.width,
+    height: mon.height,
+  }));
+  return { minLeft, minTop, width, height, monitorRects };
+}
+
+export type NetworkQualityTier = 'excellent' | 'good' | 'fair' | 'poor' | 'unknown';
+
+/**
+ * Classify RTT latency into a 4-tier visual network quality grade.
+ */
+export function classifyNetworkQualityTier(rttMs: number | null | undefined): NetworkQualityTier {
+  if (typeof rttMs !== 'number' || !Number.isFinite(rttMs) || rttMs < 0) {
+    return 'unknown';
+  }
+  if (rttMs < 40) return 'excellent';
+  if (rttMs < 100) return 'good';
+  if (rttMs < 200) return 'fair';
+  return 'poor';
+}
+
+/**
+ * Format throughput in bytes/sec as compact `0 B/s`, `12.4 KB/s`, `3.2 MB/s`.
+ */
+export function formatBandwidthBps(bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return '0 B/s';
+  if (bytesPerSec < 1024) return `${Math.round(bytesPerSec)} B/s`;
+  const kb = bytesPerSec / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB/s`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB/s`;
+  const gb = mb / 1024;
+  return `${gb.toFixed(1)} GB/s`;
+}
+
+/**
+ * Map a DOM pointer position inside a rendered viewport rectangle into virtual
+ * desktop framebuffer pixel coordinates, supporting both full-desktop view and
+ * single-monitor cropped view (`activeMonitorRect` in framebuffer space).
+ */
+export function mapViewportToVirtualDesktopCoords(
+  clientX: number,
+  clientY: number,
+  rect: { left: number; top: number; width: number; height: number },
+  virtualSize: { width: number; height: number },
+  activeMonitorRect?: { left: number; top: number; width: number; height: number } | null,
+): { x: number; y: number } {
+  if (
+    !rect
+    || !virtualSize
+    || rect.width <= 0
+    || rect.height <= 0
+    || virtualSize.width <= 0
+    || virtualSize.height <= 0
+  ) {
+    return { x: 0, y: 0 };
+  }
+
+  const nx = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  const ny = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+
+  const useSlice = Boolean(activeMonitorRect && activeMonitorRect.width > 0 && activeMonitorRect.height > 0);
+  const targetLeft = useSlice ? activeMonitorRect!.left : 0;
+  const targetTop = useSlice ? activeMonitorRect!.top : 0;
+  const targetWidth = useSlice ? activeMonitorRect!.width : virtualSize.width;
+  const targetHeight = useSlice ? activeMonitorRect!.height : virtualSize.height;
+
+  const rawX = targetLeft + nx * targetWidth;
+  const rawY = targetTop + ny * targetHeight;
+
+  const x = Math.max(0, Math.min(Math.round(virtualSize.width) - 1, Math.round(rawX)));
+  const y = Math.max(0, Math.min(Math.round(virtualSize.height) - 1, Math.round(rawY)));
+  return { x, y };
+}

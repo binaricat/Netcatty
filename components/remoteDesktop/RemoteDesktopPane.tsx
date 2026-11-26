@@ -1,15 +1,44 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Check, Eye, KeyRound, Loader2, Plug, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { AlertCircle, Check, KeyRound, Loader2, Plug, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { useTerminalSessionCloseCapture } from '../../application/state/terminalSessionCloseCapture';
 import type { Host, Identity, KnownHost, SSHKey, TerminalSession } from '../../types';
+import type { RdpMultiMonitorMode } from '../../domain/models/connection';
 import {
+  computeMonitorLayoutEntries,
   resolveRemoteDesktopConnectionSpec,
+  type MonitorLayoutSpec,
+  type RdpDisplayControlCaps,
   type RemoteDesktopProtocol,
 } from '../../domain/remoteDesktop';
+import { stopAgentTurn, type AgentStopBridge } from '../../infrastructure/ai/harness/agentStop';
+import {
+  listRemoteDesktopAuditEntries,
+  subscribeRemoteDesktopAuditLog,
+} from '../../infrastructure/remoteDesktop/remoteDesktopAuditLog';
+import {
+  getRemoteDesktopAiControlState,
+  isRemoteDesktopAiControlling,
+  preemptRemoteDesktopControl,
+  registerRemoteDesktopController,
+  subscribeRemoteDesktopAiControlState,
+} from '../../infrastructure/remoteDesktop/remoteDesktopControlRegistry';
+import {
+  addRemoteDesktopSharedFolder,
+  loadRemoteDesktopSharedFolders,
+  removeRemoteDesktopSharedFolder,
+  updateRemoteDesktopSharedFolder,
+  type RemoteDesktopSharedFolder,
+} from '../../infrastructure/remoteDesktop/remoteDesktopSharedFolders';
+import {
+  clearRemoteDesktopTelemetry,
+  publishRemoteDesktopFps,
+  publishRemoteDesktopNetworkStats,
+} from '../../infrastructure/remoteDesktop/remoteDesktopTelemetryStore';
 import {
   captureRemoteDesktopFrame,
   clearCapturedRemoteDesktopFramesForSession,
+  clearRemoteDesktopSessionState,
   getCapturedRemoteDesktopFrame,
   isRemoteDesktopAiReadBlocked,
   registerRemoteDesktopSnapshotProvider,
@@ -22,6 +51,7 @@ import { cn } from '../../lib/utils';
 import type { RemoteDesktopScreenshotDraftPayload } from '../ai/remoteDesktopAiDraft';
 import { DistroAvatar } from '../DistroAvatar';
 import {
+  CattyIcon,
   RdpProtocolIcon,
   SshTunnelIcon,
   SystemRdpClientIcon,
@@ -35,6 +65,8 @@ import {
   verifyKnownRemoteDesktopCert,
 } from './knownRemoteDesktopCerts';
 import { RdpCanvasView } from './RdpCanvasView';
+import { RemoteDesktopAiOverlay, type RemoteDesktopAiOverlayRect } from './RemoteDesktopAiOverlay';
+import { RemoteDesktopAuditDialog } from './RemoteDesktopAuditDialog';
 import { RemoteDesktopAuthDialog } from './RemoteDesktopAuthDialog';
 import { RemoteDesktopCertDialog } from './RemoteDesktopCertDialog';
 import {
@@ -48,6 +80,7 @@ import {
   type RemoteDesktopClipboardFileOffer,
   type RemoteDesktopClipboardTransferState,
   type RemoteDesktopDisplayMode,
+  type RemoteDesktopLocalDisplay,
   type RemoteDesktopQualityPreset,
 } from './remoteDesktopHelpers';
 import {
@@ -56,8 +89,10 @@ import {
 } from './RemoteDesktopSnipOverlay';
 import { RemoteDesktopToolbar } from './RemoteDesktopToolbar';
 import { useRemoteDesktopRecorder } from './useRemoteDesktopRecorder';
-import { VncCanvasView } from './VncCanvasView';
+import { VncCanvasView, type VncCapabilities } from './VncCanvasView';
 import type { RemoteDesktopSpecialKeyId } from './vncKeymap';
+
+const EMPTY_FINALIZE_LOG = () => '';
 
 export interface RemoteDesktopPaneProps {
   sessionId: string;
@@ -145,8 +180,6 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   onStatusChange,
   onCloseSession,
   onPopOut,
-  onOpenSftp,
-  isSftpOpen = false,
   onAskAi,
   onTerminalDataCapture,
 }) => {
@@ -181,11 +214,17 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   const [needsAuthPrompt, setNeedsAuthPrompt] = useState<boolean>(
     () => isRdp && (spec.needsPasswordPrompt || !spec.username),
   );
+  // Explicit connection intent prevents dismissing the credential prompt from auto-connecting.
+  const [connectionIntent, setConnectionIntent] = useState<'active' | 'idle'>(
+    () => (isRdp && (spec.needsPasswordPrompt || !spec.username) ? 'idle' : 'active'),
+  );
   const [authErrorMessage, setAuthErrorMessage] = useState<string | null>(null);
 
   const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>(
     needsAuthPrompt ? 'disconnected' : 'connecting',
   );
+  const statusRef = useRef<'connecting' | 'connected' | 'disconnected'>(status);
+  statusRef.current = status;
   const [stageMessage, setStageMessage] = useState<string>('Initializing connection...');
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
   const [wsUrl, setWsUrl] = useState<string | null>(null);
@@ -205,9 +244,11 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   const [quality, setQuality] = useState<RemoteDesktopQualityPreset>('auto');
   const [highDpi, setHighDpi] = useState<boolean>(true);
   const [mapCmdToCtrl, setMapCmdToCtrl] = useState<boolean>(() => (
-    isRdp && typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || navigator.userAgent || '')
+    typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || navigator.userAgent || '')
   ));
+  const [showRemoteCursor, setShowRemoteCursor] = useState<boolean>(() => Boolean(spec.vncConfig?.showRemoteCursor ?? true));
   const [supportsDynamicResize, setSupportsDynamicResize] = useState<boolean>(isRdp);
+  const [supportsXvp, setSupportsXvp] = useState<boolean>(false);
   const [viewOnly, setViewOnly] = useState<boolean>(() => !isRdp && Boolean(spec.vncConfig?.viewOnly));
   const [clipboardSyncEnabled, setClipboardSyncEnabled] = useState<boolean>(() => (
     isRdp ? (spec.rdpConfig?.clipboardSync ?? true) : (spec.vncConfig?.clipboardSync ?? true)
@@ -217,9 +258,27 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   const [keyboardGrabActive, setKeyboardGrabActive] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [resolution, setResolution] = useState<{ width: number; height: number } | null>(null);
-  const [fps, setFps] = useState<number>(0);
   const [encrypted, setEncrypted] = useState<boolean>(false);
   const [desktopTitle, setDesktopTitle] = useState<string | null>(null);
+  // Resolution presets, multi-monitor, RDPDR local shared folders, and live telemetry
+  const [fixedResolution, setFixedResolution] = useState<{ width: number; height: number } | null>(null);
+  const [multiMonitorMode, setMultiMonitorMode] = useState<RdpMultiMonitorMode>(
+    () => (isRdp ? (spec.rdpConfig?.multiMonitorMode ?? 'single') : 'single'),
+  );
+  const [monitorLayout, setMonitorLayout] = useState<MonitorLayoutSpec[]>([]);
+  const [activeMonitorIndex, setActiveMonitorIndex] = useState<'all' | number>('all');
+  const [localDisplays, setLocalDisplays] = useState<RemoteDesktopLocalDisplay[]>([]);
+  const [displayControlCaps, setDisplayControlCaps] = useState<RdpDisplayControlCaps | null>(null);
+  const [sharedFolders, setSharedFolders] = useState<RemoteDesktopSharedFolder[]>(() => (
+    isRdp ? loadRemoteDesktopSharedFolders(host.id) : []
+  ));
+  const lastStatsUpdateRef = useRef<number>(0);
+  const appliedAllLocalRef = useRef<boolean>(false);
+  const lastBellToastAtRef = useRef<number>(0);
+  const [aiAuditOpen, setAiAuditOpen] = useState(false);
+  const [aiAuditCount, setAiAuditCount] = useState<number>(() => listRemoteDesktopAuditEntries(sessionId).length);
+  const [aiControlActive, setAiControlActive] = useState<boolean>(() => isRemoteDesktopAiControlling(sessionId));
+  const [aiOverlayCanvasRect, setAiOverlayCanvasRect] = useState<RemoteDesktopAiOverlayRect | null>(null);
   const [pendingCert, setPendingCert] = useState<{
     event: RemoteDesktopCertVerifyEvent;
     previousFingerprint: string | null;
@@ -267,7 +326,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     enabled: Boolean(onTerminalDataCapture),
     hasConnectedRef: closeCaptureNeverConnectedRef,
     terminalDataCapturedRef: closeCaptureDoneRef,
-    finalizeTerminalLogData: () => '',
+    finalizeTerminalLogData: EMPTY_FINALIZE_LOG,
     onTerminalDataCapture: handleCloseLogCapture,
   });
 
@@ -357,6 +416,194 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     return subscribeRemoteDesktopAiReadBlocked(sessionId, setAiReadBlocked);
   }, [sessionId]);
 
+  // Reload local-only RDPDR shared folders when host changes
+  useEffect(() => {
+    if (!isRdp) {
+      setSharedFolders([]);
+      return;
+    }
+    setSharedFolders(loadRemoteDesktopSharedFolders(host.id));
+  }, [host.id, isRdp]);
+
+  // Discover local displays for RDP multi-monitor ("Match Local Displays")
+  useEffect(() => {
+    if (!isRdp) return undefined;
+    let cancelled = false;
+    const rdBridge = getRemoteDesktopBridge();
+    if (!rdBridge?.getLocalDisplays) return undefined;
+    void rdBridge
+      .getLocalDisplays()
+      .then((displays) => {
+        if (!cancelled && Array.isArray(displays)) {
+          setLocalDisplays(displays);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isRdp]);
+
+  // Subscribe to AI Computer Use audit log count for this session
+  useEffect(() => {
+    const refresh = () => setAiAuditCount(listRemoteDesktopAuditEntries(sessionId).length);
+    refresh();
+    return subscribeRemoteDesktopAuditLog(refresh);
+  }, [sessionId]);
+
+  // Keep AI Computer Use controller registered against live canvas state
+  const aiControllerStateRef = useRef({
+    connected: status === 'connected',
+    viewOnly,
+    protocol,
+    hostLabel: effectiveLabel,
+    hostname: spec.hostHostname,
+    desktopWidth: resolution?.width || 1280,
+    desktopHeight: resolution?.height || 800,
+  });
+  aiControllerStateRef.current = {
+    connected: status === 'connected',
+    viewOnly,
+    protocol,
+    hostLabel: effectiveLabel,
+    hostname: spec.hostHostname,
+    desktopWidth: resolution?.width || 1280,
+    desktopHeight: resolution?.height || 800,
+  };
+
+  useEffect(() => {
+    return registerRemoteDesktopController(sessionId, {
+      performAction: async (action, options) => {
+        const handle = canvasHandleRef.current;
+        if (!handle?.performAiAction) {
+          throw new Error('Remote desktop canvas does not support AI actions.');
+        }
+        await handle.performAiAction(action, options);
+      },
+      releaseAllInputs: () => {
+        canvasHandleRef.current?.releaseAllInputs();
+      },
+      getState: () => ({ ...aiControllerStateRef.current }),
+    });
+  }, [sessionId]);
+
+  // Clean up per-session snapshot/privacy/telemetry state and RDPDR backend state when pane unmounts
+  useEffect(() => () => {
+    clearRemoteDesktopSessionState(sessionId);
+    clearRemoteDesktopTelemetry(sessionId);
+    if (isRdp) {
+      void getRemoteDesktopBridge()?.rdpdrCleanup?.(sessionId).catch(() => {});
+    }
+  }, [isRdp, sessionId]);
+
+  const handleFpsChange = useCallback(
+    (nextFps: number) => {
+      publishRemoteDesktopFps(sessionId, nextFps);
+    },
+    [sessionId],
+  );
+
+  // Track canvas bounding rect relative to canvasAreaRef for RemoteDesktopAiOverlay.
+  // Only observe layout changes while AI control is actually active to avoid idle reflows.
+  const refreshAiOverlayRect = useCallback(() => {
+    const canvasRect = canvasHandleRef.current?.getCanvasRect?.();
+    const areaRect = canvasAreaRef.current?.getBoundingClientRect();
+    if (!canvasRect || !areaRect || canvasRect.width <= 0 || canvasRect.height <= 0) {
+      setAiOverlayCanvasRect(null);
+      return;
+    }
+    const next: RemoteDesktopAiOverlayRect = {
+      left: canvasRect.left - areaRect.left,
+      top: canvasRect.top - areaRect.top,
+      width: canvasRect.width,
+      height: canvasRect.height,
+    };
+    setAiOverlayCanvasRect((prev) => (
+      prev
+      && Math.abs(prev.left - next.left) < 1
+      && Math.abs(prev.top - next.top) < 1
+      && Math.abs(prev.width - next.width) < 1
+      && Math.abs(prev.height - next.height) < 1
+        ? prev
+        : next
+    ));
+  }, []);
+
+  useEffect(() => {
+    setAiControlActive(isRemoteDesktopAiControlling(sessionId));
+    return subscribeRemoteDesktopAiControlState(sessionId, (state) => {
+      setAiControlActive(state.controlling);
+      if (state.controlling) {
+        refreshAiOverlayRect();
+      }
+    });
+  }, [refreshAiOverlayRect, sessionId]);
+
+  useEffect(() => {
+    if (!aiControlActive) return undefined;
+    refreshAiOverlayRect();
+    const area = canvasAreaRef.current;
+    const observer = typeof ResizeObserver !== 'undefined' && area
+      ? new ResizeObserver(refreshAiOverlayRect)
+      : null;
+    if (observer && area) observer.observe(area);
+    window.addEventListener('resize', refreshAiOverlayRect, { passive: true });
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', refreshAiOverlayRect);
+    };
+  }, [activeMonitorIndex, aiControlActive, displayMode, refreshAiOverlayRect, resolution, status]);
+
+  const handleAiPreemptStop = useCallback(
+    (reason: 'stop-button' | 'escape' | 'pointer') => {
+      canvasHandleRef.current?.releaseAllInputs();
+      toast.info(
+        reason === 'stop-button' || reason === 'escape'
+          ? tr(t, 'remoteDesktop.ai.preemptedStopped', 'AI control stopped — you have taken over')
+          : tr(t, 'remoteDesktop.ai.preempted', 'AI control paused — you have taken over'),
+      );
+    },
+    [t],
+  );
+
+  const handleCanvasAreaPointerDownCapture = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!isRemoteDesktopAiControlling(sessionId)) return;
+      const targetEl = e.target as HTMLElement | null;
+      if (targetEl?.closest?.('[data-testid="remote-desktop-ai-control-banner"]')) {
+        return;
+      }
+      if (preemptRemoteDesktopControl(sessionId, 'pointer')) {
+        canvasHandleRef.current?.releaseAllInputs();
+        toast.info(tr(t, 'remoteDesktop.ai.preempted', 'AI control paused — you have taken over'));
+      }
+    },
+    [sessionId, t],
+  );
+
+  const handleCanvasAreaKeyDownCapture = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!isRemoteDesktopAiControlling(sessionId)) return;
+      const isEscape = e.key === 'Escape';
+      const chatSessionId = getRemoteDesktopAiControlState(sessionId).chatSessionId || sessionId;
+      if (preemptRemoteDesktopControl(sessionId, isEscape ? 'escape' : 'keyboard')) {
+        canvasHandleRef.current?.releaseAllInputs();
+        if (isEscape) {
+          e.preventDefault();
+          e.stopPropagation();
+          const bridge = typeof window !== 'undefined'
+            ? (window as unknown as { netcatty?: AgentStopBridge }).netcatty ?? null
+            : null;
+          void stopAgentTurn({ chatSessionId, bridge, reason: 'user' });
+          toast.info(tr(t, 'remoteDesktop.ai.preemptedStopped', 'AI control stopped — you have taken over'));
+        } else {
+          toast.info(tr(t, 'remoteDesktop.ai.preempted', 'AI control paused — you have taken over'));
+        }
+      }
+    },
+    [sessionId, t],
+  );
+
   // P2-AI: Register/unregister snapshot provider while connected; purge LRU cache on disconnect/unmount
   useEffect(() => {
     if (status !== 'connected') {
@@ -444,13 +691,6 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       await document.exitFullscreen?.().catch(() => {});
     }
   }, [isFullscreen]);
-
-  const handleOpenSftpClick = useCallback(() => {
-    if (!onOpenSftp) return;
-    void exitFullscreenIfActive().then(() => {
-      onOpenSftp();
-    });
-  }, [exitFullscreenIfActive, onOpenSftp]);
 
   const handleAskAiFull = useCallback(async () => {
     if (!onAskAi || status !== 'connected') return;
@@ -594,15 +834,25 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       });
     });
 
+    const unsubStats = rdBridge.onStats?.((stats) => {
+      const activeId = activeBackendSessionIdRef.current;
+      if (!stats || (stats.sessionId !== activeId && stats.sessionId !== sessionId)) return;
+      const now = Date.now();
+      if (now - lastStatsUpdateRef.current < 400) return;
+      lastStatsUpdateRef.current = now;
+      publishRemoteDesktopNetworkStats(sessionId, stats);
+    });
+
     return () => {
       unsubStatus();
       unsubCert();
+      unsubStats?.();
     };
-  }, [isRdp, spec.hostHostname, spec.port, spec.rdpConfig?.ignoreCertErrors]);
+  }, [isRdp, sessionId, spec.hostHostname, spec.port, spec.rdpConfig?.ignoreCertErrors]);
 
   // Start / stop backend proxy session
   useEffect(() => {
-    if (needsAuthPrompt) return undefined;
+    if (needsAuthPrompt || connectionIntent !== 'active') return undefined;
     const rdBridge = getRemoteDesktopBridge();
     if (!rdBridge) {
       setDisconnectError('Remote desktop bridge is unavailable in this environment.');
@@ -620,6 +870,11 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     setRemoteClipboardFiles([]);
     setClipboardFileTransferStatus(null);
     setClipboardTransfer(null);
+    publishRemoteDesktopNetworkStats(sessionId, null);
+    publishRemoteDesktopFps(sessionId, 0);
+    setDisplayControlCaps(null);
+    setSupportsXvp(false);
+    appliedAllLocalRef.current = false;
     updateStatus('connecting');
     setStageMessage(
       tunneled
@@ -679,9 +934,10 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         void rdBridge.stop(attemptSessionId).catch(() => {});
       }
     };
-    // Intentionally reconnect only when connectAttempt, credentials, needsAuthPrompt, quality, or fallback change.
+    // Intentionally reconnect only when connectAttempt, connectionIntent, needsAuthPrompt, or fallback change.
+    // Quality changes apply live over the active VNC WebSocket without reconnecting.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectAttempt, needsAuthPrompt, fallbackDisableCredSsp, quality]);
+  }, [connectAttempt, connectionIntent, needsAuthPrompt, fallbackDisableCredSsp]);
 
   const handleCertDecision = useCallback(
     (decision: RemoteDesktopCertDecisionValue) => {
@@ -716,15 +972,24 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       setCredentials(nextCreds);
       setAuthErrorMessage(null);
       setNeedsAuthPrompt(false);
+      setConnectionIntent('active');
       setFallbackDisableCredSsp(false);
       setConnectAttempt((n) => n + 1);
     },
     [],
   );
 
+  const handleAuthCancel = useCallback(() => {
+    setNeedsAuthPrompt(false);
+    setConnectionIntent('idle');
+    setDisconnectError(tr(t, 'remoteDesktop.auth.cancelled', 'Authentication cancelled.'));
+    updateStatus('disconnected');
+  }, [t, updateStatus]);
+
   const handleReconnect = useCallback(() => {
     setDisconnectError(null);
     setFallbackDisableCredSsp(false);
+    setConnectionIntent('active');
     setConnectAttempt((n) => n + 1);
   }, []);
 
@@ -764,9 +1029,13 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     const root = paneRootRef.current;
     if (!root) return;
     if (document.fullscreenElement === root) {
-      void document.exitFullscreen().catch(() => {});
+      void document.exitFullscreen().catch((err) => {
+        console.warn('[RemoteDesktop] Failed to exit fullscreen:', err);
+      });
     } else {
-      void root.requestFullscreen().catch(() => {});
+      void root.requestFullscreen().catch((err) => {
+        console.warn('[RemoteDesktop] Failed to enter fullscreen:', err);
+      });
     }
   }, []);
 
@@ -821,8 +1090,11 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   const handleCanvasError = useCallback(
     (err: { message: string; isAuthError?: boolean }) => {
       releaseKeyboardGrab();
+      publishRemoteDesktopNetworkStats(sessionId, null);
+      publishRemoteDesktopFps(sessionId, 0);
       if (err.isAuthError) {
         setAuthErrorMessage(err.message);
+        setConnectionIntent('idle');
         setNeedsAuthPrompt(true);
         setWsUrl(null);
         updateStatus('disconnected');
@@ -831,16 +1103,18 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       setDisconnectError(err.message);
       updateStatus('disconnected');
     },
-    [releaseKeyboardGrab, updateStatus],
+    [releaseKeyboardGrab, sessionId, updateStatus],
   );
 
   const handleCanvasDisconnected = useCallback(
     (reason?: string) => {
       releaseKeyboardGrab();
+      publishRemoteDesktopNetworkStats(sessionId, null);
+      publishRemoteDesktopFps(sessionId, 0);
       if (reason) setDisconnectError(reason);
       updateStatus('disconnected');
     },
-    [releaseKeyboardGrab, updateStatus],
+    [releaseKeyboardGrab, sessionId, updateStatus],
   );
 
   const handleNegotiationFallback = useCallback(() => {
@@ -904,6 +1178,217 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
     void canvasHandleRef.current?.uploadLocalClipboardFiles?.(files);
   }, []);
 
+  const handleChangeDisplayMode = useCallback((mode: RemoteDesktopDisplayMode) => {
+    setDisplayMode(mode);
+    if (mode === 'dynamic') {
+      setFixedResolution(null);
+      setMultiMonitorMode('single');
+      setMonitorLayout([]);
+      setActiveMonitorIndex('all');
+    }
+  }, []);
+
+  const handleChangeQuality = useCallback((nextQuality: RemoteDesktopQualityPreset) => {
+    setQuality(nextQuality);
+    canvasHandleRef.current?.setQuality?.(nextQuality);
+  }, []);
+
+  const handleSendXvpAction = useCallback((action: 'shutdown' | 'reboot' | 'reset') => {
+    canvasHandleRef.current?.sendXvpAction?.(action);
+  }, []);
+
+  const handleVncCapabilitiesChange = useCallback((caps: VncCapabilities) => {
+    if (caps.extendedDesktopSize) {
+      setSupportsDynamicResize(true);
+    }
+    if (caps.xvp) {
+      setSupportsXvp(true);
+    }
+  }, []);
+
+  const handleVncBell = useCallback(() => {
+    const now = Date.now();
+    if (now - lastBellToastAtRef.current < 3000) return;
+    lastBellToastAtRef.current = now;
+    toast.info(tr(t, 'remoteDesktop.vnc.bell', 'Remote desktop bell'));
+  }, [t]);
+
+  const handleSnipCancel = useCallback(() => {
+    setIsSnipping(false);
+  }, []);
+
+  const handleSelectResolutionPreset = useCallback((width: number, height: number) => {
+    setFixedResolution({ width, height });
+    setMultiMonitorMode('single');
+    setMonitorLayout([]);
+    setActiveMonitorIndex('all');
+    setDisplayMode((prev) => (prev === 'dynamic' ? 'fit' : prev));
+    canvasHandleRef.current?.resizeToPreset?.(width, height);
+  }, []);
+
+  const applyMultiMonitorLayout = useCallback(
+    (mode: RdpMultiMonitorMode, capsOverride?: RdpDisplayControlCaps | null) => {
+      const rect = canvasAreaRef.current?.getBoundingClientRect();
+      const paneWidth = Math.max(640, Math.floor(rect?.width || 1280));
+      const paneHeight = Math.max(480, Math.floor(rect?.height || 800));
+      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+      const caps = capsOverride ?? displayControlCaps;
+      const entries = computeMonitorLayoutEntries(mode, {
+        paneWidth,
+        paneHeight,
+        dpr,
+        highDpi,
+        localDisplays,
+        maxMonitors: caps?.maxNumMonitors,
+      });
+      setMultiMonitorMode(mode);
+      setFixedResolution(null);
+      setMonitorLayout(entries);
+      setActiveMonitorIndex('all');
+      if (mode === 'all-local' && localDisplays.length > 0) {
+        appliedAllLocalRef.current = true;
+      }
+      if (entries.length > 1) {
+        setDisplayMode((prev) => (prev === 'dynamic' ? 'fit' : prev));
+      }
+      canvasHandleRef.current?.setMonitorLayout?.(entries);
+    },
+    [displayControlCaps, highDpi, localDisplays],
+  );
+
+  const handleChangeMultiMonitorMode = useCallback(
+    (mode: RdpMultiMonitorMode) => {
+      applyMultiMonitorLayout(mode);
+    },
+    [applyMultiMonitorLayout],
+  );
+
+  const handleDisplayControlCaps = useCallback(
+    (caps: RdpDisplayControlCaps) => {
+      setDisplayControlCaps(caps);
+      if (multiMonitorMode !== 'single') {
+        applyMultiMonitorLayout(multiMonitorMode, caps);
+      }
+    },
+    [applyMultiMonitorLayout, multiMonitorMode],
+  );
+
+  // If 'all-local' was requested before localDisplays finished loading, apply once both are ready.
+  useEffect(() => {
+    if (
+      !isRdp
+      || status !== 'connected'
+      || multiMonitorMode !== 'all-local'
+      || appliedAllLocalRef.current
+      || localDisplays.length === 0
+      || !displayControlCaps
+    ) {
+      return;
+    }
+    applyMultiMonitorLayout('all-local', displayControlCaps);
+  }, [applyMultiMonitorLayout, displayControlCaps, isRdp, localDisplays.length, multiMonitorMode, status]);
+
+  const syncDrivesToBackend = useCallback(
+    async (folders: readonly RemoteDesktopSharedFolder[]) => {
+      const rdBridge = getRemoteDesktopBridge();
+      if (!rdBridge?.rdpdrRegisterDrives) return null;
+      return rdBridge
+        .rdpdrRegisterDrives(
+          sessionId,
+          folders.map((f) => ({
+            deviceId: f.deviceId,
+            name: f.name,
+            path: f.path,
+            readOnly: f.readOnly,
+          })),
+        )
+        .catch(() => null);
+    },
+    [sessionId],
+  );
+
+  const handleAddSharedFolder = useCallback(async () => {
+    const rdBridge = getRemoteDesktopBridge();
+    if (!rdBridge?.rdpdrPickFolder) return;
+    try {
+      const picked = await rdBridge.rdpdrPickFolder();
+      if (!picked?.ok || picked.canceled || !picked.path) return;
+      const result = addRemoteDesktopSharedFolder(host.id, {
+        path: picked.path,
+        name: picked.name,
+        readOnly: false,
+      });
+      if (result.duplicate) {
+        toast.info(tr(t, 'remoteDesktop.sharedFolders.duplicate', 'This folder is already shared'));
+        return;
+      }
+      setSharedFolders(result.folders);
+      const regRes = await syncDrivesToBackend(result.folders);
+      if (result.added && regRes) {
+        const isRegistered = regRes.ok
+          && regRes.registered.some((d) => d.deviceId === result.added?.deviceId);
+        if (!isRegistered) {
+          const rejectedReason = regRes.rejected.find((r) => r.deviceId === result.added?.deviceId)?.reason
+            || regRes.error
+            || 'Folder could not be registered for sharing';
+          const reverted = removeRemoteDesktopSharedFolder(host.id, result.added.id);
+          setSharedFolders(reverted);
+          toast.error(rejectedReason);
+          return;
+        }
+      }
+      if (result.added && statusRef.current === 'connected') {
+        canvasHandleRef.current?.addSharedDrive?.({
+          deviceId: result.added.deviceId,
+          name: result.added.name,
+        });
+        toast.success(
+          tr(t, 'remoteDesktop.sharedFolders.mounted', 'Mounted "{name}" on remote desktop', {
+            name: result.added.name,
+          }),
+        );
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add shared folder');
+    }
+  }, [host.id, syncDrivesToBackend, t]);
+
+  const handleAddSharedFolderClick = useCallback(() => {
+    void handleAddSharedFolder();
+  }, [handleAddSharedFolder]);
+
+  const handleRemoveSharedFolder = useCallback(
+    (folderId: string) => {
+      const target = sharedFolders.find((f) => f.id === folderId);
+      const next = removeRemoteDesktopSharedFolder(host.id, folderId);
+      setSharedFolders(next);
+      void syncDrivesToBackend(next);
+      if (target && status === 'connected') {
+        canvasHandleRef.current?.removeSharedDrive?.(target.deviceId);
+        toast.info(
+          tr(t, 'remoteDesktop.sharedFolders.unmounted', 'Unmounted "{name}"', {
+            name: target.name,
+          }),
+        );
+      }
+    },
+    [host.id, sharedFolders, status, syncDrivesToBackend, t],
+  );
+
+  const handleToggleSharedFolderReadOnly = useCallback(
+    (folderId: string, readOnly: boolean) => {
+      const next = updateRemoteDesktopSharedFolder(host.id, folderId, { readOnly });
+      setSharedFolders(next);
+      void syncDrivesToBackend(next);
+    },
+    [host.id, syncDrivesToBackend],
+  );
+
+  const handleOpenAiAuditLog = useCallback(() => {
+    releaseKeyboardGrab();
+    setAiAuditOpen(true);
+  }, [releaseKeyboardGrab]);
+
   const handleAskAiFullClick = useCallback(() => {
     void handleAskAiFull();
   }, [handleAskAiFull]);
@@ -930,11 +1415,19 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
   }, [handleOpenSystemClient]);
 
   const handleVncConnected = useCallback(
-    (info: { width: number; height: number; name?: string; encrypted?: boolean; supportsDynamicResize?: boolean }) => {
+    (info: {
+      width: number;
+      height: number;
+      name?: string;
+      encrypted?: boolean;
+      supportsDynamicResize?: boolean;
+      supportsXvp?: boolean;
+    }) => {
       setResolution({ width: info.width, height: info.height });
       if (info.name) setDesktopTitle(info.name);
       setEncrypted(Boolean(info.encrypted));
       setSupportsDynamicResize(Boolean(info.supportsDynamicResize));
+      setSupportsXvp(Boolean(info.supportsXvp));
       setStageMessage('Desktop connected');
       updateStatus('connected');
     },
@@ -995,6 +1488,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       data-remote-desktop-capture={keyboardGrabActive && isVisible && isFocused ? 'true' : undefined}
     >
       <RemoteDesktopToolbar
+        sessionId={sessionId}
         protocol={protocol}
         hostLabel={effectiveLabel}
         status={status}
@@ -1002,19 +1496,30 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         tunneled={tunneled}
         encrypted={encrypted}
         resolution={resolution}
-        fps={fps}
         isFullscreen={isFullscreen}
         keyboardGrabActive={keyboardGrabActive}
         onToggleKeyboardGrab={handleToggleKeyboardGrab}
         onSendSpecialKey={handleSendSpecialKey}
         onTypeClipboard={handleTypeClipboardClick}
         displayMode={displayMode}
-        onChangeDisplayMode={setDisplayMode}
+        onChangeDisplayMode={handleChangeDisplayMode}
         supportsDynamicResize={isRdp || supportsDynamicResize}
         highDpi={highDpi}
         onToggleHighDpi={isRdp ? setHighDpi : undefined}
         mapCmdToCtrl={mapCmdToCtrl}
-        onToggleMapCmdToCtrl={isRdp ? setMapCmdToCtrl : undefined}
+        onToggleMapCmdToCtrl={setMapCmdToCtrl}
+        fixedResolution={fixedResolution}
+        onSelectResolutionPreset={handleSelectResolutionPreset}
+        multiMonitorMode={isRdp ? multiMonitorMode : undefined}
+        onChangeMultiMonitorMode={isRdp ? handleChangeMultiMonitorMode : undefined}
+        monitorCount={isRdp ? Math.max(1, monitorLayout.length) : 1}
+        localDisplayCount={isRdp ? Math.max(1, localDisplays.length) : 1}
+        activeMonitorIndex={activeMonitorIndex}
+        onSelectActiveMonitor={isRdp ? setActiveMonitorIndex : undefined}
+        sharedFolders={isRdp ? sharedFolders : undefined}
+        onAddSharedFolder={isRdp ? handleAddSharedFolderClick : undefined}
+        onRemoveSharedFolder={isRdp ? handleRemoveSharedFolder : undefined}
+        onToggleSharedFolderReadOnly={isRdp ? handleToggleSharedFolderReadOnly : undefined}
         audioEnabled={isRdp && Boolean(spec.rdpConfig?.audioEnabled)}
         audioMuted={audioMuted}
         audioVolume={audioVolume}
@@ -1033,21 +1538,25 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
             ? handleUploadLocalClipboardFiles
             : undefined
         }
-        onOpenSftp={onOpenSftp ? handleOpenSftpClick : undefined}
-        isSftpOpen={isSftpOpen}
         onAskAiFull={onAskAi ? handleAskAiFullClick : undefined}
         onAskAiRegion={onAskAi ? handleStartAskAiRegion : undefined}
         onOpenAiChat={onAskAi ? handleOpenAiChat : undefined}
         aiReadBlocked={aiReadBlocked}
         onToggleAiReadBlocked={onAskAi ? handleToggleAiReadBlocked : undefined}
+        aiAuditCount={aiAuditCount}
+        onOpenAiAuditLog={onAskAi ? handleOpenAiAuditLog : undefined}
         isRecording={recorder.isRecording}
         recordingElapsedLabel={recorder.formattedElapsed}
         recordingSupported={recorder.isSupported}
         onToggleRecording={handleToggleRecordingClick}
         quality={quality}
-        onChangeQuality={setQuality}
+        onChangeQuality={handleChangeQuality}
         viewOnly={viewOnly}
         onToggleViewOnly={setViewOnly}
+        showRemoteCursor={!isRdp ? showRemoteCursor : undefined}
+        onToggleShowRemoteCursor={!isRdp ? setShowRemoteCursor : undefined}
+        supportsXvp={!isRdp ? supportsXvp : undefined}
+        onSendXvpAction={!isRdp ? handleSendXvpAction : undefined}
         onRefreshScreen={!isRdp ? handleRefreshScreen : undefined}
         onScreenshotCopy={handleScreenshotCopyClick}
         onScreenshotSave={handleScreenshotSaveClick}
@@ -1094,7 +1603,12 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
       )}
 
       {/* Main Canvas Area */}
-      <div ref={canvasAreaRef} className="relative flex min-h-0 flex-1 overflow-hidden">
+      <div
+        ref={canvasAreaRef}
+        className="relative flex min-h-0 flex-1 overflow-hidden"
+        onPointerDownCapture={handleCanvasAreaPointerDownCapture}
+        onKeyDownCapture={handleCanvasAreaKeyDownCapture}
+      >
         {wsUrl && !isRdp && (
           <VncCanvasView
             ref={canvasHandleRef}
@@ -1103,13 +1617,16 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
             displayMode={displayMode}
             viewOnly={viewOnly}
             clipboardSyncEnabled={clipboardSyncEnabled}
-            showRemoteCursor={spec.vncConfig?.showRemoteCursor ?? true}
+            showRemoteCursor={showRemoteCursor}
+            mapCmdToCtrl={mapCmdToCtrl}
             keyboardGrabActive={keyboardGrabActive}
             onRequestReleaseGrab={releaseKeyboardGrab}
             onConnected={handleVncConnected}
+            onCapabilitiesChange={handleVncCapabilitiesChange}
             onDesktopResize={setResolution}
             onDesktopName={setDesktopTitle}
-            onFpsChange={setFps}
+            onBell={handleVncBell}
+            onFpsChange={handleFpsChange}
             onError={handleCanvasError}
             onDisconnected={handleCanvasDisconnected}
           />
@@ -1118,6 +1635,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
         {wsUrl && isRdp && spec.rdpConfig && (
           <RdpCanvasView
             ref={canvasHandleRef}
+            sessionId={sessionId}
             wsUrl={wsUrl}
             hostname={spec.hostname}
             port={spec.port}
@@ -1135,6 +1653,12 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
             audioMuted={audioMuted}
             audioVolume={audioVolume}
             keyboardGrabActive={keyboardGrabActive}
+            sharedFolders={sharedFolders}
+            fixedResolution={fixedResolution}
+            monitorLayout={monitorLayout}
+            activeMonitorIndex={activeMonitorIndex}
+            onDisplayControlCaps={handleDisplayControlCaps}
+            onFpsChange={handleFpsChange}
             onRequestReleaseGrab={releaseKeyboardGrab}
             onConnected={handleRdpConnected}
             onDesktopResize={setResolution}
@@ -1169,14 +1693,14 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
           />
         )}
 
-        {/* P2-AI: 2s "AI is viewing screen" Top-Right Pill */}
+        {/* P2-AI: 2s "Catty is viewing desktop" Top-Right Pill */}
         {aiViewingBadgeVisible && (
           <div
             data-testid="remote-desktop-ai-viewing-badge"
-            className="pointer-events-none absolute right-3 top-3 z-30 inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-background/90 px-2.5 py-1 text-[11px] font-medium text-foreground shadow-lg backdrop-blur-md animate-in fade-in-0 zoom-in-95 duration-150"
+            className="pointer-events-none absolute right-3 top-3 z-30 inline-flex items-center gap-1.5 rounded-full border border-cyan-400/35 bg-zinc-950/88 px-2.5 py-1 text-[11px] font-medium text-cyan-100 shadow-lg backdrop-blur-md animate-in fade-in-0 zoom-in-95 duration-150"
           >
-            <Eye size={12} className="text-primary animate-pulse" />
-            <span>{tr(t, 'ai.vision.viewingScreen', 'AI is viewing screen')}</span>
+            <CattyIcon size={12} className="text-cyan-300 animate-pulse" />
+            <span>{tr(t, 'ai.vision.viewingScreen', 'Catty is viewing desktop')}</span>
           </div>
         )}
 
@@ -1187,7 +1711,14 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
           naturalHeight={resolution?.height || 800}
           getCanvasRect={handleGetSnipCanvasRect}
           onSelect={handleSnipSelectClick}
-          onCancel={() => setIsSnipping(false)}
+          onCancel={handleSnipCancel}
+        />
+
+        {/* AI Computer Use Visual Feedback & Preemption Overlay */}
+        <RemoteDesktopAiOverlay
+          sessionId={sessionId}
+          canvasRect={aiOverlayCanvasRect}
+          onPreemptStop={handleAiPreemptStop}
         />
 
         {/* Connecting Progress Overlay — matches Netcatty TerminalConnectionDialog */}
@@ -1448,6 +1979,7 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
                       className="h-8 gap-1.5 px-3 text-xs"
                       onClick={() => {
                         setAuthErrorMessage(null);
+                        setConnectionIntent('idle');
                         setNeedsAuthPrompt(true);
                       }}
                     >
@@ -1490,14 +2022,18 @@ export const RemoteDesktopPane: React.FC<RemoteDesktopPaneProps> = React.memo(({
             initialDomain={credentials.domain}
             errorMessage={authErrorMessage}
             onSubmit={handleAuthSubmit}
-            onCancel={() => {
-              setNeedsAuthPrompt(false);
-              setDisconnectError(tr(t, 'remoteDesktop.auth.cancelled', 'Authentication cancelled.'));
-              updateStatus('disconnected');
-            }}
+            onCancel={handleAuthCancel}
           />
         )}
       </div>
+
+      {/* AI Computer Use Audit Log Dialog */}
+      <RemoteDesktopAuditDialog
+        open={aiAuditOpen}
+        onOpenChange={setAiAuditOpen}
+        sessionId={sessionId}
+        hostLabel={effectiveLabel}
+      />
     </div>
   );
 });

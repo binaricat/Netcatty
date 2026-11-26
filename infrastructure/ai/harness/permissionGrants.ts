@@ -44,17 +44,30 @@ type CattyToolSpecRef = {
   policy?: {
     write?: boolean;
     bypassesApproval?: boolean;
+    requiresFreshApproval?: boolean;
   };
 };
 
+export const HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID = 'harness.remote_desktop.act:high-risk';
+
 const TOOL_NAME_TO_CAPABILITY = new Map<string, string>();
 const RPC_METHOD_TO_CAPABILITY = new Map<string, string>();
+const FRESH_APPROVAL_ONLY_CAPABILITIES = new Set<string>([
+  HIGH_RISK_REMOTE_DESKTOP_CAPABILITY_ID,
+]);
 
 for (const spec of cattyToolSpecs as CattyToolSpecRef[]) {
   TOOL_NAME_TO_CAPABILITY.set(spec.toolName, spec.capabilityId);
   if (spec.rpcMethod) {
     RPC_METHOD_TO_CAPABILITY.set(spec.rpcMethod, spec.capabilityId);
   }
+  if (spec.policy?.requiresFreshApproval) {
+    FRESH_APPROVAL_ONLY_CAPABILITIES.add(spec.capabilityId);
+  }
+}
+
+export function isFreshApprovalOnlyCapability(capabilityId: string | undefined): boolean {
+  return Boolean(capabilityId && FRESH_APPROVAL_ONLY_CAPABILITIES.has(capabilityId));
 }
 
 export function resolveCapabilityId(toolOrRpcName: string): string {
@@ -121,6 +134,7 @@ export function matchPermissionGrant(
   rules: readonly PermissionGrantRule[],
   ctx: PermissionGrantMatchContext,
 ): PermissionGrantRule | null {
+  if (isFreshApprovalOnlyCapability(ctx.capabilityId)) return null;
   if (rules.length === 0) return null;
 
   const args = ctx.args ?? {};
@@ -174,7 +188,7 @@ export function sanitizePermissionGrants(raw: unknown): PermissionGrantRule[] {
     if (!entry || typeof entry !== 'object') continue;
     const record = entry as Record<string, unknown>;
     const capabilityId = typeof record.capabilityId === 'string' ? record.capabilityId.trim() : '';
-    if (!capabilityId) continue;
+    if (!capabilityId || isFreshApprovalOnlyCapability(capabilityId)) continue;
 
     const rule: PermissionGrantRule = {
       id: typeof record.id === 'string' && record.id.trim()
@@ -225,7 +239,7 @@ const COMMAND_GRANT_CAPABILITIES = new Set([
 const GRANTABLE_CAPABILITY_IDS: readonly string[] = Object.freeze(
   [...new Set(
     (cattyToolSpecs as CattyToolSpecRef[])
-      .filter((spec) => spec.policy?.write && !spec.policy?.bypassesApproval)
+      .filter((spec) => spec.policy?.write && !spec.policy?.bypassesApproval && !spec.policy?.requiresFreshApproval)
       .map((spec) => spec.capabilityId),
   )].sort(),
 );
@@ -253,6 +267,9 @@ export function buildGrantsFromApproval(
   args: Record<string, unknown>,
   _chatSessionId?: string,
 ): PermissionGrantRule[] {
+  if (isFreshApprovalOnlyCapability(capabilityId)) {
+    return [];
+  }
   // OpenCode-style always-allow: global scope (not bound to a terminal session UUID).
   const sessionPattern = '*';
   const commandPatterns = resolveCommandGrantPatterns(capabilityId, args);

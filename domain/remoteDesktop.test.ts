@@ -4,8 +4,12 @@ import type { Host, Identity } from './models';
 import {
   buildStandaloneRdpHost,
   buildStandaloneVncHost,
+  classifyNetworkQualityTier,
+  computeMonitorLayoutEntries,
+  computeMonitorVirtualBounds,
   DEFAULT_RDP_PORT,
   DEFAULT_VNC_PORT,
+  formatBandwidthBps,
   formatVncDisplayNumber,
   getAvailableRemoteDesktopProtocols,
   hasCompanionRdp,
@@ -13,9 +17,11 @@ import {
   isRdpProtocol,
   isRemoteDesktopProtocol,
   isVncProtocol,
+  mapViewportToVirtualDesktopCoords,
   normalizeRdpConfig,
   normalizeVncConfig,
   parseVncPortOrDisplay,
+  RDP_RESOLUTION_PRESETS,
   resolveRemoteDesktopConnectionSpec,
   sanitizeRdpConfig,
   sanitizeVncConfig,
@@ -282,4 +288,133 @@ test('resolveRemoteDesktopConnectionSpec resolves standalone and companion crede
   assert.equal(companionRdpSpec.password, 'ssh-password');
   assert.equal(companionRdpSpec.credentialSource, 'host');
   assert.equal(companionRdpSpec.needsPasswordPrompt, false);
+});
+
+test('sanitizeRdpConfig preserves portable multiMonitorMode and strips local path fields', () => {
+  const sanitized = sanitizeRdpConfig({
+    multiMonitorMode: 'dual',
+    sharedFolders: [{ path: '/Users/alice/secret', name: 'Secret' }],
+    localPath: '/tmp/nope',
+  });
+  assert.equal(sanitized?.multiMonitorMode, 'dual');
+  assert.equal('sharedFolders' in (sanitized ?? {}), false);
+  assert.equal('localPath' in (sanitized ?? {}), false);
+
+  const invalidMode = sanitizeRdpConfig({ multiMonitorMode: 'quad' });
+  assert.equal(invalidMode, undefined);
+});
+
+test('RDP_RESOLUTION_PRESETS contains expected standard presets', () => {
+  assert.deepEqual(
+    RDP_RESOLUTION_PRESETS.map((p) => `${p.width}x${p.height}`),
+    ['2560x1440', '1920x1080', '1600x900', '1440x900', '1366x768', '1280x800', '1280x720'],
+  );
+});
+
+test('computeMonitorLayoutEntries produces normalized even-width non-overlapping layouts with primary at (0,0)', () => {
+  const single = computeMonitorLayoutEntries('single', {
+    paneWidth: 1281,
+    paneHeight: 801,
+    dpr: 2,
+    highDpi: true,
+  });
+  assert.equal(single.length, 1);
+  assert.equal(single[0].left, 0);
+  assert.equal(single[0].top, 0);
+  assert.equal(single[0].width % 2, 0);
+  assert.equal(single[0].height % 2, 0);
+  assert.equal(single[0].isPrimary, true);
+  assert.equal(single[0].scaleFactor, 200);
+
+  const dual = computeMonitorLayoutEntries('dual', {
+    paneWidth: 1280,
+    paneHeight: 720,
+    dpr: 1,
+    highDpi: false,
+  });
+  assert.equal(dual.length, 2);
+  assert.deepEqual(dual[0], { left: 0, top: 0, width: 1280, height: 720, isPrimary: true, scaleFactor: 100 });
+  assert.deepEqual(dual[1], { left: 1280, top: 0, width: 1280, height: 720, isPrimary: false, scaleFactor: 100 });
+
+  // maxMonitors = 1 clamps dual back to single
+  const clamped = computeMonitorLayoutEntries('dual', {
+    paneWidth: 1280,
+    paneHeight: 720,
+    maxMonitors: 1,
+  });
+  assert.equal(clamped.length, 1);
+
+  // all-local with secondary monitor to the left of primary normalizes primary to (0,0) and keeps adjacency
+  const allLocal = computeMonitorLayoutEntries('all-local', {
+    paneWidth: 1280,
+    paneHeight: 800,
+    highDpi: false,
+    localDisplays: [
+      { left: -1920, top: 0, width: 1920, height: 1080, scaleFactor: 1, isPrimary: false },
+      { left: 0, top: 0, width: 2560, height: 1440, scaleFactor: 2, isPrimary: true },
+    ],
+  });
+  assert.equal(allLocal.length, 2);
+  const primary = allLocal.find((m) => m.isPrimary)!;
+  const secondary = allLocal.find((m) => !m.isPrimary)!;
+  assert.equal(primary.left, 0);
+  assert.equal(primary.top, 0);
+  assert.equal(secondary.left + secondary.width, primary.left);
+  assert.equal(primary.width % 2, 0);
+  assert.equal(secondary.width % 2, 0);
+
+  const bounds = computeMonitorVirtualBounds(allLocal)!;
+  assert.equal(bounds.width, 1920 + 2560);
+  assert.equal(bounds.height, 1440);
+  assert.equal(bounds.monitorRects[0].left, 0);
+  assert.equal(bounds.monitorRects[1].left, 1920);
+});
+
+test('classifyNetworkQualityTier and formatBandwidthBps format telemetry accurately', () => {
+  assert.equal(classifyNetworkQualityTier(null), 'unknown');
+  assert.equal(classifyNetworkQualityTier(undefined), 'unknown');
+  assert.equal(classifyNetworkQualityTier(-5), 'unknown');
+  assert.equal(classifyNetworkQualityTier(12), 'excellent');
+  assert.equal(classifyNetworkQualityTier(39.9), 'excellent');
+  assert.equal(classifyNetworkQualityTier(40), 'good');
+  assert.equal(classifyNetworkQualityTier(99), 'good');
+  assert.equal(classifyNetworkQualityTier(100), 'fair');
+  assert.equal(classifyNetworkQualityTier(199), 'fair');
+  assert.equal(classifyNetworkQualityTier(200), 'poor');
+  assert.equal(classifyNetworkQualityTier(550), 'poor');
+
+  assert.equal(formatBandwidthBps(0), '0 B/s');
+  assert.equal(formatBandwidthBps(-10), '0 B/s');
+  assert.equal(formatBandwidthBps(512), '512 B/s');
+  assert.equal(formatBandwidthBps(12.4 * 1024), '12.4 KB/s');
+  assert.equal(formatBandwidthBps(3.2 * 1024 * 1024), '3.2 MB/s');
+});
+
+test('mapViewportToVirtualDesktopCoords maps full view and cropped single-monitor view accurately', () => {
+  const rect = { left: 100, top: 50, width: 1000, height: 500 };
+  const virtualSize = { width: 3840, height: 1080 };
+
+  // Full view (no activeMonitorRect): midpoint maps to center of 3840x1080
+  assert.deepEqual(
+    mapViewportToVirtualDesktopCoords(600, 300, rect, virtualSize, null),
+    { x: 1920, y: 540 },
+  );
+
+  // Monitor 1 slice: [0..1920, 0..1080]
+  assert.deepEqual(
+    mapViewportToVirtualDesktopCoords(600, 300, rect, virtualSize, { left: 0, top: 0, width: 1920, height: 1080 }),
+    { x: 960, y: 540 },
+  );
+
+  // Monitor 2 slice: [1920..3840, 0..1080]
+  assert.deepEqual(
+    mapViewportToVirtualDesktopCoords(600, 300, rect, virtualSize, { left: 1920, top: 0, width: 1920, height: 1080 }),
+    { x: 2880, y: 540 },
+  );
+
+  // Edge clamping
+  assert.deepEqual(
+    mapViewportToVirtualDesktopCoords(1200, 600, rect, virtualSize, { left: 1920, top: 0, width: 1920, height: 1080 }),
+    { x: 3839, y: 1079 },
+  );
 });

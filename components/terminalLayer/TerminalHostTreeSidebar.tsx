@@ -24,6 +24,14 @@ import { terminalLayoutSuppressStore } from '../../application/state/terminalLay
 import { useStoredNumber } from '../../application/state/useStoredNumber';
 import { useTreeExpandedState } from '../../application/state/useTreeExpandedState';
 import { applyHostLabelRename } from '../../domain/host';
+import {
+  DEFAULT_RDP_PORT,
+  DEFAULT_VNC_PORT,
+  hasCompanionRdp,
+  hasCompanionVnc,
+  isRdpProtocol,
+  isVncProtocol,
+} from '../../domain/remoteDesktop';
 import { ensureAncestorPathsExpanded } from '../../domain/hostGroupPathMutations';
 import { buildHostGroupTree, collectGroupTreePaths } from '../../domain/hostGroupTree';
 import {
@@ -45,6 +53,8 @@ import { HostTreeGroupContextMenuContent, HostTreeHostContextMenuContent } from 
 import { HostTreeGroupInlineRenameInput } from '../host/HostTreeGroupInlineRenameInput';
 import { LazyMessageResponse } from '../ai-elements/LazyMessageResponse';
 import { DistroAvatar } from '../DistroAvatar';
+import { RdpProtocolIcon, VncProtocolIcon } from '../icons/RemoteDesktopIcons';
+import { getProtocolBadgeClass } from '../protocolVisuals';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -267,7 +277,26 @@ function pruneEmptyGroupNode(
 const TerminalHostTreeHostHoverCard: React.FC<{ host: Host }> = ({ host }) => {
   const { t } = useI18n();
   const protocol = host.protocol || 'ssh';
-  const port = host.port ?? 22;
+  const isStandaloneRdp = isRdpProtocol(protocol);
+  const isStandaloneVnc = isVncProtocol(protocol);
+  const companionRdp = !isStandaloneRdp && hasCompanionRdp(host);
+  const companionVnc = !isStandaloneVnc && hasCompanionVnc(host);
+  const defaultPort = isStandaloneRdp
+    ? DEFAULT_RDP_PORT
+    : isStandaloneVnc
+      ? DEFAULT_VNC_PORT
+      : 22;
+  const port = isStandaloneRdp
+    ? (host.rdpConfig?.port ?? host.port ?? defaultPort)
+    : isStandaloneVnc
+      ? (host.vncConfig?.port ?? host.port ?? defaultPort)
+      : (host.port ?? defaultPort);
+  const companions: string[] = [];
+  if (companionRdp) companions.push('RDP');
+  if (companionVnc) companions.push('VNC');
+  const protocolDisplay = companions.length > 0
+    ? `${protocol.toUpperCase()} + ${companions.join(', ')}`
+    : protocol.toUpperCase();
   const username = host.username?.trim();
   const notes = host.notes?.trim();
 
@@ -275,7 +304,7 @@ const TerminalHostTreeHostHoverCard: React.FC<{ host: Host }> = ({ host }) => {
     [t('terminal.layer.hostTree.details.host'), host.hostname],
     [t('terminal.layer.hostTree.details.user'), username],
     [t('terminal.layer.hostTree.details.port'), String(port)],
-    [t('terminal.layer.hostTree.details.protocol'), protocol.toUpperCase()],
+    [t('terminal.layer.hostTree.details.protocol'), protocolDisplay],
     [t('terminal.layer.hostTree.details.group'), host.group],
     [t('terminal.layer.hostTree.details.tags'), host.tags?.join(', ')],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
@@ -464,11 +493,77 @@ const HostTreeFlatRowItem = memo<HostTreeFlatRowProps>(({
             {row.host.label}
           </span>
         )}
-        {row.host.protocol && row.host.protocol !== 'ssh' && (
-          <span className="flex shrink-0 items-center text-[10px] leading-4 uppercase opacity-70" style={{ color: theme.mutedFg }}>
-            {row.host.protocol}
-          </span>
-        )}
+        {(() => {
+          const isStandaloneRdp = isRdpProtocol(row.host.protocol);
+          const isStandaloneVnc = isVncProtocol(row.host.protocol);
+          const companionRdp = !isStandaloneRdp && hasCompanionRdp(row.host);
+          const companionVnc = !isStandaloneVnc && hasCompanionVnc(row.host);
+
+          if (isStandaloneRdp || isStandaloneVnc || companionRdp || companionVnc) {
+            return (
+              <span className="ml-auto flex shrink-0 items-center gap-1">
+                {isStandaloneRdp && (
+                  <span
+                    className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 ${getProtocolBadgeClass('rdp')}`}
+                  >
+                    <RdpProtocolIcon size={10} />
+                    RDP
+                  </span>
+                )}
+                {isStandaloneVnc && (
+                  <span
+                    className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 ${getProtocolBadgeClass('vnc')}`}
+                  >
+                    <VncProtocolIcon size={10} />
+                    VNC
+                  </span>
+                )}
+                {companionRdp && (
+                  <button
+                    type="button"
+                    title={t('vault.hosts.connectRdp')}
+                    className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 transition-all hover:brightness-110 ${getProtocolBadgeClass('rdp')}`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onConnectRemoteDesktop?.(row.host, 'rdp');
+                    }}
+                  >
+                    <RdpProtocolIcon size={10} />
+                    +RDP
+                  </button>
+                )}
+                {companionVnc && (
+                  <button
+                    type="button"
+                    title={t('vault.hosts.connectVnc')}
+                    className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 transition-all hover:brightness-110 ${getProtocolBadgeClass('vnc')}`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onConnectRemoteDesktop?.(row.host, 'vnc');
+                    }}
+                  >
+                    <VncProtocolIcon size={10} />
+                    +VNC
+                  </button>
+                )}
+              </span>
+            );
+          }
+
+          if (row.host.protocol && row.host.protocol !== 'ssh') {
+            return (
+              <span className="flex shrink-0 items-center text-[10px] leading-4 uppercase opacity-70" style={{ color: theme.mutedFg }}>
+                {row.host.protocol}
+              </span>
+            );
+          }
+
+          return null;
+        })()}
       </div>
     );
 

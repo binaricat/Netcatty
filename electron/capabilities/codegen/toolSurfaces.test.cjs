@@ -201,7 +201,7 @@ test("listCattyToolSpecs includes renderer harness tools and the shared screen r
   const specs = listCattyToolSpecs();
   assert.ok(specs.length >= 40);
   const harness = specs.filter((spec) => spec.capabilityId.startsWith("harness."));
-  assert.equal(harness.length, 7);
+  assert.equal(harness.length, 8);
   const expectedRpcById = {
     "harness.terminal.read_context": "netcatty/readContext",
     "harness.remote_desktop.read_screen": "netcatty/readRemoteScreen",
@@ -216,6 +216,14 @@ test("listCattyToolSpecs includes renderer harness tools and the shared screen r
   assert.ok(harnessIds.includes("harness.workspace.get_info"));
   assert.ok(harnessIds.includes("harness.terminal.read_context"));
   assert.ok(harnessIds.includes("harness.remote_desktop.read_screen"));
+  assert.ok(harnessIds.includes("harness.remote_desktop.act"));
+
+  const readScreenSpec = harness.find((spec) => spec.capabilityId === "harness.remote_desktop.read_screen");
+  assert.ok(readScreenSpec?.inputShape?.grid);
+  const actSpec = harness.find((spec) => spec.capabilityId === "harness.remote_desktop.act");
+  assert.equal(actSpec?.toolName, "remote_desktop_act");
+  assert.equal(actSpec?.policy?.write, true);
+  assert.equal(actSpec?.policy?.bypassesApproval, false);
 });
 
 test("only terminal and remote desktop screen reading are exposed from harness on MCP", () => {

@@ -56,6 +56,7 @@ export type PluginHostProtocol = `plugin:${string}`;
 export type HostProtocol = BuiltInHostProtocol | PluginHostProtocol;
 
 export type RdpResolutionMode = 'dynamic' | 'fit' | 'fixed';
+export type RdpMultiMonitorMode = 'single' | 'dual' | 'all-local';
 export type RdpColorDepth = 16 | 24 | 32;
 export type RdpSecurityMode = 'auto' | 'nla' | 'tls' | 'rdp';
 
@@ -64,6 +65,8 @@ export type RdpSecurityMode = 'auto' | 'nla' | 'tls' | 'rdp';
  * NEVER add plaintext password fields here: legacy iOS sync only strips top-level
  * `password` and `telnetPassword`, so credentials must stay in `Host.password`
  * or be referenced via `identityId` / `Host.identityId`.
+ * NEVER add local filesystem paths (e.g. RDPDR shared folders) here so cloud
+ * and iOS sync payloads stay device-independent.
  */
 export interface RdpConfig {
   enabled?: boolean;
@@ -76,6 +79,7 @@ export interface RdpConfig {
   tunnelViaHostSsh?: boolean;
   tunnelTargetHost?: string;
   resolutionMode?: RdpResolutionMode;
+  multiMonitorMode?: RdpMultiMonitorMode;
   width?: number;
   height?: number;
   colorDepth?: RdpColorDepth;

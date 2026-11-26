@@ -7,6 +7,7 @@ Self-contained WebAssembly build of [Devolutions/IronRDP](https://github.com/Dev
 - **Patches applied** (under `scripts/ironrdp-web-patches/`):
   1. `0001-session-responsiveness.patch` — 16ms dirty-rectangle coalescing (`PaintTicker`) and cooperative event-loop yielding every 16 frames so rapid screen updates do not starve DOM keyboard/mouse input.
   2. `0002-load-balance-info-and-shell.patch` — Exposes `load_balance_info`, `alternate_shell`, and `work_dir` extensions on `SessionBuilder` for JumpServer Razor and RDS Connection Broker routing.
+  3. `0003-rdpdr-drives-and-multimonitor.patch` — Adds `WasmDriveBackend` for MS-RDPEFS drive redirection (`rdpdr_drives`, `rdpdr_request_callback`, `rdpdr_response`, `rdpdr_add_drive`, `rdpdr_remove_drive`, composing cleanly with audio and printer redirection) and MS-RDPEDISP multi-monitor layout extensions (`set_monitor_layout`, `display_control_caps_callback`).
 
 ## Rebuilding
 

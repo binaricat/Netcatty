@@ -878,7 +878,7 @@ export const zhCNAiMessages: Messages = {
   "ai.vision.snip.cancel": "取消框选",
   "ai.vision.snip.ariaLabel": "框选远程桌面画面区域",
   "ai.vision.privacyBlocked": "当前会话已禁止 AI 读屏。",
-  "ai.vision.viewingScreen": "AI 正在查看画面",
+  "ai.vision.viewingScreen": "Catty 正在查看桌面",
   "ai.vision.askAi": "问 AI",
   "ai.vision.captureFullAndAsk": "一键截屏问 AI",
   "ai.vision.snipRegionAndAsk": "框选区域问 AI",

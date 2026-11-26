@@ -30,7 +30,8 @@
     "commit": "293cb4bee90baddfd7b8ea08d2f46e31947a3888",
     "patches": [
       "0001-session-responsiveness.patch",
-      "0002-load-balance-info-and-shell.patch"
+      "0002-load-balance-info-and-shell.patch",
+      "0003-rdpdr-drives-and-multimonitor.patch"
     ]
   }
 }

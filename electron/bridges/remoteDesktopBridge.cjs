@@ -5,12 +5,15 @@ const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
+const { performance } = require("node:perf_hooks");
 const { WebSocketServer } = require("ws");
 const {
   computeCertSha256Fingerprint,
   extractPeerCertInfo,
   handleRdpCleanPathConnection,
+  probeTcpConnectRtt,
 } = require("./rdpCleanPathProxy.cjs");
+const { registerRdpdrHandlers } = require("./remoteDesktopRdpdrBridge.cjs");
 const { createProxySocket } = require("./proxyUtils.cjs");
 const { safeSend } = require("./ipcUtils.cjs");
 const { openBoundedForwardOutCallback } = require("./boundedSshChannelOpen.cjs");
@@ -30,17 +33,21 @@ const VNC_S2C = Object.freeze({
   DESKTOP_NAME: 0x09, // [0x09][utf8 bytes]
   ERROR: 0x0a,        // [0x0a][json utf8: { code, message }]
   FRAME_SYNC: 0x0b,   // [0x0b]
+  CAPABILITIES: 0x0c, // [0x0c][json utf8: { supports }]
 });
 
 // Client -> Server (binary frames; JSON text frames also accepted)
 const VNC_C2S = Object.freeze({
-  POINTER: 0x10,    // [0x10][x:u16be][y:u16be][buttons:u8]
-  KEY: 0x11,        // [0x11][keysym:u32be][down:u8]
-  QEMU_KEY: 0x12,   // [0x12][keysym:u32be][keycode:u32be][down:u8]
-  RESIZE: 0x13,     // [0x13][width:u16be][height:u16be]
-  CLIPBOARD: 0x14,  // [0x14][utf8 bytes]
-  REFRESH: 0x15,    // [0x15][incremental:u8]
-  PAUSE: 0x16,      // [0x16][paused:u8]
+  POINTER: 0x10,       // [0x10][x:u16be][y:u16be][buttons:u8]
+  KEY: 0x11,           // [0x11][keysym:u32be][down:u8]
+  QEMU_KEY: 0x12,      // [0x12][keysym:u32be][keycode:u32be][down:u8]
+  RESIZE: 0x13,        // [0x13][width:u16be][height:u16be]
+  CLIPBOARD: 0x14,     // [0x14][utf8 bytes]
+  REFRESH: 0x15,       // [0x15][incremental:u8]
+  PAUSE: 0x16,         // [0x16][paused:u8]
+  SET_ENCODINGS: 0x17, // [0x17][utf8 qualityPreset]
+  SET_READ_ONLY: 0x18, // [0x18][readOnly:u8]
+  XVP: 0x19,           // [0x19][utf8 action: shutdown|reboot|reset]
 });
 
 const TOKEN_TTL_MS = 60_000;
@@ -152,11 +159,57 @@ function encodeVncTextFrame(opcode, text) {
   return frame;
 }
 
-function buildVncEncodings(rfb2, qualityPreset) {
+let cachedSupportsAnonymousDhTls = null;
+function supportsAnonymousDhTls() {
+  if (cachedSupportsAnonymousDhTls !== null) return cachedSupportsAnonymousDhTls;
+  try {
+    const tls = require("node:tls");
+    tls.createSecureContext({
+      ciphers: "aNULL:!eNULL@SECLEVEL=0",
+      maxVersion: "TLSv1.2",
+    });
+    cachedSupportsAnonymousDhTls = true;
+  } catch {
+    // Electron links BoringSSL which rejects OpenSSL @SECLEVEL=0 and anonymous aNULL suites.
+    cachedSupportsAnonymousDhTls = false;
+  }
+  return cachedSupportsAnonymousDhTls;
+}
+
+function buildPreferredVncSecurity(rfb2, hasUsername, opts = {}) {
+  const defaults = typeof rfb2.defaultSecurity === "function" ? rfb2.defaultSecurity(hasUsername) : [];
+  if (!Array.isArray(defaults) || defaults.length <= 1) return defaults;
+  // Prefer X509/RA2/ARD encrypted types ahead of plaintext VNC (2) and None (1).
+  // Filter out anonymous-DH VeNCrypt subtypes (TLSNone=257, TLSVnc=258, TLSPlain=259)
+  // when the runtime TLS stack (e.g. Electron's BoringSSL) cannot negotiate aNULL@SECLEVEL=0,
+  // preventing OPENSSL_internal:INVALID_COMMAND handshake failures on TigerVNC.
+  const S = rfb2.security || {};
+  const allowAnonDh = typeof opts.allowAnonymousDh === "boolean"
+    ? opts.allowAnonymousDh
+    : supportsAnonymousDhTls();
+  const anonDhTypes = new Set([
+    S.TLSNone ?? 257,
+    S.TLSVnc ?? 258,
+    S.TLSPlain ?? 259,
+  ]);
+  const plaintext = new Set([S.None ?? S.none ?? 1, S.VNC ?? S.vnc ?? 2, S.Plain ?? 256]);
+  const encrypted = [];
+  const plain = [];
+  for (const entry of defaults) {
+    if (!allowAnonDh && anonDhTypes.has(entry)) continue;
+    if (plaintext.has(entry)) plain.push(entry);
+    else encrypted.push(entry);
+  }
+  return [...encrypted, ...plain];
+}
+
+function buildVncEncodings(rfb2, qualityPreset, customOpts = {}) {
   const E = rfb2.encodings;
   const list = [
     E.tight,
+    E.tightPng,
     E.zrle,
+    E.trle,
     E.copyRect,
     E.hextile,
     E.zlib,
@@ -166,28 +219,57 @@ function buildVncEncodings(rfb2, qualityPreset) {
     E.pseudoDesktopName,
     E.pseudoCursor,
     E.pseudoCursorWithAlpha,
+    E.pseudoXCursor,
+    E.pseudoVMwareCursor,
     E.pseudoExtendedClipboard,
     E.pseudoQemuExtendedKeyEvent,
     E.pseudoContinuousUpdates,
     E.pseudoFence,
+    E.pseudoXvp,
     E.pseudoLastRect,
   ];
-  // Map quality preset to Tight JPEG quality + compression level pseudo-encodings
+  // Map quality preset (or saved host numeric quality/compressionLevel) to Tight pseudo-encodings
   if (qualityPreset === "low") {
     list.push(rfb2.jpegQuality(3), rfb2.compressionLevel(7));
   } else if (qualityPreset === "medium") {
     list.push(rfb2.jpegQuality(6), rfb2.compressionLevel(5));
   } else if (qualityPreset === "lossless") {
     list.push(rfb2.compressionLevel(6));
+  } else if (qualityPreset === "high") {
+    list.push(rfb2.jpegQuality(9), rfb2.compressionLevel(2));
   } else {
-    // high / auto
-    list.push(rfb2.jpegQuality(8), rfb2.compressionLevel(3));
+    const q = Number.isInteger(customOpts?.jpegQuality)
+      ? Math.max(0, Math.min(9, customOpts.jpegQuality))
+      : 8;
+    const c = Number.isInteger(customOpts?.compressionLevel)
+      ? Math.max(0, Math.min(9, customOpts.compressionLevel))
+      : 3;
+    list.push(rfb2.jpegQuality(q), rfb2.compressionLevel(c));
   }
   return list.filter((entry) => typeof entry === "number");
 }
 
-function dispatchVncClientMessage(client, data, isBinary, { readOnly = false } = {}) {
+function dispatchVncClientMessage(
+  client,
+  data,
+  isBinary,
+  { readOnly = false, setReadOnly, rfb2Module, onSetEncodings } = {},
+) {
   if (!client || client.closed) return;
+
+  const applyEncodings = (preset) => {
+    if (typeof onSetEncodings === "function") {
+      onSetEncodings(preset);
+      return;
+    }
+    if (rfb2Module && typeof client.setEncodings === "function") {
+      try {
+        client.setEncodings(buildVncEncodings(rfb2Module, preset));
+      } catch {
+        // ignore unsupported encoding updates
+      }
+    }
+  };
 
   if (!isBinary) {
     let msg;
@@ -215,6 +297,7 @@ function dispatchVncClientMessage(client, data, isBinary, { readOnly = false } =
         client.qemuKeyEvent(Number(msg.keysym) >>> 0, Number(msg.keycode) >>> 0, Boolean(msg.down));
         break;
       case "resize": {
+        if (readOnly) return;
         const w = Math.max(1, Math.min(8192, Math.round(Number(msg.width) || 0)));
         const h = Math.max(1, Math.min(8192, Math.round(Number(msg.height) || 0)));
         if (client.supports?.extendedDesktopSize) {
@@ -234,6 +317,24 @@ function dispatchVncClientMessage(client, data, isBinary, { readOnly = false } =
       case "pause":
         client.autoUpdate = !msg.paused;
         if (!msg.paused) client.requestUpdate(true);
+        break;
+      case "setEncodings":
+        if (typeof msg.quality === "string") {
+          applyEncodings(msg.quality);
+        }
+        break;
+      case "setReadOnly":
+        setReadOnly?.(Boolean(msg.readOnly));
+        break;
+      case "xvp":
+        if (readOnly) return;
+        if (
+          client.supports?.xvp
+          && typeof client.xvp === "function"
+          && (msg.action === "shutdown" || msg.action === "reboot" || msg.action === "reset")
+        ) {
+          try { client.xvp(msg.action); } catch { /* ignore */ }
+        }
         break;
       default:
         break;
@@ -258,7 +359,7 @@ function dispatchVncClientMessage(client, data, isBinary, { readOnly = false } =
       client.qemuKeyEvent(buf.readUInt32BE(1), buf.readUInt32BE(5), buf[9] !== 0);
       break;
     case VNC_C2S.RESIZE:
-      if (buf.length < 5) return;
+      if (readOnly || buf.length < 5) return;
       if (client.supports?.extendedDesktopSize) {
         client.setDesktopSize(buf.readUInt16BE(1), buf.readUInt16BE(3)).catch(() => {});
       }
@@ -274,6 +375,27 @@ function dispatchVncClientMessage(client, data, isBinary, { readOnly = false } =
       const paused = buf.length >= 2 && buf[1] !== 0;
       client.autoUpdate = !paused;
       if (!paused) client.requestUpdate(true);
+      break;
+    }
+    case VNC_C2S.SET_ENCODINGS: {
+      const preset = buf.subarray(1).toString("utf8").trim();
+      if (preset) applyEncodings(preset);
+      break;
+    }
+    case VNC_C2S.SET_READ_ONLY: {
+      setReadOnly?.(buf.length >= 2 && buf[1] !== 0);
+      break;
+    }
+    case VNC_C2S.XVP: {
+      if (readOnly) return;
+      const action = buf.subarray(1).toString("utf8").trim();
+      if (
+        client.supports?.xvp
+        && typeof client.xvp === "function"
+        && (action === "shutdown" || action === "reboot" || action === "reset")
+      ) {
+        try { client.xvp(action); } catch { /* ignore */ }
+      }
       break;
     }
     default:
@@ -566,6 +688,16 @@ async function defaultDialRemoteDesktop(event, config, sessionId) {
   return dialDirectTcp(targetHost, targetPort, timeoutMs);
 }
 
+const VNC_FENCE_MAGIC = Buffer.from("NCFT", "ascii");
+
+function isDirectRemoteDesktopConfig(config) {
+  if (!config || typeof config !== "object") return true;
+  if (config.tunnelViaHostSsh === true && config.sshTunnelConfig) return false;
+  if (Array.isArray(config.jumpHosts) && config.jumpHosts.length > 0) return false;
+  if (config.proxy && config.proxy.type) return false;
+  return true;
+}
+
 // ── VNC (rfb2) Session Handler ──
 
 async function attachVncSessionToWebSocket({
@@ -576,12 +708,18 @@ async function attachVncSessionToWebSocket({
   trustedFingerprints,
   signal,
   rfb2Module,
+  onStats,
+  statsIntervalMs = 1500,
+  fenceIntervalMs = 3000,
+  rttProbeIntervalMs = 4000,
+  rttProbeTimeoutMs = 3000,
 }) {
   const rfb2 = rfb2Module || require("rfb2");
-  const readOnly = config.readOnly === true || config.viewOnly === true;
+  let readOnly = config.readOnly === true || config.viewOnly === true;
   const host = config.hostname || config.host || "127.0.0.1";
   const port = Number(config.port) || 5900;
   const ignoreCertErrors = config.ignoreCertErrors === true;
+  const isDirectConnection = isDirectRemoteDesktopConfig(config);
   const sessionTrusted = trustedFingerprints instanceof Set ? trustedFingerprints : new Set();
 
   if (Array.isArray(config.knownCertFingerprints)) {
@@ -595,9 +733,41 @@ async function attachVncSessionToWebSocket({
   let currentClient = null;
   let currentUpstream = null;
   let closed = false;
+  let statsTimer = null;
+  let fenceTimer = null;
+  let backpressureTimer = null;
+  let activeRttProbe = null;
+  let totalRxBytes = 0;
+  let totalTxBytes = 0;
+  let intervalRxBytes = 0;
+  let intervalTxBytes = 0;
+  const pendingFences = new Map();
+
+  const stopTelemetry = () => {
+    if (statsTimer) {
+      clearInterval(statsTimer);
+      statsTimer = null;
+    }
+    if (fenceTimer) {
+      clearInterval(fenceTimer);
+      fenceTimer = null;
+    }
+    if (backpressureTimer) {
+      clearTimeout(backpressureTimer);
+      backpressureTimer = null;
+    }
+    if (activeRttProbe) {
+      try { activeRttProbe.cancel(); } catch { /* ignore */ }
+      activeRttProbe = null;
+    }
+    pendingFences.clear();
+  };
 
   const sendBinary = (buf) => {
     if (closed || ws.readyState !== 1) return;
+    const len = buf?.length || 0;
+    totalRxBytes += len;
+    intervalRxBytes += len;
     try {
       ws.send(buf, { binary: true });
     } catch {
@@ -606,6 +776,8 @@ async function attachVncSessionToWebSocket({
   };
 
   const cleanupCurrent = () => {
+    stopTelemetry();
+    try { currentClient?.removeAllListeners?.(); } catch { /* ignore */ }
     try { currentClient?.destroy?.(); } catch { /* ignore */ }
     currentClient = null;
     try { currentUpstream?.cleanup?.(); } catch { /* ignore */ }
@@ -650,7 +822,9 @@ async function attachVncSessionToWebSocket({
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (closed || signal?.aborted) return;
 
+      const dialStart = performance.now();
       const upstream = await dial();
+      const initialDialRttMs = Math.max(0, performance.now() - dialStart);
       if (closed || signal?.aborted) {
         upstream.cleanup?.();
         return;
@@ -659,19 +833,30 @@ async function attachVncSessionToWebSocket({
 
       let capturedUntrustedCert = null;
       const hasUsername = typeof config.username === "string" && config.username.length > 0;
-      const encodings = buildVncEncodings(rfb2, config.quality);
+      const encodings = buildVncEncodings(rfb2, config.quality, {
+        jpegQuality: config.vncQuality,
+        compressionLevel: config.vncCompressionLevel,
+      });
 
       let client;
       const connectResult = await new Promise((resolve, reject) => {
         let settled = false;
+        const onHandshakeError = (err) => finishErr(err);
+        const onHandshakeClose = () => finishErr(new Error("VNC connection closed during handshake"));
+        const cleanupHandshakeListeners = () => {
+          client?.removeListener?.("error", onHandshakeError);
+          client?.removeListener?.("close", onHandshakeClose);
+        };
         const finishOk = () => {
           if (settled) return;
           settled = true;
+          cleanupHandshakeListeners();
           resolve({ ok: true });
         };
         const finishErr = (err) => {
           if (settled) return;
           settled = true;
+          cleanupHandshakeListeners();
           if (capturedUntrustedCert) {
             resolve({ ok: false, untrustedCert: capturedUntrustedCert });
             return;
@@ -686,7 +871,7 @@ async function attachVncSessionToWebSocket({
           pixelFormat: "rgbx",
           shared: config.shared !== false,
           encodings,
-          security: rfb2.defaultSecurity(hasUsername),
+          security: buildPreferredVncSecurity(rfb2, hasUsername),
           tls: {
             rejectUnauthorized: false,
             ...(net.isIP(host) === 0 ? { servername: host } : {}),
@@ -728,8 +913,8 @@ async function attachVncSessionToWebSocket({
           finishOk();
         });
 
-        client.once("error", finishErr);
-        client.once("close", () => finishErr(new Error("VNC connection closed during handshake")));
+        client.once("error", onHandshakeError);
+        client.once("close", onHandshakeClose);
       });
 
       if (!connectResult.ok && connectResult.untrustedCert) {
@@ -763,12 +948,104 @@ async function attachVncSessionToWebSocket({
         return;
       }
 
+      const WS_BACKPRESSURE_HIGH_WATER = 8 * 1024 * 1024;
+      let userPaused = false;
+      let backpressurePaused = false;
+      let continuousUpdatesEnabled = false;
+
+      const snapshotSupports = () => ({
+        extendedDesktopSize: Boolean(client.supports?.extendedDesktopSize),
+        unicodeClipboard: Boolean(client.supports?.unicodeClipboard),
+        extendedClipboard: Boolean(client.supports?.extendedClipboard),
+        qemuExtendedKeyEvent: Boolean(client.supports?.qemuExtendedKeyEvent),
+        continuousUpdates: Boolean(client.supports?.continuousUpdates),
+        fence: Boolean(client.supports?.fence),
+        xvp: Boolean(client.supports?.xvp),
+      });
+
+      let lastSupportsJson = "";
+      const syncCapabilitiesIfChanged = () => {
+        const supports = snapshotSupports();
+        const nextJson = JSON.stringify(supports);
+        if (nextJson !== lastSupportsJson) {
+          lastSupportsJson = nextJson;
+          sendBinary(encodeVncJsonFrame(VNC_S2C.CAPABILITIES, { supports }));
+        }
+        // Enable RFB Continuous Updates as soon as the server confirms support
+        if (
+          supports.continuousUpdates
+          && !continuousUpdatesEnabled
+          && !userPaused
+          && !backpressurePaused
+          && typeof client.enableContinuousUpdates === "function"
+        ) {
+          continuousUpdatesEnabled = true;
+          try {
+            client.enableContinuousUpdates(true, 0, 0, client.width, client.height);
+          } catch {
+            continuousUpdatesEnabled = false;
+          }
+        }
+      };
+
+      const checkBackpressure = () => {
+        if (closed || !client || client.closed) return;
+        const buffered = Number(ws.bufferedAmount) || 0;
+        if (buffered > WS_BACKPRESSURE_HIGH_WATER && !backpressurePaused) {
+          backpressurePaused = true;
+          client.autoUpdate = false;
+          if (!backpressureTimer) {
+            backpressureTimer = setTimeout(() => {
+              backpressureTimer = null;
+              if (closed || !client || client.closed) return;
+              if ((Number(ws.bufferedAmount) || 0) <= WS_BACKPRESSURE_HIGH_WATER / 2) {
+                backpressurePaused = false;
+                if (!userPaused) {
+                  client.autoUpdate = true;
+                  client.requestUpdate(true);
+                }
+              } else {
+                checkBackpressure();
+              }
+            }, 80);
+            backpressureTimer.unref?.();
+          }
+        }
+      };
+
+      const isNativeRgbx = (pf) => (
+        pf
+        && pf.trueColor
+        && pf.bitsPerPixel === 32
+        && !pf.bigEndian
+        && pf.redShift === 0
+        && pf.greenShift === 8
+        && pf.blueShift === 16
+      );
+
       const sendRect = (rect) => {
         if (closed || ws.readyState !== 1) return;
         switch (rect.type) {
           case "pixels": {
-            const rgba = rfb2.toRgba(client.pixelFormat, rect.data, client.colorMap);
-            sendBinary(encodeVncRawRgbaFrame(rect.x, rect.y, rect.width, rect.height, rgba));
+            const raw = rect.data;
+            if (isNativeRgbx(client.pixelFormat) && raw && raw.length === rect.width * rect.height * 4) {
+              // Single-allocation fast path: copy directly into wire frame and stamp opaque alpha.
+              const frame = Buffer.allocUnsafe(9 + raw.length);
+              frame[0] = VNC_S2C.RAW_RGBA;
+              frame.writeUInt16BE(rect.x & 0xffff, 1);
+              frame.writeUInt16BE(rect.y & 0xffff, 3);
+              frame.writeUInt16BE(rect.width & 0xffff, 5);
+              frame.writeUInt16BE(rect.height & 0xffff, 7);
+              raw.copy(frame, 9);
+              for (let i = 12; i < frame.length; i += 4) {
+                frame[i] = 255;
+              }
+              sendBinary(frame);
+            } else {
+              const rgba = rfb2.toRgba(client.pixelFormat, raw, client.colorMap);
+              sendBinary(encodeVncRawRgbaFrame(rect.x, rect.y, rect.width, rect.height, rgba));
+            }
+            checkBackpressure();
             break;
           }
           case "copy":
@@ -778,6 +1055,7 @@ async function attachVncSessionToWebSocket({
             break;
           case "jpeg":
             sendBinary(encodeVncJpegFrame(rect.x, rect.y, rect.width, rect.height, rect.jpeg));
+            checkBackpressure();
             break;
           default:
             break;
@@ -786,15 +1064,23 @@ async function attachVncSessionToWebSocket({
 
       client.on("rect", sendRect);
       client.on("update", () => {
+        syncCapabilitiesIfChanged();
         sendBinary(Buffer.from([VNC_S2C.FRAME_SYNC]));
       });
       client.on("resize", ({ width, height }) => {
+        syncCapabilitiesIfChanged();
+        if (continuousUpdatesEnabled && typeof client.enableContinuousUpdates === "function") {
+          try {
+            client.enableContinuousUpdates(true, 0, 0, width, height);
+          } catch { /* ignore */ }
+        }
         sendBinary(encodeVncDesktopSizeFrame(width, height));
       });
       client.on("cursor", (cursor) => {
         sendBinary(encodeVncCursorFrame(cursor.x, cursor.y, cursor.width, cursor.height, cursor.rgba));
       });
       client.on("clipboard", (text) => {
+        syncCapabilitiesIfChanged();
         sendBinary(encodeVncTextFrame(VNC_S2C.CLIPBOARD, text));
       });
       client.on("bell", () => {
@@ -803,47 +1089,205 @@ async function attachVncSessionToWebSocket({
       client.on("desktopName", (name) => {
         sendBinary(encodeVncTextFrame(VNC_S2C.DESKTOP_NAME, name));
       });
+      client.on("endOfContinuousUpdates", () => {
+        continuousUpdatesEnabled = false;
+        syncCapabilitiesIfChanged();
+      });
 
       const onWsMessage = (data, isBinary) => {
-        dispatchVncClientMessage(client, data, isBinary, { readOnly });
+        const len = Buffer.isBuffer(data)
+          ? data.length
+          : data instanceof Uint8Array
+            ? data.byteLength
+            : Buffer.byteLength(String(data || ""), "utf8");
+        totalTxBytes += len;
+        intervalTxBytes += len;
+        if (isBinary) {
+          const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          if (buf.length >= 2 && buf[0] === VNC_C2S.PAUSE) {
+            userPaused = buf[1] !== 0;
+          }
+        }
+        dispatchVncClientMessage(client, data, isBinary, {
+          readOnly,
+          setReadOnly: (next) => {
+            readOnly = Boolean(next);
+          },
+          rfb2Module: rfb2,
+          onSetEncodings: (preset) => {
+            if (typeof client.setEncodings !== "function") return;
+            try {
+              client.setEncodings(buildVncEncodings(rfb2, preset, {
+                jpegQuality: config.vncQuality,
+                compressionLevel: config.vncCompressionLevel,
+              }));
+              client.requestUpdate(false);
+            } catch { /* ignore */ }
+          },
+        });
       };
       ws.on("message", onWsMessage);
 
+      // Telemetry: RFB Fence RTT (when supported) + RX/TX bandwidth stats
+      let smoothedRttMs = Number.isFinite(initialDialRttMs) ? initialDialRttMs : null;
+      let smoothedRxBps = 0;
+      let smoothedTxBps = 0;
+      let lastStatsAt = performance.now();
+      let hasEmittedInterval = false;
+      let fenceSeq = 0;
+
+      const onFenceReply = (ev) => {
+        const payload = ev?.payload;
+        if (!payload || payload.length < 8) return;
+        const buf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+        if (
+          buf[0] !== VNC_FENCE_MAGIC[0]
+          || buf[1] !== VNC_FENCE_MAGIC[1]
+          || buf[2] !== VNC_FENCE_MAGIC[2]
+          || buf[3] !== VNC_FENCE_MAGIC[3]
+        ) {
+          return;
+        }
+        const seq = buf.readUInt32BE(4);
+        const sentAt = pendingFences.get(seq);
+        if (sentAt === undefined) return;
+        pendingFences.delete(seq);
+        const sample = performance.now() - sentAt;
+        if (Number.isFinite(sample) && sample >= 0) {
+          smoothedRttMs = smoothedRttMs === null ? sample : (smoothedRttMs * 0.6 + sample * 0.4);
+        }
+      };
+      client.on("fence", onFenceReply);
+
+      const emitStats = (isInitial = false) => {
+        if (typeof onStats !== "function" || closed) return;
+        if (!isInitial) {
+          const now = performance.now();
+          const dtSec = Math.max(0.05, (now - lastStatsAt) / 1000);
+          const instRxBps = intervalRxBytes / dtSec;
+          const instTxBps = intervalTxBytes / dtSec;
+          smoothedRxBps = hasEmittedInterval ? (smoothedRxBps * 0.4 + instRxBps * 0.6) : instRxBps;
+          smoothedTxBps = hasEmittedInterval ? (smoothedTxBps * 0.4 + instTxBps * 0.6) : instTxBps;
+          if (smoothedRxBps < 1) smoothedRxBps = 0;
+          if (smoothedTxBps < 1) smoothedTxBps = 0;
+          intervalRxBytes = 0;
+          intervalTxBytes = 0;
+          lastStatsAt = now;
+          hasEmittedInterval = true;
+        }
+        try {
+          onStats({
+            protocol: "vnc",
+            rttMs: smoothedRttMs !== null && Number.isFinite(smoothedRttMs)
+              ? Math.max(0, Math.round(smoothedRttMs))
+              : null,
+            rxBps: Math.max(0, Math.round(smoothedRxBps)),
+            txBps: Math.max(0, Math.round(smoothedTxBps)),
+            totalRxBytes,
+            totalTxBytes,
+            ts: Date.now(),
+          });
+        } catch {
+          // telemetry callback errors must never disrupt the VNC session
+        }
+      };
+
+      let lastTcpFallbackProbeAt = 0;
+      const effectiveFallbackInterval = Math.max(10_000, Number(rttProbeIntervalMs) || 15_000);
+      const sendFenceOrFallbackProbe = () => {
+        if (closed || !client || client.closed) return;
+        syncCapabilitiesIfChanged();
+        if (client.supports?.fence && typeof client.fence === "function") {
+          fenceSeq = (fenceSeq + 1) >>> 0;
+          if (pendingFences.size >= 16) {
+            const oldestKey = pendingFences.keys().next().value;
+            if (oldestKey !== undefined) pendingFences.delete(oldestKey);
+          }
+          const payload = Buffer.allocUnsafe(8);
+          VNC_FENCE_MAGIC.copy(payload, 0);
+          payload.writeUInt32BE(fenceSeq, 4);
+          pendingFences.set(fenceSeq, performance.now());
+          try {
+            client.fence(0, payload);
+          } catch {
+            pendingFences.delete(fenceSeq);
+          }
+          return;
+        }
+        // Throttle fallback TCP RTT probes on non-Fence servers so we never spam failed handshakes.
+        const now = performance.now();
+        if (
+          isDirectConnection
+          && host
+          && port
+          && !activeRttProbe
+          && (now - lastTcpFallbackProbeAt >= effectiveFallbackInterval)
+        ) {
+          lastTcpFallbackProbeAt = now;
+          const effectiveTimeout = Math.max(100, Number(rttProbeTimeoutMs) || 3000);
+          const probe = probeTcpConnectRtt(host, port, effectiveTimeout);
+          activeRttProbe = probe;
+          void probe.promise.then((sample) => {
+            if (activeRttProbe === probe) activeRttProbe = null;
+            if (!closed && typeof sample === "number" && Number.isFinite(sample)) {
+              smoothedRttMs = smoothedRttMs === null ? sample : (smoothedRttMs * 0.6 + sample * 0.4);
+            }
+          });
+        }
+      };
+
       // Send READY metadata frame, then request initial full framebuffer update + enable autoUpdate.
+      const initialSupports = snapshotSupports();
+      lastSupportsJson = JSON.stringify(initialSupports);
       sendBinary(encodeVncJsonFrame(VNC_S2C.READY, {
         width: client.width,
         height: client.height,
         name: client.name || "",
         securityType: client.securityType,
         securityName: typeof rfb2.securityName === "function" ? rfb2.securityName(client.securityType) : String(client.securityType),
-        supports: {
-          extendedDesktopSize: Boolean(client.supports?.extendedDesktopSize),
-          unicodeClipboard: Boolean(client.supports?.unicodeClipboard),
-          extendedClipboard: Boolean(client.supports?.extendedClipboard),
-          qemuExtendedKeyEvent: Boolean(client.supports?.qemuExtendedKeyEvent),
-          continuousUpdates: Boolean(client.supports?.continuousUpdates),
-        },
+        supports: initialSupports,
       }));
 
       client.autoUpdate = true;
       client.requestUpdate(false);
 
+      if (typeof onStats === "function") {
+        emitStats(true);
+        const effectiveStatsInterval = Math.max(50, Number(statsIntervalMs) || 1500);
+        statsTimer = setInterval(() => emitStats(false), effectiveStatsInterval);
+        statsTimer.unref?.();
+
+        const effectiveFenceInterval = Math.max(
+          50,
+          Number(fenceIntervalMs) || 3000,
+        );
+        fenceTimer = setInterval(sendFenceOrFallbackProbe, effectiveFenceInterval);
+        fenceTimer.unref?.();
+        if (client.supports?.fence) {
+          sendFenceOrFallbackProbe();
+        }
+      }
+
       // Wait until RFB client or WebSocket closes.
       await new Promise((resolve) => {
         let done = false;
-        const finish = () => {
-          if (done) return;
-          done = true;
-          ws.removeListener("message", onWsMessage);
-          resolve();
-        };
-        client.once("error", (err) => {
+        const onClientError = (err) => {
           sendBinary(encodeVncJsonFrame(VNC_S2C.ERROR, {
             code: err?.code || "RFB_ERROR",
             message: err?.message || String(err),
           }));
           finish();
-        });
+        };
+        const finish = () => {
+          if (done) return;
+          done = true;
+          stopTelemetry();
+          client.removeAllListeners?.();
+          ws.removeListener("message", onWsMessage);
+          ws.removeListener("close", finish);
+          resolve();
+        };
+        client.once("error", onClientError);
         client.once("close", finish);
         ws.once("close", finish);
       });
@@ -861,6 +1305,8 @@ async function attachVncSessionToWebSocket({
     throw err;
   } finally {
     signal?.removeEventListener?.("abort", onAbort);
+    ws.removeListener?.("close", cleanupAll);
+    ws.removeListener?.("error", cleanupAll);
     cleanupAll();
   }
 }
@@ -1071,6 +1517,14 @@ function createRemoteDesktopService(options = {}) {
       stopSessionInternal(session.sessionId);
     };
 
+    const emitSessionStats = (stats) => {
+      if (session.closed) return;
+      safeSend(session.sender, "netcatty:remote-desktop:stats", {
+        sessionId: session.sessionId,
+        ...stats,
+      });
+    };
+
     if (session.protocol === "rdp") {
       void handleRdpCleanPathConnection({
         ws,
@@ -1081,6 +1535,9 @@ function createRemoteDesktopService(options = {}) {
         allowLegacyTls: session.config.allowLegacyTls === true || session.config.securityMode === "tls-legacy",
         handshakeTimeoutMs: Number(session.config.connectTimeoutMs) || 20_000,
         signal: session.abortController.signal,
+        isDirectConnection: isDirectRemoteDesktopConfig(session.config),
+        statsIntervalMs: options.statsIntervalMs,
+        rttProbeIntervalMs: options.rttProbeIntervalMs,
         onStatus: (stage, detail) => {
           safeSend(session.sender, "netcatty:remote-desktop:status", {
             sessionId: session.sessionId,
@@ -1088,6 +1545,7 @@ function createRemoteDesktopService(options = {}) {
             ...(detail || {}),
           });
         },
+        onStats: emitSessionStats,
       }).then(() => onDone(null), onDone);
       return;
     }
@@ -1101,6 +1559,10 @@ function createRemoteDesktopService(options = {}) {
         trustedFingerprints: session.trustedFingerprints,
         signal: session.abortController.signal,
         rfb2Module,
+        onStats: emitSessionStats,
+        statsIntervalMs: options.statsIntervalMs,
+        fenceIntervalMs: options.fenceIntervalMs,
+        rttProbeIntervalMs: options.rttProbeIntervalMs,
       }).then(() => onDone(null), onDone);
       return;
     }
@@ -1457,7 +1919,27 @@ function registerMainOsHandlers(ipcMain, options = {}) {
   } = options;
 
   const activeClipboardWriteStreams = new Map();
+  const trackedClipboardSenders = new WeakSet();
   const ephemeralSystemTunnels = new Set();
+
+  const abortClipboardStreamEntry = async (streamId, entry) => {
+    activeClipboardWriteStreams.delete(streamId);
+    try { await entry.handle.close(); } catch { /* ignore */ }
+    try { await fsImpl.promises.unlink(entry.filePath); } catch { /* ignore */ }
+  };
+
+  const trackClipboardSender = (sender) => {
+    if (!sender || typeof sender.once !== "function" || trackedClipboardSenders.has(sender)) return;
+    trackedClipboardSenders.add(sender);
+    const webContentsId = sender.id;
+    sender.once("destroyed", () => {
+      for (const [streamId, entry] of [...activeClipboardWriteStreams]) {
+        if (entry.webContentsId === webContentsId) {
+          void abortClipboardStreamEntry(streamId, entry);
+        }
+      }
+    });
+  };
 
   ipcMain.handle("netcatty:remote-desktop:save-clipboard-file", async (event, payload = {}) => {
     const dialog = electronModule?.dialog;
@@ -1473,9 +1955,14 @@ function registerMainOsHandlers(ipcMain, options = {}) {
         : payload.data instanceof Uint8Array
           ? Buffer.from(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength)
           : Buffer.from(String(payload.data || ""), "base64");
-      await entry.handle.write(buf);
-      entry.bytesWritten += buf.length;
-      return { ok: true, bytesWritten: entry.bytesWritten };
+      try {
+        await entry.handle.write(buf);
+        entry.bytesWritten += buf.length;
+        return { ok: true, bytesWritten: entry.bytesWritten };
+      } catch (err) {
+        await abortClipboardStreamEntry(payload.streamId, entry);
+        return { ok: false, error: err?.message || "Failed to write clipboard file chunk" };
+      }
     }
 
     if (action === "finish") {
@@ -1489,9 +1976,7 @@ function registerMainOsHandlers(ipcMain, options = {}) {
     if (action === "abort") {
       const entry = activeClipboardWriteStreams.get(payload.streamId);
       if (!entry) return { ok: true };
-      activeClipboardWriteStreams.delete(payload.streamId);
-      try { await entry.handle.close(); } catch { /* ignore */ }
-      try { await fsImpl.promises.unlink(entry.filePath); } catch { /* ignore */ }
+      await abortClipboardStreamEntry(payload.streamId, entry);
       return { ok: true };
     }
 
@@ -1513,12 +1998,14 @@ function registerMainOsHandlers(ipcMain, options = {}) {
     }
 
     if (action === "begin") {
+      trackClipboardSender(event?.sender);
       const handle = await fsImpl.promises.open(result.filePath, "w");
       const streamId = crypto.randomUUID();
       activeClipboardWriteStreams.set(streamId, {
         handle,
         filePath: result.filePath,
         bytesWritten: 0,
+        webContentsId: event?.sender?.id ?? null,
       });
       return { ok: true, streamId, filePath: result.filePath };
     }
@@ -1685,15 +2172,22 @@ function registerMainOsHandlers(ipcMain, options = {}) {
     return portForwardingBridge?.stopPortForward?.(event, { tunnelId }) || { ok: true };
   });
 
+  const rdpdrHandlers = registerRdpdrHandlers(ipcMain, {
+    electronModule,
+    fsImpl,
+    pathImpl,
+  });
+
   const cleanupMainOsResources = async () => {
     for (const [, entry] of [...activeClipboardWriteStreams]) {
       try { await entry.handle.close(); } catch { /* ignore */ }
     }
     activeClipboardWriteStreams.clear();
     ephemeralSystemTunnels.clear();
+    try { await rdpdrHandlers.cleanupAll(); } catch { /* ignore */ }
   };
 
-  return { cleanupMainOsResources };
+  return { cleanupMainOsResources, rdpdrBridge: rdpdrHandlers.bridge };
 }
 
 // ── Default Singleton Service + IPC Registration ──
@@ -1828,6 +2322,7 @@ function registerHandlers(ipcMain, options = {}) {
 module.exports = {
   VNC_S2C,
   VNC_C2S,
+  buildPreferredVncSecurity,
   isAllowedLoopbackOrigin,
   timingSafeTokenEquals,
   encodeVncJsonFrame,

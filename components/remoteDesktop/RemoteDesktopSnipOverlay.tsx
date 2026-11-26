@@ -50,8 +50,21 @@ export function computeSnipSelectionRect(
     return null;
   }
 
-  const clampX = (v: number) => Math.max(canvasRect.left, Math.min(canvasRect.left + canvasRect.width, v));
-  const clampY = (v: number) => Math.max(canvasRect.top, Math.min(canvasRect.top + canvasRect.height, v));
+  // Clamp pointer coordinates to the visible intersection of overlayRect and canvasRect.
+  // In single-monitor slice mode, canvasRect represents the full translated virtual desktop
+  // extending outside overlayRect, so clamping to the intersection keeps drags inside the
+  // visible monitor while normalizing 0..1000 against the full canvas framebuffer.
+  const visibleLeft = Math.max(overlayRect.left, canvasRect.left);
+  const visibleTop = Math.max(overlayRect.top, canvasRect.top);
+  const visibleRight = Math.min(overlayRect.left + overlayRect.width, canvasRect.left + canvasRect.width);
+  const visibleBottom = Math.min(overlayRect.top + overlayRect.height, canvasRect.top + canvasRect.height);
+
+  if (visibleRight <= visibleLeft || visibleBottom <= visibleTop) {
+    return null;
+  }
+
+  const clampX = (v: number) => Math.max(visibleLeft, Math.min(visibleRight, v));
+  const clampY = (v: number) => Math.max(visibleTop, Math.min(visibleBottom, v));
 
   const x1 = clampX(startClient.x);
   const y1 = clampY(startClient.y);
@@ -113,7 +126,7 @@ export interface RemoteDesktopSnipOverlayProps {
   onCancel: () => void;
 }
 
-export const RemoteDesktopSnipOverlay: React.FC<RemoteDesktopSnipOverlayProps> = ({
+export const RemoteDesktopSnipOverlay: React.FC<RemoteDesktopSnipOverlayProps> = React.memo(({
   open,
   naturalWidth,
   naturalHeight,
@@ -307,6 +320,6 @@ export const RemoteDesktopSnipOverlay: React.FC<RemoteDesktopSnipOverlayProps> =
       </div>
     </div>
   );
-};
+});
 
-export default React.memo(RemoteDesktopSnipOverlay);
+export default RemoteDesktopSnipOverlay;

@@ -82,6 +82,10 @@ class FakeMediaRecorder {
     set.add(cb);
   }
 
+  removeEventListener(type: string, cb: () => void) {
+    this.listeners.get(type)?.delete(cb);
+  }
+
   start(timeslice?: number) {
     this.state = 'recording';
     this.timeslice = timeslice;

@@ -16,6 +16,8 @@ export interface RemoteDesktopStartOptions {
   readOnly?: boolean;
   viewOnly?: boolean;
   quality?: "auto" | "high" | "medium" | "low" | "lossless";
+  vncQuality?: number;
+  vncCompressionLevel?: number;
   securityMode?: "auto" | "nla" | "tls" | "rdp" | "tls-legacy";
   allowLegacyTls?: boolean;
   ignoreCertErrors?: boolean;
@@ -66,6 +68,177 @@ export interface RemoteDesktopStatusEvent {
   status: string;
   error?: string;
   fingerprintSha256?: string;
+}
+
+export interface RemoteDesktopStatsEvent {
+  sessionId: string;
+  protocol: RemoteDesktopProtocol;
+  rttMs: number | null;
+  rxBps: number;
+  txBps: number;
+  totalRxBytes: number;
+  totalTxBytes: number;
+  ts: number;
+}
+
+export interface RemoteDesktopLocalDisplay {
+  id: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  scaleFactor: number;
+  isPrimary: boolean;
+}
+
+export interface RemoteDesktopRdpdrDriveConfig {
+  deviceId: number;
+  name: string;
+  path: string;
+  readOnly?: boolean;
+}
+
+export interface RemoteDesktopRdpdrPickFolderResult {
+  ok: boolean;
+  canceled?: boolean;
+  path?: string;
+  name?: string;
+  error?: string;
+}
+
+export interface RemoteDesktopRdpdrRegisterDrivesResult {
+  ok: boolean;
+  error?: string;
+  registered: Array<{
+    deviceId: number;
+    name: string;
+    path: string;
+    readOnly: boolean;
+  }>;
+  rejected: Array<{
+    deviceId?: number;
+    path?: string;
+    reason: string;
+  }>;
+}
+
+export interface RemoteDesktopRdpdrRequest {
+  op:
+    | "create"
+    | "close"
+    | "read"
+    | "write"
+    | "query_directory"
+    | "query_information"
+    | "query_volume_information"
+    | "set_information"
+    | "flush"
+    | "lock_control"
+    | "device_control"
+    | "notify_change_directory"
+    | "reset";
+  deviceId: number;
+  fileId: number;
+  completionId: number;
+  path?: string;
+  desiredAccess?: number;
+  allocationSize?: number;
+  fileAttributes?: number;
+  sharedAccess?: number;
+  createDisposition?: number;
+  createOptions?: number;
+  offset?: number;
+  length?: number;
+  data?: Uint8Array;
+  initialQuery?: boolean;
+  informationClass?: number;
+  creationTime?: string | number;
+  lastAccessTime?: string | number;
+  lastWriteTime?: string | number;
+  changeTime?: string | number;
+  renameTarget?: string;
+  replaceIfExists?: boolean;
+  deleteOnClose?: boolean;
+  deletePending?: boolean;
+  eofSize?: number;
+  operation?: number;
+  wait?: boolean;
+  ioControlCode?: number;
+  outputBufferLength?: number;
+  inputBuffer?: Uint8Array;
+  watchTree?: boolean;
+  completionFilter?: number;
+}
+
+export interface RemoteDesktopRdpdrDirectoryEntry {
+  fileName: string;
+  creationTime: string;
+  lastAccessTime: string;
+  lastWriteTime: string;
+  changeTime: string;
+  endOfFile: number;
+  allocationSize: number;
+  fileAttributes: number;
+}
+
+export interface RemoteDesktopRdpdrResponse {
+  op: string;
+  deviceId: number;
+  completionId: number;
+  status: number;
+  fileId?: number;
+  information?: number;
+  data?: Uint8Array;
+  bytesWritten?: number;
+  informationClass?: number;
+  entry?: RemoteDesktopRdpdrDirectoryEntry;
+  basic?: {
+    creationTime: string;
+    lastAccessTime: string;
+    lastWriteTime: string;
+    changeTime: string;
+    fileAttributes: number;
+  };
+  standard?: {
+    allocationSize: number;
+    endOfFile: number;
+    numberOfLinks: number;
+    deletePending: boolean;
+    directory: boolean;
+  };
+  attributeTag?: {
+    fileAttributes: number;
+    reparseTag: number;
+  };
+  volume?: {
+    creationTime: string;
+    serialNumber: number;
+    supportsObjects: boolean;
+    label: string;
+  };
+  size?: {
+    totalAllocationUnits: number;
+    availableAllocationUnits: number;
+    sectorsPerAllocationUnit: number;
+    bytesPerSector: number;
+  };
+  device?: {
+    deviceType: number;
+    characteristics: number;
+  };
+  attribute?: {
+    attributes: number;
+    maxComponentNameLen: number;
+    fileSystemName: string;
+  };
+  fullSize?: {
+    totalAllocationUnits: number;
+    callerAvailableAllocationUnits: number;
+    actualAvailableAllocationUnits: number;
+    sectorsPerAllocationUnit: number;
+    bytesPerSector: number;
+  };
+  outputBuffer?: Uint8Array;
 }
 
 export type RemoteDesktopSaveClipboardFileOptions =
@@ -236,8 +409,20 @@ export interface RemoteDesktopBridgeApi {
   saveClipboardFile(options: RemoteDesktopSaveClipboardFileOptions): Promise<RemoteDesktopSaveClipboardFileResult>;
   openSystemClient(options: RemoteDesktopOpenSystemClientOptions): Promise<RemoteDesktopOpenSystemClientResult>;
   stopSystemTunnel(tunnelId: string): Promise<{ ok?: boolean; success?: boolean; error?: string }>;
+  getLocalDisplays(): Promise<RemoteDesktopLocalDisplay[]>;
+  rdpdrPickFolder(): Promise<RemoteDesktopRdpdrPickFolderResult>;
+  rdpdrRegisterDrives(
+    sessionId: string,
+    drives: RemoteDesktopRdpdrDriveConfig[],
+  ): Promise<RemoteDesktopRdpdrRegisterDrivesResult>;
+  rdpdrOp(
+    sessionId: string,
+    request: RemoteDesktopRdpdrRequest,
+  ): Promise<RemoteDesktopRdpdrResponse>;
+  rdpdrCleanup(sessionId: string): Promise<{ ok: boolean }>;
   onCertVerify(cb: (payload: RemoteDesktopCertVerifyEvent) => void): () => void;
   onStatus(cb: (payload: RemoteDesktopStatusEvent) => void): () => void;
+  onStats(cb: (payload: RemoteDesktopStatsEvent) => void): () => void;
   onKeyboardGrabChanged(cb: (payload: { active: boolean }) => void): () => void;
 }
 
@@ -252,8 +437,14 @@ declare global {
     saveRemoteDesktopClipboardFile?: RemoteDesktopBridgeApi["saveClipboardFile"];
     openRemoteDesktopSystemClient?: RemoteDesktopBridgeApi["openSystemClient"];
     stopRemoteDesktopSystemTunnel?: RemoteDesktopBridgeApi["stopSystemTunnel"];
+    getRemoteDesktopLocalDisplays?: RemoteDesktopBridgeApi["getLocalDisplays"];
+    pickRemoteDesktopRdpdrFolder?: RemoteDesktopBridgeApi["rdpdrPickFolder"];
+    registerRemoteDesktopRdpdrDrives?: RemoteDesktopBridgeApi["rdpdrRegisterDrives"];
+    invokeRemoteDesktopRdpdrOp?: RemoteDesktopBridgeApi["rdpdrOp"];
+    cleanupRemoteDesktopRdpdr?: RemoteDesktopBridgeApi["rdpdrCleanup"];
     onRemoteDesktopCertVerify?: RemoteDesktopBridgeApi["onCertVerify"];
     onRemoteDesktopStatus?: RemoteDesktopBridgeApi["onStatus"];
+    onRemoteDesktopStats?: RemoteDesktopBridgeApi["onStats"];
     onRemoteDesktopKeyboardGrabChanged?: RemoteDesktopBridgeApi["onKeyboardGrabChanged"];
     remoteDesktop?: RemoteDesktopBridgeApi;
     remoteDesktopRecordings?: RemoteDesktopRecordingsBridgeApi;

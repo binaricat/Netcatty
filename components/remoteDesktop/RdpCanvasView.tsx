@@ -3,13 +3,27 @@ import React, {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from 'react';
 import { AlertCircle, UploadCloud } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import type { NormalizedRdpConfig } from '../../domain/remoteDesktop';
-import { splitWindowsUserDomain } from '../../domain/remoteDesktop';
+import {
+  computeMonitorVirtualBounds,
+  mapViewportToVirtualDesktopCoords,
+  splitWindowsUserDomain,
+  type MonitorLayoutSpec,
+  type NormalizedRdpConfig,
+  type RdpDisplayControlCaps,
+} from '../../domain/remoteDesktop';
+import {
+  permilleToFramebufferCoord,
+  resolveChordToRdpScancodes,
+  resolveKeyToRdpScancode,
+  type RemoteDesktopAction,
+} from '../../domain/remoteDesktopActionCodec';
+import type { RemoteDesktopSharedFolder } from '../../infrastructure/remoteDesktop/remoteDesktopSharedFolders';
 import {
   captureFrameFromCanvas,
   type RemoteDesktopCaptureRequest,
@@ -28,6 +42,7 @@ import {
   type RemoteDesktopClipboardFileOffer,
   type RemoteDesktopClipboardTransferState,
   type RemoteDesktopDisplayMode,
+  type RemoteDesktopRdpdrRequest,
 } from './remoteDesktopHelpers';
 import type { RemoteDesktopSpecialKeyId } from './vncKeymap';
 
@@ -73,6 +88,7 @@ function getDataTransferItemEntry(item: DataTransferItem): WebkitFileSystemEntry
 }
 
 export interface RdpCanvasViewProps {
+  sessionId: string;
   wsUrl: string;
   hostname: string;
   port: number;
@@ -90,6 +106,12 @@ export interface RdpCanvasViewProps {
   audioMuted: boolean;
   audioVolume: number;
   keyboardGrabActive: boolean;
+  sharedFolders?: readonly RemoteDesktopSharedFolder[];
+  fixedResolution?: { width: number; height: number } | null;
+  monitorLayout?: readonly MonitorLayoutSpec[];
+  activeMonitorIndex?: 'all' | number;
+  onDisplayControlCaps?: (caps: RdpDisplayControlCaps) => void;
+  onFpsChange?: (fps: number) => void;
   onRequestReleaseGrab: () => void;
   onConnected: (info: { width: number; height: number; encrypted?: boolean }) => void;
   onDesktopResize: (size: { width: number; height: number }) => void;
@@ -113,6 +135,7 @@ function extractAuthTokenFromWsUrl(wsUrl: string): string {
 export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, RdpCanvasViewProps>(
   function RdpCanvasView(
     {
+      sessionId,
       wsUrl,
       hostname,
       port,
@@ -130,6 +153,12 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       audioMuted,
       audioVolume,
       keyboardGrabActive,
+      sharedFolders = [],
+      fixedResolution = null,
+      monitorLayout = [],
+      activeMonitorIndex = 'all',
+      onDisplayControlCaps,
+      onFpsChange,
       onRequestReleaseGrab,
       onConnected,
       onDesktopResize,
@@ -144,8 +173,10 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
   ) {
     const { t } = useI18n();
     const containerRef = useRef<HTMLDivElement | null>(null);
+    const viewportRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const cachedCanvasRectRef = useRef<DOMRect | null>(null);
+    const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
     const pendingPointerRef = useRef<{ x: number; y: number } | null>(null);
     const pointerRafRef = useRef<number | null>(null);
     const lastSentPointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -196,6 +227,8 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       onClipboardFileTransferStatus,
       onClipboardTransferChange,
       onNegotiationFallbackNeeded,
+      onDisplayControlCaps,
+      onFpsChange,
       onError,
       onDisconnected,
       onRequestReleaseGrab,
@@ -207,12 +240,15 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       onClipboardFileTransferStatus,
       onClipboardTransferChange,
       onNegotiationFallbackNeeded,
+      onDisplayControlCaps,
+      onFpsChange,
       onError,
       onDisconnected,
       onRequestReleaseGrab,
     };
 
     const propsRef = useRef({
+      sessionId,
       viewOnly,
       clipboardSyncEnabled,
       isVisible,
@@ -220,8 +256,13 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       displayMode,
       highDpi,
       mapCmdToCtrl,
+      sharedFolders,
+      fixedResolution,
+      monitorLayout,
+      activeMonitorIndex,
     });
     propsRef.current = {
+      sessionId,
       viewOnly,
       clipboardSyncEnabled,
       isVisible,
@@ -229,7 +270,38 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       displayMode,
       highDpi,
       mapCmdToCtrl,
+      sharedFolders,
+      fixedResolution,
+      monitorLayout,
+      activeMonitorIndex,
     };
+
+    const activeMonitorRect = useMemo(() => {
+      if (
+        !monitorLayout
+        || monitorLayout.length <= 1
+        || typeof activeMonitorIndex !== 'number'
+        || activeMonitorIndex < 0
+        || activeMonitorIndex >= monitorLayout.length
+      ) {
+        return null;
+      }
+      const bounds = computeMonitorVirtualBounds(monitorLayout);
+      if (!bounds || bounds.width <= 0 || bounds.height <= 0) return null;
+      const slice = bounds.monitorRects[activeMonitorIndex];
+      if (!slice) return null;
+      const scaleX = remoteSize.width / bounds.width;
+      const scaleY = remoteSize.height / bounds.height;
+      return {
+        left: slice.left * scaleX,
+        top: slice.top * scaleY,
+        width: slice.width * scaleX,
+        height: slice.height * scaleY,
+      };
+    }, [activeMonitorIndex, monitorLayout, remoteSize.height, remoteSize.width]);
+
+    const activeMonitorRectRef = useRef(activeMonitorRect);
+    activeMonitorRectRef.current = activeMonitorRect;
 
     // Sync user mute / volume to audio player
     useEffect(() => {
@@ -370,6 +442,10 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       if (!beginRes?.ok || beginRes.canceled || !beginRes.streamId) {
         return;
       }
+      if (sessionRef.current !== session) {
+        void bridge.saveClipboardFile({ action: 'abort', streamId: beginRes.streamId }).catch(() => {});
+        return;
+      }
 
       const streamId = nextStreamIdRef.current++;
       const transferId = `clip-down-${Date.now()}-${streamId}`;
@@ -493,8 +569,12 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         if (text && (force || text !== lastRemoteClipboardTextRef.current)) {
           lastRemoteClipboardTextRef.current = text;
           const data = new mod.ClipboardData();
-          data.addText('text/plain', text);
-          await session.onClipboardPaste(data);
+          try {
+            data.addText('text/plain', text);
+            await session.onClipboardPaste(data);
+          } finally {
+            try { data.free(); } catch { /* ignore */ }
+          }
         }
       } catch {
         // Clipboard permission or empty
@@ -502,6 +582,297 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
     }, []);
 
     const syncClipboardNow = useCallback(() => syncLocalClipboardToRdp(true), [syncLocalClipboardToRdp]);
+
+    const resizeToPreset = useCallback((width: number, height: number) => {
+      const session = sessionRef.current;
+      if (!session) return;
+      const clampedW = Math.min(8192, Math.max(200, Math.floor(width)));
+      const clampedH = Math.min(8192, Math.max(200, Math.floor(height)));
+      const evenW = clampedW - (clampedW % 2);
+      const evenH = clampedH - (clampedH % 2);
+      const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+      const effectiveDpr = propsRef.current.highDpi ? Math.min(2, Math.max(1, rawDpr)) : 1;
+      const scaleFactor = propsRef.current.highDpi
+        ? Math.min(500, Math.max(100, Math.round(effectiveDpr * 100)))
+        : 100;
+      try {
+        // Wait for server-confirmed backing canvas resize (`canvasResizedCallback`)
+        // to update `remoteSize` so UI/pointer math never desyncs from `canvas.width/height`.
+        session.resize(evenW, evenH, scaleFactor);
+      } catch {
+        // Ignore resize error if server does not support Display Control
+      }
+    }, []);
+
+    const setMonitorLayout = useCallback((monitors: MonitorLayoutSpec[]) => {
+      const session = sessionRef.current;
+      const mod = modRef.current;
+      if (!session || !mod || !Array.isArray(monitors) || monitors.length === 0) return;
+      try {
+        // Let `canvasResizedCallback` update `remoteSize` once the server applies
+        // the new virtual desktop bounds, preventing premature coordinate desync.
+        session.invokeExtension(new mod.Extension('set_monitor_layout', monitors));
+      } catch {
+        // Ignore if display control extension is not ready
+      }
+    }, []);
+
+    const addSharedDrive = useCallback((drive: { deviceId: number; name: string }) => {
+      const session = sessionRef.current;
+      const mod = modRef.current;
+      if (!session || !mod) return;
+      try {
+        session.invokeExtension(new mod.Extension('rdpdr_add_drive', drive));
+      } catch {
+        // Session may have closed or RDPDR not active
+      }
+    }, []);
+
+    const removeSharedDrive = useCallback((deviceId: number) => {
+      const session = sessionRef.current;
+      const mod = modRef.current;
+      if (!session || !mod) return;
+      try {
+        session.invokeExtension(new mod.Extension('rdpdr_remove_drive', deviceId));
+      } catch {
+        // Session may have closed or RDPDR not active
+      }
+    }, []);
+
+    const remoteSizeRef = useRef(remoteSize);
+    remoteSizeRef.current = remoteSize;
+    const lastSentScaleFactorRef = useRef<number | null>(null);
+    const [sessionConnectedSeq, setSessionConnectedSeq] = useState(0);
+
+    const performAiAction = useCallback(
+      async (action: RemoteDesktopAction, options?: { signal?: AbortSignal }): Promise<void> => {
+        const signal = options?.signal;
+        if (signal?.aborted) return;
+        if (propsRef.current.viewOnly) {
+          throw new Error('RDP session is in view-only mode.');
+        }
+        const session = sessionRef.current;
+        const mod = modRef.current;
+        if (!session || !mod) {
+          throw new Error('RDP session is not connected.');
+        }
+        const isCancelled = () => Boolean(signal?.aborted || propsRef.current.viewOnly || sessionRef.current !== session);
+        const sleep = (ms: number) => new Promise<void>((resolve) => {
+          if (ms <= 0 || isCancelled()) {
+            resolve();
+            return;
+          }
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            window.clearTimeout(timer);
+            signal?.removeEventListener('abort', finish);
+            resolve();
+          };
+          const timer = window.setTimeout(finish, ms);
+          signal?.addEventListener('abort', finish, { once: true });
+        });
+        const canvas = canvasRef.current;
+        const fbW = Math.max(1, canvas?.width || remoteSizeRef.current.width || 1920);
+        const fbH = Math.max(1, canvas?.height || remoteSizeRef.current.height || 1080);
+
+        const glidePointerTo = async (targetX: number, targetY: number) => {
+          if (isCancelled()) return;
+          const prev = lastSentPointerRef.current;
+          if (!prev) {
+            lastSentPointerRef.current = { x: targetX, y: targetY };
+            applyDeviceEvents((m) => [m.DeviceEvent.mouseMove(targetX, targetY)]);
+            return;
+          }
+          const dx = targetX - prev.x;
+          const dy = targetY - prev.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 6) {
+            lastSentPointerRef.current = { x: targetX, y: targetY };
+            applyDeviceEvents((m) => [m.DeviceEvent.mouseMove(targetX, targetY)]);
+            return;
+          }
+          const steps = Math.max(6, Math.min(14, Math.round(dist / 85) + 5));
+          const stepDelay = 14;
+          for (let step = 1; step <= steps; step += 1) {
+            if (isCancelled()) return;
+            const t = step / steps;
+            // Cubic ease-out for natural cursor deceleration
+            const eased = 1 - Math.pow(1 - t, 3);
+            const ix = Math.round(prev.x + dx * eased);
+            const iy = Math.round(prev.y + dy * eased);
+            lastSentPointerRef.current = { x: ix, y: iy };
+            applyDeviceEvents((m) => [m.DeviceEvent.mouseMove(ix, iy)]);
+            if (step < steps) {
+              await sleep(stepDelay);
+            }
+          }
+        };
+
+        switch (action.type) {
+          case 'wait':
+            await sleep(action.ms);
+            return;
+
+          case 'move': {
+            const x = permilleToFramebufferCoord(action.x, fbW);
+            const y = permilleToFramebufferCoord(action.y, fbH);
+            await glidePointerTo(x, y);
+            return;
+          }
+
+          case 'click': {
+            const x = permilleToFramebufferCoord(action.x, fbW);
+            const y = permilleToFramebufferCoord(action.y, fbH);
+            const btn = action.button === 'right' ? 2 : action.button === 'middle' ? 1 : 0;
+            const clickCount = action.clickCount ?? 1;
+            await glidePointerTo(x, y);
+            if (isCancelled()) return;
+            const modCodes: number[] = [];
+            for (const mk of action.modifiers ?? []) {
+              const code = resolveKeyToRdpScancode(mk);
+              if (code !== null) modCodes.push(code);
+            }
+            let buttonHeld = false;
+            let modsHeld = false;
+            try {
+              if (modCodes.length > 0) {
+                applyDeviceEvents((m) => modCodes.map((sc) => m.DeviceEvent.keyPressed(sc)));
+                modsHeld = true;
+              }
+              for (let i = 0; i < clickCount; i += 1) {
+                if (isCancelled()) break;
+                if (i > 0) {
+                  await sleep(45);
+                  if (isCancelled()) break;
+                }
+                applyDeviceEvents((m) => [
+                  m.DeviceEvent.mouseMove(x, y),
+                  m.DeviceEvent.mouseButtonPressed(btn),
+                ]);
+                buttonHeld = true;
+                await sleep(24);
+                applyDeviceEvents((m) => [
+                  m.DeviceEvent.mouseMove(x, y),
+                  m.DeviceEvent.mouseButtonReleased(btn),
+                ]);
+                buttonHeld = false;
+              }
+            } finally {
+              if (buttonHeld) {
+                const pos = lastSentPointerRef.current ?? { x, y };
+                applyDeviceEvents((m) => [
+                  m.DeviceEvent.mouseMove(pos.x, pos.y),
+                  m.DeviceEvent.mouseButtonReleased(btn),
+                ]);
+              }
+              if (modsHeld && modCodes.length > 0) {
+                applyDeviceEvents((m) => [...modCodes].reverse().map((sc) => m.DeviceEvent.keyReleased(sc)));
+              }
+            }
+            return;
+          }
+
+          case 'drag': {
+            const startX = permilleToFramebufferCoord(action.fromX, fbW);
+            const startY = permilleToFramebufferCoord(action.fromY, fbH);
+            const endX = permilleToFramebufferCoord(action.toX, fbW);
+            const endY = permilleToFramebufferCoord(action.toY, fbH);
+            const btn = action.button === 'right' ? 2 : 0;
+            const steps = Math.max(6, Math.min(40, Math.round(action.steps ?? 12)));
+            await glidePointerTo(startX, startY);
+            if (isCancelled()) return;
+            await sleep(20);
+            if (isCancelled()) return;
+            let buttonHeld = false;
+            try {
+              applyDeviceEvents((m) => [
+                m.DeviceEvent.mouseMove(startX, startY),
+                m.DeviceEvent.mouseButtonPressed(btn),
+              ]);
+              buttonHeld = true;
+              for (let step = 1; step <= steps; step += 1) {
+                if (isCancelled()) break;
+                await sleep(16);
+                if (isCancelled()) break;
+                const t = step / steps;
+                const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+                const ix = Math.round(startX + (endX - startX) * eased);
+                const iy = Math.round(startY + (endY - startY) * eased);
+                lastSentPointerRef.current = { x: ix, y: iy };
+                applyDeviceEvents((m) => [m.DeviceEvent.mouseMove(ix, iy)]);
+              }
+              if (!isCancelled()) {
+                await sleep(18);
+              }
+              if (!isCancelled()) {
+                lastSentPointerRef.current = { x: endX, y: endY };
+                applyDeviceEvents((m) => [
+                  m.DeviceEvent.mouseMove(endX, endY),
+                  m.DeviceEvent.mouseButtonReleased(btn),
+                ]);
+                buttonHeld = false;
+              }
+            } finally {
+              if (buttonHeld) {
+                const pos = lastSentPointerRef.current ?? { x: startX, y: startY };
+                applyDeviceEvents((m) => [
+                  m.DeviceEvent.mouseMove(pos.x, pos.y),
+                  m.DeviceEvent.mouseButtonReleased(btn),
+                ]);
+              }
+            }
+            return;
+          }
+
+          case 'scroll': {
+            const x = permilleToFramebufferCoord(action.x, fbW);
+            const y = permilleToFramebufferCoord(action.y, fbH);
+            await glidePointerTo(x, y);
+            if (isCancelled()) return;
+            const dy = action.deltaY ?? 0;
+            const dx = action.deltaX ?? 0;
+            applyDeviceEvents((m) => {
+              const evs: IronDeviceEvent[] = [m.DeviceEvent.mouseMove(x, y)];
+              if (dy !== 0) {
+                const rawDelta = -dy;
+                const amount = Math.sign(rawDelta) * Math.max(1, Math.min(120, Math.round(Math.abs(rawDelta))));
+                evs.push(m.DeviceEvent.wheelRotations(true, amount, m.RotationUnit.Pixel));
+              }
+              if (dx !== 0) {
+                const amount = Math.sign(dx) * Math.max(1, Math.min(120, Math.round(Math.abs(dx))));
+                evs.push(m.DeviceEvent.wheelRotations(false, amount, m.RotationUnit.Pixel));
+              }
+              return evs;
+            });
+            return;
+          }
+
+          case 'type': {
+            if (isCancelled()) return;
+            typeText(action.text);
+            return;
+          }
+
+          case 'key': {
+            if (isCancelled()) return;
+            const chord = resolveChordToRdpScancodes(action.key);
+            if (!chord || chord.length === 0) {
+              throw new Error(`Unsupported RDP key chord: ${action.key}`);
+            }
+            applyDeviceEvents((m) => chord.map((sc) => m.DeviceEvent.keyPressed(sc)));
+            try {
+              await sleep(20);
+            } finally {
+              applyDeviceEvents((m) => [...chord].reverse().map((sc) => m.DeviceEvent.keyReleased(sc)));
+            }
+            return;
+          }
+        }
+      },
+      [applyDeviceEvents, typeText],
+    );
 
     useImperativeHandle(
       ref,
@@ -517,28 +888,38 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         syncClipboardNow,
         downloadRemoteClipboardFile,
         uploadLocalClipboardFiles,
+        resizeToPreset,
+        setMonitorLayout,
+        addSharedDrive,
+        removeSharedDrive,
+        performAiAction,
       }),
       [
+        addSharedDrive,
         captureFrame,
         captureScreenshot,
         downloadRemoteClipboardFile,
         focusInput,
         getCanvasRect,
         getCaptureStream,
+        performAiAction,
         releaseAllInputs,
+        removeSharedDrive,
+        resizeToPreset,
         sendSpecialKey,
+        setMonitorLayout,
         syncClipboardNow,
         typeText,
         uploadLocalClipboardFiles,
       ],
     );
 
-    // Release keys when hidden
+    // Release keys when hidden or switching into view-only mode
     useEffect(() => {
-      if (!isVisible) {
+      if (!isVisible || viewOnly) {
         releaseAllInputs();
       }
-    }, [isVisible, releaseAllInputs]);
+    }, [isVisible, releaseAllInputs, viewOnly]);
 
     // Connect IronRDP WASM session
     useEffect(() => {
@@ -565,12 +946,17 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
           : 100;
         const cssW = Math.max(640, Math.floor(containerRect?.width || rdpConfig.width || 1280));
         const cssH = Math.max(480, Math.floor(containerRect?.height || rdpConfig.height || 800));
-        const initW = rdpConfig.resolutionMode === 'fixed'
-          ? Math.max(640, rdpConfig.width || 1920)
-          : Math.min(3840, Math.max(640, Math.floor(cssW * effectiveDpr)));
-        const initH = rdpConfig.resolutionMode === 'fixed'
-          ? Math.max(480, rdpConfig.height || 1080)
-          : Math.min(2160, Math.max(480, Math.floor(cssH * effectiveDpr)));
+        const fixedRes = propsRef.current.fixedResolution;
+        const initW = fixedRes
+          ? Math.max(200, Math.min(8192, Math.floor(fixedRes.width)))
+          : rdpConfig.resolutionMode === 'fixed'
+            ? Math.max(640, rdpConfig.width || 1920)
+            : Math.min(3840, Math.max(640, Math.floor(cssW * effectiveDpr)));
+        const initH = fixedRes
+          ? Math.max(200, Math.min(8192, Math.floor(fixedRes.height)))
+          : rdpConfig.resolutionMode === 'fixed'
+            ? Math.max(480, rdpConfig.height || 1080)
+            : Math.min(2160, Math.max(480, Math.floor(cssH * effectiveDpr)));
         // Even dimensions help EGFX / H.264 / ClearCodec alignment
         const alignedW = initW - (initW % 2);
         const alignedH = initH - (initH % 2);
@@ -585,6 +971,30 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
           securityMode === 'nla' || (securityMode === 'auto' && !fallbackDisableCredSsp);
         const enableStandardRdp = securityMode === 'rdp';
 
+        const rdpdrSessionId = propsRef.current.sessionId;
+        const bridgeForRdpdr = getRemoteDesktopBridge();
+        let initialRdpdrDrives: Array<{ deviceId: number; name: string }> = [];
+        if (bridgeForRdpdr?.rdpdrRegisterDrives && rdpdrSessionId) {
+          const desiredDrives = (propsRef.current.sharedFolders ?? []).map((folder) => ({
+            deviceId: folder.deviceId,
+            name: folder.name,
+            path: folder.path,
+            readOnly: folder.readOnly,
+          }));
+          try {
+            const regRes = await bridgeForRdpdr.rdpdrRegisterDrives(rdpdrSessionId, desiredDrives);
+            if (disposed) return;
+            if (regRes?.ok && Array.isArray(regRes.registered)) {
+              initialRdpdrDrives = regRes.registered.map((d) => ({
+                deviceId: d.deviceId,
+                name: d.name,
+              }));
+            }
+          } catch {
+            // Proceed without initial drives if registration fails
+          }
+        }
+
         const builder = new mod.SessionBuilder()
           .username(cleanUser)
           .password(password)
@@ -593,6 +1003,13 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
           .authToken(authToken)
           .renderCanvas(canvas)
           .desktopSize(new mod.DesktopSize(alignedW, alignedH))
+          .canvasResizedCallback(() => {
+            if (disposed) return;
+            const c = canvasRef.current;
+            if (!c || c.width <= 0 || c.height <= 0) return;
+            setRemoteSize({ width: c.width, height: c.height });
+            callbacksRef.current.onDesktopResize({ width: c.width, height: c.height });
+          })
           .setCursorStyleCallbackContext({})
           .setCursorStyleCallback((
             cursorKind: string,
@@ -619,11 +1036,57 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
 
         builder
           .extension(new mod.Extension('display_control', true))
+          .extension(
+            new mod.Extension('display_control_caps_callback', (caps: RdpDisplayControlCaps) => {
+              if (disposed) return;
+              callbacksRef.current.onDisplayControlCaps?.(caps);
+            }),
+          )
           .extension(new mod.Extension('desktop_scale_factor', rdpConfig.resolutionMode === 'fixed' ? 100 : scaleFactor))
           .extension(new mod.Extension('color_depth', rdpConfig.colorDepth || 32))
           .extension(new mod.Extension('enable_credssp', enableCredSsp))
           .extension(new mod.Extension('enable_standard_rdp_security', enableStandardRdp))
           .extension(new mod.Extension('client_name', 'Netcatty'));
+
+        // RDPDR sandboxed local drive redirection (always attach callback so live hotplug works)
+        if (bridgeForRdpdr?.rdpdrOp && rdpdrSessionId) {
+          builder
+            .extension(new mod.Extension('rdpdr_drives', initialRdpdrDrives))
+            .extension(
+              new mod.Extension('rdpdr_request_callback', (req: RemoteDesktopRdpdrRequest) => {
+                if (disposed) return;
+                const bridge = getRemoteDesktopBridge();
+                if (!bridge?.rdpdrOp) return;
+                void bridge
+                  .rdpdrOp(rdpdrSessionId, req)
+                  .then((res) => {
+                    if (disposed) return;
+                    const activeSession = sessionRef.current;
+                    if (!activeSession) return;
+                    try {
+                      activeSession.invokeExtension(new mod.Extension('rdpdr_response', res));
+                    } catch {
+                      // Session may have just closed
+                    }
+                  })
+                  .catch(() => {
+                    if (disposed || !sessionRef.current || req.op === 'reset') return;
+                    try {
+                      sessionRef.current.invokeExtension(
+                        new mod.Extension('rdpdr_response', {
+                          op: req.op,
+                          deviceId: req.deviceId,
+                          completionId: req.completionId,
+                          status: 0xc0000001, // STATUS_UNSUCCESSFUL
+                        }),
+                      );
+                    } catch {
+                      // Ignore closed session errors
+                    }
+                  });
+              }),
+            );
+        }
 
         if (rdpConfig.loadBalanceInfo) {
           builder.extension(new mod.Extension('load_balance_info', rdpConfig.loadBalanceInfo));
@@ -894,7 +1357,10 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
                     });
                     return;
                   }
-                  if (!session) return;
+                  if (!session) {
+                    void abortDownload(`Disconnected while preparing ${state.file.name}`);
+                    return;
+                  }
                   const nextStreamId = nextStreamIdRef.current++;
                   pendingDownloadsRef.current.set(nextStreamId, {
                     ...state,
@@ -926,6 +1392,7 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
                       }),
                     );
                   } catch {
+                    pendingDownloadsRef.current.delete(nextStreamId);
                     void abortDownload(`Download interrupted for ${state.file.name}`);
                   }
                   return;
@@ -1001,6 +1468,7 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
                       }),
                     );
                   } catch {
+                    pendingDownloadsRef.current.delete(nextStreamId);
                     await abortDownload(`Download interrupted for ${state.file.name}`);
                   }
                 })();
@@ -1048,6 +1516,7 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
 
         if (disposed) {
           try { session.shutdown(); } catch { /* ignore */ }
+          try { session.free(); } catch { /* ignore */ }
           return;
         }
 
@@ -1055,7 +1524,9 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         const size = session.desktopSize();
         const w = size.width || alignedW;
         const h = size.height || alignedH;
+        try { size.free(); } catch { /* ignore */ }
         setRemoteSize({ width: w, height: h });
+        setSessionConnectedSeq((seq) => seq + 1);
         callbacksRef.current.onConnected({ width: w, height: h, encrypted: !enableStandardRdp });
 
         try {
@@ -1063,6 +1534,7 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
           if (!disposed) {
             callbacksRef.current.onDisconnected(termInfo?.reason?.() || undefined);
           }
+          try { termInfo?.free?.(); } catch { /* ignore */ }
         } catch (runErr) {
           if (disposed) return;
           const ironErr = runErr as { kind?: () => number; backtrace?: () => string };
@@ -1082,7 +1554,10 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
             kind,
           });
         } finally {
-          sessionRef.current = null;
+          if (sessionRef.current === session) {
+            sessionRef.current = null;
+          }
+          try { session.free(); } catch { /* ignore */ }
         }
       };
 
@@ -1105,6 +1580,9 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         audioPlayer?.dispose();
         audioPlayerRef.current = null;
         const bridge = getRemoteDesktopBridge();
+        if (bridge?.rdpdrCleanup && propsRef.current.sessionId) {
+          void bridge.rdpdrCleanup(propsRef.current.sessionId).catch(() => {});
+        }
         for (const pending of pendingDownloads.values()) {
           if (pending.saveStreamId && bridge) {
             void bridge.saveClipboardFile({ action: 'abort', streamId: pending.saveStreamId }).catch(() => {});
@@ -1112,6 +1590,8 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         }
         pendingDownloads.clear();
         uploadedHighWater.clear();
+        uploadedFilesRef.current = [];
+        remoteFilesRef.current = { files: [] };
         emitClipboardTransfer(null);
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1120,6 +1600,7 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
     // Debounced dynamic resize via IronRDP Display Control channel
     useEffect(() => {
       if (displayMode !== 'dynamic') return undefined;
+      if (fixedResolution || (monitorLayout && monitorLayout.length > 1)) return undefined;
       const container = containerRef.current;
       if (!container || typeof ResizeObserver === 'undefined') return undefined;
       let timerId: number | null = null;
@@ -1129,6 +1610,7 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         timerId = window.setTimeout(() => {
           timerId = null;
           if (!propsRef.current.isVisible || !sessionRef.current) return;
+          if (propsRef.current.fixedResolution || (propsRef.current.monitorLayout?.length ?? 0) > 1) return;
           const rect = container.getBoundingClientRect();
           const rawDpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
           const effectiveDpr = propsRef.current.highDpi ? Math.min(2, Math.max(1, rawDpr)) : 1;
@@ -1139,11 +1621,16 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
           const rawH = Math.min(2160, Math.max(240, Math.floor(rect.height * effectiveDpr)));
           const targetW = rawW - (rawW % 2);
           const targetH = rawH - (rawH % 2);
-          if (Math.abs(targetW - remoteSize.width) > 8 || Math.abs(targetH - remoteSize.height) > 8) {
+          const currentSize = remoteSizeRef.current;
+          const scaleChanged = lastSentScaleFactorRef.current !== null && lastSentScaleFactorRef.current !== scaleFactor;
+          if (
+            scaleChanged
+            || Math.abs(targetW - currentSize.width) > 8
+            || Math.abs(targetH - currentSize.height) > 8
+          ) {
+            lastSentScaleFactorRef.current = scaleFactor;
             try {
               sessionRef.current.resize(targetW, targetH, scaleFactor);
-              setRemoteSize({ width: targetW, height: targetH });
-              callbacksRef.current.onDesktopResize({ width: targetW, height: targetH });
             } catch { /* ignore */ }
           }
         }, 200);
@@ -1151,24 +1638,39 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
 
       const observer = new ResizeObserver(scheduleResize);
       observer.observe(container);
-      // Trigger immediately when switching into dynamic mode or toggling HiDPI
+      // Trigger immediately when switching into dynamic mode, toggling HiDPI, or right after connect
       scheduleResize();
       return () => {
         observer.disconnect();
         if (timerId !== null) window.clearTimeout(timerId);
       };
-    }, [displayMode, highDpi, remoteSize.height, remoteSize.width]);
+    }, [displayMode, fixedResolution, highDpi, monitorLayout, sessionConnectedSeq]);
 
-    // Keep cached canvas DOMRect in sync so high-frequency pointer moves avoid forced layout reads
+    // Keep cached canvas/viewport DOMRect & container size in sync so high-frequency pointer moves avoid forced layout reads
     useEffect(() => {
       const canvas = canvasRef.current;
+      const viewport = viewportRef.current;
       const container = containerRef.current;
       const refreshRect = () => {
-        cachedCanvasRectRef.current = canvasRef.current?.getBoundingClientRect() ?? null;
+        const target = activeMonitorRectRef.current ? viewportRef.current : canvasRef.current;
+        cachedCanvasRectRef.current = target?.getBoundingClientRect() ?? null;
+        // containerSize is only consumed when slicing a single monitor from a multi-monitor desktop;
+        // skipping state updates in single-monitor mode eliminates 60fps React re-renders during drag-resize.
+        if (activeMonitorRectRef.current && container) {
+          const cRect = container.getBoundingClientRect();
+          if (cRect.width > 0 && cRect.height > 0) {
+            setContainerSize((prev) => (
+              Math.abs(prev.width - cRect.width) < 1 && Math.abs(prev.height - cRect.height) < 1
+                ? prev
+                : { width: cRect.width, height: cRect.height }
+            ));
+          }
+        }
       };
       refreshRect();
       const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(refreshRect) : null;
       if (observer && canvas) observer.observe(canvas);
+      if (observer && viewport) observer.observe(viewport);
       if (observer && container) observer.observe(container);
       window.addEventListener('resize', refreshRect, { passive: true });
       container?.addEventListener('scroll', refreshRect, { passive: true });
@@ -1181,20 +1683,26 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
           pointerRafRef.current = null;
         }
       };
-    }, [displayMode, isVisible, remoteSize.height, remoteSize.width]);
+    }, [activeMonitorRect, displayMode, isVisible, remoteSize.height, remoteSize.width]);
 
     const mapPointerCoords = useCallback((clientX: number, clientY: number, forceMeasure = false) => {
       const canvas = canvasRef.current;
       if (!canvas) return { x: 0, y: 0 };
+      const slice = activeMonitorRectRef.current;
+      const target = slice ? viewportRef.current : canvas;
+      if (!target) return { x: 0, y: 0 };
       let rect = forceMeasure ? null : cachedCanvasRectRef.current;
       if (!rect || rect.width <= 0 || rect.height <= 0) {
-        rect = canvas.getBoundingClientRect();
+        rect = target.getBoundingClientRect();
         cachedCanvasRectRef.current = rect;
       }
-      if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0 };
-      const x = Math.max(0, Math.min(canvas.width - 1, Math.round(((clientX - rect.left) / rect.width) * canvas.width)));
-      const y = Math.max(0, Math.min(canvas.height - 1, Math.round(((clientY - rect.top) / rect.height) * canvas.height)));
-      return { x, y };
+      return mapViewportToVirtualDesktopCoords(
+        clientX,
+        clientY,
+        rect,
+        { width: canvas.width, height: canvas.height },
+        slice,
+      );
     }, []);
 
     const flushPendingPointerMove = useCallback(() => {
@@ -1262,8 +1770,8 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       [applyDeviceEvents, mapPointerCoords],
     );
 
-    const handleWheel = useCallback(
-      (e: React.WheelEvent<HTMLCanvasElement>) => {
+    const handleWheelNative = useCallback(
+      (e: WheelEvent) => {
         if (propsRef.current.viewOnly) return;
         e.preventDefault();
         flushPendingPointerMove();
@@ -1286,6 +1794,18 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       },
       [applyDeviceEvents, flushPendingPointerMove],
     );
+
+    const hasActiveMonitorSlice = Boolean(activeMonitorRect);
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return undefined;
+      // Attach wheel listener with `{ passive: false }` so `preventDefault()` never logs
+      // Chromium's "Unable to preventDefault inside passive event listener invocation".
+      canvas.addEventListener('wheel', handleWheelNative, { passive: false });
+      return () => {
+        canvas.removeEventListener('wheel', handleWheelNative);
+      };
+    }, [handleWheelNative, hasActiveMonitorSlice]);
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent) => {
@@ -1491,11 +2011,54 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
       [rdpConfig.clipboardFilesEnabled, resetDragOverlay, t, uploadLocalClipboardFiles],
     );
 
+    const sliceViewportStyle: React.CSSProperties | undefined = (() => {
+      if (!activeMonitorRect) return undefined;
+      if (displayMode === 'stretch') {
+        return { width: '100%', height: '100%', overflow: 'hidden', position: 'relative' };
+      }
+      if (displayMode === 'actual') {
+        return {
+          width: `${Math.round(activeMonitorRect.width)}px`,
+          height: `${Math.round(activeMonitorRect.height)}px`,
+          overflow: 'hidden',
+          position: 'relative',
+          flexShrink: 0,
+        };
+      }
+      const cW = containerSize.width > 0 ? containerSize.width : activeMonitorRect.width;
+      const cH = containerSize.height > 0 ? containerSize.height : activeMonitorRect.height;
+      const scale = Math.min(cW / activeMonitorRect.width, cH / activeMonitorRect.height);
+      return {
+        width: `${Math.max(1, Math.floor(activeMonitorRect.width * scale))}px`,
+        height: `${Math.max(1, Math.floor(activeMonitorRect.height * scale))}px`,
+        overflow: 'hidden',
+        position: 'relative',
+        flexShrink: 0,
+      };
+    })();
+
     const canvasStyle: React.CSSProperties = (() => {
       const base: React.CSSProperties = {
         cursor: cursorCss,
         imageRendering: displayMode === 'actual' ? 'pixelated' : 'auto',
+        transform: 'translateZ(0)',
       };
+      if (activeMonitorRect) {
+        const widthPct = (remoteSize.width / activeMonitorRect.width) * 100;
+        const heightPct = (remoteSize.height / activeMonitorRect.height) * 100;
+        const translateXPct = -(activeMonitorRect.left / remoteSize.width) * 100;
+        const translateYPct = -(activeMonitorRect.top / remoteSize.height) * 100;
+        return {
+          ...base,
+          display: 'block',
+          width: `${widthPct}%`,
+          height: `${heightPct}%`,
+          maxWidth: 'none',
+          maxHeight: 'none',
+          transform: `translate(${translateXPct}%, ${translateYPct}%)`,
+          transformOrigin: 'top left',
+        };
+      }
       if (displayMode === 'stretch') {
         return { ...base, width: '100%', height: '100%' };
       }
@@ -1511,6 +2074,17 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
         objectFit: 'contain',
       };
     })();
+
+    const canvasElement = (
+      <canvas
+        ref={canvasRef}
+        style={canvasStyle}
+        onContextMenu={(e) => e.preventDefault()}
+        onMouseMove={handleMouseMove}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+      />
+    );
 
     return (
       <div
@@ -1543,15 +2117,26 @@ export const RdpCanvasView = React.memo(forwardRef<RemoteDesktopCanvasHandle, Rd
             if (target.value) target.value = '';
           }}
         />
-        <canvas
-          ref={canvasRef}
-          style={canvasStyle}
-          onContextMenu={(e) => e.preventDefault()}
-          onMouseMove={handleMouseMove}
-          onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
-          onWheel={handleWheel}
-        />
+        {/* Keep <canvas> unconditionally wrapped in the same viewport div so switching
+            activeMonitorIndex between 'all' and a single monitor NEVER unmounts <canvas>
+            (IronRDP WASM binds renderCanvas to the original DOM element once at connect). */}
+        <div
+          ref={viewportRef}
+          data-testid={activeMonitorRect ? 'rdp-monitor-slice-viewport' : undefined}
+          style={
+            activeMonitorRect
+              ? sliceViewportStyle
+              : {
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }
+          }
+        >
+          {canvasElement}
+        </div>
         {dragOverlayState.active && (
           <div
             data-testid="rdp-file-drop-overlay"

@@ -324,4 +324,232 @@ describe("rdpCleanPathProxy end-to-end TLS + TOFU + binary relay", () => {
     httpServer.close();
     rdpServer.close();
   });
+
+  it("emits RDP RTT and smoothed RX/TX bandwidth telemetry for direct connections and cleans up timers on close", async () => {
+    const { key, cert } = generateSelfSignedCert();
+    const x224Confirm = buildX224ConfirmTpkt(0x02);
+    let tcpConnections = 0;
+
+    const rdpServer = net.createServer((rawSocket) => {
+      tcpConnections += 1;
+      rawSocket.once("data", () => {
+        rawSocket.write(x224Confirm);
+        const tlsServerSock = new tls.TLSSocket(rawSocket, { isServer: true, key, cert });
+        tlsServerSock.on("data", (chunk) => {
+          tlsServerSock.write(Buffer.concat([Buffer.from("RSP:"), chunk]));
+        });
+        tlsServerSock.on("error", () => {});
+      });
+      rawSocket.on("error", () => {});
+    });
+
+    await new Promise((resolve) => rdpServer.listen(0, "127.0.0.1", resolve));
+    const rdpPort = rdpServer.address().port;
+
+    const httpServer = http.createServer();
+    const wss = new WebSocketServer({ server: httpServer });
+    await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const wsPort = httpServer.address().port;
+
+    const statsSamples = [];
+    let proxyPromise;
+    wss.on("connection", (ws) => {
+      proxyPromise = handleRdpCleanPathConnection({
+        ws,
+        host: "127.0.0.1",
+        port: rdpPort,
+        isDirectConnection: true,
+        statsIntervalMs: 80,
+        rttProbeIntervalMs: 120,
+        rttProbeTimeoutMs: 1000,
+        dial: async () => {
+          const sock = net.connect(rdpPort, "127.0.0.1");
+          await new Promise((resolve, reject) => {
+            sock.once("connect", resolve);
+            sock.once("error", reject);
+          });
+          return { stream: sock, cleanup: () => sock.destroy() };
+        },
+        verifyCertificate: async () => ({ accepted: true }),
+        onStats: (sample) => statsSamples.push(sample),
+      });
+    });
+
+    const clientWs = new WebSocket(`ws://127.0.0.1:${wsPort}`);
+    await new Promise((resolve) => clientWs.once("open", resolve));
+
+    const respPromise = new Promise((resolve) => {
+      clientWs.once("message", (data) => resolve(Buffer.from(data)));
+    });
+    clientWs.send(encodeRDCleanPathRequest({
+      destination: `127.0.0.1:${rdpPort}`,
+      x224ConnectionPdu: buildX224RequestTpkt(),
+    }), { binary: true });
+    await respPromise;
+
+    const echoPromise = new Promise((resolve) => {
+      clientWs.once("message", (data) => resolve(Buffer.from(data)));
+    });
+    const payload = Buffer.alloc(1024, 0x41);
+    clientWs.send(payload, { binary: true });
+    await echoPromise;
+
+    // Wait for periodic stats ticks + at least one live TCP RTT probe
+    await new Promise((resolve) => setTimeout(resolve, 260));
+
+    clientWs.close();
+    await proxyPromise;
+
+    const countAtClose = statsSamples.length;
+    assert.ok(countAtClose >= 2, `Expected at least 2 RDP stats samples, got ${countAtClose}`);
+    const last = statsSamples[statsSamples.length - 1];
+    assert.equal(last.protocol, "rdp");
+    assert.equal(typeof last.rttMs, "number");
+    assert.ok(last.rttMs >= 0);
+    assert.equal(last.totalTxBytes, 1024);
+    assert.equal(last.totalRxBytes, 1028);
+    assert.ok(statsSamples.some((s) => s.rxBps > 0 && s.txBps > 0));
+    assert.ok(tcpConnections >= 2, `Expected live direct TCP RTT probe connection, got ${tcpConnections}`);
+
+    // Verify no further stats arrive after disconnect (all timers cleaned up)
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    assert.equal(statsSamples.length, countAtClose);
+
+    wss.close();
+    httpServer.close();
+    rdpServer.close();
+  });
+
+  it("uses passive turnaround RTT and skips direct TCP probes for tunneled RDP connections", async () => {
+    const { key, cert } = generateSelfSignedCert();
+    const x224Confirm = buildX224ConfirmTpkt(0x02);
+    let tcpConnections = 0;
+
+    const rdpServer = net.createServer((rawSocket) => {
+      tcpConnections += 1;
+      rawSocket.once("data", () => {
+        rawSocket.write(x224Confirm);
+        const tlsServerSock = new tls.TLSSocket(rawSocket, { isServer: true, key, cert });
+        tlsServerSock.on("data", (chunk) => {
+          setTimeout(() => {
+            try { tlsServerSock.write(chunk); } catch { /* ignore */ }
+          }, 20);
+        });
+        tlsServerSock.on("error", () => {});
+      });
+      rawSocket.on("error", () => {});
+    });
+
+    await new Promise((resolve) => rdpServer.listen(0, "127.0.0.1", resolve));
+    const rdpPort = rdpServer.address().port;
+
+    const httpServer = http.createServer();
+    const wss = new WebSocketServer({ server: httpServer });
+    await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const wsPort = httpServer.address().port;
+
+    const statsSamples = [];
+    let proxyPromise;
+    wss.on("connection", (ws) => {
+      proxyPromise = handleRdpCleanPathConnection({
+        ws,
+        host: "127.0.0.1",
+        port: rdpPort,
+        isDirectConnection: false,
+        statsIntervalMs: 80,
+        rttProbeIntervalMs: 100,
+        dial: async () => {
+          const sock = net.connect(rdpPort, "127.0.0.1");
+          await new Promise((resolve, reject) => {
+            sock.once("connect", resolve);
+            sock.once("error", reject);
+          });
+          return { stream: sock, cleanup: () => sock.destroy() };
+        },
+        verifyCertificate: async () => ({ accepted: true }),
+        onStats: (sample) => statsSamples.push(sample),
+      });
+    });
+
+    const clientWs = new WebSocket(`ws://127.0.0.1:${wsPort}`);
+    await new Promise((resolve) => clientWs.once("open", resolve));
+
+    const respPromise = new Promise((resolve) => {
+      clientWs.once("message", (data) => resolve(Buffer.from(data)));
+    });
+    clientWs.send(encodeRDCleanPathRequest({
+      destination: `127.0.0.1:${rdpPort}`,
+      x224ConnectionPdu: buildX224RequestTpkt(),
+    }), { binary: true });
+    await respPromise;
+
+    const echoPromise = new Promise((resolve) => {
+      clientWs.once("message", (data) => resolve(Buffer.from(data)));
+    });
+    clientWs.send(Buffer.from("tunneled-ping"), { binary: true });
+    await echoPromise;
+    await new Promise((resolve) => setTimeout(resolve, 220));
+
+    clientWs.close();
+    await proxyPromise;
+
+    assert.equal(tcpConnections, 1, "Tunneled RDP session must never open direct TCP RTT probe sockets");
+    assert.ok(statsSamples.length >= 2);
+    const last = statsSamples[statsSamples.length - 1];
+    assert.equal(typeof last.rttMs, "number");
+    assert.ok(last.rttMs >= 0);
+
+    wss.close();
+    httpServer.close();
+    rdpServer.close();
+  });
+
+  it("cleans up late-resolving upstream socket when aborted during dial and survives upstream close during TOFU", async () => {
+    // Part 1: Abort during dial cleans up socket returned after abort
+    let lateCleanupCalled = false;
+    let resolveDial;
+    const httpServer = http.createServer();
+    const wss = new WebSocketServer({ server: httpServer });
+    await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+    const wsPort = httpServer.address().port;
+
+    const ac = new AbortController();
+    let proxyPromise;
+    wss.on("connection", (ws) => {
+      proxyPromise = handleRdpCleanPathConnection({
+        ws,
+        host: "127.0.0.1",
+        port: 3389,
+        signal: ac.signal,
+        dial: () => new Promise((resolve) => {
+          resolveDial = resolve;
+        }),
+      });
+    });
+
+    const clientWs = new WebSocket(`ws://127.0.0.1:${wsPort}`);
+    await new Promise((resolve) => clientWs.once("open", resolve));
+    clientWs.send(encodeRDCleanPathRequest({
+      destination: "127.0.0.1:3389",
+      x224ConnectionPdu: buildX224RequestTpkt(),
+    }), { binary: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    ac.abort();
+    const fakeStream = new net.Socket();
+    resolveDial({
+      stream: fakeStream,
+      cleanup: () => {
+        lateCleanupCalled = true;
+        fakeStream.destroy();
+      },
+    });
+    await proxyPromise;
+    assert.equal(lateCleanupCalled, true);
+    assert.equal(fakeStream.destroyed, true);
+
+    clientWs.close();
+    wss.close();
+    httpServer.close();
+  });
 });

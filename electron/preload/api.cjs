@@ -2406,6 +2406,16 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:remote-desktop:test", options),
   cancelRemoteDesktopTestConnection: (sessionId) =>
     ipcRenderer.invoke("netcatty:remote-desktop:test:cancel", { sessionId }),
+  getRemoteDesktopLocalDisplays: () =>
+    ipcRenderer.invoke("netcatty:remote-desktop:get-local-displays"),
+  pickRemoteDesktopRdpdrFolder: () =>
+    ipcRenderer.invoke("netcatty:remote-desktop:rdpdr:pick-folder"),
+  registerRemoteDesktopRdpdrDrives: (sessionId, drives) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:rdpdr:register-drives", { sessionId, drives }),
+  invokeRemoteDesktopRdpdrOp: (sessionId, request) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:rdpdr:op", { sessionId, request }),
+  cleanupRemoteDesktopRdpdr: (sessionId) =>
+    ipcRenderer.invoke("netcatty:remote-desktop:rdpdr:cleanup", { sessionId }),
   onRemoteDesktopCertVerify: (cb) => {
     const handler = (_event, payload) => cb(payload);
     ipcRenderer.on("netcatty:remote-desktop:cert-verify", handler);
@@ -2415,6 +2425,11 @@ function createPreloadApi(ctx) {
     const handler = (_event, payload) => cb(payload);
     ipcRenderer.on("netcatty:remote-desktop:status", handler);
     return () => ipcRenderer.removeListener("netcatty:remote-desktop:status", handler);
+  },
+  onRemoteDesktopStats: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:remote-desktop:stats", handler);
+    return () => ipcRenderer.removeListener("netcatty:remote-desktop:stats", handler);
   },
   onRemoteDesktopKeyboardGrabChanged: (cb) => {
     const handler = (_event, payload) => cb(payload);
@@ -2440,6 +2455,16 @@ function createPreloadApi(ctx) {
       ipcRenderer.invoke("netcatty:remote-desktop:open-system-client", options),
     stopSystemTunnel: (tunnelId) =>
       ipcRenderer.invoke("netcatty:remote-desktop:stop-system-tunnel", { tunnelId }),
+    getLocalDisplays: () =>
+      ipcRenderer.invoke("netcatty:remote-desktop:get-local-displays"),
+    rdpdrPickFolder: () =>
+      ipcRenderer.invoke("netcatty:remote-desktop:rdpdr:pick-folder"),
+    rdpdrRegisterDrives: (sessionId, drives) =>
+      ipcRenderer.invoke("netcatty:remote-desktop:rdpdr:register-drives", { sessionId, drives }),
+    rdpdrOp: (sessionId, request) =>
+      ipcRenderer.invoke("netcatty:remote-desktop:rdpdr:op", { sessionId, request }),
+    rdpdrCleanup: (sessionId) =>
+      ipcRenderer.invoke("netcatty:remote-desktop:rdpdr:cleanup", { sessionId }),
     onCertVerify: (cb) => {
       const handler = (_event, payload) => cb(payload);
       ipcRenderer.on("netcatty:remote-desktop:cert-verify", handler);
@@ -2449,6 +2474,11 @@ function createPreloadApi(ctx) {
       const handler = (_event, payload) => cb(payload);
       ipcRenderer.on("netcatty:remote-desktop:status", handler);
       return () => ipcRenderer.removeListener("netcatty:remote-desktop:status", handler);
+    },
+    onStats: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on("netcatty:remote-desktop:stats", handler);
+      return () => ipcRenderer.removeListener("netcatty:remote-desktop:stats", handler);
     },
     onKeyboardGrabChanged: (cb) => {
       const handler = (_event, payload) => cb(payload);

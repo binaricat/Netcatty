@@ -25,6 +25,12 @@ function resolveWorkletUrl(): string {
   return '/audio/rdp-pcm-worklet.js';
 }
 
+function normalizeSampleRate(sampleRate: number): number {
+  return Number.isFinite(sampleRate) && sampleRate >= 8000 && sampleRate <= 192000
+    ? Math.round(sampleRate)
+    : 48000;
+}
+
 export class RdpAudioPlayer {
   private context: AudioContext | null = null;
   private workletNode: AudioWorkletNode | null = null;
@@ -62,9 +68,7 @@ export class RdpAudioPlayer {
 
   private async ensureInitialized(sampleRate: number): Promise<void> {
     if (this.disposed) return;
-    const targetRate = Number.isFinite(sampleRate) && sampleRate >= 8000 && sampleRate <= 192000
-      ? Math.round(sampleRate)
-      : 48000;
+    const targetRate = normalizeSampleRate(sampleRate);
 
     if (this.context && this.workletNode && this.currentSampleRate === targetRate) {
       if (this.context.state === 'suspended') {
@@ -77,8 +81,9 @@ export class RdpAudioPlayer {
       return this.initPromise;
     }
 
-    // Tear down any previous AudioContext if sample rate changed.
-    this.teardownContext();
+    // Tear down any previous AudioContext if sample rate changed, preserving
+    // freshly queued chunks for the new rate when initializing from scratch.
+    this.teardownContext({ clearPending: this.currentSampleRate !== 0 && this.currentSampleRate !== targetRate });
     this.currentSampleRate = targetRate;
 
     this.initPromise = (async () => {
@@ -98,22 +103,37 @@ export class RdpAudioPlayer {
         await ctx.audioWorklet.addModule(resolveWorkletUrl());
       } catch (err) {
         console.warn('[RdpAudioPlayer] Failed to load rdp-pcm-worklet.js:', err);
-        this.teardownContext();
+        if (this.context === ctx) {
+          this.teardownContext({ clearPending: true });
+        } else {
+          await ctx.close().catch(() => {});
+        }
         return;
       }
       if (this.disposed || this.context !== ctx) {
         await ctx.close().catch(() => {});
         return;
       }
-      const node = new AudioWorkletNode(ctx, 'rdp-pcm-worklet', {
-        numberOfInputs: 0,
-        numberOfOutputs: 1,
-        outputChannelCount: [2],
-        processorOptions: {
-          bufferFrames: Math.max(8192, targetRate),
-        },
-      });
-      node.connect(ctx.destination);
+      let node: AudioWorkletNode;
+      try {
+        node = new AudioWorkletNode(ctx, 'rdp-pcm-worklet', {
+          numberOfInputs: 0,
+          numberOfOutputs: 1,
+          outputChannelCount: [2],
+          processorOptions: {
+            bufferFrames: Math.max(8192, targetRate),
+          },
+        });
+        node.connect(ctx.destination);
+      } catch (err) {
+        console.warn('[RdpAudioPlayer] Failed to create AudioWorkletNode:', err);
+        if (this.context === ctx) {
+          this.teardownContext({ clearPending: true });
+        } else {
+          await ctx.close().catch(() => {});
+        }
+        return;
+      }
       if (typeof ctx.createMediaStreamDestination === 'function') {
         try {
           const captureDest = ctx.createMediaStreamDestination();
@@ -159,19 +179,23 @@ export class RdpAudioPlayer {
       case 'wave': {
         if (!msg.data || msg.data.byteLength === 0) return;
         const channels = msg.channels === 1 ? 1 : 2;
-        if (this.workletNode && this.currentSampleRate === Math.round(msg.sampleRate || 48000)) {
+        const normalizedRate = normalizeSampleRate(msg.sampleRate || 48000);
+        if (this.workletNode && this.currentSampleRate === normalizedRate) {
           if (this.context?.state === 'suspended') {
             void this.context.resume().catch(() => {});
           }
           this.postPcm(msg.data, channels);
         } else {
+          if (this.currentSampleRate !== 0 && this.currentSampleRate !== normalizedRate) {
+            this.pendingChunks.length = 0;
+          }
           // Bound queued startup chunks so memory never grows unbounded.
           if (this.pendingChunks.length < 32) {
             const copy = new Uint8Array(msg.data.byteLength);
             copy.set(msg.data);
             this.pendingChunks.push({ data: copy, channels });
           }
-          void this.ensureInitialized(msg.sampleRate || 48000);
+          void this.ensureInitialized(normalizedRate);
         }
         break;
       }
@@ -242,9 +266,12 @@ export class RdpAudioPlayer {
     return this.captureDest?.stream ?? null;
   }
 
-  private teardownContext(): void {
-    this.pendingChunks.length = 0;
+  private teardownContext(options?: { clearPending?: boolean }): void {
+    if (options?.clearPending !== false) {
+      this.pendingChunks.length = 0;
+    }
     const node = this.workletNode;
+    const captureDest = this.captureDest;
     const ctx = this.context;
     this.workletNode = null;
     this.captureDest = null;
@@ -253,7 +280,13 @@ export class RdpAudioPlayer {
     this.currentSampleRate = 0;
     try {
       node?.port.postMessage({ type: 'reset' });
+      node?.port.close?.();
       node?.disconnect();
+    } catch { /* ignore */ }
+    try {
+      captureDest?.stream.getTracks().forEach((track) => {
+        try { track.stop(); } catch { /* ignore */ }
+      });
     } catch { /* ignore */ }
     if (ctx) {
       void ctx.close().catch(() => {});
@@ -263,6 +296,6 @@ export class RdpAudioPlayer {
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.teardownContext();
+    this.teardownContext({ clearPending: true });
   }
 }

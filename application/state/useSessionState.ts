@@ -67,16 +67,30 @@ import {
   type RemoteDesktopBridgeApi,
   type RemoteDesktopCertDecisionValue,
   type RemoteDesktopCertVerifyEvent,
+  type RemoteDesktopLocalDisplay,
   type RemoteDesktopOpenSystemClientOptions,
+  type RemoteDesktopRdpdrDriveConfig,
+  type RemoteDesktopRdpdrPickFolderResult,
+  type RemoteDesktopRdpdrRegisterDrivesResult,
+  type RemoteDesktopRdpdrRequest,
+  type RemoteDesktopRdpdrResponse,
   type RemoteDesktopStartOptions,
+  type RemoteDesktopStatsEvent,
 } from '../../infrastructure/services/netcattyBridge';
 
 export type {
   RemoteDesktopBridgeApi,
   RemoteDesktopCertDecisionValue,
   RemoteDesktopCertVerifyEvent,
+  RemoteDesktopLocalDisplay,
   RemoteDesktopOpenSystemClientOptions,
+  RemoteDesktopRdpdrDriveConfig,
+  RemoteDesktopRdpdrPickFolderResult,
+  RemoteDesktopRdpdrRegisterDrivesResult,
+  RemoteDesktopRdpdrRequest,
+  RemoteDesktopRdpdrResponse,
   RemoteDesktopStartOptions,
+  RemoteDesktopStatsEvent,
 };
 
 export function getRemoteDesktopBridge(): RemoteDesktopBridgeApi | undefined {

@@ -878,7 +878,7 @@ export const esAiMessages: Messages = {
   "ai.vision.snip.cancel": "Cancelar selección",
   "ai.vision.snip.ariaLabel": "Seleccionar un área de la pantalla del escritorio remoto",
   "ai.vision.privacyBlocked": "La lectura de pantalla por IA está bloqueada en esta sesión.",
-  "ai.vision.viewingScreen": "La IA está viendo la pantalla",
+  "ai.vision.viewingScreen": "Catty está viendo el escritorio",
   "ai.vision.askAi": "Preguntar a la IA",
   "ai.vision.captureFullAndAsk": "Capturar pantalla y preguntar a la IA",
   "ai.vision.snipRegionAndAsk": "Recortar área y preguntar a la IA",

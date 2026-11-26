@@ -374,3 +374,9 @@ export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_FPS = 'netcatty_remote_desktop
 export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_INCLUDE_AUDIO = 'netcatty_remote_desktop_recording_include_audio_v1';
 export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_MAX_MB = 'netcatty_remote_desktop_recording_max_mb_v1';
 export const STORAGE_KEY_REMOTE_DESKTOP_RECORDING_RETENTION_DAYS = 'netcatty_remote_desktop_recording_retention_days_v1';
+
+// Remote Desktop AI Computer Use audit log (device-local)
+export const STORAGE_KEY_REMOTE_DESKTOP_AI_AUDIT = 'netcatty_remote_desktop_ai_audit_v1';
+
+// Remote Desktop RDPDR local shared folders per host (device-local, never synced to cloud/iOS)
+export const STORAGE_KEY_REMOTE_DESKTOP_SHARED_FOLDERS = 'netcatty_remote_desktop_shared_folders_v1';

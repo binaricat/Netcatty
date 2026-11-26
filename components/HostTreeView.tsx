@@ -793,8 +793,8 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
   const displayPort = displayDetails.port;
   const isStandaloneRdp = isRdpProtocol(safeHost.protocol);
   const isStandaloneVnc = isVncProtocol(safeHost.protocol);
-  const companionRdp = hasCompanionRdp(safeHost);
-  const companionVnc = hasCompanionVnc(safeHost);
+  const companionRdp = !isStandaloneRdp && hasCompanionRdp(safeHost);
+  const companionVnc = !isStandaloneVnc && hasCompanionVnc(safeHost);
   const isMultiSelected = Boolean(isMultiSelectMode && selectedHostIds?.has(host.id));
   const isFocusSelected = !isMultiSelectMode && hostClickBehavior === 'select' && focusedHostId === host.id;
   const isSelected = isMultiSelected || isFocusSelected;
@@ -893,50 +893,6 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-1.5 font-medium leading-5">
                 <span className="min-w-0 truncate">{host.label}</span>
-                {isStandaloneRdp && (
-                  <span
-                    className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 ${getProtocolBadgeClass('rdp')}`}
-                  >
-                    <RdpProtocolIcon size={10} />
-                    RDP
-                  </span>
-                )}
-                {isStandaloneVnc && (
-                  <span
-                    className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 ${getProtocolBadgeClass('vnc')}`}
-                  >
-                    <VncProtocolIcon size={10} />
-                    VNC
-                  </span>
-                )}
-                {companionRdp && (
-                  <button
-                    type="button"
-                    title={t('vault.hosts.connectRdp')}
-                    className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 transition-all hover:brightness-110 ${getProtocolBadgeClass('rdp')}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onConnectRemoteDesktop?.(safeHost, 'rdp');
-                    }}
-                  >
-                    <RdpProtocolIcon size={10} />
-                    +RDP
-                  </button>
-                )}
-                {companionVnc && (
-                  <button
-                    type="button"
-                    title={t('vault.hosts.connectVnc')}
-                    className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 transition-all hover:brightness-110 ${getProtocolBadgeClass('vnc')}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onConnectRemoteDesktop?.(safeHost, 'vnc');
-                    }}
-                  >
-                    <VncProtocolIcon size={10} />
-                    +VNC
-                  </button>
-                )}
                 <button
                   aria-label={`Edit ${host.label}`}
                   tabIndex={-1}
@@ -950,6 +906,54 @@ const HostTreeItem: React.FC<HostTreeItemProps> = ({
                   <Edit2 size={12} />
                 </button>
                 <HostNotesIndicator notes={host.notes} />
+                {(isStandaloneRdp || isStandaloneVnc || companionRdp || companionVnc) && (
+                  <span className="ml-auto flex shrink-0 items-center gap-1">
+                    {isStandaloneRdp && (
+                      <span
+                        className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 ${getProtocolBadgeClass('rdp')}`}
+                      >
+                        <RdpProtocolIcon size={10} />
+                        RDP
+                      </span>
+                    )}
+                    {isStandaloneVnc && (
+                      <span
+                        className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 ${getProtocolBadgeClass('vnc')}`}
+                      >
+                        <VncProtocolIcon size={10} />
+                        VNC
+                      </span>
+                    )}
+                    {companionRdp && (
+                      <button
+                        type="button"
+                        title={t('vault.hosts.connectRdp')}
+                        className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 transition-all hover:brightness-110 ${getProtocolBadgeClass('rdp')}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onConnectRemoteDesktop?.(safeHost, 'rdp');
+                        }}
+                      >
+                        <RdpProtocolIcon size={10} />
+                        +RDP
+                      </button>
+                    )}
+                    {companionVnc && (
+                      <button
+                        type="button"
+                        title={t('vault.hosts.connectVnc')}
+                        className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0 text-[10px] font-semibold leading-4 shrink-0 transition-all hover:brightness-110 ${getProtocolBadgeClass('vnc')}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onConnectRemoteDesktop?.(safeHost, 'vnc');
+                        }}
+                      >
+                        <VncProtocolIcon size={10} />
+                        +VNC
+                      </button>
+                    )}
+                  </span>
+                )}
               </div>
               <div className="truncate text-[11px] leading-4 text-muted-foreground">
                 {displayProtocol === 'local' || isRemoteDesktopProtocol(displayProtocol)

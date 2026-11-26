@@ -878,7 +878,7 @@ export const enAiMessages: Messages = {
   "ai.vision.snip.cancel": "Cancel region snip",
   "ai.vision.snip.ariaLabel": "Select a region of the remote desktop screen",
   "ai.vision.privacyBlocked": "AI screen reading is blocked for this session.",
-  "ai.vision.viewingScreen": "AI is viewing screen",
+  "ai.vision.viewingScreen": "Catty is viewing desktop",
   "ai.vision.askAi": "Ask AI",
   "ai.vision.captureFullAndAsk": "Capture screen & ask AI",
   "ai.vision.snipRegionAndAsk": "Snip region & ask AI",

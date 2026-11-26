@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const net = require("node:net");
+const { performance } = require("node:perf_hooks");
 const tls = require("node:tls");
 
 // Matches Devolutions/IronRDP crates/ironrdp-rdcleanpath/src/lib.rs
@@ -721,6 +722,60 @@ function upgradeToTls(
 }
 
 /**
+ * Lightweight, non-intrusive TCP connect-and-immediately-destroy RTT probe.
+ * Never rejects; returns RTT in ms or null on failure/timeout/cancel.
+ */
+function probeTcpConnectRtt(host, port, timeoutMs = 3000) {
+  let settled = false;
+  let timer = null;
+  let sock = null;
+  let resolvePromise;
+
+  const finish = (value) => {
+    if (settled) return;
+    settled = true;
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    try { sock?.destroy?.(); } catch { /* ignore */ }
+    sock = null;
+    resolvePromise(value);
+  };
+
+  const promise = new Promise((resolve) => {
+    resolvePromise = resolve;
+    if (!host || !port) {
+      settled = true;
+      resolve(null);
+      return;
+    }
+    const start = performance.now();
+    try {
+      sock = net.connect({ host, port });
+    } catch {
+      finish(null);
+      return;
+    }
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => finish(null), timeoutMs);
+      timer.unref?.();
+    }
+    sock.once("connect", () => {
+      const elapsed = performance.now() - start;
+      finish(Number.isFinite(elapsed) ? Math.max(0, elapsed) : null);
+    });
+    sock.once("error", () => finish(null));
+    sock.once("close", () => finish(null));
+  });
+
+  return {
+    promise,
+    cancel: () => finish(null),
+  };
+}
+
+/**
  * Run an RDCleanPath proxy session over an authenticated WebSocket.
  *
  * @param {object} options
@@ -733,6 +788,11 @@ function upgradeToTls(
  * @param {number} [options.handshakeTimeoutMs]
  * @param {AbortSignal} [options.signal]
  * @param {(stage: string, detail?: object) => void} [options.onStatus]
+ * @param {(stats: { protocol: string, rttMs: number | null, rxBps: number, txBps: number, totalRxBytes: number, totalTxBytes: number, ts: number }) => void} [options.onStats]
+ * @param {boolean} [options.isDirectConnection]
+ * @param {number} [options.statsIntervalMs]
+ * @param {number} [options.rttProbeIntervalMs]
+ * @param {number} [options.rttProbeTimeoutMs]
  */
 async function handleRdpCleanPathConnection(options) {
   const {
@@ -745,11 +805,34 @@ async function handleRdpCleanPathConnection(options) {
     handshakeTimeoutMs = 20_000,
     signal,
     onStatus,
+    onStats,
+    isDirectConnection = false,
+    statsIntervalMs = 1500,
+    rttProbeIntervalMs = 4000,
+    rttProbeTimeoutMs = 3000,
   } = options;
 
   let upstream = null;
   let activeSocket = null;
   let cleanedUp = false;
+  let statsTimer = null;
+  let rttProbeTimer = null;
+  let activeRttProbe = null;
+
+  const stopTelemetryTimers = () => {
+    if (statsTimer) {
+      clearInterval(statsTimer);
+      statsTimer = null;
+    }
+    if (rttProbeTimer) {
+      clearInterval(rttProbeTimer);
+      rttProbeTimer = null;
+    }
+    if (activeRttProbe) {
+      try { activeRttProbe.cancel(); } catch { /* ignore */ }
+      activeRttProbe = null;
+    }
+  };
 
   const sendErrorPdu = (errOpts) => {
     try {
@@ -762,11 +845,15 @@ async function handleRdpCleanPathConnection(options) {
   };
 
   const cleanup = () => {
-    if (cleanedUp) return;
     cleanedUp = true;
-    try { activeSocket?.destroy?.(); } catch { /* ignore */ }
-    try { upstream?.stream?.destroy?.(); } catch { /* ignore */ }
-    try { upstream?.cleanup?.(); } catch { /* ignore */ }
+    stopTelemetryTimers();
+    const sock = activeSocket;
+    activeSocket = null;
+    const up = upstream;
+    upstream = null;
+    try { sock?.destroy?.(); } catch { /* ignore */ }
+    try { up?.stream?.destroy?.(); } catch { /* ignore */ }
+    try { up?.cleanup?.(); } catch { /* ignore */ }
     try {
       if (ws.readyState === 0 || ws.readyState === 1) {
         ws.close();
@@ -797,8 +884,10 @@ async function handleRdpCleanPathConnection(options) {
     }
 
     // 2 & 3. Dial upstream RDP target and perform X.224 Connection Request/Confirm.
+    let initialRttMs = null;
     const dialAndNegotiate = async () => {
       onStatus?.("dialing");
+      const dialStart = performance.now();
       let dialed;
       try {
         dialed = await dial();
@@ -810,9 +899,10 @@ async function handleRdpCleanPathConnection(options) {
         cleanup();
         throw err;
       }
+      const dialElapsed = performance.now() - dialStart;
 
       upstream = dialed;
-      if (signal?.aborted || ws.readyState !== 1) {
+      if (cleanedUp || signal?.aborted || ws.readyState !== 1) {
         cleanup();
         return null;
       }
@@ -833,9 +923,14 @@ async function handleRdpCleanPathConnection(options) {
       let confirm = null;
       let neg = { isConfirm: true, requiresTls: true, selectedProtocol: 1, failureCode: null };
       if (request.x224ConnectionPdu && request.x224ConnectionPdu.length > 0) {
+        const x224Start = performance.now();
         stream.write(request.x224ConnectionPdu);
         confirm = await readTpktPacket(stream, handshakeTimeoutMs);
+        const x224Elapsed = performance.now() - x224Start;
+        initialRttMs = Math.max(0, x224Elapsed);
         neg = parseX224ConfirmNegotiation(confirm);
+      } else if (Number.isFinite(dialElapsed)) {
+        initialRttMs = Math.max(0, dialElapsed);
       }
       return { rawStream: stream, x224Confirm: confirm, negotiation: neg };
     };
@@ -922,42 +1017,78 @@ async function handleRdpCleanPathConnection(options) {
         }
       }
       activeSocket = tlsSocket;
-
-      const certInfo = extractPeerCertInfo(tlsSocket);
-      if (!certInfo || certInfo.certChainDer.length === 0) {
-        sendErrorPdu({ errorCode: TLS_HANDSHAKE_FAILED_ERROR_CODE, tlsAlertCode: 41 });
+      if (cleanedUp || signal?.aborted || ws.readyState !== 1) {
         cleanup();
-        throw new Error("RDP server did not present an X.509 certificate");
+        return;
       }
 
-      // 5. TOFU Certificate Verification BEFORE sending RDCleanPathPdu response to WASM.
-      // Zero NLA/CredSSP/RDP credentials can ever leave the client before trust is confirmed.
-      if (typeof verifyCertificate === "function") {
-        onStatus?.("cert-verify", { fingerprintSha256: certInfo.fingerprintSha256 });
-        let verdict;
-        try {
-          verdict = await verifyCertificate({
-            ...certInfo,
-            host,
-            port,
-            protocol: "rdp",
-          });
-        } catch (err) {
-          sendErrorPdu({ errorCode: TLS_HANDSHAKE_FAILED_ERROR_CODE, tlsAlertCode: 42 });
+      // Guard tlsSocket against unhandled 'error' / premature 'close' while awaiting TOFU decision.
+      let upstreamClosedDuringTofu = false;
+      let upstreamErrorDuringTofu = null;
+      const onTofuSocketError = (err) => {
+        upstreamErrorDuringTofu = err;
+        upstreamClosedDuringTofu = true;
+      };
+      const onTofuSocketClose = () => {
+        upstreamClosedDuringTofu = true;
+      };
+      tlsSocket.on("error", onTofuSocketError);
+      tlsSocket.once("close", onTofuSocketClose);
+
+      try {
+        const certInfo = extractPeerCertInfo(tlsSocket);
+        if (!certInfo || certInfo.certChainDer.length === 0) {
+          sendErrorPdu({ errorCode: TLS_HANDSHAKE_FAILED_ERROR_CODE, tlsAlertCode: 41 });
           cleanup();
-          throw err;
+          throw new Error("RDP server did not present an X.509 certificate");
         }
-        if (!verdict || verdict.accepted !== true) {
-          sendErrorPdu({ errorCode: TLS_HANDSHAKE_FAILED_ERROR_CODE, tlsAlertCode: 42 });
+
+        // 5. TOFU Certificate Verification BEFORE sending RDCleanPathPdu response to WASM.
+        // Zero NLA/CredSSP/RDP credentials can ever leave the client before trust is confirmed.
+        if (typeof verifyCertificate === "function") {
+          onStatus?.("cert-verify", { fingerprintSha256: certInfo.fingerprintSha256 });
+          let verdict;
+          try {
+            verdict = await verifyCertificate({
+              ...certInfo,
+              host,
+              port,
+              protocol: "rdp",
+            });
+          } catch (err) {
+            sendErrorPdu({ errorCode: TLS_HANDSHAKE_FAILED_ERROR_CODE, tlsAlertCode: 42 });
+            cleanup();
+            throw err;
+          }
+          if (!verdict || verdict.accepted !== true) {
+            sendErrorPdu({ errorCode: TLS_HANDSHAKE_FAILED_ERROR_CODE, tlsAlertCode: 42 });
+            cleanup();
+            return;
+          }
+        }
+
+        if (upstreamClosedDuringTofu || tlsSocket.destroyed || tlsSocket.readableEnded) {
+          sendErrorPdu({ errorCode: TARGET_UNREACHABLE_ERROR_CODE });
           cleanup();
+          if (upstreamErrorDuringTofu) throw upstreamErrorDuringTofu;
           return;
         }
-      }
 
-      certChainDer = certInfo.certChainDer;
+        certChainDer = certInfo.certChainDer;
+      } finally {
+        tlsSocket.removeListener("error", onTofuSocketError);
+        tlsSocket.removeListener("close", onTofuSocketClose);
+      }
     }
 
-    if (signal?.aborted || ws.readyState !== 1) {
+    if (
+      cleanedUp
+      || signal?.aborted
+      || ws.readyState !== 1
+      || !activeSocket
+      || activeSocket.destroyed
+      || activeSocket.readableEnded
+    ) {
       cleanup();
       return;
     }
@@ -981,36 +1112,134 @@ async function handleRdpCleanPathConnection(options) {
 
     onStatus?.("relaying");
 
-    // 7. Bidirectional raw binary relay between WS and TLS (or plain TCP) socket.
+    // 7. Bidirectional raw binary relay between WS and TLS (or plain TCP) socket,
+    //    with real-time RTT and smoothed RX/TX bandwidth telemetry.
+    let totalRxBytes = 0;
+    let totalTxBytes = 0;
+    let intervalRxBytes = 0;
+    let intervalTxBytes = 0;
+    let smoothedRxBps = 0;
+    let smoothedTxBps = 0;
+    let smoothedRttMs = initialRttMs;
+    let lastStatsAt = performance.now();
+    let hasEmittedInterval = false;
+    let pendingOutboundAt = null;
+
+    const emitStats = (isInitial = false) => {
+      if (typeof onStats !== "function" || cleanedUp) return;
+      if (!isInitial) {
+        const now = performance.now();
+        const dtSec = Math.max(0.05, (now - lastStatsAt) / 1000);
+        const instRxBps = intervalRxBytes / dtSec;
+        const instTxBps = intervalTxBytes / dtSec;
+        smoothedRxBps = hasEmittedInterval ? (smoothedRxBps * 0.4 + instRxBps * 0.6) : instRxBps;
+        smoothedTxBps = hasEmittedInterval ? (smoothedTxBps * 0.4 + instTxBps * 0.6) : instTxBps;
+        if (smoothedRxBps < 1) smoothedRxBps = 0;
+        if (smoothedTxBps < 1) smoothedTxBps = 0;
+        intervalRxBytes = 0;
+        intervalTxBytes = 0;
+        lastStatsAt = now;
+        hasEmittedInterval = true;
+      }
+      try {
+        onStats({
+          protocol: "rdp",
+          rttMs: smoothedRttMs !== null && Number.isFinite(smoothedRttMs)
+            ? Math.max(0, Math.round(smoothedRttMs))
+            : null,
+          rxBps: Math.max(0, Math.round(smoothedRxBps)),
+          txBps: Math.max(0, Math.round(smoothedTxBps)),
+          totalRxBytes,
+          totalTxBytes,
+          ts: Date.now(),
+        });
+      } catch {
+        // telemetry callback errors must never disrupt the RDP relay
+      }
+    };
+
+    if (typeof onStats === "function") {
+      emitStats(true);
+      const effectiveStatsInterval = Math.max(50, Number(statsIntervalMs) || 1500);
+      statsTimer = setInterval(() => emitStats(false), effectiveStatsInterval);
+      statsTimer.unref?.();
+
+      if (isDirectConnection && host && port) {
+        const effectiveProbeInterval = Math.max(100, Number(rttProbeIntervalMs) || 4000);
+        const effectiveProbeTimeout = Math.max(100, Number(rttProbeTimeoutMs) || 3000);
+        rttProbeTimer = setInterval(() => {
+          if (cleanedUp || activeRttProbe) return;
+          const probe = probeTcpConnectRtt(host, port, effectiveProbeTimeout);
+          activeRttProbe = probe;
+          void probe.promise.then((sample) => {
+            if (activeRttProbe === probe) {
+              activeRttProbe = null;
+            }
+            if (!cleanedUp && typeof sample === "number" && Number.isFinite(sample)) {
+              smoothedRttMs = smoothedRttMs === null ? sample : (smoothedRttMs * 0.6 + sample * 0.4);
+            }
+          });
+        }, effectiveProbeInterval);
+        rttProbeTimer.unref?.();
+      }
+    }
+
+    const relaySocket = activeSocket;
     await new Promise((resolve) => {
       let finished = false;
-      const done = () => {
-        if (finished) return;
-        finished = true;
-        cleanup();
-        resolve();
+      const onWsMessage = (data) => {
+        if (cleanedUp || !relaySocket || relaySocket.destroyed || !relaySocket.writable) return;
+        const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+        totalTxBytes += buf.length;
+        intervalTxBytes += buf.length;
+        if (!isDirectConnection && pendingOutboundAt === null) {
+          pendingOutboundAt = performance.now();
+        }
+        relaySocket.write(buf);
       };
 
-      ws.on("message", (data) => {
-        if (cleanedUp || !activeSocket || activeSocket.destroyed || !activeSocket.writable) return;
-        const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
-        activeSocket.write(buf);
-      });
-
-      activeSocket.on("data", (chunk) => {
+      const onSocketData = (chunk) => {
         if (cleanedUp || ws.readyState !== 1) return;
+        const len = chunk?.length || 0;
+        totalRxBytes += len;
+        intervalRxBytes += len;
+        if (!isDirectConnection && pendingOutboundAt !== null) {
+          const turnaround = performance.now() - pendingOutboundAt;
+          pendingOutboundAt = null;
+          if (turnaround >= 0 && turnaround <= 5000) {
+            smoothedRttMs = smoothedRttMs === null
+              ? turnaround
+              : (smoothedRttMs * 0.7 + turnaround * 0.3);
+          }
+        }
         try {
           ws.send(chunk, { binary: true });
         } catch {
           done();
         }
-      });
+      };
 
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        ws.removeListener("message", onWsMessage);
+        ws.removeListener("close", done);
+        ws.removeListener("error", done);
+        relaySocket?.removeListener?.("data", onSocketData);
+        relaySocket?.removeListener?.("close", done);
+        relaySocket?.removeListener?.("end", done);
+        relaySocket?.removeListener?.("error", done);
+        cleanup();
+        resolve();
+      };
+
+      ws.on("message", onWsMessage);
+      relaySocket.on("data", onSocketData);
       ws.once("close", done);
       ws.once("error", done);
-      activeSocket.once("close", done);
-      activeSocket.once("end", done);
-      activeSocket.once("error", done);
+      relaySocket.once("close", done);
+      relaySocket.once("end", done);
+      relaySocket.once("error", done);
     });
   } finally {
     signal?.removeEventListener?.("abort", onAbort);
@@ -1048,5 +1277,6 @@ module.exports = {
   readTpktPacket,
   parseX224ConfirmNegotiation,
   upgradeToTls,
+  probeTcpConnectRtt,
   handleRdpCleanPathConnection,
 };
