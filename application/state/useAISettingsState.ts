@@ -31,8 +31,10 @@ import type {
 } from '../../infrastructure/ai/types';
 import {
   DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  DEFAULT_MAX_ITERATIONS,
   DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
   normalizeCommandTimeoutSeconds,
+  normalizeMaxIterations,
   normalizeResponseIdleTimeoutSeconds,
 } from '../../infrastructure/ai/types';
 import { removeProviderReferences } from './aiProviderCleanup';
@@ -132,7 +134,9 @@ export function useSharedAISettingsState(options?: SharedAISettingsStateOptions)
     )
   );
   const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
-    localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20
+    normalizeMaxIterations(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? DEFAULT_MAX_ITERATIONS,
+    )
   );
   const [toolOutputMaxChars, setToolOutputMaxCharsRaw] = useState<number>(() =>
     normalizeAiToolOutputMaxChars(
@@ -253,9 +257,10 @@ export function useSharedAISettingsState(options?: SharedAISettingsStateOptions)
   }, []);
 
   const setMaxIterations = useCallback((value: number) => {
-    setMaxIterationsRaw(value);
-    localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, value);
-    getAIBridge()?.aiMcpSetMaxIterations?.(value);
+    const normalizedValue = normalizeMaxIterations(value);
+    setMaxIterationsRaw(normalizedValue);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, normalizedValue);
+    getAIBridge()?.aiMcpSetMaxIterations?.(normalizedValue);
   }, []);
 
   const setToolOutputMaxChars = useCallback((value: number) => {
@@ -350,10 +355,11 @@ export function useSharedAISettingsState(options?: SharedAISettingsStateOptions)
             break;
           }
           case STORAGE_KEY_AI_MAX_ITERATIONS: {
-            const iters = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20;
+            const iters = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? DEFAULT_MAX_ITERATIONS;
             if (!Number.isFinite(iters)) break;
-            setMaxIterationsRaw(iters);
-            getAIBridge()?.aiMcpSetMaxIterations?.(iters);
+            const normalizedIters = normalizeMaxIterations(iters);
+            setMaxIterationsRaw(normalizedIters);
+            getAIBridge()?.aiMcpSetMaxIterations?.(normalizedIters);
             break;
           }
           case STORAGE_KEY_AI_TOOL_OUTPUT_MAX_CHARS: {

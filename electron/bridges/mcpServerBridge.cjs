@@ -157,7 +157,7 @@ const MAX_COMMAND_TIMEOUT_SECONDS = 24 * 60 * 60;
 let commandTimeoutMs = 60000;
 
 // Max iterations for AI agent loops (default 20, synced from user settings)
-let maxIterations = 20;
+let maxIterations = 200;
 
 // Permission mode: 'observer' | 'confirm' | 'auto' (synced from user settings)
 let permissionMode = "confirm";
@@ -722,7 +722,7 @@ function getSessionIdleTimeoutMinutes() {
 }
 
 function setMaxIterations(value) {
-  maxIterations = Math.max(1, Math.min(100, value || 20));
+  maxIterations = Math.max(1, Math.min(1000, Math.floor(value || 200)));
 }
 
 function getMaxIterations() {

@@ -16,6 +16,7 @@ import type {
 import type { VaultNote } from '../domain/models';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import {
+  DEFAULT_MAX_ITERATIONS,
   filterAgentModelPresetsForCliVersion,
   getAgentModelPresets,
   resolveAgentCliVersion,
@@ -321,7 +322,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   commandBlocklist,
   commandTimeout,
   responseIdleTimeout,
-  maxIterations = 20,
+  maxIterations = DEFAULT_MAX_ITERATIONS,
   toolOutputMaxChars,
   webSearchConfig,
   quickMessages = [],

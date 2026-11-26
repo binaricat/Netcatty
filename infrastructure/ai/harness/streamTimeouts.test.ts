@@ -3,10 +3,23 @@ import assert from 'node:assert/strict';
 import { buildCattyStreamTimeouts } from './streamTimeouts';
 import { CATTY_APPROVAL_HARD_DEADLINE_MS } from '../shared/approvalConstants';
 import {
+  DEFAULT_MAX_ITERATIONS,
   DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
+  MAX_MAX_ITERATIONS,
   MAX_RESPONSE_IDLE_TIMEOUT_SECONDS,
+  normalizeMaxIterations,
   normalizeResponseIdleTimeoutSeconds,
 } from '../types';
+
+describe('normalizeMaxIterations', () => {
+  it('defaults to 200 and clamps values within the supported range', () => {
+    assert.equal(DEFAULT_MAX_ITERATIONS, 200);
+    assert.equal(normalizeMaxIterations(Number.NaN), DEFAULT_MAX_ITERATIONS);
+    assert.equal(normalizeMaxIterations(0), 1);
+    assert.equal(normalizeMaxIterations(200.9), 200);
+    assert.equal(normalizeMaxIterations(MAX_MAX_ITERATIONS + 1), MAX_MAX_ITERATIONS);
+  });
+});
 
 describe('normalizeResponseIdleTimeoutSeconds', () => {
   it('keeps stored response wait values within the supported range', () => {

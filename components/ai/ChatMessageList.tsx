@@ -30,6 +30,8 @@ import {
   VaultArtifactNavigationProvider,
   type VaultArtifactNavSection,
 } from './toolArtifacts/VaultArtifactNavigationContext';
+import { parseRemoteDesktopToolArtifact } from './toolArtifacts/remoteDesktopToolArtifact';
+import { RemoteDesktopArtifactToolResult } from './toolArtifacts/RemoteDesktopArtifactToolResult';
 import { parseTerminalToolArtifact } from './toolArtifacts/terminalToolArtifact';
 import { TerminalArtifactToolResult } from './toolArtifacts/TerminalArtifactToolResult';
 import {
@@ -619,6 +621,25 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
 
             const renderToolResultItem = (item: typeof toolResults[number]) => {
               const artifactToolName = item.artifactToolName ?? item.name;
+              const remoteDesktopArtifact = parseRemoteDesktopToolArtifact(
+                artifactToolName,
+                item.content,
+                item.args,
+                item.isError,
+              );
+              if (remoteDesktopArtifact) {
+                return (
+                  <RemoteDesktopArtifactToolResult
+                    key={item.toolCallId}
+                    artifact={remoteDesktopArtifact}
+                    toolName={artifactToolName}
+                    args={item.args}
+                    result={item.content}
+                    isError={item.isError}
+                    onOpenImagePreview={openPreview}
+                  />
+                );
+              }
               const terminalArtifact = parseTerminalToolArtifact(artifactToolName, item.content);
               if (terminalArtifact) {
                 return (
