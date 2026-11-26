@@ -3,11 +3,21 @@ import type { CodingCliProviderId } from './codingCliProviders';
 import { normalizeCodingCliTitle } from './codingCliTitleParse';
 import type { DynamicTabTitleMode } from './models/terminal';
 
-/** Connection label: user rename, live prompt host, then configured host label. */
+/** Configured connection label, independent of live terminal presentation. */
 export const getSessionConnectionLabel = (
-  session: Pick<TerminalSession, 'customName' | 'hostLabel' | 'promptHostname'>,
+  session: Pick<TerminalSession, 'customName' | 'hostLabel'>,
 ): string => {
-  return session.customName || session.promptHostname || session.hostLabel || '';
+  return session.customName || session.hostLabel || '';
+};
+
+type SessionTabLabelSession = Pick<
+  TerminalSession,
+  'customName' | 'hostLabel' | 'promptHostname' | 'dynamicTitle' | 'codingCliProviderId'
+>;
+
+const joinWorkspaceLabels = (labels: readonly string[]): string | null => {
+  const uniqueLabels = [...new Set(labels.map((label) => label.trim()).filter(Boolean))];
+  return uniqueLabels.length > 0 ? uniqueLabels.join('/') : null;
 };
 
 /**
@@ -31,18 +41,10 @@ export const buildMergedWorkspaceTitle = (
   baseLabel: string,
   joiningLabel: string,
 ): string | null => {
-  const base = baseLabel.trim();
-  const joining = joiningLabel.trim();
-  if (!base && !joining) return null;
-  if (!base) return joining;
-  if (!joining || joining === base) return base;
-  return `${base}/${joining}`;
+  return joinWorkspaceLabels([baseLabel, joiningLabel]);
 };
 
-type WorkspaceTabLabelSession = Pick<
-  TerminalSession,
-  'id' | 'customName' | 'hostLabel' | 'hostId' | 'promptHostname'
->;
+type WorkspaceTabLabelSession = Pick<TerminalSession, 'id' | 'hostId'> & SessionTabLabelSession;
 
 /**
  * Recompute a merged workspace's composed title from its *current* member
@@ -57,14 +59,7 @@ type WorkspaceTabLabelSession = Pick<
 export const buildMergedWorkspaceTitleFromSessions = (
   sessions: readonly WorkspaceTabLabelSession[],
 ): string | null => {
-  const labels: string[] = [];
-  for (const session of sessions) {
-    const label = getSessionConnectionLabel(session).trim();
-    if (!label || labels.includes(label)) continue;
-    labels.push(label);
-  }
-  if (labels.length === 0) return null;
-  return labels.join('/');
+  return joinWorkspaceLabels(sessions.map(getSessionConnectionLabel));
 };
 
 /**
@@ -75,17 +70,26 @@ export const buildMergedWorkspaceTitleFromSessions = (
  * workspace holds sessions for more than one distinct host, the focused host is
  * shown with a "+N" suffix for the others.
  *
- * Uses the stable connection label (rename / host label) rather than the
- * dynamic shell/agent title: those live titles are published only to the
- * session presentation store (not the plain session records passed here), and
- * they can differ per-pane on a single host — counting them would both go stale
- * and produce a bogus "+N". The host identity is what this tab is about.
+ * Presented sessions use the same title policy as individual tabs. Generated
+ * merge titles are display-only compositions; their persisted identity is built
+ * separately by buildMergedWorkspaceTitleFromSessions. Host counts always use
+ * hostId, never a dynamic title or per-pane rename.
  */
 export const resolveWorkspaceTabLabel = (
-  workspace: { title?: string; focusedSessionId?: string | null; autoTitle?: boolean },
+  workspace: {
+    title?: string;
+    focusedSessionId?: string | null;
+    autoTitle?: boolean;
+    generatedTitle?: boolean;
+  },
   sessions: readonly WorkspaceTabLabelSession[],
+  dynamicTabTitleMode: DynamicTabTitleMode = 'agent',
 ): string => {
   const title = workspace.title?.trim();
+  if (workspace.generatedTitle) {
+    return joinWorkspaceLabels(sessions.map((session) => resolveSessionTabTitle(session, dynamicTabTitleMode)))
+      ?? DEFAULT_WORKSPACE_TITLE;
+  }
   // Derive a host label only for an auto-titled workspace. The `autoTitle` flag
   // is authoritative when present (so a workspace a user explicitly named
   // "Workspace" is kept, not overwritten); legacy workspaces without the flag
@@ -98,7 +102,7 @@ export const resolveWorkspaceTabLabel = (
     return title || DEFAULT_WORKSPACE_TITLE;
   }
   const focused = sessions.find((s) => s.id === workspace.focusedSessionId) ?? sessions[0];
-  const primary = getSessionConnectionLabel(focused);
+  const primary = resolveSessionTabTitle(focused, dynamicTabTitleMode);
   // Count distinct HOSTS by hostId, the only stable host identity: a rename
   // rewrites both customName and hostLabel (useSessionState.submitSessionRename),
   // so neither is safe to count by — a renamed pane on the same host would add a
@@ -132,36 +136,24 @@ export const resolveCodingCliProviderIconUpdate = ({
 
 /**
  * Resolve the label shown on session tabs and pane headers.
- * Uses the shell-reported title according to the global dynamic title mode.
+ * Live prompt and Shell titles require all mode; agent mode permits Agent titles only.
  */
 export const resolveSessionTabTitle = (
-  session: Pick<
-    TerminalSession,
-    'customName' | 'hostLabel' | 'promptHostname' | 'dynamicTitle' | 'codingCliProviderId'
-  >,
+  session: SessionTabLabelSession,
   dynamicTabTitleMode: DynamicTabTitleMode = 'agent',
 ): string => {
   const connectionLabel = getSessionConnectionLabel(session);
-  if (session.customName) {
-    return session.customName;
-  }
-  if (dynamicTabTitleMode !== 'off' && session.codingCliProviderId) {
-    const agentTitle = session.dynamicTitle?.trim();
-    if (agentTitle) return normalizeCodingCliTitle(agentTitle) || agentTitle;
-  }
-  const promptHostname = session.promptHostname?.trim();
-  if (promptHostname) {
-    return promptHostname;
-  }
-  if (dynamicTabTitleMode === 'off') {
+  if (session.customName || dynamicTabTitleMode === 'off') {
     return connectionLabel;
   }
-  if (dynamicTabTitleMode === 'agent' && !session.codingCliProviderId) {
+
+  const rawTitle = session.dynamicTitle?.trim();
+  const dynamicTitle = rawTitle ? normalizeCodingCliTitle(rawTitle) || rawTitle : undefined;
+  if (session.codingCliProviderId && dynamicTitle) {
+    return dynamicTitle;
+  }
+  if (dynamicTabTitleMode !== 'all') {
     return connectionLabel;
   }
-  const dynamicTitle = session.dynamicTitle?.trim();
-  if (!dynamicTitle) {
-    return connectionLabel;
-  }
-  return normalizeCodingCliTitle(dynamicTitle) || dynamicTitle;
+  return session.promptHostname?.trim() || dynamicTitle || connectionLabel;
 };

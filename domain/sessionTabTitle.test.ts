@@ -22,6 +22,68 @@ test('getSessionConnectionLabel prefers customName over hostLabel', () => {
   );
 });
 
+test('connection identity ignores live prompt hostnames', () => {
+  const session = { hostLabel: 'Production', promptHostname: 'vm-prod' };
+  assert.equal(getSessionConnectionLabel(session), session.hostLabel);
+});
+
+test('ordinary SSH prompt hostnames do not replace configured names by default', () => {
+  const session = { hostLabel: 'Production', promptHostname: 'vm-prod' };
+  for (const mode of [undefined, 'off', 'agent'] as const) {
+    assert.equal(resolveSessionTabTitle(session, mode), session.hostLabel, String(mode));
+  }
+});
+
+test('agent mode does not use a prompt hostname when the agent has no title', () => {
+  const session = {
+    hostLabel: 'Production', promptHostname: 'vm-prod', codingCliProviderId: 'claude' as const,
+  };
+  assert.equal(resolveSessionTabTitle(session, 'agent'), session.hostLabel);
+});
+
+test('persisted merged workspace identities ignore live hostnames', () => {
+  const sessions = [
+    { id: 'a', hostId: 'h1', hostLabel: 'Production', promptHostname: 'vm-prod' },
+    { id: 'b', hostId: 'h2', hostLabel: 'Database', promptHostname: 'db-prod' },
+  ];
+  assert.equal(
+    buildMergedWorkspaceTitleFromSessions(sessions),
+    buildMergedWorkspaceTitle(sessions[0].hostLabel, sessions[1].hostLabel),
+  );
+});
+
+test('auto workspace labels honor disabled and agent-only modes', () => {
+  const session = { id: 'a', hostId: 'h1', hostLabel: 'Production', promptHostname: 'vm-prod' };
+  const workspace = { title: DEFAULT_WORKSPACE_TITLE, autoTitle: true, focusedSessionId: session.id };
+  for (const mode of [undefined, 'off', 'agent'] as const) {
+    assert.equal(resolveWorkspaceTabLabel(workspace, [session], mode), session.hostLabel, String(mode));
+  }
+});
+
+test('auto workspace labels use the same agent title policy as session tabs', () => {
+  const session = {
+    id: 'a', hostId: 'h1', hostLabel: 'Production', promptHostname: 'vm-prod',
+    dynamicTitle: 'claude: deploy', codingCliProviderId: 'claude' as const,
+  };
+  const workspace = { title: DEFAULT_WORKSPACE_TITLE, autoTitle: true, focusedSessionId: session.id };
+  assert.equal(resolveWorkspaceTabLabel(workspace, [session], 'agent'), session.dynamicTitle);
+});
+
+test('generated workspace display titles honor mode without changing their saved identity', () => {
+  const sessions = [
+    { id: 'a', hostId: 'h1', hostLabel: 'Production', promptHostname: 'vm-prod' },
+    { id: 'b', hostId: 'h2', hostLabel: 'Database', promptHostname: 'db-prod' },
+  ];
+  const savedTitle = buildMergedWorkspaceTitle(sessions[0].hostLabel, sessions[1].hostLabel)!;
+  const workspace = { title: savedTitle, autoTitle: false, generatedTitle: true, focusedSessionId: 'a' };
+  assert.equal(resolveWorkspaceTabLabel(workspace, sessions, 'off'), savedTitle);
+  assert.equal(
+    resolveWorkspaceTabLabel(workspace, sessions, 'all'),
+    buildMergedWorkspaceTitle(sessions[0].promptHostname, sessions[1].promptHostname),
+  );
+  assert.equal(workspace.title, savedTitle);
+});
+
 test('resolveSessionTabTitle ignores dynamic title for non-agent sessions', () => {
   assert.equal(
     resolveSessionTabTitle(
@@ -85,12 +147,12 @@ test('resolveSessionTabTitle strips agent spinner prefixes from dynamic titles',
   );
 });
 
-test('resolveSessionTabTitle uses a detected prompt host ahead of hostLabel', () => {
+test('resolveSessionTabTitle uses a detected prompt host in all mode', () => {
   assert.equal(
     resolveSessionTabTitle({
       hostLabel: 'jumpserver',
       promptHostname: '10.1.64.1',
-    }),
+    }, 'all'),
     '10.1.64.1',
   );
 });

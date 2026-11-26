@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createPromptHostnameSessionSignalController } from './promptHostnameSessionSignalController.ts';
+import { extractTerminalPromptHostname } from '../../domain/terminalPromptSecurity';
 
 type Change = readonly [sessionId: string, hostname: string | null];
 
@@ -20,10 +21,34 @@ function createHarness() {
   return { changes, controller };
 }
 
-test('prompt host controller ignores the initial jumpserver prompt', () => {
+test('prompt observations are independent of IP, alias, and matching connection addresses', () => {
+  const prompt = '[root@vm-prod ~]# ';
+  const observedHost = extractTerminalPromptHostname(prompt)!;
+  for (const hostname of ['203.0.113.10', 'alias.example.test', observedHost]) {
+    const changes: Change[] = [];
+    const controller = createPromptHostnameSessionSignalController({
+      getSession: () => ({ protocol: 'ssh', hostname }),
+      onChange: (sessionId, host) => changes.push([sessionId, host]),
+    });
+    controller.handleTerminalOutput('ssh-1', prompt);
+    assert.deepEqual(changes, [['ssh-1', observedHost]], hostname);
+  }
+});
+
+test('forgetting a session permits the first matching-host prompt to publish again', () => {
+  const { changes, controller } = createHarness();
+  const prompt = '[root@jump.example.com ~]# ';
+  const observedHost = extractTerminalPromptHostname(prompt)!;
+  controller.handleTerminalOutput('ssh-1', prompt);
+  controller.forgetSession('ssh-1');
+  controller.handleTerminalOutput('ssh-1', prompt);
+  assert.deepEqual(changes, [['ssh-1', observedHost], ['ssh-1', observedHost]]);
+});
+
+test('prompt host controller observes the initial jumpserver prompt', () => {
   const { changes, controller } = createHarness();
   controller.handleTerminalOutput('ssh-1', 'Last login\r\n[root@jump.example.com ~]# ');
-  assert.deepEqual(changes, []);
+  assert.deepEqual(changes, [['ssh-1', getSession('ssh-1').hostname]]);
 });
 
 test('prompt host controller publishes a nested target and de-duplicates it', () => {
@@ -31,17 +56,18 @@ test('prompt host controller publishes a nested target and de-duplicates it', ()
   controller.handleTerminalOutput('ssh-1', '[root@jump.example.com ~]# ');
   controller.handleTerminalOutput('ssh-1', 'ssh root@10.1.64.1\r\n[root@10.1.64.1 ~]# ');
   controller.handleTerminalOutput('ssh-1', '\r\n[root@10.1.64.1 ~]# ');
-  assert.deepEqual(changes, [['ssh-1', '10.1.64.1']]);
+  assert.deepEqual(changes, [['ssh-1', getSession('ssh-1').hostname], ['ssh-1', '10.1.64.1']]);
 });
 
-test('prompt host controller clears the override when returning to the jumpserver', () => {
+test('prompt host controller observes the original host when returning from a target', () => {
   const { changes, controller } = createHarness();
   controller.handleTerminalOutput('ssh-1', '[root@jump.example.com ~]# ');
   controller.handleTerminalOutput('ssh-1', '\r\n[root@10.1.64.1 ~]# ');
   controller.handleTerminalOutput('ssh-1', 'exit\r\n[root@jump.example.com ~]# ');
   assert.deepEqual(changes, [
+    ['ssh-1', getSession('ssh-1').hostname],
     ['ssh-1', '10.1.64.1'],
-    ['ssh-1', null],
+    ['ssh-1', getSession('ssh-1').hostname],
   ]);
 });
 
@@ -50,26 +76,28 @@ test('prompt host controller detects an identity split across output chunks', ()
   controller.handleTerminalOutput('ssh-1', '[root@jump.example.com ~]# ');
   controller.handleTerminalOutput('ssh-1', 'ssh target\r\n[root@10.1.');
   controller.handleTerminalOutput('ssh-1', '64.1 ~]# ');
-  assert.deepEqual(changes, [['ssh-1', '10.1.64.1']]);
+  assert.deepEqual(changes, [['ssh-1', getSession('ssh-1').hostname], ['ssh-1', '10.1.64.1']]);
 });
 
 test('prompt host controller ignores ambiguous, sensitive, and local output', () => {
   const { changes, controller } = createHarness();
   controller.handleTerminalOutput('ssh-1', '[root@jump.example.com ~]# ');
+  const initialChanges = changes.slice();
   controller.handleTerminalOutput('ssh-1', 'Password:\n# ');
   controller.handleTerminalOutput('ssh-1', 'copied output\n# ');
   controller.handleTerminalOutput('local-1', '[root@10.1.64.1 ~]# ');
-  assert.deepEqual(changes, []);
+  assert.deepEqual(changes, initialChanges);
 });
 
 test('prompt host controller ignores host-like text embedded in copied output', () => {
   const { changes, controller } = createHarness();
   controller.handleTerminalOutput('ssh-1', '[root@jump.example.com ~]# ');
+  const initialChanges = changes.slice();
   controller.handleTerminalOutput('ssh-1', 'see [root@prod] logs\n# ');
   controller.handleTerminalOutput('ssh-1', '[root@prod] copied output\n# ');
   controller.handleTerminalOutput('ssh-1', 'root@prod output\n# ');
   controller.handleTerminalOutput('ssh-1', '[root@prod] version = 1.2\n# ');
-  assert.deepEqual(changes, []);
+  assert.deepEqual(changes, initialChanges);
 });
 
 test('prompt host controller publishes common zsh, Alpine, and macOS root prompt hosts', () => {
