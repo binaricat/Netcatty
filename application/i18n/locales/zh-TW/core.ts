@@ -107,7 +107,7 @@ export const zhTWCoreMessages: Messages = {
   'sort.oldest': '從舊到新',
   'sort.group': '依群組',
   'sort.ip': '依 IP',
-  'field.label': 'Label',
+  'field.label': '標籤',
   'field.type': '型別',
   'auth.keyType': '型別 {type}',
 

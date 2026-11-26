@@ -27,6 +27,10 @@ test("parseLsofCwdOutput decodes lsof byte escapes in non-ASCII paths", () => {
     parseLsofCwdOutput("p4242\nfcwd\nn/Users/me/\\xe9\\xa1\\xb9\\xe7\\x9b\\xae\n"),
     "/Users/me/项目",
   );
+  assert.equal(parseLsofCwdOutput("p4242\nfcwd\nn/tmp/a\\tb\n"), "/tmp/a\tb");
+  assert.equal(parseLsofCwdOutput("p4242\nfcwd\nn/tmp/\\101\n"), "/tmp/A");
+  // lsof's caret form cannot distinguish a BEL byte from literal "^G".
+  assert.equal(parseLsofCwdOutput("p4242\nfcwd\nn/tmp/^G\n"), null);
 });
 
 test("readLocalSessionCwd reads /proc cwd for a local shell pid", async () => {

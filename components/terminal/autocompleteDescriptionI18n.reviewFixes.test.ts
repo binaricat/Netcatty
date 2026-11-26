@@ -120,21 +120,24 @@ test("all descriptions in macOS date and base64 specs have both translations", (
 });
 
 test("cp recursive options localize without changing insertion text", async () => {
-  const expected: Record<Locale, { recursive: string; macLegacy: string; macRecursive: string }> = {
+  const expected: Record<Locale, { recursive: string; macLegacy: string; macRecursive: string; targetDir: string }> = {
     en: {
       recursive: "Copy directories recursively",
       macLegacy: "Copy directories recursively (legacy option; prefer -R for portability)",
       macRecursive: "Copy directories recursively; a trailing slash on the source copies only its contents",
+      targetDir: "Copy all source arguments into the target directory",
     },
     "zh-CN": {
       recursive: "递归复制目录及其内容",
       macLegacy: "递归复制目录及其内容（旧版兼容选项，跨平台使用时推荐 -R）",
       macRecursive: "递归复制目录及其内容；源目录以 / 结尾时只复制目录内容",
+      targetDir: "将所有源参数复制到目标目录",
     },
     "zh-TW": {
       recursive: "遞迴複製目錄及其內容",
       macLegacy: "遞迴複製目錄及其內容（舊版相容選項，跨平台使用時建議使用 -R）",
       macRecursive: "遞迴複製目錄及其內容；來源目錄以 / 結尾時只複製目錄內容",
+      targetDir: "將所有來源引數複製到目標目錄",
     },
   };
   for (const locale of ["en", "zh-CN", "zh-TW"] as const) {
@@ -144,6 +147,9 @@ test("cp recursive options localize without changing insertion text", async () =
       assert.equal(option?.text, `cp ${flag}`);
       assert.equal(option?.description, expected[locale].recursive);
     }
+    const targetDir = linux.find((item) => item.displayText === "-t");
+    assert.equal(targetDir?.text, "cp -t");
+    assert.equal(targetDir?.description, expected[locale].targetDir);
     assert.equal(linux.some((item) => item.displayText === "-c"), false);
 
     const mac = await suggestions("cp -", "macos", locale);
@@ -154,6 +160,7 @@ test("cp recursive options localize without changing insertion text", async () =
     assert.equal(recursive?.text, "cp -R");
     assert.equal(recursive?.description, expected[locale].macRecursive);
     assert.equal(mac.some((item) => item.displayText === "--recursive"), false);
+    assert.equal(mac.some((item) => item.displayText === "-t"), false);
     assert.equal(mac.some((item) => item.displayText === "-c"), true);
   }
 });

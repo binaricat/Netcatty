@@ -1327,7 +1327,7 @@ Highlight the focused split pane:
   "plugins.agentTargets.empty": "No connected terminals. You can continue without targets.",
   "plugins.agentTargets.confirm": "Use selected terminals",
   "plugins.contextPicker.title": "Choose a reference for the plugin",
-  "plugins.contextPicker.description": "Share a Note summary and the current selected workspace, tab, session, and host summaries. Content access follows this plugin's Allow / Ask / Deny settings; this chooser shares summaries only.",
+  "plugins.contextPicker.description": "Share a Note summary and the currently selected workspace, tab, session, and host summaries. Content access follows this plugin's Allow / Ask / Deny settings; this chooser shares summaries only.",
   "plugins.contextPicker.note": "Note",
   "plugins.contextPicker.noNote": "No Note",
   "plugins.contextPicker.confirm": "Share selected summaries",

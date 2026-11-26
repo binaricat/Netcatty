@@ -3,6 +3,7 @@ const { DISK_IO_ASSIGNMENT, PARTITION_IO_ASSIGNMENT, parseDiskIo, diskIoRates, w
 const { sampleSharedStats } = require("./sharedStats.cjs");
 const { GPU_ASSIGNMENT, parseGpuStats, withCachedMonitorGpu, cacheFullGpuStats, startMonitorGpuProbe } = require("./monitorGpuStats.cjs");
 const { executeBoundedSshCommand } = require("../boundedSshExec.cjs");
+const { decodeLsofFileName } = require("../lsofEscape.cjs");
 const { readLocalSessionCwd } = require("../localSessionCwd.cjs");
 const { listInteractiveShellPids } = require("../sshInteractiveShells.cjs");
 function extraExecUnsupportedError(session) {
@@ -12,57 +13,6 @@ function extraExecUnsupportedError(session) {
     success: false,
     error: "Remote SSH server does not support extra exec channels",
   };
-}
-function decodeLsofFileName(value) {
-  if (typeof value !== 'string') return null;
-  // lsof's caret form is ambiguous: a BEL byte and the literal characters
-  // "^G" have the same output. Reject it instead of navigating to a guessed path.
-  if (/\^[\x40-\x5f?]/.test(value)) return null;
-  const bytes = [];
-  const simpleEscapes = {
-    b: 0x08,
-    f: 0x0c,
-    n: 0x0a,
-    r: 0x0d,
-    t: 0x09,
-    v: 0x0b,
-    '\\': 0x5c,
-  };
-
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-    if (char !== '\\') {
-      bytes.push(...Buffer.from(char));
-      continue;
-    }
-    const escaped = value[index + 1];
-    if (!escaped) return null;
-    if (Object.prototype.hasOwnProperty.call(simpleEscapes, escaped)) {
-      bytes.push(simpleEscapes[escaped]);
-      index += 1;
-      continue;
-    }
-    if (escaped === 'x') {
-      const hex = value.slice(index + 2, index + 4);
-      if (!/^[0-9a-fA-F]{2}$/.test(hex)) return null;
-      bytes.push(Number.parseInt(hex, 16));
-      index += 3;
-      continue;
-    }
-    const octal = value.slice(index + 1).match(/^[0-7]{1,3}/)?.[0];
-    if (octal) {
-      bytes.push(Number.parseInt(octal, 8));
-      index += octal.length;
-      continue;
-    }
-    return null;
-  }
-
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bytes));
-  } catch {
-    return null;
-  }
 }
 
 /**
