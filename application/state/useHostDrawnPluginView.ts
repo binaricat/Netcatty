@@ -11,7 +11,11 @@ export function useHostDrawnPluginView({ viewId, version, slot, active, context,
 }) {
   const contextKey = JSON.stringify(context);
   const key = JSON.stringify([viewId, version, slot, contextKey]);
-  const [state, setState] = useState<{ key: string; snapshot: PluginViewSnapshot }>({ key: '', snapshot: initial() });
+  const [state, setState] = useState<{
+    key: string;
+    snapshot: PluginViewSnapshot;
+    image?: (path: string) => Promise<string>;
+  }>({ key: '', snapshot: initial() });
   const [hidden, setHidden] = useState(false);
   const unavailableRef = useRef(unavailable); unavailableRef.current = unavailable;
   const sessionRef = useRef<{ key: string; image(path: string): Promise<string>; send(event: HostDrawnViewEvent): void } | null>(null);
@@ -22,17 +26,18 @@ export function useHostDrawnPluginView({ viewId, version, slot, active, context,
     const scopeId = resolvePluginViewWindowScope({ pathname: window.location.pathname, search: window.location.search, hash: `${window.location.hash}|plugin-slot:${slot}` });
     try {
       const session = pluginViewSessions.acquire(JSON.stringify([scopeId, key]), bridge, { viewId, scopeId, context: JSON.parse(contextKey) });
-      const update = () => { const snapshot = session.getSnapshot(); setState({ key, snapshot }); if (snapshot.error) unavailableRef.current(); };
-      const stop = session.subscribe(update); update(); setHidden(false);
       sessionRef.current = { key, send: session.send, image: session.image };
+      const update = () => { const snapshot = session.getSnapshot(); setState({ key, snapshot, image: session.image }); if (snapshot.error) unavailableRef.current(); };
+      const stop = session.subscribe(update); update(); setHidden(false);
       const stopHidden = subscribeHidden(() => { sessionRef.current = null; setHidden(true); });
       return () => { sessionRef.current = null; stopHidden(); stop(); session.release(); };
     } catch { unavailableRef.current(); }
   }, [active, contextKey, key, slot, subscribeHidden, viewId]);
-  const loadImage = useCallback((path: string) => {
+  const fallbackLoadImage = useCallback((path: string) => {
     const session = sessionRef.current;
     return active && session?.key === key ? session.image(path) : Promise.reject(new Error('Plugin view unavailable'));
   }, [active, key]);
+  const loadImage = active && state.key === key && state.image ? state.image : fallbackLoadImage;
   const sendEvent = useCallback((event: HostDrawnViewEvent) => {
     const session = sessionRef.current; if (active && session?.key === key) session.send(event);
   }, [active, key]);

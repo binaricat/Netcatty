@@ -456,3 +456,39 @@ test("normal release refuses advanced local imports and disables previously inst
   await assert.rejects(fixture.store.install(archive.archive), /browser-only packages/);
   await assert.rejects(fixture.store.assertCompatible(installed), /browser-only packages/);
 });
+
+test("readVerifiedPackageFile verifies single files against retained archive hashes and rejects tampering", async (context) => {
+  const fixture = createStore(context);
+  await fixture.store.initialize();
+  const pluginPackage = await createPackage(fixture.root);
+  const installed = await fixture.store.install(pluginPackage.archive, { enable: true });
+
+  // Coalesce concurrent preparePackageRoot calls into one verification pass.
+  let verifyCalls = 0;
+  const origVerify = fixture.store.verifyInstalledVersion.bind(fixture.store);
+  fixture.store.verifyInstalledVersion = async (...args) => {
+    verifyCalls += 1;
+    return origVerify(...args);
+  };
+  const roots = await Promise.all([
+    fixture.store.preparePackageRoot(installed),
+    fixture.store.preparePackageRoot(installed),
+    fixture.store.preparePackageRoot(installed),
+  ]);
+  assert.equal(verifyCalls, 1);
+  assert.equal(roots[0], roots[1]);
+  assert.equal(roots[1], roots[2]);
+
+  // Single-file read verifies exact SHA-256 without running a full directory scan.
+  const file = await fixture.store.readVerifiedPackageFile(installed, ["dist", "index.js"]);
+  assert.equal(file.body.toString("utf8"), "export default {};\n");
+  assert.equal(verifyCalls, 1);
+
+  // Tampering with that file fails closed and disables the plugin.
+  await fs.promises.writeFile(path.join(roots[0], "dist", "index.js"), "export default { evil: true };\n");
+  await assert.rejects(
+    fixture.store.readVerifiedPackageFile(installed, ["dist", "index.js"]),
+    /do not match the retained package archive/,
+  );
+  assert.equal(fixture.database.getActivePlugin(installed.id).enabled, false);
+});

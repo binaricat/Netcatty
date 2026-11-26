@@ -17,6 +17,7 @@ const { PluginCredentialCatalog } = require("./credentialCatalog.cjs");
 const { PluginContributionService } = require("./contributionService.cjs");
 const { PluginViewResources } = require("./viewResourceService.cjs");
 const { HostDrawnViewHost } = require("./hostDrawnViewHost.cjs");
+const { createPooledContributionIconRasterizer } = require("./contributionIconRasterizer.cjs");
 const { PluginContributionIconService } = require("./contributionIconService.cjs");
 const { PluginFilesystemBroker } = require("./filesystemBroker.cjs");
 const { createDefaultPluginHostRpcRegistry } = require("./hostRpcRegistry.cjs");
@@ -126,11 +127,16 @@ function createPluginHostService(options) {
       apiVersion: PLUGIN_API_VERSION,
       supportedFeatures,
     });
+    const imageCacheDir = path.join(paths.root, "image-cache");
+    const sharedIconRasterizer = typeof options.rasterizeContributionIcon === "function"
+      ? null
+      : createPooledContributionIconRasterizer(options.electron);
     const contributionIconService = new PluginContributionIconService({
       database,
       packageStore,
       BrowserWindow: options.electron.BrowserWindow,
-      rasterizeIcon: options.rasterizeContributionIcon,
+      rasterizeIcon: options.rasterizeContributionIcon ?? sharedIconRasterizer,
+      cacheDir: imageCacheDir,
     });
     const moduleResources = options.moduleResources
       ? normalizePluginModuleResources(options.moduleResources)
@@ -171,8 +177,8 @@ function createPluginHostService(options) {
     const filesystemBroker = new PluginFilesystemBroker({
       quotaManager,
       openDirectoryHandle: options.openPluginDirectoryHandle,
-      protectedDirectories: [paths.logs, path.join(paths.root, "agent-chats")],
-      protectedReadDirectories: [path.join(paths.root, "agent-chats")],
+      protectedDirectories: [paths.logs, path.join(paths.root, "agent-chats"), imageCacheDir],
+      protectedReadDirectories: [path.join(paths.root, "agent-chats"), imageCacheDir],
       protectedFiles: [logService.preferencesPath, `${logService.preferencesPath}.tmp`],
     });
     const networkBroker = new PluginNetworkBroker({
@@ -493,7 +499,20 @@ function createPluginHostService(options) {
     quotaManager.setViolationHandler((identity, error) => (
       runtimeSupervisor.enforcePolicyViolation(identity, error)
     ));
-    const hostDrawnViewHost = options.electron.ipcMain ? new HostDrawnViewHost({ electron: options.electron, contributionService, resources: new PluginViewResources({ electron: options.electron, packageStore }), isLocked: options.isAppLocked, subscribeLock: options.subscribeAppLock }) : null;
+    const hostDrawnViewHost = options.electron.ipcMain
+      ? new HostDrawnViewHost({
+          electron: options.electron,
+          contributionService,
+          resources: new PluginViewResources({
+            electron: options.electron,
+            packageStore,
+            rasterizeIcon: options.rasterizeContributionIcon ?? sharedIconRasterizer,
+            cacheDir: imageCacheDir,
+          }),
+          isLocked: options.isAppLocked,
+          subscribeLock: options.subscribeAppLock,
+        })
+      : null;
     const themeService = new PluginThemeService({database,packageStore,contributionService});
     manager = new PluginManager({
       secretStore,
@@ -513,6 +532,8 @@ function createPluginHostService(options) {
           extensionProviderService.shutdown();
           credentialResolver.shutdown?.();
           await hostDrawnViewHost?.shutdown();
+          contributionIconService.dispose?.();
+          sharedIconRasterizer?.dispose?.();
           await companionSupervisor.shutdown();
           leaseStore.shutdown();
           permissionDecisionHost.shutdown();

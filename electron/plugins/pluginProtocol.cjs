@@ -41,10 +41,12 @@ function decodeRequestPath(pathname) {
   return segments;
 }
 
-async function readContainedFile(root, segments, maxBytes = Infinity) {
+async function readContainedFile(root, segments, maxBytes = Infinity, realRootOverride = null) {
   const candidate = path.resolve(root, ...segments);
   if (!isPathInside(root, candidate)) throw new Error("Plugin resource escapes its root");
-  const [realRoot, realCandidate] = await Promise.all([fs.realpath(root), fs.realpath(candidate)]);
+  const [realRoot, realCandidate] = realRootOverride
+    ? [realRootOverride, await fs.realpath(candidate)]
+    : await Promise.all([fs.realpath(root), fs.realpath(candidate)]);
   if (!isPathInside(realRoot, realCandidate)) throw new Error("Plugin resource follows a symlink outside its root");
   const stats = await fs.lstat(realCandidate);
   if (!stats.isFile() || stats.isSymbolicLink()) throw new Error("Plugin resource is not a regular file");
@@ -54,15 +56,25 @@ async function readContainedFile(root, segments, maxBytes = Infinity) {
   return { body, filePath: realCandidate };
 }
 
-function htmlForRuntime(token, moduleResources) {
+function escapeHtmlAttr(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function htmlForRuntime(token, moduleResources, entryUrl) {
   const imports = Object.fromEntries(moduleResources.map((resource) => [
     resource.specifier,
     `${PLUGIN_PROTOCOL_SCHEME}://${token}/__host/modules/${resource.route}/${resource.entry}`,
   ]));
   const runtime = `${PLUGIN_PROTOCOL_SCHEME}://${token}/__host/runtime/browserRuntime.mjs`;
+  const peer = `${PLUGIN_PROTOCOL_SCHEME}://${token}/__host/runtime/runtimePeer.mjs`;
+  const expectedPrefix = `${PLUGIN_PROTOCOL_SCHEME}://${token}/package/`;
+  const preloadEntry = typeof entryUrl === "string" && entryUrl.startsWith(expectedPrefix)
+    ? `<link rel="modulepreload" href="${escapeHtmlAttr(entryUrl)}">`
+    : "";
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Netcatty plugin runtime</title>
-<script type="importmap" nonce="${token}">${JSON.stringify({ imports })}</script></head><body><script type="module" src="${runtime}"></script></body></html>`;
+<script type="importmap" nonce="${token}">${JSON.stringify({ imports })}</script>
+<link rel="modulepreload" href="${peer}">${preloadEntry}</head><body><script type="module" src="${runtime}"></script></body></html>`;
 }
 
 class PluginProtocol {
@@ -79,6 +91,15 @@ class PluginProtocol {
     this.moduleResourcesByRoute = new Map(this.moduleResources.map((resource) => [resource.route, resource]));
     this.registrations = new Map();
     this.sessions = new WeakSet();
+    this.realRoots = new Map();
+  }
+
+  async #resolveRealRoot(root) {
+    if (this.realRoots.has(root)) return this.realRoots.get(root);
+    const resolved = await fs.realpath(root);
+    if (this.realRoots.size >= 64) this.realRoots.clear();
+    this.realRoots.set(root, resolved);
+    return resolved;
   }
 
   registerSession(session) {
@@ -133,7 +154,7 @@ class PluginProtocol {
       const segments = decodeRequestPath(url.pathname);
       const csp = `default-src 'none'; script-src 'self' ${PLUGIN_PROTOCOL_SCHEME}: 'nonce-${registration.token}'; connect-src 'self' ${PLUGIN_PROTOCOL_SCHEME}:; img-src 'self' ${PLUGIN_PROTOCOL_SCHEME}:; style-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; child-src 'none'; base-uri 'none'; form-action 'none'`;
       if (segments.length === 1 && segments[0] === "index.html") {
-        return respond(htmlForRuntime(registration.token, this.moduleResources), 200, "text/html; charset=utf-8", {
+        return respond(htmlForRuntime(registration.token, this.moduleResources, registration.config?.entryUrl), 200, "text/html; charset=utf-8", {
           "Content-Security-Policy": csp,
           "Permissions-Policy": "camera=(), microphone=(), geolocation=(), display-capture=(), usb=(), serial=(), hid=(), payment=(), fullscreen=(), clipboard-read=(), clipboard-write=()",
         });
@@ -160,7 +181,8 @@ class PluginProtocol {
       if (!fileSegments.length || (!packageResource && fileSegments.some((segment) => segment.startsWith(".")))) {
         return respond("Not Found", 404);
       }
-      const file = await readContainedFile(root, fileSegments);
+      const realRoot = await this.#resolveRealRoot(root);
+      const file = await readContainedFile(root, fileSegments, Infinity, realRoot);
       const contentType = CONTENT_TYPES.get(path.extname(file.filePath).toLowerCase())
         ?? "application/octet-stream";
       return respond(file.body, 200, contentType);

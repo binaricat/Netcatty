@@ -1,9 +1,17 @@
 import React, { Suspense } from 'react';
 import type { PluginHostDrawnPageProps } from './PluginHostDrawnPage';
 
-const PluginHostDrawnPageImpl = React.lazy(() =>
-  import('./PluginHostDrawnPage').then((module) => ({ default: module.PluginHostDrawnPage })),
-);
+let preloadPromise: Promise<unknown> | null = null;
+const loadPluginHostDrawnPage = () => {
+  preloadPromise ??= import('./PluginHostDrawnPage').then((module) => ({ default: module.PluginHostDrawnPage }));
+  return preloadPromise as Promise<{ default: typeof import('./PluginHostDrawnPage').PluginHostDrawnPage }>;
+};
+
+export function preloadPluginHostDrawnPage(): void {
+  void loadPluginHostDrawnPage().catch(() => { preloadPromise = null; });
+}
+
+const PluginHostDrawnPageImpl = React.lazy(loadPluginHostDrawnPage);
 
 /**
  * Lazy boundary for host-drawn plugin views so css-tree, mdn-data, and
