@@ -22,6 +22,13 @@ import {
   shouldShowSftpUploadFolderMenu,
   shouldShowSftpUploadFilesMenu,
 } from './sftpUploadMenu';
+import { useStoredString } from '../../application/state/useStoredString';
+import {
+  DEFAULT_SFTP_TREE_FOLDER_DOUBLE_CLICK_BEHAVIOR,
+  isSftpTreeFolderDoubleClickBehavior,
+  type SftpTreeFolderDoubleClickBehavior,
+} from '../../domain/sftpTreeFolderDoubleClick';
+import { STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR } from '../../infrastructure/config/storageKeys';
 interface ContextTarget {
   entry: SftpFileEntry;
   entryPath: string;
@@ -29,9 +36,12 @@ interface ContextTarget {
 
 export const getSftpTreeEntryOpenAction = (
   entry: SftpFileEntry,
-): 'up' | 'navigate' | 'open' => {
+  folderDoubleClickBehavior: SftpTreeFolderDoubleClickBehavior = DEFAULT_SFTP_TREE_FOLDER_DOUBLE_CLICK_BEHAVIOR,
+): 'up' | 'navigate' | 'expand' | 'open' => {
   if (entry.name === '..') return 'up';
-  if (isNavigableDirectory(entry)) return 'navigate';
+  if (isNavigableDirectory(entry)) {
+    return folderDoubleClickBehavior === 'expand' ? 'expand' : 'navigate';
+  }
   return 'open';
 };
 
@@ -70,6 +80,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onCdInTerminal,
   sorting,
   reloadRequest,
+  folderDoubleClickBehavior,
 }) => {
   const {
     columnWidths,
@@ -425,10 +436,22 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     }
     lastClickedPathRef.current = entryPath;
   }, [focusTreeContainer, pane.id]);
+  const [storedFolderDoubleClickBehavior] = useStoredString<SftpTreeFolderDoubleClickBehavior>(
+    STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR,
+    DEFAULT_SFTP_TREE_FOLDER_DOUBLE_CLICK_BEHAVIOR,
+    isSftpTreeFolderDoubleClickBehavior,
+  );
+  const effectiveFolderDoubleClickBehavior = folderDoubleClickBehavior ?? storedFolderDoubleClickBehavior;
+  const folderDoubleClickBehaviorRef = useRef(effectiveFolderDoubleClickBehavior);
+  folderDoubleClickBehaviorRef.current = effectiveFolderDoubleClickBehavior;
   const openTreeEntry = useCallback((entry: SftpFileEntry, entryPath: string) => {
-    const action = getSftpTreeEntryOpenAction(entry);
+    const action = getSftpTreeEntryOpenAction(entry, folderDoubleClickBehaviorRef.current);
     if (action === 'up') {
       onNavigateUpRef.current();
+      return;
+    }
+    if (action === 'expand') {
+      void toggleExpand(entry, entryPath);
       return;
     }
     if (action === 'navigate') {
@@ -436,7 +459,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       return;
     }
     onOpenEntryRef.current(entry, entryPath);
-  }, []);
+  }, [toggleExpand]);
   const stableOnRefresh = useCallback(() => onRefreshRef.current(), []);
   const handleTreeContainerKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;

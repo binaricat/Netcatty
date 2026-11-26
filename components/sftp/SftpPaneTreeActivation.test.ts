@@ -10,6 +10,7 @@ import type { SftpFileEntry } from "../../types";
 import { createEmptyPane } from "../../application/state/sftp/types";
 import { sftpTreeSelectionStore } from "../../application/state/sftp/sftpTreeSelectionStore";
 import { installDomEnvironment, createDomRenderer } from "../test-support/renderReactDom";
+import { STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR } from "../../infrastructure/config/storageKeys";
 
 const entry = (name: string, type: SftpFileEntry["type"]): SftpFileEntry => ({
   name,
@@ -20,10 +21,21 @@ const entry = (name: string, type: SftpFileEntry["type"]): SftpFileEntry => ({
   lastModifiedFormatted: "--",
 });
 
-test("tree activation enters directories and keeps file opening separate", () => {
+test("tree activation resolves directory double-click action per preference while keeping parent and file actions separate", () => {
+  const dirLink: SftpFileEntry = { ...entry("linked-docs", "symlink"), linkTarget: "directory" };
+  const fileLink: SftpFileEntry = { ...entry("linked-file", "symlink"), linkTarget: "file" };
+
   assert.equal(getSftpTreeEntryOpenAction(entry("..", "directory")), "up");
   assert.equal(getSftpTreeEntryOpenAction(entry("docs", "directory")), "navigate");
+  assert.equal(getSftpTreeEntryOpenAction(dirLink), "navigate");
   assert.equal(getSftpTreeEntryOpenAction(entry("notes.txt", "file")), "open");
+  assert.equal(getSftpTreeEntryOpenAction(fileLink), "open");
+
+  assert.equal(getSftpTreeEntryOpenAction(entry("..", "directory"), "expand"), "up");
+  assert.equal(getSftpTreeEntryOpenAction(entry("docs", "directory"), "expand"), "expand");
+  assert.equal(getSftpTreeEntryOpenAction(dirLink, "expand"), "expand");
+  assert.equal(getSftpTreeEntryOpenAction(entry("notes.txt", "file"), "expand"), "open");
+  assert.equal(getSftpTreeEntryOpenAction(fileLink, "expand"), "open");
 });
 
 test("tree double clicks open entries while the chevron only toggles expansion", async () => {
@@ -194,6 +206,177 @@ test("tree view routes double clicks to navigation and preserves selection, expa
     sftpTreeSelectionStore.clearPane(paneId);
     if (previousObserver) Object.defineProperty(globalThis, "ResizeObserver", previousObserver);
     else Reflect.deleteProperty(globalThis, "ResizeObserver");
+    dom.cleanup();
+  }
+});
+
+test("tree view expands and collapses folders in place on double-click when configured and reacts to live setting updates", async () => {
+  const dom = installDomEnvironment();
+  const previousObserver = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+  const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const eventTargetKeys = ["addEventListener", "removeEventListener", "dispatchEvent"] as const;
+  const previousEventTarget = eventTargetKeys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+  for (const key of eventTargetKeys) {
+    Object.defineProperty(globalThis, key, {
+      configurable: true,
+      value: dom.window[key].bind(dom.window),
+    });
+  }
+  const backing = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      get length() { return backing.size; },
+      clear() { backing.clear(); },
+      getItem(key: string) { return backing.get(key) ?? null; },
+      key(index: number) { return Array.from(backing.keys())[index] ?? null; },
+      removeItem(key: string) { backing.delete(key); },
+      setItem(key: string, value: string) { backing.set(key, value); },
+    } satisfies Storage,
+  });
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    configurable: true,
+    value: class { observe() {} disconnect() {} },
+  });
+  dom.window.requestAnimationFrame = callback => dom.window.setTimeout(() => callback(0), 0);
+  dom.window.cancelAnimationFrame = id => dom.window.clearTimeout(id);
+  const renderer = await createDomRenderer(dom.document);
+  const noop = () => {};
+  const calls: string[] = [];
+  const paneId = "tree-activation-expand";
+  const directoryLink: SftpFileEntry = { ...entry("linked-docs", "symlink"), linkTarget: "directory" };
+  const fileLink: SftpFileEntry = { ...entry("linked-file", "symlink"), linkTarget: "file" };
+  const files = [entry("docs", "directory"), entry("src", "directory"), entry("notes.txt", "file"), directoryLink, fileLink];
+  const childrenByPath: Record<string, SftpFileEntry[]> = {
+    "/root/docs": [entry("nested", "directory")],
+    "/root/docs/nested": [entry("leaf.txt", "file")],
+    "/root/src": [entry("index.ts", "file")],
+    "/root/linked-docs": [entry("guide.md", "file")],
+  };
+  const props: React.ComponentProps<typeof SftpPaneTreeView> = {
+    pane: {
+      ...createEmptyPane(paneId),
+      files,
+      connection: { id: "conn", hostId: "host", hostLabel: "Host", isLocal: false, status: "connected", currentPath: "/root" },
+    },
+    side: "left",
+    onPrepareSelection: noop,
+    onLoadChildren: async path => {
+      calls.push(`load:${path}`);
+      return childrenByPath[path] ?? [];
+    },
+    onMoveEntriesToPath: async () => {},
+    onNavigateUp: () => calls.push("up"),
+    onNavigateTo: path => calls.push(`navigate:${path}`),
+    onOpenEntry: (_item, path) => { calls.push(`open:${path}`); },
+    onRefresh: noop,
+    onDragStart: noop,
+    onDragEnd: noop,
+    openRenameDialog: noop,
+    openDeleteConfirm: noop,
+    onCopyToOtherPane: noop,
+    onReceiveFromOtherPane: noop,
+    draggedFiles: null,
+    openNewFolderDialog: noop,
+    openNewFileDialog: noop,
+    sorting: {
+      sortField: "name",
+      sortOrder: "asc",
+      directoriesFirst: true,
+      columnWidths: { name: 50, modified: 24, size: 7, type: 9, owner: 10 },
+      visibleColumns: { name: true, modified: false, size: false, type: false, owner: false },
+      handleSort: noop,
+      handleResizeStart: noop,
+      toggleColumnVisibility: noop,
+      toggleDirectoriesFirst: noop,
+    },
+    reloadRequest: { token: 0 },
+  };
+  const row = (name: string) => {
+    const element = renderer.container.querySelector(`[data-entry-name="${name}"]`);
+    assert.ok(element, `missing row ${name}`);
+    return element;
+  };
+  const click = async (target: Element, type = "click", detail = 1) => {
+    await act(async () => { target.dispatchEvent(new dom.window.MouseEvent(type, { bubbles: true, detail })); });
+  };
+  const doubleClick = async (target: Element) => {
+    await click(target);
+    await click(target, "click", 2);
+    await click(target, "dblclick", 2);
+  };
+  try {
+    backing.set(STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR, "expand");
+    await renderer.render(React.createElement(SftpPaneTreeView, props));
+
+    // Double-clicking folders expands them in place while keeping other expanded branches.
+    await doubleClick(row("docs").querySelector("span.truncate")!);
+    assert.deepEqual(calls.splice(0), ["load:/root/docs"]);
+    assert.equal(row("docs").getAttribute("data-expanded"), "true");
+    row("nested");
+
+    await doubleClick(row("src").querySelector("span.truncate")!);
+    assert.deepEqual(calls.splice(0), ["load:/root/src"]);
+    assert.equal(row("docs").getAttribute("data-expanded"), "true");
+    assert.equal(row("src").getAttribute("data-expanded"), "true");
+    row("index.ts");
+
+    await doubleClick(row("nested"));
+    assert.deepEqual(calls.splice(0), ["load:/root/docs/nested"]);
+    assert.equal(row("nested").getAttribute("data-expanded"), "true");
+    row("leaf.txt");
+
+    // Double-clicking an expanded folder collapses it in place without navigating.
+    await doubleClick(row("nested"));
+    assert.deepEqual(calls, []);
+    assert.equal(row("nested").getAttribute("data-expanded"), "false");
+    assert.equal(renderer.container.querySelector('[data-entry-name="leaf.txt"]'), null);
+    assert.equal(row("src").getAttribute("data-expanded"), "true");
+
+    // Directory symlinks also expand/collapse in place; files, file symlinks and ".." keep their actions.
+    await doubleClick(row("linked-docs"));
+    assert.deepEqual(calls.splice(0), ["load:/root/linked-docs"]);
+    assert.equal(row("linked-docs").getAttribute("data-expanded"), "true");
+    row("guide.md");
+
+    for (const [name, action] of [["notes.txt", "open:/root/notes.txt"], ["linked-file", "open:/root/linked-file"], ["..", "up"]]) {
+      await doubleClick(row(name));
+      assert.deepEqual(calls.splice(0), [action]);
+    }
+
+    // Switching the setting back to "navigate" takes effect immediately on the mounted tree.
+    backing.set(STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR, "navigate");
+    await act(async () => {
+      dom.window.dispatchEvent(new dom.window.CustomEvent("netcatty:local-storage-adapter-changed", {
+        detail: { key: STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR },
+      }));
+    });
+    await doubleClick(row("docs"));
+    assert.deepEqual(calls.splice(0), ["navigate:/root/docs"]);
+    assert.equal(row("docs").getAttribute("data-expanded"), "true");
+
+    // Cross-window storage events also update the mounted tree live.
+    backing.set(STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR, "expand");
+    await act(async () => {
+      dom.window.dispatchEvent(new dom.window.StorageEvent("storage", {
+        key: STORAGE_KEY_SFTP_TREE_DOUBLE_CLICK_BEHAVIOR,
+        newValue: "expand",
+      }));
+    });
+    await doubleClick(row("docs"));
+    assert.deepEqual(calls, []);
+    assert.equal(row("docs").getAttribute("data-expanded"), "false");
+  } finally {
+    await renderer.unmount();
+    sftpTreeSelectionStore.clearPane(paneId);
+    for (const [key, descriptor] of previousEventTarget) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    if (previousObserver) Object.defineProperty(globalThis, "ResizeObserver", previousObserver);
+    else Reflect.deleteProperty(globalThis, "ResizeObserver");
+    if (previousLocalStorage) Object.defineProperty(globalThis, "localStorage", previousLocalStorage);
+    else Reflect.deleteProperty(globalThis, "localStorage");
     dom.cleanup();
   }
 });

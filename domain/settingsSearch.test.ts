@@ -339,3 +339,20 @@ test("settings search finds the SFTP default download folder from the real local
     }
   }
 });
+
+test("settings search finds the SFTP tree view folder double-click option from the real locales", () => {
+  const tZhReal = (key: string) => zhCN[key] ?? key;
+  const tTwReal = (key: string) => zhTW[key] ?? key;
+  const tEnReal = (key: string) => en[key] ?? key;
+  for (const [t, queries] of [
+    [tZhReal, ["树形视图双击文件夹", "原地展开", "进入目录"]],
+    [tTwReal, ["樹形檢視雙擊資料夾", "原地展開", "進入目錄"]],
+    [tEnReal, ["tree view folder double-click", "double click folder", "expand collapse"]],
+  ] as const) {
+    for (const query of queries) {
+      const hit = filterSettingsSearchCatalog(query, t).find((hit) => hit.entry.id === "sftp-tree-folder-double-click");
+      assert.ok(hit, `${query} should find sftp-tree-folder-double-click`);
+      assert.equal(hit.entry.tab, "file-associations");
+    }
+  }
+});

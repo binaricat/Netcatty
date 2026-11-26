@@ -350,6 +350,7 @@ export interface SyncPayload {
     sftpAutoOpenSidebar?: boolean;
     sftpFollowTerminalCwd?: boolean;
     sftpDefaultViewMode?: 'list' | 'tree';
+    sftpTreeDoubleClickBehavior?: 'navigate' | 'expand';
     sftpGlobalBookmarks?: import('./models').SftpBookmark[];
     // Vault: show recently connected hosts
     showRecentHosts?: boolean;

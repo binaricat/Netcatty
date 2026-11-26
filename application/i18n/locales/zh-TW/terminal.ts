@@ -191,6 +191,10 @@ export const zhTWTerminalMessages: Messages = {
   'settings.sftp.defaultViewMode.listDesc': '以平面列表顯示目前目錄的檔案',
   'settings.sftp.defaultViewMode.tree': '樹形檢視',
   'settings.sftp.defaultViewMode.treeDesc': '以層級樹形結構顯示檔案',
+  'settings.sftp.treeFolderDoubleClick': '樹形檢視雙擊資料夾',
+  'settings.sftp.treeFolderDoubleClick.desc': '選擇在 SFTP 樹形檢視中雙擊資料夾時的操作。點選左側箭頭始終在原地展開或摺疊。',
+  'settings.sftp.treeFolderDoubleClick.navigate': '進入目錄',
+  'settings.sftp.treeFolderDoubleClick.expand': '原地展開／摺疊',
 
   'sftp.autoSync.success': '檔案已同步到遠端：{fileName}',
   'sftp.autoSync.error': '同步檔案失敗：{error}',
