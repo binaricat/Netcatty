@@ -14,6 +14,7 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useApplicationBackend, type SshAgentStatus } from "../application/state/useApplicationBackend";
 import { applyGroupDefaults, resolveGroupDefaults, resolveGroupTerminalThemeId } from "../domain/groupConfig";
+import { normalizeGroupTargetPath, resolveHostGroupForSave } from "../domain/hostGroupPathMutations";
 import {
   getEffectiveHostDistro,
   normalizePrimaryTelnetState,
@@ -281,6 +282,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   }, [form.agentForwarding, form.identityAgent, form.hostname, form.port, form.username, checkSshAgent]);
 
   const [groupInputValue, setGroupInputValue] = useState(form.group || "");
+  const originalGroupRef = useRef(initialData ? initialData.group || "" : undefined);
+  const createdGroupInputRef = useRef<string | null>(null);
 
   const initialHostId = initialData?.id;
 
@@ -315,6 +318,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   }, [initialData, snippets]);
 
   useEffect(() => {
+    originalGroupRef.current = initialData ? initialData.group || "" : undefined;
+    createdGroupInputRef.current = null;
     if (!initialData) return;
     const normalized = normalizePrimaryTelnetState(initialData);
     setForm(
@@ -578,7 +583,10 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     }
     const normalizedProxyConfig = proxySave.normalizedProxyConfig;
     let finalLabel = form.label?.trim() || hostname;
-    const finalGroup = groupInputValue.trim() || form.group || "";
+    const finalGroup = resolveHostGroupForSave(
+      groupInputValue.trim() || form.group || "",
+      originalGroupRef.current,
+    );
 
     const targetManagedSource = managedSources
       .filter(s => finalGroup === s.groupName || finalGroup.startsWith(s.groupName + "/"))
@@ -761,14 +769,18 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     }
   };
 
-  const handleCreateGroup = () => {
-    if (!newGroupName.trim()) return;
-    const fullPath = newGroupParent
-      ? `${newGroupParent}/${newGroupName.trim()}`
-      : newGroupName.trim();
-    onCreateGroup?.(fullPath);
+  const createAndSelectGroup = (value: string) => {
+    const fullPath = normalizeGroupTargetPath(value);
+    if (!fullPath) return;
+    createdGroupInputRef.current = value;
+    if (!groups.includes(fullPath)) onCreateGroup?.(fullPath);
     setGroupInputValue(fullPath);
     update("group", fullPath);
+  };
+
+  const handleCreateGroup = () => {
+    if (!newGroupName.trim()) return;
+    createAndSelectGroup(`${newGroupParent}/${newGroupName}`);
     setNewGroupName("");
     setNewGroupParent("");
     setActiveSubPanel("none");
@@ -1117,16 +1129,18 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
               options={groupOptions}
               value={form.group || ""}
               onValueChange={(val) => {
-                update("group", val);
-                setGroupInputValue(val);
+                // Creation also calls onValueChange with the raw input. Keep that
+                // path normalized while preserving a reselected legacy group.
+                const groupPath = val === createdGroupInputRef.current
+                  ? normalizeGroupTargetPath(val)
+                  : resolveHostGroupForSave(val, originalGroupRef.current);
+                createdGroupInputRef.current = null;
+                update("group", groupPath);
+                setGroupInputValue(groupPath);
               }}
               placeholder={t("hostDetails.group.placeholder")}
               allowCreate={true}
-              onCreateNew={(val) => {
-                onCreateGroup?.(val);
-                update("group", val);
-                setGroupInputValue(val);
-              }}
+              onCreateNew={createAndSelectGroup}
               createText="Create Group"
               triggerClassName="flex-1 h-10"
             />

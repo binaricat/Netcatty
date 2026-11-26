@@ -9,6 +9,15 @@ export function normalizeGroupTargetPath(value: string): string {
     .join('/');
 }
 
+// Undefined means a new host; existing ungrouped hosts use ''. Preserve legacy
+// paths on unrelated edits so their exact-path connection defaults do not change.
+export function resolveHostGroupForSave(value: string, originalGroup?: string): string {
+  if (originalGroup !== undefined && (value === originalGroup || value === originalGroup.trim())) {
+    return originalGroup;
+  }
+  return normalizeGroupTargetPath(value);
+}
+
 export function normalizeGroupTargetPaths(values: Iterable<string>): string[] {
   return Array.from(new Set(
     [...values].map(normalizeGroupTargetPath).filter(Boolean),

@@ -5,12 +5,13 @@
  * into vault groups next to their SSH hosts (issue #3615).
  */
 import { Save, TerminalSquare, X } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { useDiscoveredShells } from '../lib/useDiscoveredShells';
 import { detectLocalOs } from '../lib/localShell';
 import type { Host } from '../domain/models';
 import { createLocalShellHost } from '../domain/localShellHost';
+import { resolveHostGroupForSave } from '../domain/hostGroupPathMutations';
 
 import { Button } from './ui/button';
 import { Combobox, ComboboxOption } from './ui/combobox';
@@ -68,6 +69,7 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
   const [group, setGroup] = useState(
     initialData ? initialData.group ?? '' : defaultGroup ?? '',
   );
+  const originalGroupRef = useRef(initialData ? initialData.group ?? '' : undefined);
 
   const matchedShell = useMemo(
     () => discoveredShells.find((candidate) => candidate.id === shell),
@@ -128,12 +130,12 @@ export const LocalShellHostDetailsPanel: React.FC<LocalShellHostDetailsPanelProp
       shellIcon: shellMeta?.icon,
       startDir,
       startupCommand,
-      // Save the controlled value directly: '' means the user explicitly
-      // cleared the group, which persists at the vault root.
-      group: group,
+      group,
       tags: initialData?.tags,
       notes: initialData?.notes,
     });
+    // Apply after the factory's outer trim to retain unchanged legacy paths exactly.
+    host.group = resolveHostGroupForSave(group, originalGroupRef.current);
     // On edits, merge over the existing host so fields this form does not
     // expose (pinned, lastConnectedAt, order, ...) and the original
     // creation timestamp survive a save.
