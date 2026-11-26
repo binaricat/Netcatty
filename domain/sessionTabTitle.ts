@@ -3,11 +3,28 @@ import type { CodingCliProviderId } from './codingCliProviders';
 import { normalizeCodingCliTitle } from './codingCliTitleParse';
 import type { DynamicTabTitleMode } from './models/terminal';
 
+const GENERIC_LOOPBACK_HOSTNAMES = new Set([
+  'localhost',
+  'localhost.localdomain',
+  'localhost.local',
+  '127.0.0.1',
+  '::1',
+]);
+
+export const isGenericLoopbackHostname = (value: string): boolean => {
+  const trimmed = value.trim();
+  const normalized = (trimmed.endsWith('.') ? trimmed.slice(0, -1) : trimmed).toLowerCase();
+  return GENERIC_LOOPBACK_HOSTNAMES.has(normalized);
+};
+
 /** Connection label: user rename, live prompt host, then configured host label. */
 export const getSessionConnectionLabel = (
   session: Pick<TerminalSession, 'customName' | 'hostLabel' | 'promptHostname'>,
 ): string => {
-  return session.customName || session.promptHostname || session.hostLabel || '';
+  const promptHostname = session.promptHostname?.trim();
+  const effectivePromptHostname =
+    promptHostname && !isGenericLoopbackHostname(promptHostname) ? promptHostname : '';
+  return session.customName || effectivePromptHostname || session.hostLabel || '';
 };
 
 /**
@@ -150,7 +167,7 @@ export const resolveSessionTabTitle = (
     if (agentTitle) return normalizeCodingCliTitle(agentTitle) || agentTitle;
   }
   const promptHostname = session.promptHostname?.trim();
-  if (promptHostname) {
+  if (promptHostname && !isGenericLoopbackHostname(promptHostname)) {
     return promptHostname;
   }
   if (dynamicTabTitleMode === 'off') {

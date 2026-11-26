@@ -5,6 +5,7 @@ import {
   buildMergedWorkspaceTitle,
   buildMergedWorkspaceTitleFromSessions,
   getSessionConnectionLabel,
+  isGenericLoopbackHostname,
   resolveCodingCliProviderIconUpdate,
   resolveSessionTabTitle,
   resolveWorkspaceTabLabel,
@@ -126,6 +127,136 @@ test('resolveSessionTabTitle prefers the live prompt host over a generic shell t
       'all',
     ),
     '10.1.64.1',
+  );
+});
+
+test('isGenericLoopbackHostname matches only generic localhost and loopback names', () => {
+  for (const generic of [
+    'localhost',
+    'localhost.localdomain',
+    'localhost.local',
+    '127.0.0.1',
+    '::1',
+    'LocalHost',
+    '  LOCALHOST.LOCALDOMAIN. ',
+    'localhost.',
+  ]) {
+    assert.equal(isGenericLoopbackHostname(generic), true, generic);
+  }
+  for (const specific of ['', '   ', '.', 'localhost..', 'ubuntu', '10.1.64.1', '192.168.100.222']) {
+    assert.equal(isGenericLoopbackHostname(specific), false, specific);
+  }
+});
+
+test('resolveSessionTabTitle ignores generic localhost prompt hosts in default and agent modes', () => {
+  for (const promptHostname of [
+    'localhost',
+    'localhost.localdomain',
+    'localhost.local',
+    '127.0.0.1',
+    '::1',
+    'LocalHost',
+    'localhost.',
+  ]) {
+    assert.equal(
+      resolveSessionTabTitle({
+        hostLabel: '192.168.100.222',
+        promptHostname,
+      }),
+      '192.168.100.222',
+    );
+    assert.equal(
+      resolveSessionTabTitle(
+        {
+          hostLabel: '192.168.100.222',
+          promptHostname,
+          dynamicTitle: 'root@localhost:~',
+        },
+        'agent',
+      ),
+      '192.168.100.222',
+    );
+  }
+});
+
+test('resolveSessionTabTitle keeps distinct SSH hostLabels when both remotes report localhost', () => {
+  const sessionA = { hostLabel: '192.168.100.222', promptHostname: 'localhost' };
+  const sessionB = { hostLabel: '192.168.100.220', promptHostname: 'localhost' };
+  assert.equal(resolveSessionTabTitle(sessionA), '192.168.100.222');
+  assert.equal(resolveSessionTabTitle(sessionB), '192.168.100.220');
+});
+
+test('resolveSessionTabTitle keeps customName ahead of a generic prompt host', () => {
+  assert.equal(
+    resolveSessionTabTitle({
+      customName: 'LAN Node 1',
+      hostLabel: '192.168.100.222',
+      promptHostname: 'localhost',
+    }),
+    'LAN Node 1',
+  );
+});
+
+test('getSessionConnectionLabel skips generic promptHostname and keeps non-generic ones', () => {
+  assert.equal(
+    getSessionConnectionLabel({
+      hostLabel: '192.168.100.222',
+      promptHostname: 'localhost',
+    }),
+    '192.168.100.222',
+  );
+  assert.equal(
+    getSessionConnectionLabel({
+      hostLabel: '192.168.100.222',
+      promptHostname: 'localhost.localdomain',
+    }),
+    '192.168.100.222',
+  );
+  assert.equal(
+    getSessionConnectionLabel({
+      customName: 'Node 222',
+      hostLabel: '192.168.100.222',
+      promptHostname: 'localhost',
+    }),
+    'Node 222',
+  );
+  assert.equal(
+    getSessionConnectionLabel({
+      hostLabel: '192.168.100.222',
+      promptHostname: 'ubuntu',
+    }),
+    'ubuntu',
+  );
+});
+
+test('resolveSessionTabTitle keeps non-generic prompt host overrides across default, agent, and all modes', () => {
+  assert.equal(
+    resolveSessionTabTitle({
+      hostLabel: '192.168.100.222',
+      promptHostname: 'ubuntu',
+    }),
+    'ubuntu',
+  );
+  assert.equal(
+    resolveSessionTabTitle(
+      {
+        hostLabel: '192.168.100.222',
+        promptHostname: 'ubuntu',
+      },
+      'agent',
+    ),
+    'ubuntu',
+  );
+  assert.equal(
+    resolveSessionTabTitle(
+      {
+        hostLabel: '192.168.100.222',
+        promptHostname: 'ubuntu',
+        dynamicTitle: 'root@ubuntu:~',
+      },
+      'all',
+    ),
+    'ubuntu',
   );
 });
 
