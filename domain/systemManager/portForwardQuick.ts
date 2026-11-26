@@ -5,7 +5,6 @@ import type { ListeningPortInfo } from './types';
 export const DEFAULT_QUICK_FORWARD_BIND_ADDRESS = '127.0.0.1';
 
 const WILDCARD_ADDRESSES = new Set(['', '*', '0.0.0.0', '::']);
-const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', 'localhost', '::1']);
 const ACTIVE_STATUSES = new Set<PortForwardingRule['status']>(['active', 'connecting']);
 
 function stripAddressDecoration(address: string): string {
@@ -26,10 +25,6 @@ export function normalizeEndpointHost(address: string | undefined): string {
 
 export function isWildcardAddress(address: string | undefined): boolean {
   return WILDCARD_ADDRESSES.has(normalizeEndpointHost(address));
-}
-
-export function isLoopbackAddress(address: string | undefined): boolean {
-  return LOOPBACK_ADDRESSES.has(normalizeEndpointHost(address));
 }
 
 export function formatHostPort(host: string, port: number): string {
@@ -80,13 +75,15 @@ export function isForwardableListeningPort(port: ListeningPortInfo): boolean {
 
 /**
  * Resolve the remote target host passed to SSH forwardOut for a listening port.
- * Wildcard listeners (* / 0.0.0.0 / ::) target 127.0.0.1; explicit interface
- * or IPv6 loopback binds (e.g. ::1, 10.0.0.5) keep their exact address.
+ * Preserves address family for wildcard listeners: IPv6 wildcards (`tcp6` or
+ * `::`) target `::1`, while IPv4 wildcards (`tcp` / `0.0.0.0` / `*`) target
+ * `127.0.0.1`. Explicit interface or loopback binds keep their exact address.
  */
 export function resolveForwardRemoteHost(port: ListeningPortInfo): string {
   const cleaned = stripAddressDecoration(port.address);
   if (isWildcardAddress(cleaned)) {
-    return DEFAULT_QUICK_FORWARD_BIND_ADDRESS;
+    const isIPv6 = port.protocol === 'tcp6' || normalizeEndpointHost(cleaned) === '::';
+    return isIPv6 ? '::1' : DEFAULT_QUICK_FORWARD_BIND_ADDRESS;
   }
   return cleaned;
 }
@@ -153,11 +150,8 @@ function remoteHostMatchesPort(ruleRemoteHost: string | undefined, port: Listeni
   if (!normRuleHost) return false;
   const targetHost = normalizeEndpointHost(resolveForwardRemoteHost(port));
   if (normRuleHost === targetHost) return true;
-  // Wildcard listeners accept loopback connections on any loopback alias.
-  if (isWildcardAddress(port.address) && isLoopbackAddress(normRuleHost)) {
-    return true;
-  }
-  // Treat 127.0.0.1 and localhost as equivalent for IPv4 loopback listeners.
+  // Treat 127.0.0.1 and localhost as equivalent for IPv4 loopback targets
+  // without crossing IPv4/IPv6 address families.
   if (
     (targetHost === '127.0.0.1' && normRuleHost === 'localhost')
     || (targetHost === 'localhost' && normRuleHost === '127.0.0.1')

@@ -97,10 +97,12 @@ test('isForwardableListeningPort accepts TCP and TCP6 valid ports and rejects UD
   assert.equal(isForwardableListeningPort(makePort({ protocol: 'tcp', port: 65536 })), false);
 });
 
-test('resolveForwardRemoteHost maps wildcards to 127.0.0.1 and preserves explicit addresses', () => {
-  assert.equal(resolveForwardRemoteHost(makePort({ address: '*' })), '127.0.0.1');
-  assert.equal(resolveForwardRemoteHost(makePort({ address: '0.0.0.0' })), '127.0.0.1');
-  assert.equal(resolveForwardRemoteHost(makePort({ address: '::', protocol: 'tcp6' })), '127.0.0.1');
+test('resolveForwardRemoteHost preserves IPv4/IPv6 address family for wildcards and keeps explicit addresses', () => {
+  assert.equal(resolveForwardRemoteHost(makePort({ address: '*', protocol: 'tcp' })), '127.0.0.1');
+  assert.equal(resolveForwardRemoteHost(makePort({ address: '0.0.0.0', protocol: 'tcp' })), '127.0.0.1');
+  assert.equal(resolveForwardRemoteHost(makePort({ address: '*', protocol: 'tcp6' })), '::1');
+  assert.equal(resolveForwardRemoteHost(makePort({ address: '::', protocol: 'tcp6' })), '::1');
+  assert.equal(resolveForwardRemoteHost(makePort({ address: '::', protocol: 'tcp' })), '::1');
   assert.equal(resolveForwardRemoteHost(makePort({ address: '127.0.0.1' })), '127.0.0.1');
   assert.equal(resolveForwardRemoteHost(makePort({ address: '::1', protocol: 'tcp6' })), '::1');
   assert.equal(resolveForwardRemoteHost(makePort({ address: '[::1]', protocol: 'tcp6' })), '::1');
@@ -141,22 +143,33 @@ test('suggestQuickForwardLocalPort avoids privileged ports and existing rule col
   );
 });
 
-test('matchListeningPortForwardRules matches active, connecting, and reusable rules for the host', () => {
-  const port = makePort({ address: '*', port: 5432 });
+test('matchListeningPortForwardRules matches active, connecting, and reusable rules per address family', () => {
+  const ipv4Port = makePort({ address: '*', protocol: 'tcp', port: 5432 });
+  const ipv6Port = makePort({ address: '*', protocol: 'tcp6', port: 5432 });
   const rules = [
     makeRule({ id: 'other-host', hostId: 'host-2', status: 'active', localPort: 5432, remotePort: 5432 }),
     makeRule({ id: 'connecting-rule', status: 'connecting', localPort: 15432, remoteHost: 'localhost', remotePort: 5432 }),
     makeRule({ id: 'active-rule', status: 'active', localPort: 25432, remoteHost: '127.0.0.1', remotePort: 5432 }),
-    makeRule({ id: 'inactive-rule', status: 'inactive', localPort: 35432, remoteHost: '::1', remotePort: 5432 }),
+    makeRule({ id: 'inactive-v4-rule', status: 'inactive', localPort: 35432, remoteHost: '127.0.0.1', remotePort: 5432 }),
+    makeRule({ id: 'active-v6-rule', status: 'active', localPort: 45432, remoteHost: '::1', remotePort: 5432 }),
   ];
 
-  const matches = matchListeningPortForwardRules(port, 'host-1', rules);
+  const v4Matches = matchListeningPortForwardRules(ipv4Port, 'host-1', rules);
   assert.deepEqual(
-    matches.activeRules.map((r) => r.id),
+    v4Matches.activeRules.map((r) => r.id),
     ['active-rule', 'connecting-rule'],
   );
-  assert.equal(matches.primaryActiveRule?.id, 'active-rule');
-  assert.equal(matches.reusableInactiveRule?.id, 'inactive-rule');
+  assert.equal(v4Matches.primaryActiveRule?.id, 'active-rule');
+  assert.equal(v4Matches.reusableInactiveRule?.id, 'inactive-v4-rule');
+
+  // IPv6 wildcard row matches ::1 rules only and does not cross-match IPv4 127.0.0.1 rules.
+  const v6Matches = matchListeningPortForwardRules(ipv6Port, 'host-1', rules);
+  assert.deepEqual(
+    v6Matches.activeRules.map((r) => r.id),
+    ['active-v6-rule'],
+  );
+  assert.equal(v6Matches.primaryActiveRule?.id, 'active-v6-rule');
+  assert.equal(v6Matches.reusableInactiveRule, undefined);
 
   // Specific IP listener does not match a 127.0.0.1 rule.
   const specificPort = makePort({ address: '10.0.0.5', port: 5432 });
